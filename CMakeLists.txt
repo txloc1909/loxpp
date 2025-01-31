@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include_directories(${PROJECT_SOURCE_DIR}/src)
 
-add_executable(loxpp src/main.cpp src/chunk.cpp)
+add_executable(loxpp src/main.cpp src/chunk.cpp src/value.cpp)
 
 enable_testing()
 add_subdirectory(test)
