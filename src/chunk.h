@@ -18,8 +18,8 @@ class Chunk : std::vector<Byte> {
   public:
     using std::vector<Byte>::at;
 
-    void write(Byte byte);
-    void write(Op op);
+    void write(Byte byte, int line);
+    void write(Op op, int line);
     int addConstant(Value value);
     void disassemble(const char* name) const;
     int disassembleInstruction(int offset) const;
@@ -27,4 +27,5 @@ class Chunk : std::vector<Byte> {
 
   private:
     ValueArray m_constants;
+    std::vector<int> m_lines;
 };

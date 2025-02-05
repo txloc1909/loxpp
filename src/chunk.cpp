@@ -15,9 +15,12 @@ static int constantInstruction(const char* name, const Chunk& chunk,
     return offset + 2;
 }
 
-void Chunk::write(Byte byte) { push_back(byte); }
+void Chunk::write(Byte byte, int line) {
+    push_back(byte);
+    m_lines.push_back(line);
+}
 
-void Chunk::write(Op op) { write(static_cast<Byte>(op)); }
+void Chunk::write(Op op, int line) { write(static_cast<Byte>(op), line); }
 
 int Chunk::addConstant(Value value) {
     m_constants.write(value);
@@ -26,6 +29,11 @@ int Chunk::addConstant(Value value) {
 
 int Chunk::disassembleInstruction(int offset) const {
     std::printf("%04d ", offset);
+    if (offset > 0 && m_lines[offset] == m_lines[offset - 1]) {
+        std::printf("   | ");
+    } else {
+        std::printf("%4d ", m_lines[offset]);
+    }
 
     Op instruction = toOpcode(this->at(offset));
     switch (instruction) {
