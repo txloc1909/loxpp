@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include <vector>
+#include <utility>
 
 using Byte = uint8_t;
 
@@ -24,8 +25,9 @@ class Chunk : std::vector<Byte> {
     void disassemble(const char* name) const;
     int disassembleInstruction(int offset) const;
     Value getConstant(int idx) const;
+    int getLine(int offset) const;
 
   private:
     ValueArray m_constants;
-    std::vector<int> m_lines;
+    std::vector<std::pair<int, int>> m_lines;
 };

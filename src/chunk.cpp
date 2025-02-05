@@ -17,7 +17,12 @@ static int constantInstruction(const char* name, const Chunk& chunk,
 
 void Chunk::write(Byte byte, int line) {
     push_back(byte);
-    m_lines.push_back(line);
+
+    if (m_lines.empty() || m_lines.back().first != line) {
+        m_lines.push_back({line, 1});
+    } else {
+        m_lines.back().second++;
+    }
 }
 
 void Chunk::write(Op op, int line) { write(static_cast<Byte>(op), line); }
@@ -27,12 +32,24 @@ int Chunk::addConstant(Value value) {
     return m_constants.size() - 1;
 }
 
+int Chunk::getLine(int offset) const {
+    int currentOffset = 0;
+    for (const auto& [line, count] : m_lines) {
+        currentOffset += count;
+        if (offset < currentOffset) {
+            return line;
+        }
+    }
+    return 0; // Error case
+}
+
 int Chunk::disassembleInstruction(int offset) const {
     std::printf("%04d ", offset);
-    if (offset > 0 && m_lines[offset] == m_lines[offset - 1]) {
+
+    if (offset > 0 && getLine(offset) == getLine(offset - 1)) {
         std::printf("   | ");
     } else {
-        std::printf("%4d ", m_lines[offset]);
+        std::printf("%4d ", getLine(offset));
     }
 
     Op instruction = toOpcode(this->at(offset));
