@@ -56,6 +56,8 @@ int Chunk::disassembleInstruction(int offset) const {
     switch (instruction) {
     case Op::RETURN:
         return simpleInstruction("Op::RETURN", offset);
+    case Op::NEGATE:
+        return simpleInstruction("Op::NEGATE", offset);
     case Op::CONSTANT:
         return constantInstruction("Op::CONSTANT", *this, offset);
     default:

@@ -15,20 +15,24 @@ Byte VM::readByte() { return *m_ip++; }
 Value VM::readConstant() { return m_chunk->getConstant(readByte()); }
 
 InterpretResult VM::run() {
+    for (;;) {
 #ifdef DEBUG_TRACE_EXECUTION
-    std::printf("          ");
-    for (Value* slot = stack; slot < stackTop; slot++) {
-        std::printf("[ %g ]", *slot);
-    }
-    std::printf("\n");
-    m_chunk->disassembleInstruction(m_ip - m_chunk->cbegin());
+        std::printf("          ");
+        for (Value* slot = stack; slot < stackTop; slot++) {
+            std::printf("[ %g ]", *slot);
+        }
+        std::printf("\n");
+        m_chunk->disassembleInstruction(m_ip - m_chunk->cbegin());
 #endif
 
-    for (;;) {
         Byte instruction = readByte();
         switch (toOpcode(instruction)) {
         case Op::CONSTANT: {
             push(readConstant());
+            break;
+        }
+        case Op::NEGATE: {
+            push(-pop());
             break;
         }
         case Op::RETURN: {

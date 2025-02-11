@@ -10,6 +10,7 @@ using Byte = uint8_t;
 
 enum class Op : Byte {
     CONSTANT,
+    NEGATE,
     RETURN,
 };
 
