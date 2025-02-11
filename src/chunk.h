@@ -18,6 +18,10 @@ inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }
 class Chunk : std::vector<Byte> {
   public:
     using std::vector<Byte>::at;
+    using std::vector<Byte>::data;
+    using std::vector<Byte>::const_iterator;
+    using std::vector<Byte>::cbegin;
+    using std::vector<Byte>::cend;
 
     void write(Byte byte, int line);
     void write(Op op, int line);
