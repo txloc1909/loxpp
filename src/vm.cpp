@@ -2,12 +2,14 @@
 
 #include <cstdio>
 
+#include <string>
+
 #define DEBUG_TRACE_EXECUTION
 
-InterpretResult VM::interpret(Chunk const* chunk) {
-    m_chunk = chunk;
-    m_ip = chunk->cbegin();
-    return run();
+InterpretResult VM::interpret(const std::string& source) {
+    // TODO: Implement actual compilation
+    printf("Interpreting source: %s\n", source.c_str());
+    return InterpretResult::OK;
 }
 
 Byte VM::readByte() { return *m_ip++; }

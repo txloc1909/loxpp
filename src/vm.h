@@ -2,6 +2,8 @@
 
 #include "chunk.h"
 
+#include <string>
+
 enum class InterpretResult {
     OK,
     COMPILE_ERROR,
@@ -15,7 +17,7 @@ class VM {
     VM() { resetStack(); }
     ~VM() {}
 
-    InterpretResult interpret(Chunk const* chunk);
+    InterpretResult interpret(const std::string& source);
     InterpretResult run();
 
   private:

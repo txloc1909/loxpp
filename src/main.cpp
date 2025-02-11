@@ -2,43 +2,54 @@
 #include "vm.h"
 
 #include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
 
-int main() {
-    Chunk chunk;
+static void repl(VM& vm) {
+    std::string line;
+    for (;;) {
+        std::cout << "> ";
+        if (!std::getline(std::cin, line)) {
+            std::cout << std::endl;
+            break;
+        }
+        vm.interpret(line);
+    }
+}
 
-    int constant = chunk.addConstant(1.2);
-    chunk.write(Op::CONSTANT, 123);
-    chunk.write(constant, 123);
+static std::string readFile(const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        std::fprintf(stderr, "Could not open file \"%s\".", path.c_str());
+        std::exit(74);
+    }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
 
-    constant = chunk.addConstant(3.4);
-    chunk.write(Op::CONSTANT, 123);
-    chunk.write(constant, 123);
+static void runFile(VM& vm, const std::string& path) {
+    std::string source = readFile(path);
+    InterpretResult result = vm.interpret(source);
 
-    chunk.write(Op::ADD, 123);
+    if (result == InterpretResult::COMPILE_ERROR)
+        std::exit(65);
+    if (result == InterpretResult::RUNTIME_ERROR)
+        std::exit(70);
+}
 
-    constant = chunk.addConstant(5.6);
-    chunk.write(Op::CONSTANT, 123);
-    chunk.write(constant, 123);
-
-    chunk.write(Op::MULTIPLY, 123);
-
-    constant = chunk.addConstant(2.0);
-    chunk.write(Op::CONSTANT, 123);
-    chunk.write(constant, 123);
-
-    chunk.write(Op::DIVIDE, 123);
-
-    constant = chunk.addConstant(1.0);
-    chunk.write(Op::CONSTANT, 123);
-    chunk.write(constant, 123);
-
-    chunk.write(Op::SUBTRACT, 123);
-
-    chunk.write(Op::RETURN, 123);
-    chunk.disassemble("test chunk");
-
+int main(int argc, const char* argv[]) {
     VM vm;
-    vm.interpret(&chunk);
+
+    if (argc == 1) {
+        repl(vm);
+    } else if (argc == 2) {
+        runFile(vm, argv[1]);
+    } else {
+        std::fprintf(stderr, "Usage: loxpp [path]\n");
+        std::exit(64);
+    }
 
     return 0;
 }
