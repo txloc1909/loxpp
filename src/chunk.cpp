@@ -60,6 +60,14 @@ int Chunk::disassembleInstruction(int offset) const {
         return simpleInstruction("Op::NEGATE", offset);
     case Op::CONSTANT:
         return constantInstruction("Op::CONSTANT", *this, offset);
+    case Op::ADD:
+        return simpleInstruction("Op::ADD", offset);
+    case Op::SUBTRACT:
+        return simpleInstruction("Op::SUBTRACT", offset);
+    case Op::MULTIPLY:
+        return simpleInstruction("Op::MULTIPLY", offset);
+    case Op::DIVIDE:
+        return simpleInstruction("Op::DIVIDE", offset);
     default:
         std::printf("Unknown opcode %d\n", instruction);
         return offset + 1;

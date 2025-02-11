@@ -35,6 +35,30 @@ InterpretResult VM::run() {
             push(-pop());
             break;
         }
+        case Op::ADD: {
+            Value b = pop();
+            Value a = pop();
+            push(a + b);
+            break;
+        }
+        case Op::SUBTRACT: {
+            Value b = pop();
+            Value a = pop();
+            push(a - b);
+            break;
+        }
+        case Op::MULTIPLY: {
+            Value b = pop();
+            Value a = pop();
+            push(a * b);
+            break;
+        }
+        case Op::DIVIDE: {
+            Value b = pop();
+            Value a = pop();
+            push(a / b);
+            break;
+        }
         case Op::RETURN: {
             std::printf("%g\n", pop());
             return InterpretResult::OK;
