@@ -101,15 +101,14 @@ TokenType Scanner::identifierType() {
     case 'i':
         return checkKeyword(1, 1, "f", TokenType::IF);
     case 'f': {
-        if (static_cast<std::size_t>(m_current - m_start) > 1 &&
-            m_start[1] == 'o') {
+        if (m_current - m_start > 1) {
             switch (m_start[1]) {
-            case 'r':
-                return TokenType::FOR;
             case 'a':
-                return TokenType::FALSE;
+                return checkKeyword(2, 3, "lse", TokenType::FALSE);
+            case 'o':
+                return checkKeyword(2, 1, "r", TokenType::FOR);
             case 'u':
-                return TokenType::FUN;
+                return checkKeyword(2, 1, "n", TokenType::FUN);
             }
         }
         break;
@@ -117,7 +116,7 @@ TokenType Scanner::identifierType() {
     case 'n':
         return checkKeyword(1, 2, "il", TokenType::NIL);
     case 'o':
-        return checkKeyword(1, 2, "r", TokenType::OR);
+        return checkKeyword(1, 1, "r", TokenType::OR);
     case 'p':
         return checkKeyword(1, 4, "rint", TokenType::PRINT);
     case 'r':
@@ -125,19 +124,18 @@ TokenType Scanner::identifierType() {
     case 's':
         return checkKeyword(1, 4, "uper", TokenType::SUPER);
     case 't': {
-        if (static_cast<std::size_t>(m_current - m_start) > 1 &&
-            m_start[1] == 'h') {
+        if (m_current - m_start > 1) {
             switch (m_start[1]) {
-            case 'i':
-                return checkKeyword(3, 1, "s", TokenType::THIS);
-            case 's':
-                return checkKeyword(3, 2, "ue", TokenType::TRUE);
+            case 'h':
+                return checkKeyword(2, 2, "is", TokenType::THIS);
+            case 'r':
+                return checkKeyword(2, 2, "ue", TokenType::TRUE);
             }
         }
         break;
     }
     case 'v':
-        return checkKeyword(1, 4, "ar", TokenType::VAR);
+        return checkKeyword(1, 2, "ar", TokenType::VAR);
     case 'w':
         return checkKeyword(1, 4, "hile", TokenType::WHILE);
     }
