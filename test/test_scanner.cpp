@@ -88,8 +88,8 @@ std::ostream& operator<<(std::ostream& os, const TokenType& type) {
     }
 }
 
-static std::vector<Token> scanTokens(const std::string& source) {
-    Scanner scanner(source);
+static std::vector<Token> scanTokens(const char* source) {
+    auto scanner = Scanner(std::string(source));
     std::vector<Token> tokens;
     for (;;) {
         Token token = scanner.scanOneToken();
@@ -101,14 +101,16 @@ static std::vector<Token> scanTokens(const std::string& source) {
 }
 
 void test_empty_source() {
-    auto tokens = scanTokens("");
+    static const char* source = "";
+    auto tokens = scanTokens(source);
     assert(tokens.size() == 1);
     assert(tokens[0].type == TokenType::EOF_);
     std::cout << "Empty source test passed!\n";
 }
 
 void test_single_character_tokens() {
-    auto tokens = scanTokens("(){},.-+;*");
+    static const char* source = "(){},.-+;*";
+    auto tokens = scanTokens(source);
     assert(tokens.size() == 11); // 10 tokens + EOF
     assert(tokens[0].type == TokenType::LEFT_PAREN);
     assert(tokens[1].type == TokenType::RIGHT_PAREN);
@@ -124,7 +126,8 @@ void test_single_character_tokens() {
 }
 
 void test_one_or_two_character_tokens() {
-    auto tokens = scanTokens("! != = == > >= < <=");
+    static const char* source = "! != = == > >= < <=";
+    auto tokens = scanTokens(source);
     assert(tokens.size() == 9); // 8 tokens + EOF
     assert(tokens[0].type == TokenType::BANG);
     assert(tokens[1].type == TokenType::BANG_EQUAL);
@@ -139,14 +142,16 @@ void test_one_or_two_character_tokens() {
 }
 
 void test_string_literal() {
-    auto tokens = scanTokens("\"hello world\"");
+    static const char* source = "\"hello world\"";
+    auto tokens = scanTokens(source);
     assert(tokens[0].type == TokenType::STRING);
     assert(tokens[0].lexeme == "hello world");
     std::cout << "String literal test passed!\n";
 }
 
 void test_number_literal() {
-    auto tokens = scanTokens("123 123.456");
+    static const char* source = "123 123.456";
+    auto tokens = scanTokens(source);
     assert(tokens[0].type == TokenType::NUMBER);
     assert(tokens[1].type == TokenType::NUMBER);
     assert(tokens[0].lexeme == "123");
@@ -155,8 +160,9 @@ void test_number_literal() {
 }
 
 void test_keywords() {
-    auto tokens = scanTokens("and class else false fun for if nil or print "
-                             "return super this true var while");
+    static const char* source = "and class else false fun for if nil or print "
+                                "return super this true var while";
+    auto tokens = scanTokens(source);
     assert(tokens.size() == 17); // 16 tokens + EOF
     assert(tokens[0].type == TokenType::AND);
     assert(tokens[1].type == TokenType::CLASS);
@@ -179,7 +185,8 @@ void test_keywords() {
 }
 
 void test_whitespace_handling() {
-    auto tokens = scanTokens("   \t\r\n  123   \n  456  ");
+    static const char* source = "   \t\r\n  123   \n  456  ";
+    auto tokens = scanTokens(source);
     assert(tokens.size() == 3); // two numbers + EOF
     assert(tokens[0].type == TokenType::NUMBER);
     assert(tokens[0].lexeme == "123");
@@ -192,10 +199,11 @@ void test_whitespace_handling() {
 }
 
 void test_comment_handling() {
-    auto tokens = scanTokens("// this is a comment\n"
-                             "123 // comment after number\n"
-                             "// another comment\n"
-                             "456");
+    static const char* source = "// this is a comment\n"
+                                "123 // comment after number\n"
+                                "// another comment\n"
+                                "456";
+    auto tokens = scanTokens(source);
     assert(tokens.size() == 3); // two numbers + EOF
     assert(tokens[0].type == TokenType::NUMBER);
     assert(tokens[0].lexeme == "123");
