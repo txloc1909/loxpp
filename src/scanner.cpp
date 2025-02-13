@@ -168,7 +168,9 @@ Token Scanner::consumeString() {
 
     // The closing quote.
     advance();
-    return makeToken(TokenType::STRING);
+    auto lexeme = std::string_view{
+        m_start + 1, static_cast<std::size_t>(m_current - m_start) - 2};
+    return makeToken(TokenType::STRING, lexeme);
 }
 
 Token Scanner::consumeIdentifier() {
