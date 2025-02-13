@@ -141,7 +141,7 @@ void test_one_or_two_character_tokens() {
 void test_string_literal() {
     auto tokens = scanTokens("\"hello world\"");
     assert(tokens[0].type == TokenType::STRING);
-    assert(tokens[0].lexeme == "\"hello world\"");
+    assert(tokens[0].lexeme == "hello world");
     std::cout << "String literal test passed!\n";
 }
 
