@@ -1,4 +1,5 @@
 #include "scanner.h"
+#include <gtest/gtest.h>
 
 #include <cassert>
 #include <iostream>
@@ -16,129 +17,118 @@ static std::vector<Token> scanTokens(const char* source) {
     return tokens;
 }
 
-void test_empty_source() {
-    static const char* source = "";
+class ScannerTest : public ::testing::Test {
+  protected:
+    void SetUp() override {}
+    void TearDown() override {}
+};
+
+TEST_F(ScannerTest, EmptySource) {
+    const char* source = "";
     auto tokens = scanTokens(source);
-    assert(tokens.size() == 1);
-    assert(tokens[0].type == TokenType::EOF_);
-    std::cout << "Empty source test passed!\n";
+    ASSERT_EQ(tokens.size(), 1);
+    EXPECT_EQ(tokens[0].type, TokenType::EOF_);
 }
 
-void test_single_character_tokens() {
-    static const char* source = "(){},.-+;*";
+TEST_F(ScannerTest, SingleCharacterTokens) {
+    const char* source = "(){},.-+;*";
     auto tokens = scanTokens(source);
-    assert(tokens.size() == 11); // 10 tokens + EOF
-    assert(tokens[0].type == TokenType::LEFT_PAREN);
-    assert(tokens[1].type == TokenType::RIGHT_PAREN);
-    assert(tokens[2].type == TokenType::LEFT_BRACE);
-    assert(tokens[3].type == TokenType::RIGHT_BRACE);
-    assert(tokens[4].type == TokenType::COMMA);
-    assert(tokens[5].type == TokenType::DOT);
-    assert(tokens[6].type == TokenType::MINUS);
-    assert(tokens[7].type == TokenType::PLUS);
-    assert(tokens[8].type == TokenType::SEMICOLON);
-    assert(tokens[9].type == TokenType::STAR);
-    std::cout << "Single character tokens test passed!\n";
+    ASSERT_EQ(tokens.size(), 11); // 10 tokens + EOF
+    EXPECT_EQ(tokens[0].type, TokenType::LEFT_PAREN);
+    EXPECT_EQ(tokens[1].type, TokenType::RIGHT_PAREN);
+    EXPECT_EQ(tokens[2].type, TokenType::LEFT_BRACE);
+    EXPECT_EQ(tokens[3].type, TokenType::RIGHT_BRACE);
+    EXPECT_EQ(tokens[4].type, TokenType::COMMA);
+    EXPECT_EQ(tokens[5].type, TokenType::DOT);
+    EXPECT_EQ(tokens[6].type, TokenType::MINUS);
+    EXPECT_EQ(tokens[7].type, TokenType::PLUS);
+    EXPECT_EQ(tokens[8].type, TokenType::SEMICOLON);
+    EXPECT_EQ(tokens[9].type, TokenType::STAR);
 }
 
-void test_one_or_two_character_tokens() {
-    static const char* source = "! != = == > >= < <=";
+TEST_F(ScannerTest, OneOrTwoCharacterTokens) {
+    const char* source = "! != = == > >= < <=";
     auto tokens = scanTokens(source);
-    assert(tokens.size() == 9); // 8 tokens + EOF
-    assert(tokens[0].type == TokenType::BANG);
-    assert(tokens[1].type == TokenType::BANG_EQUAL);
-    assert(tokens[2].type == TokenType::EQUAL);
-    assert(tokens[3].type == TokenType::EQUAL_EQUAL);
-    assert(tokens[4].type == TokenType::GREATER);
-    assert(tokens[5].type == TokenType::GREATER_EQUAL);
-    assert(tokens[6].type == TokenType::LESS);
-    assert(tokens[7].type == TokenType::LESS_EQUAL);
-    assert(tokens[8].type == TokenType::EOF_);
-    std::cout << "One or two character tokens test passed!\n";
+    ASSERT_EQ(tokens.size(), 9); // 8 tokens + EOF
+    EXPECT_EQ(tokens[0].type, TokenType::BANG);
+    EXPECT_EQ(tokens[1].type, TokenType::BANG_EQUAL);
+    EXPECT_EQ(tokens[2].type, TokenType::EQUAL);
+    EXPECT_EQ(tokens[3].type, TokenType::EQUAL_EQUAL);
+    EXPECT_EQ(tokens[4].type, TokenType::GREATER);
+    EXPECT_EQ(tokens[5].type, TokenType::GREATER_EQUAL);
+    EXPECT_EQ(tokens[6].type, TokenType::LESS);
+    EXPECT_EQ(tokens[7].type, TokenType::LESS_EQUAL);
+    EXPECT_EQ(tokens[8].type, TokenType::EOF_);
 }
 
-void test_string_literal() {
-    static const char* source = "\"hello world\"";
+TEST_F(ScannerTest, StringLiteral) {
+    const char* source = "\"hello world\"";
     auto tokens = scanTokens(source);
-    assert(tokens[0].type == TokenType::STRING);
-    assert(tokens[0].lexeme == "hello world");
-    std::cout << "String literal test passed!\n";
+    EXPECT_EQ(tokens[0].type, TokenType::STRING);
+    EXPECT_EQ(tokens[0].lexeme, "hello world");
 }
 
-void test_number_literal() {
-    static const char* source = "123 123.456";
+TEST_F(ScannerTest, NumberLiteral) {
+    const char* source = "123 123.456";
     auto tokens = scanTokens(source);
-    assert(tokens[0].type == TokenType::NUMBER);
-    assert(tokens[1].type == TokenType::NUMBER);
-    assert(tokens[0].lexeme == "123");
-    assert(tokens[1].lexeme == "123.456");
-    std::cout << "Number literal test passed!\n";
+    EXPECT_EQ(tokens[0].type, TokenType::NUMBER);
+    EXPECT_EQ(tokens[1].type, TokenType::NUMBER);
+    EXPECT_EQ(tokens[0].lexeme, "123");
+    EXPECT_EQ(tokens[1].lexeme, "123.456");
 }
 
-void test_keywords() {
-    static const char* source = "and class else false fun for if nil or print "
-                                "return super this true var while";
+TEST_F(ScannerTest, Keywords) {
+    const char* source = "and class else false fun for if nil or print "
+                         "return super this true var while";
     auto tokens = scanTokens(source);
-    assert(tokens.size() == 17); // 16 tokens + EOF
-    assert(tokens[0].type == TokenType::AND);
-    assert(tokens[1].type == TokenType::CLASS);
-    assert(tokens[2].type == TokenType::ELSE);
-    assert(tokens[3].type == TokenType::FALSE);
-    assert(tokens[4].type == TokenType::FUN);
-    assert(tokens[5].type == TokenType::FOR);
-    assert(tokens[6].type == TokenType::IF);
-    assert(tokens[7].type == TokenType::NIL);
-    assert(tokens[8].type == TokenType::OR);
-    assert(tokens[9].type == TokenType::PRINT);
-    assert(tokens[10].type == TokenType::RETURN);
-    assert(tokens[11].type == TokenType::SUPER);
-    assert(tokens[12].type == TokenType::THIS);
-    assert(tokens[13].type == TokenType::TRUE);
-    assert(tokens[14].type == TokenType::VAR);
-    assert(tokens[15].type == TokenType::WHILE);
-    assert(tokens[16].type == TokenType::EOF_);
-    std::cout << "Keywords test passed!\n";
+    ASSERT_EQ(tokens.size(), 17); // 16 tokens + EOF
+    EXPECT_EQ(tokens[0].type, TokenType::AND);
+    EXPECT_EQ(tokens[1].type, TokenType::CLASS);
+    EXPECT_EQ(tokens[2].type, TokenType::ELSE);
+    EXPECT_EQ(tokens[3].type, TokenType::FALSE);
+    EXPECT_EQ(tokens[4].type, TokenType::FUN);
+    EXPECT_EQ(tokens[5].type, TokenType::FOR);
+    EXPECT_EQ(tokens[6].type, TokenType::IF);
+    EXPECT_EQ(tokens[7].type, TokenType::NIL);
+    EXPECT_EQ(tokens[8].type, TokenType::OR);
+    EXPECT_EQ(tokens[9].type, TokenType::PRINT);
+    EXPECT_EQ(tokens[10].type, TokenType::RETURN);
+    EXPECT_EQ(tokens[11].type, TokenType::SUPER);
+    EXPECT_EQ(tokens[12].type, TokenType::THIS);
+    EXPECT_EQ(tokens[13].type, TokenType::TRUE);
+    EXPECT_EQ(tokens[14].type, TokenType::VAR);
+    EXPECT_EQ(tokens[15].type, TokenType::WHILE);
+    EXPECT_EQ(tokens[16].type, TokenType::EOF_);
 }
 
-void test_whitespace_handling() {
-    static const char* source = "   \t\r 123   \n  456  ";
+TEST_F(ScannerTest, WhitespaceHandling) {
+    const char* source = "   \t\r 123   \n  456  ";
     auto tokens = scanTokens(source);
-    assert(tokens.size() == 3); // two numbers + EOF
-    assert(tokens[0].type == TokenType::NUMBER);
-    assert(tokens[0].lexeme == "123");
-    assert(tokens[0].line == 1);
-    assert(tokens[1].type == TokenType::NUMBER);
-    assert(tokens[1].lexeme == "456");
-    assert(tokens[1].line == 2);
-    assert(tokens[2].type == TokenType::EOF_);
-    std::cout << "Whitespace handling test passed!\n";
+    ASSERT_EQ(tokens.size(), 3); // two numbers + EOF
+    EXPECT_EQ(tokens[0].type, TokenType::NUMBER);
+    EXPECT_EQ(tokens[0].lexeme, "123");
+    EXPECT_EQ(tokens[0].line, 1);
+    EXPECT_EQ(tokens[1].type, TokenType::NUMBER);
+    EXPECT_EQ(tokens[1].lexeme, "456");
+    EXPECT_EQ(tokens[1].line, 2);
+    EXPECT_EQ(tokens[2].type, TokenType::EOF_);
 }
 
-void test_comment_handling() {
-    static const char* source = "// this is a comment\n"
-                                "123 // comment after number\n"
-                                "// another comment\n"
-                                "456";
+TEST_F(ScannerTest, CommentHandling) {
+    const char* source = "// this is a comment\n"
+                         "123 // comment after number\n"
+                         "// another comment\n"
+                         "456";
     auto tokens = scanTokens(source);
-    assert(tokens.size() == 3); // two numbers + EOF
-    assert(tokens[0].type == TokenType::NUMBER);
-    assert(tokens[0].lexeme == "123");
-    assert(tokens[1].type == TokenType::NUMBER);
-    assert(tokens[1].lexeme == "456");
-    assert(tokens[2].type == TokenType::EOF_);
-    std::cout << "Comment handling test passed!\n";
+    ASSERT_EQ(tokens.size(), 3); // two numbers + EOF
+    EXPECT_EQ(tokens[0].type, TokenType::NUMBER);
+    EXPECT_EQ(tokens[0].lexeme, "123");
+    EXPECT_EQ(tokens[1].type, TokenType::NUMBER);
+    EXPECT_EQ(tokens[1].lexeme, "456");
+    EXPECT_EQ(tokens[2].type, TokenType::EOF_);
 }
 
-int main() {
-    test_empty_source();
-    test_single_character_tokens();
-    test_one_or_two_character_tokens();
-    test_string_literal();
-    test_number_literal();
-    test_keywords();
-    test_whitespace_handling();
-    test_comment_handling();
-
-    std::cout << "All scanner tests passed!\n";
-    return 0;
+int main(int argc, char** argv) {
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }
