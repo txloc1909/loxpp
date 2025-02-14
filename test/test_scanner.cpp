@@ -89,7 +89,7 @@ std::ostream& operator<<(std::ostream& os, const TokenType& type) {
 }
 
 static std::vector<Token> scanTokens(const char* source) {
-    auto scanner = Scanner(std::string(source));
+    auto scanner = Scanner(source);
     std::vector<Token> tokens;
     for (;;) {
         Token token = scanner.scanOneToken();

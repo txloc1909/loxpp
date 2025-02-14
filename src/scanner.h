@@ -5,6 +5,7 @@
 class Scanner {
   public:
     Scanner(const std::string& source);
+    Scanner(const char* source);
     Token scanOneToken();
 
   private:
@@ -26,7 +27,7 @@ class Scanner {
     char peekNext() const;
     bool match(char expected);
 
-    const std::string& m_source;
+    const std::string* m_source;
     const char* m_current;
     const char* m_start;
     std::size_t m_line;

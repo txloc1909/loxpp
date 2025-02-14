@@ -11,8 +11,12 @@ static bool isAlpha(char c) {
 static bool isAlphaNumeric(char c) { return isDigit(c) || isAlpha(c); }
 
 Scanner::Scanner(const std::string& source)
-    : m_source(source), m_current(source.data()), m_start(source.data()),
+    : m_source(&source), m_current(source.data()), m_start(source.data()),
       m_line(1) {}
+
+Scanner::Scanner(const char* source)
+    : m_source(nullptr), // we don't need m_source for char* constructor
+      m_current(source), m_start(source), m_line(1) {}
 
 Token Scanner::scanOneToken() {
     skipWhitespaceAndComments();
