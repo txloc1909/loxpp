@@ -1,14 +1,21 @@
 #include "vm.h"
+#include "scanner.h"
 
 #include <cstdio>
-
 #include <string>
+#include <iostream>
 
 #define DEBUG_TRACE_EXECUTION
 
 InterpretResult VM::interpret(const std::string& source) {
-    // TODO: Implement actual compilation
-    printf("Interpreting source: %s\n", source.c_str());
+    Scanner scanner(source);
+    for (;;) {
+        Token token = scanner.scanOneToken();
+        std::cout << token.line << ": '" << token.type << " " << token.lexeme
+                  << "'" << std::endl;
+        if (token.type == TokenType::EOF_)
+            break;
+    }
     return InterpretResult::OK;
 }
 

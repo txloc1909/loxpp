@@ -62,3 +62,5 @@ struct Token {
     std::string_view lexeme;
     std::size_t line;
 };
+
+std::ostream& operator<<(std::ostream& os, const TokenType& type);

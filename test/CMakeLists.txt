@@ -1,5 +1,5 @@
 add_executable(test_main test_main.cpp)
-add_executable(test_scanner test_scanner.cpp ${PROJECT_SOURCE_DIR}/src/scanner.cpp)
+add_executable(test_scanner test_scanner.cpp ${PROJECT_SOURCE_DIR}/src/scanner.cpp ${PROJECT_SOURCE_DIR}/src/token.cpp)
 
 target_include_directories(test_main PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_scanner PRIVATE ${PROJECT_SOURCE_DIR}/src)
