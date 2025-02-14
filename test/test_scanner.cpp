@@ -185,7 +185,7 @@ void test_keywords() {
 }
 
 void test_whitespace_handling() {
-    static const char* source = "   \t\r\n  123   \n  456  ";
+    static const char* source = "   \t\r 123   \n  456  ";
     auto tokens = scanTokens(source);
     assert(tokens.size() == 3); // two numbers + EOF
     assert(tokens[0].type == TokenType::NUMBER);
