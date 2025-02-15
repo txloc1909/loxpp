@@ -5,6 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# parser rule table uses C99 designator
+add_compile_options(-Wno-c99-designator)
+
 include_directories(${PROJECT_SOURCE_DIR}/src)
 
 add_executable(loxpp 

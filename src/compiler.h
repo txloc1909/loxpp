@@ -16,11 +16,18 @@ class Compiler {
     void endCompiler();
 
     void expression();
+    void grouping();
+    void unary();
+    void binary();
+    void number();
 
   private:
     void emitByte(Byte byte);
+    void emitByte(Op op);
     void emitBytes(Op op, Byte byte);
     void emitReturn();
+
+    uint8_t makeConstant(Value value);
 
     Chunk* m_currentChunk;
     Parser* m_parser;

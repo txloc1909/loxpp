@@ -69,7 +69,7 @@ int Chunk::disassembleInstruction(int offset) const {
     case Op::DIVIDE:
         return simpleInstruction("Op::DIVIDE", offset);
     default:
-        std::printf("Unknown opcode %d\n", instruction);
+        std::printf("Unknown opcode %hhu\n", instruction);
         return offset + 1;
     }
 }

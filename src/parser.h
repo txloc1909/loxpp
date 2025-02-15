@@ -2,10 +2,8 @@
 
 #include "scanner.h"
 
-#include <unordered_map>
-
-enum class Precedence {
-    NONE,
+enum class Precedence : int {
+    NONE = 0,
     ASSIGNMENT, // =
     OR,         // ||
     AND,        // &&
@@ -18,8 +16,16 @@ enum class Precedence {
     PRIMARY,    // literals, variables, numbers, strings
 };
 
+inline Precedence nextPrecedence(Precedence current) {
+    return static_cast<Precedence>(static_cast<int>(current) + 1);
+}
+
+inline bool operator<=(Precedence a, Precedence b) {
+    return static_cast<int>(a) <= static_cast<int>(b);
+}
+
 class Compiler;
-using ParseFn = void (*)(Compiler&);
+using ParseFn = void (Compiler::*)();
 
 struct ParseRule {
     ParseFn prefix;
@@ -36,6 +42,8 @@ struct Parser {
 
     Parser(const std::string& source);
 
+    void parsePrecedence(Precedence precedence, Compiler* compiler);
+
     void errorAt(const Token& token, const char* message);
     void errorAtCurrent(const char* message);
     void error(const char* message);
@@ -45,4 +53,6 @@ struct Parser {
     bool check(TokenType type) const;
     bool match(TokenType type);
     void synchronize();
+
+    static const ParseRule* getRule(TokenType type);
 };
