@@ -1,5 +1,6 @@
 #include "vm.h"
 #include "scanner.h"
+#include "compiler.h"
 
 #include <cstdio>
 #include <string>
@@ -8,15 +9,14 @@
 #define DEBUG_TRACE_EXECUTION
 
 InterpretResult VM::interpret(const std::string& source) {
-    Scanner scanner(source);
-    for (;;) {
-        Token token = scanner.scanOneToken();
-        std::cout << token.line << ": '" << token.type << " " << token.lexeme
-                  << "'" << std::endl;
-        if (token.type == TokenType::EOF_)
-            break;
+    auto chunk = compile(source);
+    if (chunk == nullptr) {
+        return InterpretResult::COMPILE_ERROR;
     }
-    return InterpretResult::OK;
+
+    m_chunk = chunk.get();
+    m_ip = m_chunk->cbegin();
+    return run();
 }
 
 Byte VM::readByte() { return *m_ip++; }
