@@ -27,7 +27,7 @@ void Chunk::write(Byte byte, int line) {
 
 void Chunk::write(Op op, int line) { write(static_cast<Byte>(op), line); }
 
-int Chunk::addConstant(Value value) {
+uint8_t Chunk::addConstant(Value value) {
     m_constants.write(value);
     return m_constants.size() - 1;
 }

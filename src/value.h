@@ -1,12 +1,16 @@
 #pragma once
 
-#include <vector>
+#include <array>
+#include <cstdint>
 
 using Value = double;
 
-class ValueArray : std::vector<Value> {
+class ValueArray : std::array<Value, UINT8_MAX> {
   public:
-    using std::vector<Value>::size;
-    using std::vector<Value>::at;
+    using std::array<Value, UINT8_MAX>::at;
     void write(Value value);
+    uint8_t size() const;
+
+  private:
+    uint8_t m_count = 0;
 };

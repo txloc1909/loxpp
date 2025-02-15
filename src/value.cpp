@@ -1,3 +1,5 @@
 #include "value.h"
 
-void ValueArray::write(Value value) { push_back(value); }
+uint8_t ValueArray::size() const { return m_count; }
+
+void ValueArray::write(Value value) { at(m_count++) = value; }
