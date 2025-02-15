@@ -1,0 +1,5 @@
+# Lox++
+
+## Dependencies
+* CMake
+* GTest
