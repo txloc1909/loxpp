@@ -2,6 +2,8 @@
 
 #include <memory>
 
+#define DEBUG_PRINT_CODE
+
 std::unique_ptr<Chunk> compile(const std::string& source) {
     auto chunk = std::make_unique<Chunk>();
     auto parser = std::make_unique<Parser>(source);
@@ -16,7 +18,12 @@ std::unique_ptr<Chunk> compile(const std::string& source) {
 Compiler::Compiler(Chunk* chunk, Parser* parser)
     : m_currentChunk{chunk}, m_parser{parser} {}
 
-void Compiler::endCompiler() { emitReturn(); }
+void Compiler::endCompiler() {
+    emitReturn();
+#ifdef DEBUG_PRINT_CODE
+    m_currentChunk->disassemble("code");
+#endif
+}
 
 void Compiler::expression() {
     m_parser->parsePrecedence(Precedence::ASSIGNMENT, this);
