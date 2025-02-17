@@ -87,11 +87,12 @@ Token Scanner::createErrorToken(const char* message) {
 
 TokenType Scanner::checkKeyword(std::size_t start, std::size_t length,
                                 const char* rest, TokenType type) {
-    if (m_current - m_start == start + length &&
-        std::memcmp(m_start + start, rest, length) == 0) {
+    std::string_view keyword(m_start + start, length);
+    if (m_current - m_start == start + length && keyword == rest) {
         return type;
+    } else {
+        return TokenType::IDENTIFIER;
     }
-    return TokenType::IDENTIFIER;
 }
 
 TokenType Scanner::identifierType() {
