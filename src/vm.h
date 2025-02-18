@@ -26,6 +26,9 @@ class VM {
     void resetStack();
     void push(Value value);
     Value pop();
+    Value peek(int distance);
+
+    void runtimeError(const char* format, ...);
 
     Chunk const* m_chunk;
     Chunk::const_iterator m_ip;

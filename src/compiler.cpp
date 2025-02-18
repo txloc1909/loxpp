@@ -73,8 +73,8 @@ void Compiler::binary() {
 }
 
 void Compiler::number() {
-    Value value = std::stod(m_parser->m_previous.lexeme.data(), nullptr);
-    emitBytes(Op::CONSTANT, makeConstant(value));
+    double num = std::stod(m_parser->m_previous.lexeme.data(), nullptr);
+    emitBytes(Op::CONSTANT, makeConstant(from<Number>(num)));
 }
 
 void Compiler::emitByte(Byte byte) {

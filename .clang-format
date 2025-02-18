@@ -9,3 +9,4 @@ AllowShortLoopsOnASingleLine: false
 AllowShortCaseLabelsOnASingleLine: false
 SortIncludes: false
 PointerAlignment: Left
+AlwaysBreakTemplateDeclarations: Yes

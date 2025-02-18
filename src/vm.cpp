@@ -3,6 +3,7 @@
 #include "compiler.h"
 
 #include <cstdio>
+#include <functional>
 #include <string>
 #include <iostream>
 
@@ -24,11 +25,22 @@ Byte VM::readByte() { return *m_ip++; }
 Value VM::readConstant() { return m_chunk->getConstant(readByte()); }
 
 InterpretResult VM::run() {
+#define BINARY_OP(valueType, op)                                               \
+    do {                                                                       \
+        if (!is<Number>(peek(0)) || !is<Number>(peek(1))) {                    \
+            runtimeError("Operands must be numbers.");                         \
+            return InterpretResult::RUNTIME_ERROR;                             \
+        }                                                                      \
+        Number b = as<Number>(pop());                                          \
+        Number a = as<Number>(pop());                                          \
+        push(as<valueType>(a op b));                                           \
+    } while (false)
+
     for (;;) {
 #ifdef DEBUG_TRACE_EXECUTION
         std::printf("          ");
         for (Value* slot = stack; slot < stackTop; slot++) {
-            std::printf("[ %g ]", *slot);
+            std::printf("[ %g ]", as<Number>(*slot));
         }
         std::printf("\n");
         m_chunk->disassembleInstruction(m_ip - m_chunk->cbegin());
@@ -41,39 +53,50 @@ InterpretResult VM::run() {
             break;
         }
         case Op::NEGATE: {
-            push(-pop());
+            if (!is<Number>(peek(0))) {
+                runtimeError("Operand must be a number.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            push(from<Number>(as<Number>(pop())));
             break;
         }
         case Op::ADD: {
-            Value b = pop();
-            Value a = pop();
-            push(a + b);
+            BINARY_OP(Number, +);
             break;
         }
         case Op::SUBTRACT: {
-            Value b = pop();
-            Value a = pop();
-            push(a - b);
+            BINARY_OP(Number, -);
             break;
         }
         case Op::MULTIPLY: {
-            Value b = pop();
-            Value a = pop();
-            push(a * b);
+            BINARY_OP(Number, *);
             break;
         }
         case Op::DIVIDE: {
-            Value b = pop();
-            Value a = pop();
-            push(a / b);
+            BINARY_OP(Number, /);
             break;
         }
         case Op::RETURN: {
-            std::printf("%g\n", pop());
+            std::printf("%g\n", as<Number>(pop()));
             return InterpretResult::OK;
         }
         }
     }
+
+#undef BINARY_OP
+}
+
+void VM::runtimeError(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    std::vfprintf(stderr, format, args);
+    va_end(args);
+    std::fputs("\n", stderr);
+
+    auto instruction = m_ip - m_chunk->cbegin() - 1;
+    int line = m_chunk->getLine(instruction);
+    std::fprintf(stderr, "[line %d] in script\n", line);
+    resetStack();
 }
 
 void VM::resetStack() { stackTop = stack; }
@@ -81,3 +104,5 @@ void VM::resetStack() { stackTop = stack; }
 void VM::push(Value value) { *stackTop++ = value; }
 
 Value VM::pop() { return *--stackTop; }
+
+Value VM::peek(int distance) { return stackTop[-1 - distance]; }
