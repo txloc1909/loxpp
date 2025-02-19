@@ -52,6 +52,18 @@ InterpretResult VM::run() {
             push(readConstant());
             break;
         }
+        case Op::NIL: {
+            push(from<Nil>(Nil{}));
+            break;
+        }
+        case Op::TRUE: {
+            push(from<bool>(true));
+            break;
+        }
+        case Op::FALSE: {
+            push(from<bool>(false));
+            break;
+        }
         case Op::NEGATE: {
             if (!is<Number>(peek(0))) {
                 runtimeError("Operand must be a number.");

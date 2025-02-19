@@ -10,6 +10,9 @@ using Byte = uint8_t;
 
 enum class Op : Byte {
     CONSTANT,
+    NIL,
+    TRUE,
+    FALSE,
     NEGATE,
     ADD,
     SUBTRACT,

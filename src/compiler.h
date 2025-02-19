@@ -19,6 +19,7 @@ class Compiler {
     void grouping();
     void unary();
     void binary();
+    void literal();
     void number();
 
   private:

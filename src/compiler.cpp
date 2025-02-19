@@ -72,6 +72,22 @@ void Compiler::binary() {
     }
 }
 
+void Compiler::literal() {
+    switch (m_parser->m_previous.type) {
+    case TokenType::FALSE:
+        emitByte(Op::FALSE);
+        break;
+    case TokenType::NIL:
+        emitByte(Op::NIL);
+        break;
+    case TokenType::TRUE:
+        emitByte(Op::TRUE);
+        break;
+    default:
+        return; // unreachable
+    }
+}
+
 void Compiler::number() {
     double num = std::stod(m_parser->m_previous.lexeme.data(), nullptr);
     emitBytes(Op::CONSTANT, makeConstant(from<Number>(num)));
