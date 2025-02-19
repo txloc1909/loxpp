@@ -90,8 +90,12 @@ InterpretResult VM::run() {
             BINARY_OP(Number, /);
             break;
         }
+        case Op::NOT: {
+            push(as<bool>(!pop()));
+        }
         case Op::RETURN: {
             printValue(pop());
+            std::printf("\n");
             return InterpretResult::OK;
         }
         }

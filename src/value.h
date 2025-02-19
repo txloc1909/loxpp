@@ -25,6 +25,7 @@ Value from(const T& val) {
     return Value(val);
 }
 
+bool operator!(Value value);
 void printValue(const Value& value);
 
 class ValueArray : std::array<Value, UINT8_MAX> {

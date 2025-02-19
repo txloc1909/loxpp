@@ -3,6 +3,15 @@
 
 #include <cstdio>
 
+bool operator!(Value value) {
+    return std::visit(overloaded{
+                          [](bool val) -> bool { return !val; },
+                          [](Nil) -> bool { return !false; },
+                          [](const auto& val) -> bool { return !true; },
+                      },
+                      value);
+}
+
 void printValue(const Value& value) {
     std::visit(
         overloaded{

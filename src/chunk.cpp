@@ -75,6 +75,8 @@ int Chunk::disassembleInstruction(int offset) const {
         return simpleInstruction("Op::MULTIPLY", offset);
     case Op::DIVIDE:
         return simpleInstruction("Op::DIVIDE", offset);
+    case Op::NOT:
+        return simpleInstruction("Op::NOT", offset);
     default:
         std::printf("Unknown opcode %hhu\n", instruction);
         return offset + 1;

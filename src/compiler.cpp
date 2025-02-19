@@ -41,7 +41,10 @@ void Compiler::unary() {
 
     switch (operatorType) {
     case TokenType::MINUS:
-        emitBytes(Op::NEGATE, 0);
+        emitByte(Op::NEGATE);
+        break;
+    case TokenType::BANG:
+        emitByte(Op::NOT);
         break;
     default:
         return; // Unreachable.
