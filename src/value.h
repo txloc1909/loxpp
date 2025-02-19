@@ -25,6 +25,8 @@ Value from(const T& val) {
     return Value(val);
 }
 
+void printValue(const Value& value);
+
 class ValueArray : std::array<Value, UINT8_MAX> {
   public:
     using std::array<Value, UINT8_MAX>::at;

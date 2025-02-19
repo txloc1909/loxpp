@@ -10,8 +10,9 @@ static int simpleInstruction(const char* name, int offset) {
 static int constantInstruction(const char* name, const Chunk& chunk,
                                int offset) {
     auto constantIdx = chunk.at(offset + 1);
-    std::printf("%-16s %4d '%g'\n", name, constantIdx,
-                chunk.getConstant(constantIdx));
+    std::printf("%-16s %4d '", name, constantIdx);
+    printValue(chunk.getConstant(constantIdx));
+    std::printf("'\n");
     return offset + 2;
 }
 

@@ -40,7 +40,9 @@ InterpretResult VM::run() {
 #ifdef DEBUG_TRACE_EXECUTION
         std::printf("          ");
         for (Value* slot = stack; slot < stackTop; slot++) {
-            std::printf("[ %g ]", as<Number>(*slot));
+            std::printf("[ ");
+            printValue(*slot);
+            std::printf(" ]");
         }
         std::printf("\n");
         m_chunk->disassembleInstruction(m_ip - m_chunk->cbegin());
@@ -89,7 +91,7 @@ InterpretResult VM::run() {
             break;
         }
         case Op::RETURN: {
-            std::printf("%g\n", as<Number>(pop()));
+            printValue(pop());
             return InterpretResult::OK;
         }
         }
