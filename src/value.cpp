@@ -1,19 +1,14 @@
 #include "value.h"
+#include "overload.h"
 
 #include <cstdio>
 
 void printValue(const Value& value) {
     std::visit(
-        [](const auto& val) {
-            using DecayType = std::decay_t<decltype(val)>;
-            if constexpr (std::is_same_v<DecayType, bool>) {
-                std::printf("%s", (val ? "true" : "false"));
-            } else if constexpr (std::is_same_v<DecayType, Number>) {
-                std::printf("%g", val);
-            } else {
-                static_assert(std::is_same_v<DecayType, Nil>);
-                std::printf("nil");
-            }
+        overloaded{
+            [](bool val) { std::printf("%s", (val ? "true" : "false")); },
+            [](Number val) { std::printf("%g", val); },
+            [](Nil) { std::printf("nil"); },
         },
         value);
 }
