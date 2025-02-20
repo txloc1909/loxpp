@@ -67,6 +67,12 @@ int Chunk::disassembleInstruction(int offset) const {
         return simpleInstruction("Op::TRUE", offset);
     case Op::FALSE:
         return simpleInstruction("Op::FALSE", offset);
+    case Op::EQUAL:
+        return simpleInstruction("Op::EQUAL", offset);
+    case Op::GREATER:
+        return simpleInstruction("Op::GREATER", offset);
+    case Op::LESS:
+        return simpleInstruction("Op::LESS", offset);
     case Op::ADD:
         return simpleInstruction("Op::ADD", offset);
     case Op::SUBTRACT:

@@ -58,6 +58,33 @@ void Compiler::binary() {
     m_parser->parsePrecedence(nextPrecedence(current), this);
 
     switch (operatorType) {
+    case TokenType::BANG_EQUAL: {
+        emitByte(Op::EQUAL);
+        emitByte(Op::NOT);
+        break;
+    }
+    case TokenType::EQUAL_EQUAL: {
+        emitByte(Op::EQUAL);
+        break;
+    }
+    case TokenType::GREATER: {
+        emitByte(Op::GREATER);
+        break;
+    }
+    case TokenType::GREATER_EQUAL: {
+        emitByte(Op::LESS);
+        emitByte(Op::NOT);
+        break;
+    }
+    case TokenType::LESS: {
+        emitByte(Op::LESS);
+        break;
+    }
+    case TokenType::LESS_EQUAL: {
+        emitByte(Op::GREATER);
+        emitByte(Op::NOT);
+        break;
+    }
     case TokenType::PLUS:
         emitByte(Op::ADD);
         break;

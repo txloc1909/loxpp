@@ -12,6 +12,22 @@ bool operator!(Value value) {
                       value);
 }
 
+bool operator==(const Value& a, const Value& b) {
+    if (a.index() != b.index())
+        return false;
+
+    return std::visit(
+        overloaded{
+            [](bool a_val, bool b_val) -> bool { return a_val == b_val; },
+            [](Number a_val, Number b_val) -> bool { return a_val == b_val; },
+            [](Nil, Nil) -> bool { return true; },
+            [](const auto&, const auto&) -> bool {
+                // unreachable
+                return false;
+            }},
+        a, b);
+}
+
 void printValue(const Value& value) {
     std::visit(
         overloaded{

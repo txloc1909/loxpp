@@ -66,6 +66,19 @@ InterpretResult VM::run() {
             push(from<bool>(false));
             break;
         }
+        case Op::EQUAL: {
+            auto b = pop();
+            auto a = pop();
+            push(a == b);
+        }
+        case Op::GREATER: {
+            BINARY_OP(bool, >);
+            break;
+        }
+        case Op::LESS: {
+            BINARY_OP(bool, <);
+            break;
+        }
         case Op::NEGATE: {
             if (!is<Number>(peek(0))) {
                 runtimeError("Operand must be a number.");
