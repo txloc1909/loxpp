@@ -3,6 +3,7 @@
 #include "compiler.h"
 
 #include <cstdio>
+#include <cstdarg>
 #include <functional>
 #include <string>
 #include <iostream>
