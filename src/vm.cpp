@@ -68,9 +68,8 @@ InterpretResult VM::run() {
             break;
         }
         case Op::EQUAL: {
-            auto b = pop();
-            auto a = pop();
-            push(a == b);
+            BINARY_OP(bool, ==);
+            break;
         }
         case Op::GREATER: {
             BINARY_OP(bool, >);
@@ -85,7 +84,7 @@ InterpretResult VM::run() {
                 runtimeError("Operand must be a number.");
                 return InterpretResult::RUNTIME_ERROR;
             }
-            push(from<Number>(as<Number>(pop())));
+            push(from<Number>(-as<Number>(pop())));
             break;
         }
         case Op::ADD: {
