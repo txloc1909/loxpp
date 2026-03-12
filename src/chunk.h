@@ -34,6 +34,7 @@ class Chunk : std::vector<Byte> {
     using std::vector<Byte>::const_iterator;
     using std::vector<Byte>::cbegin;
     using std::vector<Byte>::cend;
+    using std::vector<Byte>::size;
 
     void write(Byte byte, int line);
     void write(Op op, int line);

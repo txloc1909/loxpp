@@ -21,6 +21,7 @@ class VM {
 
     InterpretResult interpret(const std::string& source);
     InterpretResult run();
+    Value lastResult() const; // Returns the last value on the stack after execution
 
   private:
     Byte readByte();

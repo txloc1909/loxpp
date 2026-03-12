@@ -26,6 +26,11 @@ Byte VM::readByte() { return *m_ip++; }
 
 Value VM::readConstant() { return m_chunk->getConstant(readByte()); }
 
+Value VM::lastResult() const {
+    if (stackTop == stack) throw std::runtime_error("Stack is empty");
+    return *(stackTop - 1);
+}
+
 InterpretResult VM::run() {
 #define BINARY_OP(valueType, op)                                               \
     do {                                                                       \
