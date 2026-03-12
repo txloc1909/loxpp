@@ -28,7 +28,7 @@ static const ParseRule rules[] = {
     RULE(LESS,           nullptr,             &Compiler::binary, COMPARISON),
     RULE(LESS_EQUAL,     nullptr,             &Compiler::binary, COMPARISON),
     RULE(IDENTIFIER,     nullptr,             nullptr,           NONE),
-    RULE(STRING,         nullptr,             nullptr,           NONE),
+    RULE(STRING,         &Compiler::string,   nullptr,           NONE),
     RULE(NUMBER,         &Compiler::number,   nullptr,           NONE),
     RULE(AND,            nullptr,             nullptr,           NONE),
     RULE(CLASS,          nullptr,             nullptr,           NONE),

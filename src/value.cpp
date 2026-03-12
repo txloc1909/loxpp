@@ -6,8 +6,9 @@
 bool operator!(Value value) {
     return std::visit(overloaded{
                           [](bool val) -> bool { return !val; },
-                          [](Nil) -> bool { return !false; },
-                          [](const auto& val) -> bool { return !true; },
+                          [](Nil) -> bool { return true; },
+                          [](Obj*) -> bool { return false; },
+                          [](const auto&) -> bool { return false; },
                       },
                       value);
 }
@@ -21,10 +22,13 @@ bool operator==(const Value& a, const Value& b) {
             [](bool a_val, bool b_val) -> bool { return a_val == b_val; },
             [](Number a_val, Number b_val) -> bool { return a_val == b_val; },
             [](Nil, Nil) -> bool { return true; },
-            [](const auto&, const auto&) -> bool {
-                // unreachable
-                return false;
-            }},
+            [](Obj* a_obj, Obj* b_obj) -> bool {
+                if (a_obj->type != b_obj->type) return false;
+                if (a_obj->type == ObjType::STRING)
+                    return asObjString(a_obj)->chars == asObjString(b_obj)->chars;
+                return a_obj == b_obj;
+            },
+            [](const auto&, const auto&) -> bool { return false; }},
         a, b);
 }
 
@@ -34,6 +38,7 @@ void printValue(const Value& value) {
             [](bool val) { std::printf("%s", (val ? "true" : "false")); },
             [](Number val) { std::printf("%g", val); },
             [](Nil) { std::printf("nil"); },
+            [](Obj* obj) { printObject(obj); },
         },
         value);
 }

@@ -1,12 +1,15 @@
 #pragma once
 
+#include "object.h"
+
 #include <array>
 #include <cstdint>
 #include <variant>
 
 using Number = double;
 using Nil = std::monostate;
-using Value = std::variant<bool, Number, Nil>;
+// Obj* is non-owning. Lifetime guaranteed by VM's std::vector<std::unique_ptr<Obj>>.
+using Value = std::variant<bool, Number, Nil, Obj*>;
 
 template <typename T>
 bool is(const Value& value) {
@@ -24,6 +27,12 @@ template <typename T>
 Value from(const T& val) {
     return Value(val);
 }
+
+inline bool isObj(const Value& v)    { return is<Obj*>(v); }
+inline bool isString(const Value& v) { return isObj(v) && isObjType(as<Obj*>(v), ObjType::STRING); }
+inline Obj* asObj(const Value& v)    { return as<Obj*>(v); }
+inline ObjString* asObjString(const Value& v) { return static_cast<ObjString*>(as<Obj*>(v)); }
+inline const char* asCString(const Value& v)  { return asObjString(v)->chars.c_str(); }
 
 bool operator!(Value value);
 bool operator==(const Value& a, const Value& b);

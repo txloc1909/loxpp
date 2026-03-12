@@ -1,16 +1,20 @@
 #pragma once
 
 #include "chunk.h"
+#include "memory.h"
 #include "parser.h"
 
-#include <string>
 #include <memory>
+#include <string>
+#include <vector>
 
-std::unique_ptr<Chunk> compile(const std::string& source);
+std::unique_ptr<Chunk> compile(const std::string& source,
+                               std::vector<std::unique_ptr<Obj>>& objects);
 
 class Compiler {
   public:
-    Compiler(Chunk* chunk, Parser* parser);
+    Compiler(Chunk* chunk, Parser* parser,
+             std::vector<std::unique_ptr<Obj>>* objects);
 
     Chunk* getCurrentChunk() const { return m_currentChunk; }
     void endCompiler();
@@ -21,6 +25,7 @@ class Compiler {
     void binary();
     void literal();
     void number();
+    void string();
 
   private:
     void emitByte(Byte byte);
@@ -32,4 +37,5 @@ class Compiler {
 
     Chunk* m_currentChunk;
     Parser* m_parser;
+    std::vector<std::unique_ptr<Obj>>* m_objects;
 };

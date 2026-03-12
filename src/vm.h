@@ -1,8 +1,11 @@
 #pragma once
 
 #include "chunk.h"
+#include "object.h"
 
+#include <memory>
 #include <string>
+#include <vector>
 
 enum class InterpretResult {
     OK,
@@ -15,7 +18,6 @@ class VM {
     static constexpr int STACK_MAX = 256;
 
     VM() { resetStack(); }
-    ~VM() {}
 
     InterpretResult interpret(const std::string& source);
     InterpretResult run();
@@ -34,4 +36,5 @@ class VM {
     Chunk::const_iterator m_ip;
     Value stack[STACK_MAX];
     Value* stackTop;
+    std::vector<std::unique_ptr<Obj>> m_objects;
 };

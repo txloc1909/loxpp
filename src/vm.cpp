@@ -1,4 +1,5 @@
 #include "vm.h"
+#include "object.h"
 #include "scanner.h"
 #include "compiler.h"
 
@@ -11,7 +12,7 @@
 #define DEBUG_TRACE_EXECUTION
 
 InterpretResult VM::interpret(const std::string& source) {
-    auto chunk = compile(source);
+    auto chunk = compile(source, m_objects);
     if (chunk == nullptr) {
         return InterpretResult::COMPILE_ERROR;
     }
@@ -68,7 +69,9 @@ InterpretResult VM::run() {
             break;
         }
         case Op::EQUAL: {
-            BINARY_OP(bool, ==);
+            Value b = pop();
+            Value a = pop();
+            push(from<bool>(a == b));
             break;
         }
         case Op::GREATER: {
@@ -88,7 +91,14 @@ InterpretResult VM::run() {
             break;
         }
         case Op::ADD: {
-            BINARY_OP(Number, +);
+            if (isString(peek(0)) && isString(peek(1))) {
+                std::string b = asObjString(pop())->chars;
+                std::string a = asObjString(pop())->chars;
+                ObjString* result = makeString(m_objects, a + b);
+                push(from<Obj*>(static_cast<Obj*>(result)));
+            } else {
+                BINARY_OP(Number, +);
+            }
             break;
         }
         case Op::SUBTRACT: {
@@ -104,7 +114,8 @@ InterpretResult VM::run() {
             break;
         }
         case Op::NOT: {
-            push(as<bool>(!pop()));
+            push(from<bool>(!pop()));
+            break;
         }
         case Op::RETURN: {
             printValue(pop());
