@@ -1,13 +1,9 @@
 #include "test_harness.h"
 #include "vm.h"
 #include "compiler.h"
+#include "overload.h"
 #include <sstream>
 #include <iostream>
-
-// Helper for std::visit overloads
-// Usage: std::visit(overloaded{...}, value);
-template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
-template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 Value eval_expr(const std::string& expr) {
     VM vm;
