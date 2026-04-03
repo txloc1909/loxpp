@@ -15,7 +15,8 @@
 // that start with the same character always land in the same preferred bucket,
 // regardless of table capacity.
 static uint32_t fakeHash(const char* key, int length) {
-    if (length == 0) return 0u;
+    if (length == 0)
+        return 0u;
     return static_cast<uint32_t>(static_cast<unsigned char>(key[0]));
 }
 
@@ -267,7 +268,8 @@ TEST_F(TableTest, ThreeCollidingKeysAllFindable) {
     }
     for (size_t i = 0; i < keys.size(); ++i) {
         Value out;
-        EXPECT_TRUE(tableGet(&table, keys[i], out)) << "key[" << i << "] missing";
+        EXPECT_TRUE(tableGet(&table, keys[i], out))
+            << "key[" << i << "] missing";
         EXPECT_DOUBLE_EQ(as<double>(out), static_cast<double>(i));
     }
 }
@@ -296,7 +298,8 @@ TEST_F(TableTest, StressManyInsertsAllRetrievable) {
     }
     for (int i = 0; i < N; ++i) {
         Value out;
-        EXPECT_TRUE(tableGet(&table, keys[i], out)) << "stress" << i << " missing";
+        EXPECT_TRUE(tableGet(&table, keys[i], out))
+            << "stress" << i << " missing";
         EXPECT_DOUBLE_EQ(as<double>(out), static_cast<double>(i));
     }
 }
@@ -455,7 +458,8 @@ class StringInternTest : public ::testing::Test {
         uint32_t h = fakeHash(s.c_str(), static_cast<int>(s.size()));
         ObjString* found = tableFindString(&internTable, s.c_str(),
                                            static_cast<int>(s.size()), h);
-        if (found) return found;
+        if (found)
+            return found;
         ObjString* obj = mkstr(s);
         tableSet(&internTable, obj, Value{std::monostate{}});
         return obj;
