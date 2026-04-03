@@ -134,7 +134,8 @@ InterpretResult VM::run() {
 void VM::runtimeError(const char* format, ...) {
     va_list args;
     va_start(args, format);
-    std::vfprintf(stderr, format, args); // NOLINT(clang-analyzer-valist.Uninitialized)
+    // NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized)
+    std::vfprintf(stderr, format, args);
     va_end(args);
     std::fputs("\n", stderr);
 
