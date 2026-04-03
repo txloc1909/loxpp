@@ -14,10 +14,13 @@ Value eval_expr(const std::string& expr) {
 }
 
 std::string eval_expr_str(const std::string& expr) {
-    Value result = eval_expr(expr);
+    VM vm;
+    if (vm.interpret(expr) != InterpretResult::OK) {
+        throw std::runtime_error("Interpretation failed");
+    }
+    Value result = vm.lastResult();
+    // Convert to string while vm (and its owned objects) is still alive.
     std::ostringstream oss;
-    printValue(result); // printValue prints to stdout, so we need to capture it.
-    // Instead, reimplement here for string output:
     std::visit(overloaded{
         [&oss](bool val) { oss << (val ? "true" : "false"); },
         [&oss](Number val) { oss << val; },

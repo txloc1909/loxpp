@@ -27,8 +27,7 @@ Byte VM::readByte() { return *m_ip++; }
 Value VM::readConstant() { return m_chunk->getConstant(readByte()); }
 
 Value VM::lastResult() const {
-    if (stackTop == stack) throw std::runtime_error("Stack is empty");
-    return *(stackTop - 1);
+    return m_lastResult;
 }
 
 InterpretResult VM::run() {
@@ -123,7 +122,8 @@ InterpretResult VM::run() {
             break;
         }
         case Op::RETURN: {
-            printValue(pop());
+            m_lastResult = pop();
+            printValue(m_lastResult);
             std::printf("\n");
             return InterpretResult::OK;
         }
