@@ -26,9 +26,7 @@ Byte VM::readByte() { return *m_ip++; }
 
 Value VM::readConstant() { return m_chunk->getConstant(readByte()); }
 
-Value VM::lastResult() const {
-    return m_lastResult;
-}
+Value VM::lastResult() const { return m_lastResult; }
 
 InterpretResult VM::run() {
 #define BINARY_OP(valueType, op)                                               \

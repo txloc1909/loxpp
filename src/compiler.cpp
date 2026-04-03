@@ -8,7 +8,8 @@ std::unique_ptr<Chunk> compile(const std::string& source,
                                std::vector<std::unique_ptr<Obj>>& objects) {
     auto chunk = std::make_unique<Chunk>();
     auto parser = std::make_unique<Parser>(source);
-    auto compiler = std::make_unique<Compiler>(chunk.get(), parser.get(), &objects);
+    auto compiler =
+        std::make_unique<Compiler>(chunk.get(), parser.get(), &objects);
 
     compiler->expression();
     parser->consume(TokenType::EOF_, "Expect end of expression.");

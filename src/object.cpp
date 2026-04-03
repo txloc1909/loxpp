@@ -16,11 +16,9 @@ std::string stringifyObj(Obj* obj) {
     switch (obj->type) {
     case ObjType::STRING:
         return asObjString(obj)->chars;
-    // Future types (ObjFunction, ObjClass, etc.) go here.
+        // Future types (ObjFunction, ObjClass, etc.) go here.
     }
     return "<obj>";
 }
 
-void printObject(Obj* obj) {
-    std::printf("%s", stringifyObj(obj).c_str());
-}
+void printObject(Obj* obj) { std::printf("%s", stringifyObj(obj).c_str()); }

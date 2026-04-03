@@ -9,7 +9,7 @@ enum class ObjType { STRING };
 
 struct Obj {
     ObjType type;
-    bool    marked = false;
+    bool marked = false;
     virtual ~Obj() = default;
 };
 
@@ -23,6 +23,8 @@ ObjString* makeString(std::vector<std::unique_ptr<Obj>>& objects,
 std::string stringifyObj(Obj* obj);
 void printObject(Obj* obj);
 
-inline bool        isObjType(Obj* obj, ObjType type) { return obj->type == type; }
-inline ObjString*  asObjString(Obj* obj) { return static_cast<ObjString*>(obj); }
-inline const char* asCString(Obj* obj)   { return static_cast<ObjString*>(obj)->chars.c_str(); }
+inline bool isObjType(Obj* obj, ObjType type) { return obj->type == type; }
+inline ObjString* asObjString(Obj* obj) { return static_cast<ObjString*>(obj); }
+inline const char* asCString(Obj* obj) {
+    return static_cast<ObjString*>(obj)->chars.c_str();
+}

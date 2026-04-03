@@ -21,7 +21,8 @@ class VM {
 
     InterpretResult interpret(const std::string& source);
     InterpretResult run();
-    Value lastResult() const; // Returns the last value on the stack after execution
+    Value
+    lastResult() const; // Returns the last value on the stack after execution
 
   private:
     Byte readByte();
@@ -38,5 +39,6 @@ class VM {
     Value stack[STACK_MAX];
     Value* stackTop;
     std::vector<std::unique_ptr<Obj>> m_objects;
-    Value m_lastResult; // For testing/debugging only — stores the value popped by Op::RETURN.
+    Value m_lastResult; // For testing/debugging only — stores the value popped
+                        // by Op::RETURN.
 };

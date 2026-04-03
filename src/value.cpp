@@ -23,9 +23,11 @@ bool operator==(const Value& a, const Value& b) {
             [](Number a_val, Number b_val) -> bool { return a_val == b_val; },
             [](Nil, Nil) -> bool { return true; },
             [](Obj* a_obj, Obj* b_obj) -> bool {
-                if (a_obj->type != b_obj->type) return false;
+                if (a_obj->type != b_obj->type)
+                    return false;
                 if (a_obj->type == ObjType::STRING)
-                    return asObjString(a_obj)->chars == asObjString(b_obj)->chars;
+                    return asObjString(a_obj)->chars ==
+                           asObjString(b_obj)->chars;
                 return a_obj == b_obj;
             },
             [](const auto&, const auto&) -> bool { return false; }},
@@ -41,7 +43,8 @@ std::string stringify(const Value& value) {
         overloaded{
             [](bool val) -> std::string { return val ? "true" : "false"; },
             [](Number val) -> std::string {
-                // Match Lox's %g formatting: no trailing zeros, compact exponent.
+                // Match Lox's %g formatting: no trailing zeros, compact
+                // exponent.
                 char buf[64];
                 std::snprintf(buf, sizeof(buf), "%g", val);
                 return buf;
