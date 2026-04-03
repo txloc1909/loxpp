@@ -20,6 +20,7 @@ struct ObjString : public Obj {
 ObjString* makeString(std::vector<std::unique_ptr<Obj>>& objects,
                       std::string_view chars);
 
+std::string stringifyObj(Obj* obj);
 void printObject(Obj* obj);
 
 inline bool        isObjType(Obj* obj, ObjType type) { return obj->type == type; }

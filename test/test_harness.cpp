@@ -1,9 +1,7 @@
 #include "test_harness.h"
 #include "vm.h"
 #include "compiler.h"
-#include "overload.h"
 #include <sstream>
-#include <iostream>
 
 Value eval_expr(const std::string& expr) {
     VM vm;
@@ -18,22 +16,8 @@ std::string eval_expr_str(const std::string& expr) {
     if (vm.interpret(expr) != InterpretResult::OK) {
         throw std::runtime_error("Interpretation failed");
     }
-    Value result = vm.lastResult();
-    // Convert to string while vm (and its owned objects) is still alive.
-    std::ostringstream oss;
-    std::visit(overloaded{
-        [&oss](bool val) { oss << (val ? "true" : "false"); },
-        [&oss](Number val) { oss << val; },
-        [&oss](Nil) { oss << "nil"; },
-        [&oss](Obj* obj) {
-            if (isObjType(obj, ObjType::STRING)) {
-                oss << static_cast<ObjString*>(obj)->chars;
-            } else {
-                oss << "<obj>";
-            }
-        }
-    }, result);
-    return oss.str();
+    // Convert while vm (and its owned objects) is still alive.
+    return stringify(vm.lastResult());
 }
 
 std::string compile_to_bytecode(const std::string& expr) {
@@ -49,21 +33,8 @@ std::string compile_to_bytecode(const std::string& expr) {
         switch (op) {
             case Op::CONSTANT: {
                 uint8_t idx = chunk->at(offset + 1);
-                oss << "CONSTANT " << (int)idx << " ('";
                 Value v = chunk->getConstant(idx);
-                std::visit(overloaded{
-                    [&oss](bool val) { oss << (val ? "true" : "false"); },
-                    [&oss](Number val) { oss << val; },
-                    [&oss](Nil) { oss << "nil"; },
-                    [&oss](Obj* obj) {
-                        if (isObjType(obj, ObjType::STRING)) {
-                            oss << static_cast<ObjString*>(obj)->chars;
-                        } else {
-                            oss << "<obj>";
-                        }
-                    }
-                }, v);
-                oss << "')\n";
+                oss << "CONSTANT " << (int)idx << " ('" << stringify(v) << "')\n";
                 offset += 2;
                 break;
             }

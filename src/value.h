@@ -36,6 +36,7 @@ inline const char* asCString(const Value& v)  { return asObjString(v)->chars.c_s
 
 bool operator!(Value value);
 bool operator==(const Value& a, const Value& b);
+std::string stringify(const Value& value);
 void printValue(const Value& value);
 
 class ValueArray : std::array<Value, UINT8_MAX> {

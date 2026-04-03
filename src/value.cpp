@@ -33,12 +33,21 @@ bool operator==(const Value& a, const Value& b) {
 }
 
 void printValue(const Value& value) {
-    std::visit(
+    std::printf("%s", stringify(value).c_str());
+}
+
+std::string stringify(const Value& value) {
+    return std::visit(
         overloaded{
-            [](bool val) { std::printf("%s", (val ? "true" : "false")); },
-            [](Number val) { std::printf("%g", val); },
-            [](Nil) { std::printf("nil"); },
-            [](Obj* obj) { printObject(obj); },
+            [](bool val) -> std::string { return val ? "true" : "false"; },
+            [](Number val) -> std::string {
+                // Match Lox's %g formatting: no trailing zeros, compact exponent.
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "%g", val);
+                return buf;
+            },
+            [](Nil) -> std::string { return "nil"; },
+            [](Obj* obj) -> std::string { return stringifyObj(obj); },
         },
         value);
 }
