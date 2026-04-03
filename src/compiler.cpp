@@ -9,8 +9,8 @@ std::unique_ptr<Chunk> compile(const std::string& source,
                                Table* strings) {
     auto chunk = std::make_unique<Chunk>();
     auto parser = std::make_unique<Parser>(source);
-    auto compiler =
-        std::make_unique<Compiler>(chunk.get(), parser.get(), &objects, strings);
+    auto compiler = std::make_unique<Compiler>(chunk.get(), parser.get(),
+                                               &objects, strings);
 
     compiler->expression();
     parser->consume(TokenType::EOF_, "Expect end of expression.");
@@ -129,7 +129,8 @@ void Compiler::number() {
 }
 
 void Compiler::string() {
-    ObjString* str = makeString(*m_objects, m_parser->m_previous.lexeme, m_strings);
+    ObjString* str =
+        makeString(*m_objects, m_parser->m_previous.lexeme, m_strings);
     emitBytes(Op::CONSTANT, makeConstant(from<Obj*>(static_cast<Obj*>(str))));
 }
 

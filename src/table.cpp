@@ -36,7 +36,8 @@ Entry* Table::findBucket(Entry* entries, int capacity, ObjString* key) {
 }
 
 void Table::adjustCapacity(int newCapacity) {
-    // Allocate fresh bucket array and re-insert live entries (tombstones dropped).
+    // Allocate fresh bucket array and re-insert live entries (tombstones
+    // dropped).
     std::vector<Entry> fresh(newCapacity);
     m_count = 0;
     for (const Entry& entry : static_cast<const std::vector<Entry>&>(*this)) {
@@ -96,8 +97,7 @@ bool Table::del(ObjString* key) {
 }
 
 void Table::addAll(const Table& from) {
-    for (const Entry& entry :
-         static_cast<const std::vector<Entry>&>(from)) {
+    for (const Entry& entry : static_cast<const std::vector<Entry>&>(from)) {
         if (entry.key != nullptr)
             set(entry.key, entry.value);
     }

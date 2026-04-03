@@ -15,7 +15,8 @@
 // that start with the same character always land in the same preferred bucket,
 // regardless of table capacity.
 static uint32_t fakeHash(const char* key, int length) {
-    if (length == 0) return 0u;
+    if (length == 0)
+        return 0u;
     return static_cast<uint32_t>(static_cast<unsigned char>(key[0]));
 }
 
@@ -455,10 +456,10 @@ class StringInternTest : public ::testing::Test {
 
     ObjString* internString(const std::string& s) {
         uint32_t h = fakeHash(s.c_str(), static_cast<int>(s.size()));
-        ObjString* found = internTable.findString(s.c_str(),
-                                                  static_cast<int>(s.size()),
-                                                  h);
-        if (found) return found;
+        ObjString* found =
+            internTable.findString(s.c_str(), static_cast<int>(s.size()), h);
+        if (found)
+            return found;
         ObjString* obj = mkstr(s);
         internTable.set(obj, Value{std::monostate{}});
         return obj;
