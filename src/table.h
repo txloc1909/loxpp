@@ -24,5 +24,7 @@ bool tableGet(Table* table, ObjString* key, Value& value);
 bool tableDelete(Table* table, ObjString* key);
 void tableAddAll(Table* from, Table* to);
 
+uint32_t hashString(std::string_view s);
+
 ObjString* tableFindString(Table* table, const char* chars, int length,
                            uint32_t hash);

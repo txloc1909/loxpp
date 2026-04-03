@@ -18,8 +18,11 @@ struct ObjString : public Obj {
     uint32_t hash{0};
 };
 
+struct Table;  // Forward declaration to break circular dependency with table.h
+
 ObjString* makeString(std::vector<std::unique_ptr<Obj>>& objects,
-                      std::string_view chars);
+                      std::string_view chars,
+                      Table* strings = nullptr);
 
 std::string stringifyObj(Obj* obj);
 void printObject(Obj* obj);

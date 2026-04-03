@@ -5,11 +5,12 @@
 #define DEBUG_PRINT_CODE
 
 std::unique_ptr<Chunk> compile(const std::string& source,
-                               std::vector<std::unique_ptr<Obj>>& objects) {
+                               std::vector<std::unique_ptr<Obj>>& objects,
+                               Table* strings) {
     auto chunk = std::make_unique<Chunk>();
     auto parser = std::make_unique<Parser>(source);
     auto compiler =
-        std::make_unique<Compiler>(chunk.get(), parser.get(), &objects);
+        std::make_unique<Compiler>(chunk.get(), parser.get(), &objects, strings);
 
     compiler->expression();
     parser->consume(TokenType::EOF_, "Expect end of expression.");
@@ -18,8 +19,9 @@ std::unique_ptr<Chunk> compile(const std::string& source,
 }
 
 Compiler::Compiler(Chunk* chunk, Parser* parser,
-                   std::vector<std::unique_ptr<Obj>>* objects)
-    : m_currentChunk{chunk}, m_parser{parser}, m_objects{objects} {}
+                   std::vector<std::unique_ptr<Obj>>* objects, Table* strings)
+    : m_currentChunk{chunk}, m_parser{parser}, m_objects{objects},
+      m_strings{strings} {}
 
 void Compiler::endCompiler() {
     emitReturn();
@@ -127,7 +129,7 @@ void Compiler::number() {
 }
 
 void Compiler::string() {
-    ObjString* str = makeString(*m_objects, m_parser->m_previous.lexeme);
+    ObjString* str = makeString(*m_objects, m_parser->m_previous.lexeme, m_strings);
     emitBytes(Op::CONSTANT, makeConstant(from<Obj*>(static_cast<Obj*>(str))));
 }
 

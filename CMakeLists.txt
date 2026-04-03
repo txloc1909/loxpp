@@ -15,6 +15,7 @@ add_executable(loxpp
     src/chunk.cpp 
     src/value.cpp 
     src/object.cpp
+    src/table.cpp
     src/vm.cpp 
     src/scanner.cpp 
     src/token.cpp 

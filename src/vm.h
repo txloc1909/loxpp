@@ -2,6 +2,7 @@
 
 #include "chunk.h"
 #include "object.h"
+#include "table.h"
 
 #include <memory>
 #include <string>
@@ -39,6 +40,7 @@ class VM {
     Value stack[STACK_MAX];
     Value* stackTop;
     std::vector<std::unique_ptr<Obj>> m_objects;
+    Table m_strings;
     Value m_lastResult; // For testing/debugging only — stores the value popped
                         // by Op::RETURN.
 };

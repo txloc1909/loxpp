@@ -22,14 +22,7 @@ bool operator==(const Value& a, const Value& b) {
             [](bool a_val, bool b_val) -> bool { return a_val == b_val; },
             [](Number a_val, Number b_val) -> bool { return a_val == b_val; },
             [](Nil, Nil) -> bool { return true; },
-            [](Obj* a_obj, Obj* b_obj) -> bool {
-                if (a_obj->type != b_obj->type)
-                    return false;
-                if (a_obj->type == ObjType::STRING)
-                    return asObjString(a_obj)->chars ==
-                           asObjString(b_obj)->chars;
-                return a_obj == b_obj;
-            },
+            [](Obj* a_obj, Obj* b_obj) -> bool { return a_obj == b_obj; },
             [](const auto&, const auto&) -> bool { return false; }},
         a, b);
 }

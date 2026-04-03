@@ -2,8 +2,8 @@ find_package(GTest REQUIRED)
 
 add_executable(test_main test_main.cpp)
 add_executable(test_scanner test_scanner.cpp ${PROJECT_SOURCE_DIR}/src/scanner.cpp ${PROJECT_SOURCE_DIR}/src/token.cpp)
-add_executable(test_parser_vm test_parser_vm.cpp test_harness.cpp ${PROJECT_SOURCE_DIR}/src/vm.cpp ${PROJECT_SOURCE_DIR}/src/compiler.cpp ${PROJECT_SOURCE_DIR}/src/parser.cpp ${PROJECT_SOURCE_DIR}/src/chunk.cpp ${PROJECT_SOURCE_DIR}/src/value.cpp ${PROJECT_SOURCE_DIR}/src/object.cpp ${PROJECT_SOURCE_DIR}/src/token.cpp ${PROJECT_SOURCE_DIR}/src/scanner.cpp)
-add_executable(test_parser_bytecode test_parser_bytecode.cpp test_harness.cpp ${PROJECT_SOURCE_DIR}/src/vm.cpp ${PROJECT_SOURCE_DIR}/src/compiler.cpp ${PROJECT_SOURCE_DIR}/src/parser.cpp ${PROJECT_SOURCE_DIR}/src/chunk.cpp ${PROJECT_SOURCE_DIR}/src/value.cpp ${PROJECT_SOURCE_DIR}/src/object.cpp ${PROJECT_SOURCE_DIR}/src/token.cpp ${PROJECT_SOURCE_DIR}/src/scanner.cpp)
+add_executable(test_parser_vm test_parser_vm.cpp test_harness.cpp ${PROJECT_SOURCE_DIR}/src/vm.cpp ${PROJECT_SOURCE_DIR}/src/compiler.cpp ${PROJECT_SOURCE_DIR}/src/parser.cpp ${PROJECT_SOURCE_DIR}/src/chunk.cpp ${PROJECT_SOURCE_DIR}/src/value.cpp ${PROJECT_SOURCE_DIR}/src/object.cpp ${PROJECT_SOURCE_DIR}/src/table.cpp ${PROJECT_SOURCE_DIR}/src/token.cpp ${PROJECT_SOURCE_DIR}/src/scanner.cpp)
+add_executable(test_parser_bytecode test_parser_bytecode.cpp test_harness.cpp ${PROJECT_SOURCE_DIR}/src/vm.cpp ${PROJECT_SOURCE_DIR}/src/compiler.cpp ${PROJECT_SOURCE_DIR}/src/parser.cpp ${PROJECT_SOURCE_DIR}/src/chunk.cpp ${PROJECT_SOURCE_DIR}/src/value.cpp ${PROJECT_SOURCE_DIR}/src/object.cpp ${PROJECT_SOURCE_DIR}/src/table.cpp ${PROJECT_SOURCE_DIR}/src/token.cpp ${PROJECT_SOURCE_DIR}/src/scanner.cpp)
 add_executable(test_table test_table.cpp ${PROJECT_SOURCE_DIR}/src/table.cpp ${PROJECT_SOURCE_DIR}/src/object.cpp ${PROJECT_SOURCE_DIR}/src/value.cpp)
 
 target_include_directories(test_main PRIVATE ${PROJECT_SOURCE_DIR}/src)
