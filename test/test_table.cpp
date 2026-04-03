@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -11,14 +10,13 @@
 #include "table.h"
 #include "value.h"
 
-// FNV-1a — mirrors what the real implementation will use.
-static uint32_t fnv1a(const char* key, int length) {
-    uint32_t hash = 2166136261u;
-    for (int i = 0; i < length; i++) {
-        hash ^= static_cast<uint8_t>(key[i]);
-        hash *= 16777619u;
-    }
-    return hash;
+// Fake hash for tests: returns the first byte of the string (0 for empty).
+// Using just one byte makes it trivial to engineer collisions — any two strings
+// that start with the same character always land in the same preferred bucket,
+// regardless of table capacity.
+static uint32_t fakeHash(const char* key, int length) {
+    if (length == 0) return 0u;
+    return static_cast<uint32_t>(static_cast<unsigned char>(key[0]));
 }
 
 // ============================================================
@@ -34,44 +32,22 @@ class TableTest : public ::testing::Test {
     void TearDown() override { freeTable(&table); }
 
     ObjString* str(const std::string& s) {
-        ObjString* obj = allocateObj<ObjString>(objects);
-        obj->type = ObjType::STRING;
-        obj->chars = s;
-        obj->hash = fnv1a(s.c_str(), static_cast<int>(s.size()));
+        ObjString* obj = makeString(objects, s);
+        obj->hash = fakeHash(s.c_str(), static_cast<int>(s.size()));
         return obj;
     }
 
-    // Returns two distinct ObjStrings whose hashes land in the same bucket
-    // for a table of the given capacity. Brute-force; terminates quickly.
-    std::pair<ObjString*, ObjString*> collidingPair(uint32_t capacity = 8) {
-        std::string first;
-        uint32_t targetSlot = 0;
-        for (int i = 0;; ++i) {
-            std::string s = "probe" + std::to_string(i);
-            uint32_t h = fnv1a(s.c_str(), static_cast<int>(s.size()));
-            if (first.empty()) {
-                first = s;
-                targetSlot = h % capacity;
-            } else if (h % capacity == targetSlot) {
-                return {str(first), str(s)};
-            }
-        }
+    // Both strings start with 'a', so fakeHash returns 97 for both —
+    // guaranteed collision regardless of table capacity.
+    std::pair<ObjString*, ObjString*> collidingPair() {
+        return {str("aardvark"), str("antelope")};
     }
 
-    // Returns N ObjStrings all hashing to the same bucket for `capacity`.
-    std::vector<ObjString*> collidingN(int n, uint32_t capacity = 8) {
+    // N strings all starting with 'a' — all collide via fakeHash.
+    std::vector<ObjString*> collidingN(int n) {
         std::vector<ObjString*> keys;
-        uint32_t targetSlot = 0;
-        for (int i = 0; static_cast<int>(keys.size()) < n; ++i) {
-            std::string s = "coll" + std::to_string(i);
-            uint32_t h = fnv1a(s.c_str(), static_cast<int>(s.size()));
-            if (keys.empty()) {
-                targetSlot = h % capacity;
-                keys.push_back(str(s));
-            } else if (h % capacity == targetSlot) {
-                keys.push_back(str(s));
-            }
-        }
+        for (int i = 0; i < n; ++i)
+            keys.push_back(str("a" + std::to_string(i)));
         return keys;
     }
 };
@@ -83,10 +59,8 @@ class TableTest : public ::testing::Test {
 TEST(HashFieldTest, SameContentSameHash) {
     std::vector<std::unique_ptr<Obj>> objects;
     auto mkstr = [&](const std::string& s) {
-        ObjString* obj = allocateObj<ObjString>(objects);
-        obj->type = ObjType::STRING;
-        obj->chars = s;
-        obj->hash = fnv1a(s.c_str(), static_cast<int>(s.size()));
+        ObjString* obj = makeString(objects, s);
+        obj->hash = fakeHash(s.c_str(), static_cast<int>(s.size()));
         return obj;
     };
     ObjString* a = mkstr("hello");
@@ -94,38 +68,11 @@ TEST(HashFieldTest, SameContentSameHash) {
     EXPECT_EQ(a->hash, b->hash);
 }
 
-TEST(HashFieldTest, DifferentContentDifferentHash) {
-    auto h = [](const char* s) {
-        return fnv1a(s, static_cast<int>(strlen(s)));
-    };
-    EXPECT_NE(h("abc"), h("abd"));
-    EXPECT_NE(h("abc"), h("abcd"));
-    EXPECT_NE(h("abc"), h(""));
-}
-
 TEST(HashFieldTest, EmptyStringNoCrash) {
     std::vector<std::unique_ptr<Obj>> objects;
-    ObjString* obj = allocateObj<ObjString>(objects);
-    obj->type = ObjType::STRING;
-    obj->chars = "";
-    obj->hash = fnv1a("", 0);
-    // FNV-1a with no bytes processed equals the offset basis
-    EXPECT_EQ(obj->hash, 2166136261u);
-}
-
-TEST(HashFieldTest, HashIsNonZeroForNonEmptyString) {
-    std::vector<std::unique_ptr<Obj>> objects;
-    ObjString* obj = allocateObj<ObjString>(objects);
-    obj->type = ObjType::STRING;
-    obj->chars = "hello";
-    obj->hash = fnv1a("hello", 5);
-    EXPECT_NE(obj->hash, 0u);
-}
-
-TEST(HashFieldTest, HashIsStableAcrossTwoCalls) {
-    const char* s = "stability";
-    int len = static_cast<int>(strlen(s));
-    EXPECT_EQ(fnv1a(s, len), fnv1a(s, len));
+    ObjString* obj = makeString(objects, "");
+    obj->hash = fakeHash("", 0);
+    EXPECT_EQ(obj->hash, 0u);
 }
 
 // ============================================================
@@ -153,10 +100,8 @@ TEST(TableLifecycleTest, FreeAfterInserts) {
     initTable(&t);
     for (int i = 0; i < 20; ++i) {
         std::string s = "key" + std::to_string(i);
-        ObjString* k = allocateObj<ObjString>(objects);
-        k->type = ObjType::STRING;
-        k->chars = s;
-        k->hash = fnv1a(s.c_str(), static_cast<int>(s.size()));
+        ObjString* k = makeString(objects, s);
+        k->hash = fakeHash(s.c_str(), static_cast<int>(s.size()));
         tableSet(&t, k, Value{static_cast<double>(i)});
     }
     freeTable(&t); // ASAN should stay clean
@@ -397,10 +342,8 @@ TEST_F(TableTest, AddAllCopiesEntriesToEmptyDest) {
     Table src;
     initTable(&src);
     auto srcStr = [&](const std::string& s) {
-        ObjString* obj = allocateObj<ObjString>(srcObjs);
-        obj->type = ObjType::STRING;
-        obj->chars = s;
-        obj->hash = fnv1a(s.c_str(), static_cast<int>(s.size()));
+        ObjString* obj = makeString(srcObjs, s);
+        obj->hash = fakeHash(s.c_str(), static_cast<int>(s.size()));
         return obj;
     };
     ObjString* k1 = srcStr("alpha");
@@ -426,10 +369,8 @@ TEST_F(TableTest, AddAllNoOverlapUnionInDest) {
     ObjString* destKey = str("dest_only");
     tableSet(&table, destKey, Value{9.0});
 
-    ObjString* srcKey = allocateObj<ObjString>(srcObjs);
-    srcKey->type = ObjType::STRING;
-    srcKey->chars = "src_only";
-    srcKey->hash = fnv1a("src_only", 8);
+    ObjString* srcKey = makeString(srcObjs, "src_only");
+    srcKey->hash = fakeHash("src_only", 8);
     tableSet(&src, srcKey, Value{7.0});
 
     tableAddAll(&src, &table);
@@ -462,10 +403,8 @@ TEST_F(TableTest, AddAllDoesNotMutateSource) {
     std::vector<std::unique_ptr<Obj>> srcObjs;
     Table src;
     initTable(&src);
-    ObjString* k = allocateObj<ObjString>(srcObjs);
-    k->type = ObjType::STRING;
-    k->chars = "orig";
-    k->hash = fnv1a("orig", 4);
+    ObjString* k = makeString(srcObjs, "orig");
+    k->hash = fakeHash("orig", 4);
     tableSet(&src, k, Value{5.0});
 
     tableAddAll(&src, &table);
@@ -481,21 +420,21 @@ TEST_F(TableTest, AddAllDoesNotMutateSource) {
 // ============================================================
 
 TEST_F(TableTest, FindStringInEmptyTableReturnsNull) {
-    uint32_t h = fnv1a("hello", 5);
+    uint32_t h = fakeHash("hello", 5);
     EXPECT_EQ(tableFindString(&table, "hello", 5, h), nullptr);
 }
 
 TEST_F(TableTest, FindStringAbsentReturnsNull) {
     ObjString* k = str("present");
     tableSet(&table, k, Value{std::monostate{}});
-    uint32_t h = fnv1a("absent", 6);
+    uint32_t h = fakeHash("absent", 6);
     EXPECT_EQ(tableFindString(&table, "absent", 6, h), nullptr);
 }
 
 TEST_F(TableTest, FindStringPresentReturnsPointer) {
     ObjString* k = str("hello");
     tableSet(&table, k, Value{std::monostate{}});
-    uint32_t h = fnv1a("hello", 5);
+    uint32_t h = fakeHash("hello", 5);
     EXPECT_EQ(tableFindString(&table, "hello", 5, h), k);
 }
 
@@ -512,8 +451,8 @@ TEST_F(TableTest, FindStringByRawCharsWithoutObjStringWrapper) {
     ObjString* k = str("lookup_me");
     tableSet(&table, k, Value{std::monostate{}});
     const char* raw = "lookup_me";
-    int len = static_cast<int>(strlen(raw));
-    uint32_t h = fnv1a(raw, len);
+    int len = static_cast<int>(k->chars.size());
+    uint32_t h = fakeHash(raw, len);
     EXPECT_EQ(tableFindString(&table, raw, len, h), k);
 }
 
@@ -530,17 +469,13 @@ class StringInternTest : public ::testing::Test {
     void TearDown() override { freeTable(&internTable); }
 
     ObjString* mkstr(const std::string& s) {
-        ObjString* obj = allocateObj<ObjString>(objects);
-        obj->type = ObjType::STRING;
-        obj->chars = s;
-        obj->hash = fnv1a(s.c_str(), static_cast<int>(s.size()));
+        ObjString* obj = makeString(objects, s);
+        obj->hash = fakeHash(s.c_str(), static_cast<int>(s.size()));
         return obj;
     }
 
-    // Simulates what copyString / takeString will do: look up in the intern
-    // table first; only allocate a new ObjString if not already present.
     ObjString* internString(const std::string& s) {
-        uint32_t h = fnv1a(s.c_str(), static_cast<int>(s.size()));
+        uint32_t h = fakeHash(s.c_str(), static_cast<int>(s.size()));
         ObjString* found = tableFindString(&internTable, s.c_str(),
                                            static_cast<int>(s.size()), h);
         if (found) return found;
