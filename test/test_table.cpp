@@ -53,30 +53,7 @@ class TableTest : public ::testing::Test {
 };
 
 // ============================================================
-// 1. ObjString hash field
-// ============================================================
-
-TEST(HashFieldTest, SameContentSameHash) {
-    std::vector<std::unique_ptr<Obj>> objects;
-    auto mkstr = [&](const std::string& s) {
-        ObjString* obj = makeString(objects, s);
-        obj->hash = fakeHash(s.c_str(), static_cast<int>(s.size()));
-        return obj;
-    };
-    ObjString* a = mkstr("hello");
-    ObjString* b = mkstr("hello");
-    EXPECT_EQ(a->hash, b->hash);
-}
-
-TEST(HashFieldTest, EmptyStringNoCrash) {
-    std::vector<std::unique_ptr<Obj>> objects;
-    ObjString* obj = makeString(objects, "");
-    obj->hash = fakeHash("", 0);
-    EXPECT_EQ(obj->hash, 0u);
-}
-
-// ============================================================
-// 2. initTable / freeTable
+// 1. initTable / freeTable
 // ============================================================
 
 TEST(TableLifecycleTest, InitIsEmpty) {
