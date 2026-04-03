@@ -15,6 +15,7 @@ struct Obj {
 
 struct ObjString : public Obj {
     std::string chars;
+    uint32_t hash{0};
 };
 
 ObjString* makeString(std::vector<std::unique_ptr<Obj>>& objects,
