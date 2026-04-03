@@ -1,0 +1,18 @@
+---
+Checks: >
+  clang-diagnostic-*,
+  clang-analyzer-*,
+  modernize-*,
+  readability-*,
+  performance-*,
+  -modernize-use-trailing-return-type,
+  -readability-magic-numbers,
+  -readability-named-parameter
+
+WarningsAsErrors: >
+  clang-diagnostic-*,
+  clang-analyzer-*
+
+HeaderFilterRegex: "src/.*\\.h$"
+
+FormatStyle: "file"

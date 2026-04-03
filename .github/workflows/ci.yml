@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint:
+    name: Lint (clang-format)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dev image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: loxpp-dev:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Check formatting
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "find src test -name '*.cpp' -o -name '*.h' | xargs clang-format --dry-run --Werror"
+
+  build-and-test:
+    name: Build & Test (${{ matrix.preset }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        preset: [debug, release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dev image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: loxpp-dev:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "cmake --preset ${{ matrix.preset }} && cmake --build build"
+
+      - name: Test
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "ctest --test-dir build --output-on-failure"
+
+  static-analysis:
+    name: Static Analysis (clang-tidy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dev image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: loxpp-dev:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Configure (debug)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "cmake --preset debug"
+
+      - name: Run clang-tidy
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "find src -name '*.cpp' | xargs clang-tidy -p build"
