@@ -11,8 +11,8 @@ ObjString* makeString(std::vector<std::unique_ptr<Obj>>& objects,
                       std::string_view chars, Table* strings) {
     uint32_t hash = hashString(chars);
     if (strings) {
-        ObjString* interned = tableFindString(
-            strings, chars.data(), static_cast<int>(chars.size()), hash);
+        ObjString* interned = strings->findString(
+            chars.data(), static_cast<int>(chars.size()), hash);
         if (interned)
             return interned;
     }
@@ -23,7 +23,7 @@ ObjString* makeString(std::vector<std::unique_ptr<Obj>>& objects,
     str->hash = hash;
 
     if (strings)
-        tableSet(strings, str, Value{Nil{}});
+        strings->set(str, Value{Nil{}});
 
     return str;
 }
