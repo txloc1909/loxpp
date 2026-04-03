@@ -1,14 +1,30 @@
 #include "object.h"
-#include "memory.h"
 
 #include <cstdio>
 #include <string>
 
+#include "memory.h"
+#include "table.h"
+#include "value.h"
+
 ObjString* makeString(std::vector<std::unique_ptr<Obj>>& objects,
-                      std::string_view chars) {
+                      std::string_view chars, Table* strings) {
+    uint32_t hash = hashString(chars);
+    if (strings) {
+        ObjString* interned = strings->findString(
+            chars.data(), static_cast<int>(chars.size()), hash);
+        if (interned)
+            return interned;
+    }
+
     ObjString* str = allocateObj<ObjString>(objects);
     str->type = ObjType::STRING;
     str->chars = chars;
+    str->hash = hash;
+
+    if (strings)
+        strings->set(str, Value{Nil{}});
+
     return str;
 }
 

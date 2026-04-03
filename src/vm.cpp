@@ -12,7 +12,7 @@
 #define DEBUG_TRACE_EXECUTION
 
 InterpretResult VM::interpret(const std::string& source) {
-    auto chunk = compile(source, m_objects);
+    auto chunk = compile(source, m_objects, &m_strings);
     if (chunk == nullptr) {
         return InterpretResult::COMPILE_ERROR;
     }
@@ -96,7 +96,7 @@ InterpretResult VM::run() {
             if (isString(peek(0)) && isString(peek(1))) {
                 std::string b = asObjString(pop())->chars;
                 std::string a = asObjString(pop())->chars;
-                ObjString* result = makeString(m_objects, a + b);
+                ObjString* result = makeString(m_objects, a + b, &m_strings);
                 push(from<Obj*>(static_cast<Obj*>(result)));
             } else {
                 BINARY_OP(Number, +);

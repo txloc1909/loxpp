@@ -8,13 +8,17 @@
 #include <string>
 #include <vector>
 
+struct Table;
+
 std::unique_ptr<Chunk> compile(const std::string& source,
-                               std::vector<std::unique_ptr<Obj>>& objects);
+                               std::vector<std::unique_ptr<Obj>>& objects,
+                               Table* strings = nullptr);
 
 class Compiler {
   public:
     Compiler(Chunk* chunk, Parser* parser,
-             std::vector<std::unique_ptr<Obj>>* objects);
+             std::vector<std::unique_ptr<Obj>>* objects,
+             Table* strings = nullptr);
 
     Chunk* getCurrentChunk() const { return m_currentChunk; }
     void endCompiler();
@@ -38,4 +42,5 @@ class Compiler {
     Chunk* m_currentChunk;
     Parser* m_parser;
     std::vector<std::unique_ptr<Obj>>* m_objects;
+    Table* m_strings;
 };
