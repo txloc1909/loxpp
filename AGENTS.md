@@ -10,6 +10,30 @@ branches. PRs should be small and merged quickly — no long-running feature bra
 
 ---
 
+## Planning policy
+
+**Always plan before implementing.** When assigned a task (via issue, PR comment, or
+CLI delegation):
+
+1. **Post a plan first** — as an issue comment or PR description — covering:
+   - What the task requires and any assumptions made
+   - The proposed approach and key design decisions
+   - Files/components that will be created or changed
+   - Any open questions or trade-offs
+
+2. **Wait for explicit approval** before writing any code. Do not open a
+   implementation PR or push commits until the human has replied with approval
+   (e.g. "looks good", "approved", "go ahead").
+
+3. **If the plan is revised**, acknowledge the changes and update your approach
+   before proceeding.
+
+> This applies to all agents — CLI (`/delegate`), Copilot cloud agent, and any
+> sub-agent. Trivial one-liner fixes may skip the plan step at the agent's
+> discretion, but when in doubt, plan first.
+
+---
+
 ## Dev model
 
 The repo is a **regular clone** with a dedicated directory for agent worktrees:
