@@ -1,21 +1,5 @@
 #include "chunk.h"
 
-#include <cstdio>
-
-static int simpleInstruction(const char* name, int offset) {
-    std::printf("%s\n", name);
-    return offset + 1;
-}
-
-static int constantInstruction(const char* name, const Chunk& chunk,
-                               int offset) {
-    auto constantIdx = chunk.at(offset + 1);
-    std::printf("%-16s %4d '", name, constantIdx);
-    printValue(chunk.getConstant(constantIdx));
-    std::printf("'\n");
-    return offset + 2;
-}
-
 void Chunk::write(Byte byte, int line) {
     push_back(byte);
 
@@ -42,64 +26,6 @@ int Chunk::getLine(int offset) const {
         }
     }
     return 0; // Error case
-}
-
-int Chunk::disassembleInstruction(int offset) const {
-    std::printf("%04d ", offset);
-
-    if (offset > 0 && getLine(offset) == getLine(offset - 1)) {
-        std::printf("   | ");
-    } else {
-        std::printf("%4d ", getLine(offset));
-    }
-
-    Op instruction = toOpcode(this->at(offset));
-    switch (instruction) {
-    case Op::RETURN:
-        return simpleInstruction("Op::RETURN", offset);
-    case Op::NEGATE:
-        return simpleInstruction("Op::NEGATE", offset);
-    case Op::CONSTANT:
-        return constantInstruction("Op::CONSTANT", *this, offset);
-    case Op::NIL:
-        return simpleInstruction("Op::NIL", offset);
-    case Op::TRUE:
-        return simpleInstruction("Op::TRUE", offset);
-    case Op::FALSE:
-        return simpleInstruction("Op::FALSE", offset);
-    case Op::EQUAL:
-        return simpleInstruction("Op::EQUAL", offset);
-    case Op::GREATER:
-        return simpleInstruction("Op::GREATER", offset);
-    case Op::LESS:
-        return simpleInstruction("Op::LESS", offset);
-    case Op::ADD:
-        return simpleInstruction("Op::ADD", offset);
-    case Op::SUBTRACT:
-        return simpleInstruction("Op::SUBTRACT", offset);
-    case Op::MULTIPLY:
-        return simpleInstruction("Op::MULTIPLY", offset);
-    case Op::DIVIDE:
-        return simpleInstruction("Op::DIVIDE", offset);
-    case Op::NOT:
-        return simpleInstruction("Op::NOT", offset);
-    case Op::PRINT:
-        return simpleInstruction("Op::PRINT", offset);
-    case Op::POP:
-        return simpleInstruction("Op::POP", offset);
-    default:
-        std::printf("Unknown opcode %hhu\n",
-                    static_cast<unsigned char>(instruction));
-        return offset + 1;
-    }
-}
-
-void Chunk::disassemble(const char* name) const {
-    std::printf("== %s ==\n", name);
-
-    for (int offset = 0; offset < size();) {
-        offset = disassembleInstruction(offset);
-    }
 }
 
 Value Chunk::getConstant(int idx) const { return m_constants.at(idx); }

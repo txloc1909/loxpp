@@ -1,4 +1,5 @@
 #include "vm.h"
+#include "debug.h"
 #include "object.h"
 #include "scanner.h"
 #include "compiler.h"
@@ -6,10 +7,8 @@
 #include <cstdio>
 #include <cstdarg>
 #include <functional>
-#include <string>
 #include <iostream>
-
-#define DEBUG_TRACE_EXECUTION
+#include <string>
 
 InterpretResult VM::interpret(const std::string& source) {
     auto chunk = compile(source, m_allocator.get());
@@ -41,7 +40,9 @@ InterpretResult VM::run() {
     } while (false)
 
     for (;;) {
-#ifdef DEBUG_TRACE_EXECUTION
+#ifdef LOXPP_DEBUG_TRACE_EXECUTION
+        int currentOffset = static_cast<int>(m_ip - m_chunk->cbegin());
+        std::printf("[line %d] ", m_chunk->getLine(currentOffset));
         std::printf("          ");
         for (Value* slot = stack; slot < stackTop; slot++) {
             std::printf("[ ");
@@ -49,7 +50,8 @@ InterpretResult VM::run() {
             std::printf(" ]");
         }
         std::printf("\n");
-        m_chunk->disassembleInstruction(m_ip - m_chunk->cbegin());
+        disassembleInstruction(*m_chunk, *m_allocator, currentOffset,
+                               std::cout);
 #endif
 
         Byte instruction = readByte();

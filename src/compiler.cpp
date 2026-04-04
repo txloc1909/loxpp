@@ -1,8 +1,8 @@
 #include "compiler.h"
+#include "debug.h"
 
+#include <iostream>
 #include <memory>
-
-#define DEBUG_PRINT_CODE
 
 std::unique_ptr<Chunk> compile(const std::string& source, Allocator* alloc) {
     auto chunk = std::make_unique<Chunk>();
@@ -25,8 +25,8 @@ Compiler::Compiler(Chunk* chunk, Parser* parser, Allocator* alloc)
 
 void Compiler::endCompiler() {
     emitReturn();
-#ifdef DEBUG_PRINT_CODE
-    m_currentChunk->disassemble("code");
+#ifdef LOXPP_DEBUG_PRINT_CODE
+    disassembleChunk(*m_currentChunk, *m_allocator, "code", std::cout);
 #endif
 }
 
