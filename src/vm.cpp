@@ -124,10 +124,16 @@ InterpretResult VM::run() {
             push(from<bool>(!pop()));
             break;
         }
-        case Op::RETURN: {
-            m_lastResult = pop();
-            printValue(m_lastResult, *m_allocator);
+        case Op::PRINT: {
+            printValue(pop(), *m_allocator);
             std::printf("\n");
+            break;
+        }
+        case Op::POP: {
+            m_lastResult = pop();
+            break;
+        }
+        case Op::RETURN: {
             return InterpretResult::OK;
         }
         }

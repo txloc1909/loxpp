@@ -25,7 +25,8 @@ TEST_F(ParserBytecodeTest, Arithmetic_Addition) {
     std::string expected = "0: CONSTANT 0 ('1')\n"
                            "2: CONSTANT 1 ('2')\n"
                            "4: ADD\n"
-                           "5: RETURN\n";
+                           "5: POP\n"
+                           "6: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -37,7 +38,8 @@ TEST_F(ParserBytecodeTest, Arithmetic_MultiplySubtract) {
                            "4: MULTIPLY\n"
                            "5: CONSTANT 2 ('5')\n"
                            "7: SUBTRACT\n"
-                           "8: RETURN\n";
+                           "8: POP\n"
+                           "9: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -47,7 +49,8 @@ TEST_F(ParserBytecodeTest, Comparison_Equal) {
     std::string expected = "0: CONSTANT 0 ('1')\n"
                            "2: CONSTANT 1 ('1')\n"
                            "4: EQUAL\n"
-                           "5: RETURN\n";
+                           "5: POP\n"
+                           "6: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -59,7 +62,8 @@ TEST_F(ParserBytecodeTest, Comparison_LessGreater) {
                            "4: LESS\n"
                            "5: CONSTANT 2 ('1')\n"
                            "7: GREATER\n"
-                           "8: RETURN\n";
+                           "8: POP\n"
+                           "9: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -70,7 +74,8 @@ TEST_F(ParserBytecodeTest, Boolean_TrueFalseNot) {
                            "1: NOT\n"
                            "2: TRUE\n"
                            "3: EQUAL\n"
-                           "4: RETURN\n";
+                           "4: POP\n"
+                           "5: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -80,7 +85,8 @@ TEST_F(ParserBytecodeTest, String_Concatenation) {
     std::string expected = "0: CONSTANT 0 ('foo')\n"
                            "2: CONSTANT 1 ('bar')\n"
                            "4: ADD\n"
-                           "5: RETURN\n";
+                           "5: POP\n"
+                           "6: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -91,7 +97,8 @@ TEST_F(ParserBytecodeTest, GroupingAndNegate) {
                            "2: CONSTANT 1 ('2')\n"
                            "4: ADD\n"
                            "5: NEGATE\n"
-                           "6: RETURN\n";
+                           "6: POP\n"
+                           "7: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -99,6 +106,7 @@ TEST_F(ParserBytecodeTest, NilLiteral) {
     std::string expr = "nil";
     std::string bytecode = compile_to_bytecode(expr);
     std::string expected = "0: NIL\n"
-                           "1: RETURN\n";
+                           "1: POP\n"
+                           "2: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }

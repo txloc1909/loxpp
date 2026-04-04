@@ -10,9 +10,13 @@ std::unique_ptr<Chunk> compile(const std::string& source, Allocator* alloc) {
     auto compiler =
         std::make_unique<Compiler>(chunk.get(), parser.get(), alloc);
 
-    compiler->expression();
-    parser->consume(TokenType::EOF_, "Expect end of expression.");
+    while (!parser->check(TokenType::EOF_))
+        compiler->declaration();
+
     compiler->endCompiler();
+
+    if (parser->m_hadError)
+        return nullptr;
     return chunk;
 }
 
@@ -127,6 +131,32 @@ void Compiler::number() {
 void Compiler::string() {
     ObjHandle handle = m_allocator->makeString(m_parser->m_previous.lexeme);
     emitBytes(Op::CONSTANT, makeConstant(Value{handle}));
+}
+
+void Compiler::declaration() {
+    statement();
+    if (m_parser->m_panicMode)
+        m_parser->synchronize();
+}
+
+void Compiler::statement() {
+    if (m_parser->match(TokenType::PRINT)) {
+        printStatement();
+    } else {
+        expressionStatement();
+    }
+}
+
+void Compiler::printStatement() {
+    expression();
+    m_parser->consume(TokenType::SEMICOLON, "Expect ';' after value.");
+    emitByte(Op::PRINT);
+}
+
+void Compiler::expressionStatement() {
+    expression();
+    m_parser->consume(TokenType::SEMICOLON, "Expect ';' after expression.");
+    emitByte(Op::POP);
 }
 
 void Compiler::emitByte(Byte byte) {
