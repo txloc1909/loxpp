@@ -22,6 +22,8 @@ enum class Op : Byte {
     MULTIPLY,
     DIVIDE,
     NOT,
+    PRINT,
+    POP,
     RETURN,
 };
 

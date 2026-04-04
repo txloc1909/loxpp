@@ -6,7 +6,7 @@
 
 Value eval_expr(const std::string& expr) {
     VM vm;
-    if (vm.interpret(expr) != InterpretResult::OK) {
+    if (vm.interpret(expr + ";") != InterpretResult::OK) {
         throw std::runtime_error("Interpretation failed");
     }
     return vm.lastResult();
@@ -14,7 +14,7 @@ Value eval_expr(const std::string& expr) {
 
 std::string eval_expr_str(const std::string& expr) {
     VM vm;
-    if (vm.interpret(expr) != InterpretResult::OK) {
+    if (vm.interpret(expr + ";") != InterpretResult::OK) {
         throw std::runtime_error("Interpretation failed");
     }
     return stringify(vm.lastResult(), vm.allocator());
@@ -22,7 +22,7 @@ std::string eval_expr_str(const std::string& expr) {
 
 std::string compile_to_bytecode(const std::string& expr) {
     SimpleAllocator allocator;
-    auto chunk = compile(expr, &allocator);
+    auto chunk = compile(expr + ";", &allocator);
     if (!chunk)
         throw std::runtime_error("Compilation failed");
     std::ostringstream oss;
@@ -86,6 +86,14 @@ std::string compile_to_bytecode(const std::string& expr) {
             break;
         case Op::NOT:
             oss << "NOT\n";
+            offset += 1;
+            break;
+        case Op::PRINT:
+            oss << "PRINT\n";
+            offset += 1;
+            break;
+        case Op::POP:
+            oss << "POP\n";
             offset += 1;
             break;
         case Op::RETURN:

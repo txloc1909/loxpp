@@ -24,6 +24,11 @@ class Compiler {
     void number();
     void string();
 
+    void declaration();
+    void statement();
+    void printStatement();
+    void expressionStatement();
+
   private:
     void emitByte(Byte byte);
     void emitByte(Op op);
