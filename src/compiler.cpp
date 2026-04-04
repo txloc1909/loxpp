@@ -125,8 +125,8 @@ void Compiler::number() {
 }
 
 void Compiler::string() {
-    ObjHandle h = m_allocator->makeString(m_parser->m_previous.lexeme);
-    emitBytes(Op::CONSTANT, makeConstant(Value{h}));
+    ObjHandle handle = m_allocator->makeString(m_parser->m_previous.lexeme);
+    emitBytes(Op::CONSTANT, makeConstant(Value{handle}));
 }
 
 void Compiler::emitByte(Byte byte) {

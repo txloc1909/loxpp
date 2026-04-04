@@ -39,5 +39,6 @@ class VM {
     Value stack[STACK_MAX];
     Value* stackTop;
     std::unique_ptr<Allocator> m_allocator;
-    Value m_lastResult;
+    Value m_lastResult; // For testing/debugging only — stores the value popped
+                        // by Op::RETURN.
 };

@@ -26,6 +26,8 @@ std::string compile_to_bytecode(const std::string& expr) {
     if (!chunk)
         throw std::runtime_error("Compilation failed");
     std::ostringstream oss;
+    // TODO: implement a proper disassembler and reuse it here instead of this
+    // ad-hoc switch.
     for (size_t offset = 0; offset < chunk->size();) {
         Op op = toOpcode(chunk->at(offset));
         oss << offset << ": ";
