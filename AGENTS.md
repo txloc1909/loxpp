@@ -45,6 +45,38 @@ podman build -t loxpp-dev-env .
 
 ---
 
+## Copilot cloud agent
+
+When running as a **Copilot cloud agent** (GitHub Actions), the `loxpp-dev:latest`
+image is pre-built by `.github/workflows/copilot-setup-steps.yml` before the agent
+starts. Use `docker run` for all build, test, and lint commands — do not install the
+toolchain directly on the runner.
+
+The `Dockerfile` is the single source of truth for the dev environment. Any toolchain
+change must go there; the setup steps and CI will automatically pick it up.
+
+### Build and test (cloud agent)
+
+```bash
+# Build (debug)
+docker run --rm -v $PWD:/workspace -w /workspace loxpp-dev:latest \
+  bash -c "cmake --preset debug && cmake --build build"
+
+# Run tests
+docker run --rm -v $PWD:/workspace -w /workspace loxpp-dev:latest \
+  bash -c "ctest --test-dir build --output-on-failure"
+
+# Check formatting
+docker run --rm -v $PWD:/workspace -w /workspace loxpp-dev:latest \
+  bash -c "find src test -name '*.cpp' -o -name '*.h' | xargs clang-format --dry-run --Werror"
+
+# Run clang-tidy
+docker run --rm -v $PWD:/workspace -w /workspace loxpp-dev:latest \
+  bash -c "find src -name '*.cpp' | xargs clang-tidy -p build"
+```
+
+---
+
 ## Agent task loop
 
 Every agent task follows this loop end-to-end:
