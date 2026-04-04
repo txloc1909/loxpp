@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Pre-commit hook: auto-format staged C++ files with clang-format.
+# Applies clang-format -i in-place and re-stages the files so the
+# commit always lands already formatted.
+#
+# Skips gracefully when clang-format is not on PATH (e.g. cloud agent
+# runner where the toolchain lives inside Docker).
+
+if ! command -v clang-format &>/dev/null; then
+    echo "[pre-commit] clang-format not found on PATH, skipping format check."
+    exit 0
+fi
+
+# Collect staged .cpp / .h files that are added or modified.
+staged=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(cpp|h)$')
+
+if [ -z "$staged" ]; then
+    exit 0
+fi
+
+echo "[pre-commit] Running clang-format on staged files..."
+echo "$staged" | xargs clang-format -i
+
+# Re-stage the (possibly reformatted) files.
+echo "$staged" | xargs git add
+
+echo "[pre-commit] Done."

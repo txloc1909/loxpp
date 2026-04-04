@@ -67,6 +67,12 @@ podman build -t loxpp-dev-env .
 # docker build -t loxpp-dev-env .   # docker also works
 ```
 
+### 2. Git hooks (automatic)
+
+`cmake --preset debug` automatically runs `git config core.hooksPath .githooks`
+at configure time, activating the pre-commit hook for the current clone/worktree.
+No manual step needed — just build.
+
 ---
 
 ## Copilot cloud agent
@@ -82,7 +88,7 @@ change must go there; the setup steps and CI will automatically pick it up.
 ### Build and test (cloud agent)
 
 ```bash
-# Build (debug)
+# Build (debug) — also wires up git hooks via cmake
 docker run --rm -v $PWD:/workspace -w /workspace loxpp-dev:latest \
   bash -c "cmake --preset debug && cmake --build build"
 
@@ -95,6 +101,22 @@ docker run --rm -v $PWD:/workspace -w /workspace loxpp-dev:latest \
   bash -c "find src test -name '*.cpp' -o -name '*.h' | xargs clang-format --dry-run --Werror"
 
 # Run clang-tidy
+docker run --rm -v $PWD:/workspace -w /workspace loxpp-dev:latest \
+  bash -c "find src -name '*.cpp' | xargs clang-tidy -p build"
+```
+
+### Formatting and static analysis (cloud agent)
+
+The pre-commit hook runs automatically for **local agents** (inside the container).
+Cloud agents run `git commit` on the runner where `clang-format` is not on `PATH`,
+so the hook skips gracefully. Instead, cloud agents must run these steps explicitly:
+
+```bash
+# Before each git commit — auto-format changed files in-place
+docker run --rm -v $PWD:/workspace -w /workspace loxpp-dev:latest \
+  bash -c "find src test -name '*.cpp' -o -name '*.h' | xargs clang-format -i"
+
+# Before git push — run static analysis
 docker run --rm -v $PWD:/workspace -w /workspace loxpp-dev:latest \
   bash -c "find src -name '*.cpp' | xargs clang-tidy -p build"
 ```
@@ -266,4 +288,31 @@ and the container name:
 - Never commit directly to `main`. Always work on a feature branch and open a PR.
 - The `build/` directory lives inside the worktree (`${sourceDir}/build` per
   `CMakePresets.json`) — it is automatically isolated between worktrees.
+
+### Commit discipline
+
+Commit **atomically and often** — one logical change per commit.
+
+- **One concern per commit**: a commit should do exactly one thing (add a function,
+  fix a bug, rename a variable). If you find yourself writing "and" in the commit
+  message, split it.
+- **Commit as you go**: don't accumulate a day's work and dump it in one commit at
+  the end. Commit after each meaningful step: after tests pass, after a refactor,
+  after a new function works.
+- **Green before you commit**: the build and tests must pass on every commit, not
+  just the last one. Bisect only works if every commit is bisect-able.
+- **Commit message format**: use the Conventional Commits style
+  (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`) with a short imperative
+  subject line (≤72 chars). Add a body when the *why* needs explaining.
+
+```
+# Good
+feat: add constant folding for binary arithmetic
+fix: prevent double-free in ObjString destructor
+
+# Bad
+wip
+misc fixes
+implement feature
+```
 
