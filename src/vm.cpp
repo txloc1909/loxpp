@@ -12,7 +12,7 @@
 #define DEBUG_TRACE_EXECUTION
 
 InterpretResult VM::interpret(const std::string& source) {
-    auto chunk = compile(source, m_objects, &m_strings);
+    auto chunk = compile(source, m_allocator.get());
     if (chunk == nullptr) {
         return InterpretResult::COMPILE_ERROR;
     }
@@ -94,10 +94,10 @@ InterpretResult VM::run() {
         }
         case Op::ADD: {
             if (isString(peek(0)) && isString(peek(1))) {
-                std::string b = asObjString(pop())->chars;
-                std::string a = asObjString(pop())->chars;
-                ObjString* result = makeString(m_objects, a + b, &m_strings);
-                push(from<Obj*>(static_cast<Obj*>(result)));
+                auto* b_str = asObjString(pop(), *m_allocator);
+                auto* a_str = asObjString(pop(), *m_allocator);
+                ObjHandle h = m_allocator->makeString(a_str->chars + b_str->chars);
+                push(Value{h});
             } else {
                 BINARY_OP(Number, +);
             }
@@ -121,7 +121,7 @@ InterpretResult VM::run() {
         }
         case Op::RETURN: {
             m_lastResult = pop();
-            printValue(m_lastResult);
+            printValue(m_lastResult, *m_allocator);
             std::printf("\n");
             return InterpretResult::OK;
         }

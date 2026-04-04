@@ -1,6 +1,7 @@
 #include "test_harness.h"
 #include "vm.h"
 #include "compiler.h"
+#include "simple_allocator.h"
 #include <sstream>
 
 Value eval_expr(const std::string& expr) {
@@ -16,18 +17,15 @@ std::string eval_expr_str(const std::string& expr) {
     if (vm.interpret(expr) != InterpretResult::OK) {
         throw std::runtime_error("Interpretation failed");
     }
-    // Convert while vm (and its owned objects) is still alive.
-    return stringify(vm.lastResult());
+    return stringify(vm.lastResult(), vm.allocator());
 }
 
 std::string compile_to_bytecode(const std::string& expr) {
-    std::vector<std::unique_ptr<Obj>> objects;
-    auto chunk = compile(expr, objects);
+    SimpleAllocator allocator;
+    auto chunk = compile(expr, &allocator);
     if (!chunk)
         throw std::runtime_error("Compilation failed");
     std::ostringstream oss;
-    // Disassemble to string (redirect printf to oss)
-    // We'll reimplement a minimal disassembler here for test output
     for (size_t offset = 0; offset < chunk->size();) {
         Op op = toOpcode(chunk->at(offset));
         oss << offset << ": ";
@@ -35,7 +33,7 @@ std::string compile_to_bytecode(const std::string& expr) {
         case Op::CONSTANT: {
             uint8_t idx = chunk->at(offset + 1);
             Value v = chunk->getConstant(idx);
-            oss << "CONSTANT " << (int)idx << " ('" << stringify(v) << "')\n";
+            oss << "CONSTANT " << (int)idx << " ('" << stringify(v, allocator) << "')\n";
             offset += 2;
             break;
         }
@@ -99,3 +97,4 @@ std::string compile_to_bytecode(const std::string& expr) {
     }
     return oss.str();
 }
+

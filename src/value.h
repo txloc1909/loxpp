@@ -1,5 +1,6 @@
 #pragma once
 
+#include "allocator.h"
 #include "object.h"
 
 #include <array>
@@ -8,9 +9,9 @@
 
 using Number = double;
 using Nil = std::monostate;
-// Obj* is non-owning. Lifetime guaranteed by VM's
-// std::vector<std::unique_ptr<Obj>>.
-using Value = std::variant<bool, Number, Nil, Obj*>;
+// ObjHandle is a lightweight, stable index into the Allocator's object store.
+// It does not dangle when the allocator moves/compacts objects.
+using Value = std::variant<bool, Number, Nil, ObjHandle>;
 
 template <typename T>
 bool is(const Value& value) {
@@ -29,20 +30,23 @@ Value from(const T& val) {
     return Value(val);
 }
 
-inline bool isObj(const Value& v) { return is<Obj*>(v); }
+inline bool isObj(const Value& v) { return is<ObjHandle>(v); }
 inline bool isString(const Value& v) {
-    return isObj(v) && isObjType(as<Obj*>(v), ObjType::STRING);
+    return is<ObjHandle>(v) && as<ObjHandle>(v).type == ObjType::STRING;
 }
-inline Obj* asObj(const Value& v) { return as<Obj*>(v); }
-inline ObjString* asObjString(const Value& v) {
-    return static_cast<ObjString*>(as<Obj*>(v));
+inline Obj* asObj(const Value& v, const Allocator& alloc) {
+    return alloc.deref(as<ObjHandle>(v));
 }
-inline const char* asCString(const Value& v) {
-    return asObjString(v)->chars.c_str();
+inline ObjString* asObjString(const Value& v, const Allocator& alloc) {
+    return static_cast<ObjString*>(alloc.deref(as<ObjHandle>(v)));
 }
 
 bool operator!(Value value);
 bool operator==(const Value& a, const Value& b);
+// Primary: dereferences ObjHandle via allocator for correct string output.
+std::string stringify(const Value& value, const Allocator& alloc);
+void printValue(const Value& value, const Allocator& alloc);
+// Debug/trace: ObjHandle prints as '<str#N>' without dereferencing.
 std::string stringify(const Value& value);
 void printValue(const Value& value);
 

@@ -1,24 +1,17 @@
 #pragma once
 
+#include "allocator.h"
 #include "chunk.h"
-#include "memory.h"
 #include "parser.h"
 
 #include <memory>
 #include <string>
-#include <vector>
 
-struct Table;
-
-std::unique_ptr<Chunk> compile(const std::string& source,
-                               std::vector<std::unique_ptr<Obj>>& objects,
-                               Table* strings = nullptr);
+std::unique_ptr<Chunk> compile(const std::string& source, Allocator* alloc);
 
 class Compiler {
   public:
-    Compiler(Chunk* chunk, Parser* parser,
-             std::vector<std::unique_ptr<Obj>>* objects,
-             Table* strings = nullptr);
+    Compiler(Chunk* chunk, Parser* parser, Allocator* alloc);
 
     Chunk* getCurrentChunk() const { return m_currentChunk; }
     void endCompiler();
@@ -41,6 +34,5 @@ class Compiler {
 
     Chunk* m_currentChunk;
     Parser* m_parser;
-    std::vector<std::unique_ptr<Obj>>* m_objects;
-    Table* m_strings;
+    Allocator* m_allocator;
 };

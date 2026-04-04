@@ -1,47 +1,39 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <vector>
 
-#include "memory.h"
 #include "object.h"
+#include "simple_allocator.h"
 #include "table.h"
 #include "value.h"
 
 // Fake hash for tests: returns the first byte of the string (0 for empty).
-// Using just one byte makes it trivial to engineer collisions — any two strings
-// that start with the same character always land in the same preferred bucket,
-// regardless of table capacity.
 static uint32_t fakeHash(const char* key, int length) {
     if (length == 0)
         return 0u;
     return static_cast<uint32_t>(static_cast<unsigned char>(key[0]));
 }
 
-// ============================================================
-// Shared fixture
-// ============================================================
+static ObjString* mkstr(SimpleAllocator& alloc, const std::string& s) {
+    ObjHandle h = alloc.makeString(s);
+    auto* obj = static_cast<ObjString*>(alloc.deref(h));
+    obj->hash = fakeHash(s.c_str(), static_cast<int>(s.size()));
+    return obj;
+}
 
 class TableTest : public ::testing::Test {
   protected:
-    std::vector<std::unique_ptr<Obj>> objects;
-    Table table; // default-constructed; RAII manages lifetime
+    SimpleAllocator allocator_;
+    Table table;
 
-    ObjString* str(const std::string& s) {
-        ObjString* obj = makeString(objects, s);
-        obj->hash = fakeHash(s.c_str(), static_cast<int>(s.size()));
-        return obj;
-    }
+    ObjString* str(const std::string& s) { return mkstr(allocator_, s); }
 
-    // Both strings start with 'a', so fakeHash returns 97 for both —
-    // guaranteed collision regardless of table capacity.
     std::pair<ObjString*, ObjString*> collidingPair() {
         return {str("aardvark"), str("antelope")};
     }
 
-    // N strings all starting with 'a' — all collide via fakeHash.
     std::vector<ObjString*> collidingN(int n) {
         std::vector<ObjString*> keys;
         for (int i = 0; i < n; ++i)
@@ -55,21 +47,15 @@ class TableTest : public ::testing::Test {
 // ============================================================
 
 TEST(HashFieldTest, SameContentSameHash) {
-    std::vector<std::unique_ptr<Obj>> objects;
-    auto mkstr = [&](const std::string& s) {
-        ObjString* obj = makeString(objects, s);
-        obj->hash = fakeHash(s.c_str(), static_cast<int>(s.size()));
-        return obj;
-    };
-    ObjString* a = mkstr("hello");
-    ObjString* b = mkstr("hello");
+    SimpleAllocator alloc;
+    ObjString* a = mkstr(alloc, "hello");
+    ObjString* b = mkstr(alloc, "hello");
     EXPECT_EQ(a->hash, b->hash);
 }
 
 TEST(HashFieldTest, EmptyStringNoCrash) {
-    std::vector<std::unique_ptr<Obj>> objects;
-    ObjString* obj = makeString(objects, "");
-    obj->hash = fakeHash("", 0);
+    SimpleAllocator alloc;
+    ObjString* obj = mkstr(alloc, "");
     EXPECT_EQ(obj->hash, 0u);
 }
 
@@ -78,26 +64,22 @@ TEST(HashFieldTest, EmptyStringNoCrash) {
 // ============================================================
 
 TEST(TableLifecycleTest, DefaultConstructedTableIsEmpty) {
-    // A default-constructed Table has no entries — findString returns null.
     Table t;
     EXPECT_EQ(t.findString("anything", 8, 12345u), nullptr);
 }
 
 TEST(TableLifecycleTest, DestructorNoCrashOnEmpty) {
     Table t;
-    // destructor runs here — must not crash
 }
 
 TEST(TableLifecycleTest, DestructorNoCrashAfterInserts) {
-    std::vector<std::unique_ptr<Obj>> objects;
+    SimpleAllocator alloc;
     Table t;
     for (int i = 0; i < 20; ++i) {
         std::string s = "key" + std::to_string(i);
-        ObjString* k = makeString(objects, s);
-        k->hash = fakeHash(s.c_str(), static_cast<int>(s.size()));
+        ObjString* k = mkstr(alloc, s);
         t.set(k, Value{static_cast<double>(i)});
     }
-    // destructor runs here — ASAN should stay clean
 }
 
 // ============================================================
@@ -152,13 +134,13 @@ TEST_F(TableTest, SetNumberValue) {
     EXPECT_DOUBLE_EQ(as<double>(out), 3.14);
 }
 
-TEST_F(TableTest, SetObjPtrValue) {
+TEST_F(TableTest, SetObjHandleValue) {
     ObjString* key = str("objkey");
-    ObjString* val = str("objval");
-    table.set(key, Value{static_cast<Obj*>(val)});
+    ObjHandle valHandle = allocator_.makeString("objval");
+    table.set(key, Value{valHandle});
     Value out;
     EXPECT_TRUE(table.get(key, out));
-    EXPECT_EQ(as<Obj*>(out), static_cast<Obj*>(val));
+    EXPECT_EQ(as<ObjHandle>(out), valHandle);
 }
 
 // ============================================================
@@ -227,8 +209,6 @@ TEST_F(TableTest, DeletedKeyIsNoLongerFound) {
 }
 
 TEST_F(TableTest, DeleteDoesNotOrphanCollidingKey) {
-    // Insert two keys that land in the same bucket, delete one,
-    // the other must still be findable.
     auto [a, b] = collidingPair();
     table.set(a, Value{1.0});
     table.set(b, Value{2.0});
@@ -249,7 +229,6 @@ TEST_F(TableTest, DeleteThenReinsertSameKey) {
 }
 
 TEST_F(TableTest, DeleteSeveralFromCollisionChainRemainingStillFound) {
-    // Three-way collision: delete first two, third must still be reachable.
     auto keys = collidingN(3);
     for (size_t i = 0; i < keys.size(); ++i) {
         table.set(keys[i], Value{static_cast<double>(i)});
@@ -329,15 +308,10 @@ TEST_F(TableTest, AddAllEmptySourceLeavesDestUnchanged) {
 }
 
 TEST_F(TableTest, AddAllCopiesEntriesToEmptyDest) {
-    std::vector<std::unique_ptr<Obj>> srcObjs;
+    SimpleAllocator srcAlloc;
     Table src;
-    auto srcStr = [&](const std::string& s) {
-        ObjString* obj = makeString(srcObjs, s);
-        obj->hash = fakeHash(s.c_str(), static_cast<int>(s.size()));
-        return obj;
-    };
-    ObjString* k1 = srcStr("alpha");
-    ObjString* k2 = srcStr("beta");
+    ObjString* k1 = mkstr(srcAlloc, "alpha");
+    ObjString* k2 = mkstr(srcAlloc, "beta");
     src.set(k1, Value{1.0});
     src.set(k2, Value{2.0});
 
@@ -351,14 +325,13 @@ TEST_F(TableTest, AddAllCopiesEntriesToEmptyDest) {
 }
 
 TEST_F(TableTest, AddAllNoOverlapUnionInDest) {
-    std::vector<std::unique_ptr<Obj>> srcObjs;
+    SimpleAllocator srcAlloc;
     Table src;
 
     ObjString* destKey = str("dest_only");
     table.set(destKey, Value{9.0});
 
-    ObjString* srcKey = makeString(srcObjs, "src_only");
-    srcKey->hash = fakeHash("src_only", 8);
+    ObjString* srcKey = mkstr(srcAlloc, "src_only");
     src.set(srcKey, Value{7.0});
 
     table.addAll(src);
@@ -372,7 +345,6 @@ TEST_F(TableTest, AddAllNoOverlapUnionInDest) {
 
 TEST_F(TableTest, AddAllOverlappingKeysTakesSourceValue) {
     Table src;
-    // Use the same key pointer in both tables
     ObjString* sharedKey = str("shared");
     table.set(sharedKey, Value{1.0});
     src.set(sharedKey, Value{99.0});
@@ -385,10 +357,9 @@ TEST_F(TableTest, AddAllOverlappingKeysTakesSourceValue) {
 }
 
 TEST_F(TableTest, AddAllDoesNotMutateSource) {
-    std::vector<std::unique_ptr<Obj>> srcObjs;
+    SimpleAllocator srcAlloc;
     Table src;
-    ObjString* k = makeString(srcObjs, "orig");
-    k->hash = fakeHash("orig", 4);
+    ObjString* k = mkstr(srcAlloc, "orig");
     src.set(k, Value{5.0});
 
     table.addAll(src);
@@ -422,7 +393,6 @@ TEST_F(TableTest, FindStringPresentReturnsPointer) {
 }
 
 TEST_F(TableTest, FindStringHashCollisionDifferentContentReturnsNull) {
-    // Insert only `a`; `b` collides but is absent — must not return `a`.
     auto [a, b] = collidingPair();
     table.set(a, Value{std::monostate{}});
     EXPECT_EQ(table.findString(b->chars.c_str(),
@@ -445,14 +415,8 @@ TEST_F(TableTest, FindStringByRawCharsWithoutObjStringWrapper) {
 
 class StringInternTest : public ::testing::Test {
   protected:
-    std::vector<std::unique_ptr<Obj>> objects;
+    SimpleAllocator allocator_;
     Table internTable;
-
-    ObjString* mkstr(const std::string& s) {
-        ObjString* obj = makeString(objects, s);
-        obj->hash = fakeHash(s.c_str(), static_cast<int>(s.size()));
-        return obj;
-    }
 
     ObjString* internString(const std::string& s) {
         uint32_t h = fakeHash(s.c_str(), static_cast<int>(s.size()));
@@ -460,7 +424,7 @@ class StringInternTest : public ::testing::Test {
             internTable.findString(s.c_str(), static_cast<int>(s.size()), h);
         if (found)
             return found;
-        ObjString* obj = mkstr(s);
+        ObjString* obj = mkstr(allocator_, s);
         internTable.set(obj, Value{std::monostate{}});
         return obj;
     }
