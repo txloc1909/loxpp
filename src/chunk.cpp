@@ -83,6 +83,10 @@ int Chunk::disassembleInstruction(int offset) const {
         return simpleInstruction("Op::DIVIDE", offset);
     case Op::NOT:
         return simpleInstruction("Op::NOT", offset);
+    case Op::PRINT:
+        return simpleInstruction("Op::PRINT", offset);
+    case Op::POP:
+        return simpleInstruction("Op::POP", offset);
     default:
         std::printf("Unknown opcode %hhu\n",
                     static_cast<unsigned char>(instruction));
