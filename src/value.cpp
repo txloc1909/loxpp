@@ -23,9 +23,7 @@ bool operator==(const Value& a, const Value& b) {
             [](Number a_val, Number b_val) -> bool { return a_val == b_val; },
             [](Nil, Nil) -> bool { return true; },
             // Interning guarantees: same content → same index → equal handles.
-            [](ObjHandle a_h, ObjHandle b_h) -> bool {
-                return a_h == b_h;
-            },
+            [](ObjHandle a_h, ObjHandle b_h) -> bool { return a_h == b_h; },
             [](const auto&, const auto&) -> bool { return false; }},
         a, b);
 }

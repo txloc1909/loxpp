@@ -7,7 +7,8 @@
 std::unique_ptr<Chunk> compile(const std::string& source, Allocator* alloc) {
     auto chunk = std::make_unique<Chunk>();
     auto parser = std::make_unique<Parser>(source);
-    auto compiler = std::make_unique<Compiler>(chunk.get(), parser.get(), alloc);
+    auto compiler =
+        std::make_unique<Compiler>(chunk.get(), parser.get(), alloc);
 
     compiler->expression();
     parser->consume(TokenType::EOF_, "Expect end of expression.");

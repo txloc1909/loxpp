@@ -69,7 +69,6 @@ TEST_F(AllocatorTest, Collect_DoesNotCrash) {
     EXPECT_NO_FATAL_FAILURE(alloc->collect());
 }
 
-
 // ---------------------------------------------------------------------------
 // Phase 2 — ObjHandle in Value
 // ---------------------------------------------------------------------------

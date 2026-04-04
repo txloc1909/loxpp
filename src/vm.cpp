@@ -96,7 +96,8 @@ InterpretResult VM::run() {
             if (isString(peek(0)) && isString(peek(1))) {
                 auto* b_str = asObjString(pop(), *m_allocator);
                 auto* a_str = asObjString(pop(), *m_allocator);
-                ObjHandle h = m_allocator->makeString(a_str->chars + b_str->chars);
+                ObjHandle h =
+                    m_allocator->makeString(a_str->chars + b_str->chars);
                 push(Value{h});
             } else {
                 BINARY_OP(Number, +);

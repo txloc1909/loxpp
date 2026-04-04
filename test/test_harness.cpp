@@ -33,7 +33,8 @@ std::string compile_to_bytecode(const std::string& expr) {
         case Op::CONSTANT: {
             uint8_t idx = chunk->at(offset + 1);
             Value v = chunk->getConstant(idx);
-            oss << "CONSTANT " << (int)idx << " ('" << stringify(v, allocator) << "')\n";
+            oss << "CONSTANT " << (int)idx << " ('" << stringify(v, allocator)
+                << "')\n";
             offset += 2;
             break;
         }
@@ -97,4 +98,3 @@ std::string compile_to_bytecode(const std::string& expr) {
     }
     return oss.str();
 }
-

@@ -68,9 +68,7 @@ TEST(TableLifecycleTest, DefaultConstructedTableIsEmpty) {
     EXPECT_EQ(t.findString("anything", 8, 12345u), nullptr);
 }
 
-TEST(TableLifecycleTest, DestructorNoCrashOnEmpty) {
-    Table t;
-}
+TEST(TableLifecycleTest, DestructorNoCrashOnEmpty) { Table t; }
 
 TEST(TableLifecycleTest, DestructorNoCrashAfterInserts) {
     SimpleAllocator alloc;
