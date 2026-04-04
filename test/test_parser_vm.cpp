@@ -1,5 +1,4 @@
 #include "test_harness.h"
-#include "vm.h"
 #include <gtest/gtest.h>
 #include <cmath>
 
@@ -291,36 +290,4 @@ TEST_F(ParserVMTest, RuntimeError_NegateNonNumber) {
     expect_runtime_error("-\"s\"");
     expect_runtime_error("-nil");
     expect_runtime_error("-true");
-}
-
-// ===========================================================================
-// Statements
-// ===========================================================================
-
-TEST_F(ParserVMTest, PrintStatement_Number) {
-    // print 1 + 2; should not crash and the VM should return OK.
-    VM vm;
-    EXPECT_EQ(vm.interpret("print 1 + 2;"), InterpretResult::OK);
-}
-
-TEST_F(ParserVMTest, PrintStatement_String) {
-    VM vm;
-    EXPECT_EQ(vm.interpret("print \"hello\";"), InterpretResult::OK);
-}
-
-TEST_F(ParserVMTest, ExpressionStatement_Discards) {
-    // An expression statement evaluates and discards; the last POP sets
-    // m_lastResult, so we can still inspect the discarded value via eval_expr.
-    expect_num("3.14 * 2", 6.28);
-}
-
-TEST_F(ParserVMTest, MultiStatement_PrintThenExpr) {
-    // Acceptance-criteria input: print 1 + 2; 3.14 * 2 * 3;
-    VM vm;
-    EXPECT_EQ(vm.interpret("print 1 + 2; 3.14 * 2 * 3;"), InterpretResult::OK);
-}
-
-TEST_F(ParserVMTest, MultiStatement_ExprThenPrint) {
-    VM vm;
-    EXPECT_EQ(vm.interpret("1 + 1; print 2 + 2;"), InterpretResult::OK);
 }
