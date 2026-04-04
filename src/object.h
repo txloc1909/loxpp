@@ -1,9 +1,8 @@
 #pragma once
 
-#include <memory>
+#include <cstdint>
 #include <string>
 #include <string_view>
-#include <vector>
 
 enum class ObjType { STRING };
 
@@ -17,11 +16,6 @@ struct ObjString : public Obj {
     std::string chars;
     uint32_t hash{0};
 };
-
-struct Table; // Forward declaration to break circular dependency with table.h
-
-ObjString* makeString(std::vector<std::unique_ptr<Obj>>& objects,
-                      std::string_view chars, Table* strings = nullptr);
 
 std::string stringifyObj(Obj* obj);
 void printObject(Obj* obj);

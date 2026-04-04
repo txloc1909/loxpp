@@ -1,12 +1,11 @@
 #pragma once
 
+#include "allocator.h"
 #include "chunk.h"
-#include "object.h"
-#include "table.h"
+#include "simple_allocator.h"
 
 #include <memory>
 #include <string>
-#include <vector>
 
 enum class InterpretResult {
     OK,
@@ -18,12 +17,12 @@ class VM {
   public:
     static constexpr int STACK_MAX = 256;
 
-    VM() { resetStack(); }
+    VM() : m_allocator{std::make_unique<SimpleAllocator>()} { resetStack(); }
 
     InterpretResult interpret(const std::string& source);
     InterpretResult run();
-    Value
-    lastResult() const; // Returns the last value on the stack after execution
+    Value lastResult() const;
+    Allocator& allocator() { return *m_allocator; }
 
   private:
     Byte readByte();
@@ -39,8 +38,7 @@ class VM {
     Chunk::const_iterator m_ip;
     Value stack[STACK_MAX];
     Value* stackTop;
-    std::vector<std::unique_ptr<Obj>> m_objects;
-    Table m_strings;
+    std::unique_ptr<Allocator> m_allocator;
     Value m_lastResult; // For testing/debugging only — stores the value popped
                         // by Op::RETURN.
 };
