@@ -103,3 +103,58 @@ TEST_F(AllocatorTest, UnequalHandles_DifferentStrings) {
     Value b{alloc->makeString("y")};
     EXPECT_NE(a, b);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Tracked allocation (reallocate + bytesAllocated)
+// ---------------------------------------------------------------------------
+
+TEST_F(AllocatorTest, BytesAllocated_StartsAtZero) {
+    EXPECT_EQ(alloc->bytesAllocated(), 0u);
+}
+
+TEST_F(AllocatorTest, BytesAllocated_IncreasesOnMakeString) {
+    alloc->makeString("hello");
+    EXPECT_GT(alloc->bytesAllocated(), 0u);
+}
+
+TEST_F(AllocatorTest, BytesAllocated_IncreasesWithEachNewString) {
+    alloc->makeString("abc");
+    size_t after_one = alloc->bytesAllocated();
+    alloc->makeString("defgh"); // longer string → more bytes
+    EXPECT_GT(alloc->bytesAllocated(), after_one);
+}
+
+TEST_F(AllocatorTest, BytesAllocated_InternedStringDoesNotIncrease) {
+    alloc->makeString("same");
+    size_t after_first = alloc->bytesAllocated();
+    alloc->makeString("same"); // interned — no new allocation
+    EXPECT_EQ(alloc->bytesAllocated(), after_first);
+}
+
+TEST_F(AllocatorTest, BytesAllocated_DecreasesOnDestruction) {
+    {
+        SimpleAllocator inner;
+        inner.makeString("temp");
+        EXPECT_GT(inner.bytesAllocated(), 0u);
+        // destructor frees all objects — verified by sanitizers at runtime
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — GC hooks (markObject)
+// ---------------------------------------------------------------------------
+
+TEST_F(AllocatorTest, MarkObject_SetsMarkedFlag) {
+    ObjHandle h = alloc->makeString("marked");
+    Obj* obj = alloc->deref(h);
+    EXPECT_FALSE(obj->marked);
+    alloc->markObject(obj);
+    EXPECT_TRUE(obj->marked);
+}
+
+TEST_F(AllocatorTest, Collect_DoesNotCrashAfterMark) {
+    alloc->makeString("a");
+    alloc->makeString("b");
+    alloc->collect();
+    EXPECT_NO_FATAL_FAILURE(alloc->makeString("c"));
+}

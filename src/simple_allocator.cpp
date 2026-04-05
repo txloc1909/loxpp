@@ -2,9 +2,52 @@
 
 #include "value.h"
 
+#include <algorithm>
+#include <cstring>
+#include <new>
+
+void* SimpleAllocator::reallocateImpl(void* ptr, size_t oldSize,
+                                      size_t newSize) {
+    m_bytesAllocated += newSize;
+    m_bytesAllocated -= oldSize;
+
+    if (newSize == 0) {
+        ::operator delete(ptr);
+        return nullptr;
+    }
+
+    void* result = ::operator new(newSize);
+    if (ptr != nullptr) {
+        std::memcpy(result, ptr, std::min(oldSize, newSize));
+        ::operator delete(ptr);
+    }
+    return result;
+}
+
+void* SimpleAllocator::reallocate(void* ptr, size_t oldSize, size_t newSize) {
+    return reallocateImpl(ptr, oldSize, newSize);
+}
+
+SimpleAllocator::SimpleAllocator()
+    : m_objects(LoxAllocator<Obj*>{this}), m_strings(this) {}
+
 SimpleAllocator::~SimpleAllocator() {
     for (Obj* obj : m_objects) {
-        delete obj;
+        freeObject(obj);
+    }
+}
+
+void SimpleAllocator::freeObject(Obj* obj) {
+    switch (obj->type) {
+    case ObjType::STRING: {
+        auto* str = static_cast<ObjString*>(obj);
+        // ~ObjString() destroys LoxString chars →
+        // LoxAllocator<char>::deallocate fires → m_bytesAllocated decremented
+        // automatically.
+        str->~ObjString();
+        reallocateImpl(str, sizeof(ObjString), 0);
+        break;
+    }
     }
 }
 
@@ -20,10 +63,12 @@ ObjHandle SimpleAllocator::makeString(std::string_view chars) {
                          ObjType::STRING};
     }
 
-    auto* str = new ObjString();
+    auto* str =
+        static_cast<ObjString*>(reallocateImpl(nullptr, 0, sizeof(ObjString)));
+    new (str) ObjString{this};
     str->type = ObjType::STRING;
-    str->chars = std::string(chars);
     str->hash = hash;
+    str->chars.assign(chars.data(), chars.size());
 
     auto index = static_cast<uint32_t>(m_objects.size());
     m_objects.push_back(static_cast<Obj*>(str));
@@ -44,10 +89,12 @@ ObjHandle SimpleAllocator::makeString(std::string&& chars) {
                          ObjType::STRING};
     }
 
-    auto* str = new ObjString();
+    auto* str =
+        static_cast<ObjString*>(reallocateImpl(nullptr, 0, sizeof(ObjString)));
+    new (str) ObjString{this};
     str->type = ObjType::STRING;
-    str->chars = std::move(chars);
     str->hash = hash;
+    str->chars.assign(chars.data(), chars.size());
 
     auto index = static_cast<uint32_t>(m_objects.size());
     m_objects.push_back(static_cast<Obj*>(str));
@@ -64,6 +111,11 @@ ObjString* SimpleAllocator::findString(std::string_view chars) const {
 
 Obj* SimpleAllocator::deref(ObjHandle handle) const {
     return m_objects[handle.index];
+}
+
+void SimpleAllocator::markObject(Obj* obj) {
+    // Stub: full traversal will be wired up when collect() is implemented.
+    obj->marked = true;
 }
 
 void SimpleAllocator::collect() {

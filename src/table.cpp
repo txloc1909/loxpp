@@ -4,6 +4,8 @@
 
 #include "object.h"
 
+using VecEntry = std::vector<Entry, LoxAllocator<Entry>>;
+
 uint32_t hashString(std::string_view s) {
     uint32_t hash = 2166136261u;
     for (unsigned char c : s) {
@@ -12,6 +14,8 @@ uint32_t hashString(std::string_view s) {
     }
     return hash;
 }
+
+Table::Table(Allocator* alloc) : VecEntry(LoxAllocator<Entry>{alloc}) {}
 
 // Returns the bucket where key belongs (or the first tombstone along the probe
 // sequence if key isn't present). Callers must ensure capacity > 0.
@@ -36,11 +40,11 @@ Entry* Table::findBucket(Entry* entries, int capacity, ObjString* key) {
 }
 
 void Table::adjustCapacity(int newCapacity) {
-    // Allocate fresh bucket array and re-insert live entries (tombstones
-    // dropped).
-    std::vector<Entry> fresh(newCapacity);
+    // Allocate fresh bucket array (same allocator) and re-insert live entries
+    // (tombstones dropped).
+    VecEntry fresh(newCapacity, get_allocator());
     m_count = 0;
-    for (const Entry& entry : static_cast<const std::vector<Entry>&>(*this)) {
+    for (const Entry& entry : static_cast<const VecEntry&>(*this)) {
         if (entry.key == nullptr)
             continue;
         Entry* dest = findBucket(fresh.data(), newCapacity, entry.key);
@@ -48,18 +52,18 @@ void Table::adjustCapacity(int newCapacity) {
         dest->value = entry.value;
         m_count++;
     }
-    static_cast<std::vector<Entry>&>(*this) = std::move(fresh);
+    static_cast<VecEntry&>(*this) = std::move(fresh);
 }
 
 bool Table::set(ObjString* key, Value value) {
-    int cap = static_cast<int>(std::vector<Entry>::size());
+    int cap = static_cast<int>(VecEntry::size());
     if (m_count + 1 > static_cast<int>(cap * MAX_LOAD)) {
         int newCap = cap < 8 ? 8 : cap * 2;
         adjustCapacity(newCap);
-        cap = static_cast<int>(std::vector<Entry>::size());
+        cap = static_cast<int>(VecEntry::size());
     }
 
-    Entry* entry = findBucket(std::vector<Entry>::data(), cap, key);
+    Entry* entry = findBucket(VecEntry::data(), cap, key);
     bool isNewKey = (entry->key == nullptr);
     // Only increment count when filling a truly empty slot (not a tombstone).
     if (isNewKey && is<Nil>(entry->value))
@@ -73,10 +77,9 @@ bool Table::set(ObjString* key, Value value) {
 bool Table::get(ObjString* key, Value& out) const {
     if (m_count == 0)
         return false;
-    int cap = static_cast<int>(std::vector<Entry>::size());
+    int cap = static_cast<int>(VecEntry::size());
     // const_cast is safe: findBucket doesn't modify the entry on a get path.
-    Entry* entry =
-        findBucket(const_cast<Entry*>(std::vector<Entry>::data()), cap, key);
+    Entry* entry = findBucket(const_cast<Entry*>(VecEntry::data()), cap, key);
     if (entry->key == nullptr)
         return false;
     out = entry->value;
@@ -86,8 +89,8 @@ bool Table::get(ObjString* key, Value& out) const {
 bool Table::del(ObjString* key) {
     if (m_count == 0)
         return false;
-    int cap = static_cast<int>(std::vector<Entry>::size());
-    Entry* entry = findBucket(std::vector<Entry>::data(), cap, key);
+    int cap = static_cast<int>(VecEntry::size());
+    Entry* entry = findBucket(VecEntry::data(), cap, key);
     if (entry->key == nullptr)
         return false;
     // Place tombstone: key=null, value=true (bool).
@@ -97,7 +100,7 @@ bool Table::del(ObjString* key) {
 }
 
 void Table::addAll(const Table& from) {
-    for (const Entry& entry : static_cast<const std::vector<Entry>&>(from)) {
+    for (const Entry& entry : static_cast<const VecEntry&>(from)) {
         if (entry.key != nullptr)
             set(entry.key, entry.value);
     }
@@ -107,17 +110,17 @@ ObjString* Table::findString(const char* chars, int length,
                              uint32_t hash) const {
     if (m_count == 0)
         return nullptr;
-    int cap = static_cast<int>(std::vector<Entry>::size());
+    int cap = static_cast<int>(VecEntry::size());
     uint32_t index = hash % static_cast<uint32_t>(cap);
     for (;;) {
-        const Entry& entry = std::vector<Entry>::data()[index];
+        const Entry& entry = VecEntry::data()[index];
         if (entry.key == nullptr) {
             // Stop only on a truly empty slot; skip tombstones.
             if (is<Nil>(entry.value))
                 return nullptr;
         } else if (static_cast<int>(entry.key->chars.size()) == length &&
                    entry.key->hash == hash &&
-                   memcmp(entry.key->chars.c_str(), chars, length) == 0) {
+                   memcmp(entry.key->chars.data(), chars, length) == 0) {
             return entry.key;
         }
         index = (index + 1) % static_cast<uint32_t>(cap);

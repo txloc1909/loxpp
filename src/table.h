@@ -4,6 +4,7 @@
 #include <string_view>
 #include <vector>
 
+#include "lox_allocator.h"
 #include "value.h"
 
 struct ObjString;
@@ -13,8 +14,10 @@ struct Entry {
     Value value{Nil{}};
 };
 
-class Table : private std::vector<Entry> {
+class Table : private std::vector<Entry, LoxAllocator<Entry>> {
   public:
+    explicit Table(Allocator* alloc);
+
     // Returns true if a new key was inserted (false if existing key updated).
     bool set(ObjString* key, Value value);
     // Returns true and fills `out` if key is found.

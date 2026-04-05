@@ -26,7 +26,7 @@ static ObjString* mkstr(SimpleAllocator& alloc, const std::string& s) {
 class TableTest : public ::testing::Test {
   protected:
     SimpleAllocator allocator_;
-    Table table;
+    Table table{&allocator_};
 
     ObjString* str(const std::string& s) { return mkstr(allocator_, s); }
 
@@ -64,15 +64,19 @@ TEST(HashFieldTest, EmptyStringNoCrash) {
 // ============================================================
 
 TEST(TableLifecycleTest, DefaultConstructedTableIsEmpty) {
-    Table t;
+    SimpleAllocator alloc;
+    Table t{&alloc};
     EXPECT_EQ(t.findString("anything", 8, 12345u), nullptr);
 }
 
-TEST(TableLifecycleTest, DestructorNoCrashOnEmpty) { Table t; }
+TEST(TableLifecycleTest, DestructorNoCrashOnEmpty) {
+    SimpleAllocator alloc;
+    Table t{&alloc};
+}
 
 TEST(TableLifecycleTest, DestructorNoCrashAfterInserts) {
     SimpleAllocator alloc;
-    Table t;
+    Table t{&alloc};
     for (int i = 0; i < 20; ++i) {
         std::string s = "key" + std::to_string(i);
         ObjString* k = mkstr(alloc, s);
@@ -299,7 +303,7 @@ TEST_F(TableTest, StressManyInsertsAllRetrievable) {
 // ============================================================
 
 TEST_F(TableTest, AddAllEmptySourceLeavesDestUnchanged) {
-    Table src;
+    Table src{&allocator_};
     table.addAll(src);
     Value out;
     EXPECT_FALSE(table.get(str("any"), out));
@@ -307,7 +311,7 @@ TEST_F(TableTest, AddAllEmptySourceLeavesDestUnchanged) {
 
 TEST_F(TableTest, AddAllCopiesEntriesToEmptyDest) {
     SimpleAllocator srcAlloc;
-    Table src;
+    Table src{&srcAlloc};
     ObjString* k1 = mkstr(srcAlloc, "alpha");
     ObjString* k2 = mkstr(srcAlloc, "beta");
     src.set(k1, Value{1.0});
@@ -324,7 +328,7 @@ TEST_F(TableTest, AddAllCopiesEntriesToEmptyDest) {
 
 TEST_F(TableTest, AddAllNoOverlapUnionInDest) {
     SimpleAllocator srcAlloc;
-    Table src;
+    Table src{&srcAlloc};
 
     ObjString* destKey = str("dest_only");
     table.set(destKey, Value{9.0});
@@ -342,7 +346,7 @@ TEST_F(TableTest, AddAllNoOverlapUnionInDest) {
 }
 
 TEST_F(TableTest, AddAllOverlappingKeysTakesSourceValue) {
-    Table src;
+    Table src{&allocator_};
     ObjString* sharedKey = str("shared");
     table.set(sharedKey, Value{1.0});
     src.set(sharedKey, Value{99.0});
@@ -356,7 +360,7 @@ TEST_F(TableTest, AddAllOverlappingKeysTakesSourceValue) {
 
 TEST_F(TableTest, AddAllDoesNotMutateSource) {
     SimpleAllocator srcAlloc;
-    Table src;
+    Table src{&srcAlloc};
     ObjString* k = mkstr(srcAlloc, "orig");
     src.set(k, Value{5.0});
 
@@ -414,7 +418,7 @@ TEST_F(TableTest, FindStringByRawCharsWithoutObjStringWrapper) {
 class StringInternTest : public ::testing::Test {
   protected:
     SimpleAllocator allocator_;
-    Table internTable;
+    Table internTable{&allocator_};
 
     ObjString* internString(const std::string& s) {
         uint32_t h = fakeHash(s.c_str(), static_cast<int>(s.size()));

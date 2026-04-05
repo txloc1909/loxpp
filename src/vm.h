@@ -19,7 +19,11 @@ class VM {
   public:
     static constexpr int STACK_MAX = 256;
 
-    VM() : m_allocator{std::make_unique<SimpleAllocator>()} { resetStack(); }
+    VM()
+        : m_allocator{std::make_unique<SimpleAllocator>()},
+          m_globals{m_allocator.get()} {
+        resetStack();
+    }
 
     InterpretResult interpret(const std::string& source);
     InterpretResult run();

@@ -1,10 +1,12 @@
 #pragma once
 
+#include "lox_allocator.h"
+
 #include <cstdint>
 #include <string>
 #include <string_view>
 
-enum class ObjType { STRING };
+enum class ObjType : uint8_t { STRING };
 
 struct Obj {
     ObjType type;
@@ -13,8 +15,11 @@ struct Obj {
 };
 
 struct ObjString : public Obj {
-    std::string chars;
     uint32_t hash{0};
+    // Null-terminated string whose internal buffer is tracked via LoxAllocator.
+    LoxString chars;
+
+    explicit ObjString(Allocator* alloc) : chars(LoxAllocator<char>{alloc}) {}
 };
 
 std::string stringifyObj(Obj* obj);
