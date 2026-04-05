@@ -150,12 +150,10 @@ void Compiler::declaration() {
 }
 
 void Compiler::varDeclaration() {
-    // Consume the variable name; for locals also register in m_locals.
     m_parser->consume(TokenType::IDENTIFIER, "Expect variable name.");
-    Token name = m_parser->m_previous; // save before further parsing
+    Token name = m_parser->m_previous;
     declareVariable();
 
-    // Compile the initializer (or default to nil).
     if (m_parser->match(TokenType::EQUAL)) {
         expression();
     } else {
@@ -165,12 +163,8 @@ void Compiler::varDeclaration() {
                       "Expect ';' after variable declaration.");
 
     if (m_scopeDepth > 0) {
-        // Local: the value is already on the stack at the right slot. Just mark
-        // the slot as initialized so it can be resolved from this point
-        // forward.
         markInitialized();
     } else {
-        // Global: store the value in the globals table under the variable name.
         uint8_t nameConst = identifierConstant(name);
         emitBytes(Op::DEFINE_GLOBAL, nameConst);
     }
@@ -207,38 +201,33 @@ int Compiler::resolveLocal(const Token& name) const {
     for (int i = m_localCount - 1; i >= 0; i--) {
         const Local& local = m_locals[i];
         if (local.name.lexeme == name.lexeme) {
-            if (local.depth == -1) {
-                // The variable exists but its initializer hasn't finished —
-                // e.g. `var x = x;`. Block reads of own initializer.
+            if (local.depth == -1)
                 m_parser->error(
                     "Can't read local variable in its own initializer.");
-            }
             return i;
         }
     }
-    return -1; // not found → treat as global
+    return -1;
 }
 
 void Compiler::declareVariable() {
     if (m_scopeDepth == 0)
-        return; // global — handled by identifierConstant / DEFINE_GLOBAL
+        return;
 
     const Token& name = m_parser->m_previous;
-    // Detect re-declaration of the same name in the same scope.
     for (int i = m_localCount - 1; i >= 0; i--) {
         const Local& local = m_locals[i];
         if (local.depth != -1 && local.depth < m_scopeDepth)
-            break; // left this scope, stop searching
-        if (local.name.lexeme == name.lexeme) {
+            break;
+        if (local.name.lexeme == name.lexeme)
             m_parser->error("Already a variable with this name in this scope.");
-        }
     }
     addLocal(name);
 }
 
 void Compiler::markInitialized() {
     if (m_scopeDepth == 0)
-        return; // global declarations don't use the depth sentinel
+        return;
     m_locals[m_localCount - 1].depth = m_scopeDepth;
 }
 

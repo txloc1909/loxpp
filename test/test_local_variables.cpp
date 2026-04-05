@@ -1,14 +1,12 @@
 // test_local_variables.cpp — local variable and block-scoping invariant tests.
 //
-// Invariants under test:
+// Invariants:
 //   1. Stack discipline   — stackDepth() == 0 after every complete program.
-//                           Within a block the depth grows and then falls back.
 //   2. Scope isolation    — locals declared inside { } are unreachable after }.
-//   3. Shadow semantics   — inner `var x` creates a new slot; it never mutates
-//                           any outer binding.
+//   3. Shadow semantics   — inner `var x` never mutates any outer binding.
 //   4. Uninitialized guard— `var x = x;` is a compile error.
-//   5. Redeclaration error— declaring the same name twice in the same scope is
-//                           a compile error.
+//   5. Redeclaration error— same name twice in the same scope is a compile
+//   error.
 //   6. Nested scopes      — deeply nested locals resolve to the correct slot.
 
 #include "test_harness.h"
@@ -73,7 +71,6 @@ TEST_F(LocalStackDisciplineTest, EmptyAfterMixedGlobalAndLocal) {
 
 TEST_F(LocalStackDisciplineTest, EmptyAfterLocalExpression) {
     VMTestHarness h;
-    // Local used in an expression statement — value pushed, then popped by POP.
     ASSERT_EQ(h.run("{ var x = 5; x + 1; }"), InterpretResult::OK);
     EXPECT_EQ(h.stackDepth(), 0);
 }
@@ -87,21 +84,16 @@ class ScopeIsolationTest : public ::testing::Test {};
 TEST_F(ScopeIsolationTest, LocalIsNotGlobal) {
     VMTestHarness h;
     ASSERT_EQ(h.run("{ var x = 99; }"), InterpretResult::OK);
-    // x was local, so getGlobal sees nothing.
     EXPECT_FALSE(h.getGlobal("x").has_value());
 }
 
 TEST_F(ScopeIsolationTest, LocalUnreachableAfterBlock) {
-    // Reading a local after its block ends is a runtime error (it resolves
-    // to a global that was never defined).
     VMTestHarness h;
     ASSERT_EQ(h.run("{ var x = 1; }\nprint x;"),
               InterpretResult::RUNTIME_ERROR);
 }
 
 TEST_F(ScopeIsolationTest, InnerLocalDoesNotLeakToOuter) {
-    // The outer block's `x` is separate from the inner block's `y`.
-    // After the inner block, `y` is gone.
     VMTestHarness h;
     ASSERT_EQ(h.run("{ var x = 10; { var y = 20; } print x; }"),
               InterpretResult::OK);
@@ -109,7 +101,6 @@ TEST_F(ScopeIsolationTest, InnerLocalDoesNotLeakToOuter) {
 }
 
 TEST_F(ScopeIsolationTest, LocalDeclarationInEachBranchIsIsolated) {
-    // Two sequential blocks each declaring `x`; neither leaks into the other.
     VMTestHarness h;
     ASSERT_EQ(h.run("{ var x = 1; } { var x = 2; }"), InterpretResult::OK);
     EXPECT_EQ(h.stackDepth(), 0);
@@ -124,8 +115,6 @@ class ShadowSemanticsTest : public ::testing::Test {};
 
 TEST_F(ShadowSemanticsTest, InnerVarShadowsGlobal) {
     VMTestHarness h;
-    // Global `x = 1`. Inside block, local `x = 2` shadows it. After block,
-    // global `x` is still 1.
     ASSERT_EQ(h.run("var x = 1; { var x = 2; } "), InterpretResult::OK);
     auto g = h.getGlobal("x");
     ASSERT_TRUE(g.has_value());
@@ -133,8 +122,6 @@ TEST_F(ShadowSemanticsTest, InnerVarShadowsGlobal) {
 }
 
 TEST_F(ShadowSemanticsTest, InnerVarShadowsOuterLocal) {
-    // Outer local `x = 10`, inner local `x = 20`. After inner block, the outer
-    // `x` is still 10. Capture via global so endScope's POPs don't interfere.
     VMTestHarness h;
     ASSERT_EQ(h.run("var result; { var x = 10; { var x = 20; } result = x; }"),
               InterpretResult::OK);
@@ -144,7 +131,6 @@ TEST_F(ShadowSemanticsTest, InnerVarShadowsOuterLocal) {
 }
 
 TEST_F(ShadowSemanticsTest, AssignmentToShadowDoesNotMutateOuter) {
-    // Assigning to inner `x` must not touch the outer `x`.
     VMTestHarness h;
     ASSERT_EQ(
         h.run("var result; { var x = 1; { var x = 2; x = 99; } result = x; }"),
@@ -165,7 +151,6 @@ TEST_F(ShadowSemanticsTest, GlobalUnchangedAfterLocalAssignment) {
 
 TEST_F(ShadowSemanticsTest, MultipleLevelsOfShadow) {
     VMTestHarness h;
-    // Three nested `x` declarations; capture each level's value via a global.
     ASSERT_EQ(h.run("var r1; var r2; var r3;"
                     "{ var x = 1;"
                     "  { var x = 2;"
@@ -192,14 +177,10 @@ class UninitializedGuardTest : public ::testing::Test {};
 
 TEST_F(UninitializedGuardTest, SelfReferentialInitializerIsCompileError) {
     VMTestHarness h;
-    // `var x = x;` should be a compile error — x is declared but not yet
-    // initialized when the initializer expression is compiled.
     EXPECT_EQ(h.run("{ var x = x; }"), InterpretResult::COMPILE_ERROR);
 }
 
 TEST_F(UninitializedGuardTest, SelfRefDoesNotAffectOuterSameNameGlobal) {
-    // At global scope, `var x = x;` is NOT an error (globals are looked up
-    // at runtime and the outer `x` may exist). Only block-locals get the guard.
     VMTestHarness h;
     ASSERT_EQ(h.run("var x = 1; var y = x;"), InterpretResult::OK);
     EXPECT_EQ(h.stackDepth(), 0);
@@ -218,19 +199,16 @@ TEST_F(RedeclarationTest, RedeclareInSameScopeIsCompileError) {
 }
 
 TEST_F(RedeclarationTest, RedeclareInDifferentScopesIsOk) {
-    // Same name in two sequential sibling scopes is fine.
     VMTestHarness h;
     EXPECT_EQ(h.run("{ var x = 1; } { var x = 2; }"), InterpretResult::OK);
 }
 
 TEST_F(RedeclarationTest, RedeclareInInnerScopeIsOk) {
-    // Inner scope shadows, not redeclares.
     VMTestHarness h;
     EXPECT_EQ(h.run("{ var x = 1; { var x = 2; } }"), InterpretResult::OK);
 }
 
 TEST_F(RedeclarationTest, GlobalRedeclarationIsOk) {
-    // At global scope, redeclaration silently overwrites (book semantics).
     VMTestHarness h;
     ASSERT_EQ(h.run("var x = 1; var x = 2;"), InterpretResult::OK);
     auto g = h.getGlobal("x");
@@ -264,7 +242,6 @@ TEST_F(NestedScopeTest, InnerScopeWritesOuterLocal) {
 
 TEST_F(NestedScopeTest, MultipleSlotsCorrectlyOrdered) {
     VMTestHarness h;
-    // Three locals in one scope; capture sum via global.
     ASSERT_EQ(h.run("var result;"
                     "{ var a = 1; var b = 2; var c = 3; result = a + b + c; }"),
               InterpretResult::OK);
@@ -294,8 +271,6 @@ TEST_F(NestedScopeTest, LocalNilDefault) {
 }
 
 TEST_F(NestedScopeTest, LocalAssignmentIsExpression) {
-    // Assignment is an expression: `x = 5` produces 5, and updating x is
-    // visible.
     VMTestHarness h;
     ASSERT_EQ(h.run("var result; { var x = 0; x = 5; result = x; }"),
               InterpretResult::OK);

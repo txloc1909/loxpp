@@ -11,13 +11,9 @@ static constexpr int UINT8_COUNT = 256;
 
 std::unique_ptr<Chunk> compile(const std::string& source, Allocator* alloc);
 
-// Represents a local variable at compile time: its source name and the scope
-// depth at which it was declared. depth == -1 is a sentinel meaning "declared
-// but initializer not yet compiled" — used to block self-referential
-// initializers like `var x = x;`.
 struct Local {
     Token name;
-    int depth; // -1 = declared, not initialized; ≥0 = scope depth
+    int depth; // -1 = declared but not yet initialized; ≥0 = scope depth
 };
 
 class Compiler {
