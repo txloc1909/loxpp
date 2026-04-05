@@ -3,6 +3,7 @@
 #include "value.h"
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 #include <utility>
 
@@ -43,7 +44,7 @@ class Chunk : std::vector<Byte> {
 
     void write(Byte byte, int line);
     void write(Op op, int line);
-    uint8_t addConstant(Value value);
+    std::optional<uint8_t> addConstant(Value value);
     Value getConstant(int idx) const;
     int getLine(int offset) const;
 

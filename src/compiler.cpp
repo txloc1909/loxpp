@@ -198,16 +198,12 @@ void Compiler::emitBytes(Op op, Byte byte) {
 void Compiler::emitReturn() { emitByte(static_cast<Byte>(Op::RETURN)); }
 
 uint8_t Compiler::makeConstant(Value value) {
-    uint8_t constant = m_currentChunk->addConstant(value);
-
-    // ValueArray already hit illegal memory access at this point
-    // TODO: Handle this gracefully
-    if (constant >= UINT8_MAX) {
+    auto constant = m_currentChunk->addConstant(value);
+    if (!constant) {
         m_parser->error("Too many constants in one chunk.");
         return 0;
     }
-
-    return constant;
+    return *constant;
 }
 
 uint8_t Compiler::identifierConstant(const Token& name) {
