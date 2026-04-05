@@ -33,6 +33,18 @@ std::string compile_to_bytecode(const std::string& expr) {
     return oss.str();
 }
 
+std::string compile_program_to_bytecode(const std::string& source) {
+    SimpleAllocator allocator;
+    auto chunk = compile(source, &allocator);
+    if (!chunk)
+        throw std::runtime_error("Compilation failed");
+    std::ostringstream oss;
+    for (int offset = 0; offset < static_cast<int>(chunk->size());) {
+        offset = disassembleInstruction(*chunk, allocator, offset, oss);
+    }
+    return oss.str();
+}
+
 InterpretResult run_program(const std::string& source) {
     VM vm;
     return vm.interpret(source);

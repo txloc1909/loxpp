@@ -13,6 +13,12 @@ void Chunk::write(Byte byte, int line) {
 void Chunk::write(Op op, int line) { write(static_cast<Byte>(op), line); }
 
 std::optional<uint8_t> Chunk::addConstant(Value value) {
+    // O(N) scan for an existing equal constant; avoids duplicate slots (N ≤
+    // 256). Strings are interned, so ObjHandle equality (index+type) suffices.
+    for (uint8_t i = 0; i < m_constants.size(); i++) {
+        if (m_constants.at(i) == value)
+            return i;
+    }
     if (m_constants.isFull())
         return std::nullopt;
     m_constants.write(value);
