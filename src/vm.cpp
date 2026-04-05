@@ -110,12 +110,11 @@ InterpretResult VM::run() {
             if (isString(peek(0)) && isString(peek(1))) {
                 auto* b_str = asObjString(pop(), *m_allocator);
                 auto* a_str = asObjString(pop(), *m_allocator);
-                // std::string operator+ allocates a temporary; acceptable for
-                // now. TODO: consider pre-sizing a buffer and using append() or
-                // reserve()+memcpy() to match the book's single-allocation
-                // approach.
-                ObjHandle handle =
-                    m_allocator->makeString(a_str->chars + b_str->chars);
+                std::string result;
+                result.reserve(a_str->chars.size() + b_str->chars.size());
+                result.append(a_str->chars);
+                result.append(b_str->chars);
+                ObjHandle handle = m_allocator->makeString(std::move(result));
                 push(Value{handle});
             } else {
                 BINARY_OP(Number, +);
