@@ -150,10 +150,12 @@ void Compiler::declaration() {
 }
 
 void Compiler::varDeclaration() {
-    // Read the name from m_current, then consume the IDENTIFIER token.
-    uint8_t global = identifierConstant(m_parser->m_current);
+    // Consume the variable name; for locals also register in m_locals.
     m_parser->consume(TokenType::IDENTIFIER, "Expect variable name.");
+    Token name = m_parser->m_previous; // save before further parsing
+    declareVariable();
 
+    // Compile the initializer (or default to nil).
     if (m_parser->match(TokenType::EQUAL)) {
         expression();
     } else {
@@ -161,11 +163,91 @@ void Compiler::varDeclaration() {
     }
     m_parser->consume(TokenType::SEMICOLON,
                       "Expect ';' after variable declaration.");
-    emitBytes(Op::DEFINE_GLOBAL, global);
+
+    if (m_scopeDepth > 0) {
+        // Local: the value is already on the stack at the right slot. Just mark
+        // the slot as initialized so it can be resolved from this point
+        // forward.
+        markInitialized();
+    } else {
+        // Global: store the value in the globals table under the variable name.
+        uint8_t nameConst = identifierConstant(name);
+        emitBytes(Op::DEFINE_GLOBAL, nameConst);
+    }
+}
+
+void Compiler::block() {
+    while (!m_parser->check(TokenType::RIGHT_BRACE) &&
+           !m_parser->check(TokenType::EOF_)) {
+        declaration();
+    }
+    m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after block.");
+}
+
+void Compiler::beginScope() { m_scopeDepth++; }
+
+void Compiler::endScope() {
+    m_scopeDepth--;
+    while (m_localCount > 0 &&
+           m_locals[m_localCount - 1].depth > m_scopeDepth) {
+        emitByte(Op::DISCARD);
+        m_localCount--;
+    }
+}
+
+void Compiler::addLocal(const Token& name) {
+    if (m_localCount == UINT8_COUNT) {
+        m_parser->error("Too many local variables in function.");
+        return;
+    }
+    m_locals[m_localCount++] = Local{name, -1};
+}
+
+int Compiler::resolveLocal(const Token& name) const {
+    for (int i = m_localCount - 1; i >= 0; i--) {
+        const Local& local = m_locals[i];
+        if (local.name.lexeme == name.lexeme) {
+            if (local.depth == -1) {
+                // The variable exists but its initializer hasn't finished —
+                // e.g. `var x = x;`. Block reads of own initializer.
+                m_parser->error(
+                    "Can't read local variable in its own initializer.");
+            }
+            return i;
+        }
+    }
+    return -1; // not found → treat as global
+}
+
+void Compiler::declareVariable() {
+    if (m_scopeDepth == 0)
+        return; // global — handled by identifierConstant / DEFINE_GLOBAL
+
+    const Token& name = m_parser->m_previous;
+    // Detect re-declaration of the same name in the same scope.
+    for (int i = m_localCount - 1; i >= 0; i--) {
+        const Local& local = m_locals[i];
+        if (local.depth != -1 && local.depth < m_scopeDepth)
+            break; // left this scope, stop searching
+        if (local.name.lexeme == name.lexeme) {
+            m_parser->error("Already a variable with this name in this scope.");
+        }
+    }
+    addLocal(name);
+}
+
+void Compiler::markInitialized() {
+    if (m_scopeDepth == 0)
+        return; // global declarations don't use the depth sentinel
+    m_locals[m_localCount - 1].depth = m_scopeDepth;
 }
 
 void Compiler::statement() {
-    if (m_parser->match(TokenType::PRINT)) {
+    if (m_parser->match(TokenType::LEFT_BRACE)) {
+        beginScope();
+        block();
+        endScope();
+    } else if (m_parser->match(TokenType::PRINT)) {
         printStatement();
     } else {
         expressionStatement();
@@ -212,11 +294,24 @@ uint8_t Compiler::identifierConstant(const Token& name) {
 }
 
 void Compiler::namedVariable(const Token& name, bool canAssign) {
-    uint8_t nameConstant = identifierConstant(name);
+    Op getOp, setOp;
+    int slot = resolveLocal(name);
+    uint8_t operand;
+
+    if (slot != -1) {
+        getOp = Op::GET_LOCAL;
+        setOp = Op::SET_LOCAL;
+        operand = static_cast<uint8_t>(slot);
+    } else {
+        getOp = Op::GET_GLOBAL;
+        setOp = Op::SET_GLOBAL;
+        operand = identifierConstant(name);
+    }
+
     if (canAssign && m_parser->match(TokenType::EQUAL)) {
         expression();
-        emitBytes(Op::SET_GLOBAL, nameConstant);
+        emitBytes(setOp, operand);
     } else {
-        emitBytes(Op::GET_GLOBAL, nameConstant);
+        emitBytes(getOp, operand);
     }
 }
