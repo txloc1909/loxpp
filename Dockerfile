@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
     clang-format \
     clang-tidy \
     pkg-config \
+    libreadline-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Build and install gtest static libs (Ubuntu ships source only)
