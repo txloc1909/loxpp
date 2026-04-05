@@ -41,8 +41,6 @@ class Chunk : std::vector<Byte> {
     void write(Byte byte, int line);
     void write(Op op, int line);
     uint8_t addConstant(Value value);
-    void disassemble(const char* name) const;
-    int disassembleInstruction(int offset) const;
     Value getConstant(int idx) const;
     int getLine(int offset) const;
 

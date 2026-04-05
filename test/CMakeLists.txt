@@ -12,6 +12,7 @@ set(FULL_SRCS
     ${PROJECT_SOURCE_DIR}/src/compiler.cpp
     ${PROJECT_SOURCE_DIR}/src/parser.cpp
     ${PROJECT_SOURCE_DIR}/src/chunk.cpp
+    ${PROJECT_SOURCE_DIR}/src/debug.cpp
     ${PROJECT_SOURCE_DIR}/src/value.cpp
     ${PROJECT_SOURCE_DIR}/src/object.cpp
     ${PROJECT_SOURCE_DIR}/src/table.cpp
