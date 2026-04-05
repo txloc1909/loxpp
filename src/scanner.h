@@ -2,6 +2,10 @@
 
 #include "token.h"
 
+// Null-terminated array of all Lox keywords, kept here as the single source
+// of truth (used by the scanner and the REPL tab-completion).
+const char* const* lox_keywords();
+
 class Scanner {
   public:
     Scanner(const std::string& source);

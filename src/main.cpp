@@ -1,4 +1,5 @@
 #include "chunk.h"
+#include "scanner.h"
 #include "vm.h"
 
 #include <iostream>
@@ -11,12 +12,7 @@
 #include <readline/history.h>
 #include <cstdlib>
 #include <cstring>
-#include <cerrno>
 #include <sys/stat.h>
-
-static const char* k_lox_keywords[] = {
-    "and",   "class",  "else",  "false", "for",  "fun", "if",    "nil",  "or",
-    "print", "return", "super", "this",  "true", "var", "while", nullptr};
 
 static char* keyword_generator(const char* text, int state) {
     static int list_index;
@@ -27,8 +23,9 @@ static char* keyword_generator(const char* text, int state) {
         text_len = std::strlen(text);
     }
 
-    while (k_lox_keywords[list_index]) {
-        const char* kw = k_lox_keywords[list_index++];
+    const char* const* keywords = lox_keywords();
+    while (keywords[list_index]) {
+        const char* kw = keywords[list_index++];
         if (std::strncmp(kw, text, text_len) == 0)
             return strdup(kw);
     }
