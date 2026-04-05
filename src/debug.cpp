@@ -4,68 +4,88 @@
 
 #include <ostream>
 
-static int simpleInstruction(const char* name, int offset, std::ostream& out) {
-    out << name << '\n';
+namespace {
+
+constexpr const char* kReset = "\033[0m";
+constexpr const char* kBold = "\033[1m";
+constexpr const char* kDim = "\033[2m";
+constexpr const char* kYellow = "\033[33m";
+constexpr const char* kRed = "\033[31m";
+
+// Returns `code` when color is enabled, otherwise "".
+inline const char* cc(bool use, const char* code) { return use ? code : ""; }
+
+} // namespace
+
+static int simpleInstruction(const char* name, int offset, std::ostream& out,
+                             bool color) {
+    out << cc(color, kBold) << name << cc(color, kReset) << '\n';
     return offset + 1;
 }
 
 static int constantInstruction(const char* name, const Chunk& chunk,
                                const Allocator& alloc, int offset,
-                               std::ostream& out) {
+                               std::ostream& out, bool color) {
     uint8_t idx = chunk.at(offset + 1);
-    out << name << ' ' << static_cast<int>(idx) << " ('"
-        << stringify(chunk.getConstant(idx), alloc) << "')\n";
+    out << cc(color, kBold) << name << cc(color, kReset) << ' '
+        << static_cast<int>(idx) << " ('" << cc(color, kYellow)
+        << stringify(chunk.getConstant(idx), alloc) << cc(color, kReset)
+        << "')\n";
     return offset + 2;
 }
 
 void disassembleChunk(const Chunk& chunk, const Allocator& alloc,
-                      const char* name, std::ostream& out) {
-    out << "== " << name << " ==\n";
+                      const char* name, std::ostream& out, bool color) {
+    out << cc(color, kBold) << "== " << name << " ==" << cc(color, kReset)
+        << '\n';
     for (int offset = 0; offset < static_cast<int>(chunk.size());) {
-        offset = disassembleInstruction(chunk, alloc, offset, out);
+        offset = disassembleInstruction(chunk, alloc, offset, out, color);
     }
 }
 
 int disassembleInstruction(const Chunk& chunk, const Allocator& alloc,
-                           int offset, std::ostream& out) {
-    out << offset << ": ";
+                           int offset, std::ostream& out, bool color) {
+    out << cc(color, kDim) << offset << ": " << cc(color, kReset);
 
     Op instruction = toOpcode(chunk.at(offset));
     switch (instruction) {
     case Op::CONSTANT:
-        return constantInstruction("CONSTANT", chunk, alloc, offset, out);
+        return constantInstruction("CONSTANT", chunk, alloc, offset, out,
+                                   color);
     case Op::NIL:
-        return simpleInstruction("NIL", offset, out);
+        return simpleInstruction("NIL", offset, out, color);
     case Op::TRUE:
-        return simpleInstruction("TRUE", offset, out);
+        return simpleInstruction("TRUE", offset, out, color);
     case Op::FALSE:
-        return simpleInstruction("FALSE", offset, out);
+        return simpleInstruction("FALSE", offset, out, color);
     case Op::EQUAL:
-        return simpleInstruction("EQUAL", offset, out);
+        return simpleInstruction("EQUAL", offset, out, color);
     case Op::GREATER:
-        return simpleInstruction("GREATER", offset, out);
+        return simpleInstruction("GREATER", offset, out, color);
     case Op::LESS:
-        return simpleInstruction("LESS", offset, out);
+        return simpleInstruction("LESS", offset, out, color);
     case Op::NEGATE:
-        return simpleInstruction("NEGATE", offset, out);
+        return simpleInstruction("NEGATE", offset, out, color);
     case Op::ADD:
-        return simpleInstruction("ADD", offset, out);
+        return simpleInstruction("ADD", offset, out, color);
     case Op::SUBTRACT:
-        return simpleInstruction("SUBTRACT", offset, out);
+        return simpleInstruction("SUBTRACT", offset, out, color);
     case Op::MULTIPLY:
-        return simpleInstruction("MULTIPLY", offset, out);
+        return simpleInstruction("MULTIPLY", offset, out, color);
     case Op::DIVIDE:
-        return simpleInstruction("DIVIDE", offset, out);
+        return simpleInstruction("DIVIDE", offset, out, color);
     case Op::NOT:
-        return simpleInstruction("NOT", offset, out);
+        return simpleInstruction("NOT", offset, out, color);
     case Op::PRINT:
-        return simpleInstruction("PRINT", offset, out);
+        return simpleInstruction("PRINT", offset, out, color);
     case Op::POP:
-        return simpleInstruction("POP", offset, out);
+        return simpleInstruction("POP", offset, out, color);
     case Op::RETURN:
-        return simpleInstruction("RETURN", offset, out);
+        return simpleInstruction("RETURN", offset, out, color);
     default:
-        out << "UNKNOWN(" << static_cast<unsigned>(chunk.at(offset)) << ")\n";
+        out << cc(color, kRed) << cc(color, kBold) << "UNKNOWN("
+            << static_cast<unsigned>(chunk.at(offset)) << ")"
+            << cc(color, kReset) << '\n';
         return offset + 1;
     }
 }
