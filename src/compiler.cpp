@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <memory>
+#include <unistd.h>
 
 std::unique_ptr<Chunk> compile(const std::string& source, Allocator* alloc) {
     auto chunk = std::make_unique<Chunk>();
@@ -26,7 +27,8 @@ Compiler::Compiler(Chunk* chunk, Parser* parser, Allocator* alloc)
 void Compiler::endCompiler() {
     emitReturn();
 #ifdef LOXPP_DEBUG_PRINT_CODE
-    disassembleChunk(*m_currentChunk, *m_allocator, "code", std::cout);
+    bool color = isatty(STDOUT_FILENO) != 0;
+    disassembleChunk(*m_currentChunk, *m_allocator, "code", std::cout, color);
 #endif
 }
 

@@ -9,6 +9,7 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include <unistd.h>
 
 InterpretResult VM::interpret(const std::string& source) {
     auto chunk = compile(source, m_allocator.get());
@@ -42,6 +43,7 @@ InterpretResult VM::run() {
     for (;;) {
 #ifdef LOXPP_DEBUG_TRACE_EXECUTION
         int currentOffset = static_cast<int>(m_ip - m_chunk->cbegin());
+        bool color = isatty(STDOUT_FILENO) != 0;
         std::printf("[line %d] ", m_chunk->getLine(currentOffset));
         std::printf("          ");
         for (Value* slot = stack; slot < stackTop; slot++) {
@@ -50,8 +52,8 @@ InterpretResult VM::run() {
             std::printf(" ]");
         }
         std::printf("\n");
-        disassembleInstruction(*m_chunk, *m_allocator, currentOffset,
-                               std::cout);
+        disassembleInstruction(*m_chunk, *m_allocator, currentOffset, std::cout,
+                               color);
 #endif
 
         Byte instruction = readByte();
