@@ -2,6 +2,7 @@ find_package(GTest REQUIRED)
 
 set(ALLOC_SRCS
     ${PROJECT_SOURCE_DIR}/src/simple_allocator.cpp
+    ${PROJECT_SOURCE_DIR}/src/arena_allocator.cpp
     ${PROJECT_SOURCE_DIR}/src/object.cpp
     ${PROJECT_SOURCE_DIR}/src/table.cpp
     ${PROJECT_SOURCE_DIR}/src/value.cpp

@@ -28,6 +28,7 @@ add_executable(loxpp
     src/object.cpp
     src/table.cpp
     src/simple_allocator.cpp
+    src/arena_allocator.cpp
     src/vm.cpp 
     src/scanner.cpp 
     src/token.cpp 
