@@ -55,6 +55,7 @@ class ValueArray : std::array<Value, UINT8_MAX> {
     using std::array<Value, UINT8_MAX>::at;
     void write(Value value);
     uint8_t size() const;
+    bool isFull() const { return m_count >= UINT8_MAX; }
 
   private:
     uint8_t m_count = 0;

@@ -12,9 +12,11 @@ void Chunk::write(Byte byte, int line) {
 
 void Chunk::write(Op op, int line) { write(static_cast<Byte>(op), line); }
 
-uint8_t Chunk::addConstant(Value value) {
+std::optional<uint8_t> Chunk::addConstant(Value value) {
+    if (m_constants.isFull())
+        return std::nullopt;
     m_constants.write(value);
-    return m_constants.size() - 1;
+    return static_cast<uint8_t>(m_constants.size() - 1);
 }
 
 int Chunk::getLine(int offset) const {
