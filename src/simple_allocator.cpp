@@ -32,6 +32,12 @@ ObjHandle SimpleAllocator::makeString(std::string_view chars) {
     return ObjHandle{index, ObjType::STRING};
 }
 
+ObjString* SimpleAllocator::findString(std::string_view chars) const {
+    uint32_t hash = hashString(chars);
+    return m_strings.findString(chars.data(), static_cast<int>(chars.size()),
+                                hash);
+}
+
 Obj* SimpleAllocator::deref(ObjHandle handle) const {
     return m_objects[handle.index];
 }

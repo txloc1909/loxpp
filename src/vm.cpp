@@ -28,6 +28,16 @@ Value VM::readConstant() { return m_chunk->getConstant(readByte()); }
 
 Value VM::lastResult() const { return m_lastResult; }
 
+std::optional<Value> VM::getGlobal(const std::string& name) const {
+    ObjString* key = m_allocator->findString(name);
+    if (!key)
+        return std::nullopt;
+    Value out;
+    if (!m_globals.get(key, out))
+        return std::nullopt;
+    return out;
+}
+
 InterpretResult VM::run() {
 #define BINARY_OP(valueType, op)                                               \
     do {                                                                       \
@@ -135,6 +145,33 @@ InterpretResult VM::run() {
         }
         case Op::POP: {
             m_lastResult = pop();
+            break;
+        }
+        case Op::DEFINE_GLOBAL: {
+            ObjString* name = asObjString(readConstant(), *m_allocator);
+            m_globals.set(name, peek(0));
+            pop();
+            break;
+        }
+        case Op::GET_GLOBAL: {
+            ObjString* name = asObjString(readConstant(), *m_allocator);
+            Value value;
+            if (!m_globals.get(name, value)) {
+                runtimeError("Undefined variable '%s'.", name->chars.c_str());
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            push(value);
+            break;
+        }
+        case Op::SET_GLOBAL: {
+            ObjString* name = asObjString(readConstant(), *m_allocator);
+            // set() returns true if the key is *new*; an existing key is valid.
+            // An entirely new key means the variable was never declared.
+            if (m_globals.set(name, peek(0))) {
+                m_globals.del(name); // undo the spurious insertion
+                runtimeError("Undefined variable '%s'.", name->chars.c_str());
+                return InterpretResult::RUNTIME_ERROR;
+            }
             break;
         }
         case Op::RETURN: {

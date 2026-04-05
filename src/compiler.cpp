@@ -135,10 +135,31 @@ void Compiler::string() {
     emitBytes(Op::CONSTANT, makeConstant(Value{handle}));
 }
 
+void Compiler::variable() { namedVariable(m_parser->m_previous, m_canAssign); }
+
 void Compiler::declaration() {
-    statement();
+    if (m_parser->match(TokenType::VAR)) {
+        varDeclaration();
+    } else {
+        statement();
+    }
     if (m_parser->m_panicMode)
         m_parser->synchronize();
+}
+
+void Compiler::varDeclaration() {
+    // Read the name from m_current, then consume the IDENTIFIER token.
+    uint8_t global = identifierConstant(m_parser->m_current);
+    m_parser->consume(TokenType::IDENTIFIER, "Expect variable name.");
+
+    if (m_parser->match(TokenType::EQUAL)) {
+        expression();
+    } else {
+        emitByte(Op::NIL);
+    }
+    m_parser->consume(TokenType::SEMICOLON,
+                      "Expect ';' after variable declaration.");
+    emitBytes(Op::DEFINE_GLOBAL, global);
 }
 
 void Compiler::statement() {
@@ -185,4 +206,19 @@ uint8_t Compiler::makeConstant(Value value) {
     }
 
     return constant;
+}
+
+uint8_t Compiler::identifierConstant(const Token& name) {
+    ObjHandle handle = m_allocator->makeString(name.lexeme);
+    return makeConstant(Value{handle});
+}
+
+void Compiler::namedVariable(const Token& name, bool canAssign) {
+    uint8_t nameConstant = identifierConstant(name);
+    if (canAssign && m_parser->match(TokenType::EQUAL)) {
+        expression();
+        emitBytes(Op::SET_GLOBAL, nameConstant);
+    } else {
+        emitBytes(Op::GET_GLOBAL, nameConstant);
+    }
 }

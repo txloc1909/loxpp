@@ -24,6 +24,9 @@ enum class Op : Byte {
     NOT,
     PRINT,
     POP,
+    DEFINE_GLOBAL,
+    GET_GLOBAL,
+    SET_GLOBAL,
     RETURN,
 };
 
