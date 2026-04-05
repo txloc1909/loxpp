@@ -34,6 +34,14 @@ static int constantInstruction(const char* name, const Chunk& chunk,
     return offset + 2;
 }
 
+static int byteInstruction(const char* name, const Chunk& chunk, int offset,
+                           std::ostream& out, bool color) {
+    uint8_t slot = chunk.at(offset + 1);
+    out << cc(color, kBold) << name << cc(color, kReset) << ' '
+        << static_cast<int>(slot) << '\n';
+    return offset + 2;
+}
+
 void disassembleChunk(const Chunk& chunk, const Allocator& alloc,
                       const char* name, std::ostream& out, bool color) {
     out << cc(color, kBold) << "== " << name << " ==" << cc(color, kReset)
@@ -80,6 +88,10 @@ int disassembleInstruction(const Chunk& chunk, const Allocator& alloc,
         return simpleInstruction("PRINT", offset, out, color);
     case Op::POP:
         return simpleInstruction("POP", offset, out, color);
+    case Op::GET_LOCAL:
+        return byteInstruction("GET_LOCAL", chunk, offset, out, color);
+    case Op::SET_LOCAL:
+        return byteInstruction("SET_LOCAL", chunk, offset, out, color);
     case Op::DEFINE_GLOBAL:
         return constantInstruction("DEFINE_GLOBAL", chunk, alloc, offset, out,
                                    color);

@@ -146,6 +146,17 @@ InterpretResult VM::run() {
             m_lastResult = pop();
             break;
         }
+        case Op::GET_LOCAL: {
+            uint8_t slot = readByte();
+            push(stack[slot]);
+            break;
+        }
+        case Op::SET_LOCAL: {
+            uint8_t slot = readByte();
+            stack[slot] =
+                peek(0); // assignment is an expression; leave value on stack
+            break;
+        }
         case Op::DEFINE_GLOBAL: {
             ObjString* name = asObjString(readConstant(), *m_allocator);
             m_globals.set(name, peek(0));

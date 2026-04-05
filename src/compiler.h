@@ -7,7 +7,14 @@
 #include <memory>
 #include <string>
 
+static constexpr int UINT8_COUNT = 256;
+
 std::unique_ptr<Chunk> compile(const std::string& source, Allocator* alloc);
+
+struct Local {
+    Token name;
+    int depth; // -1 = declared but not yet initialized; ≥0 = scope depth
+};
 
 class Compiler {
   public:
@@ -30,8 +37,17 @@ class Compiler {
     void printStatement();
     void expressionStatement();
     void varDeclaration();
+    void block();
 
   private:
+    void beginScope();
+    void endScope();
+
+    void addLocal(const Token& name);
+    int resolveLocal(const Token& name) const;
+    void declareVariable();
+    void markInitialized();
+
     void emitByte(Byte byte);
     void emitByte(Op op);
     void emitBytes(Op op, Byte byte);
@@ -44,4 +60,8 @@ class Compiler {
     Chunk* m_currentChunk;
     Parser* m_parser;
     Allocator* m_allocator;
+
+    Local m_locals[UINT8_COUNT];
+    int m_localCount{0};
+    int m_scopeDepth{0};
 };

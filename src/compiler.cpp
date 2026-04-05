@@ -150,9 +150,9 @@ void Compiler::declaration() {
 }
 
 void Compiler::varDeclaration() {
-    // Read the name from m_current, then consume the IDENTIFIER token.
-    uint8_t global = identifierConstant(m_parser->m_current);
     m_parser->consume(TokenType::IDENTIFIER, "Expect variable name.");
+    Token name = m_parser->m_previous;
+    declareVariable();
 
     if (m_parser->match(TokenType::EQUAL)) {
         expression();
@@ -161,11 +161,82 @@ void Compiler::varDeclaration() {
     }
     m_parser->consume(TokenType::SEMICOLON,
                       "Expect ';' after variable declaration.");
-    emitBytes(Op::DEFINE_GLOBAL, global);
+
+    if (m_scopeDepth > 0) {
+        markInitialized();
+    } else {
+        uint8_t nameConst = identifierConstant(name);
+        emitBytes(Op::DEFINE_GLOBAL, nameConst);
+    }
+}
+
+void Compiler::block() {
+    while (!m_parser->check(TokenType::RIGHT_BRACE) &&
+           !m_parser->check(TokenType::EOF_)) {
+        declaration();
+    }
+    m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after block.");
+}
+
+void Compiler::beginScope() { m_scopeDepth++; }
+
+void Compiler::endScope() {
+    m_scopeDepth--;
+    while (m_localCount > 0 &&
+           m_locals[m_localCount - 1].depth > m_scopeDepth) {
+        emitByte(Op::POP);
+        m_localCount--;
+    }
+}
+
+void Compiler::addLocal(const Token& name) {
+    if (m_localCount == UINT8_COUNT) {
+        m_parser->error("Too many local variables in function.");
+        return;
+    }
+    m_locals[m_localCount++] = Local{name, -1};
+}
+
+int Compiler::resolveLocal(const Token& name) const {
+    for (int i = m_localCount - 1; i >= 0; i--) {
+        const Local& local = m_locals[i];
+        if (local.name.lexeme == name.lexeme) {
+            if (local.depth == -1)
+                m_parser->error(
+                    "Can't read local variable in its own initializer.");
+            return i;
+        }
+    }
+    return -1;
+}
+
+void Compiler::declareVariable() {
+    if (m_scopeDepth == 0)
+        return;
+
+    const Token& name = m_parser->m_previous;
+    for (int i = m_localCount - 1; i >= 0; i--) {
+        const Local& local = m_locals[i];
+        if (local.depth != -1 && local.depth < m_scopeDepth)
+            break;
+        if (local.name.lexeme == name.lexeme)
+            m_parser->error("Already a variable with this name in this scope.");
+    }
+    addLocal(name);
+}
+
+void Compiler::markInitialized() {
+    if (m_scopeDepth == 0)
+        return;
+    m_locals[m_localCount - 1].depth = m_scopeDepth;
 }
 
 void Compiler::statement() {
-    if (m_parser->match(TokenType::PRINT)) {
+    if (m_parser->match(TokenType::LEFT_BRACE)) {
+        beginScope();
+        block();
+        endScope();
+    } else if (m_parser->match(TokenType::PRINT)) {
         printStatement();
     } else {
         expressionStatement();
@@ -212,11 +283,24 @@ uint8_t Compiler::identifierConstant(const Token& name) {
 }
 
 void Compiler::namedVariable(const Token& name, bool canAssign) {
-    uint8_t nameConstant = identifierConstant(name);
+    Op getOp, setOp;
+    int slot = resolveLocal(name);
+    uint8_t operand;
+
+    if (slot != -1) {
+        getOp = Op::GET_LOCAL;
+        setOp = Op::SET_LOCAL;
+        operand = static_cast<uint8_t>(slot);
+    } else {
+        getOp = Op::GET_GLOBAL;
+        setOp = Op::SET_GLOBAL;
+        operand = identifierConstant(name);
+    }
+
     if (canAssign && m_parser->match(TokenType::EQUAL)) {
         expression();
-        emitBytes(Op::SET_GLOBAL, nameConstant);
+        emitBytes(setOp, operand);
     } else {
-        emitBytes(Op::GET_GLOBAL, nameConstant);
+        emitBytes(getOp, operand);
     }
 }
