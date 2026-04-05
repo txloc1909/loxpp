@@ -23,11 +23,13 @@ class Compiler {
     void literal();
     void number();
     void string();
+    void variable();
 
     void declaration();
     void statement();
     void printStatement();
     void expressionStatement();
+    void varDeclaration();
 
   private:
     void emitByte(Byte byte);
@@ -36,6 +38,8 @@ class Compiler {
     void emitReturn();
 
     uint8_t makeConstant(Value value);
+    uint8_t identifierConstant(const Token& name);
+    void namedVariable(const Token& name, bool canAssign);
 
     Chunk* m_currentChunk;
     Parser* m_parser;

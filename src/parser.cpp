@@ -27,7 +27,7 @@ static const ParseRule rules[] = {
     RULE(GREATER_EQUAL,  nullptr,             &Compiler::binary, COMPARISON),
     RULE(LESS,           nullptr,             &Compiler::binary, COMPARISON),
     RULE(LESS_EQUAL,     nullptr,             &Compiler::binary, COMPARISON),
-    RULE(IDENTIFIER,     nullptr,             nullptr,           NONE),
+    RULE(IDENTIFIER,     &Compiler::variable, nullptr,           NONE),
     RULE(STRING,         &Compiler::string,   nullptr,           NONE),
     RULE(NUMBER,         &Compiler::number,   nullptr,           NONE),
     RULE(AND,            nullptr,             nullptr,           NONE),
@@ -73,12 +73,17 @@ void Parser::parsePrecedence(Precedence precedence, Compiler* compiler) {
         return;
     }
 
+    m_canAssign = (precedence <= Precedence::ASSIGNMENT);
     (compiler->*prefixRule)();
 
     while (precedence <= getRule(m_current.type)->precedence) {
         advance();
         auto infixRule = getRule(m_previous.type)->infix;
         (compiler->*infixRule)();
+    }
+
+    if (m_canAssign && match(TokenType::EQUAL)) {
+        error("Invalid assignment target.");
     }
 }
 

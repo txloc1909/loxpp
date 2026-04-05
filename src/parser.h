@@ -39,6 +39,17 @@ struct Parser {
     Token m_current;
     bool m_hadError;
     bool m_panicMode;
+    // Parse-time context: set by parsePrecedence before invoking a prefix
+    // parselet so the parselet knows whether '=' is a valid assignment.
+    // Lives here (not on Compiler) because it is parse context — the parser
+    // derives it from the calling precedence. A different compilation backend
+    // can read this field without any change to the parser.
+    //
+    // Note: canAssign is NOT a per-rule property of ParseRule. A ParseRule
+    // (parselet) does not statically know if it is an l-value; that depends on
+    // the calling context (whether precedence <= ASSIGNMENT). Adding it to
+    // ParseRule would conflate static rule metadata with dynamic call context.
+    bool m_canAssign{false};
 
     Parser(const std::string& source);
 

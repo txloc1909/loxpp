@@ -12,6 +12,7 @@ class SimpleAllocator : public Allocator {
     ~SimpleAllocator() override;
 
     ObjHandle makeString(std::string_view chars) override;
+    ObjString* findString(std::string_view chars) const override;
     Obj* deref(ObjHandle handle) const override;
     void collect() override;
 

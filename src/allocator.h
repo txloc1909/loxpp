@@ -17,6 +17,9 @@ struct ObjHandle {
 class Allocator {
   public:
     virtual ObjHandle makeString(std::string_view chars) = 0;
+    // Non-inserting lookup: returns the interned ObjString* if it exists, else
+    // nullptr.
+    virtual ObjString* findString(std::string_view chars) const = 0;
     virtual Obj* deref(ObjHandle handle) const = 0;
     virtual void collect() = 0;
     virtual ~Allocator() = default;

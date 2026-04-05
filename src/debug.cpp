@@ -80,6 +80,15 @@ int disassembleInstruction(const Chunk& chunk, const Allocator& alloc,
         return simpleInstruction("PRINT", offset, out, color);
     case Op::POP:
         return simpleInstruction("POP", offset, out, color);
+    case Op::DEFINE_GLOBAL:
+        return constantInstruction("DEFINE_GLOBAL", chunk, alloc, offset, out,
+                                   color);
+    case Op::GET_GLOBAL:
+        return constantInstruction("GET_GLOBAL", chunk, alloc, offset, out,
+                                   color);
+    case Op::SET_GLOBAL:
+        return constantInstruction("SET_GLOBAL", chunk, alloc, offset, out,
+                                   color);
     case Op::RETURN:
         return simpleInstruction("RETURN", offset, out, color);
     default:
