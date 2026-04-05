@@ -190,7 +190,7 @@ void Compiler::endScope() {
     m_scopeDepth--;
     while (m_localCount > 0 &&
            m_locals[m_localCount - 1].depth > m_scopeDepth) {
-        emitByte(Op::DISCARD);
+        emitByte(Op::POP);
         m_localCount--;
     }
 }

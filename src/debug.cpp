@@ -88,8 +88,6 @@ int disassembleInstruction(const Chunk& chunk, const Allocator& alloc,
         return simpleInstruction("PRINT", offset, out, color);
     case Op::POP:
         return simpleInstruction("POP", offset, out, color);
-    case Op::DISCARD:
-        return simpleInstruction("DISCARD", offset, out, color);
     case Op::GET_LOCAL:
         return byteInstruction("GET_LOCAL", chunk, offset, out, color);
     case Op::SET_LOCAL:

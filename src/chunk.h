@@ -25,7 +25,6 @@ enum class Op : Byte {
     NOT,
     PRINT,
     POP,
-    DISCARD, // like POP but for scope cleanup; does not update lastResult
     GET_LOCAL,
     SET_LOCAL,
     DEFINE_GLOBAL,

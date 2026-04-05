@@ -146,10 +146,6 @@ InterpretResult VM::run() {
             m_lastResult = pop();
             break;
         }
-        case Op::DISCARD: {
-            pop(); // scope cleanup; does not update lastResult
-            break;
-        }
         case Op::GET_LOCAL: {
             uint8_t slot = readByte();
             push(stack[slot]);

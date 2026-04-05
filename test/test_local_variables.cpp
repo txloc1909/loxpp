@@ -134,18 +134,24 @@ TEST_F(ShadowSemanticsTest, InnerVarShadowsGlobal) {
 
 TEST_F(ShadowSemanticsTest, InnerVarShadowsOuterLocal) {
     // Outer local `x = 10`, inner local `x = 20`. After inner block, the outer
-    // `x` expression result is 10.
+    // `x` is still 10. Capture via global so endScope's POPs don't interfere.
     VMTestHarness h;
-    ASSERT_EQ(h.run("{ var x = 10; { var x = 20; } x; }"), InterpretResult::OK);
-    expect_num(h.lastResult(), 10.0);
+    ASSERT_EQ(h.run("var result; { var x = 10; { var x = 20; } result = x; }"),
+              InterpretResult::OK);
+    auto r = h.getGlobal("result");
+    ASSERT_TRUE(r.has_value());
+    expect_num(*r, 10.0);
 }
 
 TEST_F(ShadowSemanticsTest, AssignmentToShadowDoesNotMutateOuter) {
     // Assigning to inner `x` must not touch the outer `x`.
     VMTestHarness h;
-    ASSERT_EQ(h.run("{ var x = 1; { var x = 2; x = 99; } x; }"),
-              InterpretResult::OK);
-    expect_num(h.lastResult(), 1.0);
+    ASSERT_EQ(
+        h.run("var result; { var x = 1; { var x = 2; x = 99; } result = x; }"),
+        InterpretResult::OK);
+    auto r = h.getGlobal("result");
+    ASSERT_TRUE(r.has_value());
+    expect_num(*r, 1.0);
 }
 
 TEST_F(ShadowSemanticsTest, GlobalUnchangedAfterLocalAssignment) {
@@ -159,11 +165,23 @@ TEST_F(ShadowSemanticsTest, GlobalUnchangedAfterLocalAssignment) {
 
 TEST_F(ShadowSemanticsTest, MultipleLevelsOfShadow) {
     VMTestHarness h;
-    // Three nested `x` declarations; each level sees its own.
-    ASSERT_EQ(h.run("{ var x = 1; { var x = 2; { var x = 3; x; } x; } x; }"),
+    // Three nested `x` declarations; capture each level's value via a global.
+    ASSERT_EQ(h.run("var r1; var r2; var r3;"
+                    "{ var x = 1;"
+                    "  { var x = 2;"
+                    "    { var x = 3; r3 = x; }"
+                    "    r2 = x;"
+                    "  }"
+                    "  r1 = x;"
+                    "}"),
               InterpretResult::OK);
-    // lastResult() captures the outermost `x;` expression statement.
-    expect_num(h.lastResult(), 1.0);
+    auto r1 = h.getGlobal("r1");
+    auto r2 = h.getGlobal("r2");
+    auto r3 = h.getGlobal("r3");
+    ASSERT_TRUE(r1.has_value() && r2.has_value() && r3.has_value());
+    expect_num(*r1, 1.0);
+    expect_num(*r2, 2.0);
+    expect_num(*r3, 3.0);
 }
 
 // ===========================================================================
@@ -228,63 +246,88 @@ class NestedScopeTest : public ::testing::Test {};
 
 TEST_F(NestedScopeTest, InnerScopeReadsOuterLocal) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("{ var x = 42; { x; } }"), InterpretResult::OK);
-    expect_num(h.lastResult(), 42.0);
+    ASSERT_EQ(h.run("var result; { var x = 42; { result = x; } }"),
+              InterpretResult::OK);
+    auto r = h.getGlobal("result");
+    ASSERT_TRUE(r.has_value());
+    expect_num(*r, 42.0);
 }
 
 TEST_F(NestedScopeTest, InnerScopeWritesOuterLocal) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("{ var x = 1; { x = 99; } x; }"), InterpretResult::OK);
-    expect_num(h.lastResult(), 99.0);
+    ASSERT_EQ(h.run("var result; { var x = 1; { x = 99; } result = x; }"),
+              InterpretResult::OK);
+    auto r = h.getGlobal("result");
+    ASSERT_TRUE(r.has_value());
+    expect_num(*r, 99.0);
 }
 
 TEST_F(NestedScopeTest, MultipleSlotsCorrectlyOrdered) {
     VMTestHarness h;
-    // Three locals in one scope: a=1, b=2, c=3. Reading each must get
-    // the right slot regardless of order.
-    ASSERT_EQ(h.run("{ var a = 1; var b = 2; var c = 3; a + b + c; }"),
+    // Three locals in one scope; capture sum via global.
+    ASSERT_EQ(h.run("var result;"
+                    "{ var a = 1; var b = 2; var c = 3; result = a + b + c; }"),
               InterpretResult::OK);
-    expect_num(h.lastResult(), 6.0);
+    auto r = h.getGlobal("result");
+    ASSERT_TRUE(r.has_value());
+    expect_num(*r, 6.0);
 }
 
 TEST_F(NestedScopeTest, DeepNestingResolvesCorrectly) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("{ var x = 1; { var y = 2; { var z = 3; x + y + z; } } }"),
-              InterpretResult::OK);
-    expect_num(h.lastResult(), 6.0);
+    ASSERT_EQ(
+        h.run(
+            "var result;"
+            "{ var x = 1; { var y = 2; { var z = 3; result = x + y + z; } } }"),
+        InterpretResult::OK);
+    auto r = h.getGlobal("result");
+    ASSERT_TRUE(r.has_value());
+    expect_num(*r, 6.0);
 }
 
 TEST_F(NestedScopeTest, LocalNilDefault) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("{ var x; x; }"), InterpretResult::OK);
-    expect_nil(h.lastResult());
+    ASSERT_EQ(h.run("var result; { var x; result = x; }"), InterpretResult::OK);
+    auto r = h.getGlobal("result");
+    ASSERT_TRUE(r.has_value());
+    expect_nil(*r);
 }
 
 TEST_F(NestedScopeTest, LocalAssignmentIsExpression) {
-    // Assignment is an expression: the result of `x = 5` is 5.
+    // Assignment is an expression: `x = 5` produces 5, and updating x is
+    // visible.
     VMTestHarness h;
-    ASSERT_EQ(h.run("{ var x = 0; x = 5; }"), InterpretResult::OK);
-    // The assignment expression's value was popped by the expression statement.
-    // Verify x was actually updated.
-    ASSERT_EQ(h.run("{ var x = 0; x = 5; x; }"), InterpretResult::OK);
-    expect_num(h.lastResult(), 5.0);
+    ASSERT_EQ(h.run("var result; { var x = 0; x = 5; result = x; }"),
+              InterpretResult::OK);
+    auto r = h.getGlobal("result");
+    ASSERT_TRUE(r.has_value());
+    expect_num(*r, 5.0);
 }
 
 TEST_F(NestedScopeTest, LocalStringValue) {
     VMTestHarness h;
-    ASSERT_EQ(h.run(R"({ var s = "hello"; s; })"), InterpretResult::OK);
-    ASSERT_TRUE(isString(h.lastResult()));
+    ASSERT_EQ(h.run(R"(var result; { var s = "hello"; result = s; })"),
+              InterpretResult::OK);
+    auto r = h.getGlobal("result");
+    ASSERT_TRUE(r.has_value());
+    ASSERT_TRUE(isString(*r));
 }
 
 TEST_F(NestedScopeTest, LocalBoolValue) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("{ var b = true; b; }"), InterpretResult::OK);
-    expect_bool(h.lastResult(), true);
+    ASSERT_EQ(h.run("var result; { var b = true; result = b; }"),
+              InterpretResult::OK);
+    auto r = h.getGlobal("result");
+    ASSERT_TRUE(r.has_value());
+    expect_bool(*r, true);
 }
 
 TEST_F(NestedScopeTest, LocalAndGlobalInteraction) {
     // A global and a local with different names in the same block.
     VMTestHarness h;
-    ASSERT_EQ(h.run("var g = 10; { var l = 20; g + l; }"), InterpretResult::OK);
-    expect_num(h.lastResult(), 30.0);
+    ASSERT_EQ(h.run("var g = 10; var result; { var l = 20; result = g + l; }"),
+              InterpretResult::OK);
+    auto r = h.getGlobal("result");
+    ASSERT_TRUE(r.has_value());
+    expect_num(*r, 30.0);
 }
