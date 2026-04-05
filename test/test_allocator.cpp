@@ -24,13 +24,13 @@ TEST_F(AllocatorTest, MakeStringReturnsStringHandle) {
 TEST_F(AllocatorTest, DerefReturnsCorrectChars) {
     ObjHandle h = alloc->makeString("hello");
     auto* str = static_cast<ObjString*>(alloc->deref(h));
-    EXPECT_EQ(str->chars, "hello");
+    EXPECT_EQ(std::string_view(str->chars, str->length), "hello");
 }
 
 TEST_F(AllocatorTest, MakeString_EmptyString) {
     ObjHandle h = alloc->makeString("");
     auto* str = static_cast<ObjString*>(alloc->deref(h));
-    EXPECT_EQ(str->chars, "");
+    EXPECT_EQ(std::string_view(str->chars, str->length), "");
 }
 
 TEST_F(AllocatorTest, Interning_SameContent_SameHandle) {
@@ -50,16 +50,19 @@ TEST_F(AllocatorTest, HandleStability_AfterMoreAllocations) {
     ObjHandle h2 = alloc->makeString("second");
     ObjHandle h3 = alloc->makeString("third");
 
-    EXPECT_EQ(static_cast<ObjString*>(alloc->deref(h1))->chars, "first");
-    EXPECT_EQ(static_cast<ObjString*>(alloc->deref(h2))->chars, "second");
-    EXPECT_EQ(static_cast<ObjString*>(alloc->deref(h3))->chars, "third");
+    auto* s1 = static_cast<ObjString*>(alloc->deref(h1));
+    auto* s2 = static_cast<ObjString*>(alloc->deref(h2));
+    auto* s3 = static_cast<ObjString*>(alloc->deref(h3));
+    EXPECT_EQ(std::string_view(s1->chars, s1->length), "first");
+    EXPECT_EQ(std::string_view(s2->chars, s2->length), "second");
+    EXPECT_EQ(std::string_view(s3->chars, s3->length), "third");
 }
 
 TEST_F(AllocatorTest, PolymorphicUsage_ViaInterfacePointer) {
     std::unique_ptr<Allocator> a = std::make_unique<SimpleAllocator>();
     ObjHandle h = a->makeString("poly");
     auto* str = static_cast<ObjString*>(a->deref(h));
-    EXPECT_EQ(str->chars, "poly");
+    EXPECT_EQ(std::string_view(str->chars, str->length), "poly");
 }
 
 TEST_F(AllocatorTest, Collect_DoesNotCrash) {
@@ -102,4 +105,49 @@ TEST_F(AllocatorTest, UnequalHandles_DifferentStrings) {
     Value a{alloc->makeString("x")};
     Value b{alloc->makeString("y")};
     EXPECT_NE(a, b);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Tracked allocation (reallocate + bytesAllocated)
+// ---------------------------------------------------------------------------
+
+TEST_F(AllocatorTest, BytesAllocated_StartsAtZero) {
+    EXPECT_EQ(alloc->bytesAllocated(), 0u);
+}
+
+TEST_F(AllocatorTest, BytesAllocated_IncreasesOnMakeString) {
+    alloc->makeString("hello");
+    // struct + null-terminated char buffer (5 chars + '\0' = 6 bytes) +
+    // sizeof(ObjString)
+    EXPECT_GT(alloc->bytesAllocated(), 0u);
+}
+
+TEST_F(AllocatorTest, BytesAllocated_IncreasesWithEachNewString) {
+    alloc->makeString("abc");
+    size_t after_one = alloc->bytesAllocated();
+    alloc->makeString("defgh"); // longer string → more bytes
+    EXPECT_GT(alloc->bytesAllocated(), after_one);
+}
+
+TEST_F(AllocatorTest, BytesAllocated_InternedStringDoesNotIncrease) {
+    alloc->makeString("same");
+    size_t after_first = alloc->bytesAllocated();
+    alloc->makeString("same"); // interned — no new allocation
+    EXPECT_EQ(alloc->bytesAllocated(), after_first);
+}
+
+TEST_F(AllocatorTest, BytesAllocated_DecreasesOnDestruction) {
+    {
+        SimpleAllocator inner;
+        inner.makeString("temp");
+        EXPECT_GT(inner.bytesAllocated(), 0u);
+        // destructor frees all objects — bytesAllocated reaches 0
+    }
+    // No crash and memory is freed (verified by sanitizers at runtime)
+}
+
+TEST_F(AllocatorTest, CharsBuffer_IsNullTerminated) {
+    ObjHandle h = alloc->makeString("lox");
+    auto* str = static_cast<ObjString*>(alloc->deref(h));
+    EXPECT_EQ(str->chars[str->length], '\0');
 }

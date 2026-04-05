@@ -393,8 +393,7 @@ TEST_F(TableTest, FindStringPresentReturnsPointer) {
 TEST_F(TableTest, FindStringHashCollisionDifferentContentReturnsNull) {
     auto [a, b] = collidingPair();
     table.set(a, Value{std::monostate{}});
-    EXPECT_EQ(table.findString(b->chars.c_str(),
-                               static_cast<int>(b->chars.size()), b->hash),
+    EXPECT_EQ(table.findString(b->chars, static_cast<int>(b->length), b->hash),
               nullptr);
 }
 
@@ -402,7 +401,7 @@ TEST_F(TableTest, FindStringByRawCharsWithoutObjStringWrapper) {
     ObjString* k = str("lookup_me");
     table.set(k, Value{std::monostate{}});
     const char* raw = "lookup_me";
-    int len = static_cast<int>(k->chars.size());
+    int len = static_cast<int>(k->length);
     uint32_t h = fakeHash(raw, len);
     EXPECT_EQ(table.findString(raw, len, h), k);
 }

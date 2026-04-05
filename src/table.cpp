@@ -115,9 +115,9 @@ ObjString* Table::findString(const char* chars, int length,
             // Stop only on a truly empty slot; skip tombstones.
             if (is<Nil>(entry.value))
                 return nullptr;
-        } else if (static_cast<int>(entry.key->chars.size()) == length &&
+        } else if (static_cast<int>(entry.key->length) == length &&
                    entry.key->hash == hash &&
-                   memcmp(entry.key->chars.c_str(), chars, length) == 0) {
+                   memcmp(entry.key->chars, chars, length) == 0) {
             return entry.key;
         }
         index = (index + 1) % static_cast<uint32_t>(cap);

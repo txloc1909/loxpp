@@ -5,8 +5,10 @@
 
 std::string stringifyObj(Obj* obj) {
     switch (obj->type) {
-    case ObjType::STRING:
-        return asObjString(obj)->chars;
+    case ObjType::STRING: {
+        auto* s = asObjString(obj);
+        return std::string(s->chars, s->length);
+    }
     }
     return "<obj>";
 }

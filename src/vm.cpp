@@ -111,9 +111,9 @@ InterpretResult VM::run() {
                 auto* b_str = asObjString(pop(), *m_allocator);
                 auto* a_str = asObjString(pop(), *m_allocator);
                 std::string result;
-                result.reserve(a_str->chars.size() + b_str->chars.size());
-                result.append(a_str->chars);
-                result.append(b_str->chars);
+                result.reserve(a_str->length + b_str->length);
+                result.append(a_str->chars, a_str->length);
+                result.append(b_str->chars, b_str->length);
                 ObjHandle handle = m_allocator->makeString(std::move(result));
                 push(Value{handle});
             } else {
@@ -156,7 +156,7 @@ InterpretResult VM::run() {
             ObjString* name = asObjString(readConstant(), *m_allocator);
             Value value;
             if (!m_globals.get(name, value)) {
-                runtimeError("Undefined variable '%s'.", name->chars.c_str());
+                runtimeError("Undefined variable '%s'.", name->chars);
                 return InterpretResult::RUNTIME_ERROR;
             }
             push(value);
@@ -168,7 +168,7 @@ InterpretResult VM::run() {
             // An entirely new key means the variable was never declared.
             if (m_globals.set(name, peek(0))) {
                 m_globals.del(name); // undo the spurious insertion
-                runtimeError("Undefined variable '%s'.", name->chars.c_str());
+                runtimeError("Undefined variable '%s'.", name->chars);
                 return InterpretResult::RUNTIME_ERROR;
             }
             break;
