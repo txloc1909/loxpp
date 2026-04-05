@@ -73,7 +73,7 @@ void Parser::parsePrecedence(Precedence precedence, Compiler* compiler) {
         return;
     }
 
-    compiler->m_canAssign = (precedence <= Precedence::ASSIGNMENT);
+    m_canAssign = (precedence <= Precedence::ASSIGNMENT);
     (compiler->*prefixRule)();
 
     while (precedence <= getRule(m_current.type)->precedence) {
@@ -82,7 +82,7 @@ void Parser::parsePrecedence(Precedence precedence, Compiler* compiler) {
         (compiler->*infixRule)();
     }
 
-    if (compiler->m_canAssign && match(TokenType::EQUAL)) {
+    if (m_canAssign && match(TokenType::EQUAL)) {
         error("Invalid assignment target.");
     }
 }

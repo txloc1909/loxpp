@@ -44,9 +44,4 @@ class Compiler {
     Chunk* m_currentChunk;
     Parser* m_parser;
     Allocator* m_allocator;
-
-  public:
-    // Transient: set by parsePrecedence before calling a prefix rule so
-    // variable() knows whether an '=' is a valid assignment target.
-    bool m_canAssign{false};
 };

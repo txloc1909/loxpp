@@ -135,7 +135,9 @@ void Compiler::string() {
     emitBytes(Op::CONSTANT, makeConstant(Value{handle}));
 }
 
-void Compiler::variable() { namedVariable(m_parser->m_previous, m_canAssign); }
+void Compiler::variable() {
+    namedVariable(m_parser->m_previous, m_parser->m_canAssign);
+}
 
 void Compiler::declaration() {
     if (m_parser->match(TokenType::VAR)) {
