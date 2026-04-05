@@ -22,6 +22,10 @@ std::string eval_expr_str(const std::string& expr);
 // the bytecode chunk.
 std::string compile_to_bytecode(const std::string& expr);
 
+// Compiles a complete Lox++ program (no auto-semicolon) and returns a readable
+// string representation of the bytecode chunk.
+std::string compile_program_to_bytecode(const std::string& source);
+
 // Runs a complete Lox++ program (no auto-semicolon) and returns the interpret
 // result. Use for multi-statement programs where only pass/fail matters.
 InterpretResult run_program(const std::string& source);

@@ -46,8 +46,9 @@ TEST_F(ParserBytecodeTest, Arithmetic_MultiplySubtract) {
 TEST_F(ParserBytecodeTest, Comparison_Equal) {
     std::string expr = "1 == 1";
     std::string bytecode = compile_to_bytecode(expr);
+    // After constant-pool deduplication both '1' literals share slot 0.
     std::string expected = "0: CONSTANT 0 ('1')\n"
-                           "2: CONSTANT 1 ('1')\n"
+                           "2: CONSTANT 0 ('1')\n"
                            "4: EQUAL\n"
                            "5: POP\n"
                            "6: RETURN\n";
@@ -108,5 +109,56 @@ TEST_F(ParserBytecodeTest, NilLiteral) {
     std::string expected = "0: NIL\n"
                            "1: POP\n"
                            "2: RETURN\n";
+    EXPECT_EQ(trim(bytecode), trim(expected));
+}
+
+// ===========================================================================
+// Constant pool deduplication
+// ===========================================================================
+// Regression tests: the same value must occupy only one constant slot,
+// regardless of how many times it appears in source.
+
+TEST_F(ParserBytecodeTest, Dedup_SameVariableReusesConstantSlot) {
+    // identifierConstant("x") runs before the initializer, so 'x' lands in
+    // slot 0 and '1' in slot 1. Both subsequent references to 'x' and '1'
+    // reuse those same slots — no new constant entries.
+    std::string src = "var x = 1;\n"
+                      "x = x + 1;";
+    std::string bytecode = compile_program_to_bytecode(src);
+    std::string expected = "0: CONSTANT 1 ('1')\n" // initializer: 1 → slot 1
+                           "2: DEFINE_GLOBAL 0 ('x')\n" // x → slot 0
+                           "4: GET_GLOBAL 0 ('x')\n"    // x reuses slot 0
+                           "6: CONSTANT 1 ('1')\n"      // 1 reuses slot 1
+                           "8: ADD\n"
+                           "9: SET_GLOBAL 0 ('x')\n" // x reuses slot 0
+                           "11: POP\n"
+                           "12: RETURN\n";
+    EXPECT_EQ(trim(bytecode), trim(expected));
+}
+
+TEST_F(ParserBytecodeTest, Dedup_MultipleVariablesEachGetOwnSlot) {
+    // 'a' and 'b' are different names; each gets its own slot.
+    // Second reference to 'a' (GET_GLOBAL) reuses slot 0.
+    std::string src = "var a = 1;\n"
+                      "var b = a;";
+    std::string bytecode = compile_program_to_bytecode(src);
+    std::string expected = "0: CONSTANT 1 ('1')\n"      // 1 → slot 1
+                           "2: DEFINE_GLOBAL 0 ('a')\n" // a → slot 0
+                           "4: GET_GLOBAL 0 ('a')\n"    // a reuses slot 0
+                           "6: DEFINE_GLOBAL 2 ('b')\n" // b → slot 2
+                           "8: RETURN\n";
+    EXPECT_EQ(trim(bytecode), trim(expected));
+}
+
+TEST_F(ParserBytecodeTest, Dedup_RepeatedNumericLiteralReusesSlot) {
+    // The numeric literal 42 appears twice; both must use the same slot.
+    std::string src = "var x = 42;\n"
+                      "var y = 42;";
+    std::string bytecode = compile_program_to_bytecode(src);
+    std::string expected = "0: CONSTANT 1 ('42')\n"     // 42 → slot 1
+                           "2: DEFINE_GLOBAL 0 ('x')\n" // x → slot 0
+                           "4: CONSTANT 1 ('42')\n"     // 42 reuses slot 1
+                           "6: DEFINE_GLOBAL 2 ('y')\n" // y → slot 2
+                           "8: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
