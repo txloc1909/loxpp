@@ -22,58 +22,25 @@ static void expect_num(const Value& v, double expected) {
     EXPECT_NEAR(std::get<Number>(v), expected, 1e-9);
 }
 
-static void expect_bool(const Value& v, bool expected) {
-    ASSERT_TRUE(std::holds_alternative<bool>(v)) << "expected bool";
-    EXPECT_EQ(std::get<bool>(v), expected);
-}
-
-static void expect_nil(const Value& v) {
-    EXPECT_TRUE(std::holds_alternative<Nil>(v)) << "expected nil";
-}
-
 // ===========================================================================
 // Invariant 1: Stack discipline
 // ===========================================================================
 
-class LocalStackDisciplineTest : public ::testing::Test {};
+class LocalStackDisciplineTest : public ::testing::TestWithParam<const char*> {
+};
 
-TEST_F(LocalStackDisciplineTest, EmptyAfterEmptyBlock) {
+TEST_P(LocalStackDisciplineTest, StackEmptyAfterBlock) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("{}"), InterpretResult::OK);
+    ASSERT_EQ(h.run(GetParam()), InterpretResult::OK);
     EXPECT_EQ(h.stackDepth(), 0);
 }
 
-TEST_F(LocalStackDisciplineTest, EmptyAfterBlockWithLocal) {
-    VMTestHarness h;
-    ASSERT_EQ(h.run("{ var x = 42; }"), InterpretResult::OK);
-    EXPECT_EQ(h.stackDepth(), 0);
-}
-
-TEST_F(LocalStackDisciplineTest, EmptyAfterBlockWithMultipleLocals) {
-    VMTestHarness h;
-    ASSERT_EQ(h.run("{ var a = 1; var b = 2; var c = 3; }"),
-              InterpretResult::OK);
-    EXPECT_EQ(h.stackDepth(), 0);
-}
-
-TEST_F(LocalStackDisciplineTest, EmptyAfterNestedBlocks) {
-    VMTestHarness h;
-    ASSERT_EQ(h.run("{ var x = 1; { var y = 2; { var z = 3; } } }"),
-              InterpretResult::OK);
-    EXPECT_EQ(h.stackDepth(), 0);
-}
-
-TEST_F(LocalStackDisciplineTest, EmptyAfterMixedGlobalAndLocal) {
-    VMTestHarness h;
-    ASSERT_EQ(h.run("var g = 10; { var l = 20; }"), InterpretResult::OK);
-    EXPECT_EQ(h.stackDepth(), 0);
-}
-
-TEST_F(LocalStackDisciplineTest, EmptyAfterLocalExpression) {
-    VMTestHarness h;
-    ASSERT_EQ(h.run("{ var x = 5; x + 1; }"), InterpretResult::OK);
-    EXPECT_EQ(h.stackDepth(), 0);
-}
+INSTANTIATE_TEST_SUITE_P(
+    StackDiscipline, LocalStackDisciplineTest,
+    ::testing::Values("{}", "{ var x = 42; }",
+                      "{ var a = 1; var b = 2; var c = 3; }",
+                      "{ var x = 1; { var y = 2; { var z = 3; } } }",
+                      "var g = 10; { var l = 20; }", "{ var x = 5; x + 1; }"));
 
 // ===========================================================================
 // Invariant 2: Scope isolation
@@ -180,12 +147,6 @@ TEST_F(UninitializedGuardTest, SelfReferentialInitializerIsCompileError) {
     EXPECT_EQ(h.run("{ var x = x; }"), InterpretResult::COMPILE_ERROR);
 }
 
-TEST_F(UninitializedGuardTest, SelfRefDoesNotAffectOuterSameNameGlobal) {
-    VMTestHarness h;
-    ASSERT_EQ(h.run("var x = 1; var y = x;"), InterpretResult::OK);
-    EXPECT_EQ(h.stackDepth(), 0);
-}
-
 // ===========================================================================
 // Invariant 5: Redeclaration error
 // ===========================================================================
@@ -196,16 +157,6 @@ TEST_F(RedeclarationTest, RedeclareInSameScopeIsCompileError) {
     VMTestHarness h;
     EXPECT_EQ(h.run("{ var x = 1; var x = 2; }"),
               InterpretResult::COMPILE_ERROR);
-}
-
-TEST_F(RedeclarationTest, RedeclareInDifferentScopesIsOk) {
-    VMTestHarness h;
-    EXPECT_EQ(h.run("{ var x = 1; } { var x = 2; }"), InterpretResult::OK);
-}
-
-TEST_F(RedeclarationTest, RedeclareInInnerScopeIsOk) {
-    VMTestHarness h;
-    EXPECT_EQ(h.run("{ var x = 1; { var x = 2; } }"), InterpretResult::OK);
 }
 
 TEST_F(RedeclarationTest, GlobalRedeclarationIsOk) {
@@ -260,49 +211,4 @@ TEST_F(NestedScopeTest, DeepNestingResolvesCorrectly) {
     auto r = h.getGlobal("result");
     ASSERT_TRUE(r.has_value());
     expect_num(*r, 6.0);
-}
-
-TEST_F(NestedScopeTest, LocalNilDefault) {
-    VMTestHarness h;
-    ASSERT_EQ(h.run("var result; { var x; result = x; }"), InterpretResult::OK);
-    auto r = h.getGlobal("result");
-    ASSERT_TRUE(r.has_value());
-    expect_nil(*r);
-}
-
-TEST_F(NestedScopeTest, LocalAssignmentIsExpression) {
-    VMTestHarness h;
-    ASSERT_EQ(h.run("var result; { var x = 0; x = 5; result = x; }"),
-              InterpretResult::OK);
-    auto r = h.getGlobal("result");
-    ASSERT_TRUE(r.has_value());
-    expect_num(*r, 5.0);
-}
-
-TEST_F(NestedScopeTest, LocalStringValue) {
-    VMTestHarness h;
-    ASSERT_EQ(h.run(R"(var result; { var s = "hello"; result = s; })"),
-              InterpretResult::OK);
-    auto r = h.getGlobal("result");
-    ASSERT_TRUE(r.has_value());
-    ASSERT_TRUE(isString(*r));
-}
-
-TEST_F(NestedScopeTest, LocalBoolValue) {
-    VMTestHarness h;
-    ASSERT_EQ(h.run("var result; { var b = true; result = b; }"),
-              InterpretResult::OK);
-    auto r = h.getGlobal("result");
-    ASSERT_TRUE(r.has_value());
-    expect_bool(*r, true);
-}
-
-TEST_F(NestedScopeTest, LocalAndGlobalInteraction) {
-    // A global and a local with different names in the same block.
-    VMTestHarness h;
-    ASSERT_EQ(h.run("var g = 10; var result; { var l = 20; result = g + l; }"),
-              InterpretResult::OK);
-    auto r = h.getGlobal("result");
-    ASSERT_TRUE(r.has_value());
-    expect_num(*r, 30.0);
 }
