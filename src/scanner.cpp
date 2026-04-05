@@ -2,6 +2,14 @@
 
 #include <cstring>
 
+const char* const* lox_keywords() {
+    static const char* keywords[] = {
+        "and",  "class", "else", "false", "for",    "fun",
+        "if",   "nil",   "or",   "print", "return", "super",
+        "this", "true",  "var",  "while", nullptr};
+    return keywords;
+}
+
 static bool isDigit(char c) { return c >= '0' && c <= '9'; }
 
 static bool isAlpha(char c) {

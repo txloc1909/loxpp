@@ -1,4 +1,5 @@
 #include "chunk.h"
+#include "scanner.h"
 #include "vm.h"
 
 #include <iostream>
@@ -6,7 +7,70 @@
 #include <sstream>
 #include <string>
 
+#ifdef LOXPP_USE_READLINE
+#include <readline/readline.h>
+#include <readline/history.h>
+#include <cstdlib>
+#include <cstring>
+#include <sys/stat.h>
+
+static char* keyword_generator(const char* text, int state) {
+    static int list_index;
+    static std::size_t text_len;
+
+    if (!state) {
+        list_index = 0;
+        text_len = std::strlen(text);
+    }
+
+    const char* const* keywords = lox_keywords();
+    while (keywords[list_index]) {
+        const char* kw = keywords[list_index++];
+        if (std::strncmp(kw, text, text_len) == 0)
+            return strdup(kw);
+    }
+    return nullptr;
+}
+
+static char** lox_completion(const char* text, int /*start*/, int /*end*/) {
+    rl_attempted_completion_over = 1;
+    return rl_completion_matches(text, keyword_generator);
+}
+
+static std::string xdg_history_path() {
+    const char* xdg = std::getenv("XDG_CACHE_HOME");
+    std::string dir =
+        xdg ? std::string(xdg) : (std::string(std::getenv("HOME")) + "/.cache");
+    dir += "/loxpp";
+    mkdir(dir.c_str(), 0755);
+    return dir + "/history";
+}
+#endif
+
 static void repl(VM& vm) {
+#ifdef LOXPP_USE_READLINE
+    std::string history_path = xdg_history_path();
+    using_history();
+    stifle_history(1000);
+    read_history(history_path.c_str());
+
+    rl_attempted_completion_function = lox_completion;
+
+    for (;;) {
+        char* raw = readline("> ");
+        if (!raw) {
+            std::cout << std::endl;
+            break;
+        }
+        std::string line(raw);
+        free(raw);
+        if (!line.empty())
+            add_history(line.c_str());
+        vm.interpret(line);
+    }
+
+    write_history(history_path.c_str());
+#else
     std::string line;
     for (;;) {
         std::cout << "> ";
@@ -16,6 +80,7 @@ static void repl(VM& vm) {
         }
         vm.interpret(line);
     }
+#endif
 }
 
 static std::string readFile(const std::string& path) {
