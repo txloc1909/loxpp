@@ -1,7 +1,8 @@
 // test_control_flow.cpp — control flow invariant tests.
 //
 // Invariants:
-//   1. Stack-neutral branches  — stackDepth() identical on both sides of if/else.
+//   1. Stack-neutral branches  — stackDepth() identical on both sides of
+//   if/else.
 //   2. Short-circuit semantics — and/or leave exactly one value on the stack.
 //   3. Loop stack discipline   — stackDepth() same before and after while/for.
 //   4. For-loop var scoping    — var in for-init is scoped to the loop.
@@ -44,7 +45,8 @@ TEST_F(IfElseTest, IfFalseBranchSkipped) {
 
 TEST_F(IfElseTest, ElseBranchExecutes) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("var x = 0; if (false) { x = 1; } else { x = 2; }"), InterpretResult::OK);
+    ASSERT_EQ(h.run("var x = 0; if (false) { x = 1; } else { x = 2; }"),
+              InterpretResult::OK);
     auto v = h.getGlobal("x");
     ASSERT_TRUE(v.has_value());
     expect_num(*v, 2);
@@ -52,7 +54,8 @@ TEST_F(IfElseTest, ElseBranchExecutes) {
 
 TEST_F(IfElseTest, ElseBranchSkippedWhenTrue) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("var x = 0; if (true) { x = 1; } else { x = 2; }"), InterpretResult::OK);
+    ASSERT_EQ(h.run("var x = 0; if (true) { x = 1; } else { x = 2; }"),
+              InterpretResult::OK);
     auto v = h.getGlobal("x");
     ASSERT_TRUE(v.has_value());
     expect_num(*v, 1);
@@ -60,7 +63,8 @@ TEST_F(IfElseTest, ElseBranchSkippedWhenTrue) {
 
 TEST_F(IfElseTest, NestedIfBothTrue) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("var x = 0; if (true) { if (true) { x = 1; } }"), InterpretResult::OK);
+    ASSERT_EQ(h.run("var x = 0; if (true) { if (true) { x = 1; } }"),
+              InterpretResult::OK);
     auto v = h.getGlobal("x");
     ASSERT_TRUE(v.has_value());
     expect_num(*v, 1);
@@ -68,7 +72,8 @@ TEST_F(IfElseTest, NestedIfBothTrue) {
 
 TEST_F(IfElseTest, NestedIfOuterFalse) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("var x = 0; if (false) { if (true) { x = 1; } }"), InterpretResult::OK);
+    ASSERT_EQ(h.run("var x = 0; if (false) { if (true) { x = 1; } }"),
+              InterpretResult::OK);
     auto v = h.getGlobal("x");
     ASSERT_TRUE(v.has_value());
     expect_num(*v, 0);
@@ -89,7 +94,8 @@ class LogicalTest : public ::testing::Test {};
 TEST_F(LogicalTest, AndShortCircuitsOnFalse) {
     // Right side assigns to 'side'; it must not execute when left is false.
     VMTestHarness h;
-    ASSERT_EQ(h.run("var side = 0; false and (side = 1);"), InterpretResult::OK);
+    ASSERT_EQ(h.run("var side = 0; false and (side = 1);"),
+              InterpretResult::OK);
     auto v = h.getGlobal("side");
     ASSERT_TRUE(v.has_value());
     expect_num(*v, 0);
@@ -136,7 +142,8 @@ class WhileLoopTest : public ::testing::Test {};
 
 TEST_F(WhileLoopTest, WhileRunsNTimes) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("var n = 0; while (n < 5) { n = n + 1; }"), InterpretResult::OK);
+    ASSERT_EQ(h.run("var n = 0; while (n < 5) { n = n + 1; }"),
+              InterpretResult::OK);
     auto v = h.getGlobal("n");
     ASSERT_TRUE(v.has_value());
     expect_num(*v, 5);
@@ -144,7 +151,8 @@ TEST_F(WhileLoopTest, WhileRunsNTimes) {
 
 TEST_F(WhileLoopTest, WhileSkipsOnFalseCondition) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("var x = 0; while (false) { x = 1; }"), InterpretResult::OK);
+    ASSERT_EQ(h.run("var x = 0; while (false) { x = 1; }"),
+              InterpretResult::OK);
     auto v = h.getGlobal("x");
     ASSERT_TRUE(v.has_value());
     expect_num(*v, 0);
@@ -165,7 +173,8 @@ class ForLoopTest : public ::testing::Test {};
 TEST_F(ForLoopTest, ForLoopBasic) {
     // sum = 0 + 1 + 2 + 3 = 6
     VMTestHarness h;
-    ASSERT_EQ(h.run("var sum = 0; for (var i = 0; i < 4; i = i + 1) { sum = sum + i; }"),
+    ASSERT_EQ(h.run("var sum = 0; for (var i = 0; i < 4; i = i + 1) { sum = "
+                    "sum + i; }"),
               InterpretResult::OK);
     auto v = h.getGlobal("sum");
     ASSERT_TRUE(v.has_value());
@@ -174,7 +183,8 @@ TEST_F(ForLoopTest, ForLoopBasic) {
 
 TEST_F(ForLoopTest, ForLoopNoInit) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("var i = 0; var sum = 0; for (; i < 4; i = i + 1) { sum = sum + i; }"),
+    ASSERT_EQ(h.run("var i = 0; var sum = 0; for (; i < 4; i = i + 1) { sum = "
+                    "sum + i; }"),
               InterpretResult::OK);
     auto v = h.getGlobal("sum");
     ASSERT_TRUE(v.has_value());
@@ -183,7 +193,8 @@ TEST_F(ForLoopTest, ForLoopNoInit) {
 
 TEST_F(ForLoopTest, ForLoopNoIncrement) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("var sum = 0; for (var i = 0; i < 4;) { sum = sum + i; i = i + 1; }"),
+    ASSERT_EQ(h.run("var sum = 0; for (var i = 0; i < 4;) { sum = sum + i; i = "
+                    "i + 1; }"),
               InterpretResult::OK);
     auto v = h.getGlobal("sum");
     ASSERT_TRUE(v.has_value());

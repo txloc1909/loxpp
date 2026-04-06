@@ -43,8 +43,8 @@ static int byteInstruction(const char* name, const Chunk& chunk, int offset,
 
 static int jumpInstruction(const char* name, int sign, const Chunk& chunk,
                            int offset, std::ostream& out, bool color) {
-    uint16_t jump = static_cast<uint16_t>(chunk.at(offset + 1) << 8 |
-                                          chunk.at(offset + 2));
+    uint16_t jump =
+        static_cast<uint16_t>(chunk.at(offset + 1) << 8 | chunk.at(offset + 2));
     int target = offset + 3 + sign * static_cast<int>(jump);
     out << cc(color, kBold) << name << cc(color, kReset) << ' ' << offset
         << " -> " << target << '\n';

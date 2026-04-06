@@ -314,7 +314,8 @@ void Compiler::forStatement() {
     int exitJump = -1;
     if (!m_parser->match(TokenType::SEMICOLON)) {
         expression();
-        m_parser->consume(TokenType::SEMICOLON, "Expect ';' after loop condition.");
+        m_parser->consume(TokenType::SEMICOLON,
+                          "Expect ';' after loop condition.");
         exitJump = emitJump(Op::JUMP_IF_FALSE);
         emitByte(Op::POP);
     }
@@ -324,7 +325,8 @@ void Compiler::forStatement() {
         int incrStart = static_cast<int>(m_currentChunk->size());
         expression();
         emitByte(Op::POP);
-        m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after for clauses.");
+        m_parser->consume(TokenType::RIGHT_PAREN,
+                          "Expect ')' after for clauses.");
         emitLoop(loopStart);
         loopStart = incrStart;
         patchJump(bodyJump);
