@@ -367,3 +367,194 @@ TEST_F(ContinueTest, ContinueOutsideLoopIsError) {
     VMTestHarness h;
     EXPECT_EQ(h.run("continue;"), InterpretResult::COMPILE_ERROR);
 }
+
+// SwitchTest invariants:
+//   7. Subject is evaluated exactly once.
+//   8. Exactly one arm executes (the first matching one), or default if none
+//   match.
+//   9. Stack is neutral after the entire switch statement.
+//  10. break inside a switch exits only the switch, not any enclosing loop.
+//  11. continue inside a switch targets the nearest enclosing loop.
+//  12. continue with no enclosing loop is a compile error.
+//  13. Multiple default labels are a compile error.
+
+class SwitchTest : public ::testing::Test {};
+
+TEST_F(SwitchTest, MatchesFirstArm) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var x = 0;
+        switch (2) {
+            case 1: x = 1;
+            case 2: x = 2;
+            case 3: x = 3;
+        }
+    )"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("x");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 2);
+}
+
+TEST_F(SwitchTest, SkipsNonMatchingArms) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var x = 0;
+        switch (1) {
+            case 2: x = 99;
+            case 3: x = 99;
+        }
+    )"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("x");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 0);
+}
+
+TEST_F(SwitchTest, DefaultExecutesWhenNoMatch) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var x = 0;
+        switch (99) {
+            case 1: x = 1;
+            default: x = 42;
+        }
+    )"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("x");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 42);
+}
+
+TEST_F(SwitchTest, DefaultSkippedWhenMatched) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var x = 0;
+        switch (1) {
+            case 1: x = 1;
+            default: x = 99;
+        }
+    )"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("x");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 1);
+}
+
+TEST_F(SwitchTest, MultiValueArm) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var x = 0;
+        switch (2) {
+            case 1, 2, 3: x = 7;
+            case 4: x = 99;
+        }
+    )"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("x");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 7);
+}
+
+TEST_F(SwitchTest, BreakExitsSwitch) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var x = 0;
+        switch (1) {
+            case 1: x = 1; break; x = 99;
+        }
+    )"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("x");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 1);
+}
+
+TEST_F(SwitchTest, BreakInSwitchDoesNotExitLoop) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var count = 0;
+        var i = 0;
+        while (i < 3) {
+            i = i + 1;
+            switch (i) {
+                case 2: break;
+                default: count = count + 1;
+            }
+        }
+    )"),
+              InterpretResult::OK);
+    // Iterations: i=1 → default (count=1), i=2 → break switch (count stays 1),
+    // i=3 → default (count=2)
+    auto v = h.getGlobal("count");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 2);
+}
+
+TEST_F(SwitchTest, ContinueInSwitchContinuesLoop) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var count = 0;
+        var i = 0;
+        while (i < 3) {
+            i = i + 1;
+            switch (i) {
+                case 2: continue;
+                default: count = count + 1;
+            }
+            count = count + 10;
+        }
+    )"),
+              InterpretResult::OK);
+    // i=1: default(count=1), then +10 → 11; i=2: continue skips +10 → 11; i=3:
+    // default(count=12), +10 → 22
+    auto v = h.getGlobal("count");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 22);
+}
+
+TEST_F(SwitchTest, StackNeutralAfterSwitch) {
+    VMTestHarness h;
+    h.run(R"(
+        switch (1) {
+            case 1: var x = 10;
+            case 2: var y = 20;
+        }
+    )");
+    EXPECT_EQ(h.stackDepth(), 0);
+}
+
+TEST_F(SwitchTest, SwitchOnString) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var x = "no";
+        switch ("hello") {
+            case "world": x = "world";
+            case "hello": x = "hello";
+        }
+    )"),
+              InterpretResult::OK);
+    auto v = h.getGlobalStr("x");
+    EXPECT_EQ(v, "hello");
+}
+
+TEST_F(SwitchTest, MultipleDefaultIsError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run(R"(
+        switch (1) {
+            default: 1;
+            default: 2;
+        }
+    )"),
+              InterpretResult::COMPILE_ERROR);
+}
+
+TEST_F(SwitchTest, ContinueWithNoEnclosingLoopIsError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run(R"(
+        switch (1) {
+            case 1: continue;
+        }
+    )"),
+              InterpretResult::COMPILE_ERROR);
+}
