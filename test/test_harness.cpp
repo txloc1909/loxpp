@@ -2,6 +2,7 @@
 #include "vm.h"
 #include "compiler.h"
 #include "debug.h"
+#include "function.h"
 #include "memory_manager.h"
 #include <sstream>
 
@@ -23,24 +24,26 @@ std::string eval_expr_str(const std::string& expr) {
 
 std::string compile_to_bytecode(const std::string& expr) {
     MemoryManager mm;
-    auto chunk = compile(expr + ";", &mm);
-    if (!chunk)
+    ObjFunction* fn = compile(expr + ";", &mm);
+    if (!fn)
         throw std::runtime_error("Compilation failed");
     std::ostringstream oss;
-    for (int offset = 0; offset < static_cast<int>(chunk->size());) {
-        offset = disassembleInstruction(*chunk, mm, offset, oss);
+    const Chunk& chunk = fn->chunk;
+    for (int offset = 0; offset < static_cast<int>(chunk.size());) {
+        offset = disassembleInstruction(chunk, mm, offset, oss);
     }
     return oss.str();
 }
 
 std::string compile_program_to_bytecode(const std::string& source) {
     MemoryManager mm;
-    auto chunk = compile(source, &mm);
-    if (!chunk)
+    ObjFunction* fn = compile(source, &mm);
+    if (!fn)
         throw std::runtime_error("Compilation failed");
     std::ostringstream oss;
-    for (int offset = 0; offset < static_cast<int>(chunk->size());) {
-        offset = disassembleInstruction(*chunk, mm, offset, oss);
+    const Chunk& chunk = fn->chunk;
+    for (int offset = 0; offset < static_cast<int>(chunk.size());) {
+        offset = disassembleInstruction(chunk, mm, offset, oss);
     }
     return oss.str();
 }

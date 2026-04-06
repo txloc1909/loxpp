@@ -7,10 +7,10 @@
 #include <memory>
 #include <unistd.h>
 
-std::unique_ptr<Chunk> compile(const std::string& source, MemoryManager* mm) {
-    auto chunk = std::make_unique<Chunk>();
+ObjFunction* compile(const std::string& source, MemoryManager* mm) {
+    ObjFunction* fn = mm->create<ObjFunction>();
     auto parser = std::make_unique<Parser>(source);
-    auto compiler = std::make_unique<Compiler>(chunk.get(), parser.get(), mm);
+    auto compiler = std::make_unique<Compiler>(fn, parser.get(), mm);
 
     while (!parser->check(TokenType::EOF_))
         compiler->declaration();
@@ -19,17 +19,26 @@ std::unique_ptr<Chunk> compile(const std::string& source, MemoryManager* mm) {
 
     if (parser->m_hadError)
         return nullptr;
-    return chunk;
+    return fn;
 }
 
-Compiler::Compiler(Chunk* chunk, Parser* parser, MemoryManager* mm)
-    : m_currentChunk{chunk}, m_parser{parser}, m_mm{mm} {}
+Compiler::Compiler(ObjFunction* function, Parser* parser, MemoryManager* mm)
+    : m_function{function}, m_parser{parser}, m_mm{mm} {
+    // Reserve slot 0 for the function/script itself. User-declared locals
+    // start at slot 1. The implicit local has an empty name so resolveLocal
+    // never accidentally matches it.
+    Local* implicit = &m_locals[m_localCount++];
+    implicit->depth = 0;
+    implicit->name = Token{TokenType::IDENTIFIER, "", 0};
+}
 
 void Compiler::endCompiler() {
     emitReturn();
 #ifdef LOXPP_DEBUG_PRINT_CODE
     bool color = isatty(STDOUT_FILENO) != 0;
-    disassembleChunk(*m_currentChunk, *m_mm, "code", std::cout, color);
+    const char* name =
+        m_function->name ? m_function->name->chars.c_str() : "script";
+    disassembleChunk(*getCurrentChunk(), *m_mm, name, std::cout, color);
 #endif
 }
 
@@ -138,6 +147,22 @@ void Compiler::string() {
 
 void Compiler::variable() {
     namedVariable(m_parser->m_previous, m_parser->m_canAssign);
+}
+
+void Compiler::call() {
+    // The callee is already on the stack. Parse the argument list.
+    uint8_t argCount = 0;
+    if (!m_parser->check(TokenType::RIGHT_PAREN)) {
+        do {
+            if (argCount == 255) {
+                m_parser->error("Can't have more than 255 arguments.");
+            }
+            expression();
+            argCount++;
+        } while (m_parser->match(TokenType::COMMA));
+    }
+    m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after arguments.");
+    emitBytes(Op::CALL, argCount);
 }
 
 void Compiler::declaration() {
@@ -285,7 +310,7 @@ void Compiler::ifStatement() {
 }
 
 void Compiler::whileStatement() {
-    int loopStart = static_cast<int>(m_currentChunk->size());
+    int loopStart = static_cast<int>(getCurrentChunk()->size());
     m_loopStack.push_back({loopStart, m_localCount, {}});
 
     m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after 'while'.");
@@ -318,7 +343,7 @@ void Compiler::forStatement() {
         expressionStatement();
     }
 
-    int loopStart = static_cast<int>(m_currentChunk->size());
+    int loopStart = static_cast<int>(getCurrentChunk()->size());
     m_loopStack.push_back({loopStart, m_localCount, {}});
 
     int exitJump = -1;
@@ -332,7 +357,7 @@ void Compiler::forStatement() {
 
     if (!m_parser->match(TokenType::RIGHT_PAREN)) {
         int bodyJump = emitJump(Op::JUMP);
-        int incrStart = static_cast<int>(m_currentChunk->size());
+        int incrStart = static_cast<int>(getCurrentChunk()->size());
         expression();
         emitByte(Op::POP);
         m_parser->consume(TokenType::RIGHT_PAREN,
@@ -395,10 +420,13 @@ void Compiler::or_() {
     patchJump(endJump);
 }
 
-void Compiler::emitReturn() { emitByte(static_cast<Byte>(Op::RETURN)); }
+void Compiler::emitReturn() {
+    emitByte(Op::NIL);
+    emitByte(static_cast<Byte>(Op::RETURN));
+}
 
 void Compiler::emitByte(Byte byte) {
-    m_currentChunk->write(byte, m_parser->m_previous.line);
+    getCurrentChunk()->write(byte, m_parser->m_previous.line);
 }
 
 void Compiler::emitByte(Op op) { emitByte(static_cast<Byte>(op)); }
@@ -412,22 +440,22 @@ int Compiler::emitJump(Op op) {
     emitByte(op);
     emitByte(0xff);
     emitByte(0xff);
-    return static_cast<int>(m_currentChunk->size()) - 2;
+    return static_cast<int>(getCurrentChunk()->size()) - 2;
 }
 
 void Compiler::patchJump(int offset) {
-    int jump = static_cast<int>(m_currentChunk->size()) - offset - 2;
+    int jump = static_cast<int>(getCurrentChunk()->size()) - offset - 2;
     if (jump > UINT16_MAX) {
         m_parser->error("Too much code to jump over.");
         return;
     }
-    m_currentChunk->patch(offset, static_cast<uint8_t>((jump >> 8) & 0xff));
-    m_currentChunk->patch(offset + 1, static_cast<uint8_t>(jump & 0xff));
+    getCurrentChunk()->patch(offset, static_cast<uint8_t>((jump >> 8) & 0xff));
+    getCurrentChunk()->patch(offset + 1, static_cast<uint8_t>(jump & 0xff));
 }
 
 void Compiler::emitLoop(int loopStart) {
     emitByte(Op::LOOP);
-    int offset = static_cast<int>(m_currentChunk->size()) - loopStart + 2;
+    int offset = static_cast<int>(getCurrentChunk()->size()) - loopStart + 2;
     if (offset > UINT16_MAX) {
         m_parser->error("Loop body too large.");
         return;
@@ -443,7 +471,7 @@ void Compiler::emitLoopCleanup() {
 }
 
 uint8_t Compiler::makeConstant(Value value) {
-    auto constant = m_currentChunk->addConstant(value);
+    auto constant = getCurrentChunk()->addConstant(value);
     if (!constant) {
         m_parser->error("Too many constants in one chunk.");
         return 0;

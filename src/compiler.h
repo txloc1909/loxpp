@@ -1,6 +1,6 @@
 #pragma once
 
-#include "chunk.h"
+#include "function.h"
 #include "parser.h"
 
 #include <memory>
@@ -11,11 +11,11 @@ class MemoryManager;
 
 static constexpr int UINT8_COUNT = 256;
 
-std::unique_ptr<Chunk> compile(const std::string& source, MemoryManager* mm);
+ObjFunction* compile(const std::string& source, MemoryManager* mm);
 
 struct Local {
     Token name;
-    int depth; // -1 = declared but not yet initialized; ≥0 = scope depth
+    int depth; // -1 = declared but not yet initialized; >=0 = scope depth
 };
 
 struct LoopContext {
@@ -27,9 +27,9 @@ struct LoopContext {
 
 class Compiler {
   public:
-    Compiler(Chunk* chunk, Parser* parser, MemoryManager* mm);
+    Compiler(ObjFunction* function, Parser* parser, MemoryManager* mm);
 
-    Chunk* getCurrentChunk() const { return m_currentChunk; }
+    Chunk* getCurrentChunk() const { return &m_function->chunk; }
     void endCompiler();
 
     void expression();
@@ -40,6 +40,7 @@ class Compiler {
     void number();
     void string();
     void variable();
+    void call();
 
     void declaration();
     void statement();
@@ -78,7 +79,7 @@ class Compiler {
     uint8_t identifierConstant(const Token& name);
     void namedVariable(const Token& name, bool canAssign);
 
-    Chunk* m_currentChunk;
+    ObjFunction* m_function;
     Parser* m_parser;
     MemoryManager* m_mm;
 

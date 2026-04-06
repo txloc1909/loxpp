@@ -33,6 +33,7 @@ enum class Op : Byte {
     JUMP,
     JUMP_IF_FALSE,
     LOOP,
+    CALL,
     RETURN,
 };
 

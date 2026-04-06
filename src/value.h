@@ -31,6 +31,9 @@ inline bool isObj(const Value& v) { return is<Obj*>(v); }
 inline bool isString(const Value& v) {
     return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::STRING;
 }
+inline bool isFunction(const Value& v) {
+    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::FUNCTION;
+}
 inline Obj* asObj(const Value& v) { return as<Obj*>(v); }
 inline ObjString* asObjString(const Value& v) {
     return static_cast<ObjString*>(as<Obj*>(v));

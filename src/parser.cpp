@@ -8,7 +8,7 @@
 // clang-format off
 static const ParseRule rules[] = {
     // TokenType         Prefix              Infix              Precedence
-    RULE(LEFT_PAREN,     &Compiler::grouping, nullptr,           CALL),
+    RULE(LEFT_PAREN,     &Compiler::grouping, &Compiler::call,    CALL),
     RULE(RIGHT_PAREN,    nullptr,             nullptr,           NONE),
     RULE(LEFT_BRACE,     nullptr,             nullptr,           NONE),
     RULE(RIGHT_BRACE,    nullptr,             nullptr,           NONE),
