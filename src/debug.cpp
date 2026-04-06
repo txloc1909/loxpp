@@ -41,6 +41,16 @@ static int byteInstruction(const char* name, const Chunk& chunk, int offset,
     return offset + 2;
 }
 
+static int jumpInstruction(const char* name, int sign, const Chunk& chunk,
+                           int offset, std::ostream& out, bool color) {
+    uint16_t jump = static_cast<uint16_t>(chunk.at(offset + 1) << 8 |
+                                          chunk.at(offset + 2));
+    int target = offset + 3 + sign * static_cast<int>(jump);
+    out << cc(color, kBold) << name << cc(color, kReset) << ' ' << offset
+        << " -> " << target << '\n';
+    return offset + 3;
+}
+
 void disassembleChunk(const Chunk& chunk, const MemoryManager& mm,
                       const char* name, std::ostream& out, bool color) {
     out << cc(color, kBold) << "== " << name << " ==" << cc(color, kReset)
@@ -97,6 +107,12 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return constantInstruction("GET_GLOBAL", chunk, mm, offset, out, color);
     case Op::SET_GLOBAL:
         return constantInstruction("SET_GLOBAL", chunk, mm, offset, out, color);
+    case Op::JUMP:
+        return jumpInstruction("JUMP", 1, chunk, offset, out, color);
+    case Op::JUMP_IF_FALSE:
+        return jumpInstruction("JUMP_IF_FALSE", 1, chunk, offset, out, color);
+    case Op::LOOP:
+        return jumpInstruction("LOOP", -1, chunk, offset, out, color);
     case Op::RETURN:
         return simpleInstruction("RETURN", offset, out, color);
     default:

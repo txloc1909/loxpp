@@ -2,6 +2,7 @@
 #include "debug.h"
 #include "memory_manager.h"
 
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <unistd.h>
@@ -236,6 +237,12 @@ void Compiler::statement() {
         beginScope();
         block();
         endScope();
+    } else if (m_parser->match(TokenType::IF)) {
+        ifStatement();
+    } else if (m_parser->match(TokenType::WHILE)) {
+        whileStatement();
+    } else if (m_parser->match(TokenType::FOR)) {
+        forStatement();
     } else if (m_parser->match(TokenType::PRINT)) {
         printStatement();
     } else {
@@ -255,6 +262,103 @@ void Compiler::expressionStatement() {
     emitByte(Op::POP);
 }
 
+void Compiler::ifStatement() {
+    m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after 'if'.");
+    expression();
+    m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after condition.");
+
+    int thenJump = emitJump(Op::JUMP_IF_FALSE);
+    emitByte(Op::POP);
+    statement();
+
+    int elseJump = emitJump(Op::JUMP);
+    patchJump(thenJump);
+    emitByte(Op::POP);
+
+    if (m_parser->match(TokenType::ELSE))
+        statement();
+    patchJump(elseJump);
+}
+
+void Compiler::whileStatement() {
+    int loopStart = static_cast<int>(m_currentChunk->size());
+
+    m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after 'while'.");
+    expression();
+    m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after condition.");
+
+    int exitJump = emitJump(Op::JUMP_IF_FALSE);
+    emitByte(Op::POP);
+    statement();
+    emitLoop(loopStart);
+
+    patchJump(exitJump);
+    emitByte(Op::POP);
+}
+
+void Compiler::forStatement() {
+    beginScope();
+
+    m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after 'for'.");
+
+    if (m_parser->match(TokenType::SEMICOLON)) {
+        // no initializer
+    } else if (m_parser->match(TokenType::VAR)) {
+        varDeclaration();
+    } else {
+        expressionStatement();
+    }
+
+    int loopStart = static_cast<int>(m_currentChunk->size());
+
+    int exitJump = -1;
+    if (!m_parser->match(TokenType::SEMICOLON)) {
+        expression();
+        m_parser->consume(TokenType::SEMICOLON, "Expect ';' after loop condition.");
+        exitJump = emitJump(Op::JUMP_IF_FALSE);
+        emitByte(Op::POP);
+    }
+
+    if (!m_parser->match(TokenType::RIGHT_PAREN)) {
+        int bodyJump = emitJump(Op::JUMP);
+        int incrStart = static_cast<int>(m_currentChunk->size());
+        expression();
+        emitByte(Op::POP);
+        m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after for clauses.");
+        emitLoop(loopStart);
+        loopStart = incrStart;
+        patchJump(bodyJump);
+    }
+
+    statement();
+    emitLoop(loopStart);
+
+    if (exitJump != -1) {
+        patchJump(exitJump);
+        emitByte(Op::POP);
+    }
+
+    endScope();
+}
+
+void Compiler::and_() {
+    int endJump = emitJump(Op::JUMP_IF_FALSE);
+    emitByte(Op::POP);
+    m_parser->parsePrecedence(Precedence::AND, this);
+    patchJump(endJump);
+}
+
+void Compiler::or_() {
+    int elseJump = emitJump(Op::JUMP_IF_FALSE);
+    int endJump = emitJump(Op::JUMP);
+    patchJump(elseJump);
+    emitByte(Op::POP);
+    m_parser->parsePrecedence(Precedence::OR, this);
+    patchJump(endJump);
+}
+
+void Compiler::emitReturn() { emitByte(static_cast<Byte>(Op::RETURN)); }
+
 void Compiler::emitByte(Byte byte) {
     m_currentChunk->write(byte, m_parser->m_previous.line);
 }
@@ -266,7 +370,33 @@ void Compiler::emitBytes(Op op, Byte byte) {
     emitByte(byte);
 }
 
-void Compiler::emitReturn() { emitByte(static_cast<Byte>(Op::RETURN)); }
+int Compiler::emitJump(Op op) {
+    emitByte(op);
+    emitByte(0xff);
+    emitByte(0xff);
+    return static_cast<int>(m_currentChunk->size()) - 2;
+}
+
+void Compiler::patchJump(int offset) {
+    int jump = static_cast<int>(m_currentChunk->size()) - offset - 2;
+    if (jump > UINT16_MAX) {
+        m_parser->error("Too much code to jump over.");
+        return;
+    }
+    m_currentChunk->patch(offset, static_cast<uint8_t>((jump >> 8) & 0xff));
+    m_currentChunk->patch(offset + 1, static_cast<uint8_t>(jump & 0xff));
+}
+
+void Compiler::emitLoop(int loopStart) {
+    emitByte(Op::LOOP);
+    int offset = static_cast<int>(m_currentChunk->size()) - loopStart + 2;
+    if (offset > UINT16_MAX) {
+        m_parser->error("Loop body too large.");
+        return;
+    }
+    emitByte(static_cast<uint8_t>((offset >> 8) & 0xff));
+    emitByte(static_cast<uint8_t>(offset & 0xff));
+}
 
 uint8_t Compiler::makeConstant(Value value) {
     auto constant = m_currentChunk->addConstant(value);

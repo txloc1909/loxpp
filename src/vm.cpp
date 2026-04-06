@@ -25,6 +25,12 @@ InterpretResult VM::interpret(const std::string& source) {
 
 Byte VM::readByte() { return *m_ip++; }
 
+uint16_t VM::readShort() {
+    uint16_t hi = readByte();
+    uint16_t lo = readByte();
+    return static_cast<uint16_t>((hi << 8) | lo);
+}
+
 Value VM::readConstant() { return m_chunk->getConstant(readByte()); }
 
 Value VM::lastResult() const { return m_lastResult; }
@@ -182,6 +188,20 @@ InterpretResult VM::run() {
                 runtimeError("Undefined variable '%s'.", name->chars.c_str());
                 return InterpretResult::RUNTIME_ERROR;
             }
+            break;
+        }
+        case Op::JUMP: {
+            m_ip += readShort();
+            break;
+        }
+        case Op::JUMP_IF_FALSE: {
+            uint16_t offset = readShort();
+            if (isFalsy(peek(0)))
+                m_ip += offset;
+            break;
+        }
+        case Op::LOOP: {
+            m_ip -= readShort();
             break;
         }
         case Op::RETURN: {

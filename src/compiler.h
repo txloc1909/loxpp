@@ -37,8 +37,14 @@ class Compiler {
     void statement();
     void printStatement();
     void expressionStatement();
+    void ifStatement();
+    void whileStatement();
+    void forStatement();
     void varDeclaration();
     void block();
+
+    void and_();
+    void or_();
 
   private:
     void beginScope();
@@ -53,6 +59,9 @@ class Compiler {
     void emitByte(Op op);
     void emitBytes(Op op, Byte byte);
     void emitReturn();
+    int emitJump(Op op);
+    void patchJump(int offset);
+    void emitLoop(int loopStart);
 
     uint8_t makeConstant(Value value);
     uint8_t identifierConstant(const Token& name);

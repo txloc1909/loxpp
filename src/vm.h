@@ -30,6 +30,7 @@ class VM {
 
   private:
     Byte readByte();
+    uint16_t readShort();
     Value readConstant();
     void resetStack();
     void push(Value value);
