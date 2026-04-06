@@ -243,6 +243,10 @@ void Compiler::statement() {
         whileStatement();
     } else if (m_parser->match(TokenType::FOR)) {
         forStatement();
+    } else if (m_parser->match(TokenType::BREAK)) {
+        breakStatement();
+    } else if (m_parser->match(TokenType::CONTINUE)) {
+        continueStatement();
     } else if (m_parser->match(TokenType::PRINT)) {
         printStatement();
     } else {
@@ -282,6 +286,7 @@ void Compiler::ifStatement() {
 
 void Compiler::whileStatement() {
     int loopStart = static_cast<int>(m_currentChunk->size());
+    m_loopStack.push_back({loopStart, m_localCount, {}});
 
     m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after 'while'.");
     expression();
@@ -294,6 +299,10 @@ void Compiler::whileStatement() {
 
     patchJump(exitJump);
     emitByte(Op::POP);
+
+    for (int offset : m_loopStack.back().breakJumps)
+        patchJump(offset);
+    m_loopStack.pop_back();
 }
 
 void Compiler::forStatement() {
@@ -310,6 +319,7 @@ void Compiler::forStatement() {
     }
 
     int loopStart = static_cast<int>(m_currentChunk->size());
+    m_loopStack.push_back({loopStart, m_localCount, {}});
 
     int exitJump = -1;
     if (!m_parser->match(TokenType::SEMICOLON)) {
@@ -330,6 +340,7 @@ void Compiler::forStatement() {
         emitLoop(loopStart);
         loopStart = incrStart;
         patchJump(bodyJump);
+        m_loopStack.back().start = incrStart;
     }
 
     statement();
@@ -340,7 +351,32 @@ void Compiler::forStatement() {
         emitByte(Op::POP);
     }
 
+    for (int offset : m_loopStack.back().breakJumps)
+        patchJump(offset);
+    m_loopStack.pop_back();
+
     endScope();
+}
+
+void Compiler::breakStatement() {
+    if (m_loopStack.empty()) {
+        m_parser->error("Cannot use 'break' outside a loop.");
+        return;
+    }
+    m_parser->consume(TokenType::SEMICOLON, "Expect ';' after 'break'.");
+    emitLoopCleanup();
+    int jump = emitJump(Op::JUMP);
+    m_loopStack.back().breakJumps.push_back(jump);
+}
+
+void Compiler::continueStatement() {
+    if (m_loopStack.empty()) {
+        m_parser->error("Cannot use 'continue' outside a loop.");
+        return;
+    }
+    m_parser->consume(TokenType::SEMICOLON, "Expect ';' after 'continue'.");
+    emitLoopCleanup();
+    emitLoop(m_loopStack.back().start);
 }
 
 void Compiler::and_() {
@@ -398,6 +434,12 @@ void Compiler::emitLoop(int loopStart) {
     }
     emitByte(static_cast<uint8_t>((offset >> 8) & 0xff));
     emitByte(static_cast<uint8_t>(offset & 0xff));
+}
+
+void Compiler::emitLoopCleanup() {
+    int toPop = m_localCount - m_loopStack.back().localCount;
+    for (int i = 0; i < toPop; i++)
+        emitByte(Op::POP);
 }
 
 uint8_t Compiler::makeConstant(Value value) {
