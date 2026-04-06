@@ -29,8 +29,6 @@ ObjString* MemoryManager::makeString(std::string&& sv) {
     if (interned != nullptr)
         return interned;
 
-    // Move sv into the ObjString's MyString chars (avoids extra copy for
-    // long strings exceeding SSO).
     auto* s = create<ObjString>(std::string_view{sv}, VmAllocator<char>{this});
     m_strings.set(s, Value{Nil{}});
     return s;
