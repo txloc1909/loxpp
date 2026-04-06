@@ -39,15 +39,11 @@ SimpleAllocator::~SimpleAllocator() {
 
 void SimpleAllocator::freeObject(Obj* obj) {
     switch (obj->type) {
-    case ObjType::STRING: {
-        auto* str = static_cast<ObjString*>(obj);
-        // ~ObjString() destroys LoxString chars →
-        // LoxAllocator<char>::deallocate fires → m_bytesAllocated decremented
-        // automatically.
-        str->~ObjString();
-        reallocateImpl(str, sizeof(ObjString), 0);
+    case ObjType::STRING:
+        // ~ObjString() destroys LoxString chars; LoxAllocator<char>::deallocate
+        // fires automatically, decrementing m_bytesAllocated.
+        delete static_cast<ObjString*>(obj);
         break;
-    }
     }
 }
 
@@ -63,9 +59,7 @@ ObjHandle SimpleAllocator::makeString(std::string_view chars) {
                          ObjType::STRING};
     }
 
-    auto* str =
-        static_cast<ObjString*>(reallocateImpl(nullptr, 0, sizeof(ObjString)));
-    new (str) ObjString{this};
+    auto* str = new ObjString{this};
     str->type = ObjType::STRING;
     str->hash = hash;
     str->chars.assign(chars.data(), chars.size());
@@ -89,9 +83,7 @@ ObjHandle SimpleAllocator::makeString(std::string&& chars) {
                          ObjType::STRING};
     }
 
-    auto* str =
-        static_cast<ObjString*>(reallocateImpl(nullptr, 0, sizeof(ObjString)));
-    new (str) ObjString{this};
+    auto* str = new ObjString{this};
     str->type = ObjType::STRING;
     str->hash = hash;
     str->chars.assign(chars.data(), chars.size());
