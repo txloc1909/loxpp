@@ -41,6 +41,8 @@ bool operator==(const Value& a, const Value& b);
 std::string stringify(const Value& value);
 void printValue(const Value& value);
 
+inline bool isFalsy(const Value& v) { return !v; }
+
 class ValueArray : std::array<Value, UINT8_MAX> {
   public:
     using std::array<Value, UINT8_MAX>::at;

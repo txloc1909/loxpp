@@ -30,6 +30,9 @@ enum class Op : Byte {
     DEFINE_GLOBAL,
     GET_GLOBAL,
     SET_GLOBAL,
+    JUMP,
+    JUMP_IF_FALSE,
+    LOOP,
     RETURN,
 };
 
@@ -46,6 +49,7 @@ class Chunk : std::vector<Byte> {
 
     void write(Byte byte, int line);
     void write(Op op, int line);
+    void patch(int offset, Byte byte);
     std::optional<uint8_t> addConstant(Value value);
     Value getConstant(int idx) const;
     int getLine(int offset) const;
