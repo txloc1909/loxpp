@@ -22,7 +22,8 @@ bool operator==(const Value& a, const Value& b) {
             [](bool a_val, bool b_val) -> bool { return a_val == b_val; },
             [](Number a_val, Number b_val) -> bool { return a_val == b_val; },
             [](Nil, Nil) -> bool { return true; },
-            // Interning guarantees: same content → same pointer → equal.
+            // For strings, interning guarantees same content → same pointer.
+            // Other Obj types use identity equality.
             [](Obj* a_p, Obj* b_p) -> bool { return a_p == b_p; },
             [](const auto&, const auto&) -> bool { return false; }},
         a, b);

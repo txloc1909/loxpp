@@ -44,7 +44,7 @@ struct VmAllocator {
     bool operator!=(const VmAllocator& o) const noexcept { return mm != o.mm; }
 };
 
-using MyString =
+using LoxString =
     std::basic_string<char, std::char_traits<char>, VmAllocator<char>>;
 
 template <typename T>

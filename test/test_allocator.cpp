@@ -41,7 +41,9 @@ TEST(MemoryManagerTest, Interning_DifferentContent_DifferentPointer) {
     EXPECT_NE(a, b);
 }
 
-TEST(MemoryManagerTest, PointerStability) {
+TEST(MemoryManagerTest, HeapPointers_RemainValidAfterMoreAllocations) {
+    // Ensures that adding more strings doesn't invalidate earlier ObjString*
+    // pointers (heap objects are stable; only the allObjects vector reallocs).
     MemoryManager mm;
     ObjString* s1 = mm.makeString("first");
     ObjString* s2 = mm.makeString("second");

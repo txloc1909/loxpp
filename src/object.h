@@ -26,7 +26,7 @@ struct Obj {
 
 struct ObjString : public Obj {
     uint32_t hash{0};
-    MyString chars;
+    LoxString chars;
 
     ObjString(std::string_view sv, VmAllocator<char> alloc)
         : Obj(ObjType::STRING), hash(hashString(sv)), chars(sv, alloc) {}
