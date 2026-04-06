@@ -329,6 +329,8 @@ void Compiler::statement() {
         breakStatement();
     } else if (m_parser->match(TokenType::CONTINUE)) {
         continueStatement();
+    } else if (m_parser->match(TokenType::SWITCH)) {
+        switchStatement();
     } else if (m_parser->match(TokenType::PRINT)) {
         printStatement();
     } else if (m_parser->match(TokenType::RETURN)) {
@@ -444,23 +446,130 @@ void Compiler::forStatement() {
 
 void Compiler::breakStatement() {
     if (m_loopStack.empty()) {
-        m_parser->error("Cannot use 'break' outside a loop.");
+        m_parser->error("Cannot use 'break' outside a loop or switch.");
         return;
     }
     m_parser->consume(TokenType::SEMICOLON, "Expect ';' after 'break'.");
-    emitLoopCleanup();
+    emitLoopCleanup(m_loopStack.back().localCount);
     int jump = emitJump(Op::JUMP);
     m_loopStack.back().breakJumps.push_back(jump);
 }
 
 void Compiler::continueStatement() {
-    if (m_loopStack.empty()) {
-        m_parser->error("Cannot use 'continue' outside a loop.");
-        return;
+    // Search upward for the nearest real loop (start != -1); skip switch
+    // contexts.
+    for (int i = static_cast<int>(m_loopStack.size()) - 1; i >= 0; i--) {
+        if (m_loopStack[i].start != -1) {
+            m_parser->consume(TokenType::SEMICOLON,
+                              "Expect ';' after 'continue'.");
+            emitLoopCleanup(m_loopStack[i].localCount);
+            emitLoop(m_loopStack[i].start);
+            return;
+        }
     }
-    m_parser->consume(TokenType::SEMICOLON, "Expect ';' after 'continue'.");
-    emitLoopCleanup();
-    emitLoop(m_loopStack.back().start);
+    m_parser->error("Cannot use 'continue' outside a loop.");
+}
+
+void Compiler::switchStatement() {
+    m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after 'switch'.");
+    beginScope();
+
+    // Compile subject into a hidden local so case arms can reload it with
+    // GET_LOCAL.
+    expression();
+    Token syntheticName{TokenType::IDENTIFIER, "(switch)",
+                        m_parser->m_previous.line};
+    addLocal(syntheticName);
+    markInitialized();
+    int subjectSlot = m_localCount - 1;
+
+    m_parser->consume(TokenType::RIGHT_PAREN,
+                      "Expect ')' after switch subject.");
+    m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before switch body.");
+
+    // Push switch context: start = -1 flags this as switch (not loop).
+    m_loopStack.push_back({-1, m_localCount, {}});
+
+    bool hasDefault = false;
+
+    while (!m_parser->check(TokenType::RIGHT_BRACE) &&
+           !m_parser->check(TokenType::EOF_)) {
+        if (m_parser->match(TokenType::CASE)) {
+            // Compile one or more comma-separated values: case v1, v2, ...:
+            // For N values we build a chain:
+            //   GET_LOCAL S; v; EQUAL; JUMP_IF_FALSE→try_next; POP; JUMP→body
+            //   ... (repeat for each value except last)
+            //   GET_LOCAL S; vN; EQUAL; JUMP_IF_FALSE→arm_miss; POP [body here]
+            // At body: execute stmts; JUMP→end; arm_miss: POP; (next arm)
+            std::vector<int> missJumps; // JUMP_IF_FALSE for each non-last value
+            std::vector<int> hitJumps;  // JUMP→body for each non-last value
+
+            do {
+                emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+                m_parser->parsePrecedence(Precedence::OR, this);
+                emitByte(Op::EQUAL);
+
+                if (m_parser->check(TokenType::COMMA)) {
+                    // Not the last value: if true jump to body, else try next.
+                    hitJumps.push_back(emitJump(Op::JUMP_IF_FALSE));
+                    emitByte(Op::POP);                       // pop true
+                    missJumps.push_back(emitJump(Op::JUMP)); // jump to body
+                    patchJump(hitJumps.back());              // false comes here
+                    emitByte(Op::POP);                       // pop false
+                }
+            } while (m_parser->match(TokenType::COMMA));
+
+            // Last (or only) value: JUMP_IF_FALSE to arm_miss.
+            int lastMiss = emitJump(Op::JUMP_IF_FALSE);
+            emitByte(Op::POP); // pop true; fall into body
+
+            // Patch all intermediate hit-jumps to land here (body start).
+            for (int j : missJumps)
+                patchJump(j);
+
+            m_parser->consume(TokenType::COLON, "Expect ':' after case value.");
+            while (!m_parser->check(TokenType::CASE) &&
+                   !m_parser->check(TokenType::DEFAULT) &&
+                   !m_parser->check(TokenType::RIGHT_BRACE) &&
+                   !m_parser->check(TokenType::EOF_)) {
+                statement();
+            }
+
+            // End of arm: jump to after the switch (recorded in breakJumps).
+            int endJump = emitJump(Op::JUMP);
+            m_loopStack.back().breakJumps.push_back(endJump);
+
+            // arm_miss: pop false, continue to next arm.
+            patchJump(lastMiss);
+            emitByte(Op::POP);
+
+        } else if (m_parser->match(TokenType::DEFAULT)) {
+            if (hasDefault)
+                m_parser->error("Multiple 'default' labels in switch.");
+            hasDefault = true;
+            m_parser->consume(TokenType::COLON, "Expect ':' after 'default'.");
+            while (!m_parser->check(TokenType::CASE) &&
+                   !m_parser->check(TokenType::DEFAULT) &&
+                   !m_parser->check(TokenType::RIGHT_BRACE) &&
+                   !m_parser->check(TokenType::EOF_)) {
+                statement();
+            }
+            int endJump = emitJump(Op::JUMP);
+            m_loopStack.back().breakJumps.push_back(endJump);
+        } else {
+            m_parser->error("Expect 'case' or 'default' in switch body.");
+            break;
+        }
+    }
+
+    m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after switch body.");
+
+    // Patch all arm-end jumps to land here.
+    for (int j : m_loopStack.back().breakJumps)
+        patchJump(j);
+
+    m_loopStack.pop_back();
+    endScope(); // pops the hidden subject local
 }
 
 void Compiler::funDeclaration() {
@@ -740,8 +849,8 @@ void Compiler::emitLoop(int loopStart) {
     emitByte(static_cast<uint8_t>(offset & 0xff));
 }
 
-void Compiler::emitLoopCleanup() {
-    int toPop = m_localCount - m_loopStack.back().localCount;
+void Compiler::emitLoopCleanup(int targetLocalCount) {
+    int toPop = m_localCount - targetLocalCount;
     for (int i = 0; i < toPop; i++)
         emitByte(Op::POP);
 }

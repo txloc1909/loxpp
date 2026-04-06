@@ -15,6 +15,8 @@ std::ostream& operator<<(std::ostream& os, const TokenType& type) {
         return os << "RIGHT_BRACE";
     case TokenType::COMMA:
         return os << "COMMA";
+    case TokenType::COLON:
+        return os << "COLON";
     case TokenType::DOT:
         return os << "DOT";
     case TokenType::MINUS:
