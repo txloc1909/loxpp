@@ -7,7 +7,7 @@ bool operator!(Value value) {
     return std::visit(overloaded{
                           [](bool val) -> bool { return !val; },
                           [](Nil) -> bool { return true; },
-                          [](ObjHandle) -> bool { return false; },
+                          [](Obj*) -> bool { return false; },
                           [](const auto&) -> bool { return false; },
                       },
                       value);
@@ -22,35 +22,11 @@ bool operator==(const Value& a, const Value& b) {
             [](bool a_val, bool b_val) -> bool { return a_val == b_val; },
             [](Number a_val, Number b_val) -> bool { return a_val == b_val; },
             [](Nil, Nil) -> bool { return true; },
-            // Interning guarantees: same content → same index → equal handles.
-            [](ObjHandle a_h, ObjHandle b_h) -> bool { return a_h == b_h; },
+            // For strings, interning guarantees same content → same pointer.
+            // Other Obj types use identity equality.
+            [](Obj* a_p, Obj* b_p) -> bool { return a_p == b_p; },
             [](const auto&, const auto&) -> bool { return false; }},
         a, b);
-}
-
-void printValue(const Value& value, const Allocator& alloc) {
-    std::printf("%s", stringify(value, alloc).c_str());
-}
-
-std::string stringify(const Value& value, const Allocator& alloc) {
-    return std::visit(
-        overloaded{
-            [](bool val) -> std::string { return val ? "true" : "false"; },
-            [](Number val) -> std::string {
-                char buf[64];
-                std::snprintf(buf, sizeof(buf), "%g", val);
-                return buf;
-            },
-            [](Nil) -> std::string { return "nil"; },
-            [&alloc](ObjHandle h) -> std::string {
-                return stringifyObj(alloc.deref(h));
-            },
-        },
-        value);
-}
-
-void printValue(const Value& value) {
-    std::printf("%s", stringify(value).c_str());
 }
 
 std::string stringify(const Value& value) {
@@ -63,11 +39,13 @@ std::string stringify(const Value& value) {
                 return buf;
             },
             [](Nil) -> std::string { return "nil"; },
-            [](ObjHandle h) -> std::string {
-                return "<str#" + std::to_string(h.index) + ">";
-            },
+            [](Obj* p) -> std::string { return stringifyObj(p); },
         },
         value);
+}
+
+void printValue(const Value& value) {
+    std::printf("%s", stringify(value).c_str());
 }
 
 uint8_t ValueArray::size() const { return m_count; }

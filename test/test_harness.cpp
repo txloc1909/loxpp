@@ -2,7 +2,7 @@
 #include "vm.h"
 #include "compiler.h"
 #include "debug.h"
-#include "simple_allocator.h"
+#include "memory_manager.h"
 #include <sstream>
 
 Value eval_expr(const std::string& expr) {
@@ -18,29 +18,29 @@ std::string eval_expr_str(const std::string& expr) {
     if (vm.interpret(expr + ";") != InterpretResult::OK) {
         throw std::runtime_error("Interpretation failed");
     }
-    return stringify(vm.lastResult(), vm.allocator());
+    return stringify(vm.lastResult());
 }
 
 std::string compile_to_bytecode(const std::string& expr) {
-    SimpleAllocator allocator;
-    auto chunk = compile(expr + ";", &allocator);
+    MemoryManager mm;
+    auto chunk = compile(expr + ";", &mm);
     if (!chunk)
         throw std::runtime_error("Compilation failed");
     std::ostringstream oss;
     for (int offset = 0; offset < static_cast<int>(chunk->size());) {
-        offset = disassembleInstruction(*chunk, allocator, offset, oss);
+        offset = disassembleInstruction(*chunk, mm, offset, oss);
     }
     return oss.str();
 }
 
 std::string compile_program_to_bytecode(const std::string& source) {
-    SimpleAllocator allocator;
-    auto chunk = compile(source, &allocator);
+    MemoryManager mm;
+    auto chunk = compile(source, &mm);
     if (!chunk)
         throw std::runtime_error("Compilation failed");
     std::ostringstream oss;
     for (int offset = 0; offset < static_cast<int>(chunk->size());) {
-        offset = disassembleInstruction(*chunk, allocator, offset, oss);
+        offset = disassembleInstruction(*chunk, mm, offset, oss);
     }
     return oss.str();
 }
@@ -62,5 +62,5 @@ std::string VMTestHarness::getGlobalStr(const std::string& name) const {
     auto v = m_vm.getGlobal(name);
     if (!v)
         return "<undefined>";
-    return stringify(*v, m_vm.allocator());
+    return stringify(*v);
 }

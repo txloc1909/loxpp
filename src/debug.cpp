@@ -1,5 +1,5 @@
 #include "debug.h"
-#include "allocator.h"
+#include "memory_manager.h"
 #include "value.h"
 
 #include <ostream>
@@ -24,13 +24,12 @@ static int simpleInstruction(const char* name, int offset, std::ostream& out,
 }
 
 static int constantInstruction(const char* name, const Chunk& chunk,
-                               const Allocator& alloc, int offset,
+                               const MemoryManager& mm, int offset,
                                std::ostream& out, bool color) {
     uint8_t idx = chunk.at(offset + 1);
     out << cc(color, kBold) << name << cc(color, kReset) << ' '
         << static_cast<int>(idx) << " ('" << cc(color, kYellow)
-        << stringify(chunk.getConstant(idx), alloc) << cc(color, kReset)
-        << "')\n";
+        << stringify(chunk.getConstant(idx)) << cc(color, kReset) << "')\n";
     return offset + 2;
 }
 
@@ -42,24 +41,23 @@ static int byteInstruction(const char* name, const Chunk& chunk, int offset,
     return offset + 2;
 }
 
-void disassembleChunk(const Chunk& chunk, const Allocator& alloc,
+void disassembleChunk(const Chunk& chunk, const MemoryManager& mm,
                       const char* name, std::ostream& out, bool color) {
     out << cc(color, kBold) << "== " << name << " ==" << cc(color, kReset)
         << '\n';
     for (int offset = 0; offset < static_cast<int>(chunk.size());) {
-        offset = disassembleInstruction(chunk, alloc, offset, out, color);
+        offset = disassembleInstruction(chunk, mm, offset, out, color);
     }
 }
 
-int disassembleInstruction(const Chunk& chunk, const Allocator& alloc,
+int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
                            int offset, std::ostream& out, bool color) {
     out << cc(color, kDim) << offset << ": " << cc(color, kReset);
 
     Op instruction = toOpcode(chunk.at(offset));
     switch (instruction) {
     case Op::CONSTANT:
-        return constantInstruction("CONSTANT", chunk, alloc, offset, out,
-                                   color);
+        return constantInstruction("CONSTANT", chunk, mm, offset, out, color);
     case Op::NIL:
         return simpleInstruction("NIL", offset, out, color);
     case Op::TRUE:
@@ -93,14 +91,12 @@ int disassembleInstruction(const Chunk& chunk, const Allocator& alloc,
     case Op::SET_LOCAL:
         return byteInstruction("SET_LOCAL", chunk, offset, out, color);
     case Op::DEFINE_GLOBAL:
-        return constantInstruction("DEFINE_GLOBAL", chunk, alloc, offset, out,
+        return constantInstruction("DEFINE_GLOBAL", chunk, mm, offset, out,
                                    color);
     case Op::GET_GLOBAL:
-        return constantInstruction("GET_GLOBAL", chunk, alloc, offset, out,
-                                   color);
+        return constantInstruction("GET_GLOBAL", chunk, mm, offset, out, color);
     case Op::SET_GLOBAL:
-        return constantInstruction("SET_GLOBAL", chunk, alloc, offset, out,
-                                   color);
+        return constantInstruction("SET_GLOBAL", chunk, mm, offset, out, color);
     case Op::RETURN:
         return simpleInstruction("RETURN", offset, out, color);
     default:

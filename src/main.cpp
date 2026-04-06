@@ -39,8 +39,10 @@ static char** lox_completion(const char* text, int /*start*/, int /*end*/) {
 
 static std::string xdg_history_path() {
     const char* xdg = std::getenv("XDG_CACHE_HOME");
+    const char* home = std::getenv("HOME");
     std::string dir =
-        xdg ? std::string(xdg) : (std::string(std::getenv("HOME")) + "/.cache");
+        xdg ? std::string(xdg)
+            : (home != nullptr ? std::string(home) + "/.cache" : "/tmp");
     dir += "/loxpp";
     mkdir(dir.c_str(), 0755);
     return dir + "/history";
