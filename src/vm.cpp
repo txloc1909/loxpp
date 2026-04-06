@@ -1,5 +1,6 @@
 #include "vm.h"
 #include "debug.h"
+#include "memory_manager.h"
 #include "object.h"
 #include "scanner.h"
 #include "compiler.h"
@@ -12,7 +13,7 @@
 #include <unistd.h>
 
 InterpretResult VM::interpret(const std::string& source) {
-    auto chunk = compile(source, m_allocator.get());
+    auto chunk = compile(source, &m_mm);
     if (chunk == nullptr) {
         return InterpretResult::COMPILE_ERROR;
     }
@@ -29,7 +30,7 @@ Value VM::readConstant() { return m_chunk->getConstant(readByte()); }
 Value VM::lastResult() const { return m_lastResult; }
 
 std::optional<Value> VM::getGlobal(const std::string& name) const {
-    ObjString* key = m_allocator->findString(name);
+    ObjString* key = m_mm.findString(name);
     if (!key)
         return std::nullopt;
     Value out;
@@ -62,8 +63,7 @@ InterpretResult VM::run() {
             std::printf(" ]");
         }
         std::printf("\n");
-        disassembleInstruction(*m_chunk, *m_allocator, currentOffset, std::cout,
-                               color);
+        disassembleInstruction(*m_chunk, m_mm, currentOffset, std::cout, color);
 #endif
 
         Byte instruction = readByte();
@@ -108,14 +108,14 @@ InterpretResult VM::run() {
         }
         case Op::ADD: {
             if (isString(peek(0)) && isString(peek(1))) {
-                auto* b_str = asObjString(pop(), *m_allocator);
-                auto* a_str = asObjString(pop(), *m_allocator);
+                auto* b_str = asObjString(pop());
+                auto* a_str = asObjString(pop());
                 std::string result;
                 result.reserve(a_str->chars.size() + b_str->chars.size());
-                result.append(a_str->chars);
-                result.append(b_str->chars);
-                ObjHandle handle = m_allocator->makeString(std::move(result));
-                push(Value{handle});
+                result.append(a_str->chars.data(), a_str->chars.size());
+                result.append(b_str->chars.data(), b_str->chars.size());
+                push(Value{
+                    static_cast<Obj*>(m_mm.makeString(std::move(result)))});
             } else {
                 BINARY_OP(Number, +);
             }
@@ -138,7 +138,7 @@ InterpretResult VM::run() {
             break;
         }
         case Op::PRINT: {
-            printValue(pop(), *m_allocator);
+            printValue(pop());
             std::printf("\n");
             break;
         }
@@ -158,13 +158,13 @@ InterpretResult VM::run() {
             break;
         }
         case Op::DEFINE_GLOBAL: {
-            ObjString* name = asObjString(readConstant(), *m_allocator);
+            ObjString* name = asObjString(readConstant());
             m_globals.set(name, peek(0));
             pop();
             break;
         }
         case Op::GET_GLOBAL: {
-            ObjString* name = asObjString(readConstant(), *m_allocator);
+            ObjString* name = asObjString(readConstant());
             Value value;
             if (!m_globals.get(name, value)) {
                 runtimeError("Undefined variable '%s'.", name->chars.c_str());
@@ -174,7 +174,7 @@ InterpretResult VM::run() {
             break;
         }
         case Op::SET_GLOBAL: {
-            ObjString* name = asObjString(readConstant(), *m_allocator);
+            ObjString* name = asObjString(readConstant());
             // set() returns true if the key is *new*; an existing key is valid.
             // An entirely new key means the variable was never declared.
             if (m_globals.set(name, peek(0))) {

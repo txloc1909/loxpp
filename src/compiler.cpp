@@ -1,15 +1,15 @@
 #include "compiler.h"
 #include "debug.h"
+#include "memory_manager.h"
 
 #include <iostream>
 #include <memory>
 #include <unistd.h>
 
-std::unique_ptr<Chunk> compile(const std::string& source, Allocator* alloc) {
+std::unique_ptr<Chunk> compile(const std::string& source, MemoryManager* mm) {
     auto chunk = std::make_unique<Chunk>();
     auto parser = std::make_unique<Parser>(source);
-    auto compiler =
-        std::make_unique<Compiler>(chunk.get(), parser.get(), alloc);
+    auto compiler = std::make_unique<Compiler>(chunk.get(), parser.get(), mm);
 
     while (!parser->check(TokenType::EOF_))
         compiler->declaration();
@@ -21,14 +21,14 @@ std::unique_ptr<Chunk> compile(const std::string& source, Allocator* alloc) {
     return chunk;
 }
 
-Compiler::Compiler(Chunk* chunk, Parser* parser, Allocator* alloc)
-    : m_currentChunk{chunk}, m_parser{parser}, m_allocator{alloc} {}
+Compiler::Compiler(Chunk* chunk, Parser* parser, MemoryManager* mm)
+    : m_currentChunk{chunk}, m_parser{parser}, m_mm{mm} {}
 
 void Compiler::endCompiler() {
     emitReturn();
 #ifdef LOXPP_DEBUG_PRINT_CODE
     bool color = isatty(STDOUT_FILENO) != 0;
-    disassembleChunk(*m_currentChunk, *m_allocator, "code", std::cout, color);
+    disassembleChunk(*m_currentChunk, *m_mm, "code", std::cout, color);
 #endif
 }
 
@@ -131,8 +131,8 @@ void Compiler::number() {
 }
 
 void Compiler::string() {
-    ObjHandle handle = m_allocator->makeString(m_parser->m_previous.lexeme);
-    emitBytes(Op::CONSTANT, makeConstant(Value{handle}));
+    ObjString* s = m_mm->makeString(m_parser->m_previous.lexeme);
+    emitBytes(Op::CONSTANT, makeConstant(Value{static_cast<Obj*>(s)}));
 }
 
 void Compiler::variable() {
@@ -278,8 +278,8 @@ uint8_t Compiler::makeConstant(Value value) {
 }
 
 uint8_t Compiler::identifierConstant(const Token& name) {
-    ObjHandle handle = m_allocator->makeString(name.lexeme);
-    return makeConstant(Value{handle});
+    ObjString* s = m_mm->makeString(name.lexeme);
+    return makeConstant(Value{static_cast<Obj*>(s)});
 }
 
 void Compiler::namedVariable(const Token& name, bool canAssign) {

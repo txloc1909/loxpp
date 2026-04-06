@@ -1,7 +1,7 @@
 find_package(GTest REQUIRED)
 
 set(ALLOC_SRCS
-    ${PROJECT_SOURCE_DIR}/src/simple_allocator.cpp
+    ${PROJECT_SOURCE_DIR}/src/memory_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/object.cpp
     ${PROJECT_SOURCE_DIR}/src/table.cpp
     ${PROJECT_SOURCE_DIR}/src/value.cpp
@@ -16,7 +16,7 @@ set(FULL_SRCS
     ${PROJECT_SOURCE_DIR}/src/value.cpp
     ${PROJECT_SOURCE_DIR}/src/object.cpp
     ${PROJECT_SOURCE_DIR}/src/table.cpp
-    ${PROJECT_SOURCE_DIR}/src/simple_allocator.cpp
+    ${PROJECT_SOURCE_DIR}/src/memory_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/token.cpp
     ${PROJECT_SOURCE_DIR}/src/scanner.cpp
 )
@@ -25,7 +25,7 @@ add_executable(test_main test_main.cpp)
 add_executable(test_scanner test_scanner.cpp ${PROJECT_SOURCE_DIR}/src/scanner.cpp ${PROJECT_SOURCE_DIR}/src/token.cpp)
 add_executable(test_parser_vm test_parser_vm.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_parser_bytecode test_parser_bytecode.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_table test_table.cpp ${PROJECT_SOURCE_DIR}/src/table.cpp ${PROJECT_SOURCE_DIR}/src/object.cpp ${PROJECT_SOURCE_DIR}/src/value.cpp ${PROJECT_SOURCE_DIR}/src/simple_allocator.cpp)
+add_executable(test_table test_table.cpp ${PROJECT_SOURCE_DIR}/src/table.cpp ${PROJECT_SOURCE_DIR}/src/object.cpp ${PROJECT_SOURCE_DIR}/src/value.cpp ${PROJECT_SOURCE_DIR}/src/memory_manager.cpp)
 add_executable(test_allocator test_allocator.cpp ${ALLOC_SRCS})
 add_executable(test_local_variables test_local_variables.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_vm_runtime test_vm_runtime.cpp test_harness.cpp ${FULL_SRCS})

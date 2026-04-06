@@ -1,6 +1,5 @@
 #pragma once
 
-#include "allocator.h"
 #include "object.h"
 
 #include <array>
@@ -9,9 +8,7 @@
 
 using Number = double;
 using Nil = std::monostate;
-// ObjHandle is a lightweight, stable index into the Allocator's object store.
-// It does not dangle when the allocator moves/compacts objects.
-using Value = std::variant<bool, Number, Nil, ObjHandle>;
+using Value = std::variant<bool, Number, Nil, Obj*>;
 
 template <typename T>
 bool is(const Value& value) {
@@ -30,23 +27,17 @@ Value from(const T& val) {
     return Value(val);
 }
 
-inline bool isObj(const Value& v) { return is<ObjHandle>(v); }
+inline bool isObj(const Value& v) { return is<Obj*>(v); }
 inline bool isString(const Value& v) {
-    return is<ObjHandle>(v) && as<ObjHandle>(v).type == ObjType::STRING;
+    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::STRING;
 }
-inline Obj* asObj(const Value& v, const Allocator& alloc) {
-    return alloc.deref(as<ObjHandle>(v));
-}
-inline ObjString* asObjString(const Value& v, const Allocator& alloc) {
-    return static_cast<ObjString*>(alloc.deref(as<ObjHandle>(v)));
+inline Obj* asObj(const Value& v) { return as<Obj*>(v); }
+inline ObjString* asObjString(const Value& v) {
+    return static_cast<ObjString*>(as<Obj*>(v));
 }
 
 bool operator!(Value value);
 bool operator==(const Value& a, const Value& b);
-// Primary: dereferences ObjHandle via allocator for correct string output.
-std::string stringify(const Value& value, const Allocator& alloc);
-void printValue(const Value& value, const Allocator& alloc);
-// Debug/trace: ObjHandle prints as '<str#N>' without dereferencing.
 std::string stringify(const Value& value);
 void printValue(const Value& value);
 

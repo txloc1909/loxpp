@@ -1,15 +1,16 @@
 #pragma once
 
-#include "allocator.h"
 #include "chunk.h"
 #include "parser.h"
 
 #include <memory>
 #include <string>
 
+class MemoryManager;
+
 static constexpr int UINT8_COUNT = 256;
 
-std::unique_ptr<Chunk> compile(const std::string& source, Allocator* alloc);
+std::unique_ptr<Chunk> compile(const std::string& source, MemoryManager* mm);
 
 struct Local {
     Token name;
@@ -18,7 +19,7 @@ struct Local {
 
 class Compiler {
   public:
-    Compiler(Chunk* chunk, Parser* parser, Allocator* alloc);
+    Compiler(Chunk* chunk, Parser* parser, MemoryManager* mm);
 
     Chunk* getCurrentChunk() const { return m_currentChunk; }
     void endCompiler();
@@ -59,7 +60,7 @@ class Compiler {
 
     Chunk* m_currentChunk;
     Parser* m_parser;
-    Allocator* m_allocator;
+    MemoryManager* m_mm;
 
     Local m_locals[UINT8_COUNT];
     int m_localCount{0};

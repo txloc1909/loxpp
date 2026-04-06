@@ -1,20 +1,35 @@
 #pragma once
 
+#include "vm_allocator.h"
+
 #include <cstdint>
 #include <string>
 #include <string_view>
 
-enum class ObjType { STRING };
+enum class ObjType : uint8_t { STRING };
+
+inline uint32_t hashString(std::string_view s) {
+    uint32_t hash = 2166136261U;
+    for (unsigned char c : s) {
+        hash ^= c;
+        hash *= 16777619U;
+    }
+    return hash;
+}
 
 struct Obj {
     ObjType type;
     bool marked = false;
+    explicit Obj(ObjType t) : type(t) {}
     virtual ~Obj() = default;
 };
 
 struct ObjString : public Obj {
-    std::string chars;
     uint32_t hash{0};
+    MyString chars;
+
+    ObjString(std::string_view sv, VmAllocator<char> alloc)
+        : Obj(ObjType::STRING), hash(hashString(sv)), chars(sv, alloc) {}
 };
 
 std::string stringifyObj(Obj* obj);

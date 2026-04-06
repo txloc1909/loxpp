@@ -4,8 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "memory_manager.h"
 #include "object.h"
-#include "simple_allocator.h"
 #include "table.h"
 #include "value.h"
 
@@ -16,19 +16,18 @@ static uint32_t fakeHash(const char* key, int length) {
     return static_cast<uint32_t>(static_cast<unsigned char>(key[0]));
 }
 
-static ObjString* mkstr(SimpleAllocator& alloc, const std::string& s) {
-    ObjHandle h = alloc.makeString(s);
-    auto* obj = static_cast<ObjString*>(alloc.deref(h));
+static ObjString* mkstr(MemoryManager& mm, const std::string& s) {
+    ObjString* obj = mm.makeString(s);
     obj->hash = fakeHash(s.c_str(), static_cast<int>(s.size()));
     return obj;
 }
 
 class TableTest : public ::testing::Test {
   protected:
-    SimpleAllocator allocator_;
-    Table table;
+    MemoryManager mm;
+    Table table{VmAllocator<Entry>{&mm}};
 
-    ObjString* str(const std::string& s) { return mkstr(allocator_, s); }
+    ObjString* str(const std::string& s) { return mkstr(mm, s); }
 
     std::pair<ObjString*, ObjString*> collidingPair() {
         return {str("aardvark"), str("antelope")};
@@ -47,15 +46,15 @@ class TableTest : public ::testing::Test {
 // ============================================================
 
 TEST(HashFieldTest, SameContentSameHash) {
-    SimpleAllocator alloc;
-    ObjString* a = mkstr(alloc, "hello");
-    ObjString* b = mkstr(alloc, "hello");
+    MemoryManager mm;
+    ObjString* a = mkstr(mm, "hello");
+    ObjString* b = mkstr(mm, "hello");
     EXPECT_EQ(a->hash, b->hash);
 }
 
 TEST(HashFieldTest, EmptyStringNoCrash) {
-    SimpleAllocator alloc;
-    ObjString* obj = mkstr(alloc, "");
+    MemoryManager mm;
+    ObjString* obj = mkstr(mm, "");
     EXPECT_EQ(obj->hash, 0u);
 }
 
@@ -64,18 +63,22 @@ TEST(HashFieldTest, EmptyStringNoCrash) {
 // ============================================================
 
 TEST(TableLifecycleTest, DefaultConstructedTableIsEmpty) {
-    Table t;
+    MemoryManager mm;
+    Table t{VmAllocator<Entry>{&mm}};
     EXPECT_EQ(t.findString("anything", 8, 12345u), nullptr);
 }
 
-TEST(TableLifecycleTest, DestructorNoCrashOnEmpty) { Table t; }
+TEST(TableLifecycleTest, DestructorNoCrashOnEmpty) {
+    MemoryManager mm;
+    Table t{VmAllocator<Entry>{&mm}};
+}
 
 TEST(TableLifecycleTest, DestructorNoCrashAfterInserts) {
-    SimpleAllocator alloc;
-    Table t;
+    MemoryManager mm;
+    Table t{VmAllocator<Entry>{&mm}};
     for (int i = 0; i < 20; ++i) {
         std::string s = "key" + std::to_string(i);
-        ObjString* k = mkstr(alloc, s);
+        ObjString* k = mkstr(mm, s);
         t.set(k, Value{static_cast<double>(i)});
     }
 }
@@ -132,13 +135,13 @@ TEST_F(TableTest, SetNumberValue) {
     EXPECT_DOUBLE_EQ(as<double>(out), 3.14);
 }
 
-TEST_F(TableTest, SetObjHandleValue) {
+TEST_F(TableTest, SetObjPtrValue) {
     ObjString* key = str("objkey");
-    ObjHandle valHandle = allocator_.makeString("objval");
-    table.set(key, Value{valHandle});
+    ObjString* valStr = mm.makeString("objval");
+    table.set(key, Value{static_cast<Obj*>(valStr)});
     Value out;
     EXPECT_TRUE(table.get(key, out));
-    EXPECT_EQ(as<ObjHandle>(out), valHandle);
+    EXPECT_EQ(as<Obj*>(out), static_cast<Obj*>(valStr));
 }
 
 // ============================================================
@@ -299,17 +302,17 @@ TEST_F(TableTest, StressManyInsertsAllRetrievable) {
 // ============================================================
 
 TEST_F(TableTest, AddAllEmptySourceLeavesDestUnchanged) {
-    Table src;
+    Table src{VmAllocator<Entry>{&mm}};
     table.addAll(src);
     Value out;
     EXPECT_FALSE(table.get(str("any"), out));
 }
 
 TEST_F(TableTest, AddAllCopiesEntriesToEmptyDest) {
-    SimpleAllocator srcAlloc;
-    Table src;
-    ObjString* k1 = mkstr(srcAlloc, "alpha");
-    ObjString* k2 = mkstr(srcAlloc, "beta");
+    MemoryManager srcMm;
+    Table src{VmAllocator<Entry>{&srcMm}};
+    ObjString* k1 = mkstr(srcMm, "alpha");
+    ObjString* k2 = mkstr(srcMm, "beta");
     src.set(k1, Value{1.0});
     src.set(k2, Value{2.0});
 
@@ -323,13 +326,13 @@ TEST_F(TableTest, AddAllCopiesEntriesToEmptyDest) {
 }
 
 TEST_F(TableTest, AddAllNoOverlapUnionInDest) {
-    SimpleAllocator srcAlloc;
-    Table src;
+    MemoryManager srcMm;
+    Table src{VmAllocator<Entry>{&srcMm}};
 
     ObjString* destKey = str("dest_only");
     table.set(destKey, Value{9.0});
 
-    ObjString* srcKey = mkstr(srcAlloc, "src_only");
+    ObjString* srcKey = mkstr(srcMm, "src_only");
     src.set(srcKey, Value{7.0});
 
     table.addAll(src);
@@ -342,7 +345,7 @@ TEST_F(TableTest, AddAllNoOverlapUnionInDest) {
 }
 
 TEST_F(TableTest, AddAllOverlappingKeysTakesSourceValue) {
-    Table src;
+    Table src{VmAllocator<Entry>{&mm}};
     ObjString* sharedKey = str("shared");
     table.set(sharedKey, Value{1.0});
     src.set(sharedKey, Value{99.0});
@@ -355,9 +358,9 @@ TEST_F(TableTest, AddAllOverlappingKeysTakesSourceValue) {
 }
 
 TEST_F(TableTest, AddAllDoesNotMutateSource) {
-    SimpleAllocator srcAlloc;
-    Table src;
-    ObjString* k = mkstr(srcAlloc, "orig");
+    MemoryManager srcMm;
+    Table src{VmAllocator<Entry>{&srcMm}};
+    ObjString* k = mkstr(srcMm, "orig");
     src.set(k, Value{5.0});
 
     table.addAll(src);
@@ -413,8 +416,8 @@ TEST_F(TableTest, FindStringByRawCharsWithoutObjStringWrapper) {
 
 class StringInternTest : public ::testing::Test {
   protected:
-    SimpleAllocator allocator_;
-    Table internTable;
+    MemoryManager allocator_;
+    Table internTable{VmAllocator<Entry>{&allocator_}};
 
     ObjString* internString(const std::string& s) {
         uint32_t h = fakeHash(s.c_str(), static_cast<int>(s.size()));
