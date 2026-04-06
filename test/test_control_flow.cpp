@@ -6,6 +6,8 @@
 //   2. Short-circuit semantics — and/or leave exactly one value on the stack.
 //   3. Loop stack discipline   — stackDepth() same before and after while/for.
 //   4. For-loop var scoping    — var in for-init is scoped to the loop.
+//   5. Break exits innermost loop only; stack remains neutral.
+//   6. Continue targets condition (while) or increment (for); stack neutral.
 
 #include "test_harness.h"
 #include <gtest/gtest.h>
@@ -212,4 +214,156 @@ TEST_F(ForLoopTest, ForInitVarScopedToLoop) {
     VMTestHarness h;
     auto result = h.run("for (var i = 0; i < 1; i = i + 1) {} print i;");
     EXPECT_EQ(result, InterpretResult::RUNTIME_ERROR);
+}
+
+// ===========================================================================
+// Break
+// ===========================================================================
+
+class BreakTest : public ::testing::Test {};
+
+TEST_F(BreakTest, BreakExitsWhileEarly) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var n = 0;
+        while (true) {
+            n = n + 1;
+            if (n == 3) break;
+        }
+    )"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("n");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 3);
+}
+
+TEST_F(BreakTest, BreakInForLoop) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var sum = 0;
+        for (var i = 0; i < 10; i = i + 1) {
+            if (i == 4) break;
+            sum = sum + 1;
+        }
+    )"),
+              InterpretResult::OK);
+    // increments for i = 0,1,2,3 → sum = 4
+    auto v = h.getGlobal("sum");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 4);
+}
+
+TEST_F(BreakTest, BreakOnlyExitsInnermostLoop) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var outer = 0;
+        while (outer < 3) {
+            var inner = 0;
+            while (true) {
+                inner = inner + 1;
+                if (inner == 2) break;
+            }
+            outer = outer + 1;
+        }
+    )"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("outer");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 3);
+}
+
+TEST_F(BreakTest, BreakCleansUpLocals) {
+    VMTestHarness h;
+    h.run(R"(
+        while (true) {
+            var x = 1;
+            break;
+        }
+    )");
+    EXPECT_EQ(h.stackDepth(), 0);
+}
+
+TEST_F(BreakTest, BreakOutsideLoopIsError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("break;"), InterpretResult::COMPILE_ERROR);
+}
+
+// ===========================================================================
+// Continue
+// ===========================================================================
+
+class ContinueTest : public ::testing::Test {};
+
+TEST_F(ContinueTest, ContinueSkipsRestOfBody) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var n = 0;
+        var skipped = 0;
+        while (n < 5) {
+            n = n + 1;
+            if (n == 3) continue;
+            skipped = skipped + 1;
+        }
+    )"),
+              InterpretResult::OK);
+    // body runs 5 times, skipped once when n==3 → skipped = 4
+    auto v = h.getGlobal("skipped");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 4);
+}
+
+TEST_F(ContinueTest, ContinueInForRunsIncrement) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var count = 0;
+        for (var i = 0; i < 5; i = i + 1) {
+            if (i == 2) continue;
+            count = count + 1;
+        }
+    )"),
+              InterpretResult::OK);
+    // loop runs i=0..4 (5 iterations), skips body once → count = 4
+    auto v = h.getGlobal("count");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 4);
+}
+
+TEST_F(ContinueTest, ContinueOnlyAffectsInnermostLoop) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var outer = 0;
+        var total = 0;
+        while (outer < 3) {
+            outer = outer + 1;
+            var inner = 0;
+            while (inner < 4) {
+                inner = inner + 1;
+                if (inner == 2) continue;
+                total = total + 1;
+            }
+        }
+    )"),
+              InterpretResult::OK);
+    // inner runs 4 iters per outer, skips once per outer → 3 per outer, 9 total
+    auto v = h.getGlobal("total");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 9);
+}
+
+TEST_F(ContinueTest, ContinueCleansUpLocals) {
+    VMTestHarness h;
+    h.run(R"(
+        var n = 0;
+        while (n < 3) {
+            n = n + 1;
+            var x = 1;
+            continue;
+        }
+    )");
+    EXPECT_EQ(h.stackDepth(), 0);
+}
+
+TEST_F(ContinueTest, ContinueOutsideLoopIsError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("continue;"), InterpretResult::COMPILE_ERROR);
 }

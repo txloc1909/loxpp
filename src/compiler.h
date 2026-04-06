@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 class MemoryManager;
 
@@ -15,6 +16,13 @@ std::unique_ptr<Chunk> compile(const std::string& source, MemoryManager* mm);
 struct Local {
     Token name;
     int depth; // -1 = declared but not yet initialized; ≥0 = scope depth
+};
+
+struct LoopContext {
+    int start;      // LOOP target: condition (while) or increment (for)
+    int localCount; // m_localCount at loop entry, for cleanup POPs
+    std::vector<int>
+        breakJumps; // JUMP placeholder offsets to patch on loop exit
 };
 
 class Compiler {
@@ -40,6 +48,8 @@ class Compiler {
     void ifStatement();
     void whileStatement();
     void forStatement();
+    void breakStatement();
+    void continueStatement();
     void varDeclaration();
     void block();
 
@@ -62,6 +72,7 @@ class Compiler {
     int emitJump(Op op);
     void patchJump(int offset);
     void emitLoop(int loopStart);
+    void emitLoopCleanup();
 
     uint8_t makeConstant(Value value);
     uint8_t identifierConstant(const Token& name);
@@ -74,4 +85,5 @@ class Compiler {
     Local m_locals[UINT8_COUNT];
     int m_localCount{0};
     int m_scopeDepth{0};
+    std::vector<LoopContext> m_loopStack;
 };
