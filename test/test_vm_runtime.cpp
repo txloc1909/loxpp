@@ -323,3 +323,94 @@ TEST_F(CallFrameTest, CallExpressionResultIsRuntimeError) {
     VMTestHarness h;
     EXPECT_EQ(h.run("(1 + 2)();"), InterpretResult::RUNTIME_ERROR);
 }
+
+// ===========================================================================
+// Function declaration and call tests
+// ===========================================================================
+
+class FunctionTest : public ::testing::Test {};
+
+// A function with no explicit return returns nil.
+TEST_F(FunctionTest, NoExplicitReturn_ReturnsNil) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("fun f() {} f();"), InterpretResult::OK);
+    EXPECT_EQ(h.lastResult(), from<Nil>(Nil{}));
+}
+
+// A function can return a string literal.
+TEST_F(FunctionTest, ReturnStringLiteral) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("fun greet() { return \"hello\"; } greet();"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "hello");
+}
+
+// A function can return a computed value.
+TEST_F(FunctionTest, ReturnComputedValue) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("fun add(a, b) { return a + b; } add(2, 3);"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.lastResult(), from<Number>(5.0));
+}
+
+// Calling a function with too few arguments is a runtime error.
+TEST_F(FunctionTest, TooFewArguments_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("fun f(x) {} f();"), InterpretResult::RUNTIME_ERROR);
+}
+
+// Calling a function with too many arguments is a runtime error.
+TEST_F(FunctionTest, TooManyArguments_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("fun f() {} f(1);"), InterpretResult::RUNTIME_ERROR);
+}
+
+// A function can call itself recursively.
+TEST_F(FunctionTest, Recursion) {
+    VMTestHarness h;
+    std::string src = "fun count(n) {"
+                      "  if (n <= 0) return 0;"
+                      "  return count(n - 1) + 1;"
+                      "}"
+                      "count(5);";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.lastResult(), from<Number>(5.0));
+}
+
+// Two mutually independent functions can coexist.
+TEST_F(FunctionTest, TwoFunctions) {
+    VMTestHarness h;
+    std::string src = "fun double(x) { return x * 2; }"
+                      "fun triple(x) { return x * 3; }"
+                      "double(3) + triple(2);";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.lastResult(), from<Number>(12.0));
+}
+
+// return at the top level is a compile error.
+TEST_F(FunctionTest, ReturnAtTopLevel_CompileError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("return 1;"), InterpretResult::COMPILE_ERROR);
+}
+
+// Stack must be empty after a successful function call.
+TEST_F(FunctionTest, StackCleanAfterCall) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("fun f() { return 42; } f();"), InterpretResult::OK);
+    EXPECT_EQ(h.stackDepth(), 0);
+}
+
+// A function defined in a local scope is a local variable.
+// Store the result globally so endScope()'s POP of `square` doesn't
+// overwrite lastResult().
+TEST_F(FunctionTest, LocalFunction) {
+    VMTestHarness h;
+    std::string src = "var r = 0;"
+                      "{"
+                      "  fun square(x) { return x * x; }"
+                      "  r = square(4);"
+                      "}"
+                      "r;";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.lastResult(), from<Number>(16.0));
+}

@@ -30,6 +30,11 @@ std::string compile_program_to_bytecode(const std::string& source);
 // result. Use for multi-statement programs where only pass/fail matters.
 InterpretResult run_program(const std::string& source);
 
+// Compiles a Lox++ program and returns the bytecode of the Nth inner
+// ObjFunction constant found in the top-level script chunk (0-indexed).
+// Throws if there are fewer than (n+1) function constants.
+std::string compile_fn_body_to_bytecode(const std::string& source, int n = 0);
+
 // ---------------------------------------------------------------------------
 // VMTestHarness — wraps VM and exposes runtime state for invariant testing
 // ---------------------------------------------------------------------------

@@ -8,10 +8,13 @@
 #include <vector>
 
 class MemoryManager;
+class Compiler;
 
 static constexpr int UINT8_COUNT = 256;
 
 ObjFunction* compile(const std::string& source, MemoryManager* mm);
+
+enum class FunctionType { SCRIPT, FUNCTION };
 
 struct Local {
     Token name;
@@ -27,7 +30,9 @@ struct LoopContext {
 
 class Compiler {
   public:
-    Compiler(ObjFunction* function, Parser* parser, MemoryManager* mm);
+    Compiler(ObjFunction* function, Parser* parser, MemoryManager* mm,
+             FunctionType type = FunctionType::SCRIPT,
+             Compiler* enclosing = nullptr);
 
     Chunk* getCurrentChunk() const { return &m_function->chunk; }
     void endCompiler();
@@ -53,6 +58,8 @@ class Compiler {
     void continueStatement();
     void varDeclaration();
     void block();
+    void funDeclaration();
+    void returnStatement();
 
     void and_();
     void or_();
@@ -65,6 +72,8 @@ class Compiler {
     int resolveLocal(const Token& name) const;
     void declareVariable();
     void markInitialized();
+
+    void parseFunction(FunctionType type);
 
     void emitByte(Byte byte);
     void emitByte(Op op);
@@ -82,6 +91,8 @@ class Compiler {
     ObjFunction* m_function;
     Parser* m_parser;
     MemoryManager* m_mm;
+    FunctionType m_type;
+    Compiler* m_enclosing;
 
     Local m_locals[UINT8_COUNT];
     int m_localCount{0};
