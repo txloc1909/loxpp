@@ -113,6 +113,8 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return jumpInstruction("JUMP_IF_FALSE", 1, chunk, offset, out, color);
     case Op::LOOP:
         return jumpInstruction("LOOP", -1, chunk, offset, out, color);
+    case Op::CALL:
+        return byteInstruction("CALL", chunk, offset, out, color);
     case Op::RETURN:
         return simpleInstruction("RETURN", offset, out, color);
     default:

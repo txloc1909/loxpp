@@ -270,3 +270,56 @@ TEST_F(CompileErrorTest, TooManyConstants) {
     VMTestHarness h;
     EXPECT_EQ(h.run(source), InterpretResult::COMPILE_ERROR);
 }
+
+// ===========================================================================
+// Call frame tests
+// ===========================================================================
+// These tests verify the VM's call frame machinery via Op::CALL. Since there
+// is no function declaration syntax yet, we exercise Op::CALL by calling
+// non-function values (which must produce a runtime error) and verify that
+// the stack is clean afterwards.
+
+class CallFrameTest : public ::testing::Test {};
+
+// Calling a number must produce a runtime error.
+TEST_F(CallFrameTest, CallNumberIsRuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("var x = 42;\nx();"), InterpretResult::RUNTIME_ERROR);
+}
+
+// Calling nil must produce a runtime error.
+TEST_F(CallFrameTest, CallNilIsRuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("nil();"), InterpretResult::RUNTIME_ERROR);
+}
+
+// Calling a boolean must produce a runtime error.
+TEST_F(CallFrameTest, CallBoolIsRuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("true();"), InterpretResult::RUNTIME_ERROR);
+}
+
+// Calling a string must produce a runtime error.
+TEST_F(CallFrameTest, CallStringIsRuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("\"hello\"();"), InterpretResult::RUNTIME_ERROR);
+}
+
+// Stack must be empty after a runtime error during a call attempt.
+TEST_F(CallFrameTest, StackCleanAfterCallError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("nil();"), InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.stackDepth(), 0);
+}
+
+// A call with arguments on a non-function is still a runtime error.
+TEST_F(CallFrameTest, CallNilWithArgsIsRuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("nil(1, 2, 3);"), InterpretResult::RUNTIME_ERROR);
+}
+
+// Calling a computed expression that yields a non-function is an error.
+TEST_F(CallFrameTest, CallExpressionResultIsRuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("(1 + 2)();"), InterpretResult::RUNTIME_ERROR);
+}

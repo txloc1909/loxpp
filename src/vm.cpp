@@ -1,5 +1,6 @@
 #include "vm.h"
 #include "debug.h"
+#include "function.h"
 #include "memory_manager.h"
 #include "object.h"
 #include "scanner.h"
@@ -13,17 +14,17 @@
 #include <unistd.h>
 
 InterpretResult VM::interpret(const std::string& source) {
-    auto chunk = compile(source, &m_mm);
-    if (chunk == nullptr) {
+    ObjFunction* fn = compile(source, &m_mm);
+    if (fn == nullptr) {
         return InterpretResult::COMPILE_ERROR;
     }
 
-    m_chunk = chunk.get();
-    m_ip = m_chunk->cbegin();
+    push(Value{static_cast<Obj*>(fn)});
+    call(fn, 0);
     return run();
 }
 
-Byte VM::readByte() { return *m_ip++; }
+Byte VM::readByte() { return *m_frames[m_frameCount - 1].ip++; }
 
 uint16_t VM::readShort() {
     uint16_t hi = readByte();
@@ -31,7 +32,9 @@ uint16_t VM::readShort() {
     return static_cast<uint16_t>((hi << 8) | lo);
 }
 
-Value VM::readConstant() { return m_chunk->getConstant(readByte()); }
+Value VM::readConstant() {
+    return m_frames[m_frameCount - 1].function->chunk.getConstant(readByte());
+}
 
 Value VM::lastResult() const { return m_lastResult; }
 
@@ -43,6 +46,22 @@ std::optional<Value> VM::getGlobal(const std::string& name) const {
     if (!m_globals.get(key, out))
         return std::nullopt;
     return out;
+}
+
+bool VM::call(ObjFunction* fn, int argCount) {
+    if (argCount != fn->arity) {
+        runtimeError("Expected %d arguments but got %d.", fn->arity, argCount);
+        return false;
+    }
+    if (m_frameCount == FRAMES_MAX) {
+        runtimeError("Stack overflow.");
+        return false;
+    }
+    CallFrame* frame = &m_frames[m_frameCount++];
+    frame->function = fn;
+    frame->ip = fn->chunk.cbegin();
+    frame->slots = stackTop - argCount - 1;
+    return true;
 }
 
 InterpretResult VM::run() {
@@ -57,19 +76,25 @@ InterpretResult VM::run() {
         push(as<valueType>(a op b));                                           \
     } while (false)
 
+    CallFrame* frame = &m_frames[m_frameCount - 1];
+
     for (;;) {
 #ifdef LOXPP_DEBUG_TRACE_EXECUTION
-        int currentOffset = static_cast<int>(m_ip - m_chunk->cbegin());
-        bool color = isatty(STDOUT_FILENO) != 0;
-        std::printf("[line %d] ", m_chunk->getLine(currentOffset));
-        std::printf("          ");
-        for (Value* slot = stack; slot < stackTop; slot++) {
-            std::printf("[ ");
-            printValue(*slot);
-            std::printf(" ]");
+        {
+            const Chunk& chunk = frame->function->chunk;
+            int currentOffset = static_cast<int>(frame->ip - chunk.cbegin());
+            bool color = isatty(STDOUT_FILENO) != 0;
+            std::printf("[line %d] ", chunk.getLine(currentOffset));
+            std::printf("          ");
+            for (Value* slot = stack; slot < stackTop; slot++) {
+                std::printf("[ ");
+                printValue(*slot);
+                std::printf(" ]");
+            }
+            std::printf("\n");
+            disassembleInstruction(chunk, m_mm, currentOffset, std::cout,
+                                   color);
         }
-        std::printf("\n");
-        disassembleInstruction(*m_chunk, m_mm, currentOffset, std::cout, color);
 #endif
 
         Byte instruction = readByte();
@@ -154,13 +179,13 @@ InterpretResult VM::run() {
         }
         case Op::GET_LOCAL: {
             uint8_t slot = readByte();
-            push(stack[slot]);
+            push(frame->slots[slot]);
             break;
         }
         case Op::SET_LOCAL: {
             uint8_t slot = readByte();
-            stack[slot] =
-                peek(0); // assignment is an expression; leave value on stack
+            // assignment is an expression; leave value on stack
+            frame->slots[slot] = peek(0);
             break;
         }
         case Op::DEFINE_GLOBAL: {
@@ -181,8 +206,9 @@ InterpretResult VM::run() {
         }
         case Op::SET_GLOBAL: {
             ObjString* name = asObjString(readConstant());
-            // set() returns true if the key is *new*; an existing key is valid.
-            // An entirely new key means the variable was never declared.
+            // set() returns true if the key is *new*; an existing key is
+            // valid. An entirely new key means the variable was never
+            // declared.
             if (m_globals.set(name, peek(0))) {
                 m_globals.del(name); // undo the spurious insertion
                 runtimeError("Undefined variable '%s'.", name->chars.c_str());
@@ -191,21 +217,45 @@ InterpretResult VM::run() {
             break;
         }
         case Op::JUMP: {
-            m_ip += readShort();
+            frame->ip += readShort();
             break;
         }
         case Op::JUMP_IF_FALSE: {
             uint16_t offset = readShort();
             if (isFalsy(peek(0)))
-                m_ip += offset;
+                frame->ip += offset;
             break;
         }
         case Op::LOOP: {
-            m_ip -= readShort();
+            frame->ip -= readShort();
+            break;
+        }
+        case Op::CALL: {
+            int argCount = readByte();
+            Value callee = peek(argCount);
+            if (!isFunction(callee)) {
+                runtimeError("Can only call functions and classes.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            if (!call(asObjFunction(callee), argCount)) {
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            frame = &m_frames[m_frameCount - 1];
             break;
         }
         case Op::RETURN: {
-            return InterpretResult::OK;
+            Value result = pop();
+            m_frameCount--;
+            if (m_frameCount == 0) {
+                // Finished executing the top-level script.
+                pop(); // remove the script ObjFunction from the stack
+                return InterpretResult::OK;
+            }
+            // Discard the callee's stack window and push return value.
+            stackTop = frame->slots;
+            push(result);
+            frame = &m_frames[m_frameCount - 1];
+            break;
         }
         }
     }
@@ -221,13 +271,27 @@ void VM::runtimeError(const char* format, ...) {
     va_end(args);
     std::fputs("\n", stderr);
 
-    auto instruction = m_ip - m_chunk->cbegin() - 1;
-    int line = m_chunk->getLine(instruction);
-    std::fprintf(stderr, "[line %d] in script\n", line);
+    // Print a stack trace (innermost frame first).
+    for (int i = m_frameCount - 1; i >= 0; i--) {
+        const CallFrame& frame = m_frames[i];
+        const Chunk& chunk = frame.function->chunk;
+        auto offset = static_cast<int>(frame.ip - chunk.cbegin()) - 1;
+        int line = chunk.getLine(offset);
+        std::fprintf(stderr, "[line %d] in ", line);
+        if (frame.function->name == nullptr) {
+            std::fprintf(stderr, "script\n");
+        } else {
+            std::fprintf(stderr, "%s()\n", frame.function->name->chars.c_str());
+        }
+    }
+
     resetStack();
 }
 
-void VM::resetStack() { stackTop = stack; }
+void VM::resetStack() {
+    stackTop = stack;
+    m_frameCount = 0;
+}
 
 void VM::push(Value value) { *stackTop++ = value; }
 

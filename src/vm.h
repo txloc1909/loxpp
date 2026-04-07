@@ -1,6 +1,6 @@
 #pragma once
 
-#include "chunk.h"
+#include "function.h"
 #include "memory_manager.h"
 #include "table.h"
 
@@ -14,9 +14,16 @@ enum class InterpretResult {
     RUNTIME_ERROR,
 };
 
+struct CallFrame {
+    ObjFunction* function;
+    Chunk::const_iterator ip;
+    Value* slots; // points into the VM stack at this frame's base slot
+};
+
 class VM {
   public:
     static constexpr int STACK_MAX = 256;
+    static constexpr int FRAMES_MAX = 64;
 
     VM() : m_globals(VmAllocator<Entry>{&m_mm}) { resetStack(); }
 
@@ -26,6 +33,7 @@ class VM {
 
     // Runtime state inspection (for testing and debugging).
     int stackDepth() const { return static_cast<int>(stackTop - stack); }
+    int frameCount() const { return m_frameCount; }
     std::optional<Value> getGlobal(const std::string& name) const;
 
   private:
@@ -37,14 +45,15 @@ class VM {
     Value pop();
     Value peek(int distance);
 
+    bool call(ObjFunction* fn, int argCount);
     void runtimeError(const char* format, ...);
 
-    Chunk const* m_chunk;
-    Chunk::const_iterator m_ip;
+    CallFrame m_frames[FRAMES_MAX];
+    int m_frameCount{0};
     Value stack[STACK_MAX];
     Value* stackTop;
     MemoryManager m_mm;
     Table m_globals;
-    Value m_lastResult; // For testing/debugging only — stores the value popped
-                        // by Op::POP.
+    Value m_lastResult; // For testing/debugging only -- stores the value
+                        // popped by Op::POP.
 };
