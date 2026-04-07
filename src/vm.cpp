@@ -273,15 +273,15 @@ void VM::runtimeError(const char* format, ...) {
 
     // Print a stack trace (innermost frame first).
     for (int i = m_frameCount - 1; i >= 0; i--) {
-        const CallFrame& f = m_frames[i];
-        const Chunk& chunk = f.function->chunk;
-        auto offset = static_cast<int>(f.ip - chunk.cbegin()) - 1;
+        const CallFrame& frame = m_frames[i];
+        const Chunk& chunk = frame.function->chunk;
+        auto offset = static_cast<int>(frame.ip - chunk.cbegin()) - 1;
         int line = chunk.getLine(offset);
         std::fprintf(stderr, "[line %d] in ", line);
-        if (f.function->name == nullptr) {
+        if (frame.function->name == nullptr) {
             std::fprintf(stderr, "script\n");
         } else {
-            std::fprintf(stderr, "%s()\n", f.function->name->chars.c_str());
+            std::fprintf(stderr, "%s()\n", frame.function->name->chars.c_str());
         }
     }
 
