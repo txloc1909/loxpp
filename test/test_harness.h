@@ -30,9 +30,15 @@ std::string compile_program_to_bytecode(const std::string& source);
 // result. Use for multi-statement programs where only pass/fail matters.
 InterpretResult run_program(const std::string& source);
 
-// Compiles a Lox++ program and returns the bytecode of the Nth inner
-// ObjFunction constant found in the top-level script chunk (0-indexed).
-// Throws if there are fewer than (n+1) function constants.
+// Stage 1: compile source, return the Nth ObjFunction constant found in the
+// top-level script chunk (0-indexed). Throws if fewer than (n+1) exist.
+// Pass the MemoryManager used to compile so it owns the returned pointer.
+ObjFunction* find_inner_function(ObjFunction* script, int n = 0);
+
+// Stage 2: return a readable disassembly string for a compiled chunk.
+std::string disassemble_chunk(const Chunk& chunk, MemoryManager& mm);
+
+// Convenience: compile source, find the Nth inner function, disassemble it.
 std::string compile_fn_body_to_bytecode(const std::string& source, int n = 0);
 
 // ---------------------------------------------------------------------------
