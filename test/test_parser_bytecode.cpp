@@ -145,3 +145,67 @@ TEST_F(ParserBytecodeTest, Dedup_SameVariableReusesConstantSlot) {
                            "13: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
+
+// ===========================================================================
+// Function declaration bytecode tests
+// ===========================================================================
+
+class FunctionBytecodeTest : public ::testing::Test {};
+
+// fun foo() {} — empty body, no params.
+// Outer (script) chunk: CONSTANT(<fn foo>) + DEFINE_GLOBAL('foo') + NIL+RETURN
+// Inner (foo) chunk: NIL + RETURN (from emitReturn())
+TEST_F(FunctionBytecodeTest, EmptyFunction_OuterChunk) {
+    // Constant 0 = 'foo' (global name), constant 1 = <fn foo>
+    std::string bytecode = compile_program_to_bytecode("fun foo() {}");
+    std::string expected = "0: CONSTANT 1 ('<fn foo>')\n"
+                           "2: DEFINE_GLOBAL 0 ('foo')\n"
+                           "4: NIL\n"
+                           "5: RETURN\n";
+    EXPECT_EQ(trim(bytecode), trim(expected));
+}
+
+TEST_F(FunctionBytecodeTest, EmptyFunction_InnerChunk) {
+    std::string bytecode = compile_fn_body_to_bytecode("fun foo() {}");
+    std::string expected = "0: NIL\n"
+                           "1: RETURN\n";
+    EXPECT_EQ(trim(bytecode), trim(expected));
+}
+
+// fun add(a, b) { return a + b; }
+// Inner chunk: GET_LOCAL 1 (a), GET_LOCAL 2 (b), ADD, RETURN, NIL, RETURN
+// (The NIL+RETURN at the end is dead code emitted by endCompiler().)
+TEST_F(FunctionBytecodeTest, FunctionWithParams_InnerChunk) {
+    std::string src = "fun add(a, b) { return a + b; }";
+    std::string bytecode = compile_fn_body_to_bytecode(src);
+    std::string expected = "0: GET_LOCAL 1\n" // a — slot 1 (slot 0 = fn)
+                           "2: GET_LOCAL 2\n" // b — slot 2
+                           "4: ADD\n"
+                           "5: RETURN\n"
+                           "6: NIL\n" // dead code from endCompiler()
+                           "7: RETURN\n";
+    EXPECT_EQ(trim(bytecode), trim(expected));
+}
+
+// fun id(x) { return x; } — single param, return it
+TEST_F(FunctionBytecodeTest, FunctionSingleParam_InnerChunk) {
+    std::string src = "fun id(x) { return x; }";
+    std::string bytecode = compile_fn_body_to_bytecode(src);
+    std::string expected = "0: GET_LOCAL 1\n"
+                           "2: RETURN\n"
+                           "3: NIL\n"
+                           "4: RETURN\n";
+    EXPECT_EQ(trim(bytecode), trim(expected));
+}
+
+// fun noReturn() { var x = 1; } — no explicit return; body local is NOT
+// explicitly POPped: RETURN resets stackTop to frame->slots, cleaning the
+// frame in one shot. No endScope() is called for the outermost function scope.
+TEST_F(FunctionBytecodeTest, FunctionWithLocalVar_InnerChunk) {
+    std::string src = "fun noReturn() { var x = 1; }";
+    std::string bytecode = compile_fn_body_to_bytecode(src);
+    std::string expected = "0: CONSTANT 0 ('1')\n"
+                           "2: NIL\n"
+                           "3: RETURN\n";
+    EXPECT_EQ(trim(bytecode), trim(expected));
+}

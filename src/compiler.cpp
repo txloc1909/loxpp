@@ -10,7 +10,8 @@
 ObjFunction* compile(const std::string& source, MemoryManager* mm) {
     ObjFunction* fn = mm->create<ObjFunction>();
     auto parser = std::make_unique<Parser>(source);
-    auto compiler = std::make_unique<Compiler>(fn, parser.get(), mm);
+    auto compiler = std::make_unique<Compiler>(fn, parser.get(), mm,
+                                               FunctionType::SCRIPT, nullptr);
 
     while (!parser->check(TokenType::EOF_))
         compiler->declaration();
@@ -22,8 +23,10 @@ ObjFunction* compile(const std::string& source, MemoryManager* mm) {
     return fn;
 }
 
-Compiler::Compiler(ObjFunction* function, Parser* parser, MemoryManager* mm)
-    : m_function{function}, m_parser{parser}, m_mm{mm} {
+Compiler::Compiler(ObjFunction* function, Parser* parser, MemoryManager* mm,
+                   FunctionType type, Compiler* enclosing)
+    : m_function{function}, m_parser{parser}, m_mm{mm}, m_type{type},
+      m_enclosing{enclosing} {
     // Reserve slot 0 for the function/script itself. User-declared locals
     // start at slot 1. The implicit local has an empty name so resolveLocal
     // never accidentally matches it.
@@ -166,7 +169,9 @@ void Compiler::call() {
 }
 
 void Compiler::declaration() {
-    if (m_parser->match(TokenType::VAR)) {
+    if (m_parser->match(TokenType::FUN)) {
+        funDeclaration();
+    } else if (m_parser->match(TokenType::VAR)) {
         varDeclaration();
     } else {
         statement();
@@ -274,6 +279,8 @@ void Compiler::statement() {
         continueStatement();
     } else if (m_parser->match(TokenType::PRINT)) {
         printStatement();
+    } else if (m_parser->match(TokenType::RETURN)) {
+        returnStatement();
     } else {
         expressionStatement();
     }
@@ -402,6 +409,66 @@ void Compiler::continueStatement() {
     m_parser->consume(TokenType::SEMICOLON, "Expect ';' after 'continue'.");
     emitLoopCleanup();
     emitLoop(m_loopStack.back().start);
+}
+
+void Compiler::funDeclaration() {
+    m_parser->consume(TokenType::IDENTIFIER, "Expect function name.");
+    Token name = m_parser->m_previous;
+
+    uint8_t nameConst = 0;
+    if (m_scopeDepth > 0) {
+        declareVariable();
+        markInitialized(); // allow recursion inside the body
+    } else {
+        nameConst = identifierConstant(name);
+    }
+
+    ObjFunction* fn = m_mm->create<ObjFunction>();
+    fn->name = m_mm->makeString(name.lexeme);
+
+    Compiler inner(fn, m_parser, m_mm, FunctionType::FUNCTION, this);
+    inner.parseFunction(FunctionType::FUNCTION);
+
+    emitBytes(Op::CONSTANT, makeConstant(Value{static_cast<Obj*>(fn)}));
+    if (m_scopeDepth == 0) {
+        emitBytes(Op::DEFINE_GLOBAL, nameConst);
+    }
+}
+
+void Compiler::returnStatement() {
+    if (m_type == FunctionType::SCRIPT) {
+        m_parser->error("Can't return from top-level code.");
+        return;
+    }
+    if (m_parser->match(TokenType::SEMICOLON)) {
+        emitReturn();
+    } else {
+        expression();
+        m_parser->consume(TokenType::SEMICOLON,
+                          "Expect ';' after return value.");
+        emitByte(Op::RETURN);
+    }
+}
+
+void Compiler::parseFunction(FunctionType type) {
+    (void)type; // reserved for future use (e.g. methods vs. functions)
+    beginScope();
+    m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after function name.");
+    if (!m_parser->check(TokenType::RIGHT_PAREN)) {
+        do {
+            m_function->arity++;
+            if (m_function->arity > 255)
+                m_parser->error("Can't have more than 255 parameters.");
+            m_parser->consume(TokenType::IDENTIFIER, "Expect parameter name.");
+            declareVariable();
+            markInitialized();
+        } while (m_parser->match(TokenType::COMMA));
+    }
+    m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after parameters.");
+    m_parser->consume(TokenType::LEFT_BRACE,
+                      "Expect '{' before function body.");
+    block();
+    endCompiler();
 }
 
 void Compiler::and_() {
