@@ -18,6 +18,8 @@ std::string stringifyObj(Obj* obj) {
                std::string(fn->name->chars.data(), fn->name->chars.size()) +
                ">";
     }
+    case ObjType::NATIVE:
+        return "<native fn>";
     }
     return "<obj>";
 }

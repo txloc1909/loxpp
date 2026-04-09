@@ -2,16 +2,45 @@
 #include "debug.h"
 #include "function.h"
 #include "memory_manager.h"
+#include "native.h"
 #include "object.h"
 #include "scanner.h"
 #include "compiler.h"
 
 #include <cstdio>
 #include <cstdarg>
+#include <ctime>
 #include <functional>
 #include <iostream>
 #include <string>
 #include <unistd.h>
+
+// ---------------------------------------------------------------------------
+// Native function implementations
+// ---------------------------------------------------------------------------
+
+static Value clockNative(int /*argCount*/, Value* /*args*/) {
+    return from<Number>(static_cast<double>(std::clock()) / CLOCKS_PER_SEC);
+}
+
+// Read one line from stdin. Returns nil on EOF, otherwise an ObjString.
+// The VM pointer is smuggled via a thread-local so native functions can
+// allocate managed strings without changing the NativeFn signature.
+static MemoryManager* s_currentMM = nullptr;
+
+static Value inputNative(int /*argCount*/, Value* /*args*/) {
+    std::string line;
+    if (!std::getline(std::cin, line))
+        return from<Nil>(Nil{});
+    ObjString* s = s_currentMM->makeString(line);
+    return Value{static_cast<Obj*>(s)};
+}
+
+static Value strNative(int /*argCount*/, Value* args) {
+    std::string s = stringify(args[0]);
+    ObjString* obj = s_currentMM->makeString(s);
+    return Value{static_cast<Obj*>(obj)};
+}
 
 InterpretResult VM::interpret(const std::string& source) {
     ObjFunction* fn = compile(source, &m_mm);
@@ -19,6 +48,8 @@ InterpretResult VM::interpret(const std::string& source) {
         return InterpretResult::COMPILE_ERROR;
     }
 
+    defineNatives();
+    s_currentMM = &m_mm;
     push(Value{static_cast<Obj*>(fn)});
     call(fn, 0);
     return run();
@@ -233,14 +264,20 @@ InterpretResult VM::run() {
         case Op::CALL: {
             int argCount = readByte();
             Value callee = peek(argCount);
-            if (!isFunction(callee)) {
+            if (isNative(callee)) {
+                if (!callNative(asObjNative(callee), argCount)) {
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                frame = &m_frames[m_frameCount - 1];
+            } else if (isFunction(callee)) {
+                if (!call(asObjFunction(callee), argCount)) {
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                frame = &m_frames[m_frameCount - 1];
+            } else {
                 runtimeError("Can only call functions and classes.");
                 return InterpretResult::RUNTIME_ERROR;
             }
-            if (!call(asObjFunction(callee), argCount)) {
-                return InterpretResult::RUNTIME_ERROR;
-            }
-            frame = &m_frames[m_frameCount - 1];
             break;
         }
         case Op::RETURN: {
@@ -261,6 +298,30 @@ InterpretResult VM::run() {
     }
 
 #undef BINARY_OP
+}
+
+bool VM::callNative(ObjNative* native, int argCount) {
+    if (native->arity != -1 && argCount != native->arity) {
+        runtimeError("Expected %d arguments but got %d.", native->arity,
+                     argCount);
+        return false;
+    }
+    Value result = native->function(argCount, stackTop - argCount);
+    stackTop -= argCount + 1; // pop args + callee
+    push(result);
+    return true;
+}
+
+void VM::defineNative(const char* name, NativeFn fn, int arity) {
+    ObjNative* native = m_mm.create<ObjNative>(fn, arity);
+    ObjString* key = m_mm.makeString(name);
+    m_globals.set(key, Value{static_cast<Obj*>(native)});
+}
+
+void VM::defineNatives() {
+    defineNative("clock", clockNative, 0);
+    defineNative("input", inputNative, 0);
+    defineNative("str", strNative, 1);
 }
 
 void VM::runtimeError(const char* format, ...) {

@@ -2,6 +2,7 @@
 
 #include "function.h"
 #include "memory_manager.h"
+#include "native.h"
 #include "table.h"
 
 #include <memory>
@@ -46,6 +47,9 @@ class VM {
     Value peek(int distance);
 
     bool call(ObjFunction* fn, int argCount);
+    bool callNative(ObjNative* native, int argCount);
+    void defineNative(const char* name, NativeFn fn, int arity);
+    void defineNatives();
     void runtimeError(const char* format, ...);
 
     CallFrame m_frames[FRAMES_MAX];

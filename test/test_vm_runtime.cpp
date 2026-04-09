@@ -414,3 +414,118 @@ TEST_F(FunctionTest, LocalFunction) {
     ASSERT_EQ(h.run(src), InterpretResult::OK);
     EXPECT_EQ(h.lastResult(), from<Number>(16.0));
 }
+
+// ===========================================================================
+// Native function tests
+// ===========================================================================
+
+class NativeTest : public ::testing::Test {};
+
+// ---------------------------------------------------------------------------
+// clock()
+// ---------------------------------------------------------------------------
+
+TEST_F(NativeTest, Clock_ReturnsNumber) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("clock();"), InterpretResult::OK);
+    EXPECT_TRUE(is<Number>(h.lastResult()));
+}
+
+TEST_F(NativeTest, Clock_IsNonNegative) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("clock();"), InterpretResult::OK);
+    EXPECT_GE(as<Number>(h.lastResult()), 0.0);
+}
+
+TEST_F(NativeTest, Clock_NonDecreasing) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var t1 = clock(); var t2 = clock(); t2 - t1;"),
+              InterpretResult::OK);
+    EXPECT_GE(as<Number>(h.lastResult()), 0.0);
+}
+
+TEST_F(NativeTest, Clock_WrongArity_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("clock(1);"), InterpretResult::RUNTIME_ERROR);
+}
+
+// ---------------------------------------------------------------------------
+// str()
+// ---------------------------------------------------------------------------
+
+TEST_F(NativeTest, Str_Number) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("str(42);"), InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "42");
+}
+
+TEST_F(NativeTest, Str_NumberDecimal) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("str(3.14);"), InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "3.14");
+}
+
+TEST_F(NativeTest, Str_BoolTrue) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("str(true);"), InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "true");
+}
+
+TEST_F(NativeTest, Str_BoolFalse) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("str(false);"), InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "false");
+}
+
+TEST_F(NativeTest, Str_Nil) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("str(nil);"), InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "nil");
+}
+
+TEST_F(NativeTest, Str_String_IsIdentity) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("str(\"hello\");"), InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "hello");
+}
+
+TEST_F(NativeTest, Str_ResultIsString) {
+    // str() must return an ObjString, not just a printable value.
+    VMTestHarness h;
+    ASSERT_EQ(h.run("str(42);"), InterpretResult::OK);
+    EXPECT_TRUE(isString(h.lastResult()));
+}
+
+TEST_F(NativeTest, Str_WrongArity_TooFew_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("str();"), InterpretResult::RUNTIME_ERROR);
+}
+
+TEST_F(NativeTest, Str_WrongArity_TooMany_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("str(1, 2);"), InterpretResult::RUNTIME_ERROR);
+}
+
+// ---------------------------------------------------------------------------
+// Behavioural: natives usable in expressions
+// ---------------------------------------------------------------------------
+
+TEST_F(NativeTest, Str_UsableInConcatenation) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("\"value: \" + str(99);"), InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "value: 99");
+}
+
+TEST_F(NativeTest, NativesAreGlobalVariables) {
+    // Natives are just values stored in globals — they can be assigned to
+    // local variables and called through them.
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var s = str; s(7);"), InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "7");
+}
+
+TEST_F(NativeTest, StackCleanAfterNativeCall) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("str(1); str(2); str(3);"), InterpretResult::OK);
+    EXPECT_EQ(h.stackDepth(), 0);
+}
