@@ -50,8 +50,9 @@ InterpretResult VM::interpret(const std::string& source) {
 
     defineNatives();
     s_currentMM = &m_mm;
-    push(Value{static_cast<Obj*>(fn)});
-    call(fn, 0);
+    ObjClosure* closure = m_mm.create<ObjClosure>(fn);
+    push(Value{static_cast<Obj*>(closure)});
+    call(closure, 0);
     return run();
 }
 
@@ -64,7 +65,8 @@ uint16_t VM::readShort() {
 }
 
 Value VM::readConstant() {
-    return m_frames[m_frameCount - 1].function->chunk.getConstant(readByte());
+    return m_frames[m_frameCount - 1].closure->function->chunk.getConstant(
+        readByte());
 }
 
 Value VM::lastResult() const { return m_lastResult; }
@@ -79,7 +81,8 @@ std::optional<Value> VM::getGlobal(const std::string& name) const {
     return out;
 }
 
-bool VM::call(ObjFunction* fn, int argCount) {
+bool VM::call(ObjClosure* closure, int argCount) {
+    ObjFunction* fn = closure->function;
     if (argCount != fn->arity) {
         runtimeError("Expected %d arguments but got %d.", fn->arity, argCount);
         return false;
@@ -89,10 +92,37 @@ bool VM::call(ObjFunction* fn, int argCount) {
         return false;
     }
     CallFrame* frame = &m_frames[m_frameCount++];
-    frame->function = fn;
+    frame->closure = closure;
     frame->ip = fn->chunk.cbegin();
     frame->slots = stackTop - argCount - 1;
     return true;
+}
+
+ObjUpvalue* VM::captureUpvalue(Value* local) {
+    ObjUpvalue* prev = nullptr;
+    ObjUpvalue* cur = m_openUpvalues;
+    while (cur != nullptr && cur->location > local) {
+        prev = cur;
+        cur = cur->next;
+    }
+    if (cur != nullptr && cur->location == local)
+        return cur;
+    ObjUpvalue* uv = m_mm.create<ObjUpvalue>(local);
+    uv->next = cur;
+    if (prev == nullptr)
+        m_openUpvalues = uv;
+    else
+        prev->next = uv;
+    return uv;
+}
+
+void VM::closeUpvalues(Value* last) {
+    while (m_openUpvalues != nullptr && m_openUpvalues->location >= last) {
+        ObjUpvalue* uv = m_openUpvalues;
+        uv->closed = *uv->location;
+        uv->location = &uv->closed;
+        m_openUpvalues = uv->next;
+    }
 }
 
 InterpretResult VM::run() {
@@ -112,7 +142,7 @@ InterpretResult VM::run() {
     for (;;) {
 #ifdef LOXPP_DEBUG_TRACE_EXECUTION
         {
-            const Chunk& chunk = frame->function->chunk;
+            const Chunk& chunk = frame->closure->function->chunk;
             int currentOffset = static_cast<int>(frame->ip - chunk.cbegin());
             bool color = isatty(STDOUT_FILENO) != 0;
             std::printf("[line %d] ", chunk.getLine(currentOffset));
@@ -269,8 +299,8 @@ InterpretResult VM::run() {
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 frame = &m_frames[m_frameCount - 1];
-            } else if (isFunction(callee)) {
-                if (!call(asObjFunction(callee), argCount)) {
+            } else if (isClosure(callee)) {
+                if (!call(asObjClosure(callee), argCount)) {
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 frame = &m_frames[m_frameCount - 1];
@@ -280,12 +310,43 @@ InterpretResult VM::run() {
             }
             break;
         }
+        case Op::CLOSURE: {
+            ObjFunction* fn = asObjFunction(readConstant());
+            ObjClosure* cl = m_mm.create<ObjClosure>(fn);
+            push(Value{static_cast<Obj*>(cl)});
+            for (int i = 0; i < fn->upvalueCount; i++) {
+                uint8_t isLocal = readByte();
+                uint8_t index = readByte();
+                if (isLocal) {
+                    cl->upvalues[i] = captureUpvalue(frame->slots + index);
+                } else {
+                    cl->upvalues[i] = frame->closure->upvalues[index];
+                }
+            }
+            break;
+        }
+        case Op::GET_UPVALUE: {
+            uint8_t slot = readByte();
+            push(*frame->closure->upvalues[slot]->location);
+            break;
+        }
+        case Op::SET_UPVALUE: {
+            uint8_t slot = readByte();
+            *frame->closure->upvalues[slot]->location = peek(0);
+            break;
+        }
+        case Op::CLOSE_UPVALUE: {
+            closeUpvalues(stackTop - 1);
+            pop();
+            break;
+        }
         case Op::RETURN: {
             Value result = pop();
+            closeUpvalues(frame->slots);
             m_frameCount--;
             if (m_frameCount == 0) {
                 // Finished executing the top-level script.
-                pop(); // remove the script ObjFunction from the stack
+                pop(); // remove the script ObjClosure from the stack
                 return InterpretResult::OK;
             }
             // Discard the callee's stack window and push return value.
@@ -335,14 +396,15 @@ void VM::runtimeError(const char* format, ...) {
     // Print a stack trace (innermost frame first).
     for (int i = m_frameCount - 1; i >= 0; i--) {
         const CallFrame& frame = m_frames[i];
-        const Chunk& chunk = frame.function->chunk;
+        ObjFunction* fn = frame.closure->function;
+        const Chunk& chunk = fn->chunk;
         auto offset = static_cast<int>(frame.ip - chunk.cbegin()) - 1;
         int line = chunk.getLine(offset);
         std::fprintf(stderr, "[line %d] in ", line);
-        if (frame.function->name == nullptr) {
+        if (fn->name == nullptr) {
             std::fprintf(stderr, "script\n");
         } else {
-            std::fprintf(stderr, "%s()\n", frame.function->name->chars.c_str());
+            std::fprintf(stderr, "%s()\n", fn->name->chars.c_str());
         }
     }
 
