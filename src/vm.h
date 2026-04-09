@@ -16,7 +16,7 @@ enum class InterpretResult {
 };
 
 struct CallFrame {
-    ObjFunction* function;
+    ObjClosure* closure;
     Chunk::const_iterator ip;
     Value* slots; // points into the VM stack at this frame's base slot
 };
@@ -46,10 +46,12 @@ class VM {
     Value pop();
     Value peek(int distance);
 
-    bool call(ObjFunction* fn, int argCount);
+    bool call(ObjClosure* closure, int argCount);
     bool callNative(ObjNative* native, int argCount);
     void defineNative(const char* name, NativeFn fn, int arity);
     void defineNatives();
+    ObjUpvalue* captureUpvalue(Value* local);
+    void closeUpvalues(Value* last);
     void runtimeError(const char* format, ...);
 
     CallFrame m_frames[FRAMES_MAX];
@@ -58,6 +60,7 @@ class VM {
     Value* stackTop;
     MemoryManager m_mm;
     Table m_globals;
+    ObjUpvalue* m_openUpvalues{nullptr};
     Value m_lastResult; // For testing/debugging only -- stores the value
                         // popped by Op::POP.
 };

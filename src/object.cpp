@@ -20,6 +20,16 @@ std::string stringifyObj(Obj* obj) {
     }
     case ObjType::NATIVE:
         return "<native fn>";
+    case ObjType::CLOSURE: {
+        auto* fn = static_cast<ObjClosure*>(obj)->function;
+        if (fn->name == nullptr)
+            return "<script>";
+        return "<fn " +
+               std::string(fn->name->chars.data(), fn->name->chars.size()) +
+               ">";
+    }
+    case ObjType::UPVALUE:
+        return "<upvalue>";
     }
     return "<obj>";
 }

@@ -35,6 +35,10 @@ enum class Op : Byte {
     LOOP,
     CALL,
     RETURN,
+    CLOSURE,
+    GET_UPVALUE,
+    SET_UPVALUE,
+    CLOSE_UPVALUE,
 };
 
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }

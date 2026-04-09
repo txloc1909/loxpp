@@ -153,12 +153,12 @@ TEST_F(ParserBytecodeTest, Dedup_SameVariableReusesConstantSlot) {
 class FunctionBytecodeTest : public ::testing::Test {};
 
 // fun foo() {} — empty body, no params.
-// Outer (script) chunk: CONSTANT(<fn foo>) + DEFINE_GLOBAL('foo') + NIL+RETURN
+// Outer (script) chunk: CLOSURE(<fn foo>) + DEFINE_GLOBAL('foo') + NIL+RETURN
 // Inner (foo) chunk: NIL + RETURN (from emitReturn())
 TEST_F(FunctionBytecodeTest, EmptyFunction_OuterChunk) {
     // Constant 0 = 'foo' (global name), constant 1 = <fn foo>
     std::string bytecode = compile_program_to_bytecode("fun foo() {}");
-    std::string expected = "0: CONSTANT 1 ('<fn foo>')\n"
+    std::string expected = "0: CLOSURE 1 ('<fn foo>')\n"
                            "2: DEFINE_GLOBAL 0 ('foo')\n"
                            "4: NIL\n"
                            "5: RETURN\n";
