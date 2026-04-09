@@ -1,4 +1,6 @@
 #include "memory_manager.h"
+#include "function.h"
+#include "native.h"
 #include "value.h"
 
 MemoryManager::MemoryManager() : m_strings(VmAllocator<Entry>{this}) {}
@@ -45,4 +47,76 @@ void MemoryManager::collectAll() {
     }
     allObjects.clear();
     bytesAllocated = 0;
+}
+
+void MemoryManager::setMarkRootsCallback(std::function<void()> cb) {
+    m_markRoots = std::move(cb);
+}
+
+void MemoryManager::markObject(Obj* obj) {
+    if (obj == nullptr || obj->marked) return;
+    obj->marked = true;
+    m_grayStack.push_back(obj);
+}
+
+void MemoryManager::markValue(const Value& v) {
+    if (isObj(v)) markObject(as<Obj*>(v));
+}
+
+void MemoryManager::traceReferences() {
+    while (!m_grayStack.empty()) {
+        Obj* obj = m_grayStack.back();
+        m_grayStack.pop_back();
+        traceObject(obj);
+    }
+}
+
+void MemoryManager::traceObject(Obj* obj) {
+    switch (obj->type) {
+    case ObjType::STRING: break;
+    case ObjType::NATIVE: break;
+    case ObjType::UPVALUE:
+        markValue(static_cast<ObjUpvalue*>(obj)->closed);
+        break;
+    case ObjType::FUNCTION: {
+        auto* fn = static_cast<ObjFunction*>(obj);
+        markObject(fn->name);
+        const auto& consts = fn->chunk.constants();
+        for (uint8_t i = 0; i < consts.size(); i++)
+            markValue(consts.at(i));
+        break;
+    }
+    case ObjType::CLOSURE: {
+        auto* cl = static_cast<ObjClosure*>(obj);
+        markObject(cl->function);
+        for (auto* uv : cl->upvalues)
+            markObject(uv);
+        break;
+    }
+    }
+}
+
+void MemoryManager::removeWhiteStrings() {
+    m_strings.removeUnmarkedKeys();
+}
+
+void MemoryManager::sweep() {
+    auto it = allObjects.begin();
+    while (it != allObjects.end()) {
+        if ((*it)->marked) {
+            (*it)->marked = false;
+            ++it;
+        } else {
+            delete *it;
+            it = allObjects.erase(it);
+        }
+    }
+    m_nextGC = bytesAllocated * GC_HEAP_GROW_FACTOR;
+}
+
+void MemoryManager::collectGarbage() {
+    m_markRoots();
+    traceReferences();
+    removeWhiteStrings();
+    sweep();
 }

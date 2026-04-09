@@ -57,6 +57,7 @@ class Chunk : std::vector<Byte> {
     void patch(int offset, Byte byte);
     std::optional<uint8_t> addConstant(Value value);
     Value getConstant(int idx) const;
+    const ValueArray& constants() const { return m_constants; }
     int getLine(int offset) const;
 
   private:

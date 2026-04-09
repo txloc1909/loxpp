@@ -53,6 +53,7 @@ InterpretResult VM::interpret(const std::string& source) {
     ObjClosure* closure = m_mm.create<ObjClosure>(fn);
     push(Value{static_cast<Obj*>(closure)});
     call(closure, 0);
+    m_mm.setMarkRootsCallback([this]() { markRoots(); });
     return run();
 }
 
@@ -409,6 +410,19 @@ void VM::runtimeError(const char* format, ...) {
     }
 
     resetStack();
+}
+
+void VM::markRoots() {
+    for (Value* slot = stack; slot < stackTop; ++slot)
+        m_mm.markValue(*slot);
+    for (int i = 0; i < m_frameCount; ++i)
+        m_mm.markObject(m_frames[i].closure);
+    for (ObjUpvalue* uv = m_openUpvalues; uv != nullptr; uv = uv->next)
+        m_mm.markObject(uv);
+    m_globals.forEach([this](ObjString* key, Value val) {
+        m_mm.markObject(key);
+        m_mm.markValue(val);
+    });
 }
 
 void VM::resetStack() {

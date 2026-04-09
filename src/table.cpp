@@ -104,3 +104,12 @@ ObjString* Table::findString(const char* chars, int length,
         index = (index + 1) % static_cast<uint32_t>(cap);
     }
 }
+
+void Table::removeUnmarkedKeys() {
+    for (auto& entry : m_buckets) {
+        if (entry.key != nullptr && !entry.key->marked) {
+            entry.key = nullptr;
+            entry.value = Value{true}; // tombstone (same as del())
+        }
+    }
+}
