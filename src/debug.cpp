@@ -1,4 +1,5 @@
 #include "debug.h"
+#include "function.h"
 #include "memory_manager.h"
 #include "value.h"
 
@@ -49,6 +50,25 @@ static int jumpInstruction(const char* name, int sign, const Chunk& chunk,
     out << cc(color, kBold) << name << cc(color, kReset) << ' ' << offset
         << " -> " << target << '\n';
     return offset + 3;
+}
+
+static int closureInstruction(const char* name, const Chunk& chunk, int offset,
+                              std::ostream& out, bool color) {
+    uint8_t idx = chunk.at(offset + 1);
+    Value fnVal = chunk.getConstant(idx);
+    ObjFunction* fn = asObjFunction(fnVal);
+    out << cc(color, kBold) << name << cc(color, kReset) << ' '
+        << static_cast<int>(idx) << " ('" << cc(color, kYellow)
+        << stringify(fnVal) << cc(color, kReset) << "')\n";
+    offset += 2;
+    for (int i = 0; i < fn->upvalueCount; i++) {
+        uint8_t isLocal = chunk.at(offset++);
+        uint8_t index = chunk.at(offset++);
+        out << cc(color, kDim) << "           |  "
+            << (isLocal ? "local" : "upvalue") << ' ' << static_cast<int>(index)
+            << cc(color, kReset) << '\n';
+    }
+    return offset;
 }
 
 void disassembleChunk(const Chunk& chunk, const MemoryManager& mm,
@@ -117,6 +137,14 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return byteInstruction("CALL", chunk, offset, out, color);
     case Op::RETURN:
         return simpleInstruction("RETURN", offset, out, color);
+    case Op::CLOSURE:
+        return closureInstruction("CLOSURE", chunk, offset, out, color);
+    case Op::GET_UPVALUE:
+        return byteInstruction("GET_UPVALUE", chunk, offset, out, color);
+    case Op::SET_UPVALUE:
+        return byteInstruction("SET_UPVALUE", chunk, offset, out, color);
+    case Op::CLOSE_UPVALUE:
+        return simpleInstruction("CLOSE_UPVALUE", offset, out, color);
     default:
         out << cc(color, kRed) << cc(color, kBold) << "UNKNOWN("
             << static_cast<unsigned>(chunk.at(offset)) << ")"
