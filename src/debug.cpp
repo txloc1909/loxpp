@@ -65,8 +65,8 @@ static int closureInstruction(const char* name, const Chunk& chunk, int offset,
         uint8_t isLocal = chunk.at(offset++);
         uint8_t index = chunk.at(offset++);
         out << cc(color, kDim) << "           |  "
-            << (isLocal ? "local" : "upvalue") << ' ' << static_cast<int>(index)
-            << cc(color, kReset) << '\n';
+            << (isLocal != 0U ? "local" : "upvalue") << ' '
+            << static_cast<int>(index) << cc(color, kReset) << '\n';
     }
     return offset;
 }
