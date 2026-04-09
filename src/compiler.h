@@ -19,6 +19,12 @@ enum class FunctionType { SCRIPT, FUNCTION };
 struct Local {
     Token name;
     int depth; // -1 = declared but not yet initialized; >=0 = scope depth
+    bool isCaptured{false};
+};
+
+struct Upvalue {
+    uint8_t index;
+    bool isLocal; // true = captures a local of the immediately enclosing fn
 };
 
 struct LoopContext {
@@ -70,6 +76,8 @@ class Compiler {
 
     void addLocal(const Token& name);
     int resolveLocal(const Token& name) const;
+    int addUpvalue(uint8_t index, bool isLocal);
+    int resolveUpvalue(const Token& name);
     void declareVariable();
     void markInitialized();
 
@@ -97,5 +105,7 @@ class Compiler {
     Local m_locals[UINT8_COUNT];
     int m_localCount{0};
     int m_scopeDepth{0};
+    Upvalue m_upvalues[UINT8_COUNT];
+    int m_upvalueCount{0};
     std::vector<LoopContext> m_loopStack;
 };

@@ -215,7 +215,10 @@ void Compiler::endScope() {
     m_scopeDepth--;
     while (m_localCount > 0 &&
            m_locals[m_localCount - 1].depth > m_scopeDepth) {
-        emitByte(Op::POP);
+        if (m_locals[m_localCount - 1].isCaptured)
+            emitByte(Op::CLOSE_UPVALUE);
+        else
+            emitByte(Op::POP);
         m_localCount--;
     }
 }
@@ -238,6 +241,34 @@ int Compiler::resolveLocal(const Token& name) const {
             return i;
         }
     }
+    return -1;
+}
+
+int Compiler::addUpvalue(uint8_t index, bool isLocal) {
+    for (int i = 0; i < m_upvalueCount; i++) {
+        if (m_upvalues[i].index == index && m_upvalues[i].isLocal == isLocal)
+            return i;
+    }
+    if (m_upvalueCount == UINT8_COUNT) {
+        m_parser->error("Too many closure variables in function.");
+        return 0;
+    }
+    m_upvalues[m_upvalueCount] = {index, isLocal};
+    m_function->upvalueCount = m_upvalueCount + 1;
+    return m_upvalueCount++;
+}
+
+int Compiler::resolveUpvalue(const Token& name) {
+    if (m_enclosing == nullptr)
+        return -1;
+    int local = m_enclosing->resolveLocal(name);
+    if (local != -1) {
+        m_enclosing->m_locals[local].isCaptured = true;
+        return addUpvalue(static_cast<uint8_t>(local), true);
+    }
+    int upvalue = m_enclosing->resolveUpvalue(name);
+    if (upvalue != -1)
+        return addUpvalue(static_cast<uint8_t>(upvalue), false);
     return -1;
 }
 
@@ -429,7 +460,11 @@ void Compiler::funDeclaration() {
     Compiler inner(fn, m_parser, m_mm, FunctionType::FUNCTION, this);
     inner.parseFunction(FunctionType::FUNCTION);
 
-    emitBytes(Op::CONSTANT, makeConstant(Value{static_cast<Obj*>(fn)}));
+    emitBytes(Op::CLOSURE, makeConstant(Value{static_cast<Obj*>(fn)}));
+    for (int i = 0; i < fn->upvalueCount; i++) {
+        emitByte(inner.m_upvalues[i].isLocal ? 1 : 0);
+        emitByte(inner.m_upvalues[i].index);
+    }
     if (m_scopeDepth == 0) {
         emitBytes(Op::DEFINE_GLOBAL, nameConst);
     }
@@ -559,6 +594,10 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
     if (slot != -1) {
         getOp = Op::GET_LOCAL;
         setOp = Op::SET_LOCAL;
+        operand = static_cast<uint8_t>(slot);
+    } else if ((slot = resolveUpvalue(name)) != -1) {
+        getOp = Op::GET_UPVALUE;
+        setOp = Op::SET_UPVALUE;
         operand = static_cast<uint8_t>(slot);
     } else {
         getOp = Op::GET_GLOBAL;
