@@ -39,9 +39,11 @@ class Compiler {
     Compiler(ObjFunction* function, Parser* parser, MemoryManager* mm,
              FunctionType type = FunctionType::SCRIPT,
              Compiler* enclosing = nullptr);
+    ~Compiler();
 
     Chunk* getCurrentChunk() const { return &m_function->chunk; }
     void endCompiler();
+    void markRoots(MemoryManager& mm) const;
 
     void expression();
     void grouping();

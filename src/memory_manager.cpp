@@ -1,4 +1,5 @@
 #include "memory_manager.h"
+#include "compiler.h"
 #include "function.h"
 #include "native.h"
 #include "value.h"
@@ -53,14 +54,18 @@ void MemoryManager::setMarkRootsCallback(std::function<void()> cb) {
     m_markRoots = std::move(cb);
 }
 
+void MemoryManager::setCurrentCompiler(Compiler* c) { m_currentCompiler = c; }
+
 void MemoryManager::markObject(Obj* obj) {
-    if (obj == nullptr || obj->marked) return;
+    if (obj == nullptr || obj->marked)
+        return;
     obj->marked = true;
     m_grayStack.push_back(obj);
 }
 
 void MemoryManager::markValue(const Value& v) {
-    if (isObj(v)) markObject(as<Obj*>(v));
+    if (isObj(v))
+        markObject(as<Obj*>(v));
 }
 
 void MemoryManager::traceReferences() {
@@ -73,8 +78,10 @@ void MemoryManager::traceReferences() {
 
 void MemoryManager::traceObject(Obj* obj) {
     switch (obj->type) {
-    case ObjType::STRING: break;
-    case ObjType::NATIVE: break;
+    case ObjType::STRING:
+        break;
+    case ObjType::NATIVE:
+        break;
     case ObjType::UPVALUE:
         markValue(static_cast<ObjUpvalue*>(obj)->closed);
         break;
@@ -96,9 +103,7 @@ void MemoryManager::traceObject(Obj* obj) {
     }
 }
 
-void MemoryManager::removeWhiteStrings() {
-    m_strings.removeUnmarkedKeys();
-}
+void MemoryManager::removeWhiteStrings() { m_strings.removeUnmarkedKeys(); }
 
 void MemoryManager::sweep() {
     auto it = allObjects.begin();
@@ -115,7 +120,10 @@ void MemoryManager::sweep() {
 }
 
 void MemoryManager::collectGarbage() {
-    m_markRoots();
+    if (m_markRoots)
+        m_markRoots();
+    if (m_currentCompiler)
+        m_currentCompiler->markRoots(*this);
     traceReferences();
     removeWhiteStrings();
     sweep();

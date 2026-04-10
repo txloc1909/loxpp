@@ -33,6 +33,16 @@ Compiler::Compiler(ObjFunction* function, Parser* parser, MemoryManager* mm,
     Local* implicit = &m_locals[m_localCount++];
     implicit->depth = 0;
     implicit->name = Token{TokenType::IDENTIFIER, "", 0};
+
+    m_mm->setCurrentCompiler(this);
+}
+
+Compiler::~Compiler() { m_mm->setCurrentCompiler(m_enclosing); }
+
+void Compiler::markRoots(MemoryManager& mm) const {
+    mm.markObject(m_function);
+    if (m_enclosing)
+        m_enclosing->markRoots(mm);
 }
 
 void Compiler::endCompiler() {
