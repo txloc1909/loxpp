@@ -12,7 +12,7 @@
 //   memory_manager.h → object.h, table.h → vm_allocator.h
 struct VmAllocBase {
     std::size_t bytesAllocated{0};
-    void* rawAlloc(std::size_t bytes) {
+    virtual void* rawAlloc(std::size_t bytes) {
         bytesAllocated += bytes;
         return ::operator new(bytes);
     }
@@ -20,6 +20,7 @@ struct VmAllocBase {
         bytesAllocated -= bytes;
         ::operator delete(p);
     }
+    virtual ~VmAllocBase() = default;
 };
 
 template <typename T>
