@@ -31,6 +31,7 @@ add_executable(test_local_variables test_local_variables.cpp test_harness.cpp ${
 add_executable(test_control_flow test_control_flow.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_vm_runtime test_vm_runtime.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_closures test_closures.cpp test_harness.cpp ${FULL_SRCS})
+add_executable(test_stress_gc test_stress_gc.cpp test_harness.cpp ${FULL_SRCS})
 
 target_include_directories(test_main PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_scanner PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -42,6 +43,9 @@ target_include_directories(test_local_variables PRIVATE ${PROJECT_SOURCE_DIR}/sr
 target_include_directories(test_control_flow PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_vm_runtime PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_closures PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(test_stress_gc PRIVATE ${PROJECT_SOURCE_DIR}/src)
+
+target_compile_definitions(test_stress_gc PRIVATE LOXPP_STRESS_GC)
 
 target_link_libraries(test_scanner PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_parser_vm PRIVATE GTest::GTest GTest::Main)
@@ -52,6 +56,7 @@ target_link_libraries(test_local_variables PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_control_flow PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_vm_runtime PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_closures PRIVATE GTest::GTest GTest::Main)
+target_link_libraries(test_stress_gc PRIVATE GTest::GTest GTest::Main)
 
 add_test(NAME TestMain COMMAND test_main)
 add_test(NAME TestScanner COMMAND test_scanner)
@@ -63,3 +68,4 @@ add_test(NAME TestLocalVariables COMMAND test_local_variables)
 add_test(NAME TestControlFlow COMMAND test_control_flow)
 add_test(NAME TestVMRuntime COMMAND test_vm_runtime)
 add_test(NAME TestClosures COMMAND test_closures)
+add_test(NAME TestStressGC COMMAND test_stress_gc)

@@ -33,6 +33,13 @@ MemoryManager::MemoryManager() : m_strings(VmAllocator<Entry>{this}) {}
 
 MemoryManager::~MemoryManager() { collectAll(); }
 
+void* MemoryManager::rawAlloc(std::size_t bytes) {
+    bytesAllocated += bytes;
+    if (bytesAllocated > m_nextGC)
+        collectGarbage();
+    return ::operator new(bytes);
+}
+
 void MemoryManager::release(Obj* obj, std::size_t size) {
     bytesAllocated -= size;
     delete obj;

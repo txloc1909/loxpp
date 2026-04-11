@@ -44,6 +44,8 @@ class MemoryManager : public VmAllocBase {
 
     void collectAll();
 
+    void* rawAlloc(std::size_t bytes) override;
+
     void setMarkRootsCallback(std::function<void()> cb);
     void setCurrentCompiler(Compiler* c);
     void markObject(Obj* obj);
@@ -64,6 +66,10 @@ class MemoryManager : public VmAllocBase {
     std::vector<Obj*> m_grayStack;
     std::function<void()> m_markRoots;
     Compiler* m_currentCompiler{nullptr};
+#ifdef LOXPP_STRESS_GC
+    std::size_t m_nextGC{0};
+#else
     std::size_t m_nextGC{1024 * 1024};
+#endif
     static constexpr int GC_HEAP_GROW_FACTOR = 2;
 };

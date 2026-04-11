@@ -59,6 +59,11 @@ option(LOXPP_DEBUG_LOG_GC
 if(LOXPP_DEBUG_LOG_GC)
     target_compile_definitions(loxpp PRIVATE LOXPP_DEBUG_LOG_GC)
 endif()
+option(LOXPP_STRESS_GC
+    "Force garbage collection on every allocation (sets m_nextGC=0)" ${_debug_default})
+if(LOXPP_STRESS_GC)
+    target_compile_definitions(loxpp PRIVATE LOXPP_STRESS_GC)
+endif()
 
 # Readline support for the REPL.
 find_library(READLINE_LIB readline)
