@@ -80,7 +80,9 @@ struct ObjInstance : public Obj {
 };
 
 inline bool isObjInstance(Obj* o) { return isObjType(o, ObjType::INSTANCE); }
-inline ObjInstance* asObjInstance(Obj* o) { return static_cast<ObjInstance*>(o); }
+inline ObjInstance* asObjInstance(Obj* o) {
+    return static_cast<ObjInstance*>(o);
+}
 inline bool isInstance(const Value& v) {
     return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::INSTANCE;
 }

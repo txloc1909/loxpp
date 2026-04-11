@@ -33,7 +33,8 @@ std::string stringifyObj(Obj* obj) {
         return "<upvalue>";
     case ObjType::CLASS: {
         auto* klass = static_cast<ObjClass*>(obj);
-        return std::string(klass->name->chars.data(), klass->name->chars.size());
+        return std::string(klass->name->chars.data(),
+                           klass->name->chars.size());
     }
     case ObjType::INSTANCE: {
         auto* inst = static_cast<ObjInstance*>(obj);

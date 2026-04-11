@@ -313,8 +313,8 @@ InterpretResult VM::run() {
                 frame = &m_frames[m_frameCount - 1];
             } else if (isClass(callee)) {
                 ObjClass* klass = asObjClass(as<Obj*>(callee));
-                ObjInstance* instance = m_mm.create<ObjInstance>(
-                    klass, VmAllocator<Entry>{&m_mm});
+                ObjInstance* instance =
+                    m_mm.create<ObjInstance>(klass, VmAllocator<Entry>{&m_mm});
                 // Replace the class on the stack with the new instance.
                 stackTop[-argCount - 1] = Value{static_cast<Obj*>(instance)};
                 if (argCount != 0) {
@@ -329,7 +329,8 @@ InterpretResult VM::run() {
         }
         case Op::CLASS: {
             ObjString* name = asObjString(readConstant());
-            ObjClass* klass = m_mm.create<ObjClass>(name, VmAllocator<Entry>{&m_mm});
+            ObjClass* klass =
+                m_mm.create<ObjClass>(name, VmAllocator<Entry>{&m_mm});
             push(Value{static_cast<Obj*>(klass)});
             break;
         }
