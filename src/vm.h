@@ -53,6 +53,7 @@ class VM {
     ObjUpvalue* captureUpvalue(Value* local);
     void closeUpvalues(Value* last);
     void runtimeError(const char* format, ...);
+    void markRoots();
 
     CallFrame m_frames[FRAMES_MAX];
     int m_frameCount{0};

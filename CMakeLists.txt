@@ -54,6 +54,11 @@ endif()
 if(LOXPP_DEBUG_TRACE_EXECUTION)
     target_compile_definitions(loxpp PRIVATE LOXPP_DEBUG_TRACE_EXECUTION)
 endif()
+option(LOXPP_DEBUG_LOG_GC
+    "Log GC mark, trace, and sweep events to stderr" ${_debug_default})
+if(LOXPP_DEBUG_LOG_GC)
+    target_compile_definitions(loxpp PRIVATE LOXPP_DEBUG_LOG_GC)
+endif()
 
 # Readline support for the REPL.
 find_library(READLINE_LIB readline)

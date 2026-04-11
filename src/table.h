@@ -7,8 +7,6 @@
 #include "value.h"
 #include "vm_allocator.h"
 
-struct ObjString;
-
 struct Entry {
     ObjString* key{nullptr};
     Value value{Nil{}};
@@ -27,6 +25,14 @@ class Table {
     bool del(ObjString* key);
     void addAll(const Table& from);
     ObjString* findString(const char* chars, int length, uint32_t hash) const;
+    void removeUnmarkedKeys();
+
+    template <typename F>
+    void forEach(F&& fn) const {
+        for (const auto& entry : m_buckets)
+            if (entry.key != nullptr)
+                fn(entry.key, entry.value);
+    }
 
   private:
     static constexpr double MAX_LOAD = 0.75;

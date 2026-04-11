@@ -4,8 +4,11 @@
 #include "table.h"
 #include "vm_allocator.h"
 
+#include <functional>
 #include <string_view>
 #include <vector>
+
+class Compiler;
 
 class MemoryManager : public VmAllocBase {
   public:
@@ -21,6 +24,8 @@ class MemoryManager : public VmAllocBase {
     // Creates and takes ownership of a new Obj subclass.
     template <typename T, typename... Args>
     T* create(Args&&... args) {
+        if (bytesAllocated > m_nextGC)
+            collectGarbage();
         bytesAllocated += sizeof(T);
         T* p = new T(std::forward<Args>(args)...);
         allObjects.push_back(p);
@@ -39,9 +44,26 @@ class MemoryManager : public VmAllocBase {
 
     void collectAll();
 
+    void setMarkRootsCallback(std::function<void()> cb);
+    void setCurrentCompiler(Compiler* c);
+    void markObject(Obj* obj);
+    void markValue(const Value& v);
+    void collectGarbage();
+
   private:
+    void traceReferences();
+    void traceObject(Obj* obj);
+    void removeWhiteStrings();
+    void sweep();
+
     // Plain std::vector — using VmAllocator here would cause infinite recursion
     // inside rawAlloc when push_back triggers a reallocation.
     std::vector<Obj*> allObjects;
     Table m_strings;
+
+    std::vector<Obj*> m_grayStack;
+    std::function<void()> m_markRoots;
+    Compiler* m_currentCompiler{nullptr};
+    std::size_t m_nextGC{1024 * 1024};
+    static constexpr int GC_HEAP_GROW_FACTOR = 2;
 };
