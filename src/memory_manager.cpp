@@ -6,6 +6,19 @@
 
 #include <cstdio>
 
+#ifdef LOXPP_DEBUG_LOG_GC
+static const char* objTypeName(ObjType type) {
+    switch (type) {
+    case ObjType::STRING:   return "string";
+    case ObjType::FUNCTION: return "function";
+    case ObjType::NATIVE:   return "native";
+    case ObjType::UPVALUE:  return "upvalue";
+    case ObjType::CLOSURE:  return "closure";
+    }
+    return "?";
+}
+#endif
+
 MemoryManager::MemoryManager() : m_strings(VmAllocator<Entry>{this}) {}
 
 MemoryManager::~MemoryManager() { collectAll(); }
@@ -126,11 +139,8 @@ void MemoryManager::sweep() {
             // Use type-only log: stringifyObj dereferences fn->name which may
             // already be freed if the name ObjString appeared earlier in
             // allObjects.
-            static constexpr const char* kTypeNames[] = {
-                "string", "function", "native", "upvalue", "closure"};
-            auto typeIdx = static_cast<int>((*it)->type);
             fprintf(stderr, "[GC] free   %p (%s)\n", static_cast<void*>(*it),
-                    typeIdx >= 0 && typeIdx < 5 ? kTypeNames[typeIdx] : "?");
+                    objTypeName((*it)->type));
 #endif
             delete *it;
             it = allObjects.erase(it);
