@@ -1,5 +1,6 @@
 #include "object.h"
 #include "function.h"
+#include "table.h"
 
 #include <cstdio>
 #include <string>
@@ -30,6 +31,16 @@ std::string stringifyObj(Obj* obj) {
     }
     case ObjType::UPVALUE:
         return "<upvalue>";
+    case ObjType::CLASS: {
+        auto* klass = static_cast<ObjClass*>(obj);
+        return std::string(klass->name->chars.data(), klass->name->chars.size());
+    }
+    case ObjType::INSTANCE: {
+        auto* inst = static_cast<ObjInstance*>(obj);
+        return std::string(inst->klass->name->chars.data(),
+                           inst->klass->name->chars.size()) +
+               " instance";
+    }
     }
     return "<obj>";
 }

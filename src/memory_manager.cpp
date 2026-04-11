@@ -2,6 +2,7 @@
 #include "compiler.h"
 #include "function.h"
 #include "native.h"
+#include "table.h"
 #include "value.h"
 
 #include <cstdio>
@@ -19,6 +20,10 @@ static const char* objTypeName(ObjType type) {
         return "upvalue";
     case ObjType::CLOSURE:
         return "closure";
+    case ObjType::CLASS:
+        return "class";
+    case ObjType::INSTANCE:
+        return "instance";
     }
     return "?";
 }
@@ -126,6 +131,24 @@ void MemoryManager::traceObject(Obj* obj) {
         markObject(cl->function);
         for (auto* uv : cl->upvalues)
             markObject(uv);
+        break;
+    }
+    case ObjType::CLASS: {
+        auto* klass = static_cast<ObjClass*>(obj);
+        markObject(klass->name);
+        klass->methods.forEach([this](ObjString* k, Value v) {
+            markObject(k);
+            markValue(v);
+        });
+        break;
+    }
+    case ObjType::INSTANCE: {
+        auto* inst = static_cast<ObjInstance*>(obj);
+        markObject(inst->klass);
+        inst->fields.forEach([this](ObjString* k, Value v) {
+            markObject(k);
+            markValue(v);
+        });
         break;
     }
     }
