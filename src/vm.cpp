@@ -48,10 +48,16 @@ InterpretResult VM::interpret(const std::string& source) {
         return InterpretResult::COMPILE_ERROR;
     }
 
+    // Root fn on the stack before any allocation (defineNatives,
+    // create<ObjClosure>) can trigger GC. Without this, fn is unreachable
+    // between compile() returning and push(closure) — the Compiler has already
+    // been destroyed and m_currentCompiler is nullptr.
+    push(Value{static_cast<Obj*>(fn)});
     defineNatives();
     s_currentMM = &m_mm;
     ObjClosure* closure = m_mm.create<ObjClosure>(fn);
-    push(Value{static_cast<Obj*>(closure)});
+    stackTop[-1] = Value{
+        static_cast<Obj*>(closure)}; // replace fn with its closure in-place
     call(closure, 0);
     m_mm.setMarkRootsCallback([this]() { markRoots(); });
     return run();

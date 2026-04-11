@@ -64,8 +64,8 @@ void MemoryManager::markObject(Obj* obj) {
     obj->marked = true;
     m_grayStack.push_back(obj);
 #ifdef LOXPP_DEBUG_LOG_GC
-    fprintf(stderr, "[GC] mark   %p %s\n",
-            static_cast<void*>(obj), stringifyObj(obj).c_str());
+    fprintf(stderr, "[GC] mark   %p %s\n", static_cast<void*>(obj),
+            stringifyObj(obj).c_str());
 #endif
 }
 
@@ -84,8 +84,8 @@ void MemoryManager::traceReferences() {
 
 void MemoryManager::traceObject(Obj* obj) {
 #ifdef LOXPP_DEBUG_LOG_GC
-    fprintf(stderr, "[GC] trace  %p %s\n",
-            static_cast<void*>(obj), stringifyObj(obj).c_str());
+    fprintf(stderr, "[GC] trace  %p %s\n", static_cast<void*>(obj),
+            stringifyObj(obj).c_str());
 #endif
     switch (obj->type) {
     case ObjType::STRING:
@@ -123,8 +123,14 @@ void MemoryManager::sweep() {
             ++it;
         } else {
 #ifdef LOXPP_DEBUG_LOG_GC
-            fprintf(stderr, "[GC] free   %p %s\n",
-                    static_cast<void*>(*it), stringifyObj(*it).c_str());
+            // Use type-only log: stringifyObj dereferences fn->name which may
+            // already be freed if the name ObjString appeared earlier in
+            // allObjects.
+            static constexpr const char* kTypeNames[] = {
+                "string", "function", "native", "upvalue", "closure"};
+            auto typeIdx = static_cast<int>((*it)->type);
+            fprintf(stderr, "[GC] free   %p (%s)\n", static_cast<void*>(*it),
+                    typeIdx >= 0 && typeIdx < 5 ? kTypeNames[typeIdx] : "?");
 #endif
             delete *it;
             it = allObjects.erase(it);
