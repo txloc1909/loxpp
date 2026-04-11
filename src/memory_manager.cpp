@@ -9,11 +9,16 @@
 #ifdef LOXPP_DEBUG_LOG_GC
 static const char* objTypeName(ObjType type) {
     switch (type) {
-    case ObjType::STRING:   return "string";
-    case ObjType::FUNCTION: return "function";
-    case ObjType::NATIVE:   return "native";
-    case ObjType::UPVALUE:  return "upvalue";
-    case ObjType::CLOSURE:  return "closure";
+    case ObjType::STRING:
+        return "string";
+    case ObjType::FUNCTION:
+        return "function";
+    case ObjType::NATIVE:
+        return "native";
+    case ObjType::UPVALUE:
+        return "upvalue";
+    case ObjType::CLOSURE:
+        return "closure";
     }
     return "?";
 }
