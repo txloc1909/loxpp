@@ -4,6 +4,8 @@
 #include "native.h"
 #include "value.h"
 
+#include <cstdio>
+
 MemoryManager::MemoryManager() : m_strings(VmAllocator<Entry>{this}) {}
 
 MemoryManager::~MemoryManager() { collectAll(); }
@@ -61,6 +63,10 @@ void MemoryManager::markObject(Obj* obj) {
         return;
     obj->marked = true;
     m_grayStack.push_back(obj);
+#ifdef LOXPP_DEBUG_LOG_GC
+    fprintf(stderr, "[GC] mark   %p %s\n",
+            static_cast<void*>(obj), stringifyObj(obj).c_str());
+#endif
 }
 
 void MemoryManager::markValue(const Value& v) {
@@ -77,6 +83,10 @@ void MemoryManager::traceReferences() {
 }
 
 void MemoryManager::traceObject(Obj* obj) {
+#ifdef LOXPP_DEBUG_LOG_GC
+    fprintf(stderr, "[GC] trace  %p %s\n",
+            static_cast<void*>(obj), stringifyObj(obj).c_str());
+#endif
     switch (obj->type) {
     case ObjType::STRING:
         break;
@@ -112,6 +122,10 @@ void MemoryManager::sweep() {
             (*it)->marked = false;
             ++it;
         } else {
+#ifdef LOXPP_DEBUG_LOG_GC
+            fprintf(stderr, "[GC] free   %p %s\n",
+                    static_cast<void*>(*it), stringifyObj(*it).c_str());
+#endif
             delete *it;
             it = allObjects.erase(it);
         }
@@ -120,6 +134,9 @@ void MemoryManager::sweep() {
 }
 
 void MemoryManager::collectGarbage() {
+#ifdef LOXPP_DEBUG_LOG_GC
+    fprintf(stderr, "[GC] begin -- %zu bytes allocated\n", bytesAllocated);
+#endif
     if (m_markRoots)
         m_markRoots();
     if (m_currentCompiler)
@@ -127,4 +144,8 @@ void MemoryManager::collectGarbage() {
     traceReferences();
     removeWhiteStrings();
     sweep();
+#ifdef LOXPP_DEBUG_LOG_GC
+    fprintf(stderr, "[GC] end   -- %zu bytes allocated, next threshold %zu\n",
+            bytesAllocated, m_nextGC);
+#endif
 }
