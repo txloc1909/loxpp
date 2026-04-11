@@ -39,6 +39,9 @@ enum class Op : Byte {
     GET_UPVALUE,
     SET_UPVALUE,
     CLOSE_UPVALUE,
+    CLASS,
+    GET_PROPERTY,
+    SET_PROPERTY,
 };
 
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }

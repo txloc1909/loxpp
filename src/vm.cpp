@@ -311,10 +311,56 @@ InterpretResult VM::run() {
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 frame = &m_frames[m_frameCount - 1];
+            } else if (isClass(callee)) {
+                ObjClass* klass = asObjClass(as<Obj*>(callee));
+                ObjInstance* instance =
+                    m_mm.create<ObjInstance>(klass, VmAllocator<Entry>{&m_mm});
+                // Replace the class on the stack with the new instance.
+                stackTop[-argCount - 1] = Value{static_cast<Obj*>(instance)};
+                if (argCount != 0) {
+                    runtimeError("Expected 0 arguments but got %d.", argCount);
+                    return InterpretResult::RUNTIME_ERROR;
+                }
             } else {
                 runtimeError("Can only call functions and classes.");
                 return InterpretResult::RUNTIME_ERROR;
             }
+            break;
+        }
+        case Op::CLASS: {
+            ObjString* name = asObjString(readConstant());
+            ObjClass* klass =
+                m_mm.create<ObjClass>(name, VmAllocator<Entry>{&m_mm});
+            push(Value{static_cast<Obj*>(klass)});
+            break;
+        }
+        case Op::GET_PROPERTY: {
+            if (!isInstance(peek(0))) {
+                runtimeError("Only instances have properties.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            ObjInstance* instance = asObjInstance(as<Obj*>(peek(0)));
+            ObjString* name = asObjString(readConstant());
+            Value value;
+            if (instance->fields.get(name, value)) {
+                pop(); // instance
+                push(value);
+                break;
+            }
+            runtimeError("Undefined property '%s'.", name->chars.c_str());
+            return InterpretResult::RUNTIME_ERROR;
+        }
+        case Op::SET_PROPERTY: {
+            if (!isInstance(peek(1))) {
+                runtimeError("Only instances have fields.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            ObjInstance* instance = asObjInstance(as<Obj*>(peek(1)));
+            ObjString* name = asObjString(readConstant());
+            instance->fields.set(name, peek(0));
+            Value val = pop(); // value
+            pop();             // instance
+            push(val);         // assignment is an expression
             break;
         }
         case Op::CLOSURE: {

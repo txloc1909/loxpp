@@ -2,6 +2,7 @@
 
 #include "chunk.h"
 #include "object.h"
+#include "table.h"
 #include "value.h"
 
 #include <vector>
@@ -54,4 +55,34 @@ inline ObjClosure* asObjClosure(const Value& v) {
 }
 inline bool isClosure(const Value& v) {
     return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::CLOSURE;
+}
+
+struct ObjClass : public Obj {
+    ObjString* name;
+    Table methods; // ObjString* → ObjClosure* (populated in future chapters)
+
+    ObjClass(ObjString* n, VmAllocator<Entry> alloc)
+        : Obj(ObjType::CLASS), name(n), methods(alloc) {}
+};
+
+inline bool isObjClass(Obj* o) { return isObjType(o, ObjType::CLASS); }
+inline ObjClass* asObjClass(Obj* o) { return static_cast<ObjClass*>(o); }
+inline bool isClass(const Value& v) {
+    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::CLASS;
+}
+
+struct ObjInstance : public Obj {
+    ObjClass* klass;
+    Table fields; // ObjString* → Value (arbitrary runtime fields)
+
+    ObjInstance(ObjClass* k, VmAllocator<Entry> alloc)
+        : Obj(ObjType::INSTANCE), klass(k), fields(alloc) {}
+};
+
+inline bool isObjInstance(Obj* o) { return isObjType(o, ObjType::INSTANCE); }
+inline ObjInstance* asObjInstance(Obj* o) {
+    return static_cast<ObjInstance*>(o);
+}
+inline bool isInstance(const Value& v) {
+    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::INSTANCE;
 }

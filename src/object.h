@@ -6,7 +6,15 @@
 #include <string>
 #include <string_view>
 
-enum class ObjType : uint8_t { STRING, FUNCTION, NATIVE, UPVALUE, CLOSURE };
+enum class ObjType : uint8_t {
+    STRING,
+    FUNCTION,
+    NATIVE,
+    UPVALUE,
+    CLOSURE,
+    CLASS,
+    INSTANCE
+};
 
 inline uint32_t hashString(std::string_view s) {
     uint32_t hash = 2166136261U;

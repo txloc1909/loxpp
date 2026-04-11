@@ -13,7 +13,7 @@ static const ParseRule rules[] = {
     RULE(LEFT_BRACE,     nullptr,             nullptr,           NONE),
     RULE(RIGHT_BRACE,    nullptr,             nullptr,           NONE),
     RULE(COMMA,          nullptr,             nullptr,           NONE),
-    RULE(DOT,            nullptr,             nullptr,           NONE),
+    RULE(DOT,            nullptr,             &Compiler::dot,    CALL),
     RULE(MINUS,          &Compiler::unary,    &Compiler::binary, TERM),
     RULE(PLUS,           nullptr,             &Compiler::binary, TERM),
     RULE(SEMICOLON,      nullptr,             nullptr,           NONE),

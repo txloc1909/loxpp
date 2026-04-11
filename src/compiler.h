@@ -14,7 +14,7 @@ static constexpr int UINT8_COUNT = 256;
 
 ObjFunction* compile(const std::string& source, MemoryManager* mm);
 
-enum class FunctionType { SCRIPT, FUNCTION };
+enum class FunctionType { SCRIPT, FUNCTION, METHOD };
 
 struct Local {
     Token name;
@@ -67,10 +67,12 @@ class Compiler {
     void varDeclaration();
     void block();
     void funDeclaration();
+    void classDeclaration();
     void returnStatement();
 
     void and_();
     void or_();
+    void dot();
 
   private:
     void beginScope();

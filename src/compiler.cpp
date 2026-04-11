@@ -179,7 +179,9 @@ void Compiler::call() {
 }
 
 void Compiler::declaration() {
-    if (m_parser->match(TokenType::FUN)) {
+    if (m_parser->match(TokenType::CLASS)) {
+        classDeclaration();
+    } else if (m_parser->match(TokenType::FUN)) {
         funDeclaration();
     } else if (m_parser->match(TokenType::VAR)) {
         varDeclaration();
@@ -477,6 +479,37 @@ void Compiler::funDeclaration() {
     }
     if (m_scopeDepth == 0) {
         emitBytes(Op::DEFINE_GLOBAL, nameConst);
+    }
+}
+
+void Compiler::classDeclaration() {
+    m_parser->consume(TokenType::IDENTIFIER, "Expect class name.");
+    Token className = m_parser->m_previous;
+    uint8_t nameConst = identifierConstant(className);
+
+    if (m_scopeDepth > 0)
+        declareVariable();
+
+    emitBytes(Op::CLASS, nameConst);
+
+    if (m_scopeDepth > 0)
+        markInitialized();
+    else
+        emitBytes(Op::DEFINE_GLOBAL, nameConst);
+
+    m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before class body.");
+    m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after class body.");
+}
+
+void Compiler::dot() {
+    m_parser->consume(TokenType::IDENTIFIER, "Expect property name after '.'.");
+    uint8_t nameConst = identifierConstant(m_parser->m_previous);
+
+    if (m_parser->m_canAssign && m_parser->match(TokenType::EQUAL)) {
+        expression();
+        emitBytes(Op::SET_PROPERTY, nameConst);
+    } else {
+        emitBytes(Op::GET_PROPERTY, nameConst);
     }
 }
 
