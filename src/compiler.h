@@ -69,6 +69,7 @@ class Compiler {
     void forStatement();
     void breakStatement();
     void continueStatement();
+    void switchStatement();
     void varDeclaration();
     void block();
     void funDeclaration();
@@ -102,7 +103,7 @@ class Compiler {
     int emitJump(Op op);
     void patchJump(int offset);
     void emitLoop(int loopStart);
-    void emitLoopCleanup();
+    void emitLoopCleanup(int targetLocalCount);
 
     uint8_t makeConstant(Value value);
     uint8_t identifierConstant(const Token& name);

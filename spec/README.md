@@ -72,6 +72,7 @@ variant) and adds the following:
 |---|---|
 | `break` statement | Added in Lox++ |
 | `continue` statement | Added in Lox++ |
+| `switch`/`case`/`default` statement | Added in Lox++ |
 | `clock()` built-in | Added in Lox++ |
 | `input()` built-in | Added in Lox++ |
 | `str()` built-in | Added in Lox++ |

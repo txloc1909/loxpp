@@ -4,9 +4,10 @@
 
 const char* const* lox_keywords() {
     static const char* keywords[] = {
-        "and",  "break", "class", "continue", "else",  "false",  "for",
-        "fun",  "if",    "nil",   "or",       "print", "return", "super",
-        "this", "true",  "var",   "while",    nullptr};
+        "and",  "break", "case",   "class", "continue", "default",
+        "else", "false", "for",    "fun",   "if",       "nil",
+        "or",   "print", "return", "super", "switch",   "this",
+        "true", "var",   "while",  nullptr};
     return keywords;
 }
 
@@ -49,6 +50,8 @@ Token Scanner::scanOneToken() {
         return makeToken(TokenType::RIGHT_BRACE);
     case ',':
         return makeToken(TokenType::COMMA);
+    case ':':
+        return makeToken(TokenType::COLON);
     case '.':
         return makeToken(TokenType::DOT);
     case '-':
@@ -112,6 +115,8 @@ TokenType Scanner::identifierType() {
     case 'c': {
         if (m_current - m_start > 1) {
             switch (m_start[1]) {
+            case 'a':
+                return checkKeyword(2, 2, "se", TokenType::CASE);
             case 'l':
                 return checkKeyword(2, 3, "ass", TokenType::CLASS);
             case 'o':
@@ -120,6 +125,8 @@ TokenType Scanner::identifierType() {
         }
         break;
     }
+    case 'd':
+        return checkKeyword(1, 6, "efault", TokenType::DEFAULT);
     case 'e':
         return checkKeyword(1, 3, "lse", TokenType::ELSE);
     case 'i':
@@ -145,8 +152,17 @@ TokenType Scanner::identifierType() {
         return checkKeyword(1, 4, "rint", TokenType::PRINT);
     case 'r':
         return checkKeyword(1, 5, "eturn", TokenType::RETURN);
-    case 's':
-        return checkKeyword(1, 4, "uper", TokenType::SUPER);
+    case 's': {
+        if (m_current - m_start > 1) {
+            switch (m_start[1]) {
+            case 'u':
+                return checkKeyword(2, 3, "per", TokenType::SUPER);
+            case 'w':
+                return checkKeyword(2, 4, "itch", TokenType::SWITCH);
+            }
+        }
+        break;
+    }
     case 't': {
         if (m_current - m_start > 1) {
             switch (m_start[1]) {
