@@ -425,6 +425,39 @@ InterpretResult VM::run() {
             frame = &m_frames[m_frameCount - 1];
             break;
         }
+        case Op::INHERIT: {
+            Value superVal = peek(1);
+            if (!isClass(superVal)) {
+                runtimeError("Superclass must be a class.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            ObjClass* superclass = asObjClass(as<Obj*>(superVal));
+            ObjClass* subclass = asObjClass(as<Obj*>(peek(0)));
+            subclass->methods.addAll(superclass->methods);
+            pop(); // pop subclass; superclass stays as "super" local
+            break;
+        }
+        case Op::GET_SUPER: {
+            ObjString* name = asObjString(readConstant());
+            ObjClass* superclass = asObjClass(as<Obj*>(pop()));
+            if (!bindMethod(superclass, name))
+                return InterpretResult::RUNTIME_ERROR;
+            break;
+        }
+        case Op::SUPER_INVOKE: {
+            ObjString* name = asObjString(readConstant());
+            int argCount = readByte();
+            ObjClass* superclass = asObjClass(as<Obj*>(pop()));
+            Value method;
+            if (!superclass->methods.get(name, method)) {
+                runtimeError("Undefined property '%s'.", name->chars.c_str());
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            if (!call(asObjClosure(as<Obj*>(method)), argCount))
+                return InterpretResult::RUNTIME_ERROR;
+            frame = &m_frames[m_frameCount - 1];
+            break;
+        }
         case Op::CLOSURE: {
             ObjFunction* fn = asObjFunction(readConstant());
             ObjClosure* cl = m_mm.create<ObjClosure>(fn);

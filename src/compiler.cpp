@@ -508,13 +508,32 @@ void Compiler::classDeclaration() {
     else
         emitBytes(Op::DEFINE_GLOBAL, nameConst);
 
-    // Push class back on the stack so DEFINE_METHOD can find it at peek(1)
-    // throughout the entire method body loop.
-    namedVariable(className, false);
-
     ClassCompiler classCompiler;
     classCompiler.enclosing = m_currentClass;
     m_currentClass = &classCompiler;
+
+    if (m_parser->match(TokenType::LESS)) {
+        m_parser->consume(TokenType::IDENTIFIER, "Expect superclass name.");
+        if (m_parser->m_previous.lexeme == className.lexeme)
+            m_parser->error("A class can't inherit from itself.");
+        namedVariable(m_parser->m_previous, false); // push superclass
+
+        // Introduce "super" as a local so method closures can capture it.
+        beginScope();
+        addLocal(Token{TokenType::SUPER, "super", 0});
+        markInitialized();
+
+        namedVariable(className, false); // push subclass
+        emitByte(
+            Op::INHERIT); // pops subclass, copies methods, leaves superclass
+
+        classCompiler.hasSuperclass = true;
+    }
+
+    // Push class so DEFINE_METHOD can find it at peek(1) throughout the method
+    // loop. Must come after superclass setup: INHERIT leaves superclass on the
+    // stack, so the class pushed here lands at the correct peek(1) position.
+    namedVariable(className, false);
 
     m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before class body.");
     while (!m_parser->check(TokenType::RIGHT_BRACE) &&
@@ -524,6 +543,9 @@ void Compiler::classDeclaration() {
     m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after class body.");
 
     emitByte(Op::POP); // pop the class pushed by namedVariable above
+
+    if (classCompiler.hasSuperclass)
+        endScope(); // closes the "super" local/upvalue
 
     m_currentClass = m_currentClass->enclosing;
 }
@@ -556,6 +578,39 @@ void Compiler::this_() {
         return;
     }
     namedVariable(m_parser->m_previous, false);
+}
+
+void Compiler::super_() {
+    if (m_currentClass == nullptr)
+        m_parser->error("Can't use 'super' outside of a class.");
+    else if (!m_currentClass->hasSuperclass)
+        m_parser->error("Can't use 'super' in a class with no superclass.");
+
+    m_parser->consume(TokenType::DOT, "Expect '.' after 'super'.");
+    m_parser->consume(TokenType::IDENTIFIER, "Expect superclass method name.");
+    uint8_t nameConst = identifierConstant(m_parser->m_previous);
+
+    namedVariable(Token{TokenType::THIS, "this", 0}, false); // push receiver
+
+    if (m_parser->match(TokenType::LEFT_PAREN)) {
+        uint8_t argCount = 0;
+        if (!m_parser->check(TokenType::RIGHT_PAREN)) {
+            do {
+                if (argCount == 255)
+                    m_parser->error("Can't have more than 255 arguments.");
+                expression();
+                argCount++;
+            } while (m_parser->match(TokenType::COMMA));
+        }
+        m_parser->consume(TokenType::RIGHT_PAREN,
+                          "Expect ')' after arguments.");
+        namedVariable(Token{TokenType::SUPER, "super", 0}, false);
+        emitBytes(Op::SUPER_INVOKE, nameConst);
+        emitByte(argCount);
+    } else {
+        namedVariable(Token{TokenType::SUPER, "super", 0}, false);
+        emitBytes(Op::GET_SUPER, nameConst);
+    }
 }
 
 void Compiler::dot() {

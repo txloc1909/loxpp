@@ -18,6 +18,7 @@ enum class FunctionType { SCRIPT, FUNCTION, METHOD, INITIALIZER };
 
 struct ClassCompiler {
     ClassCompiler* enclosing{nullptr};
+    bool hasSuperclass{false};
 };
 
 struct Local {
@@ -79,6 +80,7 @@ class Compiler {
     void or_();
     void dot();
     void this_();
+    void super_();
 
   private:
     void beginScope();
