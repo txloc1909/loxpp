@@ -48,6 +48,7 @@ class VM {
 
     bool call(ObjClosure* closure, int argCount);
     bool callNative(ObjNative* native, int argCount);
+    bool bindMethod(ObjClass* klass, ObjString* name);
     void defineNative(const char* name, NativeFn fn, int arity);
     void defineNatives();
     ObjUpvalue* captureUpvalue(Value* local);

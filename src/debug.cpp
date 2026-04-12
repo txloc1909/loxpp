@@ -52,6 +52,18 @@ static int jumpInstruction(const char* name, int sign, const Chunk& chunk,
     return offset + 3;
 }
 
+static int invokeInstruction(const char* name, const Chunk& chunk,
+                             const MemoryManager& mm, int offset,
+                             std::ostream& out, bool color) {
+    uint8_t nameIdx = chunk.at(offset + 1);
+    uint8_t argCount = chunk.at(offset + 2);
+    out << cc(color, kBold) << name << cc(color, kReset) << ' '
+        << static_cast<int>(nameIdx) << " ('" << cc(color, kYellow)
+        << stringify(chunk.getConstant(nameIdx)) << cc(color, kReset) << "') "
+        << static_cast<int>(argCount) << '\n';
+    return offset + 3;
+}
+
 static int closureInstruction(const char* name, const Chunk& chunk, int offset,
                               std::ostream& out, bool color) {
     uint8_t idx = chunk.at(offset + 1);
@@ -153,6 +165,11 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
     case Op::SET_PROPERTY:
         return constantInstruction("SET_PROPERTY", chunk, mm, offset, out,
                                    color);
+    case Op::DEFINE_METHOD:
+        return constantInstruction("DEFINE_METHOD", chunk, mm, offset, out,
+                                   color);
+    case Op::INVOKE:
+        return invokeInstruction("INVOKE", chunk, mm, offset, out, color);
     default:
         out << cc(color, kRed) << cc(color, kBold) << "UNKNOWN("
             << static_cast<unsigned>(chunk.at(offset)) << ")"
