@@ -43,7 +43,10 @@ enum class Op : Byte {
     GET_PROPERTY,
     SET_PROPERTY,
     DEFINE_METHOD,
-    INVOKE, // operands: name-constant-index (1 byte), arg-count (1 byte)
+    INVOKE,       // operands: name-constant-index (1 byte), arg-count (1 byte)
+    INHERIT,      // no operand — copies superclass methods into subclass
+    GET_SUPER,    // 1-byte constant (method name) — binds method to 'this' from superclass
+    SUPER_INVOKE, // operands: name-constant-index (1 byte), arg-count (1 byte)
 };
 
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }
