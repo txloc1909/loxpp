@@ -8,7 +8,7 @@ types over its lifetime.
 
 ## Runtime Types
 
-There are five runtime types:
+There are eight runtime types:
 
 ### Nil
 
@@ -44,6 +44,27 @@ A function carries a **closure environment** — a snapshot of the lexical scope
 in which it was defined. Closures allow a function to access variables from
 enclosing scopes even after those scopes have exited.
 
+### Class
+
+A class value produced by a `class` declaration. When called as a function, it
+creates a new Instance of that class. Classes are first-class: they can be
+stored in variables, passed as arguments, and returned from functions.
+
+### Instance
+
+A runtime object created by calling a Class. Each instance has its own mutable
+field table. Fields spring into existence on first assignment; there is no
+pre-declared field list. An instance's class determines which methods are
+available on it.
+
+### BoundMethod
+
+A method that has been looked up on an instance. When `obj.method` is evaluated
+without an immediately following `(`, the result is a BoundMethod capturing
+both the method closure and `obj` as the receiver. Calling a BoundMethod is
+equivalent to calling the underlying function with `this` bound to the captured
+receiver.
+
 ---
 
 ## Truthiness
@@ -75,6 +96,8 @@ The `==` and `!=` operators compare two values.
   - Strings are equal when they contain the same sequence of characters
   - Functions are equal only when they are the same function object (identity
     equality)
+  - Classes, Instances, and BoundMethods use identity equality: two values are
+    equal only if they are the exact same object
 
 Equality never produces a runtime error regardless of the types being compared.
 
@@ -101,4 +124,7 @@ Every value has a canonical string form, produced by `print` and by the
 | Number (integer-valued) | Digits, no decimal point — `42`, `-3`, `0` |
 | Number (fractional) | Shortest decimal representation — `3.14`, `1.5` |
 | String | The string content itself (no surrounding quotes) |
-| Function | `<fn name>` where *name* is the declared function name |
+| Function / BoundMethod | `<fn name>` where *name* is the declared function name |
+| Native function | `<native fn>` |
+| Class | The class name (e.g. `Dog`) |
+| Instance | `ClassName instance` (e.g. `Dog instance`) |
