@@ -503,7 +503,8 @@ bool VM::bindMethod(ObjClass* klass, ObjString* name) {
 
 void VM::defineNative(const char* name, NativeFn fn, int arity) {
     ObjNative* native = m_mm.create<ObjNative>(fn, arity);
-    push(Value{static_cast<Obj*>(native)}); // root across makeString's potential GC
+    push(Value{
+        static_cast<Obj*>(native)}); // root across makeString's potential GC
     ObjString* key = m_mm.makeString(name);
     m_globals.set(key, Value{static_cast<Obj*>(native)});
     pop();
