@@ -24,8 +24,12 @@ class MemoryManager : public VmAllocBase {
     // Creates and takes ownership of a new Obj subclass.
     template <typename T, typename... Args>
     T* create(Args&&... args) {
+#ifdef LOXPP_STRESS_GC
+        collectGarbage(); // fire on every allocation to surface rooting bugs
+#else
         if (bytesAllocated > m_nextGC)
             collectGarbage();
+#endif
         bytesAllocated += sizeof(T);
         T* p = new T(std::forward<Args>(args)...);
         allObjects.push_back(p);

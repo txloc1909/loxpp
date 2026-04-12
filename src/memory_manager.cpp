@@ -35,8 +35,12 @@ MemoryManager::~MemoryManager() { collectAll(); }
 
 void* MemoryManager::rawAlloc(std::size_t bytes) {
     bytesAllocated += bytes;
+#ifdef LOXPP_STRESS_GC
+    collectGarbage(); // fire on every allocation to surface rooting bugs
+#else
     if (bytesAllocated > m_nextGC)
         collectGarbage();
+#endif
     return ::operator new(bytes);
 }
 
