@@ -153,6 +153,9 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
     case Op::SET_PROPERTY:
         return constantInstruction("SET_PROPERTY", chunk, mm, offset, out,
                                    color);
+    case Op::DEFINE_METHOD:
+        return constantInstruction("DEFINE_METHOD", chunk, mm, offset, out,
+                                   color);
     default:
         out << cc(color, kRed) << cc(color, kBold) << "UNKNOWN("
             << static_cast<unsigned>(chunk.at(offset)) << ")"

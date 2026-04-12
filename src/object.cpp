@@ -42,6 +42,13 @@ std::string stringifyObj(Obj* obj) {
                            inst->klass->name->chars.size()) +
                " instance";
     }
+    case ObjType::BOUND_METHOD: {
+        auto* bm = static_cast<ObjBoundMethod*>(obj);
+        auto* fn = bm->method->function;
+        return "<fn " +
+               std::string(fn->name->chars.data(), fn->name->chars.size()) +
+               ">";
+    }
     }
     return "<obj>";
 }

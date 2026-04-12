@@ -42,6 +42,7 @@ enum class Op : Byte {
     CLASS,
     GET_PROPERTY,
     SET_PROPERTY,
+    DEFINE_METHOD,
 };
 
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }
