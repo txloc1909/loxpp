@@ -524,7 +524,8 @@ void Compiler::classDeclaration() {
         markInitialized();
 
         namedVariable(className, false); // push subclass
-        emitByte(Op::INHERIT); // pops subclass, copies methods, leaves superclass
+        emitByte(
+            Op::INHERIT); // pops subclass, copies methods, leaves superclass
 
         classCompiler.hasSuperclass = true;
     }
@@ -601,7 +602,8 @@ void Compiler::super_() {
                 argCount++;
             } while (m_parser->match(TokenType::COMMA));
         }
-        m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after arguments.");
+        m_parser->consume(TokenType::RIGHT_PAREN,
+                          "Expect ')' after arguments.");
         namedVariable(Token{TokenType::SUPER, "super", 0}, false);
         emitBytes(Op::SUPER_INVOKE, nameConst);
         emitByte(argCount);

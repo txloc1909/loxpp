@@ -7,7 +7,8 @@
 //   4. Inherited init       — subclass with no init uses superclass init.
 //   5. super.init()         — subclass init delegates to superclass init.
 //   6. super non-call       — super.method stored in var, then called.
-//   7. Multi-level          — grandparent->parent->child, super resolves one level.
+//   7. Multi-level          — grandparent->parent->child, super resolves one
+//   level.
 //   8. Compile error: super outside class.
 //   9. Compile error: super in class without superclass.
 //  10. Compile error: self-inheritance.
@@ -190,7 +191,8 @@ TEST_F(InheritanceTest, CompileError_SuperInClassWithNoSuperclass) {
 // ---------------------------------------------------------------------------
 
 TEST_F(InheritanceTest, CompileError_SelfInheritance) {
-    EXPECT_EQ(run_program("class Foo < Foo {}"), InterpretResult::COMPILE_ERROR);
+    EXPECT_EQ(run_program("class Foo < Foo {}"),
+              InterpretResult::COMPILE_ERROR);
 }
 
 // ---------------------------------------------------------------------------
