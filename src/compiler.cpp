@@ -476,9 +476,11 @@ void Compiler::funDeclaration() {
     }
 
     ObjFunction* fn = m_mm->create<ObjFunction>();
-    fn->name = m_mm->makeString(name.lexeme);
-
+    // Construct inner before makeString: inner's constructor calls
+    // setCurrentCompiler(&inner), rooting fn through inner.markRoots()
+    // before any allocation that can trigger GC.
     Compiler inner(fn, m_parser, m_mm, FunctionType::FUNCTION, this);
+    fn->name = m_mm->makeString(name.lexeme);
     inner.parseFunction(FunctionType::FUNCTION);
 
     emitBytes(Op::CLOSURE, makeConstant(Value{static_cast<Obj*>(fn)}));

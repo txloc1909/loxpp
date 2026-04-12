@@ -59,7 +59,9 @@ ObjString* MemoryManager::makeString(std::string_view sv) {
         return interned;
 
     auto* s = create<ObjString>(sv, VmAllocator<char>{this});
+    pushTempRoot(s); // protect s across m_strings.set's potential rawAlloc → GC
     m_strings.set(s, Value{Nil{}});
+    popTempRoot();
     return s;
 }
 
@@ -71,7 +73,9 @@ ObjString* MemoryManager::makeString(std::string&& sv) {
         return interned;
 
     auto* s = create<ObjString>(std::string_view{sv}, VmAllocator<char>{this});
+    pushTempRoot(s); // protect s across m_strings.set's potential rawAlloc → GC
     m_strings.set(s, Value{Nil{}});
+    popTempRoot();
     return s;
 }
 
@@ -87,6 +91,9 @@ void MemoryManager::collectAll() {
     allObjects.clear();
     bytesAllocated = 0;
 }
+
+void MemoryManager::pushTempRoot(Obj* obj) { m_tempRoots.push_back(obj); }
+void MemoryManager::popTempRoot() { m_tempRoots.pop_back(); }
 
 void MemoryManager::setMarkRootsCallback(std::function<void()> cb) {
     m_markRoots = std::move(cb);
@@ -204,6 +211,8 @@ void MemoryManager::collectGarbage() {
         m_markRoots();
     if (m_currentCompiler)
         m_currentCompiler->markRoots(*this);
+    for (auto* obj : m_tempRoots)
+        markObject(obj);
     traceReferences();
     removeWhiteStrings();
     sweep();

@@ -50,6 +50,9 @@ class MemoryManager : public VmAllocBase {
 
     void* rawAlloc(std::size_t bytes) override;
 
+    void pushTempRoot(Obj* obj);
+    void popTempRoot();
+
     void setMarkRootsCallback(std::function<void()> cb);
     void setCurrentCompiler(Compiler* c);
     void markObject(Obj* obj);
@@ -68,6 +71,7 @@ class MemoryManager : public VmAllocBase {
     Table m_strings;
 
     std::vector<Obj*> m_grayStack;
+    std::vector<Obj*> m_tempRoots; // objects transiently protected from GC
     std::function<void()> m_markRoots;
     Compiler* m_currentCompiler{nullptr};
 #ifdef LOXPP_STRESS_GC
