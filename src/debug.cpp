@@ -170,6 +170,12 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
                                    color);
     case Op::INVOKE:
         return invokeInstruction("INVOKE", chunk, mm, offset, out, color);
+    case Op::INHERIT:
+        return simpleInstruction("INHERIT", offset, out, color);
+    case Op::GET_SUPER:
+        return constantInstruction("GET_SUPER", chunk, mm, offset, out, color);
+    case Op::SUPER_INVOKE:
+        return invokeInstruction("SUPER_INVOKE", chunk, mm, offset, out, color);
     default:
         out << cc(color, kRed) << cc(color, kBold) << "UNKNOWN("
             << static_cast<unsigned>(chunk.at(offset)) << ")"
