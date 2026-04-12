@@ -28,6 +28,7 @@ statement      ::= exprStmt
                  | whileStmt
                  | breakStmt
                  | continueStmt
+                 | switchStmt
                  | block ;
 
 exprStmt       ::= expression ";" ;
@@ -49,6 +50,11 @@ whileStmt      ::= "while" "(" expression ")" statement ;
 breakStmt      ::= "break" ";" ;
 
 continueStmt   ::= "continue" ";" ;
+
+switchStmt     ::= "switch" "(" expression ")" "{" switchArm* "}" ;
+switchArm      ::= caseArm | defaultArm ;
+caseArm        ::= "case" expression ( "," expression )* ":" statement* ;
+defaultArm     ::= "default" ":" statement* ;
 
 block          ::= "{" declaration* "}" ;
 
@@ -133,6 +139,14 @@ Assignment is an expression, not a statement. The left-hand side may be a
 bare `IDENTIFIER` (variable set) or a `call "." IDENTIFIER` (property set);
 any other form is a parse error. The value of an assignment expression is the
 assigned value.
+
+### `switch` statement
+
+A `switch` body consists of zero or more arms. Each arm is either a `case`
+arm (with one or more comma-separated match values) or a `default` arm. At
+most one `default` arm may appear; its position relative to `case` arms is
+unrestricted. Only `case` and `default` labels may appear at the top level of
+a switch body — bare statements outside an arm are a parse error.
 
 ### Function call arguments
 
