@@ -8,6 +8,15 @@ Lox++ is a bytecode compiler & VM for Lox, written in C++17 (Clang, CMake, Ninja
 This project uses **trunk-based development**: all work targets `main` via short-lived
 branches. PRs should be small and merged quickly — no long-running feature branches.
 
+### Language specification
+
+The canonical definition of Lox++ semantics lives in `spec/`:
+
+**The spec is the single source of truth for language behavior.** When there is a
+conflict between the spec and the implementation, the spec wins — fix the
+implementation to match. When adding or changing a language feature, update the spec
+in the same PR as the implementation change.
+
 ---
 
 ## Planning policy
