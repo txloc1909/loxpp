@@ -46,6 +46,7 @@ There are no block comments.
 | `{` | LEFT_BRACE |
 | `}` | RIGHT_BRACE |
 | `,` | COMMA |
+| `:` | COLON |
 | `.` | DOT |
 | `-` | MINUS |
 | `+` | PLUS |
@@ -78,9 +79,11 @@ names:
 | Keyword | Notes |
 |---|---|
 | `and` | Logical conjunction |
-| `break` | Loop exit |
+| `break` | Loop/switch exit |
+| `case` | Switch arm label |
 | `class` | Class declaration |
 | `continue` | Loop next-iteration |
+| `default` | Switch fallback arm label |
 | `else` | Alternate branch |
 | `false` | Boolean literal |
 | `for` | For loop |
@@ -91,6 +94,7 @@ names:
 | `print` | Print statement |
 | `return` | Function return |
 | `super` | Superclass accessor inside a method |
+| `switch` | Switch statement |
 | `this` | Current instance reference inside a method |
 | `true` | Boolean literal |
 | `var` | Variable declaration |

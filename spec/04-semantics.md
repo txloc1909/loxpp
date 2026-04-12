@@ -315,9 +315,10 @@ Where:
 break ;
 ```
 
-Immediately exits the innermost enclosing `while` or `for` loop. Any local
-variables declared inside the loop since its opening are destroyed. Executing
-`break` outside a loop is a **static error**.
+Immediately exits the innermost enclosing `while`, `for`, or `switch`
+statement. Any local variables declared inside the construct since its opening
+are destroyed. Executing `break` outside a loop or switch is a **static
+error**.
 
 ### `continue` Statement
 
@@ -331,8 +332,46 @@ Skips the remainder of the current loop body and jumps to the next iteration:
   condition.
 
 Any local variables declared inside the loop body since the top of the current
-iteration are destroyed. Executing `continue` outside a loop is a **static
+iteration are destroyed. Executing `continue` inside a `switch` that is itself
+inside a loop targets that enclosing loop (not the switch). Executing
+`continue` with no enclosing loop (even if inside a switch) is a **static
 error**.
+
+### `switch` Statement
+
+```
+switch ( subject ) {
+    case value1 : statement*
+    case value2, value3 : statement*
+    default : statement*
+}
+```
+
+1. Evaluate `subject` exactly once. The result is the **switch value**.
+2. Arms are tested in source order. For each `case` arm:
+   a. Evaluate each listed value in order. If any value equals the switch value
+      (using `==` semantics), execute that arm's statements and then jump to
+      after the switch. No further arms are tested.
+3. If no `case` arm matched and a `default` arm is present, execute its
+   statements.
+4. If no arm matched and there is no `default`, the switch body is a no-op.
+
+**No fall-through**: only the first matching arm executes. There is no implicit
+flow from one arm to the next.
+
+**Multiple values per arm** (`case v1, v2:`): equivalent to separate `case`
+arms that share the same body. Values are tested left-to-right; the first
+match wins.
+
+**`break`** inside a switch exits the switch immediately (see `break`
+statement). It does **not** exit any enclosing loop.
+
+**`continue`** inside a switch searches upward for the nearest enclosing loop
+and continues that loop. If there is no enclosing loop, this is a **static
+error**.
+
+**Duplicate `default`**: more than one `default` label in the same switch is a
+**static error**.
 
 ### Class Declaration
 
