@@ -26,7 +26,10 @@ class VM {
     static constexpr int STACK_MAX = 256;
     static constexpr int FRAMES_MAX = 64;
 
-    VM() : m_globals(VmAllocator<Entry>{&m_mm}) { resetStack(); }
+    VM() : m_globals(VmAllocator<Entry>{&m_mm}) {
+        resetStack();
+        m_mm.setMarkRootsCallback([this]() { markRoots(); });
+    }
 
     InterpretResult interpret(const std::string& source);
     InterpretResult run();

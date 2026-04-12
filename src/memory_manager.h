@@ -24,8 +24,12 @@ class MemoryManager : public VmAllocBase {
     // Creates and takes ownership of a new Obj subclass.
     template <typename T, typename... Args>
     T* create(Args&&... args) {
+#ifdef LOXPP_STRESS_GC
+        collectGarbage(); // fire on every allocation to surface rooting bugs
+#else
         if (bytesAllocated > m_nextGC)
             collectGarbage();
+#endif
         bytesAllocated += sizeof(T);
         T* p = new T(std::forward<Args>(args)...);
         allObjects.push_back(p);
@@ -46,6 +50,9 @@ class MemoryManager : public VmAllocBase {
 
     void* rawAlloc(std::size_t bytes) override;
 
+    void pushTempRoot(Obj* obj);
+    void popTempRoot();
+
     void setMarkRootsCallback(std::function<void()> cb);
     void setCurrentCompiler(Compiler* c);
     void markObject(Obj* obj);
@@ -64,6 +71,7 @@ class MemoryManager : public VmAllocBase {
     Table m_strings;
 
     std::vector<Obj*> m_grayStack;
+    std::vector<Obj*> m_tempRoots; // objects transiently protected from GC
     std::function<void()> m_markRoots;
     Compiler* m_currentCompiler{nullptr};
 #ifdef LOXPP_STRESS_GC
