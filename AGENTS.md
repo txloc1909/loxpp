@@ -12,14 +12,6 @@ branches. PRs should be small and merged quickly — no long-running feature bra
 
 The canonical definition of Lox++ semantics lives in `spec/`:
 
-| File | Contents |
-|---|---|
-| `spec/01-lexical.md` | Tokens, keywords, literals |
-| `spec/02-syntax.md` | Complete EBNF grammar and operator precedence |
-| `spec/03-types.md` | Runtime types, truthiness, equality, string forms |
-| `spec/04-semantics.md` | Evaluation rules for every expression and statement |
-| `spec/05-stdlib.md` | Built-in functions (`clock`, `input`, `str`) |
-
 **The spec is the single source of truth for language behavior.** When there is a
 conflict between the spec and the implementation, the spec wins — fix the
 implementation to match. When adding or changing a language feature, update the spec
