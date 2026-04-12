@@ -8,7 +8,7 @@ types over its lifetime.
 
 ## Runtime Types
 
-There are eight runtime types:
+There are nine runtime types:
 
 ### Nil
 
@@ -65,6 +65,33 @@ both the method closure and `obj` as the receiver. Calling a BoundMethod is
 equivalent to calling the underlying function with `this` bound to the captured
 receiver.
 
+### List
+
+A mutable, ordered, heterogeneous sequence of values. Lists are first-class:
+they can be stored in variables, passed as arguments, and returned from
+functions. A list literal is written as comma-separated expressions enclosed in
+square brackets:
+
+```lox
+var xs = [1, "hello", true, nil];
+var empty = [];
+```
+
+Elements are accessed and mutated by integer index using `[]` notation:
+
+```lox
+xs[0]        // read element at index 0
+xs[0] = 42   // write element at index 0
+```
+
+Lists use **identity equality**: two list values are equal only if they are the
+exact same object. A list containing the same elements as another list is not
+equal to it.
+
+A list is always **truthy**, even when empty.
+
+The maximum number of elements in a list literal is 255.
+
 ---
 
 ## Truthiness
@@ -78,7 +105,7 @@ conditions (`if`, `while`, `for`) and short-circuit operators (`and`, `or`).
 | `nil` | Falsy |
 | Everything else | Truthy |
 
-Note: `0`, `""` (empty string), and functions are all **truthy**.
+Note: `0`, `""` (empty string), functions, and `[]` (empty list) are all **truthy**.
 
 ---
 
@@ -96,8 +123,8 @@ The `==` and `!=` operators compare two values.
   - Strings are equal when they contain the same sequence of characters
   - Functions are equal only when they are the same function object (identity
     equality)
-  - Classes, Instances, and BoundMethods use identity equality: two values are
-    equal only if they are the exact same object
+  - Classes, Instances, BoundMethods, and Lists use identity equality: two
+    values are equal only if they are the exact same object
 
 Equality never produces a runtime error regardless of the types being compared.
 
@@ -128,3 +155,4 @@ Every value has a canonical string form, produced by `print` and by the
 | Native function | `<native fn>` |
 | Class | The class name (e.g. `Dog`) |
 | Instance | `ClassName instance` (e.g. `Dog instance`) |
+| List | `[elem0, elem1, ...]` — each element in its canonical string form, comma-space separated, enclosed in `[` and `]`. An empty list is `[]`. |

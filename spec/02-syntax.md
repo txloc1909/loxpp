@@ -60,7 +60,7 @@ block          ::= "{" declaration* "}" ;
 (* Expressions — ordered from lowest to highest precedence *)
 expression     ::= assignment ;
 
-assignment     ::= ( call "." IDENTIFIER | IDENTIFIER ) "=" assignment
+assignment     ::= ( call "." IDENTIFIER | call "[" expression "]" | IDENTIFIER ) "=" assignment
                  | logicOr ;
 
 logicOr        ::= logicAnd ( "or" logicAnd )* ;
@@ -78,7 +78,7 @@ factor         ::= unary ( ( "/" | "*" ) unary )* ;
 unary          ::= ( "!" | "-" ) unary
                  | call ;
 
-call           ::= primary ( "(" arguments? ")" | "." IDENTIFIER )* ;
+call           ::= primary ( "(" arguments? ")" | "." IDENTIFIER | "[" expression "]" )* ;
 
 arguments      ::= expression ( "," expression )* ;
 
@@ -90,7 +90,8 @@ primary        ::= "true"
                  | IDENTIFIER
                  | "this"
                  | "super" "." IDENTIFIER
-                 | "(" expression ")" ;
+                 | "(" expression ")"
+                 | "[" ( expression ( "," expression )* )? "]" ;
 ```
 
 ---
@@ -110,7 +111,7 @@ Operators within the same group are left-associative unless noted otherwise.
 | 6 | `+` `-` | Left |
 | 7 | `*` `/` | Left |
 | 8 | `!` `-` (unary) | Right (prefix) |
-| 9 (highest) | `()` (function call), `.` (property access) | Left |
+| 9 (highest) | `()` (function call), `.` (property access), `[]` (index) | Left |
 
 ---
 
@@ -135,9 +136,9 @@ with an outer `if`, enclose the inner `if` in a block.
 ### Assignment
 
 Assignment is an expression, not a statement. The left-hand side may be a
-bare `IDENTIFIER` (variable set) or a `call "." IDENTIFIER` (property set);
-any other form is a parse error. The value of an assignment expression is the
-assigned value.
+bare `IDENTIFIER` (variable set), a `call "." IDENTIFIER` (property set), or a
+`call "[" expression "]"` (index set); any other form is a parse error. The
+value of an assignment expression is the assigned value.
 
 ### `switch` statement
 
