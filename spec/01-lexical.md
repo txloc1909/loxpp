@@ -79,7 +79,7 @@ names:
 |---|---|
 | `and` | Logical conjunction |
 | `break` | Loop exit |
-| `class` | Reserved; behavior not yet defined |
+| `class` | Class declaration |
 | `continue` | Loop next-iteration |
 | `else` | Alternate branch |
 | `false` | Boolean literal |
@@ -90,8 +90,8 @@ names:
 | `or` | Logical disjunction |
 | `print` | Print statement |
 | `return` | Function return |
-| `super` | Reserved; behavior not yet defined |
-| `this` | Reserved; behavior not yet defined |
+| `super` | Superclass accessor inside a method |
+| `this` | Current instance reference inside a method |
 | `true` | Boolean literal |
 | `var` | Variable declaration |
 | `while` | While loop |
