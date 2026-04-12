@@ -58,7 +58,17 @@ print str(42);      // 42
 print str(true);    // true
 print str(nil);     // nil
 print str(3.14);    // 3.14
+
+class Dog {}
+print str(Dog);         // Dog
+var d = Dog();
+print str(d);           // Dog instance
 ```
+
+For Class values, `str()` returns the class name. For Instance values, it
+returns `"ClassName instance"`. For BoundMethod and native function values, it
+returns `"<fn name>"` or `"<native fn>"` respectively, matching the canonical
+forms documented in §03-types.
 
 This is the only built-in mechanism for converting a non-String value to a
 String so that it can be concatenated with `+`.
