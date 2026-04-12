@@ -27,12 +27,21 @@ Compiler::Compiler(ObjFunction* function, Parser* parser, MemoryManager* mm,
                    FunctionType type, Compiler* enclosing)
     : m_function{function}, m_parser{parser}, m_mm{mm}, m_type{type},
       m_enclosing{enclosing} {
-    // Reserve slot 0 for the function/script itself. User-declared locals
-    // start at slot 1. The implicit local has an empty name so resolveLocal
-    // never accidentally matches it.
+    // Reserve slot 0: "this" for methods/initializers, empty name for others.
+    // The empty name ensures resolveLocal never accidentally matches it for
+    // non-method functions; "this" allows method bodies to capture the
+    // receiver.
     Local* implicit = &m_locals[m_localCount++];
     implicit->depth = 0;
-    implicit->name = Token{TokenType::IDENTIFIER, "", 0};
+    if (type == FunctionType::METHOD || type == FunctionType::INITIALIZER)
+        implicit->name = Token{TokenType::THIS, "this", 0};
+    else
+        implicit->name = Token{TokenType::IDENTIFIER, "", 0};
+
+    // Inherit class context so inner compilers (method bodies, closures inside
+    // methods) can still resolve 'this'.
+    if (m_enclosing != nullptr)
+        m_currentClass = m_enclosing->m_currentClass;
 
     m_mm->setCurrentCompiler(this);
 }
@@ -497,8 +506,54 @@ void Compiler::classDeclaration() {
     else
         emitBytes(Op::DEFINE_GLOBAL, nameConst);
 
+    // Push class back on the stack so DEFINE_METHOD can find it at peek(1)
+    // throughout the entire method body loop.
+    namedVariable(className, false);
+
+    ClassCompiler classCompiler;
+    classCompiler.enclosing = m_currentClass;
+    m_currentClass = &classCompiler;
+
     m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before class body.");
+    while (!m_parser->check(TokenType::RIGHT_BRACE) &&
+           !m_parser->check(TokenType::EOF_)) {
+        method();
+    }
     m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after class body.");
+
+    emitByte(Op::POP); // pop the class pushed by namedVariable above
+
+    m_currentClass = m_currentClass->enclosing;
+}
+
+void Compiler::method() {
+    m_parser->consume(TokenType::IDENTIFIER, "Expect method name.");
+    uint8_t nameConst = identifierConstant(m_parser->m_previous);
+
+    FunctionType type = FunctionType::METHOD;
+    if (m_parser->m_previous.lexeme == "init")
+        type = FunctionType::INITIALIZER;
+
+    ObjFunction* fn = m_mm->create<ObjFunction>();
+    fn->name = m_mm->makeString(m_parser->m_previous.lexeme);
+
+    Compiler inner(fn, m_parser, m_mm, type, this);
+    inner.parseFunction(type);
+
+    emitBytes(Op::CLOSURE, makeConstant(Value{static_cast<Obj*>(fn)}));
+    for (int i = 0; i < fn->upvalueCount; i++) {
+        emitByte(inner.m_upvalues[i].isLocal ? 1 : 0);
+        emitByte(inner.m_upvalues[i].index);
+    }
+    emitBytes(Op::DEFINE_METHOD, nameConst);
+}
+
+void Compiler::this_() {
+    if (m_currentClass == nullptr) {
+        m_parser->error("Can't use 'this' outside of a class.");
+        return;
+    }
+    namedVariable(m_parser->m_previous, false);
 }
 
 void Compiler::dot() {
@@ -521,6 +576,8 @@ void Compiler::returnStatement() {
     if (m_parser->match(TokenType::SEMICOLON)) {
         emitReturn();
     } else {
+        if (m_type == FunctionType::INITIALIZER)
+            m_parser->error("Can't return a value from an initializer.");
         expression();
         m_parser->consume(TokenType::SEMICOLON,
                           "Expect ';' after return value.");
@@ -528,8 +585,7 @@ void Compiler::returnStatement() {
     }
 }
 
-void Compiler::parseFunction(FunctionType type) {
-    (void)type; // reserved for future use (e.g. methods vs. functions)
+void Compiler::parseFunction(FunctionType /*type*/) {
     beginScope();
     m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after function name.");
     if (!m_parser->check(TokenType::RIGHT_PAREN)) {
@@ -566,7 +622,10 @@ void Compiler::or_() {
 }
 
 void Compiler::emitReturn() {
-    emitByte(Op::NIL);
+    if (m_type == FunctionType::INITIALIZER)
+        emitBytes(Op::GET_LOCAL, 0); // implicit return of 'this'
+    else
+        emitByte(Op::NIL);
     emitByte(static_cast<Byte>(Op::RETURN));
 }
 

@@ -13,7 +13,8 @@ enum class ObjType : uint8_t {
     UPVALUE,
     CLOSURE,
     CLASS,
-    INSTANCE
+    INSTANCE,
+    BOUND_METHOD
 };
 
 inline uint32_t hashString(std::string_view s) {
