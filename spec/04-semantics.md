@@ -132,6 +132,79 @@ their operands.
 `!a` — evaluates `a` and returns `false` if `a` is truthy, `true` if `a` is
 falsy. Always returns a Boolean.
 
+### Property Get
+
+```
+obj.name
+```
+
+1. Evaluate `obj`.
+2. If `obj` is not an Instance, this is a **runtime error** ("Only instances have properties.").
+3. If the instance's field table contains `name`, return that field value. Fields shadow methods.
+4. Otherwise, look up `name` in the instance's class method table. If found, return a BoundMethod
+   wrapping the closure and `obj` as receiver.
+5. If neither step 3 nor 4 found `name`, this is a **runtime error** ("Undefined property 'name'.").
+
+### Property Set
+
+```
+obj.name = expr
+```
+
+1. Evaluate `obj`.
+2. If `obj` is not an Instance, this is a **runtime error** ("Only instances have fields.").
+3. Evaluate `expr`.
+4. Store the result in the instance's field table under `name` (creating the field if it does not
+   exist, overwriting if it does).
+5. The expression value is the assigned value.
+
+### Method Invocation
+
+```
+obj.method(arg1, arg2, ...)
+```
+
+Semantically equivalent to looking up `obj.method` and calling the result, but the implementation
+fuses both steps into a single `INVOKE` super-instruction. Fields take priority over methods: if
+the instance's field table contains `method`, that value is called (and must be callable). If the
+field value is not callable, that is a **runtime error**.
+
+### `this` Expression
+
+`this` evaluates to the instance on which the enclosing method was invoked. It is only valid inside
+a method body. Using `this` outside any class method is a **static error**.
+
+### `super` Expression
+
+```
+super.method
+super.method(arg1, arg2, ...)
+```
+
+`super.method` looks up `method` starting from the **superclass**, bypassing any override defined
+on the current class. It returns a BoundMethod with `this` bound to the current receiver. The
+`super.method(args)` form fuses this with a call via the `SUPER_INVOKE` super-instruction.
+
+`super` is lexically captured: it closes over the superclass value at class-definition time, not
+at call time.
+
+Using `super` outside a method body, or inside a method of a class with no declared superclass, is
+a **static error**.
+
+### Instance Creation
+
+```
+ClassName(arg1, arg2, ...)
+```
+
+Calling a Class value creates a new Instance:
+
+1. A fresh Instance of the class is allocated with an empty field table.
+2. If the class (or any inherited class) defines an `init` method, it is invoked with `this` bound
+   to the new instance and the supplied arguments. Arity rules apply to `init`.
+3. If no `init` method exists and arguments were supplied, this is a **runtime error**.
+4. The call expression evaluates to the new Instance; the return value of `init` is ignored.
+
 ### Function Call
 
 ```
@@ -140,7 +213,7 @@ callee(arg1, arg2, ...)
 
 1. Evaluate `callee`.
 2. Evaluate arguments left-to-right.
-3. If `callee` is not a Function, this is a **runtime error**.
+3. If `callee` is not a Function, Class, or BoundMethod, this is a **runtime error**.
 4. If the number of arguments does not match the function's arity, this is a
    **runtime error**.
 5. A new local scope is created; each parameter is bound to the corresponding
@@ -261,6 +334,34 @@ Any local variables declared inside the loop body since the top of the current
 iteration are destroyed. Executing `continue` outside a loop is a **static
 error**.
 
+### Class Declaration
+
+```
+class Name { method* }
+class Name < SuperName { method* }
+```
+
+1. If `< SuperName` is present, evaluates `SuperName`. If it is not a Class, this is a
+   **runtime error** ("Superclass must be a class."). A class cannot inherit from itself — that is
+   a **static error**.
+2. A new Class value is created with the given `Name`.
+3. If a superclass is present, its method table is **copied into the new class at definition
+   time** — not at call time. Later changes to the superclass do not affect the subclass.
+4. Each `method` body is compiled and stored in the class's method table (overwriting any inherited
+   method with the same name).
+5. The class value is bound to `Name` in the current scope (global if at top level, local
+   otherwise).
+
+### `init` — Initializer Method
+
+`init` is a specially named method that, if defined, is called automatically whenever an Instance
+of the class is created (see "Instance Creation" above).
+
+- Inside `init`, a bare `return ;` exits early; `this` is still returned as the call result.
+- `return expr ;` with a non-`nil` expression inside `init` is a **static error** ("Can't return a
+  value from an initializer.").
+- `init` implicitly returns `this`.
+
 ### Function Declaration
 
 ```
@@ -322,7 +423,7 @@ Common causes:
 | Arithmetic on non-Numbers | `"a" - 1` |
 | Comparison on non-Numbers | `"a" < 1` |
 | `+` on incompatible types | `1 + "a"` |
-| Call of a non-Function | `42()` |
+| Call of a non-callable value | `42()` |
 | Wrong argument count | `fun f(a) {} f(1, 2)` |
 | Undefined global variable | `print undeclared;` |
 | Call stack overflow | Unbounded recursion |
