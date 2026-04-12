@@ -51,8 +51,7 @@ breakStmt      ::= "break" ";" ;
 
 continueStmt   ::= "continue" ";" ;
 
-switchStmt     ::= "switch" "(" expression ")" "{" switchArm* "}" ;
-switchArm      ::= caseArm | defaultArm ;
+switchStmt     ::= "switch" "(" expression ")" "{" caseArm* defaultArm? "}" ;
 caseArm        ::= "case" expression ( "," expression )* ":" statement* ;
 defaultArm     ::= "default" ":" statement* ;
 
@@ -142,11 +141,11 @@ assigned value.
 
 ### `switch` statement
 
-A `switch` body consists of zero or more arms. Each arm is either a `case`
-arm (with one or more comma-separated match values) or a `default` arm. At
-most one `default` arm may appear; its position relative to `case` arms is
-unrestricted. Only `case` and `default` labels may appear at the top level of
-a switch body — bare statements outside an arm are a parse error.
+A `switch` body consists of zero or more `case` arms followed by an optional
+`default` arm. The `default` arm, if present, must be the final arm — a
+`case` arm after `default` is a **static error**. At most one `default` arm
+may appear. Only `case` and `default` labels may appear at the top level of a
+switch body — bare statements outside an arm are a parse error.
 
 ### Function call arguments
 

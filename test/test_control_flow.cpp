@@ -558,3 +558,14 @@ TEST_F(SwitchTest, ContinueWithNoEnclosingLoopIsError) {
     )"),
               InterpretResult::COMPILE_ERROR);
 }
+
+TEST_F(SwitchTest, CaseAfterDefaultIsError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run(R"(
+        switch (1) {
+            default: 0;
+            case 1: 1;
+        }
+    )"),
+              InterpretResult::COMPILE_ERROR);
+}

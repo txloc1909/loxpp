@@ -495,6 +495,8 @@ void Compiler::switchStatement() {
     while (!m_parser->check(TokenType::RIGHT_BRACE) &&
            !m_parser->check(TokenType::EOF_)) {
         if (m_parser->match(TokenType::CASE)) {
+            if (hasDefault)
+                m_parser->error("'case' arm cannot follow 'default'.");
             // Compile one or more comma-separated values: case v1, v2, ...:
             // For N values we build a chain:
             //   GET_LOCAL S; v; EQUAL; JUMP_IF_FALSE→try_next; POP; JUMP→body

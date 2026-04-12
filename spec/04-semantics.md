@@ -348,10 +348,11 @@ switch ( subject ) {
 ```
 
 1. Evaluate `subject` exactly once. The result is the **switch value**.
-2. Arms are tested in source order. For each `case` arm:
-   a. Evaluate each listed value in order. If any value equals the switch value
-      (using `==` semantics), execute that arm's statements and then jump to
-      after the switch. No further arms are tested.
+2. Arms are tested in source order. For each `case` arm, its values are
+   evaluated left-to-right. As soon as a value equals the switch value
+   (using `==` semantics), the remaining values in that arm and all subsequent
+   arms are **not evaluated**; the arm's statements execute and control jumps
+   to after the switch.
 3. If no `case` arm matched and a `default` arm is present, execute its
    statements.
 4. If no arm matched and there is no `default`, the switch body is a no-op.
@@ -359,9 +360,15 @@ switch ( subject ) {
 **No fall-through**: only the first matching arm executes. There is no implicit
 flow from one arm to the next.
 
-**Multiple values per arm** (`case v1, v2:`): equivalent to separate `case`
-arms that share the same body. Values are tested left-to-right; the first
-match wins.
+**Multiple values per arm** (`case v1, v2:`): values are tested left-to-right;
+the first match wins and the rest are not evaluated.
+
+**Side effects**: because evaluation short-circuits on the first match,
+case-value expressions after the matching position are never evaluated.
+Programs must not rely on side effects of unmatched case expressions.
+
+**`default` placement**: the `default` arm, if present, must be the last arm
+in the switch body. A `case` arm after `default` is a **static error**.
 
 **`break`** inside a switch exits the switch immediately (see `break`
 statement). It does **not** exit any enclosing loop.
