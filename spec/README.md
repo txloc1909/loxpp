@@ -75,7 +75,7 @@ variant) and adds the following:
 | `clock()` built-in | Added in Lox++ |
 | `input()` built-in | Added in Lox++ |
 | `str()` built-in | Added in Lox++ |
-| Classes (`class`, `super`, `this`) | Reserved; not yet defined |
+| Classes (`class`, `super`, `this`) | Added in Lox++ |
 
 ---
 
