@@ -176,6 +176,12 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return constantInstruction("GET_SUPER", chunk, mm, offset, out, color);
     case Op::SUPER_INVOKE:
         return invokeInstruction("SUPER_INVOKE", chunk, mm, offset, out, color);
+    case Op::BUILD_LIST:
+        return byteInstruction("BUILD_LIST", chunk, offset, out, color);
+    case Op::GET_INDEX:
+        return simpleInstruction("GET_INDEX", offset, out, color);
+    case Op::SET_INDEX:
+        return simpleInstruction("SET_INDEX", offset, out, color);
     default:
         out << cc(color, kRed) << cc(color, kBold) << "UNKNOWN("
             << static_cast<unsigned>(chunk.at(offset)) << ")"

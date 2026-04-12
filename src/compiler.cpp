@@ -751,6 +751,29 @@ void Compiler::dot() {
     }
 }
 
+void Compiler::listLiteral() {
+    uint8_t count = 0;
+    if (!m_parser->check(TokenType::RIGHT_BRACKET)) {
+        do {
+            expression();
+            count++;
+        } while (m_parser->match(TokenType::COMMA));
+    }
+    m_parser->consume(TokenType::RIGHT_BRACKET, "Expect ']' after list elements.");
+    emitBytes(Op::BUILD_LIST, count);
+}
+
+void Compiler::subscript() {
+    expression(); // compile index
+    m_parser->consume(TokenType::RIGHT_BRACKET, "Expect ']' after index.");
+    if (m_parser->m_canAssign && m_parser->match(TokenType::EQUAL)) {
+        expression(); // compile RHS
+        emitByte(Op::SET_INDEX);
+    } else {
+        emitByte(Op::GET_INDEX);
+    }
+}
+
 void Compiler::returnStatement() {
     if (m_type == FunctionType::SCRIPT) {
         m_parser->error("Can't return from top-level code.");

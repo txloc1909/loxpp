@@ -82,6 +82,8 @@ class Compiler {
     void dot();
     void this_();
     void super_();
+    void listLiteral();
+    void subscript();
 
   private:
     void beginScope();

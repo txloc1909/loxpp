@@ -7,6 +7,7 @@
 #include "scanner.h"
 #include "compiler.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstdarg>
 #include <ctime>
@@ -501,6 +502,69 @@ InterpretResult VM::run() {
             stackTop = frame->slots;
             push(result);
             frame = &m_frames[m_frameCount - 1];
+            break;
+        }
+        case Op::BUILD_LIST: {
+            uint8_t count = readByte();
+            ObjList* list = m_mm.create<ObjList>(VmAllocator<Value>{&m_mm});
+            m_mm.pushTempRoot(list); // protect across resize's potential GC
+            list->elements.resize(count);
+            for (int i = count - 1; i >= 0; i--)
+                list->elements[i] = pop();
+            m_mm.popTempRoot();
+            push(Value{static_cast<Obj*>(list)});
+            break;
+        }
+        case Op::GET_INDEX: {
+            Value indexVal = pop();
+            Value listVal = pop();
+            if (!isList(listVal)) {
+                runtimeError("Only lists can be indexed.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            if (!is<Number>(indexVal)) {
+                runtimeError("List index must be a number.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            double n = as<Number>(indexVal);
+            if (n != std::floor(n)) {
+                runtimeError("List index must be an integer.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            auto* list = asObjList(as<Obj*>(listVal));
+            int idx = static_cast<int>(n);
+            if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
+                runtimeError("List index out of bounds.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            push(list->elements[idx]);
+            break;
+        }
+        case Op::SET_INDEX: {
+            Value val = pop();
+            Value indexVal = pop();
+            Value listVal = pop();
+            if (!isList(listVal)) {
+                runtimeError("Only lists can be indexed.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            if (!is<Number>(indexVal)) {
+                runtimeError("List index must be a number.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            double n = as<Number>(indexVal);
+            if (n != std::floor(n)) {
+                runtimeError("List index must be an integer.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            auto* list = asObjList(as<Obj*>(listVal));
+            int idx = static_cast<int>(n);
+            if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
+                runtimeError("List index out of bounds.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            list->elements[idx] = val;
+            push(val); // assignment is an expression; its value is the assigned value
             break;
         }
         }

@@ -49,6 +49,17 @@ std::string stringifyObj(Obj* obj) {
                std::string(fn->name->chars.data(), fn->name->chars.size()) +
                ">";
     }
+    case ObjType::LIST: {
+        auto* list = static_cast<ObjList*>(obj);
+        std::string result = "[";
+        for (size_t i = 0; i < list->elements.size(); i++) {
+            if (i > 0)
+                result += ", ";
+            result += stringify(list->elements[i]);
+        }
+        result += "]";
+        return result;
+    }
     }
     return "<obj>";
 }
