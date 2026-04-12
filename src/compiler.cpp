@@ -563,6 +563,21 @@ void Compiler::dot() {
     if (m_parser->m_canAssign && m_parser->match(TokenType::EQUAL)) {
         expression();
         emitBytes(Op::SET_PROPERTY, nameConst);
+    } else if (m_parser->match(TokenType::LEFT_PAREN)) {
+        // Fuse GET_PROPERTY + CALL into a single INVOKE superinstruction.
+        uint8_t argCount = 0;
+        if (!m_parser->check(TokenType::RIGHT_PAREN)) {
+            do {
+                if (argCount == 255)
+                    m_parser->error("Can't have more than 255 arguments.");
+                expression();
+                argCount++;
+            } while (m_parser->match(TokenType::COMMA));
+        }
+        m_parser->consume(TokenType::RIGHT_PAREN,
+                          "Expect ')' after arguments.");
+        emitBytes(Op::INVOKE, nameConst);
+        emitByte(argCount);
     } else {
         emitBytes(Op::GET_PROPERTY, nameConst);
     }

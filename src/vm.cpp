@@ -387,6 +387,45 @@ InterpretResult VM::run() {
             pop(); // pop closure; leave class on stack for next method
             break;
         }
+        case Op::INVOKE: {
+            ObjString* name = asObjString(readConstant());
+            int argCount = readByte();
+            Value receiver = peek(argCount);
+            if (!isInstance(receiver)) {
+                runtimeError("Only instances have properties.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            ObjInstance* instance = asObjInstance(as<Obj*>(receiver));
+            // A field can shadow a method — check fields first.
+            Value fieldVal;
+            if (instance->fields.get(name, fieldVal)) {
+                stackTop[-argCount - 1] = fieldVal;
+                if (isClosure(fieldVal)) {
+                    if (!call(asObjClosure(as<Obj*>(fieldVal)), argCount))
+                        return InterpretResult::RUNTIME_ERROR;
+                } else if (isNative(fieldVal)) {
+                    if (!callNative(asObjNative(as<Obj*>(fieldVal)), argCount))
+                        return InterpretResult::RUNTIME_ERROR;
+                } else {
+                    runtimeError("Can only call functions and classes.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                frame = &m_frames[m_frameCount - 1];
+                break;
+            }
+            // Fast path: call the method directly — receiver already sits at
+            // stackTop[-argCount-1], which becomes slot 0 (= this) of the new
+            // frame.
+            Value method;
+            if (!instance->klass->methods.get(name, method)) {
+                runtimeError("Undefined property '%s'.", name->chars.c_str());
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            if (!call(asObjClosure(as<Obj*>(method)), argCount))
+                return InterpretResult::RUNTIME_ERROR;
+            frame = &m_frames[m_frameCount - 1];
+            break;
+        }
         case Op::CLOSURE: {
             ObjFunction* fn = asObjFunction(readConstant());
             ObjClosure* cl = m_mm.create<ObjClosure>(fn);
