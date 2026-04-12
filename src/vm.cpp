@@ -311,13 +311,28 @@ InterpretResult VM::run() {
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 frame = &m_frames[m_frameCount - 1];
+            } else if (isBoundMethod(callee)) {
+                ObjBoundMethod* bound = asObjBoundMethod(as<Obj*>(callee));
+                // Slot 0 of the new frame = receiver (= this).
+                stackTop[-argCount - 1] = bound->receiver;
+                if (!call(bound->method, argCount)) {
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                frame = &m_frames[m_frameCount - 1];
             } else if (isClass(callee)) {
                 ObjClass* klass = asObjClass(as<Obj*>(callee));
                 ObjInstance* instance =
                     m_mm.create<ObjInstance>(klass, VmAllocator<Entry>{&m_mm});
-                // Replace the class on the stack with the new instance.
                 stackTop[-argCount - 1] = Value{static_cast<Obj*>(instance)};
-                if (argCount != 0) {
+                // Call init() if the class defines one.
+                ObjString* initStr = m_mm.findString("init");
+                Value initMethod;
+                if (initStr && klass->methods.get(initStr, initMethod)) {
+                    if (!call(asObjClosure(as<Obj*>(initMethod)), argCount)) {
+                        return InterpretResult::RUNTIME_ERROR;
+                    }
+                    frame = &m_frames[m_frameCount - 1];
+                } else if (argCount != 0) {
                     runtimeError("Expected 0 arguments but got %d.", argCount);
                     return InterpretResult::RUNTIME_ERROR;
                 }
@@ -347,8 +362,9 @@ InterpretResult VM::run() {
                 push(value);
                 break;
             }
-            runtimeError("Undefined property '%s'.", name->chars.c_str());
-            return InterpretResult::RUNTIME_ERROR;
+            if (!bindMethod(instance->klass, name))
+                return InterpretResult::RUNTIME_ERROR;
+            break;
         }
         case Op::SET_PROPERTY: {
             if (!isInstance(peek(1))) {
@@ -361,6 +377,53 @@ InterpretResult VM::run() {
             Value val = pop(); // value
             pop();             // instance
             push(val);         // assignment is an expression
+            break;
+        }
+        case Op::DEFINE_METHOD: {
+            ObjString* name = asObjString(readConstant());
+            Value method = peek(0); // ObjClosure* on top
+            ObjClass* klass = asObjClass(as<Obj*>(peek(1))); // class below
+            klass->methods.set(name, method);
+            pop(); // pop closure; leave class on stack for next method
+            break;
+        }
+        case Op::INVOKE: {
+            ObjString* name = asObjString(readConstant());
+            int argCount = readByte();
+            Value receiver = peek(argCount);
+            if (!isInstance(receiver)) {
+                runtimeError("Only instances have properties.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            ObjInstance* instance = asObjInstance(as<Obj*>(receiver));
+            // A field can shadow a method — check fields first.
+            Value fieldVal;
+            if (instance->fields.get(name, fieldVal)) {
+                stackTop[-argCount - 1] = fieldVal;
+                if (isClosure(fieldVal)) {
+                    if (!call(asObjClosure(as<Obj*>(fieldVal)), argCount))
+                        return InterpretResult::RUNTIME_ERROR;
+                } else if (isNative(fieldVal)) {
+                    if (!callNative(asObjNative(as<Obj*>(fieldVal)), argCount))
+                        return InterpretResult::RUNTIME_ERROR;
+                } else {
+                    runtimeError("Can only call functions and classes.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                frame = &m_frames[m_frameCount - 1];
+                break;
+            }
+            // Fast path: call the method directly — receiver already sits at
+            // stackTop[-argCount-1], which becomes slot 0 (= this) of the new
+            // frame.
+            Value method;
+            if (!instance->klass->methods.get(name, method)) {
+                runtimeError("Undefined property '%s'.", name->chars.c_str());
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            if (!call(asObjClosure(as<Obj*>(method)), argCount))
+                return InterpretResult::RUNTIME_ERROR;
+            frame = &m_frames[m_frameCount - 1];
             break;
         }
         case Op::CLOSURE: {
@@ -423,6 +486,19 @@ bool VM::callNative(ObjNative* native, int argCount) {
     Value result = native->function(argCount, stackTop - argCount);
     stackTop -= argCount + 1; // pop args + callee
     push(result);
+    return true;
+}
+
+bool VM::bindMethod(ObjClass* klass, ObjString* name) {
+    Value method;
+    if (!klass->methods.get(name, method)) {
+        runtimeError("Undefined property '%s'.", name->chars.c_str());
+        return false;
+    }
+    ObjBoundMethod* bound =
+        m_mm.create<ObjBoundMethod>(peek(0), asObjClosure(as<Obj*>(method)));
+    pop(); // instance
+    push(Value{static_cast<Obj*>(bound)});
     return true;
 }
 

@@ -86,3 +86,21 @@ inline ObjInstance* asObjInstance(Obj* o) {
 inline bool isInstance(const Value& v) {
     return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::INSTANCE;
 }
+
+struct ObjBoundMethod : public Obj {
+    Value receiver; // the instance this method is bound to
+    ObjClosure* method;
+
+    ObjBoundMethod(Value recv, ObjClosure* m)
+        : Obj(ObjType::BOUND_METHOD), receiver(recv), method(m) {}
+};
+
+inline bool isObjBoundMethod(Obj* o) {
+    return isObjType(o, ObjType::BOUND_METHOD);
+}
+inline ObjBoundMethod* asObjBoundMethod(Obj* o) {
+    return static_cast<ObjBoundMethod*>(o);
+}
+inline bool isBoundMethod(const Value& v) {
+    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::BOUND_METHOD;
+}

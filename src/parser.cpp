@@ -44,7 +44,7 @@ static const ParseRule rules[] = {
     RULE(PRINT,          nullptr,             nullptr,           NONE),
     RULE(RETURN,         nullptr,             nullptr,           NONE),
     RULE(SUPER,          nullptr,             nullptr,           NONE),
-    RULE(THIS,           nullptr,             nullptr,           NONE),
+    RULE(THIS,           &Compiler::this_,    nullptr,           NONE),
     RULE(TRUE,           &Compiler::literal,  nullptr,           NONE),
     RULE(VAR,            nullptr,             nullptr,           NONE),
     RULE(WHILE,          nullptr,             nullptr,           NONE),
