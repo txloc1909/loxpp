@@ -31,9 +31,9 @@ TEST_F(ScannerTest, EmptySource) {
 }
 
 TEST_F(ScannerTest, SingleCharacterTokens) {
-    const char* source = "(){},.-+;*";
+    const char* source = "(){},.-+;*%";
     auto tokens = scanTokens(source);
-    ASSERT_EQ(tokens.size(), 11); // 10 tokens + EOF
+    ASSERT_EQ(tokens.size(), 12); // 11 tokens + EOF
     EXPECT_EQ(tokens[0].type, TokenType::LEFT_PAREN);
     EXPECT_EQ(tokens[1].type, TokenType::RIGHT_PAREN);
     EXPECT_EQ(tokens[2].type, TokenType::LEFT_BRACE);
@@ -44,6 +44,7 @@ TEST_F(ScannerTest, SingleCharacterTokens) {
     EXPECT_EQ(tokens[7].type, TokenType::PLUS);
     EXPECT_EQ(tokens[8].type, TokenType::SEMICOLON);
     EXPECT_EQ(tokens[9].type, TokenType::STAR);
+    EXPECT_EQ(tokens[10].type, TokenType::PERCENT);
 }
 
 TEST_F(ScannerTest, OneOrTwoCharacterTokens) {
@@ -128,14 +129,6 @@ TEST_F(ScannerTest, CommentHandling) {
     EXPECT_EQ(tokens[2].type, TokenType::EOF_);
 }
 
-TEST_F(ScannerTest, PercentToken) {
-    const char* source = "%";
-    auto tokens = scanTokens(source);
-    ASSERT_EQ(tokens.size(), 2); // 1 token + EOF
-    EXPECT_EQ(tokens[0].type, TokenType::PERCENT);
-    EXPECT_EQ(tokens[0].lexeme, "%");
-    EXPECT_EQ(tokens[1].type, TokenType::EOF_);
-}
 
 int main(int argc, char** argv) {
     testing::InitGoogleTest(&argc, argv);
