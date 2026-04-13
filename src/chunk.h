@@ -48,6 +48,9 @@ enum class Op : Byte {
     GET_SUPER, // 1-byte constant (method name) — binds method to 'this' from
                // superclass
     SUPER_INVOKE, // operands: name-constant-index (1 byte), arg-count (1 byte)
+    BUILD_LIST,   // operand: uint8 element count; pops N values, pushes ObjList
+    GET_INDEX,    // pops index then list; pushes list[index]
+    SET_INDEX, // pops value, index, list; sets list[index]=value; pushes value
 };
 
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }

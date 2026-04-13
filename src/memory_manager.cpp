@@ -26,6 +26,8 @@ static const char* objTypeName(ObjType type) {
         return "instance";
     case ObjType::BOUND_METHOD:
         return "bound_method";
+    case ObjType::LIST:
+        return "list";
     }
     return "?";
 }
@@ -175,6 +177,12 @@ void MemoryManager::traceObject(Obj* obj) {
         auto* bm = static_cast<ObjBoundMethod*>(obj);
         markValue(bm->receiver);
         markObject(bm->method);
+        break;
+    }
+    case ObjType::LIST: {
+        auto* list = static_cast<ObjList*>(obj);
+        for (auto& v : list->elements)
+            markValue(v);
         break;
     }
     }

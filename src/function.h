@@ -104,3 +104,16 @@ inline ObjBoundMethod* asObjBoundMethod(Obj* o) {
 inline bool isBoundMethod(const Value& v) {
     return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::BOUND_METHOD;
 }
+
+struct ObjList : public Obj {
+    VmVector<Value> elements;
+
+    explicit ObjList(VmAllocator<Value> alloc)
+        : Obj(ObjType::LIST), elements(alloc) {}
+};
+
+inline bool isObjList(Obj* o) { return isObjType(o, ObjType::LIST); }
+inline ObjList* asObjList(Obj* o) { return static_cast<ObjList*>(o); }
+inline bool isList(const Value& v) {
+    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::LIST;
+}

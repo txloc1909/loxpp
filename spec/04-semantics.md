@@ -457,6 +457,54 @@ print c(); // 2
 Multiple closures created within the same scope share the same closed-over
 variable; mutating it through one closure is visible through all others.
 
+### List Literal
+
+```lox
+[expr1, expr2, ...]
+[]
+```
+
+1. Each element expression is evaluated left-to-right.
+2. A new List is allocated containing those values in order.
+3. The expression evaluates to the new List.
+
+An empty `[]` produces a List with zero elements.
+
+The maximum number of element expressions in a list literal is 255 (the same
+limit as function call arguments).
+
+### Index Get
+
+```lox
+list[index]
+```
+
+1. Evaluate `list`.
+2. Evaluate `index`.
+3. If `list` is not a List, this is a **runtime error** ("Only lists can be indexed.").
+4. If `index` is not a Number, this is a **runtime error** ("List index must be a number.").
+5. If `index` is a Number but not an integer-valued number (i.e., `index ≠ floor(index)`),
+   this is a **runtime error** ("List index must be an integer.").
+6. Let `i` be the integer value of `index`.
+7. If `i < 0` or `i ≥ length(list)`, this is a **runtime error** ("List index out of bounds.").
+8. The expression evaluates to `list[i]`.
+
+Note: since there is no separate integer type, `list[1]` and `list[1.0]` are
+identical — both are the same Number value used as index 1.
+
+### Index Set
+
+```lox
+list[index] = expr
+```
+
+1. Evaluate `list`.
+2. Evaluate `index`.
+3. Perform the same type and bounds checks as Index Get (steps 3–7 above).
+4. Evaluate `expr`.
+5. Store the result in `list[i]`.
+6. The expression evaluates to the stored value (same as assignment semantics).
+
 ---
 
 ## Runtime Errors
@@ -473,3 +521,7 @@ Common causes:
 | Wrong argument count | `fun f(a) {} f(1, 2)` |
 | Undefined global variable | `print undeclared;` |
 | Call stack overflow | Unbounded recursion |
+| Index of non-List | `42[0]` |
+| Non-Number list index | `list["a"]` |
+| Fractional list index | `list[1.5]` |
+| List index out of bounds | `[][0]` |

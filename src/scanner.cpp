@@ -48,6 +48,10 @@ Token Scanner::scanOneToken() {
         return makeToken(TokenType::LEFT_BRACE);
     case '}':
         return makeToken(TokenType::RIGHT_BRACE);
+    case '[':
+        return makeToken(TokenType::LEFT_BRACKET);
+    case ']':
+        return makeToken(TokenType::RIGHT_BRACKET);
     case ',':
         return makeToken(TokenType::COMMA);
     case ':':

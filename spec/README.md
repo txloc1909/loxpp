@@ -77,6 +77,7 @@ variant) and adds the following:
 | `input()` built-in | Added in Lox++ |
 | `str()` built-in | Added in Lox++ |
 | Classes (`class`, `super`, `this`) | Added in Lox++ |
+| List type with `[]` literal and indexing | Added in Lox++ |
 
 ---
 
