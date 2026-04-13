@@ -34,7 +34,11 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++"
+        "CMAKE_CXX_COMPILER": "clang++",
+        "LOXPP_DEBUG_PRINT_CODE": "OFF",
+        "LOXPP_DEBUG_TRACE_EXECUTION": "OFF",
+        "LOXPP_DEBUG_LOG_GC": "OFF",
+        "LOXPP_STRESS_GC": "OFF"
       }
     }
   ]
