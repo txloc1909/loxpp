@@ -128,6 +128,15 @@ TEST_F(ScannerTest, CommentHandling) {
     EXPECT_EQ(tokens[2].type, TokenType::EOF_);
 }
 
+TEST_F(ScannerTest, PercentToken) {
+    const char* source = "%";
+    auto tokens = scanTokens(source);
+    ASSERT_EQ(tokens.size(), 2); // 1 token + EOF
+    EXPECT_EQ(tokens[0].type, TokenType::PERCENT);
+    EXPECT_EQ(tokens[0].lexeme, "%");
+    EXPECT_EQ(tokens[1].type, TokenType::EOF_);
+}
+
 int main(int argc, char** argv) {
     testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

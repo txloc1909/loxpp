@@ -232,6 +232,19 @@ InterpretResult VM::run() {
             BINARY_OP(Number, /);
             break;
         }
+        case Op::MODULO: {
+            if (!is<Number>(peek(0)) || !is<Number>(peek(1))) {
+                runtimeError("Operands must be numbers.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            Number b = as<Number>(pop());
+            Number a = as<Number>(pop());
+            Number result = std::fmod(a, b);
+            // Floor-division semantics: result has same sign as b (Python/Lua behavior)
+            if (result != 0 && (result < 0) != (b < 0)) result += b;
+            push(from<Number>(result));
+            break;
+        }
         case Op::NOT: {
             push(from<bool>(!pop()));
             break;

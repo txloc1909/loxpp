@@ -136,6 +136,9 @@ void Compiler::binary() {
     case TokenType::SLASH:
         emitByte(Op::DIVIDE);
         break;
+    case TokenType::PERCENT:
+        emitByte(Op::MODULO);
+        break;
     default:
         return; // Unreachable.
     }

@@ -529,3 +529,39 @@ TEST_F(NativeTest, StackCleanAfterNativeCall) {
     ASSERT_EQ(h.run("str(1); str(2); str(3);"), InterpretResult::OK);
     EXPECT_EQ(h.stackDepth(), 0);
 }
+
+// ===========================================================================
+// Modulo operator tests
+// ===========================================================================
+
+class ModuloTest : public ::testing::Test {};
+
+TEST_F(ModuloTest, BasicModulo) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("10 % 3;"), InterpretResult::OK);
+    EXPECT_NEAR(as<Number>(h.lastResult()), 1.0, 1e-9);
+}
+
+TEST_F(ModuloTest, FloatModulo) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("7.5 % 2.5;"), InterpretResult::OK);
+    EXPECT_NEAR(as<Number>(h.lastResult()), 0.0, 1e-9);
+}
+
+TEST_F(ModuloTest, NegativeDividend_FloorSemantics) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("-7 % 3;"), InterpretResult::OK);
+    EXPECT_NEAR(as<Number>(h.lastResult()), 2.0, 1e-9);
+}
+
+TEST_F(ModuloTest, NegativeDivisor_FloorSemantics) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("7 % -3;"), InterpretResult::OK);
+    EXPECT_NEAR(as<Number>(h.lastResult()), -2.0, 1e-9);
+}
+
+TEST_F(ModuloTest, ZeroDividend) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("0 % 5;"), InterpretResult::OK);
+    EXPECT_NEAR(as<Number>(h.lastResult()), 0.0, 1e-9);
+}

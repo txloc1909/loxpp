@@ -22,6 +22,7 @@ static const ParseRule rules[] = {
     RULE(SEMICOLON,      nullptr,             nullptr,           NONE),
     RULE(SLASH,          nullptr,             &Compiler::binary, FACTOR),
     RULE(STAR,           nullptr,             &Compiler::binary, FACTOR),
+    RULE(PERCENT,        nullptr,             &Compiler::binary, FACTOR),
     RULE(BANG,           &Compiler::unary,    nullptr,           NONE),
     RULE(BANG_EQUAL,     nullptr,             &Compiler::binary, EQUALITY),
     RULE(EQUAL,          nullptr,             nullptr,           NONE),

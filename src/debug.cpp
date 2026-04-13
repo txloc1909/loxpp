@@ -122,6 +122,8 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return simpleInstruction("MULTIPLY", offset, out, color);
     case Op::DIVIDE:
         return simpleInstruction("DIVIDE", offset, out, color);
+    case Op::MODULO:
+        return simpleInstruction("MODULO", offset, out, color);
     case Op::NOT:
         return simpleInstruction("NOT", offset, out, color);
     case Op::PRINT:

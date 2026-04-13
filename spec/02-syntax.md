@@ -73,7 +73,7 @@ comparison     ::= term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
 
 term           ::= factor ( ( "-" | "+" ) factor )* ;
 
-factor         ::= unary ( ( "/" | "*" ) unary )* ;
+factor         ::= unary ( ( "/" | "*" | "%" ) unary )* ;
 
 unary          ::= ( "!" | "-" ) unary
                  | call ;
@@ -109,7 +109,7 @@ Operators within the same group are left-associative unless noted otherwise.
 | 4 | `==` `!=` | Left |
 | 5 | `<` `<=` `>` `>=` | Left |
 | 6 | `+` `-` | Left |
-| 7 | `*` `/` | Left |
+| 7 | `*` `/` `%` | Left |
 | 8 | `!` `-` (unary) | Right (prefix) |
 | 9 (highest) | `()` (function call), `.` (property access), `[]` (index) | Left |
 

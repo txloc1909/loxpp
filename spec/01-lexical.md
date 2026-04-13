@@ -55,6 +55,7 @@ There are no block comments.
 | `;` | SEMICOLON |
 | `/` | SLASH |
 | `*` | STAR |
+| `%` | PERCENT |
 
 ### One-or-Two-Character Tokens
 
