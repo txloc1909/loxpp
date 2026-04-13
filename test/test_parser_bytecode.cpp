@@ -209,3 +209,15 @@ TEST_F(FunctionBytecodeTest, FunctionWithLocalVar_InnerChunk) {
                            "3: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
+
+TEST_F(ParserBytecodeTest, Arithmetic_Modulo) {
+    std::string expr = "10 % 3";
+    std::string bytecode = compile_to_bytecode(expr);
+    std::string expected = "0: CONSTANT 0 ('10')\n"
+                           "2: CONSTANT 1 ('3')\n"
+                           "4: MODULO\n"
+                           "5: POP\n"
+                           "6: NIL\n"
+                           "7: RETURN\n";
+    EXPECT_EQ(trim(bytecode), trim(expected));
+}

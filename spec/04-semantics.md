@@ -90,6 +90,7 @@ parsing precedence.
 | `a - b` | Both Numbers | Difference |
 | `a * b` | Both Numbers | Product |
 | `a / b` | Both Numbers | Quotient |
+| `a % b` | Both Numbers | Remainder (floor-division semantics) |
 | `-a` | Number | Negation |
 
 Any violation of the type requirement is a **runtime error**.
@@ -100,6 +101,8 @@ operand.
 
 Division follows IEEE 754; dividing by zero produces `Infinity` or
 `-Infinity` (not an error).
+
+Modulo (`%`) is computed as `fmod(a, b)` adjusted so the result has the same sign as `b` (floor-division semantics, same as Python and Lua). `a % 0` produces `NaN` (consistent with `a / 0` producing `Infinity`).
 
 ### Comparison
 

@@ -19,6 +19,7 @@ enum class TokenType : int {
     SEMICOLON,
     SLASH,
     STAR,
+    PERCENT,
 
     // One or two character tokens.
     BANG,

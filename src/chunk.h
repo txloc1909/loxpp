@@ -22,6 +22,7 @@ enum class Op : Byte {
     SUBTRACT,
     MULTIPLY,
     DIVIDE,
+    MODULO,
     NOT,
     PRINT,
     POP,
