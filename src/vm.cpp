@@ -564,7 +564,8 @@ InterpretResult VM::run() {
                 return InterpretResult::RUNTIME_ERROR;
             }
             list->elements[idx] = val;
-            push(val); // assignment is an expression; its value is the assigned value
+            push(val); // assignment is an expression; its value is the assigned
+                       // value
             break;
         }
         }

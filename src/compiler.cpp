@@ -759,7 +759,8 @@ void Compiler::listLiteral() {
             count++;
         } while (m_parser->match(TokenType::COMMA));
     }
-    m_parser->consume(TokenType::RIGHT_BRACKET, "Expect ']' after list elements.");
+    m_parser->consume(TokenType::RIGHT_BRACKET,
+                      "Expect ']' after list elements.");
     emitBytes(Op::BUILD_LIST, count);
 }
 

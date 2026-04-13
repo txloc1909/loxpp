@@ -72,8 +72,7 @@ TEST(List, IndexSet) {
 TEST(List, IndexSetIsExpression) {
     // Assignment expression evaluates to the assigned value
     VMTestHarness h;
-    ASSERT_EQ(h.run("var xs = [0]; var r = xs[0] = 42;"),
-              InterpretResult::OK);
+    ASSERT_EQ(h.run("var xs = [0]; var r = xs[0] = 42;"), InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("r"), "42");
 }
 
@@ -148,7 +147,8 @@ TEST(List, StoredInClosure) {
 }
 
 TEST(List, ListIdentityEquality) {
-    // Two distinct list literals are not equal even if they have the same elements
+    // Two distinct list literals are not equal even if they have the same
+    // elements
     VMTestHarness h;
     ASSERT_EQ(h.run("var a = [1, 2]; var b = [1, 2]; var r = a == b;"),
               InterpretResult::OK);
@@ -174,8 +174,7 @@ TEST(List, StringifyNested) {
 
 TEST(List, StringifyMixed) {
     VMTestHarness h;
-    ASSERT_EQ(h.run(R"(var xs = [1, "hi", true, nil];)"),
-              InterpretResult::OK);
+    ASSERT_EQ(h.run(R"(var xs = [1, "hi", true, nil];)"), InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("xs"), "[1, hi, true, nil]");
 }
 
