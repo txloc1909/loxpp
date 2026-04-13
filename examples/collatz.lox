@@ -1,0 +1,26 @@
+// collatz.lox — Collatz (3n+1) sequence printer.
+//
+// Starting from n: if even divide by 2, if odd do 3n+1. Repeat until 1.
+// Conjecture: all positive integers eventually reach 1.
+//
+// Demonstrates: %, if/else, while loops, step counting.
+
+fun collatz(n) {
+    print "Collatz(" + str(n) + "):";
+    var steps = 0;
+    while (n != 1) {
+        if (n % 2 == 0) {
+            n = n / 2;
+        } else {
+            n = 3 * n + 1;
+        }
+        steps = steps + 1;
+    }
+    print "  reached 1 in " + str(steps) + " step(s)";
+}
+
+print "=== Collatz Sequences ===";
+collatz(6);
+collatz(11);
+collatz(27);
+collatz(100);

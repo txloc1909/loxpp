@@ -1,0 +1,26 @@
+// leap_year.lox — Leap-year checker.
+//
+// A year is a leap year if:
+//   divisible by 4, AND (not divisible by 100 OR divisible by 400).
+//
+// Demonstrates: %, logical operators, functions.
+
+fun isLeap(y) {
+    return y % 4 == 0 and (y % 100 != 0 or y % 400 == 0);
+}
+
+fun check(y) {
+    if (isLeap(y)) {
+        print str(y) + " is a leap year";
+    } else {
+        print str(y) + " is NOT a leap year";
+    }
+}
+
+print "=== Leap Year Checker ===";
+check(2000);   // leap  (divisible by 400)
+check(1900);   // not   (divisible by 100 but not 400)
+check(2024);   // leap  (divisible by 4, not 100)
+check(2023);   // not   (not divisible by 4)
+check(2100);   // not   (divisible by 100 but not 400)
+check(2400);   // leap  (divisible by 400)

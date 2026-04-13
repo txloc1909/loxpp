@@ -1,0 +1,40 @@
+// digital_root.lox — Digital root of a positive integer.
+//
+// The digital root is the single digit obtained by repeatedly summing digits
+// until one digit remains. For n > 0 it equals ((n - 1) % 9) + 1 (closed form).
+//
+// Demonstrates: %, closed-form formula vs iterative approach.
+
+fun digitalRootFormula(n) {
+    if (n == 0) return 0;
+    return (n - 1) % 9 + 1;
+}
+
+// Iterative: sum the digits of n (works for small integers stored as numbers).
+fun digitSum(n) {
+    var s = 0;
+    while (n > 0) {
+        s = s + n % 10;
+        n = (n - n % 10) / 10;
+    }
+    return s;
+}
+
+fun digitalRootIterative(n) {
+    while (n >= 10) {
+        n = digitSum(n);
+    }
+    return n;
+}
+
+print "=== Digital Root ===";
+var nums = [0, 1, 9, 10, 42, 99, 493, 9999, 12345];
+var i = 0;
+while (i < 9) {
+    var n = nums[i];
+    var formula = digitalRootFormula(n);
+    var iter    = digitalRootIterative(n);
+    print "  digitalRoot(" + str(n) + ") = " + str(formula)
+        + "  (iterative: " + str(iter) + ")";
+    i = i + 1;
+}

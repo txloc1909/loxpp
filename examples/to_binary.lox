@@ -1,0 +1,22 @@
+// to_binary.lox — Convert a non-negative integer to its binary string.
+//
+// Demonstrates: %, integer division, string concatenation, recursion.
+
+fun toBinary(n) {
+    if (n == 0) return "0";
+    var bits = "";
+    while (n > 0) {
+        bits = str(n % 2) + bits;
+        n = (n - n % 2) / 2;   // integer division: floor(n/2)
+    }
+    return bits;
+}
+
+print "=== Decimal → Binary ===";
+var nums = [0, 1, 2, 5, 10, 42, 127, 255, 1024];
+var i = 0;
+while (i < 9) {
+    var n = nums[i];
+    print "  " + str(n) + " = " + toBinary(n);
+    i = i + 1;
+}

@@ -1,0 +1,45 @@
+// luhn.lox — Luhn algorithm for credit-card check-digit validation.
+//
+// Algorithm (right to left):
+//   - Odd positions (1st, 3rd, ...): take digit as-is.
+//   - Even positions (2nd, 4th, ...): double the digit; if result > 9, subtract 9.
+//   - Sum all values. Valid if sum % 10 == 0.
+//
+// We encode each card as a list of digits (most-significant first).
+//
+// Demonstrates: %, list indexing, arithmetic, functions.
+
+fun luhn(digits, len) {
+    var sum = 0;
+    var i = 0;
+    while (i < len) {
+        // Position from the right: len - 1 - i  (0-based)
+        var posFromRight = len - 1 - i;
+        var d = digits[i];
+        if (posFromRight % 2 == 1) {   // even position (1-based) = double
+            d = d * 2;
+            if (d > 9) d = d - 9;
+        }
+        sum = sum + d;
+        i = i + 1;
+    }
+    return sum % 10 == 0;
+}
+
+fun check(label, digits, len) {
+    if (luhn(digits, len)) {
+        print label + ": VALID";
+    } else {
+        print label + ": INVALID";
+    }
+}
+
+print "=== Luhn Algorithm ===";
+// Visa test number: 4532015112830366
+check("4532015112830366", [4,5,3,2,0,1,5,1,1,2,8,3,0,3,6,6], 16);
+// Mastercard test:  5425233430109903
+check("5425233430109903", [5,4,2,5,2,3,3,4,3,0,1,0,9,9,0,3], 16);
+// Invalid number:   1234567890123456
+check("1234567890123456", [1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6], 16);
+// Single valid:     0
+check("0             ", [0], 1);

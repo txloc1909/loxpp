@@ -2,20 +2,10 @@
 //
 // Demonstrates: recursion, while loops, arithmetic.
 //
-// Note: Lox++ has no % operator yet, so mod() is implemented via repeated
-// subtraction — correct for positive integers, just slower than the native op.
-
-fun mod(a, b) {
-    while (a >= b) {
-        a = a - b;
-    }
-    return a;
-}
-
 fun gcd(a, b) {
     while (b != 0) {
         var t = b;
-        b = mod(a, b);
+        b = a % b;
         a = t;
     }
     return a;
