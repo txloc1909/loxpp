@@ -240,8 +240,10 @@ InterpretResult VM::run() {
             Number b = as<Number>(pop());
             Number a = as<Number>(pop());
             Number result = std::fmod(a, b);
-            // Floor-division semantics: result has same sign as b (Python/Lua behavior)
-            if (result != 0 && (result < 0) != (b < 0)) result += b;
+            // Floor-division semantics: result has same sign as b (Python/Lua
+            // behavior)
+            if (result != 0 && (result < 0) != (b < 0))
+                result += b;
             push(from<Number>(result));
             break;
         }
