@@ -1,0 +1,38 @@
+// gcd_lcm.lox — GCD and LCM via the Euclidean algorithm.
+//
+// Demonstrates: recursion, while loops, arithmetic.
+//
+// Note: Lox++ has no % operator yet, so mod() is implemented via repeated
+// subtraction — correct for positive integers, just slower than the native op.
+
+fun mod(a, b) {
+    while (a >= b) {
+        a = a - b;
+    }
+    return a;
+}
+
+fun gcd(a, b) {
+    while (b != 0) {
+        var t = b;
+        b = mod(a, b);
+        a = t;
+    }
+    return a;
+}
+
+fun lcm(a, b) {
+    return a * b / gcd(a, b);
+}
+
+print "=== GCD / LCM ===";
+
+var pairs = [[12, 8], [100, 75], [17, 13], [48, 36], [0, 5]];
+var i = 0;
+while (i < 5) {
+    var a = pairs[i][0];
+    var b = pairs[i][1];
+    print "  gcd(" + str(a) + ", " + str(b) + ") = " + str(gcd(a, b))
+        + "   lcm = " + str(lcm(a, b));
+    i = i + 1;
+}

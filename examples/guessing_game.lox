@@ -1,0 +1,43 @@
+// guessing_game.lox — Number guessing game.
+//
+// Demonstrates: input(), while loops, break, str(), attempt counting.
+//
+// Note: Lox++ has no string-to-number conversion yet, so the secret number
+// is compared against the player's raw input via str(). Type the number
+// exactly (e.g. "42", not "042"). Higher/lower hints require a future
+// num() built-in; for now the game confirms correct or incorrect only.
+
+var secret = 42;
+var maxAttempts = 7;
+var attempts = 0;
+var won = false;
+
+print "=== Number Guessing Game ===";
+print "I'm thinking of a number between 1 and 100.";
+print "You have " + str(maxAttempts) + " attempts. Good luck!";
+print "";
+
+while (attempts < maxAttempts and !won) {
+    attempts = attempts + 1;
+    var remaining = maxAttempts - attempts + 1;
+    print "Attempt " + str(attempts) + " / " + str(maxAttempts) + ": ";
+    var guess = input();
+
+    if (guess == nil) {
+        print "Input ended.";
+        break;
+    }
+
+    if (guess == str(secret)) {
+        won = true;
+        print "Correct! You guessed it in " + str(attempts) + " attempt(s)!";
+    } else {
+        if (remaining > 0) {
+            print "Not quite. " + str(remaining - 1) + " attempt(s) left.";
+        }
+    }
+}
+
+if (!won) {
+    print "Out of attempts. The number was " + str(secret) + ".";
+}

@@ -1,0 +1,79 @@
+// shapes.lox — Class hierarchy with polymorphic area().
+//
+// Demonstrates: inheritance, super, dynamic dispatch, method overriding.
+
+class Shape {
+    name() { return "Shape"; }
+    area() { return 0; }
+    perimeter() { return 0; }
+
+    describe() {
+        print this.name()
+            + ": area=" + str(this.area())
+            + ", perimeter=" + str(this.perimeter());
+    }
+}
+
+class Circle < Shape {
+    init(radius) { this.radius = radius; }
+    name() { return "Circle(r=" + str(this.radius) + ")"; }
+    // pi approximation — math.pi is a future milestone
+    area() { return 3.14159 * this.radius * this.radius; }
+    perimeter() { return 2 * 3.14159 * this.radius; }
+}
+
+class Rectangle < Shape {
+    init(width, height) {
+        this.width = width;
+        this.height = height;
+    }
+    name() { return "Rectangle(" + str(this.width) + "x" + str(this.height) + ")"; }
+    area() { return this.width * this.height; }
+    perimeter() { return 2 * (this.width + this.height); }
+}
+
+class Square < Rectangle {
+    init(side) { super.init(side, side); }
+    name() { return "Square(" + str(this.width) + ")"; }
+}
+
+class Triangle < Shape {
+    init(base, height, a, b, c) {
+        this.base = base;
+        this.height = height;
+        this.a = a;
+        this.b = b;
+        this.c = c;
+    }
+    name() { return "Triangle(b=" + str(this.base) + ", h=" + str(this.height) + ")"; }
+    area() { return 0.5 * this.base * this.height; }
+    perimeter() { return this.a + this.b + this.c; }
+}
+
+print "=== Shape Hierarchy ===";
+
+var shapes = [
+    Circle(5),
+    Rectangle(4, 6),
+    Square(3),
+    Triangle(6, 4, 5, 5, 6)
+];
+
+var i = 0;
+while (i < 4) {
+    shapes[i].describe();
+    i = i + 1;
+}
+
+print "";
+print "=== Polymorphic dispatch demo ===";
+fun totalArea(shapeList, count) {
+    var total = 0;
+    var j = 0;
+    while (j < count) {
+        total = total + shapeList[j].area();
+        j = j + 1;
+    }
+    return total;
+}
+print "Total area of all shapes: " + str(totalArea(shapes, 4));

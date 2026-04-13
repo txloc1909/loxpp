@@ -1,0 +1,55 @@
+// quiz.lox — Interactive trivia quiz game.
+//
+// Demonstrates: classes, input(), loops, string comparison, score tracking.
+
+class Question {
+    init(text, answer) {
+        this.text = text;
+        this.answer = answer;
+    }
+
+    ask() {
+        print "  " + this.text;
+        var response = input();
+        if (response == nil) return false;
+        if (response == this.answer) {
+            print "  Correct!";
+            return true;
+        }
+        print "  Wrong. The answer is: " + this.answer;
+        return false;
+    }
+}
+
+var questions = [
+    Question("What is 2 + 2?", "4"),
+    Question("What planet is closest to the Sun?", "Mercury"),
+    Question("What is the capital of France?", "Paris"),
+    Question("How many sides does a hexagon have?", "6"),
+    Question("What gas do plants absorb from the air?", "CO2")
+];
+
+print "=== Lox++ Trivia Quiz ===";
+print "Answer each question exactly as shown.";
+print "";
+
+var score = 0;
+var i = 0;
+while (i < 5) {
+    print "Question " + str(i + 1) + ":";
+    if (questions[i].ask()) {
+        score = score + 1;
+    }
+    print "";
+    i = i + 1;
+}
+
+print "=== Results ===";
+print "Score: " + str(score) + " / 5";
+if (score == 5) {
+    print "Perfect score! Outstanding!";
+} else if (score >= 3) {
+    print "Well done!";
+} else {
+    print "Better luck next time!";
+}

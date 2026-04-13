@@ -1,0 +1,26 @@
+// hanoi.lox — Towers of Hanoi.
+//
+// Demonstrates: recursion, string concatenation, str().
+
+var moves = 0;
+
+fun hanoi(n, from, to, via) {
+    if (n == 0) return;
+    hanoi(n - 1, from, via, to);
+    moves = moves + 1;
+    print "  Move disk " + str(n) + ":  " + from + " → " + to;
+    hanoi(n - 1, via, to, from);
+}
+
+print "=== Towers of Hanoi ===";
+print "";
+
+var disks = 1;
+while (disks <= 4) {
+    moves = 0;
+    print "--- " + str(disks) + " disk(s) ---";
+    hanoi(disks, "A", "C", "B");
+    print "Total moves: " + str(moves);
+    print "";
+    disks = disks + 1;
+}

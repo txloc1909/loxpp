@@ -1,0 +1,42 @@
+// fibonacci.lox — Fibonacci sequence, recursive and iterative, timed with clock().
+//
+// Demonstrates: closures, recursion, while loops, clock() benchmark harness.
+
+fun fibRecursive(n) {
+    if (n <= 1) return n;
+    return fibRecursive(n - 1) + fibRecursive(n - 2);
+}
+
+fun fibIterative(n) {
+    if (n <= 1) return n;
+    var a = 0;
+    var b = 1;
+    var i = 2;
+    while (i <= n) {
+        var c = a + b;
+        a = b;
+        b = c;
+        i = i + 1;
+    }
+    return b;
+}
+
+print "=== Fibonacci sequence (first 10 terms) ===";
+var i = 0;
+while (i < 10) {
+    print "  fib(" + str(i) + ") = " + str(fibIterative(i));
+    i = i + 1;
+}
+
+print "";
+print "=== Benchmark: fib(30) ===";
+
+var start = clock();
+var result = fibRecursive(30);
+var elapsed = clock() - start;
+print "  recursive: " + str(result) + "  (" + str(elapsed) + " s)";
+
+start = clock();
+result = fibIterative(30);
+elapsed = clock() - start;
+print "  iterative: " + str(result) + "  (" + str(elapsed) + " s)";
