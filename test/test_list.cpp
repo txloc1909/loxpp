@@ -258,3 +258,178 @@ TEST(List, ElementsSurviveGC) {
               InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("r"), "keep-me");
 }
+
+// ---------------------------------------------------------------------------
+// append
+// ---------------------------------------------------------------------------
+
+TEST(List, AppendToEmpty) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = []; xs.append(1); var r = xs[0];"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "1");
+}
+
+TEST(List, AppendMultiple) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = [1, 2]; xs.append(3); xs.append(4);"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("xs"), "[1, 2, 3, 4]");
+}
+
+TEST(List, AppendReturnsNil) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = []; var r = xs.append(99);"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "nil");
+}
+
+TEST(List, AppendMaintainsOrder) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var xs = [];
+        xs.append(10);
+        xs.append(20);
+        xs.append(30);
+        var r = xs[2];
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "30");
+}
+
+TEST(List, AppendWrongArgCount) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = []; xs.append();"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(List, AppendTooManyArgs) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = []; xs.append(1, 2);"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+// ---------------------------------------------------------------------------
+// pop
+// ---------------------------------------------------------------------------
+
+TEST(List, PopReturnsLastElement) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = [1, 2, 3]; var r = xs.pop();"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "3");
+}
+
+TEST(List, PopShrinksListByOne) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = [1, 2, 3]; xs.pop();"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("xs"), "[1, 2]");
+}
+
+TEST(List, PopUntilEmpty) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var xs = [10, 20];
+        var a = xs.pop();
+        var b = xs.pop();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("a"), "20");
+    EXPECT_EQ(h.getGlobalStr("b"), "10");
+    EXPECT_EQ(h.getGlobalStr("xs"), "[]");
+}
+
+TEST(List, PopEmptyList) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = []; xs.pop();"), InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(List, PopWrongArgCount) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = [1]; xs.pop(1);"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(List, AppendThenPop) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var xs = [1, 2];
+        xs.append(99);
+        var r = xs.pop();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "99");
+    EXPECT_EQ(h.getGlobalStr("xs"), "[1, 2]");
+}
+
+// ---------------------------------------------------------------------------
+// len
+// ---------------------------------------------------------------------------
+
+TEST(List, LenEmpty) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var r = len([]);"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "0");
+}
+
+TEST(List, LenNonEmpty) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var r = len([1, 2, 3]);"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "3");
+}
+
+TEST(List, LenAfterAppend) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var xs = [1, 2];
+        xs.append(3);
+        var r = len(xs);
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "3");
+}
+
+TEST(List, LenAfterPop) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var xs = [1, 2, 3];
+        xs.pop();
+        var r = len(xs);
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "2");
+}
+
+TEST(List, LenUsedAsBound) {
+    // Common pattern: iterate with len as loop bound
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var xs = [10, 20, 30];
+        var sum = 0;
+        var i = 0;
+        while (i < len(xs)) {
+            sum = sum + xs[i];
+            i = i + 1;
+        }
+        var r = sum;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "60");
+}
+
+TEST(List, LenOnNonList) {
+    VMTestHarness h;
+    // len(42) is a runtime error — returns nil, prints to stderr
+    ASSERT_EQ(h.run("var r = len(42);"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "nil");
+}
+
+// ---------------------------------------------------------------------------
+// Undefined method
+// ---------------------------------------------------------------------------
+
+TEST(List, UndefinedMethod) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = [1, 2]; xs.foo();"),
+              InterpretResult::RUNTIME_ERROR);
+}

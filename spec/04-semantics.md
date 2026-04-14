@@ -508,6 +508,38 @@ list[index] = expr
 5. Store the result in `list[i]`.
 6. The expression evaluates to the stored value (same as assignment semantics).
 
+### List Methods
+
+#### `append`
+
+```lox
+list.append(value)
+```
+
+1. Evaluate `list`. If the result is not a List, this is a **runtime error** ("Only instances have methods.").
+2. Appends `value` to the end of the list.
+3. The expression evaluates to `nil`.
+
+#### `pop`
+
+```lox
+list.pop()
+```
+
+1. Evaluate `list`. If the result is not a List, this is a **runtime error** ("Only instances have methods.").
+2. If the list is empty, this is a **runtime error** ("Cannot pop from an empty list.").
+3. Removes the last element from the list.
+4. The expression evaluates to the removed element.
+
+### `len` (global native)
+
+```lox
+len(list)
+```
+
+1. If the argument is not a List, this is a **runtime error**.
+2. The expression evaluates to a Number equal to the number of elements in the list.
+
 ---
 
 ## Runtime Errors
@@ -528,3 +560,5 @@ Common causes:
 | Non-Number list index | `list["a"]` |
 | Fractional list index | `list[1.5]` |
 | List index out of bounds | `[][0]` |
+| `pop` on empty list | `[].pop()` |
+| Method called on non-instance/non-list | `42.foo()` |

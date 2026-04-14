@@ -43,6 +43,15 @@ static Value strNative(int /*argCount*/, Value* args) {
     return Value{static_cast<Obj*>(obj)};
 }
 
+static Value lenNative(int /*argCount*/, Value* args) {
+    if (!isList(args[0])) {
+        std::fputs("Runtime error: len() argument must be a list.\n", stderr);
+        return from<Nil>(Nil{});
+    }
+    auto* list = asObjList(as<Obj*>(args[0]));
+    return from<Number>(static_cast<double>(list->elements.size()));
+}
+
 InterpretResult VM::interpret(const std::string& source) {
     ObjFunction* fn = compile(source, &m_mm);
     if (fn == nullptr) {
@@ -406,39 +415,75 @@ InterpretResult VM::run() {
             ObjString* name = asObjString(readConstant());
             int argCount = readByte();
             Value receiver = peek(argCount);
-            if (!isInstance(receiver)) {
-                runtimeError("Only instances have properties.");
-                return InterpretResult::RUNTIME_ERROR;
-            }
-            ObjInstance* instance = asObjInstance(as<Obj*>(receiver));
-            // A field can shadow a method — check fields first.
-            Value fieldVal;
-            if (instance->fields.get(name, fieldVal)) {
-                stackTop[-argCount - 1] = fieldVal;
-                if (isClosure(fieldVal)) {
-                    if (!call(asObjClosure(as<Obj*>(fieldVal)), argCount))
+            if (isInstance(receiver)) {
+                ObjInstance* instance = asObjInstance(as<Obj*>(receiver));
+                // A field can shadow a method — check fields first.
+                Value fieldVal;
+                if (instance->fields.get(name, fieldVal)) {
+                    stackTop[-argCount - 1] = fieldVal;
+                    if (isClosure(fieldVal)) {
+                        if (!call(asObjClosure(as<Obj*>(fieldVal)), argCount))
+                            return InterpretResult::RUNTIME_ERROR;
+                    } else if (isNative(fieldVal)) {
+                        if (!callNative(asObjNative(as<Obj*>(fieldVal)),
+                                        argCount))
+                            return InterpretResult::RUNTIME_ERROR;
+                    } else {
+                        runtimeError("Can only call functions and classes.");
                         return InterpretResult::RUNTIME_ERROR;
-                } else if (isNative(fieldVal)) {
-                    if (!callNative(asObjNative(as<Obj*>(fieldVal)), argCount))
-                        return InterpretResult::RUNTIME_ERROR;
-                } else {
-                    runtimeError("Can only call functions and classes.");
+                    }
+                    frame = &m_frames[m_frameCount - 1];
+                    break;
+                }
+                // Fast path: call the method directly — receiver already sits
+                // at stackTop[-argCount-1], which becomes slot 0 (= this) of
+                // the new frame.
+                Value method;
+                if (!instance->klass->methods.get(name, method)) {
+                    runtimeError("Undefined property '%s'.",
+                                 name->chars.c_str());
                     return InterpretResult::RUNTIME_ERROR;
                 }
+                if (!call(asObjClosure(as<Obj*>(method)), argCount))
+                    return InterpretResult::RUNTIME_ERROR;
                 frame = &m_frames[m_frameCount - 1];
-                break;
-            }
-            // Fast path: call the method directly — receiver already sits at
-            // stackTop[-argCount-1], which becomes slot 0 (= this) of the new
-            // frame.
-            Value method;
-            if (!instance->klass->methods.get(name, method)) {
-                runtimeError("Undefined property '%s'.", name->chars.c_str());
+            } else if (isList(receiver)) {
+                ObjList* list = asObjList(as<Obj*>(receiver));
+                if (name->chars == "append") {
+                    if (argCount != 1) {
+                        runtimeError("'append' expects 1 argument but got %d.",
+                                     argCount);
+                        return InterpretResult::RUNTIME_ERROR;
+                    }
+                    Value val =
+                        peek(0); // still on stack — GC-safe during push_back
+                    list->elements.push_back(val);
+                    pop(); // arg
+                    pop(); // receiver
+                    push(from<Nil>(Nil{}));
+                } else if (name->chars == "pop") {
+                    if (argCount != 0) {
+                        runtimeError("'pop' expects 0 arguments but got %d.",
+                                     argCount);
+                        return InterpretResult::RUNTIME_ERROR;
+                    }
+                    if (list->elements.empty()) {
+                        runtimeError("Cannot pop from an empty list.");
+                        return InterpretResult::RUNTIME_ERROR;
+                    }
+                    Value val = list->elements.back();
+                    list->elements.pop_back();
+                    pop(); // receiver
+                    push(val);
+                } else {
+                    runtimeError("Undefined method '%s' on list.",
+                                 name->chars.c_str());
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+            } else {
+                runtimeError("Only instances have methods.");
                 return InterpretResult::RUNTIME_ERROR;
             }
-            if (!call(asObjClosure(as<Obj*>(method)), argCount))
-                return InterpretResult::RUNTIME_ERROR;
-            frame = &m_frames[m_frameCount - 1];
             break;
         }
         case Op::INHERIT: {
@@ -629,6 +674,7 @@ void VM::defineNatives() {
     defineNative("clock", clockNative, 0);
     defineNative("input", inputNative, 0);
     defineNative("str", strNative, 1);
+    defineNative("len", lenNative, 1);
 }
 
 void VM::runtimeError(const char* format, ...) {

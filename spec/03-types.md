@@ -90,6 +90,14 @@ equal to it.
 
 A list is always **truthy**, even when empty.
 
+Lists support two methods and a global function for dynamic mutation:
+
+| Operation | Description |
+|---|---|
+| `list.append(value)` | Appends `value` to the end of the list. Returns `nil`. |
+| `list.pop()` | Removes and returns the last element. Runtime error on empty list. |
+| `len(list)` | Returns the number of elements as a Number. |
+
 The maximum number of elements in a list literal is 255.
 
 ---
