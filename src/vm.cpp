@@ -29,6 +29,16 @@ static Value clockNative(int /*argCount*/, Value* /*args*/) {
 // allocate managed strings without changing the NativeFn signature.
 static MemoryManager* s_currentMM = nullptr;
 
+// Natives cannot call VM::runtimeError directly. They set this flag instead;
+// callNative() checks it after the native returns and reports the error.
+static bool s_nativeError = false;
+static std::string s_nativeErrorMsg;
+
+static void nativeRuntimeError(const char* msg) {
+    s_nativeError = true;
+    s_nativeErrorMsg = msg;
+}
+
 static Value inputNative(int /*argCount*/, Value* /*args*/) {
     std::string line;
     if (!std::getline(std::cin, line))
@@ -45,7 +55,7 @@ static Value strNative(int /*argCount*/, Value* args) {
 
 static Value lenNative(int /*argCount*/, Value* args) {
     if (!isList(args[0])) {
-        std::fputs("Runtime error: len() argument must be a list.\n", stderr);
+        nativeRuntimeError("len() argument must be a list.");
         return from<Nil>(Nil{});
     }
     auto* list = asObjList(as<Obj*>(args[0]));
@@ -640,7 +650,12 @@ bool VM::callNative(ObjNative* native, int argCount) {
                      argCount);
         return false;
     }
+    s_nativeError = false;
     Value result = native->function(argCount, stackTop - argCount);
+    if (s_nativeError) {
+        runtimeError("%s", s_nativeErrorMsg.c_str());
+        return false;
+    }
     stackTop -= argCount + 1; // pop args + callee
     push(result);
     return true;

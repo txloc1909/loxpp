@@ -419,9 +419,7 @@ TEST(List, LenUsedAsBound) {
 
 TEST(List, LenOnNonList) {
     VMTestHarness h;
-    // len(42) is a runtime error — returns nil, prints to stderr
-    ASSERT_EQ(h.run("var r = len(42);"), InterpretResult::OK);
-    EXPECT_EQ(h.getGlobalStr("r"), "nil");
+    ASSERT_EQ(h.run("len(42);"), InterpretResult::RUNTIME_ERROR);
 }
 
 // ---------------------------------------------------------------------------
