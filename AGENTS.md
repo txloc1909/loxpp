@@ -169,25 +169,46 @@ docker run -it --rm \
 The container starts in `/workspace` (the worktree root).
 The `:z` flag is needed for SELinux hosts (e.g. Fedora/RHEL); omit on non-SELinux hosts.
 
-### 3. Build and test locally (inside the container)
+### 3. Build and wire git hooks (before writing any code)
+
+Run cmake first — this configures the build **and** wires up the pre-commit hook via `git config core.hooksPath .githooks`. Do this before writing any code so the hook is active from your first commit.
+
+```bash
+cmake --preset debug && cmake --build build
+```
+
+### 4. Test locally (inside the container)
 
 Iterate here until everything passes:
 
 ```bash
-cmake --preset debug && cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
 Fix any failures before pushing.
 
-### 4. Push and open a PR
+### 5. Lint before pushing
+
+Run formatting and static analysis checks before opening a PR:
+
+```bash
+# Auto-format changed files in-place
+find src test -name '*.cpp' -o -name '*.h' | xargs clang-format -i
+
+# Run static analysis
+find src -name '*.cpp' | xargs clang-tidy -p build
+```
+
+Commit any formatting fixes, then verify the build and tests still pass.
+
+### 6. Push and open a PR
 
 ```bash
 git push origin <branch>
 gh pr create --base main --title "<title>" --body "<description>"
 ```
 
-### 5. Watch CI
+### 7. Watch CI
 
 ```bash
 # List recent runs for your branch
@@ -204,7 +225,7 @@ CI runs: **Lint** (clang-format), **Build & Test** (debug + release), **Static A
 
 If CI fails (for non-intentional reasons): fix locally inside the container, push again, re-watch.
 
-### 6. Resolve review comments
+### 8. Resolve review comments
 
 Poll for PR review comments:
 
@@ -214,7 +235,7 @@ gh pr view <pr-number> --repo txloc1909/loxpp --comments
 
 For each comment: fix inside the container → build/test → push → re-watch CI → repeat until approved.
 
-### 7. Merge
+### 9. Merge
 
 Once CI is green and the PR is approved, merge to `main`:
 
@@ -222,7 +243,7 @@ Once CI is green and the PR is approved, merge to `main`:
 gh pr merge <pr-number> --repo txloc1909/loxpp --squash
 ```
 
-### 8. Teardown
+### 10. Teardown
 
 ```bash
 # Remove the worktree
