@@ -771,7 +771,7 @@ void Compiler::subscript() {
     bool canAssign = m_parser->m_canAssign; // save: compiling the index
                                             // expression clobbers m_canAssign
                                             // via nested parsePrecedence calls.
-    expression(); // compile index
+    expression();                           // compile index
     m_parser->consume(TokenType::RIGHT_BRACKET, "Expect ']' after index.");
     if (canAssign && m_parser->match(TokenType::EQUAL)) {
         expression(); // compile RHS
