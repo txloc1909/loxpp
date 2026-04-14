@@ -76,6 +76,51 @@ TEST(List, IndexSetIsExpression) {
     EXPECT_EQ(h.getGlobalStr("r"), "42");
 }
 
+TEST(List, IndexSetExpressionIndex) {
+    // Bug: compiling the index expression (e.g. j + 1) clobbered m_canAssign,
+    // so xs[j + 1] = v was miscompiled as GET_INDEX followed by a stray '='.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var xs = [10, 20, 30];
+        var j = 0;
+        xs[j + 1] = 99;
+        var r = xs[1];
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "99");
+}
+
+TEST(List, IndexSetExpressionIndexInsideFunction) {
+    // Same as IndexSetExpressionIndex but inside a function scope (exercises
+    // local-variable index paths in the compiler).
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun setAt(xs, j, v) { xs[j + 1] = v; }
+        var xs = [10, 20, 30];
+        setAt(xs, 0, 99);
+        var r = xs[1];
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "99");
+}
+
+TEST(List, IndexSetSwapPattern) {
+    // In-place swap via expression indices — the core of bubble / insertion sort.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var xs = [1, 2, 3];
+        var j = 0;
+        var t = xs[j];
+        xs[j]     = xs[j + 1];
+        xs[j + 1] = t;
+        var r0 = xs[0];
+        var r1 = xs[1];
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r0"), "2");
+    EXPECT_EQ(h.getGlobalStr("r1"), "1");
+}
+
 TEST(List, IndexSetAllElements) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
