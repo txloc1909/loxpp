@@ -105,7 +105,8 @@ TEST(List, IndexSetExpressionIndexInsideFunction) {
 }
 
 TEST(List, IndexSetSwapPattern) {
-    // In-place swap via expression indices — the core of bubble / insertion sort.
+    // In-place swap via expression indices — the core of bubble / insertion
+    // sort.
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         var xs = [1, 2, 3];
