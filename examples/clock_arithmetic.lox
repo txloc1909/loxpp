@@ -7,6 +7,7 @@ fun clockAdd(val, step, modulus) {
 }
 
 // 12-hour clock: advance by various hour offsets.
+// CHECK: === 12-hour clock ===
 print "=== 12-hour clock ===";
 var hour = 10;
 var steps = [1, 3, 5, 14, 25];
@@ -18,8 +19,14 @@ while (i < 5) {
     print "  " + str(hour) + " + " + str(step) + " hours = " + str(next);
     i = i + 1;
 }
+// CHECK:   10 + 1 hours = 11
+// CHECK:   10 + 3 hours = 1
+// CHECK:   10 + 5 hours = 3
+// CHECK:   10 + 14 hours = 12
+// CHECK:   10 + 25 hours = 11
 
 // Days of the week (0=Mon … 6=Sun), advance by N days.
+// CHECK: === Day-of-week wheel ===
 print "";
 print "=== Day-of-week wheel ===";
 var dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -32,8 +39,14 @@ while (i < 5) {
     print "  " + dayNames[today] + " + " + str(adv) + " day(s) = " + dayNames[next];
     i = i + 1;
 }
+// CHECK:   Wed + 1 day(s) = Thu
+// CHECK:   Wed + 4 day(s) = Sun
+// CHECK:   Wed + 7 day(s) = Wed
+// CHECK:   Wed + 10 day(s) = Sat
+// CHECK:   Wed + 365 day(s) = Thu
 
 // RGB colour channel wrap (0–255).
+// CHECK: === RGB channel wrap (mod 256) ===
 print "";
 print "=== RGB channel wrap (mod 256) ===";
 var channel = 250;
@@ -44,3 +57,6 @@ while (i < 3) {
     print "  " + str(channel) + " + " + str(inc) + " = " + str((channel + inc) % 256);
     i = i + 1;
 }
+// CHECK:   250 + 5 = 255
+// CHECK:   250 + 10 = 4
+// CHECK:   250 + 100 = 94

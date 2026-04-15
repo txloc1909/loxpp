@@ -19,8 +19,17 @@ fun collatz(n) {
     print "  reached 1 in " + str(steps) + " step(s)";
 }
 
+// CHECK: === Collatz Sequences ===
 print "=== Collatz Sequences ===";
 collatz(6);
 collatz(11);
 collatz(27);
 collatz(100);
+// CHECK: Collatz(6):
+// CHECK:   reached 1 in 8 step(s)
+// CHECK: Collatz(11):
+// CHECK:   reached 1 in 14 step(s)
+// CHECK: Collatz(27):
+// CHECK:   reached 1 in 111 step(s)
+// CHECK: Collatz(100):
+// CHECK:   reached 1 in 25 step(s)

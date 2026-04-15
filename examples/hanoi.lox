@@ -12,6 +12,7 @@ fun hanoi(n, from, to, via) {
     hanoi(n - 1, via, to, from);
 }
 
+// CHECK: === Towers of Hanoi ===
 print "=== Towers of Hanoi ===";
 print "";
 
@@ -24,3 +25,13 @@ while (disks <= 4) {
     print "";
     disks = disks + 1;
 }
+// CHECK: --- 1 disk(s) ---
+// CHECK:   Move disk 1:  A → C
+// CHECK: Total moves: 1
+// CHECK: --- 2 disk(s) ---
+// CHECK: Total moves: 3
+// CHECK: --- 3 disk(s) ---
+// CHECK:   Move disk 3:  A → C
+// CHECK: Total moves: 7
+// CHECK: --- 4 disk(s) ---
+// CHECK: Total moves: 15

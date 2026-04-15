@@ -1,0 +1,110 @@
+// higher_order.lox — Higher-order filter, map, reduce using closures + dynamic lists.
+//
+// Note: Lox++ does not support anonymous function expressions yet, so
+// predicates and transforms are defined as named functions and passed
+// as first-class values.
+//
+// Demonstrates: functions as first-class values, append, len(), closures.
+
+fun filter(pred, lst) {
+    var result = [];
+    var i = 0;
+    while (i < len(lst)) {
+        if (pred(lst[i])) result.append(lst[i]);
+        i = i + 1;
+    }
+    return result;
+}
+
+fun map(fn, lst) {
+    var result = [];
+    var i = 0;
+    while (i < len(lst)) {
+        result.append(fn(lst[i]));
+        i = i + 1;
+    }
+    return result;
+}
+
+fun reduce(fn, lst, init) {
+    var acc = init;
+    var i = 0;
+    while (i < len(lst)) {
+        acc = fn(acc, lst[i]);
+        i = i + 1;
+    }
+    return acc;
+}
+
+fun printList(lst) {
+    var s = "[";
+    var i = 0;
+    while (i < len(lst)) {
+        s = s + str(lst[i]);
+        if (i < len(lst) - 1) s = s + ", ";
+        i = i + 1;
+    }
+    print s + "]";
+}
+
+// Named predicates / transforms passed as first-class values.
+fun isEven(n)    { return n % 2 == 0; }
+fun isOdd(n)     { return n % 2 != 0; }
+fun square(n)    { return n * n; }
+fun negate(n)    { return -n; }
+fun add(acc, n)  { return acc + n; }
+fun mul(acc, n)  { return acc * n; }
+
+var nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+// CHECK: === Higher-Order Functions ===
+print "=== Higher-Order Functions ===";
+print "Input:                   ";
+printList(nums);
+// CHECK: Input:
+// CHECK: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+print "";
+
+print "filter(isEven):          ";
+printList(filter(isEven, nums));
+// CHECK: filter(isEven):
+// CHECK: [2, 4, 6, 8, 10]
+
+print "map(square):             ";
+printList(map(square, nums));
+// CHECK: map(square):
+// CHECK: [1, 4, 9, 16, 25, 36, 49, 64, 81, 100]
+
+print "map(negate):             ";
+printList(map(negate, nums));
+// CHECK: map(negate):
+// CHECK: [-1, -2, -3, -4, -5, -6, -7, -8, -9, -10]
+
+print "reduce(add, 0) =         " + str(reduce(add, nums, 0));
+// CHECK: reduce(add, 0) =         55
+print "reduce(mul, 1) =         " + str(reduce(mul, nums, 1));
+// CHECK: reduce(mul, 1) =         3.6288e+06
+
+// Chaining: sum of squares of odd numbers
+var oddSquareSum = reduce(add, map(square, filter(isOdd, nums)), 0);
+print "sum(square(odd(nums))) = " + str(oddSquareSum);
+// CHECK: sum(square(odd(nums))) = 165
+
+// Closure factory: makeAdder
+print "";
+// CHECK: === Closure factory: makeAdder ===
+print "=== Closure factory: makeAdder ===";
+fun makeAdder(x) {
+    fun adder(y) { return x + y; }
+    return adder;
+}
+var add10 = makeAdder(10);
+var add100 = makeAdder(100);
+print "map(add10):  ";
+printList(map(add10, [1, 2, 3, 4, 5]));
+// CHECK: map(add10):
+// CHECK: [11, 12, 13, 14, 15]
+print "map(add100): ";
+printList(map(add100, [1, 2, 3, 4, 5]));
+// CHECK: map(add100):
+// CHECK: [101, 102, 103, 104, 105]

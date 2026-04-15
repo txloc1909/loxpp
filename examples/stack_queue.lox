@@ -1,0 +1,122 @@
+// stack_queue.lox — Stack and Queue classes backed by dynamic lists.
+//
+// Stack: LIFO — append to push, pop to pop.
+// Queue: FIFO — two-stack trick for amortized O(1) dequeue.
+//
+// Demonstrates: classes encapsulating lists, append, pop, len().
+
+class Stack {
+    init() { this.data = []; }
+
+    push(value) { this.data.append(value); }
+
+    pop() {
+        if (this.isEmpty()) {
+            print "Stack underflow!";
+            return nil;
+        }
+        return this.data.pop();
+    }
+
+    peek() {
+        if (this.isEmpty()) return nil;
+        return this.data[len(this.data) - 1];
+    }
+
+    isEmpty() { return len(this.data) == 0; }
+    size()    { return len(this.data); }
+}
+
+// Two-stack queue: inbox receives enqueues; dequeue transfers to outbox when needed.
+class Queue {
+    init() {
+        this.inbox  = [];
+        this.outbox = [];
+    }
+
+    enqueue(value) { this.inbox.append(value); }
+
+    dequeue() {
+        if (len(this.outbox) == 0) {
+            while (len(this.inbox) > 0) {
+                this.outbox.append(this.inbox.pop());
+            }
+        }
+        if (len(this.outbox) == 0) {
+            print "Queue is empty!";
+            return nil;
+        }
+        return this.outbox.pop();
+    }
+
+    isEmpty() { return len(this.inbox) == 0 and len(this.outbox) == 0; }
+    size()    { return len(this.inbox) + len(this.outbox); }
+}
+
+// CHECK: === Stack (LIFO) ===
+print "=== Stack (LIFO) ===";
+var s = Stack();
+s.push(10);
+s.push(20);
+s.push(30);
+print "size=" + str(s.size()) + "  peek=" + str(s.peek());
+// CHECK: size=3  peek=30
+print "pop: " + str(s.pop());
+// CHECK: pop: 30
+print "pop: " + str(s.pop());
+// CHECK: pop: 20
+s.push(99);
+print "pop: " + str(s.pop());
+// CHECK: pop: 99
+print "pop: " + str(s.pop());
+// CHECK: pop: 10
+print "empty? " + str(s.isEmpty());
+// CHECK: empty? true
+
+print "";
+// CHECK: === Queue (FIFO, two-stack) ===
+print "=== Queue (FIFO, two-stack) ===";
+var q = Queue();
+q.enqueue("a");
+q.enqueue("b");
+q.enqueue("c");
+print "dequeue: " + str(q.dequeue());
+// CHECK: dequeue: a
+q.enqueue("d");
+print "dequeue: " + str(q.dequeue());
+// CHECK: dequeue: b
+print "dequeue: " + str(q.dequeue());
+// CHECK: dequeue: c
+print "dequeue: " + str(q.dequeue());
+// CHECK: dequeue: d
+print "empty? " + str(q.isEmpty());
+// CHECK: empty? true
+
+print "";
+// CHECK: === Stack as bracket-matching checker ===
+print "=== Stack as bracket-matching checker ===";
+fun isBalanced(tokens, n) {
+    var stk = Stack();
+    var i = 0;
+    while (i < n) {
+        var t = tokens[i];
+        if (t == "(" or t == "[" or t == "{") {
+            stk.push(t);
+        } else if (t == ")") {
+            if (stk.isEmpty() or stk.pop() != "(") return false;
+        } else if (t == "]") {
+            if (stk.isEmpty() or stk.pop() != "[") return false;
+        } else if (t == "}") {
+            if (stk.isEmpty() or stk.pop() != "{") return false;
+        }
+        i = i + 1;
+    }
+    return stk.isEmpty();
+}
+
+var balanced   = ["(", "[", "{", "}", "]", ")"];
+var unbalanced = ["(", "[", "}", "]", ")"];
+print "balanced:   " + str(isBalanced(balanced, 6));
+// CHECK: balanced:   true
+print "unbalanced: " + str(isBalanced(unbalanced, 5));
+// CHECK: unbalanced: false

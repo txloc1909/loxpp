@@ -1,0 +1,80 @@
+// merge_sort.lox — Recursive merge sort building new lists on each merge.
+//
+// Demonstrates: append, len(), recursion, splitting and merging dynamic lists.
+
+fun merge(left, right) {
+    var result = [];
+    var i = 0;
+    var j = 0;
+    while (i < len(left) and j < len(right)) {
+        if (left[i] <= right[j]) {
+            result.append(left[i]);
+            i = i + 1;
+        } else {
+            result.append(right[j]);
+            j = j + 1;
+        }
+    }
+    while (i < len(left)) {
+        result.append(left[i]);
+        i = i + 1;
+    }
+    while (j < len(right)) {
+        result.append(right[j]);
+        j = j + 1;
+    }
+    return result;
+}
+
+fun mergeSort(lst) {
+    var n = len(lst);
+    if (n <= 1) return lst;
+
+    var mid = (n - n % 2) / 2;   // floor(n / 2)
+    var left = [];
+    var right = [];
+    var i = 0;
+    while (i < mid) {
+        left.append(lst[i]);
+        i = i + 1;
+    }
+    while (i < n) {
+        right.append(lst[i]);
+        i = i + 1;
+    }
+    return merge(mergeSort(left), mergeSort(right));
+}
+
+fun printList(lst) {
+    var s = "[";
+    var i = 0;
+    while (i < len(lst)) {
+        s = s + str(lst[i]);
+        if (i < len(lst) - 1) s = s + ", ";
+        i = i + 1;
+    }
+    print s + "]";
+}
+
+// CHECK: === Merge Sort ===
+print "=== Merge Sort ===";
+
+var tests = [
+    [38, 27, 43, 3, 9, 82, 10],
+    [5, 4, 3, 2, 1],
+    [1],
+    [],
+    [7, 7, 2, 7, 2]
+];
+
+var i = 0;
+while (i < len(tests)) {
+    var sorted = mergeSort(tests[i]);
+    printList(sorted);
+    i = i + 1;
+}
+// CHECK: [3, 9, 10, 27, 38, 43, 82]
+// CHECK: [1, 2, 3, 4, 5]
+// CHECK: [1]
+// CHECK: []
+// CHECK: [2, 2, 7, 7, 7]

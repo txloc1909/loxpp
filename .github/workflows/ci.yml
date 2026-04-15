@@ -69,6 +69,15 @@ jobs:
             loxpp-dev:latest \
             bash -c "ctest --test-dir build --output-on-failure"
 
+      - name: Run example checks
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "python3 tools/check_examples.py build/loxpp examples/"
+
   static-analysis:
     name: Static Analysis (clang-tidy)
     runs-on: ubuntu-latest

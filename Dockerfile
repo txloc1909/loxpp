@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y \
     clang-tidy \
     pkg-config \
     libreadline-dev \
+    python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Build and install gtest static libs (Ubuntu ships source only)

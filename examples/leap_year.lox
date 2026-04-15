@@ -17,6 +17,7 @@ fun check(y) {
     }
 }
 
+// CHECK: === Leap Year Checker ===
 print "=== Leap Year Checker ===";
 check(2000);   // leap  (divisible by 400)
 check(1900);   // not   (divisible by 100 but not 400)
@@ -24,3 +25,9 @@ check(2024);   // leap  (divisible by 4, not 100)
 check(2023);   // not   (not divisible by 4)
 check(2100);   // not   (divisible by 100 but not 400)
 check(2400);   // leap  (divisible by 400)
+// CHECK: 2000 is a leap year
+// CHECK: 1900 is NOT a leap year
+// CHECK: 2024 is a leap year
+// CHECK: 2023 is NOT a leap year
+// CHECK: 2100 is NOT a leap year
+// CHECK: 2400 is a leap year

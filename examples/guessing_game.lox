@@ -12,8 +12,11 @@ var maxAttempts = 7;
 var attempts = 0;
 var won = false;
 
+// CHECK: === Number Guessing Game ===
 print "=== Number Guessing Game ===";
+// CHECK: I'm thinking of a number between 1 and 100.
 print "I'm thinking of a number between 1 and 100.";
+// CHECK: You have 7 attempts. Good luck!
 print "You have " + str(maxAttempts) + " attempts. Good luck!";
 print "";
 
@@ -37,6 +40,12 @@ while (attempts < maxAttempts and !won) {
         }
     }
 }
+// CHECK: Attempt 1 / 7:
+// CHECK: Not quite. 6 attempt(s) left.
+// CHECK: Attempt 2 / 7:
+// CHECK: Not quite. 5 attempt(s) left.
+// CHECK: Attempt 3 / 7:
+// CHECK: Correct! You guessed it in 3 attempt(s)!
 
 if (!won) {
     print "Out of attempts. The number was " + str(secret) + ".";

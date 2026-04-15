@@ -21,22 +21,33 @@ fun fibIterative(n) {
     return b;
 }
 
+// CHECK: === Fibonacci sequence (first 10 terms) ===
 print "=== Fibonacci sequence (first 10 terms) ===";
 var i = 0;
 while (i < 10) {
     print "  fib(" + str(i) + ") = " + str(fibIterative(i));
     i = i + 1;
 }
+// CHECK:   fib(0) = 0
+// CHECK:   fib(1) = 1
+// CHECK:   fib(2) = 1
+// CHECK:   fib(5) = 5
+// CHECK:   fib(9) = 34
 
+// CHECK: === Benchmark: fib(30) ===
 print "";
 print "=== Benchmark: fib(30) ===";
 
 var start = clock();
 var result = fibRecursive(30);
 var elapsed = clock() - start;
+// CHECK:   recursive: 832040
 print "  recursive: " + str(result) + "  (" + str(elapsed) + " s)";
+// timing line not CHECK'd — varies by machine
 
 start = clock();
 result = fibIterative(30);
 elapsed = clock() - start;
+// CHECK:   iterative: 832040
 print "  iterative: " + str(result) + "  (" + str(elapsed) + " s)";
+// timing line not CHECK'd — varies by machine

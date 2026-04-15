@@ -15,6 +15,7 @@ fun lcm(a, b) {
     return a * b / gcd(a, b);
 }
 
+// CHECK: === GCD / LCM ===
 print "=== GCD / LCM ===";
 
 var pairs = [[12, 8], [100, 75], [17, 13], [48, 36], [0, 5]];
@@ -26,3 +27,8 @@ while (i < 5) {
         + "   lcm = " + str(lcm(a, b));
     i = i + 1;
 }
+// CHECK:   gcd(12, 8) = 4   lcm = 24
+// CHECK:   gcd(100, 75) = 25   lcm = 300
+// CHECK:   gcd(17, 13) = 1   lcm = 221
+// CHECK:   gcd(48, 36) = 12   lcm = 144
+// CHECK:   gcd(0, 5) = 5   lcm = 0

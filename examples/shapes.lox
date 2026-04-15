@@ -50,6 +50,7 @@ class Triangle < Shape {
     perimeter() { return this.a + this.b + this.c; }
 }
 
+// CHECK: === Shape Hierarchy ===
 print "=== Shape Hierarchy ===";
 
 var shapes = [
@@ -64,7 +65,12 @@ while (i < 4) {
     shapes[i].describe();
     i = i + 1;
 }
+// CHECK: Circle(r=5): area=78.5397, perimeter=31.4159
+// CHECK: Rectangle(4x6): area=24, perimeter=20
+// CHECK: Square(3): area=9, perimeter=12
+// CHECK: Triangle(b=6, h=4): area=12, perimeter=16
 
+// CHECK: === Polymorphic dispatch demo ===
 print "";
 print "=== Polymorphic dispatch demo ===";
 fun totalArea(shapeList, count) {
@@ -76,4 +82,5 @@ fun totalArea(shapeList, count) {
     }
     return total;
 }
+// CHECK: Total area of all shapes: 123.54
 print "Total area of all shapes: " + str(totalArea(shapes, 4));
