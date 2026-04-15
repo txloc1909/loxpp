@@ -6,6 +6,10 @@
 // Signature for all native (C++) functions callable from Lox.
 using NativeFn = Value (*)(int argCount, Value* args);
 
+// Signal a runtime error from inside a native function.
+// The VM checks this flag after every native call and surfaces the message.
+void nativeRuntimeError(const char* msg);
+
 struct ObjNative : public Obj {
     NativeFn function;
     int arity; // expected argument count; -1 = variadic (any count accepted)

@@ -9,6 +9,7 @@ set(ALLOC_SRCS
 
 set(FULL_SRCS
     ${PROJECT_SOURCE_DIR}/src/vm.cpp
+    ${PROJECT_SOURCE_DIR}/src/math.cpp
     ${PROJECT_SOURCE_DIR}/src/compiler.cpp
     ${PROJECT_SOURCE_DIR}/src/parser.cpp
     ${PROJECT_SOURCE_DIR}/src/chunk.cpp

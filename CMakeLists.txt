@@ -20,17 +20,18 @@ add_compile_options(-Wno-c99-designator)
 
 include_directories(${PROJECT_SOURCE_DIR}/src)
 
-add_executable(loxpp 
-    src/main.cpp 
-    src/chunk.cpp 
+add_executable(loxpp
+    src/main.cpp
+    src/chunk.cpp
     src/debug.cpp
-    src/value.cpp 
+    src/value.cpp
     src/object.cpp
     src/table.cpp
     src/memory_manager.cpp
-    src/vm.cpp 
-    src/scanner.cpp 
-    src/token.cpp 
+    src/math.cpp
+    src/vm.cpp
+    src/scanner.cpp
+    src/token.cpp
     src/compiler.cpp
     src/parser.cpp
 )
