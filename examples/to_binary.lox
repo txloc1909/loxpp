@@ -12,6 +12,7 @@ fun toBinary(n) {
     return bits;
 }
 
+// CHECK: === Decimal → Binary ===
 print "=== Decimal → Binary ===";
 var nums = [0, 1, 2, 5, 10, 42, 127, 255, 1024];
 var i = 0;
@@ -20,3 +21,12 @@ while (i < 9) {
     print "  " + str(n) + " = " + toBinary(n);
     i = i + 1;
 }
+// CHECK:   0 = 0
+// CHECK:   1 = 1
+// CHECK:   2 = 10
+// CHECK:   5 = 101
+// CHECK:   10 = 1010
+// CHECK:   42 = 101010
+// CHECK:   127 = 1111111
+// CHECK:   255 = 11111111
+// CHECK:   1024 = 10000000000

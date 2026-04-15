@@ -27,6 +27,7 @@ fun digitalRootIterative(n) {
     return n;
 }
 
+// CHECK: === Digital Root ===
 print "=== Digital Root ===";
 var nums = [0, 1, 9, 10, 42, 99, 493, 9999, 12345];
 var i = 0;
@@ -38,3 +39,12 @@ while (i < 9) {
         + "  (iterative: " + str(iter) + ")";
     i = i + 1;
 }
+// CHECK:   digitalRoot(0) = 0  (iterative: 0)
+// CHECK:   digitalRoot(1) = 1  (iterative: 1)
+// CHECK:   digitalRoot(9) = 9  (iterative: 9)
+// CHECK:   digitalRoot(10) = 1  (iterative: 1)
+// CHECK:   digitalRoot(42) = 6  (iterative: 6)
+// CHECK:   digitalRoot(99) = 9  (iterative: 9)
+// CHECK:   digitalRoot(493) = 7  (iterative: 7)
+// CHECK:   digitalRoot(9999) = 9  (iterative: 9)
+// CHECK:   digitalRoot(12345) = 6  (iterative: 6)

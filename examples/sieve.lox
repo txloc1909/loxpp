@@ -1,0 +1,60 @@
+// sieve.lox — Sieve of Eratosthenes: find all primes up to N.
+//
+// Demonstrates: append, len(), boolean list mutation, nested loops.
+
+fun sieve(limit) {
+    // Build a boolean list: is_prime[i] = true means i is prime.
+    var isPrime = [];
+    var i = 0;
+    while (i <= limit) {
+        isPrime.append(true);
+        i = i + 1;
+    }
+    isPrime[0] = false;
+    if (limit >= 1) isPrime[1] = false;
+
+    var p = 2;
+    while (p * p <= limit) {
+        if (isPrime[p]) {
+            var multiple = p * p;
+            while (multiple <= limit) {
+                isPrime[multiple] = false;
+                multiple = multiple + p;
+            }
+        }
+        p = p + 1;
+    }
+
+    // Collect primes.
+    var primes = [];
+    i = 2;
+    while (i <= limit) {
+        if (isPrime[i]) primes.append(i);
+        i = i + 1;
+    }
+    return primes;
+}
+
+// CHECK: === Sieve of Eratosthenes ===
+print "=== Sieve of Eratosthenes ===";
+
+var primes50 = sieve(50);
+print "Primes up to 50 (" + str(len(primes50)) + " found):";
+var line = "  ";
+var i = 0;
+while (i < len(primes50)) {
+    line = line + str(primes50[i]);
+    if (i < len(primes50) - 1) line = line + ", ";
+    i = i + 1;
+}
+print line;
+// CHECK: Primes up to 50 (15 found):
+// CHECK:   2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47
+
+var primes100 = sieve(100);
+print "Prime count up to 100: " + str(len(primes100));
+// CHECK: Prime count up to 100: 25
+
+var primes1000 = sieve(1000);
+print "Prime count up to 1000: " + str(len(primes1000));
+// CHECK: Prime count up to 1000: 168

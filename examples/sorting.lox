@@ -1,0 +1,116 @@
+// sorting.lox — Bubble, insertion, and selection sort — all in-place.
+//
+// Each algorithm receives a fresh copy of the input so results are independent.
+// See merge_sort.lox for the divide-and-conquer variant.
+//
+// Demonstrates: list index assignment (lst[i] = v), len(), in-place swaps.
+
+fun makeCopy(src) {
+    var dst = [];
+    var i = 0;
+    while (i < len(src)) {
+        dst.append(src[i]);
+        i = i + 1;
+    }
+    return dst;
+}
+
+fun printList(lst) {
+    var s = "[";
+    var i = 0;
+    while (i < len(lst)) {
+        s = s + str(lst[i]);
+        if (i < len(lst) - 1) s = s + ", ";
+        i = i + 1;
+    }
+    print s + "]";
+}
+
+fun bubbleSort(lst) {
+    var n = len(lst);
+    var i = 0;
+    while (i < n - 1) {
+        var j = 0;
+        while (j < n - 1 - i) {
+            if (lst[j] > lst[j + 1]) {
+                var t = lst[j];
+                lst[j] = lst[j + 1];
+                lst[j + 1] = t;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fun insertionSort(lst) {
+    var n = len(lst);
+    var i = 1;
+    while (i < n) {
+        var key = lst[i];
+        var j = i - 1;
+        while (j >= 0 and lst[j] > key) {
+            lst[j + 1] = lst[j];
+            j = j - 1;
+        }
+        lst[j + 1] = key;
+        i = i + 1;
+    }
+}
+
+fun selectionSort(lst) {
+    var n = len(lst);
+    var i = 0;
+    while (i < n - 1) {
+        var minIdx = i;
+        var j = i + 1;
+        while (j < n) {
+            if (lst[j] < lst[minIdx]) minIdx = j;
+            j = j + 1;
+        }
+        var t = lst[i];
+        lst[i] = lst[minIdx];
+        lst[minIdx] = t;
+        i = i + 1;
+    }
+}
+
+var data = [64, 34, 25, 12, 22, 11, 90];
+
+// CHECK: === Sorting Algorithms ===
+print "=== Sorting Algorithms ===";
+print "Input:          ";
+printList(data);
+// CHECK: Input:
+// CHECK: [64, 34, 25, 12, 22, 11, 90]
+
+var a = makeCopy(data);
+bubbleSort(a);
+print "Bubble sort:    ";
+printList(a);
+// CHECK: Bubble sort:
+// CHECK: [11, 12, 22, 25, 34, 64, 90]
+
+var b = makeCopy(data);
+insertionSort(b);
+print "Insertion sort: ";
+printList(b);
+// CHECK: Insertion sort:
+// CHECK: [11, 12, 22, 25, 34, 64, 90]
+
+var c = makeCopy(data);
+selectionSort(c);
+print "Selection sort: ";
+printList(c);
+// CHECK: Selection sort:
+// CHECK: [11, 12, 22, 25, 34, 64, 90]
+
+// CHECK: === Edge cases ===
+print "";
+print "=== Edge cases ===";
+var e1 = [];          bubbleSort(e1);     printList(e1);
+var e2 = [1];         bubbleSort(e2);     printList(e2);
+var e3 = [3,1,4,1,5,9,2,6]; insertionSort(e3); printList(e3);
+// CHECK: []
+// CHECK: [1]
+// CHECK: [1, 1, 2, 3, 4, 5, 6, 9]

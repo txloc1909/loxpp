@@ -34,6 +34,7 @@ fun check(label, digits, len) {
     }
 }
 
+// CHECK: === Luhn Algorithm ===
 print "=== Luhn Algorithm ===";
 // Visa test number: 4532015112830366
 check("4532015112830366", [4,5,3,2,0,1,5,1,1,2,8,3,0,3,6,6], 16);
@@ -43,3 +44,7 @@ check("5425233430109903", [5,4,2,5,2,3,3,4,3,0,1,0,9,9,0,3], 16);
 check("1234567890123456", [1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6], 16);
 // Single valid:     0
 check("0             ", [0], 1);
+// CHECK: 4532015112830366: VALID
+// CHECK: 5425233430109903: VALID
+// CHECK: 1234567890123456: INVALID
+// CHECK: 0             : VALID

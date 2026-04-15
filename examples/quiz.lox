@@ -29,7 +29,9 @@ var questions = [
     Question("What gas do plants absorb from the air?", "CO2")
 ];
 
+// CHECK: === Lox++ Trivia Quiz ===
 print "=== Lox++ Trivia Quiz ===";
+// CHECK: Answer each question exactly as shown.
 print "Answer each question exactly as shown.";
 print "";
 
@@ -43,11 +45,29 @@ while (i < 5) {
     print "";
     i = i + 1;
 }
+// CHECK: Question 1:
+// CHECK:   What is 2 + 2?
+// CHECK:   Correct!
+// CHECK: Question 2:
+// CHECK:   What planet is closest to the Sun?
+// CHECK:   Correct!
+// CHECK: Question 3:
+// CHECK:   What is the capital of France?
+// CHECK:   Correct!
+// CHECK: Question 4:
+// CHECK:   How many sides does a hexagon have?
+// CHECK:   Correct!
+// CHECK: Question 5:
+// CHECK:   What gas do plants absorb from the air?
+// CHECK:   Correct!
 
+// CHECK: === Results ===
 print "=== Results ===";
+// CHECK: Score: 5 / 5
 print "Score: " + str(score) + " / 5";
 if (score == 5) {
     print "Perfect score! Outstanding!";
+// CHECK: Perfect score! Outstanding!
 } else if (score >= 3) {
     print "Well done!";
 } else {

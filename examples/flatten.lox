@@ -1,0 +1,68 @@
+// flatten.lox — Flatten an arbitrarily nested list structure.
+//
+// In Lox++ there is no type-test for List vs scalar, so we use a wrapper
+// class to distinguish "a node that is itself a list" from a plain value.
+//
+// Demonstrates: append, len(), recursion, classes as tagged unions.
+
+class Node {
+    init(value, isList) {
+        this.value  = value;   // Number/String/bool/nil  OR  a List of Node
+        this.isList = isList;
+    }
+}
+
+fun leaf(v)     { return Node(v, false); }
+fun branch(lst) { return Node(lst, true); }
+
+fun flattenInto(node, result) {
+    if (!node.isList) {
+        result.append(node.value);
+    } else {
+        var i = 0;
+        while (i < len(node.value)) {
+            flattenInto(node.value[i], result);
+            i = i + 1;
+        }
+    }
+}
+
+fun flatten(node) {
+    var result = [];
+    flattenInto(node, result);
+    return result;
+}
+
+fun printList(lst) {
+    var s = "[";
+    var i = 0;
+    while (i < len(lst)) {
+        s = s + str(lst[i]);
+        if (i < len(lst) - 1) s = s + ", ";
+        i = i + 1;
+    }
+    print s + "]";
+}
+
+// CHECK: === Flatten Nested Lists ===
+print "=== Flatten Nested Lists ===";
+
+// [1, [2, 3], [4, [5, 6]], 7]
+var nested = branch([
+    leaf(1),
+    branch([leaf(2), leaf(3)]),
+    branch([leaf(4), branch([leaf(5), leaf(6)])]),
+    leaf(7)
+]);
+printList(flatten(nested));   // [1, 2, 3, 4, 5, 6, 7]
+// CHECK: [1, 2, 3, 4, 5, 6, 7]
+
+// deeply nested: [[[42]]]
+var deep = branch([branch([branch([leaf(42)])])]);
+printList(flatten(deep));     // [42]
+// CHECK: [42]
+
+// mixed types: [1, "hi", [true, nil]]
+var mixed = branch([leaf(1), leaf("hi"), branch([leaf(true), leaf(nil)])]);
+printList(flatten(mixed));    // [1, hi, true, nil]
+// CHECK: [1, hi, true, nil]
