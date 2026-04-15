@@ -1,0 +1,49 @@
+// newton_sqrt.lox — Newton's method (Heron's method) for square roots.
+//
+// Demonstrates: math.abs, math.sqrt (for verification)
+//
+// Newton's method for sqrt(n): starting from an initial guess x,
+// repeatedly apply x = (x + n/x) / 2 until |x^2 - n| < epsilon.
+
+fun sqrtNewton(n) {
+    var x = 1;          // initial guess
+    var eps = 0.000001; // convergence threshold
+    while (math.abs(x * x - n) > eps) {
+        x = (x + n / x) / 2;
+    }
+    return x;
+}
+
+// CHECK: === Newton convergence for sqrt(2) ===
+print "=== Newton convergence for sqrt(2) ===";
+var x = 1;
+var step = 0;
+while (step < 5) {
+    x = (x + 2 / x) / 2;
+    print "  step " + str(step + 1) + ": x = " + str(x);
+    step = step + 1;
+}
+// CHECK:   step 1: x = 1.5
+// CHECK:   step 2: x = 1.41667
+// CHECK:   step 3: x = 1.41422
+// CHECK:   step 4: x = 1.41421
+// CHECK:   step 5: x = 1.41421
+
+// CHECK: === Comparison with math.sqrt ===
+print "";
+print "=== Comparison with math.sqrt ===";
+var targets = [ 2, 9, 25, 144, 10000 ];
+var i = 0;
+while (i < 5) {
+    var n = targets[i];
+    var approx = sqrtNewton(n);
+    var exact = math.sqrt(n);
+    print "  sqrt(" + str(n) + "):" + "  newton=" + str(approx) +
+        "  exact=" + str(exact);
+    i = i + 1;
+}
+// CHECK:   sqrt(2):  newton=1.41421  exact=1.41421
+// CHECK:   sqrt(9):  newton=3  exact=3
+// CHECK:   sqrt(25):  newton=5  exact=5
+// CHECK:   sqrt(144):  newton=12  exact=12
+// CHECK:   sqrt(10000):  newton=100  exact=100

@@ -1,0 +1,59 @@
+// polar.lox — Cartesian ↔ polar coordinate conversion and unit circle table.
+//
+// Demonstrates: math.sin, math.cos, math.tan, math.atan2, math.hypot, math.pi
+
+fun toDegrees(radians) { return radians * 180 / math.pi; }
+
+fun toRadians(degrees) { return degrees * math.pi / 180; }
+
+// Print (x, y) in polar form.
+fun cartToPolar(x, y) {
+    var r = math.hypot(x, y);
+    var theta = toDegrees(math.atan2(y, x));
+    print "  (" + str(x) + ", " + str(y) + ")" + " -> r=" + str(r) +
+        ", theta=" + str(theta) + " deg";
+}
+
+// Print polar (r, degrees) in Cartesian form.
+fun polarToCart(r, degrees) {
+    var x = r * math.cos(toRadians(degrees));
+    var y = r * math.sin(toRadians(degrees));
+    print "  r=" + str(r) + ", theta=" + str(degrees) + " deg" + " -> (" +
+        str(x) + ", " + str(y) + ")";
+}
+
+// CHECK: === Cartesian to Polar ===
+print "=== Cartesian to Polar ===";
+// CHECK:   (3, 4) -> r=5, theta=53.1301 deg
+cartToPolar(3, 4);
+// CHECK:   (1, 0) -> r=1, theta=0 deg
+cartToPolar(1, 0);
+// CHECK:   (0, 1) -> r=1, theta=90 deg
+cartToPolar(0, 1);
+// CHECK:   (-1, 0) -> r=1, theta=180 deg
+cartToPolar(-1, 0);
+
+// CHECK: === Polar to Cartesian ===
+print "";
+print "=== Polar to Cartesian ===";
+// CHECK:   r=5, theta=53.1301 deg -> (3, 4)
+polarToCart(5, 53.1301023541559);
+// CHECK:   r=10, theta=45 deg -> (7.07107, 7.07107)
+polarToCart(10, 45);
+
+// CHECK: === Unit Circle (sin, cos, tan) ===
+print "";
+print "=== Unit Circle (sin, cos, tan) ===";
+var angles = [ 0, 30, 45, 60 ];
+var i = 0;
+while (i < 4) {
+    var deg = angles[i];
+    var rad = toRadians(deg);
+    print "  " + str(deg) + " deg:" + "  sin=" + str(math.sin(rad)) +
+        "  cos=" + str(math.cos(rad)) + "  tan=" + str(math.tan(rad));
+    i = i + 1;
+}
+// CHECK:   0 deg:  sin=0  cos=1  tan=0
+// CHECK:   30 deg:  sin=0.5  cos=0.866025  tan=0.57735
+// CHECK:   45 deg:  sin=0.707107  cos=0.707107  tan=1
+// CHECK:   60 deg:  sin=0.866025  cos=0.5  tan=1.73205

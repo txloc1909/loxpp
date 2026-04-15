@@ -1,0 +1,86 @@
+// stats.lox — Descriptive statistics: mean, variance, standard deviation.
+//
+// Demonstrates: math.sqrt, math.min, math.max, math.abs
+
+fun mean(data, n) {
+    var sum = 0;
+    var i = 0;
+    while (i < n) {
+        sum = sum + data[i];
+        i = i + 1;
+    }
+    return sum / n;
+}
+
+fun variance(data, n, avg) {
+    var sum = 0;
+    var i = 0;
+    while (i < n) {
+        var diff = data[i] - avg;
+        sum = sum + diff * diff;
+        i = i + 1;
+    }
+    return sum / n;
+}
+
+fun listMin(data, n) {
+    var m = data[0];
+    var i = 1;
+    while (i < n) {
+        m = math.min(m, data[i]);
+        i = i + 1;
+    }
+    return m;
+}
+
+fun listMax(data, n) {
+    var m = data[0];
+    var i = 1;
+    while (i < n) {
+        m = math.max(m, data[i]);
+        i = i + 1;
+    }
+    return m;
+}
+
+fun summarize(data, n) {
+    var avg = mean(data, n);
+    var varr = variance(data, n, avg);
+    var stddev = math.sqrt(varr);
+    var lo = listMin(data, n);
+    var hi = listMax(data, n);
+    print "  n        = " + str(n);
+    print "  mean     = " + str(avg);
+    print "  variance = " + str(varr);
+    print "  std dev  = " + str(stddev);
+    print "  min      = " + str(lo);
+    print "  max      = " + str(hi);
+    print "  range    = " + str(hi - lo);
+}
+
+// Data set 1: perfect bell — mean=5, stddev=2
+var data1 = [ 2, 4, 4, 4, 5, 5, 7, 9 ];
+// CHECK: === data1 ===
+print "=== data1 ===";
+// CHECK:   n        = 8
+// CHECK:   mean     = 5
+// CHECK:   variance = 4
+// CHECK:   std dev  = 2
+// CHECK:   min      = 2
+// CHECK:   max      = 9
+// CHECK:   range    = 7
+summarize(data1, 8);
+
+// Data set 2: uniform [1..5]
+print "";
+var data2 = [ 1, 2, 3, 4, 5 ];
+// CHECK: === data2 ===
+print "=== data2 ===";
+// CHECK:   n        = 5
+// CHECK:   mean     = 3
+// CHECK:   variance = 2
+// CHECK:   std dev  = 1.41421
+// CHECK:   min      = 1
+// CHECK:   max      = 5
+// CHECK:   range    = 4
+summarize(data2, 5);
