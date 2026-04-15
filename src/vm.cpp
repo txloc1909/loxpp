@@ -7,7 +7,10 @@
 #include "scanner.h"
 #include "compiler.h"
 
+#include "math.h"
+
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstdarg>
 #include <ctime>
@@ -34,7 +37,7 @@ static MemoryManager* s_currentMM = nullptr;
 static bool s_nativeError = false;
 static std::string s_nativeErrorMsg;
 
-static void nativeRuntimeError(const char* msg) {
+void nativeRuntimeError(const char* msg) {
     s_nativeError = true;
     s_nativeErrorMsg = msg;
 }
@@ -690,6 +693,54 @@ void VM::defineNatives() {
     defineNative("input", inputNative, 0);
     defineNative("str", strNative, 1);
     defineNative("len", lenNative, 1);
+    defineMathObject();
+}
+
+void VM::defineMathObject() {
+    // a. Create the Math class (just a nominal holder for the instance)
+    ObjString* className = m_mm.makeString("Math");
+    push(Value{static_cast<Obj*>(className)}); // root className
+    ObjClass* klass =
+        m_mm.create<ObjClass>(className, VmAllocator<Entry>{&m_mm});
+    push(Value{static_cast<Obj*>(klass)}); // root klass
+
+    // b. Create the instance
+    ObjInstance* instance =
+        m_mm.create<ObjInstance>(klass, VmAllocator<Entry>{&m_mm});
+    push(Value{static_cast<Obj*>(instance)}); // root instance
+
+    // c. Add function fields — each push/pop pair keeps objects rooted during
+    //    any GC triggered by makeString or fields.set.
+    for (std::size_t i = 0; i < kMathFunctionCount; ++i) {
+        const auto& e = kMathFunctions[i];
+        ObjNative* native = m_mm.create<ObjNative>(e.fn, e.arity);
+        push(Value{static_cast<Obj*>(native)}); // root native
+        ObjString* key = m_mm.makeString(e.name);
+        push(Value{static_cast<Obj*>(key)}); // root key
+        instance->fields.set(key, Value{static_cast<Obj*>(native)});
+        pop(); // key
+        pop(); // native
+    }
+
+    // d. Add constant fields
+    for (std::size_t i = 0; i < kMathConstantCount; ++i) {
+        const auto& c = kMathConstants[i];
+        ObjString* key = m_mm.makeString(c.name);
+        push(Value{static_cast<Obj*>(key)}); // root key
+        instance->fields.set(key, from<Number>(c.value));
+        pop(); // key
+    }
+
+    // e-f. Register instance as global "math"
+    ObjString* globalKey = m_mm.makeString("math");
+    push(Value{static_cast<Obj*>(globalKey)}); // root key
+    m_globals.set(globalKey, Value{static_cast<Obj*>(instance)});
+    pop(); // globalKey
+
+    // g. Pop instance, klass, className
+    pop(); // instance
+    pop(); // klass
+    pop(); // className
 }
 
 void VM::runtimeError(const char* format, ...) {

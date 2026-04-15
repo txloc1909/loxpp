@@ -54,6 +54,7 @@ class VM {
     bool bindMethod(ObjClass* klass, ObjString* name);
     void defineNative(const char* name, NativeFn fn, int arity);
     void defineNatives();
+    void defineMathObject();
     ObjUpvalue* captureUpvalue(Value* local);
     void closeUpvalues(Value* last);
     void runtimeError(const char* format, ...);
