@@ -1,0 +1,28 @@
+// RUN: loxpp %s | FileCheck %s
+
+// CHECK: 1.41421
+print math.sqrt(2);
+
+// CHECK: 1024
+print math.pow(2, 10);
+
+// CHECK: 3.14159
+print math.pi;
+
+// CHECK: 1
+print math.log(math.e);
+
+// CHECK: 3
+print math.min(3, 7);
+
+// CHECK: 7
+print math.max(3, 7);
+
+// CHECK: 0
+print math.floor(0.9);
+
+// CHECK: 1
+print math.ceil(0.1);
+
+// CHECK: 2
+print math.abs(-2);
