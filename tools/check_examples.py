@@ -8,7 +8,7 @@ For each examples/*.lox file (alphabetical order):
   3. If examples/<name>.input exists, pipe it as stdin.
   4. Run loxpp and capture stdout.
   5. For each CHECK directive, scan forward through the remaining output
-     lines until the CHECK text appears as a substring of a (stripped) line.
+     lines until a stripped line matches the CHECK text exactly.
   6. Report PASS / FAIL / SKIP per file, then exit 1 if any failed.
 
 Usage:
@@ -42,12 +42,12 @@ def run_example(loxpp: str, lox_file: Path, input_file: Path) -> tuple[int, list
 
 
 def match_checks(checks: list[str], lines: list[str]) -> tuple[bool, str | None]:
-    """Match each CHECK as a substring of output lines in order (non-adjacent ok)."""
+    """Match each CHECK against output lines in order (non-adjacent ok)."""
     cursor = 0
     for check in checks:
         matched = False
         while cursor < len(lines):
-            if check in lines[cursor].strip():
+            if lines[cursor].strip() == check:
                 cursor += 1
                 matched = True
                 break
