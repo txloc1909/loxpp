@@ -33,6 +33,16 @@ behavior follows IEEE 754.
 An immutable sequence of bytes (interpreted as UTF-8). Two strings with
 identical content are equal regardless of how or where they were created.
 
+String is a **sequence type** and supports the following sequence operations:
+
+| Operation | Description |
+|---|---|
+| `len(s)` | Number of bytes in the string. |
+| `s[i]` | Single-character string at byte index `i` (0-based). Runtime error if `i` is not an integer or is out of range. |
+| `s[i] = v` | Runtime error — strings are immutable. |
+| `sub in s` | `true` if `sub` (a String) appears as a substring of `s`. |
+| `for (var c in s)` | Iterates over each byte as a single-character String. |
+
 ### Function
 
 A callable value that, when invoked with the correct number of arguments,
@@ -90,15 +100,29 @@ equal to it.
 
 A list is always **truthy**, even when empty.
 
-Lists support two methods and a global function for dynamic mutation:
+List is a **sequence type** and supports the following sequence operations in
+addition to the mutation methods:
 
 | Operation | Description |
 |---|---|
-| `list.append(value)` | Appends `value` to the end of the list. Returns `nil`. |
+| `list.append(value)` | Appends `value` to the end. Returns `nil`. |
 | `list.pop()` | Removes and returns the last element. Runtime error on empty list. |
-| `len(list)` | Returns the number of elements as a Number. |
+| `len(list)` | Number of elements as a Number. |
+| `list[i]` | Element at index `i` (0-based). Runtime error if `i` is not an integer or is out of range. |
+| `list[i] = v` | Sets element at index `i`. Runtime error if out of range. |
+| `elem in list` | `true` if any element compares equal to `elem` under `==`. |
+| `for (var x in list)` | Iterates over elements in order. |
 
 The maximum number of elements in a list literal is 255.
+
+---
+
+## Sequence Protocol
+
+Both **List** and **String** implement the sequence protocol: they support
+`len()`, integer indexing with `[]`, membership testing with `in`, and `for-in`
+iteration. String is immutable — index assignment (`s[i] = v`) is always a
+runtime error.
 
 ---
 

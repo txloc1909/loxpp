@@ -63,6 +63,8 @@ std::ostream& operator<<(std::ostream& os, const TokenType& type) {
         return os << "FOR";
     case TokenType::IF:
         return os << "IF";
+    case TokenType::IN:
+        return os << "IN";
     case TokenType::NIL:
         return os << "NIL";
     case TokenType::OR:

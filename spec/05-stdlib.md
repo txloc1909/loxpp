@@ -48,6 +48,27 @@ if (line == nil) {
 
 ---
 
+## `len(seq) → Number`
+
+Returns the number of elements in `seq`.
+
+- If `seq` is a **List**: returns the number of elements.
+- If `seq` is a **String**: returns the number of bytes.
+
+Runtime error if `seq` is any other type.
+
+```lox
+print len([1, 2, 3]);   // 3
+print len("hello");     // 5
+print len([]);          // 0
+print len("");          // 0
+```
+
+**Arity:** 1  
+**Returns:** Number
+
+---
+
 ## `str(value) → String`
 
 Converts `value` to its canonical string representation (the same text that

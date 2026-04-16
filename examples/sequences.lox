@@ -1,0 +1,71 @@
+// sequences.lox — Sequence protocol: len, indexing, 'in', and for-in.
+//
+// Demonstrates: len() on List and String, string indexing, 'in' membership
+// expression, and for-in loops iterating over both List and String.
+
+// len() works on both List and String.
+// CHECK: 3
+print len([10, 20, 30]);
+// CHECK: 5
+print len("hello");
+
+// String indexing returns a single-character string.
+var s = "hello";
+// CHECK: h
+print s[0];
+// CHECK: o
+print s[4];
+
+// 'in' on a List: element equality.
+// CHECK: true
+print (2 in [1, 2, 3]);
+// CHECK: false
+print (9 in [1, 2, 3]);
+
+// 'in' on a String: substring membership.
+// CHECK: true
+print ("ell" in "hello");
+// CHECK: false
+print ("xyz" in "hello");
+
+// for-in iterates list elements.
+var sum = 0;
+for (var x in [1, 2, 3, 4, 5]) {
+    sum = sum + x;
+}
+// CHECK: 15
+print sum;
+
+// for-in iterates string characters.
+var reversed = "";
+for (var c in "abc") {
+    reversed = c + reversed;
+}
+// CHECK: cba
+print reversed;
+
+// break exits a for-in loop early.
+var early = 0;
+for (var x in [1, 2, 3, 4, 5]) {
+    if (x == 3) break;
+    early = early + x;
+}
+// CHECK: 3
+print early;
+
+// continue skips to the next iteration.
+var skipped = 0;
+for (var x in [1, 2, 3, 4, 5]) {
+    if (x == 3) continue;
+    skipped = skipped + x;
+}
+// CHECK: 12
+print skipped;
+
+// C-style for-loop is unaffected (regression check).
+var product = 1;
+for (var i = 1; i <= 4; i = i + 1) {
+    product = product * i;
+}
+// CHECK: 24
+print product;

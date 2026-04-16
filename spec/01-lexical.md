@@ -92,6 +92,7 @@ names:
 | `for` | For loop |
 | `fun` | Function declaration |
 | `if` | Conditional |
+| `in` | Sequence membership test; for-in loop variable binding |
 | `nil` | Nil literal |
 | `or` | Logical disjunction |
 | `print` | Print statement |

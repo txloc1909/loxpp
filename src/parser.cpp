@@ -45,6 +45,7 @@ static const ParseRule rules[] = {
     RULE(FOR,            nullptr,             nullptr,           NONE),
     RULE(FUN,            nullptr,             nullptr,           NONE),
     RULE(IF,             nullptr,             nullptr,           NONE),
+    RULE(IN,             nullptr,             &Compiler::binary, COMPARISON),
     RULE(NIL,            &Compiler::literal,  nullptr,           NONE),
     RULE(OR,             nullptr,             &Compiler::or_,    OR),
     RULE(PRINT,          nullptr,             nullptr,           NONE),

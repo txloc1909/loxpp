@@ -48,6 +48,7 @@ enum class TokenType : int {
     FUN,
     FOR,
     IF,
+    IN,
     NIL,
     OR,
     PRINT,

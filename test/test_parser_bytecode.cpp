@@ -221,3 +221,84 @@ TEST_F(ParserBytecodeTest, Arithmetic_Modulo) {
                            "7: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
+
+// ===========================================================================
+// Sequence protocol bytecode tests
+// ===========================================================================
+
+class SequenceBytecodeTest : public ::testing::Test {};
+
+// `2 in [1, 2, 3]`
+// Chunk::addConstant does an O(N) dedup scan (see src/chunk.cpp), so the
+// second occurrence of 2.0 (inside the list literal) reuses slot 0 instead
+// of allocating a new slot.
+// Slot layout: 0='2', 1='1', 2='3'
+TEST_F(SequenceBytecodeTest, InExpr_ListMembership) {
+    std::string bytecode = compile_to_bytecode("2 in [1, 2, 3]");
+    std::string expected = "0: CONSTANT 0 ('2')\n"
+                           "2: CONSTANT 1 ('1')\n"
+                           "4: CONSTANT 0 ('2')\n" // dedup: reuses slot 0
+                           "6: CONSTANT 2 ('3')\n"
+                           "8: BUILD_LIST 3\n"
+                           "10: IN\n"
+                           "11: POP\n"
+                           "12: NIL\n"
+                           "13: RETURN\n";
+    EXPECT_EQ(trim(bytecode), trim(expected));
+}
+
+// `"ell" in "hello"`: two constant loads then IN.
+TEST_F(SequenceBytecodeTest, InExpr_StringSubstring) {
+    std::string bytecode = compile_to_bytecode("\"ell\" in \"hello\"");
+    std::string expected = "0: CONSTANT 0 ('ell')\n"
+                           "2: CONSTANT 1 ('hello')\n"
+                           "4: IN\n"
+                           "5: POP\n"
+                           "6: NIL\n"
+                           "7: RETURN\n";
+    EXPECT_EQ(trim(bytecode), trim(expected));
+}
+
+// `for (var x in [1]) {}` compiles to (at script level):
+//
+//   Locals: slot0="" (implicit), slot1=(seq), slot2=(idx), slot3=x
+//   Constants: slot0='1' (list element; 1.0 increment deduped to same slot),
+//              slot1='0' (initial idx=0), slot2='len' (global name)
+//
+// The loop uses the jump-around-increment pattern so that `continue` jumps
+// to incrStart (offset 23) rather than back to the condition.
+TEST_F(SequenceBytecodeTest, ForIn_EmptyBodyBytecode) {
+    std::string bytecode = compile_program_to_bytecode("for (var x in [1]) {}");
+    std::string expected =
+        "0: CONSTANT 0 ('1')\n" // list element
+        "2: BUILD_LIST 1\n"     // push [1] as (seq)
+        "4: CONSTANT 1 ('0')\n" // push 0 as (idx)
+        "6: NIL\n"              // push nil as item x
+        "7: GET_LOCAL 2\n"      // condition: push (idx)
+        "9: GET_GLOBAL 2 ('len')\n"
+        "11: GET_LOCAL 1\n" // push (seq)
+        "13: CALL 1\n"      // len(seq)
+        "15: LESS\n"        // idx < len(seq)
+        "16: JUMP_IF_FALSE 16 -> 45\n"
+        "19: POP\n"
+        "20: JUMP 20 -> 34\n"    // jump over increment to body
+        "23: GET_LOCAL 2\n"      // increment: push (idx)
+        "25: CONSTANT 0 ('1')\n" // 1.0 deduped with list-element slot
+        "27: ADD\n"
+        "28: SET_LOCAL 2\n" // idx++
+        "30: POP\n"
+        "31: LOOP 31 -> 7\n" // back to condition
+        "34: GET_LOCAL 1\n"  // body: push (seq)
+        "36: GET_LOCAL 2\n"  // push (idx)
+        "38: GET_INDEX\n"    // seq[idx]
+        "39: SET_LOCAL 3\n"  // x = seq[idx]
+        "41: POP\n"
+        "42: LOOP 42 -> 23\n" // back to increment
+        "45: POP\n"           // discard condition on exit
+        "46: POP\n"           // endScope: x
+        "47: POP\n"           // endScope: (idx)
+        "48: POP\n"           // endScope: (seq)
+        "49: NIL\n"
+        "50: RETURN\n";
+    EXPECT_EQ(trim(bytecode), trim(expected));
+}
