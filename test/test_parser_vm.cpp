@@ -291,3 +291,209 @@ TEST_F(ParserVMTest, RuntimeError_NegateNonNumber) {
     expect_runtime_error("-nil");
     expect_runtime_error("-true");
 }
+
+// ===========================================================================
+// Sequence protocol — `elem in seq` and `for (var x in seq)`
+// ===========================================================================
+
+class SequenceVMTest : public ::testing::Test {};
+
+// ---------------------------------------------------------------------------
+// `elem in list`
+// ---------------------------------------------------------------------------
+
+TEST_F(SequenceVMTest, InList_Found) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var r = 2 in [1, 2, 3];"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "true");
+}
+
+TEST_F(SequenceVMTest, InList_NotFound) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var r = 9 in [1, 2, 3];"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "false");
+}
+
+TEST_F(SequenceVMTest, InList_EmptyList) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var r = 1 in [];"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "false");
+}
+
+TEST_F(SequenceVMTest, InList_StringElement) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(var r = "b" in ["a", "b", "c"];)"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "true");
+}
+
+TEST_F(SequenceVMTest, InList_NilElement) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var r = nil in [1, nil, 3];"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "true");
+}
+
+TEST_F(SequenceVMTest, InList_UsedInCondition) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var x = 0; if (2 in [1, 2, 3]) { x = 1; }"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("x"), "1");
+}
+
+TEST_F(SequenceVMTest, InList_RuntimeError_NonSequenceRHS) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("1 in 42;"), InterpretResult::RUNTIME_ERROR);
+}
+
+// ---------------------------------------------------------------------------
+// `elem in string` — substring membership
+// ---------------------------------------------------------------------------
+
+TEST_F(SequenceVMTest, InString_SubstringFound) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(var r = "ell" in "hello";)"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "true");
+}
+
+TEST_F(SequenceVMTest, InString_SubstringNotFound) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(var r = "xyz" in "hello";)"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "false");
+}
+
+TEST_F(SequenceVMTest, InString_EmptyNeedle) {
+    // Empty string is a substring of every string.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(var r = "" in "hello";)"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "true");
+}
+
+TEST_F(SequenceVMTest, InString_RuntimeError_NonStringElem) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(1 in "hello";)"), InterpretResult::RUNTIME_ERROR);
+}
+
+// ---------------------------------------------------------------------------
+// String indexing
+// ---------------------------------------------------------------------------
+
+TEST_F(SequenceVMTest, StringIndex_ReturnsChar) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(var r = "hello"[1];)"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "e");
+}
+
+TEST_F(SequenceVMTest, StringIndex_OutOfBounds) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"("hello"[5];)"), InterpretResult::RUNTIME_ERROR);
+}
+
+TEST_F(SequenceVMTest, StringIndex_SetIsError) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(var s = "hello"; s[0] = "x";)"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+// ---------------------------------------------------------------------------
+// `for (var x in list)` iteration
+// ---------------------------------------------------------------------------
+
+TEST_F(SequenceVMTest, ForIn_List_SumElements) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var sum = 0;
+        for (var x in [1, 2, 3]) { sum = sum + x; }
+        var r = sum;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "6");
+}
+
+TEST_F(SequenceVMTest, ForIn_List_EmptyList) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(var r = 0; for (var x in []) { r = r + 1; })"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "0");
+}
+
+TEST_F(SequenceVMTest, ForIn_List_ItemVariableScoped) {
+    // Loop variable must not leak into the enclosing scope.
+    VMTestHarness h;
+    ASSERT_EQ(h.run("for (var x in [1]) {}"), InterpretResult::OK);
+    EXPECT_FALSE(h.getGlobal("x").has_value());
+}
+
+TEST_F(SequenceVMTest, ForIn_List_Break) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var n = 0;
+        for (var x in [1, 2, 3, 4, 5]) {
+            if (x == 3) break;
+            n = n + x;
+        }
+        var r = n;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "3"); // 1 + 2
+}
+
+TEST_F(SequenceVMTest, ForIn_List_Continue) {
+    // continue must jump to the increment block, not back to the condition.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var n = 0;
+        for (var x in [1, 2, 3, 4]) {
+            if (x == 2) continue;
+            n = n + x;
+        }
+        var r = n;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "8"); // 1 + 3 + 4
+}
+
+TEST_F(SequenceVMTest, ForIn_List_Nested) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var acc = 0;
+        for (var a in [1, 2]) {
+            for (var b in [10, 20]) { acc = acc + a + b; }
+        }
+        var r = acc;
+    )"),
+              InterpretResult::OK);
+    // a=1: (1+10)+(1+20)=32; a=2: (2+10)+(2+20)=34; total=66
+    EXPECT_EQ(h.getGlobalStr("r"), "66");
+}
+
+// ---------------------------------------------------------------------------
+// `for (var c in string)` character iteration
+// ---------------------------------------------------------------------------
+
+TEST_F(SequenceVMTest, ForIn_String_ConcatChars) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(var r = ""; for (var c in "abc") { r = r + c; })"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "abc");
+}
+
+TEST_F(SequenceVMTest, ForIn_String_EmptyString) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(var r = 0; for (var c in "") { r = r + 1; })"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "0");
+}
+
+// ---------------------------------------------------------------------------
+// Regression: C-style for loop still works after the for-in change
+// ---------------------------------------------------------------------------
+
+TEST_F(SequenceVMTest, CStyleFor_Regression) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var s = 0;
+        for (var i = 0; i < 3; i = i + 1) { s = s + i; }
+        var r = s;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "3"); // 0 + 1 + 2
+}
