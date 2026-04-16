@@ -67,6 +67,7 @@ class Compiler {
     void ifStatement();
     void whileStatement();
     void forStatement();
+    void forInStatement(const Token& itemName);
     void breakStatement();
     void continueStatement();
     void switchStatement();

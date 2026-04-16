@@ -57,12 +57,16 @@ static Value strNative(int /*argCount*/, Value* args) {
 }
 
 static Value lenNative(int /*argCount*/, Value* args) {
-    if (!isList(args[0])) {
-        nativeRuntimeError("len() argument must be a list.");
-        return from<Nil>(Nil{});
+    if (isList(args[0])) {
+        auto* list = asObjList(as<Obj*>(args[0]));
+        return from<Number>(static_cast<double>(list->elements.size()));
     }
-    auto* list = asObjList(as<Obj*>(args[0]));
-    return from<Number>(static_cast<double>(list->elements.size()));
+    if (isString(args[0])) {
+        auto* s = asObjString(as<Obj*>(args[0]));
+        return from<Number>(static_cast<double>(s->chars.size()));
+    }
+    nativeRuntimeError("len() argument must be a list or string.");
+    return from<Nil>(Nil{});
 }
 
 InterpretResult VM::interpret(const std::string& source) {
@@ -590,35 +594,61 @@ InterpretResult VM::run() {
         }
         case Op::GET_INDEX: {
             Value indexVal = pop();
-            Value listVal = pop();
-            if (!isList(listVal)) {
-                runtimeError("Only lists can be indexed.");
+            Value collectionVal = pop();
+            if (isList(collectionVal)) {
+                if (!is<Number>(indexVal)) {
+                    runtimeError("List index must be a number.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                double n = as<Number>(indexVal);
+                if (n != std::floor(n)) {
+                    runtimeError("List index must be an integer.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                auto* list = asObjList(as<Obj*>(collectionVal));
+                int idx = static_cast<int>(n);
+                if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
+                    runtimeError("List index out of bounds.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                push(list->elements[idx]);
+            } else if (isString(collectionVal)) {
+                if (!is<Number>(indexVal)) {
+                    runtimeError("String index must be a number.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                double n = as<Number>(indexVal);
+                if (n != std::floor(n)) {
+                    runtimeError("String index must be an integer.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                auto* str = asObjString(as<Obj*>(collectionVal));
+                int idx = static_cast<int>(n);
+                if (idx < 0 || idx >= static_cast<int>(str->chars.size())) {
+                    runtimeError("String index out of bounds.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                // Copy char before makeString (GC-safe: same pattern as ADD)
+                char ch = str->chars[idx];
+                push(Value{static_cast<Obj*>(
+                    m_mm.makeString(std::string_view{&ch, 1}))});
+            } else {
+                runtimeError("Only lists and strings can be indexed.");
                 return InterpretResult::RUNTIME_ERROR;
             }
-            if (!is<Number>(indexVal)) {
-                runtimeError("List index must be a number.");
-                return InterpretResult::RUNTIME_ERROR;
-            }
-            double n = as<Number>(indexVal);
-            if (n != std::floor(n)) {
-                runtimeError("List index must be an integer.");
-                return InterpretResult::RUNTIME_ERROR;
-            }
-            auto* list = asObjList(as<Obj*>(listVal));
-            int idx = static_cast<int>(n);
-            if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
-                runtimeError("List index out of bounds.");
-                return InterpretResult::RUNTIME_ERROR;
-            }
-            push(list->elements[idx]);
             break;
         }
         case Op::SET_INDEX: {
             Value val = pop();
             Value indexVal = pop();
             Value listVal = pop();
+            if (isString(listVal)) {
+                runtimeError("Strings are immutable and cannot be indexed for "
+                             "assignment.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
             if (!isList(listVal)) {
-                runtimeError("Only lists can be indexed.");
+                runtimeError("Only lists can be indexed for assignment.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             if (!is<Number>(indexVal)) {
@@ -639,6 +669,37 @@ InterpretResult VM::run() {
             list->elements[idx] = val;
             push(val); // assignment is an expression; its value is the assigned
                        // value
+            break;
+        }
+        case Op::IN: {
+            Value seq = pop();
+            Value elem = pop();
+            if (isList(seq)) {
+                auto* list = asObjList(as<Obj*>(seq));
+                bool found = false;
+                for (const auto& v : list->elements) {
+                    if (v == elem) {
+                        found = true;
+                        break;
+                    }
+                }
+                push(from<bool>(found));
+            } else if (isString(seq)) {
+                if (!isString(elem)) {
+                    runtimeError(
+                        "Left operand of 'in' on a string must be a string.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                auto* haystack = asObjString(as<Obj*>(seq));
+                auto* needle = asObjString(as<Obj*>(elem));
+                bool found = haystack->chars.find(needle->chars.data(), 0,
+                                                  needle->chars.size()) !=
+                             LoxString::npos;
+                push(from<bool>(found));
+            } else {
+                runtimeError("Right operand of 'in' must be a list or string.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
             break;
         }
         }

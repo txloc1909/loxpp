@@ -184,6 +184,8 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return simpleInstruction("GET_INDEX", offset, out, color);
     case Op::SET_INDEX:
         return simpleInstruction("SET_INDEX", offset, out, color);
+    case Op::IN:
+        return simpleInstruction("IN", offset, out, color);
     default:
         out << cc(color, kRed) << cc(color, kBold) << "UNKNOWN("
             << static_cast<unsigned>(chunk.at(offset)) << ")"

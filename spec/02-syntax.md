@@ -36,7 +36,9 @@ exprStmt       ::= expression ";" ;
 forStmt        ::= "for" "(" ( varDecl | exprStmt | ";" )
                               expression? ";"
                               expression? ")"
-                   statement ;
+                   statement                                  (* C-style *)
+                 | "for" "(" "var" IDENTIFIER "in" expression ")"
+                   statement ;                               (* for-in *)
 
 ifStmt         ::= "if" "(" expression ")" statement
                    ( "else" statement )? ;
@@ -69,7 +71,7 @@ logicAnd       ::= equality ( "and" equality )* ;
 
 equality       ::= comparison ( ( "!=" | "==" ) comparison )* ;
 
-comparison     ::= term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
+comparison     ::= term ( ( ">" | ">=" | "<" | "<=" | "in" ) term )* ;
 
 term           ::= factor ( ( "-" | "+" ) factor )* ;
 
@@ -107,7 +109,7 @@ Operators within the same group are left-associative unless noted otherwise.
 | 2 | `or` | Left |
 | 3 | `and` | Left |
 | 4 | `==` `!=` | Left |
-| 5 | `<` `<=` `>` `>=` | Left |
+| 5 | `<` `<=` `>` `>=` `in` | Left |
 | 6 | `+` `-` | Left |
 | 7 | `*` `/` `%` | Left |
 | 8 | `!` `-` (unary) | Right (prefix) |
@@ -117,7 +119,7 @@ Operators within the same group are left-associative unless noted otherwise.
 
 ## Notes on Specific Constructs
 
-### `for` loop
+### `for` loop (C-style)
 
 The three clauses of a `for` statement are each optional:
 
@@ -127,6 +129,33 @@ The three clauses of a `for` statement are each optional:
   always-truthy.
 - **Increment**: an expression evaluated after each iteration body; omitted
   means nothing.
+
+### `for`-in loop
+
+`for (var x in seq) body` iterates over the elements of `seq` in order,
+binding each element to `x` for each iteration of `body`.
+
+- `seq` is evaluated once before the loop begins and stored internally.
+- `x` is scoped to the loop; it is not accessible after the loop exits.
+- `break` and `continue` work as in C-style `for` loops.
+- The sequence expression may be any List or String value. Iterating a List
+  visits elements; iterating a String visits single-character strings.
+- Modifying a list during iteration is defined: elements appended before the
+  current index is reached will be visited.
+
+### `in` expression
+
+`elem in seq` is a binary expression that evaluates to a Boolean:
+
+- If `seq` is a **List**: `true` if any element compares equal to `elem` under
+  the `==` operator.
+- If `seq` is a **String**: `elem` must be a String; `true` if `elem` appears
+  as a substring of `seq`.
+- Runtime error if `seq` is neither a List nor a String.
+- Runtime error if `seq` is a String and `elem` is not a String.
+
+`in` has comparison precedence (same level as `<`, `<=`, `>`, `>=`), so
+`a + b in c` parses as `(a + b) in c`.
 
 ### `if`/`else` dangling
 

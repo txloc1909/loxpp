@@ -135,8 +135,17 @@ TokenType Scanner::identifierType() {
         return checkKeyword(1, 6, "efault", TokenType::DEFAULT);
     case 'e':
         return checkKeyword(1, 3, "lse", TokenType::ELSE);
-    case 'i':
-        return checkKeyword(1, 1, "f", TokenType::IF);
+    case 'i': {
+        if (m_current - m_start > 1) {
+            switch (m_start[1]) {
+            case 'f':
+                return checkKeyword(2, 0, "", TokenType::IF);
+            case 'n':
+                return checkKeyword(2, 0, "", TokenType::IN);
+            }
+        }
+        break;
+    }
     case 'f': {
         if (m_current - m_start > 1) {
             switch (m_start[1]) {
