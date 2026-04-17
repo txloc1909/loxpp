@@ -43,6 +43,25 @@ String is a **sequence type** and supports the following sequence operations:
 | `sub in s` | `true` if `sub` (a String) appears as a substring of `s`. |
 | `for (var c in s)` | Iterates over each byte as a single-character String. |
 
+```lox
+var s = "hello";
+print len(s);        // 5
+print len("");       // 0
+
+print s[0];          // h
+print s[4];          // o
+// s[0] = "H";      // runtime error: strings are immutable
+
+print ("ell" in s);  // true
+print ("xyz" in s);  // false
+
+var reversed = "";
+for (var c in s) {
+    reversed = c + reversed;
+}
+print reversed;      // olleh
+```
+
 ### Function
 
 A callable value that, when invoked with the correct number of arguments,
