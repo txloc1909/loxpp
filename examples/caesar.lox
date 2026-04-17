@@ -1,0 +1,60 @@
+// caesar.lox — Caesar cipher: shift each letter by a fixed amount.
+//
+// Letters wrap within their case (a-z, A-Z); non-letter characters pass through
+// unchanged. ROT13 is Caesar with shift 13 — applying it twice restores the
+// original text.
+//
+// Demonstrates: str[i], len(), linear search in a string, % operator.
+
+var lower = "abcdefghijklmnopqrstuvwxyz";
+var upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+// Return the 0-based position of ch in alphabet, or -1 if absent.
+fun indexOf(alphabet, ch) {
+    var i = 0;
+    while (i < len(alphabet)) {
+        if (alphabet[i] == ch) return i;
+        i = i + 1;
+    }
+    return -1;
+}
+
+fun shiftChar(ch, shift) {
+    var i = indexOf(lower, ch);
+    if (i >= 0) return lower[(i + shift) % 26];
+    i = indexOf(upper, ch);
+    if (i >= 0) return upper[(i + shift) % 26];
+    return ch; // punctuation, digits, spaces — pass through
+}
+
+fun caesar(s, shift) {
+    // Normalise shift to [0, 25] so % never sees a negative left operand.
+    shift = ((shift % 26) + 26) % 26;
+    var result = "";
+    var i = 0;
+    while (i < len(s)) {
+        result = result + shiftChar(s[i], shift);
+        i = i + 1;
+    }
+    return result;
+}
+
+fun rot13(s) { return caesar(s, 13); }
+
+// CHECK: === Caesar Cipher ===
+print "=== Caesar Cipher ===";
+print caesar("Hello, World!", 3);
+print caesar("Khoor, Zruog!", -3);  // decrypt shift-3
+print caesar("Hello, World!", 0);   // identity (shift 0)
+// CHECK: Khoor, Zruog!
+// CHECK: Hello, World!
+// CHECK: Hello, World!
+
+// CHECK: === ROT13 ===
+print "";
+print "=== ROT13 ===";
+var msg = "The Quick Brown Fox";
+print rot13(msg);
+print rot13(rot13(msg)); // double ROT13 is identity
+// CHECK: Gur Dhvpx Oebja Sbk
+// CHECK: The Quick Brown Fox

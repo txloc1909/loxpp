@@ -1,0 +1,91 @@
+// run_length.lox — Run-length encoding (RLE) and decoding.
+//
+// Encoding: each run of identical consecutive characters is replaced by its
+// count followed by the character. "aaabbc" → "3a2b1c".
+//
+// Decoding: parse the numeric count, then repeat the next character that many
+// times. Counts may be more than one digit ("12a" = twelve 'a's).
+//
+// Demonstrates: str[i], len(), 'in' for digit detection, str() for numbers.
+
+var DIGITS = "0123456789";
+
+fun isDigit(ch) { return ch in DIGITS; }
+
+fun digitVal(ch) {
+    var i = 0;
+    while (i < 10) {
+        if (DIGITS[i] == ch) return i;
+        i = i + 1;
+    }
+    return 0;
+}
+
+fun encode(s) {
+    if (len(s) == 0) return "";
+    var result = "";
+    var count = 1;
+    var i = 1;
+    while (i < len(s)) {
+        if (s[i] == s[i - 1]) {
+            count = count + 1;
+        } else {
+            result = result + str(count) + s[i - 1];
+            count = 1;
+        }
+        i = i + 1;
+    }
+    return result + str(count) + s[len(s) - 1];
+}
+
+fun decode(s) {
+    var result = "";
+    var i = 0;
+    while (i < len(s)) {
+        // Accumulate multi-digit count.
+        var count = 0;
+        while (i < len(s) and isDigit(s[i])) {
+            count = count * 10 + digitVal(s[i]);
+            i = i + 1;
+        }
+        if (i < len(s)) {
+            var ch = s[i];
+            var j = 0;
+            while (j < count) {
+                result = result + ch;
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+    }
+    return result;
+}
+
+// CHECK: === Run-Length Encoding ===
+print "=== Run-Length Encoding ===";
+print encode("aaabbc");
+print encode("abcd");
+print encode("aaaa");
+print encode("");
+// CHECK: 3a2b1c
+// CHECK: 1a1b1c1d
+// CHECK: 4a
+// CHECK:
+
+// CHECK: === Decoding ===
+print "";
+print "=== Decoding ===";
+print decode("3a2b1c");
+print decode("1a1b1c1d");
+print decode("4a");
+// CHECK: aaabbc
+// CHECK: abcd
+// CHECK: aaaa
+
+// CHECK: === Round-trip ===
+print "";
+print "=== Round-trip ===";
+print decode(encode("aabbccdd"));
+print decode(encode("hello"));
+// CHECK: aabbccdd
+// CHECK: hello

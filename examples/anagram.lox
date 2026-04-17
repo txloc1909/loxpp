@@ -1,0 +1,68 @@
+// anagram.lox — Detect whether two strings are anagrams of each other.
+//
+// Strategy: maintain a 26-element frequency table indexed by letter position.
+// Increment for each character in the first string, decrement for the second.
+// The two strings are anagrams iff every counter returns to zero.
+// Only lowercase letters are counted; other characters are ignored.
+//
+// Demonstrates: str[i], len(), list index assignment.
+
+var lower = "abcdefghijklmnopqrstuvwxyz";
+var upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+// Returns 0-25 for any letter (case-insensitive), -1 for non-letters.
+fun letterIndex(ch) {
+    var i = 0;
+    while (i < 26) {
+        if (lower[i] == ch) return i;
+        if (upper[i] == ch) return i;
+        i = i + 1;
+    }
+    return -1;
+}
+
+fun isAnagram(a, b) {
+    var counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    var i = 0;
+    while (i < len(a)) {
+        var k = letterIndex(a[i]);
+        if (k >= 0) counts[k] = counts[k] + 1;
+        i = i + 1;
+    }
+    i = 0;
+    while (i < len(b)) {
+        var k = letterIndex(b[i]);
+        if (k >= 0) counts[k] = counts[k] - 1;
+        i = i + 1;
+    }
+    i = 0;
+    while (i < 26) {
+        if (counts[i] != 0) return false;
+        i = i + 1;
+    }
+    return true;
+}
+
+fun check(a, b) {
+    if (isAnagram(a, b)) {
+        print a + " / " + b + ": anagram";
+    } else {
+        print a + " / " + b + ": not an anagram";
+    }
+}
+
+// CHECK: === Anagram Detector ===
+print "=== Anagram Detector ===";
+check("listen", "silent");
+check("triangle", "integral");
+check("hello", "world");
+check("abc", "cab");
+check("abc", "abcd");  // different lengths
+check("Astronomer", "Moon starer"); // spaces and uppercase ignored
+// CHECK: listen / silent: anagram
+// CHECK: triangle / integral: anagram
+// CHECK: hello / world: not an anagram
+// CHECK: abc / cab: anagram
+// CHECK: abc / abcd: not an anagram
+// CHECK: Astronomer / Moon starer: anagram
