@@ -62,9 +62,8 @@ TEST_F(ParserVMTest, StringLiterals) {
     expect_str("\"\"", "");
     expect_str("\"hello\"", "hello");
     expect_str("\"a string\"", "a string");
-    // Non-ASCII (UTF-8 encoded): A~¶Þॐஃ
-    expect_str("\"A~\xc2\xb6\xc3\x9e\xe0\xa5\x90\xe0\xae\x83\"",
-               "A~\xc2\xb6\xc3\x9e\xe0\xa5\x90\xe0\xae\x83");
+    expect_str("\"hello world\"", "hello world");
+    expect_str("\"!@#$%^&*\"", "!@#$%^&*");
 }
 
 // ===========================================================================

@@ -2,9 +2,9 @@
 
 ## Source Encoding
 
-Source files are UTF-8 encoded text. The lexer operates on bytes; multi-byte
-UTF-8 sequences are permitted inside string literals and line comments but have
-no special meaning outside them.
+Source files are ASCII text. The lexer operates on bytes; only printable ASCII
+characters and standard whitespace (space, tab, CR, LF) are meaningful. Non-ASCII
+bytes are not permitted in source files.
 
 ---
 
@@ -12,10 +12,10 @@ no special meaning outside them.
 
 The following characters are treated as whitespace and ignored between tokens:
 
-- Space (`U+0020`)
-- Horizontal tab (`U+0009`)
-- Carriage return (`U+000D`)
-- Newline (`U+000A`)
+- Space (`0x20`)
+- Horizontal tab (`0x09`)
+- Carriage return (`0x0D`)
+- Newline (`0x0A`)
 
 Lox++ has no significant whitespace. Newlines do not terminate statements.
 

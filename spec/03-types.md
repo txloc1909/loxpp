@@ -30,7 +30,7 @@ behavior follows IEEE 754.
 
 ### String
 
-An immutable sequence of bytes (interpreted as UTF-8). Two strings with
+An immutable sequence of bytes (interpreted as ASCII). Two strings with
 identical content are equal regardless of how or where they were created.
 
 String is a **sequence type** and supports the following sequence operations:
