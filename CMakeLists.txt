@@ -72,6 +72,11 @@ option(LOXPP_STRESS_GC
 if(LOXPP_STRESS_GC)
     target_compile_definitions(loxpp PRIVATE LOXPP_STRESS_GC)
 endif()
+option(LOXPP_PROFILE
+    "Enable runtime profiler: per-opcode counts, function timing, GC stats" OFF)
+if(LOXPP_PROFILE)
+    target_compile_definitions(loxpp PRIVATE LOXPP_PROFILE)
+endif()
 
 # Value representation: NaN-tagged 8-byte word (default) vs portable
 # std::variant (16 bytes). Turn OFF for platforms where heap pointers may
