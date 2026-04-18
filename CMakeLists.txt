@@ -65,6 +65,11 @@ option(LOXPP_STRESS_GC
 if(LOXPP_STRESS_GC)
     target_compile_definitions(loxpp PRIVATE LOXPP_STRESS_GC)
 endif()
+option(LOXPP_PROFILE
+    "Enable runtime profiler: per-opcode counts, function timing, GC stats" OFF)
+if(LOXPP_PROFILE)
+    target_compile_definitions(loxpp PRIVATE LOXPP_PROFILE)
+endif()
 
 # Readline support for the REPL.
 find_library(READLINE_LIB readline)

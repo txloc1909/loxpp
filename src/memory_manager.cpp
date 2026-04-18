@@ -5,6 +5,11 @@
 #include "table.h"
 #include "value.h"
 
+#ifdef LOXPP_PROFILE
+#include "profiler.h"
+#include <optional>
+#endif
+
 #include <cstdio>
 
 #ifdef LOXPP_DEBUG_LOG_GC
@@ -190,6 +195,32 @@ void MemoryManager::traceObject(Obj* obj) {
 
 void MemoryManager::removeWhiteStrings() { m_strings.removeUnmarkedKeys(); }
 
+// Returns the sizeof(T) used when the object was created via create<T>().
+// Must match the sizeof(T) added in create<T>().
+static std::size_t objAllocatedSize(Obj* obj) {
+    switch (obj->type) {
+    case ObjType::STRING:
+        return sizeof(ObjString);
+    case ObjType::FUNCTION:
+        return sizeof(ObjFunction);
+    case ObjType::NATIVE:
+        return sizeof(ObjNative);
+    case ObjType::UPVALUE:
+        return sizeof(ObjUpvalue);
+    case ObjType::CLOSURE:
+        return sizeof(ObjClosure);
+    case ObjType::CLASS:
+        return sizeof(ObjClass);
+    case ObjType::INSTANCE:
+        return sizeof(ObjInstance);
+    case ObjType::BOUND_METHOD:
+        return sizeof(ObjBoundMethod);
+    case ObjType::LIST:
+        return sizeof(ObjList);
+    }
+    return 0;
+}
+
 void MemoryManager::sweep() {
     auto it = allObjects.begin();
     while (it != allObjects.end()) {
@@ -204,6 +235,7 @@ void MemoryManager::sweep() {
             fprintf(stderr, "[GC] free   %p (%s)\n", static_cast<void*>(*it),
                     objTypeName((*it)->type));
 #endif
+            bytesAllocated -= objAllocatedSize(*it);
             delete *it;
             it = allObjects.erase(it);
         }
@@ -212,6 +244,13 @@ void MemoryManager::sweep() {
 }
 
 void MemoryManager::collectGarbage() {
+#ifdef LOXPP_PROFILE
+    // ProfileGcScope destructor fires when collectGarbage() returns.
+    // It reads bytesAllocated by const-ref; by then sweep has updated it.
+    std::optional<ProfileGcScope> gcScope;
+    if (m_profilerData)
+        gcScope.emplace(*m_profilerData, bytesAllocated);
+#endif
 #ifdef LOXPP_DEBUG_LOG_GC
     fprintf(stderr, "[GC] begin -- %zu bytes allocated\n", bytesAllocated);
 #endif

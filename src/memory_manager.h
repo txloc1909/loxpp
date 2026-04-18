@@ -8,6 +8,11 @@
 #include <string_view>
 #include <vector>
 
+#ifdef LOXPP_PROFILE
+struct ProfilerData; // defined in profiler.h, included only in
+                     // memory_manager.cpp
+#endif
+
 class Compiler;
 
 class MemoryManager : public VmAllocBase {
@@ -55,6 +60,9 @@ class MemoryManager : public VmAllocBase {
 
     void setMarkRootsCallback(std::function<void()> cb);
     void setCurrentCompiler(Compiler* c);
+#ifdef LOXPP_PROFILE
+    void setProfilerData(ProfilerData* data) { m_profilerData = data; }
+#endif
     void markObject(Obj* obj);
     void markValue(const Value& v);
     void collectGarbage();
@@ -74,6 +82,9 @@ class MemoryManager : public VmAllocBase {
     std::vector<Obj*> m_tempRoots; // objects transiently protected from GC
     std::function<void()> m_markRoots;
     Compiler* m_currentCompiler{nullptr};
+#ifdef LOXPP_PROFILE
+    ProfilerData* m_profilerData{nullptr};
+#endif
 #ifdef LOXPP_STRESS_GC
     std::size_t m_nextGC{0};
 #else

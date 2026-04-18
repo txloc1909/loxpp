@@ -86,6 +86,11 @@ InterpretResult VM::interpret(const std::string& source) {
     stackTop[-1] = Value{
         static_cast<Obj*>(closure)}; // replace fn with its closure in-place
     call(closure, 0);
+#ifdef LOXPP_PROFILE
+    // Count the implicit script call so Op::CALL and Op::RETURN stay balanced.
+    m_profilerData.opcodeTable[static_cast<uint8_t>(Op::CALL)].count++;
+    ProfileProgramScope programScope(m_profilerData);
+#endif
     return run();
 }
 
@@ -128,6 +133,14 @@ bool VM::call(ObjClosure* closure, int argCount) {
     frame->closure = closure;
     frame->ip = fn->chunk.cbegin();
     frame->slots = stackTop - argCount - 1;
+#ifdef LOXPP_PROFILE
+    {
+        int depth = m_frameCount - 1;
+        ObjClosure* parent =
+            (depth > 0) ? m_frames[depth - 1].closure : nullptr;
+        m_profilerScopes[depth].emplace(m_profilerData, closure, depth, parent);
+    }
+#endif
     return true;
 }
 
@@ -192,6 +205,9 @@ InterpretResult VM::run() {
 #endif
 
         Byte instruction = readByte();
+#ifdef LOXPP_PROFILE
+        m_profilerData.opcodeTable[instruction].count++;
+#endif
         switch (toOpcode(instruction)) {
         case Op::CONSTANT: {
             push(readConstant());
@@ -569,6 +585,11 @@ InterpretResult VM::run() {
         case Op::RETURN: {
             Value result = pop();
             closeUpvalues(frame->slots);
+#ifdef LOXPP_PROFILE
+            // Destroy the function scope before decrementing frameCount so the
+            // depth index still points to this frame's slot.
+            m_profilerScopes[m_frameCount - 1].reset();
+#endif
             m_frameCount--;
             if (m_frameCount == 0) {
                 // Finished executing the top-level script.
