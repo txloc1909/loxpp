@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdio>
+
 #include "chunk.h"
 #include "object.h"
 #include "table.h"
@@ -116,4 +118,25 @@ inline bool isObjList(Obj* o) { return isObjType(o, ObjType::LIST); }
 inline ObjList* asObjList(Obj* o) { return static_cast<ObjList*>(o); }
 inline bool isList(const Value& v) {
     return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::LIST;
+}
+
+struct ObjFile : public Obj {
+    ObjClass* klass;       // shared s_fileClass; GC-tracked
+    FILE* handle{nullptr}; // null when closed
+    bool readable{false};
+    bool writable{false};
+
+    explicit ObjFile(ObjClass* k) : Obj(ObjType::FILE), klass(k) {}
+    ~ObjFile() override {
+        if (handle) {
+            std::fclose(handle);
+            handle = nullptr;
+        }
+    }
+};
+
+inline bool isObjFile(Obj* o) { return isObjType(o, ObjType::FILE); }
+inline ObjFile* asObjFile(Obj* o) { return static_cast<ObjFile*>(o); }
+inline bool isFile(const Value& v) {
+    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::FILE;
 }

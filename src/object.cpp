@@ -49,6 +49,8 @@ std::string stringifyObj(Obj* obj) {
                std::string(fn->name->chars.data(), fn->name->chars.size()) +
                ">";
     }
+    case ObjType::FILE:
+        return "<file>";
     case ObjType::LIST: {
         auto* list = static_cast<ObjList*>(obj);
         std::string result = "[";
