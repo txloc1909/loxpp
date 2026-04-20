@@ -6,7 +6,7 @@ var f = open("examples/grep_lite.input", "r");
 var pattern = "error";
 var matches = 0;
 
-print "=== Grep (pattern: \"" + pattern + "\") ===";
+print "=== Grep (pattern: " + pattern + ") ===";
 var line = f.readline();
 while (line != nil) {
     if (pattern in line) {
@@ -18,7 +18,7 @@ while (line != nil) {
 f.close();
 
 print str(matches) + " match(es)";
-// CHECK: === Grep (pattern: "error") ===
+// CHECK: === Grep (pattern: error) ===
 // CHECK: error: connection refused
 // CHECK: error: timeout exceeded
 // CHECK: 2 match(es)
