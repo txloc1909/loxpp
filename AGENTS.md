@@ -3,26 +3,45 @@
 ## Project overview
 
 Lox is a dynamically-typed scripting language.
-Lox++ is a bytecode compiler & VM for Lox, written in C++17 (Clang, CMake, Ninja).
+Lox++ is a bytecode compiler & VM for Lox, written in C++17 (Clang, CMake,
+Ninja).
 
-This project uses **trunk-based development**: all work targets `main` via short-lived
-branches. PRs should be small and merged quickly — no long-running feature branches.
+This project uses **trunk-based development**: all work targets `main` via
+short-lived branches. PRs should be small and merged quickly — no long-running
+feature branches.
 
 ### Language specification
 
 The canonical definition of Lox++ semantics lives in `spec/`:
 
-**The spec is the single source of truth for language behavior.** When there is a
-conflict between the spec and the implementation, the spec wins — fix the
-implementation to match. When adding or changing a language feature, update the spec
-in the same PR as the implementation change.
+**The spec is the single source of truth for language behavior.** When there is
+a conflict between the spec and the implementation, the spec wins — fix the
+implementation to match. When adding or changing a language feature, update the
+spec in the same PR as the implementation change.
+
+
+### Design notes
+
+`notes/` contains exploratory design documents representing new ideas and future
+direction for the project. They have not been committed to the spec or
+implementation.
+
+**Consult `notes/` when planning work** to understand where the project is
+headed and avoid designs that conflict with planned direction. They are
+suggestions, not requirements.
+
+Decision priority when there is a conflict:
+
+1. **Spec** (`spec/`) — authoritative definition of current behavior
+2. **Implementation** (`src/`) — what the code actually does today
+3. **Design notes** (`notes/`) — guidance on future direction
 
 ---
 
 ## Planning policy
 
-**Always plan before implementing.** When assigned a task (via issue, PR comment, or
-CLI delegation):
+**Always plan before implementing.** When assigned a task (via issue, PR
+comment, or CLI delegation):
 
 1. **Post a plan first** — as an issue comment or PR description — covering:
    - What the task requires and any assumptions made
@@ -54,8 +73,10 @@ loxpp/agents-worktree/        ← all agent worktrees live here (gitignored)
   loxpp-fix-bar/              ← agent worktree (branch: fix/bar)
 ```
 
-- `agents-worktree/` is listed in `.gitignore` — its contents never appear in commits.
-- Every agent works in its own worktree on its own branch, with its own `build/` directory.
+- `agents-worktree/` is listed in `.gitignore` - its contents never appear in
+  commits.
+- Every agent works in its own worktree on its own branch, with its own
+  `build/` directory.
 - Every worktree gets its own ephemeral container (started with `--rm`).
 - Containers all share the same `loxpp-dev-env` image; build it once.
 
@@ -79,20 +100,22 @@ podman build -t loxpp-dev-env .
 ### 2. Git hooks (automatic)
 
 `cmake --preset debug` automatically runs `git config core.hooksPath .githooks`
-at configure time, activating the pre-commit hook for the current clone/worktree.
-No manual step needed — just build.
+at configure time, activating the pre-commit hook for the current
+clone/worktree. No manual step needed — just build.
 
 ---
 
 ## Copilot cloud agent
 
-When running as a **Copilot cloud agent** (GitHub Actions), the `loxpp-dev:latest`
-image is pre-built by `.github/workflows/copilot-setup-steps.yml` before the agent
-starts. Use `docker run` for all build, test, and lint commands — do not install the
+When running as a **Copilot cloud agent** (GitHub Actions), the
+`loxpp-dev:latest` image is pre-built by
+`.github/workflows/copilot-setup-steps.yml` before the agent starts. Use
+`docker run` for all build, test, and lint commands — do not install the
 toolchain directly on the runner.
 
-The `Dockerfile` is the single source of truth for the dev environment. Any toolchain
-change must go there; the setup steps and CI will automatically pick it up.
+The `Dockerfile` is the single source of truth for the dev environment. Any
+toolchain change must go there; the setup steps and CI will automatically pick
+it up.
 
 ### Build and test (cloud agent)
 
@@ -116,9 +139,10 @@ docker run --rm -v $PWD:/workspace -w /workspace loxpp-dev:latest \
 
 ### Formatting and static analysis (cloud agent)
 
-The pre-commit hook runs automatically for **local agents** (inside the container).
-Cloud agents run `git commit` on the runner where `clang-format` is not on `PATH`,
-so the hook skips gracefully. Instead, cloud agents must run these steps explicitly:
+The pre-commit hook runs automatically for **local agents** (inside the
+container). Cloud agents run `git commit` on the runner where `clang-format` is
+not on `PATH`, so the hook skips gracefully. Instead, cloud agents must run
+these steps explicitly:
 
 ```bash
 # Before each git commit — auto-format changed files in-place
@@ -166,12 +190,14 @@ docker run -it --rm \
   loxpp-dev-env
 ```
 
-The container starts in `/workspace` (the worktree root).
-The `:z` flag is needed for SELinux hosts (e.g. Fedora/RHEL); omit on non-SELinux hosts.
+The container starts in `/workspace` (the worktree root). The `:z` flag is
+needed for SELinux hosts (e.g. Fedora/RHEL); omit on non-SELinux hosts.
 
 ### 3. Build and wire git hooks (before writing any code)
 
-Run cmake first — this configures the build **and** wires up the pre-commit hook via `git config core.hooksPath .githooks`. Do this before writing any code so the hook is active from your first commit.
+Run cmake first — this configures the build **and** wires up the pre-commit
+hook via `git config core.hooksPath .githooks`. Do this before writing any code
+so the hook is active from your first commit.
 
 ```bash
 cmake --preset debug && cmake --build build
@@ -221,9 +247,11 @@ gh run watch <run-id> --repo txloc1909/loxpp
 gh run view <run-id> --log-failed --repo txloc1909/loxpp
 ```
 
-CI runs: **Lint** (clang-format), **Build & Test** (debug + release), **Static Analysis** (clang-tidy).
+CI runs: **Lint** (clang-format), **Build & Test** (debug + release), **Static
+Analysis** (clang-tidy).
 
-If CI fails (for non-intentional reasons): fix locally inside the container, push again, re-watch.
+If CI fails (for non-intentional reasons): fix locally inside the container,
+push again, re-watch.
 
 ### 8. Resolve review comments
 
@@ -233,7 +261,8 @@ Poll for PR review comments:
 gh pr view <pr-number> --repo txloc1909/loxpp --comments
 ```
 
-For each comment: fix inside the container → build/test → push → re-watch CI → repeat until approved.
+For each comment: fix inside the container → build/test → push → re-watch CI →
+repeat until approved.
 
 ### 9. Merge
 
@@ -323,17 +352,18 @@ and the container name:
 
 Commit **atomically and often** — one logical change per commit.
 
-- **One concern per commit**: a commit should do exactly one thing (add a function,
-  fix a bug, rename a variable). If you find yourself writing "and" in the commit
-  message, split it.
+- **One concern per commit**: a commit should do exactly one thing (add a
+  function, fix a bug, rename a variable). If you find yourself writing "and"
+  in the commit message, split it.
 - **Commit as you go**: don't accumulate a day's work and dump it in one commit at
-  the end. Commit after each meaningful step: after tests pass, after a refactor,
-  after a new function works.
-- **Green before you commit**: the build and tests must pass on every commit, not
-  just the last one. Bisect only works if every commit is bisect-able.
+  the end. Commit after each meaningful step: after tests pass, after a
+  refactor, after a new function works.
+- **Green before you commit**: the build and tests must pass on every commit,
+  not just the last one. Bisect only works if every commit is bisect-able.
 - **Commit message format**: use the Conventional Commits style
-  (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`) with a short imperative
-  subject line (≤72 chars). Add a body when the *why* needs explaining.
+  (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`) with a short
+  imperative subject line (≤72 chars). Add a body when the *why* needs
+  explaining.
 
 ```
 # Good
