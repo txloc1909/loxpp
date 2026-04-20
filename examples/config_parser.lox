@@ -1,0 +1,38 @@
+// config_parser.lox — Parse a key=value configuration file.
+//
+// Demonstrates: open(), readline(), split(), string `in` to skip comments.
+
+fun split(s, delim) {
+    var result = [];
+    var current = "";
+    var i = 0;
+    while (i < len(s)) {
+        if (s[i] == delim) {
+            result.append(current);
+            current = "";
+        } else {
+            current = current + s[i];
+        }
+        i = i + 1;
+    }
+    result.append(current);
+    return result;
+}
+
+print "=== Config Parser ===";
+var f = open("examples/config_parser.input", "r");
+var line = f.readline();
+while (line != nil) {
+    // Skip blank lines and comments (lines starting with #).
+    if (len(line) > 0 and !("#" in line)) {
+        var parts = split(line, "=");
+        print parts[0] + ": " + parts[1];
+    }
+    line = f.readline();
+}
+f.close();
+// CHECK: === Config Parser ===
+// CHECK: host: localhost
+// CHECK: port: 8080
+// CHECK: debug: true
+// CHECK: timeout: 30

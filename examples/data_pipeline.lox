@@ -1,0 +1,35 @@
+// data_pipeline.lox — Read names from a file, prepend line numbers, write result.
+//
+// Demonstrates: open() "r" and "w" modes, readline(), writeline(), read-transform-write.
+
+var INPUT  = "examples/data_pipeline.input";
+var OUTPUT = "examples/data_pipeline.output";
+
+// --- Transform: read input, write numbered output ---
+var fin  = open(INPUT,  "r");
+var fout = open(OUTPUT, "w");
+var n = 1;
+var line = fin.readline();
+while (line != nil) {
+    fout.writeline(str(n) + ". " + line);
+    n = n + 1;
+    line = fin.readline();
+}
+fin.close();
+fout.close();
+
+// --- Verify: read and print the output file ---
+print "=== Data Pipeline ===";
+var f = open(OUTPUT, "r");
+line = f.readline();
+while (line != nil) {
+    print line;
+    line = f.readline();
+}
+f.close();
+// CHECK: === Data Pipeline ===
+// CHECK: 1. Alice
+// CHECK: 2. Bob
+// CHECK: 3. Carol
+// CHECK: 4. Dave
+// CHECK: 5. Eve
