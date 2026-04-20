@@ -1,0 +1,53 @@
+// line_sorter.lox — Read lines from a file, sort them, write sorted output.
+//
+// Demonstrates: open(), readlines(), writeline(), bubble sort on strings.
+
+var INPUT  = "examples/line_sorter.input";
+var OUTPUT = "examples/line_sorter.output";
+
+// Read all lines at once into a list.
+var f = open(INPUT, "r");
+var lines = f.readlines();
+f.close();
+
+// Bubble sort (lexicographic order).
+var n = len(lines);
+var i = 0;
+while (i < n - 1) {
+    var j = 0;
+    while (j < n - i - 1) {
+        if (lines[j] > lines[j + 1]) {
+            var tmp = lines[j];
+            lines[j] = lines[j + 1];
+            lines[j + 1] = tmp;
+        }
+        j = j + 1;
+    }
+    i = i + 1;
+}
+
+// Write sorted lines to the output file.
+f = open(OUTPUT, "w");
+i = 0;
+while (i < n) {
+    f.writeline(lines[i]);
+    i = i + 1;
+}
+f.close();
+
+// Print the sorted result.
+print "=== Line Sorter ===";
+f = open(OUTPUT, "r");
+var line = f.readline();
+while (line != nil) {
+    print line;
+    line = f.readline();
+}
+f.close();
+// CHECK: === Line Sorter ===
+// CHECK: apple
+// CHECK: avocado
+// CHECK: banana
+// CHECK: cherry
+// CHECK: date
+// CHECK: elderberry

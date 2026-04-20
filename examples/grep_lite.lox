@@ -1,0 +1,24 @@
+// grep_lite.lox — Print lines from a file that contain a given substring.
+//
+// Demonstrates: open(), readline(), the `in` operator for substring search.
+
+var f = open("examples/grep_lite.input", "r");
+var pattern = "error";
+var matches = 0;
+
+print "=== Grep (pattern: \"" + pattern + "\") ===";
+var line = f.readline();
+while (line != nil) {
+    if (pattern in line) {
+        print line;
+        matches = matches + 1;
+    }
+    line = f.readline();
+}
+f.close();
+
+print str(matches) + " match(es)";
+// CHECK: === Grep (pattern: "error") ===
+// CHECK: error: connection refused
+// CHECK: error: timeout exceeded
+// CHECK: 2 match(es)
