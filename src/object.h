@@ -15,7 +15,8 @@ enum class ObjType : uint8_t {
     CLASS,
     INSTANCE,
     BOUND_METHOD,
-    LIST
+    LIST,
+    FILE
 };
 
 inline uint32_t hashString(std::string_view s) {

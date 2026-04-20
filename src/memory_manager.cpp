@@ -28,6 +28,8 @@ static const char* objTypeName(ObjType type) {
         return "bound_method";
     case ObjType::LIST:
         return "list";
+    case ObjType::FILE:
+        return "file";
     }
     return "?";
 }
@@ -185,6 +187,9 @@ void MemoryManager::traceObject(Obj* obj) {
             markValue(v);
         break;
     }
+    case ObjType::FILE:
+        markObject(static_cast<ObjFile*>(obj)->klass);
+        break;
     }
 }
 
