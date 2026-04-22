@@ -180,6 +180,8 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return invokeInstruction("SUPER_INVOKE", chunk, mm, offset, out, color);
     case Op::BUILD_LIST:
         return byteInstruction("BUILD_LIST", chunk, offset, out, color);
+    case Op::BUILD_MAP:
+        return byteInstruction("BUILD_MAP", chunk, offset, out, color);
     case Op::GET_INDEX:
         return simpleInstruction("GET_INDEX", offset, out, color);
     case Op::SET_INDEX:

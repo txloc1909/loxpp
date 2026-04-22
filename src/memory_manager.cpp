@@ -32,6 +32,8 @@ static const char* objTypeName(ObjType type) {
         return "file";
     case ObjType::ITERATOR:
         return "iterator";
+    case ObjType::MAP:
+        return "map";
     }
     return "?";
 }
@@ -195,6 +197,17 @@ void MemoryManager::traceObject(Obj* obj) {
     case ObjType::ITERATOR:
         markValue(static_cast<ObjIterator*>(obj)->collection);
         break;
+    case ObjType::MAP: {
+        auto* map = static_cast<ObjMap*>(obj);
+        markObject(map->klass);
+        for (const auto& e : map->buckets) {
+            if (e.state != MapSlot::OCCUPIED)
+                continue;
+            markValue(e.key);
+            markValue(e.value);
+        }
+        break;
+    }
     }
 }
 

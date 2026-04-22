@@ -10,7 +10,7 @@ static const ParseRule rules[] = {
     // TokenType         Prefix              Infix              Precedence
     RULE(LEFT_PAREN,     &Compiler::grouping, &Compiler::call,    CALL),
     RULE(RIGHT_PAREN,    nullptr,             nullptr,           NONE),
-    RULE(LEFT_BRACE,     nullptr,             nullptr,                    NONE),
+    RULE(LEFT_BRACE,     &Compiler::mapLiteral, nullptr,                  NONE),
     RULE(RIGHT_BRACE,    nullptr,             nullptr,                    NONE),
     RULE(LEFT_BRACKET,   &Compiler::listLiteral, &Compiler::subscript,   CALL),
     RULE(RIGHT_BRACKET,  nullptr,             nullptr,                    NONE),

@@ -842,6 +842,24 @@ void Compiler::listLiteral() {
     emitBytes(Op::BUILD_LIST, count);
 }
 
+void Compiler::mapLiteral() {
+    uint8_t count = 0;
+    if (!m_parser->check(TokenType::RIGHT_BRACE)) {
+        do {
+            expression(); // key
+            m_parser->consume(TokenType::COLON, "Expect ':' after map key.");
+            expression(); // value
+            if (count == 255) {
+                m_parser->error(
+                    "Cannot have more than 255 entries in a map literal.");
+            }
+            count++;
+        } while (m_parser->match(TokenType::COMMA));
+    }
+    m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after map entries.");
+    emitBytes(Op::BUILD_MAP, count);
+}
+
 void Compiler::subscript() {
     bool canAssign = m_parser->m_canAssign; // save: compiling the index
                                             // expression clobbers m_canAssign

@@ -160,3 +160,40 @@ inline ObjFile* asObjFile(Obj* o) { return static_cast<ObjFile*>(o); }
 inline bool isFile(const Value& v) {
     return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::FILE;
 }
+
+// ---------------------------------------------------------------------------
+// ObjMap — open-addressing hash map with Value keys and values.
+// Keys must be Bool, Number, Nil, or String (interned).
+// ---------------------------------------------------------------------------
+
+enum class MapSlot : uint8_t { EMPTY, OCCUPIED, TOMBSTONE };
+
+struct MapEntry {
+    Value key{Nil{}};
+    Value value{Nil{}};
+    MapSlot state{MapSlot::EMPTY};
+};
+
+struct ObjMap : public Obj {
+    ObjClass* klass; // shared s_mapClass, for method dispatch
+    VmVector<MapEntry> buckets;
+    int count{0};      // live entries only (user-visible len)
+    int bucketUsed{0}; // live + tombstone entries (load-factor check)
+
+    static constexpr double MAX_LOAD = 0.75;
+
+    ObjMap(ObjClass* k, VmAllocator<MapEntry> alloc)
+        : Obj(ObjType::MAP), klass(k), buckets(alloc) {}
+
+    // Returns true if key was newly inserted (false = update).
+    bool mapSet(const Value& key, const Value& value);
+    bool mapGet(const Value& key, Value& out) const;
+    // Returns true if key was found and removed.
+    bool mapDel(const Value& key);
+};
+
+inline bool isObjMap(Obj* o) { return isObjType(o, ObjType::MAP); }
+inline ObjMap* asObjMap(Obj* o) { return static_cast<ObjMap*>(o); }
+inline bool isMap(const Value& v) {
+    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::MAP;
+}

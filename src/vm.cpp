@@ -67,8 +67,96 @@ static Value lenNative(int /*argCount*/, Value* args) {
         auto* s = asObjString(as<Obj*>(args[0]));
         return from<Number>(static_cast<double>(s->chars.size()));
     }
-    nativeRuntimeError("len() argument must be a list or string.");
+    if (isMap(args[0])) {
+        auto* map = asObjMap(as<Obj*>(args[0]));
+        return from<Number>(static_cast<double>(map->count));
+    }
+    nativeRuntimeError("len() argument must be a list, string, or map.");
     return from<Nil>(Nil{});
+}
+
+// ---------------------------------------------------------------------------
+// Map API — ObjMap native methods
+// ---------------------------------------------------------------------------
+
+static ObjClass* s_mapClass = nullptr;
+
+// args[-1] = the ObjMap receiver
+static ObjMap* checkMap(Value* args) { return asObjMap(as<Obj*>(args[-1])); }
+
+static Value mapHasNative(int /*argc*/, Value* args) {
+    if (!isValidMapKey(args[0])) {
+        nativeRuntimeError("Map keys must be Bool, Number, Nil, or String. NaN "
+                           "is not allowed.");
+        return from<Nil>(Nil{});
+    }
+    ObjMap* map = checkMap(args);
+    Value dummy;
+    return from<bool>(map->mapGet(args[0], dummy));
+}
+
+static Value mapDelNative(int /*argc*/, Value* args) {
+    if (!isValidMapKey(args[0])) {
+        nativeRuntimeError("Map keys must be Bool, Number, Nil, or String. NaN "
+                           "is not allowed.");
+        return from<Nil>(Nil{});
+    }
+    ObjMap* map = checkMap(args);
+    map->mapDel(args[0]);
+    return from<Nil>(Nil{});
+}
+
+static Value mapKeysNative(int /*argc*/, Value* args) {
+    ObjMap* map = checkMap(args);
+    ObjList* list =
+        s_currentMM->create<ObjList>(VmAllocator<Value>{s_currentMM});
+    s_currentMM->pushTempRoot(list);
+    for (const auto& e : map->buckets) {
+        if (e.state != MapSlot::OCCUPIED)
+            continue;
+        // key may be an ObjString; it stays alive via the map (map is rooted
+        // as the receiver on the VM stack). push_back may GC — list is rooted.
+        list->elements.push_back(e.key);
+    }
+    s_currentMM->popTempRoot();
+    return Value{static_cast<Obj*>(list)};
+}
+
+static Value mapValuesNative(int /*argc*/, Value* args) {
+    ObjMap* map = checkMap(args);
+    ObjList* list =
+        s_currentMM->create<ObjList>(VmAllocator<Value>{s_currentMM});
+    s_currentMM->pushTempRoot(list);
+    for (const auto& e : map->buckets) {
+        if (e.state != MapSlot::OCCUPIED)
+            continue;
+        list->elements.push_back(e.value);
+    }
+    s_currentMM->popTempRoot();
+    return Value{static_cast<Obj*>(list)};
+}
+
+static Value mapEntriesNative(int /*argc*/, Value* args) {
+    ObjMap* map = checkMap(args);
+    ObjList* result =
+        s_currentMM->create<ObjList>(VmAllocator<Value>{s_currentMM});
+    s_currentMM->pushTempRoot(result);
+    for (const auto& e : map->buckets) {
+        if (e.state != MapSlot::OCCUPIED)
+            continue;
+        // Build [key, value] pair list
+        ObjList* pair =
+            s_currentMM->create<ObjList>(VmAllocator<Value>{s_currentMM});
+        s_currentMM->pushTempRoot(pair);
+        pair->elements.push_back(e.key);
+        pair->elements.push_back(e.value);
+        // Keep pair rooted until after push_back: result->elements.push_back
+        // may trigger GC, and pair would be unreachable if popped too early.
+        result->elements.push_back(Value{static_cast<Obj*>(pair)});
+        s_currentMM->popTempRoot(); // pair — now safe, stored in result
+    }
+    s_currentMM->popTempRoot(); // result
+    return Value{static_cast<Obj*>(result)};
 }
 
 // ---------------------------------------------------------------------------
@@ -257,10 +345,11 @@ static Value openNative(int /*argc*/, Value* args) {
 }
 
 InterpretResult VM::interpret(const std::string& source) {
-    // Guard against a dangling s_fileClass from a prior VM instance. GC can
+    // Guard against dangling class pointers from a prior VM instance. GC can
     // fire inside compile(), and markRoots() must not dereference a pointer
     // that was freed when the previous VM's MemoryManager was destroyed.
     s_fileClass = nullptr;
+    s_mapClass = nullptr;
     ObjFunction* fn = compile(source, &m_mm);
     if (fn == nullptr) {
         return InterpretResult::COMPILE_ERROR;
@@ -594,6 +683,18 @@ InterpretResult VM::run() {
                 push(method); // ObjNative (unbound)
                 break;
             }
+            if (isMap(peek(0))) {
+                ObjString* name = asObjString(readConstant());
+                Value method;
+                if (!s_mapClass->methods.get(name, method)) {
+                    runtimeError("Undefined property '%s' on map.",
+                                 name->chars.c_str());
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                pop();        // map
+                push(method); // ObjNative (unbound)
+                break;
+            }
             if (!isInstance(peek(0))) {
                 runtimeError("Only instances have properties.");
                 return InterpretResult::RUNTIME_ERROR;
@@ -715,8 +816,17 @@ InterpretResult VM::run() {
                 }
                 if (!callNative(asObjNative(as<Obj*>(method)), argCount))
                     return InterpretResult::RUNTIME_ERROR;
+            } else if (isMap(receiver)) {
+                Value method;
+                if (!s_mapClass->methods.get(name, method)) {
+                    runtimeError("Undefined method '%s' on map.",
+                                 name->chars.c_str());
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                if (!callNative(asObjNative(as<Obj*>(method)), argCount))
+                    return InterpretResult::RUNTIME_ERROR;
             } else {
-                runtimeError("Only instances and files have methods.");
+                runtimeError("Only instances, files, and maps have methods.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             break;
@@ -810,6 +920,35 @@ InterpretResult VM::run() {
             push(Value{static_cast<Obj*>(list)});
             break;
         }
+        case Op::BUILD_MAP: {
+            uint8_t count = readByte();
+            // Validate all keys before any allocation. Stack (top to bottom):
+            //   val_{n-1}, key_{n-1}, ..., val_0, key_0
+            for (int i = 0; i < count; i++) {
+                Value key = peek(2 * (count - 1 - i) + 1);
+                if (!isValidMapKey(key)) {
+                    runtimeError(
+                        "Map keys must be Bool, Number, Nil, or String. "
+                        "NaN is not allowed.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+            }
+            ObjMap* map =
+                m_mm.create<ObjMap>(s_mapClass, VmAllocator<MapEntry>{&m_mm});
+            // Values are still on the stack → GC-rooted; map is temp-rooted
+            // so it survives any GC triggered by mapSet's grow.
+            m_mm.pushTempRoot(map);
+            for (int i = 0; i < count; i++) {
+                Value key = peek(2 * (count - 1 - i) + 1);
+                Value val = peek(2 * (count - 1 - i));
+                map->mapSet(key, val);
+            }
+            m_mm.popTempRoot();
+            for (int i = 0; i < 2 * count; i++)
+                pop();
+            push(Value{static_cast<Obj*>(map)});
+            break;
+        }
         case Op::GET_INDEX: {
             Value indexVal = pop();
             Value collectionVal = pop();
@@ -850,8 +989,19 @@ InterpretResult VM::run() {
                 char ch = str->chars[idx];
                 push(Value{static_cast<Obj*>(
                     m_mm.makeString(std::string_view{&ch, 1}))});
+            } else if (isMap(collectionVal)) {
+                if (!isValidMapKey(indexVal)) {
+                    runtimeError(
+                        "Map keys must be Bool, Number, Nil, or String. "
+                        "NaN is not allowed.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                auto* map = asObjMap(as<Obj*>(collectionVal));
+                Value result{Nil{}}; // default nil — returned when key absent
+                map->mapGet(indexVal, result);
+                push(result);
             } else {
-                runtimeError("Only lists and strings can be indexed.");
+                runtimeError("Only lists, strings, and maps can be indexed.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             break;
@@ -865,8 +1015,25 @@ InterpretResult VM::run() {
                              "assignment.");
                 return InterpretResult::RUNTIME_ERROR;
             }
+            if (isMap(listVal)) {
+                if (!isValidMapKey(indexVal)) {
+                    runtimeError(
+                        "Map keys must be Bool, Number, Nil, or String. "
+                        "NaN is not allowed.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                auto* map = asObjMap(as<Obj*>(listVal));
+                // Root the map: it was popped and may be a temporary; mapSet
+                // can grow the bucket array which triggers GC.
+                m_mm.pushTempRoot(map);
+                map->mapSet(indexVal, val);
+                m_mm.popTempRoot();
+                push(val);
+                break;
+            }
             if (!isList(listVal)) {
-                runtimeError("Only lists can be indexed for assignment.");
+                runtimeError(
+                    "Only lists and maps can be indexed for assignment.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             if (!is<Number>(indexVal)) {
@@ -914,8 +1081,19 @@ InterpretResult VM::run() {
                                                   needle->chars.size()) !=
                              LoxString::npos;
                 push(from<bool>(found));
+            } else if (isMap(seq)) {
+                if (!isValidMapKey(elem)) {
+                    runtimeError(
+                        "Map keys must be Bool, Number, Nil, or String. "
+                        "NaN is not allowed.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                auto* map = asObjMap(as<Obj*>(seq));
+                Value dummy;
+                push(from<bool>(map->mapGet(elem, dummy)));
             } else {
-                runtimeError("Right operand of 'in' must be a list or string.");
+                runtimeError(
+                    "Right operand of 'in' must be a list, string, or map.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             break;
@@ -1044,6 +1222,7 @@ void VM::defineNatives() {
     defineNative("len", lenNative, 1);
     defineMathObject();
     defineFileAPI();
+    defineMapAPI();
 }
 
 void VM::defineFileAPI() {
@@ -1075,6 +1254,34 @@ void VM::defineFileAPI() {
     pop(); // klass, className
 
     defineNative("open", openNative, 2);
+}
+
+void VM::defineMapAPI() {
+    ObjString* className = m_mm.makeString("Map");
+    push(Value{static_cast<Obj*>(className)});
+    ObjClass* klass =
+        m_mm.create<ObjClass>(className, VmAllocator<Entry>{&m_mm});
+    push(Value{static_cast<Obj*>(klass)});
+
+    auto addMethod = [&](const char* n, NativeFn fn, int arity) {
+        ObjNative* native = m_mm.create<ObjNative>(fn, arity);
+        push(Value{static_cast<Obj*>(native)});
+        ObjString* key = m_mm.makeString(n);
+        push(Value{static_cast<Obj*>(key)});
+        klass->methods.set(key, Value{static_cast<Obj*>(native)});
+        pop();
+        pop(); // key, native
+    };
+
+    addMethod("has", mapHasNative, 1);
+    addMethod("del", mapDelNative, 1);
+    addMethod("keys", mapKeysNative, 0);
+    addMethod("values", mapValuesNative, 0);
+    addMethod("entries", mapEntriesNative, 0);
+
+    s_mapClass = klass;
+    pop();
+    pop(); // klass, className
 }
 
 void VM::defineMathObject() {
@@ -1163,6 +1370,8 @@ void VM::markRoots() {
     });
     if (s_fileClass)
         m_mm.markObject(s_fileClass);
+    if (s_mapClass)
+        m_mm.markObject(s_mapClass);
 }
 
 void VM::resetStack() {

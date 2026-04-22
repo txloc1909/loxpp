@@ -1,7 +1,9 @@
 #include "value.h"
 #include "overload.h"
 
+#include <cmath>
 #include <cstdio>
+#include <cstring>
 
 bool operator!(Value value) {
     return std::visit(overloaded{
@@ -51,3 +53,28 @@ void printValue(const Value& value) {
 uint8_t ValueArray::size() const { return m_count; }
 
 void ValueArray::write(Value value) { at(m_count++) = value; }
+
+uint32_t hashValue(const Value& v) {
+    return std::visit(
+        overloaded{
+            [](bool b) -> uint32_t { return b ? 1231U : 1237U; },
+            [](Number n) -> uint32_t {
+                if (n == 0.0)
+                    n = 0.0; // canonicalize -0.0 → +0.0
+                uint64_t bits;
+                std::memcpy(&bits, &n, sizeof bits);
+                return static_cast<uint32_t>(bits ^ (bits >> 32));
+            },
+            [](Nil) -> uint32_t { return 0U; },
+            [](Obj* p) -> uint32_t { return static_cast<ObjString*>(p)->hash; },
+        },
+        v);
+}
+
+bool isValidMapKey(const Value& v) {
+    if (is<Number>(v))
+        return !std::isnan(as<Number>(v));
+    if (is<Obj*>(v))
+        return as<Obj*>(v)->type == ObjType::STRING;
+    return true; // bool and nil are always valid
+}
