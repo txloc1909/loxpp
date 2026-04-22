@@ -121,7 +121,7 @@ inline bool isList(const Value& v) {
 }
 
 struct ObjIterator : public Obj {
-    Value collection; // ObjList* or ObjString* being iterated
+    Value collection; // ObjList*, ObjString*, or ObjMap* being iterated
     int index;        // current cursor position
 
     ObjIterator(Value coll, int idx = 0)

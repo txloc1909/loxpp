@@ -275,3 +275,36 @@ TEST(Map, ObjectKeyRejected) {
     ASSERT_EQ(h.run("var m = {}; m[[1,2,3]] = 1;"),
               InterpretResult::RUNTIME_ERROR);
 }
+
+// ---------------------------------------------------------------------------
+// for-in iteration
+// ---------------------------------------------------------------------------
+
+TEST(Map, ForInEmpty) {
+    VMTestHarness h;
+    // No iterations for an empty map.
+    ASSERT_EQ(h.run(R"(
+        var count = 0;
+        for (var k in {}) {
+            count = count + 1;
+        }
+        var r = count;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "0");
+}
+
+TEST(Map, ForInCollectsAllKeys) {
+    VMTestHarness h;
+    // Sum all numeric keys to verify every key is visited exactly once.
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a", 2: "b", 3: "c"};
+        var sum = 0;
+        for (var k in m) {
+            sum = sum + k;
+        }
+        var r = sum;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "6");
+}

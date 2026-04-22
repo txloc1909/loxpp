@@ -1102,9 +1102,9 @@ InterpretResult VM::run() {
             // peek(0) keeps iterable on stack as GC root during create<>().
             // Mirrors the class-instantiation pattern at vm.cpp:556-558.
             Value iterable = peek(0);
-            if (!isList(iterable) && !isString(iterable)) {
+            if (!isList(iterable) && !isString(iterable) && !isMap(iterable)) {
                 runtimeError(
-                    "Value is not iterable (expected list or string).");
+                    "Value is not iterable (expected list, string, or map).");
                 return InterpretResult::RUNTIME_ERROR;
             }
             ObjIterator* it = m_mm.create<ObjIterator>(iterable, 0);
@@ -1113,8 +1113,7 @@ InterpretResult VM::run() {
         }
         case Op::ITER_HAS_NEXT: {
             Value top = pop();
-            // Invariant 1: value must be an ObjIterator (guaranteed by
-            // GET_ITER).
+            // Invariant: value must be an ObjIterator (guaranteed by GET_ITER).
             if (!isIterator(top)) {
                 runtimeError(
                     "BUG: ITER_HAS_NEXT expects an iterator on the stack.");
@@ -1122,17 +1121,23 @@ InterpretResult VM::run() {
             }
             ObjIterator* it = asObjIterator(as<Obj*>(top));
             bool has;
-            // Invariant 2: collection must be List or String (guaranteed by
-            // GET_ITER).
             if (isList(it->collection))
                 has = it->index <
                       (int)asObjList(as<Obj*>(it->collection))->elements.size();
             else if (isString(it->collection))
                 has = it->index <
                       (int)asObjString(as<Obj*>(it->collection))->chars.size();
-            else {
+            else if (isMap(it->collection)) {
+                // Scan forward from current index for the next occupied bucket.
+                auto* map = asObjMap(as<Obj*>(it->collection));
+                int i = it->index;
+                while (i < (int)map->buckets.size() &&
+                       map->buckets[i].state != MapSlot::OCCUPIED)
+                    ++i;
+                has = i < (int)map->buckets.size();
+            } else {
                 runtimeError(
-                    "BUG: ObjIterator::collection is neither list nor string.");
+                    "BUG: ObjIterator::collection has unexpected type.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             push(from<bool>(has));
@@ -1140,16 +1145,13 @@ InterpretResult VM::run() {
         }
         case Op::ITER_NEXT: {
             Value top = pop();
-            // Invariant 1: value must be an ObjIterator (guaranteed by
-            // GET_ITER).
+            // Invariant: value must be an ObjIterator (guaranteed by GET_ITER).
             if (!isIterator(top)) {
                 runtimeError(
                     "BUG: ITER_NEXT expects an iterator on the stack.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             ObjIterator* it = asObjIterator(as<Obj*>(top));
-            // Invariant 2: collection must be List or String (guaranteed by
-            // GET_ITER).
             if (isList(it->collection)) {
                 push(
                     asObjList(as<Obj*>(it->collection))->elements[it->index++]);
@@ -1161,9 +1163,19 @@ InterpretResult VM::run() {
                 // (which may trigger GC).
                 push(Value{static_cast<Obj*>(
                     m_mm.makeString(std::string_view{&ch, 1}))});
+            } else if (isMap(it->collection)) {
+                // Skip past empty/tombstone buckets to the next occupied one,
+                // push its key, then advance the cursor past it.
+                auto* map = asObjMap(as<Obj*>(it->collection));
+                while (it->index < (int)map->buckets.size() &&
+                       map->buckets[it->index].state != MapSlot::OCCUPIED)
+                    ++it->index;
+                // ITER_HAS_NEXT was true, so an occupied slot must exist.
+                push(map->buckets[it->index].key);
+                ++it->index;
             } else {
                 runtimeError(
-                    "BUG: ObjIterator::collection is neither list nor string.");
+                    "BUG: ObjIterator::collection has unexpected type.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             break;

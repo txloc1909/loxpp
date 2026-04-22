@@ -54,9 +54,9 @@ enum class Op : Byte {
     GET_INDEX,    // pops index then list/string/map; pushes element/char/value
     SET_INDEX, // pops value, index, list/map; sets [index]=value; pushes value
     IN,        // pops seq (rhs) then elem (lhs); pushes bool membership result
-    GET_ITER,  // pops List|String → pushes ObjIterator{cursor=0}
+    GET_ITER,      // pops List|String|Map → pushes ObjIterator{cursor=0}
     ITER_HAS_NEXT, // pops iterator copy → pushes bool (cursor < length)
-    ITER_NEXT, // pops iterator copy → pushes element at cursor, advances cursor
+    ITER_NEXT,     // pops iterator copy → pushes element/key at cursor, advances cursor
 };
 
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }
