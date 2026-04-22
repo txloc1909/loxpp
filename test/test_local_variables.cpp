@@ -18,8 +18,8 @@
 // ===========================================================================
 
 static void expect_num(const Value& v, double expected) {
-    ASSERT_TRUE(std::holds_alternative<Number>(v)) << "expected Number";
-    EXPECT_NEAR(std::get<Number>(v), expected, 1e-9);
+    ASSERT_TRUE(is<Number>(v)) << "expected Number";
+    EXPECT_NEAR(as<Number>(v), expected, 1e-9);
 }
 
 // ===========================================================================

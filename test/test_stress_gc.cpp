@@ -39,7 +39,7 @@ TEST_F(StressGCTest, GlobalFunctionSurvivesGC) {
               InterpretResult::OK);
     auto v = h.getGlobal("result");
     ASSERT_TRUE(v.has_value());
-    EXPECT_DOUBLE_EQ(std::get<Number>(*v), 3.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*v), 3.0);
     EXPECT_EQ(h.stackDepth(), 0);
 }
 
@@ -61,7 +61,7 @@ TEST_F(StressGCTest, LocalFunctionSurvivesGC) {
               InterpretResult::OK);
     auto v = h.getGlobal("result");
     ASSERT_TRUE(v.has_value());
-    EXPECT_DOUBLE_EQ(std::get<Number>(*v), 42.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*v), 42.0);
     EXPECT_EQ(h.stackDepth(), 0);
 }
 
@@ -84,7 +84,7 @@ TEST_F(StressGCTest, ClosureCaptureSurvivesGC) {
               InterpretResult::OK);
     auto v = h.getGlobal("result");
     ASSERT_TRUE(v.has_value());
-    EXPECT_DOUBLE_EQ(std::get<Number>(*v), 2.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*v), 2.0);
     EXPECT_EQ(h.stackDepth(), 0);
 }
 
@@ -104,7 +104,7 @@ TEST_F(StressGCTest, RecursionSurvivesGC) {
               InterpretResult::OK);
     auto v = h.getGlobal("result");
     ASSERT_TRUE(v.has_value());
-    EXPECT_DOUBLE_EQ(std::get<Number>(*v), 55.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*v), 55.0);
     EXPECT_EQ(h.stackDepth(), 0);
 }
 
