@@ -54,14 +54,17 @@ Returns the number of elements in `seq`.
 
 - If `seq` is a **List**: returns the number of elements.
 - If `seq` is a **String**: returns the number of bytes.
+- If `seq` is a **Map**: returns the number of key-value pairs.
 
 Runtime error if `seq` is any other type.
 
 ```lox
-print len([1, 2, 3]);   // 3
-print len("hello");     // 5
-print len([]);          // 0
-print len("");          // 0
+print len([1, 2, 3]);          // 3
+print len("hello");            // 5
+print len([]);                 // 0
+print len("");                 // 0
+print len({"a": 1, "b": 2});   // 2
+print len({});                 // 0
 ```
 
 **Arity:** 1  

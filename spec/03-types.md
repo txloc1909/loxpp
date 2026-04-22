@@ -8,7 +8,7 @@ types over its lifetime.
 
 ## Runtime Types
 
-There are nine runtime types:
+There are ten runtime types:
 
 ### Nil
 
@@ -134,14 +134,65 @@ addition to the mutation methods:
 
 The maximum number of elements in a list literal is 255.
 
+### Map
+
+A mutable, unordered mapping from **scalar keys** to heterogeneous values. Maps
+are first-class: they can be stored in variables, passed as arguments, and
+returned from functions. A map literal is written as comma-separated
+`key: value` pairs enclosed in curly braces:
+
+```lox
+var m = {"a": 1, 2: "two", true: 3, nil: 4};
+var empty = {};
+```
+
+**Valid key types**: Nil, Boolean, Number (not NaN), and String. Any other type
+as a key is a **runtime error**. NaN is explicitly rejected even though it is a
+Number, because `NaN != NaN` makes it impossible to reliably retrieve a value
+stored under it.
+
+Keys are looked up by **value equality** (the same semantics as `==`): any two
+values that compare equal under `==` map to the same slot.
+
+Values are accessed and mutated by key using `[]` notation:
+
+```lox
+m["a"]       // read value for key "a" — nil if absent
+m["a"] = 42  // insert or update key "a"
+```
+
+Maps use **identity equality**: two map values are equal only if they are the
+exact same object.
+
+A map is always **truthy**, even when empty.
+
+Map is a **sequence type** and supports the following sequence operations in
+addition to the mutation methods. Note that `[]` uses key-based access, not
+integer index.
+
+| Operation | Description |
+|---|---|
+| `m[key]` | Returns the value for `key`, or `nil` if the key is absent. Runtime error if `key` is an invalid key type. |
+| `m[key] = value` | Inserts or updates `key → value`. Runtime error if `key` is an invalid key type. |
+| `len(m)` | Number of key-value pairs as a Number. |
+| `key in m` | `true` if `key` is present in the map. |
+| `for (var k in m)` | Iterates over all keys in unspecified order. |
+| `m.has(key)` | `true` if `key` is present in the map. Equivalent to `key in m`. |
+| `m.del(key)` | Removes `key` from the map. No-op if the key is absent. Returns `nil`. |
+| `m.keys()` | Returns a List of all keys (order matches `m.values()` and `m.entries()`). |
+| `m.values()` | Returns a List of all values (order matches `m.keys()`). |
+| `m.entries()` | Returns a List of `[key, value]` two-element Lists (order matches `m.keys()`). |
+
+The maximum number of key-value pairs in a map literal is 255.
+
 ---
 
 ## Sequence Protocol
 
-Both **List** and **String** implement the sequence protocol: they support
-`len()`, integer indexing with `[]`, membership testing with `in`, and `for-in`
-iteration. String is immutable — index assignment (`s[i] = v`) is always a
-runtime error.
+**List**, **String**, and **Map** implement the sequence protocol: they support
+`len()`, `[]` access, membership testing with `in`, and `for-in` iteration.
+List and String use integer indexing; Map uses key-based access. String is
+immutable — index assignment (`s[i] = v`) is always a runtime error.
 
 ---
 
@@ -156,7 +207,7 @@ conditions (`if`, `while`, `for`) and short-circuit operators (`and`, `or`).
 | `nil` | Falsy |
 | Everything else | Truthy |
 
-Note: `0`, `""` (empty string), functions, and `[]` (empty list) are all **truthy**.
+Note: `0`, `""` (empty string), functions, `[]` (empty list), and `{}` (empty map) are all **truthy**.
 
 ---
 
@@ -174,8 +225,8 @@ The `==` and `!=` operators compare two values.
   - Strings are equal when they contain the same sequence of characters
   - Functions are equal only when they are the same function object (identity
     equality)
-  - Classes, Instances, BoundMethods, and Lists use identity equality: two
-    values are equal only if they are the exact same object
+  - Classes, Instances, BoundMethods, Lists, and Maps use identity equality:
+    two values are equal only if they are the exact same object
 
 Equality never produces a runtime error regardless of the types being compared.
 
@@ -207,3 +258,4 @@ Every value has a canonical string form, produced by `print` and by the
 | Class | The class name (e.g. `Dog`) |
 | Instance | `ClassName instance` (e.g. `Dog instance`) |
 | List | `[elem0, elem1, ...]` — each element in its canonical string form, comma-space separated, enclosed in `[` and `]`. An empty list is `[]`. |
+| Map | `{key0: value0, key1: value1, ...}` — each pair as `key: value` in canonical form, comma-space separated, enclosed in `{` and `}`. An empty map is `{}`. |

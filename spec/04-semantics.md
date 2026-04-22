@@ -505,21 +505,47 @@ An empty `[]` produces a List with zero elements.
 The maximum number of element expressions in a list literal is 255 (the same
 limit as function call arguments).
 
+### Map Literal
+
+```lox
+{"key": expr, key2: expr2, ...}
+{}
+```
+
+1. Each key-value pair is evaluated left-to-right: key expression first, then
+   value expression.
+2. Each key is validated — if it is NaN or an object type other than String,
+   this is a **runtime error** ("Map key must be a scalar (Nil, Bool, Number, or String).").
+3. A new Map is allocated and each pair is inserted in source order. If the
+   same key appears more than once, the last value wins.
+4. The expression evaluates to the new Map.
+
+An empty `{}` produces a Map with zero entries.
+
+The maximum number of key-value pairs in a map literal is 255.
+
 ### Index Get
 
 ```lox
-list[index]
+collection[key]
 ```
 
-1. Evaluate `list`.
-2. Evaluate `index`.
-3. If `list` is not a List, this is a **runtime error** ("Only lists can be indexed.").
-4. If `index` is not a Number, this is a **runtime error** ("List index must be a number.").
-5. If `index` is a Number but not an integer-valued number (i.e., `index ≠ floor(index)`),
-   this is a **runtime error** ("List index must be an integer.").
-6. Let `i` be the integer value of `index`.
-7. If `i < 0` or `i ≥ length(list)`, this is a **runtime error** ("List index out of bounds.").
-8. The expression evaluates to `list[i]`.
+1. Evaluate `collection`.
+2. Evaluate `key`.
+3. If `collection` is a **Map**:
+   a. If `key` is an invalid map key type (NaN, or an object other than String),
+      this is a **runtime error**.
+   b. If `key` is present in the map, the expression evaluates to its associated
+      value.
+   c. If `key` is absent, the expression evaluates to `nil`.
+4. If `collection` is a **List**:
+   a. If `key` is not a Number, this is a **runtime error** ("List index must be a number.").
+   b. If `key` is not an integer-valued number (i.e., `key ≠ floor(key)`),
+      this is a **runtime error** ("List index must be an integer.").
+   c. Let `i` be the integer value of `key`.
+   d. If `i < 0` or `i ≥ length(collection)`, this is a **runtime error** ("List index out of bounds.").
+   e. The expression evaluates to `collection[i]`.
+5. Otherwise, this is a **runtime error** ("Only lists and maps can be indexed.").
 
 Note: since there is no separate integer type, `list[1]` and `list[1.0]` are
 identical — both are the same Number value used as index 1.
@@ -527,15 +553,22 @@ identical — both are the same Number value used as index 1.
 ### Index Set
 
 ```lox
-list[index] = expr
+collection[key] = expr
 ```
 
-1. Evaluate `list`.
-2. Evaluate `index`.
-3. Perform the same type and bounds checks as Index Get (steps 3–7 above).
-4. Evaluate `expr`.
-5. Store the result in `list[i]`.
-6. The expression evaluates to the stored value (same as assignment semantics).
+1. Evaluate `collection`.
+2. Evaluate `key`.
+3. If `collection` is a **Map**:
+   a. Validate `key` — same rules as Index Get step 3a above.
+   b. Evaluate `expr`.
+   c. Insert or update `key → value` in the map.
+   d. The expression evaluates to the stored value.
+4. If `collection` is a **List**:
+   a. Perform the same type and bounds checks as Index Get steps 4a–4d.
+   b. Evaluate `expr`.
+   c. Store the result in `collection[i]`.
+   d. The expression evaluates to the stored value (same as assignment semantics).
+5. Otherwise, this is a **runtime error** ("Only lists and maps can be indexed.").
 
 ### List Methods
 
@@ -560,14 +593,75 @@ list.pop()
 3. Removes the last element from the list.
 4. The expression evaluates to the removed element.
 
+### Map Methods
+
+#### `has`
+
+```lox
+m.has(key)
+```
+
+1. Evaluate `m`. If the result is not a Map, this is a **runtime error**.
+2. Validate `key` — if it is an invalid map key type, this is a **runtime error**.
+3. The expression evaluates to `true` if `key` is present in the map, `false` otherwise.
+
+#### `del`
+
+```lox
+m.del(key)
+```
+
+1. Evaluate `m`. If the result is not a Map, this is a **runtime error**.
+2. Validate `key` — if it is an invalid map key type, this is a **runtime error**.
+3. If `key` is present, remove it from the map. If absent, this is a no-op.
+4. The expression evaluates to `nil`.
+
+#### `keys`
+
+```lox
+m.keys()
+```
+
+1. Evaluate `m`. If the result is not a Map, this is a **runtime error**.
+2. A new List is allocated containing all keys currently in the map, in
+   unspecified order.
+3. The expression evaluates to the new List.
+
+#### `values`
+
+```lox
+m.values()
+```
+
+1. Evaluate `m`. If the result is not a Map, this is a **runtime error**.
+2. A new List is allocated containing all values currently in the map, in the
+   same order as `m.keys()`.
+3. The expression evaluates to the new List.
+
+#### `entries`
+
+```lox
+m.entries()
+```
+
+1. Evaluate `m`. If the result is not a Map, this is a **runtime error**.
+2. A new List is allocated. For each key-value pair in the map (in the same
+   order as `m.keys()`), a two-element List `[key, value]` is appended.
+3. The expression evaluates to the new List.
+
 ### `len` (global native)
 
 ```lox
-len(list)
+len(seq)
 ```
 
-1. If the argument is not a List, this is a **runtime error**.
-2. The expression evaluates to a Number equal to the number of elements in the list.
+1. If the argument is a **List**, the expression evaluates to the number of
+   elements.
+2. If the argument is a **String**, the expression evaluates to the number of
+   bytes.
+3. If the argument is a **Map**, the expression evaluates to the number of
+   key-value pairs (deleted keys are excluded).
+4. Otherwise, this is a **runtime error**.
 
 ---
 
@@ -585,9 +679,11 @@ Common causes:
 | Wrong argument count | `fun f(a) {} f(1, 2)` |
 | Undefined global variable | `print undeclared;` |
 | Call stack overflow | Unbounded recursion |
-| Index of non-List | `42[0]` |
+| Index of non-List/non-Map | `42[0]` |
 | Non-Number list index | `list["a"]` |
 | Fractional list index | `list[1.5]` |
 | List index out of bounds | `[][0]` |
 | `pop` on empty list | `[].pop()` |
-| Method called on non-instance/non-list | `42.foo()` |
+| NaN used as map key | `m[0/0] = 1` |
+| Object (non-String) used as map key | `m[[1,2]] = 1` |
+| Method called on non-instance/non-list/non-map | `42.foo()` |
