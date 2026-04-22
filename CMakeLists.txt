@@ -11,7 +11,7 @@ if(NOT _git_config_result EQUAL 0)
     message(WARNING "Failed to set core.hooksPath — git hooks will not run automatically.")
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -24,7 +24,6 @@ add_executable(loxpp
     src/main.cpp
     src/chunk.cpp
     src/debug.cpp
-    src/value.cpp
     src/object.cpp
     src/table.cpp
     src/memory_manager.cpp
@@ -65,6 +64,14 @@ option(LOXPP_STRESS_GC
 if(LOXPP_STRESS_GC)
     target_compile_definitions(loxpp PRIVATE LOXPP_STRESS_GC)
 endif()
+option(LOXPP_NAN_TAGGING "Use NaN-tagged Value representation (8 bytes vs 16)" OFF)
+if(LOXPP_NAN_TAGGING)
+    set(LOXPP_VALUE_SRC ${PROJECT_SOURCE_DIR}/src/value_nan.cpp)
+    target_compile_definitions(loxpp PRIVATE LOXPP_NAN_TAGGING)
+else()
+    set(LOXPP_VALUE_SRC ${PROJECT_SOURCE_DIR}/src/value.cpp)
+endif()
+target_sources(loxpp PRIVATE ${LOXPP_VALUE_SRC})
 
 # Readline support for the REPL.
 find_library(READLINE_LIB readline)

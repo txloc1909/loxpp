@@ -4,7 +4,7 @@ set(ALLOC_SRCS
     ${PROJECT_SOURCE_DIR}/src/memory_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/object.cpp
     ${PROJECT_SOURCE_DIR}/src/table.cpp
-    ${PROJECT_SOURCE_DIR}/src/value.cpp
+    ${LOXPP_VALUE_SRC}
 )
 
 set(FULL_SRCS
@@ -14,7 +14,7 @@ set(FULL_SRCS
     ${PROJECT_SOURCE_DIR}/src/parser.cpp
     ${PROJECT_SOURCE_DIR}/src/chunk.cpp
     ${PROJECT_SOURCE_DIR}/src/debug.cpp
-    ${PROJECT_SOURCE_DIR}/src/value.cpp
+    ${LOXPP_VALUE_SRC}
     ${PROJECT_SOURCE_DIR}/src/object.cpp
     ${PROJECT_SOURCE_DIR}/src/table.cpp
     ${PROJECT_SOURCE_DIR}/src/memory_manager.cpp
@@ -57,6 +57,15 @@ target_include_directories(test_list_gc PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_compile_definitions(test_stress_gc PRIVATE LOXPP_STRESS_GC)
 target_compile_definitions(test_gc_regression PRIVATE LOXPP_STRESS_GC)
 target_compile_definitions(test_list_gc PRIVATE LOXPP_STRESS_GC)
+
+if(LOXPP_NAN_TAGGING)
+    foreach(_target
+        test_parser_vm test_parser_bytecode test_table test_allocator
+        test_local_variables test_control_flow test_vm_runtime test_closures
+        test_stress_gc test_gc_regression test_inheritance test_list test_list_gc)
+        target_compile_definitions(${_target} PRIVATE LOXPP_NAN_TAGGING)
+    endforeach()
+endif()
 
 target_link_libraries(test_scanner PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_parser_vm PRIVATE GTest::GTest GTest::Main)

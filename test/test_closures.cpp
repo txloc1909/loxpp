@@ -44,7 +44,7 @@ TEST_F(ClosureTest, BasicCapture_ReadsCorrectValue) {
               InterpretResult::OK);
     auto v = h.getGlobal("result");
     ASSERT_TRUE(v.has_value());
-    EXPECT_DOUBLE_EQ(std::get<Number>(*v), 8.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*v), 8.0);
     EXPECT_EQ(h.stackDepth(), 0);
 }
 
@@ -75,9 +75,9 @@ TEST_F(ClosureTest, MutationViaUpvalue) {
     ASSERT_TRUE(a.has_value());
     ASSERT_TRUE(b.has_value());
     ASSERT_TRUE(d.has_value());
-    EXPECT_DOUBLE_EQ(std::get<Number>(*a), 1.0);
-    EXPECT_DOUBLE_EQ(std::get<Number>(*b), 2.0);
-    EXPECT_DOUBLE_EQ(std::get<Number>(*d), 3.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*a), 1.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*b), 2.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*d), 3.0);
     EXPECT_EQ(h.stackDepth(), 0);
 }
 
@@ -123,9 +123,9 @@ TEST_F(ClosureTest, SharedUpvalue_IndependentCounters) {
     auto x = h.getGlobal("x");
     ASSERT_TRUE(a.has_value() && b.has_value() && x.has_value());
     // c1 and c2 each have their own upvalue — independent state.
-    EXPECT_DOUBLE_EQ(std::get<Number>(*a), 1.0);
-    EXPECT_DOUBLE_EQ(std::get<Number>(*b), 2.0);
-    EXPECT_DOUBLE_EQ(std::get<Number>(*x), 1.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*a), 1.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*b), 2.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*x), 1.0);
     EXPECT_EQ(h.stackDepth(), 0);
 }
 
@@ -149,7 +149,7 @@ TEST_F(ClosureTest, NestedClosure_UpvalueOfUpvalue) {
               InterpretResult::OK);
     auto v = h.getGlobal("result");
     ASSERT_TRUE(v.has_value());
-    EXPECT_DOUBLE_EQ(std::get<Number>(*v), 42.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*v), 42.0);
     EXPECT_EQ(h.stackDepth(), 0);
 }
 
@@ -172,8 +172,8 @@ TEST_F(ClosureTest, NestedClosure_MutationPropagates) {
     auto a = h.getGlobal("a");
     auto b = h.getGlobal("b");
     ASSERT_TRUE(a.has_value() && b.has_value());
-    EXPECT_DOUBLE_EQ(std::get<Number>(*a), 1.0);
-    EXPECT_DOUBLE_EQ(std::get<Number>(*b), 2.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*a), 1.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*b), 2.0);
     EXPECT_EQ(h.stackDepth(), 0);
 }
 
@@ -197,6 +197,6 @@ TEST_F(ClosureTest, ClosedOverVarSurvivesBlockExit) {
               InterpretResult::OK);
     auto v = h.getGlobal("result");
     ASSERT_TRUE(v.has_value());
-    EXPECT_DOUBLE_EQ(std::get<Number>(*v), 99.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*v), 99.0);
     EXPECT_EQ(h.stackDepth(), 0);
 }
