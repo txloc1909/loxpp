@@ -50,12 +50,13 @@ enum class Op : Byte {
                // superclass
     SUPER_INVOKE, // operands: name-constant-index (1 byte), arg-count (1 byte)
     BUILD_LIST,   // operand: uint8 element count; pops N values, pushes ObjList
-    GET_INDEX,    // pops index then list/string; pushes element/char
-    SET_INDEX, // pops value, index, list; sets list[index]=value; pushes value
+    BUILD_MAP,    // operand: uint8 pair count; pops 2*N values, pushes ObjMap
+    GET_INDEX,    // pops index then list/string/map; pushes element/char/value
+    SET_INDEX, // pops value, index, list/map; sets [index]=value; pushes value
     IN,        // pops seq (rhs) then elem (lhs); pushes bool membership result
-    GET_ITER,  // pops List|String → pushes ObjIterator{cursor=0}
+    GET_ITER,  // pops List|String|Map → pushes ObjIterator{cursor=0}
     ITER_HAS_NEXT, // pops iterator copy → pushes bool (cursor < length)
-    ITER_NEXT, // pops iterator copy → pushes element at cursor, advances cursor
+    ITER_NEXT, // pops iterator copy → pushes element/key at cursor, advances
 };
 
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }

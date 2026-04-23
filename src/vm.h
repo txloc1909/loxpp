@@ -56,6 +56,7 @@ class VM {
     void defineNatives();
     void defineMathObject();
     void defineFileAPI();
+    void defineMapAPI();
     ObjUpvalue* captureUpvalue(Value* local);
     void closeUpvalues(Value* last);
     void runtimeError(const char* format, ...);

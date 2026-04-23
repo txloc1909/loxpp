@@ -78,7 +78,8 @@ variant) and adds the following:
 | `str()` built-in | Added in Lox++ |
 | Classes (`class`, `super`, `this`) | Added in Lox++ |
 | List type with `[]` literal and indexing | Added in Lox++ |
-| `for (var x in seq)` iteration over List and String | Added in Lox++ |
+| `for (var x in seq)` iteration over List, String, and Map | Added in Lox++ |
+| Map type with `{}` literal and `[]` key access | Added in Lox++ |
 
 ---
 

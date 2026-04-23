@@ -93,7 +93,10 @@ primary        ::= "true"
                  | "this"
                  | "super" "." IDENTIFIER
                  | "(" expression ")"
-                 | "[" ( expression ( "," expression )* )? "]" ;
+                 | "[" ( expression ( "," expression )* )? "]"
+                 | "{" ( mapEntry ( "," mapEntry )* )? "}" ;
+
+mapEntry       ::= expression ":" expression ;
 ```
 
 ---
@@ -138,8 +141,9 @@ binding each element to `x` for each iteration of `body`.
 - `seq` is evaluated once before the loop begins and stored internally.
 - `x` is scoped to the loop; it is not accessible after the loop exits.
 - `break` and `continue` work as in C-style `for` loops.
-- The sequence expression may be any List or String value. Iterating a List
-  visits elements; iterating a String visits single-character strings.
+- The sequence expression may be any List, String, or Map value. Iterating a
+  List visits elements in order; iterating a String visits single-character
+  strings in order; iterating a Map visits keys in unspecified order.
 - Modifying a list during iteration is defined: elements appended before the
   current index is reached will be visited.
 
@@ -151,8 +155,12 @@ binding each element to `x` for each iteration of `body`.
   the `==` operator.
 - If `seq` is a **String**: `elem` must be a String; `true` if `elem` appears
   as a substring of `seq`.
-- Runtime error if `seq` is neither a List nor a String.
+- If `seq` is a **Map**: `true` if `elem` is a valid map key and is present in
+  the map. Equivalent to `seq.has(elem)`.
+- Runtime error if `seq` is neither a List, String, nor Map.
 - Runtime error if `seq` is a String and `elem` is not a String.
+- Runtime error if `seq` is a Map and `elem` is an invalid map key type (NaN,
+  or an object other than String).
 
 `in` has comparison precedence (same level as `<`, `<=`, `>`, `>=`), so
 `a + b in c` parses as `(a + b) in c`.

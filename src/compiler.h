@@ -84,6 +84,7 @@ class Compiler {
     void this_();
     void super_();
     void listLiteral();
+    void mapLiteral();
     void subscript();
 
   private:

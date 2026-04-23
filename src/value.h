@@ -47,6 +47,11 @@ bool operator==(const Value& a, const Value& b);
 std::string stringify(const Value& value);
 void printValue(const Value& value);
 
+// Hash a map-valid Value. Undefined behaviour if called with an invalid key.
+uint32_t hashValue(const Value& v);
+// Returns false for NaN numbers and non-string objects.
+bool isValidMapKey(const Value& v);
+
 inline bool isFalsy(const Value& v) { return !v; }
 
 class ValueArray : std::array<Value, UINT8_MAX> {
