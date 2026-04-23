@@ -30,6 +30,8 @@ static const char* objTypeName(ObjType type) {
         return "list";
     case ObjType::FILE:
         return "file";
+    case ObjType::ITERATOR:
+        return "iterator";
     }
     return "?";
 }
@@ -189,6 +191,9 @@ void MemoryManager::traceObject(Obj* obj) {
     }
     case ObjType::FILE:
         markObject(static_cast<ObjFile*>(obj)->klass);
+        break;
+    case ObjType::ITERATOR:
+        markValue(static_cast<ObjIterator*>(obj)->collection);
         break;
     }
 }

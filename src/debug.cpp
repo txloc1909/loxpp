@@ -186,6 +186,12 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return simpleInstruction("SET_INDEX", offset, out, color);
     case Op::IN:
         return simpleInstruction("IN", offset, out, color);
+    case Op::GET_ITER:
+        return simpleInstruction("GET_ITER", offset, out, color);
+    case Op::ITER_HAS_NEXT:
+        return simpleInstruction("ITER_HAS_NEXT", offset, out, color);
+    case Op::ITER_NEXT:
+        return simpleInstruction("ITER_NEXT", offset, out, color);
     default:
         out << cc(color, kRed) << cc(color, kBold) << "UNKNOWN("
             << static_cast<unsigned>(chunk.at(offset)) << ")"

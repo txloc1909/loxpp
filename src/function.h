@@ -120,6 +120,22 @@ inline bool isList(const Value& v) {
     return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::LIST;
 }
 
+struct ObjIterator : public Obj {
+    Value collection; // ObjList* or ObjString* being iterated
+    int index;        // current cursor position
+
+    ObjIterator(Value coll, int idx = 0)
+        : Obj(ObjType::ITERATOR), collection(coll), index(idx) {}
+};
+
+inline bool isObjIterator(Obj* o) { return isObjType(o, ObjType::ITERATOR); }
+inline ObjIterator* asObjIterator(Obj* o) {
+    return static_cast<ObjIterator*>(o);
+}
+inline bool isIterator(const Value& v) {
+    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::ITERATOR;
+}
+
 struct ObjFile : public Obj {
     ObjClass* klass;       // shared s_fileClass; GC-tracked
     FILE* handle{nullptr}; // null when closed

@@ -920,6 +920,76 @@ InterpretResult VM::run() {
             }
             break;
         }
+        case Op::GET_ITER: {
+            // peek(0) keeps iterable on stack as GC root during create<>().
+            // Mirrors the class-instantiation pattern at vm.cpp:556-558.
+            Value iterable = peek(0);
+            if (!isList(iterable) && !isString(iterable)) {
+                runtimeError(
+                    "Value is not iterable (expected list or string).");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            ObjIterator* it = m_mm.create<ObjIterator>(iterable, 0);
+            stackTop[-1] = Value{static_cast<Obj*>(it)}; // replace in-place
+            break;
+        }
+        case Op::ITER_HAS_NEXT: {
+            Value top = pop();
+            // Invariant 1: value must be an ObjIterator (guaranteed by
+            // GET_ITER).
+            if (!isIterator(top)) {
+                runtimeError(
+                    "BUG: ITER_HAS_NEXT expects an iterator on the stack.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            ObjIterator* it = asObjIterator(as<Obj*>(top));
+            bool has;
+            // Invariant 2: collection must be List or String (guaranteed by
+            // GET_ITER).
+            if (isList(it->collection))
+                has = it->index <
+                      (int)asObjList(as<Obj*>(it->collection))->elements.size();
+            else if (isString(it->collection))
+                has = it->index <
+                      (int)asObjString(as<Obj*>(it->collection))->chars.size();
+            else {
+                runtimeError(
+                    "BUG: ObjIterator::collection is neither list nor string.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            push(from<bool>(has));
+            break;
+        }
+        case Op::ITER_NEXT: {
+            Value top = pop();
+            // Invariant 1: value must be an ObjIterator (guaranteed by
+            // GET_ITER).
+            if (!isIterator(top)) {
+                runtimeError(
+                    "BUG: ITER_NEXT expects an iterator on the stack.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            ObjIterator* it = asObjIterator(as<Obj*>(top));
+            // Invariant 2: collection must be List or String (guaranteed by
+            // GET_ITER).
+            if (isList(it->collection)) {
+                push(
+                    asObjList(as<Obj*>(it->collection))->elements[it->index++]);
+            } else if (isString(it->collection)) {
+                char ch =
+                    asObjString(as<Obj*>(it->collection))->chars[it->index++];
+                // ObjIterator is GC-rooted at iterSlot on VM stack; GC is
+                // non-moving. ch is a plain char copied before makeString
+                // (which may trigger GC).
+                push(Value{static_cast<Obj*>(
+                    m_mm.makeString(std::string_view{&ch, 1}))});
+            } else {
+                runtimeError(
+                    "BUG: ObjIterator::collection is neither list nor string.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            break;
+        }
         }
     }
 

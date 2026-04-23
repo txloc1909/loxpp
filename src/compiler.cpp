@@ -476,71 +476,46 @@ void Compiler::forInStatement(const Token& itemName) {
     // At entry: 'for' '(' 'var' itemName 'in' have been consumed.
     // Caller (forStatement) owns beginScope()/endScope().
 
-    // 1. Evaluate sequence expression and store in hidden local.
+    // 1. Evaluate iterable expression; GET_ITER replaces it with an
+    // ObjIterator.
     expression();
     m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after sequence.");
+    emitByte(Op::GET_ITER);
 
-    Token seqToken{TokenType::IDENTIFIER, "(seq)", m_parser->m_previous.line};
-    addLocal(seqToken);
+    Token iterToken{TokenType::IDENTIFIER, "(iter)", m_parser->m_previous.line};
+    addLocal(iterToken);
     markInitialized();
+    int iterSlot = m_localCount - 1;
 
-    // 2. Hidden index local = 0.
-    emitBytes(Op::CONSTANT, makeConstant(from<Number>(0.0)));
-    Token idxToken{TokenType::IDENTIFIER, "(idx)", m_parser->m_previous.line};
-    addLocal(idxToken);
-    markInitialized();
-
-    // 3. Item variable = nil.
+    // 2. Item variable starts as nil.
     emitByte(Op::NIL);
     addLocal(itemName);
     markInitialized();
-
-    int seqSlot = m_localCount - 3;
-    int idxSlot = m_localCount - 2;
     int itemSlot = m_localCount - 1;
 
-    // 4. Loop header (condition re-entry point).
+    // 3. Loop header (re-entry point for LOOP and continue).
     int loopStart = static_cast<int>(getCurrentChunk()->size());
     m_loopStack.push_back({loopStart, m_localCount, {}});
 
-    // 5. Exit condition: idx < len(seq)
-    emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(idxSlot));
-    Token lenTok{TokenType::IDENTIFIER, "len", m_parser->m_previous.line};
-    emitBytes(Op::GET_GLOBAL, identifierConstant(lenTok));
-    emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(seqSlot));
-    emitBytes(Op::CALL, 1);
-    emitByte(Op::LESS); // idx < len(seq)?
+    // 4. Check: push iterator copy, ITER_HAS_NEXT → bool on stack.
+    emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(iterSlot));
+    emitByte(Op::ITER_HAS_NEXT);
     int exitJump = emitJump(Op::JUMP_IF_FALSE);
-    emitByte(Op::POP);
+    emitByte(Op::POP); // discard true
 
-    // 6. Jump over increment to body.
-    int bodyJump = emitJump(Op::JUMP);
-
-    // 7. Increment block (continue target).
-    int incrStart = static_cast<int>(getCurrentChunk()->size());
-    m_loopStack.back().start = incrStart;
-    emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(idxSlot));
-    emitBytes(Op::CONSTANT, makeConstant(from<Number>(1.0)));
-    emitByte(Op::ADD);
-    emitBytes(Op::SET_LOCAL, static_cast<uint8_t>(idxSlot));
-    emitByte(Op::POP);
-    emitLoop(loopStart);
-
-    // 8. Body start: assign item = seq[idx].
-    patchJump(bodyJump);
-    emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(seqSlot));
-    emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(idxSlot));
-    emitByte(Op::GET_INDEX);
+    // 5. Advance: push iterator copy, ITER_NEXT → next element; assign to item.
+    emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(iterSlot));
+    emitByte(Op::ITER_NEXT);
     emitBytes(Op::SET_LOCAL, static_cast<uint8_t>(itemSlot));
     emitByte(Op::POP);
 
-    // 9. User body.
+    // 6. User body.
     statement();
-    emitLoop(incrStart);
+    emitLoop(loopStart);
 
-    // 10. Exit.
+    // 7. Exit.
     patchJump(exitJump);
-    emitByte(Op::POP);
+    emitByte(Op::POP); // discard false
 
     for (int offset : m_loopStack.back().breakJumps)
         patchJump(offset);

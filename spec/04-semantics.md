@@ -312,14 +312,41 @@ Where:
 - `increment` is an expression evaluated after each iteration body; if omitted
   it is skipped.
 
+### `for`-in Statement
+
+```
+for ( var x in expr ) body
+```
+
+Iterates over the elements of a sequence in order.
+
+1. Evaluate `expr` exactly once. The result must be a **List** or a **String**;
+   any other value is a **runtime error** ("Value is not iterable.").
+2. An internal **iterator** is created, holding a reference to the sequence and
+   a cursor starting at `0`. The iterator is not accessible to user code.
+3. Before each iteration, the cursor is compared to the length of the sequence.
+   If `cursor ≥ length`, the loop exits.
+4. Otherwise, the element at `cursor` is bound to `x` and `body` executes.
+   - For a **List**: `x` is bound to the element value.
+   - For a **String**: `x` is bound to a single-character String.
+5. After the body, the cursor advances by one and the loop repeats from step 3.
+
+`x` is scoped to the loop body; it is not accessible after the loop exits.
+
+**Mutation during iteration**: modifying the List while iterating is defined.
+Elements appended to the List at indices beyond the current cursor will be
+visited. Removing elements is not directly possible (List has no `remove`).
+
+**`break`** and **`continue`** work as described below.
+
 ### `break` Statement
 
 ```
 break ;
 ```
 
-Immediately exits the innermost enclosing `while`, `for`, or `switch`
-statement. Any local variables declared inside the construct since its opening
+Immediately exits the innermost enclosing `while`, `for`, `for`-in, or
+`switch` statement. Any local variables declared inside the construct since its opening
 are destroyed. Executing `break` outside a loop or switch is a **static
 error**.
 
@@ -333,6 +360,8 @@ Skips the remainder of the current loop body and jumps to the next iteration:
 - In a `while` loop: jumps to re-evaluating the condition.
 - In a `for` loop: jumps to evaluating the increment expression, then the
   condition.
+- In a `for`-in loop: jumps to checking whether the iterator has a next
+  element (cursor advance already happened via `ITER_NEXT` before the body).
 
 Any local variables declared inside the loop body since the top of the current
 iteration are destroyed. Executing `continue` inside a `switch` that is itself
