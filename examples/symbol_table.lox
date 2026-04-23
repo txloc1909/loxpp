@@ -1,0 +1,119 @@
+// symbol_table.lox — Lexically scoped symbol table built with Map.
+//
+// Each Env holds a Map of bindings and a pointer to its enclosing Env.
+// - define(name, val)  — create a new binding in this scope
+// - lookup(name)       — search this scope then parent chain; nil if unbound
+// - assign(name, val)  — update the nearest enclosing binding; false if not found
+//
+// This is the data structure at the heart of every interpreter's variable
+// resolver (and of Lox++ itself).
+//
+// Demonstrates: Map as a string-keyed store, has(), chained Env lookups,
+//               entries() for scope introspection.
+
+class Env {
+    init(parent) {
+        this.bindings = {};
+        this.parent = parent;
+    }
+
+    define(name, value) {
+        this.bindings[name] = value;
+    }
+
+    lookup(name) {
+        if (this.bindings.has(name)) return this.bindings[name];
+        if (this.parent != nil) return this.parent.lookup(name);
+        return nil;
+    }
+
+    // Returns true if the name was found and updated, false otherwise.
+    assign(name, value) {
+        if (this.bindings.has(name)) {
+            this.bindings[name] = value;
+            return true;
+        }
+        if (this.parent != nil) return this.parent.assign(name, value);
+        return false;
+    }
+
+    // Pretty-print this scope's local bindings (not parents).
+    dump(label) {
+        print label + " {";
+        var entries = this.bindings.entries();
+        var i = 0;
+        while (i < len(entries)) {
+            var pair = entries[i];
+            print "  " + str(pair[0]) + " = " + str(pair[1]);
+            i = i + 1;
+        }
+        print "}";
+    }
+}
+
+// -----------------------------------------------------------------------
+// Demo: three nested scopes (global → module → function)
+// -----------------------------------------------------------------------
+
+var global = Env(nil);
+global.define("PI", 3.14159);
+global.define("E",  2.71828);
+global.define("x",  10);
+
+var module = Env(global);
+module.define("x",     99);    // shadows global x
+module.define("limit", 100);
+
+var func = Env(module);
+func.define("x",   42);        // shadows module x
+func.define("tmp", -1);
+
+// CHECK: === Lookups ===
+print "=== Lookups ===";
+
+// Each scope sees its own x
+// CHECK: global.x = 10
+print "global.x = "  + str(global.lookup("x"));
+// CHECK: module.x = 99
+print "module.x = "  + str(module.lookup("x"));
+// CHECK: func.x = 42
+print "func.x = "    + str(func.lookup("x"));
+
+// Inherited from global through the chain
+// CHECK: func.PI = 3.14159
+print "func.PI = "   + str(func.lookup("PI"));
+// CHECK: func.limit = 100
+print "func.limit = " + str(func.lookup("limit"));
+// CHECK: func.undef = nil
+print "func.undef = " + str(func.lookup("undef"));
+
+// -----------------------------------------------------------------------
+// Mutation via assign — updates the nearest binding in the chain
+// -----------------------------------------------------------------------
+print "";
+// CHECK: === assign() ===
+print "=== assign() ===";
+
+func.assign("x", 777);
+// CHECK: func.x after assign = 777
+print "func.x after assign = " + str(func.lookup("x"));
+// CHECK: module.x unchanged = 99
+print "module.x unchanged = " + str(module.lookup("x"));
+
+// Assigning a name that only exists in global propagates there
+func.assign("PI", 3.0);
+// CHECK: global.PI after assign = 3
+print "global.PI after assign = " + str(global.lookup("PI"));
+
+// Assigning an unbound name returns false
+// CHECK: assign unbound = false
+print "assign unbound = " + str(func.assign("ghost", 0));
+
+// -----------------------------------------------------------------------
+// Scope introspection with entries()
+// -----------------------------------------------------------------------
+print "";
+// CHECK: === Scope dumps ===
+print "=== Scope dumps ===";
+global.dump("global");
+func.dump("func");

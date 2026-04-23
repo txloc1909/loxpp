@@ -1,0 +1,60 @@
+// phonebook.lox — Interactive phone book: add, lookup, delete, list.
+//
+// Demonstrates: Map as a string-keyed store, has(), del(), keys(),
+//               interactive input() loop.
+//
+// Input protocol (one token per line):
+//   add        → prompts for name then number
+//   lookup     → prompts for name, prints entry or "Not found"
+//   delete     → prompts for name, removes entry
+//   list       → prints all entries
+//   quit       → exits
+
+var book = {};
+
+fun listAll() {
+    if (len(book) == 0) {
+        print "(empty)";
+        return;
+    }
+    // for-in on a Map iterates its keys
+    for (var name in book) {
+        print "  " + name + ": " + book[name];
+    }
+}
+
+print "Phone Book — commands: add, lookup, delete, list, quit";
+var cmd = input();
+while (cmd != nil and cmd != "quit") {
+    if (cmd == "add") {
+        print "  Name: ";
+        var name = input();
+        print "  Number: ";
+        var number = input();
+        book[name] = number;
+        print "  Added.";
+    } else if (cmd == "lookup") {
+        print "  Name: ";
+        var name = input();
+        if (book.has(name)) {
+            print "  " + name + ": " + book[name];
+        } else {
+            print "  Not found: " + name;
+        }
+    } else if (cmd == "delete") {
+        print "  Name: ";
+        var name = input();
+        if (book.has(name)) {
+            book.del(name);
+            print "  Deleted.";
+        } else {
+            print "  Not found: " + name;
+        }
+    } else if (cmd == "list") {
+        listAll();
+    } else {
+        print "Unknown command: " + cmd;
+    }
+    cmd = input();
+}
+print "Bye.";

@@ -1,0 +1,64 @@
+// word_freq.lox — Count word frequencies from a file, print sorted by count.
+//
+// Demonstrates: Map as a counter, has(), keys(), for-in on Map,
+//               sorting keys by associated value.
+
+fun splitWords(s) {
+    var words = [];
+    var cur = "";
+    var i = 0;
+    while (i < len(s)) {
+        var c = s[i];
+        if (c == " " or c == "\t" or c == ",") {
+            if (len(cur) > 0) {
+                words.append(cur);
+                cur = "";
+            }
+        } else {
+            cur = cur + c;
+        }
+        i = i + 1;
+    }
+    if (len(cur) > 0) words.append(cur);
+    return words;
+}
+
+var counts = {};
+
+var f = open("examples/word_freq.input", "r");
+var line = f.readline();
+while (line != nil) {
+    var words = splitWords(line);
+    for (var w in words) {
+        if (counts.has(w)) {
+            counts[w] = counts[w] + 1;
+        } else {
+            counts[w] = 1;
+        }
+    }
+    line = f.readline();
+}
+f.close();
+
+// Sort keys by frequency descending (insertion sort on keys list)
+var keys = counts.keys();
+var n = len(keys);
+var i = 1;
+while (i < n) {
+    var key = keys[i];
+    var j = i - 1;
+    while (j >= 0 and counts[keys[j]] < counts[key]) {
+        keys[j + 1] = keys[j];
+        j = j - 1;
+    }
+    keys[j + 1] = key;
+    i = i + 1;
+}
+
+// CHECK: === Word Frequencies ===
+print "=== Word Frequencies ===";
+for (var w in keys) {
+    print w + ": " + str(counts[w]);
+}
+// CHECK: the: 4
+// (ties in frequency are printed in unspecified Map-key order)

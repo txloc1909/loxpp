@@ -1,0 +1,64 @@
+// memo_fib.lox — Memoized Fibonacci using Map as a DP cache.
+//
+// Demonstrates: Map literal, has(), index get/set, len().
+
+var cache = {};
+
+fun fib(n) {
+    if (n <= 1) return n;
+    if (cache.has(n)) return cache[n];
+    var result = fib(n - 1) + fib(n - 2);
+    cache[n] = result;
+    return result;
+}
+
+fun fibNaive(n) {
+    if (n <= 1) return n;
+    return fibNaive(n - 1) + fibNaive(n - 2);
+}
+
+// CHECK: === Memoized Fibonacci ===
+print "=== Memoized Fibonacci ===";
+
+var i = 0;
+while (i <= 10) {
+    print "fib(" + str(i) + ") = " + str(fib(i));
+    i = i + 1;
+}
+// CHECK: fib(0) = 0
+// CHECK: fib(1) = 1
+// CHECK: fib(2) = 1
+// CHECK: fib(3) = 2
+// CHECK: fib(4) = 3
+// CHECK: fib(5) = 5
+// CHECK: fib(6) = 8
+// CHECK: fib(7) = 13
+// CHECK: fib(8) = 21
+// CHECK: fib(9) = 34
+// CHECK: fib(10) = 55
+
+print "";
+// CHECK: fib(30) = 832040
+print "fib(30) = " + str(fib(30));
+// CHECK: fib(35) = 9.22746e+06
+print "fib(35) = " + str(fib(35));
+
+// Cache holds computed values for n = 2..35
+// CHECK: cache entries: 34
+print "cache entries: " + str(len(cache));
+
+// Correctness: memoized matches naive for small n
+// CHECK: === Correctness check ===
+print "";
+print "=== Correctness check ===";
+var ok = true;
+var n = 0;
+while (n <= 15) {
+    if (fib(n) != fibNaive(n)) {
+        print "MISMATCH at n=" + str(n);
+        ok = false;
+    }
+    n = n + 1;
+}
+// CHECK: all match: true
+if (ok) print "all match: true";

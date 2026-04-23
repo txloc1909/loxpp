@@ -1,0 +1,144 @@
+// huffman.lox — Huffman encoding (capstone for the Map milestone).
+//
+// Algorithm:
+//   1. Count character frequencies (Map[char -> count]).
+//   2. Build a min-priority queue (List of HuffNodes, pop by linear scan).
+//   3. Merge the two lowest-frequency nodes until one root remains.
+//   4. Traverse the tree to generate a code table (Map[char -> bit-string]).
+//   5. Encode the input; report bits saved vs raw 8-bit ASCII.
+//
+// Demonstrates: Map as frequency counter, Map as code table, List as
+//               priority queue, recursive tree traversal, for-in on Map.
+
+class HuffNode {
+    init(ch, freq, left, right) {
+        this.ch    = ch;      // nil for internal nodes
+        this.freq  = freq;
+        this.left  = left;
+        this.right = right;
+    }
+}
+
+// Remove and return the node with the lowest frequency.
+// O(n) scan — acceptable for small alphabets.
+fun pqPop(pq) {
+    var minIdx = 0;
+    var i = 1;
+    while (i < len(pq)) {
+        if (pq[i].freq < pq[minIdx].freq) minIdx = i;
+        i = i + 1;
+    }
+    var node = pq[minIdx];
+    // Swap with last element and pop to avoid O(n) list shift.
+    pq[minIdx] = pq[len(pq) - 1];
+    pq.pop();
+    return node;
+}
+
+// Recursively walk the tree, filling `codes` Map with bit-string codes.
+fun buildCodes(node, prefix, codes) {
+    if (node.ch != nil) {
+        // Leaf: single-character input gets code "0" to stay valid.
+        if (len(prefix) == 0) {
+            codes[node.ch] = "0";
+        } else {
+            codes[node.ch] = prefix;
+        }
+        return;
+    }
+    if (node.left  != nil) buildCodes(node.left,  prefix + "0", codes);
+    if (node.right != nil) buildCodes(node.right, prefix + "1", codes);
+}
+
+fun encode(text) {
+    if (len(text) == 0) {
+        print "(empty input)";
+        return;
+    }
+
+    // --- 1. Frequency map ---
+    var freq = {};
+    var i = 0;
+    while (i < len(text)) {
+        var c = text[i];
+        if (freq.has(c)) {
+            freq[c] = freq[c] + 1;
+        } else {
+            freq[c] = 1;
+        }
+        i = i + 1;
+    }
+
+    // --- 2. Build initial priority queue ---
+    var pq = [];
+    for (var c in freq) {
+        pq.append(HuffNode(c, freq[c], nil, nil));
+    }
+
+    // --- 3. Build Huffman tree ---
+    while (len(pq) > 1) {
+        var left  = pqPop(pq);
+        var right = pqPop(pq);
+        pq.append(HuffNode(nil, left.freq + right.freq, left, right));
+    }
+    var root = pq[0];
+
+    // --- 4. Generate code table ---
+    var codes = {};
+    buildCodes(root, "", codes);
+
+    // --- 5. Encode ---
+    var encoded = "";
+    i = 0;
+    while (i < len(text)) {
+        encoded = encoded + codes[text[i]];
+        i = i + 1;
+    }
+
+    // --- 6. Report ---
+    var rawBits      = len(text) * 8;
+    var encodedBits  = len(encoded);
+    var saved        = rawBits - encodedBits;
+
+    print "Input:        [" + text + "]";
+    print "Characters:   " + str(len(text));
+    print "Unique chars: " + str(len(codes));
+    print "Raw bits:     " + str(rawBits) + "  (8 bits/char)";
+    print "Huffman bits: " + str(encodedBits);
+    print "Bits saved:   " + str(saved);
+    print "";
+    print "Code table:";
+
+    // Print code table sorted by code length then char (insertion sort on
+    // a list of [char, code] pairs pulled via entries()).
+    var entries = codes.entries();
+    var n = len(entries);
+    var pass = 1;
+    while (pass < n) {
+        var e = entries[pass];
+        var j = pass - 1;
+        while (j >= 0 and len(entries[j][1]) > len(e[1])) {
+            entries[j + 1] = entries[j];
+            j = j - 1;
+        }
+        entries[j + 1] = e;
+        pass = pass + 1;
+    }
+    i = 0;
+    while (i < n) {
+        var pair = entries[i];
+        print "  '" + pair[0] + "'  freq=" + str(freq[pair[0]]) + "  code=" + pair[1];
+        i = i + 1;
+    }
+
+    print "";
+    print "Encoded: " + encoded;
+    print "---";
+}
+
+// CHECK: === Huffman Encoding ===
+print "=== Huffman Encoding ===";
+print "";
+encode("abracadabra");
+encode("mississippi");
+encode("aaaaabbbccd");

@@ -1,0 +1,168 @@
+// graph_bfs_dfs.lox — BFS and DFS on an undirected graph.
+//
+// The graph is represented as a Map from node name (String) to a List of
+// neighbour names.  Visited sets are Maps used as hash sets (value = true).
+//
+// Demonstrates: Map of Lists, has(), for-in on Map keys,
+//               BFS with an index-based queue, recursive DFS.
+
+// -----------------------------------------------------------------------
+// Graph definition
+// -----------------------------------------------------------------------
+//
+//   A --- B --- D
+//   |     |
+//   C     E
+//   |     |
+//   F ----+
+
+var graph = {
+    "A": ["B", "C"],
+    "B": ["A", "D", "E"],
+    "C": ["A", "F"],
+    "D": ["B"],
+    "E": ["B", "F"],
+    "F": ["C", "E"]
+};
+
+// -----------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------
+
+fun listJoin(lst, sep) {
+    var s = "";
+    var i = 0;
+    while (i < len(lst)) {
+        if (i > 0) s = s + sep;
+        s = s + lst[i];
+        i = i + 1;
+    }
+    return s;
+}
+
+// -----------------------------------------------------------------------
+// BFS — level-order traversal using an index-based queue
+// -----------------------------------------------------------------------
+
+fun bfs(start) {
+    var visited = {};
+    var queue = [start];
+    var head = 0;
+    var result = [];
+    visited[start] = true;
+
+    while (head < len(queue)) {
+        var node = queue[head];
+        head = head + 1;
+        result.append(node);
+
+        var neighbours = graph[node];
+        var i = 0;
+        while (i < len(neighbours)) {
+            var nb = neighbours[i];
+            if (!visited.has(nb)) {
+                visited[nb] = true;
+                queue.append(nb);
+            }
+            i = i + 1;
+        }
+    }
+    return result;
+}
+
+// -----------------------------------------------------------------------
+// DFS — recursive, accumulates nodes in visit order
+// -----------------------------------------------------------------------
+
+fun dfsVisit(node, visited, result) {
+    visited[node] = true;
+    result.append(node);
+    var neighbours = graph[node];
+    var i = 0;
+    while (i < len(neighbours)) {
+        var nb = neighbours[i];
+        if (!visited.has(nb)) dfsVisit(nb, visited, result);
+        i = i + 1;
+    }
+}
+
+fun dfs(start) {
+    var visited = {};
+    var result = [];
+    dfsVisit(start, visited, result);
+    return result;
+}
+
+// -----------------------------------------------------------------------
+// Shortest path (BFS-based)
+// -----------------------------------------------------------------------
+
+fun shortestPath(start, goal) {
+    if (start == goal) return [start];
+    var visited = {};
+    var queue = [start];
+    var head = 0;
+    var parent = {};   // Map: node -> node it was reached from
+    visited[start] = true;
+
+    while (head < len(queue)) {
+        var node = queue[head];
+        head = head + 1;
+        var neighbours = graph[node];
+        var i = 0;
+        while (i < len(neighbours)) {
+            var nb = neighbours[i];
+            if (!visited.has(nb)) {
+                visited[nb] = true;
+                parent[nb] = node;
+                if (nb == goal) {
+                    // Reconstruct path
+                    var path = [];
+                    var cur = goal;
+                    while (cur != start) {
+                        path.append(cur);
+                        cur = parent[cur];
+                    }
+                    path.append(start);
+                    // Reverse
+                    var lo = 0;
+                    var hi = len(path) - 1;
+                    while (lo < hi) {
+                        var tmp = path[lo];
+                        path[lo] = path[hi];
+                        path[hi] = tmp;
+                        lo = lo + 1;
+                        hi = hi - 1;
+                    }
+                    return path;
+                }
+                queue.append(nb);
+            }
+            i = i + 1;
+        }
+    }
+    return nil;   // no path
+}
+
+// -----------------------------------------------------------------------
+// Output
+// -----------------------------------------------------------------------
+
+// CHECK: === Graph traversal from A ===
+print "=== Graph traversal from A ===";
+// CHECK: BFS: A, B, C, D, E, F
+print "BFS: " + listJoin(bfs("A"), ", ");
+// CHECK: DFS: A, B, D, E, F, C
+print "DFS: " + listJoin(dfs("A"), ", ");
+
+print "";
+// CHECK: === Shortest paths ===
+print "=== Shortest paths ===";
+// CHECK: A -> D: A, B, D
+print "A -> D: " + listJoin(shortestPath("A", "D"), ", ");
+// CHECK: A -> F: A, C, F
+print "A -> F: " + listJoin(shortestPath("A", "F"), ", ");
+// CHECK: D -> F: D, B, E, F
+print "D -> F: " + listJoin(shortestPath("D", "F"), ", ");
+// CHECK: A -> A: A
+print "A -> A: " + listJoin(shortestPath("A", "A"), ", ");

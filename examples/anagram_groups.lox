@@ -1,0 +1,125 @@
+// anagram_groups.lox — Group words by their anagram signature.
+//
+// Two words are anagrams if they contain the same multiset of characters.
+// The canonical key is the word's characters sorted alphabetically.
+//
+// Demonstrates: Map keyed by String (sorted chars), List as value,
+//               for-in on Map, entries().
+
+// Alphabet used for character ordering (space sorts before letters).
+var ALPHA = " abcdefghijklmnopqrstuvwxyz";
+
+// Returns true if character a comes before character b in ALPHA order.
+fun charLess(a, b) {
+    var i = 0;
+    while (i < len(ALPHA)) {
+        if (ALPHA[i] == a) return true;
+        if (ALPHA[i] == b) return false;
+        i = i + 1;
+    }
+    return false;
+}
+
+fun sortChars(s) {
+    // Collect characters into a list
+    var chars = [];
+    var i = 0;
+    while (i < len(s)) {
+        chars.append(s[i]);
+        i = i + 1;
+    }
+    // Bubble sort using charLess (strings can't use > directly)
+    var n = len(chars);
+    var pass = 0;
+    while (pass < n - 1) {
+        var j = 0;
+        while (j < n - 1 - pass) {
+            if (charLess(chars[j + 1], chars[j])) {
+                var tmp  = chars[j];
+                chars[j] = chars[j + 1];
+                chars[j + 1] = tmp;
+            }
+            j = j + 1;
+        }
+        pass = pass + 1;
+    }
+    // Reassemble into a string
+    var result = "";
+    i = 0;
+    while (i < n) {
+        result = result + chars[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+fun joinList(lst) {
+    var s = "";
+    var i = 0;
+    while (i < len(lst)) {
+        if (i > 0) s = s + ", ";
+        s = s + lst[i];
+        i = i + 1;
+    }
+    return s;
+}
+
+// -----------------------------------------------------------------------
+// Input word list
+// -----------------------------------------------------------------------
+
+var words = [
+    "eat", "tea", "tan", "ate", "nat", "bat",
+    "listen", "silent", "enlist",
+    "race", "care", "acre",
+    "dormitory", "dirty room",
+    "hello"
+];
+
+// -----------------------------------------------------------------------
+// Build groups Map: sorted-signature -> [word, ...]
+// -----------------------------------------------------------------------
+
+var groups = {};
+for (var w in words) {
+    var key = sortChars(w);
+    if (!groups.has(key)) {
+        groups[key] = [];
+    }
+    groups[key].append(w);
+}
+
+// -----------------------------------------------------------------------
+// Print groups that contain more than one word (genuine anagram sets)
+// and singleton words separately.
+// -----------------------------------------------------------------------
+
+// CHECK: === Anagram groups ===
+print "=== Anagram groups ===";
+
+var keys = groups.keys();
+for (var k in keys) {
+    var group = groups[k];
+    if (len(group) > 1) {
+        print "[" + joinList(group) + "]";
+    }
+}
+
+// CHECK: [eat, tea, ate]
+// CHECK: [tan, nat]
+// CHECK: [listen, silent, enlist]
+// CHECK: [race, care, acre]
+
+print "";
+// CHECK: === Singletons ===
+print "=== Singletons ===";
+for (var k in keys) {
+    var group = groups[k];
+    if (len(group) == 1) {
+        print group[0];
+    }
+}
+// CHECK: bat
+// CHECK: dormitory
+// CHECK: dirty room
+// CHECK: hello
