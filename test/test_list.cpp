@@ -469,6 +469,71 @@ TEST(List, LenOnNonList) {
 }
 
 // ---------------------------------------------------------------------------
+// remove
+// ---------------------------------------------------------------------------
+
+TEST(List, RemoveMiddleElement) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = [1, 2, 3]; xs.remove(2);"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("xs"), "[1, 3]");
+}
+
+TEST(List, RemoveReturnsNil) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = [1, 2, 3]; var r = xs.remove(2);"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "nil");
+}
+
+TEST(List, RemoveOnlyFirstOccurrence) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = [1, 2, 1]; xs.remove(1);"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("xs"), "[2, 1]");
+}
+
+TEST(List, RemoveFromSingleton) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = [42]; xs.remove(42);"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("xs"), "[]");
+}
+
+TEST(List, RemoveFirstElement) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = [1, 2, 3]; xs.remove(1);"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("xs"), "[2, 3]");
+}
+
+TEST(List, RemoveLastElement) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = [1, 2, 3]; xs.remove(3);"), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("xs"), "[1, 2]");
+}
+
+TEST(List, RemoveNotFound) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = [1, 2, 3]; xs.remove(99);"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(List, RemoveFromEmpty) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = []; xs.remove(1);"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(List, RemoveWrongArgCount) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = [1]; xs.remove();"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(List, RemoveTooManyArgs) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var xs = [1]; xs.remove(1, 2);"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+// ---------------------------------------------------------------------------
 // Undefined method
 // ---------------------------------------------------------------------------
 

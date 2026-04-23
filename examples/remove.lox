@@ -1,0 +1,20 @@
+// Demonstrates list.remove(value):
+//   - removes the first occurrence of value
+//   - runtime error if value is not present
+//
+// Pair `in` with `remove` for guarded removal.
+
+var cart = ["apples", "bread", "milk", "bread"];
+print cart;  // [apples, bread, milk, bread]
+
+cart.remove("milk");
+print cart;  // [apples, bread, bread]
+
+// Only the first "bread" is removed
+cart.remove("bread");
+print cart;  // [apples, bread]
+
+// remove() also works with numbers
+var nums = [3, 1, 4, 1, 5];
+nums.remove(4);
+print nums;  // [3, 1, 1, 5]
