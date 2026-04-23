@@ -200,50 +200,37 @@ separate.
 
 ### foreach / iteration protocol
 
+**Implemented (milestone 7):** List and String only, via dedicated VM opcodes.
+
 **User-facing API:**
 ```lox
-// for-in syntax over any iterable
-for (var x : list) { print x; }
-for (var ch : "hello") { print ch; }   // once strings are indexable
-
-// User-defined iterable: implement iter() returning an object with
-// hasNext()/next()
-class Range {
-    init(start, end) {
-        this.start = start;
-        this.end = end;
-    }
-    iter() {
-        return RangeIter(this.start, this.end);
-    }
-}
-
-class RangeIter {
-    init(cur, end) {
-        this.cur = cur;
-        this.end = end;
-    }
-    hasNext() { return this.cur < this.end; }
-    next() {
-        var val = this.cur;
-        this.cur = this.cur + 1;
-        return val;
-    }
-}
-
-for (var i : Range(0, 5)) { print i; }  // 0 1 2 3 4
+for (var x in [1, 2, 3]) { print x; }   // 1 2 3
+for (var ch in "hello") { print ch; }    // h e l l o
 ```
 
-**Justification:** `for (var x : expr)` desugars to:
+Iterating over any other value is a runtime error.
+
+**Implementation:** `for (var x in expr)` compiles to three new opcodes:
+
+- `GET_ITER` — pops a List or String, pushes an `ObjIterator{collection, cursor=0}`
+  in-place (GC-safe: replaces the stack slot rather than pop+alloc+push)
+- `ITER_HAS_NEXT` — pops an iterator copy, pushes `true` if `cursor < length`
+- `ITER_NEXT` — pops an iterator copy, pushes the element at `cursor` and advances it
+
+The compiler emits two hidden locals (`(iter)` + item variable) instead of the
+previous three (`(seq)` + `(idx)` + item). This eliminates the `len()` call and
+index arithmetic on every iteration.
+
+**Deferred — user-defined iterables:** User classes can opt in by implementing
+`iter()` returning an object with `hasNext()` / `next()`. The planned desugaring:
 ```lox
+// for (var x in expr) where expr is a user-defined iterable would desugar to:
 var _it = expr.iter();
 while (_it.hasNext()) { var x = _it.next(); ... }
 ```
 Explicit `hasNext()` / `next()` (vs Python's `StopIteration` exception) avoids
-needing exceptions in the language. Native List and String provide built-in
-iterators; user types opt in by implementing `iter()`. This is essentially
-Java's `Iterable`/`Iterator` — familiar, teachable, no new syntax beyond `for
-(var x : ...)`.
+needing exceptions in the language. This is essentially Java's
+`Iterable`/`Iterator` — familiar, teachable, no new syntax. Not yet implemented.
 
 ---
 
