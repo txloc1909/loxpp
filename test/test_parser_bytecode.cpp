@@ -261,44 +261,33 @@ TEST_F(SequenceBytecodeTest, InExpr_StringSubstring) {
 
 // `for (var x in [1]) {}` compiles to (at script level):
 //
-//   Locals: slot0="" (implicit), slot1=(seq), slot2=(idx), slot3=x
-//   Constants: slot0='1' (list element; 1.0 increment deduped to same slot),
-//              slot1='0' (initial idx=0), slot2='len' (global name)
+//   Locals: slot0="" (implicit), slot1=(iter), slot2=x
+//   Constants: slot0='1' (list element)
 //
-// The loop uses the jump-around-increment pattern so that `continue` jumps
-// to incrStart (offset 23) rather than back to the condition.
+// GET_ITER replaces the list on the stack with an ObjIterator in-place.
+// Each loop iteration: GET_LOCAL 1 (iter copy) → ITER_HAS_NEXT → bool check,
+// then GET_LOCAL 1 (iter copy) → ITER_NEXT → element → SET_LOCAL 2.
+// continue re-enters at loopStart (offset 6), which re-checks ITER_HAS_NEXT.
 TEST_F(SequenceBytecodeTest, ForIn_EmptyBodyBytecode) {
     std::string bytecode = compile_program_to_bytecode("for (var x in [1]) {}");
     std::string expected =
         "0: CONSTANT 0 ('1')\n" // list element
-        "2: BUILD_LIST 1\n"     // push [1] as (seq)
-        "4: CONSTANT 1 ('0')\n" // push 0 as (idx)
-        "6: NIL\n"              // push nil as item x
-        "7: GET_LOCAL 2\n"      // condition: push (idx)
-        "9: GET_GLOBAL 2 ('len')\n"
-        "11: GET_LOCAL 1\n" // push (seq)
-        "13: CALL 1\n"      // len(seq)
-        "15: LESS\n"        // idx < len(seq)
-        "16: JUMP_IF_FALSE 16 -> 45\n"
-        "19: POP\n"
-        "20: JUMP 20 -> 34\n"    // jump over increment to body
-        "23: GET_LOCAL 2\n"      // increment: push (idx)
-        "25: CONSTANT 0 ('1')\n" // 1.0 deduped with list-element slot
-        "27: ADD\n"
-        "28: SET_LOCAL 2\n" // idx++
-        "30: POP\n"
-        "31: LOOP 31 -> 7\n" // back to condition
-        "34: GET_LOCAL 1\n"  // body: push (seq)
-        "36: GET_LOCAL 2\n"  // push (idx)
-        "38: GET_INDEX\n"    // seq[idx]
-        "39: SET_LOCAL 3\n"  // x = seq[idx]
-        "41: POP\n"
-        "42: LOOP 42 -> 23\n" // back to increment
-        "45: POP\n"           // discard condition on exit
-        "46: POP\n"           // endScope: x
-        "47: POP\n"           // endScope: (idx)
-        "48: POP\n"           // endScope: (seq)
-        "49: NIL\n"
-        "50: RETURN\n";
+        "2: BUILD_LIST 1\n"     // push [1]
+        "4: GET_ITER\n"    // replace [1] with ObjIterator → (iter) at slot 1
+        "5: NIL\n"         // push nil → x at slot 2
+        "6: GET_LOCAL 1\n" // loopStart: push (iter) copy
+        "8: ITER_HAS_NEXT\n" // pop copy, push bool
+        "9: JUMP_IF_FALSE 9 -> 22\n"
+        "12: POP\n"         // discard true
+        "13: GET_LOCAL 1\n" // push (iter) copy
+        "15: ITER_NEXT\n"   // pop copy, push next element + advance cursor
+        "16: SET_LOCAL 2\n" // x = element
+        "18: POP\n"
+        "19: LOOP 19 -> 6\n" // back to loopStart
+        "22: POP\n"          // discard false
+        "23: POP\n"          // endScope: x
+        "24: POP\n"          // endScope: (iter)
+        "25: NIL\n"
+        "26: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }

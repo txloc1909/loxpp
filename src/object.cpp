@@ -51,6 +51,8 @@ std::string stringifyObj(Obj* obj) {
     }
     case ObjType::FILE:
         return "<file>";
+    case ObjType::ITERATOR:
+        return "<iterator>";
     case ObjType::LIST: {
         auto* list = static_cast<ObjList*>(obj);
         std::string result = "[";
