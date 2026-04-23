@@ -701,6 +701,29 @@ InterpretResult VM::run() {
                     list->elements.pop_back();
                     pop(); // receiver
                     push(val);
+                } else if (name->chars == "remove") {
+                    if (argCount != 1) {
+                        runtimeError("'remove' expects 1 argument but got %d.",
+                                     argCount);
+                        return InterpretResult::RUNTIME_ERROR;
+                    }
+                    Value target = peek(0);
+                    auto& elems = list->elements;
+                    bool found = false;
+                    for (int i = 0; i < static_cast<int>(elems.size()); i++) {
+                        if (elems[i] == target) {
+                            elems.erase(elems.begin() + i);
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        runtimeError("Value not found in list.");
+                        return InterpretResult::RUNTIME_ERROR;
+                    }
+                    pop(); // arg
+                    pop(); // receiver
+                    push(from<Nil>(Nil{}));
                 } else {
                     runtimeError("Undefined method '%s' on list.",
                                  name->chars.c_str());
