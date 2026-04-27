@@ -4,6 +4,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core_hash_map.h"
 #include "value.h"
 #include "vm_allocator.h"
 
@@ -12,10 +13,26 @@ struct Entry {
     Value value{Nil{}};
 };
 
+struct TablePolicy {
+    static bool isEmpty(const Entry& e) {
+        return e.key == nullptr && is<Nil>(e.value);
+    }
+    static bool isTombstone(const Entry& e) {
+        return e.key == nullptr && !is<Nil>(e.value);
+    }
+    static void makeTombstone(Entry& e) {
+        e.key = nullptr;
+        e.value = Value{true};
+    }
+    static uint32_t hashOf(const Entry& e) { return e.key->hash; }
+    static bool keyMatch(const Entry& slot, const Entry& needle) {
+        return slot.key == needle.key;
+    }
+};
+
 class Table {
-    using Storage = std::vector<Entry, VmAllocator<Entry>>;
-    Storage m_buckets;
-    int m_count{0};
+    using Map = CoreHashMap<Entry, TablePolicy, VmAllocator<Entry>>;
+    Map m_map;
 
   public:
     explicit Table(VmAllocator<Entry> alloc);
@@ -29,15 +46,8 @@ class Table {
 
     template <typename F>
     void forEach(F&& fn) const {
-        for (const auto& entry : m_buckets)
-            if (entry.key != nullptr)
-                fn(entry.key, entry.value);
+        m_map.forEach([&fn](const Entry& e) { fn(e.key, e.value); });
     }
-
-  private:
-    static constexpr double MAX_LOAD = 0.75;
-    static Entry* findBucket(Entry* entries, int capacity, ObjString* key);
-    void adjustCapacity(int newCapacity);
 };
 
 // hashString is defined inline in object.h; declared here for callers that
