@@ -69,16 +69,14 @@ std::string stringifyObj(Obj* obj) {
         auto* map = static_cast<ObjMap*>(obj);
         std::string result = "{";
         bool first = true;
-        for (const auto& e : map->buckets) {
-            if (e.state != MapSlot::OCCUPIED)
-                continue;
+        map->map.forEach([&](const MapEntry& e) {
             if (!first)
                 result += ", ";
             first = false;
             result += stringify(e.key);
             result += ": ";
             result += stringify(e.value);
-        }
+        });
         result += "}";
         return result;
     }
@@ -89,84 +87,27 @@ std::string stringifyObj(Obj* obj) {
 void printObject(Obj* obj) { std::printf("%s", stringifyObj(obj).c_str()); }
 
 // ---------------------------------------------------------------------------
-// ObjMap hash table implementation
+// ObjMap hash table implementation (delegates to CoreHashMap)
 // ---------------------------------------------------------------------------
 
-static MapEntry* mapFindBucket(MapEntry* buckets, int capacity,
-                               const Value& key) {
-    uint32_t idx = hashValue(key) % static_cast<uint32_t>(capacity);
-    MapEntry* tombstone = nullptr;
-    for (;;) {
-        MapEntry& entry = buckets[idx];
-        if (entry.state == MapSlot::EMPTY)
-            return tombstone != nullptr ? tombstone : &entry;
-        if (entry.state == MapSlot::TOMBSTONE) {
-            if (!tombstone)
-                tombstone = &entry;
-        } else if (entry.key == key) {
-            return &entry;
-        }
-        idx = (idx + 1) % static_cast<uint32_t>(capacity);
-    }
-}
+uint32_t MapPolicy::hashOf(const MapEntry& e) { return hashValue(e.key); }
 
 bool ObjMap::mapGet(const Value& key, Value& out) const {
-    if (count == 0)
+    const MapEntry* e = map.find(
+        hashValue(key), [&key](const MapEntry& s) { return s.key == key; });
+    if (!e)
         return false;
-    int cap = static_cast<int>(buckets.size());
-    MapEntry* entry =
-        mapFindBucket(const_cast<MapEntry*>(buckets.data()), cap, key);
-    if (entry->state != MapSlot::OCCUPIED)
-        return false;
-    out = entry->value;
+    out = e->value;
     return true;
 }
 
 bool ObjMap::mapSet(const Value& key, const Value& value) {
-    int cap = static_cast<int>(buckets.size());
-    // Grow when the load factor (live + tombstone) would exceed MAX_LOAD.
-    if (bucketUsed + 1 > static_cast<int>(cap * MAX_LOAD)) {
-        int newCap = std::max(8, cap * 2);
-        // Construct new storage using the same allocator (may trigger GC;
-        // caller must ensure this ObjMap is rooted before calling mapSet).
-        VmVector<MapEntry> fresh(buckets.get_allocator());
-        fresh.resize(newCap);
-        int saved = 0;
-        for (auto& e : buckets) {
-            if (e.state != MapSlot::OCCUPIED)
-                continue;
-            MapEntry* dest = mapFindBucket(fresh.data(), newCap, e.key);
-            *dest = e;
-            ++saved;
-        }
-        bucketUsed = saved; // tombstones are gone after rehash
-        buckets = std::move(fresh);
-        cap = newCap;
-    }
-
-    MapEntry* entry = mapFindBucket(buckets.data(), cap, key);
-    bool isNew = (entry->state != MapSlot::OCCUPIED);
-    if (isNew) {
-        ++count;
-        if (entry->state == MapSlot::EMPTY)
-            ++bucketUsed; // reusing a tombstone slot doesn't grow bucketUsed
-    }
-    entry->key = key;
-    entry->value = value;
-    entry->state = MapSlot::OCCUPIED;
-    return isNew;
+    // map.set may grow (re-allocate via VmAllocator, which may trigger GC).
+    // Caller must ensure this ObjMap is rooted before calling mapSet.
+    return map.set(MapEntry{key, value, MapSlot::OCCUPIED});
 }
 
 bool ObjMap::mapDel(const Value& key) {
-    if (count == 0)
-        return false;
-    int cap = static_cast<int>(buckets.size());
-    MapEntry* entry = mapFindBucket(buckets.data(), cap, key);
-    if (entry->state != MapSlot::OCCUPIED)
-        return false;
-    entry->state = MapSlot::TOMBSTONE;
-    entry->key = Value{Nil{}};
-    entry->value = Value{Nil{}};
-    --count;
-    return true;
+    return map.remove(hashValue(key),
+                      [&key](const MapEntry& s) { return s.key == key; });
 }

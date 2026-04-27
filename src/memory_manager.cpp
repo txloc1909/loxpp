@@ -200,12 +200,10 @@ void MemoryManager::traceObject(Obj* obj) {
     case ObjType::MAP: {
         auto* map = static_cast<ObjMap*>(obj);
         markObject(map->klass);
-        for (const auto& e : map->buckets) {
-            if (e.state != MapSlot::OCCUPIED)
-                continue;
+        map->map.forEach([this](const MapEntry& e) {
             markValue(e.key);
             markValue(e.value);
-        }
+        });
         break;
     }
     }
