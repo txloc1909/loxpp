@@ -105,9 +105,9 @@ for (var k in keys) {
     }
 }
 
-// CHECK: [eat, tea, ate]
 // CHECK: [tan, nat]
 // CHECK: [listen, silent, enlist]
+// CHECK: [eat, tea, ate]
 // CHECK: [race, care, acre]
 
 print "";
@@ -119,7 +119,7 @@ for (var k in keys) {
         print group[0];
     }
 }
-// CHECK: bat
 // CHECK: dormitory
 // CHECK: dirty room
+// CHECK: bat
 // CHECK: hello
