@@ -1049,7 +1049,13 @@ InterpretResult VM::run() {
                 // Root the map: it was popped and may be a temporary; mapSet
                 // can grow the bucket array which triggers GC.
                 m_mm.pushTempRoot(map);
+                // Root val if it's an object: it was popped off the stack
+                // before mapSet, so the GC won't find it through the stack.
+                if (is<Obj*>(val))
+                    m_mm.pushTempRoot(as<Obj*>(val));
                 map->mapSet(indexVal, val);
+                if (is<Obj*>(val))
+                    m_mm.popTempRoot();
                 m_mm.popTempRoot();
                 push(val);
                 break;
