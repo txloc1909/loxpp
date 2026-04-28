@@ -27,11 +27,13 @@ class CoreHashMap {
         E* tombstone = nullptr;
         for (;;) {
             E* e = &data[idx];
-            if (Policy::isEmpty(*e))
+            if (Policy::isEmpty(*e)) {
                 return tombstone != nullptr ? tombstone : e;
+            }
             if (Policy::isTombstone(*e)) {
-                if (!tombstone)
+                if (tombstone == nullptr) {
                     tombstone = e;
+                }
             } else if (match(*e)) {
                 return e;
             }
@@ -45,8 +47,9 @@ class CoreHashMap {
         Storage fresh(newCap, Entry{}, m_buckets.get_allocator());
         int saved = 0;
         for (const Entry& e : m_buckets) {
-            if (Policy::isEmpty(e) || Policy::isTombstone(e))
+            if (Policy::isEmpty(e) || Policy::isTombstone(e)) {
                 continue;
+            }
             Entry* dest = findSlotIn(
                 fresh.data(), newCap, Policy::hashOf(e),
                 [&](const Entry& s) { return Policy::keyMatch(s, e); });
@@ -65,13 +68,15 @@ class CoreHashMap {
 
     // Returns a pointer to the live matching entry, or nullptr if not found.
     template <typename KeyMatch>
-    const Entry* find(uint32_t hash, KeyMatch match) const {
-        if (m_buckets.empty())
+    [[nodiscard]] const Entry* find(uint32_t hash, KeyMatch match) const {
+        if (m_buckets.empty()) {
             return nullptr;
+        }
         int cap = static_cast<int>(m_buckets.size());
         const Entry* slot = findSlotIn(m_buckets.data(), cap, hash, match);
-        if (Policy::isEmpty(*slot) || Policy::isTombstone(*slot))
+        if (Policy::isEmpty(*slot) || Policy::isTombstone(*slot)) {
             return nullptr;
+        }
         return slot;
     }
 
@@ -88,10 +93,12 @@ class CoreHashMap {
                        [&](const Entry& s) { return Policy::keyMatch(s, e); });
         const bool wasEmpty = Policy::isEmpty(*slot);
         const bool wasTombstone = !wasEmpty && Policy::isTombstone(*slot);
-        if (wasEmpty || wasTombstone)
+        if (wasEmpty || wasTombstone) {
             ++m_count;
-        if (wasTombstone)
+        }
+        if (wasTombstone) {
             --m_dead;
+        }
         *slot = e;
         return wasEmpty || wasTombstone;
     }
@@ -99,12 +106,14 @@ class CoreHashMap {
     // Mark the entry matching hash+match as a tombstone. Returns true if found.
     template <typename KeyMatch>
     bool remove(uint32_t hash, KeyMatch match) {
-        if (m_count == 0 || m_buckets.empty())
+        if (m_count == 0 || m_buckets.empty()) {
             return false;
+        }
         int cap = static_cast<int>(m_buckets.size());
         Entry* slot = findSlotIn(m_buckets.data(), cap, hash, match);
-        if (Policy::isEmpty(*slot) || Policy::isTombstone(*slot))
+        if (Policy::isEmpty(*slot) || Policy::isTombstone(*slot)) {
             return false;
+        }
         Policy::makeTombstone(*slot);
         --m_count;
         ++m_dead;
@@ -114,9 +123,11 @@ class CoreHashMap {
     // Iterate live entries.
     template <typename F>
     void forEach(F&& fn) const {
-        for (const Entry& e : m_buckets)
-            if (!Policy::isEmpty(e) && !Policy::isTombstone(e))
+        for (const Entry& e : m_buckets) {
+            if (!Policy::isEmpty(e) && !Policy::isTombstone(e)) {
                 fn(e);
+            }
+        }
     }
 
     // Mark live entries matching shouldRemove as tombstones.
@@ -132,7 +143,9 @@ class CoreHashMap {
         }
     }
 
-    int count() const { return m_count; }
-    int capacity() const { return static_cast<int>(m_buckets.size()); }
-    const Entry* entryAt(int i) const { return &m_buckets[i]; }
+    [[nodiscard]] int count() const { return m_count; }
+    [[nodiscard]] int capacity() const {
+        return static_cast<int>(m_buckets.size());
+    }
+    [[nodiscard]] const Entry* entryAt(int i) const { return &m_buckets[i]; }
 };

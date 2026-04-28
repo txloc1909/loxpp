@@ -109,4 +109,4 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev:latest \
-            bash -c "find src -name '*.cpp' | xargs clang-tidy -p build"
+            bash -c "run-clang-tidy -p build -j$(nproc) 'src/.*\.cpp'"
