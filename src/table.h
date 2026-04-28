@@ -24,9 +24,11 @@ struct TablePolicy {
         e.key = nullptr;
         e.value = Value{true};
     }
-    // forEach only yields live entries, so e.key is never null here.
-    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
-    static uint32_t hashOf(const Entry& e) { return e.key->hash; }
+    static uint32_t hashOf(const Entry& e) {
+        // forEach only yields live entries, so e.key is never null here.
+        // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
+        return e.key->hash;
+    }
     static bool keyMatch(const Entry& slot, const Entry& needle) {
         return slot.key == needle.key;
     }
