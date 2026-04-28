@@ -3,6 +3,7 @@
 #include <cstdio>
 
 #include "chunk.h"
+#include "core_hash_map.h"
 #include "object.h"
 #include "table.h"
 #include "value.h"
@@ -174,16 +175,28 @@ struct MapEntry {
     MapSlot state{MapSlot::EMPTY};
 };
 
+struct MapPolicy {
+    static bool isEmpty(const MapEntry& e) { return e.state == MapSlot::EMPTY; }
+    static bool isTombstone(const MapEntry& e) {
+        return e.state == MapSlot::TOMBSTONE;
+    }
+    static void makeTombstone(MapEntry& e) {
+        e.key = Value{Nil{}};
+        e.value = Value{Nil{}};
+        e.state = MapSlot::TOMBSTONE;
+    }
+    static uint32_t hashOf(const MapEntry& e); // defined in object.cpp
+    static bool keyMatch(const MapEntry& slot, const MapEntry& needle) {
+        return slot.key == needle.key;
+    }
+};
+
 struct ObjMap : public Obj {
     ObjClass* klass; // shared s_mapClass, for method dispatch
-    VmVector<MapEntry> buckets;
-    int count{0};      // live entries only (user-visible len)
-    int bucketUsed{0}; // live + tombstone entries (load-factor check)
-
-    static constexpr double MAX_LOAD = 0.75;
+    CoreHashMap<MapEntry, MapPolicy, VmAllocator<MapEntry>> map;
 
     ObjMap(ObjClass* k, VmAllocator<MapEntry> alloc)
-        : Obj(ObjType::MAP), klass(k), buckets(alloc) {}
+        : Obj(ObjType::MAP), klass(k), map(alloc) {}
 
     // Returns true if key was newly inserted (false = update).
     bool mapSet(const Value& key, const Value& value);

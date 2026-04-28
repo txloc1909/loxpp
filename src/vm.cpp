@@ -69,7 +69,7 @@ static Value lenNative(int /*argCount*/, Value* args) {
     }
     if (isMap(args[0])) {
         auto* map = asObjMap(as<Obj*>(args[0]));
-        return from<Number>(static_cast<double>(map->count));
+        return from<Number>(static_cast<double>(map->map.count()));
     }
     nativeRuntimeError("len() argument must be a list, string, or map.");
     return from<Nil>(Nil{});
@@ -111,13 +111,10 @@ static Value mapKeysNative(int /*argc*/, Value* args) {
     ObjList* list =
         s_currentMM->create<ObjList>(VmAllocator<Value>{s_currentMM});
     s_currentMM->pushTempRoot(list);
-    for (const auto& e : map->buckets) {
-        if (e.state != MapSlot::OCCUPIED)
-            continue;
-        // key may be an ObjString; it stays alive via the map (map is rooted
-        // as the receiver on the VM stack). push_back may GC — list is rooted.
-        list->elements.push_back(e.key);
-    }
+    // key may be an ObjString; it stays alive via the map (map is rooted
+    // as the receiver on the VM stack). push_back may GC — list is rooted.
+    map->map.forEach(
+        [list](const MapEntry& e) { list->elements.push_back(e.key); });
     s_currentMM->popTempRoot();
     return Value{static_cast<Obj*>(list)};
 }
@@ -127,11 +124,8 @@ static Value mapValuesNative(int /*argc*/, Value* args) {
     ObjList* list =
         s_currentMM->create<ObjList>(VmAllocator<Value>{s_currentMM});
     s_currentMM->pushTempRoot(list);
-    for (const auto& e : map->buckets) {
-        if (e.state != MapSlot::OCCUPIED)
-            continue;
-        list->elements.push_back(e.value);
-    }
+    map->map.forEach(
+        [list](const MapEntry& e) { list->elements.push_back(e.value); });
     s_currentMM->popTempRoot();
     return Value{static_cast<Obj*>(list)};
 }
@@ -141,9 +135,7 @@ static Value mapEntriesNative(int /*argc*/, Value* args) {
     ObjList* result =
         s_currentMM->create<ObjList>(VmAllocator<Value>{s_currentMM});
     s_currentMM->pushTempRoot(result);
-    for (const auto& e : map->buckets) {
-        if (e.state != MapSlot::OCCUPIED)
-            continue;
+    map->map.forEach([result](const MapEntry& e) {
         // Build [key, value] pair list
         ObjList* pair =
             s_currentMM->create<ObjList>(VmAllocator<Value>{s_currentMM});
@@ -154,7 +146,7 @@ static Value mapEntriesNative(int /*argc*/, Value* args) {
         // may trigger GC, and pair would be unreachable if popped too early.
         result->elements.push_back(Value{static_cast<Obj*>(pair)});
         s_currentMM->popTempRoot(); // pair — now safe, stored in result
-    }
+    });
     s_currentMM->popTempRoot(); // result
     return Value{static_cast<Obj*>(result)};
 }
@@ -1160,10 +1152,10 @@ InterpretResult VM::run() {
                 // Scan forward from current index for the next occupied bucket.
                 auto* map = asObjMap(as<Obj*>(it->collection));
                 int i = it->index;
-                while (i < (int)map->buckets.size() &&
-                       map->buckets[i].state != MapSlot::OCCUPIED)
+                while (i < map->map.capacity() &&
+                       map->map.entryAt(i)->state != MapSlot::OCCUPIED)
                     ++i;
-                has = i < (int)map->buckets.size();
+                has = i < map->map.capacity();
             } else {
                 runtimeError(
                     "BUG: ObjIterator::collection has unexpected type.");
@@ -1196,11 +1188,11 @@ InterpretResult VM::run() {
                 // Skip past empty/tombstone buckets to the next occupied one,
                 // push its key, then advance the cursor past it.
                 auto* map = asObjMap(as<Obj*>(it->collection));
-                while (it->index < (int)map->buckets.size() &&
-                       map->buckets[it->index].state != MapSlot::OCCUPIED)
+                while (it->index < map->map.capacity() &&
+                       map->map.entryAt(it->index)->state != MapSlot::OCCUPIED)
                     ++it->index;
                 // ITER_HAS_NEXT was true, so an occupied slot must exist.
-                push(map->buckets[it->index].key);
+                push(map->map.entryAt(it->index)->key);
                 ++it->index;
             } else {
                 runtimeError(
