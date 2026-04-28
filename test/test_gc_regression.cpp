@@ -89,3 +89,49 @@ TEST(GcRegression, Bug32_ObjFunctionUnrootedInLocalFunDeclaration) {
     ASSERT_TRUE(v.has_value());
     EXPECT_DOUBLE_EQ(std::get<Number>(*v), 42.0);
 }
+
+// ---------------------------------------------------------------------------
+// Bug #58: ObjList (val) unrooted in SET_INDEX map branch (vm.cpp)
+//
+// Timeline under LOXPP_STRESS_GC:
+//   SET_INDEX handler:
+//     val = pop()        ← ObjList leaves the VM stack
+//     indexVal = pop()
+//     listVal  = pop()
+//     pushTempRoot(map)  ← map is protected
+//     map->mapSet(indexVal, val)
+//       → ObjMap::mapSet grows bucket array
+//       → VmAllocator::allocate → rawAlloc → GC fires
+//         val (ObjList) not on stack, not a temp root → swept/freed
+//       → map stores dangling pointer
+//     push(val)          ← pushes dangling pointer
+//   Later: m["key"].append(99) → isInstance() on freed ObjList → UAF
+//
+// The reproducer fills the map to 6 entries (capacity 8, load-factor 0.75
+// threshold = 6) so the 7th insert crosses the resize threshold.
+//
+// ASAN detects: heap-use-after-free in isInstance / vm.cpp::run, freed by
+// sweep(), allocated by BUILD_LIST 0.
+// ---------------------------------------------------------------------------
+
+TEST(GcRegression, Bug58_MapSetIndexUAFOnResize) {
+    VMTestHarness h;
+    // Fill map to 6 entries so the 7th insert triggers a resize, then assign
+    // a freshly-allocated list as the value. Under ASAN+STRESS_GC this aborts
+    // with a heap-use-after-free unless val is also rooted during mapSet.
+    ASSERT_EQ(h.run(R"(
+        var m = {};
+        var i = 0;
+        while (i < 6) {
+            m[i] = i;
+            i = i + 1;
+        }
+        m["key"] = [];
+        m["key"].append(99);
+        var result = m["key"][0];
+    )"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("result");
+    ASSERT_TRUE(v.has_value());
+    EXPECT_DOUBLE_EQ(std::get<Number>(*v), 99.0);
+}
