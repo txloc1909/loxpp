@@ -2,8 +2,8 @@
 #include <gtest/gtest.h>
 
 static void expect_num(const Value& v, double expected) {
-    ASSERT_TRUE(std::holds_alternative<Number>(v)) << "expected Number";
-    EXPECT_NEAR(std::get<Number>(v), expected, 1e-9);
+    ASSERT_TRUE(is<Number>(v)) << "expected Number";
+    EXPECT_NEAR(as<Number>(v), expected, 1e-9);
 }
 
 class VarDestructureTest : public ::testing::Test {};
@@ -116,6 +116,19 @@ TEST_F(VarDestructureTest, GlobalScopeSingleField) {
     auto v = h.getGlobal("n");
     ASSERT_TRUE(v.has_value());
     expect_num(*v, 42);
+}
+
+TEST_F(VarDestructureTest, TrailingCommaIsValid) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        class Wrapper { init(n) { this.n = n; } }
+        var src = Wrapper(7);
+        var {n,} = src;
+    )"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("n");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 7);
 }
 
 // ===========================================================================

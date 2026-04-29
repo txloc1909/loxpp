@@ -217,7 +217,8 @@ void Compiler::varDestructure() {
             m_parser->error("Too many fields in destructuring pattern.");
         m_parser->consume(TokenType::IDENTIFIER, "Expect field name.");
         fields.push_back(m_parser->m_previous);
-    } while (m_parser->match(TokenType::COMMA));
+    } while (m_parser->match(TokenType::COMMA) &&
+             !m_parser->check(TokenType::RIGHT_BRACE));
 
     m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after field names.");
     m_parser->consume(TokenType::EQUAL,

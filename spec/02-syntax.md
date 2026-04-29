@@ -18,7 +18,7 @@ funDecl        ::= "fun" IDENTIFIER "(" parameters? ")" block ;
 parameters     ::= IDENTIFIER ( "," IDENTIFIER )* ;
 
 varDecl        ::= "var" IDENTIFIER ( "=" expression )? ";"
-               | "var" "{" IDENTIFIER ( "," IDENTIFIER )* "}" "=" expression ";" ;
+               | "var" "{" IDENTIFIER ( "," IDENTIFIER )* ","? "}" "=" expression ";" ;
 
 (* Statements *)
 statement      ::= exprStmt

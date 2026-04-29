@@ -192,6 +192,15 @@ var [a, b] = list
 
 **No new opcodes** — uses existing `GET_PROPERTY`.
 
+**Trailing comma** is allowed: `var {x, y,} = obj` is valid.
+
+**Return-value optimization opportunity:** when the RHS is a call expression
+(`var {a, b} = f()`), the returned instance is used only for field extraction
+and then discarded. A future optimisation could fuse the call + destructure
+into a single pass that reads fields directly without materialising a hidden
+source variable, saving one local slot and one `GET_LOCAL` per field. This
+requires a new opcode or compiler pass — deferred, not in scope for Phases 1–2.
+
 **Programs unlocked:**
 
 | Program | What Phase 1.5 enables |
