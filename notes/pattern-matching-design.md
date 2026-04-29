@@ -326,3 +326,327 @@ Phase 2: variant + destructuring in arms + match-as-expression
 - **Open class hierarchies remain open.** Matching on user-defined classes that
   are not declared as `variant` gets runtime exhaustiveness only — no compile-
   time check, because new subclasses can be added anywhere.
+
+---
+
+## Open questions resolved
+
+This section records explicit answers to the design questions raised in
+`pattern-matching-counterpoints.md`. Each answer is recorded here because these
+decisions are non-obvious and have downstream implementation consequences.
+
+---
+
+### First-class patterns — explicitly declined
+
+The counterpoints document lists first-class patterns (patterns as passable
+runtime values) as a tentative "Yes". **This decision is reversed: first-class
+patterns are out of scope, at least through Phase 2.**
+
+The cascading consequences are too severe for the language at this stage:
+- Forces structural (non-nominal) matching → kills compile-time exhaustiveness
+  for `variant`
+- Forces open variants → exhaustiveness degrades to a lint hint, not a guarantee
+- Requires a pattern algebra as a core VM type (`Pattern = Wildcard | Bind | Eq
+  | Constructor | Guard | Or | And | Not | Seq`)
+- Requires `Option<Bindings>` as the match result type everywhere, infecting
+  the entire error handling story
+- Creates the pattern equality problem (undecidable in general)
+- Decision-tree compilation is only possible for static arms; all dynamic arms
+  fall back to O(n) sequential testing
+
+None of these trade-offs are acceptable for a language whose primary goals are
+learnability and clean semantics. First-class patterns are a research feature.
+The existing design — nominal closed `variant` types, syntactic patterns only —
+preserves all the ergonomic wins (destructuring, exhaustiveness, binding) without
+any of the above costs.
+
+If first-class patterns are revisited in the future, they must be scoped as a
+separate opt-in facility (e.g. a `pat` object) that explicitly degrades
+exhaustiveness to runtime-only for the match expressions that use them.
+
+---
+
+### Nominal vs. structural matching — nominal (tag-based)
+
+A `variant` constructor match checks the **runtime constructor tag** (a small
+integer discriminant stored in the value), not the presence or shape of fields.
+
+```lox
+variant Shape { Circle(radius) Rect(width, height) }
+
+var s = circle(5)
+match s {
+  case circle{r} => ...   // tag check: is this a circle? then bind radius as r
+  case rect{w,h} => ...   // tag check: is this a rect?
+}
+```
+
+An object that happens to have a `radius` field but was not constructed with
+`Circle(...)` does not match `case Circle{r}`. This is the nominal model.
+Structural ("duck-typed") matching — "does this object have a `radius` field?"
+— is not supported. Reasons:
+
+1. Structural matching makes exhaustiveness impossible: the compiler cannot know
+   what shapes exist in the world.
+2. Tag-based matching maps directly to a jump table on the discriminant integer
+   — O(1) dispatch for `variant` types.
+3. Nominal semantics are what users from OCaml/Rust/Haskell expect, and what
+   makes `variant` useful as a replacement for stringly-typed kind fields.
+
+---
+
+### Open vs. closed variants — closed, with runtime fallback for open types
+
+`variant` declarations are **closed**: the compiler records all constructors at
+parse time and rejects new constructors outside the declaring scope. This
+enables compile-time exhaustiveness.
+
+Open class hierarchies are **not** made into variants. Matching on an open class
+gets runtime exhaustiveness (MatchError on miss) only. These are separate
+facilities — users choose the guarantee they want by choosing `variant` vs.
+`class`.
+
+There is no "open variant" or extension mechanism. If a library variant needs to
+be extended, the correct model is composition: wrap the library variant in a new
+`variant` that adds cases.
+
+---
+
+### Bind vs. test disambiguation — bare identifier always binds
+
+The classic ML ambiguity: does `north` in a pattern position test against the
+existing variable `north` or create a new binding?
+
+**Decision: bare identifiers in patterns always create new bindings.** To test
+against an existing value, use a guard clause.
+
+```lox
+var north = 0
+
+match direction {
+  case north => ...       // WRONG intent: binds a NEW 'north', always matches
+  case d if d == north => ...  // CORRECT: test against existing 'north'
+  case _ => ...
+}
+```
+
+Rationale:
+- Consistent and unsurprising: pattern position always means "bind this"
+- No pin operator (`^`) needed — that syntax is unfamiliar and adds novelty budget
+- Guards already exist for Phase 1; "use a guard to test existing values" is
+  one teachable rule
+- Rust uses the same convention (with the addition of named constants in `const`
+  position, which Lox++ does not have)
+
+The compiler should warn when a bare identifier arm shadows an in-scope variable
+with the same name, since this is almost always a mistake.
+
+---
+
+### Struct literal vs. block ambiguity — resolved by `=>` separator
+
+Lox++ uses `{` for both blocks and (in Phase 2) field destructuring patterns.
+Without care, `case Circle { ... }` is ambiguous: is `{ ... }` the field pattern
+or the start of the arm body?
+
+**Resolution: the `=>` separator is mandatory between pattern and body.** The
+grammar rule is:
+
+```
+arm ::= 'case' pattern ('if' expr)? '=>' body
+```
+
+Everything before `=>` is pattern context; `{` in pattern context means field
+destructuring. Everything after `=>` is expression/statement context; `{` there
+starts a block. The ambiguity does not exist at the grammar level because the
+contexts are delimited by `=>`.
+
+```lox
+match shape {
+  case Circle{r}    => 3.14159 * r * r     // {r} is a field pattern
+  case Rect{w, h}   => { var a = w * h; a }  // { after => is a block
+}
+```
+
+This is the same resolution Rust uses for `match`. Rust additionally disallows
+struct literal expressions in `if`/`while` conditions for the same reason; Lox++
+inherits the same restriction: struct-pattern syntax (`Constructor{fields}`) is
+only valid in pattern position.
+
+---
+
+### Or-patterns and binding consistency — hard error on mismatch
+
+Or-patterns (`case A(y) | B(y)`) are supported in Phase 2. The constraint is:
+**all alternatives must bind exactly the same set of names**, or the compiler
+emits an error.
+
+```lox
+match x {
+  case A(y) | B(y) => use(y)     // ok: both bind y
+  case A(y) | B(z) => ...        // compile error: A binds y, B binds z
+  case A(y) | C    => ...        // compile error: A binds y, C binds nothing
+}
+```
+
+This is not optional — a body that references `y` must know `y` is bound in
+every path that reaches it. Allowing mismatched bindings would require either
+making unbound names nil (silent bugs) or runtime checks (defeats the point of
+compile-time binding).
+
+Note: the existing multi-value arm syntax from Phase 1 (`case 1, 2, 3 =>`) is
+the degenerate case of or-patterns with no bindings. It remains valid and is not
+affected by this constraint.
+
+---
+
+### Scope and hygiene of pattern-bound variables
+
+Variables bound in a pattern are in scope for **both the guard clause and the
+arm body**. If the guard fails, the bindings do not escape to subsequent arms —
+they are implemented as locals that go out of scope at the end of the failed
+arm's test sequence.
+
+```lox
+match x {
+  case A(y) if y > 0 => use(y)   // y in scope for guard AND body
+  case A(y)          => other(y) // fresh y, independent of the arm above
+}
+```
+
+Implementation: the compiler allocates a local slot for each pattern binding
+within the arm's test sequence. On guard failure, a `JUMP` skips the arm body
+and the slots go out of scope. No special "rollback" is needed — the slot simply
+was never committed to the user-visible scope table.
+
+---
+
+### Mutability of pattern-bound variables — mutable, following language default
+
+Lox++ has no `let`/`const` distinction; all `var` bindings are mutable. Pattern
+bindings follow the same convention: they create implicit `var`s and are
+mutable by default.
+
+```lox
+match point {
+  case Point{x, y} => {
+    x = x + 1   // legal — x is a mutable local
+    print x
+  }
+}
+```
+
+This is consistent with the rest of the language and requires no new rules.
+If Lox++ ever adds immutable bindings, pattern bindings should adopt the same
+syntax as the general solution rather than pattern matching having its own
+mutability rules.
+
+---
+
+### Decision tree vs. sequential compilation — decision tree for `variant`
+
+For nominal closed `variant` types, arms are compiled to a **decision tree**
+dispatching on the constructor tag discriminant. The discriminant is a small
+integer (index of the constructor in the variant's declaration order), enabling
+a jump table when the number of constructors is small and dense.
+
+```
+match shape {             compiled to:
+  case Circle{r} => a       LOAD subject
+  case Rect{w,h} => b       GET_TAG
+  case Triangle  => c       JUMP_TABLE [Circle→L1, Rect→L2, Triangle→L3]
+}                         L1: bind r, jump to a
+                          L2: bind w h, jump to b
+                          L3: jump to c
+```
+
+This is O(1) dispatch for `variant` types. Guards break the jump table model
+(a guard can fail, requiring a fall-through), so arms with guards revert to
+sequential testing within their tag's slot.
+
+For open-class and untyped scrutinees (Phase 1 and non-variant Phase 2), the
+existing `EQUAL + JUMP_IF_FALSE` chain remains — sequential and O(n) in arms,
+which is acceptable for the small switch-like cases that form of match is used
+for.
+
+**First-class patterns would have forced all match to be sequential.** This is
+one concrete implementation cost of that decision.
+
+---
+
+### `not`-patterns — deferred
+
+Negation (`not`-patterns) is not part of Phase 1 or Phase 2. The reasons:
+
+1. Exhaustiveness with `Not` is co-NP hard in general.
+2. Decision-tree compilation is not possible for arbitrary `Not` patterns.
+3. Binding semantics under `Not` are undefined (`not(bind(x))` makes no sense).
+4. The restricted form (non-binding `Not` only) has limited use cases that guards
+   already cover: `case x if x != 0` is more readable than a hypothetical
+   `case not(0)`.
+
+If added later, the restriction from the counterpoints document applies: `Not`
+is only permitted over non-binding sub-patterns, and match expressions
+containing `not`-patterns are explicitly excluded from exhaustiveness checking.
+
+---
+
+### Recursive variants — heap-allocated, naturally supported
+
+Recursive variants (e.g. `variant Tree { Leaf(v) Node(left, right) }`) are
+supported without special treatment. All `variant` constructor values are
+heap-allocated `Obj*` values — the same representation as class instances. A
+`Node` holding two `Tree` sub-values holds two `Obj*` pointers, which is exactly
+how the GC already traces object graphs.
+
+No "boxing" annotation is needed and no optimization for unboxed recursive
+variants is planned. If performance becomes a concern for deep recursive
+structures, that is a VM-level optimization problem, not a language design one.
+
+---
+
+### Nested pattern depth and `@`-bindings — deferred
+
+Deep nested patterns are supported syntactically but `@`-bindings (bind the
+whole matched subtree and destructure it simultaneously, e.g. `node @ Node{l,r}`)
+are deferred. They add syntax surface without unblocking any new program class.
+A user who needs both the whole value and its parts can introduce a local:
+
+```lox
+case Node{left, right} => {
+  var node = Node(left, right)   // reconstruct if needed
+  ...
+}
+```
+
+This is verbose but the workaround is clear. `@`-bindings can be added later
+without changing any other part of the design.
+
+---
+
+### Match failure semantics — MatchError, not Option\<Bindings\>
+
+The counterpoints document identifies `Option<Bindings>` as "the most
+principled choice" for first-class patterns. Since first-class patterns are
+declined, this does not apply.
+
+For syntactic match expressions, failure semantics are simpler:
+- A `match` expression with no matching arm and no wildcard raises `MatchError`
+  at runtime
+- The error is not catchable within a match expression (it propagates up)
+- There is no implicit `None`/`nil` return on no-match
+
+This is the Elixir/Rust model: match is *assumed exhaustive* by the programmer,
+and a miss is always a bug. `Option<Bindings>` would make every match expression
+partial by default, requiring callers to handle the "no match" case even when it
+is structurally impossible — exactly the nil-proliferation problem the design is
+trying to eliminate.
+
+---
+
+### Pattern equality — not applicable
+
+Pattern equality (are two patterns equal? can patterns be hashed?) is a
+consequence of first-class patterns. Since patterns are syntactic constructs
+and not runtime values, this question does not arise.
