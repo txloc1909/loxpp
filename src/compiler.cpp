@@ -562,11 +562,9 @@ void Compiler::matchStatement() {
 
     m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before match body.");
 
-    // Push match context: start = -1 flags this as match (not loop).
+    // start = -1 flags this context as a match (not a loop).
     m_loopStack.push_back({-1, m_localCount, {}});
 
-    // True when an unguarded identifier (wildcard or binding) arm is seen — no
-    // MATCH_ERROR needed at the end, and no further arms are reachable.
     bool hasUnguardedCatchAll = false;
 
     while (!m_parser->check(TokenType::RIGHT_BRACE) &&
@@ -575,146 +573,125 @@ void Compiler::matchStatement() {
             m_parser->error("Expect 'case' in match body.");
             break;
         }
-        if (hasUnguardedCatchAll)
+        if (hasUnguardedCatchAll) {
             m_parser->error("Unreachable arm after catch-all.");
+        }
 
-        // Track locals at arm entry so we can clean them up on guard-fail.
         int armLocalBase = m_localCount;
-
-        // -------------------------------------------------------
-        // Pattern
-        // -------------------------------------------------------
-        // An IDENTIFIER token (not a keyword) is a wildcard/binding.
-        // Everything else is a literal equality test.
-        bool isIdentPat = m_parser->check(TokenType::IDENTIFIER);
-        int lastMiss = -1; // patch target for literal-miss
-        int bindingCount =
-            0; // locals pushed onto the stack by this arm's pattern
-
-        if (isIdentPat) {
-            // Consume the identifier.
-            Token patTok = m_parser->m_current;
-            m_parser->advance();
-
-            // Binding or wildcard must be the sole pattern.
-            if (m_parser->check(TokenType::COMMA))
-                m_parser->error(
-                    "A binding pattern must be the sole arm pattern.");
-
-            if (patTok.lexeme != "_") {
-                // Non-wildcard: push subject value and declare a local.
-                emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
-                Token bindTok{TokenType::IDENTIFIER, patTok.lexeme,
-                              patTok.line};
-                addLocal(bindTok);
-                markInitialized();
-                bindingCount = 1;
-            }
-            // Wildcard '_': no code emitted; always matches.
-        } else {
-            // Literal pattern(s): equality chain.
-            // hitJumps: JUMP_IF_FALSE per non-last literal (miss → try next).
-            // bodyJumps: unconditional JUMP per non-last literal (hit → body).
-            std::vector<int> hitJumps;
-            std::vector<int> bodyJumps;
-
-            do {
-                emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
-                m_parser->parsePrecedence(Precedence::OR, this);
-                emitByte(Op::EQUAL);
-
-                if (m_parser->check(TokenType::COMMA)) {
-                    hitJumps.push_back(emitJump(Op::JUMP_IF_FALSE));
-                    emitByte(Op::POP);                       // pop true
-                    bodyJumps.push_back(emitJump(Op::JUMP)); // hit → body
-                    patchJump(hitJumps.back());              // false: try next
-                    emitByte(Op::POP);                       // pop false
-                }
-            } while (m_parser->match(TokenType::COMMA));
-
-            lastMiss = emitJump(Op::JUMP_IF_FALSE);
-            emitByte(Op::POP); // pop true; fall into body
-            for (int j : bodyJumps)
-                patchJump(j); // all hits land here
-        }
-
-        // -------------------------------------------------------
-        // Guard clause (optional)
-        // -------------------------------------------------------
-        int guardMiss = -1;
-        bool hasGuard = m_parser->match(TokenType::IF);
-        if (hasGuard) {
-            expression();
-            guardMiss = emitJump(Op::JUMP_IF_FALSE);
-            emitByte(Op::POP); // pop true; enter body
-        }
-
-        if (isIdentPat && !hasGuard)
+        auto arm = compileMatchArm(subjectSlot, armLocalBase);
+        if (arm.isUnguardedCatchAll) {
             hasUnguardedCatchAll = true;
-
-        // -------------------------------------------------------
-        // Arm separator
-        // -------------------------------------------------------
-        m_parser->consume(TokenType::FAT_ARROW, "Expect '=>' after pattern.");
-
-        // -------------------------------------------------------
-        // Body (single statement or braced block)
-        // -------------------------------------------------------
-        beginScope();
-        if (m_parser->match(TokenType::LEFT_BRACE)) {
-            while (!m_parser->check(TokenType::RIGHT_BRACE) &&
-                   !m_parser->check(TokenType::EOF_))
-                declaration();
-            m_parser->consume(TokenType::RIGHT_BRACE,
-                              "Expect '}' after match arm body.");
-        } else {
-            statement();
         }
-        endScope(); // clean up any var declarations inside the body
 
-        // -------------------------------------------------------
-        // Normal arm exit: clean up binding locals, jump to match end.
-        // emitLoopCleanup handles captured upvalues correctly.
-        // -------------------------------------------------------
-        emitLoopCleanup(armLocalBase);
-        m_localCount = armLocalBase;
-        int endJump = emitJump(Op::JUMP);
-        m_loopStack.back().breakJumps.push_back(endJump);
-
-        // -------------------------------------------------------
         // Guard-fail exit: pop guard bool, pop binding locals.
-        // -------------------------------------------------------
-        if (guardMiss != -1) {
-            patchJump(guardMiss);
+        if (arm.guardMiss != -1) {
+            patchJump(arm.guardMiss);
             emitByte(Op::POP); // pop false guard
-            for (int i = 0; i < bindingCount; i++)
+            for (int i = 0; i < arm.bindingCount; i++) {
                 emitByte(Op::POP); // pop binding value(s)
+            }
         }
 
-        // -------------------------------------------------------
         // Literal miss: pop false equality, fall through to next arm.
-        // -------------------------------------------------------
-        if (lastMiss != -1) {
-            patchJump(lastMiss);
-            emitByte(Op::POP); // pop false
+        if (arm.lastMiss != -1) {
+            patchJump(arm.lastMiss);
+            emitByte(Op::POP);
         }
     }
 
     m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after match body.");
 
-    // If no unguarded catch-all arm was seen, emit MATCH_ERROR so that a
-    // completely non-matching subject raises a runtime error rather than
-    // silently falling through.
+    // No unguarded catch-all → raise MatchError when no arm matched.
     if (!hasUnguardedCatchAll) {
         emitByte(Op::MATCH_ERROR);
     }
 
-    // Patch all arm-end jumps to land here (after MATCH_ERROR or at end).
-    for (int j : m_loopStack.back().breakJumps)
+    for (int j : m_loopStack.back().breakJumps) {
         patchJump(j);
-
+    }
     m_loopStack.pop_back();
     endScope(); // pops the hidden subject local
+}
+
+Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
+                                                   int armLocalBase) {
+    bool isIdentPat = m_parser->check(TokenType::IDENTIFIER);
+    int lastMiss = -1;
+    int bindingCount = 0;
+
+    if (isIdentPat) {
+        Token patTok = m_parser->m_current;
+        m_parser->advance();
+        if (m_parser->check(TokenType::COMMA)) {
+            m_parser->error("A binding pattern must be the sole arm pattern.");
+        }
+        if (patTok.lexeme != "_") {
+            emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+            Token bindTok{TokenType::IDENTIFIER, patTok.lexeme, patTok.line};
+            addLocal(bindTok);
+            markInitialized();
+            bindingCount = 1;
+        }
+    } else {
+        // Literal pattern(s): equality chain.
+        // hitJumps: JUMP_IF_FALSE per non-last literal (miss → try next).
+        // bodyJumps: unconditional JUMP per non-last literal (hit → body).
+        std::vector<int> hitJumps;
+        std::vector<int> bodyJumps;
+
+        do {
+            emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+            m_parser->parsePrecedence(Precedence::OR, this);
+            emitByte(Op::EQUAL);
+
+            if (m_parser->check(TokenType::COMMA)) {
+                hitJumps.push_back(emitJump(Op::JUMP_IF_FALSE));
+                emitByte(Op::POP);
+                bodyJumps.push_back(emitJump(Op::JUMP));
+                patchJump(hitJumps.back());
+                emitByte(Op::POP);
+            }
+        } while (m_parser->match(TokenType::COMMA));
+
+        lastMiss = emitJump(Op::JUMP_IF_FALSE);
+        emitByte(Op::POP);
+        for (int j : bodyJumps) {
+            patchJump(j);
+        }
+    }
+
+    // Guard clause (optional).
+    int guardMiss = -1;
+    bool hasGuard = m_parser->match(TokenType::IF);
+    if (hasGuard) {
+        expression();
+        guardMiss = emitJump(Op::JUMP_IF_FALSE);
+        emitByte(Op::POP);
+    }
+
+    m_parser->consume(TokenType::FAT_ARROW, "Expect '=>' after pattern.");
+
+    // Body (single statement or braced block).
+    beginScope();
+    if (m_parser->match(TokenType::LEFT_BRACE)) {
+        while (!m_parser->check(TokenType::RIGHT_BRACE) &&
+               !m_parser->check(TokenType::EOF_)) {
+            declaration();
+        }
+        m_parser->consume(TokenType::RIGHT_BRACE,
+                          "Expect '}' after match arm body.");
+    } else {
+        statement();
+    }
+    endScope();
+
+    // Normal arm exit: clean up binding locals, jump to match end.
+    emitLoopCleanup(armLocalBase);
+    m_localCount = armLocalBase;
+    int endJump = emitJump(Op::JUMP);
+    m_loopStack.back().breakJumps.push_back(endJump);
+
+    return {lastMiss, guardMiss, bindingCount, isIdentPat && !hasGuard};
 }
 
 void Compiler::funDeclaration() {

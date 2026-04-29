@@ -71,6 +71,14 @@ class Compiler {
     void breakStatement();
     void continueStatement();
     void matchStatement();
+
+    struct MatchArmResult {
+        int lastMiss;     // patch offset for literal miss (-1 = ident pat)
+        int guardMiss;    // patch offset for guard fail  (-1 = no guard)
+        int bindingCount; // locals pushed by the pattern
+        bool isUnguardedCatchAll; // true → suppress MATCH_ERROR
+    };
+    MatchArmResult compileMatchArm(int subjectSlot, int armLocalBase);
     void varDeclaration();
     void block();
     void funDeclaration();
