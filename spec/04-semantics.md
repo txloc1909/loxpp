@@ -63,6 +63,24 @@ Evaluates `expr` and stores the result in the variable named `x`. The
 expression value is the assigned value. If `x` is not declared in any
 reachable scope this is a **runtime error**.
 
+### Destructuring Declaration
+
+```
+var {a, b} = expr
+```
+
+Evaluates `expr` exactly once to produce a source object. For each field name
+in the pattern, reads that named property from the source object (equivalent to
+`source.fieldName`) and binds it to a new variable in the current scope.
+
+- The initializer is **required**; `var {a, b};` is a **static error**.
+- Each field name must be a distinct identifier. Duplicate names in the same
+  pattern are a **static error**.
+- The source object is not exposed as a user-accessible variable.
+- Pattern-bound variables are mutable (same default as `var`).
+- If a named property is absent from the source object, this is a **runtime
+  error** (same as `obj.missingField`).
+
 ---
 
 ## Expressions

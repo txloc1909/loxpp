@@ -106,6 +106,10 @@ class Compiler {
     void declareVariable();
     void markInitialized();
 
+    void varDestructure();
+    void emitDestructureLocal(const std::vector<Token>& fields);
+    void emitDestructureGlobal(const std::vector<Token>& fields);
+
     void parseFunction(FunctionType type);
 
     void emitByte(Byte byte);

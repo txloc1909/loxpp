@@ -1,0 +1,71 @@
+// multi_return.lox — Returning multiple values via class instances and destructuring.
+//
+// Demonstrates: var {x, y} destructuring, multi-return pattern via classes.
+
+class DivResult {
+    init(q, r) {
+        this.quot = q;
+        this.rem = r;
+    }
+}
+
+fun divmod(a, b) {
+    return DivResult(a / b, a % b);
+}
+
+// CHECK: === divmod ===
+print "=== divmod ===";
+var {quot, rem} = divmod(17, 5);
+// CHECK: quot = 3.4
+// CHECK: rem = 2
+print "quot = " + str(quot);
+print "rem = " + str(rem);
+
+class Point {
+    init(px, py) {
+        this.x = px;
+        this.y = py;
+    }
+}
+
+fun midpoint(p1, p2) {
+    return Point((p1.x + p2.x) / 2, (p1.y + p2.y) / 2);
+}
+
+// CHECK: === midpoint ===
+print "=== midpoint ===";
+var a = Point(0, 0);
+var b = Point(4, 6);
+var {x, y} = midpoint(a, b);
+// CHECK: x = 2
+// CHECK: y = 3
+print "x = " + str(x);
+print "y = " + str(y);
+
+class MinMax {
+    init(lo, hi) {
+        this.min = lo;
+        this.max = hi;
+    }
+}
+
+fun minmax(list) {
+    var lo = list[0];
+    var hi = list[0];
+    var i = 1;
+    while (i < len(list)) {
+        if (list[i] < lo) lo = list[i];
+        if (list[i] > hi) hi = list[i];
+        i = i + 1;
+    }
+    return MinMax(lo, hi);
+}
+
+// CHECK: === minmax ===
+print "=== minmax ===";
+var nums = [3, 1, 4, 1, 5, 9, 2, 6];
+var {min, max} = minmax(nums);
+// CHECK: min = 1
+// CHECK: max = 9
+print "min = " + str(min);
+print "max = " + str(max);

@@ -207,7 +207,82 @@ void Compiler::declaration() {
         m_parser->synchronize();
 }
 
+void Compiler::varDestructure() {
+    m_parser->consume(TokenType::LEFT_BRACE,
+                      "Expect '{' in destructuring pattern.");
+
+    std::vector<Token> fields;
+    do {
+        if (fields.size() >= UINT8_COUNT)
+            m_parser->error("Too many fields in destructuring pattern.");
+        m_parser->consume(TokenType::IDENTIFIER, "Expect field name.");
+        fields.push_back(m_parser->m_previous);
+    } while (m_parser->match(TokenType::COMMA) &&
+             !m_parser->check(TokenType::RIGHT_BRACE));
+
+    m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after field names.");
+    m_parser->consume(TokenType::EQUAL,
+                      "Expect '=' after destructuring pattern.");
+
+    expression();
+
+    m_parser->consume(TokenType::SEMICOLON,
+                      "Expect ';' after variable declaration.");
+
+    if (m_scopeDepth > 0)
+        emitDestructureLocal(fields);
+    else
+        emitDestructureGlobal(fields);
+}
+
+void Compiler::emitDestructureLocal(const std::vector<Token>& fields) {
+    // src_obj is already on the stack from expression(); claim it as a hidden
+    // local.
+    Token hidden;
+    hidden.type = TokenType::IDENTIFIER;
+    hidden.lexeme = "#src";
+    hidden.line = m_parser->m_previous.line;
+    addLocal(hidden);
+    int srcSlot = m_localCount - 1;
+    m_locals[srcSlot].depth = m_scopeDepth;
+
+    for (const Token& field : fields) {
+        for (int i = m_localCount - 1; i >= 0; i--) {
+            const Local& local = m_locals[i];
+            if (local.depth != -1 && local.depth < m_scopeDepth)
+                break;
+            if (local.name.lexeme == field.lexeme)
+                m_parser->error(
+                    "Already a variable with this name in this scope.");
+        }
+        addLocal(field);
+        emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(srcSlot));
+        emitBytes(Op::GET_PROPERTY, identifierConstant(field));
+        m_locals[m_localCount - 1].depth = m_scopeDepth;
+    }
+}
+
+void Compiler::emitDestructureGlobal(const std::vector<Token>& fields) {
+    Token hidden;
+    hidden.type = TokenType::IDENTIFIER;
+    hidden.lexeme = "#destruct";
+    hidden.line = m_parser->m_previous.line;
+    uint8_t hiddenIdx = identifierConstant(hidden);
+    emitBytes(Op::DEFINE_GLOBAL, hiddenIdx);
+
+    for (const Token& field : fields) {
+        emitBytes(Op::GET_GLOBAL, hiddenIdx);
+        emitBytes(Op::GET_PROPERTY, identifierConstant(field));
+        emitBytes(Op::DEFINE_GLOBAL, identifierConstant(field));
+    }
+}
+
 void Compiler::varDeclaration() {
+    if (m_parser->check(TokenType::LEFT_BRACE)) {
+        varDestructure();
+        return;
+    }
+
     m_parser->consume(TokenType::IDENTIFIER, "Expect variable name.");
     Token name = m_parser->m_previous;
     declareVariable();
