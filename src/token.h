@@ -45,6 +45,7 @@ enum class TokenType : int {
     CONTINUE,
     DEFAULT,
     ELSE,
+    ENUM,
     FALSE,
     FUN,
     FOR,

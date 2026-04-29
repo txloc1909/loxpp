@@ -615,6 +615,16 @@ InterpretResult VM::run() {
             runtimeError("MatchError: no matching arm.");
             return InterpretResult::RUNTIME_ERROR;
         }
+        case Op::GET_TAG: {
+            Value val = pop();
+            if (!isEnumValue(val)) {
+                runtimeError("GET_TAG: expected an enum value.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            auto tag = static_cast<double>(asObjEnum(as<Obj*>(val))->ctor->tag);
+            push(Value{tag});
+            break;
+        }
         case Op::CALL: {
             int argCount = readByte();
             Value callee = peek(argCount);
@@ -653,6 +663,24 @@ InterpretResult VM::run() {
                     runtimeError("Expected 0 arguments but got %d.", argCount);
                     return InterpretResult::RUNTIME_ERROR;
                 }
+            } else if (isEnumCtor(callee)) {
+                ObjEnumCtor* ctor = asObjEnumCtor(as<Obj*>(callee));
+                if (argCount != static_cast<int>(ctor->arity)) {
+                    runtimeError("'%s' expects %d argument(s) but got %d.",
+                                 ctor->ctorName->chars.c_str(),
+                                 static_cast<int>(ctor->arity), argCount);
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                ObjEnum* enumVal =
+                    m_mm.create<ObjEnum>(ctor, VmAllocator<Value>{&m_mm});
+                m_mm.pushTempRoot(enumVal);
+                enumVal->fields.resize(static_cast<size_t>(argCount));
+                for (int i = argCount - 1; i >= 0; i--) {
+                    enumVal->fields[static_cast<size_t>(i)] = pop();
+                }
+                m_mm.popTempRoot();
+                pop(); // pop the ObjEnumCtor from the callee slot
+                push(Value{static_cast<Obj*>(enumVal)});
             } else {
                 runtimeError("Can only call functions and classes.");
                 return InterpretResult::RUNTIME_ERROR;
@@ -1019,6 +1047,19 @@ InterpretResult VM::run() {
                 Value result{Nil{}}; // default nil — returned when key absent
                 map->mapGet(indexVal, result);
                 push(result);
+            } else if (isEnumValue(collectionVal)) {
+                if (!is<Number>(indexVal)) {
+                    runtimeError("Enum field index must be a number.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                double n = as<Number>(indexVal);
+                auto* e = asObjEnum(as<Obj*>(collectionVal));
+                int idx = static_cast<int>(n);
+                if (idx < 0 || idx >= static_cast<int>(e->fields.size())) {
+                    runtimeError("Enum field index %d out of range.", idx);
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                push(e->fields[static_cast<size_t>(idx)]);
             } else {
                 runtimeError("Only lists, strings, and maps can be indexed.");
                 return InterpretResult::RUNTIME_ERROR;

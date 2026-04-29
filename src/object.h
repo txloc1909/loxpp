@@ -19,6 +19,8 @@ enum class ObjType : uint8_t {
     FILE,
     ITERATOR,
     MAP,
+    ENUM_CTOR,
+    ENUM,
 };
 
 inline uint32_t hashString(std::string_view s) {

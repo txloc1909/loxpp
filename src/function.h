@@ -210,3 +210,40 @@ inline ObjMap* asObjMap(Obj* o) { return static_cast<ObjMap*>(o); }
 inline bool isMap(const Value& v) {
     return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::MAP;
 }
+
+// ---------------------------------------------------------------------------
+// ObjEnumCtor — callable constructor created by an enum declaration.
+// ---------------------------------------------------------------------------
+struct ObjEnumCtor : public Obj {
+    uint8_t tag;
+    uint8_t arity;
+    ObjString* ctorName;
+    ObjString* enumName;
+
+    ObjEnumCtor(uint8_t t, uint8_t a, ObjString* cn, ObjString* en)
+        : Obj(ObjType::ENUM_CTOR), tag(t), arity(a), ctorName(cn),
+          enumName(en) {}
+};
+
+inline bool isEnumCtor(const Value& v) {
+    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::ENUM_CTOR;
+}
+inline ObjEnumCtor* asObjEnumCtor(Obj* o) {
+    return static_cast<ObjEnumCtor*>(o);
+}
+
+// ---------------------------------------------------------------------------
+// ObjEnum — value produced by calling an ObjEnumCtor.
+// ---------------------------------------------------------------------------
+struct ObjEnum : public Obj {
+    ObjEnumCtor* ctor;
+    VmVector<Value> fields;
+
+    ObjEnum(ObjEnumCtor* c, VmAllocator<Value> alloc)
+        : Obj(ObjType::ENUM), ctor(c), fields(alloc) {}
+};
+
+inline bool isEnumValue(const Value& v) {
+    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::ENUM;
+}
+inline ObjEnum* asObjEnum(Obj* o) { return static_cast<ObjEnum*>(o); }
