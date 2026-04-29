@@ -81,7 +81,6 @@ TEST_F(ScannerTest, MatchKeyword) {
     EXPECT_EQ(tokens[0].lexeme, "match");
 }
 
-
 TEST_F(ScannerTest, StringLiteral) {
     const char* source = "\"hello world\"";
     auto tokens = scanTokens(source);
