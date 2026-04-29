@@ -611,6 +611,10 @@ InterpretResult VM::run() {
             frame->ip -= readShort();
             break;
         }
+        case Op::MATCH_ERROR: {
+            runtimeError("MatchError: no matching arm.");
+            return InterpretResult::RUNTIME_ERROR;
+        }
         case Op::CALL: {
             int argCount = readByte();
             Value callee = peek(argCount);

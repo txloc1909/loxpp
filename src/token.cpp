@@ -35,6 +35,8 @@ std::ostream& operator<<(std::ostream& os, const TokenType& type) {
         return os << "EQUAL";
     case TokenType::EQUAL_EQUAL:
         return os << "EQUAL_EQUAL";
+    case TokenType::FAT_ARROW:
+        return os << "FAT_ARROW";
     case TokenType::GREATER:
         return os << "GREATER";
     case TokenType::GREATER_EQUAL:
@@ -73,6 +75,8 @@ std::ostream& operator<<(std::ostream& os, const TokenType& type) {
         return os << "PRINT";
     case TokenType::RETURN:
         return os << "RETURN";
+    case TokenType::MATCH:
+        return os << "MATCH";
     case TokenType::SUPER:
         return os << "SUPER";
     case TokenType::THIS:

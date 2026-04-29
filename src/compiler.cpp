@@ -335,8 +335,8 @@ void Compiler::statement() {
         breakStatement();
     } else if (m_parser->match(TokenType::CONTINUE)) {
         continueStatement();
-    } else if (m_parser->match(TokenType::SWITCH)) {
-        switchStatement();
+    } else if (m_parser->match(TokenType::MATCH)) {
+        matchStatement();
     } else if (m_parser->match(TokenType::PRINT)) {
         printStatement();
     } else if (m_parser->match(TokenType::RETURN)) {
@@ -524,7 +524,7 @@ void Compiler::forInStatement(const Token& itemName) {
 
 void Compiler::breakStatement() {
     if (m_loopStack.empty()) {
-        m_parser->error("Cannot use 'break' outside a loop or switch.");
+        m_parser->error("Cannot use 'break' outside a loop or match.");
         return;
     }
     m_parser->consume(TokenType::SEMICOLON, "Expect ';' after 'break'.");
@@ -548,41 +548,75 @@ void Compiler::continueStatement() {
     m_parser->error("Cannot use 'continue' outside a loop.");
 }
 
-void Compiler::switchStatement() {
-    m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after 'switch'.");
+void Compiler::matchStatement() {
     beginScope();
 
     // Compile subject into a hidden local so case arms can reload it with
     // GET_LOCAL.
     expression();
-    Token syntheticName{TokenType::IDENTIFIER, "(switch)",
+    Token syntheticName{TokenType::IDENTIFIER, "(match)",
                         m_parser->m_previous.line};
     addLocal(syntheticName);
     markInitialized();
     int subjectSlot = m_localCount - 1;
 
-    m_parser->consume(TokenType::RIGHT_PAREN,
-                      "Expect ')' after switch subject.");
-    m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before switch body.");
+    m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before match body.");
 
-    // Push switch context: start = -1 flags this as switch (not loop).
+    // Push match context: start = -1 flags this as match (not loop).
     m_loopStack.push_back({-1, m_localCount, {}});
 
-    bool hasDefault = false;
+    // True when an unguarded identifier (wildcard or binding) arm is seen — no
+    // MATCH_ERROR needed at the end, and no further arms are reachable.
+    bool hasUnguardedCatchAll = false;
 
     while (!m_parser->check(TokenType::RIGHT_BRACE) &&
            !m_parser->check(TokenType::EOF_)) {
-        if (m_parser->match(TokenType::CASE)) {
-            if (hasDefault)
-                m_parser->error("'case' arm cannot follow 'default'.");
-            // Compile one or more comma-separated values: case v1, v2, ...:
-            // For N values we build a chain:
-            //   GET_LOCAL S; v; EQUAL; JUMP_IF_FALSE→try_next; POP; JUMP→body
-            //   ... (repeat for each value except last)
-            //   GET_LOCAL S; vN; EQUAL; JUMP_IF_FALSE→arm_miss; POP [body here]
-            // At body: execute stmts; JUMP→end; arm_miss: POP; (next arm)
-            std::vector<int> missJumps; // JUMP_IF_FALSE for each non-last value
-            std::vector<int> hitJumps;  // JUMP→body for each non-last value
+        if (!m_parser->match(TokenType::CASE)) {
+            m_parser->error("Expect 'case' in match body.");
+            break;
+        }
+        if (hasUnguardedCatchAll)
+            m_parser->error("Unreachable arm after catch-all.");
+
+        // Track locals at arm entry so we can clean them up on guard-fail.
+        int armLocalBase = m_localCount;
+
+        // -------------------------------------------------------
+        // Pattern
+        // -------------------------------------------------------
+        // An IDENTIFIER token (not a keyword) is a wildcard/binding.
+        // Everything else is a literal equality test.
+        bool isIdentPat = m_parser->check(TokenType::IDENTIFIER);
+        int lastMiss = -1; // patch target for literal-miss
+        int bindingCount =
+            0; // locals pushed onto the stack by this arm's pattern
+
+        if (isIdentPat) {
+            // Consume the identifier.
+            Token patTok = m_parser->m_current;
+            m_parser->advance();
+
+            // Binding or wildcard must be the sole pattern.
+            if (m_parser->check(TokenType::COMMA))
+                m_parser->error(
+                    "A binding pattern must be the sole arm pattern.");
+
+            if (patTok.lexeme != "_") {
+                // Non-wildcard: push subject value and declare a local.
+                emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+                Token bindTok{TokenType::IDENTIFIER, patTok.lexeme,
+                              patTok.line};
+                addLocal(bindTok);
+                markInitialized();
+                bindingCount = 1;
+            }
+            // Wildcard '_': no code emitted; always matches.
+        } else {
+            // Literal pattern(s): equality chain.
+            // hitJumps: JUMP_IF_FALSE per non-last literal (miss → try next).
+            // bodyJumps: unconditional JUMP per non-last literal (hit → body).
+            std::vector<int> hitJumps;
+            std::vector<int> bodyJumps;
 
             do {
                 emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
@@ -590,61 +624,92 @@ void Compiler::switchStatement() {
                 emitByte(Op::EQUAL);
 
                 if (m_parser->check(TokenType::COMMA)) {
-                    // Not the last value: if true jump to body, else try next.
                     hitJumps.push_back(emitJump(Op::JUMP_IF_FALSE));
                     emitByte(Op::POP);                       // pop true
-                    missJumps.push_back(emitJump(Op::JUMP)); // jump to body
-                    patchJump(hitJumps.back());              // false comes here
+                    bodyJumps.push_back(emitJump(Op::JUMP)); // hit → body
+                    patchJump(hitJumps.back());              // false: try next
                     emitByte(Op::POP);                       // pop false
                 }
             } while (m_parser->match(TokenType::COMMA));
 
-            // Last (or only) value: JUMP_IF_FALSE to arm_miss.
-            int lastMiss = emitJump(Op::JUMP_IF_FALSE);
+            lastMiss = emitJump(Op::JUMP_IF_FALSE);
             emitByte(Op::POP); // pop true; fall into body
+            for (int j : bodyJumps)
+                patchJump(j); // all hits land here
+        }
 
-            // Patch all intermediate hit-jumps to land here (body start).
-            for (int j : missJumps)
-                patchJump(j);
+        // -------------------------------------------------------
+        // Guard clause (optional)
+        // -------------------------------------------------------
+        int guardMiss = -1;
+        bool hasGuard = m_parser->match(TokenType::IF);
+        if (hasGuard) {
+            expression();
+            guardMiss = emitJump(Op::JUMP_IF_FALSE);
+            emitByte(Op::POP); // pop true; enter body
+        }
 
-            m_parser->consume(TokenType::COLON, "Expect ':' after case value.");
-            while (!m_parser->check(TokenType::CASE) &&
-                   !m_parser->check(TokenType::DEFAULT) &&
-                   !m_parser->check(TokenType::RIGHT_BRACE) &&
-                   !m_parser->check(TokenType::EOF_)) {
-                statement();
-            }
+        if (isIdentPat && !hasGuard)
+            hasUnguardedCatchAll = true;
 
-            // End of arm: jump to after the switch (recorded in breakJumps).
-            int endJump = emitJump(Op::JUMP);
-            m_loopStack.back().breakJumps.push_back(endJump);
+        // -------------------------------------------------------
+        // Arm separator
+        // -------------------------------------------------------
+        m_parser->consume(TokenType::FAT_ARROW, "Expect '=>' after pattern.");
 
-            // arm_miss: pop false, continue to next arm.
-            patchJump(lastMiss);
-            emitByte(Op::POP);
-
-        } else if (m_parser->match(TokenType::DEFAULT)) {
-            if (hasDefault)
-                m_parser->error("Multiple 'default' labels in switch.");
-            hasDefault = true;
-            m_parser->consume(TokenType::COLON, "Expect ':' after 'default'.");
-            while (!m_parser->check(TokenType::CASE) &&
-                   !m_parser->check(TokenType::DEFAULT) &&
-                   !m_parser->check(TokenType::RIGHT_BRACE) &&
-                   !m_parser->check(TokenType::EOF_)) {
-                statement();
-            }
-            int endJump = emitJump(Op::JUMP);
-            m_loopStack.back().breakJumps.push_back(endJump);
+        // -------------------------------------------------------
+        // Body (single statement or braced block)
+        // -------------------------------------------------------
+        beginScope();
+        if (m_parser->match(TokenType::LEFT_BRACE)) {
+            while (!m_parser->check(TokenType::RIGHT_BRACE) &&
+                   !m_parser->check(TokenType::EOF_))
+                declaration();
+            m_parser->consume(TokenType::RIGHT_BRACE,
+                              "Expect '}' after match arm body.");
         } else {
-            m_parser->error("Expect 'case' or 'default' in switch body.");
-            break;
+            statement();
+        }
+        endScope(); // clean up any var declarations inside the body
+
+        // -------------------------------------------------------
+        // Normal arm exit: clean up binding locals, jump to match end.
+        // emitLoopCleanup handles captured upvalues correctly.
+        // -------------------------------------------------------
+        emitLoopCleanup(armLocalBase);
+        m_localCount = armLocalBase;
+        int endJump = emitJump(Op::JUMP);
+        m_loopStack.back().breakJumps.push_back(endJump);
+
+        // -------------------------------------------------------
+        // Guard-fail exit: pop guard bool, pop binding locals.
+        // -------------------------------------------------------
+        if (guardMiss != -1) {
+            patchJump(guardMiss);
+            emitByte(Op::POP); // pop false guard
+            for (int i = 0; i < bindingCount; i++)
+                emitByte(Op::POP); // pop binding value(s)
+        }
+
+        // -------------------------------------------------------
+        // Literal miss: pop false equality, fall through to next arm.
+        // -------------------------------------------------------
+        if (lastMiss != -1) {
+            patchJump(lastMiss);
+            emitByte(Op::POP); // pop false
         }
     }
 
-    m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after switch body.");
+    m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after match body.");
 
-    // Patch all arm-end jumps to land here.
+    // If no unguarded catch-all arm was seen, emit MATCH_ERROR so that a
+    // completely non-matching subject raises a runtime error rather than
+    // silently falling through.
+    if (!hasUnguardedCatchAll) {
+        emitByte(Op::MATCH_ERROR);
+    }
+
+    // Patch all arm-end jumps to land here (after MATCH_ERROR or at end).
     for (int j : m_loopStack.back().breakJumps)
         patchJump(j);
 

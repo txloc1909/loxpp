@@ -70,7 +70,7 @@ class Compiler {
     void forInStatement(const Token& itemName);
     void breakStatement();
     void continueStatement();
-    void switchStatement();
+    void matchStatement();
     void varDeclaration();
     void block();
     void funDeclaration();

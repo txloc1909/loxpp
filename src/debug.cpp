@@ -194,6 +194,8 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return simpleInstruction("ITER_HAS_NEXT", offset, out, color);
     case Op::ITER_NEXT:
         return simpleInstruction("ITER_NEXT", offset, out, color);
+    case Op::MATCH_ERROR:
+        return simpleInstruction("MATCH_ERROR", offset, out, color);
     default:
         out << cc(color, kRed) << cc(color, kBold) << "UNKNOWN("
             << static_cast<unsigned>(chunk.at(offset)) << ")"

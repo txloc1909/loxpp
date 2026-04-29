@@ -1,0 +1,26 @@
+// match_http_status.lox — classify HTTP status codes with guards.
+
+fun classify(status) {
+    match status {
+        case 200         => print "OK";
+        case 201         => print "Created";
+        case 301, 302    => print "Redirect";
+        case 400         => print "Bad Request";
+        case 401         => print "Unauthorized";
+        case 403         => print "Forbidden";
+        case 404         => print "Not Found";
+        case n if n >= 500 => print "Server Error: " + n;
+        case n if n >= 400 => print "Client Error: " + n;
+        case n if n >= 300 => print "Redirect: " + n;
+        case n if n >= 200 => print "Success: " + n;
+        case _ => print "Unknown status";
+    }
+}
+
+classify(200);
+classify(201);
+classify(301);
+classify(404);
+classify(500);
+classify(503);
+classify(418);

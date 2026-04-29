@@ -62,6 +62,43 @@ TEST_F(ScannerTest, OneOrTwoCharacterTokens) {
     EXPECT_EQ(tokens[8].type, TokenType::EOF_);
 }
 
+TEST_F(ScannerTest, FatArrow) {
+    // => is FAT_ARROW; = alone is EQUAL; == is EQUAL_EQUAL.
+    const char* source = "=> = ==";
+    auto tokens = scanTokens(source);
+    ASSERT_EQ(tokens.size(), 4); // 3 tokens + EOF
+    EXPECT_EQ(tokens[0].type, TokenType::FAT_ARROW);
+    EXPECT_EQ(tokens[0].lexeme, "=>");
+    EXPECT_EQ(tokens[1].type, TokenType::EQUAL);
+    EXPECT_EQ(tokens[2].type, TokenType::EQUAL_EQUAL);
+}
+
+TEST_F(ScannerTest, MatchKeyword) {
+    const char* source = "match";
+    auto tokens = scanTokens(source);
+    ASSERT_EQ(tokens.size(), 2); // match + EOF
+    EXPECT_EQ(tokens[0].type, TokenType::MATCH);
+    EXPECT_EQ(tokens[0].lexeme, "match");
+}
+
+TEST_F(ScannerTest, SwitchIsNoLongerKeyword) {
+    // 'switch' was removed as a keyword; it now scans as an IDENTIFIER.
+    const char* source = "switch";
+    auto tokens = scanTokens(source);
+    ASSERT_EQ(tokens.size(), 2);
+    EXPECT_EQ(tokens[0].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[0].lexeme, "switch");
+}
+
+TEST_F(ScannerTest, MatchKeywordNotSubstringMatch) {
+    // 'matcher', 'matched' etc. must scan as IDENTIFIER, not MATCH.
+    const char* source = "matcher matched";
+    auto tokens = scanTokens(source);
+    ASSERT_EQ(tokens.size(), 3);
+    EXPECT_EQ(tokens[0].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[1].type, TokenType::IDENTIFIER);
+}
+
 TEST_F(ScannerTest, StringLiteral) {
     const char* source = "\"hello world\"";
     auto tokens = scanTokens(source);
@@ -79,10 +116,10 @@ TEST_F(ScannerTest, NumberLiteral) {
 }
 
 TEST_F(ScannerTest, Keywords) {
-    const char* source = "and class else false fun for if nil or print "
+    const char* source = "and class else false fun for if match nil or print "
                          "return super this true var while";
     auto tokens = scanTokens(source);
-    ASSERT_EQ(tokens.size(), 17); // 16 tokens + EOF
+    ASSERT_EQ(tokens.size(), 18); // 17 tokens + EOF
     EXPECT_EQ(tokens[0].type, TokenType::AND);
     EXPECT_EQ(tokens[1].type, TokenType::CLASS);
     EXPECT_EQ(tokens[2].type, TokenType::ELSE);
@@ -90,16 +127,17 @@ TEST_F(ScannerTest, Keywords) {
     EXPECT_EQ(tokens[4].type, TokenType::FUN);
     EXPECT_EQ(tokens[5].type, TokenType::FOR);
     EXPECT_EQ(tokens[6].type, TokenType::IF);
-    EXPECT_EQ(tokens[7].type, TokenType::NIL);
-    EXPECT_EQ(tokens[8].type, TokenType::OR);
-    EXPECT_EQ(tokens[9].type, TokenType::PRINT);
-    EXPECT_EQ(tokens[10].type, TokenType::RETURN);
-    EXPECT_EQ(tokens[11].type, TokenType::SUPER);
-    EXPECT_EQ(tokens[12].type, TokenType::THIS);
-    EXPECT_EQ(tokens[13].type, TokenType::TRUE);
-    EXPECT_EQ(tokens[14].type, TokenType::VAR);
-    EXPECT_EQ(tokens[15].type, TokenType::WHILE);
-    EXPECT_EQ(tokens[16].type, TokenType::EOF_);
+    EXPECT_EQ(tokens[7].type, TokenType::MATCH);
+    EXPECT_EQ(tokens[8].type, TokenType::NIL);
+    EXPECT_EQ(tokens[9].type, TokenType::OR);
+    EXPECT_EQ(tokens[10].type, TokenType::PRINT);
+    EXPECT_EQ(tokens[11].type, TokenType::RETURN);
+    EXPECT_EQ(tokens[12].type, TokenType::SUPER);
+    EXPECT_EQ(tokens[13].type, TokenType::THIS);
+    EXPECT_EQ(tokens[14].type, TokenType::TRUE);
+    EXPECT_EQ(tokens[15].type, TokenType::VAR);
+    EXPECT_EQ(tokens[16].type, TokenType::WHILE);
+    EXPECT_EQ(tokens[17].type, TokenType::EOF_);
 }
 
 TEST_F(ScannerTest, WhitespaceHandling) {
