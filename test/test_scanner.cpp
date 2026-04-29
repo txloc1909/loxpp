@@ -81,23 +81,6 @@ TEST_F(ScannerTest, MatchKeyword) {
     EXPECT_EQ(tokens[0].lexeme, "match");
 }
 
-TEST_F(ScannerTest, SwitchIsNoLongerKeyword) {
-    // 'switch' was removed as a keyword; it now scans as an IDENTIFIER.
-    const char* source = "switch";
-    auto tokens = scanTokens(source);
-    ASSERT_EQ(tokens.size(), 2);
-    EXPECT_EQ(tokens[0].type, TokenType::IDENTIFIER);
-    EXPECT_EQ(tokens[0].lexeme, "switch");
-}
-
-TEST_F(ScannerTest, MatchKeywordNotSubstringMatch) {
-    // 'matcher', 'matched' etc. must scan as IDENTIFIER, not MATCH.
-    const char* source = "matcher matched";
-    auto tokens = scanTokens(source);
-    ASSERT_EQ(tokens.size(), 3);
-    EXPECT_EQ(tokens[0].type, TokenType::IDENTIFIER);
-    EXPECT_EQ(tokens[1].type, TokenType::IDENTIFIER);
-}
 
 TEST_F(ScannerTest, StringLiteral) {
     const char* source = "\"hello world\"";

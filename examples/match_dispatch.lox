@@ -12,8 +12,13 @@ fun describe(cmd) {
     }
 }
 
+// CHECK: Available: quit, help, version, status
 describe("help");
+// CHECK: lox++ 1.0
 describe("version");
+// CHECK: Exiting.
 describe("quit");
+// CHECK: Error command: error_something
 describe("error_something");
+// CHECK: Unknown command: foo
 describe("foo");

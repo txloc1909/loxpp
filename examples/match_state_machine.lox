@@ -5,10 +5,10 @@ var cycles = 0;
 
 fun next_state(s) {
     match s {
-        case "red"    => "green";
-        case "green"  => "yellow";
-        case "yellow" => "red";
-        case _        => "red";
+        case "red"    => return "green";
+        case "green"  => return "yellow";
+        case "yellow" => return "red";
+        case _        => return "red";
     }
 }
 
@@ -22,6 +22,13 @@ fun describe_state(s) {
 }
 
 // Simulate 7 transitions.
+// CHECK: STOP  (red)
+// CHECK: GO    (green)
+// CHECK: SLOW  (yellow)
+// CHECK: STOP  (red)
+// CHECK: GO    (green)
+// CHECK: SLOW  (yellow)
+// CHECK: STOP  (red)
 var i = 0;
 while (i < 7) {
     describe_state(state);
@@ -32,4 +39,5 @@ while (i < 7) {
     }
 }
 
-print "Full cycles completed: " + cycles;
+// CHECK: Full cycles completed: 2
+print "Full cycles completed: " + str(cycles);
