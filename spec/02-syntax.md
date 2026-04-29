@@ -28,7 +28,7 @@ statement      ::= exprStmt
                  | whileStmt
                  | breakStmt
                  | continueStmt
-                 | switchStmt
+                 | matchStmt
                  | block ;
 
 exprStmt       ::= expression ";" ;
@@ -53,9 +53,12 @@ breakStmt      ::= "break" ";" ;
 
 continueStmt   ::= "continue" ";" ;
 
-switchStmt     ::= "switch" "(" expression ")" "{" caseArm* defaultArm? "}" ;
-caseArm        ::= "case" expression ( "," expression )* ":" statement* ;
-defaultArm     ::= "default" ":" statement* ;
+matchStmt      ::= "match" expression "{" matchArm* "}" ;
+matchArm       ::= "case" armPats ( "if" expression )? "=>" armBody ;
+armPats        ::= armPat ( "," armPat )* ;
+armPat         ::= NUMBER | STRING | "true" | "false" | "nil"
+                 | IDENTIFIER ;          (* IDENTIFIER: "_" = wildcard; other = binding *)
+armBody        ::= statement | "{" declaration* "}" ;
 
 block          ::= "{" declaration* "}" ;
 
@@ -177,13 +180,35 @@ bare `IDENTIFIER` (variable set), a `call "." IDENTIFIER` (property set), or a
 `call "[" expression "]"` (index set); any other form is a parse error. The
 value of an assignment expression is the assigned value.
 
-### `switch` statement
+### `match` statement
 
-A `switch` body consists of zero or more `case` arms followed by an optional
-`default` arm. The `default` arm, if present, must be the final arm — a
-`case` arm after `default` is a **static error**. At most one `default` arm
-may appear. Only `case` and `default` labels may appear at the top level of a
-switch body — bare statements outside an arm are a parse error.
+A `match` body consists of one or more `case` arms. Each arm has a pattern,
+an optional guard clause (`if expr`), the `=>` separator, and a body (either a
+single statement or a braced block of declarations).
+
+**Patterns:**
+- `NUMBER`, `STRING`, `true`, `false`, `nil` — equality test against the subject.
+- `IDENTIFIER` other than `_` — variable binding: always matches, introduces a
+  new local bound to the subject value, visible in the guard and the body.
+- `_` (the identifier `_`) — wildcard: always matches, no binding introduced.
+- Multiple comma-separated literals: `case 1, 2, 3 =>` — matches if the subject
+  equals any of them. A binding identifier must be the sole pattern in its arm.
+
+**Guard clauses:** `case x if x > 0 =>` — after the pattern matches, the guard
+expression is evaluated; if falsy the arm is skipped.
+
+**No fall-through:** each arm executes its body and then jumps past the match.
+
+**Wildcard:** `case _ =>` is the canonical catch-all. An unguarded `_` (or any
+unguarded binding) must come last; arms after it are unreachable and are a
+compile error.
+
+**`MatchError`:** if no arm matches and no unguarded catch-all arm exists, the
+VM raises `MatchError` at runtime.
+
+**`break`/`continue`:** `break` exits the match; `continue` targets the nearest
+enclosing loop (not the match itself). `continue` with no enclosing loop is a
+compile error.
 
 ### Function call arguments
 

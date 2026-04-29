@@ -291,3 +291,91 @@ TEST_F(SequenceBytecodeTest, ForIn_EmptyBodyBytecode) {
         "26: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
+
+// ===========================================================================
+// Match statement bytecode tests
+// ===========================================================================
+
+class MatchByteCodeTest : public ::testing::Test {};
+
+// Single literal arm with wildcard: verify EQUAL+JIF+POP chain and
+// MATCH_ERROR suppressed by wildcard.
+//
+//   match 1 { case 1 => x = 1; case _ => x = 0; }
+//
+// Expected code (subject at local slot 1, program-level local 'x' at slot 0):
+//   CONSTANT(1)           push subject
+//   GET_LOCAL 1           hidden (match) local — subject
+//   CONSTANT(1)           test value
+//   EQUAL
+//   JUMP_IF_FALSE → miss  if false, skip arm
+//   POP                   pop true
+//   [body: x=1]
+//   POP                   pop binding locals (none here)
+//   JUMP → end
+//   [miss:] POP           pop false
+//   GET_LOCAL 1           wildcard arm — no test emitted
+//   [body: x=0]
+//   POP                   no binding locals
+//   JUMP → end
+//   [end:]                no MATCH_ERROR (wildcard present)
+TEST_F(MatchByteCodeTest, SingleLiteralPlusWildcard) {
+    std::string src = "var x = 0;\n"
+                      "match 1 {\n"
+                      "    case 1 => x = 1;\n"
+                      "    case _ => x = 0;\n"
+                      "}";
+    // Just verify it compiles and contains MATCH_ERROR-free sequences.
+    // We don't fix bytecode offsets here — that's brittle; we verify the
+    // presence/absence of MATCH_ERROR via the disassembly string.
+    std::string bytecode = compile_program_to_bytecode(src);
+    EXPECT_EQ(bytecode.find("MATCH_ERROR"), std::string::npos)
+        << "wildcard arm should suppress MATCH_ERROR";
+    EXPECT_NE(bytecode.find("EQUAL"), std::string::npos)
+        << "literal arm must emit EQUAL";
+    EXPECT_NE(bytecode.find("JUMP_IF_FALSE"), std::string::npos)
+        << "literal arm must emit JUMP_IF_FALSE";
+}
+
+// No wildcard arm: MATCH_ERROR must be emitted.
+TEST_F(MatchByteCodeTest, NoWildcardEmitsMatchError) {
+    std::string src = "var x = 0;\n"
+                      "match 1 {\n"
+                      "    case 1 => x = 1;\n"
+                      "    case 2 => x = 2;\n"
+                      "}";
+    std::string bytecode = compile_program_to_bytecode(src);
+    EXPECT_NE(bytecode.find("MATCH_ERROR"), std::string::npos)
+        << "missing wildcard must emit MATCH_ERROR";
+}
+
+// Binding arm: GET_LOCAL for subject is emitted (to push binding value).
+// MATCH_ERROR is suppressed because the binding always matches.
+TEST_F(MatchByteCodeTest, BindingArmEmitsGetLocal) {
+    std::string src = "match 42 {\n"
+                      "    case n => n;\n"
+                      "}";
+    std::string bytecode = compile_program_to_bytecode(src);
+    EXPECT_EQ(bytecode.find("MATCH_ERROR"), std::string::npos)
+        << "binding arm (always matches) must suppress MATCH_ERROR";
+    EXPECT_NE(bytecode.find("GET_LOCAL"), std::string::npos)
+        << "binding arm must emit GET_LOCAL to push subject value";
+}
+
+// Guard arm: JUMP_IF_FALSE appears twice — once for the guard, in addition
+// to any literal test.
+TEST_F(MatchByteCodeTest, GuardEmitsExtraJumpIfFalse) {
+    std::string src = "match 5 {\n"
+                      "    case n if n > 3 => n;\n"
+                      "    case _ => 0;\n"
+                      "}";
+    std::string bytecode = compile_program_to_bytecode(src);
+    // Count JUMP_IF_FALSE occurrences: guard adds one.
+    size_t count = 0;
+    size_t pos = 0;
+    while ((pos = bytecode.find("JUMP_IF_FALSE", pos)) != std::string::npos) {
+        ++count;
+        pos += 1;
+    }
+    EXPECT_GE(count, 1u) << "guard must emit at least one JUMP_IF_FALSE";
+}

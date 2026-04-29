@@ -4,10 +4,10 @@
 
 const char* const* lox_keywords() {
     static const char* keywords[] = {
-        "and",  "break", "case",   "class", "continue", "default",
-        "else", "false", "for",    "fun",   "if",       "nil",
-        "or",   "print", "return", "super", "switch",   "this",
-        "true", "var",   "while",  nullptr};
+        "and",  "break", "case",  "class",  "continue", "default",
+        "else", "false", "for",   "fun",    "if",       "match",
+        "nil",  "or",    "print", "return", "super",    "this",
+        "true", "var",   "while", nullptr};
     return keywords;
 }
 
@@ -73,6 +73,8 @@ Token Scanner::scanOneToken() {
     case '!':
         return makeToken(match('=') ? TokenType::BANG_EQUAL : TokenType::BANG);
     case '=':
+        if (match('>'))
+            return makeToken(TokenType::FAT_ARROW);
         return makeToken(match('=') ? TokenType::EQUAL_EQUAL
                                     : TokenType::EQUAL);
     case '>':
@@ -167,17 +169,10 @@ TokenType Scanner::identifierType() {
         return checkKeyword(1, 4, "rint", TokenType::PRINT);
     case 'r':
         return checkKeyword(1, 5, "eturn", TokenType::RETURN);
-    case 's': {
-        if (m_current - m_start > 1) {
-            switch (m_start[1]) {
-            case 'u':
-                return checkKeyword(2, 3, "per", TokenType::SUPER);
-            case 'w':
-                return checkKeyword(2, 4, "itch", TokenType::SWITCH);
-            }
-        }
-        break;
-    }
+    case 'm':
+        return checkKeyword(1, 4, "atch", TokenType::MATCH);
+    case 's':
+        return checkKeyword(1, 4, "uper", TokenType::SUPER);
     case 't': {
         if (m_current - m_start > 1) {
             switch (m_start[1]) {

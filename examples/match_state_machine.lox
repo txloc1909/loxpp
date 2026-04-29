@@ -1,0 +1,43 @@
+// match_state_machine.lox — traffic light state machine using match.
+
+var state = "red";
+var cycles = 0;
+
+fun next_state(s) {
+    match s {
+        case "red"    => return "green";
+        case "green"  => return "yellow";
+        case "yellow" => return "red";
+        case _        => return "red";
+    }
+}
+
+fun describe_state(s) {
+    match s {
+        case "red"    => print "STOP  (red)";
+        case "green"  => print "GO    (green)";
+        case "yellow" => print "SLOW  (yellow)";
+        case _        => print "UNKNOWN";
+    }
+}
+
+// Simulate 7 transitions.
+// CHECK: STOP  (red)
+// CHECK: GO    (green)
+// CHECK: SLOW  (yellow)
+// CHECK: STOP  (red)
+// CHECK: GO    (green)
+// CHECK: SLOW  (yellow)
+// CHECK: STOP  (red)
+var i = 0;
+while (i < 7) {
+    describe_state(state);
+    state = next_state(state);
+    i = i + 1;
+    if (state == "red") {
+        cycles = cycles + 1;
+    }
+}
+
+// CHECK: Full cycles completed: 2
+print "Full cycles completed: " + str(cycles);

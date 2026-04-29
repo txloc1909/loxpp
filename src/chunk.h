@@ -57,6 +57,7 @@ enum class Op : Byte {
     GET_ITER,  // pops List|String|Map → pushes ObjIterator{cursor=0}
     ITER_HAS_NEXT, // pops iterator copy → pushes bool (cursor < length)
     ITER_NEXT, // pops iterator copy → pushes element/key at cursor, advances
+    MATCH_ERROR, // no operands — raises MatchError; VM never returns
 };
 
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }
