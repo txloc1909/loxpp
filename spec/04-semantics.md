@@ -705,3 +705,41 @@ Common causes:
 | NaN used as map key | `m[0/0] = 1` |
 | Object (non-String) used as map key | `m[[1,2]] = 1` |
 | Method called on non-instance/non-list/non-map | `42.foo()` |
+| No arm matches in a `match` statement | `match 99 { case 1 => ... }` |
+| Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field |
+
+---
+
+## Enum Types (Phase 2)
+
+### `ObjEnumCtor` — constructor object
+
+Produced by an `enum` declaration. Each constructor in the declaration becomes
+a globally-scoped `ObjEnumCtor` value. It is callable: calling it with
+`arity` arguments creates and returns an `ObjEnum` value.
+
+Fields: `tag` (0-based index in declaration order), `arity`, `ctorName`,
+`enumName`. Stringifies as `<ctor name>`.
+
+### `ObjEnum` — enum value
+
+Produced by calling an `ObjEnumCtor`. Fields are stored in a positional array;
+named access is resolved at compile time (the compiler emits the index).
+
+Stringifies as `ctorName(f1, f2, ...)` with fields expanded, or just
+`ctorName` for zero-field constructors.
+
+### `GET_TAG` opcode
+
+Pops an `ObjEnum` value and pushes its constructor's tag as a Number. Used by
+constructor pattern arms in `match` for dispatch. Applying `GET_TAG` to a
+non-enum value is a runtime error.
+
+### Exhaustiveness at compile time
+
+When a match statement contains at least one constructor-pattern arm for enum
+`E`, the compiler checks that:
+1. Every constructor of `E` appears as a pattern arm, **or**
+2. An unguarded catch-all arm (`case _` or an unguarded binding) is present.
+
+A violation is a **compile error** listing the missing constructor names.

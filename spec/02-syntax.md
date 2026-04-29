@@ -211,6 +211,55 @@ VM raises `MatchError` at runtime.
 enclosing loop (not the match itself). `continue` with no enclosing loop is a
 compile error.
 
+**Constructor patterns (Phase 2):** when an enum constructor name is used as a
+pattern, the arm dispatches on the constructor's tag. Bindings can be
+positional `case ok(v)` or named `case rect{width, height}`. Zero-field
+constructors use the bare name: `case none`. See §4 for exhaustiveness rules.
+
+### `enum` declaration
+
+```
+enumDecl       : 'enum' IDENTIFIER '{' constructorDecl* '}'
+constructorDecl: IDENTIFIER ( '(' IDENTIFIER (',' IDENTIFIER)* ')' )?
+```
+
+An `enum` declaration introduces a closed type with one or more constructors.
+Each constructor name becomes a globally-scoped callable that returns an enum
+value when called with the declared number of arguments. Constructors with no
+field list take zero arguments.
+
+```lox
+enum Result { ok(value) err(msg) }
+enum Option { some(v) none }
+var r = ok(42);
+var n = none();
+```
+
+- Enum declarations are only permitted at global scope.
+- Duplicate enum names and duplicate constructor names within an enum are
+  compile errors.
+- Calling a constructor with the wrong number of arguments is a runtime error.
+
+### Extended `match` arm patterns (Phase 2)
+
+```
+armPat : NUMBER | STRING | 'true' | 'false' | 'nil'
+       | IDENTIFIER                                    // wildcard (_) or binding
+       | IDENTIFIER '{' fieldPat (',' fieldPat)* '}'  // named field pattern
+       | IDENTIFIER '(' IDENTIFIER (',' IDENTIFIER)* ')' // positional pattern
+       | IDENTIFIER                                    // zero-field constructor
+
+fieldPat: IDENTIFIER
+```
+
+When the pattern name resolves to a known constructor, the arm performs a tag
+check rather than a binding. Unknown identifiers continue to act as bindings.
+
+**Exhaustiveness:** if a match contains at least one constructor-pattern arm
+from enum `E`, the compiler verifies that every constructor of `E` appears as
+an arm, or that an unguarded `_`/binding wildcard is present. A missing
+constructor is a compile error listing the absent names.
+
 ### Function call arguments
 
 A call may pass up to 255 arguments. The maximum number of parameters a
