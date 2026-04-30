@@ -306,9 +306,33 @@ match r {
 value is an `ObjInstance` of that class (exact match or subclass), `false` otherwise. Used in
 place of `GET_TAG + EQUAL` for class pattern arms.
 
-**Compiler change:** maintain a class table alongside the constructor table. When a class
-declaration is compiled, register its name. In pattern position, check class table before falling
-through to variable binding.
+**Compiler change:** rather than maintaining a separate class table alongside the existing
+constructor table, both are unified into a single **pattern symbol table**:
+
+```cpp
+enum class PatternSymbolKind { EnumCtor, Class };
+
+struct PatternSymbol {
+    PatternSymbolKind kind;
+    union {
+        const ConstructorInfo* ctor;  // kind == EnumCtor
+        ObjClass* klass;              // kind == Class
+    };
+};
+
+std::unordered_map<std::string, PatternSymbol> m_patternSymbols;
+```
+
+`enum` declaration registers each constructor as `EnumCtor`; `class` declaration registers the
+class name as `Class`. Pattern resolution becomes one lookup, one switch — no parallel map walks.
+The `m_enumCtors` table (enum name → constructor list) stays separate: it is only consulted for
+exhaustiveness checking after all arms are compiled, a different access pattern.
+
+The current `m_constructors` per-root-compiler design carries an O(scope depth) chain walk on
+every pattern lookup. Phase 2.5 is the right moment to fix this: every `Compiler` instance
+receives a `PatternSymbol` table pointer at construction time pointing at the root's map. All
+registrations write through that pointer; all lookups are a direct dereference — O(1) regardless
+of nesting depth. `findRootCompiler()` is eliminated entirely.
 
 **Out of scope for this phase:**
 - Positional class patterns `case Point(x, y)` — classes have no declared field order; named-only
