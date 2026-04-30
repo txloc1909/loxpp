@@ -774,7 +774,8 @@ InterpretResult VM::run() {
                                         argCount))
                             return InterpretResult::RUNTIME_ERROR;
                     } else {
-                        runtimeError("Can only call functions, classes and enums.");
+                        runtimeError(
+                            "Can only call functions, classes and enums.");
                         return InterpretResult::RUNTIME_ERROR;
                     }
                     frame = &m_frames[m_frameCount - 1];
