@@ -62,7 +62,8 @@ inline bool isClosure(const Value& v) {
 
 struct ObjClass : public Obj {
     ObjString* name;
-    Table methods; // ObjString* → ObjClosure* (populated in future chapters)
+    ObjClass* superclass{nullptr}; // set by Op::INHERIT; nullptr for base classes
+    Table methods; // ObjString* → ObjClosure*
 
     ObjClass(ObjString* n, VmAllocator<Entry> alloc)
         : Obj(ObjType::CLASS), name(n), methods(alloc) {}

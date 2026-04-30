@@ -257,7 +257,7 @@ present. Missing constructors → compile error.
 
 ---
 
-### Phase 2.5 — Class patterns (planned)
+### Phase 2.5 — Class patterns ✅
 
 Named-field pattern matching on open class instances, using `instanceof` dispatch at runtime.
 
@@ -420,7 +420,7 @@ Phase 1.5: var {x, y} destructuring                  ✅ PR #62
   ↓
 Phase 2:   enum + constructor pattern + exhaustiveness ✅ PR #64
   ↓
-Phase 2.5: class patterns (instanceof dispatch, named-field binding)
+Phase 2.5: class patterns (instanceof dispatch, named-field binding) ✅
   ↓
 Phase 3:   or-patterns, match-as-expression, var [a,b]
   ↓

@@ -244,21 +244,47 @@ var n = None();
 
 ```
 armPat : NUMBER | STRING | 'true' | 'false' | 'nil'
-       | IDENTIFIER                                    // wildcard (_) or binding
-       | IDENTIFIER '{' fieldPat (',' fieldPat)* '}'  // named field pattern
-       | IDENTIFIER '(' IDENTIFIER (',' IDENTIFIER)* ')' // positional pattern
-       | IDENTIFIER                                    // zero-field constructor
+       | IDENTIFIER                                       // wildcard (_) or binding
+       | IDENTIFIER '{' fieldPat (',' fieldPat)* '}'     // named: enum ctor OR class
+       | IDENTIFIER '(' IDENTIFIER (',' IDENTIFIER)* ')' // positional: enum ctor only
+       | IDENTIFIER                                       // zero-field ctor or class
 
 fieldPat: IDENTIFIER
 ```
 
-When the pattern name resolves to a known constructor, the arm performs a tag
-check rather than a binding. Unknown identifiers continue to act as bindings.
+Pattern disambiguation (in priority order):
 
-**Exhaustiveness:** if a match contains at least one constructor-pattern arm
+1. **Known enum constructor** → tag check + `GET_INDEX` field bindings (positional or named)
+2. **Known class** → `instanceof` check + `GET_PROPERTY` field bindings (named only)
+3. **Unknown name** → variable binding (always matches); `_` is wildcard (no binding)
+
+**Enum exhaustiveness:** if a match contains at least one constructor-pattern arm
 from enum `E`, the compiler verifies that every constructor of `E` appears as
 an arm, or that an unguarded `_`/binding wildcard is present. A missing
 constructor is a compile error listing the absent names.
+
+**Class patterns:**
+
+When the pattern name resolves to a known class (declared at global scope before
+the `match`), the arm compiles to an `instanceof` check followed by
+`GET_PROPERTY` bindings for each named field. Subclass instances match a parent
+class pattern. Positional class patterns (`ClassName(x, y)`) are a compile
+error — classes have no declared field order.
+
+Class patterns do not trigger exhaustiveness checking. A `case _ =>` or any
+unguarded binding is needed if the match might see a value of a different type,
+otherwise `MatchError` is raised at runtime.
+
+```lox
+class Point  { init(x, y) { this.x = x; this.y = y; } }
+class Circle < Point { init(x, y, r) { super.init(x, y); this.r = r; } }
+
+match shape {
+    case Circle{x, y, r} => print r;    // instanceof check, then GET_PROPERTY
+    case Point{x, y}     => print x;    // Circle also matches this arm (subclass)
+    case _               => print "?";
+}
+```
 
 ### Function call arguments
 

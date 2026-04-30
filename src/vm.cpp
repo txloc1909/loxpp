@@ -625,6 +625,27 @@ InterpretResult VM::run() {
             push(Value{tag});
             break;
         }
+        case Op::INSTANCEOF: {
+            ObjString* className = asObjString(readConstant());
+            Value val = pop();
+            Value classVal;
+            bool result = false;
+            if (m_globals.get(className, classVal) && isClass(classVal)) {
+                ObjClass* target = asObjClass(as<Obj*>(classVal));
+                if (isInstance(val)) {
+                    ObjClass* klass = asObjInstance(as<Obj*>(val))->klass;
+                    while (klass != nullptr) {
+                        if (klass == target) {
+                            result = true;
+                            break;
+                        }
+                        klass = klass->superclass;
+                    }
+                }
+            }
+            push(Value{result});
+            break;
+        }
         case Op::CALL: {
             int argCount = readByte();
             Value callee = peek(argCount);
@@ -888,6 +909,7 @@ InterpretResult VM::run() {
             ObjClass* superclass = asObjClass(as<Obj*>(superVal));
             ObjClass* subclass = asObjClass(as<Obj*>(peek(0)));
             subclass->methods.addAll(superclass->methods);
+            subclass->superclass = superclass;
             pop(); // pop subclass; superclass stays as "super" local
             break;
         }
