@@ -190,6 +190,13 @@ var [a, b] = list
 
 **No new opcodes** — uses existing `GET_PROPERTY`. Trailing comma is allowed.
 
+**Return-value optimization opportunity:** when the RHS is a call expression
+(`var {a, b} = f()`), the returned instance is used only for field extraction
+and then discarded. A future optimisation could fuse the call + destructure into
+a single pass that reads fields directly without materialising a hidden source
+variable, saving one local slot and one `GET_LOCAL` per field. Requires a new
+opcode or compiler pass — deferred.
+
 ---
 
 ### Phase 2 — `enum` declaration + constructor pattern match ✅ (PR #64)
