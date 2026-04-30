@@ -2,8 +2,8 @@
 
 ## Context
 
-Lox++ has `switch/case/default` (merged PR #41) that dispatches on equality of primitive values.
-It is being completely replaced by nominal pattern matching with three goals:
+Lox++ had `switch/case/default` (PR #41) that dispatched on equality of primitive values.
+It has been replaced by nominal pattern matching with three goals:
 
 1. Type-check and field extraction happen in one operation (not two separate if-else chains)
 2. Match failure is explicit and loud (`MatchError`) rather than silently falling through
@@ -16,8 +16,8 @@ It is being completely replaced by nominal pattern matching with three goals:
 ### Nominal, not structural
 
 A constructor match checks the **runtime tag** stored in the value, not the presence or shape of
-fields. An object that has a `radius` field but was not constructed with `circle(...)` does not
-match `case circle{r}`. This enables O(1) tag dispatch and makes compile-time exhaustiveness
+fields. An object that has a `radius` field but was not constructed with `Circle(...)` does not
+match `case Circle{r}`. This enables O(1) tag dispatch and makes compile-time exhaustiveness
 possible.
 
 ### Closed `enum`, runtime fallback for open types
@@ -29,8 +29,9 @@ the VM raises `MatchError`.
 
 ### Bare identifier always binds; use guard to test existing values
 
-In pattern position, a bare lowercase identifier always creates a new local binding (and always
-matches). To test against an existing variable, use a guard clause.
+In pattern position, a bare identifier always creates a new local binding (and always matches),
+unless it resolves to a known constructor (see below). To test against an existing variable, use
+a guard clause.
 
 ```lox
 var north = 0
@@ -42,8 +43,10 @@ match direction {
 
 ### Constructor disambiguation — symbol lookup
 
-No naming convention is required for constructor names. In pattern position, the compiler checks
-its constructor table:
+No naming convention is required by the compiler, but **uppercase constructor names are
+encouraged** (`Ok`, `Err`, `Some`, `None`) to visually distinguish them from variable bindings.
+
+In pattern position, the compiler checks its constructor table:
 
 - Name is a known constructor → constructor dispatch pattern (tag check + field binding)
 - Name is not a known constructor → variable binding (always matches)
@@ -53,10 +56,10 @@ documented behaviour. Wildcard `_` is always a non-binding wildcard; no construc
 `_`.
 
 ```lox
-enum result { ok(value) err(code) }
+enum Result { Ok(value) Err(code) }
 match r {
-  case ok{v}   => print v      // ok is a known constructor → dispatch
-  case err{c}  => print c      // err is a known constructor → dispatch
+  case Ok{v}   => print v      // Ok is a known constructor → dispatch
+  case Err{c}  => print c      // Err is a known constructor → dispatch
 }
 ```
 
@@ -67,8 +70,8 @@ Everything before `=>` is pattern context; `{` there means field destructuring. 
 
 ```lox
 match shape {
-  case circle{r}  => 3.14159 * r * r   // {r} is a field pattern
-  case rect{w, h} => { var a = w * h; a }  // { after => is a block
+  case Circle{r}  => 3.14159 * r * r       // {r} is a field pattern
+  case Rect{w, h} => { var a = w * h; a }  // { after => is a block
 }
 ```
 
@@ -79,8 +82,8 @@ identifier whose name is `"_"`; the compiler suppresses the binding — no local
 
 ### Match failure raises `MatchError`
 
-A `match` expression with no matching arm and no `case _ =>` raises `MatchError` at runtime. The
-error propagates up; it is not catchable within the same `match`.
+A `match` with no matching arm and no `case _ =>` raises `MatchError` at runtime. The error
+propagates up; it is not catchable within the same `match`.
 
 ### First-class patterns — declined
 
@@ -92,9 +95,9 @@ Making patterns passable runtime values would:
 
 These costs are not acceptable. Patterns are syntactic constructs only.
 
-### `not`-patterns and `@`-bindings — deferred
+### `not`-patterns and `@`-bindings — deferred to Phase 4
 
-Not in scope for Phases 1–2. If added later: `not` is restricted to non-binding sub-patterns;
+Not in scope for Phases 1–3. If added later: `not` is restricted to non-binding sub-patterns;
 `@`-bindings require no other changes.
 
 ### Or-patterns — binding consistency is a hard error
@@ -102,8 +105,8 @@ Not in scope for Phases 1–2. If added later: `not` is restricted to non-bindin
 All alternatives in an or-pattern must bind the same set of names, or the compiler emits an error.
 
 ```lox
-case a(y) | b(y) => use(y)    // ok
-case a(y) | b(z) => ...       // compile error: a binds y, b binds z
+case A(y) | B(y) => use(y)    // ok — both bind y
+case A(y) | B(z) => ...       // compile error: A binds y, B binds z
 ```
 
 ### Match-bound variables are mutable
@@ -120,7 +123,9 @@ guard failure, a `JUMP` skips the body; locals go out of scope normally — no r
 
 ## Phases
 
-### Phase 1 — Match statement (replaces `switch`)
+### Phase 1 — Match statement ✅ (PR #61)
+
+Replaced `switch/case/default` with a `match` statement.
 
 **Grammar:**
 
@@ -136,30 +141,23 @@ armBody    : statement | '{' statement* '}'
 Binding in multi-pattern arms: if any `armPat` is an `IDENTIFIER` it must be the only pattern;
 mixing a binding with literal alternatives is a compile error.
 
-**What changes from `switch`:**
+**What changed from `switch`:**
 
 - `switch (expr) { case val: ... }` → `match expr { case pattern => body }`
 - No fall-through
 - `MatchError` on no-match when no `case _ =>` arm exists
 - Guard clauses: `case x if x > 0 => ...`
 - Multi-pattern arms: `case 1, 2, 3 => ...`
-- Match remains a **statement** in this phase
+- Match is a **statement**
 
 **New tokens:** `MATCH` (`match`), `FAT_ARROW` (`=>`)  
-**New opcode:** `MATCH_ERROR` — raises `MatchError`; VM never returns
-
-**Programs unlocked:**
-
-| Program | What Phase 1 enables |
-|---|---|
-| Command dispatcher | `match input { case "quit" => ... case _ => ... }` with MatchError safety |
-| HTTP status handler | `match status { case 200 => ... case x if x >= 400 => ... }` |
-| Token classifier | `case "+", "-" => ...` — cleaner than switch |
-| Simple state machine | Match on state string + guard on input range |
+**New opcode:** `MATCH_ERROR` — raises `MatchError`; VM never returns from this instruction
 
 ---
 
-### Phase 1.5 — Destructuring in `var`
+### Phase 1.5 — Destructuring in `var` ✅ (PR #62)
+
+Named-field destructuring into `var` declarations.
 
 **Grammar addition:**
 
@@ -190,159 +188,146 @@ var {pos: {x, y}} = entity
 var [a, b] = list
 ```
 
-**No new opcodes** — uses existing `GET_PROPERTY`.
-
-**Trailing comma** is allowed: `var {x, y,} = obj` is valid.
-
-**Return-value optimization opportunity:** when the RHS is a call expression
-(`var {a, b} = f()`), the returned instance is used only for field extraction
-and then discarded. A future optimisation could fuse the call + destructure
-into a single pass that reads fields directly without materialising a hidden
-source variable, saving one local slot and one `GET_LOCAL` per field. This
-requires a new opcode or compiler pass — deferred, not in scope for Phases 1–2.
-
-**Programs unlocked:**
-
-| Program | What Phase 1.5 enables |
-|---|---|
-| Multi-return via map | `var {quot, rem} = divmod(a, b)` |
-| Coordinate unpacking | `var {x, y} = getPosition()` |
+**No new opcodes** — uses existing `GET_PROPERTY`. Trailing comma is allowed.
 
 ---
 
-### Phase 2 — `enum`, structural match, match as expression
+### Phase 2 — `enum` declaration + constructor pattern match ✅ (PR #64)
 
-**`enum` declaration:**
+Closed algebraic types with compile-time exhaustiveness checking.
+
+**`enum` declaration (global scope only):**
 
 ```lox
-enum Result {
-  ok(value)
-  err(code, message)
+enum Result { Ok(value) Err(code, message) }
+enum Option { Some(v) None }
+enum Tree   { Leaf(val) Node(left, right) }
+```
+
+- Each constructor becomes a globally-scoped callable (`ObjEnumCtor`)
+- Calling it with the declared arity creates an `ObjEnum` value
+- Constructor tag = 0-based index in declaration order
+- Duplicate constructor name → compile error
+- `enum` at non-global scope → compile error
+
+**Constructor pattern match:**
+
+```lox
+match r {
+  case Ok(v)       => print v            // positional binding
+  case Err{code}   => print code         // named field binding
 }
 
-enum Shape {
-  circle(radius)
-  rect(width, height)
+match opt {
+  case Some(v) => print v
+  case None    => print "nothing"        // zero-field constructor
 }
 
-enum Tree {
-  leaf(value)
-  node(left, right)
+match r {
+  case Ok(v) if v > 0 => print "positive"  // guard on constructor arm
+  case Ok(v)          => print "non-positive"
+  case Err(m)         => print m
 }
 ```
 
-- Constructors are global functions: `ok(42)` → `ObjEnum{tag=0, fields=[42]}`
-- Tag is the 0-based index of the constructor in declaration order
-- Duplicate constructor name across enums → compile error
-- All constructors registered at parse time (exhaustiveness checking)
+**Compile-time exhaustiveness:** when a match contains at least one constructor arm from enum `E`,
+the compiler verifies all constructors of `E` appear as arms, or an unguarded `_` wildcard is
+present. Missing constructors → compile error.
 
-**Grammar:**
+**New token:** `ENUM` (`enum`)  
+**New opcode:** `GET_TAG` — pops `ObjEnum`, pushes its tag as a Number  
+**New runtime types:** `ObjEnumCtor` (callable), `ObjEnum` (value with `VmVector<Value> fields`)  
+**Constructor calls:** dispatched through the existing `Op::CALL` path — no `BUILD_ENUM` opcode needed  
+**Stringify:** `ObjEnum` renders as `EnumName::CtorName(f1, f2)` (or bare `EnumName::CtorName` for zero-field)
 
+---
+
+### Phase 3 — Or-patterns + match as expression (planned)
+
+**Or-patterns** allow a single arm to match multiple constructors that bind the same names:
+
+```lox
+match msg {
+  case Quit | Pause => stop()
+  case Move(x) | Teleport(x) => go(x)   // both alternatives must bind x
+}
 ```
-enumDecl       : 'enum' IDENTIFIER '{' constructorDecl* '}'
-constructorDecl: IDENTIFIER ('(' IDENTIFIER (',' IDENTIFIER)* ')')?
 
-matchExpr   : 'match' expression '{' matchArm+ '}'
-matchArm    : 'case' pattern ('if' expression)? '=>' armExpr
-armExpr     : expression | '{' statement* expression '}'
+New token: `PIPE` (`|`)
 
-pattern     : NUMBER | STRING | 'true' | 'false' | 'nil'
-            | IDENTIFIER                                       // constructor or binding (lookup)
-            | IDENTIFIER '{' fieldPat (',' fieldPat)* '}'     // named constructor pattern
-            | IDENTIFIER '(' IDENTIFIER (',' IDENTIFIER)* ')' // positional constructor pattern
-            | pattern '|' pattern                             // or-pattern
-fieldPat    : IDENTIFIER
-```
-
-**Match as expression:** from Phase 2, every arm body must leave one value on the stack. Used as
-a statement, the result is `POP`ped. All arms must produce the same stack height.
+**Match as expression** — every arm body produces a value on the stack:
 
 ```lox
 var area = match shape {
-  case circle{r}   => 3.14159 * r * r
-  case rect{w, h}  => w * h
+  case Circle{r}  => 3.14159 * r * r
+  case Rect{w, h} => w * h
 }
 ```
 
-**Compile-time exhaustiveness:** when the scrutinee is statically known to be an `enum` type,
-the compiler checks that every constructor appears as an arm or a `case _ =>` wildcard exists.
-Missing constructors → compile error listing them.
+All arms must leave the same stack height. Used as a statement the result is `POP`ped.
 
-**New tokens:** `ENUM` (`enum`), `PIPE` (`|`)  
-**New opcodes:**
+**`var [a, b]` sequence destructuring:**
 
-| Opcode | Operands | Behaviour |
-|---|---|---|
-| `BUILD_ENUM` | uint8 `tag`, uint8 `field_count` | Pop N fields → push `ObjEnum{tag, fields[]}` |
-| `GET_TAG` | none | Pop `ObjEnum` → push its tag as integer |
-
-**New runtime type:**
-
-```cpp
-struct ObjEnum : Obj {
-    uint8_t tag;
-    uint8_t fieldCount;
-    Value fields[];   // flexible array member
-};
+```lox
+var [head, tail] = list    // positional destructure into a list
 ```
 
-**Dispatch compilation:**
+New opcode: `GET_INDEX` already exists; may need a length guard.
 
+---
+
+### Phase 4 — List patterns in match + advanced patterns (future)
+
+**List patterns in `match`:**
+
+```lox
+match lst {
+  case []          => print "empty"
+  case [x]         => print "singleton"
+  case [x, ...rest] => print x
+}
 ```
-GET_LOCAL <subject>
-GET_TAG
-CONSTANT <tag_idx>
-EQUAL
-JUMP_IF_FALSE → next_arm
-POP
-[bind fields via GET_PROPERTY or GET_INDEX]
-[guard if any]
-[arm body]
-JUMP → match_end
-...
-MATCH_ERROR     // if no wildcard arm
+
+**`@`-bindings** — bind a whole matched value while also inspecting its structure:
+
+```lox
+case node @ Node(l, r) => process(node, l, r)
 ```
 
-**Decision tree:** currently sequential tag comparison (correct, O(n) in arms). A `JUMP_TABLE`
-optimisation is future work.
+**`not`-patterns** — match anything that does not match a sub-pattern (non-binding only):
 
-**Programs unlocked:**
+```lox
+case not None => ...
+```
 
-| Program | What Phase 2 enables |
-|---|---|
-| Result-based file I/O | `match open(...) { case ok{f} => ... case err{c} => ... }` |
-| Option type | `enum option { some(value) none }` — replaces nil sentinel |
-| Expression tree evaluator | `enum expr { num(n) add(l,r) mul(l,r) }` — recursive match |
-| Binary tree algorithms | Insert, search, height on `enum tree { leaf(v) node(l,r) }` |
-| Typed tokenizer | `enum token { number(n) ident(name) plus minus }` |
-| State machine | `enum state { idle running(task) error(code) }` — exhaustive transitions |
+**`JUMP_TABLE` optimization** — replace the sequential tag-comparison chain in `match` arms with
+a single jump table dispatch when the match is dense over a contiguous range of tags. Purely an
+optimization; no semantic change.
 
 ---
 
 ## Dependency chain
 
 ```
-Phase 1: match statement + MatchError
+Phase 1:   match statement + MatchError              ✅ PR #61
   ↓
-Phase 1.5: var {x, y} destructuring
+Phase 1.5: var {x, y} destructuring                  ✅ PR #62
   ↓
-Phase 2: enum + structural match + match-as-expression
+Phase 2:   enum + constructor pattern + exhaustiveness ✅ PR #64
   ↓
-Phase 3/4 (future): var [a, b], list patterns in match, sequence ops
+Phase 3:   or-patterns, match-as-expression, var [a,b]
+  ↓
+Phase 4:   list patterns, @-bindings, not-patterns, JUMP_TABLE opt
 ```
 
 ---
 
-## Out of scope (Phases 1–2)
+## Out of scope (permanently)
 
-| Feature | Status |
+| Feature | Reason |
 |---|---|
-| Rename form `{field: newName}` | Dropped entirely |
+| Rename form `{field: newName}` | Dropped — use positional `Ctor(v)` for aliasing |
 | Nested `var` destructuring | Not supported; chain two `var` declarations |
-| Sequence destructuring (`var [a, b]`, `case []`, `case [x, ...rest]`) | Phase 3/4 |
-| `@`-bindings | Deferred |
-| `not`-patterns | Deferred |
-| First-class patterns | Declined |
-| `JUMP_TABLE` for variant dispatch | Future optimisation |
+| First-class patterns | Declined — kills exhaustiveness and requires pattern algebra |
 | Generics (`Result<T>`) | Not planned |
-| Namespace for constructors | Not planned |
+| Namespace for constructors (`Result::Ok`) | Not planned — global ctor names encouraged to be unique |
