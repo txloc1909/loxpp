@@ -1,0 +1,44 @@
+// ast_eval.lox — expression AST evaluator using class patterns (visitor pattern).
+// Demonstrates: recursive class pattern dispatch as a substitute for virtual dispatch.
+
+class Num { init(v)      { this.v = v; } }
+class Add { init(l, r)   { this.l = l; this.r = r; } }
+class Sub { init(l, r)   { this.l = l; this.r = r; } }
+class Mul { init(l, r)   { this.l = l; this.r = r; } }
+class Neg { init(e)      { this.e = e; } }
+
+fun eval(node) {
+    match node {
+        case Num{v}     => return v;
+        case Add{l, r}  => return eval(l) + eval(r);
+        case Sub{l, r}  => return eval(l) - eval(r);
+        case Mul{l, r}  => return eval(l) * eval(r);
+        case Neg{e}     => return -eval(e);
+        case _          => return 0;
+    }
+}
+
+fun pretty(node) {
+    match node {
+        case Num{v}     => return str(v);
+        case Add{l, r}  => return "(" + pretty(l) + " + " + pretty(r) + ")";
+        case Sub{l, r}  => return "(" + pretty(l) + " - " + pretty(r) + ")";
+        case Mul{l, r}  => return "(" + pretty(l) + " * " + pretty(r) + ")";
+        case Neg{e}     => return "(-" + pretty(e) + ")";
+        case _          => return "?";
+    }
+}
+
+// (2 + 3) * -(4)  =>  -20
+var expr = Mul(Add(Num(2), Num(3)), Neg(Num(4)));
+// CHECK: -20
+print eval(expr);
+// CHECK: ((2 + 3) * (-4))
+print pretty(expr);
+
+// 10 - (3 + 2)  =>  5
+var expr2 = Sub(Num(10), Add(Num(3), Num(2)));
+// CHECK: 5
+print eval(expr2);
+// CHECK: (10 - (3 + 2))
+print pretty(expr2);
