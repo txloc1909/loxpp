@@ -347,12 +347,10 @@ of nesting depth. `findRootCompiler()` is eliminated entirely.
 
 ```lox
 match msg {
-  case Quit | Pause => stop()
-  case Move(x) | Teleport(x) => go(x)   // both alternatives must bind x
+  case Quit or Pause => stop()
+  case Move(x) or Teleport(x) => go(x)   // both alternatives must bind x
 }
 ```
-
-New token: `PIPE` (`|`)
 
 **Match as expression** — every arm body produces a value on the stack:
 
