@@ -682,7 +682,7 @@ InterpretResult VM::run() {
                 pop(); // pop the ObjEnumCtor from the callee slot
                 push(Value{static_cast<Obj*>(enumVal)});
             } else {
-                runtimeError("Can only call functions and classes.");
+                runtimeError("Can only call functions, classes and enums.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             break;
@@ -774,7 +774,7 @@ InterpretResult VM::run() {
                                         argCount))
                             return InterpretResult::RUNTIME_ERROR;
                     } else {
-                        runtimeError("Can only call functions and classes.");
+                        runtimeError("Can only call functions, classes and enums.");
                         return InterpretResult::RUNTIME_ERROR;
                     }
                     frame = &m_frames[m_frameCount - 1];

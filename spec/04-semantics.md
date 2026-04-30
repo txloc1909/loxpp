@@ -710,7 +710,7 @@ Common causes:
 
 ---
 
-## Enum Types (Phase 2)
+## Enum Types
 
 ### `ObjEnumCtor` — constructor object
 

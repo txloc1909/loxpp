@@ -1,18 +1,18 @@
 // enum_tree.lox — Binary tree using enum + recursive constructor patterns.
 
-enum Tree { leaf(val) node(left, right) }
+enum Tree { Leaf(val) Node(left, right) }
 
 fun tree_sum(t) {
     match t {
-        case leaf(v) => return v;
-        case node(l, r) => return tree_sum(l) + tree_sum(r);
+        case Leaf(v) => return v;
+        case Node(l, r) => return tree_sum(l) + tree_sum(r);
     }
 }
 
 fun tree_depth(t) {
     match t {
-        case leaf(v) => return 0;
-        case node(l, r) => {
+        case Leaf(v) => return 0;
+        case Node(l, r) => {
             var dl = tree_depth(l);
             var dr = tree_depth(r);
             if (dl > dr) { return dl + 1; }
@@ -21,9 +21,9 @@ fun tree_depth(t) {
     }
 }
 
-var t = node(
-    node(leaf(1), leaf(2)),
-    node(leaf(3), node(leaf(4), leaf(5)))
+var t = Node(
+    Node(Leaf(1), Leaf(2)),
+    Node(Leaf(3), Node(Leaf(4), Leaf(5)))
 );
 
 // CHECK: sum: 15

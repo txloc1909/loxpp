@@ -24,8 +24,8 @@ class EnumDeclarationTest : public ::testing::Test {};
 TEST_F(EnumDeclarationTest, SingleConstructor) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        enum Msg { ping }
-        var x = ping();
+        enum Msg { Ping }
+        var x = Ping();
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("x");
@@ -37,10 +37,10 @@ TEST_F(EnumDeclarationTest, SingleConstructor) {
 TEST_F(EnumDeclarationTest, MultipleConstructors) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        enum Shape { circle rect triangle }
-        var c = circle();
-        var r = rect();
-        var t = triangle();
+        enum Shape { Circle Rect Triangle }
+        var c = Circle();
+        var r = Rect();
+        var t = Triangle();
     )"),
               InterpretResult::OK);
     auto cv = h.getGlobal("c");
@@ -57,8 +57,8 @@ TEST_F(EnumDeclarationTest, MultipleConstructors) {
 TEST_F(EnumDeclarationTest, ConstructorWithFields) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        enum Pair { pair(first, second) }
-        var p = pair(10, 20);
+        enum Pair { Pair(first, second) }
+        var p = Pair(10, 20);
     )"),
               InterpretResult::OK);
     auto pv = h.getGlobal("p");
@@ -72,26 +72,26 @@ TEST_F(EnumDeclarationTest, ConstructorWithFields) {
 
 TEST_F(EnumDeclarationTest, DuplicateEnumNameIsError) {
     VMTestHarness h;
-    ASSERT_NE(h.run(R"(
-        enum X { a }
-        enum X { b }
+    ASSERT_EQ(h.run(R"(
+        enum X { A }
+        enum X { B }
     )"),
-              InterpretResult::OK);
+              InterpretResult::COMPILE_ERROR);
 }
 
 TEST_F(EnumDeclarationTest, DuplicateCtorNameIsError) {
     VMTestHarness h;
-    ASSERT_NE(h.run(R"(
-        enum X { a a }
+    ASSERT_EQ(h.run(R"(
+        enum X { A A }
     )"),
-              InterpretResult::OK);
+              InterpretResult::COMPILE_ERROR);
 }
 
 TEST_F(EnumDeclarationTest, WrongArityAtRuntime) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        enum E { pair(a, b) }
-        pair(1);
+        enum E { Pair(a, b) }
+        Pair(1);
     )"),
               InterpretResult::RUNTIME_ERROR);
 }
@@ -105,12 +105,12 @@ class MatchEnumTest : public ::testing::Test {};
 TEST_F(MatchEnumTest, PositionalBinding) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        enum Result { ok(value) err(msg) }
-        var r = ok(42);
+        enum Result { Ok(value) Err(msg) }
+        var r = Ok(42);
         var got = 0;
         match r {
-            case ok(v) => got = v;
-            case err(m) => got = -1;
+            case Ok(v) => got = v;
+            case Err(m) => got = -1;
         }
     )"),
               InterpretResult::OK);
@@ -122,12 +122,12 @@ TEST_F(MatchEnumTest, PositionalBinding) {
 TEST_F(MatchEnumTest, NamedFieldBinding) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        enum Point { point(x, y) }
-        var p = point(3, 4);
+        enum Point { Point(x, y) }
+        var p = Point(3, 4);
         var px = 0;
         var py = 0;
         match p {
-            case point{x, y} => { px = x; py = y; }
+            case Point{x, y} => { px = x; py = y; }
         }
     )"),
               InterpretResult::OK);
@@ -142,12 +142,12 @@ TEST_F(MatchEnumTest, NamedFieldBinding) {
 TEST_F(MatchEnumTest, ZeroFieldConstructor) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        enum Opt { some(v) none }
-        var x = none();
+        enum Opt { Some(v) None }
+        var x = None();
         var got = 0;
         match x {
-            case some(v) => got = v;
-            case none => got = 99;
+            case Some(v) => got = v;
+            case None => got = 99;
         }
     )"),
               InterpretResult::OK);
@@ -159,12 +159,12 @@ TEST_F(MatchEnumTest, ZeroFieldConstructor) {
 TEST_F(MatchEnumTest, WildcardAfterConstructors) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        enum Color { red green blue }
-        var c = blue();
+        enum Color { Red Green Blue }
+        var c = Blue();
         var got = 0;
         match c {
-            case red => got = 1;
-            case green => got = 2;
+            case Red => got = 1;
+            case Green => got = 2;
             case _ => got = 99;
         }
     )"),
@@ -177,13 +177,13 @@ TEST_F(MatchEnumTest, WildcardAfterConstructors) {
 TEST_F(MatchEnumTest, GuardOnConstructorArm) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        enum R { ok(v) err(m) }
-        var r = ok(5);
+        enum R { Ok(v) Err(m) }
+        var r = Ok(5);
         var got = 0;
         match r {
-            case ok(v) if v > 3 => got = 1;
-            case ok(v) => got = 2;
-            case err(m) => got = 3;
+            case Ok(v) if v > 3 => got = 1;
+            case Ok(v) => got = 2;
+            case Err(m) => got = 3;
         }
     )"),
               InterpretResult::OK);
@@ -195,13 +195,13 @@ TEST_F(MatchEnumTest, GuardOnConstructorArm) {
 TEST_F(MatchEnumTest, GuardFailsFallsThrough) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        enum R { ok(v) err(m) }
-        var r = ok(1);
+        enum R { Ok(v) Err(m) }
+        var r = Ok(1);
         var got = 0;
         match r {
-            case ok(v) if v > 3 => got = 1;
-            case ok(v) => got = 2;
-            case err(m) => got = 3;
+            case Ok(v) if v > 3 => got = 1;
+            case Ok(v) => got = 2;
+            case Err(m) => got = 3;
         }
     )"),
               InterpretResult::OK);
@@ -219,12 +219,12 @@ class ExhaustivenessTest : public ::testing::Test {};
 TEST_F(ExhaustivenessTest, CompleteMatchPasses) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        enum Coin { heads tails }
-        var c = heads();
+        enum Coin { Heads Tails }
+        var c = Heads();
         var got = 0;
         match c {
-            case heads => got = 1;
-            case tails => got = 2;
+            case Heads => got = 1;
+            case Tails => got = 2;
         }
     )"),
               InterpretResult::OK);
@@ -235,33 +235,34 @@ TEST_F(ExhaustivenessTest, CompleteMatchPasses) {
 
 TEST_F(ExhaustivenessTest, MissingArmIsCompileError) {
     VMTestHarness h;
-    // Missing 'blue' arm — should fail at compile time.
-    ASSERT_NE(h.run(R"(
-        enum Color { red green blue }
-        var c = red();
+    // Missing 'Blue' arm — should fail at compile time.
+    ASSERT_EQ(h.run(R"(
+        enum Color { Red Green Blue }
+        var c = Red();
         match c {
-            case red => 1;
-            case green => 2;
+            case Red => 1;
+            case Green => 2;
         }
     )"),
-              InterpretResult::OK);
+              InterpretResult::COMPILE_ERROR);
 }
 
 TEST_F(ExhaustivenessTest, WildcardSuppressesExhaustivenessError) {
     VMTestHarness h;
+    // c is Blue — not covered by Red arm, so the wildcard arm must be hit.
     ASSERT_EQ(h.run(R"(
-        enum Color { red green blue }
-        var c = red();
+        enum Color { Red Green Blue }
+        var c = Blue();
         var got = 0;
         match c {
-            case red => got = 1;
+            case Red => got = 1;
             case _ => got = 99;
         }
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
     ASSERT_TRUE(v.has_value());
-    expect_num(*v, 1.0);
+    expect_num(*v, 99.0);
 }
 
 // ---------------------------------------------------------------------------
@@ -273,15 +274,15 @@ class MatchGCTest : public ::testing::Test {};
 TEST_F(MatchGCTest, EnumValueSurvivesGC) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        enum Tree { leaf(val) node(left, right) }
-        var t = node(leaf(1), leaf(2));
+        enum Tree { Leaf(val) Node(left, right) }
+        var t = Node(Leaf(1), Leaf(2));
         var got = 0;
         match t {
-            case leaf(v) => got = v;
-            case node(l, r) => {
+            case Leaf(v) => got = v;
+            case Node(l, r) => {
                 match l {
-                    case leaf(v) => got = v;
-                    case node(a, b) => got = -1;
+                    case Leaf(v) => got = v;
+                    case Node(a, b) => got = -1;
                 }
             }
         }
@@ -295,12 +296,12 @@ TEST_F(MatchGCTest, EnumValueSurvivesGC) {
 TEST_F(MatchGCTest, ConstructorIsFirstClassValue) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        enum Wrap { box(v) }
-        var ctor = box;
+        enum Wrap { Box(v) }
+        var ctor = Box;
         var w = ctor(42);
         var got = 0;
         match w {
-            case box(v) => got = v;
+            case Box(v) => got = v;
         }
     )"),
               InterpretResult::OK);

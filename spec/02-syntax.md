@@ -211,10 +211,10 @@ VM raises `MatchError` at runtime.
 enclosing loop (not the match itself). `continue` with no enclosing loop is a
 compile error.
 
-**Constructor patterns (Phase 2):** when an enum constructor name is used as a
+**Constructor patterns:** when an enum constructor name is used as a
 pattern, the arm dispatches on the constructor's tag. Bindings can be
-positional `case ok(v)` or named `case rect{width, height}`. Zero-field
-constructors use the bare name: `case none`. See §4 for exhaustiveness rules.
+positional `case Ok(v)` or named `case Rect{width, height}`. Zero-field
+constructors use the bare name: `case None`. See §4 for exhaustiveness rules.
 
 ### `enum` declaration
 
@@ -229,10 +229,10 @@ value when called with the declared number of arguments. Constructors with no
 field list take zero arguments.
 
 ```lox
-enum Result { ok(value) err(msg) }
-enum Option { some(v) none }
-var r = ok(42);
-var n = none();
+enum Result { Ok(value) Err(msg) }
+enum Option { Some(v) None }
+var r = Ok(42);
+var n = None();
 ```
 
 - Enum declarations are only permitted at global scope.
@@ -240,7 +240,7 @@ var n = none();
   compile errors.
 - Calling a constructor with the wrong number of arguments is a runtime error.
 
-### Extended `match` arm patterns (Phase 2)
+### Extended `match` arm patterns
 
 ```
 armPat : NUMBER | STRING | 'true' | 'false' | 'nil'
