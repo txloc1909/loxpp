@@ -300,9 +300,17 @@ case node @ Node(l, r) => process(node, l, r)
 case not None => ...
 ```
 
-**`JUMP_TABLE` optimization** — replace the sequential tag-comparison chain in `match` arms with
-a single jump table dispatch when the match is dense over a contiguous range of tags. Purely an
-optimization; no semantic change.
+---
+
+### Phase 5 — `JUMP_TABLE` optimization (future)
+
+Replace the sequential tag-comparison chain emitted for `enum` match arms with a single jump
+table dispatch when the match covers a dense range of tags. No semantic change — purely a
+code-generation optimization.
+
+New opcode: `JUMP_TABLE` — pops a tag integer, indexes into an inline jump offset table, and
+branches to the matching arm. Falls back to the existing sequential chain when the tag range is
+sparse.
 
 ---
 
@@ -317,7 +325,9 @@ Phase 2:   enum + constructor pattern + exhaustiveness ✅ PR #64
   ↓
 Phase 3:   or-patterns, match-as-expression, var [a,b]
   ↓
-Phase 4:   list patterns, @-bindings, not-patterns, JUMP_TABLE opt
+Phase 4:   list patterns, @-bindings, not-patterns
+  ↓
+Phase 5:   JUMP_TABLE optimization
 ```
 
 ---
