@@ -41,25 +41,33 @@ match direction {
 }
 ```
 
-### Constructor disambiguation — symbol lookup
+### Pattern disambiguation — symbol lookup
 
-No naming convention is required by the compiler, but **uppercase constructor names are
-encouraged** (`Ok`, `Err`, `Some`, `None`) to visually distinguish them from variable bindings.
+No naming convention is required by the compiler, but **uppercase names are encouraged** for both
+enum constructors (`Ok`, `Err`) and class names (`Circle`, `Point`) to visually distinguish them
+from variable bindings.
 
-In pattern position, the compiler checks its constructor table:
+In pattern position, the compiler resolves a name in this priority order:
 
-- Name is a known constructor → constructor dispatch pattern (tag check + field binding)
-- Name is not a known constructor → variable binding (always matches)
+1. Name is a known enum constructor → **enum pattern** (tag check + positional/named field binding)
+2. Name is a known class → **class pattern** (`instanceof` check + named field binding)
+3. Otherwise → **variable binding** (always matches)
 
-If a constructor name shadows a local variable, the constructor wins in pattern position. This is
-documented behaviour. Wildcard `_` is always a non-binding wildcard; no constructor may be named
-`_`.
+Wildcard `_` is always a non-binding wildcard regardless of resolution. No constructor or class
+may be named `_`.
 
 ```lox
 enum Result { Ok(value) Err(code) }
+class Point { init(x, y) { this.x = x; this.y = y; } }
+
 match r {
-  case Ok{v}   => print v      // Ok is a known constructor → dispatch
-  case Err{c}  => print c      // Err is a known constructor → dispatch
+  case Ok{v}      => print v     // known constructor → enum pattern
+  case Err{c}     => print c     // known constructor → enum pattern
+}
+
+match p {
+  case Point{x, y} => print x   // known class → class pattern
+  case other       => print "?" // unknown name → binding
 }
 ```
 
@@ -249,6 +257,66 @@ present. Missing constructors → compile error.
 
 ---
 
+### Phase 2.5 — Class patterns (planned)
+
+Named-field pattern matching on open class instances, using `instanceof` dispatch at runtime.
+
+**Syntax** — identical to enum named-field patterns, no new tokens:
+
+```lox
+class Point  { init(x, y)    { this.x = x; this.y = y; } }
+class Circle { init(center, radius) { this.center = center; this.radius = radius; } }
+class Rect   { init(tl, br)  { this.tl = tl; this.br = br; } }
+
+match shape {
+  case Circle{center, radius} => print radius;
+  case Rect{tl, br}           => print tl.x;
+  case _                      => print "unknown";
+}
+```
+
+**Disambiguation:** in pattern position, if the name resolves to a known class (registered in the
+compiler's class table at the point of the `match`), the arm compiles to an `instanceof` check
+followed by `GET_PROPERTY` for each bound field. This is the same grammar production as enum
+named-field patterns — the compiler decides which path to take based on symbol lookup alone.
+
+**No exhaustiveness** — open class hierarchies are never fully enumerable. A `case _` arm is
+always required, or `MatchError` is the runtime fallback. This is consistent with the existing
+behavior for unguarded open-type matches.
+
+**Composing with enum patterns** — class patterns and enum patterns can appear in the same match
+when the subject is known to be one or the other, but not mixed across the same value:
+
+```lox
+enum Result { Ok(value) Err(msg) }
+class NetworkError { init(code, msg) { this.code = code; this.msg = msg; } }
+class ParseError   { init(line, msg) { this.line = line; this.msg = msg; } }
+
+match r {
+  case Ok(v) => match v {                       // outer: enum (exhaustive)
+    case NetworkError{code, msg} => print code; // inner: class (open)
+    case ParseError{line, msg}   => print line;
+    case _                       => print "?";
+  }
+  case Err(m) => print m;
+}
+```
+
+**New opcode:** `INSTANCEOF` — pops a value, reads a class constant operand, pushes `true` if the
+value is an `ObjInstance` of that class (exact match or subclass), `false` otherwise. Used in
+place of `GET_TAG + EQUAL` for class pattern arms.
+
+**Compiler change:** maintain a class table alongside the constructor table. When a class
+declaration is compiled, register its name. In pattern position, check class table before falling
+through to variable binding.
+
+**Out of scope for this phase:**
+- Positional class patterns `case Point(x, y)` — classes have no declared field order; named-only
+- Or-patterns mixing class arms `case Circle{r} | Rect{w, h}` — deferred to Phase 3
+- Exhaustiveness for `sealed` classes — not planned; use `enum` for closed hierarchies
+
+---
+
 ### Phase 3 — Or-patterns + match as expression (planned)
 
 **Or-patterns** allow a single arm to match multiple constructors that bind the same names:
@@ -329,6 +397,8 @@ Phase 1:   match statement + MatchError              ✅ PR #61
 Phase 1.5: var {x, y} destructuring                  ✅ PR #62
   ↓
 Phase 2:   enum + constructor pattern + exhaustiveness ✅ PR #64
+  ↓
+Phase 2.5: class patterns (instanceof dispatch, named-field binding)
   ↓
 Phase 3:   or-patterns, match-as-expression, var [a,b]
   ↓
