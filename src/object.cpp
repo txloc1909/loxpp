@@ -80,6 +80,37 @@ std::string stringifyObj(Obj* obj) {
         result += "}";
         return result;
     }
+    case ObjType::ENUM_CTOR: {
+        auto* ctor = asObjEnumCtor(obj);
+        return "<ctor " +
+               std::string(ctor->enumName->chars.data(),
+                           ctor->enumName->chars.size()) +
+               "::" +
+               std::string(ctor->ctorName->chars.data(),
+                           ctor->ctorName->chars.size()) +
+               ">";
+    }
+    case ObjType::ENUM: {
+        auto* e = asObjEnum(obj);
+        std::string s(e->ctor->enumName->chars.data(),
+                      e->ctor->enumName->chars.size());
+        s += "::";
+        s += std::string(e->ctor->ctorName->chars.data(),
+                         e->ctor->ctorName->chars.size());
+        if (!e->fields.empty()) {
+            s += "(";
+            bool first = true;
+            for (auto& f : e->fields) {
+                if (!first) {
+                    s += ", ";
+                }
+                first = false;
+                s += stringify(f);
+            }
+            s += ")";
+        }
+        return s;
+    }
     }
     return "<obj>";
 }

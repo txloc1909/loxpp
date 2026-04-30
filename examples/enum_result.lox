@@ -1,0 +1,45 @@
+// enum_result.lox — Result/Option idiom using enum + constructor patterns.
+
+enum Result { Ok(value) Err(msg) }
+enum Option { Some(v) None }
+
+fun safe_div(a, b) {
+    if (b == 0) {
+        return Err("division by zero");
+    }
+    return Ok(a / b);
+}
+
+fun show_result(r) {
+    match r {
+        case Ok(v) => print "ok: " + str(v);
+        case Err(m) => print "err: " + m;
+    }
+}
+
+// CHECK: ok: 5
+show_result(safe_div(10, 2));
+// CHECK: err: division by zero
+show_result(safe_div(1, 0));
+
+fun find_first(lst, pred) {
+    var i = 0;
+    while (i < len(lst)) {
+        if (pred(lst[i])) {
+            return Some(lst[i]);
+        }
+        i = i + 1;
+    }
+    return None();
+}
+
+fun is_even(x) { return x % 2 == 0; }
+
+var nums = [1, 3, 5, 4, 7];
+var result = find_first(nums, is_even);
+
+match result {
+    // CHECK: found even: 4
+    case Some(v) => print "found even: " + str(v);
+    case None => print "no even number";
+}

@@ -57,6 +57,8 @@ std::ostream& operator<<(std::ostream& os, const TokenType& type) {
         return os << "CLASS";
     case TokenType::ELSE:
         return os << "ELSE";
+    case TokenType::ENUM:
+        return os << "ENUM";
     case TokenType::FALSE:
         return os << "FALSE";
     case TokenType::FUN:

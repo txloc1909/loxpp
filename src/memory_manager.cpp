@@ -34,6 +34,10 @@ static const char* objTypeName(ObjType type) {
         return "iterator";
     case ObjType::MAP:
         return "map";
+    case ObjType::ENUM_CTOR:
+        return "enum_ctor";
+    case ObjType::ENUM:
+        return "enum";
     }
     return "?";
 }
@@ -204,6 +208,20 @@ void MemoryManager::traceObject(Obj* obj) {
             markValue(e.key);
             markValue(e.value);
         });
+        break;
+    }
+    case ObjType::ENUM_CTOR: {
+        auto* ctor = static_cast<ObjEnumCtor*>(obj);
+        markObject(ctor->ctorName);
+        markObject(ctor->enumName);
+        break;
+    }
+    case ObjType::ENUM: {
+        auto* e = static_cast<ObjEnum*>(obj);
+        markObject(e->ctor);
+        for (auto& v : e->fields) {
+            markValue(v);
+        }
         break;
     }
     }

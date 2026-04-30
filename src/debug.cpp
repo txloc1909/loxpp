@@ -196,6 +196,8 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return simpleInstruction("ITER_NEXT", offset, out, color);
     case Op::MATCH_ERROR:
         return simpleInstruction("MATCH_ERROR", offset, out, color);
+    case Op::GET_TAG:
+        return simpleInstruction("GET_TAG", offset, out, color);
     default:
         out << cc(color, kRed) << cc(color, kBold) << "UNKNOWN("
             << static_cast<unsigned>(chunk.at(offset)) << ")"

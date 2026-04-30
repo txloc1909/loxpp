@@ -2,9 +2,12 @@
 #include "debug.h"
 #include "memory_manager.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <numeric>
+#include <set>
 #include <unistd.h>
 
 ObjFunction* compile(const std::string& source, MemoryManager* mm) {
@@ -196,6 +199,8 @@ void Compiler::call() {
 void Compiler::declaration() {
     if (m_parser->match(TokenType::CLASS)) {
         classDeclaration();
+    } else if (m_parser->match(TokenType::ENUM)) {
+        enumDeclaration();
     } else if (m_parser->match(TokenType::FUN)) {
         funDeclaration();
     } else if (m_parser->match(TokenType::VAR)) {
@@ -641,6 +646,7 @@ void Compiler::matchStatement() {
     m_loopStack.push_back({-1, m_localCount, {}});
 
     bool hasUnguardedCatchAll = false;
+    std::set<std::string> seenCtors;
 
     while (!m_parser->check(TokenType::RIGHT_BRACE) &&
            !m_parser->check(TokenType::EOF_)) {
@@ -657,24 +663,41 @@ void Compiler::matchStatement() {
         if (arm.isUnguardedCatchAll) {
             hasUnguardedCatchAll = true;
         }
+        if (!arm.ctorName.empty()) {
+            seenCtors.insert(arm.ctorName);
+        }
 
         // Guard-fail exit: pop guard bool, pop binding locals.
+        // If lastMiss is also set (constructor arm), the guard-fail path must
+        // jump over the lastMiss POP to avoid a spurious extra pop.
+        int skipLastMissPop = -1;
         if (arm.guardMiss != -1) {
             patchJump(arm.guardMiss);
             emitByte(Op::POP); // pop false guard
             for (int i = 0; i < arm.bindingCount; i++) {
                 emitByte(Op::POP); // pop binding value(s)
             }
+            if (arm.lastMiss != -1) {
+                skipLastMissPop = emitJump(Op::JUMP);
+            }
         }
 
-        // Literal miss: pop false equality, fall through to next arm.
+        // Literal/tag miss: pop false equality, fall through to next arm.
         if (arm.lastMiss != -1) {
             patchJump(arm.lastMiss);
             emitByte(Op::POP);
         }
+
+        if (skipLastMissPop != -1) {
+            patchJump(skipLastMissPop);
+        }
     }
 
     m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after match body.");
+
+    if (!hasUnguardedCatchAll && !seenCtors.empty()) {
+        checkEnumExhaustiveness(seenCtors);
+    }
 
     // No unguarded catch-all → raise MatchError when no arm matched.
     if (!hasUnguardedCatchAll) {
@@ -693,19 +716,46 @@ Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
     bool isIdentPat = m_parser->check(TokenType::IDENTIFIER);
     int lastMiss = -1;
     int bindingCount = 0;
+    std::string matchedCtorName;
 
     if (isIdentPat) {
         Token patTok = m_parser->m_current;
         m_parser->advance();
-        if (m_parser->check(TokenType::COMMA)) {
-            m_parser->error("A binding pattern must be the sole arm pattern.");
-        }
-        if (patTok.lexeme != "_") {
+        std::string patName(patTok.lexeme);
+
+        const ConstructorInfo* info = findConstructor(patName);
+
+        // Constructor pattern: emit tag check + field bindings.
+        if (info != nullptr) {
+            matchedCtorName = patName;
+
             emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
-            Token bindTok{TokenType::IDENTIFIER, patTok.lexeme, patTok.line};
-            addLocal(bindTok);
-            markInitialized();
-            bindingCount = 1;
+            emitByte(Op::GET_TAG);
+            emitBytes(Op::CONSTANT,
+                      makeConstant(Value{static_cast<double>(info->tag)}));
+            emitByte(Op::EQUAL);
+            lastMiss = emitJump(Op::JUMP_IF_FALSE);
+            emitByte(Op::POP); // pop true
+
+            bindingCount = compileCtorPattern(subjectSlot, *info, patTok);
+        } else if (m_parser->check(TokenType::LEFT_BRACE) ||
+                   m_parser->check(TokenType::LEFT_PAREN)) {
+            // Looks like a constructor pattern but name is unknown.
+            m_parser->error(("Unknown constructor '" + patName + "'.").c_str());
+        } else {
+            // Plain binding or wildcard.
+            if (m_parser->check(TokenType::COMMA)) {
+                m_parser->error(
+                    "A binding pattern must be the sole arm pattern.");
+            }
+            if (patName != "_") {
+                emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+                Token bindTok{TokenType::IDENTIFIER, patTok.lexeme,
+                              patTok.line};
+                addLocal(bindTok);
+                markInitialized();
+                bindingCount = 1;
+            }
         }
     } else {
         // Literal pattern(s): equality chain.
@@ -766,7 +816,201 @@ Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
     int endJump = emitJump(Op::JUMP);
     m_loopStack.back().breakJumps.push_back(endJump);
 
-    return {lastMiss, guardMiss, bindingCount, isIdentPat && !hasGuard};
+    bool isPlainIdentCatchAll =
+        isIdentPat && matchedCtorName.empty() && !hasGuard;
+    return {lastMiss, guardMiss, bindingCount, isPlainIdentCatchAll,
+            matchedCtorName};
+}
+
+Compiler* Compiler::findRootCompiler() {
+    Compiler* c = this;
+    while (c->m_enclosing != nullptr) {
+        c = c->m_enclosing;
+    }
+    return c;
+}
+
+const ConstructorInfo*
+Compiler::findConstructor(const std::string& name) const {
+    const Compiler* c = this;
+    while (c != nullptr) {
+        auto it = c->m_constructors.find(name);
+        if (it != c->m_constructors.end()) {
+            return &it->second;
+        }
+        c = c->m_enclosing;
+    }
+    return nullptr;
+}
+
+void Compiler::enumDeclaration() {
+    if (m_scopeDepth > 0) {
+        m_parser->error("Enum declarations are only allowed at global scope.");
+        return;
+    }
+
+    m_parser->consume(TokenType::IDENTIFIER, "Expect enum name.");
+    Token enumTok = m_parser->m_previous;
+    std::string enumName(enumTok.lexeme);
+
+    Compiler* root = findRootCompiler();
+    if (root->m_enumCtors.count(enumName) != 0U) {
+        m_parser->error("Duplicate enum name.");
+        return;
+    }
+
+    m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before enum body.");
+
+    uint8_t tag = 0;
+    while (!m_parser->check(TokenType::RIGHT_BRACE) &&
+           !m_parser->check(TokenType::EOF_)) {
+        m_parser->consume(TokenType::IDENTIFIER, "Expect constructor name.");
+        Token ctorTok = m_parser->m_previous;
+        std::string ctorName(ctorTok.lexeme);
+
+        if (root->m_constructors.count(ctorName) != 0U) {
+            m_parser->error("Duplicate constructor name.");
+            return;
+        }
+
+        std::vector<std::string> fieldNames;
+        if (m_parser->match(TokenType::LEFT_PAREN)) {
+            if (!m_parser->check(TokenType::RIGHT_PAREN)) {
+                do {
+                    m_parser->consume(TokenType::IDENTIFIER,
+                                      "Expect field name.");
+                    fieldNames.emplace_back(m_parser->m_previous.lexeme);
+                } while (m_parser->match(TokenType::COMMA));
+            }
+            m_parser->consume(TokenType::RIGHT_PAREN,
+                              "Expect ')' after field list.");
+        }
+
+        auto arity = static_cast<uint8_t>(fieldNames.size());
+
+        ObjString* ctorNameStr = m_mm->makeString(ctorTok.lexeme);
+        m_mm->pushTempRoot(ctorNameStr);
+        ObjString* enumNameStr = m_mm->makeString(enumTok.lexeme);
+        m_mm->pushTempRoot(enumNameStr);
+
+        auto* ctor =
+            m_mm->create<ObjEnumCtor>(tag, arity, ctorNameStr, enumNameStr);
+        m_mm->pushTempRoot(ctor);
+        uint8_t ctorConst = makeConstant(Value{static_cast<Obj*>(ctor)});
+        m_mm->popTempRoot(); // ctor
+        m_mm->popTempRoot(); // enumNameStr
+        m_mm->popTempRoot(); // ctorNameStr
+
+        uint8_t nameConst = identifierConstant(ctorTok);
+        emitBytes(Op::CONSTANT, ctorConst);
+        emitBytes(Op::DEFINE_GLOBAL, nameConst);
+
+        root->m_constructors[ctorName] = {enumName, tag, arity, fieldNames};
+        root->m_enumCtors[enumName].push_back(ctorName);
+        tag++;
+    }
+
+    m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after enum body.");
+}
+
+int Compiler::compileCtorPattern(int subjectSlot, const ConstructorInfo& info,
+                                 const Token& patTok) {
+    int bindingCount = 0;
+    bool namedFields = m_parser->check(TokenType::LEFT_BRACE) &&
+                       !m_parser->check(TokenType::FAT_ARROW) &&
+                       !m_parser->check(TokenType::IF);
+    bool positionalFields =
+        !namedFields && m_parser->check(TokenType::LEFT_PAREN);
+
+    if (namedFields) {
+        m_parser->advance(); // consume '{'
+        if (!m_parser->check(TokenType::RIGHT_BRACE)) {
+            do {
+                m_parser->consume(TokenType::IDENTIFIER, "Expect field name.");
+                std::string fieldName(m_parser->m_previous.lexeme);
+                auto it = std::find(info.fieldNames.begin(),
+                                    info.fieldNames.end(), fieldName);
+                if (it == info.fieldNames.end()) {
+                    m_parser->error(("Unknown field '" + fieldName + "' for '" +
+                                     std::string(patTok.lexeme) + "'.")
+                                        .c_str());
+                    break;
+                }
+                auto idx = static_cast<uint8_t>(
+                    std::distance(info.fieldNames.begin(), it));
+                emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+                emitBytes(Op::CONSTANT,
+                          makeConstant(Value{static_cast<double>(idx)}));
+                emitByte(Op::GET_INDEX);
+                addLocal(m_parser->m_previous);
+                markInitialized();
+                bindingCount++;
+            } while (m_parser->match(TokenType::COMMA));
+        }
+        m_parser->consume(TokenType::RIGHT_BRACE,
+                          "Expect '}' after field pattern.");
+    } else if (positionalFields) {
+        m_parser->advance(); // consume '('
+        int i = 0;
+        if (!m_parser->check(TokenType::RIGHT_PAREN)) {
+            do {
+                if (i >= static_cast<int>(info.arity)) {
+                    m_parser->error("Too many fields in constructor pattern.");
+                    break;
+                }
+                m_parser->consume(TokenType::IDENTIFIER,
+                                  "Expect binding name.");
+                emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+                emitBytes(Op::CONSTANT,
+                          makeConstant(Value{static_cast<double>(i)}));
+                emitByte(Op::GET_INDEX);
+                addLocal(m_parser->m_previous);
+                markInitialized();
+                bindingCount++;
+                i++;
+            } while (m_parser->match(TokenType::COMMA));
+        }
+        m_parser->consume(TokenType::RIGHT_PAREN,
+                          "Expect ')' after field pattern.");
+    }
+    return bindingCount;
+}
+
+void Compiler::checkEnumExhaustiveness(const std::set<std::string>& seenCtors) {
+    std::set<std::string> checkedEnums;
+    for (const auto& ctorName : seenCtors) {
+        const ConstructorInfo* info = findConstructor(ctorName);
+        if (info == nullptr) {
+            continue;
+        }
+        if (checkedEnums.count(info->enumName) != 0U) {
+            continue;
+        }
+        checkedEnums.insert(info->enumName);
+
+        Compiler* root = findRootCompiler();
+        auto enumIt = root->m_enumCtors.find(info->enumName);
+        if (enumIt == root->m_enumCtors.end()) {
+            continue;
+        }
+        std::vector<std::string> missing;
+        for (const auto& c : enumIt->second) {
+            if (seenCtors.count(c) == 0U) {
+                missing.push_back(c);
+            }
+        }
+        if (!missing.empty()) {
+            std::string msg = "Non-exhaustive match on enum '" +
+                              info->enumName + "': missing arms for: ";
+            for (size_t i = 0; i < missing.size(); i++) {
+                if (i > 0) {
+                    msg += ", ";
+                }
+                msg += missing[i];
+            }
+            m_parser->error(msg.c_str());
+        }
+    }
 }
 
 void Compiler::funDeclaration() {
