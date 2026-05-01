@@ -79,7 +79,7 @@ inline bool isObjClass(Obj* o) { return isObjType(o, ObjType::CLASS); }
 inline ObjClass* asObjClass(Obj* o) { return static_cast<ObjClass*>(o); }
 inline bool isClass(const Value& v) {
     return isValueOfType<ObjType::CLASS>(v);
-}
+} // NOLINT
 
 struct ObjInstance : public Obj {
     ObjClass* klass;
@@ -124,9 +124,7 @@ struct ObjList : public Obj {
 
 inline bool isObjList(Obj* o) { return isObjType(o, ObjType::LIST); }
 inline ObjList* asObjList(Obj* o) { return static_cast<ObjList*>(o); }
-inline bool isList(const Value& v) {
-    return isValueOfType<ObjType::LIST>(v);
-}
+inline bool isList(const Value& v) { return isValueOfType<ObjType::LIST>(v); }
 
 struct ObjIterator : public Obj {
     Value collection; // ObjList*, ObjString*, or ObjMap* being iterated
@@ -165,9 +163,7 @@ struct ObjFile : public Obj {
 
 inline bool isObjFile(Obj* o) { return isObjType(o, ObjType::FILE); }
 inline ObjFile* asObjFile(Obj* o) { return static_cast<ObjFile*>(o); }
-inline bool isFile(const Value& v) {
-    return isValueOfType<ObjType::FILE>(v);
-}
+inline bool isFile(const Value& v) { return isValueOfType<ObjType::FILE>(v); }
 
 // ---------------------------------------------------------------------------
 // ObjMap — open-addressing hash map with Value keys and values.
@@ -214,9 +210,7 @@ struct ObjMap : public Obj {
 
 inline bool isObjMap(Obj* o) { return isObjType(o, ObjType::MAP); }
 inline ObjMap* asObjMap(Obj* o) { return static_cast<ObjMap*>(o); }
-inline bool isMap(const Value& v) {
-    return isValueOfType<ObjType::MAP>(v);
-}
+inline bool isMap(const Value& v) { return isValueOfType<ObjType::MAP>(v); }
 
 // ---------------------------------------------------------------------------
 // ObjEnumCtor — callable constructor created by an enum declaration.

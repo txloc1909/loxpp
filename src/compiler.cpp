@@ -862,7 +862,9 @@ Compiler::findConstructor(const std::string& name) const {
 bool Compiler::findClass(const std::string& name) const {
     const Compiler* found = walkChain<Compiler>(
         this,
-        [&name](const Compiler* c) { return c->m_classNames.count(name) != 0U; },
+        [&name](const Compiler* c) {
+            return c->m_classNames.count(name) != 0U;
+        },
         [](const Compiler* c) { return c->m_enclosing; });
     return found != nullptr;
 }
