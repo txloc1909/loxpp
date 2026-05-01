@@ -643,13 +643,22 @@ void Compiler::compileMatchBody() {
     markInitialized();
     int subjectSlot = m_localCount - 1;
 
-    // No result-local pre-allocation. Arm values are bare stack values.
+    // armLocalBase is set here - loop cleanup will only touch bindings after this
     int armLocalBase = m_localCount;
 
     m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before match body.");
 
+    // PUSH LOOP CONTEXT FIRST - this saves m_localCount as the limit for cleanup
     // start = -1 flags this context as a match (not a loop).
     m_loopStack.push_back({-1, m_localCount, {}});
+
+    // NOW pre-allocate result-local AFTER push - loop cleanup won't see it!
+    emitByte(Op::NIL);
+    Token resultName{TokenType::IDENTIFIER, "(match_result)",
+                     m_parser->m_previous.line};
+    addLocal(resultName);
+    markInitialized();
+    int resultSlot = m_localCount - 1;
 
     bool hasUnguardedCatchAll = false;
     std::set<std::string> seenCtors;
@@ -665,7 +674,7 @@ void Compiler::compileMatchBody() {
         }
 
         int armLocalBase_iter = m_localCount;
-        auto arm = compileMatchArm(subjectSlot, armLocalBase_iter);
+        auto arm = compileMatchArm(subjectSlot, armLocalBase_iter, resultSlot);
         if (arm.isUnguardedCatchAll) {
             hasUnguardedCatchAll = true;
         }
@@ -715,18 +724,29 @@ void Compiler::compileMatchBody() {
     }
     m_loopStack.pop_back();
 
-    // Stack at this point: [..., subject, arm_value]
-    // subject is at subjectSlot; arm_value is a bare stack value (not a local).
-    // Overwrite subject slot with arm_value, pop the bare copy, close scope manually.
-    emitBytes(Op::SET_LOCAL, static_cast<uint8_t>(subjectSlot));
-    emitByte(Op::POP);
+    // Result is in resultSlot (never on stack - stored via SET_LOCAL in arm).
+    // Load it onto the stack for the expression context.
+    emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(resultSlot));
+    // Stack: [..., subject_on_stack, result_on_stack, arm_value_in_reg]
+    // Wait: subject and result are in locals, not on stack!
+    // They were addLocal'd, so they consumed the stack values used to initialize them.
+    // So the stack is actually just: [..., arm_value]
+    // Now emit POPs for the locals (subject and result) so they're retired from tracking
+    // But we don't actually POP from the stack since they're not there
     m_scopeDepth--;
-    m_localCount = subjectSlot;
-    // One value remains on the stack: the match result.
+    int startCount = m_localCount;
+    while (m_localCount > 0 &&
+           m_locals[m_localCount - 1].depth > m_scopeDepth) {
+        m_localCount--;
+    }
+    // POPs would normally be emitted here, but subject/result locals
+    // are not on the stack, so we don't emit them
+    // Stack: [..., arm_value]
 }
 
 Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
-                                                   int armLocalBase) {
+                                                   int armLocalBase,
+                                                   int resultSlot) {
     bool isIdentPat = m_parser->check(TokenType::IDENTIFIER);
     int lastMiss = -1;
     int bindingCount = 0;
@@ -847,7 +867,9 @@ Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
     } else {
         expression();
     }
-    // arm_value now on top of stack — leave it there.
+    // arm_value now on top of stack — store in pre-allocated result slot.
+    emitBytes(Op::SET_LOCAL, static_cast<uint8_t>(resultSlot));
+    emitByte(Op::POP);
     endScope();
 
     // Normal arm exit: clean up binding locals, jump to match end.
