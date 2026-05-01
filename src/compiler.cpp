@@ -1,6 +1,7 @@
 #include "compiler.h"
 #include "debug.h"
 #include "memory_manager.h"
+#include "utility.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -738,10 +739,23 @@ Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
             emitByte(Op::POP); // pop true
 
             bindingCount = compileCtorPattern(subjectSlot, *info, patTok);
+        } else if (findClass(patName)) {
+            // Class pattern: instanceof check + named-field bindings.
+            ObjString* classNameStr = m_mm->makeString(patTok.lexeme);
+            m_mm->pushTempRoot(classNameStr);
+            uint8_t classNameConst =
+                makeConstant(Value{static_cast<Obj*>(classNameStr)});
+            m_mm->popTempRoot();
+            emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+            emitBytes(Op::INSTANCEOF, classNameConst);
+            lastMiss = emitJump(Op::JUMP_IF_FALSE);
+            emitByte(Op::POP); // pop true
+            bindingCount = compileClassPattern(subjectSlot, patTok);
         } else if (m_parser->check(TokenType::LEFT_BRACE) ||
                    m_parser->check(TokenType::LEFT_PAREN)) {
             // Looks like a constructor pattern but name is unknown.
-            m_parser->error(("Unknown constructor '" + patName + "'.").c_str());
+            m_parser->error(
+                ("Unknown constructor or class '" + patName + "'.").c_str());
         } else {
             // Plain binding or wildcard.
             if (m_parser->check(TokenType::COMMA)) {
@@ -816,8 +830,10 @@ Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
     int endJump = emitJump(Op::JUMP);
     m_loopStack.back().breakJumps.push_back(endJump);
 
+    // A plain identifier is a catch-all only if it emitted no conditional check
+    // (lastMiss == -1 means no JUMP_IF_FALSE was emitted).
     bool isPlainIdentCatchAll =
-        isIdentPat && matchedCtorName.empty() && !hasGuard;
+        isIdentPat && matchedCtorName.empty() && lastMiss == -1 && !hasGuard;
     return {lastMiss, guardMiss, bindingCount, isPlainIdentCatchAll,
             matchedCtorName};
 }
@@ -841,6 +857,44 @@ Compiler::findConstructor(const std::string& name) const {
         c = c->m_enclosing;
     }
     return nullptr;
+}
+
+bool Compiler::findClass(const std::string& name) const {
+    const Compiler* found = walkChain<Compiler>(
+        this,
+        [&name](const Compiler* c) {
+            return c->m_classNames.count(name) != 0U;
+        },
+        [](const Compiler* c) { return c->m_enclosing; });
+    return found != nullptr;
+}
+
+int Compiler::compileClassPattern(int subjectSlot, const Token& patTok) {
+    if (m_parser->check(TokenType::LEFT_PAREN)) {
+        m_parser->error("Class patterns only support named-field syntax "
+                        "(e.g., 'ClassName{field1, field2}').");
+        return 0;
+    }
+    if (!m_parser->check(TokenType::LEFT_BRACE))
+        return 0; // zero-field class pattern — instanceof check only
+
+    m_parser->advance(); // consume '{'
+    int bindingCount = 0;
+    if (!m_parser->check(TokenType::RIGHT_BRACE)) {
+        do {
+            m_parser->consume(TokenType::IDENTIFIER, "Expect field name.");
+            Token fieldTok = m_parser->m_previous;
+            uint8_t propConst = identifierConstant(fieldTok);
+            emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+            emitBytes(Op::GET_PROPERTY, propConst);
+            addLocal(fieldTok);
+            markInitialized();
+            bindingCount++;
+        } while (m_parser->match(TokenType::COMMA));
+    }
+    m_parser->consume(TokenType::RIGHT_BRACE,
+                      "Expect '}' after field pattern.");
+    return bindingCount;
 }
 
 void Compiler::enumDeclaration() {
@@ -1053,10 +1107,12 @@ void Compiler::classDeclaration() {
 
     emitBytes(Op::CLASS, nameConst);
 
-    if (m_scopeDepth > 0)
+    if (m_scopeDepth > 0) {
         markInitialized();
-    else
+    } else {
         emitBytes(Op::DEFINE_GLOBAL, nameConst);
+        findRootCompiler()->m_classNames.insert(std::string(className.lexeme));
+    }
 
     ClassCompiler classCompiler;
     classCompiler.enclosing = m_currentClass;

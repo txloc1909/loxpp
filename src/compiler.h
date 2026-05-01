@@ -139,10 +139,14 @@ class Compiler {
     // Walks the enclosing chain to the root compiler.
     Compiler* findRootCompiler();
     const ConstructorInfo* findConstructor(const std::string& name) const;
+    bool findClass(const std::string& name) const;
     // Emit GET_INDEX bindings for a constructor pattern.
     // Returns the number of locals bound.
     int compileCtorPattern(int subjectSlot, const ConstructorInfo& info,
                            const Token& patTok);
+    // Emit GET_PROPERTY bindings for a class pattern (named-field only).
+    // Returns the number of locals bound.
+    int compileClassPattern(int subjectSlot, const Token& patTok);
     // Raise a compile error if seen constructor arms don't cover all variants.
     void checkEnumExhaustiveness(const std::set<std::string>& seenCtors);
 
@@ -164,4 +168,6 @@ class Compiler {
     std::unordered_map<std::string, ConstructorInfo> m_constructors;
     // enumName → ordered list of ctor names, for exhaustiveness checking.
     std::unordered_map<std::string, std::vector<std::string>> m_enumCtors;
+    // Class name table — only meaningfully populated on the root compiler.
+    std::set<std::string> m_classNames;
 };

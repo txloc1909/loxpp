@@ -6,6 +6,7 @@
 #include "object.h"
 #include "scanner.h"
 #include "compiler.h"
+#include "utility.h"
 
 #include "math.h"
 
@@ -625,6 +626,25 @@ InterpretResult VM::run() {
             push(Value{tag});
             break;
         }
+        case Op::INSTANCEOF: {
+            ObjString* className = asObjString(readConstant());
+            Value val = pop();
+            Value classVal;
+            bool result = false;
+            if (m_globals.get(className, classVal) && isClass(classVal)) {
+                ObjClass* target = asObjClass(as<Obj*>(classVal));
+                if (isInstance(val)) {
+                    ObjClass* klass = asObjInstance(as<Obj*>(val))->klass;
+                    const ObjClass* found = walkChain<ObjClass>(
+                        klass,
+                        [target](const ObjClass* k) { return k == target; },
+                        [](const ObjClass* k) { return k->superclass; });
+                    result = found != nullptr;
+                }
+            }
+            push(Value{result});
+            break;
+        }
         case Op::CALL: {
             int argCount = readByte();
             Value callee = peek(argCount);
@@ -888,6 +908,7 @@ InterpretResult VM::run() {
             ObjClass* superclass = asObjClass(as<Obj*>(superVal));
             ObjClass* subclass = asObjClass(as<Obj*>(peek(0)));
             subclass->methods.addAll(superclass->methods);
+            subclass->superclass = superclass;
             pop(); // pop subclass; superclass stays as "super" local
             break;
         }

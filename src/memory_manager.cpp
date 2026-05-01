@@ -168,6 +168,8 @@ void MemoryManager::traceObject(Obj* obj) {
     case ObjType::CLASS: {
         auto* klass = static_cast<ObjClass*>(obj);
         markObject(klass->name);
+        if (klass->superclass)
+            markObject(klass->superclass);
         klass->methods.forEach([this](ObjString* k, Value v) {
             markObject(k);
             markValue(v);

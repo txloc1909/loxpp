@@ -1,0 +1,43 @@
+// class_dispatch.lox — class patterns as a visitor over an OOP shape hierarchy.
+// Demonstrates: named-field class patterns, subclass matching, wildcard fallback.
+
+class Shape    { init(color)      { this.color = color; } }
+class Circle   < Shape { init(color, r)    { super.init(color); this.r = r; } }
+class Rect     < Shape { init(color, w, h) { super.init(color); this.w = w; this.h = h; } }
+class Triangle < Shape { init(color, b, h) { super.init(color); this.b = b; this.h = h; } }
+
+fun area(s) {
+    match s {
+        case Circle{r}      => return 3.14159 * r * r;
+        case Rect{w, h}     => return w * h;
+        case Triangle{b, h} => return 0.5 * b * h;
+        case Shape{color}   => return 0;
+    }
+}
+
+fun describe(s) {
+    match s {
+        case Circle{r}  => return "circle r=" + str(r);
+        case Rect{w, h} => return "rect " + str(w) + "x" + str(h);
+        case _          => return "shape";
+    }
+}
+
+var shapes = [Circle("red", 5), Rect("blue", 4, 6), Triangle("green", 3, 8)];
+
+var i = 0;
+while (i < len(shapes)) {
+    var s = shapes[i];
+    // CHECK: 78.5397
+    // CHECK: 24
+    // CHECK: 12
+    print area(s);
+    i = i + 1;
+}
+
+// CHECK: circle r=5
+print describe(Circle("red", 5));
+// CHECK: rect 4x6
+print describe(Rect("blue", 4, 6));
+// CHECK: shape
+print describe(Triangle("green", 3, 8));
