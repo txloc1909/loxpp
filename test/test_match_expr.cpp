@@ -76,9 +76,9 @@ TEST_F(MatchExpressionTest, StackNeutral) {
     ASSERT_EQ(h.run(R"(
         var x = 42;
         match x {
-            case 42 => 100;
-            case _ => 200;
-        }
+            case 42 => 100
+            case _ => 200
+        };
         var y = 99;
     )"), InterpretResult::OK);
     EXPECT_EQ(h.stackDepth(), 0);
