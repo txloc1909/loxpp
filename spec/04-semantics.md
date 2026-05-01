@@ -246,6 +246,25 @@ callee(arg1, arg2, ...)
 Functions may be called recursively. The depth limit is implementation-defined;
 exceeding it is a **runtime error**.
 
+### match Expression
+
+```
+match subject { matchArm* }
+```
+
+1. Evaluate `subject` exactly once and store it internally (not user-accessible).
+2. Arms are tested in source order. For each arm:
+   a. Evaluate the pattern against the stored subject (tag check, literal equality, or wildcard).
+   b. If the pattern does not match, proceed to the next arm.
+   c. If the pattern matches and a guard (`if expr`) is present, evaluate the guard. If the guard is falsy, proceed to the next arm.
+   d. If the pattern matches (and the guard, if present, is truthy), evaluate the arm's body **expression** and return its value as the result of the `match` expression.
+3. If no arm matches: raise **`MatchError`** at runtime. The `match` expression does not produce a value.
+
+All arms must be written so that their body expressions leave exactly one value; this is enforced structurally by the compiler (each arm stores its result into a pre-allocated slot before cleanup).
+
+When a `match` expression is used as a statement (`exprStmt`), the result value is discarded.
+
+
 ---
 
 ## Statements
@@ -705,7 +724,7 @@ Common causes:
 | NaN used as map key | `m[0/0] = 1` |
 | Object (non-String) used as map key | `m[[1,2]] = 1` |
 | Method called on non-instance/non-list/non-map | `42.foo()` |
-| No arm matches in a `match` statement | `match 99 { case 1 => ... }` |
+| No arm matches in a `match` statement or expression | `match 99 { case 1 => "one" }` |
 | Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field |
 
 ---

@@ -59,7 +59,10 @@ matchArm       ::= "case" armPats ( "if" expression )? "=>" armBody ;
 armPats        ::= armPat ( "," armPat )* ;
 armPat         ::= NUMBER | STRING | "true" | "false" | "nil"
                  | IDENTIFIER ;          (* IDENTIFIER: "_" = wildcard; other = binding *)
-armBody        ::= statement | "{" declaration* "}" ;
+armBody        ::= statement
+                 | "{" declaration* "}"
+                 | "{" declaration* expression "}"
+                 | expression ;          (* last two forms: expression-mode arms only *)
 
 block          ::= "{" declaration* "}" ;
 
@@ -98,7 +101,10 @@ primary        ::= "true"
                  | "super" "." IDENTIFIER
                  | "(" expression ")"
                  | "[" ( expression ( "," expression )* )? "]"
-                 | "{" ( mapEntry ( "," mapEntry )* )? "}" ;
+                 | "{" ( mapEntry ( "," mapEntry )* )? "}"
+                 | matchExpr ;
+
+matchExpr      ::= "match" expression "{" matchArm* "}" ;
 
 mapEntry       ::= expression ":" expression ;
 ```

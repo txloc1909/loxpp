@@ -80,6 +80,7 @@ class Compiler {
     void breakStatement();
     void continueStatement();
     void matchStatement();
+    void matchExpression();
     void enumDeclaration();
 
     struct MatchArmResult {
@@ -89,7 +90,7 @@ class Compiler {
         bool isUnguardedCatchAll; // true → suppress MATCH_ERROR
         std::string ctorName;     // non-empty if this was a constructor arm
     };
-    MatchArmResult compileMatchArm(int subjectSlot, int armLocalBase);
+    MatchArmResult compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot, bool asExpr);
     void varDeclaration();
     void block();
     void funDeclaration();
@@ -121,6 +122,7 @@ class Compiler {
     void emitDestructureLocal(const std::vector<Token>& fields);
     void emitDestructureGlobal(const std::vector<Token>& fields);
 
+    void compileMatchBody(bool asExpr);
     void parseFunction(FunctionType type);
 
     void emitByte(Byte byte);
