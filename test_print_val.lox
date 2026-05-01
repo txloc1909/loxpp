@@ -1,0 +1,20 @@
+enum Result { Ok(value) Err(msg) }
+
+fun divide(a, b) {
+    if (b == 0) return Err("division by zero");
+    return Ok(a / b);
+}
+
+var cases = [divide(10, 2), divide(7, 0)];
+var i = 0;
+while (i < 2) {
+    print "Value is:";
+    print cases[i];
+    print "Now matching:";
+    var label = match cases[i] {
+        case Ok(v) => "ok"
+        case Err(m) => "err"
+    };
+    print label;
+    i = i + 1;
+}

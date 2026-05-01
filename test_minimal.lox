@@ -1,0 +1,7 @@
+enum Result { Ok(value) Err(msg) }
+var x = Ok(5);
+var y = match x {
+    case Ok(v) => v
+    case Err(m) => 0
+};
+print y;

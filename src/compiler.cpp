@@ -734,14 +734,19 @@ void Compiler::compileMatchBody(bool asExpr) {
     if (!asExpr) {
         endScope(); // pops the hidden subject local
     } else {
-        // Stack: [..., subject, result_placeholder(holds winning arm value)]
-        // Move result into subject slot and pop the redundant top copy.
-        emitBytes(Op::SET_LOCAL, static_cast<uint8_t>(subjectSlot));
-        emitByte(Op::POP);
-        // Stack: [..., result]   (at subject's old slot position)
-        // Manually close scope without emitting POP for the result.
+        // In expression mode: the result is in the result local.
+        // We need to leave the result on the stack for the expression context.
+        // The stack currently has values from SET_LOCAL (peek) operations.
+        // We leave just the result by:
+        // 1. Keep result value on stack (it was SET_LOCAL'd without final POP)
+        // 2. Load result from local onto stack
+        emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(resultSlot));
+        // 3. Close the match scope without emitting POPs
         m_scopeDepth--;
-        m_localCount = subjectSlot;
+        while (m_localCount > 0 &&
+               m_locals[m_localCount - 1].depth > m_scopeDepth) {
+            m_localCount--;
+        }
     }
 }
 
