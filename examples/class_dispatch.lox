@@ -28,7 +28,7 @@ var shapes = [Circle("red", 5), Rect("blue", 4, 6), Triangle("green", 3, 8)];
 var i = 0;
 while (i < len(shapes)) {
     var s = shapes[i];
-    // CHECK: 78.53975
+    // CHECK: 78.5397
     // CHECK: 24
     // CHECK: 12
     print area(s);

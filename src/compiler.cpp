@@ -891,7 +891,8 @@ int Compiler::compileClassPattern(int subjectSlot, const Token& patTok) {
             bindingCount++;
         } while (m_parser->match(TokenType::COMMA));
     }
-    m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after field pattern.");
+    m_parser->consume(TokenType::RIGHT_BRACE,
+                      "Expect '}' after field pattern.");
     return bindingCount;
 }
 
