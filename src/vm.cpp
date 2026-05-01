@@ -6,6 +6,7 @@
 #include "object.h"
 #include "scanner.h"
 #include "compiler.h"
+#include "utility.h"
 
 #include "math.h"
 
@@ -634,13 +635,11 @@ InterpretResult VM::run() {
                 ObjClass* target = asObjClass(as<Obj*>(classVal));
                 if (isInstance(val)) {
                     ObjClass* klass = asObjInstance(as<Obj*>(val))->klass;
-                    while (klass != nullptr) {
-                        if (klass == target) {
-                            result = true;
-                            break;
-                        }
-                        klass = klass->superclass;
-                    }
+                    const ObjClass* found = walkChain<ObjClass>(
+                        klass,
+                        [target](const ObjClass* k) { return k == target; },
+                        [](const ObjClass* k) { return k->superclass; });
+                    result = found != nullptr;
                 }
             }
             push(Value{result});

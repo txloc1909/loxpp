@@ -1,6 +1,7 @@
 #include "compiler.h"
 #include "debug.h"
 #include "memory_manager.h"
+#include "utility.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -859,13 +860,11 @@ Compiler::findConstructor(const std::string& name) const {
 }
 
 bool Compiler::findClass(const std::string& name) const {
-    const Compiler* c = this;
-    while (c != nullptr) {
-        if (c->m_classNames.count(name) != 0U)
-            return true;
-        c = c->m_enclosing;
-    }
-    return false;
+    const Compiler* found = walkChain<Compiler>(
+        this,
+        [&name](const Compiler* c) { return c->m_classNames.count(name) != 0U; },
+        [](const Compiler* c) { return c->m_enclosing; });
+    return found != nullptr;
 }
 
 int Compiler::compileClassPattern(int subjectSlot, const Token& patTok) {

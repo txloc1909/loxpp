@@ -10,6 +10,12 @@
 
 #include <vector>
 
+// Generic type-checking template for Value types
+template <ObjType T>
+inline bool isValueOfType(const Value& v) {
+    return is<Obj*>(v) && as<Obj*>(v)->type == T;
+}
+
 struct ObjFunction : public Obj {
     int arity{0};
     int upvalueCount{0};
@@ -57,7 +63,7 @@ inline ObjClosure* asObjClosure(const Value& v) {
     return static_cast<ObjClosure*>(as<Obj*>(v));
 }
 inline bool isClosure(const Value& v) {
-    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::CLOSURE;
+    return isValueOfType<ObjType::CLOSURE>(v);
 }
 
 struct ObjClass : public Obj {
@@ -72,7 +78,7 @@ struct ObjClass : public Obj {
 inline bool isObjClass(Obj* o) { return isObjType(o, ObjType::CLASS); }
 inline ObjClass* asObjClass(Obj* o) { return static_cast<ObjClass*>(o); }
 inline bool isClass(const Value& v) {
-    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::CLASS;
+    return isValueOfType<ObjType::CLASS>(v);
 }
 
 struct ObjInstance : public Obj {
@@ -88,7 +94,7 @@ inline ObjInstance* asObjInstance(Obj* o) {
     return static_cast<ObjInstance*>(o);
 }
 inline bool isInstance(const Value& v) {
-    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::INSTANCE;
+    return isValueOfType<ObjType::INSTANCE>(v);
 }
 
 struct ObjBoundMethod : public Obj {
@@ -106,7 +112,7 @@ inline ObjBoundMethod* asObjBoundMethod(Obj* o) {
     return static_cast<ObjBoundMethod*>(o);
 }
 inline bool isBoundMethod(const Value& v) {
-    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::BOUND_METHOD;
+    return isValueOfType<ObjType::BOUND_METHOD>(v);
 }
 
 struct ObjList : public Obj {
@@ -119,7 +125,7 @@ struct ObjList : public Obj {
 inline bool isObjList(Obj* o) { return isObjType(o, ObjType::LIST); }
 inline ObjList* asObjList(Obj* o) { return static_cast<ObjList*>(o); }
 inline bool isList(const Value& v) {
-    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::LIST;
+    return isValueOfType<ObjType::LIST>(v);
 }
 
 struct ObjIterator : public Obj {
@@ -135,7 +141,7 @@ inline ObjIterator* asObjIterator(Obj* o) {
     return static_cast<ObjIterator*>(o);
 }
 inline bool isIterator(const Value& v) {
-    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::ITERATOR;
+    return isValueOfType<ObjType::ITERATOR>(v);
 }
 
 struct ObjFile : public Obj {
@@ -160,7 +166,7 @@ struct ObjFile : public Obj {
 inline bool isObjFile(Obj* o) { return isObjType(o, ObjType::FILE); }
 inline ObjFile* asObjFile(Obj* o) { return static_cast<ObjFile*>(o); }
 inline bool isFile(const Value& v) {
-    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::FILE;
+    return isValueOfType<ObjType::FILE>(v);
 }
 
 // ---------------------------------------------------------------------------
@@ -209,7 +215,7 @@ struct ObjMap : public Obj {
 inline bool isObjMap(Obj* o) { return isObjType(o, ObjType::MAP); }
 inline ObjMap* asObjMap(Obj* o) { return static_cast<ObjMap*>(o); }
 inline bool isMap(const Value& v) {
-    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::MAP;
+    return isValueOfType<ObjType::MAP>(v);
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +233,7 @@ struct ObjEnumCtor : public Obj {
 };
 
 inline bool isEnumCtor(const Value& v) {
-    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::ENUM_CTOR;
+    return isValueOfType<ObjType::ENUM_CTOR>(v);
 }
 inline ObjEnumCtor* asObjEnumCtor(Obj* o) {
     return static_cast<ObjEnumCtor*>(o);
@@ -245,6 +251,6 @@ struct ObjEnum : public Obj {
 };
 
 inline bool isEnumValue(const Value& v) {
-    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::ENUM;
+    return isValueOfType<ObjType::ENUM>(v);
 }
 inline ObjEnum* asObjEnum(Obj* o) { return static_cast<ObjEnum*>(o); }
