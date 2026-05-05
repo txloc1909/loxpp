@@ -627,9 +627,7 @@ void Compiler::continueStatement() {
     m_parser->error("Cannot use 'continue' outside a loop.");
 }
 
-void Compiler::matchExpression() {
-    compileMatchBody();
-}
+void Compiler::matchExpression() { compileMatchBody(); }
 
 void Compiler::compileMatchBody() {
     // depth==-1 locals are declared but not yet pushed onto the runtime stack.
@@ -668,13 +666,11 @@ void Compiler::compileMatchBody() {
     markInitialized();
     int subjectSlot = m_localCount - 1;
 
-    // armLocalBase encompasses both result and subject.
-    int armLocalBase = m_localCount;
-
     m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before match body.");
 
     // start = -1 flags this context as a match (not a loop).
-    // localCount = armLocalBase so break cleanup stops before result and subject.
+    // localCount = armLocalBase so break cleanup stops before result and
+    // subject.
     m_loopStack.push_back({-1, m_localCount, {}});
 
     bool hasUnguardedCatchAll = false;
@@ -744,7 +740,7 @@ void Compiler::compileMatchBody() {
     // Stack: [..., result_value(resultSlot), subject(subjectSlot)]
     // Pop the subject; result_value becomes the match expression result.
     emitByte(Op::POP);
-    m_localCount--;  // retire subject from tracking
+    m_localCount--; // retire subject from tracking
     m_scopeDepth--;
     while (m_localCount > 0 &&
            m_locals[m_localCount - 1].depth > m_scopeDepth) {
@@ -761,9 +757,8 @@ void Compiler::compileMatchBody() {
     m_localCount += numPending;
 }
 
-Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
-                                                   int armLocalBase,
-                                                   int resultSlot) {
+Compiler::MatchArmResult
+Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
     bool isIdentPat = m_parser->check(TokenType::IDENTIFIER);
     int lastMiss = -1;
     int bindingCount = 0;
@@ -895,9 +890,9 @@ Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
             } else {
                 expression();
                 if (m_parser->match(TokenType::SEMICOLON)) {
-                    emitByte(Op::POP);  // discard intermediate expression
+                    emitByte(Op::POP); // discard intermediate expression
                 } else {
-                    break;  // last expression — the arm value
+                    break; // last expression — the arm value
                 }
             }
         }

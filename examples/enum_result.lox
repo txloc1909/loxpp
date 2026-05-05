@@ -11,10 +11,10 @@ fun safe_div(a, b) {
 }
 
 fun show_result(r) {
-    match r {
-        case Ok(v) => print "ok: " + str(v);
-        case Err(m) => print "err: " + m;
-    }
+    print match r {
+        case Ok(v)  => "ok: " + str(v)
+        case Err(m) => "err: " + m
+    };
 }
 
 // CHECK: ok: 5
@@ -38,8 +38,8 @@ fun is_even(x) { return x % 2 == 0; }
 var nums = [1, 3, 5, 4, 7];
 var result = find_first(nums, is_even);
 
-match result {
-    // CHECK: found even: 4
-    case Some(v) => print "found even: " + str(v);
-    case None => print "no even number";
-}
+// CHECK: found even: 4
+print match result {
+    case Some(v) => "found even: " + str(v)
+    case None    => "no even number"
+};

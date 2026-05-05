@@ -89,7 +89,8 @@ class Compiler {
         bool isUnguardedCatchAll; // true → suppress MATCH_ERROR
         std::string ctorName;     // non-empty if this was a constructor arm
     };
-    MatchArmResult compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot);
+    MatchArmResult compileMatchArm(int subjectSlot, int armLocalBase,
+                                   int resultSlot);
     void varDeclaration();
     void block();
     void funDeclaration();

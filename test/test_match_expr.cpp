@@ -23,7 +23,8 @@ TEST_F(MatchExpressionTest, LiteralArm) {
             case 1 => 42
             case _ => 0
         };
-    )"), InterpretResult::OK);
+    )"),
+              InterpretResult::OK);
     auto v = h.getGlobal("x");
     ASSERT_TRUE(v.has_value());
     expect_num(*v, 42);
@@ -37,7 +38,8 @@ TEST_F(MatchExpressionTest, EnumConstructor) {
             case Ok(v) => v
             case Err(m) => 0
         };
-    )"), InterpretResult::OK);
+    )"),
+              InterpretResult::OK);
     auto v = h.getGlobal("x");
     ASSERT_TRUE(v.has_value());
     expect_num(*v, 5);
@@ -52,7 +54,8 @@ TEST_F(MatchExpressionTest, GuardPass) {
             case Ok(v) => 2
             case Err(m) => 3
         };
-    )"), InterpretResult::OK);
+    )"),
+              InterpretResult::OK);
     auto v = h.getGlobal("x");
     ASSERT_TRUE(v.has_value());
     expect_num(*v, 1);
@@ -65,7 +68,8 @@ TEST_F(MatchExpressionTest, BracedBody) {
             case 1 => { var t = 10; t * 2 }
             case _ => 0
         };
-    )"), InterpretResult::OK);
+    )"),
+              InterpretResult::OK);
     auto v = h.getGlobal("x");
     ASSERT_TRUE(v.has_value());
     expect_num(*v, 20);
@@ -80,7 +84,8 @@ TEST_F(MatchExpressionTest, StackNeutral) {
             case _ => 200
         };
         var y = 99;
-    )"), InterpretResult::OK);
+    )"),
+              InterpretResult::OK);
     EXPECT_EQ(h.stackDepth(), 0);
 }
 
@@ -95,7 +100,8 @@ TEST_F(MatchExpressionTest, MatchInFunctionReturn) {
             };
         }
         var x = f(1);
-    )"), InterpretResult::OK);
+    )"),
+              InterpretResult::OK);
     auto v = h.getGlobal("x");
     ASSERT_TRUE(v.has_value());
     expect_str(*v, "one");
@@ -107,7 +113,8 @@ TEST_F(MatchExpressionTest, NoMatchRaisesError) {
         var x = match 5 {
             case 1 => 10
         };
-    )"), InterpretResult::RUNTIME_ERROR);
+    )"),
+              InterpretResult::RUNTIME_ERROR);
 }
 
 // Exercises issue #68: var label = match expr { ... } inside a loop at local
@@ -127,8 +134,9 @@ TEST_F(MatchExpressionTest, LoopLocalSlotCorruption) {
             };
             out = out + r;
         }
-    )"), InterpretResult::OK);
+    )"),
+              InterpretResult::OK);
     auto v = h.getGlobal("out");
     ASSERT_TRUE(v.has_value());
-    expect_num(*v, 3);  // 1 + 2
+    expect_num(*v, 3); // 1 + 2
 }
