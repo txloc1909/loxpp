@@ -28,9 +28,9 @@ TEST_F(ClassPatternTest, BasicNamedFieldPattern) {
         var px = 0;
         var py = 0;
         match p {
-            case Point{x, y} => { px = x; py = y; }
-            case _           => {}
-        }
+            case Point{x, y} => { px = x; py = y }
+            case _           => 0
+        };
     )"),
               InterpretResult::OK);
     auto xv = h.getGlobal("px");
@@ -46,11 +46,10 @@ TEST_F(ClassPatternTest, ZeroFieldClassPattern) {
     ASSERT_EQ(h.run(R"(
         class Sentinel { init() {} }
         var s = Sentinel();
-        var got = 0;
-        match s {
-            case Sentinel => got = 1;
-            case _        => got = 2;
-        }
+        var got = match s {
+            case Sentinel => 1
+            case _        => 2
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -63,12 +62,11 @@ TEST_F(ClassPatternTest, GuardOnClassArm) {
     ASSERT_EQ(h.run(R"(
         class Box { init(v) { this.v = v; } }
         var b = Box(10);
-        var got = 0;
-        match b {
-            case Box{v} if v > 5 => got = 1;
-            case Box{v}          => got = 2;
-            case _               => got = 3;
-        }
+        var got = match b {
+            case Box{v} if v > 5 => 1
+            case Box{v}          => 2
+            case _               => 3
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -81,12 +79,11 @@ TEST_F(ClassPatternTest, GuardFailsFallsThrough) {
     ASSERT_EQ(h.run(R"(
         class Box { init(v) { this.v = v; } }
         var b = Box(3);
-        var got = 0;
-        match b {
-            case Box{v} if v > 5 => got = 1;
-            case Box{v}          => got = 2;
-            case _               => got = 3;
-        }
+        var got = match b {
+            case Box{v} if v > 5 => 1
+            case Box{v}          => 2
+            case _               => 3
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -98,11 +95,10 @@ TEST_F(ClassPatternTest, WildcardCatchesNonInstance) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         class Point { init(x, y) { this.x = x; this.y = y; } }
-        var got = 0;
-        match 42 {
-            case Point{x, y} => got = 1;
-            case _           => got = 2;
-        }
+        var got = match 42 {
+            case Point{x, y} => 1
+            case _           => 2
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -117,8 +113,8 @@ TEST_F(ClassPatternTest, NoMatchRaisesMatchError) {
         class Bar { init() {} }
         var f = Foo();
         match f {
-            case Bar => print "bar";
-        }
+            case Bar => 0
+        };
     )"),
               InterpretResult::RUNTIME_ERROR);
 }
@@ -130,18 +126,16 @@ TEST_F(ClassPatternTest, MultipleClassArms) {
         class Rect   { init(w, h) { this.w = w; this.h = h; } }
         var c = Circle(5);
         var r = Rect(4, 6);
-        var ca = 0;
-        var ra = 0;
-        match c {
-            case Circle{r} => ca = r;
-            case Rect{w, h} => ca = w * h;
-            case _ => {}
-        }
-        match r {
-            case Circle{r} => ra = r;
-            case Rect{w, h} => ra = w * h;
-            case _ => {}
-        }
+        var ca = match c {
+            case Circle{r}  => r
+            case Rect{w, h} => w * h
+            case _          => 0
+        };
+        var ra = match r {
+            case Circle{r}  => r
+            case Rect{w, h} => w * h
+            case _          => 0
+        };
     )"),
               InterpretResult::OK);
     auto cav = h.getGlobal("ca");
@@ -158,9 +152,9 @@ TEST_F(ClassPatternTest, PositionalClassPatternIsError) {
         class Point { init(x, y) { this.x = x; this.y = y; } }
         var p = Point(1, 2);
         match p {
-            case Point(x, y) => print x;
-            case _ => {}
-        }
+            case Point(x, y) => 0
+            case _ => 0
+        };
     )"),
               InterpretResult::COMPILE_ERROR);
 }
@@ -177,11 +171,10 @@ TEST_F(SubclassPatternTest, SubclassMatchesParentPattern) {
         class Animal { init(name) { this.name = name; } }
         class Dog < Animal { init(name) { super.init(name); } }
         var d = Dog("Rex");
-        var got = "";
-        match d {
-            case Animal{name} => got = name;
-            case _            => got = "miss";
-        }
+        var got = match d {
+            case Animal{name} => name
+            case _            => "miss"
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -195,11 +188,10 @@ TEST_F(SubclassPatternTest, ExactClassMatchAlsoWorks) {
         class Animal { init(name) { this.name = name; } }
         class Dog < Animal { init(name) { super.init(name); } }
         var d = Dog("Rex");
-        var got = "";
-        match d {
-            case Dog{name} => got = name;
-            case _         => got = "miss";
-        }
+        var got = match d {
+            case Dog{name} => name
+            case _         => "miss"
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -214,12 +206,11 @@ TEST_F(SubclassPatternTest, SubclassDoesNotMatchSiblingPattern) {
         class Dog < Animal { init() { super.init(); } }
         class Cat < Animal { init() { super.init(); } }
         var d = Dog();
-        var got = 0;
-        match d {
-            case Cat  => got = 1;
-            case Dog  => got = 2;
-            case _    => got = 3;
-        }
+        var got = match d {
+            case Cat => 1
+            case Dog => 2
+            case _   => 3
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -234,11 +225,10 @@ TEST_F(SubclassPatternTest, DeepInheritanceChain) {
         class B < A { init(v) { super.init(v); } }
         class C < B { init(v) { super.init(v); } }
         var c = C(99);
-        var got = 0;
-        match c {
-            case A{v} => got = v;
-            case _    => got = -1;
-        }
+        var got = match c {
+            case A{v} => v
+            case _    => -1
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -258,14 +248,13 @@ TEST_F(EnumClassCompositionTest, EnumWrapsClassValue) {
         enum Result { Ok(v) Err(m) }
         class NetworkError { init(code) { this.code = code; } }
         var r = Ok(NetworkError(404));
-        var got = 0;
-        match r {
+        var got = match r {
             case Ok(v) => match v {
-                case NetworkError{code} => got = code;
-                case _                 => got = -1;
+                case NetworkError{code} => code
+                case _                 => -1
             }
-            case Err(m) => got = -2;
-        }
+            case Err(m) => -2
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -282,8 +271,8 @@ TEST_F(EnumClassCompositionTest, ClassPatternNoExhaustivenessError) {
         class Foo { init() {} }
         var f = Foo();
         match f {
-            case Foo => print "ok";
-        }
+            case Foo => 0
+        };
     )"),
               InterpretResult::OK);
 }
