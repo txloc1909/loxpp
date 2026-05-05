@@ -109,3 +109,26 @@ TEST_F(MatchExpressionTest, NoMatchRaisesError) {
         };
     )"), InterpretResult::RUNTIME_ERROR);
 }
+
+// Exercises issue #68: var label = match expr { ... } inside a loop at local
+// scope. The pre-existing slot-corruption bug causes wrong values on the second
+// and subsequent iterations.
+TEST_F(MatchExpressionTest, LoopLocalSlotCorruption) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum Result { Ok(v) Err(msg) }
+        var out = 0;
+        var i = 0;
+        while (i < 2) {
+            i = i + 1;
+            var r = match Ok(i) {
+                case Ok(v) => v
+                case Err(m) => -1
+            };
+            out = out + r;
+        }
+    )"), InterpretResult::OK);
+    auto v = h.getGlobal("out");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 3);  // 1 + 2
+}

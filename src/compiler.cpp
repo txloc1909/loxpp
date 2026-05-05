@@ -632,10 +632,35 @@ void Compiler::matchExpression() {
 }
 
 void Compiler::compileMatchBody() {
+    // depth==-1 locals are declared but not yet pushed onto the runtime stack.
+    // They inflate m_localCount without a corresponding runtime slot, which
+    // would offset every slot assignment inside the match body. Temporarily
+    // hide them so the invariant m_locals[i] == runtime slot i holds
+    // throughout this function. We save both the count and the m_locals
+    // entries (which the internal allocations will overwrite), and restore
+    // both before returning so the caller's markInitialized still works.
+    int numPending = 0;
+    while (numPending < m_localCount &&
+           m_locals[m_localCount - 1 - numPending].depth == -1) {
+        numPending++;
+    }
+    Local pendingSaved[UINT8_COUNT];
+    for (int i = 0; i < numPending; i++) {
+        pendingSaved[i] = m_locals[m_localCount - numPending + i];
+    }
+    m_localCount -= numPending;
+
     beginScope();
 
-    // Compile subject into a hidden local so case arms can reload it with
-    // GET_LOCAL.
+    // Pre-allocate result slot FIRST so break/continue cleanup skips it.
+    emitByte(Op::NIL);
+    Token resultName{TokenType::IDENTIFIER, "(match_result)",
+                     m_parser->m_previous.line};
+    addLocal(resultName);
+    markInitialized();
+    int resultSlot = m_localCount - 1;
+
+    // Compile subject SECOND.
     expression();
     Token syntheticName{TokenType::IDENTIFIER, "(match)",
                         m_parser->m_previous.line};
@@ -643,22 +668,14 @@ void Compiler::compileMatchBody() {
     markInitialized();
     int subjectSlot = m_localCount - 1;
 
-    // armLocalBase is set here - loop cleanup will only touch bindings after this
+    // armLocalBase encompasses both result and subject.
     int armLocalBase = m_localCount;
 
     m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before match body.");
 
-    // PUSH LOOP CONTEXT FIRST - this saves m_localCount as the limit for cleanup
     // start = -1 flags this context as a match (not a loop).
+    // localCount = armLocalBase so break cleanup stops before result and subject.
     m_loopStack.push_back({-1, m_localCount, {}});
-
-    // NOW pre-allocate result-local AFTER push - loop cleanup won't see it!
-    emitByte(Op::NIL);
-    Token resultName{TokenType::IDENTIFIER, "(match_result)",
-                     m_parser->m_previous.line};
-    addLocal(resultName);
-    markInitialized();
-    int resultSlot = m_localCount - 1;
 
     bool hasUnguardedCatchAll = false;
     std::set<std::string> seenCtors;
@@ -724,24 +741,24 @@ void Compiler::compileMatchBody() {
     }
     m_loopStack.pop_back();
 
-    // Result is in resultSlot (never on stack - stored via SET_LOCAL in arm).
-    // Load it onto the stack for the expression context.
-    emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(resultSlot));
-    // Stack: [..., subject_on_stack, result_on_stack, arm_value_in_reg]
-    // Wait: subject and result are in locals, not on stack!
-    // They were addLocal'd, so they consumed the stack values used to initialize them.
-    // So the stack is actually just: [..., arm_value]
-    // Now emit POPs for the locals (subject and result) so they're retired from tracking
-    // But we don't actually POP from the stack since they're not there
+    // Stack: [..., result_value(resultSlot), subject(subjectSlot)]
+    // Pop the subject; result_value becomes the match expression result.
+    emitByte(Op::POP);
+    m_localCount--;  // retire subject from tracking
     m_scopeDepth--;
-    int startCount = m_localCount;
     while (m_localCount > 0 &&
            m_locals[m_localCount - 1].depth > m_scopeDepth) {
         m_localCount--;
     }
-    // POPs would normally be emitted here, but subject/result locals
-    // are not on the stack, so we don't emit them
-    // Stack: [..., arm_value]
+    // Stack: [..., result_value]
+
+    // Restore the pending locals. The internal allocations (result, subject,
+    // arm bindings) overwrote those m_locals slots; put the originals back
+    // so the caller's markInitialized finds the right entry.
+    for (int i = 0; i < numPending; i++) {
+        m_locals[m_localCount + i] = pendingSaved[i];
+    }
+    m_localCount += numPending;
 }
 
 Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
@@ -853,6 +870,28 @@ Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
                 m_parser->check(TokenType::CLASS) ||
                 m_parser->check(TokenType::ENUM)) {
                 declaration();
+            } else if (m_parser->match(TokenType::BREAK)) {
+                breakStatement();
+                // Consume dead code after break until '}'
+                while (!m_parser->check(TokenType::RIGHT_BRACE) &&
+                       !m_parser->check(TokenType::EOF_)) {
+                    statement();
+                }
+                break;
+            } else if (m_parser->match(TokenType::CONTINUE)) {
+                continueStatement();
+                while (!m_parser->check(TokenType::RIGHT_BRACE) &&
+                       !m_parser->check(TokenType::EOF_)) {
+                    statement();
+                }
+                break;
+            } else if (m_parser->match(TokenType::RETURN)) {
+                returnStatement();
+                while (!m_parser->check(TokenType::RIGHT_BRACE) &&
+                       !m_parser->check(TokenType::EOF_)) {
+                    statement();
+                }
+                break;
             } else {
                 expression();
                 if (m_parser->match(TokenType::SEMICOLON)) {
