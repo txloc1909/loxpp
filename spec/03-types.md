@@ -40,6 +40,7 @@ String is a **sequence type** and supports the following sequence operations:
 | `len(s)` | Number of bytes in the string. |
 | `s[i]` | Single-character string at byte index `i` (0-based). Runtime error if `i` is not an integer or is out of range. |
 | `s[i] = v` | Runtime error — strings are immutable. |
+| `s[start:end]` | New String of bytes from index `start` (inclusive) to `end` (exclusive). Both bounds required. Out-of-range bounds are clamped to `[0, len(s)]`. Runtime error if either index is negative, non-integer, or non-number. |
 | `sub in s` | `true` if `sub` (a String) appears as a substring of `s`. |
 | `for (var c in s)` | Iterates over each byte as a single-character String. |
 
@@ -129,6 +130,7 @@ addition to the mutation methods:
 | `len(list)` | Number of elements as a Number. |
 | `list[i]` | Element at index `i` (0-based). Runtime error if `i` is not an integer or is out of range. |
 | `list[i] = v` | Sets element at index `i`. Runtime error if out of range. |
+| `list[start:end]` | New List of elements from index `start` (inclusive) to `end` (exclusive). Both bounds required. Out-of-range bounds are clamped to `[0, len(list)]`. Runtime error if either index is negative, non-integer, or non-number. |
 | `elem in list` | `true` if any element compares equal to `elem` under `==`. |
 | `for (var x in list)` | Iterates over elements in order. |
 
@@ -193,6 +195,8 @@ The maximum number of key-value pairs in a map literal is 255.
 `len()`, `[]` access, membership testing with `in`, and `for-in` iteration.
 List and String use integer indexing; Map uses key-based access. String is
 immutable — index assignment (`s[i] = v`) is always a runtime error.
+
+Slice syntax (`seq[start:end]`) is supported on **List** and **String**; it produces a new value of the same type. Both bounds must be provided. Slicing is not supported on Map — a runtime error is raised. Slice expressions are read-only; they cannot appear as an assignment target.
 
 ---
 
