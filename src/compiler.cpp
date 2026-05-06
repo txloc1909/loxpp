@@ -1360,8 +1360,9 @@ void Compiler::mapLiteral() {
 }
 
 void Compiler::subscript() {
-    bool canAssign = m_parser->m_canAssign; // save: nested expression() clobbers it
-    expression();                           // compile first index
+    bool canAssign =
+        m_parser->m_canAssign; // save: nested expression() clobbers it
+    expression();              // compile first index
 
     if (m_parser->match(TokenType::COLON)) {
         // Slice: seq[start:end] — end expression is required
