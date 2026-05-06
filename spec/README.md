@@ -72,14 +72,23 @@ variant) and adds the following:
 |---|---|
 | `break` statement | Added in Lox++ |
 | `continue` statement | Added in Lox++ |
-| `switch`/`case`/`default` statement | Added in Lox++ |
+| `%` modulo operator | Added in Lox++ |
 | `clock()` built-in | Added in Lox++ |
 | `input()` built-in | Added in Lox++ |
 | `str()` built-in | Added in Lox++ |
+| `len()` built-in | Added in Lox++ |
+| `math` global object (`sqrt`, `floor`, `ceil`, `abs`, `pow`, `pi`, `e`) | Added in Lox++ |
+| `open()` built-in + file I/O methods (`read`, `readline`, `write`, `close`) | Added in Lox++ |
 | Classes (`class`, `super`, `this`) | Added in Lox++ |
-| List type with `[]` literal and indexing | Added in Lox++ |
+| List type with `[...]` literal, indexing, and methods (`append`, `pop`, `remove`) | Added in Lox++ |
+| String indexing `s[i]` (read-only, single-character) | Added in Lox++ |
+| `seq[start:end]` slice syntax for List and String | Added in Lox++ |
 | `for (var x in seq)` iteration over List, String, and Map | Added in Lox++ |
 | Map type with `{}` literal and `[]` key access | Added in Lox++ |
+| `match` expression with literal, wildcard, or-arm, and guard patterns | Added in Lox++ |
+| `var {x, y} = expr` destructuring | Added in Lox++ |
+| `enum` declaration with constructor variants | Added in Lox++ |
+| Constructor patterns and class (instanceof) patterns in `match` | Added in Lox++ |
 
 ---
 

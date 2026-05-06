@@ -8,16 +8,28 @@ path through language-implementation space, not a general-purpose language. The
 new operators are hard to read when users lack precedence intuition, and
 overloading *familiar* operators differs from inventing new ones.
 
-Lox++ has already extended Lox significantly (switch/case, break/continue,
-inheritance). The answers below weigh each addition against that novelty
+Lox++ has already extended Lox significantly (match expressions, enums, break/continue,
+inheritance, List, Map, File I/O, and more). The answers below weigh each addition against that novelty
 budget.
 
 ## Status Against PRs
 
-| PR | Feature | Status | Plan alignment |
-|---|---|---|---|
-| #41 | switch/case/default | **Merged** | Fully aligned — plan was written with this in mind |
-| #42 | `List` type + `[...]` literal + `list[i]` subscript | **Open** | Partially aligned — see notes under Topic 2 |
+| PR | Feature | Status |
+|---|---|---|
+| #41 | switch/case/default | **Superseded** — replaced by `match` expression (PR #61) |
+| #42 | `List` type + `[...]` literal + `list[i]` subscript | **Merged** |
+| #47 | `math` global object | **Merged** |
+| #49 | Sequence protocol: `len()`, `str[i]`, List/String indexing | **Merged** |
+| #51 | File I/O (`open`, `ObjFile`) | **Merged** |
+| #54 | Map type with `{}` literal + `[]` key access | **Merged** |
+| #55 | Iterator protocol (`for (var x in seq)`) | **Merged** |
+| #56 | `List.remove(value)` method | **Merged** |
+| #61 | `match` statement — Phase 1 (literal, wildcard, or-arm, guard) | **Merged** |
+| #62 | `var {x, y}` destructuring — Phase 1.5 | **Merged** |
+| #64 | `enum` declaration + constructor pattern matching — Phase 2 | **Merged** |
+| #66 | Class patterns via instanceof dispatch — Phase 2.5 | **Merged** |
+| #67 | `match` as expression — Phase 3.2 | **Merged** |
+| #69 | `seq[start:end]` slice syntax | **Merged** |
 
 ---
 
@@ -105,19 +117,17 @@ A Lox-level linked list class is a useful exercise but cannot replace a native
 List: `get(i)` is O(n), string indexing requires O(1) access, and a `foreach`
 loop needs a real iterable. A native List is the foundation for both.
 
-**PR #42 status:** Covers creation and indexing. Still missing: `append`,
-`pop`, `len` — need a follow-up PR.
+**Status:** Fully implemented. PR #42 added creation and indexing; follow-up PRs added `append`, `pop`, `len` (#49), and `remove` (#56).
 
-**Two differences from original plan that PR #42 resolves better:**
+**Two differences from the original plan, both resolved correctly:**
 
-1. **Literal syntax over constructor.** The plan proposed `List()` / `List("a",
-   "b")`. PR #42 uses `[...]` literals — clearly better (matches Python/JS/Lua,
-familiar to all users, uses zero novelty budget). Update plan to match.
+1. **Literal syntax over constructor.** The original plan proposed `List()` / `List("a",
+   "b")`. The implementation uses `[...]` literals — matches Python/JS/Lua,
+   familiar to all users, uses zero novelty budget.
 
-2. **Non-integer index → runtime error, not silent floor.** The plan said
-   "silently `floor()` the index." PR #42 makes fractional index a runtime
-error ("`list[1.5]` → error, `list[1.0]` → ok"). This is more consistent with
-Lox's "fail loudly" design — update plan to match.
+2. **Non-integer index → runtime error, not silent floor.** The original plan said
+   "silently `floor()` the index." The implementation makes fractional index a runtime
+   error ("`list[1.5]` → error, `list[1.0]` → ok"). Consistent with Lox's "fail loudly" design.
 
 **User-facing API (updated to match PR #42 + planned methods):**
 ```lox
@@ -141,7 +151,7 @@ print nums.pop();           // removes and returns last element
 print nums.len();           // length
 
 // Iteration (once foreach is added)
-for (var x : nums) { print x; }
+for (var x in nums) { print x; }
 ```
 
 **Justification for `[...]` literal:** Subscript syntax `list[i]` adds `"["
@@ -200,12 +210,13 @@ separate.
 
 ### foreach / iteration protocol
 
-**Implemented (milestone 7):** List and String only, via dedicated VM opcodes.
+**Implemented:** List, String, and Map, via dedicated VM opcodes.
 
 **User-facing API:**
 ```lox
 for (var x in [1, 2, 3]) { print x; }   // 1 2 3
 for (var ch in "hello") { print ch; }    // h e l l o
+for (var k in map) { print k; }          // iterates over Map keys
 ```
 
 Iterating over any other value is a runtime error.
@@ -289,13 +300,13 @@ print s[4];         // "o"
 // Strings are immutable — s[0] = "H" is a runtime error
 
 // Iterate characters once foreach is added
-for (var ch : s) {
+for (var ch in s) {
     print ch;
 }
 
 // Common pattern: split on a delimiter (user-implemented using indexing)
 fun split(s, delim) {
-    var result = List();
+    var result = [];
     var current = "";
     var i = 0;
     while (i < len(s)) {
@@ -402,15 +413,17 @@ class costs 4 lines at VM startup and zero ongoing maintenance.
 
 | # | Feature | Status |
 |---|---|---|
-| 1 | `%` operator | Not started |
-| 2 | `math` global object | Not started |
-| 3 | `List` type with `[...]` literal + `list[i]` subscript | **PR #42 open** |
-| 4 | `List` methods: `append`, `pop`, `len` | Needs follow-up after #42 |
-| 5 | `len()` global native (for both List and String) | Needs follow-up after #42 |
-| 6 | String indexing `str[i]` (reuses `GET_INDEX` from #42) | Needs follow-up after #42 |
-| 7 | foreach `for (var x : expr)` with iterator protocol | Blocked on List + String indexing |
-| 8 | File I/O (`open`, `ObjFile`) | Not started |
-| 9 | Map/Dict type | Last — List experience shapes the API |
+| 1 | `%` operator | **Done** |
+| 2 | `math` global object | **Done** (#47) |
+| 3 | `List` type with `[...]` literal + `list[i]` subscript | **Done** (#42) |
+| 4 | `List` methods: `append`, `pop`, `len`, `remove` | **Done** (#42, #49, #56) |
+| 5 | `len()` global native (for both List and String) | **Done** (#49) |
+| 6 | String indexing `str[i]` (reuses `GET_INDEX` from #42) | **Done** (#49) |
+| 7 | `seq[start:end]` slice syntax | **Done** (#69) |
+| 8 | `for (var x in seq)` with iterator protocol | **Done** (#55) |
+| 9 | File I/O (`open`, `ObjFile`) | **Done** (#51) |
+| 10 | Map/Dict type | **Done** (#54) |
+| 11 | `match` expression (phases 1–3.2) | **Done** (#61, #62, #64, #66, #67) |
 
 ---
 
@@ -422,7 +435,7 @@ milestone. Programs from earlier milestones remain available.
 ### Baseline (already possible today)
 
 Features in hand: closures, classes + inheritance, `input()`, `str()`,
-`clock()`, switch/case, break/continue.
+`clock()`, `match`, break/continue.
 
 | Program | What it exercises |
 |---|---|
@@ -515,9 +528,9 @@ jump in expressiveness.
 
 ---
 
-### Milestone 7 — `foreach` / iterator protocol
+### Milestone 7 — `for (var x in seq)` / iterator protocol
 
-`foreach` doesn't unlock new programs — it makes every existing program shorter
+`for-in` doesn't unlock new programs — it makes every existing program shorter
 and enables user-defined iterable types.
 
 | Program | What it showcases |
@@ -526,7 +539,7 @@ and enables user-defined iterable types.
 | `Enumerate(list)` — yields `[i, val]` pairs | Composable iterators |
 | `Zip(listA, listB)` — yields `[a, b]` pairs | Multiple iterables |
 | `Map(fn, list)` / `Filter(pred, list)` as lazy iterators | Higher-order iteration without building intermediate lists |
-| Rewrite sort / search programs using `for (var x : list)` | Demonstrate clarity improvement |
+| Rewrite sort / search programs using `for (var x in list)` | Demonstrate clarity improvement |
 
 ---
 
@@ -555,3 +568,28 @@ and enables user-defined iterable types.
 | Simple symbol table | Foundation for a mini-interpreter in Lox++ |
 | Anagram grouping | `Map` keyed by sorted characters, `List` as value |
 | **Huffman encoder** (capstone) | Character frequency map → priority queue → tree → encode |
+
+---
+
+### Milestone 10 — `seq[start:end]` slice syntax
+
+| Program | What slicing enables |
+|---|---|
+| String trimming / windowing | `s[1:len(s)-1]` to strip first/last char |
+| Subarray extraction | Pass `list[lo:hi]` to a sort helper instead of index arithmetic |
+| Sliding-window algorithms | Iterate overlapping `list[i:i+k]` slices |
+| Merge sort (cleaner split) | `list[0:mid]` and `list[mid:len(list)]` |
+| Rotate a list | `list[k:] + list[:k]` (once `+` is defined for lists) |
+
+---
+
+### Milestone 11 — `match` expression, `enum`, destructuring
+
+| Program | What pattern matching enables |
+|---|---|
+| Expression evaluator AST | `match node { Add(l, r) => ..., Num(n) => n }` |
+| Option / Result type | `enum Option { Some(val) None }` with exhaustive match |
+| Shape dispatch without `if`-chains | Class patterns: `match shape { Circle(r) => ... Rectangle(w, h) => ... }` |
+| JSON-like value printer | Recursive match on value type |
+| State machine | `match state { Idle => ... Running(job) => ... }` |
+| Destructuring swap | `var {a, b} = expr` for packing/unpacking |
