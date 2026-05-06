@@ -1,2 +1,0 @@
-var x = match 1 { case 1 => 42 case _ => 0 };
-print x;

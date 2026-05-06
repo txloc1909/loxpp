@@ -1,3 +1,0 @@
-enum Result { Ok(value) }
-var x = match Ok(5) { case Ok(v) if v > 3 => 1 case Ok(v) => 2 };
-print x;
