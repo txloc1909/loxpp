@@ -1,7 +1,7 @@
-// sequences.lox — Sequence protocol: len, indexing, 'in', and for-in.
+// sequences.lox — Sequence protocol: len, indexing, slicing, 'in', and for-in.
 //
-// Demonstrates: len() on List and String, string indexing, 'in' membership
-// expression, and for-in loops iterating over both List and String.
+// Demonstrates: len() on List and String, string indexing, slice expressions,
+// 'in' membership expression, and for-in loops iterating over both List and String.
 
 // len() works on both List and String.
 // CHECK: 3
@@ -61,6 +61,40 @@ for (var x in [1, 2, 3, 4, 5]) {
 }
 // CHECK: 12
 print skipped;
+
+// Slice: list[start:end] returns a new list.
+var xs = [10, 20, 30, 40, 50];
+// CHECK: [20, 30, 40]
+print xs[1:4];
+// CHECK: [10, 20]
+print xs[0:2];
+// Out-of-range end is clamped, never an error.
+// CHECK: [30, 40, 50]
+print xs[2:100];
+// start >= end returns an empty list.
+// CHECK: []
+print xs[3:1];
+
+// Slice: string[start:end] returns a new string.
+var greeting = "hello world";
+// CHECK: hello
+print greeting[0:5];
+// CHECK: world
+print greeting[6:11];
+// CHECK: llo
+print greeting[2:5];
+
+// Slices work naturally with for-in and len().
+var evens = [2, 4, 6, 8, 10];
+var tail = evens[1:5];
+// CHECK: 4
+print len(tail);
+var tailSum = 0;
+for (var x in tail) {
+    tailSum = tailSum + x;
+}
+// CHECK: 28
+print tailSum;
 
 // C-style for-loop is unaffected (regression check).
 var product = 1;

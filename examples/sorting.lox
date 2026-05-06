@@ -5,15 +5,7 @@
 //
 // Demonstrates: list index assignment (lst[i] = v), len(), in-place swaps.
 
-fun makeCopy(src) {
-    var dst = [];
-    var i = 0;
-    while (i < len(src)) {
-        dst.append(src[i]);
-        i = i + 1;
-    }
-    return dst;
-}
+fun makeCopy(src) { return src[0:len(src)]; }
 
 fun printList(lst) {
     var s = "[";
