@@ -1,4 +1,5 @@
-// test_slice.cpp — Tests for seq[start:end] slice expressions on List and String.
+// test_slice.cpp — Tests for seq[start:end] slice expressions on List and
+// String.
 
 #include "test_harness.h"
 #include <gtest/gtest.h>
@@ -62,8 +63,7 @@ TEST(Slice, ListEmptyStartGtEnd) {
 
 TEST(Slice, ListEmptyOnEmptyList) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("var xs = []; var r = xs[0:0];"),
-              InterpretResult::OK);
+    ASSERT_EQ(h.run("var xs = []; var r = xs[0:0];"), InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("r"), "[]");
 }
 
@@ -219,22 +219,19 @@ TEST(Slice, StringSingleChar) {
 
 TEST(Slice, StringEmptyStartEqualsEnd) {
     VMTestHarness h;
-    ASSERT_EQ(h.run(R"(var s = "hi"; var r = s[1:1];)"),
-              InterpretResult::OK);
+    ASSERT_EQ(h.run(R"(var s = "hi"; var r = s[1:1];)"), InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("r"), "");
 }
 
 TEST(Slice, StringEmptyStartGtEnd) {
     VMTestHarness h;
-    ASSERT_EQ(h.run(R"(var s = "hi"; var r = s[2:0];)"),
-              InterpretResult::OK);
+    ASSERT_EQ(h.run(R"(var s = "hi"; var r = s[2:0];)"), InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("r"), "");
 }
 
 TEST(Slice, StringEmptyOnEmptyString) {
     VMTestHarness h;
-    ASSERT_EQ(h.run(R"(var s = ""; var r = s[0:0];)"),
-              InterpretResult::OK);
+    ASSERT_EQ(h.run(R"(var s = ""; var r = s[0:0];)"), InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("r"), "");
 }
 
@@ -244,15 +241,13 @@ TEST(Slice, StringEmptyOnEmptyString) {
 
 TEST(Slice, StringEndClampedToLen) {
     VMTestHarness h;
-    ASSERT_EQ(h.run(R"(var s = "hi"; var r = s[0:100];)"),
-              InterpretResult::OK);
+    ASSERT_EQ(h.run(R"(var s = "hi"; var r = s[0:100];)"), InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("r"), "hi");
 }
 
 TEST(Slice, StringStartClampedToLen) {
     VMTestHarness h;
-    ASSERT_EQ(h.run(R"(var s = "hi"; var r = s[10:20];)"),
-              InterpretResult::OK);
+    ASSERT_EQ(h.run(R"(var s = "hi"; var r = s[10:20];)"), InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("r"), "");
 }
 
@@ -360,7 +355,6 @@ TEST(Slice, ListSliceLen) {
 
 TEST(Slice, StringSliceLen) {
     VMTestHarness h;
-    ASSERT_EQ(h.run(R"(var r = len("hello"[1:4]);)"),
-              InterpretResult::OK);
+    ASSERT_EQ(h.run(R"(var r = len("hello"[1:4]);)"), InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("r"), "3");
 }
