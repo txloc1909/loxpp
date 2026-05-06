@@ -724,7 +724,7 @@ Common causes:
 | NaN used as map key | `m[0/0] = 1` |
 | Object (non-String) used as map key | `m[[1,2]] = 1` |
 | Method called on non-instance/non-list/non-map | `42.foo()` |
-| No arm matches in a `match` statement or expression | `match 99 { case 1 => "one" }` |
+| No arm matches in a `match` expression | `match 99 { case 1 => "one" }` |
 | Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field |
 
 ---
@@ -756,51 +756,9 @@ non-enum value is a runtime error.
 
 ### Exhaustiveness at compile time
 
-When a match statement contains at least one constructor-pattern arm for enum
+When a match expression contains at least one constructor-pattern arm for enum
 `E`, the compiler checks that:
 1. Every constructor of `E` appears as a pattern arm, **or**
 2. An unguarded catch-all arm (`case _` or an unguarded binding) is present.
 
 A violation is a **compile error** listing the missing constructor names.
-
----
-
-## Class Patterns
-
-### `INSTANCEOF` opcode
-
-Operand: 1-byte constant index → `ObjString*` (class name).
-
-Pops a value, looks up the class by name in the global environment, then walks
-the instance's class chain (`klass->superclass`) until a match is found or the
-chain is exhausted. Pushes `true` on match, `false` otherwise (including when
-the value is not an instance or the class name is not in the global scope).
-
-### Class name registration
-
-`class` declarations at global scope register the class name in the compiler's
-class symbol table at parse time. Local class declarations are not registered
-and cannot be used as class patterns.
-
-### Subclass chain
-
-`ObjClass` carries a `superclass` pointer (set by `Op::INHERIT` at class
-definition time; `nullptr` for base classes). `INSTANCEOF` walks this chain, so
-a `Dog` instance matches `case Animal` when `Dog < Animal`. Method dispatch is
-unaffected: `INHERIT` copies methods at class-definition time (copy-down),
-keeping `GET_PROPERTY` and `INVOKE` O(1). The `superclass` pointer is only
-consulted by `INSTANCEOF`.
-
-### No exhaustiveness for class patterns
-
-Open class hierarchies are not enumerable at compile time. Class pattern arms
-never contribute to the enum exhaustiveness check. Unmatched values raise
-`MatchError` at runtime.
-
-### Field binding via `GET_PROPERTY`
-
-After a successful `INSTANCEOF` check, named fields in the pattern are bound by
-emitting `GET_LOCAL <subject>` + `GET_PROPERTY <fieldName>` for each name. If
-the field does not exist on the instance at runtime, `GET_PROPERTY` raises a
-runtime error (`"Only instances have properties."`). Positional field syntax
-(`ClassName(a, b)`) is not supported for class patterns and is a compile error.
