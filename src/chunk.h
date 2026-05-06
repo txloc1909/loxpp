@@ -53,6 +53,7 @@ enum class Op : Byte {
     BUILD_MAP,    // operand: uint8 pair count; pops 2*N values, pushes ObjMap
     GET_INDEX,    // pops index then list/string/map; pushes element/char/value
     SET_INDEX, // pops value, index, list/map; sets [index]=value; pushes value
+    SLICE,     // pops end, start, seq; pushes new List|String slice
     IN,        // pops seq (rhs) then elem (lhs); pushes bool membership result
     GET_ITER,  // pops List|String|Map → pushes ObjIterator{cursor=0}
     ITER_HAS_NEXT, // pops iterator copy → pushes bool (cursor < length)

@@ -1360,16 +1360,23 @@ void Compiler::mapLiteral() {
 }
 
 void Compiler::subscript() {
-    bool canAssign = m_parser->m_canAssign; // save: compiling the index
-                                            // expression clobbers m_canAssign
-                                            // via nested parsePrecedence calls.
-    expression();                           // compile index
-    m_parser->consume(TokenType::RIGHT_BRACKET, "Expect ']' after index.");
-    if (canAssign && m_parser->match(TokenType::EQUAL)) {
-        expression(); // compile RHS
-        emitByte(Op::SET_INDEX);
+    bool canAssign = m_parser->m_canAssign; // save: nested expression() clobbers it
+    expression();                           // compile first index
+
+    if (m_parser->match(TokenType::COLON)) {
+        // Slice: seq[start:end] — end expression is required
+        expression();
+        m_parser->consume(TokenType::RIGHT_BRACKET, "Expect ']' after slice.");
+        emitByte(Op::SLICE);
     } else {
-        emitByte(Op::GET_INDEX);
+        // Plain index: seq[i]
+        m_parser->consume(TokenType::RIGHT_BRACKET, "Expect ']' after index.");
+        if (canAssign && m_parser->match(TokenType::EQUAL)) {
+            expression();
+            emitByte(Op::SET_INDEX);
+        } else {
+            emitByte(Op::GET_INDEX);
+        }
     }
 }
 

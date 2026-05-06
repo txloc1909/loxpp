@@ -186,6 +186,8 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return simpleInstruction("GET_INDEX", offset, out, color);
     case Op::SET_INDEX:
         return simpleInstruction("SET_INDEX", offset, out, color);
+    case Op::SLICE:
+        return simpleInstruction("SLICE", offset, out, color);
     case Op::IN:
         return simpleInstruction("IN", offset, out, color);
     case Op::GET_ITER:
