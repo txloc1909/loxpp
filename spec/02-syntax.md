@@ -29,7 +29,6 @@ statement      ::= exprStmt
                  | whileStmt
                  | breakStmt
                  | continueStmt
-                 | matchStmt
                  | block ;
 
 exprStmt       ::= expression ";" ;
@@ -53,13 +52,6 @@ whileStmt      ::= "while" "(" expression ")" statement ;
 breakStmt      ::= "break" ";" ;
 
 continueStmt   ::= "continue" ";" ;
-
-matchStmt      ::= "match" expression "{" matchArm* "}" ;
-matchArm       ::= "case" armPats ( "if" expression )? "=>" armBody ;
-armPats        ::= armPat ( "," armPat )* ;
-armPat         ::= NUMBER | STRING | "true" | "false" | "nil"
-                 | IDENTIFIER ;          (* IDENTIFIER: "_" = wildcard; other = binding *)
-armBody        ::= statement | "{" declaration* "}" ;
 
 block          ::= "{" declaration* "}" ;
 
@@ -98,10 +90,20 @@ primary        ::= "true"
                  | "super" "." IDENTIFIER
                  | "(" expression ")"
                  | "[" ( expression ( "," expression )* )? "]"
-                 | "{" ( mapEntry ( "," mapEntry )* )? "}" ;
+                 | "{" ( mapEntry ( "," mapEntry )* )? "}"
+                 | "match" expression "{" matchArm* "}" ;
+
+matchArm       ::= "case" armPats ( "if" expression )? "=>" armBody ;
+armPats        ::= armPat ( "," armPat )* ;
+armPat         ::= NUMBER | STRING | "true" | "false" | "nil"
+                 | IDENTIFIER ;          (* IDENTIFIER: "_" = wildcard; other = binding *)
+armBody        ::= "{" declaration* expression "}"
+                 | expression ;
 
 mapEntry       ::= expression ":" expression ;
 ```
+
+**Note on `match`:** `match` is an **expression** construct. It always produces a value. Arms can contain multiple declarations followed by a final expression, or a single expression. When a `match` expression is used as a statement (followed by `;`), the produced value is discarded.
 
 ---
 
@@ -181,41 +183,6 @@ bare `IDENTIFIER` (variable set), a `call "." IDENTIFIER` (property set), or a
 `call "[" expression "]"` (index set); any other form is a parse error. The
 value of an assignment expression is the assigned value.
 
-### `match` statement
-
-A `match` body consists of one or more `case` arms. Each arm has a pattern,
-an optional guard clause (`if expr`), the `=>` separator, and a body (either a
-single statement or a braced block of declarations).
-
-**Patterns:**
-- `NUMBER`, `STRING`, `true`, `false`, `nil` — equality test against the subject.
-- `IDENTIFIER` other than `_` — variable binding: always matches, introduces a
-  new local bound to the subject value, visible in the guard and the body.
-- `_` (the identifier `_`) — wildcard: always matches, no binding introduced.
-- Multiple comma-separated literals: `case 1, 2, 3 =>` — matches if the subject
-  equals any of them. A binding identifier must be the sole pattern in its arm.
-
-**Guard clauses:** `case x if x > 0 =>` — after the pattern matches, the guard
-expression is evaluated; if falsy the arm is skipped.
-
-**No fall-through:** each arm executes its body and then jumps past the match.
-
-**Wildcard:** `case _ =>` is the canonical catch-all. An unguarded `_` (or any
-unguarded binding) must come last; arms after it are unreachable and are a
-compile error.
-
-**`MatchError`:** if no arm matches and no unguarded catch-all arm exists, the
-VM raises `MatchError` at runtime.
-
-**`break`/`continue`:** `break` exits the match; `continue` targets the nearest
-enclosing loop (not the match itself). `continue` with no enclosing loop is a
-compile error.
-
-**Constructor patterns:** when an enum constructor name is used as a
-pattern, the arm dispatches on the constructor's tag. Bindings can be
-positional `case Ok(v)` or named `case Rect{width, height}`. Zero-field
-constructors use the bare name: `case None`. See §4 for exhaustiveness rules.
-
 ### `enum` declaration
 
 ```
@@ -244,47 +211,21 @@ var n = None();
 
 ```
 armPat : NUMBER | STRING | 'true' | 'false' | 'nil'
-       | IDENTIFIER                                       // wildcard (_) or binding
-       | IDENTIFIER '{' fieldPat (',' fieldPat)* '}'     // named: enum ctor OR class
-       | IDENTIFIER '(' IDENTIFIER (',' IDENTIFIER)* ')' // positional: enum ctor only
-       | IDENTIFIER                                       // zero-field ctor or class
+       | IDENTIFIER                                    // wildcard (_) or binding
+       | IDENTIFIER '{' fieldPat (',' fieldPat)* '}'  // named field pattern
+       | IDENTIFIER '(' IDENTIFIER (',' IDENTIFIER)* ')' // positional pattern
+       | IDENTIFIER                                    // zero-field constructor
 
 fieldPat: IDENTIFIER
 ```
 
-Pattern disambiguation (in priority order):
+When the pattern name resolves to a known constructor, the arm performs a tag
+check rather than a binding. Unknown identifiers continue to act as bindings.
 
-1. **Known enum constructor** → tag check + `GET_INDEX` field bindings (positional or named)
-2. **Known class** → `instanceof` check + `GET_PROPERTY` field bindings (named only)
-3. **Unknown name** → variable binding (always matches); `_` is wildcard (no binding)
-
-**Enum exhaustiveness:** if a match contains at least one constructor-pattern arm
+**Exhaustiveness:** if a match contains at least one constructor-pattern arm
 from enum `E`, the compiler verifies that every constructor of `E` appears as
 an arm, or that an unguarded `_`/binding wildcard is present. A missing
 constructor is a compile error listing the absent names.
-
-**Class patterns:**
-
-When the pattern name resolves to a known class (declared at global scope before
-the `match`), the arm compiles to an `instanceof` check followed by
-`GET_PROPERTY` bindings for each named field. Subclass instances match a parent
-class pattern. Positional class patterns (`ClassName(x, y)`) are a compile
-error — classes have no declared field order.
-
-Class patterns do not trigger exhaustiveness checking. A `case _ =>` or any
-unguarded binding is needed if the match might see a value of a different type,
-otherwise `MatchError` is raised at runtime.
-
-```lox
-class Point  { init(x, y) { this.x = x; this.y = y; } }
-class Circle < Point { init(x, y, r) { super.init(x, y); this.r = r; } }
-
-match shape {
-    case Circle{x, y, r} => print r;    // instanceof check, then GET_PROPERTY
-    case Point{x, y}     => print x;    // Circle also matches this arm (subclass)
-    case _               => print "?";
-}
-```
 
 ### Function call arguments
 

@@ -1,0 +1,61 @@
+// enum_match.lox — Match as expression with algebraic types.
+//
+// Demonstrates: enum, match-as-expression, guard clauses, nested match.
+
+enum Result { Ok(value) Err(msg) }
+enum Option { Some(v) None }
+
+fun divide(a, b) {
+    if (b == 0) return Err("division by zero");
+    return Ok(a / b);
+}
+
+fun safeSqrt(n) {
+    if (n < 0) return None();
+    return Some(math.sqrt(n));
+}
+
+// CHECK: === Result / Option demo ===
+print "=== Result / Option demo ===";
+
+var cases = [divide(10, 2), divide(7, 0), divide(9, 3)];
+var i = 0;
+while (i < 3) {
+    var label = match cases[i] {
+        case Ok(v)  => "ok: " + str(v)
+        case Err(m) => "err: " + m
+    };
+    print label;
+    i = i + 1;
+}
+// CHECK: ok: 5
+// CHECK: err: division by zero
+// CHECK: ok: 3
+
+print "";
+var roots = [safeSqrt(4), safeSqrt(-1), safeSqrt(9)];
+i = 0;
+while (i < 3) {
+    print match roots[i] {
+        case Some(v) => "sqrt = " + str(v)
+        case None    => "no real root"
+    };
+    i = i + 1;
+}
+// CHECK: sqrt = 2
+// CHECK: no real root
+// CHECK: sqrt = 3
+
+// Nested match as expression.
+print "";
+var r = Ok(42);
+var desc = match r {
+    case Ok(v) => match v {
+        case 0  => "zero"
+        case 42 => "the answer"
+        case _  => "other"
+    }
+    case Err(m) => "error"
+};
+print desc;
+// CHECK: the answer

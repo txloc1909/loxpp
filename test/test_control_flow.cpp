@@ -386,12 +386,11 @@ class MatchTest : public ::testing::Test {};
 TEST_F(MatchTest, MatchesFirstArm) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        var x = 0;
-        match 2 {
-            case 1 => x = 1;
-            case 2 => x = 2;
-            case 3 => x = 3;
-        }
+        var x = match 2 {
+            case 1 => 1
+            case 2 => 2
+            case 3 => 3
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("x");
@@ -401,15 +400,12 @@ TEST_F(MatchTest, MatchesFirstArm) {
 
 TEST_F(MatchTest, SkipsNonMatchingArms) {
     VMTestHarness h;
-    // Without a wildcard arm the match raises MatchError when nothing matches.
-    // Wrap in a function so the runtime error doesn't kill the test process.
     ASSERT_EQ(h.run(R"(
-        var x = 0;
-        match 1 {
-            case 2 => x = 99;
-            case 3 => x = 99;
-            case _ => x = 0;
-        }
+        var x = match 1 {
+            case 2 => 99
+            case 3 => 99
+            case _ => 0
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("x");
@@ -420,11 +416,10 @@ TEST_F(MatchTest, SkipsNonMatchingArms) {
 TEST_F(MatchTest, WildcardExecutesWhenNoLiteralMatches) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        var x = 0;
-        match 99 {
-            case 1 => x = 1;
-            case _ => x = 42;
-        }
+        var x = match 99 {
+            case 1 => 1
+            case _ => 42
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("x");
@@ -435,11 +430,10 @@ TEST_F(MatchTest, WildcardExecutesWhenNoLiteralMatches) {
 TEST_F(MatchTest, WildcardSkippedWhenLiteralMatches) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        var x = 0;
-        match 1 {
-            case 1 => x = 1;
-            case _ => x = 99;
-        }
+        var x = match 1 {
+            case 1 => 1
+            case _ => 99
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("x");
@@ -450,12 +444,11 @@ TEST_F(MatchTest, WildcardSkippedWhenLiteralMatches) {
 TEST_F(MatchTest, MultiValueArm) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        var x = 0;
-        match 2 {
-            case 1, 2, 3 => x = 7;
-            case 4       => x = 99;
-            case _       => x = 0;
-        }
+        var x = match 2 {
+            case 1, 2, 3 => 7
+            case 4       => 99
+            case _       => 0
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("x");
@@ -469,7 +462,7 @@ TEST_F(MatchTest, BreakExitsMatch) {
         var x = 0;
         match 1 {
             case 1 => { x = 1; break; x = 99; }
-        }
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("x");
@@ -485,9 +478,9 @@ TEST_F(MatchTest, BreakInMatchDoesNotExitLoop) {
         while (i < 3) {
             i = i + 1;
             match i {
-                case 2 => break;
-                case _ => count = count + 1;
-            }
+                case 2 => { break; }
+                case _ => count = count + 1
+            };
         }
     )"),
               InterpretResult::OK);
@@ -505,9 +498,9 @@ TEST_F(MatchTest, ContinueInMatchContinuesLoop) {
         while (i < 3) {
             i = i + 1;
             match i {
-                case 2 => continue;
-                case _ => count = count + 1;
-            }
+                case 2 => { continue; }
+                case _ => count = count + 1
+            };
             count = count + 10;
         }
     )"),
@@ -523,10 +516,10 @@ TEST_F(MatchTest, StackNeutralAfterMatch) {
     VMTestHarness h;
     h.run(R"(
         match 1 {
-            case 1 => var x = 10;
-            case 2 => var y = 20;
-            case _ => var z = 30;
-        }
+            case 1 => 10
+            case 2 => 20
+            case _ => 30
+        };
     )");
     EXPECT_EQ(h.stackDepth(), 0);
 }
@@ -534,12 +527,11 @@ TEST_F(MatchTest, StackNeutralAfterMatch) {
 TEST_F(MatchTest, MatchOnString) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        var x = "no";
-        match "hello" {
-            case "world" => x = "world";
-            case "hello" => x = "hello";
-            case _       => x = "other";
-        }
+        var x = match "hello" {
+            case "world" => "world"
+            case "hello" => "hello"
+            case _       => "other"
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobalStr("x");
@@ -550,9 +542,9 @@ TEST_F(MatchTest, MatchErrorOnNoMatch) {
     VMTestHarness h;
     EXPECT_EQ(h.run(R"(
         match 99 {
-            case 1 => 1;
-            case 2 => 2;
-        }
+            case 1 => 1
+            case 2 => 2
+        };
     )"),
               InterpretResult::RUNTIME_ERROR);
 }
@@ -560,10 +552,9 @@ TEST_F(MatchTest, MatchErrorOnNoMatch) {
 TEST_F(MatchTest, BindingPatternBindsSubject) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        var result = 0;
-        match 42 {
-            case n => result = n;
-        }
+        var result = match 42 {
+            case n => n
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("result");
@@ -574,11 +565,10 @@ TEST_F(MatchTest, BindingPatternBindsSubject) {
 TEST_F(MatchTest, BindingPatternAlwaysMatches) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        var result = 0;
-        match 7 {
-            case 1 => result = 1;
-            case n => result = n * 2;
-        }
+        var result = match 7 {
+            case 1 => 1
+            case n => n * 2
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("result");
@@ -589,12 +579,11 @@ TEST_F(MatchTest, BindingPatternAlwaysMatches) {
 TEST_F(MatchTest, GuardClauseFilters) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        var result = 0;
-        match 5 {
-            case n if n > 10 => result = 1;
-            case n if n > 3  => result = 2;
-            case _           => result = 3;
-        }
+        var result = match 5 {
+            case n if n > 10 => 1
+            case n if n > 3  => 2
+            case _           => 3
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("result");
@@ -605,11 +594,10 @@ TEST_F(MatchTest, GuardClauseFilters) {
 TEST_F(MatchTest, GuardClauseFallsThrough) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        var result = 0;
-        match 2 {
-            case n if n > 5 => result = 1;
-            case _          => result = 99;
-        }
+        var result = match 2 {
+            case n if n > 5 => 1
+            case _          => 99
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("result");
@@ -620,13 +608,12 @@ TEST_F(MatchTest, GuardClauseFallsThrough) {
 TEST_F(MatchTest, LiteralGuardCombined) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        var result = 0;
         var limit = 3;
-        match 3 {
-            case 3 if limit > 5 => result = 1;
-            case 3              => result = 2;
-            case _              => result = 3;
-        }
+        var result = match 3 {
+            case 3 if limit > 5 => 1
+            case 3              => 2
+            case _              => 3
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("result");
@@ -638,8 +625,8 @@ TEST_F(MatchTest, ContinueWithNoEnclosingLoopIsError) {
     VMTestHarness h;
     EXPECT_EQ(h.run(R"(
         match 1 {
-            case 1 => continue;
-        }
+            case 1 => { continue; }
+        };
     )"),
               InterpretResult::COMPILE_ERROR);
 }
@@ -648,9 +635,9 @@ TEST_F(MatchTest, ArmAfterCatchAllIsError) {
     VMTestHarness h;
     EXPECT_EQ(h.run(R"(
         match 1 {
-            case _ => 0;
-            case 1 => 1;
-        }
+            case _ => 0
+            case 1 => 1
+        };
     )"),
               InterpretResult::COMPILE_ERROR);
 }
@@ -659,8 +646,8 @@ TEST_F(MatchTest, BindingMustBeSolePattern) {
     VMTestHarness h;
     EXPECT_EQ(h.run(R"(
         match 1 {
-            case x, 2 => 0;
-        }
+            case x, 2 => 0
+        };
     )"),
               InterpretResult::COMPILE_ERROR);
 }
@@ -668,14 +655,13 @@ TEST_F(MatchTest, BindingMustBeSolePattern) {
 TEST_F(MatchTest, BlockBody) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        var result = 0;
-        match 5 {
+        var result = match 5 {
             case 5 => {
                 var tmp = 10;
-                result = tmp + 5;
+                tmp + 5
             }
-            case _ => result = 0;
-        }
+            case _ => 0
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("result");

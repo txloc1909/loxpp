@@ -3,22 +3,22 @@
 enum Tree { Leaf(val) Node(left, right) }
 
 fun tree_sum(t) {
-    match t {
-        case Leaf(v) => return v;
-        case Node(l, r) => return tree_sum(l) + tree_sum(r);
-    }
+    return match t {
+        case Leaf(v)    => v
+        case Node(l, r) => tree_sum(l) + tree_sum(r)
+    };
+}
+
+fun max_int(a, b) {
+    if (a > b) { return a; }
+    return b;
 }
 
 fun tree_depth(t) {
-    match t {
-        case Leaf(v) => return 0;
-        case Node(l, r) => {
-            var dl = tree_depth(l);
-            var dr = tree_depth(r);
-            if (dl > dr) { return dl + 1; }
-            return dr + 1;
-        }
-    }
+    return match t {
+        case Leaf(v)    => 0
+        case Node(l, r) => max_int(tree_depth(l), tree_depth(r)) + 1
+    };
 }
 
 var t = Node(

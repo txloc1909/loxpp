@@ -7,20 +7,20 @@ class Rect     < Shape { init(color, w, h) { super.init(color); this.w = w; this
 class Triangle < Shape { init(color, b, h) { super.init(color); this.b = b; this.h = h; } }
 
 fun area(s) {
-    match s {
-        case Circle{r}      => return 3.14159 * r * r;
-        case Rect{w, h}     => return w * h;
-        case Triangle{b, h} => return 0.5 * b * h;
-        case Shape{color}   => return 0;
-    }
+    return match s {
+        case Circle{r}      => 3.14159 * r * r
+        case Rect{w, h}     => w * h
+        case Triangle{b, h} => 0.5 * b * h
+        case Shape{color}   => 0
+    };
 }
 
 fun describe(s) {
-    match s {
-        case Circle{r}  => return "circle r=" + str(r);
-        case Rect{w, h} => return "rect " + str(w) + "x" + str(h);
-        case _          => return "shape";
-    }
+    return match s {
+        case Circle{r}  => "circle r=" + str(r)
+        case Rect{w, h} => "rect " + str(w) + "x" + str(h)
+        case _          => "shape"
+    };
 }
 
 var shapes = [Circle("red", 5), Rect("blue", 4, 6), Triangle("green", 3, 8)];

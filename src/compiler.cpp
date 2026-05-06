@@ -416,8 +416,6 @@ void Compiler::statement() {
         breakStatement();
     } else if (m_parser->match(TokenType::CONTINUE)) {
         continueStatement();
-    } else if (m_parser->match(TokenType::MATCH)) {
-        matchStatement();
     } else if (m_parser->match(TokenType::PRINT)) {
         printStatement();
     } else if (m_parser->match(TokenType::RETURN)) {
@@ -629,11 +627,38 @@ void Compiler::continueStatement() {
     m_parser->error("Cannot use 'continue' outside a loop.");
 }
 
-void Compiler::matchStatement() {
+void Compiler::matchExpression() { compileMatchBody(); }
+
+void Compiler::compileMatchBody() {
+    // depth==-1 locals are declared but not yet pushed onto the runtime stack.
+    // They inflate m_localCount without a corresponding runtime slot, which
+    // would offset every slot assignment inside the match body. Temporarily
+    // hide them so the invariant m_locals[i] == runtime slot i holds
+    // throughout this function. We save both the count and the m_locals
+    // entries (which the internal allocations will overwrite), and restore
+    // both before returning so the caller's markInitialized still works.
+    int numPending = 0;
+    while (numPending < m_localCount &&
+           m_locals[m_localCount - 1 - numPending].depth == -1) {
+        numPending++;
+    }
+    Local pendingSaved[UINT8_COUNT];
+    for (int i = 0; i < numPending; i++) {
+        pendingSaved[i] = m_locals[m_localCount - numPending + i];
+    }
+    m_localCount -= numPending;
+
     beginScope();
 
-    // Compile subject into a hidden local so case arms can reload it with
-    // GET_LOCAL.
+    // Pre-allocate result slot FIRST so break/continue cleanup skips it.
+    emitByte(Op::NIL);
+    Token resultName{TokenType::IDENTIFIER, "(match_result)",
+                     m_parser->m_previous.line};
+    addLocal(resultName);
+    markInitialized();
+    int resultSlot = m_localCount - 1;
+
+    // Compile subject SECOND.
     expression();
     Token syntheticName{TokenType::IDENTIFIER, "(match)",
                         m_parser->m_previous.line};
@@ -644,6 +669,8 @@ void Compiler::matchStatement() {
     m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before match body.");
 
     // start = -1 flags this context as a match (not a loop).
+    // localCount = armLocalBase so break cleanup stops before result and
+    // subject.
     m_loopStack.push_back({-1, m_localCount, {}});
 
     bool hasUnguardedCatchAll = false;
@@ -659,8 +686,8 @@ void Compiler::matchStatement() {
             m_parser->error("Unreachable arm after catch-all.");
         }
 
-        int armLocalBase = m_localCount;
-        auto arm = compileMatchArm(subjectSlot, armLocalBase);
+        int armLocalBase_iter = m_localCount;
+        auto arm = compileMatchArm(subjectSlot, armLocalBase_iter, resultSlot);
         if (arm.isUnguardedCatchAll) {
             hasUnguardedCatchAll = true;
         }
@@ -709,11 +736,29 @@ void Compiler::matchStatement() {
         patchJump(j);
     }
     m_loopStack.pop_back();
-    endScope(); // pops the hidden subject local
+
+    // Stack: [..., result_value(resultSlot), subject(subjectSlot)]
+    // Pop the subject; result_value becomes the match expression result.
+    emitByte(Op::POP);
+    m_localCount--; // retire subject from tracking
+    m_scopeDepth--;
+    while (m_localCount > 0 &&
+           m_locals[m_localCount - 1].depth > m_scopeDepth) {
+        m_localCount--;
+    }
+    // Stack: [..., result_value]
+
+    // Restore the pending locals. The internal allocations (result, subject,
+    // arm bindings) overwrote those m_locals slots; put the originals back
+    // so the caller's markInitialized finds the right entry.
+    for (int i = 0; i < numPending; i++) {
+        m_locals[m_localCount + i] = pendingSaved[i];
+    }
+    m_localCount += numPending;
 }
 
-Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
-                                                   int armLocalBase) {
+Compiler::MatchArmResult
+Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
     bool isIdentPat = m_parser->check(TokenType::IDENTIFIER);
     int lastMiss = -1;
     int bindingCount = 0;
@@ -810,18 +855,55 @@ Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
 
     m_parser->consume(TokenType::FAT_ARROW, "Expect '=>' after pattern.");
 
-    // Body (single statement or braced block).
+    // Body — always expression mode.
     beginScope();
     if (m_parser->match(TokenType::LEFT_BRACE)) {
         while (!m_parser->check(TokenType::RIGHT_BRACE) &&
                !m_parser->check(TokenType::EOF_)) {
-            declaration();
+            if (m_parser->check(TokenType::VAR) ||
+                m_parser->check(TokenType::FUN) ||
+                m_parser->check(TokenType::CLASS) ||
+                m_parser->check(TokenType::ENUM)) {
+                declaration();
+            } else if (m_parser->match(TokenType::BREAK)) {
+                breakStatement();
+                // Consume dead code after break until '}'
+                while (!m_parser->check(TokenType::RIGHT_BRACE) &&
+                       !m_parser->check(TokenType::EOF_)) {
+                    statement();
+                }
+                break;
+            } else if (m_parser->match(TokenType::CONTINUE)) {
+                continueStatement();
+                while (!m_parser->check(TokenType::RIGHT_BRACE) &&
+                       !m_parser->check(TokenType::EOF_)) {
+                    statement();
+                }
+                break;
+            } else if (m_parser->match(TokenType::RETURN)) {
+                returnStatement();
+                while (!m_parser->check(TokenType::RIGHT_BRACE) &&
+                       !m_parser->check(TokenType::EOF_)) {
+                    statement();
+                }
+                break;
+            } else {
+                expression();
+                if (m_parser->match(TokenType::SEMICOLON)) {
+                    emitByte(Op::POP); // discard intermediate expression
+                } else {
+                    break; // last expression — the arm value
+                }
+            }
         }
         m_parser->consume(TokenType::RIGHT_BRACE,
                           "Expect '}' after match arm body.");
     } else {
-        statement();
+        expression();
     }
+    // arm_value now on top of stack — store in pre-allocated result slot.
+    emitBytes(Op::SET_LOCAL, static_cast<uint8_t>(resultSlot));
+    emitByte(Op::POP);
     endScope();
 
     // Normal arm exit: clean up binding locals, jump to match end.

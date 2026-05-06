@@ -8,25 +8,25 @@ class Mul { init(l, r)   { this.l = l; this.r = r; } }
 class Neg { init(e)      { this.e = e; } }
 
 fun eval(node) {
-    match node {
-        case Num{v}     => return v;
-        case Add{l, r}  => return eval(l) + eval(r);
-        case Sub{l, r}  => return eval(l) - eval(r);
-        case Mul{l, r}  => return eval(l) * eval(r);
-        case Neg{e}     => return -eval(e);
-        case _          => return 0;
-    }
+    return match node {
+        case Num{v}    => v
+        case Add{l, r} => eval(l) + eval(r)
+        case Sub{l, r} => eval(l) - eval(r)
+        case Mul{l, r} => eval(l) * eval(r)
+        case Neg{e}    => -eval(e)
+        case _         => 0
+    };
 }
 
 fun pretty(node) {
-    match node {
-        case Num{v}     => return str(v);
-        case Add{l, r}  => return "(" + pretty(l) + " + " + pretty(r) + ")";
-        case Sub{l, r}  => return "(" + pretty(l) + " - " + pretty(r) + ")";
-        case Mul{l, r}  => return "(" + pretty(l) + " * " + pretty(r) + ")";
-        case Neg{e}     => return "(-" + pretty(e) + ")";
-        case _          => return "?";
-    }
+    return match node {
+        case Num{v}    => str(v)
+        case Add{l, r} => "(" + pretty(l) + " + " + pretty(r) + ")"
+        case Sub{l, r} => "(" + pretty(l) + " - " + pretty(r) + ")"
+        case Mul{l, r} => "(" + pretty(l) + " * " + pretty(r) + ")"
+        case Neg{e}    => "(-" + pretty(e) + ")"
+        case _         => "?"
+    };
 }
 
 // (2 + 3) * -(4)  =>  -20

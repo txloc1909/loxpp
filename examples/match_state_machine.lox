@@ -4,21 +4,21 @@ var state = "red";
 var cycles = 0;
 
 fun next_state(s) {
-    match s {
-        case "red"    => return "green";
-        case "green"  => return "yellow";
-        case "yellow" => return "red";
-        case _        => return "red";
-    }
+    return match s {
+        case "red"    => "green"
+        case "green"  => "yellow"
+        case "yellow" => "red"
+        case _        => "red"
+    };
 }
 
 fun describe_state(s) {
-    match s {
-        case "red"    => print "STOP  (red)";
-        case "green"  => print "GO    (green)";
-        case "yellow" => print "SLOW  (yellow)";
-        case _        => print "UNKNOWN";
-    }
+    print match s {
+        case "red"    => "STOP  (red)"
+        case "green"  => "GO    (green)"
+        case "yellow" => "SLOW  (yellow)"
+        case _        => "UNKNOWN"
+    };
 }
 
 // Simulate 7 transitions.

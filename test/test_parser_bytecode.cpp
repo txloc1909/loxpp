@@ -322,9 +322,9 @@ class MatchByteCodeTest : public ::testing::Test {};
 TEST_F(MatchByteCodeTest, SingleLiteralPlusWildcard) {
     std::string src = "var x = 0;\n"
                       "match 1 {\n"
-                      "    case 1 => x = 1;\n"
-                      "    case _ => x = 0;\n"
-                      "}";
+                      "    case 1 => x = 1\n"
+                      "    case _ => x = 0\n"
+                      "};\n";
     // Just verify it compiles and contains MATCH_ERROR-free sequences.
     // We don't fix bytecode offsets here — that's brittle; we verify the
     // presence/absence of MATCH_ERROR via the disassembly string.
@@ -341,9 +341,9 @@ TEST_F(MatchByteCodeTest, SingleLiteralPlusWildcard) {
 TEST_F(MatchByteCodeTest, NoWildcardEmitsMatchError) {
     std::string src = "var x = 0;\n"
                       "match 1 {\n"
-                      "    case 1 => x = 1;\n"
-                      "    case 2 => x = 2;\n"
-                      "}";
+                      "    case 1 => x = 1\n"
+                      "    case 2 => x = 2\n"
+                      "};\n";
     std::string bytecode = compile_program_to_bytecode(src);
     EXPECT_NE(bytecode.find("MATCH_ERROR"), std::string::npos)
         << "missing wildcard must emit MATCH_ERROR";
@@ -353,8 +353,8 @@ TEST_F(MatchByteCodeTest, NoWildcardEmitsMatchError) {
 // MATCH_ERROR is suppressed because the binding always matches.
 TEST_F(MatchByteCodeTest, BindingArmEmitsGetLocal) {
     std::string src = "match 42 {\n"
-                      "    case n => n;\n"
-                      "}";
+                      "    case n => n\n"
+                      "};\n";
     std::string bytecode = compile_program_to_bytecode(src);
     EXPECT_EQ(bytecode.find("MATCH_ERROR"), std::string::npos)
         << "binding arm (always matches) must suppress MATCH_ERROR";
@@ -366,9 +366,9 @@ TEST_F(MatchByteCodeTest, BindingArmEmitsGetLocal) {
 // to any literal test.
 TEST_F(MatchByteCodeTest, GuardEmitsExtraJumpIfFalse) {
     std::string src = "match 5 {\n"
-                      "    case n if n > 3 => n;\n"
-                      "    case _ => 0;\n"
-                      "}";
+                      "    case n if n > 3 => n\n"
+                      "    case _ => 0\n"
+                      "};\n";
     std::string bytecode = compile_program_to_bytecode(src);
     // Count JUMP_IF_FALSE occurrences: guard adds one.
     size_t count = 0;

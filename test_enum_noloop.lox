@@ -1,0 +1,5 @@
+enum Result { Ok(value) Err(msg) }
+fun divide(a, b) { if (b == 0) return Err("div/0"); return Ok(a / b); }
+var r = divide(10, 2);
+var label = match r { case Ok(v) => "ok" case Err(m) => "err" };
+print label;

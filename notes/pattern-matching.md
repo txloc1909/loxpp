@@ -259,6 +259,37 @@ present. Missing constructors → compile error.
 
 ### Phase 2.5 — Class patterns ✅
 
+### Phase 3.2 — Match as expression ✅
+
+Promotion of `match` from a statement to a primary expression, enabling its use on the RHS of assignments, in function arguments, and as nested expressions. Independent of Phase 2.5 and can ship in parallel.
+
+**Syntax:**
+
+```lox
+var area = match shape {
+  case Circle(r)  => 3.14159 * r * r
+  case Rect(w, h) => w * h
+};
+
+var result = match value {
+  case Ok(v) if v > 0 => { var x = v * 2; x }
+  case Ok(v)          => v
+  case Err(m)         => 0
+};
+```
+
+**Grammar:** `match` joins `primary` as a `matchExpr` alternative. Each `armBody` can be a bare expression or `{ decl* expression }` (last item without `;` is the value). In statement position, the form is identical to Phase 1 (single statement or braced block); in expression position, only expression-producing forms are valid.
+
+**Semantics:** Evaluate subject once. For each arm, check pattern (tag check, equality, wildcard). On match, evaluate the arm's body expression and return its value. If no arm matches and no catch-all, raise `MatchError`.
+
+**Stack guarantee:** Each arm stores its result into a pre-allocated hidden slot before cleanup. All arms leave exactly one value via this mechanism — the compiler enforces structural uniformity, no runtime delta checking needed.
+
+**Statement use:** When used as a statement (`match x { ... };` in `exprStmt`), the result is `POP`ped by the normal expression statement path. Stack-neutral.
+
+**No new tokens, no new opcodes:** Uses existing `SET_LOCAL` and `POP`. No changes to `MATCH_ERROR` (already aborts, never returns).
+
+---
+
 Named-field pattern matching on open class instances, using `instanceof` dispatch at runtime.
 
 **Syntax** — identical to enum named-field patterns, no new tokens:
@@ -422,7 +453,9 @@ Phase 2:   enum + constructor pattern + exhaustiveness ✅ PR #64
   ↓
 Phase 2.5: class patterns (instanceof dispatch, named-field binding) ✅
   ↓
-Phase 3:   or-patterns, match-as-expression, var [a,b]
+Phase 3.2: match-as-expression ✅
+  ↓
+Phase 3:   or-patterns, var [a,b]
   ↓
 Phase 4:   list patterns, @-bindings, not-patterns
   ↓

@@ -109,9 +109,9 @@ TEST_F(MatchEnumTest, PositionalBinding) {
         var r = Ok(42);
         var got = 0;
         match r {
-            case Ok(v) => got = v;
-            case Err(m) => got = -1;
-        }
+            case Ok(v) => got = v
+            case Err(m) => got = -1
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -127,8 +127,8 @@ TEST_F(MatchEnumTest, NamedFieldBinding) {
         var px = 0;
         var py = 0;
         match p {
-            case Point{x, y} => { px = x; py = y; }
-        }
+            case Point{x, y} => { px = x; py = y }
+        };
     )"),
               InterpretResult::OK);
     auto xv = h.getGlobal("px");
@@ -146,9 +146,9 @@ TEST_F(MatchEnumTest, ZeroFieldConstructor) {
         var x = None();
         var got = 0;
         match x {
-            case Some(v) => got = v;
-            case None => got = 99;
-        }
+            case Some(v) => got = v
+            case None => got = 99
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -163,10 +163,10 @@ TEST_F(MatchEnumTest, WildcardAfterConstructors) {
         var c = Blue();
         var got = 0;
         match c {
-            case Red => got = 1;
-            case Green => got = 2;
-            case _ => got = 99;
-        }
+            case Red => got = 1
+            case Green => got = 2
+            case _ => got = 99
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -181,10 +181,10 @@ TEST_F(MatchEnumTest, GuardOnConstructorArm) {
         var r = Ok(5);
         var got = 0;
         match r {
-            case Ok(v) if v > 3 => got = 1;
-            case Ok(v) => got = 2;
-            case Err(m) => got = 3;
-        }
+            case Ok(v) if v > 3 => got = 1
+            case Ok(v) => got = 2
+            case Err(m) => got = 3
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -199,10 +199,10 @@ TEST_F(MatchEnumTest, GuardFailsFallsThrough) {
         var r = Ok(1);
         var got = 0;
         match r {
-            case Ok(v) if v > 3 => got = 1;
-            case Ok(v) => got = 2;
-            case Err(m) => got = 3;
-        }
+            case Ok(v) if v > 3 => got = 1
+            case Ok(v) => got = 2
+            case Err(m) => got = 3
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -223,9 +223,9 @@ TEST_F(ExhaustivenessTest, CompleteMatchPasses) {
         var c = Heads();
         var got = 0;
         match c {
-            case Heads => got = 1;
-            case Tails => got = 2;
-        }
+            case Heads => got = 1
+            case Tails => got = 2
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -240,9 +240,9 @@ TEST_F(ExhaustivenessTest, MissingArmIsCompileError) {
         enum Color { Red Green Blue }
         var c = Red();
         match c {
-            case Red => 1;
-            case Green => 2;
-        }
+            case Red => 1
+            case Green => 2
+        };
     )"),
               InterpretResult::COMPILE_ERROR);
 }
@@ -255,9 +255,9 @@ TEST_F(ExhaustivenessTest, WildcardSuppressesExhaustivenessError) {
         var c = Blue();
         var got = 0;
         match c {
-            case Red => got = 1;
-            case _ => got = 99;
-        }
+            case Red => got = 1
+            case _ => got = 99
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -278,14 +278,14 @@ TEST_F(MatchGCTest, EnumValueSurvivesGC) {
         var t = Node(Leaf(1), Leaf(2));
         var got = 0;
         match t {
-            case Leaf(v) => got = v;
+            case Leaf(v) => got = v
             case Node(l, r) => {
                 match l {
-                    case Leaf(v) => got = v;
-                    case Node(a, b) => got = -1;
-                }
+                    case Leaf(v) => got = v
+                    case Node(a, b) => got = -1
+                };
             }
-        }
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");
@@ -301,8 +301,8 @@ TEST_F(MatchGCTest, ConstructorIsFirstClassValue) {
         var w = ctor(42);
         var got = 0;
         match w {
-            case Box(v) => got = v;
-        }
+            case Box(v) => got = v
+        };
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("got");

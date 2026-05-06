@@ -1,0 +1,10 @@
+enum Result { Ok(value) }
+var cases = [Ok(5), Ok(10)];
+var i = 0;
+while (i < 2) {
+    var y = match cases[i] {
+        case Ok(v) => v
+    };
+    print y;
+    i = i + 1;
+}

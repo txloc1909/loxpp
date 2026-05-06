@@ -1,15 +1,13 @@
 // match_dispatch.lox — command dispatcher using match with guards and bindings.
 
 fun describe(cmd) {
-    match cmd {
-        case "quit"  => print "Exiting.";
-        case "help"  => print "Available: quit, help, version, status";
-        case "version" => print "lox++ 1.0";
-        case n if "err" in n => {
-            print "Error command: " + n;
-        }
-        case _ => print "Unknown command: " + cmd;
-    }
+    print match cmd {
+        case "quit"          => "Exiting."
+        case "help"          => "Available: quit, help, version, status"
+        case "version"       => "lox++ 1.0"
+        case n if "err" in n => "Error command: " + n
+        case _               => "Unknown command: " + cmd
+    };
 }
 
 // CHECK: Available: quit, help, version, status
