@@ -76,7 +76,10 @@ factor         ::= unary ( ( "/" | "*" | "%" ) unary )* ;
 unary          ::= ( "!" | "-" ) unary
                  | call ;
 
-call           ::= primary ( "(" arguments? ")" | "." IDENTIFIER | "[" expression "]" )* ;
+call             ::= primary ( "(" arguments? ")" | "." IDENTIFIER | "[" subscriptOrSlice "]" )* ;
+
+subscriptOrSlice ::= expression                       (* plain index *)
+                   | expression ":" expression ;      (* slice — both bounds required *)
 
 arguments      ::= expression ( "," expression )* ;
 
@@ -175,6 +178,16 @@ binding each element to `x` for each iteration of `body`.
 
 The `else` clause binds to the nearest preceding `if`. To associate an `else`
 with an outer `if`, enclose the inner `if` in a block.
+
+### Slice expression
+
+`seq[start:end]` produces a new sequence value of the same type containing the
+elements from index `start` (inclusive) to `end` (exclusive). Both bounds are
+required — omitting either is a parse error. A slice cannot appear as an
+assignment target. See §04-semantics for full evaluation rules.
+
+The disambiguation rule: a `:` inside `[...]` makes the form a slice; without
+`:` it is a plain index. Both bind at CALL precedence (level 9).
 
 ### Assignment
 

@@ -1144,6 +1144,83 @@ InterpretResult VM::run() {
                        // value
             break;
         }
+        case Op::SLICE: {
+            // Stack (bottom→top): seq, start, end
+            Value endVal = peek(0);
+            Value startVal = peek(1);
+            Value seqVal = peek(2);
+
+            if (!isList(seqVal) && !isString(seqVal)) {
+                runtimeError("Slice requires a List or String.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            if (!is<Number>(startVal)) {
+                runtimeError("Slice index must be a number.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            double startD = as<Number>(startVal);
+            if (startD != std::floor(startD)) {
+                runtimeError("Slice index must be an integer.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            if (startD < 0.0) {
+                runtimeError("Slice index must be non-negative.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            if (!is<Number>(endVal)) {
+                runtimeError("Slice index must be a number.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            double endD = as<Number>(endVal);
+            if (endD != std::floor(endD)) {
+                runtimeError("Slice index must be an integer.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            if (endD < 0.0) {
+                runtimeError("Slice index must be non-negative.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+
+            if (isList(seqVal)) {
+                auto* src = asObjList(as<Obj*>(seqVal));
+                int n = static_cast<int>(src->elements.size());
+                int s = static_cast<int>(std::min(startD, (double)n));
+                int e = static_cast<int>(std::min(endD, (double)n));
+                int count = (s < e) ? e - s : 0;
+
+                ObjList* result =
+                    m_mm.create<ObjList>(VmAllocator<Value>{&m_mm});
+                // seqVal is still at peek(2) → src is GC-rooted on the stack
+                m_mm.pushTempRoot(result);
+                result->elements.resize(count); // may trigger GC
+                src =
+                    asObjList(as<Obj*>(peek(2))); // re-read after potential GC
+                for (int i = 0; i < count; i++)
+                    result->elements[i] = src->elements[s + i];
+                m_mm.popTempRoot();
+                pop();
+                pop();
+                pop();
+                push(Value{static_cast<Obj*>(result)});
+            } else {
+                // String — copy chars to local buffer while src is still on
+                // stack
+                auto* src = asObjString(as<Obj*>(seqVal));
+                int n = static_cast<int>(src->chars.size());
+                int s = static_cast<int>(std::min(startD, (double)n));
+                int e = static_cast<int>(std::min(endD, (double)n));
+                std::string substr =
+                    (s < e) ? std::string(src->chars.data() + s,
+                                          static_cast<size_t>(e - s))
+                            : std::string{};
+                pop();
+                pop();
+                pop();
+                push(Value{
+                    static_cast<Obj*>(m_mm.makeString(std::move(substr)))});
+            }
+            break;
+        }
         case Op::IN: {
             Value seq = pop();
             Value elem = pop();

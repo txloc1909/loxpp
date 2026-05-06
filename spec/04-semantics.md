@@ -607,6 +607,48 @@ collection[key] = expr
    d. The expression evaluates to the stored value (same as assignment semantics).
 5. Otherwise, this is a **runtime error** ("Only lists and maps can be indexed.").
 
+### Slice Get
+
+```lox
+seq[start:end]
+```
+
+Both `start` and `end` must be present; omitting either is a **parse error**.
+
+**Evaluation:**
+
+**Step 1 — Evaluate operands.**  
+Evaluate `seq`, then `start`, then `end` (left-to-right).
+
+**Step 2 — Type-check `seq`.**  
+If `seq` is not a List or String, this is a **runtime error** ("Slice requires a List or String.").
+
+**Step 3 — Validate `start`.**
+- If `start` is not a Number → runtime error ("Slice index must be a number.").
+- If `start` is not integer-valued (i.e., `start ≠ floor(start)`) → runtime error ("Slice index must be an integer.").
+- If `start < 0` → runtime error ("Slice index must be non-negative.").
+- Let `s = integer value of start`.
+
+**Step 4 — Validate `end`.**
+- If `end` is not a Number → runtime error ("Slice index must be a number.").
+- If `end` is not integer-valued → runtime error ("Slice index must be an integer.").
+- If `end < 0` → runtime error ("Slice index must be non-negative.").
+- Let `e = integer value of end`.
+
+**Step 5 — Clamp bounds.**  
+Let `n = len(seq)`.
+- `s = min(s, n)`
+- `e = min(e, n)`
+
+**Step 6 — Collect and return.**
+- If `s >= e`, return an empty List (`[]`) or empty String (`""`).
+- Otherwise, collect elements at indices `s, s+1, …, e−1`.
+- If `seq` is a **List**: return a new List containing those elements in order.
+- If `seq` is a **String**: return a new String formed by copying the bytes at those indices. The result is a freshly allocated string value, not a view into the original.
+- The original `seq` is not modified.
+
+**Slice assignment is not supported.** A slice expression on the left side of `=` is a **parse error**.
+
 ### List Methods
 
 #### `append`
