@@ -191,9 +191,6 @@ var {width, height} = rect
 ```lox
 // nested — not supported:
 var {pos: {x, y}} = entity
-
-// sequence — deferred to Phase 3/4:
-var [a, b] = list
 ```
 
 **No new opcodes** — uses existing `GET_PROPERTY`. Trailing comma is allowed.
@@ -394,13 +391,30 @@ var area = match shape {
 
 All arms must leave the same stack height. Used as a statement the result is `POP`ped.
 
-**`var [a, b]` sequence destructuring:**
+See Phase 3.3 below.
+
+---
+
+### Phase 3.3 — `var [a, b]` sequence destructuring ✅
+
+Positional destructuring of lists (and strings) into `var` declarations.
 
 ```lox
-var [head, tail] = list    // positional destructure into a list
+var [a, b]    = [10, 20]       // a=10, b=20
+var [x, _, z] = [1, 2, 3]     // x=1, z=3 (_discards index 1)
+var [h, t]    = "hi"           // h="h", t="i"
 ```
 
-New opcode: `GET_INDEX` already exists; may need a length guard.
+**Grammar addition** — extends Phase 1.5 `varLhs`:
+
+```
+varLhs  : IDENTIFIER | '{' mapPat '}' | '[' seqPat ']'
+seqPat  : IDENTIFIER (',' IDENTIFIER)*
+```
+
+**`_` semantics** — positional wildcard: accesses `source[i]` and discards it (`GET_INDEX` + `POP`), creates no binding. Elements beyond the last pattern position are never accessed. The rest pattern (`[a, ...rest]`) is deferred to Phase 4.
+
+**No new opcodes** — uses existing `GET_INDEX`. Out-of-bounds raises "List index out of bounds." at runtime. Local scope: hidden `#src` local; global scope: hidden `#destruct` global. Same pattern as Phase 1.5.
 
 ---
 
@@ -455,7 +469,9 @@ Phase 2.5: class patterns (instanceof dispatch, named-field binding) ✅
   ↓
 Phase 3.2: match-as-expression ✅
   ↓
-Phase 3:   or-patterns, var [a,b]
+Phase 3.3: var [a, b] sequence destructuring ✅
+  ↓
+Phase 3:   or-patterns
   ↓
 Phase 4:   list patterns, @-bindings, not-patterns
   ↓

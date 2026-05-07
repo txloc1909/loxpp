@@ -283,7 +283,92 @@ void Compiler::emitDestructureGlobal(const std::vector<Token>& fields) {
     }
 }
 
+void Compiler::varDestructureSeq() {
+    m_parser->consume(TokenType::LEFT_BRACKET,
+                      "Expect '[' in sequence destructuring pattern.");
+
+    std::vector<Token> names;
+    do {
+        if (names.size() >= UINT8_COUNT)
+            m_parser->error("Too many elements in sequence destructuring.");
+        m_parser->consume(TokenType::IDENTIFIER, "Expect element name.");
+        names.push_back(m_parser->m_previous);
+    } while (m_parser->match(TokenType::COMMA) &&
+             !m_parser->check(TokenType::RIGHT_BRACKET));
+
+    m_parser->consume(TokenType::RIGHT_BRACKET,
+                      "Expect ']' after element names.");
+    m_parser->consume(TokenType::EQUAL,
+                      "Expect '=' after destructuring pattern.");
+
+    expression();
+
+    m_parser->consume(TokenType::SEMICOLON,
+                      "Expect ';' after variable declaration.");
+
+    if (m_scopeDepth > 0)
+        emitDestructureSeqLocal(names);
+    else
+        emitDestructureSeqGlobal(names);
+}
+
+void Compiler::emitDestructureSeqLocal(const std::vector<Token>& names) {
+    Token hidden;
+    hidden.type = TokenType::IDENTIFIER;
+    hidden.lexeme = "#src";
+    hidden.line = m_parser->m_previous.line;
+    addLocal(hidden);
+    int srcSlot = m_localCount - 1;
+    m_locals[srcSlot].depth = m_scopeDepth;
+
+    for (int i = 0; i < static_cast<int>(names.size()); i++) {
+        const Token& name = names[i];
+        emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(srcSlot));
+        emitBytes(Op::CONSTANT,
+                  makeConstant(from<Number>(static_cast<double>(i))));
+        emitByte(Op::GET_INDEX);
+        if (name.lexeme == "_") {
+            emitByte(Op::POP);
+        } else {
+            for (int j = m_localCount - 1; j >= 0; j--) {
+                const Local& local = m_locals[j];
+                if (local.depth != -1 && local.depth < m_scopeDepth)
+                    break;
+                if (local.name.lexeme == name.lexeme)
+                    m_parser->error(
+                        "Already a variable with this name in this scope.");
+            }
+            addLocal(name);
+            m_locals[m_localCount - 1].depth = m_scopeDepth;
+        }
+    }
+}
+
+void Compiler::emitDestructureSeqGlobal(const std::vector<Token>& names) {
+    Token hidden;
+    hidden.type = TokenType::IDENTIFIER;
+    hidden.lexeme = "#destruct";
+    hidden.line = m_parser->m_previous.line;
+    uint8_t hiddenIdx = identifierConstant(hidden);
+    emitBytes(Op::DEFINE_GLOBAL, hiddenIdx);
+
+    for (int i = 0; i < static_cast<int>(names.size()); i++) {
+        emitBytes(Op::GET_GLOBAL, hiddenIdx);
+        emitBytes(Op::CONSTANT,
+                  makeConstant(from<Number>(static_cast<double>(i))));
+        emitByte(Op::GET_INDEX);
+        if (names[i].lexeme == "_")
+            emitByte(Op::POP);
+        else
+            emitBytes(Op::DEFINE_GLOBAL, identifierConstant(names[i]));
+    }
+}
+
 void Compiler::varDeclaration() {
+    if (m_parser->check(TokenType::LEFT_BRACKET)) {
+        varDestructureSeq();
+        return;
+    }
     if (m_parser->check(TokenType::LEFT_BRACE)) {
         varDestructure();
         return;

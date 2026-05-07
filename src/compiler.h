@@ -122,6 +122,10 @@ class Compiler {
     void emitDestructureLocal(const std::vector<Token>& fields);
     void emitDestructureGlobal(const std::vector<Token>& fields);
 
+    void varDestructureSeq();
+    void emitDestructureSeqLocal(const std::vector<Token>& names);
+    void emitDestructureSeqGlobal(const std::vector<Token>& names);
+
     void compileMatchBody();
     void parseFunction(FunctionType type);
 
