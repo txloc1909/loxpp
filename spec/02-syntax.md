@@ -223,22 +223,36 @@ var n = None();
 ### Extended `match` arm patterns
 
 ```
-armPat : NUMBER | STRING | 'true' | 'false' | 'nil'
-       | IDENTIFIER                                    // wildcard (_) or binding
-       | IDENTIFIER '{' fieldPat (',' fieldPat)* '}'  // named field pattern
-       | IDENTIFIER '(' IDENTIFIER (',' IDENTIFIER)* ')' // positional pattern
-       | IDENTIFIER                                    // zero-field constructor
+armPats  : armPat ('or' armPat)*
+armPat   : NUMBER | STRING | 'true' | 'false' | 'nil'  // literal (comma chain only)
+         | IDENTIFIER                                    // wildcard (_) or binding
+         | IDENTIFIER '{' fieldPat (',' fieldPat)* '}'  // named field pattern
+         | IDENTIFIER '(' IDENTIFIER (',' IDENTIFIER)* ')' // positional pattern
+         | IDENTIFIER                                    // zero-field constructor
 
-fieldPat: IDENTIFIER
+fieldPat : IDENTIFIER
 ```
 
 When the pattern name resolves to a known constructor, the arm performs a tag
 check rather than a binding. Unknown identifiers continue to act as bindings.
 
+**Or-patterns:** multiple identifier-starting alternatives may be separated by
+`or`. All alternatives must bind the same names in the same order; a mismatch
+is a compile error. The guard and body run once for whichever alternative
+matched. Literal comma-chaining (`case 1, 2, 3 =>`) remains valid for backward
+compatibility and is not extended with `or`.
+
+```lox
+case Quit or Pause         => stop()
+case Move(x) or Teleport(x) => go(x)   // both bind x
+case A(y)    or B(z)       => ...       // compile error: y ≠ z
+```
+
 **Exhaustiveness:** if a match contains at least one constructor-pattern arm
 from enum `E`, the compiler verifies that every constructor of `E` appears as
-an arm, or that an unguarded `_`/binding wildcard is present. A missing
-constructor is a compile error listing the absent names.
+an arm (across all alternatives in or-patterns), or that an unguarded
+`_`/binding wildcard is present. A missing constructor is a compile error
+listing the absent names.
 
 ### Function call arguments
 
