@@ -845,7 +845,15 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
             allCtorNames.push_back(first.ctorName);
         }
 
-        if (m_parser->check(TokenType::OR)) {
+        if (m_parser->check(TokenType::OR) && first.missJump == -1) {
+            // Error already reported (binding/wildcard with 'or'). Consume the
+            // remaining alternatives so parsing can continue without cascading
+            // errors, but do not patch any jumps.
+            while (m_parser->match(TokenType::OR)) {
+                m_localCount = armLocalBase;
+                compileOneIdentPat();
+            }
+        } else if (m_parser->check(TokenType::OR)) {
             // Or-pattern: compile additional alternatives.
             std::vector<int> bodyJumps; // hit-jumps patched after all alts
 
@@ -872,9 +880,13 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
 
                 if (m_parser->check(TokenType::OR)) {
                     // Non-last: hit → skip rest; miss → try next.
+                    // Guard against missJump == -1 (binding/wildcard in a
+                    // later alternative — error already reported).
                     bodyJumps.push_back(emitJump(Op::JUMP));
-                    patchJump(next.missJump);
-                    emitByte(Op::POP);
+                    if (next.missJump != -1) {
+                        patchJump(next.missJump);
+                        emitByte(Op::POP);
+                    }
                 } else {
                     // Last alternative: its miss becomes the arm's final miss.
                     lastMiss = next.missJump;
