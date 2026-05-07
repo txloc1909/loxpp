@@ -691,8 +691,8 @@ void Compiler::compileMatchBody() {
         if (arm.isUnguardedCatchAll) {
             hasUnguardedCatchAll = true;
         }
-        if (!arm.ctorName.empty()) {
-            seenCtors.insert(arm.ctorName);
+        for (const auto& n : arm.ctorNames) {
+            seenCtors.insert(n);
         }
 
         // Guard-fail exit: pop guard bool, pop binding locals.
@@ -759,33 +759,38 @@ void Compiler::compileMatchBody() {
 
 Compiler::MatchArmResult
 Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
-    bool isIdentPat = m_parser->check(TokenType::IDENTIFIER);
-    int lastMiss = -1;
-    int bindingCount = 0;
-    std::string matchedCtorName;
+    // Result of compiling one pattern alternative (before 'or' or guard/arrow).
+    struct OnePatResult {
+        int missJump; // JUMP_IF_FALSE offset; -1 = always matches
+        int bindingCount;
+        std::vector<std::string> bindNames; // in declaration order
+        std::string ctorName;               // non-empty if constructor pattern
+    };
 
-    if (isIdentPat) {
+    // Compile one identifier-starting pattern alternative. m_localCount must
+    // equal armLocalBase on entry so that addLocal assigns the same slots
+    // across all alternatives in an or-chain.
+    auto compileOneIdentPat = [&]() -> OnePatResult {
         Token patTok = m_parser->m_current;
         m_parser->advance();
         std::string patName(patTok.lexeme);
 
+        int missJump = -1;
+        int localsBefore = m_localCount;
+        std::string ctorName;
+
         const ConstructorInfo* info = findConstructor(patName);
-
-        // Constructor pattern: emit tag check + field bindings.
         if (info != nullptr) {
-            matchedCtorName = patName;
-
+            ctorName = patName;
             emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
             emitByte(Op::GET_TAG);
             emitBytes(Op::CONSTANT,
                       makeConstant(Value{static_cast<double>(info->tag)}));
             emitByte(Op::EQUAL);
-            lastMiss = emitJump(Op::JUMP_IF_FALSE);
-            emitByte(Op::POP); // pop true
-
-            bindingCount = compileCtorPattern(subjectSlot, *info, patTok);
+            missJump = emitJump(Op::JUMP_IF_FALSE);
+            emitByte(Op::POP);
+            compileCtorPattern(subjectSlot, *info, patTok);
         } else if (findClass(patName)) {
-            // Class pattern: instanceof check + named-field bindings.
             ObjString* classNameStr = m_mm->makeString(patTok.lexeme);
             m_mm->pushTempRoot(classNameStr);
             uint8_t classNameConst =
@@ -793,17 +798,17 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
             m_mm->popTempRoot();
             emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
             emitBytes(Op::INSTANCEOF, classNameConst);
-            lastMiss = emitJump(Op::JUMP_IF_FALSE);
-            emitByte(Op::POP); // pop true
-            bindingCount = compileClassPattern(subjectSlot, patTok);
+            missJump = emitJump(Op::JUMP_IF_FALSE);
+            emitByte(Op::POP);
+            compileClassPattern(subjectSlot, patTok);
         } else if (m_parser->check(TokenType::LEFT_BRACE) ||
                    m_parser->check(TokenType::LEFT_PAREN)) {
-            // Looks like a constructor pattern but name is unknown.
             m_parser->error(
                 ("Unknown constructor or class '" + patName + "'.").c_str());
         } else {
             // Plain binding or wildcard.
-            if (m_parser->check(TokenType::COMMA)) {
+            if (m_parser->check(TokenType::COMMA) ||
+                m_parser->check(TokenType::OR)) {
                 m_parser->error(
                     "A binding pattern must be the sole arm pattern.");
             }
@@ -813,13 +818,78 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
                               patTok.line};
                 addLocal(bindTok);
                 markInitialized();
-                bindingCount = 1;
             }
         }
+
+        // Collect names of locals pushed by this alternative.
+        int bindCount = m_localCount - localsBefore;
+        std::vector<std::string> names;
+        names.reserve(static_cast<size_t>(bindCount));
+        for (int i = localsBefore; i < m_localCount; i++) {
+            names.emplace_back(m_locals[i].name.lexeme);
+        }
+        return {missJump, bindCount, std::move(names), std::move(ctorName)};
+    };
+
+    bool isIdentPat = m_parser->check(TokenType::IDENTIFIER);
+    int lastMiss = -1;
+    int bindingCount = 0;
+    bool hasGuard = false;
+    std::vector<std::string> allCtorNames;
+
+    if (isIdentPat) {
+        auto first = compileOneIdentPat();
+        lastMiss = first.missJump;
+        bindingCount = first.bindingCount;
+        if (!first.ctorName.empty()) {
+            allCtorNames.push_back(first.ctorName);
+        }
+
+        if (m_parser->check(TokenType::OR)) {
+            // Or-pattern: compile additional alternatives.
+            std::vector<int> bodyJumps; // hit-jumps patched after all alts
+
+            // First alternative hit → skip remaining alternatives.
+            bodyJumps.push_back(emitJump(Op::JUMP));
+            // First alternative miss → try next.
+            patchJump(first.missJump);
+            emitByte(Op::POP); // pop false from EQUAL/INSTANCEOF
+
+            while (m_parser->match(TokenType::OR)) {
+                // Reset so the next alternative's addLocal calls land at the
+                // same slots as the first alternative's bindings.
+                m_localCount = armLocalBase;
+                auto next = compileOneIdentPat();
+
+                if (next.bindNames != first.bindNames) {
+                    m_parser->error(
+                        "Or-pattern alternatives must bind the same names "
+                        "in the same order.");
+                }
+                if (!next.ctorName.empty()) {
+                    allCtorNames.push_back(next.ctorName);
+                }
+
+                if (m_parser->check(TokenType::OR)) {
+                    // Non-last: hit → skip rest; miss → try next.
+                    bodyJumps.push_back(emitJump(Op::JUMP));
+                    patchJump(next.missJump);
+                    emitByte(Op::POP);
+                } else {
+                    // Last alternative: its miss becomes the arm's final miss.
+                    lastMiss = next.missJump;
+                }
+            }
+
+            for (int j : bodyJumps) {
+                patchJump(j);
+            }
+            // All alternatives push the same number of bindings; restore count
+            // so the guard and body see the correct locals.
+            m_localCount = armLocalBase + bindingCount;
+        }
     } else {
-        // Literal pattern(s): equality chain.
-        // hitJumps: JUMP_IF_FALSE per non-last literal (miss → try next).
-        // bodyJumps: unconditional JUMP per non-last literal (hit → body).
+        // Literal pattern(s): equality chain (comma-separated).
         std::vector<int> hitJumps;
         std::vector<int> bodyJumps;
 
@@ -846,7 +916,7 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
 
     // Guard clause (optional).
     int guardMiss = -1;
-    bool hasGuard = m_parser->match(TokenType::IF);
+    hasGuard = m_parser->match(TokenType::IF);
     if (hasGuard) {
         expression();
         guardMiss = emitJump(Op::JUMP_IF_FALSE);
@@ -867,7 +937,6 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
                 declaration();
             } else if (m_parser->match(TokenType::BREAK)) {
                 breakStatement();
-                // Consume dead code after break until '}'
                 while (!m_parser->check(TokenType::RIGHT_BRACE) &&
                        !m_parser->check(TokenType::EOF_)) {
                     statement();
@@ -890,9 +959,9 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
             } else {
                 expression();
                 if (m_parser->match(TokenType::SEMICOLON)) {
-                    emitByte(Op::POP); // discard intermediate expression
+                    emitByte(Op::POP);
                 } else {
-                    break; // last expression — the arm value
+                    break;
                 }
             }
         }
@@ -912,12 +981,10 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
     int endJump = emitJump(Op::JUMP);
     m_loopStack.back().breakJumps.push_back(endJump);
 
-    // A plain identifier is a catch-all only if it emitted no conditional check
-    // (lastMiss == -1 means no JUMP_IF_FALSE was emitted).
     bool isPlainIdentCatchAll =
-        isIdentPat && matchedCtorName.empty() && lastMiss == -1 && !hasGuard;
+        isIdentPat && allCtorNames.empty() && lastMiss == -1 && !hasGuard;
     return {lastMiss, guardMiss, bindingCount, isPlainIdentCatchAll,
-            matchedCtorName};
+            std::move(allCtorNames)};
 }
 
 Compiler* Compiler::findRootCompiler() {
