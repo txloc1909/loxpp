@@ -1,0 +1,109 @@
+// linear_regression.lox — Least-squares linear regression.
+//
+// fit(xs, ys, n) returns [slope, intercept] so the caller can immediately
+// destructure the two-value result without a wrapper class.
+//
+// Demonstrates: var [a, b] sequence destructuring as a lightweight
+//               multi-return alternative to class instances.
+
+fun fit(xs, ys, n) {
+    // Accumulate sums for the normal equations.
+    var sumX  = 0;
+    var sumY  = 0;
+    var sumXY = 0;
+    var sumXX = 0;
+    var i = 0;
+    while (i < n) {
+        sumX  = sumX  + xs[i];
+        sumY  = sumY  + ys[i];
+        sumXY = sumXY + xs[i] * ys[i];
+        sumXX = sumXX + xs[i] * xs[i];
+        i = i + 1;
+    }
+    var slope     = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+    var intercept = (sumY - slope * sumX) / n;
+    return [slope, intercept];
+}
+
+fun predict(m, b, x) { return m * x + b; }
+
+fun rSquared(xs, ys, n, m, b) {
+    var meanY = 0;
+    var i = 0;
+    while (i < n) { meanY = meanY + ys[i]; i = i + 1; }
+    meanY = meanY / n;
+
+    var ssTot = 0;
+    var ssRes = 0;
+    i = 0;
+    while (i < n) {
+        var diff = ys[i] - meanY;
+        ssTot = ssTot + diff * diff;
+        var res = ys[i] - predict(m, b, xs[i]);
+        ssRes = ssRes + res * res;
+        i = i + 1;
+    }
+    return 1 - ssRes / ssTot;
+}
+
+// -----------------------------------------------------------------------
+// Dataset 1: perfect line  y = 2x + 1
+// -----------------------------------------------------------------------
+
+// CHECK: === Dataset 1: y = 2x + 1 ===
+print "=== Dataset 1: y = 2x + 1 ===";
+
+var xs1 = [1, 2, 3, 4, 5];
+var ys1 = [3, 5, 7, 9, 11];
+var [m1, b1] = fit(xs1, ys1, 5);
+
+// CHECK: slope     = 2
+// CHECK: intercept = 1
+print "slope     = " + str(m1);
+print "intercept = " + str(b1);
+
+// CHECK: predict(6) = 13
+print "predict(6) = " + str(predict(m1, b1, 6));
+
+// CHECK: R^2 = 1
+print "R^2 = " + str(rSquared(xs1, ys1, 5, m1, b1));
+
+// -----------------------------------------------------------------------
+// Dataset 2: noisy linear data
+// -----------------------------------------------------------------------
+
+print "";
+// CHECK: === Dataset 2: noisy linear ===
+print "=== Dataset 2: noisy linear ===";
+
+var xs2 = [1,  2,  3,  4,  5,  6,  7,  8,  9,  10];
+var ys2 = [2.1, 3.9, 6.2, 7.8, 10.1, 12.0, 14.0, 15.9, 18.1, 20.0];
+var [m2, b2] = fit(xs2, ys2, 10);
+
+// CHECK: slope     = 1.99697
+// CHECK: intercept = 0.0266667
+print "slope     = " + str(m2);
+print "intercept = " + str(b2);
+
+// CHECK: predict(11) = 21.9933
+print "predict(11) = " + str(predict(m2, b2, 11));
+
+// CHECK: R^2 = 0.99961
+print "R^2 = " + str(rSquared(xs2, ys2, 10, m2, b2));
+
+// -----------------------------------------------------------------------
+// Dataset 3: horizontal line  y = 5  (slope should be 0)
+// -----------------------------------------------------------------------
+
+print "";
+// CHECK: === Dataset 3: y = 5 ===
+print "=== Dataset 3: y = 5 ===";
+
+var xs3 = [0, 1, 2, 3, 4];
+var ys3 = [5, 5, 5, 5, 5];
+var [m3, b3] = fit(xs3, ys3, 5);
+
+// CHECK: slope     = 0
+// CHECK: intercept = 5
+print "slope     = " + str(m3);
+print "intercept = " + str(b3);

@@ -126,8 +126,8 @@ fun encode(text) {
     }
     i = 0;
     while (i < n) {
-        var pair = entries[i];
-        print "  '" + pair[0] + "'  freq=" + str(freq[pair[0]]) + "  code=" + pair[1];
+        var [ch, code] = entries[i];
+        print "  '" + ch + "'  freq=" + str(freq[ch]) + "  code=" + code;
         i = i + 1;
     }
 
