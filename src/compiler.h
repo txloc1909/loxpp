@@ -86,8 +86,8 @@ class Compiler {
         int lastMiss;     // patch offset for literal miss (-1 = ident pat)
         int guardMiss;    // patch offset for guard fail  (-1 = no guard)
         int bindingCount; // locals pushed by the pattern
-        bool isUnguardedCatchAll; // true → suppress MATCH_ERROR
-        std::string ctorName;     // non-empty if this was a constructor arm
+        bool isUnguardedCatchAll;           // true → suppress MATCH_ERROR
+        std::vector<std::string> ctorNames; // constructors matched by this arm
     };
     MatchArmResult compileMatchArm(int subjectSlot, int armLocalBase,
                                    int resultSlot);

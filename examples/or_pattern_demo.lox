@@ -1,0 +1,98 @@
+// or_pattern_demo.lox — or-patterns: one arm, multiple constructor alternatives.
+//
+// Demonstrates:
+//   - Zero-binding or-pattern: several constructors share the same body
+//   - Binding or-pattern: constructors with the same field name
+//   - Guard on an or-pattern
+//   - Three-alternative or-pattern
+//   - Or-pattern arms contributing to exhaustiveness
+
+// ---------------------------------------------------------------------------
+// Zero-binding or-pattern
+// ---------------------------------------------------------------------------
+
+// A traffic light where Red and Amber both mean "stop".
+enum Light { Red Amber Green }
+
+fun must_stop(light) {
+    return match light {
+        case Red or Amber => true
+        case Green        => false
+    };
+}
+
+// CHECK: must_stop: true true false
+print "must_stop: " + str(must_stop(Red())) + " " +
+                      str(must_stop(Amber())) + " " +
+                      str(must_stop(Green()));
+
+// ---------------------------------------------------------------------------
+// Binding or-pattern: two constructors, same field name
+// ---------------------------------------------------------------------------
+
+// Control signals: Stop and SlowDown both carry a reason; Go carries nothing.
+enum Signal { Stop(reason) SlowDown(reason) Go }
+
+fun describe(s) {
+    return match s {
+        case Stop(reason) or SlowDown(reason) => "caution: " + reason
+        case Go                               => "proceed"
+    };
+}
+
+// CHECK: caution: red light
+print describe(Stop("red light"));
+// CHECK: caution: school zone
+print describe(SlowDown("school zone"));
+// CHECK: proceed
+print describe(Go());
+
+// ---------------------------------------------------------------------------
+// Guard on an or-pattern
+// ---------------------------------------------------------------------------
+
+// Only mark as "urgent" if the reason begins with "!".
+fun urgency(s) {
+    return match s {
+        case Stop(reason) or SlowDown(reason) if "!" in reason => "URGENT: " + reason
+        case Stop(reason) or SlowDown(reason)                  => "normal: " + reason
+        case Go                                                => "clear"
+    };
+}
+
+// CHECK: URGENT: !emergency vehicle
+print urgency(Stop("!emergency vehicle"));
+// CHECK: normal: low visibility
+print urgency(SlowDown("low visibility"));
+// CHECK: clear
+print urgency(Go());
+
+// ---------------------------------------------------------------------------
+// Three-alternative or-pattern
+// ---------------------------------------------------------------------------
+
+// Cardinal directions: group into horizontal vs vertical movement.
+enum Dir { North South East West }
+
+fun axis(d) {
+    return match d {
+        case North or South            => "vertical"
+        case East or West              => "horizontal"
+    };
+}
+
+// CHECK: vertical vertical horizontal horizontal
+print axis(North()) + " " + axis(South()) + " " +
+      axis(East())  + " " + axis(West());
+
+// Three directions in one arm:
+fun near_north(d) {
+    return match d {
+        case North or East or West => true
+        case South                 => false
+    };
+}
+
+// CHECK: true false true true
+print str(near_north(North())) + " " + str(near_north(South())) + " " +
+      str(near_north(East()))  + " " + str(near_north(West()));
