@@ -1,5 +1,6 @@
 #include "compiler.h"
 #include "debug.h"
+#include "escape.h"
 #include "memory_manager.h"
 #include "utility.h"
 
@@ -173,7 +174,18 @@ void Compiler::number() {
 }
 
 void Compiler::string() {
-    ObjString* s = m_mm->makeString(m_parser->m_previous.lexeme);
+    std::string_view raw = m_parser->m_previous.lexeme;
+    std::string processed;
+    processed.reserve(raw.size());
+    for (std::size_t i = 0; i < raw.size(); ++i) {
+        if (raw[i] == '\\' && i + 1 < raw.size()) {
+            ++i;
+            processed += *decodeEscape(raw[i]); // scanner already validated
+        } else {
+            processed += raw[i];
+        }
+    }
+    ObjString* s = m_mm->makeString(std::move(processed));
     emitBytes(Op::CONSTANT, makeConstant(Value{static_cast<Obj*>(s)}));
 }
 

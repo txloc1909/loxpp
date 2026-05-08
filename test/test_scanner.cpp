@@ -88,6 +88,25 @@ TEST_F(ScannerTest, StringLiteral) {
     EXPECT_EQ(tokens[0].lexeme, "hello world");
 }
 
+TEST_F(ScannerTest, StringWithEscapedQuote) {
+    // Source: "say \"hi\""  — embedded double quotes via escape
+    auto tokens = scanTokens(R"("say \"hi\"")");
+    EXPECT_EQ(tokens[0].type, TokenType::STRING);
+    EXPECT_EQ(tokens[0].lexeme,
+              R"(say \"hi\")"); // raw lexeme keeps backslashes
+}
+
+TEST_F(ScannerTest, StringWithEscapeSequences) {
+    auto tokens = scanTokens(R"("a\nb\tc\\d")");
+    EXPECT_EQ(tokens[0].type, TokenType::STRING);
+    EXPECT_EQ(tokens[0].lexeme, R"(a\nb\tc\\d)");
+}
+
+TEST_F(ScannerTest, StringUnknownEscape) {
+    auto tokens = scanTokens(R"("\q")");
+    EXPECT_EQ(tokens[0].type, TokenType::ERROR);
+}
+
 TEST_F(ScannerTest, NumberLiteral) {
     const char* source = "123 123.456";
     auto tokens = scanTokens(source);

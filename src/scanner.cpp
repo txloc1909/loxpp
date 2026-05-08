@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include "escape.h"
+
 const char* const* lox_keywords() {
     static const char* keywords[] = {
         "and",   "break", "case",  "class", "continue", "default",
@@ -221,6 +223,15 @@ Token Scanner::consumeString() {
     while (peek() != '"' && !isAtEnd()) {
         if (peek() == '\n')
             m_line++;
+        if (peek() == '\\') {
+            advance(); // consume '\'
+            if (isAtEnd())
+                break;
+            if (!decodeEscape(peek())) {
+                advance(); // consume the bad char before reporting
+                return createErrorToken("Unknown escape sequence.");
+            }
+        }
         advance();
     }
 
