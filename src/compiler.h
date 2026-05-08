@@ -153,6 +153,16 @@ class Compiler {
     // Emit GET_PROPERTY bindings for a class pattern (named-field only).
     // Returns the number of locals bound.
     int compileClassPattern(int subjectSlot, const Token& patTok);
+
+    struct ListPatResult {
+        int missJump; // caller-visible miss patch offset
+        int bindingCount;
+        std::vector<std::string> bindNames;
+    };
+    // Emit IS_SEQ + GET_LEN checks and GET_INDEX/SLICE bindings for a sequence
+    // pattern starting at '['. Returns miss jump + binding info.
+    ListPatResult compileListPattern(int subjectSlot, int armLocalBase);
+
     // Raise a compile error if seen constructor arms don't cover all variants.
     void checkEnumExhaustiveness(const std::set<std::string>& seenCtors);
 

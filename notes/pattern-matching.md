@@ -449,17 +449,63 @@ seqPat  : IDENTIFIER (',' IDENTIFIER)*
 
 ---
 
-### Phase 4 — List patterns in match + advanced patterns (future)
+### Phase 4 — Sequence patterns in match + advanced patterns
 
-**List patterns in `match`:**
+#### Sequence patterns in `match` ✅
+
+Match on the shape and contents of any sequence (List or String).
+
+**Syntax:**
 
 ```lox
 match lst {
-  case []          => print "empty"
-  case [x]         => print "singleton"
-  case [x, ...rest] => print x
+  case []           => print "empty"
+  case [x]          => print "singleton"
+  case [h, ...rest] => print h   // rest = remaining slice
+  case [a, _, b]    => print a   // _ discards element at that position
 }
 ```
+
+**Sequence protocol** — a value participates if it satisfies all four operations: `IS_SEQ`
+(List | String), `GET_LEN`, `GET_INDEX`, and `SLICE`. Maps and Enums are excluded.
+
+**Grammar addition:**
+
+```
+armPat : ...
+       | '[' seqArmPat ']'
+
+seqArmPat : ε                                              // empty — len == 0
+          | seqElem (',' seqElem)*                         // fixed-length — len == N
+          | seqElem (',' seqElem)* ',' '...' IDENTIFIER   // rest — len >= N
+          | '...' IDENTIFIER                               // rest-only — len >= 0
+
+seqElem : IDENTIFIER    // binding, or '_' to discard
+```
+
+**Semantics:**
+- Empty `[]`: checks `IS_SEQ` then `len == 0`.
+- Fixed-length `[a, b]`: checks `IS_SEQ` then `len == N`; binds each non-`_` element via `GET_INDEX`.
+- Rest `[h, ...rest]`: checks `IS_SEQ` then `len >= N`; binds prefix elements then binds `rest` as `subject[N:]` via `SLICE`.
+- `_` at any position: emits `GET_INDEX + POP` — element is accessed (for consistency) but not bound.
+- Type or length mismatch → arm miss (falls to next arm or `MATCH_ERROR`).
+
+**Guards work normally:**
+
+```lox
+case [x, y] if x > y => x - y
+```
+
+**No exhaustiveness** — sequence shapes are infinite. A `case _ =>` arm or `MATCH_ERROR` is always the fallback.
+
+**New token:** `ELIPSIS` (`...`) — three consecutive dots.  
+**New opcodes:** `IS_SEQ` — pop value, push bool (true if List or String); `GET_LEN` — pop List|String, push length as Number.  
+**Existing opcodes reused:** `GET_INDEX` (element access), `SLICE` (rest binding).
+
+**Or-patterns with sequence arms** — deferred; requires refactoring the pattern dispatch.  
+**Nested patterns inside elements** (`case [Ok(v)]`) — deferred to a later pass.
+
+---
 
 **`@`-bindings** — bind a whole matched value while also inspecting its structure:
 
@@ -515,7 +561,9 @@ Phase 3.3: var [a, b] sequence destructuring ✅
   ↓
 Phase 3:   or-patterns ✅ PR #70
   ↓
-Phase 4:   list patterns, @-bindings, not-patterns
+Phase 4.1: sequence patterns in match ✅
+  ↓
+Phase 4:   @-bindings, not-patterns
   ↓
 Phase 5:   JUMP_TABLE optimization
 ```

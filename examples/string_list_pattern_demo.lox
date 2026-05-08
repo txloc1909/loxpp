@@ -1,0 +1,178 @@
+// string_list_pattern_demo.lox — list patterns applied to strings.
+//
+// Strings satisfy the sequence protocol (IS_SEQ, len, GET_INDEX, SLICE), so
+// list patterns work on them.  Two important differences from lists:
+//
+//   1. GET_INDEX on a string yields a one-character string, not a code point.
+//      Every element binding `c` holds a single-char string like "h".
+//
+//   2. Pattern elements can only be bindings or wildcards — not literal values.
+//      You cannot write `case ["h", "e", _] =>`.  To match a specific character
+//      use a guard: `case [a, b, _] if a == "h" and b == "e" =>`.
+//
+//   3. A rest binding `...t` yields a substring (string), not a list.
+
+// ---------------------------------------------------------------------------
+// 1.  Empty-string check
+// ---------------------------------------------------------------------------
+
+// `case [] =>` matches the empty string exactly as it matches an empty list.
+fun is_empty(s) {
+    return match s {
+        case []  => true
+        case _   => false
+    };
+}
+
+// CHECK: true
+print str(is_empty(""));
+// CHECK: false
+print str(is_empty("x"));
+
+// ---------------------------------------------------------------------------
+// 2.  Head / rest decomposition
+// ---------------------------------------------------------------------------
+
+// `case [first, ...rest] =>` binds the first character to `first` (a
+// one-char string) and the remaining substring to `rest`.
+fun head(s) {
+    return match s {
+        case [c, ..._] => c
+        case []        => ""
+    };
+}
+
+fun tail(s) {
+    return match s {
+        case [_, ...t] => t
+        case []        => ""
+    };
+}
+
+// CHECK: h
+print head("hello");
+// CHECK: ello
+print tail("hello");
+// CHECK: (empty)
+print "(" + head("") + "empty)";
+
+// ---------------------------------------------------------------------------
+// 3.  Recursive string reversal
+// ---------------------------------------------------------------------------
+
+fun rev(s) {
+    return match s {
+        case []        => ""
+        case [c, ...t] => rev(t) + c
+    };
+}
+
+// CHECK: olleh
+print rev("hello");
+// CHECK: a
+print rev("a");
+// CHECK: (empty)
+print "(" + rev("") + "empty)";
+
+// ---------------------------------------------------------------------------
+// 4.  Matching specific character values — use a guard
+// ---------------------------------------------------------------------------
+
+// You cannot write literal chars in element position:
+//   case ["h", "t", "t", "p", ..._] =>   ← compile error
+//
+// Instead, bind then compare in a guard.  This is more verbose but explicit.
+
+fun starts_with_http(url) {
+    return match url {
+        case [a, b, c, d, ..._] if a == "h" and b == "t" and c == "t" and d == "p" => true
+        case _                                                                        => false
+    };
+}
+
+// CHECK: true
+print str(starts_with_http("http://example.com"));
+// CHECK: false
+print str(starts_with_http("ftp://example.com"));
+// CHECK: false
+print str(starts_with_http("htt"));           // only 3 chars, misses fixed arm
+
+// ---------------------------------------------------------------------------
+// 5.  Length-gated fixed patterns
+// ---------------------------------------------------------------------------
+
+// A fixed pattern `[a, b]` matches only a string of length exactly 2.
+// Longer or shorter strings fall through to the next arm.
+fun describe_len(s) {
+    return match s {
+        case []        => "empty"
+        case [_]       => "one char"
+        case [_, _]    => "two chars"
+        case [_, _, _] => "three chars"
+        case _         => "longer"
+    };
+}
+
+// CHECK: empty
+print describe_len("");
+// CHECK: one char
+print describe_len("x");
+// CHECK: two chars
+print describe_len("ab");
+// CHECK: three chars
+print describe_len("abc");
+// CHECK: longer
+print describe_len("hello");
+
+// ---------------------------------------------------------------------------
+// 6.  Counting a character with recursion
+// ---------------------------------------------------------------------------
+
+fun count_char(s, ch) {
+    return match s {
+        case []                   => 0
+        case [c, ...t] if c == ch => 1 + count_char(t, ch)
+        case [_, ...t]            => count_char(t, ch)
+    };
+}
+
+// CHECK: 3
+print str(count_char("banana", "a"));
+// CHECK: 2
+print str(count_char("hello", "l"));
+// CHECK: 0
+print str(count_char("hello", "z"));
+
+// ---------------------------------------------------------------------------
+// 7.  Rest binding yields a substring, not a list
+// ---------------------------------------------------------------------------
+
+// Unlike list rest (which is always an ObjList), the rest of a string is
+// still a string.  You can concatenate, pass to string functions, etc.
+
+fun drop_first(s) {
+    return match s {
+        case [_, ...rest] => rest
+        case []           => ""
+    };
+}
+
+// CHECK: ello
+print drop_first("hello");
+// CHECK: bc
+print drop_first("abc");
+// CHECK: (empty)
+print "(" + drop_first("") + "empty)";
+
+// Tail is a real substring so len() and further patterns work on it.
+fun second_char(s) {
+    return match s {
+        case [_, c, ..._] => c
+        case _            => ""
+    };
+}
+
+// CHECK: e
+print second_char("hello");
+// CHECK: (empty)
+print "(" + second_char("x") + "empty)";

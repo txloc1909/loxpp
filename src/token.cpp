@@ -19,6 +19,8 @@ std::ostream& operator<<(std::ostream& os, const TokenType& type) {
         return os << "COLON";
     case TokenType::DOT:
         return os << "DOT";
+    case TokenType::ELIPSIS:
+        return os << "ELIPSIS";
     case TokenType::MINUS:
         return os << "MINUS";
     case TokenType::PLUS:

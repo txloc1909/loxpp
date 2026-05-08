@@ -122,6 +122,31 @@ TEST_F(ScannerTest, Keywords) {
     EXPECT_EQ(tokens[17].type, TokenType::EOF_);
 }
 
+TEST_F(ScannerTest, ElipsisToken) {
+    // "..." scans as ELIPSIS; "." alone scans as DOT
+    const char* source = "... .";
+    auto tokens = scanTokens(source);
+    ASSERT_EQ(tokens.size(), 3); // ELIPSIS, DOT, EOF
+    EXPECT_EQ(tokens[0].type, TokenType::ELIPSIS);
+    EXPECT_EQ(tokens[0].lexeme, "...");
+    EXPECT_EQ(tokens[1].type, TokenType::DOT);
+    EXPECT_EQ(tokens[1].lexeme, ".");
+}
+
+TEST_F(ScannerTest, ElipsisInListPattern) {
+    // ...rest inside a match arm bracket
+    const char* source = "[head, ...tail]";
+    auto tokens = scanTokens(source);
+    ASSERT_EQ(tokens.size(), 7); // [ head , ... tail ] EOF
+    EXPECT_EQ(tokens[0].type, TokenType::LEFT_BRACKET);
+    EXPECT_EQ(tokens[1].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[2].type, TokenType::COMMA);
+    EXPECT_EQ(tokens[3].type, TokenType::ELIPSIS);
+    EXPECT_EQ(tokens[4].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[4].lexeme, "tail");
+    EXPECT_EQ(tokens[5].type, TokenType::RIGHT_BRACKET);
+}
+
 TEST_F(ScannerTest, WhitespaceHandling) {
     const char* source = "   \t\r 123   \n  456  ";
     auto tokens = scanTokens(source);
