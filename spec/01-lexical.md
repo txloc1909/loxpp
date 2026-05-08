@@ -142,7 +142,9 @@ Examples: `0`, `42`, `3.14`, `1.0`
 ## String Literals
 
 ```
-STRING ::= '"' CHARACTER* '"' ;
+STRING   ::= '"' STR_CHAR* '"' ;
+STR_CHAR ::= ESCAPE | <any character except '"' and '\'>
+ESCAPE   ::= '\' ( '"' | '\' | 'n' | 't' | 'r' | '0' ) ;
 ```
 
 A string literal is a sequence of characters enclosed in double quotes. The
@@ -155,8 +157,18 @@ the value.
 An unterminated string (reaching end-of-input before the closing `"`) is a
 static error.
 
-There are currently no recognized escape sequences — each character in the
-source appears literally in the string value.
+The following escape sequences are recognised inside string literals:
+
+| Sequence | Value |
+|----------|-------|
+| `\"` | double-quote character (`"`) |
+| `\\` | backslash character (`\`) |
+| `\n` | newline (U+000A) |
+| `\t` | horizontal tab (U+0009) |
+| `\r` | carriage return (U+000D) |
+| `\0` | null byte (U+0000) |
+
+A `\` followed by any character not in the table above is a static error.
 
 ---
 

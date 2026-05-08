@@ -66,6 +66,14 @@ TEST_F(ParserVMTest, StringLiterals) {
     expect_str("\"!@#$%^&*\"", "!@#$%^&*");
 }
 
+TEST_F(ParserVMTest, StringEscapeSequences) {
+    expect_str(R"("say \"hi\"")", "say \"hi\"");
+    expect_str(R"("back\\slash")", "back\\slash");
+    expect_str(R"("a\nb")", "a\nb");
+    expect_str(R"("a\tb")", "a\tb");
+    expect_str(R"("a\rb")", "a\rb");
+}
+
 // ===========================================================================
 // Arithmetic
 // ===========================================================================
