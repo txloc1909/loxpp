@@ -6,25 +6,6 @@
 // The ten test cases mirror test/test_scanner.cpp exactly.
 
 // ---------------------------------------------------------------------------
-// Bootstrap: read the double-quote character and the StringLiteral test
-// source from examples/scanner.input (which contains: "hello world").
-// Lox++ strings have no escape sequences, so DQUOTE cannot appear in a
-// string literal — we obtain it by indexing the first char of the file.
-// ---------------------------------------------------------------------------
-var _f = open("examples/scanner.input", "r");
-var _str_test_src = _f.readline();
-_f.close();
-var DQUOTE = _str_test_src[0];
-
-// ---------------------------------------------------------------------------
-// Newline and tab constants — embedded as literal characters since Lox++
-// has no string escape sequences.
-// ---------------------------------------------------------------------------
-var NL = "
-";
-var TAB = "	";
-
-// ---------------------------------------------------------------------------
 // Keyword map
 // ---------------------------------------------------------------------------
 var keywords = {
@@ -114,13 +95,13 @@ class Scanner {
         var running = true;
         while (running) {
             var c = this.peek();
-            if (c == " " or c == TAB) {
+            if (c == " " or c == "\t") {
                 this.advance();
-            } else if (c == NL) {
+            } else if (c == "\n") {
                 this.line = this.line + 1;
                 this.advance();
             } else if (c == "/" and this.peekNext() == "/") {
-                while (!this.isAtEnd() and this.peek() != NL) {
+                while (!this.isAtEnd() and this.peek() != "\n") {
                     this.advance();
                 }
             } else {
@@ -143,8 +124,8 @@ class Scanner {
     }
 
     consumeString() {
-        while (!this.isAtEnd() and this.peek() != DQUOTE) {
-            if (this.peek() == NL) {
+        while (!this.isAtEnd() and this.peek() != "\"") {
+            if (this.peek() == "\n") {
                 this.line = this.line + 1;
             }
             this.advance();
@@ -213,7 +194,7 @@ class Scanner {
             if (this.matchChar("=")) return this.makeToken("LESS_EQUAL");
             return this.makeToken("LESS");
         }
-        if (c == DQUOTE) return this.consumeString();
+        if (c == "\"") return this.consumeString();
 
         return this.errorToken("Unexpected character.");
     }
@@ -299,10 +280,8 @@ print "token[0].lexeme " + t[0].lexeme;
 // CHECK: token[0].lexeme match
 
 // --- StringLiteral ---
-// Source is read from scanner.input because double-quotes cannot appear in
-// a Lox++ string literal (no escape sequences).
 print "=== StringLiteral ===";
-t = scanTokens(_str_test_src);
+t = scanTokens("\"hello world\"");
 print str(len(t)) + " token(s)";
 print tokenTypes(t);
 print "token[0].lexeme " + t[0].lexeme;
@@ -334,11 +313,8 @@ print tokenTypes(t);
 // CHECK: AND CLASS ELSE FALSE FUN FOR IF MATCH NIL OR PRINT RETURN SUPER THIS TRUE VAR WHILE EOF
 
 // --- WhitespaceHandling ---
-// Source contains an embedded tab and newline (no \r — not embeddable without
-// escape sequences; its absence does not affect token counts or line numbers).
 print "=== WhitespaceHandling ===";
-var wsrc = "   	 123
-  456  ";
+var wsrc = "   \t 123\n  456  ";
 t = scanTokens(wsrc);
 print str(len(t)) + " token(s)";
 print tokenTypes(t);
@@ -352,10 +328,7 @@ print "token[1].lexeme " + t[1].lexeme + " line " + str(t[1].line);
 
 // --- CommentHandling ---
 print "=== CommentHandling ===";
-var csrc = "// this is a comment
-123 // comment after number
-// another comment
-456";
+var csrc = "// this is a comment\n123 // comment after number\n// another comment\n456";
 t = scanTokens(csrc);
 print str(len(t)) + " token(s)";
 print tokenTypes(t);
