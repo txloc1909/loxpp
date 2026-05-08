@@ -3,15 +3,15 @@
 // Mirrors the EBNF grammar in spec/02-syntax.md one production per parser
 // method. Input is a hand-synthesized list of Token values (as if produced
 // by a scanner — see examples/scanner.lox for the lexer side). Output is an
-// AST built from the class hierarchy below.
+// AST modelled as a single tagged enum (one constructor per production).
 //
 // Verification: each test prints the AST in a single-line S-expression form
 // using the recursive `pretty` visitor. The // CHECK: directives are picked
 // up by tools/check_examples.py.
 //
-// Demonstrates: classes, recursion, list operations, higher-order functions,
-// match expressions with class patterns, and a complete recursive descent
-// parser with precedence climbing for assignment.
+// Demonstrates: tagged enums, classes, recursion, higher-order functions,
+// match expressions with constructor patterns (named-field form), and a
+// complete recursive descent parser with precedence climbing for assignment.
 
 // ===========================================================================
 // Token: tag, lexeme, line. Token-type strings match the names in
@@ -33,63 +33,69 @@ fun STR(s)        { return T("STRING", s); }    // STRING lexeme is post-decoded
 fun eof()         { return T("EOF", ""); }
 
 // ===========================================================================
-// AST node classes. One class per grammar production. Truly nullary nodes
-// (This, WildcardPat, BreakStmt, ContinueStmt) take no init args; the
-// `case ClassName` shorthand in match expressions handles them.
+// AST nodes. The grammar is a fixed taxonomy, so a single tagged enum is a
+// better fit than ~35 class declarations: one decl per production, no init
+// boilerplate, and `match` against an enum's known constructor set gives
+// exhaustiveness checking as a bonus. Field names are reused unchanged in
+// the named-field patterns (`case Variable{name}`, `case Binary{op,l,r}`,
+// …) below — enum constructor patterns support both `{…}` and `(…)` forms.
+// Truly nullary nodes (This, WildcardPat, BreakStmt, ContinueStmt) take no
+// fields; the `case Ctor` shorthand handles them in match arms.
 // ===========================================================================
+enum AST {
+    // --- Expressions ---
+    Literal(v)
+    Variable(name)
+    This
+    Super(method)
+    Group(e)
+    ListLit(elements)
+    MapLit(entries)              // entries is a list of [k, v] pairs
+    Unary(op, e)
+    Binary(op, l, r)
+    Logical(op, l, r)
+    Assign(name, value)
+    Get(obj, name)
+    Set(obj, name, v)
+    IndexGet(obj, idx)
+    IndexSet(obj, idx, v)
+    Slice(obj, s, e)
+    Call(callee, args)
+    MatchExpr(scrut, arms)
+    MatchArm(pats, guard, body)
 
-// --- Expressions ---
-class Literal     { init(v)              { this.v = v; } }
-class Variable    { init(name)           { this.name = name; } }
-class This        { init()               { } }
-class Super       { init(method)         { this.method = method; } }
-class Group       { init(e)              { this.e = e; } }
-class ListLit     { init(elements)       { this.elements = elements; } }
-class MapLit      { init(entries)        { this.entries = entries; } } // list of [k,v]
-class Unary       { init(op, e)          { this.op = op; this.e = e; } }
-class Binary      { init(op, l, r)       { this.op = op; this.l = l; this.r = r; } }
-class Logical     { init(op, l, r)       { this.op = op; this.l = l; this.r = r; } }
-class Assign      { init(name, value)    { this.name = name; this.value = value; } }
-class Get         { init(obj, name)      { this.obj = obj; this.name = name; } }
-class Set         { init(obj, name, v)   { this.obj = obj; this.name = name; this.v = v; } }
-class IndexGet    { init(obj, idx)       { this.obj = obj; this.idx = idx; } }
-class IndexSet    { init(obj, idx, v)    { this.obj = obj; this.idx = idx; this.v = v; } }
-class Slice       { init(obj, s, e)      { this.obj = obj; this.s = s; this.e = e; } }
-class Call        { init(callee, args)   { this.callee = callee; this.args = args; } }
-class MatchExpr   { init(scrut, arms)    { this.scrut = scrut; this.arms = arms; } }
-class MatchArm    { init(pats, guard, body) { this.pats = pats; this.guard = guard; this.body = body; } }
+    // --- Patterns ---
+    LiteralPat(v)
+    WildcardPat
+    BindingPat(name)
+    FieldPat(ctor, fields)
+    PositionalPat(ctor, binds)
+    CtorPat(ctor)                // zero-field constructor (carries name as data)
+    OrPat(alts)
 
-// --- Patterns ---
-class LiteralPat    { init(v)               { this.v = v; } }
-class WildcardPat   { init()                { } }
-class BindingPat    { init(name)            { this.name = name; } }
-class FieldPat      { init(ctor, fields)    { this.ctor = ctor; this.fields = fields; } }
-class PositionalPat { init(ctor, binds)     { this.ctor = ctor; this.binds = binds; } }
-class CtorPat       { init(ctor)            { this.ctor = ctor; } }   // zero-field
-class OrPat         { init(alts)            { this.alts = alts; } }
+    // --- Declarations ---
+    VarDecl(name, init_)
+    ListDestructure(names, init_)
+    MapDestructure(names, init_)
+    FunDecl(name, params, body)
+    Method(name, params, body)
+    ClassDecl(name, super_, methods)
 
-// --- Declarations ---
-class VarDecl         { init(name, init_)         { this.name = name; this.init_ = init_; } }
-class ListDestructure { init(names, init_)        { this.names = names; this.init_ = init_; } }
-class MapDestructure  { init(names, init_)        { this.names = names; this.init_ = init_; } }
-class FunDecl         { init(name, params, body)  { this.name = name; this.params = params; this.body = body; } }
-class Method          { init(name, params, body)  { this.name = name; this.params = params; this.body = body; } }
-class ClassDecl       { init(name, super_, methods) { this.name = name; this.super_ = super_; this.methods = methods; } }
+    // --- Statements ---
+    ExprStmt(e)
+    PrintStmt(e)
+    IfStmt(c, t, e)              // e=nil ⇒ no else
+    WhileStmt(c, body)
+    ForStmt(init_, c, inc, body)
+    ForInStmt(name, seq, body)
+    Block(decls)
+    BreakStmt
+    ContinueStmt
+    ReturnStmt(e)                // e=nil ⇒ bare return
 
-// --- Statements ---
-class ExprStmt     { init(e)              { this.e = e; } }
-class PrintStmt    { init(e)              { this.e = e; } }
-class IfStmt       { init(c, t, e)        { this.c = c; this.t = t; this.e = e; } } // e=nil ⇒ no else
-class WhileStmt    { init(c, body)        { this.c = c; this.body = body; } }
-class ForStmt      { init(init_, c, inc, body) { this.init_ = init_; this.c = c; this.inc = inc; this.body = body; } }
-class ForInStmt    { init(name, seq, body) { this.name = name; this.seq = seq; this.body = body; } }
-class Block        { init(decls)          { this.decls = decls; } }
-class BreakStmt    { init()               { } }
-class ContinueStmt { init()               { } }
-class ReturnStmt   { init(e)              { this.e = e; } } // e=nil ⇒ bare return
-
-// --- Top-level ---
-class Program { init(decls) { this.decls = decls; } }
+    // --- Top-level ---
+    Program(decls)
+}
 
 // ===========================================================================
 // Pretty-printer helpers and the recursive S-expression visitor.
@@ -222,12 +228,12 @@ fun prettyMapEntries(entries) {
 // Parser. State is the token list and a cursor; methods correspond to
 // productions in spec/02-syntax.md.
 //
-// Wrapped in `fun main()` so the Parser class (with ~70 methods) and the
-// 13 test functions all live in `main`'s constant pool rather than the
-// top-level pool. Lox++ has a 256-constant-per-chunk limit, and each method
-// definition consumes 2 entries in the enclosing chunk (method name +
-// closure object). The AST classes above stay at top level because match
-// expressions only resolve class patterns against top-level classes.
+// Wrapped in `fun main()` so the Parser class (~70 methods) and the 13
+// test functions live in `main`'s constant pool rather than the top-level
+// pool. Lox++'s 256-constant-per-chunk limit is otherwise exceeded: each
+// method definition consumes 2 entries in the enclosing chunk (method name
+// + closure object). The AST enum stays at top level because that is where
+// `enum` declarations are permitted (see spec/02-syntax.md).
 // ===========================================================================
 fun main() {
 class Parser {
