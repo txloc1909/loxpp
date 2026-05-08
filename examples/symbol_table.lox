@@ -43,8 +43,8 @@ class Env {
         var entries = this.bindings.entries();
         var i = 0;
         while (i < len(entries)) {
-            var pair = entries[i];
-            print "  " + str(pair[0]) + " = " + str(pair[1]);
+            var [key, val] = entries[i];
+            print "  " + str(key) + " = " + str(val);
             i = i + 1;
         }
         print "}";

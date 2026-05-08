@@ -81,6 +81,26 @@ in the pattern, reads that named property from the source object (equivalent to
 - If a named property is absent from the source object, this is a **runtime
   error** (same as `obj.missingField`).
 
+### Sequence Destructuring Declaration
+
+```
+var [a, b] = expr
+```
+
+Evaluates `expr` exactly once to produce a source sequence (List or String).
+For each name at position `i` in the pattern, reads `source[i]` and binds it
+to a new variable in the current scope.
+
+- The initializer is **required**; `var [a, b];` is a **static error**.
+- Each name must be a distinct identifier. Duplicate names are a **static error**.
+- `_` is a positional wildcard: `source[i]` is accessed and discarded; no
+  variable is created. The duplicate-name restriction does not apply to `_`.
+- Elements beyond the last pattern position are never accessed.
+- Out-of-bounds access raises a **runtime error** ("List index out of bounds.").
+- The source sequence is not exposed as a user-accessible variable.
+- Pattern-bound variables are mutable (same default as `var`).
+- Trailing comma in the pattern is allowed.
+
 ---
 
 ## Expressions
