@@ -14,6 +14,7 @@ enum class TokenType : int {
     COMMA,
     COLON,
     DOT,
+    ELIPSIS,
     MINUS,
     PLUS,
     SEMICOLON,

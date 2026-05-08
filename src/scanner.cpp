@@ -57,6 +57,8 @@ Token Scanner::scanOneToken() {
     case ':':
         return makeToken(TokenType::COLON);
     case '.':
+        if (match('.') && match('.'))
+            return makeToken(TokenType::ELIPSIS);
         return makeToken(TokenType::DOT);
     case '-':
         return makeToken(TokenType::MINUS);

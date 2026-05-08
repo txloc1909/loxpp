@@ -202,6 +202,8 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return simpleInstruction("GET_TAG", offset, out, color);
     case Op::INSTANCEOF:
         return constantInstruction("INSTANCEOF", chunk, mm, offset, out, color);
+    case Op::IS_SEQ:
+        return simpleInstruction("IS_SEQ", offset, out, color);
     default:
         out << cc(color, kRed) << cc(color, kBold) << "UNKNOWN("
             << static_cast<unsigned>(chunk.at(offset)) << ")"

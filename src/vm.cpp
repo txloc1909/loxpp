@@ -626,6 +626,11 @@ InterpretResult VM::run() {
             push(Value{tag});
             break;
         }
+        case Op::IS_SEQ: {
+            Value val = pop();
+            push(Value{isList(val) || isString(val)});
+            break;
+        }
         case Op::INSTANCEOF: {
             ObjString* className = asObjString(readConstant());
             Value val = pop();

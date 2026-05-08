@@ -917,12 +917,21 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
     };
 
     bool isIdentPat = m_parser->check(TokenType::IDENTIFIER);
+    bool isListPat = m_parser->check(TokenType::LEFT_BRACKET);
     int lastMiss = -1;
     int bindingCount = 0;
     bool hasGuard = false;
     std::vector<std::string> allCtorNames;
 
-    if (isIdentPat) {
+    if (isListPat) {
+        auto res = compileListPattern(subjectSlot, armLocalBase);
+        lastMiss = res.missJump;
+        bindingCount = res.bindingCount;
+        if (m_parser->check(TokenType::OR)) {
+            m_parser->error(
+                "Or-patterns are not supported for sequence patterns.");
+        }
+    } else if (isIdentPat) {
         auto first = compileOneIdentPat();
         lastMiss = first.missJump;
         bindingCount = first.bindingCount;
@@ -1690,4 +1699,124 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
     } else {
         emitBytes(getOp, operand);
     }
+}
+
+Compiler::ListPatResult Compiler::compileListPattern(int subjectSlot,
+                                                     int armLocalBase) {
+    (void)armLocalBase;
+
+    m_parser->consume(TokenType::LEFT_BRACKET,
+                      "Expect '[' in sequence pattern.");
+
+    struct Elem {
+        Token name;
+        bool isRest;
+    };
+    std::vector<Elem> elems;
+    bool hasRest = false;
+
+    if (!m_parser->check(TokenType::RIGHT_BRACKET)) {
+        do {
+            if (elems.size() >= UINT8_COUNT) {
+                m_parser->error("Too many elements in sequence pattern.");
+                break;
+            }
+            if (m_parser->match(TokenType::ELIPSIS)) {
+                m_parser->consume(
+                    TokenType::IDENTIFIER,
+                    "Expect name after '...' in sequence pattern.");
+                elems.push_back({m_parser->m_previous, true});
+                hasRest = true;
+                break;
+            }
+            m_parser->consume(TokenType::IDENTIFIER,
+                              "Expect element name in sequence pattern.");
+            elems.push_back({m_parser->m_previous, false});
+        } while (m_parser->match(TokenType::COMMA) &&
+                 !m_parser->check(TokenType::RIGHT_BRACKET));
+    }
+
+    m_parser->consume(TokenType::RIGHT_BRACKET,
+                      "Expect ']' after sequence pattern.");
+
+    int fixedCount = static_cast<int>(elems.size());
+    if (hasRest)
+        fixedCount--;
+
+    // ---- Type check: IS_SEQ -----------------------------------------------
+    // On miss, the IS_SEQ false stays on stack (JUMP_IF_FALSE peeks).
+    // We patch typeMiss to land on the length-check JUMP_IF_FALSE below, so
+    // both type-miss and length-miss share one caller-visible miss target.
+    emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+    emitByte(Op::IS_SEQ);
+    int typeMiss = emitJump(Op::JUMP_IF_FALSE);
+    emitByte(Op::POP); // pop IS_SEQ true on hit path
+
+    // ---- Length check: len(subject) vs fixedCount -------------------------
+    // Inline call: GET_GLOBAL "len"; GET_LOCAL subject; CALL 1
+    Token lenTok{TokenType::IDENTIFIER, "len", m_parser->m_previous.line};
+    emitBytes(Op::GET_GLOBAL, identifierConstant(lenTok));
+    emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+    emitBytes(Op::CALL, 1);
+    emitBytes(Op::CONSTANT,
+              makeConstant(Value{static_cast<double>(fixedCount)}));
+    if (hasRest) {
+        // rest pattern: miss when len < fixedCount.
+        // LESS pushes (len < fixedCount): true=miss. NOT inverts: false=miss.
+        // JUMP_IF_FALSE fires on false → correct.
+        emitByte(Op::LESS);
+        emitByte(Op::NOT);
+    } else {
+        // fixed pattern: miss when len != fixedCount.
+        // EQUAL pushes (len == fixedCount): false=miss.
+        emitByte(Op::EQUAL);
+    }
+
+    // Patch typeMiss to land HERE (the length JUMP_IF_FALSE).
+    // - type miss path:  IS_SEQ false is on peek(0) → JUMP_IF_FALSE fires.
+    // - length miss path: EQUAL/NOT false is on peek(0) → JUMP_IF_FALSE fires.
+    // Both paths leave one false at lenMiss's target for the caller to POP.
+    patchJump(typeMiss);
+
+    int lenMiss = emitJump(Op::JUMP_IF_FALSE);
+    emitByte(Op::POP); // pop comparison true on hit path
+
+    // ---- Bind elements ----------------------------------------------------
+    int bindingCount = 0;
+    std::vector<std::string> bindNames;
+
+    for (int i = 0; i < static_cast<int>(elems.size()); i++) {
+        const auto& elem = elems[i];
+        if (elem.isRest) {
+            if (std::string(elem.name.lexeme) != "_") {
+                // subject[fixedCount : len(subject)]
+                emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+                emitBytes(Op::CONSTANT,
+                          makeConstant(Value{static_cast<double>(fixedCount)}));
+                emitBytes(Op::GET_GLOBAL, identifierConstant(lenTok));
+                emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+                emitBytes(Op::CALL, 1);
+                emitByte(Op::SLICE);
+                addLocal(elem.name);
+                markInitialized();
+                bindingCount++;
+                bindNames.emplace_back(elem.name.lexeme);
+            }
+        } else {
+            emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+            emitBytes(Op::CONSTANT,
+                      makeConstant(Value{static_cast<double>(i)}));
+            emitByte(Op::GET_INDEX);
+            if (std::string(elem.name.lexeme) == "_") {
+                emitByte(Op::POP);
+            } else {
+                addLocal(elem.name);
+                markInitialized();
+                bindingCount++;
+                bindNames.emplace_back(elem.name.lexeme);
+            }
+        }
+    }
+
+    return {lenMiss, bindingCount, std::move(bindNames)};
 }

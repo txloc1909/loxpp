@@ -62,6 +62,7 @@ enum class Op : Byte {
     GET_TAG,     // no operands — pop ObjEnum, push ctor->tag as Number
     INSTANCEOF,  // 1-byte constant (class name ObjString*); pop value, push
                  // bool
+    IS_SEQ,      // no operands — pop value, push true if List or String
 };
 
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }
