@@ -1,0 +1,357 @@
+// scanner.lox — A Lox++ scanner (lexer) written in Lox++.
+//
+// Demonstrates: classes, maps, string indexing, slices, the `in`
+// substring operator for character classification, and map .has().
+//
+// The ten test cases mirror test/test_scanner.cpp exactly.
+
+// ---------------------------------------------------------------------------
+// Bootstrap: read the double-quote character and the StringLiteral test
+// source from examples/scanner.input (which contains: "hello world").
+// Lox++ strings have no escape sequences, so DQUOTE cannot appear in a
+// string literal — we obtain it by indexing the first char of the file.
+// ---------------------------------------------------------------------------
+var _f = open("examples/scanner.input", "r");
+var _str_test_src = _f.readline();
+_f.close();
+var DQUOTE = _str_test_src[0];
+
+// ---------------------------------------------------------------------------
+// Newline and tab constants — embedded as literal characters since Lox++
+// has no string escape sequences.
+// ---------------------------------------------------------------------------
+var NL = "
+";
+var TAB = "	";
+
+// ---------------------------------------------------------------------------
+// Keyword map
+// ---------------------------------------------------------------------------
+var keywords = {
+    "and": "AND",      "break": "BREAK",       "case": "CASE",
+    "class": "CLASS",  "continue": "CONTINUE", "default": "DEFAULT",
+    "else": "ELSE",    "enum": "ENUM",          "false": "FALSE",
+    "for": "FOR",      "fun": "FUN",            "if": "IF",
+    "in": "IN",        "match": "MATCH",        "nil": "NIL",
+    "or": "OR",        "print": "PRINT",        "return": "RETURN",
+    "super": "SUPER",  "this": "THIS",          "true": "TRUE",
+    "var": "VAR",      "while": "WHILE"
+};
+
+// ---------------------------------------------------------------------------
+// Character helpers — `in` checks substring; safe because c is always a
+// single-character string from source[i].
+// ---------------------------------------------------------------------------
+fun isDigit(c) { return c in "0123456789"; }
+fun isAlpha(c) {
+    return c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+}
+fun isAlphaNumeric(c) { return isDigit(c) or isAlpha(c); }
+
+// ---------------------------------------------------------------------------
+// Scanner class
+// ---------------------------------------------------------------------------
+class Scanner {
+    init(source) {
+        this.source = source;
+        this.start = 0;
+        this.current = 0;
+        this.line = 1;
+    }
+
+    isAtEnd() {
+        return this.current >= len(this.source);
+    }
+
+    peek() {
+        if (this.isAtEnd()) return "";
+        return this.source[this.current];
+    }
+
+    peekNext() {
+        if (this.current + 1 >= len(this.source)) return "";
+        return this.source[this.current + 1];
+    }
+
+    advance() {
+        var c = this.source[this.current];
+        this.current = this.current + 1;
+        return c;
+    }
+
+    matchChar(expected) {
+        if (this.isAtEnd()) return false;
+        if (this.peek() != expected) return false;
+        this.current = this.current + 1;
+        return true;
+    }
+
+    makeToken(type) {
+        var lexeme = this.source[this.start : this.current];
+        return {"type": type, "lexeme": lexeme, "line": this.line};
+    }
+
+    makeTokenL(type, lexeme) {
+        return {"type": type, "lexeme": lexeme, "line": this.line};
+    }
+
+    errorToken(msg) {
+        return {"type": "ERROR", "lexeme": msg, "line": this.line};
+    }
+
+    skipWS() {
+        var running = true;
+        while (running) {
+            var c = this.peek();
+            if (c == " " or c == TAB) {
+                this.advance();
+            } else if (c == NL) {
+                this.line = this.line + 1;
+                this.advance();
+            } else if (c == "/" and this.peekNext() == "/") {
+                while (!this.isAtEnd() and this.peek() != NL) {
+                    this.advance();
+                }
+            } else {
+                running = false;
+            }
+        }
+    }
+
+    consumeNumber() {
+        while (!this.isAtEnd() and isDigit(this.peek())) {
+            this.advance();
+        }
+        if (this.peek() == "." and isDigit(this.peekNext())) {
+            this.advance();
+            while (!this.isAtEnd() and isDigit(this.peek())) {
+                this.advance();
+            }
+        }
+        return this.makeToken("NUMBER");
+    }
+
+    consumeString() {
+        while (!this.isAtEnd() and this.peek() != DQUOTE) {
+            if (this.peek() == NL) {
+                this.line = this.line + 1;
+            }
+            this.advance();
+        }
+        if (this.isAtEnd()) {
+            return this.errorToken("Unterminated string.");
+        }
+        this.advance();
+        var lexeme = this.source[this.start + 1 : this.current - 1];
+        return this.makeTokenL("STRING", lexeme);
+    }
+
+    identifierType() {
+        var word = this.source[this.start : this.current];
+        if (keywords.has(word)) return keywords[word];
+        return "IDENTIFIER";
+    }
+
+    consumeIdentifier() {
+        while (!this.isAtEnd() and isAlphaNumeric(this.peek())) {
+            this.advance();
+        }
+        return this.makeToken(this.identifierType());
+    }
+
+    scanOneToken() {
+        this.skipWS();
+        this.start = this.current;
+
+        if (this.isAtEnd()) return this.makeToken("EOF");
+
+        var c = this.advance();
+
+        if (isAlpha(c)) return this.consumeIdentifier();
+        if (isDigit(c)) return this.consumeNumber();
+
+        if (c == "(") return this.makeToken("LEFT_PAREN");
+        if (c == ")") return this.makeToken("RIGHT_PAREN");
+        if (c == "{") return this.makeToken("LEFT_BRACE");
+        if (c == "}") return this.makeToken("RIGHT_BRACE");
+        if (c == "[") return this.makeToken("LEFT_BRACKET");
+        if (c == "]") return this.makeToken("RIGHT_BRACKET");
+        if (c == ",") return this.makeToken("COMMA");
+        if (c == ":") return this.makeToken("COLON");
+        if (c == ".") return this.makeToken("DOT");
+        if (c == "-") return this.makeToken("MINUS");
+        if (c == "+") return this.makeToken("PLUS");
+        if (c == ";") return this.makeToken("SEMICOLON");
+        if (c == "*") return this.makeToken("STAR");
+        if (c == "/") return this.makeToken("SLASH");
+        if (c == "%") return this.makeToken("PERCENT");
+        if (c == "!") {
+            if (this.matchChar("=")) return this.makeToken("BANG_EQUAL");
+            return this.makeToken("BANG");
+        }
+        if (c == "=") {
+            if (this.matchChar(">")) return this.makeToken("FAT_ARROW");
+            if (this.matchChar("=")) return this.makeToken("EQUAL_EQUAL");
+            return this.makeToken("EQUAL");
+        }
+        if (c == ">") {
+            if (this.matchChar("=")) return this.makeToken("GREATER_EQUAL");
+            return this.makeToken("GREATER");
+        }
+        if (c == "<") {
+            if (this.matchChar("=")) return this.makeToken("LESS_EQUAL");
+            return this.makeToken("LESS");
+        }
+        if (c == DQUOTE) return this.consumeString();
+
+        return this.errorToken("Unexpected character.");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Driver helpers
+// ---------------------------------------------------------------------------
+fun scanTokens(source) {
+    var scanner = Scanner(source);
+    var tokens = [];
+    var done = false;
+    while (!done) {
+        var t = scanner.scanOneToken();
+        tokens.append(t);
+        if (t["type"] == "EOF") { done = true; }
+    }
+    return tokens;
+}
+
+fun tokenTypes(tokens) {
+    var out = "";
+    var i = 0;
+    while (i < len(tokens)) {
+        if (i > 0) out = out + " ";
+        out = out + tokens[i]["type"];
+        i = i + 1;
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// Tests  (mirror test/test_scanner.cpp one-to-one)
+// ---------------------------------------------------------------------------
+
+// --- EmptySource ---
+print "=== EmptySource ===";
+var t = scanTokens("");
+print str(len(t)) + " token(s)";
+print tokenTypes(t);
+// CHECK: === EmptySource ===
+// CHECK: 1 token(s)
+// CHECK: EOF
+
+// --- SingleCharacterTokens ---
+print "=== SingleCharacterTokens ===";
+t = scanTokens("(){},.-+;*%");
+print str(len(t)) + " token(s)";
+print tokenTypes(t);
+// CHECK: === SingleCharacterTokens ===
+// CHECK: 12 token(s)
+// CHECK: LEFT_PAREN RIGHT_PAREN LEFT_BRACE RIGHT_BRACE COMMA DOT MINUS PLUS SEMICOLON STAR PERCENT EOF
+
+// --- OneOrTwoCharacterTokens ---
+print "=== OneOrTwoCharacterTokens ===";
+t = scanTokens("! != = == > >= < <=");
+print str(len(t)) + " token(s)";
+print tokenTypes(t);
+// CHECK: === OneOrTwoCharacterTokens ===
+// CHECK: 9 token(s)
+// CHECK: BANG BANG_EQUAL EQUAL EQUAL_EQUAL GREATER GREATER_EQUAL LESS LESS_EQUAL EOF
+
+// --- FatArrow ---
+print "=== FatArrow ===";
+t = scanTokens("=> = ==");
+print str(len(t)) + " token(s)";
+print tokenTypes(t);
+print "token[0].lexeme " + t[0]["lexeme"];
+// CHECK: === FatArrow ===
+// CHECK: 4 token(s)
+// CHECK: FAT_ARROW EQUAL EQUAL_EQUAL EOF
+// CHECK: token[0].lexeme =>
+
+// --- MatchKeyword ---
+print "=== MatchKeyword ===";
+t = scanTokens("match");
+print str(len(t)) + " token(s)";
+print tokenTypes(t);
+print "token[0].lexeme " + t[0]["lexeme"];
+// CHECK: === MatchKeyword ===
+// CHECK: 2 token(s)
+// CHECK: MATCH EOF
+// CHECK: token[0].lexeme match
+
+// --- StringLiteral ---
+// Source is read from scanner.input because double-quotes cannot appear in
+// a Lox++ string literal (no escape sequences).
+print "=== StringLiteral ===";
+t = scanTokens(_str_test_src);
+print str(len(t)) + " token(s)";
+print tokenTypes(t);
+print "token[0].lexeme " + t[0]["lexeme"];
+// CHECK: === StringLiteral ===
+// CHECK: 2 token(s)
+// CHECK: STRING EOF
+// CHECK: token[0].lexeme hello world
+
+// --- NumberLiteral ---
+print "=== NumberLiteral ===";
+t = scanTokens("123 123.456");
+print str(len(t)) + " token(s)";
+print tokenTypes(t);
+print "token[0].lexeme " + t[0]["lexeme"];
+print "token[1].lexeme " + t[1]["lexeme"];
+// CHECK: === NumberLiteral ===
+// CHECK: 3 token(s)
+// CHECK: NUMBER NUMBER EOF
+// CHECK: token[0].lexeme 123
+// CHECK: token[1].lexeme 123.456
+
+// --- Keywords ---
+print "=== Keywords ===";
+t = scanTokens("and class else false fun for if match nil or print return super this true var while");
+print str(len(t)) + " token(s)";
+print tokenTypes(t);
+// CHECK: === Keywords ===
+// CHECK: 18 token(s)
+// CHECK: AND CLASS ELSE FALSE FUN FOR IF MATCH NIL OR PRINT RETURN SUPER THIS TRUE VAR WHILE EOF
+
+// --- WhitespaceHandling ---
+// Source contains an embedded tab and newline (no \r — not embeddable without
+// escape sequences; its absence does not affect token counts or line numbers).
+print "=== WhitespaceHandling ===";
+var wsrc = "   	 123
+  456  ";
+t = scanTokens(wsrc);
+print str(len(t)) + " token(s)";
+print tokenTypes(t);
+print "token[0].lexeme " + t[0]["lexeme"] + " line " + str(t[0]["line"]);
+print "token[1].lexeme " + t[1]["lexeme"] + " line " + str(t[1]["line"]);
+// CHECK: === WhitespaceHandling ===
+// CHECK: 3 token(s)
+// CHECK: NUMBER NUMBER EOF
+// CHECK: token[0].lexeme 123 line 1
+// CHECK: token[1].lexeme 456 line 2
+
+// --- CommentHandling ---
+print "=== CommentHandling ===";
+var csrc = "// this is a comment
+123 // comment after number
+// another comment
+456";
+t = scanTokens(csrc);
+print str(len(t)) + " token(s)";
+print tokenTypes(t);
+print "token[0].lexeme " + t[0]["lexeme"];
+print "token[1].lexeme " + t[1]["lexeme"];
+// CHECK: === CommentHandling ===
+// CHECK: 3 token(s)
+// CHECK: NUMBER NUMBER EOF
+// CHECK: token[0].lexeme 123
+// CHECK: token[1].lexeme 456
