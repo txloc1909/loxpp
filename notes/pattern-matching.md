@@ -61,20 +61,20 @@ enum Result { Ok(value) Err(code) }
 class Point { init(x, y) { this.x = x; this.y = y; } }
 
 match r {
-  case Ok{v}      => print v     // known constructor → enum pattern
-  case Err{c}     => print c     // known constructor → enum pattern
+  case Ok{v}      => v    // known constructor → enum pattern
+  case Err{c}     => c    // known constructor → enum pattern
 }
 
 match p {
-  case Point{x, y} => print x   // known class → class pattern
-  case other       => print "?" // unknown name → binding
+  case Point{x, y} => x         // known class → class pattern
+  case other       => "unknown" // unknown name → binding
 }
 ```
 
 ### `=>` separator resolves `{` ambiguity
 
 Everything before `=>` is pattern context; `{` there means field destructuring. Everything after
-`=>` is expression/statement context; `{` there starts a block. No grammar ambiguity exists.
+`=>` is expression context; `{` there starts a block. No grammar ambiguity exists.
 
 ```lox
 match shape {
@@ -117,6 +117,33 @@ case A(y) | B(y) => use(y)    // ok — both bind y
 case A(y) | B(z) => ...       // compile error: A binds y, B binds z
 ```
 
+### `not`-patterns — restricted to non-exhaustive matching
+
+`not`-patterns provide value only in open-type matching (classes) where negation expresses a meaningful constraint. In closed enum matching, exhaustiveness checking makes `not` redundant — enumerate constructors explicitly instead.
+
+**Validation rule:** A `not`-pattern in an arm that triggers exhaustiveness checking (i.e., when the match contains at least one constructor arm from enum `E`) is a compile error.
+
+```lox
+enum Option { Some(v), None }
+match opt {
+  case not None => ...  // ❌ compile error: not-patterns forbidden in exhaustive enum match
+}
+
+// Correct approach for enums: enumerate constructors
+match opt {
+  case Some(v) => ...
+  case None => ...
+}
+
+// not-patterns are allowed in open type matching:
+match shape {
+  case not Circle{r} => ...  // ✓ OK: class matching has no exhaustiveness requirement
+  case _ => ...
+}
+```
+
+**Rationale:** This avoids the complexity of SAT-based exhaustiveness checking while preserving the feature's utility in class matching.
+
 ### Match-bound variables are mutable
 
 Pattern bindings create implicit `var`s and follow the language default (mutable). No new rules.
@@ -145,6 +172,10 @@ armPat     : NUMBER | STRING | 'true' | 'false' | 'nil'
            | IDENTIFIER      // _ → wildcard (no binding); other → binding (always matches)
 armBody    : statement | '{' statement* '}'
 ```
+
+> **Note:** Phase 3.2 superseded `armBody` — arm bodies are now always
+> expressions. The statement form above reflects the original Phase 1
+> implementation only.
 
 Binding in multi-pattern arms: if any `armPat` is an `IDENTIFIER` it must be the only pattern;
 mixing a binding with literal alternatives is a compile error.
@@ -226,19 +257,19 @@ enum Tree   { Leaf(val) Node(left, right) }
 
 ```lox
 match r {
-  case Ok(v)       => print v            // positional binding
-  case Err{code}   => print code         // named field binding
+  case Ok(v)     => v     // positional binding
+  case Err{code} => code  // named field binding
 }
 
 match opt {
-  case Some(v) => print v
-  case None    => print "nothing"        // zero-field constructor
+  case Some(v) => v
+  case None    => nil   // zero-field constructor
 }
 
 match r {
-  case Ok(v) if v > 0 => print "positive"  // guard on constructor arm
-  case Ok(v)          => print "non-positive"
-  case Err(m)         => print m
+  case Ok(v) if v > 0 => "positive"     // guard on constructor arm
+  case Ok(v)          => "non-positive"
+  case Err(m)         => m
 }
 ```
 
@@ -275,7 +306,7 @@ var result = match value {
 };
 ```
 
-**Grammar:** `match` joins `primary` as a `matchExpr` alternative. Each `armBody` can be a bare expression or `{ decl* expression }` (last item without `;` is the value). In statement position, the form is identical to Phase 1 (single statement or braced block); in expression position, only expression-producing forms are valid.
+**Grammar:** `match` joins `primary` as a `matchExpr` alternative. Each `armBody` must be an expression: a bare expression, or `{ decl* expression }` where the last item (without `;`) is the yielded value. For arms with side effects, use the block form: `case Foo{x} => { sideEffect(x); x }`.
 
 **Semantics:** Evaluate subject once. For each arm, check pattern (tag check, equality, wildcard). On match, evaluate the arm's body expression and return its value. If no arm matches and no catch-all, raise `MatchError`.
 
@@ -297,9 +328,9 @@ class Circle { init(center, radius) { this.center = center; this.radius = radius
 class Rect   { init(tl, br)  { this.tl = tl; this.br = br; } }
 
 match shape {
-  case Circle{center, radius} => print radius;
-  case Rect{tl, br}           => print tl.x;
-  case _                      => print "unknown";
+  case Circle{center, radius} => radius
+  case Rect{tl, br}           => tl.x
+  case _                      => nil
 }
 ```
 
@@ -321,12 +352,12 @@ class NetworkError { init(code, msg) { this.code = code; this.msg = msg; } }
 class ParseError   { init(line, msg) { this.line = line; this.msg = msg; } }
 
 match r {
-  case Ok(v) => match v {                       // outer: enum (exhaustive)
-    case NetworkError{code, msg} => print code; // inner: class (open)
-    case ParseError{line, msg}   => print line;
-    case _                       => print "?";
+  case Ok(v)  => match v {                     // outer: enum (exhaustive)
+    case NetworkError{code, msg} => code        // inner: class (open)
+    case ParseError{line, msg}   => line
+    case _                       => nil
   }
-  case Err(m) => print m;
+  case Err(m) => m
 }
 ```
 
@@ -369,7 +400,7 @@ of nesting depth. `findRootCompiler()` is eliminated entirely.
 
 ---
 
-### Phase 3 — Or-patterns + match as expression (planned)
+### Phase 3 — Or-patterns + match as expression only ✅ (PR #70)
 
 **Or-patterns** allow a single arm to match multiple constructors that bind the same names:
 
@@ -436,11 +467,22 @@ match lst {
 case node @ Node(l, r) => process(node, l, r)
 ```
 
-**`not`-patterns** — match anything that does not match a sub-pattern (non-binding only):
+**`not`-patterns** — match anything that does not match a sub-pattern
+(non-binding only), restricted to non-exhaustive matching:
 
 ```lox
-case not None => ...
+match shape {
+  case not Circle{r} => ...  // ✓ allowed in class matching (non-exhaustive)
+  case _ => ...
+}
+
+enum Option { Some(v), None }
+match opt {
+  case not None => ...  // ❌ compile error: not allowed in exhaustive enum matching
+}
 ```
+
+See design decision "not-patterns — restricted to non-exhaustive matching" for rationale.
 
 ---
 
@@ -471,7 +513,7 @@ Phase 3.2: match-as-expression ✅
   ↓
 Phase 3.3: var [a, b] sequence destructuring ✅
   ↓
-Phase 3:   or-patterns
+Phase 3:   or-patterns ✅ PR #70
   ↓
 Phase 4:   list patterns, @-bindings, not-patterns
   ↓
