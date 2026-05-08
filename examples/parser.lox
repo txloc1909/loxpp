@@ -1,0 +1,1132 @@
+// parser.lox — A recursive descent parser for Lox++, written in Lox++.
+//
+// Mirrors the EBNF grammar in spec/02-syntax.md one production per parser
+// method. Input is a hand-synthesized list of Token values (as if produced
+// by a scanner — see examples/scanner.lox for the lexer side). Output is an
+// AST built from the class hierarchy below.
+//
+// Verification: each test prints the AST in a single-line S-expression form
+// using the recursive `pretty` visitor. The // CHECK: directives are picked
+// up by tools/check_examples.py.
+//
+// Demonstrates: classes, recursion, list operations, higher-order functions,
+// match expressions with class patterns, and a complete recursive descent
+// parser with precedence climbing for assignment.
+
+// ===========================================================================
+// Token: tag, lexeme, line. Token-type strings match the names in
+// spec/01-lexical.md (LEFT_PAREN, IDENTIFIER, NUMBER, …).
+// ===========================================================================
+class Token {
+    init(type, lexeme, line) {
+        this.type = type;
+        this.lexeme = lexeme;
+        this.line = line;
+    }
+}
+
+// Concise token constructors for tests. All hand-built tokens use line=1.
+fun T(type, lex)  { return Token(type, lex, 1); }
+fun ID(name)      { return T("IDENTIFIER", name); }
+fun NUM(s)        { return T("NUMBER", s); }    // pass the lexeme as a string
+fun STR(s)        { return T("STRING", s); }    // STRING lexeme is post-decoded
+fun eof()         { return T("EOF", ""); }
+
+// ===========================================================================
+// AST node classes. One class per grammar production. Truly nullary nodes
+// (This, WildcardPat, BreakStmt, ContinueStmt) take no init args; the
+// `case ClassName` shorthand in match expressions handles them.
+// ===========================================================================
+
+// --- Expressions ---
+class Literal     { init(v)              { this.v = v; } }
+class Variable    { init(name)           { this.name = name; } }
+class This        { init()               { } }
+class Super       { init(method)         { this.method = method; } }
+class Group       { init(e)              { this.e = e; } }
+class ListLit     { init(elements)       { this.elements = elements; } }
+class MapLit      { init(entries)        { this.entries = entries; } } // list of [k,v]
+class Unary       { init(op, e)          { this.op = op; this.e = e; } }
+class Binary      { init(op, l, r)       { this.op = op; this.l = l; this.r = r; } }
+class Logical     { init(op, l, r)       { this.op = op; this.l = l; this.r = r; } }
+class Assign      { init(name, value)    { this.name = name; this.value = value; } }
+class Get         { init(obj, name)      { this.obj = obj; this.name = name; } }
+class Set         { init(obj, name, v)   { this.obj = obj; this.name = name; this.v = v; } }
+class IndexGet    { init(obj, idx)       { this.obj = obj; this.idx = idx; } }
+class IndexSet    { init(obj, idx, v)    { this.obj = obj; this.idx = idx; this.v = v; } }
+class Slice       { init(obj, s, e)      { this.obj = obj; this.s = s; this.e = e; } }
+class Call        { init(callee, args)   { this.callee = callee; this.args = args; } }
+class MatchExpr   { init(scrut, arms)    { this.scrut = scrut; this.arms = arms; } }
+class MatchArm    { init(pats, guard, body) { this.pats = pats; this.guard = guard; this.body = body; } }
+
+// --- Patterns ---
+class LiteralPat    { init(v)               { this.v = v; } }
+class WildcardPat   { init()                { } }
+class BindingPat    { init(name)            { this.name = name; } }
+class FieldPat      { init(ctor, fields)    { this.ctor = ctor; this.fields = fields; } }
+class PositionalPat { init(ctor, binds)     { this.ctor = ctor; this.binds = binds; } }
+class CtorPat       { init(ctor)            { this.ctor = ctor; } }   // zero-field
+class OrPat         { init(alts)            { this.alts = alts; } }
+
+// --- Declarations ---
+class VarDecl         { init(name, init_)         { this.name = name; this.init_ = init_; } }
+class ListDestructure { init(names, init_)        { this.names = names; this.init_ = init_; } }
+class MapDestructure  { init(names, init_)        { this.names = names; this.init_ = init_; } }
+class FunDecl         { init(name, params, body)  { this.name = name; this.params = params; this.body = body; } }
+class Method          { init(name, params, body)  { this.name = name; this.params = params; this.body = body; } }
+class ClassDecl       { init(name, super_, methods) { this.name = name; this.super_ = super_; this.methods = methods; } }
+
+// --- Statements ---
+class ExprStmt     { init(e)              { this.e = e; } }
+class PrintStmt    { init(e)              { this.e = e; } }
+class IfStmt       { init(c, t, e)        { this.c = c; this.t = t; this.e = e; } } // e=nil ⇒ no else
+class WhileStmt    { init(c, body)        { this.c = c; this.body = body; } }
+class ForStmt      { init(init_, c, inc, body) { this.init_ = init_; this.c = c; this.inc = inc; this.body = body; } }
+class ForInStmt    { init(name, seq, body) { this.name = name; this.seq = seq; this.body = body; } }
+class Block        { init(decls)          { this.decls = decls; } }
+class BreakStmt    { init()               { } }
+class ContinueStmt { init()               { } }
+class ReturnStmt   { init(e)              { this.e = e; } } // e=nil ⇒ bare return
+
+// --- Top-level ---
+class Program { init(decls) { this.decls = decls; } }
+
+// ===========================================================================
+// Pretty-printer helpers and the recursive S-expression visitor.
+// ===========================================================================
+fun joinStrs(items, sep) {
+    var out = "";
+    var i = 0;
+    while (i < len(items)) {
+        if (i > 0) out = out + sep;
+        out = out + items[i];
+        i = i + 1;
+    }
+    return out;
+}
+
+fun mapPretty(items) {
+    var out = [];
+    var i = 0;
+    while (i < len(items)) {
+        out.append(pretty(items[i]));
+        i = i + 1;
+    }
+    return out;
+}
+
+fun fmtLiteral(v) {
+    // Lox++'s str(true) == "true", str(nil) == "nil", str(<num>) is the
+    // textual number form. Distinguish strings from numbers so strings can
+    // be quoted in the output: str(v)==v iff v is itself a string (numbers
+    // and booleans don't equal their textual form due to type-strict ==).
+    if (v == nil) return "nil";
+    if (v == true) return "true";
+    if (v == false) return "false";
+    if (str(v) == v) return "\"" + v + "\"";
+    return str(v);
+}
+
+fun fmtMaybe(node) {
+    if (node == nil) return "nil";
+    return pretty(node);
+}
+
+fun fmtMaybeName(name) {
+    if (name == nil) return "nil";
+    return name;
+}
+
+fun joinNodes(nodes) { return joinStrs(mapPretty(nodes), " "); }
+
+fun pretty(node) {
+    return match node {
+        // --- Literals & atoms ---
+        case Literal{v}                  => fmtLiteral(v)
+        case Variable{name}              => name
+        case This                        => "this"
+        case Super{method}               => "(super " + method + ")"
+        case Group{e}                    => "(group " + pretty(e) + ")"
+
+        // --- Operators ---
+        case Unary{op, e}                => "(" + op + " " + pretty(e) + ")"
+        case Binary{op, l, r}            => "(" + op + " " + pretty(l) + " " + pretty(r) + ")"
+        case Logical{op, l, r}           => "(" + op + " " + pretty(l) + " " + pretty(r) + ")"
+
+        // --- L-values ---
+        case Assign{name, value}         => "(= " + name + " " + pretty(value) + ")"
+        case Get{obj, name}              => "(. " + pretty(obj) + " " + name + ")"
+        case Set{obj, name, v}           => "(.set " + pretty(obj) + " " + name + " " + pretty(v) + ")"
+        case IndexGet{obj, idx}          => "([] " + pretty(obj) + " " + pretty(idx) + ")"
+        case IndexSet{obj, idx, v}       => "([]set " + pretty(obj) + " " + pretty(idx) + " " + pretty(v) + ")"
+        case Slice{obj, s, e}            => "(slice " + pretty(obj) + " " + pretty(s) + " " + pretty(e) + ")"
+        case Call{callee, args}          => "(call " + pretty(callee) + " " + joinNodes(args) + ")"
+
+        // --- Aggregates ---
+        case ListLit{elements}           => "(list " + joinNodes(elements) + ")"
+        case MapLit{entries}             => "(map " + joinStrs(prettyMapEntries(entries), " ") + ")"
+
+        // --- Match ---
+        case MatchExpr{scrut, arms}      => "(match " + pretty(scrut) + " " + joinNodes(arms) + ")"
+        case MatchArm{pats, guard, body} => "(arm (" + joinNodes(pats) + ") " + fmtMaybe(guard) + " " + pretty(body) + ")"
+
+        // --- Patterns ---
+        case LiteralPat{v}               => "(plit " + fmtLiteral(v) + ")"
+        case WildcardPat                 => "_"
+        case BindingPat{name}            => "(bind " + name + ")"
+        case CtorPat{ctor}               => "(ctor " + ctor + ")"
+        case FieldPat{ctor, fields}      => "(field " + ctor + " " + joinStrs(fields, " ") + ")"
+        case PositionalPat{ctor, binds}  => "(pos " + ctor + " " + joinStrs(binds, " ") + ")"
+        case OrPat{alts}                 => "(or-pat " + joinNodes(alts) + ")"
+
+        // --- Declarations ---
+        case VarDecl{name, init_}         => "(var " + name + " " + fmtMaybe(init_) + ")"
+        case ListDestructure{names, init_} => "(varlist (" + joinStrs(names, " ") + ") " + pretty(init_) + ")"
+        case MapDestructure{names, init_}  => "(varmap (" + joinStrs(names, " ") + ") " + pretty(init_) + ")"
+        case FunDecl{name, params, body}   => "(fun " + name + " (" + joinStrs(params, " ") + ") " + pretty(body) + ")"
+        case Method{name, params, body}    => "(method " + name + " (" + joinStrs(params, " ") + ") " + pretty(body) + ")"
+        case ClassDecl{name, super_, methods} => "(class " + name + " " + fmtMaybeName(super_) + " " + joinNodes(methods) + ")"
+
+        // --- Statements ---
+        case ExprStmt{e}                  => "(expr " + pretty(e) + ")"
+        case PrintStmt{e}                 => "(print " + pretty(e) + ")"
+        case IfStmt{c, t, e}              => "(if " + pretty(c) + " " + pretty(t) + " " + fmtMaybe(e) + ")"
+        case WhileStmt{c, body}           => "(while " + pretty(c) + " " + pretty(body) + ")"
+        case ForStmt{init_, c, inc, body} => "(for " + fmtMaybe(init_) + " " + fmtMaybe(c) + " " + fmtMaybe(inc) + " " + pretty(body) + ")"
+        case ForInStmt{name, seq, body}   => "(for-in " + name + " " + pretty(seq) + " " + pretty(body) + ")"
+        case Block{decls}                 => "(block " + joinNodes(decls) + ")"
+        case BreakStmt                    => "(break)"
+        case ContinueStmt                 => "(continue)"
+        case ReturnStmt{e}                => "(return " + fmtMaybe(e) + ")"
+
+        // --- Top-level ---
+        case Program{decls}               => "(program " + joinNodes(decls) + ")"
+
+        case _                            => "?"
+    };
+}
+
+// Map entries are stored as 2-element lists [k, v] for printing.
+fun prettyMapEntries(entries) {
+    var out = [];
+    var i = 0;
+    while (i < len(entries)) {
+        var kv = entries[i];
+        out.append("(" + pretty(kv[0]) + " " + pretty(kv[1]) + ")");
+        i = i + 1;
+    }
+    return out;
+}
+
+// ===========================================================================
+// Parser. State is the token list and a cursor; methods correspond to
+// productions in spec/02-syntax.md.
+//
+// Wrapped in `fun main()` so the Parser class (with ~70 methods) and the
+// 13 test functions all live in `main`'s constant pool rather than the
+// top-level pool. Lox++ has a 256-constant-per-chunk limit, and each method
+// definition consumes 2 entries in the enclosing chunk (method name +
+// closure object). The AST classes above stay at top level because match
+// expressions only resolve class patterns against top-level classes.
+// ===========================================================================
+fun main() {
+class Parser {
+    init(tokens) {
+        this.tokens = tokens;
+        this.current = 0;
+        this.hadError = false;
+    }
+
+    // --- Cursor helpers ---
+    isAtEnd()    { return this.peek().type == "EOF"; }
+    peek()       { return this.tokens[this.current]; }
+    peekAt(n) {
+        var i = this.current + n;
+        if (i >= len(this.tokens)) return this.tokens[len(this.tokens) - 1];
+        return this.tokens[i];
+    }
+    previous()   { return this.tokens[this.current - 1]; }
+    advance() {
+        if (!this.isAtEnd()) this.current = this.current + 1;
+        return this.previous();
+    }
+    check(type)  { return this.peek().type == type; }
+    matchT(type) {
+        if (this.check(type)) { this.advance(); return true; }
+        return false;
+    }
+    matchAny(types) {
+        var i = 0;
+        while (i < len(types)) {
+            if (this.check(types[i])) { this.advance(); return true; }
+            i = i + 1;
+        }
+        return false;
+    }
+    expect(type, msg) {
+        if (this.check(type)) { return this.advance(); }
+        this.error(msg);
+        return nil;
+    }
+    error(msg) {
+        this.hadError = true;
+        print "parse error at '" + this.peek().lexeme + "': " + msg;
+    }
+
+    // ---------------------------------------------------------------------
+    // program ::= declaration* EOF
+    // ---------------------------------------------------------------------
+    program() {
+        var decls = [];
+        while (!this.isAtEnd()) {
+            decls.append(this.declaration());
+        }
+        return Program(decls);
+    }
+
+    // ---------------------------------------------------------------------
+    // declaration ::= classDecl | funDecl | varDecl | statement
+    // ---------------------------------------------------------------------
+    declaration() {
+        if (this.matchT("CLASS")) return this.classDecl();
+        if (this.matchT("FUN"))   return this.funDecl();
+        if (this.matchT("VAR"))   return this.varDecl();
+        return this.statement();
+    }
+
+    // ---------------------------------------------------------------------
+    // classDecl ::= IDENT ( "<" IDENT )? "{" method* "}"
+    // (the `class` keyword is already consumed)
+    // ---------------------------------------------------------------------
+    classDecl() {
+        var name = this.expect("IDENTIFIER", "class name").lexeme;
+        var super_ = nil;
+        if (this.matchT("LESS")) {
+            super_ = this.expect("IDENTIFIER", "superclass name").lexeme;
+        }
+        this.expect("LEFT_BRACE", "'{' before class body");
+        var methods = [];
+        while (!this.check("RIGHT_BRACE") and !this.isAtEnd()) {
+            methods.append(this.method());
+        }
+        this.expect("RIGHT_BRACE", "'}' after class body");
+        return ClassDecl(name, super_, methods);
+    }
+
+    method() {
+        var name = this.expect("IDENTIFIER", "method name").lexeme;
+        var params = this.parameters();
+        var body = this.blockBody();
+        return Method(name, params, body);
+    }
+
+    // funDecl ::= "fun" IDENT "(" parameters? ")" block
+    funDecl() {
+        var name = this.expect("IDENTIFIER", "function name").lexeme;
+        var params = this.parameters();
+        var body = this.blockBody();
+        return FunDecl(name, params, body);
+    }
+
+    // parameters ::= "(" ( IDENT ( "," IDENT )* )? ")"
+    parameters() {
+        this.expect("LEFT_PAREN", "'(' before parameters");
+        var params = [];
+        if (!this.check("RIGHT_PAREN")) {
+            params.append(this.expect("IDENTIFIER", "parameter name").lexeme);
+            while (this.matchT("COMMA")) {
+                params.append(this.expect("IDENTIFIER", "parameter name").lexeme);
+            }
+        }
+        this.expect("RIGHT_PAREN", "')' after parameters");
+        return params;
+    }
+
+    // Expects a "{" already, parses declarations until "}", returns Block.
+    blockBody() {
+        this.expect("LEFT_BRACE", "'{' before block");
+        return this.blockAfterBrace();
+    }
+    // Block after the "{" has already been consumed.
+    blockAfterBrace() {
+        var decls = [];
+        while (!this.check("RIGHT_BRACE") and !this.isAtEnd()) {
+            decls.append(this.declaration());
+        }
+        this.expect("RIGHT_BRACE", "'}' after block");
+        return Block(decls);
+    }
+
+    // ---------------------------------------------------------------------
+    // varDecl has three forms (the `var` keyword is already consumed):
+    //   var IDENT ( "=" expression )? ";"
+    //   var "{" IDENT ("," IDENT)* ","? "}" "=" expression ";"
+    //   var "[" IDENT ("," IDENT)* ","? "]" "=" expression ";"
+    // ---------------------------------------------------------------------
+    varDecl() {
+        if (this.matchT("LEFT_BRACE"))   return this.varDestructure(true);
+        if (this.matchT("LEFT_BRACKET")) return this.varDestructure(false);
+        var name = this.expect("IDENTIFIER", "variable name").lexeme;
+        var init_ = nil;
+        if (this.matchT("EQUAL")) {
+            init_ = this.expression();
+        }
+        this.expect("SEMICOLON", "';' after variable declaration");
+        return VarDecl(name, init_);
+    }
+
+    // Shared parser for `var { a, b } = e;` and `var [ a, b ] = e;`.
+    // `isMap` selects the closing token and AST node.
+    varDestructure(isMap) {
+        var closeTok = "RIGHT_BRACKET";
+        if (isMap) closeTok = "RIGHT_BRACE";
+        var names = [];
+        names.append(this.expect("IDENTIFIER", "destructure name").lexeme);
+        while (this.matchT("COMMA")) {
+            // Allow trailing comma: stop if the close token is next.
+            if (this.check(closeTok)) {  } else {
+                names.append(this.expect("IDENTIFIER", "destructure name").lexeme);
+            }
+        }
+        this.expect(closeTok, "closing destructure bracket");
+        this.expect("EQUAL", "'=' in destructure");
+        var init_ = this.expression();
+        this.expect("SEMICOLON", "';' after destructure");
+        if (isMap) return MapDestructure(names, init_);
+        return ListDestructure(names, init_);
+    }
+
+    // ---------------------------------------------------------------------
+    // statement ::= exprStmt | forStmt | ifStmt | printStmt | returnStmt
+    //             | whileStmt | breakStmt | continueStmt | block
+    // ---------------------------------------------------------------------
+    statement() {
+        if (this.matchT("FOR"))        return this.forStmt();
+        if (this.matchT("IF"))         return this.ifStmt();
+        if (this.matchT("PRINT"))      return this.printStmt();
+        if (this.matchT("RETURN"))     return this.returnStmt();
+        if (this.matchT("WHILE"))      return this.whileStmt();
+        if (this.matchT("BREAK"))      return this.breakStmt();
+        if (this.matchT("CONTINUE"))   return this.continueStmt();
+        if (this.matchT("LEFT_BRACE")) return this.blockAfterBrace();
+        return this.exprStmt();
+    }
+
+    exprStmt() {
+        var e = this.expression();
+        this.expect("SEMICOLON", "';' after expression");
+        return ExprStmt(e);
+    }
+
+    printStmt() {
+        var e = this.expression();
+        this.expect("SEMICOLON", "';' after print value");
+        return PrintStmt(e);
+    }
+
+    returnStmt() {
+        var e = nil;
+        if (!this.check("SEMICOLON")) {
+            e = this.expression();
+        }
+        this.expect("SEMICOLON", "';' after return");
+        return ReturnStmt(e);
+    }
+
+    whileStmt() {
+        this.expect("LEFT_PAREN", "'(' after 'while'");
+        var c = this.expression();
+        this.expect("RIGHT_PAREN", "')' after while condition");
+        var body = this.statement();
+        return WhileStmt(c, body);
+    }
+
+    breakStmt()    { this.expect("SEMICOLON", "';' after 'break'");    return BreakStmt(); }
+    continueStmt() { this.expect("SEMICOLON", "';' after 'continue'"); return ContinueStmt(); }
+
+    ifStmt() {
+        this.expect("LEFT_PAREN", "'(' after 'if'");
+        var c = this.expression();
+        this.expect("RIGHT_PAREN", "')' after if condition");
+        var t = this.statement();
+        var e = nil;
+        if (this.matchT("ELSE")) e = this.statement();
+        return IfStmt(c, t, e);
+    }
+
+    // ---------------------------------------------------------------------
+    // forStmt has two forms; disambiguation: peek for `for ( var IDENT in`
+    // versus `for ( var IDENT (=|;|,)`.
+    // ---------------------------------------------------------------------
+    forStmt() {
+        this.expect("LEFT_PAREN", "'(' after 'for'");
+        if (this.check("VAR") and this.peekAt(1).type == "IDENTIFIER"
+                              and this.peekAt(2).type == "IN") {
+            this.advance();  // var
+            var name = this.advance().lexeme;
+            this.advance();  // in
+            var seq = this.expression();
+            this.expect("RIGHT_PAREN", "')' after for-in header");
+            var body = this.statement();
+            return ForInStmt(name, seq, body);
+        }
+        // C-style: initializer
+        var init_ = nil;
+        if (this.matchT("SEMICOLON")) {
+            init_ = nil;
+        } else if (this.matchT("VAR")) {
+            init_ = this.varDecl();   // consumes its own ';'
+        } else {
+            init_ = this.exprStmt();   // consumes its own ';'
+        }
+        // Condition
+        var c = nil;
+        if (!this.check("SEMICOLON")) c = this.expression();
+        this.expect("SEMICOLON", "';' after for condition");
+        // Increment
+        var inc = nil;
+        if (!this.check("RIGHT_PAREN")) inc = this.expression();
+        this.expect("RIGHT_PAREN", "')' after for clauses");
+        var body = this.statement();
+        return ForStmt(init_, c, inc, body);
+    }
+
+    // ---------------------------------------------------------------------
+    // Expressions, in precedence order.
+    // ---------------------------------------------------------------------
+    expression() { return this.assignment(); }
+
+    // assignment ::= ( IDENT | call "." IDENT | call "[" expr "]" ) "=" assignment
+    //              | logicOr
+    //
+    // Strategy: parse logicOr, then check for "=". If present, recurse for
+    // the right-hand side and reshape the LHS into an Assign / Set / IndexSet.
+    assignment() {
+        var lhs = this.logicOr();
+        if (this.matchT("EQUAL")) {
+            var rhs = this.assignment();
+            return match lhs {
+                case Variable{name}     => Assign(name, rhs)
+                case Get{obj, name}     => Set(obj, name, rhs)
+                case IndexGet{obj, idx} => IndexSet(obj, idx, rhs)
+                case _                  => this.invalidAssignTarget()
+            };
+        }
+        return lhs;
+    }
+    invalidAssignTarget() {
+        this.error("invalid assignment target");
+        return Literal(nil);
+    }
+
+    logicOr() {
+        var l = this.logicAnd();
+        while (this.matchT("OR")) {
+            var r = this.logicAnd();
+            l = Logical("or", l, r);
+        }
+        return l;
+    }
+    logicAnd() {
+        var l = this.equality();
+        while (this.matchT("AND")) {
+            var r = this.equality();
+            l = Logical("and", l, r);
+        }
+        return l;
+    }
+    equality() {
+        var l = this.comparison();
+        while (this.matchAny(["BANG_EQUAL", "EQUAL_EQUAL"])) {
+            var op = this.previous().lexeme;
+            var r = this.comparison();
+            l = Binary(op, l, r);
+        }
+        return l;
+    }
+    comparison() {
+        var l = this.term();
+        while (this.matchAny(["GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL", "IN"])) {
+            var op = this.previous().lexeme;
+            var r = this.term();
+            l = Binary(op, l, r);
+        }
+        return l;
+    }
+    term() {
+        var l = this.factor();
+        while (this.matchAny(["MINUS", "PLUS"])) {
+            var op = this.previous().lexeme;
+            var r = this.factor();
+            l = Binary(op, l, r);
+        }
+        return l;
+    }
+    factor() {
+        var l = this.unary();
+        while (this.matchAny(["SLASH", "STAR", "PERCENT"])) {
+            var op = this.previous().lexeme;
+            var r = this.unary();
+            l = Binary(op, l, r);
+        }
+        return l;
+    }
+    unary() {
+        if (this.matchAny(["BANG", "MINUS"])) {
+            var op = this.previous().lexeme;
+            var e = this.unary();
+            return Unary(op, e);
+        }
+        return this.call();
+    }
+
+    // call ::= primary ( "(" args? ")" | "." IDENT | "[" subscriptOrSlice "]" )*
+    call() {
+        var e = this.primary();
+        var running = true;
+        while (running) {
+            if (this.matchT("LEFT_PAREN"))        { e = this.finishCall(e); }
+            else if (this.matchT("DOT"))           {
+                var name = this.expect("IDENTIFIER", "property name").lexeme;
+                e = Get(e, name);
+            }
+            else if (this.matchT("LEFT_BRACKET"))  { e = this.finishSubscript(e); }
+            else                                   { running = false; }
+        }
+        return e;
+    }
+    finishCall(callee) {
+        var args = [];
+        if (!this.check("RIGHT_PAREN")) {
+            args.append(this.expression());
+            while (this.matchT("COMMA")) {
+                args.append(this.expression());
+            }
+        }
+        this.expect("RIGHT_PAREN", "')' after arguments");
+        return Call(callee, args);
+    }
+    finishSubscript(obj) {
+        var first = this.expression();
+        if (this.matchT("COLON")) {
+            var second = this.expression();
+            this.expect("RIGHT_BRACKET", "']' after slice");
+            return Slice(obj, first, second);
+        }
+        this.expect("RIGHT_BRACKET", "']' after index");
+        return IndexGet(obj, first);
+    }
+
+    // ---------------------------------------------------------------------
+    // primary ::= literal | IDENT | "this" | "super" "." IDENT
+    //           | "(" expression ")" | listLit | mapLit | matchExpr
+    // ---------------------------------------------------------------------
+    primary() {
+        if (this.matchT("TRUE"))   return Literal(true);
+        if (this.matchT("FALSE"))  return Literal(false);
+        if (this.matchT("NIL"))    return Literal(nil);
+        if (this.matchT("NUMBER")) return Literal(this.parseNumber(this.previous().lexeme));
+        if (this.matchT("STRING")) return Literal(this.previous().lexeme);
+        if (this.matchT("THIS"))   return This();
+        if (this.matchT("SUPER")) {
+            this.expect("DOT", "'.' after 'super'");
+            return Super(this.expect("IDENTIFIER", "superclass method name").lexeme);
+        }
+        if (this.matchT("IDENTIFIER")) return Variable(this.previous().lexeme);
+        if (this.matchT("LEFT_PAREN")) {
+            var e = this.expression();
+            this.expect("RIGHT_PAREN", "')' after expression");
+            return Group(e);
+        }
+        if (this.matchT("LEFT_BRACKET")) return this.listLiteral();
+        if (this.matchT("LEFT_BRACE"))   return this.mapLiteral();
+        if (this.matchT("MATCH"))        return this.matchExpr();
+        this.error("expected expression");
+        return Literal(nil);
+    }
+
+    // The scanner already produces a NUMBER lexeme; here we re-parse to a
+    // numeric value so the AST holds a number, not a string.
+    parseNumber(lex) {
+        var n = 0;
+        var i = 0;
+        // integer part
+        while (i < len(lex) and lex[i] != ".") {
+            n = n * 10 + this.digitValue(lex[i]);
+            i = i + 1;
+        }
+        // fractional part
+        if (i < len(lex) and lex[i] == ".") {
+            i = i + 1;
+            var frac = 0;
+            var div = 1;
+            while (i < len(lex)) {
+                frac = frac * 10 + this.digitValue(lex[i]);
+                div = div * 10;
+                i = i + 1;
+            }
+            n = n + frac / div;
+        }
+        return n;
+    }
+    digitValue(c) {
+        if (c == "0") return 0; if (c == "1") return 1;
+        if (c == "2") return 2; if (c == "3") return 3;
+        if (c == "4") return 4; if (c == "5") return 5;
+        if (c == "6") return 6; if (c == "7") return 7;
+        if (c == "8") return 8; if (c == "9") return 9;
+        return 0;
+    }
+
+    // listLit: "[" already consumed.
+    listLiteral() {
+        var elems = [];
+        if (!this.check("RIGHT_BRACKET")) {
+            elems.append(this.expression());
+            while (this.matchT("COMMA")) {
+                if (this.check("RIGHT_BRACKET")) {  } else {
+                    elems.append(this.expression());
+                }
+            }
+        }
+        this.expect("RIGHT_BRACKET", "']' after list literal");
+        return ListLit(elems);
+    }
+    // mapLit: "{" already consumed.
+    mapLiteral() {
+        var entries = [];
+        if (!this.check("RIGHT_BRACE")) {
+            entries.append(this.mapEntry());
+            while (this.matchT("COMMA")) {
+                if (this.check("RIGHT_BRACE")) {  } else {
+                    entries.append(this.mapEntry());
+                }
+            }
+        }
+        this.expect("RIGHT_BRACE", "'}' after map literal");
+        return MapLit(entries);
+    }
+    mapEntry() {
+        var k = this.expression();
+        this.expect("COLON", "':' in map entry");
+        var v = this.expression();
+        return [k, v];
+    }
+
+    // ---------------------------------------------------------------------
+    // matchExpr ::= "match" expression "{" matchArm* "}"
+    // ("match" already consumed)
+    // ---------------------------------------------------------------------
+    matchExpr() {
+        var scrut = this.expression();
+        this.expect("LEFT_BRACE", "'{' before match arms");
+        var arms = [];
+        while (this.check("CASE")) {
+            arms.append(this.matchArm());
+        }
+        this.expect("RIGHT_BRACE", "'}' after match arms");
+        return MatchExpr(scrut, arms);
+    }
+
+    matchArm() {
+        this.expect("CASE", "'case' to begin arm");
+        var pats = this.armPats();
+        var guard = nil;
+        if (this.matchT("IF")) guard = this.expression();
+        this.expect("FAT_ARROW", "'=>' before arm body");
+        var body = this.armBody();
+        return MatchArm(pats, guard, body);
+    }
+
+    // armPats : armPat (","  armPat)*    (only when each is a literal)
+    //         : armPat ("or" armPat)*    (only for identifier-starting)
+    armPats() {
+        var first = this.armPat();
+        if (this.isLiteralPat(first) and this.check("COMMA")) {
+            var pats = [first];
+            while (this.matchT("COMMA")) {
+                pats.append(this.armPat());
+            }
+            return pats;
+        }
+        if (!this.isLiteralPat(first) and this.check("OR")) {
+            var alts = [first];
+            while (this.matchT("OR")) {
+                alts.append(this.armPat());
+            }
+            return [OrPat(alts)];
+        }
+        return [first];
+    }
+    isLiteralPat(p) {
+        return match p {
+            case LiteralPat{v} => true
+            case _             => false
+        };
+    }
+
+    // armPat : NUMBER|STRING|"true"|"false"|"nil"
+    //        | IDENT ( "{" IDENT (","IDENT)* "}" | "(" IDENT (","IDENT)* ")" )?
+    armPat() {
+        if (this.matchT("NUMBER")) return LiteralPat(this.parseNumber(this.previous().lexeme));
+        if (this.matchT("STRING")) return LiteralPat(this.previous().lexeme);
+        if (this.matchT("TRUE"))   return LiteralPat(true);
+        if (this.matchT("FALSE"))  return LiteralPat(false);
+        if (this.matchT("NIL"))    return LiteralPat(nil);
+        var name = this.expect("IDENTIFIER", "pattern identifier").lexeme;
+        if (this.matchT("LEFT_BRACE")) {
+            var fields = [];
+            fields.append(this.expect("IDENTIFIER", "field name").lexeme);
+            while (this.matchT("COMMA")) {
+                fields.append(this.expect("IDENTIFIER", "field name").lexeme);
+            }
+            this.expect("RIGHT_BRACE", "'}' after field pattern");
+            return FieldPat(name, fields);
+        }
+        if (this.matchT("LEFT_PAREN")) {
+            var binds = [];
+            binds.append(this.expect("IDENTIFIER", "binding name").lexeme);
+            while (this.matchT("COMMA")) {
+                binds.append(this.expect("IDENTIFIER", "binding name").lexeme);
+            }
+            this.expect("RIGHT_PAREN", "')' after positional pattern");
+            return PositionalPat(name, binds);
+        }
+        if (name == "_") return WildcardPat();
+        // Ambiguous in isolation: bare identifier may be either a binding or
+        // a zero-field constructor tag. The compiler resolves at semantic
+        // analysis; here we report it as BindingPat (the spec's default for
+        // unknown names) — tests that expect zero-field tags rely on the
+        // fact that the parser cannot distinguish, only the back-end can.
+        return BindingPat(name);
+    }
+
+    armBody() {
+        // Block body: "{" declaration* expression "}"
+        if (this.matchT("LEFT_BRACE")) {
+            var decls = [];
+            // Read declarations; the final unsemicoloned expression is the
+            // body value. We detect end-of-arm-body by the closing "}".
+            while (!this.check("RIGHT_BRACE") and !this.isAtEnd()) {
+                // Save cursor: if this is the last item before "}", and it's
+                // an expression with no trailing ";", treat it as the body
+                // expression. Simpler approach: parse one declaration; if
+                // we then see "}", convert the just-parsed ExprStmt back to
+                // its expression. Otherwise keep accumulating decls.
+                var d = this.declaration();
+                if (this.check("RIGHT_BRACE")) {
+                    // d should be an ExprStmt — extract the inner expression.
+                    this.expect("RIGHT_BRACE", "'}' after match arm body");
+                    var bodyExpr = this.armBodyExpr(d);
+                    // Wrap decls + final expression in a Block-ish container:
+                    // since match expects an expression, and we have decls
+                    // before it, return a Group of a Block-flavored node.
+                    // For pretty-print purposes we model this as Block.
+                    if (len(decls) == 0) return bodyExpr;
+                    // Append the bare expression as an ExprStmt for printing.
+                    decls.append(ExprStmt(bodyExpr));
+                    return Block(decls);
+                }
+                decls.append(d);
+            }
+            // Empty {} body — degenerate, return a nil literal.
+            this.expect("RIGHT_BRACE", "'}' after match arm body");
+            return Block(decls);
+        }
+        return this.expression();
+    }
+    // Extract the trailing expression from a parsed ExprStmt; otherwise,
+    // a non-expression cannot legally close an arm body, so we surface an
+    // error.
+    armBodyExpr(d) {
+        return match d {
+            case ExprStmt{e} => e
+            case _           => this.armBodyError()
+        };
+    }
+    armBodyError() {
+        this.error("match arm body must end with an expression");
+        return Literal(nil);
+    }
+}
+
+// ===========================================================================
+// Test harness — call a parser entry point on a token list and print the
+// pretty-printed result.
+// ===========================================================================
+fun parseExpr(tokens) {
+    var p = Parser(tokens);
+    return p.expression();
+}
+fun parseProgram(tokens) {
+    var p = Parser(tokens);
+    return p.program();
+}
+fun parseDecl(tokens) {
+    var p = Parser(tokens);
+    return p.declaration();
+}
+
+fun banner(name) { print "=== " + name + " ==="; }
+
+// ===========================================================================
+// Test cases — each test is wrapped in its own function so each gets its own
+// constant pool (Lox++ allows up to 256 constants per chunk; the entire test
+// suite together would exceed that if inlined at top level).
+// ===========================================================================
+
+fun test_Literals() {
+    banner("Literals");
+    print pretty(parseExpr([NUM("42"), eof()]));                  // 42
+    print pretty(parseExpr([STR("hi"), eof()]));                  // "hi"
+    print pretty(parseExpr([T("TRUE", "true"), eof()]));          // true
+    print pretty(parseExpr([T("FALSE", "false"), eof()]));        // false
+    print pretty(parseExpr([T("NIL", "nil"), eof()]));            // nil
+    print pretty(parseExpr([ID("x"), eof()]));                    // x
+}
+// CHECK: === Literals ===
+// CHECK: 42
+// CHECK: "hi"
+// CHECK: true
+// CHECK: false
+// CHECK: nil
+// CHECK: x
+
+// 1 + 2 * 3
+fun test_ArithPrec() {
+    banner("ArithPrec");
+    print pretty(parseExpr([
+        NUM("1"), T("PLUS", "+"), NUM("2"), T("STAR", "*"), NUM("3"), eof()
+    ]));
+}
+// CHECK: === ArithPrec ===
+// CHECK: (+ 1 (* 2 3))
+
+// -(1 + 2) > 0
+fun test_UnaryGroupCmp() {
+    banner("UnaryGroupCmp");
+    print pretty(parseExpr([
+        T("MINUS", "-"), T("LEFT_PAREN", "("),
+            NUM("1"), T("PLUS", "+"), NUM("2"),
+        T("RIGHT_PAREN", ")"),
+        T("GREATER", ">"), NUM("0"), eof()
+    ]));
+}
+// CHECK: === UnaryGroupCmp ===
+// CHECK: (> (- (group (+ 1 2))) 0)
+
+// a < b and c == d
+fun test_LogicEq() {
+    banner("LogicEq");
+    print pretty(parseExpr([
+        ID("a"), T("LESS", "<"), ID("b"),
+        T("AND", "and"),
+        ID("c"), T("EQUAL_EQUAL", "=="), ID("d"),
+        eof()
+    ]));
+}
+// CHECK: === LogicEq ===
+// CHECK: (and (< a b) (== c d))
+
+// a = b = 1   (right-associative)
+fun test_AssignChain() {
+    banner("AssignChain");
+    print pretty(parseExpr([
+        ID("a"), T("EQUAL", "="), ID("b"), T("EQUAL", "="), NUM("1"), eof()
+    ]));
+}
+// CHECK: === AssignChain ===
+// CHECK: (= a (= b 1))
+
+// obj.x[0] = 1
+fun test_PropIdxLvalue() {
+    banner("PropIdxLvalue");
+    print pretty(parseExpr([
+        ID("obj"), T("DOT", "."), ID("x"),
+        T("LEFT_BRACKET", "["), NUM("0"), T("RIGHT_BRACKET", "]"),
+        T("EQUAL", "="), NUM("1"), eof()
+    ]));
+}
+// CHECK: === PropIdxLvalue ===
+// CHECK: ([]set (. obj x) 0 1)
+
+// f(a)[1:5]
+fun test_SliceCall() {
+    banner("SliceCall");
+    print pretty(parseExpr([
+        ID("f"), T("LEFT_PAREN", "("), ID("a"), T("RIGHT_PAREN", ")"),
+        T("LEFT_BRACKET", "["), NUM("1"), T("COLON", ":"), NUM("5"), T("RIGHT_BRACKET", "]"),
+        eof()
+    ]));
+}
+// CHECK: === SliceCall ===
+// CHECK: (slice (call f a) 1 5)
+
+// [1, 2]   and   {"k": v}
+fun test_ListMap() {
+    banner("ListMap");
+    print pretty(parseExpr([
+        T("LEFT_BRACKET", "["), NUM("1"), T("COMMA", ","), NUM("2"), T("RIGHT_BRACKET", "]"), eof()
+    ]));
+    print pretty(parseExpr([
+        T("LEFT_BRACE", "{"), STR("k"), T("COLON", ":"), ID("v"), T("RIGHT_BRACE", "}"), eof()
+    ]));
+}
+// CHECK: === ListMap ===
+// CHECK: (list 1 2)
+// CHECK: (map ("k" v))
+
+// var x = 1; { print x; }
+fun test_VarPrintBlock() {
+    banner("VarPrintBlock");
+    print pretty(parseProgram([
+        T("VAR", "var"), ID("x"), T("EQUAL", "="), NUM("1"), T("SEMICOLON", ";"),
+        T("LEFT_BRACE", "{"),
+            T("PRINT", "print"), ID("x"), T("SEMICOLON", ";"),
+        T("RIGHT_BRACE", "}"),
+        eof()
+    ]));
+}
+// CHECK: === VarPrintBlock ===
+// CHECK: (program (var x 1) (block (print x)))
+
+// if (a) { break; } else { continue; }
+// while (b) { return c; }
+// for (var i = 0; i < n; i = i + 1) { print i; }
+// for (var x in xs) { print x; }
+fun test_Control() {
+    banner("Control");
+    print pretty(parseDecl([
+        T("IF", "if"), T("LEFT_PAREN", "("), ID("a"), T("RIGHT_PAREN", ")"),
+        T("LEFT_BRACE", "{"), T("BREAK", "break"), T("SEMICOLON", ";"), T("RIGHT_BRACE", "}"),
+        T("ELSE", "else"),
+        T("LEFT_BRACE", "{"), T("CONTINUE", "continue"), T("SEMICOLON", ";"), T("RIGHT_BRACE", "}"),
+        eof()
+    ]));
+    print pretty(parseDecl([
+        T("WHILE", "while"), T("LEFT_PAREN", "("), ID("b"), T("RIGHT_PAREN", ")"),
+        T("LEFT_BRACE", "{"),
+            T("RETURN", "return"), ID("c"), T("SEMICOLON", ";"),
+        T("RIGHT_BRACE", "}"),
+        eof()
+    ]));
+    print pretty(parseDecl([
+        T("FOR", "for"), T("LEFT_PAREN", "("),
+            T("VAR", "var"), ID("i"), T("EQUAL", "="), NUM("0"), T("SEMICOLON", ";"),
+            ID("i"), T("LESS", "<"), ID("n"), T("SEMICOLON", ";"),
+            ID("i"), T("EQUAL", "="), ID("i"), T("PLUS", "+"), NUM("1"),
+        T("RIGHT_PAREN", ")"),
+        T("LEFT_BRACE", "{"),
+            T("PRINT", "print"), ID("i"), T("SEMICOLON", ";"),
+        T("RIGHT_BRACE", "}"),
+        eof()
+    ]));
+    print pretty(parseDecl([
+        T("FOR", "for"), T("LEFT_PAREN", "("),
+            T("VAR", "var"), ID("x"), T("IN", "in"), ID("xs"),
+        T("RIGHT_PAREN", ")"),
+        T("LEFT_BRACE", "{"),
+            T("PRINT", "print"), ID("x"), T("SEMICOLON", ";"),
+        T("RIGHT_BRACE", "}"),
+        eof()
+    ]));
+}
+// CHECK: === Control ===
+// CHECK: (if a (block (break)) (block (continue)))
+// CHECK: (while b (block (return c)))
+// CHECK: (for (var i 0) (< i n) (= i (+ i 1)) (block (print i)))
+// CHECK: (for-in x xs (block (print x)))
+
+// fun add(a, b) { return a + b; }
+// class C < Base { greet() { print this.name; } }
+fun test_FunClass() {
+    banner("FunClass");
+    print pretty(parseDecl([
+        T("FUN", "fun"), ID("add"),
+        T("LEFT_PAREN", "("), ID("a"), T("COMMA", ","), ID("b"), T("RIGHT_PAREN", ")"),
+        T("LEFT_BRACE", "{"),
+            T("RETURN", "return"), ID("a"), T("PLUS", "+"), ID("b"), T("SEMICOLON", ";"),
+        T("RIGHT_BRACE", "}"),
+        eof()
+    ]));
+    print pretty(parseDecl([
+        T("CLASS", "class"), ID("C"), T("LESS", "<"), ID("Base"),
+        T("LEFT_BRACE", "{"),
+            ID("greet"), T("LEFT_PAREN", "("), T("RIGHT_PAREN", ")"),
+            T("LEFT_BRACE", "{"),
+                T("PRINT", "print"), T("THIS", "this"), T("DOT", "."), ID("name"), T("SEMICOLON", ";"),
+            T("RIGHT_BRACE", "}"),
+        T("RIGHT_BRACE", "}"),
+        eof()
+    ]));
+}
+// CHECK: === FunClass ===
+// CHECK: (fun add (a b) (block (return (+ a b))))
+// CHECK: (class C Base (method greet () (block (print (. this name)))))
+
+// match x {
+//   case 1, 2 => "small"
+//   case Foo{a, b} if a > b => a
+//   case Bar(c) or Baz(c) => c
+//   case _ => 0
+// }
+fun test_Match() {
+    banner("Match");
+    print pretty(parseExpr([
+        T("MATCH", "match"), ID("x"), T("LEFT_BRACE", "{"),
+            T("CASE", "case"), NUM("1"), T("COMMA", ","), NUM("2"),
+                T("FAT_ARROW", "=>"), STR("small"),
+            T("CASE", "case"), ID("Foo"),
+                T("LEFT_BRACE", "{"), ID("a"), T("COMMA", ","), ID("b"), T("RIGHT_BRACE", "}"),
+                T("IF", "if"), ID("a"), T("GREATER", ">"), ID("b"),
+                T("FAT_ARROW", "=>"), ID("a"),
+            T("CASE", "case"), ID("Bar"), T("LEFT_PAREN", "("), ID("c"), T("RIGHT_PAREN", ")"),
+                T("OR", "or"),
+                ID("Baz"), T("LEFT_PAREN", "("), ID("c"), T("RIGHT_PAREN", ")"),
+                T("FAT_ARROW", "=>"), ID("c"),
+            T("CASE", "case"), ID("_"),
+                T("FAT_ARROW", "=>"), NUM("0"),
+        T("RIGHT_BRACE", "}"),
+        eof()
+    ]));
+}
+// CHECK: === Match ===
+// CHECK: (match x (arm ((plit 1) (plit 2)) nil "small") (arm ((field Foo a b)) (> a b) a) (arm ((or-pat (pos Bar c) (pos Baz c))) nil c) (arm (_) nil 0))
+
+// var greeting = "hi";
+// fun shout(s) { return s + "!"; }
+// print shout(greeting);
+fun test_Program() {
+    banner("Program");
+    print pretty(parseProgram([
+        T("VAR", "var"), ID("greeting"), T("EQUAL", "="), STR("hi"), T("SEMICOLON", ";"),
+        T("FUN", "fun"), ID("shout"),
+            T("LEFT_PAREN", "("), ID("s"), T("RIGHT_PAREN", ")"),
+            T("LEFT_BRACE", "{"),
+                T("RETURN", "return"), ID("s"), T("PLUS", "+"), STR("!"), T("SEMICOLON", ";"),
+            T("RIGHT_BRACE", "}"),
+        T("PRINT", "print"), ID("shout"),
+            T("LEFT_PAREN", "("), ID("greeting"), T("RIGHT_PAREN", ")"), T("SEMICOLON", ";"),
+        eof()
+    ]));
+}
+// CHECK: === Program ===
+// CHECK: (program (var greeting "hi") (fun shout (s) (block (return (+ s "!")))) (print (call shout greeting)))
+
+// Run them all.
+test_Literals();
+test_ArithPrec();
+test_UnaryGroupCmp();
+test_LogicEq();
+test_AssignChain();
+test_PropIdxLvalue();
+test_SliceCall();
+test_ListMap();
+test_VarPrintBlock();
+test_Control();
+test_FunClass();
+test_Match();
+test_Program();
+
+} // end fun main
+main();
