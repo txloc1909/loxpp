@@ -67,13 +67,13 @@ comment, or CLI delegation):
 The repo is a **regular clone** with a dedicated directory for agent worktrees:
 
 ```
-loxpp/                        ← human's clone (branch: main)
-loxpp/agents-worktree/        ← all agent worktrees live here (gitignored)
-  loxpp-feat-foo/             ← agent worktree (branch: feat/foo)
-  loxpp-fix-bar/              ← agent worktree (branch: fix/bar)
+loxpp/                            ← human's clone (branch: main)
+loxpp/.claude/worktrees/          ← all agent worktrees live here (gitignored)
+  loxpp-feat-foo/                 ← agent worktree (branch: feat/foo)
+  loxpp-fix-bar/                  ← agent worktree (branch: fix/bar)
 ```
 
-- `agents-worktree/` is listed in `.gitignore` - its contents never appear in
+- `.claude/worktrees/` is listed in `.gitignore` - its contents never appear in
   commits.
 - Every agent works in its own worktree on its own branch, with its own
   `build/` directory.
@@ -164,10 +164,10 @@ Every agent task follows this loop end-to-end:
 
 ```bash
 # From the repo root (loxpp/)
-git worktree add agents-worktree/loxpp-<branch> -b <type>/<short-description>
+git worktree add .claude/worktrees/loxpp-<branch> -b <type>/<short-description>
 
 # Example
-git worktree add agents-worktree/loxpp-feat-closures -b feat/closures
+git worktree add .claude/worktrees/loxpp-feat-closures -b feat/closures
 ```
 
 See [Conventions](#conventions) for branch naming rules.
@@ -179,13 +179,13 @@ Mount the worktree directory into the container as `/workspace`:
 ```bash
 # podman (recommended)
 podman run -it --rm \
-  -v /path/to/loxpp/agents-worktree/loxpp-<branch>:/workspace:z \
+  -v /path/to/loxpp/.claude/worktrees/loxpp-<branch>:/workspace:z \
   --name loxpp-<branch> \
   loxpp-dev-env
 
 # docker (alternative)
 docker run -it --rm \
-  -v /path/to/loxpp/agents-worktree/loxpp-<branch>:/workspace \
+  -v /path/to/loxpp/.claude/worktrees/loxpp-<branch>:/workspace \
   --name loxpp-<branch> \
   loxpp-dev-env
 ```
@@ -276,7 +276,7 @@ gh pr merge <pr-number> --repo txloc1909/loxpp --squash
 
 ```bash
 # Remove the worktree
-git worktree remove agents-worktree/loxpp-<branch>
+git worktree remove .claude/worktrees/loxpp-<branch>
 
 # Delete the local branch
 git branch -d <type>/<short-description>
@@ -338,8 +338,8 @@ and the container name:
 
 | Branch | Worktree dir | Container name |
 |---|---|---|
-| `feat/closures` | `agents-worktree/loxpp-feat-closures/` | `loxpp-feat-closures` |
-| `fix/string-gc` | `agents-worktree/loxpp-fix-string-gc/` | `loxpp-fix-string-gc` |
+| `feat/closures` | `.claude/worktrees/loxpp-feat-closures/` | `loxpp-feat-closures` |
+| `fix/string-gc` | `.claude/worktrees/loxpp-fix-string-gc/` | `loxpp-fix-string-gc` |
 
 ### Isolation rules
 

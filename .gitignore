@@ -34,5 +34,4 @@
 build/
 .cache/
 .vscode/
-agents-worktree/*
-!agents-worktree/.gitkeep
+.claude/worktrees/
