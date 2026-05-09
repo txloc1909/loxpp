@@ -80,6 +80,8 @@ enum AST {
     FunDecl(name, params, body)
     Method(name, params, body)
     ClassDecl(name, super_, methods)
+    EnumDecl(name, ctors)        // ctors is a list of EnumCtor
+    EnumCtor(name, fields)       // fields is a list of identifier strings
 
     // --- Statements ---
     ExprStmt(e)
@@ -138,6 +140,13 @@ fun fmtMaybe(node) {
     return pretty(node);
 }
 
+// EnumCtor with no fields prints as "(Name)" — no trailing space — to keep
+// the output unambiguous with otherwise-empty parens.
+fun fmtEnumCtor(name, fields) {
+    if (len(fields) == 0) return "(" + name + ")";
+    return "(" + name + " " + joinStrs(fields, " ") + ")";
+}
+
 fun fmtMaybeName(name) {
     if (name == nil) return "nil";
     return name;
@@ -192,6 +201,8 @@ fun pretty(node) {
         case FunDecl{name, params, body}   => "(fun " + name + " (" + joinStrs(params, " ") + ") " + pretty(body) + ")"
         case Method{name, params, body}    => "(method " + name + " (" + joinStrs(params, " ") + ") " + pretty(body) + ")"
         case ClassDecl{name, super_, methods} => "(class " + name + " " + fmtMaybeName(super_) + " " + joinNodes(methods) + ")"
+        case EnumDecl{name, ctors}            => "(enum " + name + " " + joinNodes(ctors) + ")"
+        case EnumCtor{name, fields}           => fmtEnumCtor(name, fields)
 
         // --- Statements ---
         case ExprStmt{e}                  => "(expr " + pretty(e) + ")"
@@ -297,6 +308,7 @@ class Parser {
         if (this.matchT("CLASS")) return this.classDecl();
         if (this.matchT("FUN"))   return this.funDecl();
         if (this.matchT("VAR"))   return this.varDecl();
+        if (this.matchT("ENUM"))  return this.enumDecl();
         return this.statement();
     }
 
@@ -324,6 +336,37 @@ class Parser {
         var params = this.parameters();
         var body = this.blockBody();
         return Method(name, params, body);
+    }
+
+    // ---------------------------------------------------------------------
+    // enumDecl ::= IDENT "{" enumCtor* "}"
+    // enumCtor ::= IDENT ( "(" IDENT ("," IDENT)* ")" )?
+    // (the `enum` keyword is already consumed)
+    // ---------------------------------------------------------------------
+    enumDecl() {
+        var name = this.expect("IDENTIFIER", "enum name").lexeme;
+        this.expect("LEFT_BRACE", "'{' before enum body");
+        var ctors = [];
+        while (!this.check("RIGHT_BRACE") and !this.isAtEnd()) {
+            ctors.append(this.enumCtor());
+        }
+        this.expect("RIGHT_BRACE", "'}' after enum body");
+        return EnumDecl(name, ctors);
+    }
+
+    enumCtor() {
+        var name = this.expect("IDENTIFIER", "constructor name").lexeme;
+        var fields = [];
+        if (this.matchT("LEFT_PAREN")) {
+            if (!this.check("RIGHT_PAREN")) {
+                fields.append(this.expect("IDENTIFIER", "field name").lexeme);
+                while (this.matchT("COMMA")) {
+                    fields.append(this.expect("IDENTIFIER", "field name").lexeme);
+                }
+            }
+            this.expect("RIGHT_PAREN", "')' after enum constructor fields");
+        }
+        return EnumCtor(name, fields);
     }
 
     // funDecl ::= "fun" IDENT "(" parameters? ")" block
@@ -1099,6 +1142,29 @@ fun test_Match() {
 // CHECK: === Match ===
 // CHECK: (match x (arm ((plit 1) (plit 2)) nil "small") (arm ((field Foo a b)) (> a b) a) (arm ((or-pat (pos Bar c) (pos Baz c))) nil c) (arm (_) nil 0))
 
+// enum Result { Ok(value) Err(msg) }
+// enum Option { Some(v) None }
+fun test_Enum() {
+    banner("Enum");
+    print pretty(parseDecl([
+        T("ENUM", "enum"), ID("Result"), T("LEFT_BRACE", "{"),
+            ID("Ok"),  T("LEFT_PAREN", "("), ID("value"), T("RIGHT_PAREN", ")"),
+            ID("Err"), T("LEFT_PAREN", "("), ID("msg"),   T("RIGHT_PAREN", ")"),
+        T("RIGHT_BRACE", "}"),
+        eof()
+    ]));
+    print pretty(parseDecl([
+        T("ENUM", "enum"), ID("Option"), T("LEFT_BRACE", "{"),
+            ID("Some"), T("LEFT_PAREN", "("), ID("v"), T("RIGHT_PAREN", ")"),
+            ID("None"),
+        T("RIGHT_BRACE", "}"),
+        eof()
+    ]));
+}
+// CHECK: === Enum ===
+// CHECK: (enum Result (Ok value) (Err msg))
+// CHECK: (enum Option (Some v) (None))
+
 // var greeting = "hi";
 // fun shout(s) { return s + "!"; }
 // print shout(greeting);
@@ -1132,6 +1198,7 @@ test_VarPrintBlock();
 test_Control();
 test_FunClass();
 test_Match();
+test_Enum();
 test_Program();
 
 } // end fun main

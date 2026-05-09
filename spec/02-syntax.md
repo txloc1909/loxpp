@@ -9,6 +9,7 @@ program        ::= declaration* EOF ;
 declaration    ::= classDecl
                  | funDecl
                  | varDecl
+                 | enumDecl
                  | statement ;
 
 classDecl      ::= "class" IDENTIFIER ( "<" IDENTIFIER )? "{" method* "}" ;
@@ -20,6 +21,9 @@ parameters     ::= IDENTIFIER ( "," IDENTIFIER )* ;
 varDecl        ::= "var" IDENTIFIER ( "=" expression )? ";"
                | "var" "{" IDENTIFIER ( "," IDENTIFIER )* ","? "}" "=" expression ";"
                | "var" "[" IDENTIFIER ( "," IDENTIFIER )* ","? "]" "=" expression ";" ;
+
+enumDecl       ::= "enum" IDENTIFIER "{" enumCtor* "}" ;
+enumCtor       ::= IDENTIFIER ( "(" IDENTIFIER ( "," IDENTIFIER )* ")" )? ;
 
 (* Statements *)
 statement      ::= exprStmt
@@ -98,9 +102,17 @@ primary        ::= "true"
                  | "match" expression "{" matchArm* "}" ;
 
 matchArm       ::= "case" armPats ( "if" expression )? "=>" armBody ;
-armPats        ::= armPat ( "," armPat )* ;
-armPat         ::= NUMBER | STRING | "true" | "false" | "nil"
-                 | IDENTIFIER ;          (* IDENTIFIER: "_" = wildcard; other = binding *)
+
+armPats        ::= literalPat ( "," literalPat )*       (* literal comma-chain *)
+                 | identArmPat ( "or" identArmPat )* ;  (* identifier-starting alternatives *)
+
+armPat         ::= literalPat | identArmPat ;
+literalPat     ::= NUMBER | STRING | "true" | "false" | "nil" ;
+
+identArmPat    ::= IDENTIFIER                                          (* "_" = wildcard, else binding or zero-field constructor *)
+                 | IDENTIFIER "{" IDENTIFIER ( "," IDENTIFIER )* "}"   (* named-field constructor pattern *)
+                 | IDENTIFIER "(" IDENTIFIER ( "," IDENTIFIER )* ")" ; (* positional constructor pattern *)
+
 armBody        ::= "{" declaration* expression "}"
                  | expression ;
 
@@ -199,10 +211,7 @@ value of an assignment expression is the assigned value.
 
 ### `enum` declaration
 
-```
-enumDecl       : 'enum' IDENTIFIER '{' constructorDecl* '}'
-constructorDecl: IDENTIFIER ( '(' IDENTIFIER (',' IDENTIFIER)* ')' )?
-```
+See `enumDecl` / `enumCtor` in the main EBNF.
 
 An `enum` declaration introduces a closed type with one or more constructors.
 Each constructor name becomes a globally-scoped callable that returns an enum
@@ -223,16 +232,7 @@ var n = None();
 
 ### Extended `match` arm patterns
 
-```
-armPats  : armPat ('or' armPat)*
-armPat   : NUMBER | STRING | 'true' | 'false' | 'nil'  // literal (comma chain only)
-         | IDENTIFIER                                    // wildcard (_) or binding
-         | IDENTIFIER '{' fieldPat (',' fieldPat)* '}'  // named field pattern
-         | IDENTIFIER '(' IDENTIFIER (',' IDENTIFIER)* ')' // positional pattern
-         | IDENTIFIER                                    // zero-field constructor
-
-fieldPat : IDENTIFIER
-```
+See `armPats` / `armPat` / `identArmPat` in the main EBNF.
 
 When the pattern name resolves to a known constructor, the arm performs a tag
 check rather than a binding. Unknown identifiers continue to act as bindings.
