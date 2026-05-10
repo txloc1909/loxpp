@@ -23,8 +23,8 @@ struct CallFrame {
 
 class VM {
   public:
-    static constexpr int STACK_MAX = 256;
-    static constexpr int FRAMES_MAX = 64;
+    static constexpr int STACK_MAX = 2048;
+    static constexpr int FRAMES_MAX = 256;
 
     VM() : m_globals(VmAllocator<Entry>{&m_mm}) {
         resetStack();
