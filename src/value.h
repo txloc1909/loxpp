@@ -2,9 +2,9 @@
 
 #include "object.h"
 
-#include <array>
 #include <cstdint>
 #include <variant>
+#include <vector>
 
 using Number = double;
 using Nil = std::monostate;
@@ -54,13 +54,14 @@ bool isValidMapKey(const Value& v);
 
 inline bool isFalsy(const Value& v) { return !v; }
 
-class ValueArray : std::array<Value, UINT8_MAX> {
+class ValueArray {
   public:
-    using std::array<Value, UINT8_MAX>::at;
     void write(Value value);
-    uint8_t size() const;
-    bool isFull() const { return m_count >= UINT8_MAX; }
+    uint16_t size() const;
+    bool isFull() const { return m_count >= UINT16_MAX; }
+    Value at(uint16_t idx) const { return m_values.at(idx); }
 
   private:
-    uint8_t m_count = 0;
+    std::vector<Value> m_values;
+    uint16_t m_count = 0;
 };

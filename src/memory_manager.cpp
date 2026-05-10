@@ -154,7 +154,7 @@ void MemoryManager::traceObject(Obj* obj) {
         auto* fn = static_cast<ObjFunction*>(obj);
         markObject(fn->name);
         const auto& consts = fn->chunk.constants();
-        for (uint8_t i = 0; i < consts.size(); i++)
+        for (uint16_t i = 0; i < consts.size(); i++)
             markValue(consts.at(i));
         break;
     }

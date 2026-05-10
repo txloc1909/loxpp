@@ -138,8 +138,9 @@ class Compiler {
     void emitLoop(int loopStart);
     void emitLoopCleanup(int targetLocalCount);
 
-    uint8_t makeConstant(Value value);
-    uint8_t identifierConstant(const Token& name);
+    uint16_t makeConstant(Value value);
+    uint16_t identifierConstant(const Token& name);
+    void emitConstantOp(Op op, uint16_t idx);
     void namedVariable(const Token& name, bool canAssign);
 
     // Walks the enclosing chain to the root compiler.

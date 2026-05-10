@@ -261,14 +261,24 @@ TEST_F(CompileErrorTest, InvalidAssignmentTarget) {
 }
 
 TEST_F(CompileErrorTest, TooManyConstants) {
-    // Generate 256 distinct numeric literal expression statements.
-    // The 256th constant exhausts the pool (capacity: 255) and must produce a
-    // compile error — not a crash or out-of-bounds exception.
+    // Generate 65536 distinct numeric literal expression statements.
+    // The 65536th constant exhausts the pool (capacity: 65535) and must produce
+    // a compile error — not a crash or out-of-bounds exception.
     std::string source;
-    for (int i = 0; i < 256; ++i)
-        source += std::to_string(i) + ";\n";
+    for (int i = 0; i < 65536; ++i)
+        source += std::to_string(i) + ".5;\n"; // .5 avoids integer dedup
     VMTestHarness h;
     EXPECT_EQ(h.run(source), InterpretResult::COMPILE_ERROR);
+}
+
+TEST_F(CompileErrorTest, MoreThan255ConstantsSucceed) {
+    // Programs with more than 255 distinct constants must compile and run.
+    std::string source;
+    for (int i = 0; i < 300; ++i)
+        source += "var v" + std::to_string(i) + " = " + std::to_string(i) +
+                  ".5;\n";
+    VMTestHarness h;
+    EXPECT_EQ(h.run(source), InterpretResult::OK);
 }
 
 // ===========================================================================

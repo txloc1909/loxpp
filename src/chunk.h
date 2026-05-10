@@ -44,11 +44,11 @@ enum class Op : Byte {
     GET_PROPERTY,
     SET_PROPERTY,
     DEFINE_METHOD,
-    INVOKE,    // operands: name-constant-index (1 byte), arg-count (1 byte)
+    INVOKE,    // operands: name-constant-index (2 bytes), arg-count (1 byte)
     INHERIT,   // no operand — copies superclass methods into subclass
-    GET_SUPER, // 1-byte constant (method name) — binds method to 'this' from
+    GET_SUPER, // 2-byte constant (method name) — binds method to 'this' from
                // superclass
-    SUPER_INVOKE, // operands: name-constant-index (1 byte), arg-count (1 byte)
+    SUPER_INVOKE, // operands: name-constant-index (2 bytes), arg-count (1 byte)
     BUILD_LIST,   // operand: uint8 element count; pops N values, pushes ObjList
     BUILD_MAP,    // operand: uint8 pair count; pops 2*N values, pushes ObjMap
     GET_INDEX,    // pops index then list/string/map; pushes element/char/value
@@ -60,7 +60,7 @@ enum class Op : Byte {
     ITER_NEXT, // pops iterator copy → pushes element/key at cursor, advances
     MATCH_ERROR, // no operands — raises MatchError; VM never returns
     GET_TAG,     // no operands — pop ObjEnum, push ctor->tag as Number
-    INSTANCEOF,  // 1-byte constant (class name ObjString*); pop value, push
+    INSTANCEOF,  // 2-byte constant (class name ObjString*); pop value, push
                  // bool
     IS_SEQ, // no operands — pop value, push true if it is a sequence type
 };
@@ -79,8 +79,8 @@ class Chunk : std::vector<Byte> {
     void write(Byte byte, int line);
     void write(Op op, int line);
     void patch(int offset, Byte byte);
-    std::optional<uint8_t> addConstant(Value value);
-    Value getConstant(int idx) const;
+    std::optional<uint16_t> addConstant(Value value);
+    Value getConstant(uint16_t idx) const;
     const ValueArray& constants() const { return m_constants; }
     int getLine(int offset) const;
 

@@ -22,12 +22,13 @@ class ParserBytecodeTest : public ::testing::Test {};
 TEST_F(ParserBytecodeTest, Arithmetic_Addition) {
     std::string expr = "1 + 2";
     std::string bytecode = compile_to_bytecode(expr);
+    // CONSTANT now takes 3 bytes (opcode + 2-byte index).
     std::string expected = "0: CONSTANT 0 ('1')\n"
-                           "2: CONSTANT 1 ('2')\n"
-                           "4: ADD\n"
-                           "5: POP\n"
-                           "6: NIL\n"
-                           "7: RETURN\n";
+                           "3: CONSTANT 1 ('2')\n"
+                           "6: ADD\n"
+                           "7: POP\n"
+                           "8: NIL\n"
+                           "9: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -35,13 +36,13 @@ TEST_F(ParserBytecodeTest, Arithmetic_MultiplySubtract) {
     std::string expr = "3 * 4 - 5";
     std::string bytecode = compile_to_bytecode(expr);
     std::string expected = "0: CONSTANT 0 ('3')\n"
-                           "2: CONSTANT 1 ('4')\n"
-                           "4: MULTIPLY\n"
-                           "5: CONSTANT 2 ('5')\n"
-                           "7: SUBTRACT\n"
-                           "8: POP\n"
-                           "9: NIL\n"
-                           "10: RETURN\n";
+                           "3: CONSTANT 1 ('4')\n"
+                           "6: MULTIPLY\n"
+                           "7: CONSTANT 2 ('5')\n"
+                           "10: SUBTRACT\n"
+                           "11: POP\n"
+                           "12: NIL\n"
+                           "13: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -50,11 +51,11 @@ TEST_F(ParserBytecodeTest, Comparison_Equal) {
     std::string bytecode = compile_to_bytecode(expr);
     // After constant-pool deduplication both '1' literals share slot 0.
     std::string expected = "0: CONSTANT 0 ('1')\n"
-                           "2: CONSTANT 0 ('1')\n"
-                           "4: EQUAL\n"
-                           "5: POP\n"
-                           "6: NIL\n"
-                           "7: RETURN\n";
+                           "3: CONSTANT 0 ('1')\n"
+                           "6: EQUAL\n"
+                           "7: POP\n"
+                           "8: NIL\n"
+                           "9: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -62,13 +63,13 @@ TEST_F(ParserBytecodeTest, Comparison_LessGreater) {
     std::string expr = "2 < 3 > 1";
     std::string bytecode = compile_to_bytecode(expr);
     std::string expected = "0: CONSTANT 0 ('2')\n"
-                           "2: CONSTANT 1 ('3')\n"
-                           "4: LESS\n"
-                           "5: CONSTANT 2 ('1')\n"
-                           "7: GREATER\n"
-                           "8: POP\n"
-                           "9: NIL\n"
-                           "10: RETURN\n";
+                           "3: CONSTANT 1 ('3')\n"
+                           "6: LESS\n"
+                           "7: CONSTANT 2 ('1')\n"
+                           "10: GREATER\n"
+                           "11: POP\n"
+                           "12: NIL\n"
+                           "13: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -89,11 +90,11 @@ TEST_F(ParserBytecodeTest, String_Concatenation) {
     std::string expr = "\"foo\" + \"bar\"";
     std::string bytecode = compile_to_bytecode(expr);
     std::string expected = "0: CONSTANT 0 ('foo')\n"
-                           "2: CONSTANT 1 ('bar')\n"
-                           "4: ADD\n"
-                           "5: POP\n"
-                           "6: NIL\n"
-                           "7: RETURN\n";
+                           "3: CONSTANT 1 ('bar')\n"
+                           "6: ADD\n"
+                           "7: POP\n"
+                           "8: NIL\n"
+                           "9: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -101,12 +102,12 @@ TEST_F(ParserBytecodeTest, GroupingAndNegate) {
     std::string expr = "-(1 + 2)";
     std::string bytecode = compile_to_bytecode(expr);
     std::string expected = "0: CONSTANT 0 ('1')\n"
-                           "2: CONSTANT 1 ('2')\n"
-                           "4: ADD\n"
-                           "5: NEGATE\n"
-                           "6: POP\n"
-                           "7: NIL\n"
-                           "8: RETURN\n";
+                           "3: CONSTANT 1 ('2')\n"
+                           "6: ADD\n"
+                           "7: NEGATE\n"
+                           "8: POP\n"
+                           "9: NIL\n"
+                           "10: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -134,15 +135,15 @@ TEST_F(ParserBytecodeTest, Dedup_SameVariableReusesConstantSlot) {
     std::string src = "var x = 1;\n"
                       "x = x + 1;";
     std::string bytecode = compile_program_to_bytecode(src);
-    std::string expected = "0: CONSTANT 0 ('1')\n" // initializer: 1 → slot 0
-                           "2: DEFINE_GLOBAL 1 ('x')\n" // x → slot 1
-                           "4: GET_GLOBAL 1 ('x')\n"    // x reuses slot 1
-                           "6: CONSTANT 0 ('1')\n"      // 1 reuses slot 0
-                           "8: ADD\n"
-                           "9: SET_GLOBAL 1 ('x')\n" // x reuses slot 1
-                           "11: POP\n"
-                           "12: NIL\n"
-                           "13: RETURN\n";
+    std::string expected = "0: CONSTANT 0 ('1')\n"  // initializer: 1 → slot 0
+                           "3: DEFINE_GLOBAL 1 ('x')\n" // x → slot 1
+                           "6: GET_GLOBAL 1 ('x')\n"    // x reuses slot 1
+                           "9: CONSTANT 0 ('1')\n"      // 1 reuses slot 0
+                           "12: ADD\n"
+                           "13: SET_GLOBAL 1 ('x')\n" // x reuses slot 1
+                           "16: POP\n"
+                           "17: NIL\n"
+                           "18: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -159,9 +160,9 @@ TEST_F(FunctionBytecodeTest, EmptyFunction_OuterChunk) {
     // Constant 0 = 'foo' (global name), constant 1 = <fn foo>
     std::string bytecode = compile_program_to_bytecode("fun foo() {}");
     std::string expected = "0: CLOSURE 1 ('<fn foo>')\n"
-                           "2: DEFINE_GLOBAL 0 ('foo')\n"
-                           "4: NIL\n"
-                           "5: RETURN\n";
+                           "3: DEFINE_GLOBAL 0 ('foo')\n"
+                           "6: NIL\n"
+                           "7: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -205,8 +206,8 @@ TEST_F(FunctionBytecodeTest, FunctionWithLocalVar_InnerChunk) {
     std::string src = "fun noReturn() { var x = 1; }";
     std::string bytecode = compile_fn_body_to_bytecode(src);
     std::string expected = "0: CONSTANT 0 ('1')\n"
-                           "2: NIL\n"
-                           "3: RETURN\n";
+                           "3: NIL\n"
+                           "4: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -214,11 +215,11 @@ TEST_F(ParserBytecodeTest, Arithmetic_Modulo) {
     std::string expr = "10 % 3";
     std::string bytecode = compile_to_bytecode(expr);
     std::string expected = "0: CONSTANT 0 ('10')\n"
-                           "2: CONSTANT 1 ('3')\n"
-                           "4: MODULO\n"
-                           "5: POP\n"
-                           "6: NIL\n"
-                           "7: RETURN\n";
+                           "3: CONSTANT 1 ('3')\n"
+                           "6: MODULO\n"
+                           "7: POP\n"
+                           "8: NIL\n"
+                           "9: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -236,14 +237,14 @@ class SequenceBytecodeTest : public ::testing::Test {};
 TEST_F(SequenceBytecodeTest, InExpr_ListMembership) {
     std::string bytecode = compile_to_bytecode("2 in [1, 2, 3]");
     std::string expected = "0: CONSTANT 0 ('2')\n"
-                           "2: CONSTANT 1 ('1')\n"
-                           "4: CONSTANT 0 ('2')\n" // dedup: reuses slot 0
-                           "6: CONSTANT 2 ('3')\n"
-                           "8: BUILD_LIST 3\n"
-                           "10: IN\n"
-                           "11: POP\n"
-                           "12: NIL\n"
-                           "13: RETURN\n";
+                           "3: CONSTANT 1 ('1')\n"
+                           "6: CONSTANT 0 ('2')\n" // dedup: reuses slot 0
+                           "9: CONSTANT 2 ('3')\n"
+                           "12: BUILD_LIST 3\n"
+                           "14: IN\n"
+                           "15: POP\n"
+                           "16: NIL\n"
+                           "17: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -251,11 +252,11 @@ TEST_F(SequenceBytecodeTest, InExpr_ListMembership) {
 TEST_F(SequenceBytecodeTest, InExpr_StringSubstring) {
     std::string bytecode = compile_to_bytecode("\"ell\" in \"hello\"");
     std::string expected = "0: CONSTANT 0 ('ell')\n"
-                           "2: CONSTANT 1 ('hello')\n"
-                           "4: IN\n"
-                           "5: POP\n"
-                           "6: NIL\n"
-                           "7: RETURN\n";
+                           "3: CONSTANT 1 ('hello')\n"
+                           "6: IN\n"
+                           "7: POP\n"
+                           "8: NIL\n"
+                           "9: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
@@ -267,28 +268,28 @@ TEST_F(SequenceBytecodeTest, InExpr_StringSubstring) {
 // GET_ITER replaces the list on the stack with an ObjIterator in-place.
 // Each loop iteration: GET_LOCAL 1 (iter copy) → ITER_HAS_NEXT → bool check,
 // then GET_LOCAL 1 (iter copy) → ITER_NEXT → element → SET_LOCAL 2.
-// continue re-enters at loopStart (offset 6), which re-checks ITER_HAS_NEXT.
+// continue re-enters at loopStart (offset 7), which re-checks ITER_HAS_NEXT.
 TEST_F(SequenceBytecodeTest, ForIn_EmptyBodyBytecode) {
     std::string bytecode = compile_program_to_bytecode("for (var x in [1]) {}");
     std::string expected =
-        "0: CONSTANT 0 ('1')\n" // list element
-        "2: BUILD_LIST 1\n"     // push [1]
-        "4: GET_ITER\n"    // replace [1] with ObjIterator → (iter) at slot 1
-        "5: NIL\n"         // push nil → x at slot 2
-        "6: GET_LOCAL 1\n" // loopStart: push (iter) copy
-        "8: ITER_HAS_NEXT\n" // pop copy, push bool
-        "9: JUMP_IF_FALSE 9 -> 22\n"
-        "12: POP\n"         // discard true
-        "13: GET_LOCAL 1\n" // push (iter) copy
-        "15: ITER_NEXT\n"   // pop copy, push next element + advance cursor
-        "16: SET_LOCAL 2\n" // x = element
-        "18: POP\n"
-        "19: LOOP 19 -> 6\n" // back to loopStart
-        "22: POP\n"          // discard false
-        "23: POP\n"          // endScope: x
-        "24: POP\n"          // endScope: (iter)
-        "25: NIL\n"
-        "26: RETURN\n";
+        "0: CONSTANT 0 ('1')\n" // list element (3 bytes)
+        "3: BUILD_LIST 1\n"     // push [1]
+        "5: GET_ITER\n"    // replace [1] with ObjIterator → (iter) at slot 1
+        "6: NIL\n"         // push nil → x at slot 2
+        "7: GET_LOCAL 1\n" // loopStart: push (iter) copy
+        "9: ITER_HAS_NEXT\n" // pop copy, push bool
+        "10: JUMP_IF_FALSE 10 -> 23\n"
+        "13: POP\n"         // discard true
+        "14: GET_LOCAL 1\n" // push (iter) copy
+        "16: ITER_NEXT\n"   // pop copy, push next element + advance cursor
+        "17: SET_LOCAL 2\n" // x = element
+        "19: POP\n"
+        "20: LOOP 20 -> 7\n" // back to loopStart
+        "23: POP\n"          // discard false
+        "24: POP\n"          // endScope: x
+        "25: POP\n"          // endScope: (iter)
+        "26: NIL\n"
+        "27: RETURN\n";
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
