@@ -736,7 +736,7 @@ class Resolver {
             case PrintStmt{expr}                                 => this.resolveExpr(expr)
             case ReturnStmt{line, value}                         => this.resolveReturn(line, value)
             case VarDecl{name, line, initializer}                => this.resolveVarDecl(name, line, initializer)
-            case WhileStmt{condition, body}                      => { this.resolveExpr(condition); this.resolveStmt(body); }
+            case WhileStmt{condition, body}                      => { this.resolveExpr(condition); this.resolveStmt(body) }
         };
     }
 
@@ -764,19 +764,19 @@ class Resolver {
         this.resolveFunction(params, body, kind);
     }
 
-    // Wrapper: match inside a while loop corrupts the Lox++ stack, so each
-    // iteration must call a function that does the match internally.
+    // Wrapper called per-iteration so the match is compiled inside a function
+    // body rather than inline in the while loop in resolveClass.
     resolveMethodItem(method) {
         match method {
             case FunDecl{name, line, params, body}               => this.resolveMethodDecl(name, params, body)
-            case Block{statements}                               => {}
-            case ClassDecl{name, super_id, super_name, super_line, methods} => {}
-            case ExpressionStmt{expr}                            => {}
-            case IfStmt{condition, then_branch, else_branch}     => {}
-            case PrintStmt{expr}                                 => {}
-            case ReturnStmt{line, value}                         => {}
-            case VarDecl{name, line, initializer}                => {}
-            case WhileStmt{condition, body}                      => {}
+            case Block{statements}                               => nil
+            case ClassDecl{name, super_id, super_name, super_line, methods} => nil
+            case ExpressionStmt{expr}                            => nil
+            case IfStmt{condition, then_branch, else_branch}     => nil
+            case PrintStmt{expr}                                 => nil
+            case ReturnStmt{line, value}                         => nil
+            case VarDecl{name, line, initializer}                => nil
+            case WhileStmt{condition, body}                      => nil
         };
     }
 
@@ -844,15 +844,15 @@ class Resolver {
 
     resolveExpr(expr) {
         match expr {
-            case Literal{v}                    => {}
+            case Literal{v}                    => nil
             case Variable{id, name, line}      => this.resolveVariable(id, name, line)
-            case Assign{id, name, line, value} => { this.resolveExpr(value); this.resolveLocal(id, name); }
-            case Binary{op, left, right}       => { this.resolveExpr(left);  this.resolveExpr(right); }
+            case Assign{id, name, line, value} => { this.resolveExpr(value); this.resolveLocal(id, name) }
+            case Binary{op, left, right}       => { this.resolveExpr(left);  this.resolveExpr(right) }
             case Unary{op, right}              => this.resolveExpr(right)
-            case Logical{op, left, right}      => { this.resolveExpr(left);  this.resolveExpr(right); }
+            case Logical{op, left, right}      => { this.resolveExpr(left);  this.resolveExpr(right) }
             case Call{callee, paren_line, args} => this.resolveCall(callee, args)
             case Get{object, name, line}       => this.resolveExpr(object)
-            case Set{object, name, line, value} => { this.resolveExpr(object); this.resolveExpr(value); }
+            case Set{object, name, line, value} => { this.resolveExpr(object); this.resolveExpr(value) }
             case ThisExpr{id, line}            => this.resolveThis(id, line)
             case SuperExpr{id, method, line}   => this.resolveSuper(id, line)
             case Grouping{expression}          => this.resolveExpr(expression)
@@ -1093,7 +1093,7 @@ class Interpreter {
         match stmt {
             case Block{statements}                               => this.execBlock(statements, Environment(env))
             case ClassDecl{name, super_id, super_name, super_line, methods} => this.execClass(name, super_id, super_name, super_line, methods, env)
-            case ExpressionStmt{expr}                            => { this.evalExpr(expr, env); }
+            case ExpressionStmt{expr}                            => { this.evalExpr(expr, env) }
             case FunDecl{name, line, params, body}               => this.execFun(name, params, body, env)
             case IfStmt{condition, then_branch, else_branch}     => this.execIf(condition, then_branch, else_branch, env)
             case PrintStmt{expr}                                 => this.execPrint(expr, env)
@@ -1117,21 +1117,22 @@ class Interpreter {
         env.define(name, fn);
     }
 
-    // Wrapper: match inside a while loop corrupts the Lox++ stack.
+    // Wrapper called per-iteration so the match is compiled inside a function
+    // body rather than inline in the while loop in execClass.
     processMethodDecl(method, methodMap, methodEnv) {
         match method {
             case FunDecl{name, line, params, body} => {
                 var isInit = name == "init";
-                methodMap[name] = LoxFunction(name, params, body, methodEnv, isInit);
+                methodMap[name] = LoxFunction(name, params, body, methodEnv, isInit)
             }
-            case Block{statements}                               => {}
-            case ClassDecl{name, super_id, super_name, super_line, methods} => {}
-            case ExpressionStmt{expr}                            => {}
-            case IfStmt{condition, then_branch, else_branch}     => {}
-            case PrintStmt{expr}                                 => {}
-            case ReturnStmt{line, value}                         => {}
-            case VarDecl{name, line, initializer}                => {}
-            case WhileStmt{condition, body}                      => {}
+            case Block{statements}                               => nil
+            case ClassDecl{name, super_id, super_name, super_line, methods} => nil
+            case ExpressionStmt{expr}                            => nil
+            case IfStmt{condition, then_branch, else_branch}     => nil
+            case PrintStmt{expr}                                 => nil
+            case ReturnStmt{line, value}                         => nil
+            case VarDecl{name, line, initializer}                => nil
+            case WhileStmt{condition, body}                      => nil
         };
     }
 
