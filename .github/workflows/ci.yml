@@ -77,3 +77,17 @@ jobs:
             -w /workspace \
             loxpp-dev:latest \
             bash -c "python3 tools/check_examples.py build/loxpp examples/"
+
+      - name: Run Lox interpreter test suite (craftinginterpreters)
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "
+              git clone --depth=1 https://github.com/munificent/craftinginterpreters /tmp/craftinginterpreters &&
+              cd /tmp/craftinginterpreters/tool && dart pub get &&
+              cd /tmp/craftinginterpreters &&
+              dart tool/bin/test.dart jlox --interpreter /workspace/bootstrap/lox_wrapper.sh
+            "
