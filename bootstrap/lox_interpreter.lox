@@ -768,15 +768,8 @@ class Resolver {
     // body rather than inline in the while loop in resolveClass.
     resolveMethodItem(method) {
         match method {
-            case FunDecl{name, line, params, body}               => this.resolveMethodDecl(name, params, body)
-            case Block{statements}                               => nil
-            case ClassDecl{name, super_id, super_name, super_line, methods} => nil
-            case ExpressionStmt{expr}                            => nil
-            case IfStmt{condition, then_branch, else_branch}     => nil
-            case PrintStmt{expr}                                 => nil
-            case ReturnStmt{line, value}                         => nil
-            case VarDecl{name, line, initializer}                => nil
-            case WhileStmt{condition, body}                      => nil
+            case FunDecl{name, line, params, body} => this.resolveMethodDecl(name, params, body)
+            case _                                 => nil
         };
     }
 
@@ -1125,14 +1118,7 @@ class Interpreter {
                 var isInit = name == "init";
                 methodMap[name] = LoxFunction(name, params, body, methodEnv, isInit)
             }
-            case Block{statements}                               => nil
-            case ClassDecl{name, super_id, super_name, super_line, methods} => nil
-            case ExpressionStmt{expr}                            => nil
-            case IfStmt{condition, then_branch, else_branch}     => nil
-            case PrintStmt{expr}                                 => nil
-            case ReturnStmt{line, value}                         => nil
-            case VarDecl{name, line, initializer}                => nil
-            case WhileStmt{condition, body}                      => nil
+            case _ => nil
         };
     }
 
