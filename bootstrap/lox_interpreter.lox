@@ -1,0 +1,1432 @@
+// lox_interpreter.lox — Tree-walking interpreter for the original Lox language,
+// written in Lox++.  Feed Lox source via stdin; output goes to stdout.
+//
+// Pipeline: Scanner → Parser → Resolver → Interpreter
+//
+// Run:  cat program.lox | ./build/loxpp examples/lox_interpreter.lox
+
+// ===========================================================================
+// GLOBAL HELPERS
+// ===========================================================================
+
+var LOX_KEYWORDS = {
+    "and": "AND",       "class": "CLASS",   "else": "ELSE",
+    "false": "FALSE",   "for": "FOR",       "fun": "FUN",
+    "if": "IF",         "nil": "NIL",       "or": "OR",
+    "print": "PRINT",   "return": "RETURN", "super": "SUPER",
+    "this": "THIS",     "true": "TRUE",     "var": "VAR",
+    "while": "WHILE"
+};
+
+var DIGIT_MAP = {
+    "0": 0, "1": 1, "2": 2, "3": 3, "4": 4,
+    "5": 5, "6": 6, "7": 7, "8": 8, "9": 9
+};
+
+fun isDigit(c) { return len(c) == 1 and c in "0123456789"; }
+fun isAlpha(c) {
+    return len(c) == 1 and c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+}
+fun isAlphaNumeric(c) { return isDigit(c) or isAlpha(c); }
+
+fun parseIntStr(s) {
+    var n = 0;
+    var i = 0;
+    while (i < len(s)) {
+        n = n * 10 + DIGIT_MAP[s[i]];
+        i = i + 1;
+    }
+    return n;
+}
+
+fun parseNumber(s) {
+    var dotIdx = -1;
+    var i = 0;
+    while (i < len(s)) {
+        if (s[i] == ".") dotIdx = i;
+        i = i + 1;
+    }
+    if (dotIdx == -1) return parseIntStr(s);
+    var intPart = parseIntStr(s[0:dotIdx]);
+    var fracStr = s[dotIdx + 1 : len(s)];
+    if (len(fracStr) == 0) return intPart + 0.0;
+    var fracPart = parseIntStr(fracStr);
+    var denom = 1;
+    var j = 0;
+    while (j < len(fracStr)) {
+        denom = denom * 10;
+        j = j + 1;
+    }
+    return intPart + fracPart / denom;
+}
+
+fun isLoxNum(v) {
+    if (v == nil or v == true or v == false) return false;
+    if (str(v) == v) return false;
+    var c = str(v)[0];
+    return (c in "0123456789-") or c == "i" or c == "n";
+}
+
+fun isLoxStr(v)  { return str(v) == v; }
+
+fun loxTag(v) {
+    if (v == nil or v == true or v == false) return "primitive";
+    if (str(v) == v) return "string";
+    if (isLoxNum(v)) return "number";
+    return v.loxTag;
+}
+
+// ===========================================================================
+// AST ENUMS  (must stay at global scope — Lox++ restriction)
+// ===========================================================================
+
+enum Expr {
+    Literal(v)
+    Variable(id, name, line)
+    Assign(id, name, line, value)
+    Binary(op, left, right)
+    Unary(op, right)
+    Logical(op, left, right)
+    Call(callee, paren_line, args)
+    Get(object, name, line)
+    Set(object, name, line, value)
+    ThisExpr(id, line)
+    SuperExpr(id, method, line)
+    Grouping(expression)
+}
+
+// ClassDecl(name, super_id, super_name, methods) — super_id/super_name are nil
+// when there is no superclass.  methods is a list of FunDecl Stmt nodes.
+enum Stmt {
+    Block(statements)
+    ClassDecl(name, super_id, super_name, super_line, methods)
+    ExpressionStmt(expr)
+    FunDecl(name, line, params, body)
+    IfStmt(condition, then_branch, else_branch)
+    PrintStmt(expr)
+    ReturnStmt(line, value)
+    VarDecl(name, line, initializer)
+    WhileStmt(condition, body)
+}
+
+// ===========================================================================
+// ALL CLASSES + INTERPRETER LOGIC — wrapped in runInterpreter() to stay
+// under the 256-constant-per-chunk limit in Lox++.
+// ===========================================================================
+
+fun runInterpreter() {
+
+// ---------------------------------------------------------------------------
+// SCANNER
+// ---------------------------------------------------------------------------
+
+class Token {
+    init(type, lexeme, literal, line) {
+        this.type    = type;
+        this.lexeme  = lexeme;
+        this.literal = literal;
+        this.line    = line;
+    }
+}
+
+class Scanner {
+    init(source) {
+        this.source   = source;
+        this.tokens   = [];
+        this.start    = 0;
+        this.current  = 0;
+        this.line     = 1;
+        this.hadError = false;
+    }
+
+    isAtEnd()   { return this.current >= len(this.source); }
+
+    peek() {
+        if (this.isAtEnd()) return "";
+        return this.source[this.current];
+    }
+
+    peekNext() {
+        if (this.current + 1 >= len(this.source)) return "";
+        return this.source[this.current + 1];
+    }
+
+    advance() {
+        var c = this.source[this.current];
+        this.current = this.current + 1;
+        return c;
+    }
+
+    // Renamed from 'match' — that is a reserved keyword in Lox++.
+    tryMatch(expected) {
+        if (this.isAtEnd()) return false;
+        if (this.source[this.current] != expected) return false;
+        this.current = this.current + 1;
+        return true;
+    }
+
+    addToken(type, literal) {
+        var text = this.source[this.start : this.current];
+        this.tokens.append(Token(type, text, literal, this.line));
+    }
+
+    lexError(msg) {
+        print "LOXERR65 [line " + str(this.line) + "] Error: " + msg;
+        this.hadError = true;
+    }
+
+    scanString() {
+        var startLine = this.line;
+        while (this.peek() != "\"" and !this.isAtEnd()) {
+            if (this.peek() == "\n") this.line = this.line + 1;
+            this.advance();
+        }
+        if (this.isAtEnd()) {
+            this.line = startLine;
+            this.lexError("Unterminated string.");
+            return;
+        }
+        this.advance();
+        var value = this.source[this.start + 1 : this.current - 1];
+        this.addToken("STRING", value);
+    }
+
+    scanNumber() {
+        while (isDigit(this.peek())) this.advance();
+        if (this.peek() == "." and isDigit(this.peekNext())) {
+            this.advance();
+            while (isDigit(this.peek())) this.advance();
+        }
+        var text = this.source[this.start : this.current];
+        this.addToken("NUMBER", parseNumber(text));
+    }
+
+    scanIdentifier() {
+        while (isAlphaNumeric(this.peek())) this.advance();
+        var text = this.source[this.start : this.current];
+        var type = "IDENTIFIER";
+        if (LOX_KEYWORDS.has(text)) type = LOX_KEYWORDS[text];
+        this.addToken(type, nil);
+    }
+
+    scanToken() {
+        var c = this.advance();
+        if (c == "(") { this.addToken("LEFT_PAREN",  nil); return; }
+        if (c == ")") { this.addToken("RIGHT_PAREN", nil); return; }
+        if (c == "{") { this.addToken("LEFT_BRACE",  nil); return; }
+        if (c == "}") { this.addToken("RIGHT_BRACE", nil); return; }
+        if (c == ",") { this.addToken("COMMA",       nil); return; }
+        if (c == ".") { this.addToken("DOT",         nil); return; }
+        if (c == "-") { this.addToken("MINUS",       nil); return; }
+        if (c == "+") { this.addToken("PLUS",        nil); return; }
+        if (c == ";") { this.addToken("SEMICOLON",   nil); return; }
+        if (c == "*") { this.addToken("STAR",        nil); return; }
+        if (c == "!") {
+            if (this.tryMatch("=")) { this.addToken("BANG_EQUAL",    nil); }
+            else                    { this.addToken("BANG",          nil); }
+            return;
+        }
+        if (c == "=") {
+            if (this.tryMatch("=")) { this.addToken("EQUAL_EQUAL",   nil); }
+            else                    { this.addToken("EQUAL",         nil); }
+            return;
+        }
+        if (c == "<") {
+            if (this.tryMatch("=")) { this.addToken("LESS_EQUAL",    nil); }
+            else                    { this.addToken("LESS",          nil); }
+            return;
+        }
+        if (c == ">") {
+            if (this.tryMatch("=")) { this.addToken("GREATER_EQUAL", nil); }
+            else                    { this.addToken("GREATER",       nil); }
+            return;
+        }
+        if (c == "/") {
+            if (this.tryMatch("/")) {
+                while (this.peek() != "\n" and !this.isAtEnd()) this.advance();
+            } else {
+                this.addToken("SLASH", nil);
+            }
+            return;
+        }
+        if (c == " " or c == "\r" or c == "\t") return;
+        if (c == "\n") { this.line = this.line + 1; return; }
+        if (c == "\"") { this.scanString(); return; }
+        if (isDigit(c)) { this.scanNumber(); return; }
+        if (isAlpha(c)) { this.scanIdentifier(); return; }
+        this.lexError("Unexpected character.");
+    }
+
+    scanTokens() {
+        while (!this.isAtEnd()) {
+            this.start = this.current;
+            this.scanToken();
+        }
+        this.tokens.append(Token("EOF", "", nil, this.line));
+        return this.tokens;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PARSER
+// ---------------------------------------------------------------------------
+
+class Parser {
+    init(tokens) {
+        this.tokens     = tokens;
+        this.current    = 0;
+        this.nextId     = 0;
+        this.hadError   = false;
+        this.panicMode  = false;
+    }
+
+    allocId() {
+        var id = this.nextId;
+        this.nextId = this.nextId + 1;
+        return id;
+    }
+
+    isAtEnd()    { return this.peek().type == "EOF"; }
+    peek()       { return this.tokens[this.current]; }
+    previous()   { return this.tokens[this.current - 1]; }
+
+    advance() {
+        if (!this.isAtEnd()) this.current = this.current + 1;
+        return this.previous();
+    }
+
+    check(type) {
+        if (this.isAtEnd()) return false;
+        return this.peek().type == type;
+    }
+
+    matchT(type) {
+        if (this.check(type)) { this.advance(); return true; }
+        return false;
+    }
+
+    matchAny(types) {
+        var i = 0;
+        while (i < len(types)) {
+            if (this.check(types[i])) { this.advance(); return true; }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    expect(type, msg) {
+        if (this.check(type)) return this.advance();
+        this.parseError(this.peek(), msg);
+        return this.peek();
+    }
+
+    parseError(token, msg) {
+        if (this.panicMode) return;
+        this.panicMode = true;
+        this.softError(token, msg);
+    }
+
+    softError(token, msg) {
+        if (token.type == "EOF") {
+            print "LOXERR65 [line " + str(token.line) + "] Error at end: " + msg;
+        } else {
+            print "LOXERR65 [line " + str(token.line) + "] Error at '" + token.lexeme + "': " + msg;
+        }
+        this.hadError = true;
+    }
+
+    synchronize() {
+        this.panicMode = false;
+        this.advance();
+        while (!this.isAtEnd()) {
+            if (this.previous().type == "SEMICOLON") return;
+            var t = this.peek().type;
+            if (t == "CLASS" or t == "FUN" or t == "VAR" or t == "FOR" or
+                t == "IF"    or t == "WHILE" or t == "PRINT" or t == "RETURN") return;
+            this.advance();
+        }
+    }
+
+    parse() {
+        var stmts = [];
+        while (!this.isAtEnd()) {
+            var d = this.declaration();
+            if (d != nil) stmts.append(d);
+        }
+        return stmts;
+    }
+
+    declaration() {
+        var stmt = nil;
+        if (this.matchT("CLASS"))  stmt = this.classDeclaration();
+        else if (this.matchT("FUN"))    stmt = this.funDeclaration("function");
+        else if (this.matchT("VAR"))    stmt = this.varDeclaration();
+        else                            stmt = this.statement();
+        if (this.panicMode) { this.synchronize(); return nil; }
+        return stmt;
+    }
+
+    classDeclaration() {
+        var nameTok = this.expect("IDENTIFIER", "Expect class name.");
+        var cname   = nameTok.lexeme;
+        var superId = nil;
+        var superName = nil;
+        var superLine = 0;
+        if (this.matchT("LESS")) {
+            var superTok = this.expect("IDENTIFIER", "Expect superclass name.");
+            if (this.panicMode) return ClassDecl(cname, nil, nil, 0, []);
+            superId   = this.allocId();
+            superName = superTok.lexeme;
+            superLine = superTok.line;
+            if (superName == cname) {
+                this.softError(superTok, "A class can't inherit from itself.");
+            }
+        }
+        this.expect("LEFT_BRACE", "Expect '{' before class body.");
+        if (this.panicMode) return ClassDecl(cname, superId, superName, superLine, []);
+        var methods = [];
+        while (!this.check("RIGHT_BRACE") and !this.isAtEnd()) {
+            methods.append(this.funDeclaration("method"));
+            if (this.panicMode) break;
+        }
+        this.expect("RIGHT_BRACE", "Expect '}' after class body.");
+        return ClassDecl(cname, superId, superName, superLine, methods);
+    }
+
+    funDeclaration(kind) {
+        var nameTok = this.expect("IDENTIFIER", "Expect " + kind + " name.");
+        this.expect("LEFT_PAREN", "Expect '(' after " + kind + " name.");
+        var params = [];
+        if (!this.check("RIGHT_PAREN")) {
+            params.append(this.expect("IDENTIFIER", "Expect parameter name."));
+            while (this.matchT("COMMA")) {
+                if (len(params) >= 255) {
+                    this.softError(this.peek(), "Can't have more than 255 parameters.");
+                }
+                params.append(this.expect("IDENTIFIER", "Expect parameter name."));
+            }
+        }
+        this.expect("RIGHT_PAREN", "Expect ')' after parameters.");
+        if (this.panicMode) return FunDecl(nameTok.lexeme, nameTok.line, params, []);
+        this.expect("LEFT_BRACE", "Expect '{' before " + kind + " body.");
+        if (this.panicMode) return FunDecl(nameTok.lexeme, nameTok.line, params, []);
+        var body = this.blockContents();
+        return FunDecl(nameTok.lexeme, nameTok.line, params, body);
+    }
+
+    varDeclaration() {
+        var nameTok = this.expect("IDENTIFIER", "Expect variable name.");
+        var init = nil;
+        if (this.matchT("EQUAL")) init = this.expression();
+        this.expect("SEMICOLON", "Expect ';' after variable declaration.");
+        return VarDecl(nameTok.lexeme, nameTok.line, init);
+    }
+
+    statement() {
+        if (this.matchT("FOR"))    return this.forStatement();
+        if (this.matchT("IF"))     return this.ifStatement();
+        if (this.matchT("PRINT"))  return this.printStatement();
+        if (this.matchT("RETURN")) return this.returnStatement();
+        if (this.matchT("WHILE"))  return this.whileStatement();
+        if (this.matchT("LEFT_BRACE")) return Block(this.blockContents());
+        return this.expressionStatement();
+    }
+
+    blockContents() {
+        var stmts = [];
+        while (!this.check("RIGHT_BRACE") and !this.isAtEnd()) {
+            var d = this.declaration();
+            if (d != nil) stmts.append(d);
+        }
+        this.expect("RIGHT_BRACE", "Expect '}' after block.");
+        return stmts;
+    }
+
+    forStatement() {
+        this.expect("LEFT_PAREN", "Expect '(' after 'for'.");
+        var init = nil;
+        if (this.matchT("SEMICOLON")) {
+            init = nil;
+        } else if (this.matchT("VAR")) {
+            init = this.varDeclaration();
+        } else {
+            init = this.expressionStatement();
+        }
+        var cond = nil;
+        if (!this.check("SEMICOLON")) cond = this.expression();
+        this.expect("SEMICOLON", "Expect ';' after loop condition.");
+        var inc = nil;
+        if (!this.check("RIGHT_PAREN")) inc = this.expression();
+        this.expect("RIGHT_PAREN", "Expect ')' after for clauses.");
+        var body = this.statement();
+        if (inc != nil) {
+            body = Block([body, ExpressionStmt(inc)]);
+        }
+        if (cond == nil) cond = Literal(true);
+        body = WhileStmt(cond, body);
+        if (init != nil) {
+            body = Block([init, body]);
+        }
+        return body;
+    }
+
+    ifStatement() {
+        this.expect("LEFT_PAREN", "Expect '(' after 'if'.");
+        var cond = this.expression();
+        this.expect("RIGHT_PAREN", "Expect ')' after if condition.");
+        var thenB = this.statement();
+        var elseB = nil;
+        if (this.matchT("ELSE")) elseB = this.statement();
+        return IfStmt(cond, thenB, elseB);
+    }
+
+    printStatement() {
+        var val = this.expression();
+        this.expect("SEMICOLON", "Expect ';' after value.");
+        return PrintStmt(val);
+    }
+
+    returnStatement() {
+        var line = this.previous().line;
+        var val  = nil;
+        if (!this.check("SEMICOLON")) val = this.expression();
+        this.expect("SEMICOLON", "Expect ';' after return value.");
+        return ReturnStmt(line, val);
+    }
+
+    whileStatement() {
+        this.expect("LEFT_PAREN", "Expect '(' after 'while'.");
+        var cond = this.expression();
+        this.expect("RIGHT_PAREN", "Expect ')' after condition.");
+        var body = this.statement();
+        return WhileStmt(cond, body);
+    }
+
+    expressionStatement() {
+        var expr = this.expression();
+        if (this.panicMode) return nil;
+        this.expect("SEMICOLON", "Expect ';' after expression.");
+        return ExpressionStmt(expr);
+    }
+
+    expression() { return this.assignment(); }
+
+    assignment() {
+        var expr = this.logicOr();
+        if (this.matchT("EQUAL")) {
+            var equals = this.previous();
+            var val    = this.assignment();
+            return match expr {
+                case Variable{id, name, line}      => Assign(id, name, equals.line, val)
+                case Get{object, name, line}       => Set(object, name, line, val)
+                case Literal{v}              => { this.parseError(equals, "Invalid assignment target."); expr }
+                case Assign{id, name, line, value} => { this.parseError(equals, "Invalid assignment target."); expr }
+                case Binary{op, left, right} => { this.parseError(equals, "Invalid assignment target."); expr }
+                case Unary{op, right}        => { this.parseError(equals, "Invalid assignment target."); expr }
+                case Logical{op, left, right}=> { this.parseError(equals, "Invalid assignment target."); expr }
+                case Call{callee, paren_line, args} => { this.parseError(equals, "Invalid assignment target."); expr }
+                case Set{object, name, line, value}=> { this.parseError(equals, "Invalid assignment target."); expr }
+                case ThisExpr{id, line}      => { this.parseError(equals, "Invalid assignment target."); expr }
+                case SuperExpr{id, method, line}   => { this.parseError(equals, "Invalid assignment target."); expr }
+                case Grouping{expression}    => { this.parseError(equals, "Invalid assignment target."); expr }
+            };
+        }
+        return expr;
+    }
+
+    logicOr() {
+        var left = this.logicAnd();
+        while (this.matchT("OR")) {
+            var op    = this.previous().lexeme;
+            var right = this.logicAnd();
+            left = Logical(op, left, right);
+        }
+        return left;
+    }
+
+    logicAnd() {
+        var left = this.equality();
+        while (this.matchT("AND")) {
+            var op    = this.previous().lexeme;
+            var right = this.equality();
+            left = Logical(op, left, right);
+        }
+        return left;
+    }
+
+    equality() {
+        var left = this.comparison();
+        while (this.matchAny(["BANG_EQUAL", "EQUAL_EQUAL"])) {
+            var op    = this.previous();
+            var right = this.comparison();
+            left = Binary(op, left, right);
+        }
+        return left;
+    }
+
+    comparison() {
+        var left = this.term();
+        while (this.matchAny(["GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL"])) {
+            var op    = this.previous();
+            var right = this.term();
+            left = Binary(op, left, right);
+        }
+        return left;
+    }
+
+    term() {
+        var left = this.factor();
+        while (this.matchAny(["MINUS", "PLUS"])) {
+            var op    = this.previous();
+            var right = this.factor();
+            left = Binary(op, left, right);
+        }
+        return left;
+    }
+
+    factor() {
+        var left = this.unary();
+        while (this.matchAny(["SLASH", "STAR"])) {
+            var op    = this.previous();
+            var right = this.unary();
+            left = Binary(op, left, right);
+        }
+        return left;
+    }
+
+    unary() {
+        if (this.matchAny(["BANG", "MINUS"])) {
+            var op    = this.previous();
+            var right = this.unary();
+            return Unary(op, right);
+        }
+        return this.call();
+    }
+
+    call() {
+        var expr = this.primary();
+        while (true) {
+            if (this.matchT("LEFT_PAREN")) {
+                expr = this.finishCall(expr);
+            } else if (this.matchT("DOT")) {
+                var nameTok = this.expect("IDENTIFIER", "Expect property name after '.'.");
+                expr = Get(expr, nameTok.lexeme, nameTok.line);
+            } else {
+                break;
+            }
+        }
+        return expr;
+    }
+
+    finishCall(callee) {
+        var args = [];
+        if (!this.check("RIGHT_PAREN")) {
+            args.append(this.expression());
+            while (this.matchT("COMMA")) {
+                if (len(args) >= 255) {
+                    this.softError(this.peek(), "Can't have more than 255 arguments.");
+                }
+                args.append(this.expression());
+            }
+        }
+        var paren = this.expect("RIGHT_PAREN", "Expect ')' after arguments.");
+        return Call(callee, paren.line, args);
+    }
+
+    primary() {
+        if (this.matchT("FALSE"))  return Literal(false);
+        if (this.matchT("TRUE"))   return Literal(true);
+        if (this.matchT("NIL"))    return Literal(nil);
+        if (this.matchT("NUMBER")) return Literal(this.previous().literal);
+        if (this.matchT("STRING")) return Literal(this.previous().literal);
+
+        if (this.matchT("SUPER")) {
+            var superTok = this.previous();
+            this.expect("DOT", "Expect '.' after 'super'.");
+            var method = this.expect("IDENTIFIER", "Expect superclass method name.");
+            return SuperExpr(this.allocId(), method.lexeme, superTok.line);
+        }
+
+        if (this.matchT("THIS")) {
+            return ThisExpr(this.allocId(), this.previous().line);
+        }
+
+        if (this.matchT("IDENTIFIER")) {
+            var tok = this.previous();
+            return Variable(this.allocId(), tok.lexeme, tok.line);
+        }
+
+        if (this.matchT("LEFT_PAREN")) {
+            var expr = this.expression();
+            this.expect("RIGHT_PAREN", "Expect ')' after expression.");
+            return Grouping(expr);
+        }
+
+        this.parseError(this.peek(), "Expect expression.");
+        return Literal(nil);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RESOLVER
+// ---------------------------------------------------------------------------
+
+class Resolver {
+    init() {
+        this.scopes          = [];
+        this.locals          = {};
+        this.currentFunction = "NONE";
+        this.currentClass    = "NONE";
+        this.hadError        = false;
+    }
+
+    resError(name, line, msg) {
+        print "LOXERR65 [line " + str(line) + "] Error at '" + name + "': " + msg;
+        this.hadError = true;
+    }
+
+    beginScope() { this.scopes.append({}); }
+    endScope()   { this.scopes.pop(); }
+
+    declare(name, line) {
+        if (len(this.scopes) == 0) return;
+        var scope = this.scopes[len(this.scopes) - 1];
+        if (scope.has(name)) {
+            this.resError(name, line, "Already a variable with this name in this scope.");
+        }
+        scope[name] = false;
+    }
+
+    define(name) {
+        if (len(this.scopes) == 0) return;
+        // Use a local variable — chained index assignment (this.scopes[...][name])
+        // is not supported in Lox++.
+        var s = this.scopes[len(this.scopes) - 1];
+        s[name] = true;
+    }
+
+    resolveLocal(id, name) {
+        var i = len(this.scopes) - 1;
+        while (i >= 0) {
+            if (this.scopes[i].has(name)) {
+                this.locals[id] = len(this.scopes) - 1 - i;
+                return;
+            }
+            i = i - 1;
+        }
+    }
+
+    resolve(stmts) { this.resolveStmts(stmts); }
+
+    resolveStmts(stmts) {
+        var i = 0;
+        while (i < len(stmts)) {
+            this.resolveStmt(stmts[i]);
+            i = i + 1;
+        }
+    }
+
+    resolveStmt(stmt) {
+        match stmt {
+            case Block{statements}                               => this.resolveBlock(statements)
+            case ClassDecl{name, super_id, super_name, super_line, methods} => this.resolveClass(name, super_id, super_name, methods)
+            case ExpressionStmt{expr}                            => this.resolveExpr(expr)
+            case FunDecl{name, line, params, body}               => this.resolveFunDecl(name, line, params, body)
+            case IfStmt{condition, then_branch, else_branch}     => this.resolveIf(condition, then_branch, else_branch)
+            case PrintStmt{expr}                                 => this.resolveExpr(expr)
+            case ReturnStmt{line, value}                         => this.resolveReturn(line, value)
+            case VarDecl{name, line, initializer}                => this.resolveVarDecl(name, line, initializer)
+            case WhileStmt{condition, body}                      => { this.resolveExpr(condition); this.resolveStmt(body) }
+        };
+    }
+
+    resolveBlock(stmts) {
+        this.beginScope();
+        this.resolveStmts(stmts);
+        this.endScope();
+    }
+
+    resolveVarDecl(name, line, initializer) {
+        this.declare(name, line);
+        if (initializer != nil) this.resolveExpr(initializer);
+        this.define(name);
+    }
+
+    resolveFunDecl(name, line, params, body) {
+        this.declare(name, line);
+        this.define(name);
+        this.resolveFunction(params, body, "FUNCTION");
+    }
+
+    resolveMethodDecl(name, params, body) {
+        var kind = "METHOD";
+        if (name == "init") kind = "INITIALIZER";
+        this.resolveFunction(params, body, kind);
+    }
+
+    // Wrapper called per-iteration so the match is compiled inside a function
+    // body rather than inline in the while loop in resolveClass.
+    resolveMethodItem(method) {
+        match method {
+            case FunDecl{name, line, params, body} => this.resolveMethodDecl(name, params, body)
+            case _                                 => nil
+        };
+    }
+
+    resolveFunction(params, body, kind) {
+        var enclosing = this.currentFunction;
+        this.currentFunction = kind;
+        this.beginScope();
+        var i = 0;
+        while (i < len(params)) {
+            this.declare(params[i].lexeme, params[i].line);
+            this.define(params[i].lexeme);
+            i = i + 1;
+        }
+        this.resolveStmts(body);
+        this.endScope();
+        this.currentFunction = enclosing;
+    }
+
+    resolveClass(name, super_id, super_name, methods) {
+        var enclosingClass = this.currentClass;
+        this.currentClass = "CLASS";
+        this.declare(name, 0);
+        this.define(name);
+
+        if (super_id != nil) {
+            this.currentClass = "SUBCLASS";
+            this.resolveLocal(super_id, super_name);
+            this.beginScope();
+            var superScope = this.scopes[len(this.scopes) - 1];
+            superScope["super"] = true;
+        }
+
+        this.beginScope();
+        var thisScope = this.scopes[len(this.scopes) - 1];
+        thisScope["this"] = true;
+
+        var i = 0;
+        while (i < len(methods)) {
+            this.resolveMethodItem(methods[i]);
+            i = i + 1;
+        }
+
+        this.endScope();
+        if (super_id != nil) this.endScope();
+        this.currentClass = enclosingClass;
+    }
+
+    resolveIf(cond, thenB, elseB) {
+        this.resolveExpr(cond);
+        this.resolveStmt(thenB);
+        if (elseB != nil) this.resolveStmt(elseB);
+    }
+
+    resolveReturn(line, value) {
+        if (this.currentFunction == "NONE") {
+            this.resError("return", line, "Can't return from top-level code.");
+        }
+        if (value != nil) {
+            if (this.currentFunction == "INITIALIZER") {
+                this.resError("return", line, "Can't return a value from an initializer.");
+            }
+            this.resolveExpr(value);
+        }
+    }
+
+    resolveExpr(expr) {
+        match expr {
+            case Literal{v}                    => nil
+            case Variable{id, name, line}      => this.resolveVariable(id, name, line)
+            case Assign{id, name, line, value} => { this.resolveExpr(value); this.resolveLocal(id, name) }
+            case Binary{op, left, right}       => { this.resolveExpr(left);  this.resolveExpr(right) }
+            case Unary{op, right}              => this.resolveExpr(right)
+            case Logical{op, left, right}      => { this.resolveExpr(left);  this.resolveExpr(right) }
+            case Call{callee, paren_line, args} => this.resolveCall(callee, args)
+            case Get{object, name, line}       => this.resolveExpr(object)
+            case Set{object, name, line, value} => { this.resolveExpr(object); this.resolveExpr(value) }
+            case ThisExpr{id, line}            => this.resolveThis(id, line)
+            case SuperExpr{id, method, line}   => this.resolveSuper(id, line)
+            case Grouping{expression}          => this.resolveExpr(expression)
+        };
+    }
+
+    resolveVariable(id, name, line) {
+        if (len(this.scopes) > 0) {
+            var scope = this.scopes[len(this.scopes) - 1];
+            if (scope.has(name) and !scope[name]) {
+                this.resError(name, line, "Can't read local variable in its own initializer.");
+            }
+        }
+        this.resolveLocal(id, name);
+    }
+
+    resolveCall(callee, args) {
+        this.resolveExpr(callee);
+        var i = 0;
+        while (i < len(args)) {
+            this.resolveExpr(args[i]);
+            i = i + 1;
+        }
+    }
+
+    resolveThis(id, line) {
+        if (this.currentClass == "NONE") {
+            this.resError("this", line, "Can't use 'this' outside of a class.");
+            return;
+        }
+        this.resolveLocal(id, "this");
+    }
+
+    resolveSuper(id, line) {
+        if (this.currentClass == "NONE") {
+            this.resError("super", line, "Can't use 'super' outside of a class.");
+        } else if (this.currentClass != "SUBCLASS") {
+            this.resError("super", line, "Can't use 'super' in a class with no superclass.");
+        }
+        this.resolveLocal(id, "super");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ENVIRONMENT
+// ---------------------------------------------------------------------------
+
+class Environment {
+    init(enclosing) {
+        this.enclosing = enclosing;
+        this.values    = {};
+    }
+
+    define(name, value) {
+        this.values[name] = value;
+    }
+
+    ancestor(distance) {
+        var env = this;
+        var i = 0;
+        while (i < distance) {
+            env = env.enclosing;
+            i = i + 1;
+        }
+        return env;
+    }
+
+    getAt(distance, name) {
+        return this.ancestor(distance).values[name];
+    }
+
+    assignAt(distance, name, value) {
+        this.ancestor(distance).values[name] = value;
+    }
+
+    envGet(name, line) {
+        if (this.values.has(name)) return this.values[name];
+        if (this.enclosing != nil)  return this.enclosing.envGet(name, line);
+        return nil;
+    }
+
+    envHas(name) {
+        if (this.values.has(name)) return true;
+        if (this.enclosing != nil)  return this.enclosing.envHas(name);
+        return false;
+    }
+
+    envAssign(name, value) {
+        if (this.values.has(name)) { this.values[name] = value; return true; }
+        if (this.enclosing != nil)  return this.enclosing.envAssign(name, value);
+        return false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RUNTIME OBJECTS
+// ---------------------------------------------------------------------------
+
+class LoxFunction {
+    init(name, params, body, closure, isInitializer) {
+        this.name          = name;
+        this.params        = params;
+        this.body          = body;
+        this.closure       = closure;
+        this.isInitializer = isInitializer;
+        this.loxTag        = "function";
+    }
+
+    arity() { return len(this.params); }
+
+    bind(instance) {
+        var env = Environment(this.closure);
+        env.define("this", instance);
+        return LoxFunction(this.name, this.params, this.body, env, this.isInitializer);
+    }
+
+    call(interp, args) {
+        var callEnv = Environment(this.closure);
+        var i = 0;
+        while (i < len(this.params)) {
+            callEnv.define(this.params[i].lexeme, args[i]);
+            i = i + 1;
+        }
+        interp.execBlock(this.body, callEnv);
+        var returnVal = nil;
+        if (interp.returnFlag) {
+            returnVal = interp.returnValue;
+            interp.returnFlag  = false;
+            interp.returnValue = nil;
+        }
+        if (this.isInitializer) return this.closure.getAt(0, "this");
+        return returnVal;
+    }
+
+    toString() { return "<fn " + this.name + ">"; }
+}
+
+// LoxInstance must come before LoxClass — LoxClass.call() references LoxInstance
+// by name, so it must be defined first for single-pass upvalue capture.
+class LoxInstance {
+    init(klass) {
+        this.klass  = klass;
+        this.fields = {};
+        this.loxTag = "instance";
+    }
+
+    instGet(name, line) {
+        if (this.fields.has(name)) return this.fields[name];
+        var method = this.klass.findMethod(name);
+        if (method != nil) return method.bind(this);
+        return nil;
+    }
+
+    instSet(name, value) {
+        this.fields[name] = value;
+    }
+
+    toString() { return this.klass.name + " instance"; }
+}
+
+class LoxClass {
+    init(name, superclass, methods) {
+        this.name       = name;
+        this.superclass = superclass;
+        this.methods    = methods;
+        this.loxTag     = "class";
+    }
+
+    arity() {
+        var initFn = this.findMethod("init");
+        if (initFn == nil) return 0;
+        return initFn.arity();
+    }
+
+    findMethod(name) {
+        if (this.methods.has(name)) return this.methods[name];
+        if (this.superclass != nil)  return this.superclass.findMethod(name);
+        return nil;
+    }
+
+    call(interp, args) {
+        var instance = LoxInstance(this);
+        var initFn = this.findMethod("init");
+        if (initFn != nil) initFn.bind(instance).call(interp, args);
+        return instance;
+    }
+
+    toString() { return this.name; }
+}
+
+class LoxNative {
+    init(name) {
+        this.name   = name;
+        this.loxTag = "native";
+    }
+    arity() { return 0; }
+    call(interp, args) {
+        if (this.name == "clock") return clock();
+        return nil;
+    }
+    toString() { return "<native fn>"; }
+}
+
+// ---------------------------------------------------------------------------
+// INTERPRETER
+// ---------------------------------------------------------------------------
+
+class Interpreter {
+    init(locals) {
+        this.locals      = locals;
+        this.globals     = Environment(nil);
+        this.returnFlag  = false;
+        this.returnValue = nil;
+        this.errorFlag   = false;
+        this.globals.define("clock", LoxNative("clock"));
+    }
+
+    setError(msg, line) {
+        if (!this.errorFlag) {
+            print "LOXERR70 " + msg;
+            if (line > 0) {
+                print "LOXERR70 [line " + str(line) + "]";
+            }
+            this.errorFlag = true;
+        }
+    }
+
+    interpret(stmts) {
+        var i = 0;
+        while (i < len(stmts)) {
+            this.execStmt(stmts[i], this.globals);
+            if (this.errorFlag or this.returnFlag) return;
+            i = i + 1;
+        }
+    }
+
+    execStmt(stmt, env) {
+        match stmt {
+            case Block{statements}                               => this.execBlock(statements, Environment(env))
+            case ClassDecl{name, super_id, super_name, super_line, methods} => this.execClass(name, super_id, super_name, super_line, methods, env)
+            case ExpressionStmt{expr}                            => { this.evalExpr(expr, env) }
+            case FunDecl{name, line, params, body}               => this.execFun(name, params, body, env)
+            case IfStmt{condition, then_branch, else_branch}     => this.execIf(condition, then_branch, else_branch, env)
+            case PrintStmt{expr}                                 => this.execPrint(expr, env)
+            case ReturnStmt{line, value}                         => this.execReturn(line, value, env)
+            case VarDecl{name, line, initializer}                => this.execVar(name, initializer, env)
+            case WhileStmt{condition, body}                      => this.execWhile(condition, body, env)
+        };
+    }
+
+    execBlock(stmts, env) {
+        var i = 0;
+        while (i < len(stmts)) {
+            this.execStmt(stmts[i], env);
+            if (this.errorFlag or this.returnFlag) return;
+            i = i + 1;
+        }
+    }
+
+    execFun(name, params, body, env) {
+        var fn = LoxFunction(name, params, body, env, false);
+        env.define(name, fn);
+    }
+
+    // Wrapper called per-iteration so the match is compiled inside a function
+    // body rather than inline in the while loop in execClass.
+    processMethodDecl(method, methodMap, methodEnv) {
+        match method {
+            case FunDecl{name, line, params, body} => {
+                var isInit = name == "init";
+                methodMap[name] = LoxFunction(name, params, body, methodEnv, isInit)
+            }
+            case _ => nil
+        };
+    }
+
+    execClass(name, super_id, super_name, super_line, methods, env) {
+        var superclass = nil;
+        if (super_id != nil) {
+            superclass = this.lookupVariable(super_id, super_name, super_line, env);
+            if (this.errorFlag) return;
+            if (loxTag(superclass) != "class") {
+                this.setError("Superclass must be a class.", super_line);
+                return;
+            }
+        }
+        env.define(name, nil);
+        var methodEnv = env;
+        if (superclass != nil) {
+            methodEnv = Environment(env);
+            methodEnv.define("super", superclass);
+        }
+        var methodMap = {};
+        var i = 0;
+        while (i < len(methods)) {
+            this.processMethodDecl(methods[i], methodMap, methodEnv);
+            i = i + 1;
+        }
+        var klass = LoxClass(name, superclass, methodMap);
+        env.envAssign(name, klass);
+    }
+
+    execIf(cond, thenB, elseB, env) {
+        var condVal = this.evalExpr(cond, env);
+        if (this.errorFlag) return;
+        if (this.isTruthy(condVal)) {
+            this.execStmt(thenB, env);
+        } else if (elseB != nil) {
+            this.execStmt(elseB, env);
+        }
+    }
+
+    execPrint(expr, env) {
+        var val = this.evalExpr(expr, env);
+        if (this.errorFlag) return;
+        print this.stringify(val);
+    }
+
+    execReturn(line, valueExpr, env) {
+        var val = nil;
+        if (valueExpr != nil) {
+            val = this.evalExpr(valueExpr, env);
+            if (this.errorFlag) return;
+        }
+        this.returnFlag  = true;
+        this.returnValue = val;
+    }
+
+    execVar(name, initializer, env) {
+        var val = nil;
+        if (initializer != nil) {
+            val = this.evalExpr(initializer, env);
+            if (this.errorFlag) return;
+        }
+        env.define(name, val);
+    }
+
+    execWhile(cond, body, env) {
+        var condVal = this.evalExpr(cond, env);
+        if (this.errorFlag) return;
+        while (this.isTruthy(condVal)) {
+            this.execStmt(body, env);
+            if (this.errorFlag or this.returnFlag) return;
+            condVal = this.evalExpr(cond, env);
+            if (this.errorFlag) return;
+        }
+    }
+
+    evalExpr(expr, env) {
+        return match expr {
+            case Literal{v}                     => v
+            case Grouping{expression}           => this.evalExpr(expression, env)
+            case Variable{id, name, line}       => this.evalVariable(id, name, line, env)
+            case Assign{id, name, line, value}  => this.evalAssign(id, name, line, value, env)
+            case Unary{op, right}               => this.evalUnary(op, right, env)
+            case Binary{op, left, right}        => this.evalBinary(op, left, right, env)
+            case Logical{op, left, right}       => this.evalLogical(op, left, right, env)
+            case Call{callee, paren_line, args} => this.evalCall(callee, paren_line, args, env)
+            case Get{object, name, line}        => this.evalGet(object, name, line, env)
+            case Set{object, name, line, value} => this.evalSet(object, name, line, value, env)
+            case ThisExpr{id, line}             => this.lookupVariable(id, "this", 0, env)
+            case SuperExpr{id, method, line}    => this.evalSuper(id, method, line, env)
+        };
+    }
+
+    lookupVariable(id, name, line, env) {
+        if (this.locals.has(id)) {
+            return env.getAt(this.locals[id], name);
+        }
+        if (!this.globals.envHas(name)) {
+            this.setError("Undefined variable '" + name + "'.", line);
+            return nil;
+        }
+        return this.globals.envGet(name, 0);
+    }
+
+    evalVariable(id, name, line, env) {
+        return this.lookupVariable(id, name, line, env);
+    }
+
+    evalAssign(id, name, line, valueExpr, env) {
+        var val = this.evalExpr(valueExpr, env);
+        if (this.errorFlag) return nil;
+        if (this.locals.has(id)) {
+            env.assignAt(this.locals[id], name, val);
+        } else {
+            if (!this.globals.envAssign(name, val)) {
+                this.setError("Undefined variable '" + name + "'.", line);
+                return nil;
+            }
+        }
+        return val;
+    }
+
+    evalUnary(op, rightExpr, env) {
+        var right = this.evalExpr(rightExpr, env);
+        if (this.errorFlag) return nil;
+        if (op.lexeme == "!") return !this.isTruthy(right);
+        if (op.lexeme == "-") {
+            if (!isLoxNum(right)) {
+                this.setError("Operand must be a number.", op.line);
+                return nil;
+            }
+            return -right;
+        }
+        return nil;
+    }
+
+    evalBinary(op, leftExpr, rightExpr, env) {
+        var left = this.evalExpr(leftExpr, env);
+        if (this.errorFlag) return nil;
+        var right = this.evalExpr(rightExpr, env);
+        if (this.errorFlag) return nil;
+        var opL = op.lexeme;
+        var opLine = op.line;
+        if (opL == "+") {
+            if (isLoxNum(left) and isLoxNum(right)) return left + right;
+            if (isLoxStr(left) and isLoxStr(right)) return left + right;
+            this.setError("Operands must be two numbers or two strings.", opLine);
+            return nil;
+        }
+        if (opL == "-") {
+            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("Operands must be numbers.", opLine); return nil; }
+            return left - right;
+        }
+        if (opL == "*") {
+            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("Operands must be numbers.", opLine); return nil; }
+            return left * right;
+        }
+        if (opL == "/") {
+            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("Operands must be numbers.", opLine); return nil; }
+            return left / right;
+        }
+        if (opL == "<")  {
+            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("Operands must be numbers.", opLine); return nil; }
+            return left < right;
+        }
+        if (opL == "<=") {
+            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("Operands must be numbers.", opLine); return nil; }
+            return left <= right;
+        }
+        if (opL == ">")  {
+            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("Operands must be numbers.", opLine); return nil; }
+            return left > right;
+        }
+        if (opL == ">=") {
+            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("Operands must be numbers.", opLine); return nil; }
+            return left >= right;
+        }
+        if (opL == "==") return left == right;
+        if (opL == "!=") return left != right;
+        return nil;
+    }
+
+    evalLogical(op, leftExpr, rightExpr, env) {
+        var left = this.evalExpr(leftExpr, env);
+        if (this.errorFlag) return nil;
+        if (op == "or") {
+            if (this.isTruthy(left)) return left;
+        } else {
+            if (!this.isTruthy(left)) return left;
+        }
+        return this.evalExpr(rightExpr, env);
+    }
+
+    evalCall(calleeExpr, paren_line, argsExprs, env) {
+        var callee = this.evalExpr(calleeExpr, env);
+        if (this.errorFlag) return nil;
+        if (callee == nil or callee == true or callee == false) {
+            this.setError("Can only call functions and classes.", paren_line);
+            return nil;
+        }
+        if (isLoxStr(callee) or isLoxNum(callee)) {
+            this.setError("Can only call functions and classes.", paren_line);
+            return nil;
+        }
+        var args = [];
+        var i = 0;
+        while (i < len(argsExprs)) {
+            var arg = this.evalExpr(argsExprs[i], env);
+            if (this.errorFlag) return nil;
+            args.append(arg);
+            i = i + 1;
+        }
+        var tag = callee.loxTag;
+        if (tag != "function" and tag != "class" and tag != "native") {
+            this.setError("Can only call functions and classes.", paren_line);
+            return nil;
+        }
+        if (len(args) != callee.arity()) {
+            this.setError("Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".", paren_line);
+            return nil;
+        }
+        return callee.call(this, args);
+    }
+
+    evalGet(objectExpr, name, line, env) {
+        var object = this.evalExpr(objectExpr, env);
+        if (this.errorFlag) return nil;
+        if (loxTag(object) != "instance") {
+            this.setError("Only instances have properties.", line);
+            return nil;
+        }
+        var val = object.instGet(name, 0);
+        if (val == nil and !object.fields.has(name) and object.klass.findMethod(name) == nil) {
+            this.setError("Undefined property '" + name + "'.", line);
+            return nil;
+        }
+        return val;
+    }
+
+    evalSet(objectExpr, name, line, valueExpr, env) {
+        var object = this.evalExpr(objectExpr, env);
+        if (this.errorFlag) return nil;
+        if (loxTag(object) != "instance") {
+            this.setError("Only instances have fields.", line);
+            return nil;
+        }
+        var val = this.evalExpr(valueExpr, env);
+        if (this.errorFlag) return nil;
+        object.instSet(name, val);
+        return val;
+    }
+
+    evalSuper(id, method, line, env) {
+        var dist       = this.locals[id];
+        var superclass = env.getAt(dist, "super");
+        var object     = env.getAt(dist - 1, "this");
+        var fn         = superclass.findMethod(method);
+        if (fn == nil) {
+            this.setError("Undefined property '" + method + "'.", line);
+            return nil;
+        }
+        return fn.bind(object);
+    }
+
+    isTruthy(v) {
+        if (v == nil)   return false;
+        if (v == false) return false;
+        return true;
+    }
+
+    stringify(val) {
+        if (val == nil)   return "nil";
+        if (val == true)  return "true";
+        if (val == false) return "false";
+        if (isLoxStr(val)) return val;
+        if (isLoxNum(val)) return str(val);
+        return val.toString();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Entry point — reads Lox source from stdin and runs it.
+// ---------------------------------------------------------------------------
+
+    var source = "";
+    var ln = input();
+    while (ln != nil) {
+        source = source + ln + "\n";
+        ln = input();
+    }
+    // Remove the trailing newline we added to the last line — avoids off-by-one
+    // in line numbers for files that don't end with a newline.
+    if (len(source) > 0 and source[len(source) - 1] == "\n") {
+        source = source[0 : len(source) - 1];
+    }
+
+    var scanner = Scanner(source);
+    var tokens  = scanner.scanTokens();
+
+    var parser = Parser(tokens);
+    var stmts  = parser.parse();
+    if (scanner.hadError or parser.hadError) return;
+
+    var resolver = Resolver();
+    resolver.resolve(stmts);
+    if (resolver.hadError) return;
+
+    var interpreter = Interpreter(resolver.locals);
+    interpreter.interpret(stmts);
+}
+
+runInterpreter();
