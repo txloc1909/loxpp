@@ -17,7 +17,12 @@ static constexpr int UINT8_COUNT = 256;
 
 ObjFunction* compile(const std::string& source, MemoryManager* mm);
 
-enum class FunctionType : std::uint8_t { SCRIPT, FUNCTION, METHOD, INITIALIZER };
+enum class FunctionType : std::uint8_t {
+    SCRIPT,
+    FUNCTION,
+    METHOD,
+    INITIALIZER
+};
 
 struct ClassCompiler {
     ClassCompiler* enclosing{nullptr};

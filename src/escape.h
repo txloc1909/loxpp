@@ -21,7 +21,7 @@ constexpr std::optional<char> decodeEscape(char code) {
     for (auto& e : kEscapeSequences) {
         if (e.code == code) {
             return e.value;
-}
-}
+        }
+    }
     return std::nullopt;
 }

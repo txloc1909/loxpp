@@ -35,15 +35,15 @@ Token Scanner::scanOneToken() {
 
     if (isAtEnd()) {
         return makeToken(TokenType::EOF_);
-}
+    }
 
     char c = advance();
     if (isAlpha(c)) {
         return consumeIdentifier();
-}
+    }
     if (isDigit(c)) {
         return consumeNumber();
-}
+    }
     switch (c) {
     case '(':
         return makeToken(TokenType::LEFT_PAREN);
@@ -64,7 +64,7 @@ Token Scanner::scanOneToken() {
     case '.':
         if (match('.') && match('.')) {
             return makeToken(TokenType::ELIPSIS);
-}
+        }
         return makeToken(TokenType::DOT);
     case '-':
         return makeToken(TokenType::MINUS);
@@ -83,7 +83,7 @@ Token Scanner::scanOneToken() {
     case '=':
         if (match('>')) {
             return makeToken(TokenType::FAT_ARROW);
-}
+        }
         return makeToken(match('=') ? TokenType::EQUAL_EQUAL
                                     : TokenType::EQUAL);
     case '>':
@@ -213,7 +213,7 @@ TokenType Scanner::identifierType() {
 Token Scanner::consumeNumber() {
     while (isDigit(peek())) {
         advance();
-}
+    }
 
     // Look for a fractional part.
     if (peek() == '.' && isDigit(peekNext())) {
@@ -221,7 +221,7 @@ Token Scanner::consumeNumber() {
         advance();
         while (isDigit(peek())) {
             advance();
-}
+        }
     }
     return makeToken(TokenType::NUMBER);
 }
@@ -230,12 +230,12 @@ Token Scanner::consumeString() {
     while (peek() != '"' && !isAtEnd()) {
         if (peek() == '\n') {
             m_line++;
-}
+        }
         if (peek() == '\\') {
             advance(); // consume '\'
             if (isAtEnd()) {
                 break;
-}
+            }
             if (!decodeEscape(peek())) {
                 advance(); // consume the bad char before reporting
                 return createErrorToken("Unknown escape sequence.");
@@ -246,7 +246,7 @@ Token Scanner::consumeString() {
 
     if (isAtEnd()) {
         return createErrorToken("Unterminated string.");
-}
+    }
 
     // The closing quote.
     advance();
@@ -258,7 +258,7 @@ Token Scanner::consumeString() {
 Token Scanner::consumeIdentifier() {
     while (isAlphaNumeric(peek())) {
         advance();
-}
+    }
     return makeToken(identifierType());
 }
 
@@ -279,7 +279,7 @@ void Scanner::skipWhitespaceAndComments() {
             if (peekNext() == '/') {
                 while (peek() != '\n' && !isAtEnd()) {
                     advance();
-}
+                }
             } else {
                 return;
             }
@@ -301,10 +301,10 @@ char Scanner::peekNext() const { return *(m_current + 1); }
 bool Scanner::match(char expected) {
     if (isAtEnd()) {
         return false;
-}
+    }
     if (*m_current != expected) {
         return false;
-}
+    }
     m_current++;
     return true;
 }

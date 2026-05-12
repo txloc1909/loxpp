@@ -28,7 +28,7 @@ static char* keyword_generator(const char* text, int state) {
         const char* kw = keywords[list_index++];
         if (std::strncmp(kw, text, text_len) == 0) {
             return strdup(kw);
-}
+        }
     }
     return nullptr;
 }
@@ -69,7 +69,7 @@ static void repl(VM& vm) {
         free(raw);
         if (!line.empty()) {
             add_history(line.c_str());
-}
+        }
         vm.interpret(line);
     }
 
@@ -104,10 +104,10 @@ static void runFile(VM& vm, const std::string& path) {
 
     if (result == InterpretResult::COMPILE_ERROR) {
         std::exit(65);
-}
+    }
     if (result == InterpretResult::RUNTIME_ERROR) {
         std::exit(70);
-}
+    }
 }
 
 int main(int argc, const char* argv[]) {

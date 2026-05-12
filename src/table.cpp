@@ -15,7 +15,7 @@ bool Table::get(ObjString* key, Value& out) const {
         m_map.find(key->hash, [key](const Entry& s) { return s.key == key; });
     if (!e) {
         return false;
-}
+    }
     out = e->value;
     return true;
 }
@@ -33,14 +33,14 @@ ObjString* Table::findString(const char* chars, int length,
                              uint32_t hash) const {
     if (m_map.count() == 0) {
         return nullptr;
-}
+    }
     int cap = m_map.capacity();
     uint32_t index = hash % static_cast<uint32_t>(cap);
     for (;;) {
         const Entry* entry = m_map.entryAt(index);
         if (TablePolicy::isEmpty(*entry)) {
             return nullptr;
-}
+        }
         if (!TablePolicy::isTombstone(*entry) &&
             static_cast<int>(entry->key->chars.size()) == length &&
             entry->key->hash == hash &&

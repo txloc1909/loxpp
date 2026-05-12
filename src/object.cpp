@@ -16,7 +16,7 @@ std::string stringifyObj(Obj* obj) {
         auto* fn = asObjFunction(obj);
         if (fn->name == nullptr) {
             return "<script>";
-}
+        }
         return "<fn " +
                std::string(fn->name->chars.data(), fn->name->chars.size()) +
                ">";
@@ -27,7 +27,7 @@ std::string stringifyObj(Obj* obj) {
         auto* fn = static_cast<ObjClosure*>(obj)->function;
         if (fn->name == nullptr) {
             return "<script>";
-}
+        }
         return "<fn " +
                std::string(fn->name->chars.data(), fn->name->chars.size()) +
                ">";
@@ -62,7 +62,7 @@ std::string stringifyObj(Obj* obj) {
         for (size_t i = 0; i < list->elements.size(); i++) {
             if (i > 0) {
                 result += ", ";
-}
+            }
             result += stringify(list->elements[i]);
         }
         result += "]";
@@ -75,7 +75,7 @@ std::string stringifyObj(Obj* obj) {
         map->map.forEach([&](const MapEntry& e) {
             if (!first) {
                 result += ", ";
-}
+            }
             first = false;
             result += stringify(e.key);
             result += ": ";
@@ -132,7 +132,7 @@ bool ObjMap::mapGet(const Value& key, Value& out) const {
         hashValue(key), [&key](const MapEntry& s) { return s.key == key; });
     if (!e) {
         return false;
-}
+    }
     out = e->value;
     return true;
 }

@@ -29,7 +29,7 @@ class MemoryManager : public VmAllocBase {
 #else
         if (bytesAllocated > m_nextGC) {
             collectGarbage();
-}
+        }
 #endif
         bytesAllocated += sizeof(T);
         T* p = new T(std::forward<Args>(args)...);

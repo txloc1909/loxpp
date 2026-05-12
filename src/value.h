@@ -19,7 +19,7 @@ template <typename T>
 T as(const Value& value) {
     if (!is<T>(value)) {
         throw std::bad_variant_access();
-}
+    }
     return std::get<T>(value);
 }
 

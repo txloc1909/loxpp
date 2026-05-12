@@ -37,7 +37,9 @@ class VM {
     [[nodiscard]] Value lastResult() const;
 
     // Runtime state inspection (for testing and debugging).
-    [[nodiscard]] int stackDepth() const { return static_cast<int>(stackTop - stack); }
+    [[nodiscard]] int stackDepth() const {
+        return static_cast<int>(stackTop - stack);
+    }
     [[nodiscard]] int frameCount() const { return m_frameCount; }
     [[nodiscard]] std::optional<Value> getGlobal(const std::string& name) const;
 
