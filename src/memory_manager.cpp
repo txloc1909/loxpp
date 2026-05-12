@@ -52,8 +52,9 @@ void* MemoryManager::rawAlloc(std::size_t bytes) {
 #ifdef LOXPP_STRESS_GC
     collectGarbage(); // fire on every allocation to surface rooting bugs
 #else
-    if (bytesAllocated > m_nextGC)
+    if (bytesAllocated > m_nextGC) {
         collectGarbage();
+}
 #endif
     return ::operator new(bytes);
 }
@@ -67,8 +68,9 @@ ObjString* MemoryManager::makeString(std::string_view sv) {
     uint32_t hash = hashString(sv);
     auto* interned =
         m_strings.findString(sv.data(), static_cast<int>(sv.size()), hash);
-    if (interned != nullptr)
+    if (interned != nullptr) {
         return interned;
+}
 
     auto* s = create<ObjString>(sv, VmAllocator<char>{this});
     pushTempRoot(s); // protect s across m_strings.set's potential rawAlloc → GC
@@ -81,8 +83,9 @@ ObjString* MemoryManager::makeString(std::string&& sv) {
     uint32_t hash = hashString(sv);
     auto* interned =
         m_strings.findString(sv.data(), static_cast<int>(sv.size()), hash);
-    if (interned != nullptr)
+    if (interned != nullptr) {
         return interned;
+}
 
     auto* s = create<ObjString>(std::string_view{sv}, VmAllocator<char>{this});
     pushTempRoot(s); // protect s across m_strings.set's potential rawAlloc → GC
@@ -114,8 +117,9 @@ void MemoryManager::setMarkRootsCallback(std::function<void()> cb) {
 void MemoryManager::setCurrentCompiler(Compiler* c) { m_currentCompiler = c; }
 
 void MemoryManager::markObject(Obj* obj) {
-    if (obj == nullptr || obj->marked)
+    if (obj == nullptr || obj->marked) {
         return;
+}
     obj->marked = true;
     m_grayStack.push_back(obj);
 #ifdef LOXPP_DEBUG_LOG_GC
@@ -125,8 +129,9 @@ void MemoryManager::markObject(Obj* obj) {
 }
 
 void MemoryManager::markValue(const Value& v) {
-    if (isObj(v))
+    if (isObj(v)) {
         markObject(as<Obj*>(v));
+}
 }
 
 void MemoryManager::traceReferences() {
@@ -154,22 +159,25 @@ void MemoryManager::traceObject(Obj* obj) {
         auto* fn = static_cast<ObjFunction*>(obj);
         markObject(fn->name);
         const auto& consts = fn->chunk.constants();
-        for (uint16_t i = 0; i < consts.size(); i++)
+        for (uint16_t i = 0; i < consts.size(); i++) {
             markValue(consts.at(i));
+}
         break;
     }
     case ObjType::CLOSURE: {
         auto* cl = static_cast<ObjClosure*>(obj);
         markObject(cl->function);
-        for (auto* uv : cl->upvalues)
+        for (auto* uv : cl->upvalues) {
             markObject(uv);
+}
         break;
     }
     case ObjType::CLASS: {
         auto* klass = static_cast<ObjClass*>(obj);
         markObject(klass->name);
-        if (klass->superclass)
+        if (klass->superclass) {
             markObject(klass->superclass);
+}
         klass->methods.forEach([this](ObjString* k, Value v) {
             markObject(k);
             markValue(v);
@@ -193,8 +201,9 @@ void MemoryManager::traceObject(Obj* obj) {
     }
     case ObjType::LIST: {
         auto* list = static_cast<ObjList*>(obj);
-        for (auto& v : list->elements)
+        for (auto& v : list->elements) {
             markValue(v);
+}
         break;
     }
     case ObjType::FILE:
@@ -256,12 +265,15 @@ void MemoryManager::collectGarbage() {
 #ifdef LOXPP_DEBUG_LOG_GC
     fprintf(stderr, "[GC] begin -- %zu bytes allocated\n", bytesAllocated);
 #endif
-    if (m_markRoots)
+    if (m_markRoots) {
         m_markRoots();
-    if (m_currentCompiler)
+}
+    if (m_currentCompiler) {
         m_currentCompiler->markRoots(*this);
-    for (auto* obj : m_tempRoots)
+}
+    for (auto* obj : m_tempRoots) {
         markObject(obj);
+}
     traceReferences();
     removeWhiteStrings();
     sweep();

@@ -100,8 +100,9 @@ void Parser::parsePrecedence(Precedence precedence, Compiler* compiler) {
 }
 
 void Parser::errorAt(const Token& token, const char* message) {
-    if (m_panicMode)
+    if (m_panicMode) {
         return;
+}
     m_panicMode = true;
     std::fprintf(stderr, "[line %zu] Error", token.line);
     if (token.type == TokenType::EOF_) {
@@ -127,8 +128,9 @@ void Parser::advance() {
     m_previous = m_current;
     for (;;) {
         m_current = m_scanner.scanOneToken();
-        if (m_current.type != TokenType::ERROR)
+        if (m_current.type != TokenType::ERROR) {
             break;
+}
 
         errorAtCurrent(m_current.lexeme.data());
     }
@@ -145,8 +147,9 @@ void Parser::consume(TokenType type, const char* message) {
 bool Parser::check(TokenType type) const { return m_current.type == type; }
 
 bool Parser::match(TokenType type) {
-    if (!check(type))
+    if (!check(type)) {
         return false;
+}
     advance();
     return true;
 }
@@ -155,8 +158,9 @@ void Parser::synchronize() {
     m_panicMode = false;
 
     while (m_current.type != TokenType::EOF_) {
-        if (m_previous.type == TokenType::SEMICOLON)
+        if (m_previous.type == TokenType::SEMICOLON) {
             return;
+}
 
         switch (m_current.type) {
         case TokenType::CLASS:

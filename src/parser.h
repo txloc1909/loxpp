@@ -2,7 +2,9 @@
 
 #include "scanner.h"
 
-enum class Precedence : int {
+#include <cstdint>
+
+enum class Precedence : std::uint8_t {
     NONE = 0,
     ASSIGNMENT, // =
     OR,         // ||
@@ -61,7 +63,7 @@ struct Parser {
 
     void advance();
     void consume(TokenType type, const char* message);
-    bool check(TokenType type) const;
+    [[nodiscard]] bool check(TokenType type) const;
     bool match(TokenType type);
     void synchronize();
 

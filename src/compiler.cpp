@@ -18,13 +18,15 @@ ObjFunction* compile(const std::string& source, MemoryManager* mm) {
     auto compiler = std::make_unique<Compiler>(fn, parser.get(), mm,
                                                FunctionType::SCRIPT, nullptr);
 
-    while (!parser->check(TokenType::EOF_))
+    while (!parser->check(TokenType::EOF_)) {
         compiler->declaration();
+}
 
     compiler->endCompiler();
 
-    if (parser->m_hadError)
+    if (parser->m_hadError) {
         return nullptr;
+}
     return fn;
 }
 
@@ -38,15 +40,17 @@ Compiler::Compiler(ObjFunction* function, Parser* parser, MemoryManager* mm,
     // receiver.
     Local* implicit = &m_locals[m_localCount++];
     implicit->depth = 0;
-    if (type == FunctionType::METHOD || type == FunctionType::INITIALIZER)
+    if (type == FunctionType::METHOD || type == FunctionType::INITIALIZER) {
         implicit->name = Token{TokenType::THIS, "this", 0};
-    else
+    } else {
         implicit->name = Token{TokenType::IDENTIFIER, "", 0};
+}
 
     // Inherit class context so inner compilers (method bodies, closures inside
     // methods) can still resolve 'this'.
-    if (m_enclosing != nullptr)
+    if (m_enclosing != nullptr) {
         m_currentClass = m_enclosing->m_currentClass;
+}
 
     m_mm->setCurrentCompiler(this);
 }
@@ -55,8 +59,9 @@ Compiler::~Compiler() { m_mm->setCurrentCompiler(m_enclosing); }
 
 void Compiler::markRoots(MemoryManager& mm) const {
     mm.markObject(m_function);
-    if (m_enclosing)
+    if (m_enclosing) {
         m_enclosing->markRoots(mm);
+}
 }
 
 void Compiler::endCompiler() {
@@ -221,8 +226,9 @@ void Compiler::declaration() {
     } else {
         statement();
     }
-    if (m_parser->m_panicMode)
+    if (m_parser->m_panicMode) {
         m_parser->synchronize();
+}
 }
 
 void Compiler::varDestructure() {
@@ -231,8 +237,9 @@ void Compiler::varDestructure() {
 
     std::vector<Token> fields;
     do {
-        if (fields.size() >= UINT8_COUNT)
+        if (fields.size() >= UINT8_COUNT) {
             m_parser->error("Too many fields in destructuring pattern.");
+}
         m_parser->consume(TokenType::IDENTIFIER, "Expect field name.");
         fields.push_back(m_parser->m_previous);
     } while (m_parser->match(TokenType::COMMA) &&
@@ -247,10 +254,11 @@ void Compiler::varDestructure() {
     m_parser->consume(TokenType::SEMICOLON,
                       "Expect ';' after variable declaration.");
 
-    if (m_scopeDepth > 0)
+    if (m_scopeDepth > 0) {
         emitDestructureLocal(fields);
-    else
+    } else {
         emitDestructureGlobal(fields);
+}
 }
 
 void Compiler::emitDestructureLocal(const std::vector<Token>& fields) {
@@ -267,11 +275,13 @@ void Compiler::emitDestructureLocal(const std::vector<Token>& fields) {
     for (const Token& field : fields) {
         for (int i = m_localCount - 1; i >= 0; i--) {
             const Local& local = m_locals[i];
-            if (local.depth != -1 && local.depth < m_scopeDepth)
+            if (local.depth != -1 && local.depth < m_scopeDepth) {
                 break;
-            if (local.name.lexeme == field.lexeme)
+}
+            if (local.name.lexeme == field.lexeme) {
                 m_parser->error(
                     "Already a variable with this name in this scope.");
+}
         }
         addLocal(field);
         emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(srcSlot));
@@ -301,8 +311,9 @@ void Compiler::varDestructureSeq() {
 
     std::vector<Token> names;
     do {
-        if (names.size() >= UINT8_COUNT)
+        if (names.size() >= UINT8_COUNT) {
             m_parser->error("Too many elements in sequence destructuring.");
+}
         m_parser->consume(TokenType::IDENTIFIER, "Expect element name.");
         names.push_back(m_parser->m_previous);
     } while (m_parser->match(TokenType::COMMA) &&
@@ -318,10 +329,11 @@ void Compiler::varDestructureSeq() {
     m_parser->consume(TokenType::SEMICOLON,
                       "Expect ';' after variable declaration.");
 
-    if (m_scopeDepth > 0)
+    if (m_scopeDepth > 0) {
         emitDestructureSeqLocal(names);
-    else
+    } else {
         emitDestructureSeqGlobal(names);
+}
 }
 
 void Compiler::emitDestructureSeqLocal(const std::vector<Token>& names) {
@@ -344,11 +356,13 @@ void Compiler::emitDestructureSeqLocal(const std::vector<Token>& names) {
         } else {
             for (int j = m_localCount - 1; j >= 0; j--) {
                 const Local& local = m_locals[j];
-                if (local.depth != -1 && local.depth < m_scopeDepth)
+                if (local.depth != -1 && local.depth < m_scopeDepth) {
                     break;
-                if (local.name.lexeme == name.lexeme)
+}
+                if (local.name.lexeme == name.lexeme) {
                     m_parser->error(
                         "Already a variable with this name in this scope.");
+}
             }
             addLocal(name);
             m_locals[m_localCount - 1].depth = m_scopeDepth;
@@ -369,10 +383,11 @@ void Compiler::emitDestructureSeqGlobal(const std::vector<Token>& names) {
         emitConstantOp(Op::CONSTANT,
                        makeConstant(from<Number>(static_cast<double>(i))));
         emitByte(Op::GET_INDEX);
-        if (names[i].lexeme == "_")
+        if (names[i].lexeme == "_") {
             emitByte(Op::POP);
-        else
+        } else {
             emitConstantOp(Op::DEFINE_GLOBAL, identifierConstant(names[i]));
+}
     }
 }
 
@@ -420,10 +435,11 @@ void Compiler::endScope() {
     m_scopeDepth--;
     while (m_localCount > 0 &&
            m_locals[m_localCount - 1].depth > m_scopeDepth) {
-        if (m_locals[m_localCount - 1].isCaptured)
+        if (m_locals[m_localCount - 1].isCaptured) {
             emitByte(Op::CLOSE_UPVALUE);
-        else
+        } else {
             emitByte(Op::POP);
+}
         m_localCount--;
     }
 }
@@ -440,9 +456,10 @@ int Compiler::resolveLocal(const Token& name) const {
     for (int i = m_localCount - 1; i >= 0; i--) {
         const Local& local = m_locals[i];
         if (local.name.lexeme == name.lexeme) {
-            if (local.depth == -1)
+            if (local.depth == -1) {
                 m_parser->error(
                     "Can't read local variable in its own initializer.");
+}
             return i;
         }
     }
@@ -451,8 +468,9 @@ int Compiler::resolveLocal(const Token& name) const {
 
 int Compiler::addUpvalue(uint8_t index, bool isLocal) {
     for (int i = 0; i < m_upvalueCount; i++) {
-        if (m_upvalues[i].index == index && m_upvalues[i].isLocal == isLocal)
+        if (m_upvalues[i].index == index && m_upvalues[i].isLocal == isLocal) {
             return i;
+}
     }
     if (m_upvalueCount == UINT8_COUNT) {
         m_parser->error("Too many closure variables in function.");
@@ -464,37 +482,43 @@ int Compiler::addUpvalue(uint8_t index, bool isLocal) {
 }
 
 int Compiler::resolveUpvalue(const Token& name) {
-    if (m_enclosing == nullptr)
+    if (m_enclosing == nullptr) {
         return -1;
+}
     int local = m_enclosing->resolveLocal(name);
     if (local != -1) {
         m_enclosing->m_locals[local].isCaptured = true;
         return addUpvalue(static_cast<uint8_t>(local), true);
     }
     int upvalue = m_enclosing->resolveUpvalue(name);
-    if (upvalue != -1)
+    if (upvalue != -1) {
         return addUpvalue(static_cast<uint8_t>(upvalue), false);
+}
     return -1;
 }
 
 void Compiler::declareVariable() {
-    if (m_scopeDepth == 0)
+    if (m_scopeDepth == 0) {
         return;
+}
 
     const Token& name = m_parser->m_previous;
     for (int i = m_localCount - 1; i >= 0; i--) {
         const Local& local = m_locals[i];
-        if (local.depth != -1 && local.depth < m_scopeDepth)
+        if (local.depth != -1 && local.depth < m_scopeDepth) {
             break;
-        if (local.name.lexeme == name.lexeme)
+}
+        if (local.name.lexeme == name.lexeme) {
             m_parser->error("Already a variable with this name in this scope.");
+}
     }
     addLocal(name);
 }
 
 void Compiler::markInitialized() {
-    if (m_scopeDepth == 0)
+    if (m_scopeDepth == 0) {
         return;
+}
     m_locals[m_localCount - 1].depth = m_scopeDepth;
 }
 
@@ -547,8 +571,9 @@ void Compiler::ifStatement() {
     patchJump(thenJump);
     emitByte(Op::POP);
 
-    if (m_parser->match(TokenType::ELSE))
+    if (m_parser->match(TokenType::ELSE)) {
         statement();
+}
     patchJump(elseJump);
 }
 
@@ -568,8 +593,9 @@ void Compiler::whileStatement() {
     patchJump(exitJump);
     emitByte(Op::POP);
 
-    for (int offset : m_loopStack.back().breakJumps)
+    for (int offset : m_loopStack.back().breakJumps) {
         patchJump(offset);
+}
     m_loopStack.pop_back();
 }
 
@@ -641,8 +667,9 @@ void Compiler::forStatement() {
         emitByte(Op::POP);
     }
 
-    for (int offset : m_loopStack.back().breakJumps)
+    for (int offset : m_loopStack.back().breakJumps) {
         patchJump(offset);
+}
     m_loopStack.pop_back();
 
     endScope();
@@ -693,8 +720,9 @@ void Compiler::forInStatement(const Token& itemName) {
     patchJump(exitJump);
     emitByte(Op::POP); // discard false
 
-    for (int offset : m_loopStack.back().breakJumps)
+    for (int offset : m_loopStack.back().breakJumps) {
         patchJump(offset);
+}
     m_loopStack.pop_back();
 }
 
@@ -1142,8 +1170,9 @@ int Compiler::compileClassPattern(int subjectSlot, const Token& patTok) {
                         "(e.g., 'ClassName{field1, field2}').");
         return 0;
     }
-    if (!m_parser->check(TokenType::LEFT_BRACE))
+    if (!m_parser->check(TokenType::LEFT_BRACE)) {
         return 0; // zero-field class pattern — instanceof check only
+}
 
     m_parser->advance(); // consume '{'
     int bindingCount = 0;
@@ -1369,8 +1398,9 @@ void Compiler::classDeclaration() {
     Token className = m_parser->m_previous;
     uint16_t nameConst = identifierConstant(className);
 
-    if (m_scopeDepth > 0)
+    if (m_scopeDepth > 0) {
         declareVariable();
+}
 
     emitConstantOp(Op::CLASS, nameConst);
 
@@ -1387,8 +1417,9 @@ void Compiler::classDeclaration() {
 
     if (m_parser->match(TokenType::LESS)) {
         m_parser->consume(TokenType::IDENTIFIER, "Expect superclass name.");
-        if (m_parser->m_previous.lexeme == className.lexeme)
+        if (m_parser->m_previous.lexeme == className.lexeme) {
             m_parser->error("A class can't inherit from itself.");
+}
         namedVariable(m_parser->m_previous, false); // push superclass
 
         // Introduce "super" as a local so method closures can capture it.
@@ -1417,8 +1448,9 @@ void Compiler::classDeclaration() {
 
     emitByte(Op::POP); // pop the class pushed by namedVariable above
 
-    if (classCompiler.hasSuperclass)
+    if (classCompiler.hasSuperclass) {
         endScope(); // closes the "super" local/upvalue
+}
 
     m_currentClass = m_currentClass->enclosing;
 }
@@ -1428,8 +1460,9 @@ void Compiler::method() {
     uint16_t nameConst = identifierConstant(m_parser->m_previous);
 
     FunctionType type = FunctionType::METHOD;
-    if (m_parser->m_previous.lexeme == "init")
+    if (m_parser->m_previous.lexeme == "init") {
         type = FunctionType::INITIALIZER;
+}
 
     ObjFunction* fn = m_mm->create<ObjFunction>();
     fn->name = m_mm->makeString(m_parser->m_previous.lexeme);
@@ -1454,10 +1487,11 @@ void Compiler::this_() {
 }
 
 void Compiler::super_() {
-    if (m_currentClass == nullptr)
+    if (m_currentClass == nullptr) {
         m_parser->error("Can't use 'super' outside of a class.");
-    else if (!m_currentClass->hasSuperclass)
+    } else if (!m_currentClass->hasSuperclass) {
         m_parser->error("Can't use 'super' in a class with no superclass.");
+}
 
     m_parser->consume(TokenType::DOT, "Expect '.' after 'super'.");
     m_parser->consume(TokenType::IDENTIFIER, "Expect superclass method name.");
@@ -1469,8 +1503,9 @@ void Compiler::super_() {
         uint8_t argCount = 0;
         if (!m_parser->check(TokenType::RIGHT_PAREN)) {
             do {
-                if (argCount == 255)
+                if (argCount == 255) {
                     m_parser->error("Can't have more than 255 arguments.");
+}
                 expression();
                 argCount++;
             } while (m_parser->match(TokenType::COMMA));
@@ -1498,8 +1533,9 @@ void Compiler::dot() {
         uint8_t argCount = 0;
         if (!m_parser->check(TokenType::RIGHT_PAREN)) {
             do {
-                if (argCount == 255)
+                if (argCount == 255) {
                     m_parser->error("Can't have more than 255 arguments.");
+}
                 expression();
                 argCount++;
             } while (m_parser->match(TokenType::COMMA));
@@ -1574,8 +1610,9 @@ void Compiler::returnStatement() {
     if (m_parser->match(TokenType::SEMICOLON)) {
         emitReturn();
     } else {
-        if (m_type == FunctionType::INITIALIZER)
+        if (m_type == FunctionType::INITIALIZER) {
             m_parser->error("Can't return a value from an initializer.");
+}
         expression();
         m_parser->consume(TokenType::SEMICOLON,
                           "Expect ';' after return value.");
@@ -1589,8 +1626,9 @@ void Compiler::parseFunction(FunctionType /*type*/) {
     if (!m_parser->check(TokenType::RIGHT_PAREN)) {
         do {
             m_function->arity++;
-            if (m_function->arity > 255)
+            if (m_function->arity > 255) {
                 m_parser->error("Can't have more than 255 parameters.");
+}
             m_parser->consume(TokenType::IDENTIFIER, "Expect parameter name.");
             declareVariable();
             markInitialized();
@@ -1620,10 +1658,11 @@ void Compiler::or_() {
 }
 
 void Compiler::emitReturn() {
-    if (m_type == FunctionType::INITIALIZER)
+    if (m_type == FunctionType::INITIALIZER) {
         emitBytes(Op::GET_LOCAL, 0); // implicit return of 'this'
-    else
+    } else {
         emitByte(Op::NIL);
+}
     emitByte(static_cast<Byte>(Op::RETURN));
 }
 
@@ -1668,8 +1707,9 @@ void Compiler::emitLoop(int loopStart) {
 
 void Compiler::emitLoopCleanup(int targetLocalCount) {
     int toPop = m_localCount - targetLocalCount;
-    for (int i = 0; i < toPop; i++)
+    for (int i = 0; i < toPop; i++) {
         emitByte(Op::POP);
+}
 }
 
 uint16_t Compiler::makeConstant(Value value) {
@@ -1760,8 +1800,9 @@ Compiler::ListPatResult Compiler::compileListPattern(int subjectSlot,
                       "Expect ']' after sequence pattern.");
 
     int fixedCount = static_cast<int>(elems.size());
-    if (hasRest)
+    if (hasRest) {
         fixedCount--;
+}
 
     // ---- Type check: IS_SEQ -----------------------------------------------
     // On miss, the IS_SEQ false stays on stack (JUMP_IF_FALSE peeks).

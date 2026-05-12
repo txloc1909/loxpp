@@ -14,8 +14,9 @@ std::string stringifyObj(Obj* obj) {
     }
     case ObjType::FUNCTION: {
         auto* fn = asObjFunction(obj);
-        if (fn->name == nullptr)
+        if (fn->name == nullptr) {
             return "<script>";
+}
         return "<fn " +
                std::string(fn->name->chars.data(), fn->name->chars.size()) +
                ">";
@@ -24,8 +25,9 @@ std::string stringifyObj(Obj* obj) {
         return "<native fn>";
     case ObjType::CLOSURE: {
         auto* fn = static_cast<ObjClosure*>(obj)->function;
-        if (fn->name == nullptr)
+        if (fn->name == nullptr) {
             return "<script>";
+}
         return "<fn " +
                std::string(fn->name->chars.data(), fn->name->chars.size()) +
                ">";
@@ -58,8 +60,9 @@ std::string stringifyObj(Obj* obj) {
         auto* list = static_cast<ObjList*>(obj);
         std::string result = "[";
         for (size_t i = 0; i < list->elements.size(); i++) {
-            if (i > 0)
+            if (i > 0) {
                 result += ", ";
+}
             result += stringify(list->elements[i]);
         }
         result += "]";
@@ -70,8 +73,9 @@ std::string stringifyObj(Obj* obj) {
         std::string result = "{";
         bool first = true;
         map->map.forEach([&](const MapEntry& e) {
-            if (!first)
+            if (!first) {
                 result += ", ";
+}
             first = false;
             result += stringify(e.key);
             result += ": ";
@@ -126,8 +130,9 @@ uint32_t MapPolicy::hashOf(const MapEntry& e) { return hashValue(e.key); }
 bool ObjMap::mapGet(const Value& key, Value& out) const {
     const MapEntry* e = map.find(
         hashValue(key), [&key](const MapEntry& s) { return s.key == key; });
-    if (!e)
+    if (!e) {
         return false;
+}
     out = e->value;
     return true;
 }

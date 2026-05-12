@@ -27,8 +27,9 @@ class MemoryManager : public VmAllocBase {
 #ifdef LOXPP_STRESS_GC
         collectGarbage(); // fire on every allocation to surface rooting bugs
 #else
-        if (bytesAllocated > m_nextGC)
+        if (bytesAllocated > m_nextGC) {
             collectGarbage();
+}
 #endif
         bytesAllocated += sizeof(T);
         T* p = new T(std::forward<Args>(args)...);
