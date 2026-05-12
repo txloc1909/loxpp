@@ -16,8 +16,9 @@ bool operator!(Value value) {
 }
 
 bool operator==(const Value& a, const Value& b) {
-    if (a.index() != b.index())
+    if (a.index() != b.index()) {
         return false;
+}
 
     return std::visit(
         overloaded{
@@ -62,8 +63,9 @@ uint32_t hashValue(const Value& v) {
         overloaded{
             [](bool b) -> uint32_t { return b ? 1231U : 1237U; },
             [](Number n) -> uint32_t {
-                if (n == 0.0)
+                if (n == 0.0) {
                     n = 0.0; // canonicalize -0.0 → +0.0
+}
                 uint64_t bits;
                 std::memcpy(&bits, &n, sizeof bits);
                 return static_cast<uint32_t>(bits ^ (bits >> 32));
@@ -75,9 +77,11 @@ uint32_t hashValue(const Value& v) {
 }
 
 bool isValidMapKey(const Value& v) {
-    if (is<Number>(v))
+    if (is<Number>(v)) {
         return !std::isnan(as<Number>(v));
-    if (is<Obj*>(v))
+}
+    if (is<Obj*>(v)) {
         return as<Obj*>(v)->type == ObjType::STRING;
+}
     return true; // bool and nil are always valid
 }

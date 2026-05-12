@@ -18,11 +18,13 @@ std::optional<uint16_t> Chunk::addConstant(Value value) {
     // O(N) scan for an existing equal constant; avoids duplicate slots.
     // Strings are interned, so ObjHandle equality (index+type) suffices.
     for (uint16_t i = 0; i < m_constants.size(); i++) {
-        if (m_constants.at(i) == value)
+        if (m_constants.at(i) == value) {
             return i;
+}
     }
-    if (m_constants.isFull())
+    if (m_constants.isFull()) {
         return std::nullopt;
+}
     m_constants.write(value);
     return static_cast<uint16_t>(m_constants.size() - 1);
 }

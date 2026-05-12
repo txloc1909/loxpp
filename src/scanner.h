@@ -25,10 +25,10 @@ class Scanner {
     Token consumeIdentifier();
     void skipWhitespaceAndComments();
 
-    bool isAtEnd() const;
+    [[nodiscard]] bool isAtEnd() const;
     char advance();
-    char peek() const;
-    char peekNext() const;
+    [[nodiscard]] char peek() const;
+    [[nodiscard]] char peekNext() const;
     bool match(char expected);
 
     const std::string* m_source;

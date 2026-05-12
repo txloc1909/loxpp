@@ -80,9 +80,9 @@ class Chunk : std::vector<Byte> {
     void write(Op op, int line);
     void patch(int offset, Byte byte);
     std::optional<uint16_t> addConstant(Value value);
-    Value getConstant(uint16_t idx) const;
-    const ValueArray& constants() const { return m_constants; }
-    int getLine(int offset) const;
+    [[nodiscard]] Value getConstant(uint16_t idx) const;
+    [[nodiscard]] const ValueArray& constants() const { return m_constants; }
+    [[nodiscard]] int getLine(int offset) const;
 
   private:
     ValueArray m_constants;

@@ -17,8 +17,9 @@ bool is(const Value& value) {
 
 template <typename T>
 T as(const Value& value) {
-    if (!is<T>(value))
+    if (!is<T>(value)) {
         throw std::bad_variant_access();
+}
     return std::get<T>(value);
 }
 
@@ -57,9 +58,9 @@ inline bool isFalsy(const Value& v) { return !v; }
 class ValueArray {
   public:
     void write(Value value);
-    uint16_t size() const;
-    bool isFull() const { return m_count >= UINT16_MAX; }
-    Value at(uint16_t idx) const { return m_values.at(idx); }
+    [[nodiscard]] uint16_t size() const;
+    [[nodiscard]] bool isFull() const { return m_count >= UINT16_MAX; }
+    [[nodiscard]] Value at(uint16_t idx) const { return m_values.at(idx); }
 
   private:
     std::vector<Value> m_values;

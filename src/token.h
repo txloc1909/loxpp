@@ -1,9 +1,10 @@
 #pragma once
 
+#include <cstdint>
 #include <string_view>
 #include <string>
 
-enum class TokenType : int {
+enum class TokenType : std::uint8_t {
     // Single-character tokens.
     LEFT_PAREN,
     RIGHT_PAREN,

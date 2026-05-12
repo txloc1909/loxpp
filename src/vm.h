@@ -5,11 +5,12 @@
 #include "native.h"
 #include "table.h"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 
-enum class InterpretResult {
+enum class InterpretResult : std::uint8_t {
     OK,
     COMPILE_ERROR,
     RUNTIME_ERROR,
@@ -33,12 +34,12 @@ class VM {
 
     InterpretResult interpret(const std::string& source);
     InterpretResult run();
-    Value lastResult() const;
+    [[nodiscard]] Value lastResult() const;
 
     // Runtime state inspection (for testing and debugging).
-    int stackDepth() const { return static_cast<int>(stackTop - stack); }
-    int frameCount() const { return m_frameCount; }
-    std::optional<Value> getGlobal(const std::string& name) const;
+    [[nodiscard]] int stackDepth() const { return static_cast<int>(stackTop - stack); }
+    [[nodiscard]] int frameCount() const { return m_frameCount; }
+    [[nodiscard]] std::optional<Value> getGlobal(const std::string& name) const;
 
   private:
     Byte readByte();

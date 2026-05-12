@@ -47,8 +47,9 @@ void nativeRuntimeError(const char* msg) {
 
 static Value inputNative(int /*argCount*/, Value* /*args*/) {
     std::string line;
-    if (!std::getline(std::cin, line))
+    if (!std::getline(std::cin, line)) {
         return from<Nil>(Nil{});
+}
     ObjString* s = s_currentMM->makeString(line);
     return Value{static_cast<Obj*>(s)};
 }
@@ -174,23 +175,26 @@ static ObjFile* checkFile(Value* args, const char* method) {
 
 static Value fileReadNative(int /*argc*/, Value* args) {
     ObjFile* file = checkFile(args, "read");
-    if (!file)
+    if (!file) {
         return from<Nil>(Nil{});
+}
     if (!file->readable) {
         nativeRuntimeError("File is not open for reading.");
         return from<Nil>(Nil{});
     }
     std::string buf;
     char chunk[4096];
-    while (std::fgets(chunk, sizeof(chunk), file->handle))
+    while (std::fgets(chunk, sizeof(chunk), file->handle)) {
         buf += chunk;
+}
     return Value{static_cast<Obj*>(s_currentMM->makeString(std::move(buf)))};
 }
 
 static Value fileReadlineNative(int /*argc*/, Value* args) {
     ObjFile* file = checkFile(args, "readline");
-    if (!file)
+    if (!file) {
         return from<Nil>(Nil{});
+}
     if (!file->readable) {
         nativeRuntimeError("File is not open for reading.");
         return from<Nil>(Nil{});
@@ -206,15 +210,17 @@ static Value fileReadlineNative(int /*argc*/, Value* args) {
             break;
         }
     }
-    if (!got)
+    if (!got) {
         return from<Nil>(Nil{});
+}
     return Value{static_cast<Obj*>(s_currentMM->makeString(std::move(line)))};
 }
 
 static Value fileReadlinesNative(int /*argc*/, Value* args) {
     ObjFile* file = checkFile(args, "readlines");
-    if (!file)
+    if (!file) {
         return from<Nil>(Nil{});
+}
     if (!file->readable) {
         nativeRuntimeError("File is not open for reading.");
         return from<Nil>(Nil{});
@@ -239,16 +245,18 @@ static Value fileReadlinesNative(int /*argc*/, Value* args) {
             flush();
         }
     }
-    if (!line.empty())
+    if (!line.empty()) {
         flush(); // trailing line with no newline
+}
     s_currentMM->popTempRoot();
     return Value{static_cast<Obj*>(list)};
 }
 
 static Value fileWriteNative(int /*argc*/, Value* args) {
     ObjFile* file = checkFile(args, "write");
-    if (!file)
+    if (!file) {
         return from<Nil>(Nil{});
+}
     if (!file->writable) {
         nativeRuntimeError("File is not open for writing.");
         return from<Nil>(Nil{});
@@ -264,8 +272,9 @@ static Value fileWriteNative(int /*argc*/, Value* args) {
 
 static Value fileWritelineNative(int /*argc*/, Value* args) {
     ObjFile* file = checkFile(args, "writeline");
-    if (!file)
+    if (!file) {
         return from<Nil>(Nil{});
+}
     if (!file->writable) {
         nativeRuntimeError("File is not open for writing.");
         return from<Nil>(Nil{});
@@ -379,11 +388,13 @@ Value VM::lastResult() const { return m_lastResult; }
 
 std::optional<Value> VM::getGlobal(const std::string& name) const {
     ObjString* key = m_mm.findString(name);
-    if (!key)
+    if (!key) {
         return std::nullopt;
+}
     Value out;
-    if (!m_globals.get(key, out))
+    if (!m_globals.get(key, out)) {
         return std::nullopt;
+}
     return out;
 }
 
@@ -411,14 +422,16 @@ ObjUpvalue* VM::captureUpvalue(Value* local) {
         prev = cur;
         cur = cur->next;
     }
-    if (cur != nullptr && cur->location == local)
+    if (cur != nullptr && cur->location == local) {
         return cur;
+}
     ObjUpvalue* uv = m_mm.create<ObjUpvalue>(local);
     uv->next = cur;
-    if (prev == nullptr)
+    if (prev == nullptr) {
         m_openUpvalues = uv;
-    else
+    } else {
         prev->next = uv;
+}
     return uv;
 }
 
@@ -541,8 +554,9 @@ InterpretResult VM::run() {
             Number result = std::fmod(a, b);
             // Floor-division semantics: result has same sign as b (Python/Lua
             // behavior)
-            if (result != 0 && (result < 0) != (b < 0))
+            if (result != 0 && (result < 0) != (b < 0)) {
                 result += b;
+}
             push(from<Number>(result));
             break;
         }
@@ -604,8 +618,9 @@ InterpretResult VM::run() {
         }
         case Op::JUMP_IF_FALSE: {
             uint16_t offset = readShort();
-            if (isFalsy(peek(0)))
+            if (isFalsy(peek(0))) {
                 frame->ip += offset;
+}
             break;
         }
         case Op::LOOP: {
@@ -756,8 +771,9 @@ InterpretResult VM::run() {
                 push(value);
                 break;
             }
-            if (!bindMethod(instance->klass, name))
+            if (!bindMethod(instance->klass, name)) {
                 return InterpretResult::RUNTIME_ERROR;
+}
             break;
         }
         case Op::SET_PROPERTY: {
@@ -792,12 +808,14 @@ InterpretResult VM::run() {
                 if (instance->fields.get(name, fieldVal)) {
                     stackTop[-argCount - 1] = fieldVal;
                     if (isClosure(fieldVal)) {
-                        if (!call(asObjClosure(as<Obj*>(fieldVal)), argCount))
+                        if (!call(asObjClosure(as<Obj*>(fieldVal)), argCount)) {
                             return InterpretResult::RUNTIME_ERROR;
+}
                     } else if (isNative(fieldVal)) {
                         if (!callNative(asObjNative(as<Obj*>(fieldVal)),
-                                        argCount))
+                                        argCount)) {
                             return InterpretResult::RUNTIME_ERROR;
+}
                     } else {
                         runtimeError(
                             "Can only call functions, classes and enums.");
@@ -817,11 +835,13 @@ InterpretResult VM::run() {
                 }
                 Obj* methodObj = as<Obj*>(method);
                 if (isObjNative(methodObj)) {
-                    if (!callNative(asObjNative(methodObj), argCount))
+                    if (!callNative(asObjNative(methodObj), argCount)) {
                         return InterpretResult::RUNTIME_ERROR;
+}
                 } else {
-                    if (!call(asObjClosure(methodObj), argCount))
+                    if (!call(asObjClosure(methodObj), argCount)) {
                         return InterpretResult::RUNTIME_ERROR;
+}
                     frame = &m_frames[m_frameCount - 1];
                 }
             } else if (isList(receiver)) {
@@ -887,8 +907,9 @@ InterpretResult VM::run() {
                                  name->chars.c_str());
                     return InterpretResult::RUNTIME_ERROR;
                 }
-                if (!callNative(asObjNative(as<Obj*>(method)), argCount))
+                if (!callNative(asObjNative(as<Obj*>(method)), argCount)) {
                     return InterpretResult::RUNTIME_ERROR;
+}
             } else if (isMap(receiver)) {
                 Value method;
                 if (!s_mapClass->methods.get(name, method)) {
@@ -896,8 +917,9 @@ InterpretResult VM::run() {
                                  name->chars.c_str());
                     return InterpretResult::RUNTIME_ERROR;
                 }
-                if (!callNative(asObjNative(as<Obj*>(method)), argCount))
+                if (!callNative(asObjNative(as<Obj*>(method)), argCount)) {
                     return InterpretResult::RUNTIME_ERROR;
+}
             } else {
                 runtimeError("Only instances, files, and maps have methods.");
                 return InterpretResult::RUNTIME_ERROR;
@@ -920,8 +942,9 @@ InterpretResult VM::run() {
         case Op::GET_SUPER: {
             ObjString* name = asObjString(readConstant());
             ObjClass* superclass = asObjClass(as<Obj*>(pop()));
-            if (!bindMethod(superclass, name))
+            if (!bindMethod(superclass, name)) {
                 return InterpretResult::RUNTIME_ERROR;
+}
             break;
         }
         case Op::SUPER_INVOKE: {
@@ -933,8 +956,9 @@ InterpretResult VM::run() {
                 runtimeError("Undefined property '%s'.", name->chars.c_str());
                 return InterpretResult::RUNTIME_ERROR;
             }
-            if (!call(asObjClosure(as<Obj*>(method)), argCount))
+            if (!call(asObjClosure(as<Obj*>(method)), argCount)) {
                 return InterpretResult::RUNTIME_ERROR;
+}
             frame = &m_frames[m_frameCount - 1];
             break;
         }
@@ -988,8 +1012,9 @@ InterpretResult VM::run() {
             ObjList* list = m_mm.create<ObjList>(VmAllocator<Value>{&m_mm});
             m_mm.pushTempRoot(list); // protect across resize's potential GC
             list->elements.resize(count);
-            for (int i = count - 1; i >= 0; i--)
+            for (int i = count - 1; i >= 0; i--) {
                 list->elements[i] = pop();
+}
             m_mm.popTempRoot();
             push(Value{static_cast<Obj*>(list)});
             break;
@@ -1018,8 +1043,9 @@ InterpretResult VM::run() {
                 map->mapSet(key, val);
             }
             m_mm.popTempRoot();
-            for (int i = 0; i < 2 * count; i++)
+            for (int i = 0; i < 2 * count; i++) {
                 pop();
+}
             push(Value{static_cast<Obj*>(map)});
             break;
         }
@@ -1115,11 +1141,13 @@ InterpretResult VM::run() {
                 m_mm.pushTempRoot(map);
                 // Root val if it's an object: it was popped off the stack
                 // before mapSet, so the GC won't find it through the stack.
-                if (is<Obj*>(val))
+                if (is<Obj*>(val)) {
                     m_mm.pushTempRoot(as<Obj*>(val));
+}
                 map->mapSet(indexVal, val);
-                if (is<Obj*>(val))
+                if (is<Obj*>(val)) {
                     m_mm.popTempRoot();
+}
                 m_mm.popTempRoot();
                 push(val);
                 break;
@@ -1200,8 +1228,9 @@ InterpretResult VM::run() {
                 result->elements.resize(count); // may trigger GC
                 src =
                     asObjList(as<Obj*>(peek(2))); // re-read after potential GC
-                for (int i = 0; i < count; i++)
+                for (int i = 0; i < count; i++) {
                     result->elements[i] = src->elements[s + i];
+}
                 m_mm.popTempRoot();
                 pop();
                 pop();
@@ -1291,19 +1320,20 @@ InterpretResult VM::run() {
             }
             ObjIterator* it = asObjIterator(as<Obj*>(top));
             bool has;
-            if (isList(it->collection))
+            if (isList(it->collection)) {
                 has = it->index <
                       (int)asObjList(as<Obj*>(it->collection))->elements.size();
-            else if (isString(it->collection))
+            } else if (isString(it->collection)) {
                 has = it->index <
                       (int)asObjString(as<Obj*>(it->collection))->chars.size();
-            else if (isMap(it->collection)) {
+            } else if (isMap(it->collection)) {
                 // Scan forward from current index for the next occupied bucket.
                 auto* map = asObjMap(as<Obj*>(it->collection));
                 int i = it->index;
                 while (i < map->map.capacity() &&
-                       map->map.entryAt(i)->state != MapSlot::OCCUPIED)
+                       map->map.entryAt(i)->state != MapSlot::OCCUPIED) {
                     ++i;
+}
                 has = i < map->map.capacity();
             } else {
                 runtimeError(
@@ -1338,8 +1368,9 @@ InterpretResult VM::run() {
                 // push its key, then advance the cursor past it.
                 auto* map = asObjMap(as<Obj*>(it->collection));
                 while (it->index < map->map.capacity() &&
-                       map->map.entryAt(it->index)->state != MapSlot::OCCUPIED)
+                       map->map.entryAt(it->index)->state != MapSlot::OCCUPIED) {
                     ++it->index;
+}
                 // ITER_HAS_NEXT was true, so an occupied slot must exist.
                 push(map->map.entryAt(it->index)->key);
                 ++it->index;
@@ -1540,20 +1571,25 @@ void VM::runtimeError(const char* format, ...) {
 }
 
 void VM::markRoots() {
-    for (Value* slot = stack; slot < stackTop; ++slot)
+    for (Value* slot = stack; slot < stackTop; ++slot) {
         m_mm.markValue(*slot);
-    for (int i = 0; i < m_frameCount; ++i)
+}
+    for (int i = 0; i < m_frameCount; ++i) {
         m_mm.markObject(m_frames[i].closure);
-    for (ObjUpvalue* uv = m_openUpvalues; uv != nullptr; uv = uv->next)
+}
+    for (ObjUpvalue* uv = m_openUpvalues; uv != nullptr; uv = uv->next) {
         m_mm.markObject(uv);
+}
     m_globals.forEach([this](ObjString* key, Value val) {
         m_mm.markObject(key);
         m_mm.markValue(val);
     });
-    if (s_fileClass)
+    if (s_fileClass) {
         m_mm.markObject(s_fileClass);
-    if (s_mapClass)
+}
+    if (s_mapClass) {
         m_mm.markObject(s_mapClass);
+}
 }
 
 void VM::resetStack() {

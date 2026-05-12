@@ -18,8 +18,10 @@ constexpr std::array<EscapeEntry, 6> kEscapeSequences{{
 
 // Returns the decoded value for `code`, or nullopt if not a valid escape char.
 constexpr std::optional<char> decodeEscape(char code) {
-    for (auto& e : kEscapeSequences)
-        if (e.code == code)
+    for (auto& e : kEscapeSequences) {
+        if (e.code == code) {
             return e.value;
+}
+}
     return std::nullopt;
 }
