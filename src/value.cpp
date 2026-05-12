@@ -52,7 +52,10 @@ void printValue(const Value& value) {
 
 uint16_t ValueArray::size() const { return m_count; }
 
-void ValueArray::write(Value value) { m_values.push_back(value); m_count++; }
+void ValueArray::write(Value value) {
+    m_values.push_back(value);
+    m_count++;
+}
 
 uint32_t hashValue(const Value& v) {
     return std::visit(

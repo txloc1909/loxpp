@@ -275,8 +275,8 @@ TEST_F(CompileErrorTest, MoreThan255ConstantsSucceed) {
     // Programs with more than 255 distinct constants must compile and run.
     std::string source;
     for (int i = 0; i < 300; ++i)
-        source += "var v" + std::to_string(i) + " = " + std::to_string(i) +
-                  ".5;\n";
+        source +=
+            "var v" + std::to_string(i) + " = " + std::to_string(i) + ".5;\n";
     VMTestHarness h;
     EXPECT_EQ(h.run(source), InterpretResult::OK);
 }

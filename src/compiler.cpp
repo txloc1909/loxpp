@@ -1811,8 +1811,9 @@ Compiler::ListPatResult Compiler::compileListPattern(int subjectSlot,
             if (std::string(elem.name.lexeme) != "_") {
                 // subject[fixedCount : len(subject)]
                 emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
-                emitConstantOp(Op::CONSTANT,
-                               makeConstant(Value{static_cast<double>(fixedCount)}));
+                emitConstantOp(
+                    Op::CONSTANT,
+                    makeConstant(Value{static_cast<double>(fixedCount)}));
                 emitConstantOp(Op::GET_GLOBAL, identifierConstant(lenTok));
                 emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
                 emitBytes(Op::CALL, 1);

@@ -135,7 +135,7 @@ TEST_F(ParserBytecodeTest, Dedup_SameVariableReusesConstantSlot) {
     std::string src = "var x = 1;\n"
                       "x = x + 1;";
     std::string bytecode = compile_program_to_bytecode(src);
-    std::string expected = "0: CONSTANT 0 ('1')\n"  // initializer: 1 → slot 0
+    std::string expected = "0: CONSTANT 0 ('1')\n" // initializer: 1 → slot 0
                            "3: DEFINE_GLOBAL 1 ('x')\n" // x → slot 1
                            "6: GET_GLOBAL 1 ('x')\n"    // x reuses slot 1
                            "9: CONSTANT 0 ('1')\n"      // 1 reuses slot 0

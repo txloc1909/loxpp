@@ -27,8 +27,8 @@ static int simpleInstruction(const char* name, int offset, std::ostream& out,
 static int constantInstruction(const char* name, const Chunk& chunk,
                                const MemoryManager& mm, int offset,
                                std::ostream& out, bool color) {
-    uint16_t idx = static_cast<uint16_t>(chunk.at(offset + 1) << 8 |
-                                         chunk.at(offset + 2));
+    uint16_t idx =
+        static_cast<uint16_t>(chunk.at(offset + 1) << 8 | chunk.at(offset + 2));
     out << cc(color, kBold) << name << cc(color, kReset) << ' '
         << static_cast<int>(idx) << " ('" << cc(color, kYellow)
         << stringify(chunk.getConstant(idx)) << cc(color, kReset) << "')\n";
@@ -56,8 +56,8 @@ static int jumpInstruction(const char* name, int sign, const Chunk& chunk,
 static int invokeInstruction(const char* name, const Chunk& chunk,
                              const MemoryManager& mm, int offset,
                              std::ostream& out, bool color) {
-    uint16_t nameIdx = static_cast<uint16_t>(chunk.at(offset + 1) << 8 |
-                                              chunk.at(offset + 2));
+    uint16_t nameIdx =
+        static_cast<uint16_t>(chunk.at(offset + 1) << 8 | chunk.at(offset + 2));
     uint8_t argCount = chunk.at(offset + 3);
     out << cc(color, kBold) << name << cc(color, kReset) << ' '
         << static_cast<int>(nameIdx) << " ('" << cc(color, kYellow)
@@ -68,8 +68,8 @@ static int invokeInstruction(const char* name, const Chunk& chunk,
 
 static int closureInstruction(const char* name, const Chunk& chunk, int offset,
                               std::ostream& out, bool color) {
-    uint16_t idx = static_cast<uint16_t>(chunk.at(offset + 1) << 8 |
-                                         chunk.at(offset + 2));
+    uint16_t idx =
+        static_cast<uint16_t>(chunk.at(offset + 1) << 8 | chunk.at(offset + 2));
     Value fnVal = chunk.getConstant(idx);
     ObjFunction* fn = asObjFunction(fnVal);
     out << cc(color, kBold) << name << cc(color, kReset) << ' '
