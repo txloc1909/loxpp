@@ -27,11 +27,12 @@ static int simpleInstruction(const char* name, int offset, std::ostream& out,
 static int constantInstruction(const char* name, const Chunk& chunk,
                                const MemoryManager& mm, int offset,
                                std::ostream& out, bool color) {
-    uint8_t idx = chunk.at(offset + 1);
+    uint16_t idx =
+        static_cast<uint16_t>(chunk.at(offset + 1) << 8 | chunk.at(offset + 2));
     out << cc(color, kBold) << name << cc(color, kReset) << ' '
         << static_cast<int>(idx) << " ('" << cc(color, kYellow)
         << stringify(chunk.getConstant(idx)) << cc(color, kReset) << "')\n";
-    return offset + 2;
+    return offset + 3;
 }
 
 static int byteInstruction(const char* name, const Chunk& chunk, int offset,
@@ -55,24 +56,26 @@ static int jumpInstruction(const char* name, int sign, const Chunk& chunk,
 static int invokeInstruction(const char* name, const Chunk& chunk,
                              const MemoryManager& mm, int offset,
                              std::ostream& out, bool color) {
-    uint8_t nameIdx = chunk.at(offset + 1);
-    uint8_t argCount = chunk.at(offset + 2);
+    uint16_t nameIdx =
+        static_cast<uint16_t>(chunk.at(offset + 1) << 8 | chunk.at(offset + 2));
+    uint8_t argCount = chunk.at(offset + 3);
     out << cc(color, kBold) << name << cc(color, kReset) << ' '
         << static_cast<int>(nameIdx) << " ('" << cc(color, kYellow)
         << stringify(chunk.getConstant(nameIdx)) << cc(color, kReset) << "') "
         << static_cast<int>(argCount) << '\n';
-    return offset + 3;
+    return offset + 4;
 }
 
 static int closureInstruction(const char* name, const Chunk& chunk, int offset,
                               std::ostream& out, bool color) {
-    uint8_t idx = chunk.at(offset + 1);
+    uint16_t idx =
+        static_cast<uint16_t>(chunk.at(offset + 1) << 8 | chunk.at(offset + 2));
     Value fnVal = chunk.getConstant(idx);
     ObjFunction* fn = asObjFunction(fnVal);
     out << cc(color, kBold) << name << cc(color, kReset) << ' '
         << static_cast<int>(idx) << " ('" << cc(color, kYellow)
         << stringify(fnVal) << cc(color, kReset) << "')\n";
-    offset += 2;
+    offset += 3;
     for (int i = 0; i < fn->upvalueCount; i++) {
         uint8_t isLocal = chunk.at(offset++);
         uint8_t index = chunk.at(offset++);

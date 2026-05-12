@@ -372,7 +372,7 @@ uint16_t VM::readShort() {
 
 Value VM::readConstant() {
     return m_frames[m_frameCount - 1].closure->function->chunk.getConstant(
-        readByte());
+        readShort());
 }
 
 Value VM::lastResult() const { return m_lastResult; }

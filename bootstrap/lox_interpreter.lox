@@ -77,7 +77,7 @@ fun loxTag(v) {
 }
 
 // ===========================================================================
-// AST ENUMS  (must stay at global scope — Lox++ restriction)
+// AST ENUMS
 // ===========================================================================
 
 enum Expr {
@@ -110,15 +110,8 @@ enum Stmt {
 }
 
 // ===========================================================================
-// ALL CLASSES + INTERPRETER LOGIC — wrapped in runInterpreter() to stay
-// under the 256-constant-per-chunk limit in Lox++.
-// ===========================================================================
-
-fun runInterpreter() {
-
-// ---------------------------------------------------------------------------
 // SCANNER
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
 class Token {
     init(type, lexeme, literal, line) {
@@ -267,9 +260,9 @@ class Scanner {
     }
 }
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
 // PARSER
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
 class Parser {
     init(tokens) {
@@ -667,9 +660,9 @@ class Parser {
     }
 }
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
 // RESOLVER
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
 class Resolver {
     init() {
@@ -889,9 +882,9 @@ class Resolver {
     }
 }
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
 // ENVIRONMENT
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
 class Environment {
     init(enclosing) {
@@ -940,9 +933,9 @@ class Environment {
     }
 }
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
 // RUNTIME OBJECTS
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
 class LoxFunction {
     init(name, params, body, closure, isInitializer) {
@@ -1049,9 +1042,9 @@ class LoxNative {
     toString() { return "<native fn>"; }
 }
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
 // INTERPRETER
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
 class Interpreter {
     init(locals) {
@@ -1398,35 +1391,32 @@ class Interpreter {
     }
 }
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
 // Entry point — reads Lox source from stdin and runs it.
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
-    var source = "";
-    var ln = input();
-    while (ln != nil) {
-        source = source + ln + "\n";
-        ln = input();
-    }
-    // Remove the trailing newline we added to the last line — avoids off-by-one
-    // in line numbers for files that don't end with a newline.
-    if (len(source) > 0 and source[len(source) - 1] == "\n") {
-        source = source[0 : len(source) - 1];
-    }
-
-    var scanner = Scanner(source);
-    var tokens  = scanner.scanTokens();
-
-    var parser = Parser(tokens);
-    var stmts  = parser.parse();
-    if (scanner.hadError or parser.hadError) return;
-
-    var resolver = Resolver();
-    resolver.resolve(stmts);
-    if (resolver.hadError) return;
-
-    var interpreter = Interpreter(resolver.locals);
-    interpreter.interpret(stmts);
+var source = "";
+var ln = input();
+while (ln != nil) {
+    source = source + ln + "\n";
+    ln = input();
+}
+// Remove the trailing newline we added to the last line — avoids off-by-one
+// in line numbers for files that don't end with a newline.
+if (len(source) > 0 and source[len(source) - 1] == "\n") {
+    source = source[0 : len(source) - 1];
 }
 
-runInterpreter();
+var scanner = Scanner(source);
+var tokens  = scanner.scanTokens();
+
+var parser = Parser(tokens);
+var stmts  = parser.parse();
+if (!scanner.hadError and !parser.hadError) {
+    var resolver = Resolver();
+    resolver.resolve(stmts);
+    if (!resolver.hadError) {
+        var interpreter = Interpreter(resolver.locals);
+        interpreter.interpret(stmts);
+    }
+}

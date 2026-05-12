@@ -170,7 +170,7 @@ void Compiler::literal() {
 
 void Compiler::number() {
     double num = std::stod(m_parser->m_previous.lexeme.data(), nullptr);
-    emitBytes(Op::CONSTANT, makeConstant(from<Number>(num)));
+    emitConstantOp(Op::CONSTANT, makeConstant(from<Number>(num)));
 }
 
 void Compiler::string() {
@@ -186,7 +186,7 @@ void Compiler::string() {
         }
     }
     ObjString* s = m_mm->makeString(std::move(processed));
-    emitBytes(Op::CONSTANT, makeConstant(Value{static_cast<Obj*>(s)}));
+    emitConstantOp(Op::CONSTANT, makeConstant(Value{static_cast<Obj*>(s)}));
 }
 
 void Compiler::variable() {
@@ -275,7 +275,7 @@ void Compiler::emitDestructureLocal(const std::vector<Token>& fields) {
         }
         addLocal(field);
         emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(srcSlot));
-        emitBytes(Op::GET_PROPERTY, identifierConstant(field));
+        emitConstantOp(Op::GET_PROPERTY, identifierConstant(field));
         m_locals[m_localCount - 1].depth = m_scopeDepth;
     }
 }
@@ -285,13 +285,13 @@ void Compiler::emitDestructureGlobal(const std::vector<Token>& fields) {
     hidden.type = TokenType::IDENTIFIER;
     hidden.lexeme = "#destruct";
     hidden.line = m_parser->m_previous.line;
-    uint8_t hiddenIdx = identifierConstant(hidden);
-    emitBytes(Op::DEFINE_GLOBAL, hiddenIdx);
+    uint16_t hiddenIdx = identifierConstant(hidden);
+    emitConstantOp(Op::DEFINE_GLOBAL, hiddenIdx);
 
     for (const Token& field : fields) {
-        emitBytes(Op::GET_GLOBAL, hiddenIdx);
-        emitBytes(Op::GET_PROPERTY, identifierConstant(field));
-        emitBytes(Op::DEFINE_GLOBAL, identifierConstant(field));
+        emitConstantOp(Op::GET_GLOBAL, hiddenIdx);
+        emitConstantOp(Op::GET_PROPERTY, identifierConstant(field));
+        emitConstantOp(Op::DEFINE_GLOBAL, identifierConstant(field));
     }
 }
 
@@ -336,8 +336,8 @@ void Compiler::emitDestructureSeqLocal(const std::vector<Token>& names) {
     for (int i = 0; i < static_cast<int>(names.size()); i++) {
         const Token& name = names[i];
         emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(srcSlot));
-        emitBytes(Op::CONSTANT,
-                  makeConstant(from<Number>(static_cast<double>(i))));
+        emitConstantOp(Op::CONSTANT,
+                       makeConstant(from<Number>(static_cast<double>(i))));
         emitByte(Op::GET_INDEX);
         if (name.lexeme == "_") {
             emitByte(Op::POP);
@@ -361,18 +361,18 @@ void Compiler::emitDestructureSeqGlobal(const std::vector<Token>& names) {
     hidden.type = TokenType::IDENTIFIER;
     hidden.lexeme = "#destruct";
     hidden.line = m_parser->m_previous.line;
-    uint8_t hiddenIdx = identifierConstant(hidden);
-    emitBytes(Op::DEFINE_GLOBAL, hiddenIdx);
+    uint16_t hiddenIdx = identifierConstant(hidden);
+    emitConstantOp(Op::DEFINE_GLOBAL, hiddenIdx);
 
     for (int i = 0; i < static_cast<int>(names.size()); i++) {
-        emitBytes(Op::GET_GLOBAL, hiddenIdx);
-        emitBytes(Op::CONSTANT,
-                  makeConstant(from<Number>(static_cast<double>(i))));
+        emitConstantOp(Op::GET_GLOBAL, hiddenIdx);
+        emitConstantOp(Op::CONSTANT,
+                       makeConstant(from<Number>(static_cast<double>(i))));
         emitByte(Op::GET_INDEX);
         if (names[i].lexeme == "_")
             emitByte(Op::POP);
         else
-            emitBytes(Op::DEFINE_GLOBAL, identifierConstant(names[i]));
+            emitConstantOp(Op::DEFINE_GLOBAL, identifierConstant(names[i]));
     }
 }
 
@@ -401,8 +401,8 @@ void Compiler::varDeclaration() {
     if (m_scopeDepth > 0) {
         markInitialized();
     } else {
-        uint8_t nameConst = identifierConstant(name);
-        emitBytes(Op::DEFINE_GLOBAL, nameConst);
+        uint16_t nameConst = identifierConstant(name);
+        emitConstantOp(Op::DEFINE_GLOBAL, nameConst);
     }
 }
 
@@ -881,8 +881,8 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
             ctorName = patName;
             emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
             emitByte(Op::GET_TAG);
-            emitBytes(Op::CONSTANT,
-                      makeConstant(Value{static_cast<double>(info->tag)}));
+            emitConstantOp(Op::CONSTANT,
+                           makeConstant(Value{static_cast<double>(info->tag)}));
             emitByte(Op::EQUAL);
             missJump = emitJump(Op::JUMP_IF_FALSE);
             emitByte(Op::POP);
@@ -890,11 +890,11 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
         } else if (findClass(patName)) {
             ObjString* classNameStr = m_mm->makeString(patTok.lexeme);
             m_mm->pushTempRoot(classNameStr);
-            uint8_t classNameConst =
+            uint16_t classNameConst =
                 makeConstant(Value{static_cast<Obj*>(classNameStr)});
             m_mm->popTempRoot();
             emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
-            emitBytes(Op::INSTANCEOF, classNameConst);
+            emitConstantOp(Op::INSTANCEOF, classNameConst);
             missJump = emitJump(Op::JUMP_IF_FALSE);
             emitByte(Op::POP);
             compileClassPattern(subjectSlot, patTok);
@@ -1151,9 +1151,9 @@ int Compiler::compileClassPattern(int subjectSlot, const Token& patTok) {
         do {
             m_parser->consume(TokenType::IDENTIFIER, "Expect field name.");
             Token fieldTok = m_parser->m_previous;
-            uint8_t propConst = identifierConstant(fieldTok);
+            uint16_t propConst = identifierConstant(fieldTok);
             emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
-            emitBytes(Op::GET_PROPERTY, propConst);
+            emitConstantOp(Op::GET_PROPERTY, propConst);
             addLocal(fieldTok);
             markInitialized();
             bindingCount++;
@@ -1217,14 +1217,14 @@ void Compiler::enumDeclaration() {
         auto* ctor =
             m_mm->create<ObjEnumCtor>(tag, arity, ctorNameStr, enumNameStr);
         m_mm->pushTempRoot(ctor);
-        uint8_t ctorConst = makeConstant(Value{static_cast<Obj*>(ctor)});
+        uint16_t ctorConst = makeConstant(Value{static_cast<Obj*>(ctor)});
         m_mm->popTempRoot(); // ctor
         m_mm->popTempRoot(); // enumNameStr
         m_mm->popTempRoot(); // ctorNameStr
 
-        uint8_t nameConst = identifierConstant(ctorTok);
-        emitBytes(Op::CONSTANT, ctorConst);
-        emitBytes(Op::DEFINE_GLOBAL, nameConst);
+        uint16_t nameConst = identifierConstant(ctorTok);
+        emitConstantOp(Op::CONSTANT, ctorConst);
+        emitConstantOp(Op::DEFINE_GLOBAL, nameConst);
 
         root->m_constructors[ctorName] = {enumName, tag, arity, fieldNames};
         root->m_enumCtors[enumName].push_back(ctorName);
@@ -1260,8 +1260,8 @@ int Compiler::compileCtorPattern(int subjectSlot, const ConstructorInfo& info,
                 auto idx = static_cast<uint8_t>(
                     std::distance(info.fieldNames.begin(), it));
                 emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
-                emitBytes(Op::CONSTANT,
-                          makeConstant(Value{static_cast<double>(idx)}));
+                emitConstantOp(Op::CONSTANT,
+                               makeConstant(Value{static_cast<double>(idx)}));
                 emitByte(Op::GET_INDEX);
                 addLocal(m_parser->m_previous);
                 markInitialized();
@@ -1282,8 +1282,8 @@ int Compiler::compileCtorPattern(int subjectSlot, const ConstructorInfo& info,
                 m_parser->consume(TokenType::IDENTIFIER,
                                   "Expect binding name.");
                 emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
-                emitBytes(Op::CONSTANT,
-                          makeConstant(Value{static_cast<double>(i)}));
+                emitConstantOp(Op::CONSTANT,
+                               makeConstant(Value{static_cast<double>(i)}));
                 emitByte(Op::GET_INDEX);
                 addLocal(m_parser->m_previous);
                 markInitialized();
@@ -1338,7 +1338,7 @@ void Compiler::funDeclaration() {
     m_parser->consume(TokenType::IDENTIFIER, "Expect function name.");
     Token name = m_parser->m_previous;
 
-    uint8_t nameConst = 0;
+    uint16_t nameConst = 0;
     if (m_scopeDepth > 0) {
         declareVariable();
         markInitialized(); // allow recursion inside the body
@@ -1354,30 +1354,30 @@ void Compiler::funDeclaration() {
     fn->name = m_mm->makeString(name.lexeme);
     inner.parseFunction(FunctionType::FUNCTION);
 
-    emitBytes(Op::CLOSURE, makeConstant(Value{static_cast<Obj*>(fn)}));
+    emitConstantOp(Op::CLOSURE, makeConstant(Value{static_cast<Obj*>(fn)}));
     for (int i = 0; i < fn->upvalueCount; i++) {
         emitByte(inner.m_upvalues[i].isLocal ? 1 : 0);
         emitByte(inner.m_upvalues[i].index);
     }
     if (m_scopeDepth == 0) {
-        emitBytes(Op::DEFINE_GLOBAL, nameConst);
+        emitConstantOp(Op::DEFINE_GLOBAL, nameConst);
     }
 }
 
 void Compiler::classDeclaration() {
     m_parser->consume(TokenType::IDENTIFIER, "Expect class name.");
     Token className = m_parser->m_previous;
-    uint8_t nameConst = identifierConstant(className);
+    uint16_t nameConst = identifierConstant(className);
 
     if (m_scopeDepth > 0)
         declareVariable();
 
-    emitBytes(Op::CLASS, nameConst);
+    emitConstantOp(Op::CLASS, nameConst);
 
     if (m_scopeDepth > 0) {
         markInitialized();
     } else {
-        emitBytes(Op::DEFINE_GLOBAL, nameConst);
+        emitConstantOp(Op::DEFINE_GLOBAL, nameConst);
         findRootCompiler()->m_classNames.insert(std::string(className.lexeme));
     }
 
@@ -1425,7 +1425,7 @@ void Compiler::classDeclaration() {
 
 void Compiler::method() {
     m_parser->consume(TokenType::IDENTIFIER, "Expect method name.");
-    uint8_t nameConst = identifierConstant(m_parser->m_previous);
+    uint16_t nameConst = identifierConstant(m_parser->m_previous);
 
     FunctionType type = FunctionType::METHOD;
     if (m_parser->m_previous.lexeme == "init")
@@ -1437,12 +1437,12 @@ void Compiler::method() {
     Compiler inner(fn, m_parser, m_mm, type, this);
     inner.parseFunction(type);
 
-    emitBytes(Op::CLOSURE, makeConstant(Value{static_cast<Obj*>(fn)}));
+    emitConstantOp(Op::CLOSURE, makeConstant(Value{static_cast<Obj*>(fn)}));
     for (int i = 0; i < fn->upvalueCount; i++) {
         emitByte(inner.m_upvalues[i].isLocal ? 1 : 0);
         emitByte(inner.m_upvalues[i].index);
     }
-    emitBytes(Op::DEFINE_METHOD, nameConst);
+    emitConstantOp(Op::DEFINE_METHOD, nameConst);
 }
 
 void Compiler::this_() {
@@ -1461,7 +1461,7 @@ void Compiler::super_() {
 
     m_parser->consume(TokenType::DOT, "Expect '.' after 'super'.");
     m_parser->consume(TokenType::IDENTIFIER, "Expect superclass method name.");
-    uint8_t nameConst = identifierConstant(m_parser->m_previous);
+    uint16_t nameConst = identifierConstant(m_parser->m_previous);
 
     namedVariable(Token{TokenType::THIS, "this", 0}, false); // push receiver
 
@@ -1478,21 +1478,21 @@ void Compiler::super_() {
         m_parser->consume(TokenType::RIGHT_PAREN,
                           "Expect ')' after arguments.");
         namedVariable(Token{TokenType::SUPER, "super", 0}, false);
-        emitBytes(Op::SUPER_INVOKE, nameConst);
+        emitConstantOp(Op::SUPER_INVOKE, nameConst);
         emitByte(argCount);
     } else {
         namedVariable(Token{TokenType::SUPER, "super", 0}, false);
-        emitBytes(Op::GET_SUPER, nameConst);
+        emitConstantOp(Op::GET_SUPER, nameConst);
     }
 }
 
 void Compiler::dot() {
     m_parser->consume(TokenType::IDENTIFIER, "Expect property name after '.'.");
-    uint8_t nameConst = identifierConstant(m_parser->m_previous);
+    uint16_t nameConst = identifierConstant(m_parser->m_previous);
 
     if (m_parser->m_canAssign && m_parser->match(TokenType::EQUAL)) {
         expression();
-        emitBytes(Op::SET_PROPERTY, nameConst);
+        emitConstantOp(Op::SET_PROPERTY, nameConst);
     } else if (m_parser->match(TokenType::LEFT_PAREN)) {
         // Fuse GET_PROPERTY + CALL into a single INVOKE superinstruction.
         uint8_t argCount = 0;
@@ -1506,10 +1506,10 @@ void Compiler::dot() {
         }
         m_parser->consume(TokenType::RIGHT_PAREN,
                           "Expect ')' after arguments.");
-        emitBytes(Op::INVOKE, nameConst);
+        emitConstantOp(Op::INVOKE, nameConst);
         emitByte(argCount);
     } else {
-        emitBytes(Op::GET_PROPERTY, nameConst);
+        emitConstantOp(Op::GET_PROPERTY, nameConst);
     }
 }
 
@@ -1672,7 +1672,7 @@ void Compiler::emitLoopCleanup(int targetLocalCount) {
         emitByte(Op::POP);
 }
 
-uint8_t Compiler::makeConstant(Value value) {
+uint16_t Compiler::makeConstant(Value value) {
     auto constant = getCurrentChunk()->addConstant(value);
     if (!constant) {
         m_parser->error("Too many constants in one chunk.");
@@ -1681,35 +1681,43 @@ uint8_t Compiler::makeConstant(Value value) {
     return *constant;
 }
 
-uint8_t Compiler::identifierConstant(const Token& name) {
+uint16_t Compiler::identifierConstant(const Token& name) {
     ObjString* s = m_mm->makeString(name.lexeme);
     return makeConstant(Value{static_cast<Obj*>(s)});
 }
 
+void Compiler::emitConstantOp(Op op, uint16_t idx) {
+    emitByte(op);
+    emitByte(static_cast<Byte>((idx >> 8) & 0xff));
+    emitByte(static_cast<Byte>(idx & 0xff));
+}
+
 void Compiler::namedVariable(const Token& name, bool canAssign) {
-    Op getOp, setOp;
     int slot = resolveLocal(name);
-    uint8_t operand;
-
     if (slot != -1) {
-        getOp = Op::GET_LOCAL;
-        setOp = Op::SET_LOCAL;
-        operand = static_cast<uint8_t>(slot);
-    } else if ((slot = resolveUpvalue(name)) != -1) {
-        getOp = Op::GET_UPVALUE;
-        setOp = Op::SET_UPVALUE;
-        operand = static_cast<uint8_t>(slot);
-    } else {
-        getOp = Op::GET_GLOBAL;
-        setOp = Op::SET_GLOBAL;
-        operand = identifierConstant(name);
+        if (canAssign && m_parser->match(TokenType::EQUAL)) {
+            expression();
+            emitBytes(Op::SET_LOCAL, static_cast<Byte>(slot));
+        } else {
+            emitBytes(Op::GET_LOCAL, static_cast<Byte>(slot));
+        }
+        return;
     }
-
+    if ((slot = resolveUpvalue(name)) != -1) {
+        if (canAssign && m_parser->match(TokenType::EQUAL)) {
+            expression();
+            emitBytes(Op::SET_UPVALUE, static_cast<Byte>(slot));
+        } else {
+            emitBytes(Op::GET_UPVALUE, static_cast<Byte>(slot));
+        }
+        return;
+    }
+    uint16_t constIdx = identifierConstant(name);
     if (canAssign && m_parser->match(TokenType::EQUAL)) {
         expression();
-        emitBytes(setOp, operand);
+        emitConstantOp(Op::SET_GLOBAL, constIdx);
     } else {
-        emitBytes(getOp, operand);
+        emitConstantOp(Op::GET_GLOBAL, constIdx);
     }
 }
 
@@ -1767,11 +1775,11 @@ Compiler::ListPatResult Compiler::compileListPattern(int subjectSlot,
     // ---- Length check: len(subject) vs fixedCount -------------------------
     // Inline call: GET_GLOBAL "len"; GET_LOCAL subject; CALL 1
     Token lenTok{TokenType::IDENTIFIER, "len", m_parser->m_previous.line};
-    emitBytes(Op::GET_GLOBAL, identifierConstant(lenTok));
+    emitConstantOp(Op::GET_GLOBAL, identifierConstant(lenTok));
     emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
     emitBytes(Op::CALL, 1);
-    emitBytes(Op::CONSTANT,
-              makeConstant(Value{static_cast<double>(fixedCount)}));
+    emitConstantOp(Op::CONSTANT,
+                   makeConstant(Value{static_cast<double>(fixedCount)}));
     if (hasRest) {
         // rest pattern: miss when len < fixedCount.
         // LESS pushes (len < fixedCount): true=miss. NOT inverts: false=miss.
@@ -1803,9 +1811,10 @@ Compiler::ListPatResult Compiler::compileListPattern(int subjectSlot,
             if (std::string(elem.name.lexeme) != "_") {
                 // subject[fixedCount : len(subject)]
                 emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
-                emitBytes(Op::CONSTANT,
-                          makeConstant(Value{static_cast<double>(fixedCount)}));
-                emitBytes(Op::GET_GLOBAL, identifierConstant(lenTok));
+                emitConstantOp(
+                    Op::CONSTANT,
+                    makeConstant(Value{static_cast<double>(fixedCount)}));
+                emitConstantOp(Op::GET_GLOBAL, identifierConstant(lenTok));
                 emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
                 emitBytes(Op::CALL, 1);
                 emitByte(Op::SLICE);
@@ -1816,8 +1825,8 @@ Compiler::ListPatResult Compiler::compileListPattern(int subjectSlot,
             }
         } else {
             emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
-            emitBytes(Op::CONSTANT,
-                      makeConstant(Value{static_cast<double>(i)}));
+            emitConstantOp(Op::CONSTANT,
+                           makeConstant(Value{static_cast<double>(i)}));
             emitByte(Op::GET_INDEX);
             if (std::string(elem.name.lexeme) == "_") {
                 emitByte(Op::POP);
