@@ -346,6 +346,237 @@ static Value openNative(int /*argc*/, Value* args) {
     return Value{static_cast<Obj*>(file)};
 }
 
+// ---------------------------------------------------------------------------
+// Reflect API — global `reflect` object with introspection methods
+// ---------------------------------------------------------------------------
+
+static Value reflectTypeOfNative(int /*argc*/, Value* args) {
+    const Value& v = args[0];
+    const char* name = nullptr;
+    if (is<Nil>(v))
+        name = "nil";
+    else if (is<bool>(v))
+        name = "bool";
+    else if (is<Number>(v))
+        name = "number";
+    else {
+        switch (as<Obj*>(v)->type) {
+        case ObjType::STRING:
+            name = "string";
+            break;
+        case ObjType::CLOSURE:
+        case ObjType::NATIVE:
+        case ObjType::FUNCTION:
+        case ObjType::BOUND_METHOD:
+            name = "function";
+            break;
+        case ObjType::CLASS:
+            name = "class";
+            break;
+        case ObjType::INSTANCE:
+            name = "instance";
+            break;
+        case ObjType::LIST:
+            name = "list";
+            break;
+        case ObjType::MAP:
+            name = "map";
+            break;
+        case ObjType::ENUM_CTOR:
+            name = "enum_ctor";
+            break;
+        case ObjType::ENUM:
+            name = "enum";
+            break;
+        default:
+            name = "object";
+            break;
+        }
+    }
+    return Value{static_cast<Obj*>(s_currentMM->makeString(name))};
+}
+
+static Value reflectIsNilNative(int, Value* args) {
+    return from<bool>(is<Nil>(args[0]));
+}
+static Value reflectIsBoolNative(int, Value* args) {
+    return from<bool>(is<bool>(args[0]));
+}
+static Value reflectIsNumberNative(int, Value* args) {
+    return from<bool>(is<Number>(args[0]));
+}
+static Value reflectIsStringNative(int, Value* args) {
+    return from<bool>(isValueOfType<ObjType::STRING>(args[0]));
+}
+static Value reflectIsListNative(int, Value* args) {
+    return from<bool>(isList(args[0]));
+}
+static Value reflectIsMapNative(int, Value* args) {
+    return from<bool>(isMap(args[0]));
+}
+static Value reflectIsClassNative(int, Value* args) {
+    return from<bool>(isClass(args[0]));
+}
+static Value reflectIsInstanceNative(int, Value* args) {
+    return from<bool>(isInstance(args[0]));
+}
+static Value reflectIsFunctionNative(int, Value* args) {
+    const Value& v = args[0];
+    return from<bool>(isClosure(v) || isValueOfType<ObjType::NATIVE>(v) ||
+                      isBoundMethod(v) || isClass(v) || isEnumCtor(v));
+}
+
+static Value reflectClassOfNative(int, Value* args) {
+    if (!isInstance(args[0])) {
+        nativeRuntimeError("reflect.classOf: argument must be an instance.");
+        return from<Nil>(Nil{});
+    }
+    return Value{static_cast<Obj*>(asObjInstance(as<Obj*>(args[0]))->klass)};
+}
+
+static Value reflectClassNameNative(int, Value* args) {
+    if (!isClass(args[0])) {
+        nativeRuntimeError("reflect.className: argument must be a class.");
+        return from<Nil>(Nil{});
+    }
+    return Value{static_cast<Obj*>(asObjClass(as<Obj*>(args[0]))->name)};
+}
+
+static Value reflectSuperOfNative(int, Value* args) {
+    if (!isClass(args[0])) {
+        nativeRuntimeError("reflect.superOf: argument must be a class.");
+        return from<Nil>(Nil{});
+    }
+    ObjClass* sup = asObjClass(as<Obj*>(args[0]))->superclass;
+    if (!sup)
+        return from<Nil>(Nil{});
+    return Value{static_cast<Obj*>(sup)};
+}
+
+static Value reflectFieldsNative(int, Value* args) {
+    if (!isInstance(args[0])) {
+        nativeRuntimeError("reflect.fields: argument must be an instance.");
+        return from<Nil>(Nil{});
+    }
+    ObjList* list =
+        s_currentMM->create<ObjList>(VmAllocator<Value>{s_currentMM});
+    s_currentMM->pushTempRoot(list);
+    ObjInstance* inst = asObjInstance(as<Obj*>(args[0]));
+    inst->fields.forEach([list](ObjString* k, Value) {
+        list->elements.push_back(Value{static_cast<Obj*>(k)});
+    });
+    s_currentMM->popTempRoot();
+    return Value{static_cast<Obj*>(list)};
+}
+
+static Value reflectMethodsNative(int, Value* args) {
+    if (!isClass(args[0])) {
+        nativeRuntimeError("reflect.methods: argument must be a class.");
+        return from<Nil>(Nil{});
+    }
+    ObjList* list =
+        s_currentMM->create<ObjList>(VmAllocator<Value>{s_currentMM});
+    s_currentMM->pushTempRoot(list);
+    ObjClass* klass = asObjClass(as<Obj*>(args[0]));
+    klass->methods.forEach([list](ObjString* k, Value) {
+        list->elements.push_back(Value{static_cast<Obj*>(k)});
+    });
+    s_currentMM->popTempRoot();
+    return Value{static_cast<Obj*>(list)};
+}
+
+static Value reflectHasFieldNative(int, Value* args) {
+    if (!isInstance(args[0]) || !isValueOfType<ObjType::STRING>(args[1])) {
+        nativeRuntimeError("reflect.hasField: expects (instance, string).");
+        return from<Nil>(Nil{});
+    }
+    Value dummy;
+    return from<bool>(asObjInstance(as<Obj*>(args[0]))
+                          ->fields.get(asObjString(as<Obj*>(args[1])), dummy));
+}
+
+static Value reflectGetFieldNative(int, Value* args) {
+    if (!isInstance(args[0]) || !isValueOfType<ObjType::STRING>(args[1])) {
+        nativeRuntimeError("reflect.getField: expects (instance, string).");
+        return from<Nil>(Nil{});
+    }
+    Value result;
+    if (!asObjInstance(as<Obj*>(args[0]))
+             ->fields.get(asObjString(as<Obj*>(args[1])), result)) {
+        nativeRuntimeError("reflect.getField: field not found.");
+        return from<Nil>(Nil{});
+    }
+    return result;
+}
+
+static Value reflectSetFieldNative(int, Value* args) {
+    if (!isInstance(args[0]) || !isValueOfType<ObjType::STRING>(args[1])) {
+        nativeRuntimeError(
+            "reflect.setField: expects (instance, string, value).");
+        return from<Nil>(Nil{});
+    }
+    asObjInstance(as<Obj*>(args[0]))
+        ->fields.set(asObjString(as<Obj*>(args[1])), args[2]);
+    return from<Nil>(Nil{});
+}
+
+static Value reflectHasMethodNative(int, Value* args) {
+    if (!isClass(args[0]) || !isValueOfType<ObjType::STRING>(args[1])) {
+        nativeRuntimeError("reflect.hasMethod: expects (class, string).");
+        return from<Nil>(Nil{});
+    }
+    Value dummy;
+    return from<bool>(asObjClass(as<Obj*>(args[0]))
+                          ->methods.get(asObjString(as<Obj*>(args[1])), dummy));
+}
+
+static Value reflectGetMethodNative(int, Value* args) {
+    if (!isInstance(args[0]) || !isValueOfType<ObjType::STRING>(args[1])) {
+        nativeRuntimeError("reflect.getMethod: expects (instance, string).");
+        return from<Nil>(Nil{});
+    }
+    ObjInstance* inst = asObjInstance(as<Obj*>(args[0]));
+    Value methodVal;
+    if (!inst->klass->methods.get(asObjString(as<Obj*>(args[1])), methodVal)) {
+        nativeRuntimeError("reflect.getMethod: method not found.");
+        return from<Nil>(Nil{});
+    }
+    ObjBoundMethod* bm = s_currentMM->create<ObjBoundMethod>(
+        args[0], asObjClosure(as<Obj*>(methodVal)));
+    return Value{static_cast<Obj*>(bm)};
+}
+
+struct ReflectFnEntry {
+    const char* name;
+    NativeFn fn;
+    int arity;
+};
+
+static const ReflectFnEntry kReflectFunctions[] = {
+    {"typeOf", reflectTypeOfNative, 1},
+    {"isNil", reflectIsNilNative, 1},
+    {"isBool", reflectIsBoolNative, 1},
+    {"isNumber", reflectIsNumberNative, 1},
+    {"isString", reflectIsStringNative, 1},
+    {"isList", reflectIsListNative, 1},
+    {"isMap", reflectIsMapNative, 1},
+    {"isFunction", reflectIsFunctionNative, 1},
+    {"isClass", reflectIsClassNative, 1},
+    {"isInstance", reflectIsInstanceNative, 1},
+    {"classOf", reflectClassOfNative, 1},
+    {"className", reflectClassNameNative, 1},
+    {"superOf", reflectSuperOfNative, 1},
+    {"fields", reflectFieldsNative, 1},
+    {"methods", reflectMethodsNative, 1},
+    {"hasField", reflectHasFieldNative, 2},
+    {"getField", reflectGetFieldNative, 2},
+    {"setField", reflectSetFieldNative, 3},
+    {"hasMethod", reflectHasMethodNative, 2},
+    {"getMethod", reflectGetMethodNative, 2},
+};
+
+// ---------------------------------------------------------------------------
+
 InterpretResult VM::interpret(const std::string& source) {
     // Guard against dangling class pointers from a prior VM instance. GC can
     // fire inside compile(), and markRoots() must not dereference a pointer
@@ -1437,6 +1668,7 @@ void VM::defineNatives() {
     defineMathObject();
     defineFileAPI();
     defineMapAPI();
+    defineReflectObject();
 }
 
 void VM::defineFileAPI() {
@@ -1540,6 +1772,37 @@ void VM::defineMathObject() {
     pop(); // globalKey
 
     // g. Pop instance, klass, className
+    pop(); // instance
+    pop(); // klass
+    pop(); // className
+}
+
+void VM::defineReflectObject() {
+    ObjString* className = m_mm.makeString("Reflect");
+    push(Value{static_cast<Obj*>(className)});
+    ObjClass* klass =
+        m_mm.create<ObjClass>(className, VmAllocator<Entry>{&m_mm});
+    push(Value{static_cast<Obj*>(klass)});
+
+    ObjInstance* instance =
+        m_mm.create<ObjInstance>(klass, VmAllocator<Entry>{&m_mm});
+    push(Value{static_cast<Obj*>(instance)});
+
+    for (const auto& e : kReflectFunctions) {
+        ObjNative* native = m_mm.create<ObjNative>(e.fn, e.arity);
+        push(Value{static_cast<Obj*>(native)});
+        ObjString* key = m_mm.makeString(e.name);
+        push(Value{static_cast<Obj*>(key)});
+        instance->fields.set(key, Value{static_cast<Obj*>(native)});
+        pop(); // key
+        pop(); // native
+    }
+
+    ObjString* globalKey = m_mm.makeString("reflect");
+    push(Value{static_cast<Obj*>(globalKey)});
+    m_globals.set(globalKey, Value{static_cast<Obj*>(instance)});
+    pop(); // globalKey
+
     pop(); // instance
     pop(); // klass
     pop(); // className
