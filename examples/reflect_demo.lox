@@ -1,0 +1,75 @@
+// reflect_demo.lox — demonstrates the reflect API.
+
+class Animal {
+    init(name) { this.name = name; }
+    speak() { return this.name + " makes a sound"; }
+}
+
+class Dog < Animal {
+    init(name, breed) {
+        super.init(name);
+        this.breed = breed;
+    }
+    fetch() { return this.name + " fetches the ball!"; }
+}
+
+var d = Dog("Rex", "Husky");
+
+// Type introspection
+print reflect.typeOf(42);        // number
+print reflect.typeOf("hello");   // string
+print reflect.typeOf(d);         // instance
+print reflect.typeOf(Dog);       // class
+print reflect.typeOf([1, 2, 3]); // list
+print reflect.typeOf({});        // map
+
+// Type predicates
+print reflect.isInstance(d);     // true
+print reflect.isClass(Dog);      // true
+print reflect.isFunction(Dog);   // true (classes are callable)
+print reflect.isNumber("x");     // false
+
+// Class hierarchy
+var cls = reflect.classOf(d);
+print reflect.className(cls);                       // Dog
+print reflect.className(reflect.superOf(cls));      // Animal
+print reflect.isNil(reflect.superOf(reflect.superOf(cls))); // true
+
+// Field enumeration (own fields only)
+var fs = reflect.fields(d);
+print len(fs);   // 2  (name, breed)
+
+// Method enumeration (flat after inheritance — includes inherited methods)
+var ms = reflect.methods(cls);
+print len(ms);   // 3  (init, fetch, speak)
+
+// Dynamic property access
+print reflect.hasField(d, "name");     // true
+print reflect.hasField(d, "missing");  // false
+print reflect.getField(d, "name");     // Rex
+reflect.setField(d, "age", 3);
+print d.age;                           // 3
+
+// Dynamic method lookup and invocation
+print reflect.hasMethod(cls, "fetch"); // true
+var m = reflect.getMethod(d, "speak");
+print m();                             // Rex makes a sound
+var fetchFn = reflect.getMethod(d, "fetch");
+print fetchFn();                       // Rex fetches the ball!
+
+// Generic serializer using reflect
+fun serialize(inst) {
+    var out = "{";
+    var fields = reflect.fields(inst);
+    var i = 0;
+    while (i < len(fields)) {
+        var key = fields[i];
+        var val = reflect.getField(inst, key);
+        out = out + key + ": " + str(val);
+        if (i < len(fields) - 1) { out = out + ", "; }
+        i = i + 1;
+    }
+    return out + "}";
+}
+
+print serialize(d);   // {name: Rex, breed: Husky, age: 3}

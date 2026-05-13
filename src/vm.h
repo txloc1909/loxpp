@@ -60,6 +60,7 @@ class VM {
     void defineMathObject();
     void defineFileAPI();
     void defineMapAPI();
+    void defineReflectObject();
     ObjUpvalue* captureUpvalue(Value* local);
     void closeUpvalues(Value* last);
     void runtimeError(const char* format, ...);
