@@ -78,6 +78,16 @@ jobs:
             loxpp-dev:latest \
             bash -c "python3 tools/check_examples.py build/loxpp examples/"
 
+      - name: Run examples through loxpp bootstrap interpreter
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev:latest \
+            bash -c "python3 tools/check_examples.py bootstrap/lox_wrapper.sh examples/ || true"
+
       - name: Run Lox interpreter test suite (craftinginterpreters)
         if: matrix.preset == 'release'
         run: |
