@@ -70,7 +70,6 @@ jobs:
             bash -c "ctest --test-dir build --output-on-failure"
 
       - name: Run example checks
-        if: matrix.preset == 'release'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
