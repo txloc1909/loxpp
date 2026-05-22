@@ -26,7 +26,8 @@ var LOX_KEYWORDS = {
     "if": "IF",         "nil": "NIL",         "or": "OR",
     "print": "PRINT",   "return": "RETURN",   "super": "SUPER",
     "this": "THIS",     "true": "TRUE",       "var": "VAR",
-    "while": "WHILE",   "break": "BREAK",     "continue": "CONTINUE"
+    "while": "WHILE",   "break": "BREAK",     "continue": "CONTINUE",
+    "in": "IN"
 };
 
 var DIGIT_MAP = {
@@ -104,6 +105,11 @@ enum Expr {
     ThisExpr(id, line)
     SuperExpr(id, method, line)
     Grouping(expression)
+    ListExpr(elements)
+    MapExpr(keys, vals)
+    IndexExpr(object, index, line)
+    SliceExpr(object, start, end_, line)
+    IndexSetExpr(object, index, line, value)
 }
 
 // ClassDecl(name, super_id, super_name, methods) — super_id/super_name are nil
@@ -121,6 +127,7 @@ enum Stmt {
     BreakStmt(line)
     ContinueStmt(line)
     ForStmt(init, condition, increment, body)
+    ForInStmt(varName, varLine, iterable, body)
 }
 
 // ===========================================================================
@@ -257,6 +264,9 @@ class Scanner {
             return;
         }
         if (c == "%") { this.addToken("PERCENT",       nil); return; }
+        if (c == "[") { this.addToken("LEFT_BRACKET",  nil); return; }
+        if (c == "]") { this.addToken("RIGHT_BRACKET", nil); return; }
+        if (c == ":") { this.addToken("COLON",         nil); return; }
         if (c == " " or c == "\r" or c == "\t") return;
         if (c == "\n") { this.line = this.line + 1; return; }
         if (c == "\"") { this.scanString(); return; }
@@ -306,6 +316,12 @@ class Parser {
     check(type) {
         if (this.isAtEnd()) return false;
         return this.peek().type == type;
+    }
+
+    checkAhead(offset, type) {
+        var idx = this.current + offset;
+        if (idx >= len(this.tokens)) return false;
+        return this.tokens[idx].type == type;
     }
 
     matchT(type) {
@@ -467,6 +483,15 @@ class Parser {
 
     forStatement() {
         this.expect("LEFT_PAREN", "Expect '(' after 'for'.");
+        if (this.check("VAR") and this.checkAhead(1, "IDENTIFIER") and this.checkAhead(2, "IN")) {
+            this.advance();  // consume VAR
+            var varTok = this.advance();  // consume IDENTIFIER
+            this.advance();  // consume IN
+            var iterable = this.expression();
+            this.expect("RIGHT_PAREN", "Expect ')' after for-in expression.");
+            var body = this.statement();
+            return ForInStmt(varTok.lexeme, varTok.line, iterable, body);
+        }
         var init = nil;
         if (this.matchT("SEMICOLON")) {
             init = nil;
@@ -544,6 +569,11 @@ class Parser {
                 case ThisExpr{id, line}      => { this.parseError(equals, "Invalid assignment target."); expr }
                 case SuperExpr{id, method, line}   => { this.parseError(equals, "Invalid assignment target."); expr }
                 case Grouping{expression}    => { this.parseError(equals, "Invalid assignment target."); expr }
+                case IndexExpr{object, index, line}           => IndexSetExpr(object, index, line, val)
+                case ListExpr{elements}                       => { this.parseError(equals, "Invalid assignment target."); expr }
+                case MapExpr{keys, vals}                      => { this.parseError(equals, "Invalid assignment target."); expr }
+                case SliceExpr{object, start, end_, line}     => { this.parseError(equals, "Invalid assignment target."); expr }
+                case IndexSetExpr{object, index, line, value} => { this.parseError(equals, "Invalid assignment target."); expr }
             };
         }
         return expr;
@@ -581,7 +611,7 @@ class Parser {
 
     comparison() {
         var left = this.term();
-        while (this.matchAny(["GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL"])) {
+        while (this.matchAny(["GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL", "IN"])) {
             var op    = this.previous();
             var right = this.term();
             left = Binary(op, left, right);
@@ -626,11 +656,25 @@ class Parser {
             } else if (this.matchT("DOT")) {
                 var nameTok = this.expect("IDENTIFIER", "Expect property name after '.'.");
                 expr = Get(expr, nameTok.lexeme, nameTok.line);
+            } else if (this.matchT("LEFT_BRACKET")) {
+                expr = this.finishSubscript(expr);
             } else {
                 break;
             }
         }
         return expr;
+    }
+
+    finishSubscript(object) {
+        var line = this.previous().line;
+        var idx = this.expression();
+        if (this.matchT("COLON")) {
+            var end_ = this.expression();
+            this.expect("RIGHT_BRACKET", "Expect ']' after slice.");
+            return SliceExpr(object, idx, end_, line);
+        }
+        this.expect("RIGHT_BRACKET", "Expect ']' after index.");
+        return IndexExpr(object, idx, line);
     }
 
     finishCall(callee) {
@@ -675,6 +719,36 @@ class Parser {
             var expr = this.expression();
             this.expect("RIGHT_PAREN", "Expect ')' after expression.");
             return Grouping(expr);
+        }
+
+        if (this.matchT("LEFT_BRACKET")) {
+            var elems = [];
+            if (!this.check("RIGHT_BRACKET")) {
+                elems.append(this.expression());
+                while (this.matchT("COMMA")) {
+                    if (len(elems) >= 255) this.softError(this.peek(), "Can't have more than 255 list elements.");
+                    elems.append(this.expression());
+                }
+            }
+            this.expect("RIGHT_BRACKET", "Expect ']' after list elements.");
+            return ListExpr(elems);
+        }
+        if (this.matchT("LEFT_BRACE")) {
+            var keys = [];
+            var vals = [];
+            if (!this.check("RIGHT_BRACE")) {
+                keys.append(this.expression());
+                this.expect("COLON", "Expect ':' after map key.");
+                vals.append(this.expression());
+                while (this.matchT("COMMA")) {
+                    if (len(keys) >= 255) this.softError(this.peek(), "Can't have more than 255 map entries.");
+                    keys.append(this.expression());
+                    this.expect("COLON", "Expect ':' after map key.");
+                    vals.append(this.expression());
+                }
+            }
+            this.expect("RIGHT_BRACE", "Expect '}' after map entries.");
+            return MapExpr(keys, vals);
         }
 
         this.parseError(this.peek(), "Expect expression.");
@@ -761,6 +835,16 @@ class Resolver {
             case BreakStmt{line}    => this.resolveBreak(line)
             case ContinueStmt{line} => this.resolveContinue(line)
             case ForStmt{init, condition, increment, body} => this.resolveForStmt(init, condition, increment, body)
+            case ForInStmt{varName, varLine, iterable, body} => {
+                this.resolveExpr(iterable);
+                this.beginScope();
+                this.declare(varName, varLine);
+                this.define(varName);
+                this.loopDepth = this.loopDepth + 1;
+                this.resolveStmt(body);
+                this.loopDepth = this.loopDepth - 1;
+                this.endScope();
+            }
         };
     }
 
@@ -894,6 +978,11 @@ class Resolver {
             case ThisExpr{id, line}            => this.resolveThis(id, line)
             case SuperExpr{id, method, line}   => this.resolveSuper(id, line)
             case Grouping{expression}          => this.resolveExpr(expression)
+            case ListExpr{elements}                        => this.resolveList(elements)
+            case MapExpr{keys, vals}                       => this.resolveMapExpr(keys, vals)
+            case IndexExpr{object, index, line}            => { this.resolveExpr(object); this.resolveExpr(index) }
+            case SliceExpr{object, start, end_, line}      => { this.resolveExpr(object); this.resolveExpr(start); this.resolveExpr(end_) }
+            case IndexSetExpr{object, index, line, value}  => { this.resolveExpr(object); this.resolveExpr(index); this.resolveExpr(value) }
         };
     }
 
@@ -931,6 +1020,16 @@ class Resolver {
             this.resError("super", line, "Can't use 'super' in a class with no superclass.");
         }
         this.resolveLocal(id, "super");
+    }
+
+    resolveList(elements) {
+        var i = 0;
+        while (i < len(elements)) { this.resolveExpr(elements[i]); i = i + 1; }
+    }
+
+    resolveMapExpr(keys, vals) {
+        var i = 0;
+        while (i < len(keys)) { this.resolveExpr(keys[i]); this.resolveExpr(vals[i]); i = i + 1; }
     }
 }
 
@@ -1088,6 +1187,7 @@ class LoxNative {
     }
     arity() {
         if (this.name == "clock" or this.name == "input") return 0;
+        if (this.name == "open") return 2;
         return 1;   // str, len
     }
     call(interp, args) {
@@ -1097,8 +1197,15 @@ class LoxNative {
         if (this.name == "len") {
             var v = args[0];
             if (isLoxStr(v)) return len(v);
-            interp.setError("len() argument must be a String.", 0);
+            var vtag = loxTag(v);
+            if (vtag == "list") return len(v.elements);
+            if (vtag == "map")  return len(v.data);
+            interp.setError("len() argument must be a String, List, or Map.", 0);
             return nil;
+        }
+        if (this.name == "open") {
+            var handle = open(args[0], args[1]);
+            return InterpFile(handle);
         }
         return nil;
     }
@@ -1137,6 +1244,157 @@ class InterpMathFn {
     toString() { return "<native fn>"; }
 }
 
+class InterpList {
+    init(elements) {
+        this.elements = elements;
+        this.loxTag   = "list";
+    }
+    toString() { return "<list>"; }
+}
+
+class InterpListMethod {
+    init(name, list) {
+        this.name   = name;
+        this.list   = list;
+        this.loxTag = "listmethod";
+    }
+    arity() {
+        if (this.name == "pop") return 0;
+        return 1;
+    }
+    call(interp, args) {
+        if (this.name == "append") {
+            this.list.elements.append(args[0]);
+            return nil;
+        }
+        if (this.name == "pop") {
+            if (len(this.list.elements) == 0) {
+                interp.setError("Cannot pop from an empty list.", 0);
+                return nil;
+            }
+            return this.list.elements.pop();
+        }
+        if (this.name == "remove") {
+            var i = 0;
+            while (i < len(this.list.elements)) {
+                if (this.list.elements[i] == args[0]) {
+                    var j = i;
+                    while (j < len(this.list.elements) - 1) {
+                        this.list.elements[j] = this.list.elements[j + 1];
+                        j = j + 1;
+                    }
+                    this.list.elements.pop();
+                    return nil;
+                }
+                i = i + 1;
+            }
+            interp.setError("Value not found in list.", 0);
+            return nil;
+        }
+        return nil;
+    }
+    toString() { return "<native fn>"; }
+}
+
+class InterpMap {
+    init() {
+        this.data   = {};
+        this.loxTag = "map";
+    }
+    toString() { return "<map>"; }
+}
+
+class InterpMapMethod {
+    init(name, map) {
+        this.name   = name;
+        this.map    = map;
+        this.loxTag = "mapmethod";
+    }
+    arity() {
+        if (this.name == "keys" or this.name == "values" or this.name == "entries") return 0;
+        return 1;
+    }
+    call(interp, args) {
+        if (this.name == "has") {
+            if (!interp.isValidMapKey(args[0])) {
+                interp.setError("Map key must be a scalar (Nil, Bool, Number, or String).", 0);
+                return nil;
+            }
+            return this.map.data.has(args[0]);
+        }
+        if (this.name == "del") {
+            if (!interp.isValidMapKey(args[0])) {
+                interp.setError("Map key must be a scalar (Nil, Bool, Number, or String).", 0);
+                return nil;
+            }
+            if (this.map.data.has(args[0])) this.map.data.del(args[0]);
+            return nil;
+        }
+        if (this.name == "keys") {
+            var result = InterpList([]);
+            var ks = this.map.data.keys();
+            var i = 0;
+            while (i < len(ks)) { result.elements.append(ks[i]); i = i + 1; }
+            return result;
+        }
+        if (this.name == "values") {
+            var result = InterpList([]);
+            var ks = this.map.data.keys();
+            var i = 0;
+            while (i < len(ks)) { result.elements.append(this.map.data[ks[i]]); i = i + 1; }
+            return result;
+        }
+        if (this.name == "entries") {
+            var result = InterpList([]);
+            var ks = this.map.data.keys();
+            var i = 0;
+            while (i < len(ks)) {
+                var pair = InterpList([ks[i], this.map.data[ks[i]]]);
+                result.elements.append(pair);
+                i = i + 1;
+            }
+            return result;
+        }
+        return nil;
+    }
+    toString() { return "<native fn>"; }
+}
+
+class InterpFile {
+    init(handle) {
+        this.handle = handle;
+        this.loxTag = "file";
+    }
+    toString() { return "<file>"; }
+}
+
+class InterpFileMethod {
+    init(name, file) {
+        this.name   = name;
+        this.file   = file;
+        this.loxTag = "filemethod";
+    }
+    arity() {
+        if (this.name == "readline" or this.name == "readlines" or this.name == "close") return 0;
+        return 1;
+    }
+    call(interp, args) {
+        if (this.name == "readline")  return this.file.handle.readline();
+        if (this.name == "readlines") {
+            var lines = this.file.handle.readlines();
+            var result = InterpList([]);
+            var i = 0;
+            while (i < len(lines)) { result.elements.append(lines[i]); i = i + 1; }
+            return result;
+        }
+        if (this.name == "write")     { this.file.handle.write(args[0]); return nil; }
+        if (this.name == "writeline") { this.file.handle.writeline(args[0]); return nil; }
+        if (this.name == "close")     { this.file.handle.close(); return nil; }
+        return nil;
+    }
+    toString() { return "<native fn>"; }
+}
+
 // ===========================================================================
 // INTERPRETER
 // ===========================================================================
@@ -1154,6 +1412,7 @@ class Interpreter {
         this.globals.define("input", LoxNative("input"));
         this.globals.define("str",   LoxNative("str"));
         this.globals.define("len",   LoxNative("len"));
+        this.globals.define("open",  LoxNative("open"));
         this.globals.define("math",  InterpMath());
     }
 
@@ -1167,11 +1426,205 @@ class Interpreter {
         }
     }
 
+    isValidMapKey(v) {
+        if (v == nil or v == true or v == false) return true;
+        if (isLoxStr(v)) return true;
+        if (isLoxNum(v)) return v == v;
+        return false;
+    }
+
+    stringifyList(list) {
+        var s = "[";
+        var i = 0;
+        while (i < len(list.elements)) {
+            if (i > 0) s = s + ", ";
+            s = s + this.stringify(list.elements[i]);
+            i = i + 1;
+        }
+        return s + "]";
+    }
+
+    stringifyMap(map) {
+        var s = "{";
+        var ks = map.data.keys();
+        var i = 0;
+        while (i < len(ks)) {
+            if (i > 0) s = s + ", ";
+            s = s + this.stringify(ks[i]) + ": " + this.stringify(map.data[ks[i]]);
+            i = i + 1;
+        }
+        return s + "}";
+    }
+
     interpret(stmts) {
         var i = 0;
         while (i < len(stmts)) {
             this.execStmt(stmts[i], this.globals);
             if (this.errorFlag or this.returnFlag) return;
+            i = i + 1;
+        }
+    }
+
+    evalList(elements, env) {
+        var result = InterpList([]);
+        var i = 0;
+        while (i < len(elements)) {
+            var v = this.evalExpr(elements[i], env);
+            if (this.errorFlag) return nil;
+            result.elements.append(v);
+            i = i + 1;
+        }
+        return result;
+    }
+
+    evalMap(keys, vals, env) {
+        var result = InterpMap();
+        var i = 0;
+        while (i < len(keys)) {
+            var k = this.evalExpr(keys[i], env);
+            if (this.errorFlag) return nil;
+            var v = this.evalExpr(vals[i], env);
+            if (this.errorFlag) return nil;
+            if (!this.isValidMapKey(k)) { this.setError("Map key must be a scalar (Nil, Bool, Number, or String).", 0); return nil; }
+            result.data[k] = v;
+            i = i + 1;
+        }
+        return result;
+    }
+
+    evalIndex(objectExpr, indexExpr, line, env) {
+        var object = this.evalExpr(objectExpr, env);
+        if (this.errorFlag) return nil;
+        var index = this.evalExpr(indexExpr, env);
+        if (this.errorFlag) return nil;
+        var tag = loxTag(object);
+        if (tag == "map") {
+            if (!this.isValidMapKey(index)) { this.setError("Map key must be a scalar (Nil, Bool, Number, or String).", line); return nil; }
+            if (object.data.has(index)) return object.data[index];
+            return nil;
+        }
+        if (tag == "list") {
+            if (!isLoxNum(index)) { this.setError("Index must be a number.", line); return nil; }
+            var fl = math.floor(index);
+            if (fl != index) { this.setError("Index must be an integer.", line); return nil; }
+            if (fl < 0 or fl >= len(object.elements)) { this.setError("List index out of bounds.", line); return nil; }
+            return object.elements[fl];
+        }
+        if (isLoxStr(object)) {
+            if (!isLoxNum(index)) { this.setError("Index must be a number.", line); return nil; }
+            var fl = math.floor(index);
+            if (fl != index) { this.setError("Index must be an integer.", line); return nil; }
+            if (fl < 0 or fl >= len(object)) { this.setError("List index out of bounds.", line); return nil; }
+            return object[fl];
+        }
+        this.setError("Only lists, maps, and strings can be indexed.", line);
+        return nil;
+    }
+
+    evalIndexSet(objectExpr, indexExpr, line, valueExpr, env) {
+        var object = this.evalExpr(objectExpr, env);
+        if (this.errorFlag) return nil;
+        var index = this.evalExpr(indexExpr, env);
+        if (this.errorFlag) return nil;
+        var tag = loxTag(object);
+        if (tag == "map") {
+            if (!this.isValidMapKey(index)) { this.setError("Map key must be a scalar (Nil, Bool, Number, or String).", line); return nil; }
+            var val = this.evalExpr(valueExpr, env);
+            if (this.errorFlag) return nil;
+            object.data[index] = val;
+            return val;
+        }
+        if (tag == "list") {
+            if (!isLoxNum(index)) { this.setError("Index must be a number.", line); return nil; }
+            var fl = math.floor(index);
+            if (fl != index) { this.setError("Index must be an integer.", line); return nil; }
+            if (fl < 0 or fl >= len(object.elements)) { this.setError("List index out of bounds.", line); return nil; }
+            var val = this.evalExpr(valueExpr, env);
+            if (this.errorFlag) return nil;
+            object.elements[fl] = val;
+            return val;
+        }
+        if (isLoxStr(object)) { this.setError("Strings are immutable.", line); return nil; }
+        this.setError("Only lists and maps support index assignment.", line);
+        return nil;
+    }
+
+    evalSlice(objectExpr, startExpr, endExpr, line, env) {
+        var object = this.evalExpr(objectExpr, env);
+        if (this.errorFlag) return nil;
+        var startV = this.evalExpr(startExpr, env);
+        if (this.errorFlag) return nil;
+        var endV = this.evalExpr(endExpr, env);
+        if (this.errorFlag) return nil;
+        var tag = loxTag(object);
+        if (tag != "list" and !isLoxStr(object)) { this.setError("Slice requires a List or String.", line); return nil; }
+        if (!isLoxNum(startV)) { this.setError("Slice index must be a number.", line); return nil; }
+        if (math.floor(startV) != startV) { this.setError("Slice index must be an integer.", line); return nil; }
+        if (startV < 0) { this.setError("Slice index must be non-negative.", line); return nil; }
+        if (!isLoxNum(endV)) { this.setError("Slice index must be a number.", line); return nil; }
+        if (math.floor(endV) != endV) { this.setError("Slice index must be an integer.", line); return nil; }
+        if (endV < 0) { this.setError("Slice index must be non-negative.", line); return nil; }
+        var s = startV;
+        var e = endV;
+        if (tag == "list") {
+            var n = len(object.elements);
+            if (s > n) s = n;
+            if (e > n) e = n;
+            var result = InterpList([]);
+            var i = s;
+            while (i < e) { result.elements.append(object.elements[i]); i = i + 1; }
+            return result;
+        }
+        var n = len(object);
+        if (s > n) s = n;
+        if (e > n) e = n;
+        if (s >= e) return "";
+        return object[s:e];
+    }
+
+    execForIn(varName, varLine, iterableExpr, body, env) {
+        var iterable = this.evalExpr(iterableExpr, env);
+        if (this.errorFlag) return;
+        var tag = loxTag(iterable);
+        if (tag != "list" and !isLoxStr(iterable) and tag != "map") {
+            this.setError("Value is not iterable.", varLine);
+            return;
+        }
+        var loopEnv = Environment(env);
+        loopEnv.define(varName, nil);
+        if (tag == "map") {
+            var ks = iterable.data.keys();
+            var i = 0;
+            while (i < len(ks)) {
+                loopEnv.define(varName, ks[i]);
+                this.execStmt(body, loopEnv);
+                if (this.errorFlag or this.returnFlag) return;
+                if (this.breakFlag) { this.breakFlag = false; return; }
+                if (this.continueFlag) { this.continueFlag = false; }
+                i = i + 1;
+            }
+            return;
+        }
+        if (isLoxStr(iterable)) {
+            var slen = len(iterable);
+            var i = 0;
+            while (i < slen) {
+                loopEnv.define(varName, iterable[i]);
+                this.execStmt(body, loopEnv);
+                if (this.errorFlag or this.returnFlag) return;
+                if (this.breakFlag) { this.breakFlag = false; return; }
+                if (this.continueFlag) { this.continueFlag = false; }
+                i = i + 1;
+            }
+            return;
+        }
+        var i = 0;
+        while (i < len(iterable.elements)) {
+            loopEnv.define(varName, iterable.elements[i]);
+            this.execStmt(body, loopEnv);
+            if (this.errorFlag or this.returnFlag) return;
+            if (this.breakFlag) { this.breakFlag = false; return; }
+            if (this.continueFlag) { this.continueFlag = false; }
             i = i + 1;
         }
     }
@@ -1190,6 +1643,7 @@ class Interpreter {
             case BreakStmt{line}                                 => { this.breakFlag = true; }
             case ContinueStmt{line}                              => { this.continueFlag = true; }
             case ForStmt{init, condition, increment, body}       => this.execFor(init, condition, increment, body, env)
+            case ForInStmt{varName, varLine, iterable, body}     => this.execForIn(varName, varLine, iterable, body, env)
         };
     }
 
@@ -1328,6 +1782,11 @@ class Interpreter {
             case Set{object, name, line, value} => this.evalSet(object, name, line, value, env)
             case ThisExpr{id, line}             => this.lookupVariable(id, "this", 0, env)
             case SuperExpr{id, method, line}    => this.evalSuper(id, method, line, env)
+            case ListExpr{elements}                        => this.evalList(elements, env)
+            case MapExpr{keys, vals}                       => this.evalMap(keys, vals, env)
+            case IndexExpr{object, index, line}            => this.evalIndex(object, index, line, env)
+            case SliceExpr{object, start, end_, line}      => this.evalSlice(object, start, end_, line, env)
+            case IndexSetExpr{object, index, line, value}  => this.evalIndexSet(object, index, line, value, env)
         };
     }
 
@@ -1425,6 +1884,27 @@ class Interpreter {
             // Floor-mod: result sign matches divisor.
             return left - math.floor(left / right) * right;
         }
+        if (opL == "in") {
+            var rtag = loxTag(right);
+            if (rtag == "list") {
+                var i = 0;
+                while (i < len(right.elements)) {
+                    if (right.elements[i] == left) return true;
+                    i = i + 1;
+                }
+                return false;
+            }
+            if (isLoxStr(right)) {
+                if (!isLoxStr(left)) { this.setError("Left operand of 'in' on a String must be a String.", opLine); return nil; }
+                return left in right;
+            }
+            if (rtag == "map") {
+                if (!this.isValidMapKey(left)) { this.setError("Map key must be a scalar (Nil, Bool, Number, or String).", opLine); return nil; }
+                return right.data.has(left);
+            }
+            this.setError("Right operand of 'in' must be a List, String, or Map.", opLine);
+            return nil;
+        }
         return nil;
     }
 
@@ -1459,7 +1939,7 @@ class Interpreter {
             i = i + 1;
         }
         var tag = callee.loxTag;
-        if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn") {
+        if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod") {
             this.setError("Can only call functions and classes.", paren_line);
             return nil;
         }
@@ -1477,6 +1957,21 @@ class Interpreter {
             if (name == "pi") return math.pi;
             if (name == "e")  return math.e;
             return InterpMathFn(name);
+        }
+        if (loxTag(object) == "list") {
+            if (name == "append" or name == "pop" or name == "remove") return InterpListMethod(name, object);
+            this.setError("Undefined property '" + name + "'.", line);
+            return nil;
+        }
+        if (loxTag(object) == "map") {
+            if (name == "has" or name == "del" or name == "keys" or name == "values" or name == "entries") return InterpMapMethod(name, object);
+            this.setError("Undefined property '" + name + "'.", line);
+            return nil;
+        }
+        if (loxTag(object) == "file") {
+            if (name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close") return InterpFileMethod(name, object);
+            this.setError("Undefined property '" + name + "'.", line);
+            return nil;
         }
         if (loxTag(object) != "instance") {
             this.setError("Only instances have properties.", line);
@@ -1527,6 +2022,8 @@ class Interpreter {
         if (val == false) return "false";
         if (isLoxStr(val)) return val;
         if (isLoxNum(val)) return str(val);
+        if (loxTag(val) == "list") return this.stringifyList(val);
+        if (loxTag(val) == "map")  return this.stringifyMap(val);
         return val.toString();
     }
 }
