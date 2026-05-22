@@ -21,12 +21,12 @@
 // ===========================================================================
 
 var LOX_KEYWORDS = {
-    "and": "AND",       "class": "CLASS",   "else": "ELSE",
-    "false": "FALSE",   "for": "FOR",       "fun": "FUN",
-    "if": "IF",         "nil": "NIL",       "or": "OR",
-    "print": "PRINT",   "return": "RETURN", "super": "SUPER",
-    "this": "THIS",     "true": "TRUE",     "var": "VAR",
-    "while": "WHILE"
+    "and": "AND",       "class": "CLASS",     "else": "ELSE",
+    "false": "FALSE",   "for": "FOR",         "fun": "FUN",
+    "if": "IF",         "nil": "NIL",         "or": "OR",
+    "print": "PRINT",   "return": "RETURN",   "super": "SUPER",
+    "this": "THIS",     "true": "TRUE",       "var": "VAR",
+    "while": "WHILE",   "break": "BREAK",     "continue": "CONTINUE"
 };
 
 var DIGIT_MAP = {
@@ -118,6 +118,9 @@ enum Stmt {
     ReturnStmt(line, value)
     VarDecl(name, line, initializer)
     WhileStmt(condition, body)
+    BreakStmt(line)
+    ContinueStmt(line)
+    ForStmt(init, condition, increment, body)
 }
 
 // ===========================================================================
@@ -253,6 +256,7 @@ class Scanner {
             }
             return;
         }
+        if (c == "%") { this.addToken("PERCENT",       nil); return; }
         if (c == " " or c == "\r" or c == "\t") return;
         if (c == "\n") { this.line = this.line + 1; return; }
         if (c == "\"") { this.scanString(); return; }
@@ -346,7 +350,8 @@ class Parser {
             if (this.previous().type == "SEMICOLON") return;
             var t = this.peek().type;
             if (t == "CLASS" or t == "FUN" or t == "VAR" or t == "FOR" or
-                t == "IF"    or t == "WHILE" or t == "PRINT" or t == "RETURN") return;
+                t == "IF"    or t == "WHILE" or t == "PRINT" or t == "RETURN" or
+                t == "BREAK" or t == "CONTINUE") return;
             this.advance();
         }
     }
@@ -427,6 +432,8 @@ class Parser {
     }
 
     statement() {
+        if (this.matchT("BREAK"))    return this.breakStatement();
+        if (this.matchT("CONTINUE")) return this.continueStatement();
         if (this.matchT("FOR"))    return this.forStatement();
         if (this.matchT("IF"))     return this.ifStatement();
         if (this.matchT("PRINT"))  return this.printStatement();
@@ -434,6 +441,18 @@ class Parser {
         if (this.matchT("WHILE"))  return this.whileStatement();
         if (this.matchT("LEFT_BRACE")) return Block(this.blockContents());
         return this.expressionStatement();
+    }
+
+    breakStatement() {
+        var line = this.previous().line;
+        this.expect("SEMICOLON", "Expect ';' after 'break'.");
+        return BreakStmt(line);
+    }
+
+    continueStatement() {
+        var line = this.previous().line;
+        this.expect("SEMICOLON", "Expect ';' after 'continue'.");
+        return ContinueStmt(line);
     }
 
     blockContents() {
@@ -463,15 +482,7 @@ class Parser {
         if (!this.check("RIGHT_PAREN")) inc = this.expression();
         this.expect("RIGHT_PAREN", "Expect ')' after for clauses.");
         var body = this.statement();
-        if (inc != nil) {
-            body = Block([body, ExpressionStmt(inc)]);
-        }
-        if (cond == nil) cond = Literal(true);
-        body = WhileStmt(cond, body);
-        if (init != nil) {
-            body = Block([init, body]);
-        }
-        return body;
+        return ForStmt(init, cond, inc, body);
     }
 
     ifStatement() {
@@ -590,7 +601,7 @@ class Parser {
 
     factor() {
         var left = this.unary();
-        while (this.matchAny(["SLASH", "STAR"])) {
+        while (this.matchAny(["SLASH", "STAR", "PERCENT"])) {
             var op    = this.previous();
             var right = this.unary();
             left = Binary(op, left, right);
@@ -682,6 +693,7 @@ class Resolver {
         this.currentFunction = "NONE";
         this.currentClass    = "NONE";
         this.hadError        = false;
+        this.loopDepth       = 0;
     }
 
     resError(name, line, msg) {
@@ -740,7 +752,15 @@ class Resolver {
             case PrintStmt{expr}                                 => this.resolveExpr(expr)
             case ReturnStmt{line, value}                         => this.resolveReturn(line, value)
             case VarDecl{name, line, initializer}                => this.resolveVarDecl(name, line, initializer)
-            case WhileStmt{condition, body}                      => { this.resolveExpr(condition); this.resolveStmt(body) }
+            case WhileStmt{condition, body}                      => {
+                this.resolveExpr(condition);
+                this.loopDepth = this.loopDepth + 1;
+                this.resolveStmt(body);
+                this.loopDepth = this.loopDepth - 1;
+            }
+            case BreakStmt{line}    => this.resolveBreak(line)
+            case ContinueStmt{line} => this.resolveContinue(line)
+            case ForStmt{init, condition, increment, body} => this.resolveForStmt(init, condition, increment, body)
         };
     }
 
@@ -825,6 +845,27 @@ class Resolver {
         this.resolveExpr(cond);
         this.resolveStmt(thenB);
         if (elseB != nil) this.resolveStmt(elseB);
+    }
+
+    resolveBreak(line) {
+        if (this.loopDepth == 0)
+            this.resError("break", line, "Can't use 'break' outside of a loop.");
+    }
+
+    resolveContinue(line) {
+        if (this.loopDepth == 0)
+            this.resError("continue", line, "Can't use 'continue' outside of a loop.");
+    }
+
+    resolveForStmt(init, cond, inc, body) {
+        this.beginScope();
+        if (init != nil) this.resolveStmt(init);
+        if (cond != nil) this.resolveExpr(cond);
+        if (inc  != nil) this.resolveExpr(inc);
+        this.loopDepth = this.loopDepth + 1;
+        this.resolveStmt(body);
+        this.loopDepth = this.loopDepth - 1;
+        this.endScope();
     }
 
     resolveReturn(line, value) {
@@ -1045,9 +1086,52 @@ class LoxNative {
         this.name   = name;
         this.loxTag = "native";
     }
-    arity() { return 0; }
+    arity() {
+        if (this.name == "clock" or this.name == "input") return 0;
+        return 1;   // str, len
+    }
     call(interp, args) {
         if (this.name == "clock") return clock();
+        if (this.name == "input") return input();
+        if (this.name == "str")   return interp.stringify(args[0]);
+        if (this.name == "len") {
+            var v = args[0];
+            if (isLoxStr(v)) return len(v);
+            interp.setError("len() argument must be a String.", 0);
+            return nil;
+        }
+        return nil;
+    }
+    toString() { return "<native fn>"; }
+}
+
+class InterpMath {
+    init() { this.loxTag = "math"; }
+}
+
+class InterpMathFn {
+    init(name) { this.name = name; this.loxTag = "mathfn"; }
+    arity() {
+        if (this.name == "pow"   or this.name == "min"   or this.name == "max" or
+            this.name == "atan2" or this.name == "hypot") return 2;
+        return 1;
+    }
+    call(interp, args) {
+        var a = args[0];
+        if (this.name == "sqrt")  return math.sqrt(a);
+        if (this.name == "floor") return math.floor(a);
+        if (this.name == "ceil")  return math.ceil(a);
+        if (this.name == "abs")   return math.abs(a);
+        if (this.name == "log")   return math.log(a);
+        if (this.name == "sin")   return math.sin(a);
+        if (this.name == "cos")   return math.cos(a);
+        if (this.name == "tan")   return math.tan(a);
+        var b = args[1];
+        if (this.name == "pow")   return math.pow(a, b);
+        if (this.name == "min")   return math.min(a, b);
+        if (this.name == "max")   return math.max(a, b);
+        if (this.name == "atan2") return math.atan2(a, b);
+        if (this.name == "hypot") return math.hypot(a, b);
         return nil;
     }
     toString() { return "<native fn>"; }
@@ -1059,12 +1143,18 @@ class LoxNative {
 
 class Interpreter {
     init(locals) {
-        this.locals      = locals;
-        this.globals     = Environment(nil);
-        this.returnFlag  = false;
-        this.returnValue = nil;
-        this.errorFlag   = false;
+        this.locals       = locals;
+        this.globals      = Environment(nil);
+        this.returnFlag   = false;
+        this.returnValue  = nil;
+        this.errorFlag    = false;
+        this.breakFlag    = false;
+        this.continueFlag = false;
         this.globals.define("clock", LoxNative("clock"));
+        this.globals.define("input", LoxNative("input"));
+        this.globals.define("str",   LoxNative("str"));
+        this.globals.define("len",   LoxNative("len"));
+        this.globals.define("math",  InterpMath());
     }
 
     setError(msg, line) {
@@ -1097,14 +1187,38 @@ class Interpreter {
             case ReturnStmt{line, value}                         => this.execReturn(line, value, env)
             case VarDecl{name, line, initializer}                => this.execVar(name, initializer, env)
             case WhileStmt{condition, body}                      => this.execWhile(condition, body, env)
+            case BreakStmt{line}                                 => { this.breakFlag = true; }
+            case ContinueStmt{line}                              => { this.continueFlag = true; }
+            case ForStmt{init, condition, increment, body}       => this.execFor(init, condition, increment, body, env)
         };
+    }
+
+    execFor(init, cond, inc, body, env) {
+        var forEnv = Environment(env);
+        if (init != nil) { this.execStmt(init, forEnv); if (this.errorFlag) return; }
+        var condVal = nil;
+        if (cond != nil) { condVal = this.evalExpr(cond, forEnv); if (this.errorFlag) return; }
+        var keep = cond == nil or this.isTruthy(condVal);
+        while (keep) {
+            this.execStmt(body, forEnv);
+            if (this.errorFlag or this.returnFlag) return;
+            if (this.breakFlag) { this.breakFlag = false; return; }
+            if (this.continueFlag) { this.continueFlag = false; }
+            // Increment always runs — even after continue.
+            if (inc != nil) { this.evalExpr(inc, forEnv); if (this.errorFlag) return; }
+            if (cond != nil) {
+                condVal = this.evalExpr(cond, forEnv);
+                if (this.errorFlag) return;
+                keep = this.isTruthy(condVal);
+            }
+        }
     }
 
     execBlock(stmts, env) {
         var i = 0;
         while (i < len(stmts)) {
             this.execStmt(stmts[i], env);
-            if (this.errorFlag or this.returnFlag) return;
+            if (this.errorFlag or this.returnFlag or this.breakFlag or this.continueFlag) return;
             i = i + 1;
         }
     }
@@ -1193,6 +1307,8 @@ class Interpreter {
         while (this.isTruthy(condVal)) {
             this.execStmt(body, env);
             if (this.errorFlag or this.returnFlag) return;
+            if (this.breakFlag)    { this.breakFlag = false; return; }
+            if (this.continueFlag) { this.continueFlag = false; }
             condVal = this.evalExpr(cond, env);
             if (this.errorFlag) return;
         }
@@ -1301,6 +1417,14 @@ class Interpreter {
         }
         if (opL == "==") return left == right;
         if (opL == "!=") return left != right;
+        if (opL == "%") {
+            if (!isLoxNum(left) or !isLoxNum(right)) {
+                this.setError("Operands must be numbers.", opLine);
+                return nil;
+            }
+            // Floor-mod: result sign matches divisor.
+            return left - math.floor(left / right) * right;
+        }
         return nil;
     }
 
@@ -1335,7 +1459,7 @@ class Interpreter {
             i = i + 1;
         }
         var tag = callee.loxTag;
-        if (tag != "function" and tag != "class" and tag != "native") {
+        if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn") {
             this.setError("Can only call functions and classes.", paren_line);
             return nil;
         }
@@ -1349,6 +1473,11 @@ class Interpreter {
     evalGet(objectExpr, name, line, env) {
         var object = this.evalExpr(objectExpr, env);
         if (this.errorFlag) return nil;
+        if (loxTag(object) == "math") {
+            if (name == "pi") return math.pi;
+            if (name == "e")  return math.e;
+            return InterpMathFn(name);
+        }
         if (loxTag(object) != "instance") {
             this.setError("Only instances have properties.", line);
             return nil;
