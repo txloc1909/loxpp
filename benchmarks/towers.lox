@@ -1,0 +1,37 @@
+// Towers of Hanoi — stresses recursion and list (stack) operations.
+// Source: Are We Fast Yet? benchmark suite.
+// Counts total moves for 22 discs (should be 2^22 - 1 = 4194303).
+
+var DISCS = 22;
+
+fun run_towers() {
+    var piles = [[], [], []];
+    var move_count = 0;
+
+    fun move(n, from, to, via) {
+        if (n == 1) {
+            piles[to].append(piles[from].pop());
+            move_count = move_count + 1;
+        } else {
+            move(n - 1, from, via, to);
+            piles[to].append(piles[from].pop());
+            move_count = move_count + 1;
+            move(n - 1, via, to, from);
+        }
+    }
+
+    var i = DISCS;
+    while (i >= 1) {
+        piles[0].append(i);
+        i = i - 1;
+    }
+
+    move(DISCS, 0, 2, 1);
+    return move_count;
+}
+
+var start = clock();
+var count = run_towers();
+// 2^22 - 1 = 4194303 moves expected
+print "result: " + str(count == 4194303);
+print "elapsed: " + str(clock() - start);
