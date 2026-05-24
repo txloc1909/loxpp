@@ -1,0 +1,32 @@
+// Mandelbrot — stresses float arithmetic in tight loops.
+// Counts pixels inside the Mandelbrot set for a 750x750 grid.
+// Port of AWFY / CLBG mandelbrot (output-free variant).
+
+var SIZE = 750;
+var LIMIT = 4.0;
+var ITERATIONS = 50;
+
+var start = clock();
+
+var inside = 0;
+for (var y = 0; y < SIZE; y = y + 1) {
+    for (var x = 0; x < SIZE; x = x + 1) {
+        var cr = 2.0 * x / SIZE - 1.5;
+        var ci = 2.0 * y / SIZE - 1.0;
+        var zr = 0.0;
+        var zi = 0.0;
+        var i = 0;
+        while (i < ITERATIONS) {
+            var zr2 = zr * zr;
+            var zi2 = zi * zi;
+            if (zr2 + zi2 > LIMIT) break;
+            zi = 2.0 * zr * zi + ci;
+            zr = zr2 - zi2 + cr;
+            i = i + 1;
+        }
+        if (i == ITERATIONS) inside = inside + 1;
+    }
+}
+
+print "result: " + str(inside > 0);
+print "elapsed: " + str(clock() - start);
