@@ -7,8 +7,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOXPP="${SCRIPT_DIR}/../build/loxpp"
 
 case "${LANGUAGE:-LOX}" in
-    LOXPP) INTERPRETER="${SCRIPT_DIR}/loxpp_interpreter.lox" ;;
-    *)     INTERPRETER="${SCRIPT_DIR}/lox_interpreter.lox" ;;
+    LOXPP)
+        INTERPRETER="${SCRIPT_DIR}/loxpp_interpreter.lox"
+        # Sentinel protocol: wrap source so that subsequent input() calls in
+        # the interpreted program can still read from the caller's stdin.
+        FEED_CMD='{ printf "__SOURCE_BEGIN__\n"; cat "$1"; printf "__SOURCE_END__\n"; cat; }'
+        ;;
+    *)
+        INTERPRETER="${SCRIPT_DIR}/lox_interpreter.lox"
+        FEED_CMD='cat "$1"'
+        ;;
 esac
 
 exitcode=0
@@ -26,5 +34,5 @@ while IFS= read -r line; do
             printf '%s\n' "$line"
             ;;
     esac
-done < <({ printf '__SOURCE_BEGIN__\n'; cat "$1"; printf '__SOURCE_END__\n'; cat; } | "$LOXPP" "$INTERPRETER")
+done < <(eval "$FEED_CMD" | "$LOXPP" "$INTERPRETER")
 exit $exitcode
