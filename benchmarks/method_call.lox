@@ -1,0 +1,52 @@
+// Method call / dynamic dispatch — stresses polymorphic dispatch.
+// Port of Wren's method_call benchmark.
+// Alternates between two subclasses via a Toggle object.
+
+class Toggle {
+    init(start) {
+        this.state = start;
+    }
+    value() {
+        return this.state;
+    }
+    activate() {
+        this.state = !this.state;
+        return this;
+    }
+}
+
+class NthToggle < Toggle {
+    init(start, max_counter) {
+        super.init(start);
+        this.count_max = max_counter;
+        this.counter = 0;
+    }
+    activate() {
+        this.counter = this.counter + 1;
+        if (this.counter >= this.count_max) {
+            this.state = !this.state;
+            this.counter = 0;
+        }
+        return this;
+    }
+}
+
+var N = 3000000;
+var start = clock();
+
+var toggle = Toggle(true);
+var i = 0;
+while (i < N) {
+    toggle = toggle.activate();
+    i = i + 1;
+}
+
+var toggle2 = NthToggle(true, 3);
+i = 0;
+while (i < N) {
+    toggle2 = toggle2.activate();
+    i = i + 1;
+}
+
+print "result: " + str(toggle.value());
+print "elapsed: " + str(clock() - start);
