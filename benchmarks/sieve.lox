@@ -1,0 +1,38 @@
+// Sieve of Eratosthenes — stresses list (array) access and loops.
+// Source: Are We Fast Yet? benchmark suite.
+
+fun sieve(limit) {
+    var primes = [];
+    var i = 0;
+    while (i <= limit) {
+        primes.append(true);
+        i = i + 1;
+    }
+    primes[0] = false;
+    primes[1] = false;
+
+    i = 2;
+    while (i * i <= limit) {
+        if (primes[i]) {
+            var j = i * i;
+            while (j <= limit) {
+                primes[j] = false;
+                j = j + i;
+            }
+        }
+        i = i + 1;
+    }
+
+    var count = 0;
+    i = 0;
+    while (i <= limit) {
+        if (primes[i]) count = count + 1;
+        i = i + 1;
+    }
+    return count;
+}
+
+var start = clock();
+var r = sieve(2000000);
+print "result: " + str(r);
+print "elapsed: " + str(clock() - start);
