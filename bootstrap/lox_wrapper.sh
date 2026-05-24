@@ -26,5 +26,5 @@ while IFS= read -r line; do
             printf '%s\n' "$line"
             ;;
     esac
-done < <(cat "$1" | "$LOXPP" "$INTERPRETER")
+done < <({ printf '__SOURCE_BEGIN__\n'; cat "$1"; printf '__SOURCE_END__\n'; cat; } | "$LOXPP" "$INTERPRETER")
 exit $exitcode

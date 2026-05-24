@@ -1,16 +1,7 @@
 // loxpp_interpreter.lox — Tree-walking interpreter for Lox++, written in Lox++.
 //
-// TODO: This is currently a copy of lox_interpreter.lox (original Lox only).
-// Expand to cover the full Lox++ language spec:
-//   - Scanner: LEFT_BRACKET, RIGHT_BRACKET, COLON, PERCENT, FAT_ARROW, ELIPSIS tokens;
-//              keywords: break, continue, enum, match, in, case
-//   - Parser:  enum decls, match exprs (with all pattern forms), list/map literals,
-//              index/slice access, for-in loops, break/continue, % and in operators,
-//              destructuring var declarations
-//   - Resolver: loop-depth tracking (break/continue), enum ctor tracking, new AST nodes
-//   - Runtime: InterpList, InterpMap, LoxppEnum/LoxEnumCtor, InterpMath
-//   - Interpreter: pattern matching engine, for-in, break/continue flags,
-//                  list/map method dispatch, str/len/open built-ins extended
+// Covers full Lox++ spec: lists, maps, index/slice, for-in, in-operator,
+// file I/O, break/continue, %, math, builtins, enums, match, destructuring.
 //
 // Pipeline: Scanner → Parser → Resolver → Interpreter
 //
@@ -27,7 +18,7 @@ var LOX_KEYWORDS = {
     "print": "PRINT",   "return": "RETURN",   "super": "SUPER",
     "this": "THIS",     "true": "TRUE",       "var": "VAR",
     "while": "WHILE",   "break": "BREAK",     "continue": "CONTINUE",
-    "in": "IN"
+    "in": "IN",         "enum": "ENUM",       "match": "MATCH",       "case": "CASE"
 };
 
 var DIGIT_MAP = {
@@ -110,6 +101,7 @@ enum Expr {
     IndexExpr(object, index, line)
     SliceExpr(object, start, end_, line)
     IndexSetExpr(object, index, line, value)
+    MatchExpr(subject, arms)
 }
 
 // ClassDecl(name, super_id, super_name, methods) — super_id/super_name are nil
@@ -128,6 +120,25 @@ enum Stmt {
     ContinueStmt(line)
     ForStmt(init, condition, increment, body)
     ForInStmt(varName, varLine, iterable, body)
+    EnumDecl(name, ctor_names, ctor_fields_list)
+    SeqDestructure(names, line, initializer)
+    ObjDestructure(names, line, initializer)
+}
+
+enum Pattern {
+    WildPat
+    LitPat(v)
+    BindPat(name)
+    CtorPat(cname, subpats)
+    ListPat(elems, rest_name)
+}
+
+class MatchArm {
+    init(pats, guard, body) {
+        this.pats  = pats;
+        this.guard = guard;
+        this.body  = body;
+    }
 }
 
 // ===========================================================================
@@ -191,9 +202,21 @@ class Scanner {
 
     scanString() {
         var startLine = this.line;
+        var value = "";
         while (this.peek() != "\"" and !this.isAtEnd()) {
             if (this.peek() == "\n") this.line = this.line + 1;
-            this.advance();
+            if (this.peek() == "\\") {
+                this.advance();
+                var esc = this.peek();
+                if      (esc == "n")  { value = value + "\n"; this.advance(); }
+                else if (esc == "t")  { value = value + "\t"; this.advance(); }
+                else if (esc == "\"") { value = value + "\""; this.advance(); }
+                else if (esc == "\\") { value = value + "\\"; this.advance(); }
+                else                  { value = value + "\\"; }
+            } else {
+                value = value + this.peek();
+                this.advance();
+            }
         }
         if (this.isAtEnd()) {
             this.line = startLine;
@@ -201,7 +224,6 @@ class Scanner {
             return;
         }
         this.advance();
-        var value = this.source[this.start + 1 : this.current - 1];
         this.addToken("STRING", value);
     }
 
@@ -230,7 +252,15 @@ class Scanner {
         if (c == "{") { this.addToken("LEFT_BRACE",  nil); return; }
         if (c == "}") { this.addToken("RIGHT_BRACE", nil); return; }
         if (c == ",") { this.addToken("COMMA",       nil); return; }
-        if (c == ".") { this.addToken("DOT",         nil); return; }
+        if (c == ".") {
+            if (this.peek() == "." and this.peekNext() == ".") {
+                this.advance(); this.advance();
+                this.addToken("ELIPSIS", nil);
+            } else {
+                this.addToken("DOT", nil);
+            }
+            return;
+        }
         if (c == "-") { this.addToken("MINUS",       nil); return; }
         if (c == "+") { this.addToken("PLUS",        nil); return; }
         if (c == ";") { this.addToken("SEMICOLON",   nil); return; }
@@ -241,8 +271,9 @@ class Scanner {
             return;
         }
         if (c == "=") {
-            if (this.tryMatch("=")) { this.addToken("EQUAL_EQUAL",   nil); }
-            else                    { this.addToken("EQUAL",         nil); }
+            if (this.tryMatch("="))      { this.addToken("EQUAL_EQUAL", nil); }
+            else if (this.tryMatch(">")) { this.addToken("FAT_ARROW",   nil); }
+            else                         { this.addToken("EQUAL",       nil); }
             return;
         }
         if (c == "<") {
@@ -383,7 +414,8 @@ class Parser {
 
     declaration() {
         var stmt = nil;
-        if (this.matchT("CLASS"))  stmt = this.classDeclaration();
+        if (this.matchT("ENUM"))        stmt = this.enumDeclaration();
+        else if (this.matchT("CLASS"))  stmt = this.classDeclaration();
         else if (this.matchT("FUN"))    stmt = this.funDeclaration("function");
         else if (this.matchT("VAR"))    stmt = this.varDeclaration();
         else                            stmt = this.statement();
@@ -440,6 +472,8 @@ class Parser {
     }
 
     varDeclaration() {
+        if (this.matchT("LEFT_BRACKET")) return this.seqDestructure();
+        if (this.matchT("LEFT_BRACE"))   return this.objDestructure();
         var nameTok = this.expect("IDENTIFIER", "Expect variable name.");
         var init = nil;
         if (this.matchT("EQUAL")) init = this.expression();
@@ -574,6 +608,7 @@ class Parser {
                 case MapExpr{keys, vals}                      => { this.parseError(equals, "Invalid assignment target."); expr }
                 case SliceExpr{object, start, end_, line}     => { this.parseError(equals, "Invalid assignment target."); expr }
                 case IndexSetExpr{object, index, line, value} => { this.parseError(equals, "Invalid assignment target."); expr }
+                case MatchExpr{subject, arms}                 => { this.parseError(equals, "Invalid assignment target."); expr }
             };
         }
         return expr;
@@ -751,8 +786,174 @@ class Parser {
             return MapExpr(keys, vals);
         }
 
+        if (this.matchT("MATCH")) return this.matchExpression();
+
         this.parseError(this.peek(), "Expect expression.");
         return Literal(nil);
+    }
+
+    seqDestructure() {
+        var line = this.previous().line;
+        var names = [];
+        if (!this.check("RIGHT_BRACKET")) {
+            names.append(this.expect("IDENTIFIER", "Expect variable name.").lexeme);
+            while (this.matchT("COMMA")) {
+                names.append(this.expect("IDENTIFIER", "Expect variable name.").lexeme);
+            }
+        }
+        this.expect("RIGHT_BRACKET", "Expect ']' after names.");
+        this.expect("EQUAL", "Expect '=' after destructure pattern.");
+        var init = this.expression();
+        this.expect("SEMICOLON", "Expect ';' after variable declaration.");
+        return SeqDestructure(names, line, init);
+    }
+
+    objDestructure() {
+        var line = this.previous().line;
+        var names = [];
+        if (!this.check("RIGHT_BRACE")) {
+            names.append(this.expect("IDENTIFIER", "Expect field name.").lexeme);
+            while (this.matchT("COMMA")) {
+                names.append(this.expect("IDENTIFIER", "Expect field name.").lexeme);
+            }
+        }
+        this.expect("RIGHT_BRACE", "Expect '}' after names.");
+        this.expect("EQUAL", "Expect '=' after destructure pattern.");
+        var init = this.expression();
+        this.expect("SEMICOLON", "Expect ';' after variable declaration.");
+        return ObjDestructure(names, line, init);
+    }
+
+    enumDeclaration() {
+        var nameTok = this.expect("IDENTIFIER", "Expect enum name.");
+        this.expect("LEFT_BRACE", "Expect '{' before enum body.");
+        if (this.panicMode) return EnumDecl(nameTok.lexeme, [], []);
+        var ctor_names = [];
+        var ctor_fields = [];
+        while (!this.check("RIGHT_BRACE") and !this.isAtEnd()) {
+            var ctorTok = this.expect("IDENTIFIER", "Expect constructor name.");
+            if (this.panicMode) break;
+            var fields = [];
+            if (this.matchT("LEFT_PAREN")) {
+                if (!this.check("RIGHT_PAREN")) {
+                    fields.append(this.expect("IDENTIFIER", "Expect field name.").lexeme);
+                    while (this.matchT("COMMA")) {
+                        fields.append(this.expect("IDENTIFIER", "Expect field name.").lexeme);
+                    }
+                }
+                this.expect("RIGHT_PAREN", "Expect ')' after constructor fields.");
+            }
+            ctor_names.append(ctorTok.lexeme);
+            ctor_fields.append(fields);
+        }
+        this.expect("RIGHT_BRACE", "Expect '}' after enum body.");
+        return EnumDecl(nameTok.lexeme, ctor_names, ctor_fields);
+    }
+
+    matchExpression() {
+        var subject = this.expression();
+        this.expect("LEFT_BRACE", "Expect '{' after match subject.");
+        if (this.panicMode) return MatchExpr(subject, []);
+        var arms = [];
+        while (!this.check("RIGHT_BRACE") and !this.isAtEnd()) {
+            this.expect("CASE", "Expect 'case' in match arm.");
+            if (this.panicMode) break;
+            var pats = this.parseMatchArmPatterns();
+            var guard = nil;
+            if (this.matchT("IF")) guard = this.expression();
+            this.expect("FAT_ARROW", "Expect '=>' after match pattern.");
+            if (this.panicMode) break;
+            var body = this.expression();
+            arms.append(MatchArm(pats, guard, body));
+        }
+        this.expect("RIGHT_BRACE", "Expect '}' after match arms.");
+        return MatchExpr(subject, arms);
+    }
+
+    parseMatchArmPatterns() {
+        var pats = [];
+        pats.append(this.parsePattern());
+        while (this.matchT("OR") or this.matchT("COMMA")) {
+            if (this.check("RIGHT_BRACE") or this.check("CASE") or this.check("IF") or this.check("FAT_ARROW")) break;
+            pats.append(this.parsePattern());
+        }
+        return pats;
+    }
+
+    parsePattern() {
+        if (this.check("IDENTIFIER") and this.peek().lexeme == "_") {
+            this.advance();
+            return WildPat();
+        }
+        if (this.matchT("LEFT_BRACKET")) return this.parseListPattern();
+        if (this.matchT("NUMBER")) return LitPat(this.previous().literal);
+        if (this.matchT("STRING")) return LitPat(this.previous().literal);
+        if (this.matchT("TRUE"))   return LitPat(true);
+        if (this.matchT("FALSE"))  return LitPat(false);
+        if (this.matchT("NIL"))    return LitPat(nil);
+        if (this.matchT("IDENTIFIER")) {
+            var nameTok = this.previous();
+            if (this.matchT("LEFT_PAREN")) {
+                var subpats = [];
+                if (!this.check("RIGHT_PAREN")) {
+                    subpats.append(this.parsePattern());
+                    while (this.matchT("COMMA")) {
+                        subpats.append(this.parsePattern());
+                    }
+                }
+                this.expect("RIGHT_PAREN", "Expect ')' after constructor pattern fields.");
+                return CtorPat(nameTok.lexeme, subpats);
+            }
+            if (this.matchT("LEFT_BRACE")) {
+                var subpats = [];
+                if (!this.check("RIGHT_BRACE")) {
+                    subpats.append(this.parsePattern());
+                    while (this.matchT("COMMA")) {
+                        subpats.append(this.parsePattern());
+                    }
+                }
+                this.expect("RIGHT_BRACE", "Expect '}' after constructor pattern fields.");
+                return CtorPat(nameTok.lexeme, subpats);
+            }
+            return BindPat(nameTok.lexeme);
+        }
+        this.parseError(this.peek(), "Expect pattern.");
+        return WildPat();
+    }
+
+    parseListPatternElem() {
+        if (this.check("IDENTIFIER") and this.peek().lexeme == "_") {
+            this.advance();
+            return WildPat();
+        }
+        if (this.matchT("IDENTIFIER")) return BindPat(this.previous().lexeme);
+        this.parseError(this.peek(), "Expect binding or wildcard in list pattern.");
+        return WildPat();
+    }
+
+    parseListPattern() {
+        var elems = [];
+        var rest_name = nil;
+        if (!this.check("RIGHT_BRACKET")) {
+            if (this.matchT("ELIPSIS")) {
+                var rname = "_";
+                if (this.matchT("IDENTIFIER")) rname = this.previous().lexeme;
+                rest_name = rname;
+            } else {
+                elems.append(this.parseListPatternElem());
+                while (this.matchT("COMMA")) {
+                    if (this.matchT("ELIPSIS")) {
+                        var rname = "_";
+                        if (this.matchT("IDENTIFIER")) rname = this.previous().lexeme;
+                        rest_name = rname;
+                        break;
+                    }
+                    elems.append(this.parseListPatternElem());
+                }
+            }
+        }
+        this.expect("RIGHT_BRACKET", "Expect ']' after list pattern.");
+        return ListPat(elems, rest_name);
     }
 }
 
@@ -768,6 +969,7 @@ class Resolver {
         this.currentClass    = "NONE";
         this.hadError        = false;
         this.loopDepth       = 0;
+        this.enumCtors       = {};
     }
 
     resError(name, line, msg) {
@@ -845,6 +1047,9 @@ class Resolver {
                 this.loopDepth = this.loopDepth - 1;
                 this.endScope();
             }
+            case EnumDecl{name, ctor_names, ctor_fields_list} => this.resolveEnumDecl(name, ctor_names)
+            case SeqDestructure{names, line, initializer}     => this.resolveDestructure(names, line, initializer)
+            case ObjDestructure{names, line, initializer}     => this.resolveDestructure(names, line, initializer)
         };
     }
 
@@ -983,6 +1188,7 @@ class Resolver {
             case IndexExpr{object, index, line}            => { this.resolveExpr(object); this.resolveExpr(index) }
             case SliceExpr{object, start, end_, line}      => { this.resolveExpr(object); this.resolveExpr(start); this.resolveExpr(end_) }
             case IndexSetExpr{object, index, line, value}  => { this.resolveExpr(object); this.resolveExpr(index); this.resolveExpr(value) }
+            case MatchExpr{subject, arms}                  => this.resolveMatchExpr(subject, arms)
         };
     }
 
@@ -1030,6 +1236,83 @@ class Resolver {
     resolveMapExpr(keys, vals) {
         var i = 0;
         while (i < len(keys)) { this.resolveExpr(keys[i]); this.resolveExpr(vals[i]); i = i + 1; }
+    }
+
+    resolveEnumDecl(name, ctor_names) {
+        this.declare(name, 0);
+        this.define(name);
+        var i = 0;
+        while (i < len(ctor_names)) {
+            var cname = ctor_names[i];
+            this.declare(cname, 0);
+            this.define(cname);
+            this.enumCtors[cname] = true;
+            i = i + 1;
+        }
+    }
+
+    resolveDestructure(names, line, initializer) {
+        if (initializer != nil) this.resolveExpr(initializer);
+        var i = 0;
+        while (i < len(names)) {
+            this.declare(names[i], line);
+            this.define(names[i]);
+            i = i + 1;
+        }
+    }
+
+    resolvePattern(pat) {
+        match pat {
+            case WildPat                   => nil
+            case LitPat{v}                 => nil
+            case BindPat{name}             => this.resolveBindPat(name)
+            case CtorPat{cname, subpats}   => this.resolveSubpats(subpats)
+            case ListPat{elems, rest_name} => this.resolveListPat(elems, rest_name)
+        };
+    }
+
+    resolveBindPat(name) {
+        if (this.enumCtors.has(name)) return;
+        // In OR-patterns, the same name may appear in multiple alternatives.
+        // Skip re-declaration if already bound in the current scope.
+        if (len(this.scopes) > 0) {
+            var scope = this.scopes[len(this.scopes) - 1];
+            if (scope.has(name)) return;
+        }
+        this.declare(name, 0);
+        this.define(name);
+    }
+
+    resolveSubpats(subpats) {
+        var i = 0;
+        while (i < len(subpats)) { this.resolvePattern(subpats[i]); i = i + 1; }
+    }
+
+    resolveListPat(elems, rest_name) {
+        var i = 0;
+        while (i < len(elems)) { this.resolvePattern(elems[i]); i = i + 1; }
+        if (rest_name != nil and rest_name != "_") {
+            this.declare(rest_name, 0);
+            this.define(rest_name);
+        }
+    }
+
+    resolveMatchExpr(subject, arms) {
+        this.resolveExpr(subject);
+        var i = 0;
+        while (i < len(arms)) {
+            var arm = arms[i];
+            this.beginScope();
+            var j = 0;
+            while (j < len(arm.pats)) {
+                this.resolvePattern(arm.pats[j]);
+                j = j + 1;
+            }
+            if (arm.guard != nil) this.resolveExpr(arm.guard);
+            this.resolveExpr(arm.body);
+            this.endScope();
+            i = i + 1;
+        }
     }
 }
 
@@ -1395,6 +1678,29 @@ class InterpFileMethod {
     toString() { return "<native fn>"; }
 }
 
+class LoxEnumCtor {
+    init(tag, fields) {
+        this.tag    = tag;
+        this.fields = fields;
+        this.loxTag = "enum_ctor";
+    }
+    arity() { return len(this.fields); }
+    call(interp, args) { return LoxEnumValue(this.tag, args); }
+    toString() { return "<enum ctor " + this.tag + ">"; }
+}
+
+class LoxEnumValue {
+    init(tag, fields) {
+        this.tag    = tag;
+        this.fields = fields;
+        this.loxTag = "enum_val";
+    }
+    toString() {
+        if (len(this.fields) == 0) return this.tag;
+        return this.tag + "(...)";
+    }
+}
+
 // ===========================================================================
 // INTERPRETER
 // ===========================================================================
@@ -1644,6 +1950,9 @@ class Interpreter {
             case ContinueStmt{line}                              => { this.continueFlag = true; }
             case ForStmt{init, condition, increment, body}       => this.execFor(init, condition, increment, body, env)
             case ForInStmt{varName, varLine, iterable, body}     => this.execForIn(varName, varLine, iterable, body, env)
+            case EnumDecl{name, ctor_names, ctor_fields_list}    => this.execEnumDecl(name, ctor_names, ctor_fields_list, env)
+            case SeqDestructure{names, line, initializer}        => this.execSeqDestructure(names, line, initializer, env)
+            case ObjDestructure{names, line, initializer}        => this.execObjDestructure(names, line, initializer, env)
         };
     }
 
@@ -1787,6 +2096,7 @@ class Interpreter {
             case IndexExpr{object, index, line}            => this.evalIndex(object, index, line, env)
             case SliceExpr{object, start, end_, line}      => this.evalSlice(object, start, end_, line, env)
             case IndexSetExpr{object, index, line, value}  => this.evalIndexSet(object, index, line, value, env)
+            case MatchExpr{subject, arms}                  => this.evalMatchExpr(subject, arms, env)
         };
     }
 
@@ -1939,7 +2249,7 @@ class Interpreter {
             i = i + 1;
         }
         var tag = callee.loxTag;
-        if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod") {
+        if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "enum_ctor") {
             this.setError("Can only call functions and classes.", paren_line);
             return nil;
         }
@@ -2022,9 +2332,194 @@ class Interpreter {
         if (val == false) return "false";
         if (isLoxStr(val)) return val;
         if (isLoxNum(val)) return str(val);
-        if (loxTag(val) == "list") return this.stringifyList(val);
-        if (loxTag(val) == "map")  return this.stringifyMap(val);
+        var vtag = loxTag(val);
+        if (vtag == "list")     return this.stringifyList(val);
+        if (vtag == "map")      return this.stringifyMap(val);
+        if (vtag == "enum_val") return this.stringifyEnumVal(val);
         return val.toString();
+    }
+
+    stringifyEnumVal(val) {
+        if (len(val.fields) == 0) return val.tag;
+        var s = val.tag + "(";
+        var i = 0;
+        while (i < len(val.fields)) {
+            if (i > 0) s = s + ", ";
+            s = s + this.stringify(val.fields[i]);
+            i = i + 1;
+        }
+        return s + ")";
+    }
+
+    execEnumDecl(name, ctor_names, ctor_fields_list, env) {
+        env.define(name, nil);
+        var i = 0;
+        while (i < len(ctor_names)) {
+            var ctor = LoxEnumCtor(ctor_names[i], ctor_fields_list[i]);
+            env.define(ctor_names[i], ctor);
+            i = i + 1;
+        }
+    }
+
+    execSeqDestructure(names, line, initializer, env) {
+        var val = this.evalExpr(initializer, env);
+        if (this.errorFlag) return;
+        if (loxTag(val) != "list") {
+            this.setError("Sequence destructuring requires a List.", line);
+            return;
+        }
+        var i = 0;
+        while (i < len(names)) {
+            if (i >= len(val.elements)) {
+                this.setError("Not enough elements for sequence destructuring.", line);
+                return;
+            }
+            env.define(names[i], val.elements[i]);
+            i = i + 1;
+        }
+    }
+
+    execObjDestructure(names, line, initializer, env) {
+        var val = this.evalExpr(initializer, env);
+        if (this.errorFlag) return;
+        if (loxTag(val) != "instance") {
+            this.setError("Object destructuring requires an instance.", line);
+            return;
+        }
+        var i = 0;
+        while (i < len(names)) {
+            var field = val.instGet(names[i], line);
+            env.define(names[i], field);
+            i = i + 1;
+        }
+    }
+
+    evalMatchExpr(subjectExpr, arms, env) {
+        var subject = this.evalExpr(subjectExpr, env);
+        if (this.errorFlag) return nil;
+        var i = 0;
+        while (i < len(arms)) {
+            var arm = arms[i];
+            var j = 0;
+            var matched = false;
+            var bindings = {};
+            while (!matched and j < len(arm.pats)) {
+                var tryBindings = {};
+                if (this.matchPattern(arm.pats[j], subject, tryBindings)) {
+                    matched = true;
+                    bindings = tryBindings;
+                }
+                j = j + 1;
+            }
+            if (matched) {
+                var armEnv = Environment(env);
+                var bkeys = bindings.keys();
+                var k = 0;
+                while (k < len(bkeys)) {
+                    armEnv.define(bkeys[k], bindings[bkeys[k]]);
+                    k = k + 1;
+                }
+                var doBody = true;
+                if (arm.guard != nil) {
+                    var guardVal = this.evalExpr(arm.guard, armEnv);
+                    if (this.errorFlag) return nil;
+                    if (!this.isTruthy(guardVal)) doBody = false;
+                }
+                if (doBody) return this.evalExpr(arm.body, armEnv);
+            }
+            i = i + 1;
+        }
+        this.setError("Match expression was not exhaustive.", 0);
+        return nil;
+    }
+
+    matchPattern(pat, subject, bindings) {
+        return match pat {
+            case WildPat                   => true
+            case LitPat{v}                 => v == subject
+            case BindPat{name}             => this.matchBind(name, subject, bindings)
+            case CtorPat{cname, subpats}   => this.matchCtor(cname, subpats, subject, bindings)
+            case ListPat{elems, rest_name} => this.matchListPat(elems, rest_name, subject, bindings)
+        };
+    }
+
+    matchBind(name, subject, bindings) {
+        var ctorVal = this.globals.envGet(name, 0);
+        if (ctorVal != nil and loxTag(ctorVal) == "enum_ctor" and ctorVal.arity() == 0) {
+            return loxTag(subject) == "enum_val" and subject.tag == name;
+        }
+        bindings[name] = subject;
+        return true;
+    }
+
+    matchCtor(cname, subpats, subject, bindings) {
+        var stag = loxTag(subject);
+        if (stag == "enum_val") {
+            if (subject.tag != cname) return false;
+            if (len(subject.fields) != len(subpats)) return false;
+            var i = 0;
+            while (i < len(subpats)) {
+                if (!this.matchPattern(subpats[i], subject.fields[i], bindings)) return false;
+                i = i + 1;
+            }
+            return true;
+        }
+        if (stag == "instance") {
+            if (subject.klass.name != cname) return false;
+            return this.matchClassPat(subpats, subject, bindings);
+        }
+        return false;
+    }
+
+    matchClassPat(subpats, subject, bindings) {
+        var i = 0;
+        while (i < len(subpats)) {
+            var subpat = subpats[i];
+            var fieldVal = match subpat {
+                case BindPat{name} => subject.instGet(name, 0)
+                case WildPat       => nil
+                case _             => nil
+            };
+            if (!this.matchPattern(subpat, fieldVal, bindings)) return false;
+            i = i + 1;
+        }
+        return true;
+    }
+
+    matchListPat(elems, rest_name, subject, bindings) {
+        var tag = loxTag(subject);
+        var items = nil;
+        var restIsString = false;
+        if (tag == "list") {
+            items = subject.elements;
+        } else if (isLoxStr(subject)) {
+            items = [];
+            var si = 0;
+            while (si < len(subject)) { items.append(subject[si]); si = si + 1; }
+            restIsString = true;
+        } else {
+            return false;
+        }
+        var n = len(items);
+        var numElems = len(elems);
+        if (rest_name == nil and n != numElems) return false;
+        if (rest_name != nil and n < numElems) return false;
+        var i = 0;
+        while (i < numElems) {
+            if (!this.matchPattern(elems[i], items[i], bindings)) return false;
+            i = i + 1;
+        }
+        if (rest_name != nil and rest_name != "_") {
+            if (restIsString) {
+                bindings[rest_name] = subject[numElems : n];
+            } else {
+                var rest = InterpList([]);
+                var j = numElems;
+                while (j < n) { rest.elements.append(items[j]); j = j + 1; }
+                bindings[rest_name] = rest;
+            }
+        }
+        return true;
     }
 }
 
@@ -2032,14 +2527,24 @@ class Interpreter {
 // Entry point — reads Lox source from stdin and runs it.
 // ===========================================================================
 
+// Read source from stdin. Two protocols are supported:
+// 1. Sentinel: lox_wrapper.sh sends __SOURCE_BEGIN__ / __SOURCE_END__ so that
+//    remaining stdin is available for input() calls in the interpreted program.
+// 2. Legacy: plain pipe of source with no sentinel (no program stdin).
 var source = "";
 var ln = input();
-while (ln != nil) {
-    source = source + ln + "\n";
+if (ln == "__SOURCE_BEGIN__") {
     ln = input();
+    while (ln != nil and ln != "__SOURCE_END__") {
+        source = source + ln + "\n";
+        ln = input();
+    }
+} else {
+    while (ln != nil) {
+        source = source + ln + "\n";
+        ln = input();
+    }
 }
-// Remove the trailing newline we added to the last line — avoids off-by-one
-// in line numbers for files that don't end with a newline.
 if (len(source) > 0 and source[len(source) - 1] == "\n") {
     source = source[0 : len(source) - 1];
 }
