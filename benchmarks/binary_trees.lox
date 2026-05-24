@@ -1,0 +1,57 @@
+// Binary trees — stresses GC and object allocation.
+// Port of Computer Language Benchmarks Game binary-trees.
+// Allocates a complete binary tree of given depth, then checks (sums) all nodes.
+
+class Tree {
+    init(left, right) {
+        this.left = left;
+        this.right = right;
+    }
+
+    check() {
+        if (this.left == nil) return 1;
+        return 1 + this.left.check() + this.right.check();
+    }
+}
+
+fun make(depth) {
+    if (depth == 0) return Tree(nil, nil);
+    depth = depth - 1;
+    return Tree(make(depth), make(depth));
+}
+
+var MIN_DEPTH = 4;
+var MAX_DEPTH = 12;
+
+var start = clock();
+
+// Stretch tree: allocate and immediately discard one tree of max_depth+2.
+var stretch_depth = MAX_DEPTH + 2;
+var check = make(stretch_depth).check();
+
+// Long-lived tree that survives all iterations.
+var long_lived = make(MAX_DEPTH);
+
+var total_checks = 0;
+var depth = MIN_DEPTH;
+while (depth <= MAX_DEPTH) {
+    var iterations = 1;
+    var d = MAX_DEPTH - depth + MIN_DEPTH;
+    while (d > 0) {
+        iterations = iterations * 2;
+        d = d - 1;
+    }
+    var i = 0;
+    while (i < iterations) {
+        total_checks = total_checks + make(depth).check();
+        i = i + 1;
+    }
+    depth = depth + 2;
+}
+
+// Verify long-lived tree is intact.
+var alive = long_lived.check();
+
+// Result: 1 if long-lived tree check > 0 (sanity).
+print "result: " + str(alive > 0);
+print "elapsed: " + str(clock() - start);
