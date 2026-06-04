@@ -26,6 +26,7 @@ add_executable(loxpp
     src/debug.cpp
     src/value.cpp
     src/object.cpp
+    src/container_objects.cpp
     src/table.cpp
     src/memory_manager.cpp
     src/math.cpp
@@ -34,6 +35,12 @@ add_executable(loxpp
     src/token.cpp
     src/compiler.cpp
     src/parser.cpp
+    src/stdlib/stdlib_context.cpp
+    src/stdlib/stdlib_registrar.cpp
+    src/stdlib/globals.cpp
+    src/stdlib/file_api.cpp
+    src/stdlib/map_api.cpp
+    src/stdlib/math_module.cpp
 )
 
 # Debug output flags: default ON for Debug builds, OFF otherwise.

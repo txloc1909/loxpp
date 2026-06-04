@@ -2,7 +2,7 @@
 #include "vm.h"
 #include "compiler.h"
 #include "debug.h"
-#include "function.h"
+#include "objects.h"
 #include "memory_manager.h"
 #include "object.h"
 #include <sstream>

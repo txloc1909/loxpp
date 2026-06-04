@@ -1,6 +1,6 @@
 #include "math.h"
 
-#include "native.h"
+#include "exec_objects.h"
 #include "value.h"
 
 #include <cmath>

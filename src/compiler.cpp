@@ -2,6 +2,7 @@
 #include "debug.h"
 #include "escape.h"
 #include "memory_manager.h"
+#include "objects.h"
 #include "utility.h"
 
 #include <algorithm>
