@@ -68,7 +68,7 @@ for (n in evens) {
 ```
 
 More programs in [`examples/`](examples/) — from graph traversal and Huffman
-coding to a [self-hosted parser](bootstrap/loxpp_interpreter.lox).
+coding to a [self-hosted interpreter](bootstrap/loxpp_interpreter.lox).
 
 ---
 
