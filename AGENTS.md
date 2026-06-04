@@ -1,273 +1,94 @@
 # AGENTS.md
 
-## Project overview
+## Source of truth
 
-Lox is a dynamically-typed scripting language.
-Lox++ is a bytecode compiler & VM for Lox, written in C++17 (Clang, CMake,
-Ninja).
+`spec/` is the canonical definition of Lox++ semantics. **When spec and
+implementation conflict, fix the implementation.** Always update `spec/` in the
+same PR as any language change.
 
-This project uses **trunk-based development**: all work targets `main` via
-short-lived branches. PRs should be small and merged quickly — no long-running
-feature branches.
+Decision priority: **spec** (`spec/`) > **implementation** (`src/`) > **design
+notes** (`notes/`)
 
-### Language specification
-
-The canonical definition of Lox++ semantics lives in `spec/`:
-
-**The spec is the single source of truth for language behavior.** When there is
-a conflict between the spec and the implementation, the spec wins — fix the
-implementation to match. When adding or changing a language feature, update the
-spec in the same PR as the implementation change.
-
-
-### Design notes
-
-`notes/` contains exploratory design documents representing new ideas and future
-direction for the project. They have not been committed to the spec or
-implementation.
-
-**Consult `notes/` when planning work** to understand where the project is
-headed and avoid designs that conflict with planned direction. They are
-suggestions, not requirements.
-
-Decision priority when there is a conflict:
-
-1. **Spec** (`spec/`) — authoritative definition of current behavior
-2. **Implementation** (`src/`) — what the code actually does today
-3. **Design notes** (`notes/`) — guidance on future direction
+Consult `notes/` when planning — it captures future direction and helps avoid
+conflicting designs.
 
 ---
 
 ## Planning policy
 
-**Always plan before implementing.** When assigned a task (via issue, PR
-comment, or CLI delegation):
+**Always plan before implementing.**
 
-1. **Post a plan first** — as an issue comment or PR description — covering:
-   - What the task requires and any assumptions made
-   - The proposed approach and key design decisions
-   - Files/components that will be created or changed
-   - Any open questions or trade-offs
+1. Post a plan (approach, files affected, open questions) as an issue comment
+   or PR description.
+2. Wait for explicit approval before writing any code or opening a PR.
+3. If the plan changes, acknowledge the revision before proceeding.
 
-2. **Wait for explicit approval** before writing any code. Do not open a
-   implementation PR or push commits until the human has replied with approval
-   (e.g. "looks good", "approved", "go ahead").
-
-3. **If the plan is revised**, acknowledge the changes and update your approach
-   before proceeding.
-
-> This applies to all agents — CLI (`/delegate`), Copilot cloud agent, and any
-> sub-agent. Trivial one-liner fixes may skip the plan step at the agent's
-> discretion, but when in doubt, plan first.
+> Trivial one-liners may skip this. When in doubt, plan first.
 
 ---
 
 ## Dev model
 
-The repo is a **regular clone** with a dedicated directory for agent worktrees:
+Each agent works in its own worktree and ephemeral container — isolated from
+the human's environment and from other agents:
 
 ```
-loxpp/                            ← human's clone (branch: main)
-loxpp/.claude/worktrees/          ← all agent worktrees live here (gitignored)
-  loxpp-feat-foo/                 ← agent worktree (branch: feat/foo)
-  loxpp-fix-bar/                  ← agent worktree (branch: fix/bar)
+loxpp/
+  .claude/worktrees/
+    loxpp-feat-foo/    ← agent worktree (branch: feat/foo), own build/
+    loxpp-fix-bar/     ← agent worktree (branch: fix/bar), own build/
 ```
 
-- `.claude/worktrees/` is listed in `.gitignore` - its contents never appear in
-  commits.
-- Every agent works in its own worktree on its own branch, with its own
-  `build/` directory.
-- Every worktree gets its own ephemeral container (started with `--rm`).
-- Containers all share the same `loxpp-dev-env` image; build it once.
-
-> **The `loxpp-dev` distrobox container is the human's environment. Agents must
-> not use or modify it.**
+> The human's `loxpp-dev` distrobox container is off-limits — never use or
+> modify it.
 
 ---
 
-## One-time setup
-
-### 1. Build the dev image
-
-Run this once (or whenever the `Dockerfile` changes):
+## Task loop
 
 ```bash
-# From the repo root
-podman build -t loxpp-dev-env .
-# docker build -t loxpp-dev-env .   # docker also works
-```
+# 1. Create worktree + branch (from repo root)
+git worktree add .claude/worktrees/loxpp-<type>-<desc> -b <type>/<desc>
 
-### 2. Git hooks (automatic)
-
-`cmake --preset debug` automatically runs `git config core.hooksPath .githooks`
-at configure time, activating the pre-commit hook for the current
-clone/worktree. No manual step needed — just build.
-
----
-
-## Agent task loop
-
-Every agent task follows this loop end-to-end:
-
-### 1. Create a branch and worktree
-
-```bash
-# From the repo root (loxpp/)
-git worktree add .claude/worktrees/loxpp-<branch> -b <type>/<short-description>
-
-# Example
-git worktree add .claude/worktrees/loxpp-feat-closures -b feat/closures
-```
-
-See [Conventions](#conventions) for branch naming rules.
-
-### 2. Start an ephemeral container for that worktree
-
-Mount the worktree directory into the container as `/workspace`:
-
-```bash
-# podman (recommended)
+# 2. Start ephemeral container (:z needed on SELinux hosts e.g. Fedora)
 podman run -it --rm \
-  -v /path/to/loxpp/.claude/worktrees/loxpp-<branch>:/workspace:z \
-  --name loxpp-<branch> \
-  loxpp-dev-env
+  -v /path/to/.claude/worktrees/loxpp-<type>-<desc>:/workspace:z \
+  --name loxpp-<type>-<desc> loxpp-dev-env
 
-# docker (alternative)
-docker run -it --rm \
-  -v /path/to/loxpp/.claude/worktrees/loxpp-<branch>:/workspace \
-  --name loxpp-<branch> \
-  loxpp-dev-env
-```
-
-The container starts in `/workspace` (the worktree root). The `:z` flag is
-needed for SELinux hosts (e.g. Fedora/RHEL); omit on non-SELinux hosts.
-
-### 3. Build and wire git hooks (before writing any code)
-
-Run cmake first — this configures the build **and** wires up the pre-commit
-hook via `git config core.hooksPath .githooks`. Do this before writing any code
-so the hook is active from your first commit.
-
-```bash
+# 3. Build — also wires the pre-commit hook via cmake
 cmake --preset debug && cmake --build build
-```
 
-### 4. Test locally (inside the container)
-
-Iterate here until everything passes:
-
-```bash
+# 4. Iterate: write code, test
 ctest --test-dir build --output-on-failure
-```
 
-Fix any failures before pushing.
-
-### 5. Lint before pushing
-
-Run formatting and static analysis checks before opening a PR:
-
-```bash
-# Auto-format changed files in-place
+# 5. Format + lint
 find src test -name '*.cpp' -o -name '*.h' | xargs clang-format -i
-
-# Run static analysis
 find src -name '*.cpp' | xargs clang-tidy -p build
-```
 
-Commit any formatting fixes, then verify the build and tests still pass.
-
-### 6. Push and open a PR
-
-```bash
+# 6. Push + open PR
 git push origin <branch>
 gh pr create --base main --title "<title>" --body "<description>"
-```
 
-### 7. Watch CI
-
-```bash
-# List recent runs for your branch
-gh run list --branch <your-branch> --repo txloc1909/loxpp
-
-# Watch a run in real time
+# 7. Watch CI
 gh run watch <run-id> --repo txloc1909/loxpp
+gh run view <run-id> --log-failed --repo txloc1909/loxpp   # on failure
 
-# Show failed job logs
-gh run view <run-id> --log-failed --repo txloc1909/loxpp
-```
-
-CI runs: **Lint** (clang-format), **Build & Test** (debug + release), **Static
-Analysis** (clang-tidy).
-
-If CI fails (for non-intentional reasons): fix locally inside the container,
-push again, re-watch.
-
-### 8. Resolve review comments
-
-Poll for PR review comments:
-
-```bash
+# 8. Resolve review comments → push → re-watch → repeat until approved
 gh pr view <pr-number> --repo txloc1909/loxpp --comments
-```
 
-For each comment: fix inside the container → build/test → push → re-watch CI →
-repeat until approved.
-
-### 9. Merge
-
-Once CI is green and the PR is approved, merge to `main`:
-
-```bash
+# 9. Merge (squash)
 gh pr merge <pr-number> --repo txloc1909/loxpp --squash
+
+# 10. Teardown
+git worktree remove .claude/worktrees/loxpp-<type>-<desc>
+git branch -d <type>/<desc>
 ```
-
-### 10. Teardown
-
-```bash
-# Remove the worktree
-git worktree remove .claude/worktrees/loxpp-<branch>
-
-# Delete the local branch
-git branch -d <type>/<short-description>
-
-# The container is already gone (started with --rm)
-```
-
----
-
-## Build, test, run (inside the container)
-
-```bash
-# Configure + build (debug preset — includes compile_commands.json)
-cmake --preset debug && cmake --build build
-
-# Run all tests
-ctest --test-dir build --output-on-failure
-
-# Run a specific test binary
-./build/test_scanner
-
-# Run the interpreter interactively
-./build/loxpp
-
-# Run a Lox script
-./build/loxpp path/to/script.lox
-
-# Release build
-cmake --preset release && cmake --build build
-```
-
-Available presets: `debug`, `release` (see `CMakePresets.json`).
 
 ---
 
 ## Conventions
 
-### Branch naming
-
-```
-<type>/<short-description>
-```
+**Branch naming:** `<type>/<short-description>`
 
 | Type | Use for |
 |---|---|
@@ -278,50 +99,13 @@ Available presets: `debug`, `release` (see `CMakePresets.json`).
 | `ci/` | CI/tooling changes |
 | `docs/` | Documentation only |
 
-Examples: `feat/closures`, `fix/string-gc`, `test/scanner-edge-cases`
-
-### Container & worktree naming
-
-Use the branch name (with `/` replaced by `-`) for both the worktree directory
-and the container name:
-
-| Branch | Worktree dir | Container name |
-|---|---|---|
-| `feat/closures` | `.claude/worktrees/loxpp-feat-closures/` | `loxpp-feat-closures` |
-| `fix/string-gc` | `.claude/worktrees/loxpp-fix-string-gc/` | `loxpp-fix-string-gc` |
-
-### Isolation rules
-
-- Each agent works **only** in its own worktree and its own container.
-- Never commit directly to `main`. Always work on a feature branch and open a PR.
-- The `build/` directory lives inside the worktree (`${sourceDir}/build` per
-  `CMakePresets.json`) — it is automatically isolated between worktrees.
-
-### Commit discipline
-
-Commit **atomically and often** — one logical change per commit.
-
-- **One concern per commit**: a commit should do exactly one thing (add a
-  function, fix a bug, rename a variable). If you find yourself writing "and"
-  in the commit message, split it.
-- **Commit as you go**: don't accumulate a day's work and dump it in one commit at
-  the end. Commit after each meaningful step: after tests pass, after a
-  refactor, after a new function works.
-- **Green before you commit**: the build and tests must pass on every commit,
-  not just the last one. Bisect only works if every commit is bisect-able.
-- **Commit message format**: use the Conventional Commits style
-  (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`) with a short
-  imperative subject line (≤72 chars). Add a body when the *why* needs
-  explaining.
+**Commit discipline:** atomic and often — one concern per commit, green on
+every commit. Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
-# Good
 feat: add constant folding for binary arithmetic
 fix: prevent double-free in ObjString destructor
-
-# Bad
-wip
-misc fixes
-implement feature
 ```
 
+If you'd write "and" in the subject, split the commit. Add a body only when the
+*why* needs explaining.
