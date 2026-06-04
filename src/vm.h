@@ -1,9 +1,10 @@
 #pragma once
 
-#include "function.h"
+#include "exec_objects.h"
+#include "class_objects.h"
 #include "memory_manager.h"
-#include "native.h"
 #include "table.h"
+#include "stdlib/stdlib_context.h"
 
 #include <cstdint>
 #include <memory>
@@ -55,11 +56,7 @@ class VM {
     bool call(ObjClosure* closure, int argCount);
     bool callNative(ObjNative* native, int argCount);
     bool bindMethod(ObjClass* klass, ObjString* name);
-    void defineNative(const char* name, NativeFn fn, int arity);
     void defineNatives();
-    void defineMathObject();
-    void defineFileAPI();
-    void defineMapAPI();
     ObjUpvalue* captureUpvalue(Value* local);
     void closeUpvalues(Value* last);
     void runtimeError(const char* format, ...);
@@ -74,4 +71,7 @@ class VM {
     ObjUpvalue* m_openUpvalues{nullptr};
     Value m_lastResult; // For testing/debugging only -- stores the value
                         // popped by Op::POP.
+    StdlibContext m_stdlibCtx;
+    ObjClass* m_fileClass{nullptr};
+    ObjClass* m_mapClass{nullptr};
 };

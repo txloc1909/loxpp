@@ -1,357 +1,34 @@
 #include "vm.h"
 #include "debug.h"
-#include "function.h"
+#include "objects.h"
 #include "memory_manager.h"
-#include "native.h"
 #include "object.h"
 #include "scanner.h"
 #include "compiler.h"
 #include "utility.h"
 
-#include "math.h"
+#include "stdlib/stdlib_context.h"
+#include "stdlib/stdlib_registrar.h"
+#include "stdlib/globals.h"
+#include "stdlib/file_api.h"
+#include "stdlib/map_api.h"
+#include "stdlib/math_module.h"
 
-#include <cerrno>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
-#include <ctime>
 #include <functional>
-#include <iostream>
 #include <string>
 #include <unistd.h>
-
-// ---------------------------------------------------------------------------
-// Native function implementations
-// ---------------------------------------------------------------------------
-
-static Value clockNative(int /*argCount*/, Value* /*args*/) {
-    return from<Number>(static_cast<double>(std::clock()) / CLOCKS_PER_SEC);
-}
-
-// Read one line from stdin. Returns nil on EOF, otherwise an ObjString.
-// The VM pointer is smuggled via a thread-local so native functions can
-// allocate managed strings without changing the NativeFn signature.
-static MemoryManager* s_currentMM = nullptr;
-
-// Natives cannot call VM::runtimeError directly. They set this flag instead;
-// callNative() checks it after the native returns and reports the error.
-static bool s_nativeError = false;
-static std::string s_nativeErrorMsg;
-
-void nativeRuntimeError(const char* msg) {
-    s_nativeError = true;
-    s_nativeErrorMsg = msg;
-}
-
-static Value inputNative(int /*argCount*/, Value* /*args*/) {
-    std::string line;
-    if (!std::getline(std::cin, line)) {
-        return from<Nil>(Nil{});
-    }
-    ObjString* s = s_currentMM->makeString(line);
-    return Value{static_cast<Obj*>(s)};
-}
-
-static Value strNative(int /*argCount*/, Value* args) {
-    std::string s = stringify(args[0]);
-    ObjString* obj = s_currentMM->makeString(s);
-    return Value{static_cast<Obj*>(obj)};
-}
-
-static Value lenNative(int /*argCount*/, Value* args) {
-    if (isList(args[0])) {
-        auto* list = asObjList(as<Obj*>(args[0]));
-        return from<Number>(static_cast<double>(list->elements.size()));
-    }
-    if (isString(args[0])) {
-        auto* s = asObjString(as<Obj*>(args[0]));
-        return from<Number>(static_cast<double>(s->chars.size()));
-    }
-    if (isMap(args[0])) {
-        auto* map = asObjMap(as<Obj*>(args[0]));
-        return from<Number>(static_cast<double>(map->map.count()));
-    }
-    nativeRuntimeError("len() argument must be a list, string, or map.");
-    return from<Nil>(Nil{});
-}
-
-// ---------------------------------------------------------------------------
-// Map API — ObjMap native methods
-// ---------------------------------------------------------------------------
-
-static ObjClass* s_mapClass = nullptr;
-
-// args[-1] = the ObjMap receiver
-static ObjMap* checkMap(Value* args) { return asObjMap(as<Obj*>(args[-1])); }
-
-static Value mapHasNative(int /*argc*/, Value* args) {
-    if (!isValidMapKey(args[0])) {
-        nativeRuntimeError("Map keys must be Bool, Number, Nil, or String. NaN "
-                           "is not allowed.");
-        return from<Nil>(Nil{});
-    }
-    ObjMap* map = checkMap(args);
-    Value dummy;
-    return from<bool>(map->mapGet(args[0], dummy));
-}
-
-static Value mapDelNative(int /*argc*/, Value* args) {
-    if (!isValidMapKey(args[0])) {
-        nativeRuntimeError("Map keys must be Bool, Number, Nil, or String. NaN "
-                           "is not allowed.");
-        return from<Nil>(Nil{});
-    }
-    ObjMap* map = checkMap(args);
-    map->mapDel(args[0]);
-    return from<Nil>(Nil{});
-}
-
-static Value mapKeysNative(int /*argc*/, Value* args) {
-    ObjMap* map = checkMap(args);
-    ObjList* list =
-        s_currentMM->create<ObjList>(VmAllocator<Value>{s_currentMM});
-    s_currentMM->pushTempRoot(list);
-    // key may be an ObjString; it stays alive via the map (map is rooted
-    // as the receiver on the VM stack). push_back may GC — list is rooted.
-    map->map.forEach(
-        [list](const MapEntry& e) { list->elements.push_back(e.key); });
-    s_currentMM->popTempRoot();
-    return Value{static_cast<Obj*>(list)};
-}
-
-static Value mapValuesNative(int /*argc*/, Value* args) {
-    ObjMap* map = checkMap(args);
-    ObjList* list =
-        s_currentMM->create<ObjList>(VmAllocator<Value>{s_currentMM});
-    s_currentMM->pushTempRoot(list);
-    map->map.forEach(
-        [list](const MapEntry& e) { list->elements.push_back(e.value); });
-    s_currentMM->popTempRoot();
-    return Value{static_cast<Obj*>(list)};
-}
-
-static Value mapEntriesNative(int /*argc*/, Value* args) {
-    ObjMap* map = checkMap(args);
-    ObjList* result =
-        s_currentMM->create<ObjList>(VmAllocator<Value>{s_currentMM});
-    s_currentMM->pushTempRoot(result);
-    map->map.forEach([result](const MapEntry& e) {
-        // Build [key, value] pair list
-        ObjList* pair =
-            s_currentMM->create<ObjList>(VmAllocator<Value>{s_currentMM});
-        s_currentMM->pushTempRoot(pair);
-        pair->elements.push_back(e.key);
-        pair->elements.push_back(e.value);
-        // Keep pair rooted until after push_back: result->elements.push_back
-        // may trigger GC, and pair would be unreachable if popped too early.
-        result->elements.push_back(Value{static_cast<Obj*>(pair)});
-        s_currentMM->popTempRoot(); // pair — now safe, stored in result
-    });
-    s_currentMM->popTempRoot(); // result
-    return Value{static_cast<Obj*>(result)};
-}
-
-// ---------------------------------------------------------------------------
-// File API — ObjFile native methods and open() factory
-// ---------------------------------------------------------------------------
-
-static ObjClass* s_fileClass = nullptr;
-
-// Validate that args[-1] is an open ObjFile. Returns nullptr and sets a
-// runtime error if the file is closed.
-static ObjFile* checkFile(Value* args, const char* method) {
-    ObjFile* file = asObjFile(as<Obj*>(args[-1]));
-    if (!file->handle) {
-        std::string msg = "Cannot call '";
-        msg += method;
-        msg += "' on a closed file.";
-        nativeRuntimeError(msg.c_str());
-        return nullptr;
-    }
-    return file;
-}
-
-static Value fileReadNative(int /*argc*/, Value* args) {
-    ObjFile* file = checkFile(args, "read");
-    if (!file) {
-        return from<Nil>(Nil{});
-    }
-    if (!file->readable) {
-        nativeRuntimeError("File is not open for reading.");
-        return from<Nil>(Nil{});
-    }
-    std::string buf;
-    char chunk[4096];
-    while (std::fgets(chunk, sizeof(chunk), file->handle)) {
-        buf += chunk;
-    }
-    return Value{static_cast<Obj*>(s_currentMM->makeString(std::move(buf)))};
-}
-
-static Value fileReadlineNative(int /*argc*/, Value* args) {
-    ObjFile* file = checkFile(args, "readline");
-    if (!file) {
-        return from<Nil>(Nil{});
-    }
-    if (!file->readable) {
-        nativeRuntimeError("File is not open for reading.");
-        return from<Nil>(Nil{});
-    }
-    std::string line;
-    char chunk[4096];
-    bool got = false;
-    while (std::fgets(chunk, sizeof(chunk), file->handle)) {
-        got = true;
-        line += chunk;
-        if (!line.empty() && line.back() == '\n') {
-            line.pop_back();
-            break;
-        }
-    }
-    if (!got) {
-        return from<Nil>(Nil{});
-    }
-    return Value{static_cast<Obj*>(s_currentMM->makeString(std::move(line)))};
-}
-
-static Value fileReadlinesNative(int /*argc*/, Value* args) {
-    ObjFile* file = checkFile(args, "readlines");
-    if (!file) {
-        return from<Nil>(Nil{});
-    }
-    if (!file->readable) {
-        nativeRuntimeError("File is not open for reading.");
-        return from<Nil>(Nil{});
-    }
-    ObjList* list =
-        s_currentMM->create<ObjList>(VmAllocator<Value>{s_currentMM});
-    s_currentMM->pushTempRoot(list);
-    char chunk[4096];
-    std::string line;
-    auto flush = [&]() {
-        ObjString* s = s_currentMM->makeString(line);
-        // Protect s across push_back, which can GC on vector resize.
-        s_currentMM->pushTempRoot(s);
-        list->elements.push_back(Value{static_cast<Obj*>(s)});
-        s_currentMM->popTempRoot();
-        line.clear();
-    };
-    while (std::fgets(chunk, sizeof(chunk), file->handle)) {
-        line += chunk;
-        if (!line.empty() && line.back() == '\n') {
-            line.pop_back();
-            flush();
-        }
-    }
-    if (!line.empty()) {
-        flush(); // trailing line with no newline
-    }
-    s_currentMM->popTempRoot();
-    return Value{static_cast<Obj*>(list)};
-}
-
-static Value fileWriteNative(int /*argc*/, Value* args) {
-    ObjFile* file = checkFile(args, "write");
-    if (!file) {
-        return from<Nil>(Nil{});
-    }
-    if (!file->writable) {
-        nativeRuntimeError("File is not open for writing.");
-        return from<Nil>(Nil{});
-    }
-    if (!isString(args[0])) {
-        nativeRuntimeError("'write' argument must be a string.");
-        return from<Nil>(Nil{});
-    }
-    auto* s = asObjString(as<Obj*>(args[0]));
-    std::fwrite(s->chars.data(), 1, s->chars.size(), file->handle);
-    return from<Nil>(Nil{});
-}
-
-static Value fileWritelineNative(int /*argc*/, Value* args) {
-    ObjFile* file = checkFile(args, "writeline");
-    if (!file) {
-        return from<Nil>(Nil{});
-    }
-    if (!file->writable) {
-        nativeRuntimeError("File is not open for writing.");
-        return from<Nil>(Nil{});
-    }
-    if (!isString(args[0])) {
-        nativeRuntimeError("'writeline' argument must be a string.");
-        return from<Nil>(Nil{});
-    }
-    auto* s = asObjString(as<Obj*>(args[0]));
-    std::fwrite(s->chars.data(), 1, s->chars.size(), file->handle);
-    std::fputc('\n', file->handle);
-    return from<Nil>(Nil{});
-}
-
-static Value fileCloseNative(int /*argc*/, Value* args) {
-    // Idempotent — no error if already closed.
-    ObjFile* file = asObjFile(as<Obj*>(args[-1]));
-    if (file->handle) {
-        std::fclose(file->handle);
-        file->handle = nullptr;
-    }
-    return from<Nil>(Nil{});
-}
-
-static Value openNative(int /*argc*/, Value* args) {
-    if (!isString(args[0]) || !isString(args[1])) {
-        nativeRuntimeError("open() requires string path and mode.");
-        return from<Nil>(Nil{});
-    }
-    auto* pathStr = asObjString(as<Obj*>(args[0]));
-    auto* modeStr = asObjString(as<Obj*>(args[1]));
-    std::string modeS(modeStr->chars.data(), modeStr->chars.size());
-
-    bool readable = false, writable = false;
-    const char* cmode = nullptr;
-    if (modeS == "r") {
-        readable = true;
-        cmode = "r";
-    } else if (modeS == "w") {
-        writable = true;
-        cmode = "w";
-    } else if (modeS == "a") {
-        writable = true;
-        cmode = "a";
-    } else if (modeS == "r+") {
-        readable = writable = true;
-        cmode = "r+";
-    } else {
-        nativeRuntimeError(
-            "open(): invalid mode. Expected \"r\", \"w\", \"a\", or \"r+\".");
-        return from<Nil>(Nil{});
-    }
-    std::string pathS(pathStr->chars.data(), pathStr->chars.size());
-    FILE* fp = std::fopen(pathS.c_str(), cmode);
-    if (!fp) {
-        std::string msg = "open(): cannot open '";
-        msg += pathS;
-        msg += "': ";
-        msg += std::strerror(errno);
-        nativeRuntimeError(msg.c_str());
-        return from<Nil>(Nil{});
-    }
-    ObjFile* file = s_currentMM->create<ObjFile>(s_fileClass);
-    s_currentMM->pushTempRoot(file);
-    file->handle = fp;
-    file->readable = readable;
-    file->writable = writable;
-    s_currentMM->popTempRoot();
-    return Value{static_cast<Obj*>(file)};
-}
 
 InterpretResult VM::interpret(const std::string& source) {
     // Guard against dangling class pointers from a prior VM instance. GC can
     // fire inside compile(), and markRoots() must not dereference a pointer
     // that was freed when the previous VM's MemoryManager was destroyed.
-    s_fileClass = nullptr;
-    s_mapClass = nullptr;
+    m_fileClass = nullptr;
+    m_mapClass = nullptr;
     ObjFunction* fn = compile(source, &m_mm);
     if (fn == nullptr) {
         return InterpretResult::COMPILE_ERROR;
@@ -362,8 +39,9 @@ InterpretResult VM::interpret(const std::string& source) {
     // between compile() returning and push(closure) — the Compiler has already
     // been destroyed and m_currentCompiler is nullptr.
     push(Value{static_cast<Obj*>(fn)});
+    m_stdlibCtx.mm = &m_mm;
+    setActiveContext(&m_stdlibCtx);
     defineNatives();
-    s_currentMM = &m_mm;
     ObjClosure* closure = m_mm.create<ObjClosure>(fn);
     stackTop[-1] = Value{
         static_cast<Obj*>(closure)}; // replace fn with its closure in-place
@@ -738,7 +416,7 @@ InterpretResult VM::run() {
             if (isFile(peek(0))) {
                 ObjString* name = asObjString(readConstant());
                 Value method;
-                if (!s_fileClass->methods.get(name, method)) {
+                if (!m_fileClass->methods.get(name, method)) {
                     runtimeError("Undefined property '%s' on file.",
                                  name->chars.c_str());
                     return InterpretResult::RUNTIME_ERROR;
@@ -750,7 +428,7 @@ InterpretResult VM::run() {
             if (isMap(peek(0))) {
                 ObjString* name = asObjString(readConstant());
                 Value method;
-                if (!s_mapClass->methods.get(name, method)) {
+                if (!m_mapClass->methods.get(name, method)) {
                     runtimeError("Undefined property '%s' on map.",
                                  name->chars.c_str());
                     return InterpretResult::RUNTIME_ERROR;
@@ -902,7 +580,7 @@ InterpretResult VM::run() {
                 }
             } else if (isFile(receiver)) {
                 Value method;
-                if (!s_fileClass->methods.get(name, method)) {
+                if (!m_fileClass->methods.get(name, method)) {
                     runtimeError("Undefined method '%s' on file.",
                                  name->chars.c_str());
                     return InterpretResult::RUNTIME_ERROR;
@@ -912,7 +590,7 @@ InterpretResult VM::run() {
                 }
             } else if (isMap(receiver)) {
                 Value method;
-                if (!s_mapClass->methods.get(name, method)) {
+                if (!m_mapClass->methods.get(name, method)) {
                     runtimeError("Undefined method '%s' on map.",
                                  name->chars.c_str());
                     return InterpretResult::RUNTIME_ERROR;
@@ -1033,7 +711,7 @@ InterpretResult VM::run() {
                 }
             }
             ObjMap* map =
-                m_mm.create<ObjMap>(s_mapClass, VmAllocator<MapEntry>{&m_mm});
+                m_mm.create<ObjMap>(m_mapClass, VmAllocator<MapEntry>{&m_mm});
             // Values are still on the stack → GC-rooted; map is temp-rooted
             // so it survives any GC triggered by mapSet's grow.
             m_mm.pushTempRoot(map);
@@ -1394,10 +1072,10 @@ bool VM::callNative(ObjNative* native, int argCount) {
                      argCount);
         return false;
     }
-    s_nativeError = false;
+    m_stdlibCtx.clearError();
     Value result = native->function(argCount, stackTop - argCount);
-    if (s_nativeError) {
-        runtimeError("%s", s_nativeErrorMsg.c_str());
+    if (m_stdlibCtx.nativeError) {
+        runtimeError("%s", m_stdlibCtx.nativeErrorMsg.c_str());
         return false;
     }
     stackTop -= argCount + 1; // pop args + callee
@@ -1418,131 +1096,12 @@ bool VM::bindMethod(ObjClass* klass, ObjString* name) {
     return true;
 }
 
-void VM::defineNative(const char* name, NativeFn fn, int arity) {
-    ObjNative* native = m_mm.create<ObjNative>(fn, arity);
-    push(
-        Value{static_cast<Obj*>(native)}); // root native across makeString's GC
-    ObjString* key = m_mm.makeString(name);
-    push(Value{static_cast<Obj*>(key)}); // root key across m_globals.set's GC
-    m_globals.set(key, Value{static_cast<Obj*>(native)});
-    pop(); // key
-    pop(); // native
-}
-
 void VM::defineNatives() {
-    defineNative("clock", clockNative, 0);
-    defineNative("input", inputNative, 0);
-    defineNative("str", strNative, 1);
-    defineNative("len", lenNative, 1);
-    defineMathObject();
-    defineFileAPI();
-    defineMapAPI();
-}
-
-void VM::defineFileAPI() {
-    ObjString* className = m_mm.makeString("File");
-    push(Value{static_cast<Obj*>(className)});
-    ObjClass* klass =
-        m_mm.create<ObjClass>(className, VmAllocator<Entry>{&m_mm});
-    push(Value{static_cast<Obj*>(klass)});
-
-    auto addMethod = [&](const char* n, NativeFn fn, int arity) {
-        ObjNative* native = m_mm.create<ObjNative>(fn, arity);
-        push(Value{static_cast<Obj*>(native)});
-        ObjString* key = m_mm.makeString(n);
-        push(Value{static_cast<Obj*>(key)});
-        klass->methods.set(key, Value{static_cast<Obj*>(native)});
-        pop();
-        pop(); // key, native
-    };
-
-    addMethod("read", fileReadNative, 0);
-    addMethod("readline", fileReadlineNative, 0);
-    addMethod("readlines", fileReadlinesNative, 0);
-    addMethod("write", fileWriteNative, 1);
-    addMethod("writeline", fileWritelineNative, 1);
-    addMethod("close", fileCloseNative, 0);
-
-    s_fileClass = klass;
-    pop();
-    pop(); // klass, className
-
-    defineNative("open", openNative, 2);
-}
-
-void VM::defineMapAPI() {
-    ObjString* className = m_mm.makeString("Map");
-    push(Value{static_cast<Obj*>(className)});
-    ObjClass* klass =
-        m_mm.create<ObjClass>(className, VmAllocator<Entry>{&m_mm});
-    push(Value{static_cast<Obj*>(klass)});
-
-    auto addMethod = [&](const char* n, NativeFn fn, int arity) {
-        ObjNative* native = m_mm.create<ObjNative>(fn, arity);
-        push(Value{static_cast<Obj*>(native)});
-        ObjString* key = m_mm.makeString(n);
-        push(Value{static_cast<Obj*>(key)});
-        klass->methods.set(key, Value{static_cast<Obj*>(native)});
-        pop();
-        pop(); // key, native
-    };
-
-    addMethod("has", mapHasNative, 1);
-    addMethod("del", mapDelNative, 1);
-    addMethod("keys", mapKeysNative, 0);
-    addMethod("values", mapValuesNative, 0);
-    addMethod("entries", mapEntriesNative, 0);
-
-    s_mapClass = klass;
-    pop();
-    pop(); // klass, className
-}
-
-void VM::defineMathObject() {
-    // a. Create the Math class (just a nominal holder for the instance)
-    ObjString* className = m_mm.makeString("Math");
-    push(Value{static_cast<Obj*>(className)}); // root className
-    ObjClass* klass =
-        m_mm.create<ObjClass>(className, VmAllocator<Entry>{&m_mm});
-    push(Value{static_cast<Obj*>(klass)}); // root klass
-
-    // b. Create the instance
-    ObjInstance* instance =
-        m_mm.create<ObjInstance>(klass, VmAllocator<Entry>{&m_mm});
-    push(Value{static_cast<Obj*>(instance)}); // root instance
-
-    // c. Add function fields — each push/pop pair keeps objects rooted during
-    //    any GC triggered by makeString or fields.set.
-    for (std::size_t i = 0; i < kMathFunctionCount; ++i) {
-        const auto& e = kMathFunctions[i];
-        ObjNative* native = m_mm.create<ObjNative>(e.fn, e.arity);
-        push(Value{static_cast<Obj*>(native)}); // root native
-        ObjString* key = m_mm.makeString(e.name);
-        push(Value{static_cast<Obj*>(key)}); // root key
-        instance->fields.set(key, Value{static_cast<Obj*>(native)});
-        pop(); // key
-        pop(); // native
-    }
-
-    // d. Add constant fields
-    for (std::size_t i = 0; i < kMathConstantCount; ++i) {
-        const auto& c = kMathConstants[i];
-        ObjString* key = m_mm.makeString(c.name);
-        push(Value{static_cast<Obj*>(key)}); // root key
-        instance->fields.set(key, from<Number>(c.value));
-        pop(); // key
-    }
-
-    // e-f. Register instance as global "math"
-    ObjString* globalKey = m_mm.makeString("math");
-    push(Value{static_cast<Obj*>(globalKey)}); // root key
-    m_globals.set(globalKey, Value{static_cast<Obj*>(instance)});
-    pop(); // globalKey
-
-    // g. Pop instance, klass, className
-    pop(); // instance
-    pop(); // klass
-    pop(); // className
+    StdlibRegistrar reg(m_mm, m_globals);
+    registerGlobals(reg);
+    m_fileClass = registerFileAPI(reg);
+    m_mapClass  = registerMapAPI(reg);
+    registerMath(reg);
 }
 
 void VM::runtimeError(const char* format, ...) {
@@ -1585,11 +1144,11 @@ void VM::markRoots() {
         m_mm.markObject(key);
         m_mm.markValue(val);
     });
-    if (s_fileClass) {
-        m_mm.markObject(s_fileClass);
+    if (m_fileClass) {
+        m_mm.markObject(m_fileClass);
     }
-    if (s_mapClass) {
-        m_mm.markObject(s_mapClass);
+    if (m_mapClass) {
+        m_mm.markObject(m_mapClass);
     }
 }
 
