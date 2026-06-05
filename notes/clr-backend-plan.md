@@ -36,9 +36,17 @@ runtime/clr/src/
                         //   same lookup order as JVM plan: fields first, then class methods
   LoxBoundMethod.cs     // object Receiver, LoxClosure Method — implements ILoxCallable
   LoxList.cs            // List<object> — implements sequence protocol
-  LoxOps.cs             // static helpers for every operation (same surface as JVM plan):
+  LoxMap.cs             // Dictionary<object,object> — scalar keys only; Put/Get/Has/Del/Keys/Values/Entries
+  LoxIterator.cs        // cursor over List/String/LoxMap; HasNext() / Next()
+  LoxEnum.cs            // int Tag (variant index), optional object[] Payload; GetTag() → double
+  LoxOps.cs             // static helpers for every operation:
                         //   Add/Subtract/Multiply/Divide/Modulo/Negate
                         //   Equal/Greater/Less/Not/In
+                        //   Slice(object seq, object start, object end)
+                        //   GetIter(object collection) → LoxIterator
+                        //   InstanceOf(object value, string className) → object (boxed bool)
+                        //   IsSeq(object value) → object (boxed bool)
+                        //   MatchError() — throws LoxError("non-exhaustive match")
                         //   CheckNumber(object) — throws LoxError if not double
                         //   Print(object)
                         //   Invoke(object receiver, string name, object[] args)
@@ -132,9 +140,18 @@ Same two-phase structure as the JVM backend:
 | `GET_SUPER name` | `call object Lox.LoxOps::GetSuper(object, LoxClass, string)` |
 | `SUPER_INVOKE name argc` | `call object Lox.LoxOps::SuperInvoke(object, LoxClass, string, object[])` |
 | `BUILD_LIST n` | `newobj Lox.LoxList::.ctor()` + `n` × `callvirt Add(object)` |
+| `BUILD_MAP n` | `newobj Lox.LoxMap::.ctor()` + `n` × `callvirt Put(object, object)` |
 | `GET_INDEX` | `call object Lox.LoxOps::GetIndex(object, object)` |
 | `SET_INDEX` | `call object Lox.LoxOps::SetIndex(object, object, object)` |
+| `SLICE` | `call object Lox.LoxOps::Slice(object, object, object)` |
 | `IN` | `call object Lox.LoxOps::In(object, object)` |
+| `GET_ITER` | `call class Lox.LoxIterator Lox.LoxOps::GetIter(object)` — result stored in a dedicated iter-local |
+| `ITER_HAS_NEXT` | `ldloc iter-local` → `callvirt bool Lox.LoxIterator::HasNext()` → `box bool` |
+| `ITER_NEXT` | `ldloc iter-local` → `callvirt object Lox.LoxIterator::Next()` |
+| `MATCH_ERROR` | `call void Lox.LoxOps::MatchError()` |
+| `GET_TAG` | `castclass Lox.LoxEnum` → `callvirt double Lox.LoxEnum::GetTag()` → `box float64` |
+| `INSTANCEOF name` | `ldstr name` → `call object Lox.LoxOps::InstanceOf(object, string)` |
+| `IS_SEQ` | `call object Lox.LoxOps::IsSeq(object)` |
 
 4. **Globals**: one `LoxGlobals.il` with a class holding `public static object <name>`
    fields. `LoxMain::Main` calls `Lox.LoxRuntime.Init()` first.
@@ -207,3 +224,12 @@ src/
   `$(dotnet --list-runtimes | ... )/ilasm` — its path is version-dependent.
   The build script should locate it via `dotnet --list-sdks` or hardcode a
   discovery fallback.
+- **Map key hashing**: `LoxMap` uses `Dictionary<object,object>`. `double` and
+  `string` hash correctly when boxed; `null` (nil) is not a valid `Dictionary` key
+  so nil keys should be mapped to a private sentinel object in `LoxMap`.
+- **Iterator local slot**: `.locals init` must include an extra slot per active for-in
+  loop for the `LoxIterator` instance. The backend scans for nested for-in depth to
+  determine the required count upfront.
+- **Enum as class hierarchy vs. tagged struct**: `LoxEnum` is a tagged struct (int
+  `Tag` + optional `object[]` payload). If Lox++ later adds methods on enum variants,
+  this will need revisiting. Flat struct is sufficient for the current spec.

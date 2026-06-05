@@ -38,9 +38,17 @@ runtime/jvm/src/lox/
                         //                wrap in LoxBoundMethod if found
   LoxBoundMethod.java   // Object receiver, LoxClosure method — implements LoxCallable
   LoxList.java          // ArrayList<Object> — implements sequence protocol
+  LoxMap.java           // HashMap<Object,Object> — scalar keys only; put/get/has/del/keys/values/entries
+  LoxIterator.java      // cursor over List/String/LoxMap; hasNext() / next()
+  LoxEnum.java          // int tag (variant index), optional Object[] payload; getTag() → double
   LoxOps.java           // static helpers for every operation:
                         //   add/subtract/multiply/divide/modulo/negate
                         //   equal/greater/less/not/in
+                        //   slice(Object seq, Object start, Object end)
+                        //   getIter(Object collection) → LoxIterator
+                        //   instanceOf(Object value, String className) → Boolean
+                        //   isSeq(Object value) → Boolean
+                        //   matchError() — throws LoxError("non-exhaustive match")
                         //   checkNumber(Object) — throws LoxError if not Double
                         //   print(Object)
                         //   invoke(Object receiver, String name, Object[] args)
@@ -125,9 +133,18 @@ Internally, one pass over the ObjFunction tree:
 | `GET_SUPER name` | `invokestatic lox/LoxOps/getSuper` |
 | `SUPER_INVOKE name argc` | `invokestatic lox/LoxOps/superInvoke` |
 | `BUILD_LIST n` | `new lox/LoxList` + `n` × `invokevirtual add` |
+| `BUILD_MAP n` | `new lox/LoxMap` + `n` × `invokevirtual put(Obj;Obj;)V` |
 | `GET_INDEX` | `invokestatic lox/LoxOps/getIndex` |
 | `SET_INDEX` | `invokestatic lox/LoxOps/setIndex` |
+| `SLICE` | `invokestatic lox/LoxOps/slice(Obj;Obj;Obj;)Obj;` |
 | `IN` | `invokestatic lox/LoxOps/in` |
+| `GET_ITER` | `invokestatic lox/LoxOps/getIter(Obj;)Llox/LoxIterator;` — result stored in a dedicated iter-local slot |
+| `ITER_HAS_NEXT` | load iter-local → `invokevirtual lox/LoxIterator/hasNext()Z` → `invokestatic java/lang/Boolean.valueOf` |
+| `ITER_NEXT` | load iter-local → `invokevirtual lox/LoxIterator/next()Obj;` |
+| `MATCH_ERROR` | `invokestatic lox/LoxOps/matchError()V` |
+| `GET_TAG` | `checkcast lox/LoxEnum` → `invokevirtual lox/LoxEnum/getTag()D` → `invokestatic java/lang/Double.valueOf` |
+| `INSTANCEOF name` | `invokestatic lox/LoxOps/instanceOf(Obj;Str;)Z` → `invokestatic java/lang/Boolean.valueOf` |
+| `IS_SEQ` | `invokestatic lox/LoxOps/isSeq(Obj;)Z` → `invokestatic java/lang/Boolean.valueOf` |
 
 4. **Globals**: generate a single `LoxGlobals.j` with one `public static Object <name>`
    field per global. Top-level script (`LoxMain`) calls `LoxRuntime.init()` first
@@ -187,3 +204,13 @@ tools/
 - **Jasmin maintenance**: Jasmin is an old tool (last release 2010) but stable and
   sufficient. Alternative: emit `.class` directly (requires implementing constant
   pool, stack map frames, class file format) — much more work for no gain here.
+- **Map key hashing**: `LoxMap` keys are scalars (nil, bool, number, string). The
+  Java `HashMap` will use `Object.hashCode()` / `equals()`, which works correctly
+  for `Double` and `String` but needs a sentinel for nil (`null` keys are permitted
+  by `HashMap` so they can be used directly).
+- **Iterator local slot**: `GET_ITER`/`ITER_HAS_NEXT`/`ITER_NEXT` assume a dedicated
+  local JVM slot allocated by the backend for the iterator object. The slot count in
+  `.limit locals` must account for this extra slot per active for-in loop.
+- **Enum as class hierarchy vs. tagged struct**: `LoxEnum` is implemented as a tagged
+  struct (int tag + payload). If Lox++ later adds methods on enum variants, this will
+  need to become a proper class hierarchy. For now the flat struct is sufficient.
