@@ -1,7 +1,6 @@
 #include "memory_manager.h"
 #include "compiler.h"
-#include "function.h"
-#include "native.h"
+#include "objects.h"
 #include "table.h"
 #include "value.h"
 

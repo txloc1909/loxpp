@@ -3,6 +3,7 @@ find_package(GTest REQUIRED)
 set(ALLOC_SRCS
     ${PROJECT_SOURCE_DIR}/src/memory_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/object.cpp
+    ${PROJECT_SOURCE_DIR}/src/container_objects.cpp
     ${PROJECT_SOURCE_DIR}/src/table.cpp
     ${PROJECT_SOURCE_DIR}/src/value.cpp
 )
@@ -16,10 +17,17 @@ set(FULL_SRCS
     ${PROJECT_SOURCE_DIR}/src/debug.cpp
     ${PROJECT_SOURCE_DIR}/src/value.cpp
     ${PROJECT_SOURCE_DIR}/src/object.cpp
+    ${PROJECT_SOURCE_DIR}/src/container_objects.cpp
     ${PROJECT_SOURCE_DIR}/src/table.cpp
     ${PROJECT_SOURCE_DIR}/src/memory_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/token.cpp
     ${PROJECT_SOURCE_DIR}/src/scanner.cpp
+    ${PROJECT_SOURCE_DIR}/src/stdlib/stdlib_context.cpp
+    ${PROJECT_SOURCE_DIR}/src/stdlib/stdlib_registrar.cpp
+    ${PROJECT_SOURCE_DIR}/src/stdlib/globals.cpp
+    ${PROJECT_SOURCE_DIR}/src/stdlib/file_api.cpp
+    ${PROJECT_SOURCE_DIR}/src/stdlib/map_api.cpp
+    ${PROJECT_SOURCE_DIR}/src/stdlib/math_module.cpp
 )
 
 add_executable(test_main test_main.cpp)

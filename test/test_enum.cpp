@@ -1,5 +1,5 @@
 #include "test_harness.h"
-#include "function.h"
+#include "objects.h"
 #include "value.h"
 
 #include <gtest/gtest.h>

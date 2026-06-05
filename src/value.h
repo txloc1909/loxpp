@@ -28,15 +28,20 @@ Value from(const T& val) {
     return Value(val);
 }
 
+template <ObjType T>
+inline bool isValueOfType(const Value& v) {
+    return is<Obj*>(v) && as<Obj*>(v)->type == T;
+}
+
 inline bool isObj(const Value& v) { return is<Obj*>(v); }
 inline bool isString(const Value& v) {
-    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::STRING;
+    return isValueOfType<ObjType::STRING>(v);
 }
 inline bool isFunction(const Value& v) {
-    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::FUNCTION;
+    return isValueOfType<ObjType::FUNCTION>(v);
 }
 inline bool isNative(const Value& v) {
-    return is<Obj*>(v) && as<Obj*>(v)->type == ObjType::NATIVE;
+    return isValueOfType<ObjType::NATIVE>(v);
 }
 inline Obj* asObj(const Value& v) { return as<Obj*>(v); }
 inline ObjString* asObjString(const Value& v) {

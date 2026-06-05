@@ -1,5 +1,5 @@
 #include "debug.h"
-#include "function.h"
+#include "exec_objects.h"
 #include "memory_manager.h"
 #include "value.h"
 
