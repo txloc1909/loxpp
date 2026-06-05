@@ -59,7 +59,7 @@ podman run -it --rm \
 cmake --preset debug && cmake --build build
 
 # 4. Iterate: write code, test
-ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure -j$(nproc)
 
 # 5. Format + lint
 find src test -name '*.cpp' -o -name '*.h' | xargs clang-format -i
