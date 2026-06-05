@@ -6,7 +6,10 @@ struct StdlibContext {
     MemoryManager* mm{nullptr};
     bool nativeError{false};
     std::string nativeErrorMsg;
-    void reportError(const char* msg) { nativeError = true; nativeErrorMsg = msg; }
+    void reportError(const char* msg) {
+        nativeError = true;
+        nativeErrorMsg = msg;
+    }
     void clearError() { nativeError = false; }
 };
 

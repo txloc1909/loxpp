@@ -48,6 +48,6 @@ static Value lenNative(int /*argCount*/, Value* args) {
 void registerGlobals(StdlibRegistrar& reg) {
     reg.defineGlobal("clock", clockNative, 0);
     reg.defineGlobal("input", inputNative, 0);
-    reg.defineGlobal("str",   strNative,   1);
-    reg.defineGlobal("len",   lenNative,   1);
+    reg.defineGlobal("str", strNative, 1);
+    reg.defineGlobal("len", lenNative, 1);
 }

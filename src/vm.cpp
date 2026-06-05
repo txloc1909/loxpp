@@ -20,6 +20,7 @@
 #include <cstdarg>
 #include <cstring>
 #include <functional>
+#include <iostream>
 #include <string>
 #include <unistd.h>
 
@@ -1100,7 +1101,7 @@ void VM::defineNatives() {
     StdlibRegistrar reg(m_mm, m_globals);
     registerGlobals(reg);
     m_fileClass = registerFileAPI(reg);
-    m_mapClass  = registerMapAPI(reg);
+    m_mapClass = registerMapAPI(reg);
     registerMath(reg);
 }
 

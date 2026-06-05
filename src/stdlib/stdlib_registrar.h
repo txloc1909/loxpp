@@ -5,7 +5,8 @@
 
 class StdlibRegistrar {
   public:
-    StdlibRegistrar(MemoryManager& mm, Table& globals) : m_mm(mm), m_globals(globals) {}
+    StdlibRegistrar(MemoryManager& mm, Table& globals)
+        : m_mm(mm), m_globals(globals) {}
 
     void defineGlobal(const char* name, NativeFn fn, int arity);
     void defineGlobalValue(const char* name, Value val);
@@ -13,7 +14,8 @@ class StdlibRegistrar {
     void addMethod(ObjClass* klass, const char* name, NativeFn fn, int arity);
     ObjInstance* makeInstance(ObjClass* klass);
     void addField(ObjInstance* inst, const char* name, Value val);
-    void addNativeField(ObjInstance* inst, const char* name, NativeFn fn, int arity);
+    void addNativeField(ObjInstance* inst, const char* name, NativeFn fn,
+                        int arity);
     MemoryManager& mm() { return m_mm; }
 
   private:

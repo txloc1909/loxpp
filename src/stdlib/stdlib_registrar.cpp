@@ -27,12 +27,14 @@ void StdlibRegistrar::defineGlobalValue(const char* name, Value val) {
 ObjClass* StdlibRegistrar::makeClass(const char* name) {
     ObjString* className = m_mm.makeString(name);
     m_mm.pushTempRoot(className);
-    ObjClass* klass = m_mm.create<ObjClass>(className, VmAllocator<Entry>{&m_mm});
+    ObjClass* klass =
+        m_mm.create<ObjClass>(className, VmAllocator<Entry>{&m_mm});
     m_mm.popTempRoot(); // className
     return klass;
 }
 
-void StdlibRegistrar::addMethod(ObjClass* klass, const char* name, NativeFn fn, int arity) {
+void StdlibRegistrar::addMethod(ObjClass* klass, const char* name, NativeFn fn,
+                                int arity) {
     m_mm.pushTempRoot(klass);
     ObjNative* native = m_mm.create<ObjNative>(fn, arity);
     m_mm.pushTempRoot(native);
@@ -46,7 +48,8 @@ void StdlibRegistrar::addMethod(ObjClass* klass, const char* name, NativeFn fn, 
 
 ObjInstance* StdlibRegistrar::makeInstance(ObjClass* klass) {
     m_mm.pushTempRoot(klass);
-    ObjInstance* inst = m_mm.create<ObjInstance>(klass, VmAllocator<Entry>{&m_mm});
+    ObjInstance* inst =
+        m_mm.create<ObjInstance>(klass, VmAllocator<Entry>{&m_mm});
     m_mm.popTempRoot(); // klass
     return inst;
 }
@@ -66,7 +69,8 @@ void StdlibRegistrar::addField(ObjInstance* inst, const char* name, Value val) {
     m_mm.popTempRoot(); // inst
 }
 
-void StdlibRegistrar::addNativeField(ObjInstance* inst, const char* name, NativeFn fn, int arity) {
+void StdlibRegistrar::addNativeField(ObjInstance* inst, const char* name,
+                                     NativeFn fn, int arity) {
     m_mm.pushTempRoot(inst);
     ObjNative* native = m_mm.create<ObjNative>(fn, arity);
     m_mm.pushTempRoot(native);

@@ -81,10 +81,10 @@ ObjClass* registerMapAPI(StdlibRegistrar& reg) {
     ObjClass* klass = reg.makeClass("Map");
     reg.mm().pushTempRoot(klass);
 
-    reg.addMethod(klass, "has",     mapHasNative,     1);
-    reg.addMethod(klass, "del",     mapDelNative,     1);
-    reg.addMethod(klass, "keys",    mapKeysNative,    0);
-    reg.addMethod(klass, "values",  mapValuesNative,  0);
+    reg.addMethod(klass, "has", mapHasNative, 1);
+    reg.addMethod(klass, "del", mapDelNative, 1);
+    reg.addMethod(klass, "keys", mapKeysNative, 0);
+    reg.addMethod(klass, "values", mapValuesNative, 0);
     reg.addMethod(klass, "entries", mapEntriesNative, 0);
 
     s_mapClass = klass;

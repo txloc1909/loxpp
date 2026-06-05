@@ -8,5 +8,6 @@ MemoryManager* getActiveMM() { return t_activeCtx ? t_activeCtx->mm : nullptr; }
 
 // implements the declaration in exec_objects.h
 void nativeRuntimeError(const char* msg) {
-    if (t_activeCtx) t_activeCtx->reportError(msg);
+    if (t_activeCtx)
+        t_activeCtx->reportError(msg);
 }

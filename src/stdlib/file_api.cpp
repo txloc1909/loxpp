@@ -204,12 +204,12 @@ ObjClass* registerFileAPI(StdlibRegistrar& reg) {
     ObjClass* klass = reg.makeClass("File");
     reg.mm().pushTempRoot(klass);
 
-    reg.addMethod(klass, "read",      fileReadNative,      0);
-    reg.addMethod(klass, "readline",  fileReadlineNative,  0);
+    reg.addMethod(klass, "read", fileReadNative, 0);
+    reg.addMethod(klass, "readline", fileReadlineNative, 0);
     reg.addMethod(klass, "readlines", fileReadlinesNative, 0);
-    reg.addMethod(klass, "write",     fileWriteNative,     1);
+    reg.addMethod(klass, "write", fileWriteNative, 1);
     reg.addMethod(klass, "writeline", fileWritelineNative, 1);
-    reg.addMethod(klass, "close",     fileCloseNative,     0);
+    reg.addMethod(klass, "close", fileCloseNative, 0);
 
     s_fileClass = klass;
     reg.defineGlobal("open", openNative, 2);

@@ -81,7 +81,8 @@ struct MapPolicy {
         e.value = Value{Nil{}};
         e.state = MapSlot::TOMBSTONE;
     }
-    static uint32_t hashOf(const MapEntry& e); // defined in container_objects.cpp
+    static uint32_t
+    hashOf(const MapEntry& e); // defined in container_objects.cpp
     static bool keyMatch(const MapEntry& slot, const MapEntry& needle) {
         return slot.key == needle.key;
     }
