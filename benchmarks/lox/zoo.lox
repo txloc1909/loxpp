@@ -1,0 +1,77 @@
+// Zoo — polymorphic method dispatch. Wren benchmark suite.
+// Ported from https://github.com/wren-lang/wren/blob/main/test/benchmark/zoo.wren
+
+class Animal {
+  init(name) { this.name = name; }
+  type() { return 0; }
+}
+
+class Gorilla < Animal {
+  init() { super.init("Gorilla"); }
+  type() { return 1; }
+}
+
+class Monkey < Animal {
+  init() { super.init("Monkey"); }
+  type() { return 2; }
+}
+
+class Spider < Animal {
+  init() { super.init("Spider"); }
+  type() { return 3; }
+}
+
+class Bear < Animal {
+  init() { super.init("Bear"); }
+  type() { return 4; }
+}
+
+class PolarBear < Animal {
+  init() { super.init("Polar bear"); }
+  type() { return 5; }
+}
+
+class Cat < Animal {
+  init() { super.init("Cat"); }
+  type() { return 6; }
+}
+
+class Zoo {
+  init() {
+    this.animals = [
+      Gorilla(), Monkey(), Spider(), Bear(), PolarBear(), Cat()
+    ];
+  }
+
+  benchmark() {
+    var sum = 0;
+    var i = 0;
+    while (i < 10000) {
+      var j = 0;
+      while (j < len(this.animals)) {
+        sum = sum + this.animals[j].type();
+        j = j + 1;
+      }
+      i = i + 1;
+    }
+    return sum;
+  }
+}
+
+// Expected: (1+2+3+4+5+6) * 10000 = 210000
+
+var _bench = Zoo();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "Zoo: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "Zoo: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

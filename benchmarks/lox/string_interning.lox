@@ -1,0 +1,48 @@
+// StringInterning — string creation and equality comparison. Wren benchmark suite.
+// Ported from https://github.com/wren-lang/wren/blob/main/test/benchmark/string_interning.wren
+
+class StringInterning {
+  benchmark() {
+    var strings = [];
+    var i = 0;
+    while (i < 10) {
+      strings.append("hello");
+      strings.append("world");
+      strings.append("foo");
+      strings.append("bar");
+      strings.append("baz");
+      i = i + 1;
+    }
+
+    var count = 0;
+    i = 0;
+    while (i < len(strings)) {
+      var j = i + 1;
+      while (j < len(strings)) {
+        if (strings[i] == strings[j]) count = count + 1;
+        j = j + 1;
+      }
+      i = i + 1;
+    }
+    return count;
+  }
+}
+
+// 50 strings: 10 copies each of "hello","world","foo","bar","baz".
+// Each word contributes C(10,2)=45 equal pairs => 5*45 = 225 total.
+
+var _bench = StringInterning();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "StringInterning: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "StringInterning: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";
