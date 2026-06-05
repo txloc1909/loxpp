@@ -1,0 +1,35 @@
+# langs.toml — interpreter configurations and container image names
+#
+# Each entry declares how to invoke a language in a container and which image
+# it uses. The runner mounts lox/ read-only at /bench for lox++ and lox-clox.
+
+[lox]
+image  = "loxpp-dev-env:latest"
+cmd    = ["/workspace/build/loxpp", "/bench/{file}"]
+mount  = "benchmarks/lox:/bench:ro"
+adapter = "awfy"
+
+[clox]
+image  = "bench-clox:latest"
+cmd    = ["clox", "/benchmarks/clox/{file}"]
+adapter = "raw"
+
+[python]
+image  = "bench-python:latest"
+cmd    = ["python3", "/benchmarks/awfy/{file}"]
+adapter = "awfy"
+
+[lua]
+image  = "bench-lua:latest"
+cmd    = ["lua5.4", "/benchmarks/awfy/{file}"]
+adapter = "awfy"
+
+[js]
+image  = "bench-js:latest"
+cmd    = ["node", "/benchmarks/awfy/{file}"]
+adapter = "awfy"
+
+[wren]
+image  = "bench-wren:latest"
+cmd    = ["wren", "/benchmarks/wren/{file}"]
+adapter = "wren"

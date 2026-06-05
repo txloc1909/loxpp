@@ -1,0 +1,639 @@
+// Json — recursive-descent JSON parser. AWFY benchmark suite.
+// Copyright (c) 2015-2016 Stefan Marr. MIT License.
+//
+// Parses a JSON string representing a Tower of Hanoi move sequence.
+// Returns the number of operations (expected: 156).
+
+// ---------- HashIndexTable ----------
+// 32-slot hash table mapping string names to indices in a JsonObject.
+
+class HashIndexTable {
+  init() {
+    this.slots = [];
+    var i = 0;
+    while (i < 32) {
+      this.slots.append(-1);
+      i = i + 1;
+    }
+  }
+
+  // Simple string hash: sum of char codes, mod 32.
+  hashOf(name) {
+    var h = 0;
+    var i = 0;
+    var n = len(name);
+    while (i < n) {
+      h = (h * 31 + charCode(name[i])) % 1048576;
+      i = i + 1;
+    }
+    return h % 32;
+  }
+
+  add(name, index) {
+    var slot = this.hashOf(name);
+    this.slots[slot] = index;
+  }
+
+  get(name) {
+    var slot = this.hashOf(name);
+    return this.slots[slot];
+  }
+}
+
+// ---------- charCode helper ----------
+// Returns integer code for a single-character string.
+
+fun charCode(c) {
+  // We map each relevant ASCII character to its code.
+  // Use string comparison since Lox++ has no built-in charCodeAt.
+  if (c == " ")  return 32;
+  if (c == "!")  return 33;
+  if (c == "\"") return 34;
+  if (c == "#")  return 35;
+  if (c == "$")  return 36;
+  if (c == "%")  return 37;
+  if (c == "&")  return 38;
+  if (c == "'")  return 39;
+  if (c == "(")  return 40;
+  if (c == ")")  return 41;
+  if (c == "*")  return 42;
+  if (c == "+")  return 43;
+  if (c == ",")  return 44;
+  if (c == "-")  return 45;
+  if (c == ".")  return 46;
+  if (c == "/")  return 47;
+  if (c == "0")  return 48;
+  if (c == "1")  return 49;
+  if (c == "2")  return 50;
+  if (c == "3")  return 51;
+  if (c == "4")  return 52;
+  if (c == "5")  return 53;
+  if (c == "6")  return 54;
+  if (c == "7")  return 55;
+  if (c == "8")  return 56;
+  if (c == "9")  return 57;
+  if (c == ":")  return 58;
+  if (c == ";")  return 59;
+  if (c == "<")  return 60;
+  if (c == "=")  return 61;
+  if (c == ">")  return 62;
+  if (c == "?")  return 63;
+  if (c == "@")  return 64;
+  if (c == "A")  return 65;
+  if (c == "B")  return 66;
+  if (c == "C")  return 67;
+  if (c == "D")  return 68;
+  if (c == "E")  return 69;
+  if (c == "F")  return 70;
+  if (c == "G")  return 71;
+  if (c == "H")  return 72;
+  if (c == "I")  return 73;
+  if (c == "J")  return 74;
+  if (c == "K")  return 75;
+  if (c == "L")  return 76;
+  if (c == "M")  return 77;
+  if (c == "N")  return 78;
+  if (c == "O")  return 79;
+  if (c == "P")  return 80;
+  if (c == "Q")  return 81;
+  if (c == "R")  return 82;
+  if (c == "S")  return 83;
+  if (c == "T")  return 84;
+  if (c == "U")  return 85;
+  if (c == "V")  return 86;
+  if (c == "W")  return 87;
+  if (c == "X")  return 88;
+  if (c == "Y")  return 89;
+  if (c == "Z")  return 90;
+  if (c == "[")  return 91;
+  if (c == "\\") return 92;
+  if (c == "]")  return 93;
+  if (c == "^")  return 94;
+  if (c == "_")  return 95;
+  if (c == "`")  return 96;
+  if (c == "a")  return 97;
+  if (c == "b")  return 98;
+  if (c == "c")  return 99;
+  if (c == "d")  return 100;
+  if (c == "e")  return 101;
+  if (c == "f")  return 102;
+  if (c == "g")  return 103;
+  if (c == "h")  return 104;
+  if (c == "i")  return 105;
+  if (c == "j")  return 106;
+  if (c == "k")  return 107;
+  if (c == "l")  return 108;
+  if (c == "m")  return 109;
+  if (c == "n")  return 110;
+  if (c == "o")  return 111;
+  if (c == "p")  return 112;
+  if (c == "q")  return 113;
+  if (c == "r")  return 114;
+  if (c == "s")  return 115;
+  if (c == "t")  return 116;
+  if (c == "u")  return 117;
+  if (c == "v")  return 118;
+  if (c == "w")  return 119;
+  if (c == "x")  return 120;
+  if (c == "y")  return 121;
+  if (c == "z")  return 122;
+  if (c == "{")  return 123;
+  if (c == "|")  return 124;
+  if (c == "}")  return 125;
+  if (c == "~")  return 126;
+  return 0;
+}
+
+fun isDigit(c) {
+  return c == "0" or c == "1" or c == "2" or c == "3" or c == "4"
+      or c == "5" or c == "6" or c == "7" or c == "8" or c == "9";
+}
+
+fun digitVal(c) {
+  if (c == "0") return 0;
+  if (c == "1") return 1;
+  if (c == "2") return 2;
+  if (c == "3") return 3;
+  if (c == "4") return 4;
+  if (c == "5") return 5;
+  if (c == "6") return 6;
+  if (c == "7") return 7;
+  if (c == "8") return 8;
+  return 9;
+}
+
+// ---------- JsonObject ----------
+
+class JsonObject {
+  init() {
+    this.names  = [];
+    this.values = [];
+    this.table  = HashIndexTable();
+  }
+
+  add(name, value) {
+    var idx = len(this.names);
+    this.table.add(name, idx);
+    this.names.append(name);
+    this.values.append(value);
+  }
+
+  get(name) {
+    var idx = this.table.get(name);
+    if (idx == -1) return nil;
+    if (idx < len(this.names) and this.names[idx] == name) {
+      return this.values[idx];
+    }
+    // Hash collision: linear search.
+    var i = 0;
+    while (i < len(this.names)) {
+      if (this.names[i] == name) return this.values[i];
+      i = i + 1;
+    }
+    return nil;
+  }
+}
+
+// ---------- JsonArray ----------
+
+class JsonArray {
+  init() {
+    this.values = [];
+  }
+
+  add(value) {
+    this.values.append(value);
+  }
+
+  size() {
+    return len(this.values);
+  }
+}
+
+// ---------- Parser ----------
+
+class Parser {
+  init(input) {
+    this.input  = input;
+    this.pos    = 0;
+    this.length = len(input);
+  }
+
+  current() {
+    if (this.pos >= this.length) return "";
+    return this.input[this.pos];
+  }
+
+  advance() {
+    this.pos = this.pos + 1;
+  }
+
+  skipWhitespace() {
+    var c = this.current();
+    while (c == " " or c == "\t" or c == "\n" or c == "\r") {
+      this.advance();
+      c = this.current();
+    }
+  }
+
+  // Expects and consumes a specific character.
+  expect(c) {
+    this.skipWhitespace();
+    this.advance(); // consume the expected character
+  }
+
+  parse() {
+    this.skipWhitespace();
+    var result = this.readValue();
+    return result;
+  }
+
+  readValue() {
+    this.skipWhitespace();
+    var c = this.current();
+    if (c == "{") return this.readObject();
+    if (c == "[") return this.readArray();
+    if (c == "\"") return this.readString();
+    if (c == "t") return this.readLiteralTrue();
+    if (c == "f") return this.readLiteralFalse();
+    if (c == "n") return this.readLiteralNull();
+    // Must be a number.
+    return this.readNumber();
+  }
+
+  readObject() {
+    var obj = JsonObject();
+    this.advance(); // consume '{'
+    this.skipWhitespace();
+    if (this.current() == "}") {
+      this.advance();
+      return obj;
+    }
+    while (true) {
+      this.skipWhitespace();
+      var name = this.readString();
+      this.skipWhitespace();
+      this.advance(); // consume ':'
+      this.skipWhitespace();
+      var value = this.readValue();
+      obj.add(name, value);
+      this.skipWhitespace();
+      if (this.current() == ",") {
+        this.advance();
+      } else {
+        break;
+      }
+    }
+    this.advance(); // consume '}'
+    return obj;
+  }
+
+  readArray() {
+    var arr = JsonArray();
+    this.advance(); // consume '['
+    this.skipWhitespace();
+    if (this.current() == "]") {
+      this.advance();
+      return arr;
+    }
+    while (true) {
+      this.skipWhitespace();
+      var value = this.readValue();
+      arr.add(value);
+      this.skipWhitespace();
+      if (this.current() == ",") {
+        this.advance();
+      } else {
+        break;
+      }
+    }
+    this.advance(); // consume ']'
+    return arr;
+  }
+
+  readString() {
+    this.advance(); // consume opening '"'
+    var result = "";
+    var c = this.current();
+    while (c != "\"") {
+      if (c == "\\") {
+        this.advance();
+        var esc = this.current();
+        if (esc == "n")       { result = result + "\n"; }
+        else if (esc == "t")  { result = result + "\t"; }
+        else if (esc == "r")  { result = result + "\r"; }
+        else if (esc == "\\") { result = result + "\\"; }
+        else if (esc == "\"") { result = result + "\""; }
+        else if (esc == "/")  { result = result + "/"; }
+        else                  { result = result + esc; }
+      } else {
+        result = result + c;
+      }
+      this.advance();
+      c = this.current();
+    }
+    this.advance(); // consume closing '"'
+    return result;
+  }
+
+  readNumber() {
+    var start = this.pos;
+    var negative = false;
+    if (this.current() == "-") {
+      negative = true;
+      this.advance();
+    }
+    // Integer part.
+    while (isDigit(this.current())) {
+      this.advance();
+    }
+    var hasFrac = false;
+    if (this.current() == ".") {
+      hasFrac = true;
+      this.advance();
+      while (isDigit(this.current())) {
+        this.advance();
+      }
+    }
+    // Exponent part.
+    var c = this.current();
+    if (c == "e" or c == "E") {
+      this.advance();
+      c = this.current();
+      if (c == "+" or c == "-") this.advance();
+      while (isDigit(this.current())) {
+        this.advance();
+      }
+    }
+    // Parse the accumulated substring. We re-parse manually.
+    var s = this.input[start:this.pos];
+    return parseNumber(s);
+  }
+
+  readLiteralTrue() {
+    this.advance(); // t
+    this.advance(); // r
+    this.advance(); // u
+    this.advance(); // e
+    return true;
+  }
+
+  readLiteralFalse() {
+    this.advance(); // f
+    this.advance(); // a
+    this.advance(); // l
+    this.advance(); // s
+    this.advance(); // e
+    return false;
+  }
+
+  readLiteralNull() {
+    this.advance(); // n
+    this.advance(); // u
+    this.advance(); // l
+    this.advance(); // l
+    return nil;
+  }
+}
+
+// ---------- parseNumber helper ----------
+// Converts a numeric string to a Lox++ Number.
+
+fun parseNumber(s) {
+  var i = 0;
+  var n = len(s);
+  var negative = false;
+  if (n == 0) return 0;
+  if (s[0] == "-") {
+    negative = true;
+    i = 1;
+  }
+  var intPart = 0;
+  while (i < n and isDigit(s[i])) {
+    intPart = intPart * 10 + digitVal(s[i]);
+    i = i + 1;
+  }
+  var result = intPart * 1.0;
+  if (i < n and s[i] == ".") {
+    i = i + 1;
+    var frac = 0.0;
+    var place = 0.1;
+    while (i < n and isDigit(s[i])) {
+      frac = frac + digitVal(s[i]) * place;
+      place = place * 0.1;
+      i = i + 1;
+    }
+    result = result + frac;
+  }
+  // Exponent.
+  if (i < n and (s[i] == "e" or s[i] == "E")) {
+    i = i + 1;
+    var expNeg = false;
+    if (i < n and s[i] == "-") { expNeg = true; i = i + 1; }
+    else if (i < n and s[i] == "+") { i = i + 1; }
+    var exp = 0;
+    while (i < n and isDigit(s[i])) {
+      exp = exp * 10 + digitVal(s[i]);
+      i = i + 1;
+    }
+    var factor = 1.0;
+    var j = 0;
+    while (j < exp) { factor = factor * 10.0; j = j + 1; }
+    if (expNeg) { result = result / factor; }
+    else        { result = result * factor; }
+  }
+  if (negative) return 0 - result;
+  return result;
+}
+
+// ---------- JSON input string ----------
+// Tower of Hanoi move sequence, 156 moves. Minified.
+
+fun makeJsonInput() {
+  return "{\"head\":{\"version\":3},\"operations\":[" +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg3\",\"to\":\"peg1\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg2\"}," +
+    "{\"op\":\"move\",\"from\":\"peg1\",\"to\":\"peg3\"}," +
+    "{\"op\":\"move\",\"from\":\"peg2\",\"to\":\"peg3\"}" +
+    "]}";
+}
+
+// ---------- Json benchmark ----------
+
+class Json {
+  benchmark() {
+    var input  = makeJsonInput();
+    var parser = Parser(input);
+    var result = parser.parse();
+    var ops    = result.get("operations");
+    return ops.size();
+  }
+}
+
+var _bench = Json();
+var _result = _bench.benchmark();
+if (_result != 156) {
+  print "Json: wrong result: " + str(_result);
+}
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "Json: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "Json: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

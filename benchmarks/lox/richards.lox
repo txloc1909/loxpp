@@ -1,0 +1,464 @@
+// Richards — OS task scheduler simulation. AWFY benchmark suite.
+// Copyright (c) 2015-2016 Stefan Marr. MIT License.
+
+// Constants
+var NO_TASK = nil;
+var NO_WORK = nil;
+var IDLER     = 0;
+var WORKER    = 1;
+var HANDLER_A = 2;
+var HANDLER_B = 3;
+var DEVICE_A  = 4;
+var DEVICE_B  = 5;
+var NUM_TYPES = 6;
+var DEVICE_PACKET_KIND = 0;
+var WORK_PACKET_KIND   = 1;
+var DATA_SIZE = 4;
+
+// ---------- RBObject ----------
+
+class RBObject {
+  append(packet, queueHead) {
+    packet.link = NO_WORK;
+    if (queueHead == NO_WORK) return packet;
+    var mouse = queueHead;
+    var link = mouse.link;
+    while (link != NO_WORK) {
+      mouse = link;
+      link = mouse.link;
+    }
+    mouse.link = packet;
+    return queueHead;
+  }
+}
+
+// ---------- TaskState ----------
+
+class TaskState < RBObject {
+  init() {
+    this.packetPending_ = false;
+    this.taskWaiting_   = false;
+    this.taskHolding_   = false;
+  }
+
+  isPacketPending() { return this.packetPending_; }
+  isTaskWaiting()   { return this.taskWaiting_; }
+  isTaskHolding()   { return this.taskHolding_; }
+
+  setPacketPending(b) { this.packetPending_ = b; }
+  setTaskWaiting(b)   { this.taskWaiting_   = b; }
+  setTaskHolding(b)   { this.taskHolding_   = b; }
+
+  packetPending() {
+    this.packetPending_ = true;
+    this.taskWaiting_   = false;
+    this.taskHolding_   = false;
+  }
+
+  running() {
+    this.packetPending_ = false;
+    this.taskWaiting_   = false;
+    this.taskHolding_   = false;
+  }
+
+  waiting() {
+    this.packetPending_ = false;
+    this.taskHolding_   = false;
+    this.taskWaiting_   = true;
+  }
+
+  waitingWithPacket() {
+    this.taskHolding_   = false;
+    this.taskWaiting_   = true;
+    this.packetPending_ = true;
+  }
+
+  isTaskHoldingOrWaiting() {
+    return this.taskHolding_ or (!this.packetPending_ and this.taskWaiting_);
+  }
+
+  isWaitingWithPacket() {
+    return this.packetPending_ and this.taskWaiting_ and !this.taskHolding_;
+  }
+}
+
+fun createRunning() {
+  var t = TaskState();
+  t.running();
+  return t;
+}
+
+fun createWaiting() {
+  var t = TaskState();
+  t.waiting();
+  return t;
+}
+
+fun createWaitingWithPacket() {
+  var t = TaskState();
+  t.waitingWithPacket();
+  return t;
+}
+
+// ---------- Packet ----------
+
+class Packet < RBObject {
+  init(link, identity, kind) {
+    this.link     = link;
+    this.identity = identity;
+    this.kind     = kind;
+    this.datum    = 0;
+    this.data     = [0, 0, 0, 0];
+  }
+}
+
+// ---------- TaskControlBlock ----------
+
+class TaskControlBlock < TaskState {
+  init(link, identity, priority, initialWorkQueue, initialState, privateData, fn) {
+    this.link     = link;
+    this.identity = identity;
+    this.priority = priority;
+    this.input    = initialWorkQueue;
+    this.setPacketPending(initialState.isPacketPending());
+    this.setTaskWaiting(initialState.isTaskWaiting());
+    this.setTaskHolding(initialState.isTaskHolding());
+    this.handle   = privateData;
+    this.function = fn;
+  }
+
+  addInputAndCheckPriority(packet, oldTask) {
+    if (this.input == NO_WORK) {
+      this.input = packet;
+      this.setPacketPending(true);
+      if (this.priority > oldTask.priority) return this;
+    } else {
+      this.input = this.append(packet, this.input);
+    }
+    return oldTask;
+  }
+
+  runTask() {
+    var message;
+    if (this.isWaitingWithPacket()) {
+      message    = this.input;
+      this.input = message.link;
+      if (this.input == NO_WORK) {
+        this.running();
+      } else {
+        this.packetPending();
+      }
+    } else {
+      message = NO_WORK;
+    }
+    return this.function.run(message, this.handle);
+  }
+}
+
+// ---------- Data records ----------
+
+class DeviceTaskDataRecord < RBObject {
+  init() { this.pending = NO_WORK; }
+}
+
+class HandlerTaskDataRecord < RBObject {
+  init() {
+    this.workIn   = NO_WORK;
+    this.deviceIn = NO_WORK;
+  }
+  deviceInAdd(packet) { this.deviceIn = this.append(packet, this.deviceIn); }
+  workInAdd(packet)   { this.workIn   = this.append(packet, this.workIn); }
+}
+
+class IdleTaskDataRecord < RBObject {
+  init() {
+    this.control = 1;
+    this.count   = 10000;
+  }
+}
+
+class WorkerTaskDataRecord < RBObject {
+  init() {
+    this.destination = HANDLER_A;
+    this.count       = 0;
+  }
+}
+
+// ---------- Task runner objects (replace JS lambdas) ----------
+// JS idler uses bitwise ops: (ctrl & 1), (ctrl >> 1), (ctrl ^ 0xd008).
+// Lox++ has no bitwise ops; we emulate via modulo (bit-test) and floor-divide (right-shift),
+// then call bitwiseXor() for the XOR with the constant 0xd008 = 53256.
+
+class IdlerTask {
+  init() { this.scheduler = nil; }
+
+  run(work, handle) {
+    handle.count = handle.count - 1;
+    if (handle.count == 0) return this.scheduler.holdCurrent();
+    var ctrl = handle.control;
+    var bit0 = ctrl % 2;
+    if (bit0 == 0) {
+      handle.control = math.floor(ctrl / 2);
+      return this.scheduler.releaseTask(DEVICE_A);
+    }
+    handle.control = bitwiseXor(math.floor(ctrl / 2), 53256);
+    return this.scheduler.releaseTask(DEVICE_B);
+  }
+}
+
+class WorkerTask {
+  init() { this.scheduler = nil; }
+
+  run(work, handle) {
+    if (work == NO_WORK) return this.scheduler.waitCurrent();
+    if (handle.destination == HANDLER_A) {
+      handle.destination = HANDLER_B;
+    } else {
+      handle.destination = HANDLER_A;
+    }
+    work.identity = handle.destination;
+    work.datum    = 0;
+    var i = 0;
+    while (i < DATA_SIZE) {
+      handle.count = handle.count + 1;
+      work.data[i] = handle.count % 26 + 65; // ASCII 'A'=65
+      i = i + 1;
+    }
+    return this.scheduler.queuePacket(work);
+  }
+}
+
+class HandlerATask {
+  init() { this.scheduler = nil; }
+
+  run(work, handle) {
+    if (work != NO_WORK) {
+      if (work.kind == WORK_PACKET_KIND) {
+        handle.workInAdd(work);
+      } else {
+        handle.deviceInAdd(work);
+      }
+    }
+    var workPacket = handle.workIn;
+    if (workPacket == NO_WORK) return this.scheduler.waitCurrent();
+    var count = workPacket.datum;
+    if (count >= DATA_SIZE) {
+      handle.workIn = workPacket.link;
+      return this.scheduler.queuePacket(workPacket);
+    }
+    var devicePacket = handle.deviceIn;
+    if (devicePacket == NO_WORK) return this.scheduler.waitCurrent();
+    handle.deviceIn = devicePacket.link;
+    devicePacket.datum = workPacket.data[count];
+    workPacket.datum   = count + 1;
+    return this.scheduler.queuePacket(devicePacket);
+  }
+}
+
+class HandlerBTask {
+  init() { this.scheduler = nil; }
+
+  run(work, handle) {
+    if (work != NO_WORK) {
+      if (work.kind == WORK_PACKET_KIND) {
+        handle.workInAdd(work);
+      } else {
+        handle.deviceInAdd(work);
+      }
+    }
+    var workPacket = handle.workIn;
+    if (workPacket == NO_WORK) return this.scheduler.waitCurrent();
+    var count = workPacket.datum;
+    if (count >= DATA_SIZE) {
+      handle.workIn = workPacket.link;
+      return this.scheduler.queuePacket(workPacket);
+    }
+    var devicePacket = handle.deviceIn;
+    if (devicePacket == NO_WORK) return this.scheduler.waitCurrent();
+    handle.deviceIn    = devicePacket.link;
+    devicePacket.datum = workPacket.data[count];
+    workPacket.datum   = count + 1;
+    return this.scheduler.queuePacket(devicePacket);
+  }
+}
+
+class DeviceTask {
+  init() { this.scheduler = nil; }
+
+  run(work, handle) {
+    if (work == NO_WORK) {
+      if (handle.pending == NO_WORK) return this.scheduler.waitCurrent();
+      var pkt      = handle.pending;
+      handle.pending = NO_WORK;
+      return this.scheduler.queuePacket(pkt);
+    }
+    handle.pending = work;
+    return this.scheduler.holdCurrent();
+  }
+}
+
+// ---------- Bitwise XOR helper (for non-negative integers, small values) ----------
+// We simulate integer XOR by processing bit-by-bit.
+
+fun bitwiseXor(a, b) {
+  var result = 0;
+  var bit    = 1;
+  var i      = 0;
+  while (i < 30) {
+    var aBit = math.floor(a / bit) % 2;
+    var bBit = math.floor(b / bit) % 2;
+    if (aBit != bBit) result = result + bit;
+    bit = bit * 2;
+    i   = i + 1;
+  }
+  return result;
+}
+
+// ---------- Scheduler ----------
+
+class Scheduler < RBObject {
+  init() {
+    this.queuePacketCount    = 0;
+    this.holdCount           = 0;
+    this.taskTable           = [nil, nil, nil, nil, nil, nil];
+    this.taskList            = NO_TASK;
+    this.currentTask         = nil;
+    this.currentTaskIdentity = 0;
+  }
+
+  addTask(identity, priority, workQueue, state, fn, handle) {
+    var task = TaskControlBlock(
+      this.taskList, identity, priority, workQueue, state, handle, fn
+    );
+    this.taskList              = task;
+    this.taskTable[identity]   = task;
+  }
+
+  addIdleTask(identity, priority, workQueue, count) {
+    var data = IdleTaskDataRecord();
+    data.count = count;
+    var fn = IdlerTask();
+    fn.scheduler = this;
+    this.addTask(identity, priority, workQueue, createRunning(), fn, data);
+  }
+
+  addWorkerTask(identity, priority, workQueue) {
+    var data = WorkerTaskDataRecord();
+    var fn   = WorkerTask();
+    fn.scheduler = this;
+    this.addTask(identity, priority, workQueue, createWaiting(), fn, data);
+  }
+
+  addHandlerTask(identity, priority, workQueue) {
+    var data = HandlerTaskDataRecord();
+    var fn;
+    if (identity == HANDLER_A) {
+      fn = HandlerATask();
+    } else {
+      fn = HandlerBTask();
+    }
+    fn.scheduler = this;
+    this.addTask(identity, priority, workQueue, createWaiting(), fn, data);
+  }
+
+  addDeviceTask(identity, priority, workQueue) {
+    var data = DeviceTaskDataRecord();
+    var fn   = DeviceTask();
+    fn.scheduler = this;
+    this.addTask(identity, priority, workQueue, createWaiting(), fn, data);
+  }
+
+  schedule() {
+    this.currentTask = this.taskList;
+    while (this.currentTask != NO_TASK) {
+      if (this.currentTask.isTaskHoldingOrWaiting()) {
+        this.currentTask = this.currentTask.link;
+      } else {
+        this.currentTaskIdentity = this.currentTask.identity;
+        this.currentTask         = this.currentTask.runTask();
+      }
+    }
+  }
+
+  releaseTask(identity) {
+    var task = this.taskTable[identity];
+    if (task == NO_TASK) return NO_TASK;
+    task.setTaskHolding(false);
+    if (task.priority > this.currentTask.priority) return task;
+    return this.currentTask;
+  }
+
+  holdCurrent() {
+    this.holdCount            = this.holdCount + 1;
+    this.currentTask.setTaskHolding(true);
+    return this.currentTask.link;
+  }
+
+  waitCurrent() {
+    this.currentTask.waiting();
+    return this.currentTask;
+  }
+
+  queuePacket(packet) {
+    var task = this.taskTable[packet.identity];
+    if (task == NO_TASK) return NO_TASK;
+    this.queuePacketCount = this.queuePacketCount + 1;
+    packet.link           = NO_WORK;
+    packet.identity       = this.currentTaskIdentity;
+    return task.addInputAndCheckPriority(packet, this.currentTask);
+  }
+
+  start() {
+    this.addIdleTask(IDLER, 0, NO_WORK, 10000);
+
+    var pkt = Packet(NO_WORK, WORKER, WORK_PACKET_KIND);
+    pkt = Packet(pkt, WORKER, WORK_PACKET_KIND);
+    this.addWorkerTask(WORKER, 1000, pkt);
+
+    pkt = Packet(NO_WORK, DEVICE_A, DEVICE_PACKET_KIND);
+    pkt = Packet(pkt,     DEVICE_A, DEVICE_PACKET_KIND);
+    pkt = Packet(pkt,     DEVICE_A, DEVICE_PACKET_KIND);
+    this.addHandlerTask(HANDLER_A, 2000, pkt);
+
+    pkt = Packet(NO_WORK, DEVICE_B, DEVICE_PACKET_KIND);
+    pkt = Packet(pkt,     DEVICE_B, DEVICE_PACKET_KIND);
+    pkt = Packet(pkt,     DEVICE_B, DEVICE_PACKET_KIND);
+    this.addHandlerTask(HANDLER_B, 3000, pkt);
+
+    this.addDeviceTask(DEVICE_A, 4000, NO_WORK);
+    this.addDeviceTask(DEVICE_B, 5000, NO_WORK);
+
+    this.schedule();
+
+    return this.queuePacketCount == 23246 and this.holdCount == 9297;
+  }
+}
+
+// ---------- Benchmark wrapper ----------
+
+class Richards {
+  benchmark() {
+    var s = Scheduler();
+    var result = s.start();
+    if (!result) {
+      print "Richards: wrong result: queuePacketCount=" + str(s.queuePacketCount) + " holdCount=" + str(s.holdCount);
+    }
+    return result;
+  }
+}
+
+var _bench = Richards();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "Richards: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "Richards: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

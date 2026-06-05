@@ -1,0 +1,71 @@
+// Queens — N-queens solver using recursive backtracking. Standard clox benchmark.
+// No arrays: row/diagonal occupancy tracked as integers via arithmetic.
+// Counts solutions for 8-queens. Expected: 92.
+//
+// Encoding: each occupied set is a number whose digits in base 9 record
+// which rows/diagonals are taken. We instead use a clean recursive approach
+// where each level of recursion represents one column and passes
+// per-row / per-diagonal state as bitmask integers (bit k = row/diag k).
+//
+// Bit manipulation via arithmetic: check bit k of n  => (n / pow2(k)) % 2
+// Set bit k of n                                     => n + pow2(k)
+
+var numSolutions = 0;
+
+// Return 2^k for small k (k in 0..15).
+fun pow2(k) {
+  var result = 1;
+  var i = 0;
+  while (i < k) {
+    result = result * 2;
+    i = i + 1;
+  }
+  return result;
+}
+
+// Return 1 if bit k is set in mask, else 0.
+fun hasBit(mask, k) {
+  var shifted = mask;
+  var i = 0;
+  while (i < k) {
+    shifted = shifted / 2;
+    i = i + 1;
+  }
+  return shifted % 2;
+}
+
+// Place queens in columns [col..7]. rowMask, diagDown, diagUp are bitmasks
+// of occupied rows and diagonals respectively.
+//   diagDown bit k => occupied down-diagonal (row - col) + 7 == k
+//   diagUp   bit k => occupied up-diagonal   (row + col)      == k
+fun solve(col, rowMask, diagDown, diagUp) {
+  if (col == 8) {
+    numSolutions = numSolutions + 1;
+    return;
+  }
+  var row = 0;
+  while (row < 8) {
+    var ddBit = row - col + 7;   // 0..14, use low 8 we care about
+    var duBit = row + col;       // 0..14
+
+    var rowFree  = hasBit(rowMask, row) == 0;
+    var ddFree   = hasBit(diagDown, ddBit) == 0;
+    var duFree   = hasBit(diagUp,   duBit) == 0;
+
+    if (rowFree and ddFree and duFree) {
+      solve(
+        col + 1,
+        rowMask + pow2(row),
+        diagDown + pow2(ddBit),
+        diagUp   + pow2(duBit)
+      );
+    }
+    row = row + 1;
+  }
+}
+
+var start = clock();
+solve(0, 0, 0, 0);
+var elapsed = clock() - start;
+print numSolutions;
+print elapsed;

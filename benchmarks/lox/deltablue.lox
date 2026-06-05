@@ -1,0 +1,868 @@
+// DeltaBlue constraint solver. AWFY benchmark suite.
+// Derived from Mario Wolczko's Smalltalk version and the SOM/JS ports.
+// Original license: http://web.archive.org/web/20050825101121/http://www.sunlabs.com/people/mario/java_benchmarking/index.html
+
+// ---------------------------------------------------------------------------
+// Strength constants (integer encoding replaces Sym/IdentityDictionary)
+// ---------------------------------------------------------------------------
+var ABSOLUTE_STRONGEST = 0;
+var REQUIRED           = 1;
+var STRONG_PREFERRED   = 2;
+var PREFERRED          = 3;
+var STRONG_DEFAULT     = 4;
+var DEFAULT            = 5;
+var WEAK_DEFAULT       = 6;
+var ABSOLUTE_WEAKEST   = 7;
+
+fun strengthArithmetic(sym) {
+  if (sym == 0) return -10000;
+  if (sym == 1) return -800;
+  if (sym == 2) return -600;
+  if (sym == 3) return -400;
+  if (sym == 4) return -200;
+  if (sym == 5) return 0;
+  if (sym == 6) return 500;
+  return 10000; // ABSOLUTE_WEAKEST
+}
+
+// ---------------------------------------------------------------------------
+// Direction constants: 0=none, 1=forward, 2=backward
+// ---------------------------------------------------------------------------
+var DIR_NONE     = 0;
+var DIR_FORWARD  = 1;
+var DIR_BACKWARD = 2;
+
+// ---------------------------------------------------------------------------
+// Strength
+// ---------------------------------------------------------------------------
+class Strength {
+  init(sym) {
+    this.sym             = sym;
+    this.arithmeticValue = strengthArithmetic(sym);
+  }
+
+  sameAs(s) { return this.arithmeticValue == s.arithmeticValue; }
+
+  stronger(s) { return this.arithmeticValue < s.arithmeticValue; }
+
+  weaker(s) { return this.arithmeticValue > s.arithmeticValue; }
+
+  strongest(s) {
+    if (s.stronger(this)) return s;
+    return this;
+  }
+
+  weakest(s) {
+    if (s.weaker(this)) return s;
+    return this;
+  }
+}
+
+// Pre-built strength singletons
+var STRENGTH_ABSOLUTE_STRONGEST = Strength(ABSOLUTE_STRONGEST);
+var STRENGTH_REQUIRED           = Strength(REQUIRED);
+var STRENGTH_STRONG_PREFERRED   = Strength(STRONG_PREFERRED);
+var STRENGTH_PREFERRED          = Strength(PREFERRED);
+var STRENGTH_STRONG_DEFAULT     = Strength(STRONG_DEFAULT);
+var STRENGTH_DEFAULT            = Strength(DEFAULT);
+var STRENGTH_WEAK_DEFAULT       = Strength(WEAK_DEFAULT);
+var STRENGTH_ABSOLUTE_WEAKEST   = Strength(ABSOLUTE_WEAKEST);
+
+fun strengthOf(sym) {
+  if (sym == 0) return STRENGTH_ABSOLUTE_STRONGEST;
+  if (sym == 1) return STRENGTH_REQUIRED;
+  if (sym == 2) return STRENGTH_STRONG_PREFERRED;
+  if (sym == 3) return STRENGTH_PREFERRED;
+  if (sym == 4) return STRENGTH_STRONG_DEFAULT;
+  if (sym == 5) return STRENGTH_DEFAULT;
+  if (sym == 6) return STRENGTH_WEAK_DEFAULT;
+  return STRENGTH_ABSOLUTE_WEAKEST;
+}
+
+// ---------------------------------------------------------------------------
+// Vector — wrapper around Lox++ list with queue semantics
+// ---------------------------------------------------------------------------
+class Vector {
+  init() {
+    this.storage  = [];
+    this.firstIdx = 0;
+  }
+
+  append(x) {
+    this.storage.append(x);
+  }
+
+  at(i) {
+    return this.storage[i];
+  }
+
+  size() {
+    return len(this.storage) - this.firstIdx;
+  }
+
+  isEmpty() {
+    return this.firstIdx >= len(this.storage);
+  }
+
+  removeFirst() {
+    var x = this.storage[this.firstIdx];
+    this.firstIdx = this.firstIdx + 1;
+    return x;
+  }
+
+  // Iterate over active elements
+  forEach(fn) {
+    var i = this.firstIdx;
+    while (i < len(this.storage)) {
+      fn.call(this.storage[i]);
+      i = i + 1;
+    }
+  }
+
+  // Remove first occurrence by reference equality
+  remove(obj) {
+    var newStorage = [];
+    var i = this.firstIdx;
+    var found = false;
+    while (i < len(this.storage)) {
+      var elem = this.storage[i];
+      if (!found and elem == obj) {
+        found = true;
+      } else {
+        newStorage.append(elem);
+      }
+      i = i + 1;
+    }
+    this.storage  = newStorage;
+    this.firstIdx = 0;
+  }
+
+  // Insertion sort: comparator.call(a, b) returns true if a should come before b
+  sort(comparator) {
+    // Compact first
+    var arr = [];
+    var i = this.firstIdx;
+    while (i < len(this.storage)) {
+      arr.append(this.storage[i]);
+      i = i + 1;
+    }
+    // Insertion sort
+    var n = len(arr);
+    var j = 1;
+    while (j < n) {
+      var key = arr[j];
+      var k = j - 1;
+      while (k >= 0 and comparator.call(key, arr[k])) {
+        arr[k + 1] = arr[k];
+        k = k - 1;
+      }
+      arr[k + 1] = key;
+      j = j + 1;
+    }
+    this.storage  = arr;
+    this.firstIdx = 0;
+  }
+
+  hasSome(fn) {
+    var i = this.firstIdx;
+    while (i < len(this.storage)) {
+      if (fn.call(this.storage[i])) return true;
+      i = i + 1;
+    }
+    return false;
+  }
+}
+
+// Because Lox++ has no first-class lambdas stored in variables, we use
+// small single-method "callable" classes wherever the JS code passes lambdas.
+
+fun vectorWith(elem) {
+  var v = Vector();
+  v.append(elem);
+  return v;
+}
+
+// ---------------------------------------------------------------------------
+// Callable helpers (replace JS arrow functions / lambdas)
+// ---------------------------------------------------------------------------
+
+// Used in AbstractConstraint.inputsKnown — tests whether a variable's mark
+// differs from the target mark AND is not stay AND has a determiner.
+class InputsKnownFn {
+  init(mark) { this.mark = mark; }
+  call(v) {
+    return !(v.mark == this.mark or v.stay or v.determinedBy == nil);
+  }
+}
+
+// Used in Planner.removePropagateFrom — collect unsatisfied constraints
+class CollectUnsatisfiedFn {
+  init(unsatisfied) { this.unsatisfied = unsatisfied; }
+  call(c) {
+    if (!c.isSatisfied()) this.unsatisfied.append(c);
+  }
+}
+
+// Used in Planner.constraintsConsuming / addConstraintsConsumingTo
+class ConstraintsConsumingFn {
+  init(determiningC, coll) {
+    this.determiningC = determiningC;
+    this.coll         = coll;
+  }
+  call(c) {
+    if (c != this.determiningC and c.isSatisfied()) {
+      this.coll.append(c);
+    }
+  }
+}
+
+// Used in Planner.constraintsConsuming (with side-effect: recalc + append output)
+class RecalcAndCollectFn {
+  init(todo) { this.todo = todo; }
+  call(c) {
+    c.recalculate();
+    this.todo.append(c.getOutput());
+  }
+}
+
+// Used in Plan.execute
+class ExecuteFn {
+  init() {}
+  call(c) { c.execute(); }
+}
+
+// Used in Planner.incrementalRemove
+class IncrementalAddFn {
+  init(planner) { this.planner = planner; }
+  call(u) { this.planner.incrementalAdd(u); }
+}
+
+// Comparator for sort in removePropagateFrom: stronger constraints first
+class StrengthComparator {
+  init() {}
+  // Returns true if c1 should come before c2 (i.e. c1 is stronger than c2)
+  call(c1, c2) { return c1.strength.stronger(c2.strength); }
+}
+
+// Used in extractPlanFromConstraints
+class CollectInputsFn {
+  init(sources) { this.sources = sources; }
+  call(c) {
+    if (c.isInput() and c.isSatisfied()) this.sources.append(c);
+  }
+}
+
+// Used in addConstraintsConsumingTo (inner forEach on variable constraints)
+class AddConsumingFn {
+  init(determiningC, coll) {
+    this.determiningC = determiningC;
+    this.coll         = coll;
+  }
+  call(c) {
+    if (c != this.determiningC and c.isSatisfied()) this.coll.append(c);
+  }
+}
+
+// Used in addPropagate inner loop
+class AddPropagateConsumingFn {
+  init(todo) { this.todo = todo; }
+  call(c) { this.todo.append(c); }
+}
+
+// hasSome test: does nodePool already contain ydash?
+class ContainsFn {
+  init(target) { this.target = target; }
+  call(e) { return e == this.target; }
+}
+
+// Mark inputs
+class MarkInputFn {
+  init(mark) { this.mark = mark; }
+  call(v) { v.mark = this.mark; }
+}
+
+// ---------------------------------------------------------------------------
+// Variable
+// ---------------------------------------------------------------------------
+class Variable {
+  init() {
+    this.value        = 0;
+    this.constraints  = Vector();
+    this.determinedBy = nil;
+    this.walkStrength = STRENGTH_ABSOLUTE_WEAKEST;
+    this.stay         = true;
+    this.mark         = 0;
+  }
+
+  addConstraint(c) {
+    this.constraints.append(c);
+  }
+
+  removeConstraint(c) {
+    this.constraints.remove(c);
+    if (this.determinedBy == c) this.determinedBy = nil;
+  }
+}
+
+fun variableWithValue(aValue) {
+  var v = Variable();
+  v.value = aValue;
+  return v;
+}
+
+// ---------------------------------------------------------------------------
+// AbstractConstraint
+// ---------------------------------------------------------------------------
+class AbstractConstraint {
+  init(strengthSym) {
+    this.strength = strengthOf(strengthSym);
+  }
+
+  isInput() { return false; }
+
+  addConstraint(planner) {
+    this.addToGraph();
+    planner.incrementalAdd(this);
+  }
+
+  destroyConstraint(planner) {
+    if (this.isSatisfied()) planner.incrementalRemove(this);
+    this.removeFromGraph();
+  }
+
+  inputsKnown(mark) {
+    var fn = InputsKnownFn(mark);
+    return !this.inputsHasOne(fn);
+  }
+
+  satisfy(mark, planner) {
+    var overridden;
+    this.chooseMethod(mark);
+
+    if (this.isSatisfied()) {
+      var markFn = MarkInputFn(mark);
+      this.inputsDo(markFn);
+
+      var out = this.getOutput();
+      overridden = out.determinedBy;
+      if (overridden != nil) overridden.markUnsatisfied();
+      out.determinedBy = this;
+      if (!planner.addPropagate(this, mark)) {
+        print "DeltaBlue: cycle encountered adding constraint";
+        return nil;
+      }
+      out.mark = mark;
+    } else {
+      overridden = nil;
+      if (this.strength.sameAs(STRENGTH_REQUIRED)) {
+        print "DeltaBlue: could not satisfy a required constraint";
+      }
+    }
+    return overridden;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BinaryConstraint
+// ---------------------------------------------------------------------------
+class BinaryConstraint < AbstractConstraint {
+  init(var1, var2, strengthSym) {
+    super.init(strengthSym);
+    this.v1        = var1;
+    this.v2        = var2;
+    this.direction = DIR_NONE;
+  }
+
+  isSatisfied() { return this.direction != DIR_NONE; }
+
+  addToGraph() {
+    this.v1.addConstraint(this);
+    this.v2.addConstraint(this);
+    this.direction = DIR_NONE;
+  }
+
+  removeFromGraph() {
+    if (this.v1 != nil) this.v1.removeConstraint(this);
+    if (this.v2 != nil) this.v2.removeConstraint(this);
+    this.direction = DIR_NONE;
+  }
+
+  chooseMethod(mark) {
+    if (this.v1.mark == mark) {
+      if (this.v2.mark != mark and this.strength.stronger(this.v2.walkStrength)) {
+        this.direction = DIR_FORWARD;
+      } else {
+        this.direction = DIR_NONE;
+      }
+      return;
+    }
+    if (this.v2.mark == mark) {
+      if (this.v1.mark != mark and this.strength.stronger(this.v1.walkStrength)) {
+        this.direction = DIR_BACKWARD;
+      } else {
+        this.direction = DIR_NONE;
+      }
+      return;
+    }
+    // Neither marked — choose based on walkStrength
+    if (this.v1.walkStrength.weaker(this.v2.walkStrength)) {
+      if (this.strength.stronger(this.v1.walkStrength)) {
+        this.direction = DIR_BACKWARD;
+      } else {
+        this.direction = DIR_NONE;
+      }
+    } else {
+      if (this.strength.stronger(this.v2.walkStrength)) {
+        this.direction = DIR_FORWARD;
+      } else {
+        this.direction = DIR_NONE;
+      }
+    }
+  }
+
+  inputsDo(fn) {
+    if (this.direction == DIR_FORWARD) {
+      fn.call(this.v1);
+    } else {
+      fn.call(this.v2);
+    }
+  }
+
+  inputsHasOne(fn) {
+    if (this.direction == DIR_FORWARD) return fn.call(this.v1);
+    return fn.call(this.v2);
+  }
+
+  markUnsatisfied() { this.direction = DIR_NONE; }
+
+  getOutput() {
+    if (this.direction == DIR_FORWARD) return this.v2;
+    return this.v1;
+  }
+
+  recalculate() {
+    var ihn;
+    var out;
+    if (this.direction == DIR_FORWARD) {
+      ihn = this.v1; out = this.v2;
+    } else {
+      ihn = this.v2; out = this.v1;
+    }
+    out.walkStrength = this.strength.weakest(ihn.walkStrength);
+    out.stay = ihn.stay;
+    if (out.stay) this.execute();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// UnaryConstraint
+// ---------------------------------------------------------------------------
+class UnaryConstraint < AbstractConstraint {
+  init(v, strengthSym, planner) {
+    super.init(strengthSym);
+    this.output    = v;
+    this.satisfied = false;
+    this.addConstraint(planner);
+  }
+
+  isSatisfied() { return this.satisfied; }
+
+  addToGraph() {
+    this.output.addConstraint(this);
+    this.satisfied = false;
+  }
+
+  removeFromGraph() {
+    if (this.output != nil) this.output.removeConstraint(this);
+    this.satisfied = false;
+  }
+
+  chooseMethod(mark) {
+    this.satisfied = (this.output.mark != mark) and
+                     this.strength.stronger(this.output.walkStrength);
+  }
+
+  inputsDo(fn) { /* no inputs */ }
+
+  inputsHasOne(fn) { return false; }
+
+  markUnsatisfied() { this.satisfied = false; }
+
+  getOutput() { return this.output; }
+
+  recalculate() {
+    this.output.walkStrength = this.strength;
+    this.output.stay = !this.isInput();
+    if (this.output.stay) this.execute();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// EditConstraint
+// ---------------------------------------------------------------------------
+class EditConstraint < UnaryConstraint {
+  isInput() { return true; }
+  execute() { /* no-op */ }
+}
+
+// ---------------------------------------------------------------------------
+// StayConstraint
+// ---------------------------------------------------------------------------
+class StayConstraint < UnaryConstraint {
+  execute() { /* no-op */ }
+}
+
+// ---------------------------------------------------------------------------
+// EqualityConstraint
+// ---------------------------------------------------------------------------
+class EqualityConstraint < BinaryConstraint {
+  init(var1, var2, strengthSym, planner) {
+    super.init(var1, var2, strengthSym);
+    this.addConstraint(planner);
+  }
+
+  execute() {
+    if (this.direction == DIR_FORWARD) {
+      this.v2.value = this.v1.value;
+    } else {
+      this.v1.value = this.v2.value;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ScaleConstraint
+// ---------------------------------------------------------------------------
+class ScaleConstraint < BinaryConstraint {
+  init(src, scale, offset, dest, strengthSym, planner) {
+    super.init(src, dest, strengthSym);
+    this.scale  = scale;
+    this.offset = offset;
+    this.addConstraint(planner);
+  }
+
+  addToGraph() {
+    this.v1.addConstraint(this);
+    this.v2.addConstraint(this);
+    this.scale.addConstraint(this);
+    this.offset.addConstraint(this);
+    this.direction = DIR_NONE;
+  }
+
+  removeFromGraph() {
+    if (this.v1 != nil)     this.v1.removeConstraint(this);
+    if (this.v2 != nil)     this.v2.removeConstraint(this);
+    if (this.scale != nil)  this.scale.removeConstraint(this);
+    if (this.offset != nil) this.offset.removeConstraint(this);
+    this.direction = DIR_NONE;
+  }
+
+  execute() {
+    if (this.direction == DIR_FORWARD) {
+      this.v2.value = this.v1.value * this.scale.value + this.offset.value;
+    } else {
+      this.v1.value = (this.v2.value - this.offset.value) / this.scale.value;
+    }
+  }
+
+  inputsDo(fn) {
+    if (this.direction == DIR_FORWARD) {
+      fn.call(this.v1);
+      fn.call(this.scale);
+      fn.call(this.offset);
+    } else {
+      fn.call(this.v2);
+      fn.call(this.scale);
+      fn.call(this.offset);
+    }
+  }
+
+  recalculate() {
+    var ihn;
+    var out;
+    if (this.direction == DIR_FORWARD) {
+      ihn = this.v1; out = this.v2;
+    } else {
+      out = this.v1; ihn = this.v2;
+    }
+    out.walkStrength = this.strength.weakest(ihn.walkStrength);
+    out.stay = ihn.stay and this.scale.stay and this.offset.stay;
+    if (out.stay) this.execute();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Plan
+// ---------------------------------------------------------------------------
+class Plan {
+  init() {
+    this.constraints = Vector();
+  }
+
+  append(c) {
+    this.constraints.append(c);
+  }
+
+  execute() {
+    var fn = ExecuteFn();
+    this.constraints.forEach(fn);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Planner
+// ---------------------------------------------------------------------------
+class Planner {
+  init() {
+    this.currentMark = 1;
+  }
+
+  newMark() {
+    this.currentMark = this.currentMark + 1;
+    return this.currentMark;
+  }
+
+  incrementalAdd(c) {
+    var mark     = this.newMark();
+    var overridden = c.satisfy(mark, this);
+    while (overridden != nil) {
+      overridden = overridden.satisfy(mark, this);
+    }
+  }
+
+  incrementalRemove(c) {
+    var out = c.getOutput();
+    c.markUnsatisfied();
+    c.removeFromGraph();
+
+    var unsatisfied = this.removePropagateFrom(out);
+    var fn = IncrementalAddFn(this);
+    unsatisfied.forEach(fn);
+  }
+
+  extractPlanFromConstraints(constraints) {
+    var sources = Vector();
+    var fn = CollectInputsFn(sources);
+    constraints.forEach(fn);
+    return this.makePlan(sources);
+  }
+
+  makePlan(sources) {
+    var mark = this.newMark();
+    var plan = Plan();
+    var todo = sources;
+
+    while (!todo.isEmpty()) {
+      var c = todo.removeFirst();
+      if (c.getOutput().mark != mark and c.inputsKnown(mark)) {
+        plan.append(c);
+        c.getOutput().mark = mark;
+        this.addConstraintsConsumingTo(c.getOutput(), todo);
+      }
+    }
+    return plan;
+  }
+
+  propagateFrom(v) {
+    var todo = Vector();
+    this.addConstraintsConsumingTo(v, todo);
+    while (!todo.isEmpty()) {
+      var c = todo.removeFirst();
+      c.execute();
+      this.addConstraintsConsumingTo(c.getOutput(), todo);
+    }
+  }
+
+  addConstraintsConsumingTo(v, coll) {
+    var determiningC = v.determinedBy;
+    var fn = AddConsumingFn(determiningC, coll);
+    v.constraints.forEach(fn);
+  }
+
+  addPropagate(c, mark) {
+    var todo = vectorWith(c);
+    while (!todo.isEmpty()) {
+      var d = todo.removeFirst();
+      if (d.getOutput().mark == mark) {
+        this.incrementalRemove(c);
+        return false;
+      }
+      d.recalculate();
+      this.addConstraintsConsumingTo(d.getOutput(), todo);
+    }
+    return true;
+  }
+
+  change(v, newValue) {
+    var editC = EditConstraint(v, PREFERRED, this);
+    var editV = vectorWith(editC);
+    var plan  = this.extractPlanFromConstraints(editV);
+    var i = 0;
+    while (i < 10) {
+      v.value = newValue;
+      plan.execute();
+      i = i + 1;
+    }
+    editC.destroyConstraint(this);
+  }
+
+  constraintsConsuming(v, fn) {
+    var determiningC = v.determinedBy;
+    var innerFn = ConstraintsConsumingFn(determiningC, nil);
+    // We need a version that calls fn directly — use RecalcAndCollectFn pattern
+    // but here fn is already a callable; iterate manually.
+    var i = v.constraints.firstIdx;
+    while (i < len(v.constraints.storage)) {
+      var c = v.constraints.storage[i];
+      if (c != determiningC and c.isSatisfied()) fn.call(c);
+      i = i + 1;
+    }
+  }
+
+  removePropagateFrom(out) {
+    var unsatisfied = Vector();
+
+    out.determinedBy = nil;
+    out.walkStrength = STRENGTH_ABSOLUTE_WEAKEST;
+    out.stay         = true;
+
+    var todo = vectorWith(out);
+
+    while (!todo.isEmpty()) {
+      var v = todo.removeFirst();
+
+      // Collect unsatisfied constraints on v
+      var collectFn = CollectUnsatisfiedFn(unsatisfied);
+      v.constraints.forEach(collectFn);
+
+      // For each satisfied constraint consuming v, recalculate and enqueue output
+      var recalcFn = RecalcAndCollectFn(todo);
+      this.constraintsConsuming(v, recalcFn);
+    }
+
+    unsatisfied.sort(StrengthComparator());
+    return unsatisfied;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// chainTest(n) — build a chain of n equality constraints and verify propagation
+// ---------------------------------------------------------------------------
+fun chainTest(n) {
+  var planner = Planner();
+  var vars    = [];
+  var i = 0;
+  while (i <= n) {
+    vars.append(Variable());
+    i = i + 1;
+  }
+
+  i = 0;
+  while (i < n) {
+    EqualityConstraint(vars[i], vars[i + 1], REQUIRED, planner);
+    i = i + 1;
+  }
+
+  StayConstraint(vars[n], STRONG_DEFAULT, planner);
+
+  var editC = EditConstraint(vars[0], PREFERRED, planner);
+  var editV = vectorWith(editC);
+  var plan  = planner.extractPlanFromConstraints(editV);
+
+  i = 0;
+  while (i < 100) {
+    vars[0].value = i;
+    plan.execute();
+    if (vars[n].value != i) {
+      print "DeltaBlue: chain test failed at i=" + str(i);
+      return false;
+    }
+    i = i + 1;
+  }
+  editC.destroyConstraint(planner);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// projectionTest(n) — scale + offset constraints
+// ---------------------------------------------------------------------------
+fun projectionTest(n) {
+  var planner = Planner();
+  var dests   = Vector();
+  var scale   = variableWithValue(10);
+  var offset  = variableWithValue(1000);
+
+  var src = nil;
+  var dst = nil;
+
+  var i = 1;
+  while (i <= n) {
+    src = variableWithValue(i);
+    dst = variableWithValue(i);
+    dests.append(dst);
+    StayConstraint(src, DEFAULT, planner);
+    ScaleConstraint(src, scale, offset, dst, REQUIRED, planner);
+    i = i + 1;
+  }
+
+  planner.change(src, 17);
+  if (dst.value != 1170) {
+    print "DeltaBlue: projection test 1 failed, dst=" + str(dst.value);
+    return false;
+  }
+
+  planner.change(dst, 1050);
+  if (src.value != 5) {
+    print "DeltaBlue: projection test 2 failed, src=" + str(src.value);
+    return false;
+  }
+
+  planner.change(scale, 5);
+  i = 0;
+  while (i < n - 1) {
+    if (dests.at(i).value != (i + 1) * 5 + 1000) {
+      print "DeltaBlue: projection test 3 failed at i=" + str(i);
+      return false;
+    }
+    i = i + 1;
+  }
+
+  planner.change(offset, 2000);
+  i = 0;
+  while (i < n - 1) {
+    if (dests.at(i).value != (i + 1) * 5 + 2000) {
+      print "DeltaBlue: projection test 4 failed at i=" + str(i);
+      return false;
+    }
+    i = i + 1;
+  }
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Benchmark wrapper
+// ---------------------------------------------------------------------------
+class DeltaBlue {
+  benchmark() {
+    var ok1 = chainTest(100);
+    var ok2 = projectionTest(100);
+    return ok1 and ok2;
+  }
+}
+
+var _bench = DeltaBlue();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "DeltaBlue: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "DeltaBlue: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";
