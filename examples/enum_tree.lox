@@ -21,6 +21,18 @@ fun tree_depth(t) {
     };
 }
 
+// tree_find uses @-binding to return the whole Leaf node when found,
+// so the caller can re-inspect it without matching again.
+fun tree_find(t, target) {
+    return match t {
+        case leaf @ Leaf(v) => (v == target) and leaf or nil
+        case Node(l, r)     => {
+            var res = tree_find(l, target);
+            res or tree_find(r, target)
+        }
+    };
+}
+
 var t = Node(
     Node(Leaf(1), Leaf(2)),
     Node(Leaf(3), Node(Leaf(4), Leaf(5)))
@@ -30,3 +42,10 @@ var t = Node(
 print "sum: " + str(tree_sum(t));
 // CHECK: depth: 3
 print "depth: " + str(tree_depth(t));
+
+var found = tree_find(t, 4);
+// CHECK: found: true
+print "found: " + str(found != nil);
+var found_val = match found { case Leaf(v) => v case _ => -1 };
+// CHECK: found val: 4
+print "found val: " + str(found_val);
