@@ -901,6 +901,87 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
         m_parser->advance();
         std::string patName(patTok.lexeme);
 
+        // @-binding: IDENTIFIER "@" subPat
+        //
+        // The @-name is bound AFTER the structural check so that a miss leaves
+        // no extra values on the stack (the normal POP of the false boolean is
+        // the only cleanup needed, exactly as for non-@ patterns).
+        if (m_parser->match(TokenType::AT)) {
+            if (patName == "_") {
+                m_parser->error("'_' cannot be used as an @-binding name.");
+            }
+            Token atTok{TokenType::IDENTIFIER, patTok.lexeme, patTok.line};
+            int localsBefore = m_localCount;
+            int subMissJump = -1;
+            std::string subCtorName;
+
+            if (m_parser->check(TokenType::LEFT_BRACKET)) {
+                auto lr = compileListPattern(subjectSlot, armLocalBase);
+                subMissJump = lr.missJump;
+                // List check passed: bind @-name to the whole subject.
+                emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+                addLocal(atTok);
+                markInitialized();
+            } else if (m_parser->check(TokenType::IDENTIFIER)) {
+                Token subTok = m_parser->m_current;
+                m_parser->advance();
+                std::string subName(subTok.lexeme);
+                const ConstructorInfo* subInfo = findConstructor(subName);
+                if (subInfo != nullptr) {
+                    subCtorName = subName;
+                    emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+                    emitByte(Op::GET_TAG);
+                    emitConstantOp(
+                        Op::CONSTANT,
+                        makeConstant(Value{static_cast<double>(subInfo->tag)}));
+                    emitByte(Op::EQUAL);
+                    subMissJump = emitJump(Op::JUMP_IF_FALSE);
+                    emitByte(Op::POP);
+                    compileCtorPattern(subjectSlot, *subInfo, subTok);
+                    // Tag check passed: bind @-name to the whole subject.
+                    emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+                    addLocal(atTok);
+                    markInitialized();
+                } else if (findClass(subName)) {
+                    ObjString* cn = m_mm->makeString(subTok.lexeme);
+                    m_mm->pushTempRoot(cn);
+                    uint16_t cnConst =
+                        makeConstant(Value{static_cast<Obj*>(cn)});
+                    m_mm->popTempRoot();
+                    emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+                    emitConstantOp(Op::INSTANCEOF, cnConst);
+                    subMissJump = emitJump(Op::JUMP_IF_FALSE);
+                    emitByte(Op::POP);
+                    compileClassPattern(subjectSlot, subTok);
+                    // INSTANCEOF passed: bind @-name to the whole subject.
+                    emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+                    addLocal(atTok);
+                    markInitialized();
+                } else if (m_parser->check(TokenType::LEFT_BRACE) ||
+                           m_parser->check(TokenType::LEFT_PAREN)) {
+                    m_parser->error(
+                        ("Unknown constructor or class '" + subName + "'.")
+                            .c_str());
+                } else {
+                    m_parser->error(
+                        "Sub-pattern after '@' must be a structural pattern "
+                        "(constructor or class), not a plain binding.");
+                }
+            } else {
+                m_parser->error(
+                    "Expected a structural pattern (constructor, class, or "
+                    "'[') after '@'.");
+            }
+
+            int totalBindings = m_localCount - localsBefore;
+            std::vector<std::string> allNames;
+            allNames.reserve(static_cast<size_t>(totalBindings));
+            for (int i = localsBefore; i < m_localCount; i++)
+                allNames.emplace_back(m_locals[i].name.lexeme);
+            return {subMissJump, totalBindings, std::move(allNames),
+                    std::move(subCtorName)};
+        }
+
         int missJump = -1;
         int localsBefore = m_localCount;
         std::string ctorName;
