@@ -24,10 +24,7 @@ var t = Node(
 fun find_leaf(tree, target) {
     return match tree {
         case leaf @ Leaf(v) => (v == target) and leaf or nil
-        case Node(l, r)     => {
-            var found = find_leaf(l, target);
-            found or find_leaf(r, target)
-        }
+        case Node(l, r)     => find_leaf(l, target) or find_leaf(r, target)
     };
 }
 

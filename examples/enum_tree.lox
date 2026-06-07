@@ -26,10 +26,7 @@ fun tree_depth(t) {
 fun tree_find(t, target) {
     return match t {
         case leaf @ Leaf(v) => (v == target) and leaf or nil
-        case Node(l, r)     => {
-            var res = tree_find(l, target);
-            res or tree_find(r, target)
-        }
+        case Node(l, r)     => tree_find(l, target) or tree_find(r, target)
     };
 }
 

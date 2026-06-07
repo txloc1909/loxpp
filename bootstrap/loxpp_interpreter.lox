@@ -131,6 +131,7 @@ enum Pattern {
     BindPat(name)
     CtorPat(cname, subpats)
     ListPat(elems, rest_name)
+    AtPat(at_name, subpat)
 }
 
 class MatchArm {
@@ -295,6 +296,7 @@ class Scanner {
             return;
         }
         if (c == "%") { this.addToken("PERCENT",       nil); return; }
+        if (c == "@") { this.addToken("AT",            nil); return; }
         if (c == "[") { this.addToken("LEFT_BRACKET",  nil); return; }
         if (c == "]") { this.addToken("RIGHT_BRACKET", nil); return; }
         if (c == ":") { this.addToken("COLON",         nil); return; }
@@ -893,6 +895,10 @@ class Parser {
         if (this.matchT("NIL"))    return LitPat(nil);
         if (this.matchT("IDENTIFIER")) {
             var nameTok = this.previous();
+            if (this.matchT("AT")) {
+                var subpat = this.parsePattern();
+                return AtPat(nameTok.lexeme, subpat);
+            }
             if (this.matchT("LEFT_PAREN")) {
                 var subpats = [];
                 if (!this.check("RIGHT_PAREN")) {
@@ -1268,7 +1274,13 @@ class Resolver {
             case BindPat{name}             => this.resolveBindPat(name)
             case CtorPat{cname, subpats}   => this.resolveSubpats(subpats)
             case ListPat{elems, rest_name} => this.resolveListPat(elems, rest_name)
+            case AtPat{at_name, subpat}    => this.resolveAtPat(at_name, subpat)
         };
+    }
+
+    resolveAtPat(at_name, subpat) {
+        this.resolvePattern(subpat);
+        this.resolveBindPat(at_name);
     }
 
     resolveBindPat(name) {
@@ -2440,7 +2452,14 @@ class Interpreter {
             case BindPat{name}             => this.matchBind(name, subject, bindings)
             case CtorPat{cname, subpats}   => this.matchCtor(cname, subpats, subject, bindings)
             case ListPat{elems, rest_name} => this.matchListPat(elems, rest_name, subject, bindings)
+            case AtPat{at_name, subpat}    => this.matchAtPat(at_name, subpat, subject, bindings)
         };
+    }
+
+    matchAtPat(at_name, subpat, subject, bindings) {
+        if (!this.matchPattern(subpat, subject, bindings)) { return false; }
+        bindings[at_name] = subject;
+        return true;
     }
 
     matchBind(name, subject, bindings) {
