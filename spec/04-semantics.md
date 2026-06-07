@@ -284,6 +284,8 @@ All arms must be written so that their body expressions leave exactly one value;
 
 When a `match` expression is used as a statement (`exprStmt`), the result value is discarded.
 
+**@-bindings.** A pattern of the form `name @ subPat` evaluates `subPat` against the subject; if it matches, `name` is bound to the whole subject value. Both `name` and any bindings introduced by `subPat` are visible in the arm body. `_` is not allowed as an @-binding name. The sub-pattern must be a structural pattern (constructor, class, or sequence); a plain binding or wildcard sub-pattern is a compile error.
+
 
 ---
 
