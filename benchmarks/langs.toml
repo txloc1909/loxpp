@@ -1,35 +1,41 @@
 # langs.toml — interpreter configurations and container image names
 #
 # Each entry declares how to invoke a language in a container and which image
-# it uses. The runner mounts lox/ read-only at /bench for lox++ and lox-clox.
+# it uses. The runner mounts lox/ read-only at /bench for lox++.
 
 [lox]
-image  = "loxpp-dev-env:latest"
-cmd    = ["/workspace/build/loxpp", "/bench/{file}"]
-mount  = "benchmarks/lox:/bench:ro"
+image   = "loxpp-dev-env:latest"
+cmd     = ["/workspace/build/loxpp", "/bench/{file}"]
+mount   = "benchmarks/lox:/bench:ro"
 adapter = "awfy"
 
 [clox]
-image  = "bench-clox:latest"
-cmd    = ["clox", "/benchmarks/clox/{file}"]
-adapter = "raw"
+image   = "bench-clox:latest"
+cmd     = ["clox", "/benchmarks/clox/{file}"]
+# clox benchmarks self-report elapsed time as the last stdout line (seconds)
+adapter = "clox"
 
 [python]
-image  = "bench-python:latest"
-cmd    = ["python3", "/benchmarks/awfy/{file}"]
+image   = "bench-python:latest"
+# run_bench.py invokes the AWFY Run harness with the correct PascalCase class name
+cmd     = ["python3", "/benchmarks/run_bench.py", "/benchmarks/awfy/Python/{file}"]
 adapter = "awfy"
 
 [lua]
-image  = "bench-lua:latest"
-cmd    = ["lua5.4", "/benchmarks/awfy/{file}"]
+image   = "bench-lua:latest"
+# run_bench.sh cd's to the benchmark dir (for module resolution) then calls harness.lua
+cmd     = ["/benchmarks/run_bench.sh", "/benchmarks/awfy/{file}"]
 adapter = "awfy"
 
 [js]
-image  = "bench-js:latest"
-cmd    = ["node", "/benchmarks/awfy/{file}"]
+image   = "bench-js:latest"
+# run_bench.js invokes the AWFY Run harness with the correct PascalCase class name
+cmd     = ["node", "/benchmarks/run_bench.js", "/benchmarks/awfy/{file}"]
 adapter = "awfy"
 
-[wren]
-image  = "bench-wren:latest"
-cmd    = ["wren", "/benchmarks/wren/{file}"]
-adapter = "wren"
+# wren: disabled — standalone wren CLI was removed from the upstream repo.
+# See Dockerfile.wren for details. Uncomment when a standalone CLI is available.
+# [wren]
+# image   = "bench-wren:latest"
+# cmd     = ["wren", "/benchmarks/wren/{file}"]
+# adapter = "wren"
