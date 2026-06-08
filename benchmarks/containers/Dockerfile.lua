@@ -1,16 +1,20 @@
 FROM alpine:3.20
 
 # Pinned upstream commits — see benchmarks/SOURCES.md
-ARG AWFY_COMMIT=5e9fa8e657a4b9c4b3dfb4e9a2ac31b5ad3b0ef3
+ARG AWFY_COMMIT=74306fec151070fd07157cefeacf19e7e0bcdc89
 
 RUN apk add --no-cache lua5.4 curl
 
 # Fetch AWFY Lua benchmarks at pinned commit
-RUN mkdir -p /benchmarks/awfy && \
+# Note: Alpine uses busybox tar (no --wildcards); extract all, then select subdir.
+RUN mkdir -p /tmp/awfy /benchmarks/awfy && \
     curl -fsSL "https://github.com/smarr/are-we-fast-yet/archive/${AWFY_COMMIT}.tar.gz" \
-    | tar xz --strip-components=2 \
-         --wildcards \
-         -C /benchmarks/awfy \
-         "are-we-fast-yet-${AWFY_COMMIT}/benchmarks/Lua/*"
+    | tar xz --strip-components=1 -C /tmp/awfy && \
+    mv /tmp/awfy/benchmarks/Lua/* /benchmarks/awfy/ && \
+    rm -rf /tmp/awfy
+
+# Wrapper: invokes a single AWFY benchmark via the harness
+COPY benchmarks/containers/run_awfy_lua.sh /benchmarks/run_bench.sh
+RUN chmod +x /benchmarks/run_bench.sh
 
 WORKDIR /benchmarks
