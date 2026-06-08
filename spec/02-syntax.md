@@ -109,9 +109,17 @@ armPats        ::= literalPat ( "," literalPat )*       (* literal comma-chain *
 armPat         ::= literalPat | identArmPat ;
 literalPat     ::= NUMBER | STRING | "true" | "false" | "nil" ;
 
-identArmPat    ::= IDENTIFIER                                          (* "_" = wildcard, else binding or zero-field constructor *)
-                 | IDENTIFIER "{" IDENTIFIER ( "," IDENTIFIER )* "}"   (* named-field constructor pattern *)
+identArmPat    ::= IDENTIFIER "@" subPat                               (* @-binding: bind whole value, then inspect structure *)
+                 | IDENTIFIER                                          (* "_" = wildcard, else binding or zero-field constructor *)
+                 | IDENTIFIER "{" IDENTIFIER ( "," IDENTIFIER )* "}"   (* named-field constructor/class pattern *)
                  | IDENTIFIER "(" IDENTIFIER ( "," IDENTIFIER )* ")" ; (* positional constructor pattern *)
+
+subPat         ::= IDENTIFIER                                          (* zero-field constructor or class type check *)
+                 | IDENTIFIER "{" IDENTIFIER ( "," IDENTIFIER )* "}"
+                 | IDENTIFIER "(" IDENTIFIER ( "," IDENTIFIER )* ")"
+                 | "[" ( seqElem ( "," seqElem )* )? "]" ;
+
+seqElem        ::= "..." IDENTIFIER | IDENTIFIER ;
 
 armBody        ::= "{" declaration* expression "}"
                  | expression ;

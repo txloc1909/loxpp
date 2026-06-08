@@ -78,6 +78,8 @@ Token Scanner::scanOneToken() {
         return makeToken(TokenType::SLASH);
     case '%':
         return makeToken(TokenType::PERCENT);
+    case '@':
+        return makeToken(TokenType::AT);
     case '!':
         return makeToken(match('=') ? TokenType::BANG_EQUAL : TokenType::BANG);
     case '=':

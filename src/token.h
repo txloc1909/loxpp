@@ -22,6 +22,7 @@ enum class TokenType : std::uint8_t {
     SLASH,
     STAR,
     PERCENT,
+    AT,
 
     // One or two character tokens.
     BANG,

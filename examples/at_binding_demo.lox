@@ -1,0 +1,81 @@
+// at_binding_demo.lox — demonstrates @-bindings in pattern matching.
+//
+// An @-binding lets a match arm bind the *whole* matched value to a name
+// while also inspecting its structure:
+//
+//   case node @ Node(l, r) => process(node, l, r)
+//
+// This is useful when you need to pass the matched value to a function AND
+// destructure its fields in the same arm — without matching twice.
+
+enum Tree { Leaf(val) Node(left, right) }
+
+// Build a small tree for the demos.
+var t = Node(
+    Node(Leaf(1), Leaf(2)),
+    Node(Leaf(3), Node(Leaf(4), Leaf(5)))
+);
+
+// --- Demo 1: find_leaf -------------------------------------------------------
+// Returns the Leaf enum value whose field equals `target`, or nil.
+// The @-binding lets us return the whole Leaf value while checking its field.
+// Without @-binding we'd have to re-match the tree to get back the node.
+
+fun find_leaf(tree, target) {
+    return match tree {
+        case leaf @ Leaf(v) => (v == target) and leaf or nil
+        case Node(l, r)     => find_leaf(l, target) or find_leaf(r, target)
+    };
+}
+
+var found = find_leaf(t, 3);
+// CHECK: found: true
+print "found: " + str(found != nil);
+
+// Verify it is really the Leaf(3) node by re-matching on it.
+var found_val = match found {
+    case Leaf(v) => v
+    case _       => -1
+};
+// CHECK: found val: 3
+print "found val: " + str(found_val);
+
+// Searching for a non-existent value returns nil.
+var not_found = find_leaf(t, 99);
+// CHECK: not found: true
+print "not found: " + str(not_found == nil);
+
+// --- Demo 2: @-binding with a sequence pattern ------------------------------
+// find_tail returns the suffix of lst starting at the first occurrence of
+// target (inclusive), or nil if not found.
+// The @-binding captures the whole remaining list (s) while h/t destructure it.
+
+fun find_tail(lst, target) {
+    return match lst {
+        case []            => nil
+        case s @ [h, ...t] => (h == target) and s or find_tail(t, target)
+    };
+}
+
+var nums = [10, 30, 40, 50];
+var tail = find_tail(nums, 30);
+// CHECK: tail len: 3
+print "tail len: " + str(len(tail));
+// CHECK: tail head: 30
+print "tail head: " + str(tail[0]);
+
+// --- Demo 3: @-binding in an or-pattern -------------------------------------
+// Both arms bind the same names, so the @-binding works across alternatives.
+
+enum Result { Ok(value) Err(msg) }
+
+fun unwrap_or(r, default_val) {
+    return match r {
+        case v @ Ok(x) or v @ Err(x) => x
+    };
+}
+
+// CHECK: ok value: 42
+print "ok value: " + str(unwrap_or(Ok(42), 0));
+// CHECK: err value: 7
+print "err value: " + str(unwrap_or(Err(7), 0));

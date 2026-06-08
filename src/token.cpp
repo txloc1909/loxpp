@@ -29,6 +29,8 @@ std::ostream& operator<<(std::ostream& os, const TokenType& type) {
         return os << "SEMICOLON";
     case TokenType::STAR:
         return os << "STAR";
+    case TokenType::AT:
+        return os << "AT";
     case TokenType::BANG:
         return os << "BANG";
     case TokenType::BANG_EQUAL:
