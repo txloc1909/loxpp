@@ -2,179 +2,174 @@
 #
 # file: path relative to the language's benchmark root inside the container
 # adapter: override the lang-level adapter if needed (optional)
+#
+# AWFY Python/JS/Lua filenames were renamed from PascalCase (Bounce.py) to
+# lowercase (bounce.py) in the current AWFY master branch.
 
 # ---------------------------------------------------------------------------
 # AWFY — micro benchmarks
 # ---------------------------------------------------------------------------
 
 [bounce]
-suite = "awfy"
-[bounce.lox]    file = "bounce.lox"
-[bounce.python] file = "Bounce.py"
-[bounce.lua]    file = "Bounce.lua"
-[bounce.js]     file = "Bounce.js"
+suite  = "awfy"
+lox    = {file = "bounce.lox"}
+python = {file = "bounce.py"}
+lua    = {file = "bounce.lua"}
+js     = {file = "bounce.js"}
 
 [fib]
-suite = "awfy"
-[fib.lox]    file = "fib.lox"
-[fib.clox]   file = "fib.lox"
-[fib.python] file = "Fib.py"
-[fib.lua]    file = "Fib.lua"
-[fib.js]     file = "Fib.js"
+suite  = "awfy"
+lox    = {file = "fib.lox"}
+clox   = {file = "fib.lox"}
+# fib.py / fib.lua / fib.js do not exist in AWFY; lox and clox only
 
 [list]
-suite = "awfy"
-[list.lox]    file = "list.lox"
-[list.python] file = "List.py"
-[list.lua]    file = "List.lua"
-[list.js]     file = "List.js"
+suite  = "awfy"
+lox    = {file = "list.lox"}
+python = {file = "list.py"}
+lua    = {file = "list.lua"}
+js     = {file = "list.js"}
 
 [mandelbrot]
-suite = "awfy"
-[mandelbrot.lox]    file = "mandelbrot.lox"
-[mandelbrot.clox]   file = "mandelbrot.lox"
-[mandelbrot.python] file = "Mandelbrot.py"
-[mandelbrot.lua]    file = "Mandelbrot.lua"
-[mandelbrot.js]     file = "Mandelbrot.js"
+suite  = "awfy"
+lox    = {file = "mandelbrot.lox"}
+clox   = {file = "mandelbrot.lox"}
+python = {file = "mandelbrot.py"}
+lua    = {file = "mandelbrot.lua"}
+js     = {file = "mandelbrot.js"}
 
 [nbody]
-suite = "awfy"
-[nbody.lox]    file = "nbody.lox"
-[nbody.python] file = "NBody.py"
-[nbody.lua]    file = "NBody.lua"
-[nbody.js]     file = "NBody.js"
+suite  = "awfy"
+lox    = {file = "nbody.lox"}
+python = {file = "nbody.py"}
+lua    = {file = "nbody.lua"}
+js     = {file = "nbody.js"}
 
 [permute]
-suite = "awfy"
-[permute.lox]    file = "permute.lox"
-[permute.python] file = "Permute.py"
-[permute.lua]    file = "Permute.lua"
-[permute.js]     file = "Permute.js"
+suite  = "awfy"
+lox    = {file = "permute.lox"}
+python = {file = "permute.py"}
+lua    = {file = "permute.lua"}
+js     = {file = "permute.js"}
 
 [queens]
-suite = "awfy"
-[queens.lox]    file = "queens.lox"
-[queens.clox]   file = "queens.lox"
-[queens.python] file = "Queens.py"
-[queens.lua]    file = "Queens.lua"
-[queens.js]     file = "Queens.js"
+suite  = "awfy"
+lox    = {file = "queens.lox"}
+clox   = {file = "queens.lox"}
+python = {file = "queens.py"}
+lua    = {file = "queens.lua"}
+js     = {file = "queens.js"}
 
 [sieve]
-suite = "awfy"
-[sieve.lox]    file = "sieve.lox"
-[sieve.python] file = "Sieve.py"
-[sieve.lua]    file = "Sieve.lua"
-[sieve.js]     file = "Sieve.js"
+suite  = "awfy"
+lox    = {file = "sieve.lox"}
+python = {file = "sieve.py"}
+lua    = {file = "sieve.lua"}
+js     = {file = "sieve.js"}
 
 [storage]
-suite = "awfy"
-[storage.lox]    file = "storage.lox"
-[storage.python] file = "Storage.py"
-[storage.lua]    file = "Storage.lua"
-[storage.js]     file = "Storage.js"
+suite  = "awfy"
+lox    = {file = "storage.lox"}
+python = {file = "storage.py"}
+lua    = {file = "storage.lua"}
+js     = {file = "storage.js"}
 
 [towers]
-suite = "awfy"
-[towers.lox]    file = "towers.lox"
-[towers.clox]   file = "towers.lox"
-[towers.python] file = "Towers.py"
-[towers.lua]    file = "Towers.lua"
-[towers.js]     file = "Towers.js"
+suite  = "awfy"
+lox    = {file = "towers.lox"}
+clox   = {file = "towers.lox"}
+python = {file = "towers.py"}
+lua    = {file = "towers.lua"}
+js     = {file = "towers.js"}
 
 # ---------------------------------------------------------------------------
 # AWFY — macro benchmarks
 # ---------------------------------------------------------------------------
 
 [cd]
-suite = "awfy"
-[cd.lox]    file = "cd.lox"
-[cd.python] file = "CD.py"
-[cd.lua]    file = "CD.lua"
-[cd.js]     file = "CD.js"
+suite  = "awfy"
+lox    = {file = "cd.lox"}
+python = {file = "cd.py"}
+lua    = {file = "cd.lua"}
+js     = {file = "cd.js"}
 
 [deltablue]
-suite = "awfy"
-[deltablue.lox]    file = "deltablue.lox"
-[deltablue.python] file = "DeltaBlue.py"
-[deltablue.lua]    file = "DeltaBlue.lua"
-[deltablue.js]     file = "DeltaBlue.js"
+suite  = "awfy"
+lox    = {file = "deltablue.lox"}
+python = {file = "deltablue.py"}
+lua    = {file = "deltablue.lua"}
+js     = {file = "deltablue.js"}
 
 [earley]
-suite = "awfy"
-[earley.lox]    file = "earley.lox"
-[earley.python] file = "Earley.py"
-[earley.lua]    file = "Earley.lua"
-[earley.js]     file = "Earley.js"
+suite  = "awfy"
+lox    = {file = "earley.lox"}
+# earley.py / earley.lua / earley.js do not exist in AWFY; lox only
 
 [havlak]
-suite = "awfy"
-[havlak.lox]    file = "havlak.lox"
-[havlak.python] file = "Havlak.py"
-[havlak.lua]    file = "Havlak.lua"
-[havlak.js]     file = "Havlak.js"
+suite  = "awfy"
+lox    = {file = "havlak.lox"}
+python = {file = "havlak.py"}
+lua    = {file = "havlak.lua"}
+js     = {file = "havlak.js"}
 
 [json]
-suite = "awfy"
-[json.lox]    file = "json.lox"
-[json.python] file = "Json.py"
-[json.lua]    file = "Json.lua"
-[json.js]     file = "Json.js"
+suite  = "awfy"
+lox    = {file = "json.lox"}
+python = {file = "json.py"}
+lua    = {file = "json.lua"}
+js     = {file = "json.js"}
 
 [richards]
-suite = "awfy"
-[richards.lox]    file = "richards.lox"
-[richards.python] file = "Richards.py"
-[richards.lua]    file = "Richards.lua"
-[richards.js]     file = "Richards.js"
+suite  = "awfy"
+lox    = {file = "richards.lox"}
+python = {file = "richards.py"}
+lua    = {file = "richards.lua"}
+js     = {file = "richards.js"}
 
 # ---------------------------------------------------------------------------
-# CLBG — non-overlapping benchmarks
+# CLBG — non-overlapping benchmarks (Lox++ only)
 # ---------------------------------------------------------------------------
 
 [binary_trees]
 suite = "clbg"
-[binary_trees.lox]    file = "binary_trees.lox"
+lox   = {file = "binary_trees.lox"}
 
 [fannkuch]
 suite = "clbg"
-[fannkuch.lox]    file = "fannkuch.lox"
+lox   = {file = "fannkuch.lox"}
 
 [fasta]
 suite = "clbg"
-[fasta.lox]    file = "fasta.lox"
+lox   = {file = "fasta.lox"}
 
 [k_nucleotide]
 suite = "clbg"
-[k_nucleotide.lox]    file = "k_nucleotide.lox"
+lox   = {file = "k_nucleotide.lox"}
 
 [reverse_complement]
 suite = "clbg"
-[reverse_complement.lox]    file = "reverse_complement.lox"
+lox   = {file = "reverse_complement.lox"}
 
 [spectral_norm]
 suite = "clbg"
-[spectral_norm.lox]    file = "spectral_norm.lox"
+lox   = {file = "spectral_norm.lox"}
 
 # ---------------------------------------------------------------------------
-# Wren suite
+# Wren suite (Lox++ only — wren standalone CLI removed from upstream repo)
 # ---------------------------------------------------------------------------
 
 [zoo]
 suite = "wren"
-[zoo.lox]  file = "zoo.lox"
-[zoo.wren] file = "zoo.wren"
+lox   = {file = "zoo.lox"}
 
 [string_interning]
 suite = "wren"
-[string_interning.lox]  file = "string_interning.lox"
-[string_interning.wren] file = "string_interning.wren"
+lox   = {file = "string_interning.lox"}
 
 [for_in]
 suite = "wren"
-[for_in.lox]  file = "for_in.lox"
-[for_in.wren] file = "for_in.wren"
+lox   = {file = "for_in.lox"}
 
 [instantiation]
 suite = "wren"
-[instantiation.lox]  file = "instantiation.lox"
-[instantiation.wren] file = "instantiation.wren"
+lox   = {file = "instantiation.lox"}
