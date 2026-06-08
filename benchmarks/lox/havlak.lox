@@ -1,0 +1,792 @@
+// Havlak loop detection in control flow graphs. AWFY benchmark suite.
+// Adapted from SOM and Java benchmark.
+// Copyright 2011 Google Inc. Apache License 2.0.
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+var UNVISITED       = 2147483647; // Marker for uninitialized/unvisited nodes
+var MAXNONBACKPREDS = 32768;      // 32 * 1024 — safeguard against pathological behavior
+
+// Edge type strings (only used as tags in type arrays)
+var BB_NONHEADER  = 0;
+var BB_REDUCIBLE  = 1;
+var BB_SELF       = 2;
+var BB_IRREDUCIBLE = 3;
+var BB_DEAD       = 4;
+
+// ---------------------------------------------------------------------------
+// BasicBlock
+// ---------------------------------------------------------------------------
+class BasicBlock {
+  init(name) {
+    this.name     = name;
+    this.inEdges  = [];
+    this.outEdges = [];
+  }
+
+  getInEdges()  { return this.inEdges; }
+  getOutEdges() { return this.outEdges; }
+  getNumPred()  { return len(this.inEdges); }
+
+  addOutEdge(to)   { this.outEdges.append(to); }
+  addInEdge(from)  { this.inEdges.append(from); }
+}
+
+// ---------------------------------------------------------------------------
+// BasicBlockEdge — connects two blocks in a CFG
+// ---------------------------------------------------------------------------
+class BasicBlockEdge {
+  init(cfg, fromName, toName) {
+    this.from = cfg.createNode(fromName);
+    this.to   = cfg.createNode(toName);
+    this.from.addOutEdge(this.to);
+    this.to.addInEdge(this.from);
+    cfg.addEdge(this);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ControlFlowGraph
+// ---------------------------------------------------------------------------
+// basicBlockMap is a Lox++ list indexed by block name (integer).
+// We grow it on demand, initialising slots to nil.
+
+fun bbMapGet(bbMap, name) {
+  if (name >= len(bbMap)) return nil;
+  return bbMap[name];
+}
+
+fun bbMapSet(bbMap, name, node) {
+  // Grow list with nils until index is reachable
+  while (len(bbMap) <= name) {
+    bbMap.append(nil);
+  }
+  bbMap[name] = node;
+}
+
+class ControlFlowGraph {
+  init() {
+    this.startNode     = nil;
+    this.basicBlockMap = []; // list indexed by block name
+    this.edgeList      = [];
+    this.numNodes      = 0;
+  }
+
+  createNode(name) {
+    var node = bbMapGet(this.basicBlockMap, name);
+    if (node != nil) return node;
+    node = BasicBlock(name);
+    bbMapSet(this.basicBlockMap, name, node);
+    this.numNodes = this.numNodes + 1;
+    if (this.numNodes == 1) this.startNode = node;
+    return node;
+  }
+
+  addEdge(edge) {
+    this.edgeList.append(edge);
+  }
+
+  getNumNodes() { return this.numNodes; }
+
+  getStartBasicBlock() { return this.startNode; }
+
+  // Returns the basicBlockMap list (sparse — some slots may be nil)
+  getBasicBlocks() { return this.basicBlockMap; }
+}
+
+// ---------------------------------------------------------------------------
+// SimpleLoop — loop node in the loop structure graph
+// ---------------------------------------------------------------------------
+class SimpleLoop {
+  init(bb, isReducible) {
+    this.isReducible  = isReducible;
+    this.parent       = nil;
+    this.isRoot_      = false;
+    this.nestingLevel = 0;
+    this.depthLevel   = 0;
+    this.basicBlocks  = []; // identity set (list, no duplicates by ref)
+    this.children     = []; // identity set of child loops
+    this.header       = bb;
+    this.counter      = 0;
+
+    if (bb != nil) this.basicBlocks.append(bb);
+  }
+
+  addNode(bb) {
+    // Only add if not already present (identity check)
+    var i = 0;
+    while (i < len(this.basicBlocks)) {
+      if (this.basicBlocks[i] == bb) return;
+      i = i + 1;
+    }
+    this.basicBlocks.append(bb);
+  }
+
+  addChildLoop(loop) {
+    var i = 0;
+    while (i < len(this.children)) {
+      if (this.children[i] == loop) return;
+      i = i + 1;
+    }
+    this.children.append(loop);
+  }
+
+  getChildren()     { return this.children; }
+  getParent()       { return this.parent; }
+  getNestingLevel() { return this.nestingLevel; }
+  isRoot()          { return this.isRoot_; }
+
+  setParent(parent) {
+    this.parent = parent;
+    this.parent.addChildLoop(this);
+  }
+
+  setIsRoot()         { this.isRoot_ = true; }
+  setCounter(value)   { this.counter = value; }
+  setNestingLevel(level) {
+    this.nestingLevel = level;
+    if (level == 0) this.setIsRoot();
+  }
+  setDepthLevel(level) { this.depthLevel = level; }
+}
+
+// ---------------------------------------------------------------------------
+// LoopStructureGraph
+// ---------------------------------------------------------------------------
+class LoopStructureGraph {
+  init() {
+    this.loopCounter = 0;
+    this.loops       = [];
+    this.root        = SimpleLoop(nil, true);
+    this.root.setNestingLevel(0);
+    this.root.setCounter(this.loopCounter);
+    this.loopCounter = this.loopCounter + 1;
+    this.loops.append(this.root);
+  }
+
+  createNewLoop(bb, isReducible) {
+    var loop = SimpleLoop(bb, isReducible);
+    loop.setCounter(this.loopCounter);
+    this.loopCounter = this.loopCounter + 1;
+    this.loops.append(loop);
+    return loop;
+  }
+
+  calculateNestingLevel() {
+    // Link all 1st-level loops to the root
+    var i = 0;
+    while (i < len(this.loops)) {
+      var liter = this.loops[i];
+      if (!liter.isRoot()) {
+        if (liter.getParent() == nil) liter.setParent(this.root);
+      }
+      i = i + 1;
+    }
+    this.calculateNestingLevelRec(this.root, 0);
+  }
+
+  calculateNestingLevelRec(loop, depth) {
+    loop.setDepthLevel(depth);
+    var children = loop.getChildren();
+    var i = 0;
+    while (i < len(children)) {
+      var liter = children[i];
+      this.calculateNestingLevelRec(liter, depth + 1);
+      var newLevel = loop.getNestingLevel();
+      var childLevel = 1 + liter.getNestingLevel();
+      if (childLevel > newLevel) newLevel = childLevel;
+      loop.setNestingLevel(newLevel);
+      i = i + 1;
+    }
+  }
+
+  getNumLoops() { return len(this.loops); }
+}
+
+// ---------------------------------------------------------------------------
+// UnionFindNode
+// ---------------------------------------------------------------------------
+class UnionFindNode {
+  init() {
+    this.parent    = nil;
+    this.bb        = nil;
+    this.dfsNumber = 0;
+    this.loop      = nil;
+  }
+
+  initNode(bb, dfsNumber) {
+    this.parent    = this;
+    this.bb        = bb;
+    this.dfsNumber = dfsNumber;
+    this.loop      = nil;
+  }
+
+  // Find with path compression
+  findSet() {
+    var nodeList = [];
+    var node = this;
+    while (node != node.parent) {
+      if (node.parent != node.parent.parent) {
+        nodeList.append(node);
+      }
+      node = node.parent;
+    }
+    // Path compression: point all collected nodes directly to root
+    var i = 0;
+    while (i < len(nodeList)) {
+      nodeList[i].union(node);
+      i = i + 1;
+    }
+    return node;
+  }
+
+  union(basicBlock) {
+    this.parent = basicBlock;
+  }
+
+  getBb()        { return this.bb; }
+  getLoop()      { return this.loop; }
+  getDfsNumber() { return this.dfsNumber; }
+  setLoop(loop)  { this.loop = loop; }
+}
+
+// ---------------------------------------------------------------------------
+// IntSet — a set of integers (for nonBackPreds, which holds DFS numbers)
+// ---------------------------------------------------------------------------
+class IntSet {
+  init() {
+    this.items = [];
+  }
+
+  add(n) {
+    // Only add if not already present
+    var i = 0;
+    while (i < len(this.items)) {
+      if (this.items[i] == n) return;
+      i = i + 1;
+    }
+    this.items.append(n);
+  }
+
+  size() { return len(this.items); }
+
+  forEach(fn) {
+    var i = 0;
+    while (i < len(this.items)) {
+      fn.call(this.items[i]);
+      i = i + 1;
+    }
+  }
+
+  clear() { this.items = []; }
+}
+
+// ---------------------------------------------------------------------------
+// Callable helpers (replace JS arrow functions / lambdas)
+// ---------------------------------------------------------------------------
+
+// For LoopStructureGraph.calculateNestingLevel forEach
+class CalcNestingFn {
+  init(lsg) { this.lsg = lsg; }
+  call(liter) {
+    if (!liter.isRoot()) {
+      if (liter.getParent() == nil) liter.setParent(this.lsg.root);
+    }
+  }
+}
+
+// For HavlakLoopFinder.initAllNodes: mark all bb nodes as UNVISITED
+class MarkUnvisitedFn {
+  init(finder) { this.finder = finder; }
+  call(bb) {
+    if (bb != nil) {
+      this.finder.numberSet(bb, UNVISITED);
+    }
+  }
+}
+
+// For nonBackPreds inner forEach in stepEProcessNonBackPreds
+class StepEFn {
+  init(finder, w, nodePool, workList) {
+    this.finder   = finder;
+    this.w        = w;
+    this.nodePool = nodePool;
+    this.workList = workList;
+  }
+  call(iter) {
+    var y    = this.finder.nodes[iter];
+    var ydash = y.findSet();
+    if (!this.finder.isAncestor(this.w, ydash.getDfsNumber())) {
+      this.finder.type[this.w] = BB_IRREDUCIBLE;
+      this.finder.nonBackPredsAt(this.w).add(ydash.getDfsNumber());
+    } else if (ydash.getDfsNumber() != this.w) {
+      // Check if ydash already in nodePool
+      var found = false;
+      var k = 0;
+      while (k < len(this.nodePool)) {
+        if (this.nodePool[k] == ydash) { found = true; }
+        k = k + 1;
+      }
+      if (!found) {
+        this.workList.append(ydash);
+        this.nodePool.append(ydash);
+      }
+    }
+  }
+}
+
+// For backPreds forEach in stepD
+class StepDFn {
+  init(finder, w, nodePool) {
+    this.finder   = finder;
+    this.w        = w;
+    this.nodePool = nodePool;
+  }
+  call(v) {
+    if (v != this.w) {
+      this.nodePool.append(this.finder.nodes[v].findSet());
+    } else {
+      this.finder.type[this.w] = BB_SELF;
+    }
+  }
+}
+
+// For setLoopAttributes: forEach on nodePool
+class SetLoopAttrFn {
+  init(finder, w, loop) {
+    this.finder = finder;
+    this.w      = w;
+    this.loop   = loop;
+  }
+  call(node) {
+    this.finder.header[node.getDfsNumber()] = this.w;
+    node.union(this.finder.nodes[this.w]);
+    if (node.getLoop() != nil) {
+      node.getLoop().setParent(this.loop);
+    } else {
+      this.loop.addNode(node.getBb());
+    }
+  }
+}
+
+// For processEdges: forEach on inEdges
+class ProcessEdgeFn {
+  init(finder, w) {
+    this.finder = finder;
+    this.w      = w;
+  }
+  call(nodeV) {
+    var v = this.finder.numberAt(nodeV);
+    if (v != UNVISITED) {
+      if (this.finder.isAncestor(this.w, v)) {
+        this.finder.backPredsAt(this.w).append(v);
+      } else {
+        this.finder.nonBackPredsAt(this.w).add(v);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// HavlakLoopFinder
+// ---------------------------------------------------------------------------
+// number: maps BasicBlock → DFS integer. We store these in a parallel list
+// indexed by bb.name (since names are 0-based integers).
+
+class HavlakLoopFinder {
+  init(cfg, lsg) {
+    this.cfg     = cfg;
+    this.lsg     = lsg;
+    this.maxSize = 0;
+
+    // These are resized arrays (Lox++ lists)
+    this.nonBackPreds = []; // list of IntSet, indexed by DFS number
+    this.backPreds    = []; // list of lists (of integers), indexed by DFS number
+    this.header       = []; // list of integers
+    this.type         = []; // list of integer tags (BB_* constants)
+    this.last         = []; // list of integers (DFS last numbers)
+    this.nodes        = []; // list of UnionFindNode
+
+    // number map: indexed by bb.name → DFS number
+    this.numberMap    = [];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Number map helpers (replace IdentityDictionary keyed by BasicBlock)
+  // ---------------------------------------------------------------------------
+  numberAt(bb) {
+    if (bb.name >= len(this.numberMap)) return UNVISITED;
+    var v = this.numberMap[bb.name];
+    if (v == nil) return UNVISITED;
+    return v;
+  }
+
+  numberSet(bb, n) {
+    while (len(this.numberMap) <= bb.name) {
+      this.numberMap.append(nil);
+    }
+    this.numberMap[bb.name] = n;
+  }
+
+  numberRemoveAll() {
+    this.numberMap = [];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Accessors for per-node arrays
+  // ---------------------------------------------------------------------------
+  nonBackPredsAt(w) { return this.nonBackPreds[w]; }
+  backPredsAt(w)    { return this.backPreds[w]; }
+
+  // ---------------------------------------------------------------------------
+  // isAncestor(w, v): w is ancestor of v iff w <= v <= last[w]
+  // ---------------------------------------------------------------------------
+  isAncestor(w, v) {
+    return (w <= v) and (v <= this.last[w]);
+  }
+
+  // ---------------------------------------------------------------------------
+  // DFS traversal — iterative to avoid call-stack overflow on large CFGs.
+  // Uses three parallel lists (sNode, sId, sIdx) as the DFS stack so that
+  // each frame access is a single list lookup rather than a nested list read.
+  // globalLastId equals the max DFS id in the current subtree at post-order,
+  // matching the semantics of the original recursive algorithm.
+  // ---------------------------------------------------------------------------
+  doDFS(startNode, startId) {
+    this.nodes[startId].initNode(startNode, startId);
+    this.numberSet(startNode, startId);
+
+    var globalLastId = startId;
+    var sNode = [startNode];
+    var sId   = [startId];
+    var sIdx  = [0];
+
+    while (len(sNode) > 0) {
+      var top     = len(sNode) - 1;
+      var node    = sNode[top];
+      var id      = sId[top];
+      var edgeIdx = sIdx[top];
+      var edges   = node.getOutEdges();
+
+      if (edgeIdx < len(edges)) {
+        sIdx[top] = edgeIdx + 1;
+        var target = edges[edgeIdx];
+        if (this.numberAt(target) == UNVISITED) {
+          globalLastId = globalLastId + 1;
+          var newId = globalLastId;
+          this.nodes[newId].initNode(target, newId);
+          this.numberSet(target, newId);
+          sNode.append(target);
+          sId.append(newId);
+          sIdx.append(0);
+        }
+      } else {
+        this.last[id] = globalLastId;
+        sNode.pop();
+        sId.pop();
+        sIdx.pop();
+      }
+    }
+
+    return globalLastId;
+  }
+
+  initAllNodes() {
+    // Mark all nodes as unvisited
+    var bbMap = this.cfg.getBasicBlocks();
+    var i = 0;
+    while (i < len(bbMap)) {
+      var bb = bbMap[i];
+      if (bb != nil) this.numberSet(bb, UNVISITED);
+      i = i + 1;
+    }
+    this.doDFS(this.cfg.getStartBasicBlock(), 0);
+  }
+
+  identifyEdges(size) {
+    var w = 0;
+    while (w < size) {
+      this.header[w] = 0;
+      this.type[w]   = BB_NONHEADER;
+      var nodeW = this.nodes[w].getBb();
+      if (nodeW == nil) {
+        this.type[w] = BB_DEAD;
+      } else {
+        this.processEdges(nodeW, w);
+      }
+      w = w + 1;
+    }
+  }
+
+  processEdges(nodeW, w) {
+    if (nodeW.getNumPred() > 0) {
+      var fn = ProcessEdgeFn(this, w);
+      var edges = nodeW.getInEdges();
+      var i = 0;
+      while (i < len(edges)) {
+        fn.call(edges[i]);
+        i = i + 1;
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Main loop-finding algorithm (Havlak / Tarjan)
+  // ---------------------------------------------------------------------------
+  findLoops() {
+    if (this.cfg.getStartBasicBlock() == nil) return;
+
+    var size = this.cfg.getNumNodes();
+
+    // Reset per-invocation structures
+    this.nonBackPreds = [];
+    this.backPreds    = [];
+    this.numberRemoveAll();
+
+    if (size > this.maxSize) {
+      this.header  = [];
+      this.type    = [];
+      this.last    = [];
+      this.nodes   = [];
+      this.maxSize = size;
+    }
+
+    var i = 0;
+    while (i < size) {
+      this.nonBackPreds.append(IntSet());
+      this.backPreds.append([]);
+      if (i >= len(this.nodes)) {
+        this.nodes.append(UnionFindNode());
+      } else {
+        this.nodes[i] = UnionFindNode();
+      }
+      // Ensure header/type/last arrays are long enough
+      while (len(this.header) <= i) { this.header.append(0); }
+      while (len(this.type)   <= i) { this.type.append(BB_NONHEADER); }
+      while (len(this.last)   <= i) { this.last.append(0); }
+      i = i + 1;
+    }
+
+    this.initAllNodes();
+    this.identifyEdges(size);
+
+    // Start node is root of all other loops.
+    this.header[0] = 0;
+
+    // Step c: process nodes in reverse DFS preorder
+    var w = size - 1;
+    while (w >= 0) {
+      var nodePool = [];
+      var nodeW    = this.nodes[w].getBb();
+
+      if (nodeW != nil) {
+        this.stepD(w, nodePool);
+
+        // Copy nodePool to workList
+        var workList = [];
+        var k = 0;
+        while (k < len(nodePool)) {
+          workList.append(nodePool[k]);
+          k = k + 1;
+        }
+
+        if (len(nodePool) != 0) this.type[w] = BB_REDUCIBLE;
+
+        // Process workList
+        while (len(workList) > 0) {
+          var x = workList[0];
+          // Remove first element
+          workList = workList[1:len(workList)];
+
+          var nonBackSize = this.nonBackPredsAt(x.getDfsNumber()).size();
+          if (nonBackSize > MAXNONBACKPREDS) return;
+
+          this.stepEProcessNonBackPreds(w, nodePool, workList, x);
+        }
+
+        // Create loop if needed
+        if ((len(nodePool) > 0) or (this.type[w] == BB_SELF)) {
+          var loop = this.lsg.createNewLoop(nodeW, this.type[w] != BB_IRREDUCIBLE);
+          this.setLoopAttributes(w, nodePool, loop);
+        }
+      }
+      w = w - 1;
+    }
+  }
+
+  stepEProcessNonBackPreds(w, nodePool, workList, x) {
+    var fn = StepEFn(this, w, nodePool, workList);
+    this.nonBackPredsAt(x.getDfsNumber()).forEach(fn);
+  }
+
+  setLoopAttributes(w, nodePool, loop) {
+    this.nodes[w].setLoop(loop);
+    var i = 0;
+    while (i < len(nodePool)) {
+      var node = nodePool[i];
+      this.header[node.getDfsNumber()] = w;
+      node.union(this.nodes[w]);
+      if (node.getLoop() != nil) {
+        node.getLoop().setParent(loop);
+      } else {
+        loop.addNode(node.getBb());
+      }
+      i = i + 1;
+    }
+  }
+
+  stepD(w, nodePool) {
+    var fn = StepDFn(this, w, nodePool);
+    var bpList = this.backPredsAt(w);
+    var i = 0;
+    while (i < len(bpList)) {
+      fn.call(bpList[i]);
+      i = i + 1;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// LoopTesterApp
+// ---------------------------------------------------------------------------
+class LoopTesterApp {
+  init() {
+    this.cfg = ControlFlowGraph();
+    this.lsg = LoopStructureGraph();
+    this.cfg.createNode(0);
+  }
+
+  // Create 4 blocks forming a diamond (if/then/else shape)
+  buildDiamond(start) {
+    var bb0 = start;
+    BasicBlockEdge(this.cfg, bb0,     bb0 + 1);
+    BasicBlockEdge(this.cfg, bb0,     bb0 + 2);
+    BasicBlockEdge(this.cfg, bb0 + 1, bb0 + 3);
+    BasicBlockEdge(this.cfg, bb0 + 2, bb0 + 3);
+    return bb0 + 3;
+  }
+
+  // Connect two existing nodes
+  buildConnect(start, end) {
+    BasicBlockEdge(this.cfg, start, end);
+  }
+
+  // Straight connected sequence of n blocks
+  buildStraight(start, n) {
+    var i = 0;
+    while (i < n) {
+      this.buildConnect(start + i, start + i + 1);
+      i = i + 1;
+    }
+    return start + n;
+  }
+
+  // A simple loop with two diamonds
+  buildBaseLoop(from) {
+    var header   = this.buildStraight(from, 1);
+    var diamond1 = this.buildDiamond(header);
+    var d11      = this.buildStraight(diamond1, 1);
+    var diamond2 = this.buildDiamond(d11);
+    var footer   = this.buildStraight(diamond2, 1);
+    this.buildConnect(diamond2, d11);
+    this.buildConnect(diamond1, header);
+    this.buildConnect(footer, from);
+    footer = this.buildStraight(footer, 1);
+    return footer;
+  }
+
+  main(numDummyLoops, findLoopIterations, parLoops, pparLoops, ppparLoops) {
+    this.constructSimpleCFG();
+    this.addDummyLoops(numDummyLoops);
+    this.constructCFG(parLoops, pparLoops, ppparLoops);
+
+    this.findLoops(this.lsg);
+    var i = 0;
+    while (i < findLoopIterations) {
+      this.findLoops(LoopStructureGraph());
+      i = i + 1;
+    }
+
+    this.lsg.calculateNestingLevel();
+    return this.lsg.getNumLoops();
+  }
+
+  constructCFG(parLoops, pparLoops, ppparLoops) {
+    var n = 2;
+    var parlooptrees = 0;
+    while (parlooptrees < parLoops) {
+      this.cfg.createNode(n + 1);
+      this.buildConnect(2, n + 1);
+      n = n + 1;
+
+      var i = 0;
+      while (i < pparLoops) {
+        var top = n;
+        n = this.buildStraight(n, 1);
+        var j = 0;
+        while (j < ppparLoops) {
+          n = this.buildBaseLoop(n);
+          j = j + 1;
+        }
+        var bottom = this.buildStraight(n, 1);
+        this.buildConnect(n, top);
+        n = bottom;
+        i = i + 1;
+      }
+      this.buildConnect(n, 1);
+      parlooptrees = parlooptrees + 1;
+    }
+  }
+
+  addDummyLoops(numDummyLoops) {
+    var dummyloop = 0;
+    while (dummyloop < numDummyLoops) {
+      this.findLoops(this.lsg);
+      dummyloop = dummyloop + 1;
+    }
+  }
+
+  findLoops(loopStructure) {
+    var finder = HavlakLoopFinder(this.cfg, loopStructure);
+    finder.findLoops();
+  }
+
+  constructSimpleCFG() {
+    this.cfg.createNode(0);
+    this.buildBaseLoop(0);
+    this.cfg.createNode(1);
+    BasicBlockEdge(this.cfg, 0, 2);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Benchmark wrapper
+// ---------------------------------------------------------------------------
+class Havlak {
+  benchmark() {
+    // Reduced from the JS params (15,50,10,10,5) because the original recursive
+    // doDFS overflows Lox++'s 256-frame call stack for large CFGs.  The
+    // iterative rewrite handles any depth but is slower due to list overhead,
+    // so we scale parameters down to keep runtimes comparable.
+    // (5,10,5,5,2) → 192 loops expected.
+    var result = LoopTesterApp().main(5, 10, 5, 5, 2);
+    return result == 192;
+  }
+}
+
+var _bench = Havlak();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "Havlak: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "Havlak: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

@@ -1,0 +1,180 @@
+// NBody — n-body simulation. AWFY benchmark suite.
+// Copyright (c) 2015-2016 Stefan Marr. MIT License.
+// Based on the Java SOM benchmark; 5 bodies, 250000 steps.
+// Expected result: -0.1690859889909308 (energy after steps)
+
+var SOLAR_MASS = 39.478417604357432;
+var DAYS_PER_YEAR = 365.24;
+
+class Body {
+  init(x, y, z, vx, vy, vz, mass) {
+    this.x    = x;
+    this.y    = y;
+    this.z    = z;
+    this.vx   = vx * DAYS_PER_YEAR;
+    this.vy   = vy * DAYS_PER_YEAR;
+    this.vz   = vz * DAYS_PER_YEAR;
+    this.mass = mass * SOLAR_MASS;
+  }
+
+  offsetMomentum(px, py, pz) {
+    this.vx = (0 - px) / SOLAR_MASS;
+    this.vy = (0 - py) / SOLAR_MASS;
+    this.vz = (0 - pz) / SOLAR_MASS;
+  }
+}
+
+fun sun() {
+  return Body(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+}
+
+fun jupiter() {
+  return Body(
+    4.84143144246472090,
+    -1.16032004402742839,
+    -0.103622044471123109,
+    0.00166007664274403694,
+    0.00769901118419740425,
+    -0.0000690460016972063023,
+    0.000954791938424326609
+  );
+}
+
+fun saturn() {
+  return Body(
+    8.34336671824457987,
+    4.12479856412430479,
+    -0.403523417114321381,
+    -0.00276742510726862411,
+    0.00499379184143987318,
+    0.0000230417297573763929,
+    0.000285885980666130812
+  );
+}
+
+fun uranus() {
+  return Body(
+    12.8943695621391310,
+    -15.1111514016986312,
+    -0.223307578892655734,
+    0.00296460137564761618,
+    0.00237847173959480950,
+    -0.0000296589568540237556,
+    0.0000436624404335156298
+  );
+}
+
+fun neptune() {
+  return Body(
+    15.3796971148509165,
+    -25.9193146099879641,
+    0.179258772950371181,
+    0.00268067772490389322,
+    0.00162824170038242295,
+    -0.0000951592254519715870,
+    0.0000515138902046611451
+  );
+}
+
+class NBodySystem {
+  init() {
+    this.bodies = [sun(), jupiter(), saturn(), uranus(), neptune()];
+    var px = 0.0;
+    var py = 0.0;
+    var pz = 0.0;
+    var i = 0;
+    while (i < len(this.bodies)) {
+      var b = this.bodies[i];
+      px = px + b.vx * b.mass;
+      py = py + b.vy * b.mass;
+      pz = pz + b.vz * b.mass;
+      i = i + 1;
+    }
+    this.bodies[0].offsetMomentum(px, py, pz);
+  }
+
+  advance(dt) {
+    var n = len(this.bodies);
+    var i = 0;
+    while (i < n) {
+      var bi = this.bodies[i];
+      var j = i + 1;
+      while (j < n) {
+        var bj = this.bodies[j];
+        var dx = bi.x - bj.x;
+        var dy = bi.y - bj.y;
+        var dz = bi.z - bj.z;
+        var dSquared = dx * dx + dy * dy + dz * dz;
+        var distance = math.sqrt(dSquared);
+        var mag = dt / (dSquared * distance);
+        bi.vx = bi.vx - dx * bj.mass * mag;
+        bi.vy = bi.vy - dy * bj.mass * mag;
+        bi.vz = bi.vz - dz * bj.mass * mag;
+        bj.vx = bj.vx + dx * bi.mass * mag;
+        bj.vy = bj.vy + dy * bi.mass * mag;
+        bj.vz = bj.vz + dz * bi.mass * mag;
+        j = j + 1;
+      }
+      i = i + 1;
+    }
+    i = 0;
+    while (i < n) {
+      var b = this.bodies[i];
+      b.x = b.x + dt * b.vx;
+      b.y = b.y + dt * b.vy;
+      b.z = b.z + dt * b.vz;
+      i = i + 1;
+    }
+  }
+
+  energy() {
+    var e = 0.0;
+    var n = len(this.bodies);
+    var i = 0;
+    while (i < n) {
+      var bi = this.bodies[i];
+      e = e + 0.5 * bi.mass * (bi.vx * bi.vx + bi.vy * bi.vy + bi.vz * bi.vz);
+      var j = i + 1;
+      while (j < n) {
+        var bj = this.bodies[j];
+        var dx = bi.x - bj.x;
+        var dy = bi.y - bj.y;
+        var dz = bi.z - bj.z;
+        var distance = math.sqrt(dx * dx + dy * dy + dz * dz);
+        e = e - bi.mass * bj.mass / distance;
+        j = j + 1;
+      }
+      i = i + 1;
+    }
+    return e;
+  }
+}
+
+class NBody {
+  benchmark() {
+    var system = NBodySystem();
+    var steps = 250000;
+    var i = 0;
+    while (i < steps) {
+      system.advance(0.01);
+      i = i + 1;
+    }
+    return system.energy();
+  }
+}
+
+var _bench = NBody();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "NBody: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "NBody: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

@@ -1,0 +1,20 @@
+FROM python:3.12-slim
+
+# Pinned upstream commits — see benchmarks/SOURCES.md
+ARG AWFY_COMMIT=74306fec151070fd07157cefeacf19e7e0bcdc89
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Fetch AWFY Python benchmarks at pinned commit
+# Uses --strip-components=1 (no --wildcards: GNU tar only, not needed here)
+RUN mkdir -p /tmp/awfy /benchmarks/awfy/Python && \
+    curl -fsSL "https://github.com/smarr/are-we-fast-yet/archive/${AWFY_COMMIT}.tar.gz" \
+    | tar xz --strip-components=1 -C /tmp/awfy && \
+    cp -r /tmp/awfy/benchmarks/Python/. /benchmarks/awfy/Python/ && \
+    rm -rf /tmp/awfy
+
+# Wrapper: invokes a single AWFY benchmark via the Run harness
+COPY benchmarks/containers/run_awfy_python.py /benchmarks/run_bench.py
+
+WORKDIR /benchmarks

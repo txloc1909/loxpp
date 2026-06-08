@@ -1,0 +1,81 @@
+// Fasta — DNA sequence generation using a Linear Congruential Generator.
+// CLBG benchmark: https://benchmarksgame-team.pages.debian.net/benchmarksgame/
+// LCG: seed = (seed * IA + IC) % IM; random = seed / IM
+// IM=139968, IA=3877, IC=29573, initial seed=42
+// Returns n (number of characters "generated") to verify the run completed.
+
+class Fasta {
+  init() {
+    this.seed = 42;
+
+    // IUB ambiguity codes with cumulative probabilities (simplified 4-symbol table)
+    this.iub = [
+      [0.27, "a"],
+      [0.39, "c"],
+      [0.51, "g"],
+      [1.00, "t"]
+    ];
+
+    // Homo sapiens frequency table (cumulative)
+    this.homosapiens = [
+      [0.3029549426680,  "a"],
+      [0.5009432431231,  "c"],
+      [0.6984905094755,  "g"],
+      [1.0000000000000,  "t"]
+    ];
+  }
+
+  nextRandom() {
+    this.seed = (this.seed * 3877 + 29573) % 139968;
+    return this.seed / 139968;
+  }
+
+  selectRandom(table) {
+    var r = this.nextRandom();
+    var i = 0;
+    while (i < len(table)) {
+      if (r <= table[i][0]) return table[i][1];
+      i = i + 1;
+    }
+    return table[len(table) - 1][1];
+  }
+
+  benchmark() {
+    var n = 1000;
+
+    // Reset LCG seed for reproducibility
+    this.seed = 42;
+
+    // Generate n characters from the IUB table
+    var count = 0;
+    while (count < n) {
+      this.selectRandom(this.iub);
+      count = count + 1;
+    }
+
+    // Generate n characters from the Homo sapiens table
+    count = 0;
+    while (count < n) {
+      this.selectRandom(this.homosapiens);
+      count = count + 1;
+    }
+
+    return n;
+  }
+}
+
+var _bench = Fasta();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "Fasta: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "Fasta: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

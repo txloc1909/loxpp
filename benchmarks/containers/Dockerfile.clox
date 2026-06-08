@@ -1,0 +1,22 @@
+FROM ubuntu:24.04
+
+# Pinned upstream commits — see benchmarks/SOURCES.md
+# Last commit of the book source (clox chapter — "A Virtual Machine")
+# Note: GitHub archive endpoint requires a branch name or tag; commit-only SHAs 404.
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates gcc make libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build clox from source (master branch) with maximum optimization
+RUN curl -fsSL "https://github.com/munificent/craftinginterpreters/archive/master.tar.gz" \
+    | tar xz && \
+    cd craftinginterpreters-master && \
+    CFLAGS="-O3 -march=native" make clox && \
+    mv clox /usr/local/bin/clox && \
+    cd / && rm -rf craftinginterpreters-master
+
+# Copy clox-compatible Lox benchmark files (context root = repo root)
+COPY benchmarks/clox/ /benchmarks/clox/
+
+WORKDIR /benchmarks

@@ -1,0 +1,55 @@
+// Mandelbrot — Mandelbrot set computation. AWFY/CLBG benchmark.
+// Copyright (c) 2015-2016 Stefan Marr. MIT License.
+// size=750, returns the count of interior points.
+
+class Mandelbrot {
+  benchmark() {
+    return this.mandelbrot(750);
+  }
+
+  mandelbrot(size) {
+    var sum = 0;
+    var y = 0;
+    while (y < size) {
+      var ci = (2.0 * y / size) - 1.0;
+      var x = 0;
+      while (x < size) {
+        var zr = 0.0;
+        var zi = 0.0;
+        var cr = (2.0 * x / size) - 1.5;
+        var z = 0;
+        var notEscaped = true;
+        while (z < 50 and notEscaped) {
+          var tr = zr * zr - zi * zi + cr;
+          var ti = 2.0 * zr * zi + ci;
+          zr = tr;
+          zi = ti;
+          if (zr * zr + zi * zi > 4.0) {
+            notEscaped = false;
+          }
+          z = z + 1;
+        }
+        if (notEscaped) sum = sum + 1;
+        x = x + 1;
+      }
+      y = y + 1;
+    }
+    return sum;
+  }
+}
+
+var _bench = Mandelbrot();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "Mandelbrot: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "Mandelbrot: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

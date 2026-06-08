@@ -1,0 +1,53 @@
+// Permute — permutation generation. AWFY benchmark suite.
+// Copyright (c) 2015-2016 Stefan Marr. MIT License.
+
+class Permute {
+  init() {
+    this.count = 0;
+    this.v = nil;
+  }
+
+  benchmark() {
+    this.count = 0;
+    this.v = [0, 0, 0, 0, 0, 0];
+    this.permute(6);
+    return this.count;
+  }
+
+  permute(n) {
+    this.count = this.count + 1;
+    if (n != 0) {
+      var n1 = n - 1;
+      this.permute(n1);
+      var i = n1;
+      while (i >= 0) {
+        this.swap(n1, i);
+        this.permute(n1);
+        this.swap(n1, i);
+        i = i - 1;
+      }
+    }
+  }
+
+  swap(i, j) {
+    var tmp = this.v[i];
+    this.v[i] = this.v[j];
+    this.v[j] = tmp;
+  }
+}
+
+var _bench = Permute();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "Permute: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "Permute: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

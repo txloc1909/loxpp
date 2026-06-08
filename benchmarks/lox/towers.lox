@@ -1,0 +1,83 @@
+// Towers — Towers of Hanoi with disk objects. AWFY benchmark suite.
+// Copyright (c) 2015-2016 Stefan Marr. MIT License.
+// 13 discs yields 8191 moves.
+
+class TowersDisk {
+  init(size) { this.size = size; }
+}
+
+class Towers {
+  init() {
+    this.piles = [nil, nil, nil];
+    this.movesDone = 0;
+  }
+
+  benchmark() {
+    this.piles = [[], [], []];
+    this.movesDone = 0;
+    this.buildTowerAt(0, 13);
+    this.moveDisks(13, 0, 1);
+    return this.movesDone;
+  }
+
+  pushDisk(disk, pile) {
+    var top = this.topDisk(pile);
+    if (top != nil and disk.size >= top.size) {
+      print "Error: pushing disk onto smaller disk";
+    }
+    this.piles[pile].append(disk);
+  }
+
+  topDisk(pile) {
+    var p = this.piles[pile];
+    if (len(p) == 0) return nil;
+    return p[len(p) - 1];
+  }
+
+  popDisk(pile) {
+    var p = this.piles[pile];
+    var top = p[len(p) - 1];
+    this.piles[pile] = p[0:len(p) - 1];
+    return top;
+  }
+
+  moveTopDisk(fromPile, toPile) {
+    this.pushDisk(this.popDisk(fromPile), toPile);
+    this.movesDone = this.movesDone + 1;
+  }
+
+  buildTowerAt(pile, disks) {
+    var i = disks;
+    while (i >= 0) {
+      this.pushDisk(TowersDisk(i), pile);
+      i = i - 1;
+    }
+  }
+
+  moveDisks(disks, fromPile, toPile) {
+    if (disks == 1) {
+      this.moveTopDisk(fromPile, toPile);
+      return;
+    }
+    var otherPile = 3 - fromPile - toPile;
+    this.moveDisks(disks - 1, fromPile, otherPile);
+    this.moveTopDisk(fromPile, toPile);
+    this.moveDisks(disks - 1, otherPile, toPile);
+  }
+}
+
+var _bench = Towers();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "Towers: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "Towers: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";
