@@ -2,12 +2,12 @@
 """Multi-language, multi-suite benchmark runner for Lox++.
 
 Runs benchmarks defined in manifest.toml via podman containers (or directly
-on the host with --no-container), normalising heterogeneous output formats
-into a single results table.
+on the host with --no-container for lox only), normalising heterogeneous output
+formats into a single results table.
 
 Usage examples
 --------------
-# Run all lox++ benchmarks, no container:
+# Run all lox++ benchmarks without a container (needs build/loxpp):
   python benchmarks/runner.py --lang lox --no-container
 
 # Run a single benchmark across all languages:
@@ -62,21 +62,32 @@ class RunResult:
 # Output adapters
 # ---------------------------------------------------------------------------
 
+# Matches integers, decimals, and scientific notation (e.g. 3.99692e+06)
+_NUM = r"[\d.eE+\-]+"
+
+
 def _parse_awfy(stdout: str, bench: str) -> tuple[list[float], Optional[float], Optional[float]]:
-    """Parse AWFY-format lines:  Name: iterations=1 runtime: X us"""
-    iter_us = []
-    average_us = None
-    total_us = None
+    """Parse AWFY-format lines:  Name: iterations=1 runtime: X us
+
+    Lox++ may emit large numbers in scientific notation (e.g. 3.99e+06 us),
+    so we match _NUM instead of the narrower [\\d.]+ pattern.
+    Falls back to computing average from per-iteration data if the summary
+    line is absent or unparseable.
+    """
+    iter_us: list[float] = []
+    average_us: Optional[float] = None
+    total_us: Optional[float] = None
     for line in stdout.splitlines():
-        # Per-iteration line
-        m = re.search(r"runtime:\s*([\d.]+)\s*us", line)
+        m = re.search(rf"runtime:\s*({_NUM})\s*us", line)
         if m and "average:" not in line:
             iter_us.append(float(m.group(1)))
-        # Summary line
-        m2 = re.search(r"average:\s*([\d.]+)\s*us\s+total:\s*([\d.]+)\s*us", line)
+        m2 = re.search(rf"average:\s*({_NUM})\s*us\s+total:\s*({_NUM})\s*us", line)
         if m2:
             average_us = float(m2.group(1))
             total_us = float(m2.group(2))
+    if average_us is None and iter_us:
+        average_us = sum(iter_us) / len(iter_us)
+        total_us = sum(iter_us)
     return iter_us, average_us, total_us
 
 
@@ -98,8 +109,20 @@ def _parse_clbg(wall_ms: float) -> tuple[list[float], Optional[float], Optional[
     return [wall_us], wall_us, wall_us
 
 
-def _parse_raw(wall_ms: float, stdout: str) -> tuple[list[float], Optional[float], Optional[float]]:
-    """clox: external wall time, stdout printed as-is for manual correctness check."""
+def _parse_clox(stdout: str) -> tuple[list[float], Optional[float], Optional[float]]:
+    """clox benchmarks print: result-line, then elapsed-seconds on the last line."""
+    lines = [ln.strip() for ln in stdout.splitlines() if ln.strip()]
+    if len(lines) >= 2:
+        try:
+            elapsed_us = float(lines[-1]) * 1_000_000
+            return [elapsed_us], elapsed_us, elapsed_us
+        except ValueError:
+            pass
+    return [], None, None
+
+
+def _parse_raw(wall_ms: float) -> tuple[list[float], Optional[float], Optional[float]]:
+    """Fallback: use wall-clock time."""
     wall_us = wall_ms * 1000
     return [wall_us], wall_us, wall_us
 
@@ -168,14 +191,14 @@ def run_benchmark(
     file = bench_cfg["file"]
     cmd = _resolve_cmd(lang_cfg, file)
 
-    # Override lox++ binary when running without container
+    # --no-container only affects lox++; all other languages always use containers.
     if lang == "lox" and no_container:
         binary = lox_binary or str(BENCHMARKS_DIR.parent / "build" / "loxpp")
         lox_file = str(BENCHMARKS_DIR / "lox" / file)
         cmd = [binary, lox_file]
 
     try:
-        if no_container or lang == "lox":
+        if lang == "lox" and no_container:
             stdout, stderr, wall_ms, rc = run_direct(cmd, timeout)
         else:
             mount = lang_cfg.get("mount")
@@ -196,8 +219,10 @@ def run_benchmark(
         iter_us, avg, total = _parse_wren(stdout)
     elif adapter == "clbg":
         iter_us, avg, total = _parse_clbg(wall_ms)
-    else:  # raw / clox
-        iter_us, avg, total = _parse_raw(wall_ms, stdout)
+    elif adapter == "clox":
+        iter_us, avg, total = _parse_clox(stdout)
+    else:  # raw
+        iter_us, avg, total = _parse_raw(wall_ms)
 
     return RunResult(
         bench=bench, lang=lang, suite=suite, adapter=adapter, ok=ok,
