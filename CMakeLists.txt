@@ -73,6 +73,15 @@ if(LOXPP_STRESS_GC)
     target_compile_definitions(loxpp PRIVATE LOXPP_STRESS_GC)
 endif()
 
+# Value representation: NaN-tagged 8-byte word (default) vs portable
+# std::variant (16 bytes). Turn OFF for platforms where heap pointers may
+# exceed 48 bits or where the IEEE 754 bit-pattern assumptions do not hold.
+option(LOXPP_NAN_TAGGING
+    "Use NaN-tagged 8-byte Value instead of std::variant" ON)
+if(LOXPP_NAN_TAGGING)
+    target_compile_definitions(loxpp PRIVATE LOXPP_NAN_TAGGING)
+endif()
+
 # Readline support for the REPL.
 find_library(READLINE_LIB readline)
 find_path(READLINE_INCLUDE_DIR readline/readline.h)

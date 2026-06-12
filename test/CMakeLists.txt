@@ -1,5 +1,11 @@
 find_package(GTest REQUIRED)
 
+# Propagate the NaN-tagging selection (inherited from the top-level option) to
+# every test target, which compile their own copies of src/*.cpp.
+if(LOXPP_NAN_TAGGING)
+    add_compile_definitions(LOXPP_NAN_TAGGING)
+endif()
+
 set(ALLOC_SRCS
     ${PROJECT_SOURCE_DIR}/src/memory_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/object.cpp
