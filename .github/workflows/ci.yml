@@ -38,7 +38,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        preset: [debug, release]
+        # NaN-tagged (debug, release) is the default Value representation;
+        # the *-variant presets exercise the std::variant fallback.
+        preset: [debug, release, debug-variant, release-variant]
     steps:
       - uses: actions/checkout@v4
 
