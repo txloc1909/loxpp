@@ -14,13 +14,13 @@
 #include <cmath>
 
 static void expect_num(const Value& v, double expected) {
-    ASSERT_TRUE(std::holds_alternative<Number>(v)) << "expected Number";
-    EXPECT_NEAR(std::get<Number>(v), expected, 1e-9);
+    ASSERT_TRUE(is<Number>(v)) << "expected Number";
+    EXPECT_NEAR(as<Number>(v), expected, 1e-9);
 }
 
 static void expect_bool(const Value& v, bool expected) {
-    ASSERT_TRUE(std::holds_alternative<bool>(v)) << "expected bool";
-    EXPECT_EQ(std::get<bool>(v), expected);
+    ASSERT_TRUE(is<bool>(v)) << "expected bool";
+    EXPECT_EQ(as<bool>(v), expected);
 }
 
 // ===========================================================================

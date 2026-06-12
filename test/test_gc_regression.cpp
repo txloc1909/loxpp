@@ -87,7 +87,7 @@ TEST(GcRegression, Bug32_ObjFunctionUnrootedInLocalFunDeclaration) {
               InterpretResult::OK);
     auto v = h.getGlobal("result");
     ASSERT_TRUE(v.has_value());
-    EXPECT_DOUBLE_EQ(std::get<Number>(*v), 42.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*v), 42.0);
 }
 
 // ---------------------------------------------------------------------------
@@ -133,5 +133,5 @@ TEST(GcRegression, Bug58_MapSetIndexUAFOnResize) {
               InterpretResult::OK);
     auto v = h.getGlobal("result");
     ASSERT_TRUE(v.has_value());
-    EXPECT_DOUBLE_EQ(std::get<Number>(*v), 99.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*v), 99.0);
 }
