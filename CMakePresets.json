@@ -40,6 +40,22 @@
         "LOXPP_DEBUG_LOG_GC": "OFF",
         "LOXPP_STRESS_GC": "OFF"
       }
+    },
+    {
+      "name": "debug-variant",
+      "inherits": "debug",
+      "description": "Debug build with the portable std::variant Value",
+      "cacheVariables": {
+        "LOXPP_NAN_TAGGING": "OFF"
+      }
+    },
+    {
+      "name": "release-variant",
+      "inherits": "release",
+      "description": "Release build with the portable std::variant Value",
+      "cacheVariables": {
+        "LOXPP_NAN_TAGGING": "OFF"
+      }
     }
   ]
 }
