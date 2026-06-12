@@ -109,3 +109,8 @@ fix: prevent double-free in ObjString destructor
 
 If you'd write "and" in the subject, split the commit. Add a body only when the
 *why* needs explaining.
+
+**Comments:** let the code and the project structure speak for themselves.
+Comment only the non-obvious *why* — a subtle invariant, a constraint not
+visible locally, a deliberate trade-off. Don't narrate *what* the code already
+states or restate the obvious; redundant comments are noise, not help.
