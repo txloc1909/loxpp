@@ -28,6 +28,13 @@ Special IEEE 754 values (positive/negative infinity, NaN) are not directly
 expressible as literals but may arise from certain arithmetic operations. Their
 behavior follows IEEE 754.
 
+> **Implementation note (non-normative).** By default the VM stores every value
+> in an 8-byte NaN-tagged word, packing numbers, `nil`, booleans, and object
+> references into the unused bit patterns of an IEEE 754 quiet NaN. This is an
+> internal encoding only and does not affect any observable behavior; a portable
+> `std::variant` representation is available via the `LOXPP_NAN_TAGGING=OFF`
+> build option.
+
 ### String
 
 An immutable sequence of bytes (interpreted as ASCII). Two strings with

@@ -2,10 +2,10 @@
 
 [![CI](https://github.com/txloc1909/loxpp/actions/workflows/ci.yml/badge.svg)](https://github.com/txloc1909/loxpp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 
 A bytecode-compiled virtual machine for the Lox++ scripting language, written
-in C++17.
+in C++20.
 
 The `++` is both a nod to the implementation language and a tribute to
 [Lox](https://craftinginterpreters.com). Lox++ is its own language, shaped by
