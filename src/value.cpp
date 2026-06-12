@@ -4,10 +4,6 @@
 #include <cstdio>
 #include <cstring>
 
-// These functions are written exclusively against the public is<>/as<>/from<>
-// API so that a single translation unit serves both the std::variant and the
-// NaN-tagged Value representations — no representation-specific branches.
-
 bool operator!(Value value) {
     if (is<bool>(value)) {
         return !as<bool>(value);
