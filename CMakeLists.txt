@@ -11,7 +11,7 @@ if(NOT _git_config_result EQUAL 0)
     message(WARNING "Failed to set core.hooksPath — git hooks will not run automatically.")
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
