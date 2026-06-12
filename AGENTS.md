@@ -86,21 +86,6 @@ git branch -d <type>/<desc>
 
 ---
 
-## Build options
-
-The VM compiles with a **NaN-tagged 8-byte `Value`** by default. To build the
-portable `std::variant` representation instead, configure with
-`-DLOXPP_NAN_TAGGING=OFF` or use the `debug-variant` / `release-variant`
-presets. Both representations are behaviour-identical and verified in CI; the
-variant fallback exists for platforms where heap pointers may exceed 48 bits.
-
-```bash
-cmake --preset release          # NaN-tagged (default)
-cmake --preset release-variant  # std::variant fallback
-```
-
----
-
 ## Conventions
 
 **Branch naming:** `<type>/<short-description>`
