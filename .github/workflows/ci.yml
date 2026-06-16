@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        preset: [debug, release]
+        preset: [debug, release, debug-variant, release-variant]
     steps:
       - uses: actions/checkout@v4
 

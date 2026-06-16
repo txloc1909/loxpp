@@ -11,7 +11,7 @@ if(NOT _git_config_result EQUAL 0)
     message(WARNING "Failed to set core.hooksPath — git hooks will not run automatically.")
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -71,6 +71,15 @@ option(LOXPP_STRESS_GC
     "Force garbage collection on every allocation (sets m_nextGC=0)" ${_debug_default})
 if(LOXPP_STRESS_GC)
     target_compile_definitions(loxpp PRIVATE LOXPP_STRESS_GC)
+endif()
+
+# Value representation: NaN-tagged 8-byte word (default) vs portable
+# std::variant (16 bytes). Turn OFF for platforms where heap pointers may
+# exceed 48 bits or where the IEEE 754 bit-pattern assumptions do not hold.
+option(LOXPP_NAN_TAGGING
+    "Use NaN-tagged 8-byte Value instead of std::variant" ON)
+if(LOXPP_NAN_TAGGING)
+    target_compile_definitions(loxpp PRIVATE LOXPP_NAN_TAGGING)
 endif()
 
 # Readline support for the REPL.

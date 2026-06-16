@@ -10,21 +10,21 @@ class ParserVMTest : public ::testing::Test {};
 
 static void expect_num(const std::string& expr, double expected) {
     Value v = eval_expr(expr);
-    ASSERT_TRUE(std::holds_alternative<Number>(v))
+    ASSERT_TRUE(is<Number>(v))
         << "  expr: " << expr << "\n  expected number, got different type";
-    EXPECT_NEAR(std::get<Number>(v), expected, 1e-9) << "  expr: " << expr;
+    EXPECT_NEAR(as<Number>(v), expected, 1e-9) << "  expr: " << expr;
 }
 
 static void expect_bool(const std::string& expr, bool expected) {
     Value v = eval_expr(expr);
-    ASSERT_TRUE(std::holds_alternative<bool>(v))
+    ASSERT_TRUE(is<bool>(v))
         << "  expr: " << expr << "\n  expected bool, got different type";
-    EXPECT_EQ(std::get<bool>(v), expected) << "  expr: " << expr;
+    EXPECT_EQ(as<bool>(v), expected) << "  expr: " << expr;
 }
 
 static void expect_nil(const std::string& expr) {
     Value v = eval_expr(expr);
-    EXPECT_TRUE(std::holds_alternative<Nil>(v))
+    EXPECT_TRUE(is<Nil>(v))
         << "  expr: " << expr << "\n  expected nil, got different type";
 }
 

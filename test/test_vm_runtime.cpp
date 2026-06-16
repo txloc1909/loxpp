@@ -24,25 +24,22 @@ static void expect_global_num(VMTestHarness& h, const std::string& name,
                               double expected) {
     auto v = h.getGlobal(name);
     ASSERT_TRUE(v.has_value()) << "  global '" << name << "' not defined";
-    ASSERT_TRUE(std::holds_alternative<Number>(*v))
-        << "  global '" << name << "' expected Number";
-    EXPECT_NEAR(std::get<Number>(*v), expected, 1e-9);
+    ASSERT_TRUE(is<Number>(*v)) << "  global '" << name << "' expected Number";
+    EXPECT_NEAR(as<Number>(*v), expected, 1e-9);
 }
 
 static void expect_global_bool(VMTestHarness& h, const std::string& name,
                                bool expected) {
     auto v = h.getGlobal(name);
     ASSERT_TRUE(v.has_value()) << "  global '" << name << "' not defined";
-    ASSERT_TRUE(std::holds_alternative<bool>(*v))
-        << "  global '" << name << "' expected bool";
-    EXPECT_EQ(std::get<bool>(*v), expected);
+    ASSERT_TRUE(is<bool>(*v)) << "  global '" << name << "' expected bool";
+    EXPECT_EQ(as<bool>(*v), expected);
 }
 
 static void expect_global_nil(VMTestHarness& h, const std::string& name) {
     auto v = h.getGlobal(name);
     ASSERT_TRUE(v.has_value()) << "  global '" << name << "' not defined";
-    EXPECT_TRUE(std::holds_alternative<Nil>(*v))
-        << "  global '" << name << "' expected nil";
+    EXPECT_TRUE(is<Nil>(*v)) << "  global '" << name << "' expected nil";
 }
 
 static void expect_global_str(VMTestHarness& h, const std::string& name,

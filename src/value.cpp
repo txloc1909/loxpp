@@ -1,50 +1,52 @@
 #include "value.h"
-#include "overload.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 
 bool operator!(Value value) {
-    return std::visit(overloaded{
-                          [](bool val) -> bool { return !val; },
-                          [](Nil) -> bool { return true; },
-                          [](Obj*) -> bool { return false; },
-                          [](const auto&) -> bool { return false; },
-                      },
-                      value);
+    if (is<bool>(value)) {
+        return !as<bool>(value);
+    }
+    return is<Nil>(value); // numbers and objects are truthy
 }
 
 bool operator==(const Value& a, const Value& b) {
-    if (a.index() != b.index()) {
-        return false;
+    // Numbers must compare as IEEE 754 doubles (so +0.0 == -0.0 and NaN != NaN)
+    // rather than by raw representation — handle them before anything else.
+    if (is<Number>(a) && is<Number>(b)) {
+        return as<Number>(a) == as<Number>(b);
     }
-
-    return std::visit(
-        overloaded{
-            [](bool a_val, bool b_val) -> bool { return a_val == b_val; },
-            [](Number a_val, Number b_val) -> bool { return a_val == b_val; },
-            [](Nil, Nil) -> bool { return true; },
-            // For strings, interning guarantees same content → same pointer.
-            // Other Obj types use identity equality.
-            [](Obj* a_p, Obj* b_p) -> bool { return a_p == b_p; },
-            [](const auto&, const auto&) -> bool { return false; }},
-        a, b);
+    if (is<Number>(a) || is<Number>(b)) {
+        return false; // a number is never equal to a non-number
+    }
+    if (is<bool>(a) && is<bool>(b)) {
+        return as<bool>(a) == as<bool>(b);
+    }
+    if (is<Nil>(a) && is<Nil>(b)) {
+        return true;
+    }
+    // For strings, interning guarantees same content → same pointer. Other Obj
+    // types use identity equality.
+    if (is<Obj*>(a) && is<Obj*>(b)) {
+        return as<Obj*>(a) == as<Obj*>(b);
+    }
+    return false;
 }
 
 std::string stringify(const Value& value) {
-    return std::visit(
-        overloaded{
-            [](bool val) -> std::string { return val ? "true" : "false"; },
-            [](Number val) -> std::string {
-                char buf[64];
-                std::snprintf(buf, sizeof(buf), "%g", val);
-                return buf;
-            },
-            [](Nil) -> std::string { return "nil"; },
-            [](Obj* p) -> std::string { return stringifyObj(p); },
-        },
-        value);
+    if (is<bool>(value)) {
+        return as<bool>(value) ? "true" : "false";
+    }
+    if (is<Nil>(value)) {
+        return "nil";
+    }
+    if (is<Obj*>(value)) {
+        return stringifyObj(as<Obj*>(value));
+    }
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%g", as<Number>(value));
+    return buf;
 }
 
 void printValue(const Value& value) {
@@ -59,21 +61,22 @@ void ValueArray::write(Value value) {
 }
 
 uint32_t hashValue(const Value& v) {
-    return std::visit(
-        overloaded{
-            [](bool b) -> uint32_t { return b ? 1231U : 1237U; },
-            [](Number n) -> uint32_t {
-                if (n == 0.0) {
-                    n = 0.0; // canonicalize -0.0 → +0.0
-                }
-                uint64_t bits;
-                std::memcpy(&bits, &n, sizeof bits);
-                return static_cast<uint32_t>(bits ^ (bits >> 32));
-            },
-            [](Nil) -> uint32_t { return 0U; },
-            [](Obj* p) -> uint32_t { return static_cast<ObjString*>(p)->hash; },
-        },
-        v);
+    if (is<bool>(v)) {
+        return as<bool>(v) ? 1231U : 1237U;
+    }
+    if (is<Nil>(v)) {
+        return 0U;
+    }
+    if (is<Obj*>(v)) {
+        return static_cast<ObjString*>(as<Obj*>(v))->hash;
+    }
+    Number n = as<Number>(v);
+    if (n == 0.0) {
+        n = 0.0; // canonicalize -0.0 → +0.0
+    }
+    uint64_t bits;
+    std::memcpy(&bits, &n, sizeof bits);
+    return static_cast<uint32_t>(bits ^ (bits >> 32));
 }
 
 bool isValidMapKey(const Value& v) {
