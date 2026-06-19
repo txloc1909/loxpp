@@ -26,7 +26,7 @@ commits listed below. No submodules — the Docker build fetches them.
 ## Crafting Interpreters (clox)
 
 - **Repo**: https://github.com/munificent/craftinginterpreters
-- **Pinned commit**: `d9a658f4fc40c90c0e09ba7fc5bb0e17c96f7b1f`
+- **Pinned commit**: `4a840f70f69c6ddd17cfef4f6964f8e1bcd8c3d4`
 - **License**: MIT (see `LICENSE` in that repo)
 - **Build target**: `make clox` with `CFLAGS="-O3 -march=native"`
 - **Note**: This is the book's canonical bytecode interpreter. No lists/maps;

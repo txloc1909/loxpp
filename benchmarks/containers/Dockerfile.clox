@@ -2,7 +2,7 @@ FROM ubuntu:24.04
 
 # Pinned upstream commits — see benchmarks/SOURCES.md
 # Last commit of the book source (clox chapter — "A Virtual Machine")
-ARG CLOX_COMMIT=d9a658f4fc40c90c0e09ba7fc5bb0e17c96f7b1f
+ARG CLOX_COMMIT=4a840f70f69c6ddd17cfef4f6964f8e1bcd8c3d4
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates gcc make \

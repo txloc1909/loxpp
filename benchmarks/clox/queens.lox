@@ -1,71 +1,94 @@
-// Queens — N-queens solver using recursive backtracking. Standard clox benchmark.
-// No arrays: row/diagonal occupancy tracked as integers via arithmetic.
-// Counts solutions for 8-queens. Expected: 92.
-//
-// Encoding: each occupied set is a number whose digits in base 9 record
-// which rows/diagonals are taken. We instead use a clean recursive approach
-// where each level of recursion represents one column and passes
-// per-row / per-diagonal state as bitmask integers (bit k = row/diag k).
-//
-// Bit manipulation via arithmetic: check bit k of n  => (n / pow2(k)) % 2
-// Set bit k of n                                     => n + pow2(k)
+// Queens — 8-queens solver. Standard clox benchmark.
+// No arrays, no %, no math.*. Pure recursive backtracking.
+// Passes already-placed column positions as individual arguments.
+// Expected: 92 solutions.
 
-var numSolutions = 0;
+var count = 0;
 
-// Return 2^k for small k (k in 0..15).
-fun pow2(k) {
-  var result = 1;
-  var i = 0;
-  while (i < k) {
-    result = result * 2;
-    i = i + 1;
-  }
-  return result;
+fun abs(n) { if (n < 0) return 0 - n; return n; }
+
+// ok(c, prev, dist): true if column c doesn't conflict with a queen
+// placed at column prev that is dist rows away.
+fun ok(c, prev, dist) {
+  return c != prev and abs(c - prev) != dist;
 }
 
-// Return 1 if bit k is set in mask, else 0.
-fun hasBit(mask, k) {
-  var shifted = mask;
-  var i = 0;
-  while (i < k) {
-    shifted = shifted / 2;
-    i = i + 1;
+fun q8(c0, c1, c2, c3, c4, c5, c6) {
+  var c = 0;
+  while (c < 8) {
+    if (ok(c,c6,1) and ok(c,c5,2) and ok(c,c4,3) and ok(c,c3,4) and
+        ok(c,c2,5) and ok(c,c1,6) and ok(c,c0,7))
+      count = count + 1;
+    c = c + 1;
   }
-  return shifted % 2;
 }
 
-// Place queens in columns [col..7]. rowMask, diagDown, diagUp are bitmasks
-// of occupied rows and diagonals respectively.
-//   diagDown bit k => occupied down-diagonal (row - col) + 7 == k
-//   diagUp   bit k => occupied up-diagonal   (row + col)      == k
-fun solve(col, rowMask, diagDown, diagUp) {
-  if (col == 8) {
-    numSolutions = numSolutions + 1;
-    return;
+fun q7(c0, c1, c2, c3, c4, c5) {
+  var c = 0;
+  while (c < 8) {
+    if (ok(c,c5,1) and ok(c,c4,2) and ok(c,c3,3) and ok(c,c2,4) and
+        ok(c,c1,5) and ok(c,c0,6))
+      q8(c0, c1, c2, c3, c4, c5, c);
+    c = c + 1;
   }
-  var row = 0;
-  while (row < 8) {
-    var ddBit = row - col + 7;   // 0..14, use low 8 we care about
-    var duBit = row + col;       // 0..14
+}
 
-    var rowFree  = hasBit(rowMask, row) == 0;
-    var ddFree   = hasBit(diagDown, ddBit) == 0;
-    var duFree   = hasBit(diagUp,   duBit) == 0;
+fun q6(c0, c1, c2, c3, c4) {
+  var c = 0;
+  while (c < 8) {
+    if (ok(c,c4,1) and ok(c,c3,2) and ok(c,c2,3) and ok(c,c1,4) and
+        ok(c,c0,5))
+      q7(c0, c1, c2, c3, c4, c);
+    c = c + 1;
+  }
+}
 
-    if (rowFree and ddFree and duFree) {
-      solve(
-        col + 1,
-        rowMask + pow2(row),
-        diagDown + pow2(ddBit),
-        diagUp   + pow2(duBit)
-      );
-    }
-    row = row + 1;
+fun q5(c0, c1, c2, c3) {
+  var c = 0;
+  while (c < 8) {
+    if (ok(c,c3,1) and ok(c,c2,2) and ok(c,c1,3) and ok(c,c0,4))
+      q6(c0, c1, c2, c3, c);
+    c = c + 1;
+  }
+}
+
+fun q4(c0, c1, c2) {
+  var c = 0;
+  while (c < 8) {
+    if (ok(c,c2,1) and ok(c,c1,2) and ok(c,c0,3))
+      q5(c0, c1, c2, c);
+    c = c + 1;
+  }
+}
+
+fun q3(c0, c1) {
+  var c = 0;
+  while (c < 8) {
+    if (ok(c,c1,1) and ok(c,c0,2))
+      q4(c0, c1, c);
+    c = c + 1;
+  }
+}
+
+fun q2(c0) {
+  var c = 0;
+  while (c < 8) {
+    if (ok(c, c0, 1))
+      q3(c0, c);
+    c = c + 1;
+  }
+}
+
+fun q1() {
+  var c = 0;
+  while (c < 8) {
+    q2(c);
+    c = c + 1;
   }
 }
 
 var start = clock();
-solve(0, 0, 0, 0);
+q1();
 var elapsed = clock() - start;
-print numSolutions;
+print count;
 print elapsed;
