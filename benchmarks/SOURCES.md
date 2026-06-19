@@ -39,9 +39,15 @@ commits listed below. No submodules — the Docker build fetches them.
 `benchmarks/crosslang.py` is the only **cross-comparable** harness: every
 language runs the *identical* algorithm at the *identical* size and self-times
 the compute region (startup excluded). Programs live in `benchmarks/clox/`
-(shared by lox++ and clox) and `benchmarks/{python,lua,js}/`. Images:
+(shared by lox++ and clox) and `benchmarks/{python,lua,js,wren}/`. Images:
 `loxpp-dev-env`, `bench-clox` (Dockerfile.clox), `bench-lua` (Dockerfile.lua),
-and the official `python:3.12-slim` / `node:22-alpine`.
+`bench-wren` (Dockerfile.wren), and the official `python:3.12-slim` /
+`node:22-alpine`.
+
+The `wren` CLI is built from **wren-lang/wren-cli** (pinned commit
+`18553636618a4d33f10af9b5ab92da6431784a8c`, `make config=release_64bit`); it
+bundles the wren VM and libuv as submodules. The `wren-lang/wren` repo builds
+only a test runner, not a CLI.
 
 `runner.py` with the AWFY/CLBG/Wren manifest is **not** cross-comparable (each
 language runs a different port at a different size); it is for tracking lox++
@@ -49,9 +55,9 @@ across its own suite.
 
 **WIP / not yet wired:** the AWFY-harness images for python/lua/js
 (`Dockerfile.{python,js}`) still point at a 404 commit and need
-harness-invocation wiring; a `wren` interpreter needs the separate
-`wren-lang/wren-cli` repo (the `wren-lang/wren` repo builds only a test runner).
-Adding lua/js/python/wren to `crosslang.py` is the path to a full matrix.
+harness-invocation wiring. The apples-to-apples harness above supersedes them
+for cross-language comparison; extending it to more benchmarks is the path to a
+fuller matrix.
 
 ---
 

@@ -43,6 +43,9 @@ LANGS = {
     "js": lambda b: _podman(
         "-v", f"{ROOT}/benchmarks/js:/bench:ro,z", "node:22-alpine",
         "node", f"/bench/{b}.js"),
+    "wren": lambda b: _podman(
+        "-v", f"{ROOT}/benchmarks/wren:/bench:ro,z", "bench-wren",
+        "wren", f"/bench/{b}.wren"),
 }
 
 _NUM = re.compile(r"^\s*([-\d.eE+]+)\s*$")
