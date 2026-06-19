@@ -23,7 +23,9 @@ class CoreHashMap {
     // Works for both Entry* and const Entry* by template deduction on E.
     template <typename E, typename KeyMatch>
     static E* findSlotIn(E* data, int cap, uint32_t hash, KeyMatch match) {
-        uint32_t idx = hash % static_cast<uint32_t>(cap);
+        // cap is always a power of two (grow() doubles from 8), so the index
+        // reduction is a bitmask rather than a per-probe hardware divide.
+        uint32_t idx = hash & (static_cast<uint32_t>(cap) - 1);
         E* tombstone = nullptr;
         for (;;) {
             E* e = &data[idx];
@@ -37,7 +39,7 @@ class CoreHashMap {
             } else if (match(*e)) {
                 return e;
             }
-            idx = (idx + 1) % static_cast<uint32_t>(cap);
+            idx = (idx + 1) & (static_cast<uint32_t>(cap) - 1);
         }
     }
 
