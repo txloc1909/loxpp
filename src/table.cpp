@@ -35,7 +35,8 @@ ObjString* Table::findString(const char* chars, int length,
         return nullptr;
     }
     int cap = m_map.capacity();
-    uint32_t index = hash % static_cast<uint32_t>(cap);
+    // cap is a power of two (see CoreHashMap::grow): modulo reduces to a mask.
+    uint32_t index = hash & (static_cast<uint32_t>(cap) - 1);
     for (;;) {
         const Entry* entry = m_map.entryAt(index);
         if (TablePolicy::isEmpty(*entry)) {
@@ -47,7 +48,7 @@ ObjString* Table::findString(const char* chars, int length,
             memcmp(entry->key->chars.data(), chars, length) == 0) {
             return entry->key;
         }
-        index = (index + 1) % static_cast<uint32_t>(cap);
+        index = (index + 1) & (static_cast<uint32_t>(cap) - 1);
     }
 }
 
