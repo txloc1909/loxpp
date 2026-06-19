@@ -1,4 +1,5 @@
 find_package(GTest REQUIRED)
+include(GoogleTest)
 
 # Propagate the NaN-tagging selection (inherited from the top-level option) to
 # every test target, which compile their own copies of src/*.cpp.
@@ -141,34 +142,21 @@ target_link_libraries(test_list_pattern_gc PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_at_binding PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_at_binding_gc PRIVATE GTest::GTest GTest::Main)
 
+# test_main is a hand-rolled main() (asserts), not a GTest binary.
 add_test(NAME TestMain COMMAND test_main)
-add_test(NAME TestScanner COMMAND test_scanner)
-add_test(NAME TestParserVM COMMAND test_parser_vm)
-add_test(NAME TestParserBytecode COMMAND test_parser_bytecode)
-add_test(NAME TestTable COMMAND test_table)
-add_test(NAME TestAllocator COMMAND test_allocator)
-add_test(NAME TestLocalVariables COMMAND test_local_variables)
-add_test(NAME TestControlFlow COMMAND test_control_flow)
-add_test(NAME TestVMRuntime COMMAND test_vm_runtime)
-add_test(NAME TestClosures COMMAND test_closures)
-add_test(NAME TestStressGC COMMAND test_stress_gc)
-add_test(NAME TestGcRegression COMMAND test_gc_regression)
-add_test(NAME TestInheritance COMMAND test_inheritance)
-add_test(NAME TestList COMMAND test_list)
-add_test(NAME TestListGC COMMAND test_list_gc)
-add_test(NAME TestMap COMMAND test_map)
-add_test(NAME TestMapGC COMMAND test_map_gc)
-add_test(NAME TestVarDestructure COMMAND test_var_destructure)
-add_test(NAME TestEnum COMMAND test_enum)
-add_test(NAME TestEnumGC COMMAND test_enum_gc)
-add_test(NAME TestClassPattern COMMAND test_class_pattern)
-add_test(NAME TestClassPatternGC COMMAND test_class_pattern_gc)
-add_test(NAME TestMatchExpr COMMAND test_match_expr)
-add_test(NAME TestSlice COMMAND test_slice)
-add_test(NAME TestOrPattern COMMAND test_or_pattern)
-add_test(NAME TestOrPatternGC COMMAND test_or_pattern_gc)
-add_test(NAME TestSeqDestructure COMMAND test_seq_destructure)
-add_test(NAME TestListPattern COMMAND test_list_pattern)
-add_test(NAME TestListPatternGC COMMAND test_list_pattern_gc)
-add_test(NAME TestAtBinding COMMAND test_at_binding)
-add_test(NAME TestAtBindingGC COMMAND test_at_binding_gc)
+
+# Register each GTest case as its own CTest test so `ctest -j` parallelizes
+# within a binary, not just across binaries. The per-target prefix keeps names
+# unique: the *_gc targets recompile the same sources, so their Suite.Case
+# names would otherwise collide.
+set(LOXPP_GTEST_TARGETS
+    test_scanner test_parser_vm test_parser_bytecode test_table test_allocator
+    test_local_variables test_control_flow test_vm_runtime test_closures
+    test_stress_gc test_gc_regression test_inheritance test_list test_list_gc
+    test_map test_map_gc test_var_destructure test_enum test_enum_gc
+    test_class_pattern test_class_pattern_gc test_match_expr test_slice
+    test_or_pattern test_or_pattern_gc test_seq_destructure test_list_pattern
+    test_list_pattern_gc test_at_binding test_at_binding_gc)
+foreach(t IN LISTS LOXPP_GTEST_TARGETS)
+    gtest_discover_tests(${t} TEST_PREFIX "${t}.")
+endforeach()

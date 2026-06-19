@@ -187,6 +187,11 @@ class Compiler {
     int m_upvalueCount{0};
     std::vector<LoopContext> m_loopStack;
 
+    // Constant-pool dedup index → existing slot, so repeated literals reuse one
+    // slot. O(1) amortized. Compile-time only: dies with this per-function
+    // Compiler and never reaches the runtime Chunk.
+    std::unordered_map<Value, uint16_t, ValueHash> m_constantIndex;
+
     // Constructor table — only meaningfully populated on the root compiler.
     std::unordered_map<std::string, ConstructorInfo> m_constructors;
     // enumName → ordered list of ctor names, for exhaustiveness checking.

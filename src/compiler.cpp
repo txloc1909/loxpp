@@ -175,7 +175,11 @@ void Compiler::literal() {
 }
 
 void Compiler::number() {
-    double num = std::stod(m_parser->m_previous.lexeme.data(), nullptr);
+    // Construct a bounded std::string from the lexeme view: the view's data()
+    // is not NUL-terminated at the token's end (it points into the source), so
+    // passing it straight to std::stod would scan to the end of the whole
+    // source — O(source length) per literal, i.e. O(N^2) over a large program.
+    double num = std::stod(std::string(m_parser->m_previous.lexeme));
     emitConstantOp(Op::CONSTANT, makeConstant(from<Number>(num)));
 }
 
@@ -1795,11 +1799,15 @@ void Compiler::emitLoopCleanup(int targetLocalCount) {
 }
 
 uint16_t Compiler::makeConstant(Value value) {
+    if (auto it = m_constantIndex.find(value); it != m_constantIndex.end()) {
+        return it->second;
+    }
     auto constant = getCurrentChunk()->addConstant(value);
     if (!constant) {
         m_parser->error("Too many constants in one chunk.");
         return 0;
     }
+    m_constantIndex.emplace(value, *constant);
     return *constant;
 }
 
