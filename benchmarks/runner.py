@@ -67,13 +67,15 @@ def _parse_awfy(stdout: str, bench: str) -> tuple[list[float], Optional[float], 
     iter_us = []
     average_us = None
     total_us = None
+    # [\d.eE+-] also matches scientific notation, which lox++ str() emits for
+    # large numbers (e.g. "1.07e+06 us").
     for line in stdout.splitlines():
         # Per-iteration line
-        m = re.search(r"runtime:\s*([\d.]+)\s*us", line)
+        m = re.search(r"runtime:\s*([\d.eE+\-]+)\s*us", line)
         if m and "average:" not in line:
             iter_us.append(float(m.group(1)))
         # Summary line
-        m2 = re.search(r"average:\s*([\d.]+)\s*us\s+total:\s*([\d.]+)\s*us", line)
+        m2 = re.search(r"average:\s*([\d.eE+\-]+)\s*us\s+total:\s*([\d.eE+\-]+)\s*us", line)
         if m2:
             average_us = float(m2.group(1))
             total_us = float(m2.group(2))
@@ -99,9 +101,20 @@ def _parse_clbg(wall_ms: float) -> tuple[list[float], Optional[float], Optional[
 
 
 def _parse_raw(wall_ms: float, stdout: str) -> tuple[list[float], Optional[float], Optional[float]]:
-    """clox: external wall time, stdout printed as-is for manual correctness check."""
-    wall_us = wall_ms * 1000
-    return [wall_us], wall_us, wall_us
+    """clox: the program self-times with clock() and prints elapsed seconds as
+    its last line. Prefer that over container wall time, which is dominated by
+    podman startup for short benchmarks. Fall back to wall time if absent."""
+    secs = None
+    for line in reversed(stdout.splitlines()):
+        m = re.fullmatch(r"\s*([\d.eE+\-]+)\s*", line)
+        if m:
+            try:
+                secs = float(m.group(1))
+                break
+            except ValueError:
+                continue
+    us = secs * 1_000_000 if secs is not None else wall_ms * 1000
+    return [us], us, us
 
 
 # ---------------------------------------------------------------------------
@@ -168,8 +181,9 @@ def run_benchmark(
     file = bench_cfg["file"]
     cmd = _resolve_cmd(lang_cfg, file)
 
-    # Override lox++ binary when running without container
-    if lang == "lox" and no_container:
+    # lox++ always runs directly (its binary lives in the build tree, not a
+    # container image), so it uses host paths regardless of --no-container.
+    if lang == "lox":
         binary = lox_binary or str(BENCHMARKS_DIR.parent / "build" / "loxpp")
         lox_file = str(BENCHMARKS_DIR / "lox" / file)
         cmd = [binary, lox_file]
