@@ -230,7 +230,7 @@ TEST_F(ParserBytecodeTest, Arithmetic_Modulo) {
 class SequenceBytecodeTest : public ::testing::Test {};
 
 // `2 in [1, 2, 3]`
-// Chunk::addConstant does an O(N) dedup scan (see src/chunk.cpp), so the
+// Compiler::makeConstant dedups via a hash index (see src/compiler.cpp), so the
 // second occurrence of 2.0 (inside the list literal) reuses slot 0 instead
 // of allocating a new slot.
 // Slot layout: 0='2', 1='1', 2='3'

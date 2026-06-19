@@ -15,13 +15,8 @@ void Chunk::write(Op op, int line) { write(static_cast<Byte>(op), line); }
 void Chunk::patch(int offset, Byte byte) { (*this)[offset] = byte; }
 
 std::optional<uint16_t> Chunk::addConstant(Value value) {
-    // O(N) scan for an existing equal constant; avoids duplicate slots.
-    // Strings are interned, so ObjHandle equality (index+type) suffices.
-    for (uint16_t i = 0; i < m_constants.size(); i++) {
-        if (m_constants.at(i) == value) {
-            return i;
-        }
-    }
+    // Append-only: dedup is the compiler's job (Compiler::makeConstant keeps an
+    // O(1) hash index), so this stays a plain bounded push.
     if (m_constants.isFull()) {
         return std::nullopt;
     }

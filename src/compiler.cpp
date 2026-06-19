@@ -1799,11 +1799,15 @@ void Compiler::emitLoopCleanup(int targetLocalCount) {
 }
 
 uint16_t Compiler::makeConstant(Value value) {
+    if (auto it = m_constantIndex.find(value); it != m_constantIndex.end()) {
+        return it->second;
+    }
     auto constant = getCurrentChunk()->addConstant(value);
     if (!constant) {
         m_parser->error("Too many constants in one chunk.");
         return 0;
     }
+    m_constantIndex.emplace(value, *constant);
     return *constant;
 }
 

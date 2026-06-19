@@ -168,6 +168,16 @@ uint32_t hashValue(const Value& v);
 // Returns false for NaN numbers and non-string objects.
 bool isValidMapKey(const Value& v);
 
+// General-purpose hash for any Value, consistent with operator==. Unlike
+// hashValue() (the table's uint32 string-key hash), this hashes Obj* by
+// pointer identity — matching operator== — so it is safe for any value,
+// including non-string objects. Used to dedup the compiler's constant pool.
+// Implemented via is<T>/as<T>, so it carries over to the NaN-tagged Value
+// representation unchanged.
+struct ValueHash {
+    size_t operator()(const Value& v) const;
+};
+
 inline bool isFalsy(const Value& v) { return !v; }
 
 class ValueArray {

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 
 bool operator!(Value value) {
     if (is<bool>(value)) {
@@ -87,4 +88,25 @@ bool isValidMapKey(const Value& v) {
         return as<Obj*>(v)->type == ObjType::STRING;
     }
     return true; // bool and nil are always valid
+}
+
+size_t ValueHash::operator()(const Value& v) const {
+    if (is<bool>(v)) {
+        return as<bool>(v) ? 1231U : 1237U;
+    }
+    if (is<Nil>(v)) {
+        return 0U;
+    }
+    if (is<Obj*>(v)) {
+        // Pointer identity — matches operator==. Do NOT use hashValue(), which
+        // assumes Obj* is an interned ObjString and is UB for other objects.
+        return std::hash<const void*>{}(as<Obj*>(v));
+    }
+    Number n = as<Number>(v);
+    if (n == 0.0) {
+        n = 0.0; // canonicalize -0.0 → +0.0 (matches -0.0 == 0.0)
+    }
+    uint64_t bits;
+    std::memcpy(&bits, &n, sizeof bits);
+    return std::hash<uint64_t>{}(bits);
 }
