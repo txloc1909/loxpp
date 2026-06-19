@@ -7,6 +7,11 @@
 #include "stdlib/stdlib_context.h"
 
 #include <cstdint>
+
+#ifdef LOXPP_PROFILE
+#include "profiler.h"
+#endif
+
 #include <memory>
 #include <optional>
 #include <string>
@@ -31,6 +36,9 @@ class VM {
     VM() : m_globals(VmAllocator<Entry>{&m_mm}) {
         resetStack();
         m_mm.setMarkRootsCallback([this]() { markRoots(); });
+#ifdef LOXPP_PROFILE
+        m_mm.setProfilerData(&m_profilerData);
+#endif
     }
 
     InterpretResult interpret(const std::string& source);
@@ -74,4 +82,17 @@ class VM {
     StdlibContext m_stdlibCtx;
     ObjClass* m_fileClass{nullptr};
     ObjClass* m_mapClass{nullptr};
+
+#ifdef LOXPP_PROFILE
+    ProfilerData m_profilerData;
+    // Parallel to m_frames[]: active ProfileFunctionScope per call depth.
+    // .emplace() at function entry; .reset() at Op::RETURN.
+    std::array<std::optional<ProfileFunctionScope>, FRAMES_MAX>
+        m_profilerScopes;
+
+  public:
+    const ProfilerData& profilerData() const { return m_profilerData; }
+
+  private:
+#endif
 };

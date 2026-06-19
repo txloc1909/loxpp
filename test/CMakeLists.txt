@@ -68,6 +68,7 @@ add_executable(test_list_pattern test_list_pattern.cpp test_harness.cpp ${FULL_S
 add_executable(test_list_pattern_gc test_list_pattern.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_at_binding test_at_binding.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_at_binding_gc test_at_binding.cpp test_harness.cpp ${FULL_SRCS})
+add_executable(test_profiler profiler_test.cpp test_harness.cpp ${FULL_SRCS})
 
 target_include_directories(test_main PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_scanner PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -100,6 +101,7 @@ target_include_directories(test_list_pattern PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_list_pattern_gc PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_at_binding PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_at_binding_gc PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(test_profiler PRIVATE ${PROJECT_SOURCE_DIR}/src)
 
 target_compile_definitions(test_stress_gc PRIVATE LOXPP_STRESS_GC)
 target_compile_definitions(test_gc_regression PRIVATE LOXPP_STRESS_GC)
@@ -110,6 +112,7 @@ target_compile_definitions(test_class_pattern_gc PRIVATE LOXPP_STRESS_GC)
 target_compile_definitions(test_or_pattern_gc PRIVATE LOXPP_STRESS_GC)
 target_compile_definitions(test_list_pattern_gc PRIVATE LOXPP_STRESS_GC)
 target_compile_definitions(test_at_binding_gc PRIVATE LOXPP_STRESS_GC)
+target_compile_definitions(test_profiler PRIVATE LOXPP_PROFILE)
 
 target_link_libraries(test_scanner PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_parser_vm PRIVATE GTest::GTest GTest::Main)
@@ -141,6 +144,7 @@ target_link_libraries(test_list_pattern PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_list_pattern_gc PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_at_binding PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_at_binding_gc PRIVATE GTest::GTest GTest::Main)
+target_link_libraries(test_profiler PRIVATE GTest::GTest GTest::Main)
 
 # test_main is a hand-rolled main() (asserts), not a GTest binary.
 add_test(NAME TestMain COMMAND test_main)
@@ -156,7 +160,7 @@ set(LOXPP_GTEST_TARGETS
     test_map test_map_gc test_var_destructure test_enum test_enum_gc
     test_class_pattern test_class_pattern_gc test_match_expr test_slice
     test_or_pattern test_or_pattern_gc test_seq_destructure test_list_pattern
-    test_list_pattern_gc test_at_binding test_at_binding_gc)
+    test_list_pattern_gc test_at_binding test_at_binding_gc test_profiler)
 foreach(t IN LISTS LOXPP_GTEST_TARGETS)
     gtest_discover_tests(${t} TEST_PREFIX "${t}.")
 endforeach()
