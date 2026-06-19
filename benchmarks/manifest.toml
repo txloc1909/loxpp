@@ -9,77 +9,77 @@
 
 [bounce]
 suite = "awfy"
-[bounce.lox]    file = "bounce.lox"
-[bounce.python] file = "Bounce.py"
-[bounce.lua]    file = "Bounce.lua"
-[bounce.js]     file = "Bounce.js"
+lox = { file = "bounce.lox" }
+python = { file = "Bounce.py" }
+lua = { file = "Bounce.lua" }
+js = { file = "Bounce.js" }
 
 [fib]
 suite = "awfy"
-[fib.lox]    file = "fib.lox"
-[fib.clox]   file = "fib.lox"
-[fib.python] file = "Fib.py"
-[fib.lua]    file = "Fib.lua"
-[fib.js]     file = "Fib.js"
+lox = { file = "fib.lox" }
+clox = { file = "fib.lox" }
+python = { file = "Fib.py" }
+lua = { file = "Fib.lua" }
+js = { file = "Fib.js" }
 
 [list]
 suite = "awfy"
-[list.lox]    file = "list.lox"
-[list.python] file = "List.py"
-[list.lua]    file = "List.lua"
-[list.js]     file = "List.js"
+lox = { file = "list.lox" }
+python = { file = "List.py" }
+lua = { file = "List.lua" }
+js = { file = "List.js" }
 
 [mandelbrot]
 suite = "awfy"
-[mandelbrot.lox]    file = "mandelbrot.lox"
-[mandelbrot.clox]   file = "mandelbrot.lox"
-[mandelbrot.python] file = "Mandelbrot.py"
-[mandelbrot.lua]    file = "Mandelbrot.lua"
-[mandelbrot.js]     file = "Mandelbrot.js"
+lox = { file = "mandelbrot.lox" }
+clox = { file = "mandelbrot.lox" }
+python = { file = "Mandelbrot.py" }
+lua = { file = "Mandelbrot.lua" }
+js = { file = "Mandelbrot.js" }
 
 [nbody]
 suite = "awfy"
-[nbody.lox]    file = "nbody.lox"
-[nbody.python] file = "NBody.py"
-[nbody.lua]    file = "NBody.lua"
-[nbody.js]     file = "NBody.js"
+lox = { file = "nbody.lox" }
+python = { file = "NBody.py" }
+lua = { file = "NBody.lua" }
+js = { file = "NBody.js" }
 
 [permute]
 suite = "awfy"
-[permute.lox]    file = "permute.lox"
-[permute.python] file = "Permute.py"
-[permute.lua]    file = "Permute.lua"
-[permute.js]     file = "Permute.js"
+lox = { file = "permute.lox" }
+python = { file = "Permute.py" }
+lua = { file = "Permute.lua" }
+js = { file = "Permute.js" }
 
 [queens]
 suite = "awfy"
-[queens.lox]    file = "queens.lox"
-[queens.clox]   file = "queens.lox"
-[queens.python] file = "Queens.py"
-[queens.lua]    file = "Queens.lua"
-[queens.js]     file = "Queens.js"
+lox = { file = "queens.lox" }
+clox = { file = "queens.lox" }
+python = { file = "Queens.py" }
+lua = { file = "Queens.lua" }
+js = { file = "Queens.js" }
 
 [sieve]
 suite = "awfy"
-[sieve.lox]    file = "sieve.lox"
-[sieve.python] file = "Sieve.py"
-[sieve.lua]    file = "Sieve.lua"
-[sieve.js]     file = "Sieve.js"
+lox = { file = "sieve.lox" }
+python = { file = "Sieve.py" }
+lua = { file = "Sieve.lua" }
+js = { file = "Sieve.js" }
 
 [storage]
 suite = "awfy"
-[storage.lox]    file = "storage.lox"
-[storage.python] file = "Storage.py"
-[storage.lua]    file = "Storage.lua"
-[storage.js]     file = "Storage.js"
+lox = { file = "storage.lox" }
+python = { file = "Storage.py" }
+lua = { file = "Storage.lua" }
+js = { file = "Storage.js" }
 
 [towers]
 suite = "awfy"
-[towers.lox]    file = "towers.lox"
-[towers.clox]   file = "towers.lox"
-[towers.python] file = "Towers.py"
-[towers.lua]    file = "Towers.lua"
-[towers.js]     file = "Towers.js"
+lox = { file = "towers.lox" }
+clox = { file = "towers.lox" }
+python = { file = "Towers.py" }
+lua = { file = "Towers.lua" }
+js = { file = "Towers.js" }
 
 # ---------------------------------------------------------------------------
 # AWFY — macro benchmarks
@@ -87,45 +87,45 @@ suite = "awfy"
 
 [cd]
 suite = "awfy"
-[cd.lox]    file = "cd.lox"
-[cd.python] file = "CD.py"
-[cd.lua]    file = "CD.lua"
-[cd.js]     file = "CD.js"
+lox = { file = "cd.lox" }
+python = { file = "CD.py" }
+lua = { file = "CD.lua" }
+js = { file = "CD.js" }
 
 [deltablue]
 suite = "awfy"
-[deltablue.lox]    file = "deltablue.lox"
-[deltablue.python] file = "DeltaBlue.py"
-[deltablue.lua]    file = "DeltaBlue.lua"
-[deltablue.js]     file = "DeltaBlue.js"
+lox = { file = "deltablue.lox" }
+python = { file = "DeltaBlue.py" }
+lua = { file = "DeltaBlue.lua" }
+js = { file = "DeltaBlue.js" }
 
 [earley]
 suite = "awfy"
-[earley.lox]    file = "earley.lox"
-[earley.python] file = "Earley.py"
-[earley.lua]    file = "Earley.lua"
-[earley.js]     file = "Earley.js"
+lox = { file = "earley.lox" }
+python = { file = "Earley.py" }
+lua = { file = "Earley.lua" }
+js = { file = "Earley.js" }
 
 [havlak]
 suite = "awfy"
-[havlak.lox]    file = "havlak.lox"
-[havlak.python] file = "Havlak.py"
-[havlak.lua]    file = "Havlak.lua"
-[havlak.js]     file = "Havlak.js"
+lox = { file = "havlak.lox" }
+python = { file = "Havlak.py" }
+lua = { file = "Havlak.lua" }
+js = { file = "Havlak.js" }
 
 [json]
 suite = "awfy"
-[json.lox]    file = "json.lox"
-[json.python] file = "Json.py"
-[json.lua]    file = "Json.lua"
-[json.js]     file = "Json.js"
+lox = { file = "json.lox" }
+python = { file = "Json.py" }
+lua = { file = "Json.lua" }
+js = { file = "Json.js" }
 
 [richards]
 suite = "awfy"
-[richards.lox]    file = "richards.lox"
-[richards.python] file = "Richards.py"
-[richards.lua]    file = "Richards.lua"
-[richards.js]     file = "Richards.js"
+lox = { file = "richards.lox" }
+python = { file = "Richards.py" }
+lua = { file = "Richards.lua" }
+js = { file = "Richards.js" }
 
 # ---------------------------------------------------------------------------
 # CLBG — non-overlapping benchmarks
@@ -133,27 +133,27 @@ suite = "awfy"
 
 [binary_trees]
 suite = "clbg"
-[binary_trees.lox]    file = "binary_trees.lox"
+lox = { file = "binary_trees.lox" }
 
 [fannkuch]
 suite = "clbg"
-[fannkuch.lox]    file = "fannkuch.lox"
+lox = { file = "fannkuch.lox" }
 
 [fasta]
 suite = "clbg"
-[fasta.lox]    file = "fasta.lox"
+lox = { file = "fasta.lox" }
 
 [k_nucleotide]
 suite = "clbg"
-[k_nucleotide.lox]    file = "k_nucleotide.lox"
+lox = { file = "k_nucleotide.lox" }
 
 [reverse_complement]
 suite = "clbg"
-[reverse_complement.lox]    file = "reverse_complement.lox"
+lox = { file = "reverse_complement.lox" }
 
 [spectral_norm]
 suite = "clbg"
-[spectral_norm.lox]    file = "spectral_norm.lox"
+lox = { file = "spectral_norm.lox" }
 
 # ---------------------------------------------------------------------------
 # Wren suite
@@ -161,20 +161,20 @@ suite = "clbg"
 
 [zoo]
 suite = "wren"
-[zoo.lox]  file = "zoo.lox"
-[zoo.wren] file = "zoo.wren"
+lox = { file = "zoo.lox" }
+wren = { file = "zoo.wren" }
 
 [string_interning]
 suite = "wren"
-[string_interning.lox]  file = "string_interning.lox"
-[string_interning.wren] file = "string_interning.wren"
+lox = { file = "string_interning.lox" }
+wren = { file = "string_interning.wren" }
 
 [for_in]
 suite = "wren"
-[for_in.lox]  file = "for_in.lox"
-[for_in.wren] file = "for_in.wren"
+lox = { file = "for_in.lox" }
+wren = { file = "for_in.wren" }
 
 [instantiation]
 suite = "wren"
-[instantiation.lox]  file = "instantiation.lox"
-[instantiation.wren] file = "instantiation.wren"
+lox = { file = "instantiation.lox" }
+wren = { file = "instantiation.wren" }
