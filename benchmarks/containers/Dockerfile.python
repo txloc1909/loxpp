@@ -1,17 +1,18 @@
 FROM python:3.12-slim
 
-# Pinned upstream commits — see benchmarks/SOURCES.md
-ARG AWFY_COMMIT=5e9fa8e657a4b9c4b3dfb4e9a2ac31b5ad3b0ef3
+# AWFY (Are We Fast Yet) Python benchmarks + SOM harness — see SOURCES.md.
+# Run via: python3 /benchmarks/awfy/harness.py <BenchmarkName> <iters> <inner>
+ARG AWFY_COMMIT=74306fec151070fd07157cefeacf19e7e0bcdc89
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Fetch AWFY Python benchmarks at pinned commit
+# Extract the whole benchmarks/Python tree (harness.py, run.py, benchmark.py,
+# som/, and the benchmark modules) into /benchmarks/awfy.
 RUN mkdir -p /benchmarks/awfy && \
     curl -fsSL "https://github.com/smarr/are-we-fast-yet/archive/${AWFY_COMMIT}.tar.gz" \
-    | tar xz --strip-components=2 \
-         --wildcards \
-         -C /benchmarks/awfy \
-         "are-we-fast-yet-${AWFY_COMMIT}/benchmarks/Python/*"
+    | tar xz -C /benchmarks/awfy --strip-components=3 \
+        "are-we-fast-yet-${AWFY_COMMIT}/benchmarks/Python"
 
-WORKDIR /benchmarks
+WORKDIR /benchmarks/awfy

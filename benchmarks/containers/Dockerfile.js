@@ -1,16 +1,14 @@
 FROM node:22-alpine
 
-# Pinned upstream commits — see benchmarks/SOURCES.md
-ARG AWFY_COMMIT=5e9fa8e657a4b9c4b3dfb4e9a2ac31b5ad3b0ef3
+# AWFY (Are We Fast Yet) JavaScript benchmarks + SOM harness — see SOURCES.md.
+# Run via: node /benchmarks/awfy/harness.js <BenchmarkName> <iters> <inner>
+ARG AWFY_COMMIT=74306fec151070fd07157cefeacf19e7e0bcdc89
 
-RUN apk add --no-cache curl
+RUN apk add --no-cache curl tar
 
-# Fetch AWFY JavaScript benchmarks at pinned commit
 RUN mkdir -p /benchmarks/awfy && \
     curl -fsSL "https://github.com/smarr/are-we-fast-yet/archive/${AWFY_COMMIT}.tar.gz" \
-    | tar xz --strip-components=2 \
-         --wildcards \
-         -C /benchmarks/awfy \
-         "are-we-fast-yet-${AWFY_COMMIT}/benchmarks/JavaScript/*"
+    | tar xz -C /benchmarks/awfy --strip-components=3 \
+        "are-we-fast-yet-${AWFY_COMMIT}/benchmarks/JavaScript"
 
-WORKDIR /benchmarks
+WORKDIR /benchmarks/awfy
