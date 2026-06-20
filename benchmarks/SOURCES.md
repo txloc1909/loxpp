@@ -54,19 +54,18 @@ only a test runner, not a CLI.
 `runner.py` runs the AWFY suite for python/lua/js via the SOM harness
 (`harness.<ext> <Name> <iters> <inner>`) from `smarr/are-we-fast-yet`
 @`74306fec151070fd07157cefeacf19e7e0bcdc89`, baked into `bench-{python,lua,js}`.
-`manifest.toml` carries a per-benchmark `inner` chosen to match the lox++ port's
-workload, so the row is comparable to lox++.
+The lox++ ports under `benchmarks/lox/` are faithful translations of AWFY's
+`benchmark()`; `manifest.toml` carries a per-benchmark `inner` so the harness
+does the identical work (`inner` is the problem size for the size-parameterized
+benchmarks — mandelbrot 750, nbody 250000, cd 2, deltablue 100 — and `1` for the
+rest, whose `benchmark()` already encapsulates one unit of work).
 
-**This holds only where the lox++ port runs AWFY's exact algorithm at a size we
-can reproduce:** ✅ bounce, cd, mandelbrot, nbody, richards. ⚠️ The other lox++
-ports use reduced/ad-hoc sizes that don't map onto AWFY's harness (e.g. sieve,
-queens, list, permute, storage, towers diverge by large factors), so those rows
-are **reference-only, not apples-to-apple**. Aligning those lox++ ports to
-AWFY's standard workloads is follow-up. `crosslang.py` remains the guaranteed
-cross-comparable harness.
+**Apples-to-apple across lox++/python/lua/js:** bounce, cd, deltablue, list,
+mandelbrot, nbody, permute, queens, richards, sieve, storage, towers.
 
-`fib`/`earley` have no AWFY python/lua/js port; `havlak`'s lox++ port uses a
-non-AWFY signature — all stay lox++-only.
+Lox++-only: `fib`/`earley` (no AWFY python/lua/js port); `havlak` (its recursive
+`doDFS` exceeds lox++'s 256-frame call stack at meaningful sizes, and its port
+uses a non-AWFY signature — needs an iterative rewrite to run/compare).
 
 ---
 

@@ -55,7 +55,7 @@ js = { file = "Permute" }
 
 [queens]
 suite = "awfy"
-inner = 10
+inner = 1
 lox = { file = "queens.lox" }
 clox = { file = "queens.lox" }
 python = { file = "Queens" }
@@ -64,7 +64,7 @@ js = { file = "Queens" }
 
 [sieve]
 suite = "awfy"
-inner = 5000
+inner = 1
 lox = { file = "sieve.lox" }
 python = { file = "Sieve" }
 lua = { file = "Sieve" }
