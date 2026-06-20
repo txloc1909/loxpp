@@ -14,19 +14,22 @@ image  = "bench-clox:latest"
 cmd    = ["clox", "/benchmarks/clox/{file}"]
 adapter = "raw"
 
+# AWFY suites run via the SOM harness: <interp> harness.<ext> <Name> <iters>
+# <inner>. {inner} is the per-benchmark size/repeat from manifest.toml, chosen
+# to match the lox++ port's workload so the numbers are comparable.
 [python]
 image  = "bench-python:latest"
-cmd    = ["python3", "/benchmarks/awfy/{file}"]
+cmd    = ["python3", "/benchmarks/awfy/harness.py", "{file}", "5", "{inner}"]
 adapter = "awfy"
 
 [lua]
 image  = "bench-lua:latest"
-cmd    = ["lua5.4", "/benchmarks/awfy/{file}"]
+cmd    = ["lua5.4", "/benchmarks/awfy/harness.lua", "{file}", "5", "{inner}"]
 adapter = "awfy"
 
 [js]
 image  = "bench-js:latest"
-cmd    = ["node", "/benchmarks/awfy/{file}"]
+cmd    = ["node", "/benchmarks/awfy/harness.js", "{file}", "5", "{inner}"]
 adapter = "awfy"
 
 [wren]

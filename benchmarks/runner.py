@@ -163,8 +163,9 @@ def run_direct(
 # Runner
 # ---------------------------------------------------------------------------
 
-def _resolve_cmd(lang_cfg: dict, file: str) -> list[str]:
-    return [part.replace("{file}", file) for part in lang_cfg["cmd"]]
+def _resolve_cmd(lang_cfg: dict, file: str, inner: int) -> list[str]:
+    return [part.replace("{file}", file).replace("{inner}", str(inner))
+            for part in lang_cfg["cmd"]]
 
 
 def run_benchmark(
@@ -176,10 +177,11 @@ def run_benchmark(
     no_container: bool,
     lox_binary: Optional[str],
     timeout: int,
+    inner: int = 1,
 ) -> RunResult:
     adapter = bench_cfg.get("adapter", lang_cfg.get("adapter", "awfy"))
     file = bench_cfg["file"]
-    cmd = _resolve_cmd(lang_cfg, file)
+    cmd = _resolve_cmd(lang_cfg, file, inner)
 
     # lox++ always runs directly (its binary lives in the build tree, not a
     # container image), so it uses host paths regardless of --no-container.
@@ -327,32 +329,31 @@ def main() -> None:
         langs_cfg = tomllib.load(f)
 
     # Collect (bench, lang) pairs to run
-    runs: list[tuple[str, str, dict, dict, str]] = []
+    runs: list[tuple[str, str, dict, dict, str, int]] = []
     for bench_name, bench_data in manifest.items():
         if not isinstance(bench_data, dict):
             continue
         suite = bench_data.get("suite", "")
+        inner = bench_data.get("inner", 1)
         if args.suite and suite != args.suite:
             continue
         if args.bench and bench_name not in args.bench:
             continue
         for lang, lang_bench in bench_data.items():
-            if lang in ("suite",):
-                continue
-            if not isinstance(lang_bench, dict):
+            if not isinstance(lang_bench, dict):  # skip scalars: suite, inner
                 continue
             if args.lang and lang not in args.lang:
                 continue
             if lang not in langs_cfg:
                 continue
-            runs.append((bench_name, lang, lang_bench, langs_cfg[lang], suite))
+            runs.append((bench_name, lang, lang_bench, langs_cfg[lang], suite, inner))
 
     if not runs:
         print("No matching benchmarks found.", file=sys.stderr)
         sys.exit(1)
 
     results = []
-    for bench_name, lang, bench_cfg, lang_cfg, suite in runs:
+    for bench_name, lang, bench_cfg, lang_cfg, suite, inner in runs:
         print(f"  {bench_name:20s} [{lang}] ...", end=" ", flush=True)
         r = run_benchmark(
             bench=bench_name,
@@ -363,6 +364,7 @@ def main() -> None:
             no_container=args.no_container,
             lox_binary=args.lox_binary,
             timeout=args.timeout,
+            inner=inner,
         )
         status = _fmt_us(r.average_us) if r.ok else f"ERROR: {r.error[:60]}"
         print(status)

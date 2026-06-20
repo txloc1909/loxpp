@@ -49,15 +49,24 @@ The `wren` CLI is built from **wren-lang/wren-cli** (pinned commit
 bundles the wren VM and libuv as submodules. The `wren-lang/wren` repo builds
 only a test runner, not a CLI.
 
-`runner.py` with the AWFY/CLBG/Wren manifest is **not** cross-comparable (each
-language runs a different port at a different size); it is for tracking lox++
-across its own suite.
+## AWFY suite (runner.py) — python/lua/js
 
-**WIP / not yet wired:** the AWFY-harness images for python/lua/js
-(`Dockerfile.{python,js}`) still point at a 404 commit and need
-harness-invocation wiring. The apples-to-apples harness above supersedes them
-for cross-language comparison; extending it to more benchmarks is the path to a
-fuller matrix.
+`runner.py` runs the AWFY suite for python/lua/js via the SOM harness
+(`harness.<ext> <Name> <iters> <inner>`) from `smarr/are-we-fast-yet`
+@`74306fec151070fd07157cefeacf19e7e0bcdc89`, baked into `bench-{python,lua,js}`.
+`manifest.toml` carries a per-benchmark `inner` chosen to match the lox++ port's
+workload, so the row is comparable to lox++.
+
+**This holds only where the lox++ port runs AWFY's exact algorithm at a size we
+can reproduce:** ✅ bounce, cd, mandelbrot, nbody, richards. ⚠️ The other lox++
+ports use reduced/ad-hoc sizes that don't map onto AWFY's harness (e.g. sieve,
+queens, list, permute, storage, towers diverge by large factors), so those rows
+are **reference-only, not apples-to-apple**. Aligning those lox++ ports to
+AWFY's standard workloads is follow-up. `crosslang.py` remains the guaranteed
+cross-comparable harness.
+
+`fib`/`earley` have no AWFY python/lua/js port; `havlak`'s lox++ port uses a
+non-AWFY signature — all stay lox++-only.
 
 ---
 

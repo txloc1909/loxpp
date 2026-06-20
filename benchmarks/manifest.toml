@@ -9,77 +9,83 @@
 
 [bounce]
 suite = "awfy"
+inner = 1
 lox = { file = "bounce.lox" }
-python = { file = "Bounce.py" }
-lua = { file = "Bounce.lua" }
-js = { file = "Bounce.js" }
+python = { file = "Bounce" }
+lua = { file = "Bounce" }
+js = { file = "Bounce" }
 
 [fib]
 suite = "awfy"
 lox = { file = "fib.lox" }
 clox = { file = "fib.lox" }
-python = { file = "Fib.py" }
-lua = { file = "Fib.lua" }
-js = { file = "Fib.js" }
 
 [list]
 suite = "awfy"
+inner = 1
 lox = { file = "list.lox" }
-python = { file = "List.py" }
-lua = { file = "List.lua" }
-js = { file = "List.js" }
+python = { file = "List" }
+lua = { file = "List" }
+js = { file = "List" }
 
 [mandelbrot]
 suite = "awfy"
+inner = 750
 lox = { file = "mandelbrot.lox" }
 clox = { file = "mandelbrot.lox" }
-python = { file = "Mandelbrot.py" }
-lua = { file = "Mandelbrot.lua" }
-js = { file = "Mandelbrot.js" }
+python = { file = "Mandelbrot" }
+lua = { file = "Mandelbrot" }
+js = { file = "Mandelbrot" }
 
 [nbody]
 suite = "awfy"
+inner = 250000
 lox = { file = "nbody.lox" }
-python = { file = "NBody.py" }
-lua = { file = "NBody.lua" }
-js = { file = "NBody.js" }
+python = { file = "NBody" }
+lua = { file = "NBody" }
+js = { file = "NBody" }
 
 [permute]
 suite = "awfy"
+inner = 1
 lox = { file = "permute.lox" }
-python = { file = "Permute.py" }
-lua = { file = "Permute.lua" }
-js = { file = "Permute.js" }
+python = { file = "Permute" }
+lua = { file = "Permute" }
+js = { file = "Permute" }
 
 [queens]
 suite = "awfy"
+inner = 10
 lox = { file = "queens.lox" }
 clox = { file = "queens.lox" }
-python = { file = "Queens.py" }
-lua = { file = "Queens.lua" }
-js = { file = "Queens.js" }
+python = { file = "Queens" }
+lua = { file = "Queens" }
+js = { file = "Queens" }
 
 [sieve]
 suite = "awfy"
+inner = 5000
 lox = { file = "sieve.lox" }
-python = { file = "Sieve.py" }
-lua = { file = "Sieve.lua" }
-js = { file = "Sieve.js" }
+python = { file = "Sieve" }
+lua = { file = "Sieve" }
+js = { file = "Sieve" }
 
 [storage]
 suite = "awfy"
+inner = 1
 lox = { file = "storage.lox" }
-python = { file = "Storage.py" }
-lua = { file = "Storage.lua" }
-js = { file = "Storage.js" }
+python = { file = "Storage" }
+lua = { file = "Storage" }
+js = { file = "Storage" }
 
 [towers]
 suite = "awfy"
+inner = 1
 lox = { file = "towers.lox" }
 clox = { file = "towers.lox" }
-python = { file = "Towers.py" }
-lua = { file = "Towers.lua" }
-js = { file = "Towers.js" }
+python = { file = "Towers" }
+lua = { file = "Towers" }
+js = { file = "Towers" }
 
 # ---------------------------------------------------------------------------
 # AWFY — macro benchmarks
@@ -87,45 +93,43 @@ js = { file = "Towers.js" }
 
 [cd]
 suite = "awfy"
+inner = 2
 lox = { file = "cd.lox" }
-python = { file = "CD.py" }
-lua = { file = "CD.lua" }
-js = { file = "CD.js" }
+python = { file = "CD" }
+lua = { file = "CD" }
+js = { file = "CD" }
 
 [deltablue]
 suite = "awfy"
+inner = 100
 lox = { file = "deltablue.lox" }
-python = { file = "DeltaBlue.py" }
-lua = { file = "DeltaBlue.lua" }
-js = { file = "DeltaBlue.js" }
+python = { file = "DeltaBlue" }
+lua = { file = "DeltaBlue" }
+js = { file = "DeltaBlue" }
 
 [earley]
 suite = "awfy"
 lox = { file = "earley.lox" }
-python = { file = "Earley.py" }
-lua = { file = "Earley.lua" }
-js = { file = "Earley.js" }
 
 [havlak]
 suite = "awfy"
 lox = { file = "havlak.lox" }
-python = { file = "Havlak.py" }
-lua = { file = "Havlak.lua" }
-js = { file = "Havlak.js" }
 
 [json]
 suite = "awfy"
+inner = 1
 lox = { file = "json.lox" }
-python = { file = "Json.py" }
-lua = { file = "Json.lua" }
-js = { file = "Json.js" }
+python = { file = "Json" }
+lua = { file = "Json" }
+js = { file = "Json" }
 
 [richards]
 suite = "awfy"
+inner = 1
 lox = { file = "richards.lox" }
-python = { file = "Richards.py" }
-lua = { file = "Richards.lua" }
-js = { file = "Richards.js" }
+python = { file = "Richards" }
+lua = { file = "Richards" }
+js = { file = "Richards" }
 
 # ---------------------------------------------------------------------------
 # CLBG — non-overlapping benchmarks
