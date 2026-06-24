@@ -1,0 +1,34 @@
+// bench_jump_table.lox — microbenchmark for the JUMP_TABLE optimisation.
+//
+// Measures throughput of a dense enum match with five arms, executed in a
+// tight loop.  Run with the release build for meaningful numbers:
+//
+//   cmake --preset release && cmake --build build_release
+//   time ./build_release/loxpp examples/bench_jump_table.lox
+
+enum Op { Add Sub Mul Div Mod }
+
+fun apply(op, a, b) {
+    return match op {
+        case Add => a + b
+        case Sub => a - b
+        case Mul => a * b
+        case Div => a / b
+        case Mod => a - b * math.floor(a / b)
+    };
+}
+
+var N = 5000000;
+var ops = [Add(), Sub(), Mul(), Div(), Mod(),
+           Mul(), Add(), Div(), Sub(), Mod()];
+var len = 10;
+
+var acc = 0;
+var i = 0;
+while (i < N) {
+    acc = apply(ops[i - len * math.floor(i / len)], acc + 1, 3);
+    i = i + 1;
+}
+
+print "result: " + str(acc);
+print "iterations: " + str(N);

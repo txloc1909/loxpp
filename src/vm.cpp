@@ -326,6 +326,21 @@ InterpretResult VM::run() {
             runtimeError("MatchError: no matching arm.");
             return InterpretResult::RUNTIME_ERROR;
         }
+        case Op::JUMP_TABLE: {
+            uint8_t minTag = readByte();
+            uint8_t count = readByte();
+            auto tableBase = frame->ip; // iterator to entry[0]
+            frame->ip += static_cast<int>(count) * 2;
+            Value tagVal = pop();
+            int tag = static_cast<int>(as<Number>(tagVal));
+            int idx = tag - static_cast<int>(minTag);
+            if (idx >= 0 && idx < static_cast<int>(count)) {
+                uint16_t fwd = static_cast<uint16_t>((tableBase[idx * 2] << 8) |
+                                                     tableBase[(idx * 2) + 1]);
+                frame->ip += fwd;
+            }
+            break;
+        }
         case Op::GET_TAG: {
             Value val = pop();
             if (!isEnumValue(val)) {

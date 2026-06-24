@@ -9,6 +9,7 @@
 
 using Byte = uint8_t;
 
+// clang-format off
 enum class Op : Byte {
     CONSTANT,
     NIL,
@@ -59,11 +60,16 @@ enum class Op : Byte {
     ITER_HAS_NEXT, // pops iterator copy → pushes bool (cursor < length)
     ITER_NEXT, // pops iterator copy → pushes element/key at cursor, advances
     MATCH_ERROR, // no operands — raises MatchError; VM never returns
+    // min_tag (1 byte), count (1 byte), then count×2 forward-offset bytes.
+    // Pops the tag integer; if tag-min_tag is in [0,count) jumps to that arm's
+    // code; otherwise falls through (to MATCH_ERROR for the out-of-range case).
+    JUMP_TABLE,
     GET_TAG,     // no operands — pop ObjEnum, push ctor->tag as Number
     INSTANCEOF,  // 2-byte constant (class name ObjString*); pop value, push
                  // bool
     IS_SEQ, // no operands — pop value, push true if it is a sequence type
 };
+// clang-format on
 
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }
 

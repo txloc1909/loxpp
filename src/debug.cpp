@@ -66,6 +66,23 @@ static int invokeInstruction(const char* name, const Chunk& chunk,
     return offset + 4;
 }
 
+static int jumpTableInstruction(const Chunk& chunk, int offset,
+                                std::ostream& out, bool color) {
+    uint8_t minTag = chunk.at(offset + 1);
+    uint8_t count = chunk.at(offset + 2);
+    int tableEnd = offset + 3 + count * 2;
+    out << cc(color, kBold) << "JUMP_TABLE" << cc(color, kReset)
+        << " min=" << static_cast<int>(minTag)
+        << " count=" << static_cast<int>(count) << '\n';
+    for (int i = 0; i < static_cast<int>(count); i++) {
+        uint16_t fwd = static_cast<uint16_t>(chunk.at(offset + 3 + i * 2) << 8 |
+                                             chunk.at(offset + 3 + i * 2 + 1));
+        out << cc(color, kDim) << "           | tag " << (minTag + i) << " -> "
+            << (tableEnd + static_cast<int>(fwd)) << cc(color, kReset) << '\n';
+    }
+    return tableEnd;
+}
+
 static int closureInstruction(const char* name, const Chunk& chunk, int offset,
                               std::ostream& out, bool color) {
     uint16_t idx =
@@ -201,6 +218,8 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return simpleInstruction("ITER_NEXT", offset, out, color);
     case Op::MATCH_ERROR:
         return simpleInstruction("MATCH_ERROR", offset, out, color);
+    case Op::JUMP_TABLE:
+        return jumpTableInstruction(chunk, offset, out, color);
     case Op::GET_TAG:
         return simpleInstruction("GET_TAG", offset, out, color);
     case Op::INSTANCEOF:
