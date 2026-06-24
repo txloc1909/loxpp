@@ -96,7 +96,8 @@ class Compiler {
         std::vector<std::string> ctorNames; // constructors matched by this arm
     };
     MatchArmResult compileMatchArm(int subjectSlot, int armLocalBase,
-                                   int resultSlot);
+                                   int resultSlot,
+                                   bool skipPatternCheck = false);
     void varDeclaration();
     void block();
     void funDeclaration();
@@ -172,6 +173,16 @@ class Compiler {
 
     // Raise a compile error if seen constructor arms don't cover all variants.
     void checkEnumExhaustiveness(const std::set<std::string>& seenCtors);
+
+    struct JumpTableCandidate {
+        bool eligible{false};
+        uint8_t minTag{0};
+        uint8_t count{0};
+    };
+    // Speculatively scan the current match body (after '{') to decide whether a
+    // JUMP_TABLE is applicable. Restores parser state before returning, so the
+    // real compilation pass still sees the original token stream.
+    JumpTableCandidate previewEnumArms();
 
     ObjFunction* m_function;
     Parser* m_parser;

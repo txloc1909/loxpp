@@ -798,6 +798,8 @@ void Compiler::compileMatchBody() {
 
     m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before match body.");
 
+    JumpTableCandidate jtc = previewEnumArms();
+
     // start = -1 flags this context as a match (not a loop).
     // localCount = armLocalBase so break cleanup stops before result and
     // subject.
@@ -805,6 +807,28 @@ void Compiler::compileMatchBody() {
 
     bool hasUnguardedCatchAll = false;
     std::set<std::string> seenCtors;
+
+    // JUMP_TABLE: emit dispatch preamble before any arm body.
+    // Tags in [minTag, minTag+count) jump forward to their arm; out-of-range
+    // falls through to the MATCH_ERROR placed immediately after the table.
+    int tableEntryBase = -1;
+    int tableEnd = -1;
+    std::unordered_map<uint8_t, int> jtArmStarts;
+
+    if (jtc.eligible) {
+        emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+        emitByte(Op::GET_TAG);
+        emitByte(Op::JUMP_TABLE);
+        emitByte(jtc.minTag);
+        emitByte(jtc.count);
+        tableEntryBase = static_cast<int>(getCurrentChunk()->size());
+        for (int i = 0; i < jtc.count; i++) {
+            emitByte(0);
+            emitByte(0);
+        }
+        tableEnd = static_cast<int>(getCurrentChunk()->size());
+        emitByte(Op::MATCH_ERROR); // reached when tag is out of table range
+    }
 
     while (!m_parser->check(TokenType::RIGHT_BRACE) &&
            !m_parser->check(TokenType::EOF_)) {
@@ -817,7 +841,17 @@ void Compiler::compileMatchBody() {
         }
 
         int armLocalBase_iter = m_localCount;
-        auto arm = compileMatchArm(subjectSlot, armLocalBase_iter, resultSlot);
+
+        if (jtc.eligible) {
+            // Record arm start before compiling so we can patch the table.
+            const ConstructorInfo* peekInfo =
+                findConstructor(std::string(m_parser->m_current.lexeme));
+            jtArmStarts[peekInfo->tag] =
+                static_cast<int>(getCurrentChunk()->size());
+        }
+
+        auto arm = compileMatchArm(subjectSlot, armLocalBase_iter, resultSlot,
+                                   jtc.eligible);
         if (arm.isUnguardedCatchAll) {
             hasUnguardedCatchAll = true;
         }
@@ -858,7 +892,9 @@ void Compiler::compileMatchBody() {
     }
 
     // No unguarded catch-all → raise MatchError when no arm matched.
-    if (!hasUnguardedCatchAll) {
+    // In JUMP_TABLE mode the MATCH_ERROR was already emitted right after the
+    // dispatch table, so skip emitting a second one here.
+    if (!hasUnguardedCatchAll && !jtc.eligible) {
         emitByte(Op::MATCH_ERROR);
     }
 
@@ -866,6 +902,23 @@ void Compiler::compileMatchBody() {
         patchJump(j);
     }
     m_loopStack.pop_back();
+
+    // Patch JUMP_TABLE entries: each offset is relative to tableEnd (the byte
+    // immediately after all table entries, which is where the MATCH_ERROR
+    // sits).
+    if (jtc.eligible) {
+        for (int i = 0; i < static_cast<int>(jtc.count); i++) {
+            auto tag = static_cast<uint8_t>(jtc.minTag + i);
+            auto it = jtArmStarts.find(tag);
+            if (it != jtArmStarts.end()) {
+                int fwd = it->second - tableEnd;
+                getCurrentChunk()->patch(tableEntryBase + i * 2,
+                                         static_cast<Byte>(fwd >> 8));
+                getCurrentChunk()->patch(tableEntryBase + i * 2 + 1,
+                                         static_cast<Byte>(fwd & 0xff));
+            }
+        }
+    }
 
     // Stack: [..., result_value(resultSlot), subject(subjectSlot)]
     // Pop the subject; result_value becomes the match expression result.
@@ -887,8 +940,10 @@ void Compiler::compileMatchBody() {
     m_localCount += numPending;
 }
 
-Compiler::MatchArmResult
-Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
+Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
+                                                   int armLocalBase,
+                                                   int resultSlot,
+                                                   bool skipPatternCheck) {
     // Result of compiling one pattern alternative (before 'or' or guard/arrow).
     struct OnePatResult {
         int missJump; // JUMP_IF_FALSE offset; -1 = always matches
@@ -993,13 +1048,16 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int resultSlot) {
         const ConstructorInfo* info = findConstructor(patName);
         if (info != nullptr) {
             ctorName = patName;
-            emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
-            emitByte(Op::GET_TAG);
-            emitConstantOp(Op::CONSTANT,
-                           makeConstant(Value{static_cast<double>(info->tag)}));
-            emitByte(Op::EQUAL);
-            missJump = emitJump(Op::JUMP_IF_FALSE);
-            emitByte(Op::POP);
+            if (!skipPatternCheck) {
+                emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+                emitByte(Op::GET_TAG);
+                emitConstantOp(
+                    Op::CONSTANT,
+                    makeConstant(Value{static_cast<double>(info->tag)}));
+                emitByte(Op::EQUAL);
+                missJump = emitJump(Op::JUMP_IF_FALSE);
+                emitByte(Op::POP);
+            }
             compileCtorPattern(subjectSlot, *info, patTok);
         } else if (findClass(patName)) {
             ObjString* classNameStr = m_mm->makeString(patTok.lexeme);
@@ -1410,6 +1468,152 @@ int Compiler::compileCtorPattern(int subjectSlot, const ConstructorInfo& info,
                           "Expect ')' after field pattern.");
     }
     return bindingCount;
+}
+
+Compiler::JumpTableCandidate Compiler::previewEnumArms() {
+    // Save parser state so this scan is non-destructive.
+    Scanner savedScanner = m_parser->m_scanner;
+    Token savedCurrent = m_parser->m_current;
+    Token savedPrevious = m_parser->m_previous;
+    bool savedHadError = m_parser->m_hadError;
+    bool savedPanicMode = m_parser->m_panicMode;
+    // Suppress any error output triggered during speculative scanning.
+    m_parser->m_panicMode = true;
+
+    JumpTableCandidate result;
+    std::vector<uint8_t> tags;
+    std::set<uint8_t> tagSet;
+    std::string firstEnumName;
+    bool ok = true;
+
+    while (ok && !m_parser->check(TokenType::RIGHT_BRACE) &&
+           !m_parser->check(TokenType::EOF_)) {
+        if (!m_parser->match(TokenType::CASE)) {
+            ok = false;
+            break;
+        }
+        if (!m_parser->check(TokenType::IDENTIFIER)) {
+            ok = false;
+            break;
+        }
+
+        std::string ctorName(m_parser->m_current.lexeme);
+        m_parser->advance();
+
+        const ConstructorInfo* info = findConstructor(ctorName);
+        if (info == nullptr) {
+            ok = false;
+            break;
+        }
+
+        if (firstEnumName.empty()) {
+            firstEnumName = info->enumName;
+        } else if (info->enumName != firstEnumName) {
+            ok = false;
+            break;
+        }
+
+        if (tagSet.count(info->tag) != 0U) {
+            ok = false;
+            break;
+        }
+        tagSet.insert(info->tag);
+        tags.push_back(info->tag);
+
+        // Reject @-binding, or-patterns, and guards — they prevent JUMP_TABLE.
+        if (m_parser->check(TokenType::AT) || m_parser->check(TokenType::OR)) {
+            ok = false;
+            break;
+        }
+
+        // Skip optional positional or named field bindings.
+        if (m_parser->match(TokenType::LEFT_PAREN)) {
+            int depth = 1;
+            while (depth > 0 && !m_parser->check(TokenType::EOF_)) {
+                if (m_parser->match(TokenType::LEFT_PAREN)) {
+                    depth++;
+                } else if (m_parser->match(TokenType::RIGHT_PAREN)) {
+                    depth--;
+                } else {
+                    m_parser->advance();
+                }
+            }
+        } else if (m_parser->match(TokenType::LEFT_BRACE)) {
+            int depth = 1;
+            while (depth > 0 && !m_parser->check(TokenType::EOF_)) {
+                if (m_parser->match(TokenType::LEFT_BRACE)) {
+                    depth++;
+                } else if (m_parser->match(TokenType::RIGHT_BRACE)) {
+                    depth--;
+                } else {
+                    m_parser->advance();
+                }
+            }
+        }
+
+        if (m_parser->check(TokenType::IF)) {
+            ok = false;
+            break;
+        }
+        if (!m_parser->match(TokenType::FAT_ARROW)) {
+            ok = false;
+            break;
+        }
+
+        // Skip the arm body, tracking brace nesting.
+        if (m_parser->check(TokenType::LEFT_BRACE)) {
+            m_parser->advance();
+            int depth = 1;
+            while (depth > 0 && !m_parser->check(TokenType::EOF_)) {
+                if (m_parser->match(TokenType::LEFT_BRACE)) {
+                    depth++;
+                } else if (m_parser->match(TokenType::RIGHT_BRACE)) {
+                    depth--;
+                } else {
+                    m_parser->advance();
+                }
+            }
+        } else {
+            int depth = 0;
+            while (!m_parser->check(TokenType::EOF_)) {
+                if (depth == 0 && (m_parser->check(TokenType::CASE) ||
+                                   m_parser->check(TokenType::RIGHT_BRACE))) {
+                    break;
+                }
+                if (m_parser->check(TokenType::LEFT_BRACE)) {
+                    depth++;
+                    m_parser->advance();
+                } else if (m_parser->check(TokenType::RIGHT_BRACE)) {
+                    depth--;
+                    m_parser->advance();
+                } else {
+                    m_parser->advance();
+                }
+            }
+        }
+    }
+
+    // Restore parser state unconditionally.
+    m_parser->m_scanner = savedScanner;
+    m_parser->m_current = savedCurrent;
+    m_parser->m_previous = savedPrevious;
+    m_parser->m_hadError = savedHadError;
+    m_parser->m_panicMode = savedPanicMode;
+
+    if (!ok || tags.empty()) {
+        return result;
+    }
+
+    uint8_t minT = *std::min_element(tags.begin(), tags.end());
+    uint8_t maxT = *std::max_element(tags.begin(), tags.end());
+    if (static_cast<size_t>(maxT - minT + 1) != tags.size()) {
+        return result; // sparse range — not eligible
+    }
+
+    result.eligible = true;
+    result.minTag = minT;
+    result.count = static_cast<uint8_t>(maxT - minT + 1);
+    return result;
 }
 
 void Compiler::checkEnumExhaustiveness(const std::set<std::string>& seenCtors) {
