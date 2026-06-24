@@ -1,0 +1,41 @@
+// ForIn — for-in iterator loop performance. Wren benchmark suite.
+// Ported from https://github.com/wren-lang/wren/blob/main/test/benchmark/for_in.wren
+
+class ForIn {
+  benchmark() {
+    var list = [];
+    var i = 0;
+    while (i < 100) {
+      list.append(i);
+      i = i + 1;
+    }
+
+    var sum = 0;
+    var outer = 0;
+    while (outer < 100) {
+      for (var x in list) {
+        sum = sum + x;
+      }
+      outer = outer + 1;
+    }
+    return sum;
+  }
+}
+
+// Expected: 100 * (0+1+...+99) = 100 * 4950 = 495000
+
+var _bench = ForIn();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "ForIn: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "ForIn: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

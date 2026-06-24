@@ -1,0 +1,17 @@
+// Towers — Towers of Hanoi, move-count only. Standard clox benchmark.
+// Tests deep recursion. Expected moves for n=20: 1048575.
+
+var movesDone = 0;
+
+fun hanoi(n, from, to, via) {
+  if (n == 0) return;
+  hanoi(n - 1, from, via, to);
+  movesDone = movesDone + 1;
+  hanoi(n - 1, via, to, from);
+}
+
+var start = clock();
+hanoi(20, 1, 3, 2);
+var elapsed = clock() - start;
+print movesDone;
+print elapsed;

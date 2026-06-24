@@ -1,0 +1,68 @@
+// List — recursive linked-list operations. AWFY benchmark suite.
+// Copyright (c) 2015-2016 Stefan Marr. MIT License.
+
+class Element {
+  init(v) {
+    this.val  = v;
+    this.next = nil;
+  }
+  length() {
+    if (this.next == nil) return 1;
+    return 1 + this.next.length();
+  }
+}
+
+class List {
+  benchmark() {
+    return this.tail(
+      this.makeList(15),
+      this.makeList(10),
+      this.makeList(6)
+    ).length();
+  }
+
+  makeList(length) {
+    if (length == 0) return nil;
+    var e = Element(length);
+    e.next = this.makeList(length - 1);
+    return e;
+  }
+
+  isShorterThan(x, y) {
+    var xTail = x;
+    var yTail = y;
+    while (yTail != nil) {
+      if (xTail == nil) return true;
+      xTail = xTail.next;
+      yTail = yTail.next;
+    }
+    return false;
+  }
+
+  tail(x, y, z) {
+    if (this.isShorterThan(y, x)) {
+      return this.tail(
+        this.tail(x.next, y, z),
+        this.tail(y.next, z, x),
+        this.tail(z.next, x, y)
+      );
+    }
+    return z;
+  }
+}
+
+var _bench = List();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "List: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "List: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

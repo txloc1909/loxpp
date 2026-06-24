@@ -1,0 +1,38 @@
+# langs.toml — interpreter configurations and container image names
+#
+# Each entry declares how to invoke a language in a container and which image
+# it uses. The runner mounts lox/ read-only at /bench for lox++ and lox-clox.
+
+[lox]
+image  = "loxpp-dev-env:latest"
+cmd    = ["/workspace/build/loxpp", "/bench/{file}"]
+mount  = "benchmarks/lox:/bench:ro"
+adapter = "awfy"
+
+[clox]
+image  = "bench-clox:latest"
+cmd    = ["clox", "/benchmarks/clox/{file}"]
+adapter = "raw"
+
+# AWFY suites run via the SOM harness: <interp> harness.<ext> <Name> <iters>
+# <inner>. {inner} is the per-benchmark size/repeat from manifest.toml, chosen
+# to match the lox++ port's workload so the numbers are comparable.
+[python]
+image  = "bench-python:latest"
+cmd    = ["python3", "/benchmarks/awfy/harness.py", "{file}", "5", "{inner}"]
+adapter = "awfy"
+
+[lua]
+image  = "bench-lua:latest"
+cmd    = ["lua5.4", "/benchmarks/awfy/harness.lua", "{file}", "5", "{inner}"]
+adapter = "awfy"
+
+[js]
+image  = "bench-js:latest"
+cmd    = ["node", "/benchmarks/awfy/harness.js", "{file}", "5", "{inner}"]
+adapter = "awfy"
+
+[wren]
+image  = "bench-wren:latest"
+cmd    = ["wren", "/benchmarks/wren/{file}"]
+adapter = "wren"

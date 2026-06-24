@@ -1,0 +1,184 @@
+# manifest.toml — maps (benchmark, language) to the file run inside the container
+#
+# file: path relative to the language's benchmark root inside the container
+# adapter: override the lang-level adapter if needed (optional)
+
+# ---------------------------------------------------------------------------
+# AWFY — micro benchmarks
+# ---------------------------------------------------------------------------
+
+[bounce]
+suite = "awfy"
+inner = 1
+lox = { file = "bounce.lox" }
+python = { file = "Bounce" }
+lua = { file = "Bounce" }
+js = { file = "Bounce" }
+
+[fib]
+suite = "awfy"
+lox = { file = "fib.lox" }
+clox = { file = "fib.lox" }
+
+[list]
+suite = "awfy"
+inner = 1
+lox = { file = "list.lox" }
+python = { file = "List" }
+lua = { file = "List" }
+js = { file = "List" }
+
+[mandelbrot]
+suite = "awfy"
+inner = 750
+lox = { file = "mandelbrot.lox" }
+clox = { file = "mandelbrot.lox" }
+python = { file = "Mandelbrot" }
+lua = { file = "Mandelbrot" }
+js = { file = "Mandelbrot" }
+
+[nbody]
+suite = "awfy"
+inner = 250000
+lox = { file = "nbody.lox" }
+python = { file = "NBody" }
+lua = { file = "NBody" }
+js = { file = "NBody" }
+
+[permute]
+suite = "awfy"
+inner = 1
+lox = { file = "permute.lox" }
+python = { file = "Permute" }
+lua = { file = "Permute" }
+js = { file = "Permute" }
+
+[queens]
+suite = "awfy"
+inner = 1
+lox = { file = "queens.lox" }
+clox = { file = "queens.lox" }
+python = { file = "Queens" }
+lua = { file = "Queens" }
+js = { file = "Queens" }
+
+[sieve]
+suite = "awfy"
+inner = 1
+lox = { file = "sieve.lox" }
+python = { file = "Sieve" }
+lua = { file = "Sieve" }
+js = { file = "Sieve" }
+
+[storage]
+suite = "awfy"
+inner = 1
+lox = { file = "storage.lox" }
+python = { file = "Storage" }
+lua = { file = "Storage" }
+js = { file = "Storage" }
+
+[towers]
+suite = "awfy"
+inner = 1
+lox = { file = "towers.lox" }
+clox = { file = "towers.lox" }
+python = { file = "Towers" }
+lua = { file = "Towers" }
+js = { file = "Towers" }
+
+# ---------------------------------------------------------------------------
+# AWFY — macro benchmarks
+# ---------------------------------------------------------------------------
+
+[cd]
+suite = "awfy"
+inner = 2
+lox = { file = "cd.lox" }
+python = { file = "CD" }
+lua = { file = "CD" }
+js = { file = "CD" }
+
+[deltablue]
+suite = "awfy"
+inner = 100
+lox = { file = "deltablue.lox" }
+python = { file = "DeltaBlue" }
+lua = { file = "DeltaBlue" }
+js = { file = "DeltaBlue" }
+
+[earley]
+suite = "awfy"
+lox = { file = "earley.lox" }
+
+[havlak]
+suite = "awfy"
+lox = { file = "havlak.lox" }
+
+[json]
+suite = "awfy"
+inner = 1
+lox = { file = "json.lox" }
+python = { file = "Json" }
+lua = { file = "Json" }
+js = { file = "Json" }
+
+[richards]
+suite = "awfy"
+inner = 1
+lox = { file = "richards.lox" }
+python = { file = "Richards" }
+lua = { file = "Richards" }
+js = { file = "Richards" }
+
+# ---------------------------------------------------------------------------
+# CLBG — non-overlapping benchmarks
+# ---------------------------------------------------------------------------
+
+[binary_trees]
+suite = "clbg"
+lox = { file = "binary_trees.lox" }
+
+[fannkuch]
+suite = "clbg"
+lox = { file = "fannkuch.lox" }
+
+[fasta]
+suite = "clbg"
+lox = { file = "fasta.lox" }
+
+[k_nucleotide]
+suite = "clbg"
+lox = { file = "k_nucleotide.lox" }
+
+[reverse_complement]
+suite = "clbg"
+lox = { file = "reverse_complement.lox" }
+
+[spectral_norm]
+suite = "clbg"
+lox = { file = "spectral_norm.lox" }
+
+# ---------------------------------------------------------------------------
+# Wren suite
+# ---------------------------------------------------------------------------
+
+[zoo]
+suite = "wren"
+lox = { file = "zoo.lox" }
+wren = { file = "zoo.wren" }
+
+[string_interning]
+suite = "wren"
+lox = { file = "string_interning.lox" }
+wren = { file = "string_interning.wren" }
+
+[for_in]
+suite = "wren"
+lox = { file = "for_in.lox" }
+wren = { file = "for_in.wren" }
+
+[instantiation]
+suite = "wren"
+lox = { file = "instantiation.lox" }
+wren = { file = "instantiation.wren" }
