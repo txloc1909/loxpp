@@ -9,6 +9,7 @@
 
 using Byte = uint8_t;
 
+// clang-format off
 enum class Op : Byte {
     CONSTANT,
     NIL,
@@ -44,10 +45,10 @@ enum class Op : Byte {
     GET_PROPERTY,
     SET_PROPERTY,
     DEFINE_METHOD,
-    INVOKE,       // operands: name-constant-index (2 bytes), arg-count (1 byte)
-    INHERIT,      // no operand — copies superclass methods into subclass
-    GET_SUPER,    // 2-byte constant (method name) — binds method to 'this' from
-                  // superclass
+    INVOKE,    // operands: name-constant-index (2 bytes), arg-count (1 byte)
+    INHERIT,   // no operand — copies superclass methods into subclass
+    GET_SUPER, // 2-byte constant (method name) — binds method to 'this' from
+               // superclass
     SUPER_INVOKE, // operands: name-constant-index (2 bytes), arg-count (1 byte)
     BUILD_LIST,   // operand: uint8 element count; pops N values, pushes ObjList
     BUILD_MAP,    // operand: uint8 pair count; pops 2*N values, pushes ObjMap
@@ -57,17 +58,18 @@ enum class Op : Byte {
     IN,        // pops seq (rhs) then elem (lhs); pushes bool membership result
     GET_ITER,  // pops List|String|Map → pushes ObjIterator{cursor=0}
     ITER_HAS_NEXT, // pops iterator copy → pushes bool (cursor < length)
-    ITER_NEXT,   // pops iterator copy → pushes element/key at cursor, advances
+    ITER_NEXT, // pops iterator copy → pushes element/key at cursor, advances
     MATCH_ERROR, // no operands — raises MatchError; VM never returns
     // min_tag (1 byte), count (1 byte), then count×2 forward-offset bytes.
     // Pops the tag integer; if tag-min_tag is in [0,count) jumps to that arm's
     // code; otherwise falls through (to MATCH_ERROR for the out-of-range case).
     JUMP_TABLE,
-    GET_TAG,    // no operands — pop ObjEnum, push ctor->tag as Number
-    INSTANCEOF, // 2-byte constant (class name ObjString*); pop value, push
-                // bool
-    IS_SEQ,     // no operands — pop value, push true if it is a sequence type
+    GET_TAG,     // no operands — pop ObjEnum, push ctor->tag as Number
+    INSTANCEOF,  // 2-byte constant (class name ObjString*); pop value, push
+                 // bool
+    IS_SEQ, // no operands — pop value, push true if it is a sequence type
 };
+// clang-format on
 
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }
 

@@ -271,12 +271,13 @@ TEST_F(SequenceBytecodeTest, InExpr_StringSubstring) {
 // continue re-enters at loopStart (offset 7), which re-checks ITER_HAS_NEXT.
 TEST_F(SequenceBytecodeTest, ForIn_EmptyBodyBytecode) {
     std::string bytecode = compile_program_to_bytecode("for (var x in [1]) {}");
+    // clang-format off
     std::string expected =
         "0: CONSTANT 0 ('1')\n" // list element (3 bytes)
         "3: BUILD_LIST 1\n"     // push [1]
-        "5: GET_ITER\n"      // replace [1] with ObjIterator → (iter) at slot 1
-        "6: NIL\n"           // push nil → x at slot 2
-        "7: GET_LOCAL 1\n"   // loopStart: push (iter) copy
+        "5: GET_ITER\n"    // replace [1] with ObjIterator → (iter) at slot 1
+        "6: NIL\n"         // push nil → x at slot 2
+        "7: GET_LOCAL 1\n" // loopStart: push (iter) copy
         "9: ITER_HAS_NEXT\n" // pop copy, push bool
         "10: JUMP_IF_FALSE 10 -> 23\n"
         "13: POP\n"         // discard true
@@ -290,6 +291,7 @@ TEST_F(SequenceBytecodeTest, ForIn_EmptyBodyBytecode) {
         "25: POP\n"          // endScope: (iter)
         "26: NIL\n"
         "27: RETURN\n";
+    // clang-format on
     EXPECT_EQ(trim(bytecode), trim(expected));
 }
 
