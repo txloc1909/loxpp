@@ -5,6 +5,36 @@ plan: the existing parser and compiler are left untouched; a new backend walks t
 `ObjFunction` tree and translates to CIL text (`.il` files), which are assembled by
 `ilasm` (ships with .NET SDK) and run with `dotnet`.
 
+## Goals
+
+Beyond "run Lox++ on the CLR", this backend serves the same two deliberate purposes
+as the JVM backend, with CLR-specific angles:
+
+**1. Performance baseline for the native VM.**
+RyuJIT (the .NET JIT) and HotSpot take different optimisation strategies — comparing
+Lox++ native VM performance against *both* managed runtimes on the same benchmark
+suite gives a more robust baseline than either alone. A result that is slower than
+both JVM and CLR points clearly at the native VM; a result that sits between them is
+harder to interpret without the second data point. The same benchmark categories
+apply: arithmetic loops, recursion, OOP dispatch, closure-heavy code, and
+collection-heavy workloads. Results from all three targets should be tracked together
+(e.g. in `notes/benchmark_report_*.md`) so regressions and improvements are visible
+across the full picture.
+
+**2. Grounding the bytecode IR semantics.**
+A second independent translation of every opcode to a different managed platform
+strengthens the normative claim that the Lox++ IR is well-defined. Where the JVM
+translation validates that an opcode *can* be expressed in terms of JVM semantics,
+the CLR translation validates that the same opcode *can also* be expressed in CIL
+without needing to smuggle in platform-specific tricks. Divergences between the
+two translations (e.g. tail-call support, locals declaration style) are intentional
+and documented in "Differences from JVM Plan" — but the *observable Lox++ semantics*
+must be identical across all three targets. Any future improvement to the native VM
+(new IR instructions, changed dispatch semantics, GC-visible behaviour changes) that
+breaks either translation is a strong signal that Lox++ bytecode semantics is
+drifting — a prompt for the maintainer to pause and reconsider whether the change is
+intentional and well-understood.
+
 ## Architecture
 
 ```

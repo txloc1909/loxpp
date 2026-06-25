@@ -5,6 +5,34 @@ are left completely untouched. The backend walks the `ObjFunction` tree that the
 existing compiler already produces and translates it to Jasmin assembly (text-format
 JVM bytecode), which is then assembled to `.class` files and run on the JVM.
 
+## Goals
+
+Beyond "run Lox++ on the JVM", this backend serves two deliberate purposes:
+
+**1. Performance baseline for the native VM.**
+HotSpot is a mature, heavily optimised runtime. Running the same Lox++ programs
+under `--target jvm` and comparing wall-clock times against the native bytecode VM
+gives a calibrated reference point: if the native VM is significantly slower than
+JVM on a CPU-bound benchmark, that gap is a concrete improvement target. If it is
+competitive, that is evidence the native VM is already well-optimised for the class
+of program. Benchmarks should cover: arithmetic-heavy loops, recursive functions
+(fibonacci, ackermann), OOP dispatch (method calls on large inheritance trees),
+closure-heavy code, and collection-heavy workloads (list/map iteration).
+
+**2. Grounding the bytecode IR semantics.**
+Targeting an external, independently-specified platform forces every opcode's
+observable behaviour to be defined precisely enough that a second, unrelated
+runtime can implement it correctly. Any ambiguity in what an opcode does — edge
+cases in arithmetic, property lookup order, upvalue closing, iterator protocol —
+surfaces immediately as a correctness divergence between targets. The opcode
+translation table below therefore doubles as a normative description of what each
+Lox++ IR instruction *means*, independent of the C++ VM implementation. Future
+changes to the native VM (optimisation passes, new dispatch strategies, GC
+changes) should not violate the semantics documented here. A change that breaks
+the JVM translation is a strong signal that Lox++ bytecode semantics is drifting —
+a prompt for the maintainer to pause and reconsider whether the change is
+intentional and well-understood.
+
 ## Architecture
 
 ```
