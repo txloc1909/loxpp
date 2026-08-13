@@ -71,3 +71,22 @@ RUN curl -fsSL "https://downloads.sourceforge.net/project/jasmin/jasmin/jasmin-2
         > /usr/local/bin/jasmin \
     && chmod +x /usr/local/bin/jasmin \
     && rm -rf /tmp/jasmin.zip /tmp/jasmin
+
+# Ubuntu 24.04 carries the .NET SDK in its own archive, so no Microsoft feed and
+# no third-party apt key to maintain.
+RUN apt-get update && apt-get install -y \
+    dotnet-sdk-8.0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# ilasm assembles the .il text CIL the CLR backend emits. It is not part of the
+# .NET SDK on Linux — Microsoft ships it only inside a runtime-specific NuGet
+# package — so unpack the binary out of that. nuget.org will not let a published
+# version be replaced, but verify the digest anyway to match the jasmin fetch.
+RUN curl -fsSL "https://api.nuget.org/v3-flatcontainer/runtime.linux-x64.microsoft.netcore.ilasm/8.0.0/runtime.linux-x64.microsoft.netcore.ilasm.8.0.0.nupkg" \
+        -o /tmp/ilasm.nupkg \
+    && echo "e7c3c4a9a082a11c7e91ce74ba5dad83a8877f4ed85d5f8e1f2c9ea6c2cadee7  /tmp/ilasm.nupkg" \
+        | sha256sum -c - \
+    && unzip -q /tmp/ilasm.nupkg -d /tmp/ilasm \
+    && install -Dm755 /tmp/ilasm/runtimes/linux-x64/native/ilasm \
+        /usr/local/bin/ilasm \
+    && rm -rf /tmp/ilasm.nupkg /tmp/ilasm
