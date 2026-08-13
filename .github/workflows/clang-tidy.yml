@@ -19,9 +19,10 @@ jobs:
         with:
           context: .
           load: true
+          target: dev
           tags: loxpp-dev:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=dev
+          cache-to: type=gha,mode=max,scope=dev
 
       - name: Configure (debug)
         run: |

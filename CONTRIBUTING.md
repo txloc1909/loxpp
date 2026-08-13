@@ -6,11 +6,17 @@ configuration.
 
 [TESTING.md](TESTING.md) covers how to write new GTest cases and use the VM test helpers.
 
-**Dev environment:** the `Dockerfile` packages the full toolchain. Build it once:
+**Dev environment:** the `Dockerfile` packages the full toolchain in two stages —
+`dev` for C++ work, `dev-managed` when touching the JVM or CLR backends. Build the one
+you need:
 
 ```bash
-podman build -t loxpp-dev-env .
+podman build --target dev -t loxpp-dev-env .                    # C++ work
+podman build --target dev-managed -t loxpp-dev-env-managed .    # backend work
 ```
+
+The `--target` matters: `dev-managed` is the last stage, so omitting it builds the
+larger managed image regardless of what you tag it.
 
 ---
 

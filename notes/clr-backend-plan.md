@@ -3,7 +3,7 @@
 Adds a `--target clr` compilation path to loxpp. Mirrors the structure of the JVM
 plan: the existing parser and compiler are left untouched; a new backend walks the
 `ObjFunction` tree and translates to CIL text (`.il` files), which are assembled by
-`ilasm` (ships with .NET SDK) and run with `dotnet`.
+`ilasm` (a separate download on Linux — see Open Questions) and run with `dotnet`.
 
 ## Goals
 
@@ -211,8 +211,19 @@ CLI: `loxpp --target clr --out-dir build/clr/ program.lox`
 
 Post-compilation:
 ```bash
-ilasm /dll /output:build/clr/LoxMain.dll build/clr/LoxMain.il
+# -exe, not -dll: `dotnet X.dll` demands a managed executable with an entrypoint.
+# Note the `-` prefix: given the Windows-style `/exe`, the Linux ilasm reads an
+# absolute path and tries to assemble a file named /exe.il.
+ilasm -exe -output:build/clr/LoxMain.dll build/clr/LoxMain.il
 dotnet build runtime/clr/ -o build/clr/   # puts LoxRuntime.dll next to LoxMain.dll
+
+# ilasm emits no runtimeconfig.json, and `dotnet` will not run an assembly
+# without one, so the build step has to write it.
+cat > build/clr/LoxMain.runtimeconfig.json <<'JSON'
+{ "runtimeOptions": { "tfm": "net8.0",
+    "framework": { "name": "Microsoft.NETCore.App", "version": "8.0.0" } } }
+JSON
+
 dotnet build/clr/LoxMain.dll
 ```
 
@@ -232,8 +243,8 @@ src/
 
 | Concern | JVM | CLR |
 |---|---|---|
-| Assembler tool | `jasmin.jar` (bundled) | `ilasm` (ships with .NET SDK, no bundling) |
-| Stack map frames | Jasmin computes automatically | Not required in CIL |
+| Assembler tool | `jasmin.jar` (fetched into the image) | `ilasm` (fetched into the image) |
+| Stack map frames | Sidestepped — Jasmin emits class file 45.3, pre-dating the requirement | Not required in CIL |
 | Local variable decl | Implicit (JVM infers from bytecode) | Must declare upfront with `.locals init` |
 | Tail calls | Not supported | `tail.` prefix — implement for `CALL+RETURN` |
 | Binary format | `.class` (per-class files) | `.dll` (single assembly for all classes) |
@@ -243,17 +254,23 @@ src/
 ## Open Questions / Risks
 
 - **Single `.dll` vs multiple**: `ilasm` can assemble multiple `.il` files into one
-  `.dll` (via `/resource` or merging). Emit all classes into one `LoxMain.il` or
+  `.dll` (via `-resource` or merging). Emit all classes into one `LoxMain.il` or
   use `ILMerge`/`illink` in the build step. Single file is simpler to start.
 - **`CLOSE_UPVALUE` as no-op**: same justification as JVM plan — all captured locals
   are ref-cells from declaration. Acceptable for baseline.
 - **Tail call correctness**: the `tail.` prefix is a hint; the CLR JIT is not required
   to honor it (though RyuJIT does for direct calls). For the performance baseline this
   is fine. Deep recursion will still stack-overflow, same as native loxpp.
-- **ilasm availability**: `ilasm` lives at
-  `$(dotnet --list-runtimes | ... )/ilasm` — its path is version-dependent.
-  The build script should locate it via `dotnet --list-sdks` or hardcode a
-  discovery fallback.
+- **ilasm availability**: `ilasm` is *not* part of the .NET SDK on Linux. Microsoft
+  ships it only as the `runtime.linux-x64.Microsoft.NETCore.ILAsm` NuGet package,
+  which is flagged upstream as an internal implementation package. `dev-managed`
+  unpacks 8.0.0 from it to `/usr/local/bin/ilasm`, so the build script can assume
+  a plain `ilasm` on `PATH` and needs no discovery logic.
+- **CoreCLR assembly references**: CIL for CoreCLR cannot reference one umbrella
+  `mscorlib`. `System.Object` resolves from `System.Runtime` and `System.Console`
+  from `System.Console`, each needing its own `.assembly extern` declaration — so
+  the backend must emit an extern per assembly it touches, not a single fixed
+  preamble. `tools/toolchain_smoke/hello.il` carries the minimal working set.
 - **Map key hashing**: `LoxMap` uses `Dictionary<object,object>`. `double` and
   `string` hash correctly when boxed; `null` (nil) is not a valid `Dictionary` key
   so nil keys should be mapped to a private sentinel object in `LoxMap`.
