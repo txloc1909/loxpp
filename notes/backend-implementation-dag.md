@@ -66,6 +66,31 @@ All settled to stay faithful to the Lox++ spec and the current C++ implementatio
   frames and `.maxstack`), then CLR reuses N0–N3 unchanged (CLR must hand-compute
   `.maxstack`).
 
+## Build & emission notes (from the toolchain image, PR #94)
+
+The `dev-managed` image (OpenJDK 21 + jasmin 2.4 + .NET SDK 8 + ilasm 8.0) proves
+the assemble→run path in CI. Facts it pins down for the nodes:
+
+- **Runtime-library build.** Build `lox-rt.jar` with plain `javac` + `jar` — the
+  image has **no** maven/gradle; build `LoxRuntime.dll` with `dotnet build` (a
+  dependency-free `net8.0` class library, so restore works offline). The JVM
+  plan's `pom.xml`/`mvn`/`gradle` mention is superseded and gets corrected at the
+  post-#94 rebase. This library-build path is *not* covered by the smoke test —
+  RT's own unit-test checkpoint is where `jar`/`dotnet build` are first exercised.
+- **EH harness — reuse, don't reinvent.** EH *is* PR #94's
+  `tools/toolchain_smoke/{Hello.java,hello.j,hello.il}` + `check_managed_toolchains.sh`.
+  Point the EH node at it. `hello.il` also carries a minimal working
+  `.assembly extern` set for CoreCLR.
+- **CLR module scaffolding** — required by the CLR emission nodes (N4/N5),
+  discovered in #94:
+  - Assemble with `-exe -output:X.dll` — Linux ilasm reads options with `-`, not
+    `/` (a leading `/exe` is parsed as an absolute path and fails).
+  - Generate `X.runtimeconfig.json` per module; ilasm emits none and `dotnet`
+    refuses to run an assembly without it.
+  - Emit a `.assembly extern` per BCL assembly referenced (`System.Runtime`,
+    `System.Console`, …) plus `LoxRuntime` — CoreCLR has no single `mscorlib`
+    umbrella, so the extern set grows as features touch more of the BCL.
+
 ## The graph
 
 ```mermaid
@@ -152,8 +177,8 @@ and steps 4–6 are independent analyses.)
 
 | Node | Discharges | Deliverable | Depends on | Verifiable checkpoint |
 |---|---|---|---|---|
-| **RT** | P6 | Runtime lib: `LoxOps` (incl. `stringify` emulating C `%g`), `LoxCallable`/`LoxClosure`, `LoxClass`/`LoxInstance`, `LoxList`/`LoxMap`/`LoxIterator`/`LoxEnum` (tagged struct, B1), `LoxGlobals` (name→value map, A2), `LoxError`; native `String` (ASCII); **full stdlib** (`math_module`, `map_api`, `file_api`, `globals`); boxing + one `Callable` interface | — | Runtime unit tests green in Java/C# with **no codegen**: `add(1.0,2.0)==3.0`, `stringify(3.0)=="3"` and `stringify(1e6)=="1e+06"`, `in(1,[1,2,3])==true`, `slice("hello",1,3)=="el"`, `Enum` equality is identity, `LoxGlobals.get(undefined)` throws. Builds `lox-rt.jar` / `LoxRuntime.dll`. |
-| **EH** | (infra) | Emit `.j`/`.il` text; shell out to jasmin/ilasm; load+run | toolchain | A **hand-written** `Hello.j`/`.il` that calls `LoxOps.print` assembles, runs, and links against RT. Proves assemble→run→runtime-link end-to-end. |
+| **RT** | P6 | Runtime lib: `LoxOps` (incl. `stringify` emulating C `%g`), `LoxCallable`/`LoxClosure`, `LoxClass`/`LoxInstance`, `LoxList`/`LoxMap`/`LoxIterator`/`LoxEnum` (tagged struct, B1), `LoxGlobals` (name→value map, A2), `LoxError`; native `String` (ASCII); **full stdlib** (`math_module`, `map_api`, `file_api`, `globals`); boxing + one `Callable` interface | — | Runtime unit tests green in Java/C# with **no codegen**: `add(1.0,2.0)==3.0`, `stringify(3.0)=="3"` and `stringify(1e6)=="1e+06"`, `in(1,[1,2,3])==true`, `slice("hello",1,3)=="el"`, `Enum` equality is identity, `LoxGlobals.get(undefined)` throws. Builds `lox-rt.jar` (`javac`+`jar`) / `LoxRuntime.dll` (`dotnet build`) — no maven/gradle. |
+| **EH** | (infra) | Emit `.j`/`.il` text; assemble via jasmin/ilasm; load+run. **Reuse PR #94's `tools/toolchain_smoke/` + `check_managed_toolchains.sh`** (see Build & emission notes for the CLR module scaffolding) | toolchain (`dev-managed`) | `check_managed_toolchains.sh` green: hand-written `Hello.java`/`hello.j`/`hello.il` assemble, run, and (once RT exists) link against it — assemble→run→link end-to-end. |
 | **N0** | enables P1/P3/P8 | Decoder for every op incl. variable-length `CLOSURE`, `JUMP_TABLE`, `INVOKE`; walks the `ObjFunction` tree | — | Re-disassemble each probe from the walker; **byte/structure-exact diff** against `loxpp -DLOXPP_DEBUG_PRINT_CODE`. No unknown/misaligned opcodes on any probe. |
 | **N1** | P3a | CFG via leaders algorithm; label at every jump target | N0 | `05_for` CFG has exactly **2 back-edges + 1 forward skip**; every jump/loop/table target is a block leader; **no target lands mid-instruction** (assert). |
 | **N2** | P1 | Symbolic stack sim: per-offset height, slot classification (named-local vs temporary), max-stack | N0 | `01_assign_local`: offset 8 `POP` → **TEMP**, offset 12 `POP` → **LOCAL-RECLAIM**. `15_nested_arith`: computed `.maxstack` equals independent count. Stack height == 0 at every `RETURN`. |
