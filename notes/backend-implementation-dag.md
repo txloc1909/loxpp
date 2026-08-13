@@ -20,10 +20,11 @@ Assumes the toolchain is solved (JDK+jasmin / .NET SDK+ilasm in the image).
   to green, then the second reuses every analysis node and every checkpoint.
 - **The gate (N11) is differential** across native loxpp ⟷ JVM ⟷ CLR.
 
-## Resolved design decisions (RT contract)
+## Resolved design decisions
 
-The forks inside RT are settled; both choices stay faithful to the Lox++ spec and
-the current C++ implementation:
+All settled to stay faithful to the Lox++ spec and the current C++ implementation.
+
+**RT contract**
 
 - **Premise → chunk-walker.** Reuse the existing bytecode; do not add an AST/IR
   codegen path. (This is why N0–N3, the un-fusing analyses, exist.)
@@ -35,6 +36,35 @@ the current C++ implementation:
 - **Enum → B1 (tagged struct).** `LoxEnum` = int tag + optional payload array,
   matching the current C++ `ObjEnum`. Revisit only if enum variants gain methods
   (on the roadmap).
+- **Numbers → emulate C `%g`.** Number `stringify` reproduces native's
+  `snprintf("%g")` exactly (6 significant digits, trailing zeros stripped, `e±0N`
+  exponents) — *not* `Double.toString`/`double.ToString()`, which diverge
+  (`3.0`→`"3"`, `0.1+0.2`→`"0.3"`, `1e6`→`"1e+06"`). Native is the reference oracle.
+- **Strings → native `String`.** Lox++ strings are ASCII per spec
+  (`03-types.md`), so `java.lang.String`/`System.String` are faithful: byte index =
+  char index, `len` = char count, `for-in` = per-char. The runtime assumes ASCII;
+  non-ASCII bytes (e.g. from file I/O) are outside the string contract (undefined
+  per spec).
+- **Stdlib → full native surface.** The runtimes reimplement the whole native
+  stdlib: `globals` (clock, …), `math_module`, `map_api` (keys/values/entries/
+  has/del), and `file_api` (file I/O). This bounds what the N11 corpus can run and
+  makes RT a heavier node than a benchmark-minimal port.
+
+**Verification & build order**
+
+- **Map order → unspecified; canonicalize at the program level (Option 1).** The
+  spec leaves map iteration order unspecified, so native/JVM/CLR may legitimately
+  differ. N11 does *not* sort output; instead map tests are written to emit a fixed
+  order (sort keys in the Lox++ program). Keeps the spec free and needs no
+  order-sensitivity logic in the runner. (Pinning an order / excluding tests were
+  the rejected alternatives.)
+- **Differential scope → stdout only.** N11 compares stdout of successful
+  programs. Error messages, stderr, and exit codes are *not* compared (Phase 1), so
+  no line-number debug info (`LineNumberTable`/CIL `.line`) is required in
+  N0/emission.
+- **Target order → JVM first.** Take JVM to green (jasmin auto-computes stack-map
+  frames and `.maxstack`), then CLR reuses N0–N3 unchanged (CLR must hand-compute
+  `.maxstack`).
 
 ## The graph
 
@@ -122,7 +152,7 @@ and steps 4–6 are independent analyses.)
 
 | Node | Discharges | Deliverable | Depends on | Verifiable checkpoint |
 |---|---|---|---|---|
-| **RT** | P6 | Runtime lib: `LoxOps`, `LoxCallable`/`LoxClosure`, `LoxClass`/`LoxInstance`, `LoxList`/`LoxMap`/`LoxIterator`/`LoxEnum` (tagged struct, B1), `LoxGlobals` (name→value map, A2), `LoxError`; boxing + one `Callable` interface | — | Runtime unit tests green in Java/C# with **no codegen**: `add(1.0,2.0)==3.0`, `in(1,[1,2,3])==true`, `slice("hello",1,3)=="el"`, `Enum` equality is identity, `LoxGlobals.get(undefined)` throws. Builds `lox-rt.jar` / `LoxRuntime.dll`. |
+| **RT** | P6 | Runtime lib: `LoxOps` (incl. `stringify` emulating C `%g`), `LoxCallable`/`LoxClosure`, `LoxClass`/`LoxInstance`, `LoxList`/`LoxMap`/`LoxIterator`/`LoxEnum` (tagged struct, B1), `LoxGlobals` (name→value map, A2), `LoxError`; native `String` (ASCII); **full stdlib** (`math_module`, `map_api`, `file_api`, `globals`); boxing + one `Callable` interface | — | Runtime unit tests green in Java/C# with **no codegen**: `add(1.0,2.0)==3.0`, `stringify(3.0)=="3"` and `stringify(1e6)=="1e+06"`, `in(1,[1,2,3])==true`, `slice("hello",1,3)=="el"`, `Enum` equality is identity, `LoxGlobals.get(undefined)` throws. Builds `lox-rt.jar` / `LoxRuntime.dll`. |
 | **EH** | (infra) | Emit `.j`/`.il` text; shell out to jasmin/ilasm; load+run | toolchain | A **hand-written** `Hello.j`/`.il` that calls `LoxOps.print` assembles, runs, and links against RT. Proves assemble→run→runtime-link end-to-end. |
 | **N0** | enables P1/P3/P8 | Decoder for every op incl. variable-length `CLOSURE`, `JUMP_TABLE`, `INVOKE`; walks the `ObjFunction` tree | — | Re-disassemble each probe from the walker; **byte/structure-exact diff** against `loxpp -DLOXPP_DEBUG_PRINT_CODE`. No unknown/misaligned opcodes on any probe. |
 | **N1** | P3a | CFG via leaders algorithm; label at every jump target | N0 | `05_for` CFG has exactly **2 back-edges + 1 forward skip**; every jump/loop/table target is a block leader; **no target lands mid-instruction** (assert). |
@@ -135,7 +165,7 @@ and steps 4–6 are independent analyses.)
 | **N8** | P5+P4 | `CLASS`/`DEFINE_METHOD`/`GET`/`SET_PROPERTY`/`INVOKE`/`INHERIT`/`GET_SUPER`/`SUPER_INVOKE`; `init` returns `this` | N6, N7 (super = upvalue) | `09_class`→`5`; `10_super`→`2`. Method receiver at slot 0; property peek/leave correct. |
 | **N9** | P7 | `BUILD_LIST`/`BUILD_MAP` (spill temps → array-init), `GET`/`SET_INDEX`, `SLICE`, `IN`, for-in iterator protocol | N5 | `11_for_in`→`1\n2\n3`; `12_list_map_index`→`10`; `16_slice_in`→`el\ntrue`. |
 | **N10** | P8 | `GET_TAG`→`tableswitch`/`switch` (box/unbox fusion), `JUMP_TABLE`→cases, `MATCH_ERROR`=default, enum-ctor `CALL`, payload `GET_INDEX` | N5, N6, N9 | `14_enum_payload`→`5`; a fixed dense `match` over enum variants dispatches to the correct arm and traps out-of-range via `MATCH_ERROR`. |
-| **N11** | (gate) | Differential test runner across all three runtimes | all | Every probe **and** the repo test corpus produce **byte-identical stdout** on native ⟷ JVM ⟷ CLR. Any divergence localizes to one opcode family. |
+| **N11** | (gate) | Differential test runner across all three runtimes (**stdout only**; map tests emit a fixed key order) | all | Every probe **and** the repo test corpus produce **byte-identical stdout** on native ⟷ JVM ⟷ CLR (stderr/exit codes not compared). Any divergence localizes to one opcode family. |
 
 ## Critical path & parallelization
 
