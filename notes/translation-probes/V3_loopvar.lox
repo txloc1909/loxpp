@@ -1,0 +1,12 @@
+fun make() {
+  var fns = [nil, nil, nil];
+  for (var i = 0; i < 3; i = i + 1) {
+    fun f() { return i; }
+    fns[i] = f;
+  }
+  return fns;
+}
+var fs = make();
+print fs[0]();
+print fs[1]();
+print fs[2]();
