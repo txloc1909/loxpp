@@ -178,8 +178,23 @@ Internally, one pass over the ObjFunction tree:
    field per global. Top-level script (`LoxMain`) calls `LoxRuntime.init()` first
    to populate native globals (clock, math, etc.).
 
-5. **Stack map frames**: not required when using Jasmin — Jasmin computes them
-   automatically. This is a key reason to prefer Jasmin over emitting `.class` directly.
+5. **Stack map frames**: not required — but *not* because Jasmin computes them.
+   Jasmin has no frame computation at all; its only frame facility is the manual
+   `.stack` directive. It emits class file version **45.3** (Java 1.1), below the
+   v50 threshold at which `StackMapTable` became mandatory, so branching methods
+   are verified by the old type-inferencing verifier instead.
+
+   Verified, not assumed: a class with a forward conditional and a backward goto
+   assembles and runs on JDK 21 carrying no `StackMapTable`
+   (`tools/toolchain_smoke/branch.j`, checked by
+   `tools/check_managed_toolchains.sh`).
+
+   The catch is that 45.3 also forecloses every class file feature above it —
+   `invokedynamic` (v51) in particular, which rules out `LambdaMetafactory`-style
+   closure dispatch should that ever look attractive. Emitting `.class` directly
+   would lift that ceiling, at the cost of implementing the constant pool, frames,
+   and class file format. Still the right trade for a baseline, but for a narrower
+   reason than "Jasmin handles it".
 
 6. **Branch labels**: during the translation pass, first scan the Chunk for all
    jump targets and emit `label_<byteOffset>:` anchors at those positions.

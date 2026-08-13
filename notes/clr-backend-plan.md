@@ -244,7 +244,7 @@ src/
 | Concern | JVM | CLR |
 |---|---|---|
 | Assembler tool | `jasmin.jar` (fetched into the image) | `ilasm` (fetched into the image) |
-| Stack map frames | Jasmin computes automatically | Not required in CIL |
+| Stack map frames | Sidestepped — Jasmin emits class file 45.3, pre-dating the requirement | Not required in CIL |
 | Local variable decl | Implicit (JVM infers from bytecode) | Must declare upfront with `.locals init` |
 | Tail calls | Not supported | `tail.` prefix — implement for `CALL+RETURN` |
 | Binary format | `.class` (per-class files) | `.dll` (single assembly for all classes) |
