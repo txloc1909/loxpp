@@ -27,6 +27,28 @@ check() {
     fi
 }
 
+# Compile and assemble steps have to report through the same path as everything
+# else. As bare commands under `set -e` they abort the script before `check` runs,
+# so a broken assembler — the failure mode that produces the least output — would
+# surface as a bare nonzero exit. Output is captured and printed only on failure:
+# ilasm writes its errors to stdout, so discarding it would throw away the only
+# explanation of what went wrong.
+step() {
+    local name="$1"; shift
+    local out
+    if out="$("$@" 2>&1)"; then
+        return 0
+    fi
+    printf '  FAIL  %s\n' "$name"
+    printf '%s\n' "$out" | sed 's/^/          /'
+    failures=$((failures + 1))
+    return 1
+}
+
+cd "$work"
+cp "$fixtures/Hello.java" "$fixtures/hello.j" "$fixtures/branch.j" \
+   "$fixtures/hello.il" .
+
 # Jasmin and ilasm print their banner and exit nonzero when invoked with no
 # arguments, so these probes must not be allowed to trip `set -e` — the banner
 # is what we are after, not the status.
@@ -35,35 +57,46 @@ java -version 2>&1 | sed 's/^/  /' || true
 printf '  javac %s\n' "$(javac -version 2>&1 | awk '{print $2}' || true)"
 printf '  jasmin %s\n' \
     "$(java -jar /opt/jasmin/jasmin.jar -version 2>&1 | awk '/Jasmin/ {print $3; exit}' || true)"
-printf '  jasmin emits class file version %s\n' \
-    "$(cd "$work" && jasmin -d . "$fixtures/hello.j" >/dev/null 2>&1 \
-        && javap -v HelloJasmin.class 2>/dev/null \
-        | awk '/major version/ {maj = $3} /minor version/ {min = $3} END {print maj "." min}' \
-        || true)"
 printf '  dotnet sdk %s\n' "$(dotnet --version || true)"
 printf '  ilasm %s\n' \
     "$(ilasm -? 2>&1 | awk '/IL Assembler/ {print $NF; exit}' || true)"
+
+# Pick the highest runtime rather than whichever awk saw last, and derive the tfm
+# from it: hardcoding one while discovering the other would silently pair a 9.0
+# framework with a net8.0 tfm if a second runtime ever lands in the image.
+runtime_version="$(dotnet --list-runtimes 2>/dev/null \
+    | awk '$1 == "Microsoft.NETCore.App" { print $2 }' | sort -V | tail -1 || true)"
+printf '  dotnet runtime %s\n' "${runtime_version:-<none found>}"
 
 echo
 echo "== round-trips =="
 
 # 1. JDK alone — isolates a broken JDK from a broken Jasmin.
-cp "$fixtures/Hello.java" "$work/"
-(cd "$work" && javac Hello.java)
-check "javac -> java" "javac ok" "$(cd "$work" && java Hello)"
+if step "javac" javac Hello.java; then
+    check "javac -> java" "javac ok" "$(java Hello 2>&1 || true)"
+fi
 
 # 2. Jasmin: the path the JVM backend emits into.
-cp "$fixtures/hello.j" "$work/"
-(cd "$work" && jasmin -d . hello.j >/dev/null)
-check "jasmin -> java" "jasmin ok" "$(cd "$work" && java HelloJasmin)"
+if step "jasmin assembly" jasmin -d . hello.j; then
+    check "jasmin -> java" "jasmin ok" "$(java HelloJasmin 2>&1 || true)"
 
-# 2b. Branching bytecode. Guards the assumption the backend rests on: that it
-#     never has to compute a StackMapTable. That holds only because Jasmin emits
-#     class file 45.3, below the version where frames became mandatory — so this
-#     verifying is the real evidence, not the straight-line case above.
-cp "$fixtures/branch.j" "$work/"
-(cd "$work" && jasmin -d . branch.j >/dev/null)
-check "jasmin -> java (branching)" "branching ok" "$(cd "$work" && java BranchProbe)"
+    # Asserted, not merely logged: both backend plans rest on this version
+    # staying below the frame requirement, so it should fail loudly rather than
+    # print a number nothing reads.
+    check "jasmin class file version" "45.3" \
+        "$(javap -v HelloJasmin.class 2>/dev/null \
+            | awk '/major version/ {maj = $3} /minor version/ {min = $3}
+                   END {print maj "." min}' || true)"
+fi
+
+# 2b. Branching bytecode — the case that actually bears on frames. A v51+ class
+#     file with these branches and no StackMapTable fails verification outright;
+#     at exactly v50 HotSpot still fails over to the old type-inferencing
+#     verifier, so v51 is where this check starts biting. 45.3 sits below both.
+if step "jasmin assembly (branching)" jasmin -d . branch.j; then
+    check "jasmin -> java (branching)" "branching ok" \
+        "$(java BranchProbe 2>&1 || true)"
+fi
 
 # 3. ilasm: the path the CLR backend emits into. Two Linux-specific traps here,
 #    both of which the backend's build step will hit as well:
@@ -71,14 +104,14 @@ check "jasmin -> java (branching)" "branching ok" "$(cd "$work" && java BranchPr
 #      tries to assemble a file named /exe.il, then reports FAILURE.
 #    - A raw ilasm assembly has no runtimeconfig.json, and `dotnet` refuses to
 #      run an assembly without one, so it has to be generated.
-cp "$fixtures/hello.il" "$work/"
-(cd "$work" && ilasm -exe -output:HelloIl.dll hello.il >/dev/null)
-runtime_version="$(dotnet --list-runtimes \
-    | awk '$1 == "Microsoft.NETCore.App" { v = $2 } END { print v }')"
-cat > "$work/HelloIl.runtimeconfig.json" <<JSON
+if [ -z "$runtime_version" ]; then
+    printf '  FAIL  dotnet runtime discovery (no Microsoft.NETCore.App listed)\n'
+    failures=$((failures + 1))
+elif step "ilasm assembly" ilasm -exe -output:HelloIl.dll hello.il; then
+    cat > HelloIl.runtimeconfig.json <<JSON
 {
   "runtimeOptions": {
-    "tfm": "net8.0",
+    "tfm": "net${runtime_version%%.*}.0",
     "framework": {
       "name": "Microsoft.NETCore.App",
       "version": "${runtime_version}"
@@ -86,7 +119,8 @@ cat > "$work/HelloIl.runtimeconfig.json" <<JSON
   }
 }
 JSON
-check "ilasm -> dotnet" "ilasm ok" "$(cd "$work" && dotnet HelloIl.dll)"
+    check "ilasm -> dotnet" "ilasm ok" "$(dotnet HelloIl.dll 2>&1 || true)"
+fi
 
 echo
 if [ "$failures" -ne 0 ]; then
