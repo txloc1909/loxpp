@@ -83,6 +83,10 @@ runtime/clr/src/
                         //   GetIndex/SetIndex
   LoxError.cs           // extends Exception
   LoxNative.cs          // delegate object LoxNativeFn(object[] args)
+  LoxGlobals.cs         // global environment: Dictionary<string,object>;
+                        //   Define(name,val) / Get(name) [throws if undefined] /
+                        //   Set(name,val) [throws if undefined] — mirrors Lox's
+                        //   dynamic, late-bound globals (not one static field per name)
   LoxRuntime.cs         // bootstraps globals: clock(), math stdlib, etc.
 ```
 
@@ -149,9 +153,9 @@ Same two-phase structure as the JVM backend:
 | `POP` | `pop` |
 | `GET_LOCAL n` | `ldloc <n>` |
 | `SET_LOCAL n` | `stloc <n>` |
-| `DEFINE_GLOBAL name` | `stsfld object Lox.LoxGlobals::<name>` |
-| `GET_GLOBAL name` | `ldsfld object Lox.LoxGlobals::<name>` |
-| `SET_GLOBAL name` | `stsfld object Lox.LoxGlobals::<name>` |
+| `DEFINE_GLOBAL name` | `ldstr "<name>"` → `call void Lox.LoxGlobals::Define(object, string)` (pops the value) |
+| `GET_GLOBAL name` | `ldstr "<name>"` → `call object Lox.LoxGlobals::Get(string)` (throws if undefined) |
+| `SET_GLOBAL name` | `ldstr "<name>"` → `call object Lox.LoxGlobals::Set(object, string)` (assignment expr — returns/leaves the value; see P2) |
 | `JUMP offset` | `br label_<target>` |
 | `JUMP_IF_FALSE offset` | `call bool Lox.LoxOps::IsFalsy(object)` → `brtrue label_<target>` |
 | `LOOP offset` | `br label_<target>` |
@@ -183,8 +187,13 @@ Same two-phase structure as the JVM backend:
 | `INSTANCEOF name` | `ldstr name` → `call object Lox.LoxOps::InstanceOf(object, string)` |
 | `IS_SEQ` | `call object Lox.LoxOps::IsSeq(object)` |
 
-4. **Globals**: one `LoxGlobals.il` with a class holding `public static object <name>`
-   fields. `LoxMain::Main` calls `Lox.LoxRuntime.Init()` first.
+4. **Globals**: a single runtime `LoxGlobals` holds a `Dictionary<string,object>`
+   global environment. `DEFINE_GLOBAL`/`GET_GLOBAL`/`SET_GLOBAL` call its
+   `Define`/`Get`/`Set` helpers; `Get`/`Set` on an undefined name throw `LoxError`,
+   matching the VM. This mirrors Lox's dynamic, late-bound globals — not one static
+   field per name — and keeps global-access cost comparable to the native VM's hash
+   lookup for the performance baseline. `LoxMain::Main` calls
+   `Lox.LoxRuntime.Init()` first.
 
 5. **Locals declaration**: CIL `.locals init` requires declaring all locals upfront.
    Scan the Chunk for max local slot index before emitting the method body.
@@ -277,6 +286,12 @@ src/
 - **Iterator local slot**: `.locals init` must include an extra slot per active for-in
   loop for the `LoxIterator` instance. The backend scans for nested for-in depth to
   determine the required count upfront.
-- **Enum as class hierarchy vs. tagged struct**: `LoxEnum` is a tagged struct (int
-  `Tag` + optional `object[]` payload). If Lox++ later adds methods on enum variants,
-  this will need revisiting. Flat struct is sufficient for the current spec.
+- **Globals via a global map (decided: A2)**: `LoxGlobals` holds a
+  `Dictionary<string,object>`, not one static field per name — faithful to the
+  spec's dynamic, late-bound globals and comparable to the native VM's hash lookup
+  for the perf baseline. Static fields were the alternative: faster, but
+  single-file only and not spec-faithful.
+- **Enum as a tagged struct (decided: B1)**: `LoxEnum` is a flat tagged struct
+  (int `Tag` + optional `object[]` payload), matching the current C++ `ObjEnum` and
+  the current spec. Methods on enum variants (on the roadmap) would force a
+  class-per-variant hierarchy — revisit then.

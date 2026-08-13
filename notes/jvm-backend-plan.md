@@ -82,6 +82,10 @@ runtime/jvm/src/lox/
                         //   invoke(Object receiver, String name, Object[] args)
   LoxError.java         // extends RuntimeException
   LoxNative.java        // @FunctionalInterface: Object call(Object[] args)
+  LoxGlobals.java       // global environment: HashMap<String,Object>;
+                        //   define(name,val) / get(name) [throws if undefined] /
+                        //   set(name,val) [throws if undefined] — mirrors Lox's
+                        //   dynamic, late-bound globals (not one static field per name)
   LoxRuntime.java       // bootstraps globals: clock(), math stdlib, etc.
 ```
 
@@ -140,9 +144,9 @@ Internally, one pass over the ObjFunction tree:
 | `POP` | `pop` |
 | `GET_LOCAL n` | `aload <n + argOffset>` |
 | `SET_LOCAL n` | `astore <n + argOffset>` |
-| `DEFINE_GLOBAL name` | `putstatic LoxGlobals/<name> Obj` |
-| `GET_GLOBAL name` | `getstatic LoxGlobals/<name> Obj` |
-| `SET_GLOBAL name` | `putstatic LoxGlobals/<name> Obj` |
+| `DEFINE_GLOBAL name` | `ldc "<name>"` → `invokestatic lox/LoxGlobals/define(Obj;Str;)V` (pops the value) |
+| `GET_GLOBAL name` | `ldc "<name>"` → `invokestatic lox/LoxGlobals/get(Str;)Obj;` (throws if undefined) |
+| `SET_GLOBAL name` | `ldc "<name>"` → `invokestatic lox/LoxGlobals/set(Obj;Str;)Obj;` (assignment expr — returns/leaves the value; see P2) |
 | `JUMP offset` | `goto label_<target>` |
 | `JUMP_IF_FALSE offset` | `invokestatic lox/LoxOps/isFalsy` → `ifne label_<target>` |
 | `LOOP offset` | `goto label_<target>` |
@@ -174,9 +178,14 @@ Internally, one pass over the ObjFunction tree:
 | `INSTANCEOF name` | `invokestatic lox/LoxOps/instanceOf(Obj;Str;)Z` → `invokestatic java/lang/Boolean.valueOf` |
 | `IS_SEQ` | `invokestatic lox/LoxOps/isSeq(Obj;)Z` → `invokestatic java/lang/Boolean.valueOf` |
 
-4. **Globals**: generate a single `LoxGlobals.j` with one `public static Object <name>`
-   field per global. Top-level script (`LoxMain`) calls `LoxRuntime.init()` first
-   to populate native globals (clock, math, etc.).
+4. **Globals**: a single runtime `LoxGlobals` holds a `HashMap<String,Object>`
+   global environment (name → value). `DEFINE_GLOBAL`/`GET_GLOBAL`/`SET_GLOBAL`
+   call its `define`/`get`/`set` helpers; `get`/`set` on an undefined name throw
+   `LoxError`, matching the VM. This mirrors Lox's dynamic, late-bound globals —
+   not one static field per name — and keeps global-access cost comparable to the
+   native VM's hash lookup for the performance baseline. Top-level script
+   (`LoxMain`) calls `LoxRuntime.init()` first to populate native globals
+   (clock, math, etc.).
 
 5. **Stack map frames**: not required — but *not* because Jasmin computes them.
    Jasmin has no frame computation at all; its only frame facility is the manual
@@ -236,8 +245,12 @@ Jasmin is not vendored here — the `dev-managed` image stage fetches it and put
 
 ## Open Questions / Risks
 
-- **Globals as static fields**: this works for single-file programs; for multi-file
-  or REPL support it needs revisiting.
+- **Globals via a global map (decided: A2)**: `LoxGlobals` holds a
+  `HashMap<String,Object>`, not one static field per name. Chosen to stay faithful
+  to the spec's dynamic, late-bound globals (define/redefine at runtime, forward
+  references, undefined-`get`/`set` errors) and to keep global-access cost
+  comparable to the native VM for the perf baseline. Static fields were the
+  alternative — faster, but single-file only and not spec-faithful.
 - **`CLOSE_UPVALUE` as no-op**: valid because all locals that are captured are
   allocated as `Object[]` ref-cells from the start (not on the JVM operand stack).
   This means all captured locals pay the boxing cost upfront, even if they are
@@ -260,6 +273,7 @@ Jasmin is not vendored here — the `dev-managed` image stage fetches it and put
 - **Iterator local slot**: `GET_ITER`/`ITER_HAS_NEXT`/`ITER_NEXT` assume a dedicated
   local JVM slot allocated by the backend for the iterator object. The slot count in
   `.limit locals` must account for this extra slot per active for-in loop.
-- **Enum as class hierarchy vs. tagged struct**: `LoxEnum` is implemented as a tagged
-  struct (int tag + payload). If Lox++ later adds methods on enum variants, this will
-  need to become a proper class hierarchy. For now the flat struct is sufficient.
+- **Enum as a tagged struct (decided: B1)**: `LoxEnum` is a flat tagged struct
+  (int tag + optional payload array), matching the current C++ `ObjEnum` and the
+  current spec. If Lox++ later adds methods on enum variants (on the roadmap), this
+  must become a class-per-variant hierarchy — revisit then.

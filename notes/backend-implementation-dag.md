@@ -20,6 +20,22 @@ Assumes the toolchain is solved (JDK+jasmin / .NET SDK+ilasm in the image).
   to green, then the second reuses every analysis node and every checkpoint.
 - **The gate (N11) is differential** across native loxpp ⟷ JVM ⟷ CLR.
 
+## Resolved design decisions (RT contract)
+
+The forks inside RT are settled; both choices stay faithful to the Lox++ spec and
+the current C++ implementation:
+
+- **Premise → chunk-walker.** Reuse the existing bytecode; do not add an AST/IR
+  codegen path. (This is why N0–N3, the un-fusing analyses, exist.)
+- **Globals → A2 (global map).** `LoxGlobals` holds a name→value map
+  (`HashMap`/`Dictionary`); `DEFINE/GET/SET_GLOBAL` call `define`/`get`/`set`, and
+  `get`/`set`-undefined throw. Faithful to the spec's dynamic, late-bound globals;
+  keeps global-access cost comparable to the native VM's hash lookup for the perf
+  baseline. (Static fields rejected: single-file only, not spec-faithful.)
+- **Enum → B1 (tagged struct).** `LoxEnum` = int tag + optional payload array,
+  matching the current C++ `ObjEnum`. Revisit only if enum variants gain methods
+  (on the roadmap).
+
 ## The graph
 
 ```mermaid
@@ -106,7 +122,7 @@ and steps 4–6 are independent analyses.)
 
 | Node | Discharges | Deliverable | Depends on | Verifiable checkpoint |
 |---|---|---|---|---|
-| **RT** | P6 | Runtime lib: `LoxOps`, `LoxCallable`/`LoxClosure`, `LoxClass`/`LoxInstance`, `LoxList`/`LoxMap`/`LoxIterator`/`LoxEnum`, `LoxError`; boxing + one `Callable` interface | — | Runtime unit tests green in Java/C# with **no codegen**: `add(1.0,2.0)==3.0`, `in(1,[1,2,3])==true`, `slice("hello",1,3)=="el"`, `Enum` equality is identity. Builds `lox-rt.jar` / `LoxRuntime.dll`. |
+| **RT** | P6 | Runtime lib: `LoxOps`, `LoxCallable`/`LoxClosure`, `LoxClass`/`LoxInstance`, `LoxList`/`LoxMap`/`LoxIterator`/`LoxEnum` (tagged struct, B1), `LoxGlobals` (name→value map, A2), `LoxError`; boxing + one `Callable` interface | — | Runtime unit tests green in Java/C# with **no codegen**: `add(1.0,2.0)==3.0`, `in(1,[1,2,3])==true`, `slice("hello",1,3)=="el"`, `Enum` equality is identity, `LoxGlobals.get(undefined)` throws. Builds `lox-rt.jar` / `LoxRuntime.dll`. |
 | **EH** | (infra) | Emit `.j`/`.il` text; shell out to jasmin/ilasm; load+run | toolchain | A **hand-written** `Hello.j`/`.il` that calls `LoxOps.print` assembles, runs, and links against RT. Proves assemble→run→runtime-link end-to-end. |
 | **N0** | enables P1/P3/P8 | Decoder for every op incl. variable-length `CLOSURE`, `JUMP_TABLE`, `INVOKE`; walks the `ObjFunction` tree | — | Re-disassemble each probe from the walker; **byte/structure-exact diff** against `loxpp -DLOXPP_DEBUG_PRINT_CODE`. No unknown/misaligned opcodes on any probe. |
 | **N1** | P3a | CFG via leaders algorithm; label at every jump target | N0 | `05_for` CFG has exactly **2 back-edges + 1 forward skip**; every jump/loop/table target is a block leader; **no target lands mid-instruction** (assert). |
