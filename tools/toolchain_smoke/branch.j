@@ -1,11 +1,12 @@
 ; Branching bytecode — a forward conditional and a backward goto, the shapes the
 ; JVM backend emits for JUMP_IF_FALSE and LOOP.
 ;
-; This is the fixture that matters for the frames question. Under class file
-; version 50+ a method with these branches needs a StackMapTable, and the backend
-; would have to compute one. Jasmin emits 45.3, so the old type-inferencing
-; verifier applies and no table is required. If a future assembler swap starts
-; emitting 50+, this stops verifying and the smoke check catches it.
+; This is the fixture that matters for the frames question. From class file
+; version 51 a method with these branches needs a StackMapTable, and the backend
+; would have to compute one. At exactly v50 HotSpot still fails over to the old
+; type-inferencing verifier, so v51 is where the requirement actually bites.
+; Jasmin emits 45.3, below both. If a future assembler swap starts emitting v51+,
+; this stops verifying and the smoke check catches it.
 .class public BranchProbe
 .super java/lang/Object
 

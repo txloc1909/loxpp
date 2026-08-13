@@ -180,9 +180,10 @@ Internally, one pass over the ObjFunction tree:
 
 5. **Stack map frames**: not required — but *not* because Jasmin computes them.
    Jasmin has no frame computation at all; its only frame facility is the manual
-   `.stack` directive. It emits class file version **45.3** (Java 1.1), below the
-   v50 threshold at which `StackMapTable` became mandatory, so branching methods
-   are verified by the old type-inferencing verifier instead.
+   `.stack` directive. It emits class file version **45.3** (Java 1.1) — below
+   v50, where `StackMapTable` was introduced, and below v51, where verifier
+   failover to type inference was removed and frames became genuinely mandatory.
+   Branching methods are therefore verified by the old type-inferencing verifier.
 
    Verified, not assumed: a class with a forward conditional and a backward goto
    assembles and runs on JDK 21 carrying no `StackMapTable`
