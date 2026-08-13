@@ -5,6 +5,16 @@ are left completely untouched. The backend walks the `ObjFunction` tree that the
 existing compiler already produces and translates it to Jasmin assembly (text-format
 JVM bytecode), which is then assembled to `.class` files and run on the JVM.
 
+> **Status.** This plan predates the deeper translation analysis. The opcode
+> table below is a **first-pass sketch** — several rows are simplified or wrong
+> (stack effects of the `SET_*`/assignment family and `JUMP_IF_FALSE`, the two
+> meanings of `POP`, closure-cell lifetime, the missing `JUMP_TABLE`, `CONSTANT`
+> of an enum ctor). The **authoritative** per-opcode corrections are in
+> [`bytecode-translation-problems.md`](bytecode-translation-problems.md) (P1–P8);
+> the build order, checkpoints, and resolved runtime-contract decisions are in
+> [`backend-implementation-dag.md`](backend-implementation-dag.md). Implement per
+> those, not the table verbatim.
+
 ## Goals
 
 Beyond "run Lox++ on the JVM", this backend serves two deliberate purposes:
@@ -25,8 +35,10 @@ observable behaviour to be defined precisely enough that a second, unrelated
 runtime can implement it correctly. Any ambiguity in what an opcode does — edge
 cases in arithmetic, property lookup order, upvalue closing, iterator protocol —
 surfaces immediately as a correctness divergence between targets. The opcode
-translation table below therefore doubles as a normative description of what each
-Lox++ IR instruction *means*, independent of the C++ VM implementation. Future
+translation aims to be a normative description of what each Lox++ IR instruction
+*means*, independent of the C++ VM implementation — though the table below is only
+a first-pass sketch (see the Status note); the corrected, authoritative semantics
+live in `bytecode-translation-problems.md`. Future
 changes to the native VM (optimisation passes, new dispatch strategies, GC
 changes) should not violate the semantics documented here. A change that breaks
 the JVM translation is a strong signal that Lox++ bytecode semantics is drifting —
@@ -155,7 +167,7 @@ Internally, one pass over the ObjFunction tree:
 | `CLOSURE fnIdx upvals…` | `new LoxFn$N` + push ref-cells for each upvalue |
 | `GET_UPVALUE n` | `aload upvalsLocal` + `n` → `aaload` → `aaload` (cell[0]) |
 | `SET_UPVALUE n` | same load + `aastore` into cell[0] |
-| `CLOSE_UPVALUE` | no-op (ref-cells are already heap-allocated) |
+| `CLOSE_UPVALUE` | **not a no-op** — ends a captured slot's live range so its next (re)declaration binds a *fresh* ref-cell; required for correct per-iteration loop captures (see P4) |
 | `GET_PROPERTY name` | `checkcast lox/LoxInstance` → `invokevirtual getProperty` |
 | `SET_PROPERTY name` | `checkcast lox/LoxInstance` → `invokevirtual setProperty` |
 | `INVOKE name argc` | `invokestatic lox/LoxOps/invoke(Obj;Str;[Obj;)Obj;` |
@@ -170,11 +182,12 @@ Internally, one pass over the ObjFunction tree:
 | `SET_INDEX` | `invokestatic lox/LoxOps/setIndex` |
 | `SLICE` | `invokestatic lox/LoxOps/slice(Obj;Obj;Obj;)Obj;` |
 | `IN` | `invokestatic lox/LoxOps/in` |
-| `GET_ITER` | `invokestatic lox/LoxOps/getIter(Obj;)Llox/LoxIterator;` — result stored in a dedicated iter-local slot |
+| `GET_ITER` | `invokestatic lox/LoxOps/getIter(Obj;)Llox/LoxIterator;` — result lands in the for-in loop's own local slot (an ordinary Chunk local, not a backend-invented slot) |
 | `ITER_HAS_NEXT` | load iter-local → `invokevirtual lox/LoxIterator/hasNext()Z` → `invokestatic java/lang/Boolean.valueOf` |
 | `ITER_NEXT` | load iter-local → `invokevirtual lox/LoxIterator/next()Obj;` |
 | `MATCH_ERROR` | `invokestatic lox/LoxOps/matchError()V` |
-| `GET_TAG` | `checkcast lox/LoxEnum` → `invokevirtual lox/LoxEnum/getTag()D` → `invokestatic java/lang/Double.valueOf` |
+| `GET_TAG` | `checkcast lox/LoxEnum` → `invokevirtual lox/LoxEnum/getTag()D` → `invokestatic java/lang/Double.valueOf` (skip the box when the next op is `JUMP_TABLE`) |
+| `JUMP_TABLE min count offs…` | fuse with the preceding `GET_TAG`: `…getTag()D` → `d2i` → `tableswitch <min>` with one label per arm, `default` → `label_<MATCH_ERROR>` (keep the tag primitive; do **not** box) — see P8 |
 | `INSTANCEOF name` | `invokestatic lox/LoxOps/instanceOf(Obj;Str;)Z` → `invokestatic java/lang/Boolean.valueOf` |
 | `IS_SEQ` | `invokestatic lox/LoxOps/isSeq(Obj;)Z` → `invokestatic java/lang/Boolean.valueOf` |
 
@@ -251,10 +264,13 @@ Jasmin is not vendored here — the `dev-managed` image stage fetches it and put
   references, undefined-`get`/`set` errors) and to keep global-access cost
   comparable to the native VM for the perf baseline. Static fields were the
   alternative — faster, but single-file only and not spec-faithful.
-- **`CLOSE_UPVALUE` as no-op**: valid because all locals that are captured are
-  allocated as `Object[]` ref-cells from the start (not on the JVM operand stack).
-  This means all captured locals pay the boxing cost upfront, even if they are
-  never actually closed over at runtime. Acceptable for a baseline.
+- **`CLOSE_UPVALUE` is not a no-op** (corrected): treating it as a no-op with all
+  captured-local cells allocated once at function entry **miscompiles**
+  fresh-per-iteration captures — every closure sees the last value instead of its
+  per-iteration value (proven by probe `V1`: `2 2 2` instead of `0 1 2`, while the
+  shared-loop-var case `V3` still gives `3 3 3`). A captured local must get a fresh
+  `Object[]` cell each time its declaration executes; `CLOSE_UPVALUE` marks the end
+  of that cell's live range. See P4 in `bytecode-translation-problems.md`.
 - **Arithmetic performance**: every `+` on numbers goes through `LoxOps.add` which
   unboxes two Doubles and reboxes the result. HotSpot's escape analysis will
   eventually eliminate most boxing on hot paths, but cold-start latency will be
@@ -270,9 +286,11 @@ Jasmin is not vendored here — the `dev-managed` image stage fetches it and put
   Java `HashMap` will use `Object.hashCode()` / `equals()`, which works correctly
   for `Double` and `String` but needs a sentinel for nil (`null` keys are permitted
   by `HashMap` so they can be used directly).
-- **Iterator local slot**: `GET_ITER`/`ITER_HAS_NEXT`/`ITER_NEXT` assume a dedicated
-  local JVM slot allocated by the backend for the iterator object. The slot count in
-  `.limit locals` must account for this extra slot per active for-in loop.
+- **Iterator local**: the for-in iterator is an ordinary local the compiler already
+  allocated in the Chunk (see probe `11_for_in`); `ITER_HAS_NEXT`/`ITER_NEXT` operate
+  on the copy loaded by the preceding `GET_LOCAL`. The backend maps it like any other
+  local — no dedicated backend slot is needed, and `.limit locals` counts it
+  automatically (P8/N9).
 - **Enum as a tagged struct (decided: B1)**: `LoxEnum` is a flat tagged struct
   (int tag + optional payload array), matching the current C++ `ObjEnum` and the
   current spec. If Lox++ later adds methods on enum variants (on the roadmap), this

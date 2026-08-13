@@ -5,6 +5,16 @@ plan: the existing parser and compiler are left untouched; a new backend walks t
 `ObjFunction` tree and translates to CIL text (`.il` files), which are assembled by
 `ilasm` (a separate download on Linux — see Open Questions) and run with `dotnet`.
 
+> **Status.** Like the JVM plan, this predates the deeper translation analysis.
+> The opcode table below is a **first-pass sketch** — several rows are simplified
+> or wrong (stack effects of the `SET_*`/assignment family and `JUMP_IF_FALSE`, the
+> two meanings of `POP`, closure-cell lifetime, the missing `JUMP_TABLE`, `CONSTANT`
+> of an enum ctor). The **authoritative** per-opcode corrections are in
+> [`bytecode-translation-problems.md`](bytecode-translation-problems.md) (P1–P8);
+> the build order, checkpoints, and resolved runtime-contract decisions are in
+> [`backend-implementation-dag.md`](backend-implementation-dag.md). Implement per
+> those, not the table verbatim.
+
 ## Goals
 
 Beyond "run Lox++ on the CLR", this backend serves the same two deliberate purposes
@@ -164,7 +174,7 @@ Same two-phase structure as the JVM backend:
 | `CLOSURE fnIdx upvals…` | `newobj LoxFn_N::.ctor(object[][])` after building upval array |
 | `GET_UPVALUE n` | `ldfld object[][] LoxClosure::upvals` → `n` → `ldelem` → `ldc.i4.0` → `ldelem` |
 | `SET_UPVALUE n` | same load path + `stelem` into `cell[0]` |
-| `CLOSE_UPVALUE` | no-op (ref-cells are already heap objects) |
+| `CLOSE_UPVALUE` | **not a no-op** — ends a captured slot's live range so its next (re)declaration binds a *fresh* ref-cell; required for correct per-iteration loop captures (see P4) |
 | `GET_PROPERTY name` | `castclass Lox.LoxInstance` → `callvirt GetProperty(string)` |
 | `SET_PROPERTY name` | `castclass Lox.LoxInstance` → `callvirt SetProperty(string, object)` |
 | `INVOKE name argc` | `call object Lox.LoxOps::Invoke(object, string, object[])` |
@@ -179,11 +189,12 @@ Same two-phase structure as the JVM backend:
 | `SET_INDEX` | `call object Lox.LoxOps::SetIndex(object, object, object)` |
 | `SLICE` | `call object Lox.LoxOps::Slice(object, object, object)` |
 | `IN` | `call object Lox.LoxOps::In(object, object)` |
-| `GET_ITER` | `call class Lox.LoxIterator Lox.LoxOps::GetIter(object)` — result stored in a dedicated iter-local |
+| `GET_ITER` | `call class Lox.LoxIterator Lox.LoxOps::GetIter(object)` — result lands in the for-in loop's own local (an ordinary Chunk local, not a backend-invented slot) |
 | `ITER_HAS_NEXT` | `ldloc iter-local` → `callvirt bool Lox.LoxIterator::HasNext()` → `box bool` |
 | `ITER_NEXT` | `ldloc iter-local` → `callvirt object Lox.LoxIterator::Next()` |
 | `MATCH_ERROR` | `call void Lox.LoxOps::MatchError()` |
-| `GET_TAG` | `castclass Lox.LoxEnum` → `callvirt double Lox.LoxEnum::GetTag()` → `box float64` |
+| `GET_TAG` | `castclass Lox.LoxEnum` → `callvirt double Lox.LoxEnum::GetTag()` → `box float64` (skip the box when the next op is `JUMP_TABLE`) |
+| `JUMP_TABLE min count offs…` | fuse with the preceding `GET_TAG`: `…GetTag()` → `conv.i4` → `ldc.i4 <min>` → `sub` (CIL `switch` is base-0) → `switch (label_<arm0>, …)` with fall-through to `label_<MATCH_ERROR>` (keep the tag primitive; do **not** box) — see P8 |
 | `INSTANCEOF name` | `ldstr name` → `call object Lox.LoxOps::InstanceOf(object, string)` |
 | `IS_SEQ` | `call object Lox.LoxOps::IsSeq(object)` |
 
@@ -265,8 +276,12 @@ src/
 - **Single `.dll` vs multiple**: `ilasm` can assemble multiple `.il` files into one
   `.dll` (via `-resource` or merging). Emit all classes into one `LoxMain.il` or
   use `ILMerge`/`illink` in the build step. Single file is simpler to start.
-- **`CLOSE_UPVALUE` as no-op**: same justification as JVM plan — all captured locals
-  are ref-cells from declaration. Acceptable for baseline.
+- **`CLOSE_UPVALUE` is not a no-op** (corrected): same finding as the JVM plan —
+  treating it as a no-op with captured-local cells hoisted to function entry
+  miscompiles fresh-per-iteration captures (probe `V1`: `2 2 2` instead of `0 1 2`).
+  A captured local gets a fresh `object[]` cell each time its declaration executes;
+  `CLOSE_UPVALUE` ends that cell's live range. See P4 in
+  `bytecode-translation-problems.md`.
 - **Tail call correctness**: the `tail.` prefix is a hint; the CLR JIT is not required
   to honor it (though RyuJIT does for direct calls). For the performance baseline this
   is fine. Deep recursion will still stack-overflow, same as native loxpp.
@@ -283,9 +298,11 @@ src/
 - **Map key hashing**: `LoxMap` uses `Dictionary<object,object>`. `double` and
   `string` hash correctly when boxed; `null` (nil) is not a valid `Dictionary` key
   so nil keys should be mapped to a private sentinel object in `LoxMap`.
-- **Iterator local slot**: `.locals init` must include an extra slot per active for-in
-  loop for the `LoxIterator` instance. The backend scans for nested for-in depth to
-  determine the required count upfront.
+- **Iterator local**: the for-in iterator is an ordinary local the compiler already
+  allocated in the Chunk (see probe `11_for_in`); `ITER_HAS_NEXT`/`ITER_NEXT` operate
+  on the copy loaded by the preceding `GET_LOCAL`. It is declared in `.locals init`
+  with the function's other locals (from the P1 max-slot scan) — no separate for-in
+  slot scan is needed (P8/N9).
 - **Globals via a global map (decided: A2)**: `LoxGlobals` holds a
   `Dictionary<string,object>`, not one static field per name — faithful to the
   spec's dynamic, late-bound globals and comparable to the native VM's hash lookup
