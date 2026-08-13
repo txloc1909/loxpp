@@ -123,7 +123,11 @@ jobs:
           cache-from: |
             type=gha,scope=dev-managed
             type=gha,scope=dev
-          cache-to: type=gha,mode=max,scope=dev-managed
+          # mode=min, unlike the dev scope: this exports only the final image's
+          # layers, not every intermediate step. Enough to keep the SourceForge
+          # and nuget.org fetches out of later runs without spending much of the
+          # repo's 10 GB cache budget, which is already ~65% used.
+          cache-to: type=gha,mode=min,scope=dev-managed
 
       - name: Check managed toolchains
         run: |
