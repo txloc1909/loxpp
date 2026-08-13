@@ -1,0 +1,38 @@
+// Instantiation — object creation rate. Wren benchmark suite.
+// Ported from https://github.com/wren-lang/wren/blob/main/test/benchmark/instantiation.wren
+
+class Point {
+  init(x, y) {
+    this.x = x;
+    this.y = y;
+  }
+}
+
+class Instantiation {
+  benchmark() {
+    var count = 0;
+    while (count < 100000) {
+      Point(count, count + 1);
+      count = count + 1;
+    }
+    return count;
+  }
+}
+
+// Expected: 100000
+
+var _bench = Instantiation();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "Instantiation: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "Instantiation: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

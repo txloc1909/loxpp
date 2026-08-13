@@ -1,0 +1,165 @@
+// Earley — Earley parser for a simple grammar. AWFY benchmark suite.
+// Copyright (c) 2015-2016 Stefan Marr. MIT License.
+// Parses a series of arithmetic expressions using the Earley parsing algorithm.
+
+// ---------------------------------------------------------------------------
+// Grammar: simple arithmetic  S -> S + S | S * S | '1'
+// We parse the string "1+1+1+1+1+1+1+1+1+1" and similar.
+// Expected result: the number of distinct parse states produced.
+// ---------------------------------------------------------------------------
+
+class EarleyState {
+  init(name, production, dot, startCol) {
+    this.name       = name;
+    this.production = production;  // list of symbols (strings)
+    this.dot        = dot;
+    this.startCol   = startCol;
+    this.endCol     = nil;
+  }
+
+  completed() {
+    return this.dot >= len(this.production);
+  }
+
+  nextCat() {
+    if (this.completed()) return nil;
+    return this.production[this.dot];
+  }
+}
+
+class EarleyColumn {
+  init(index, token) {
+    this.index  = index;
+    this.token  = token;
+    this.states = [];
+    this.keys   = {};
+  }
+
+  add(state) {
+    var key = state.name + ":" + str(state.dot) + ":" + str(state.startCol.index);
+    if (!this.keys.has(key)) {
+      this.keys[key] = true;
+      this.states.append(state);
+      state.endCol = this;
+    }
+  }
+}
+
+class EarleyGrammar {
+  init() {
+    // Grammar: P -> S; S -> S '+' S | S '*' S | '1'
+    this.rules = {};
+    this.rules["P"] = [["S"]];
+    this.rules["S"] = [["S", "+", "S"], ["S", "*", "S"], ["1"]];
+  }
+
+  predict(col, cat) {
+    var prods = this.rules[cat];
+    if (prods == nil) return;
+    var i = 0;
+    while (i < len(prods)) {
+      col.add(EarleyState(cat, prods[i], 0, col));
+      i = i + 1;
+    }
+  }
+
+  scan(col, state, token) {
+    if (token == state.nextCat()) {
+      col.add(EarleyState(state.name, state.production, state.dot + 1, state.startCol));
+    }
+  }
+
+  complete(col, state) {
+    if (!state.completed()) return;
+    var startStates = state.startCol.states;
+    var i = 0;
+    while (i < len(startStates)) {
+      var st = startStates[i];
+      if (st.nextCat() == state.name) {
+        col.add(EarleyState(st.name, st.production, st.dot + 1, st.startCol));
+      }
+      i = i + 1;
+    }
+  }
+
+  parse(text) {
+    // Build columns: one per character + 1 initial epsilon column
+    var table = [];
+    var startCol = EarleyColumn(0, "");
+    table.append(startCol);
+    startCol.add(EarleyState("P", ["S"], 0, startCol));
+
+    var ci = 0;
+    while (ci < len(text)) {
+      var col = EarleyColumn(ci + 1, text[ci]);
+      table.append(col);
+      ci = ci + 1;
+    }
+
+    // Main Earley loop
+    var t = 0;
+    while (t < len(table)) {
+      var col = table[t];
+      var si = 0;
+      while (si < len(col.states)) {
+        var state = col.states[si];
+        if (state.completed()) {
+          this.complete(col, state);
+        } else {
+          var cat = state.nextCat();
+          if (this.rules.has(cat)) {
+            this.predict(col, cat);
+          } else if (t + 1 < len(table)) {
+            this.scan(table[t + 1], state, table[t + 1].token);
+          }
+        }
+        si = si + 1;
+      }
+      t = t + 1;
+    }
+
+    // Return total number of states across all columns
+    var total = 0;
+    var ti = 0;
+    while (ti < len(table)) {
+      total = total + len(table[ti].states);
+      ti = ti + 1;
+    }
+    return total;
+  }
+}
+
+class Earley {
+  benchmark() {
+    var grammar = EarleyGrammar();
+    var total = 0;
+    // Parse 10 different expressions
+    total = total + grammar.parse("1");
+    total = total + grammar.parse("1+1");
+    total = total + grammar.parse("1*1");
+    total = total + grammar.parse("1+1+1");
+    total = total + grammar.parse("1*1+1");
+    total = total + grammar.parse("1+1*1");
+    total = total + grammar.parse("1+1+1+1");
+    total = total + grammar.parse("1*1*1*1");
+    total = total + grammar.parse("1+1+1+1+1");
+    total = total + grammar.parse("1+1+1+1+1+1");
+    return total;
+  }
+}
+
+var _bench = Earley();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "Earley: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "Earley: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

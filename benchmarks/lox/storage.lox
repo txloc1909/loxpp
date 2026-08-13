@@ -1,0 +1,58 @@
+// Storage — tree-of-arrays GC stress test. AWFY benchmark suite.
+// Copyright (c) 2015-2016 Stefan Marr. MIT License.
+
+class Random {
+  init() { this.seed = 74755; }
+  next() {
+    this.seed = (this.seed * 1309 + 13849) % 65536;
+    return this.seed;
+  }
+}
+
+class Storage {
+  init() { this.count = 0; }
+
+  benchmark() {
+    var random = Random();
+    this.count = 0;
+    this.buildTreeDepth(7, random);
+    return this.count;
+  }
+
+  buildTreeDepth(depth, random) {
+    this.count = this.count + 1;
+    if (depth == 1) {
+      var size = (random.next() % 10) + 1;
+      var arr = [];
+      var i = 0;
+      while (i < size) {
+        arr.append(0);
+        i = i + 1;
+      }
+      return arr;
+    }
+    var arr = [];
+    var i = 0;
+    while (i < 4) {
+      arr.append(this.buildTreeDepth(depth - 1, random));
+      i = i + 1;
+    }
+    return arr;
+  }
+}
+
+var _bench = Storage();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "Storage: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "Storage: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

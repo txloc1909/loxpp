@@ -1,0 +1,66 @@
+// BinaryTrees — recursive binary tree creation and summing. CLBG/AWFY benchmark.
+// https://benchmarksgame-team.pages.debian.net/benchmarksgame/
+// depth=14, expected result: 65535 (check sum of a stretch tree of depth 15)
+
+class TreeNode {
+  init(left, right) {
+    this.left  = left;
+    this.right = right;
+  }
+  check() {
+    if (this.left == nil) return 1;
+    return 1 + this.left.check() + this.right.check();
+  }
+}
+
+fun makeTree(depth) {
+  if (depth == 0) return TreeNode(nil, nil);
+  return TreeNode(makeTree(depth - 1), makeTree(depth - 1));
+}
+
+class BinaryTrees {
+  benchmark() {
+    var minDepth = 4;
+    var maxDepth = 14;
+    var stretchDepth = maxDepth + 1;
+
+    var checkSum = makeTree(stretchDepth).check();
+
+    var longLivedTree = makeTree(maxDepth);
+
+    var totalChecks = 0;
+    var depth = minDepth;
+    while (depth <= maxDepth) {
+      var iterations = 1;
+      var d = 0;
+      while (d < maxDepth - depth + minDepth) {
+        iterations = iterations * 2;
+        d = d + 1;
+      }
+      var i = 0;
+      while (i < iterations) {
+        totalChecks = totalChecks + makeTree(depth).check();
+        i = i + 1;
+      }
+      depth = depth + 2;
+    }
+
+    return longLivedTree.check();
+  }
+}
+
+var _bench = BinaryTrees();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "BinaryTrees: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "BinaryTrees: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

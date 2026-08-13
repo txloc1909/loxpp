@@ -1,0 +1,838 @@
+// CD — collision detection benchmark. AWFY benchmark suite.
+// Copyright (c) 2001-2010, Purdue University. All rights reserved.
+// Copyright (C) 2015 Apple Inc. All rights reserved.
+// Ported to Lox++ from the JavaScript version by Stefan Marr.
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+var MIN_X = 0;
+var MIN_Y = 0;
+var MAX_X = 1000;
+var MAX_Y = 1000;
+var MIN_Z = 0;
+var MAX_Z = 10;
+var PROXIMITY_RADIUS = 1;
+var GOOD_VOXEL_SIZE = 2;   // PROXIMITY_RADIUS * 2
+
+// ---------------------------------------------------------------------------
+// Vector2D
+// ---------------------------------------------------------------------------
+class Vector2D {
+  init(x, y) {
+    this.x = x;
+    this.y = y;
+  }
+
+  plus(other) {
+    return Vector2D(this.x + other.x, this.y + other.y);
+  }
+
+  minus(other) {
+    return Vector2D(this.x - other.x, this.y - other.y);
+  }
+
+  compareNumbers(a, b) {
+    if (a == b) return 0;
+    if (a < b)  return -1;
+    if (a > b)  return 1;
+    return -1;
+  }
+
+  compareTo(other) {
+    var result = this.compareNumbers(this.x, other.x);
+    if (result != 0) return result;
+    return this.compareNumbers(this.y, other.y);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Vector3D
+// ---------------------------------------------------------------------------
+class Vector3D {
+  init(x, y, z) {
+    this.x = x;
+    this.y = y;
+    this.z = z;
+  }
+
+  plus(other) {
+    return Vector3D(this.x + other.x, this.y + other.y, this.z + other.z);
+  }
+
+  minus(other) {
+    return Vector3D(this.x - other.x, this.y - other.y, this.z - other.z);
+  }
+
+  dot(other) {
+    return this.x * other.x + this.y * other.y + this.z * other.z;
+  }
+
+  squaredMagnitude() {
+    return this.dot(this);
+  }
+
+  magnitude() {
+    return math.sqrt(this.squaredMagnitude());
+  }
+
+  times(amount) {
+    return Vector3D(this.x * amount, this.y * amount, this.z * amount);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Red-Black Tree
+// ---------------------------------------------------------------------------
+
+// Walk left to find the minimum node in the subtree rooted at x.
+fun treeMinimum(x) {
+  var current = x;
+  while (current.left != nil) {
+    current = current.left;
+  }
+  return current;
+}
+
+class RBNode {
+  init(key, value) {
+    this.key    = key;
+    this.value  = value;
+    this.left   = nil;
+    this.right  = nil;
+    this.parent = nil;
+    this.red    = true;   // true = red, false = black
+  }
+
+  successor() {
+    var x = this;
+    if (x.right != nil) {
+      return treeMinimum(x.right);
+    }
+    var y = x.parent;
+    while (y != nil and x == y.right) {
+      x = y;
+      y = y.parent;
+    }
+    return y;
+  }
+}
+
+class InsertResult {
+  init(isNewEntry, newNode, oldValue) {
+    this.isNewEntry = isNewEntry;
+    this.newNode    = newNode;
+    this.oldValue   = oldValue;
+  }
+}
+
+class RedBlackTree {
+  init() {
+    this.root = nil;
+  }
+
+  put(key, value) {
+    var insertionResult = this.treeInsert(key, value);
+    if (!insertionResult.isNewEntry) {
+      return insertionResult.oldValue;
+    }
+
+    var x = insertionResult.newNode;
+    var y = nil;
+
+    while (x != this.root and x.parent.red) {
+      if (x.parent == x.parent.parent.left) {
+        y = x.parent.parent.right;
+        if (y != nil and y.red) {
+          // Case 1
+          x.parent.red = false;
+          y.red = false;
+          x.parent.parent.red = true;
+          x = x.parent.parent;
+        } else {
+          if (x == x.parent.right) {
+            // Case 2
+            x = x.parent;
+            this.leftRotate(x);
+          }
+          // Case 3
+          x.parent.red = false;
+          x.parent.parent.red = true;
+          this.rightRotate(x.parent.parent);
+        }
+      } else {
+        // Mirror: "right" and "left" exchanged.
+        y = x.parent.parent.left;
+        if (y != nil and y.red) {
+          // Case 1
+          x.parent.red = false;
+          y.red = false;
+          x.parent.parent.red = true;
+          x = x.parent.parent;
+        } else {
+          if (x == x.parent.left) {
+            // Case 2
+            x = x.parent;
+            this.rightRotate(x);
+          }
+          // Case 3
+          x.parent.red = false;
+          x.parent.parent.red = true;
+          this.leftRotate(x.parent.parent);
+        }
+      }
+    }
+
+    this.root.red = false;
+    return nil;
+  }
+
+  remove(key) {
+    var z = this.findNode(key);
+    if (z == nil) return nil;
+
+    // y is the node to be unlinked from the tree.
+    var y;
+    if (z.left == nil or z.right == nil) {
+      y = z;
+    } else {
+      y = z.successor();
+    }
+
+    // y is guaranteed non-nil at this point.
+    var x;
+    if (y.left != nil) {
+      x = y.left;
+    } else {
+      x = y.right;
+    }
+
+    // x is the child of y which might replace y. x might be nil.
+    var xParent;
+    if (x != nil) {
+      x.parent = y.parent;
+      xParent = x.parent;
+    } else {
+      xParent = y.parent;
+    }
+    if (y.parent == nil) {
+      this.root = x;
+    } else if (y == y.parent.left) {
+      y.parent.left = x;
+    } else {
+      y.parent.right = x;
+    }
+
+    if (y != z) {
+      if (!y.red) {
+        this.removeFixup(x, xParent);
+      }
+
+      y.parent = z.parent;
+      y.red    = z.red;
+      y.left   = z.left;
+      y.right  = z.right;
+
+      if (z.left != nil)  z.left.parent  = y;
+      if (z.right != nil) z.right.parent = y;
+      if (z.parent != nil) {
+        if (z.parent.left == z) {
+          z.parent.left = y;
+        } else {
+          z.parent.right = y;
+        }
+      } else {
+        this.root = y;
+      }
+    } else if (!y.red) {
+      this.removeFixup(x, xParent);
+    }
+
+    return z.value;
+  }
+
+  get(key) {
+    var node = this.findNode(key);
+    if (node == nil) return nil;
+    return node.value;
+  }
+
+  // Return all values in key order as a Lox++ list.
+  toList() {
+    var result = [];
+    if (this.root == nil) return result;
+    var current = treeMinimum(this.root);
+    while (current != nil) {
+      result.append(current.value);
+      current = current.successor();
+    }
+    return result;
+  }
+
+  // Return all [key, value] pairs in key order as a Lox++ list of two-element lists.
+  toEntryList() {
+    var result = [];
+    if (this.root == nil) return result;
+    var current = treeMinimum(this.root);
+    while (current != nil) {
+      var entry = [current.key, current.value];
+      result.append(entry);
+      current = current.successor();
+    }
+    return result;
+  }
+
+  findNode(key) {
+    var current = this.root;
+    while (current != nil) {
+      var cmp = key.compareTo(current.key);
+      if (cmp == 0) {
+        return current;
+      } else if (cmp < 0) {
+        current = current.left;
+      } else {
+        current = current.right;
+      }
+    }
+    return nil;
+  }
+
+  treeInsert(key, value) {
+    var y = nil;
+    var x = this.root;
+    while (x != nil) {
+      y = x;
+      var cmp = key.compareTo(x.key);
+      if (cmp < 0) {
+        x = x.left;
+      } else if (cmp > 0) {
+        x = x.right;
+      } else {
+        var oldValue = x.value;
+        x.value = value;
+        return InsertResult(false, nil, oldValue);
+      }
+    }
+
+    var z = RBNode(key, value);
+    z.parent = y;
+    if (y == nil) {
+      this.root = z;
+    } else if (key.compareTo(y.key) < 0) {
+      y.left = z;
+    } else {
+      y.right = z;
+    }
+    return InsertResult(true, z, nil);
+  }
+
+  leftRotate(x) {
+    var y = x.right;
+
+    // Turn y's left subtree into x's right subtree.
+    x.right = y.left;
+    if (y.left != nil) {
+      y.left.parent = x;
+    }
+
+    // Link x's parent to y.
+    y.parent = x.parent;
+    if (x.parent == nil) {
+      this.root = y;
+    } else if (x == x.parent.left) {
+      x.parent.left = y;
+    } else {
+      x.parent.right = y;
+    }
+
+    // Put x on y's left.
+    y.left = x;
+    x.parent = y;
+
+    return y;
+  }
+
+  rightRotate(y) {
+    var x = y.left;
+
+    // Turn x's right subtree into y's left subtree.
+    y.left = x.right;
+    if (x.right != nil) {
+      x.right.parent = y;
+    }
+
+    // Link y's parent to x.
+    x.parent = y.parent;
+    if (y.parent == nil) {
+      this.root = x;
+    } else if (y == y.parent.left) {
+      y.parent.left = x;
+    } else {
+      y.parent.right = x;
+    }
+
+    x.right = y;
+    y.parent = x;
+
+    return x;
+  }
+
+  removeFixup(x, xParent) {
+    var w = nil;
+    while (x != this.root and (x == nil or !x.red)) {
+      if (x == xParent.left) {
+        w = xParent.right;
+        if (w.red) {
+          // Case 1
+          w.red = false;
+          xParent.red = true;
+          this.leftRotate(xParent);
+          w = xParent.right;
+        }
+        if ((w.left == nil or !w.left.red) and
+            (w.right == nil or !w.right.red)) {
+          // Case 2
+          w.red = true;
+          x = xParent;
+          xParent = x.parent;
+        } else {
+          if (w.right == nil or !w.right.red) {
+            // Case 3
+            w.left.red = false;
+            w.red = true;
+            this.rightRotate(w);
+            w = xParent.right;
+          }
+          // Case 4
+          w.red = xParent.red;
+          xParent.red = false;
+          if (w.right != nil) w.right.red = false;
+          this.leftRotate(xParent);
+          x = this.root;
+          xParent = x.parent;
+        }
+      } else {
+        // Mirror: "right" and "left" exchanged.
+        w = xParent.left;
+        if (w.red) {
+          // Case 1
+          w.red = false;
+          xParent.red = true;
+          this.rightRotate(xParent);
+          w = xParent.left;
+        }
+        if ((w.right == nil or !w.right.red) and
+            (w.left == nil or !w.left.red)) {
+          // Case 2
+          w.red = true;
+          x = xParent;
+          xParent = x.parent;
+        } else {
+          if (w.left == nil or !w.left.red) {
+            // Case 3
+            w.right.red = false;
+            w.red = true;
+            this.leftRotate(w);
+            w = xParent.left;
+          }
+          // Case 4
+          w.red = xParent.red;
+          xParent.red = false;
+          if (w.left != nil) w.left.red = false;
+          this.rightRotate(xParent);
+          x = this.root;
+          xParent = x.parent;
+        }
+      }
+    }
+    if (x != nil) x.red = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Geometric helpers
+// ---------------------------------------------------------------------------
+
+fun isInVoxel(voxel, motion) {
+  if (voxel.x > MAX_X or voxel.x < MIN_X or
+      voxel.y > MAX_Y or voxel.y < MIN_Y) {
+    return false;
+  }
+
+  var init = motion.posOne;
+  var fin  = motion.posTwo;
+
+  var vS = GOOD_VOXEL_SIZE;
+  var r  = PROXIMITY_RADIUS / 2;
+
+  var vX = voxel.x;
+  var x0 = init.x;
+  var xv = fin.x - init.x;
+
+  var vY = voxel.y;
+  var y0 = init.y;
+  var yv = fin.y - init.y;
+
+  var lowX  = (vX - r - x0) / xv;
+  var highX = (vX + vS + r - x0) / xv;
+
+  if (xv < 0) {
+    var tmp = lowX;
+    lowX  = highX;
+    highX = tmp;
+  }
+
+  var lowY  = (vY - r - y0) / yv;
+  var highY = (vY + vS + r - y0) / yv;
+
+  if (yv < 0) {
+    var tmp = lowY;
+    lowY  = highY;
+    highY = tmp;
+  }
+
+  var xOk;
+  if (xv == 0) {
+    xOk = (vX <= x0 + r and x0 - r <= vX + vS);
+  } else {
+    xOk = ((lowX <= 1 and 1 <= highX) or
+            (lowX <= 0 and 0 <= highX) or
+            (0 <= lowX and highX <= 1));
+  }
+
+  var yOk;
+  if (yv == 0) {
+    yOk = (vY <= y0 + r and y0 - r <= vY + vS);
+  } else {
+    yOk = ((lowY <= 1 and 1 <= highY) or
+            (lowY <= 0 and 0 <= highY) or
+            (0 <= lowY and highY <= 1));
+  }
+
+  var xyOverlap;
+  if (xv == 0 or yv == 0) {
+    xyOverlap = true;
+  } else {
+    xyOverlap = ((lowY <= highX and highX <= highY) or
+                 (lowY <= lowX  and lowX  <= highY) or
+                 (lowX <= lowY  and highY <= highX));
+  }
+
+  return xOk and yOk and xyOverlap;
+}
+
+fun putIntoMap(voxelMap, voxel, motion) {
+  var vec = voxelMap.get(voxel);
+  if (vec == nil) {
+    vec = [];
+    voxelMap.put(voxel, vec);
+  }
+  vec.append(motion);
+}
+
+fun recurse(voxelMap, seen, nextVoxel, motion) {
+  if (!isInVoxel(nextVoxel, motion)) return;
+  if (seen.put(nextVoxel, true) != nil) return;
+
+  putIntoMap(voxelMap, nextVoxel, motion);
+
+  recurse(voxelMap, seen, nextVoxel.minus(Vector2D(GOOD_VOXEL_SIZE, 0)), motion);
+  recurse(voxelMap, seen, nextVoxel.plus(Vector2D(GOOD_VOXEL_SIZE, 0)),  motion);
+  recurse(voxelMap, seen, nextVoxel.minus(Vector2D(0, GOOD_VOXEL_SIZE)), motion);
+  recurse(voxelMap, seen, nextVoxel.plus(Vector2D(0, GOOD_VOXEL_SIZE)),  motion);
+  recurse(voxelMap, seen,
+    nextVoxel.minus(Vector2D(GOOD_VOXEL_SIZE, 0)).minus(Vector2D(0, GOOD_VOXEL_SIZE)), motion);
+  recurse(voxelMap, seen,
+    nextVoxel.minus(Vector2D(GOOD_VOXEL_SIZE, 0)).plus(Vector2D(0, GOOD_VOXEL_SIZE)),  motion);
+  recurse(voxelMap, seen,
+    nextVoxel.plus(Vector2D(GOOD_VOXEL_SIZE, 0)).minus(Vector2D(0, GOOD_VOXEL_SIZE)),  motion);
+  recurse(voxelMap, seen,
+    nextVoxel.plus(Vector2D(GOOD_VOXEL_SIZE, 0)).plus(Vector2D(0, GOOD_VOXEL_SIZE)),   motion);
+}
+
+// Truncate toward zero (matches JS bitwise |0 operator).
+fun truncate(n) {
+  if (n >= 0) return math.floor(n);
+  return 0 - math.floor(0 - n);
+}
+
+fun voxelHash(position) {
+  var xDiv = truncate(position.x / GOOD_VOXEL_SIZE);
+  var yDiv = truncate(position.y / GOOD_VOXEL_SIZE);
+
+  var rx = GOOD_VOXEL_SIZE * xDiv;
+  var ry = GOOD_VOXEL_SIZE * yDiv;
+
+  if (position.x < 0) rx = rx - GOOD_VOXEL_SIZE;
+  if (position.y < 0) ry = ry - GOOD_VOXEL_SIZE;
+
+  return Vector2D(rx, ry);
+}
+
+fun drawMotionOnVoxelMap(voxelMap, motion) {
+  var seen = RedBlackTree();
+  recurse(voxelMap, seen, voxelHash(motion.posOne), motion);
+}
+
+fun reduceCollisionSet(motions) {
+  var voxelMap = RedBlackTree();
+  var mi = 0;
+  while (mi < len(motions)) {
+    drawMotionOnVoxelMap(voxelMap, motions[mi]);
+    mi = mi + 1;
+  }
+
+  var result = [];
+  var entries = voxelMap.toList();
+  var ei = 0;
+  while (ei < len(entries)) {
+    var vec = entries[ei];
+    if (len(vec) > 1) {
+      result.append(vec);
+    }
+    ei = ei + 1;
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Motion
+// ---------------------------------------------------------------------------
+class Motion {
+  init(callsign, posOne, posTwo) {
+    this.callsign = callsign;
+    this.posOne   = posOne;
+    this.posTwo   = posTwo;
+  }
+
+  delta() {
+    return this.posTwo.minus(this.posOne);
+  }
+
+  findIntersection(other) {
+    var init1 = this.posOne;
+    var init2 = other.posOne;
+    var vec1  = this.delta();
+    var vec2  = other.delta();
+    var radius = PROXIMITY_RADIUS;
+
+    // a = (V2 - V1)^T * (V2 - V1)
+    var a = vec2.minus(vec1).squaredMagnitude();
+
+    if (a != 0) {
+      // b = 2 * <I1-I2, V1-V2>
+      var b = 2 * init1.minus(init2).dot(vec1.minus(vec2));
+
+      // c = -r^2 + (I2 - I1)^T * (I2 - I1)
+      var c = (0 - radius * radius) + init2.minus(init1).squaredMagnitude();
+
+      var discr = b * b - 4 * a * c;
+      if (discr < 0) return nil;
+
+      var v1 = (0 - b - math.sqrt(discr)) / (2 * a);
+      var v2 = (0 - b + math.sqrt(discr)) / (2 * a);
+
+      if (v1 <= v2 and ((v1 <= 1 and 1 <= v2) or
+                        (v1 <= 0 and 0 <= v2) or
+                        (0 <= v1 and v2 <= 1))) {
+        var v;
+        if (v1 <= 0) {
+          v = 0;
+        } else {
+          v = v1;
+        }
+
+        var result1 = init1.plus(vec1.times(v));
+        var result2 = init2.plus(vec2.times(v));
+        var result  = result1.plus(result2).times(0.5);
+
+        if (result.x >= MIN_X and result.x <= MAX_X and
+            result.y >= MIN_Y and result.y <= MAX_Y and
+            result.z >= MIN_Z and result.z <= MAX_Z) {
+          return result;
+        }
+      }
+
+      return nil;
+    }
+
+    // Parallel motion — same speed. Distance is constant; check initial distance.
+    var dist = init2.minus(init1).magnitude();
+    if (dist <= radius) {
+      return init1.plus(init2).times(0.5);
+    }
+
+    return nil;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CollisionDetector
+// ---------------------------------------------------------------------------
+
+// CallSign wrapper so integers can serve as RB-tree keys with compareTo.
+class CallSign {
+  init(value) {
+    this.value = value;
+  }
+
+  compareTo(other) {
+    if (this.value == other.value) return 0;
+    if (this.value < other.value)  return -1;
+    return 1;
+  }
+}
+
+class Aircraft {
+  init(callsign, position) {
+    this.callsign = callsign;
+    this.position = position;
+  }
+}
+
+class CollisionDetector {
+  init() {
+    this.state = RedBlackTree();
+  }
+
+  handleNewFrame(frame) {
+    var motions = [];
+    var seen    = RedBlackTree();
+
+    var fi = 0;
+    while (fi < len(frame)) {
+      var aircraft = frame[fi];
+      var oldPosition = this.state.put(aircraft.callsign, aircraft.position);
+      var newPosition = aircraft.position;
+      seen.put(aircraft.callsign, true);
+
+      if (oldPosition == nil) {
+        // Treat newly introduced aircraft as stationary.
+        oldPosition = newPosition;
+      }
+      motions.append(Motion(aircraft.callsign, oldPosition, newPosition));
+      fi = fi + 1;
+    }
+
+    // Remove aircraft that are no longer present.
+    var toRemove = [];
+    var stateEntries = this.state.toEntryList();
+    var si = 0;
+    while (si < len(stateEntries)) {
+      var entry = stateEntries[si];
+      var k = entry[0];
+      if (seen.get(k) == nil) {
+        toRemove.append(k);
+      }
+      si = si + 1;
+    }
+
+    var ri = 0;
+    while (ri < len(toRemove)) {
+      this.state.remove(toRemove[ri]);
+      ri = ri + 1;
+    }
+
+    var allReduced = reduceCollisionSet(motions);
+    var collisions = [];
+
+    var ai = 0;
+    while (ai < len(allReduced)) {
+      var reduced = allReduced[ai];
+      var i = 0;
+      while (i < len(reduced)) {
+        var motion1 = reduced[i];
+        var j = i + 1;
+        while (j < len(reduced)) {
+          var motion2 = reduced[j];
+          var collision = motion1.findIntersection(motion2);
+          if (collision != nil) {
+            collisions.append(collision);
+          }
+          j = j + 1;
+        }
+        i = i + 1;
+      }
+      ai = ai + 1;
+    }
+
+    return collisions;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Simulator
+// ---------------------------------------------------------------------------
+class Simulator {
+  init(numAircraft) {
+    this.aircraft = [];
+    var i = 0;
+    while (i < numAircraft) {
+      this.aircraft.append(CallSign(i));
+      i = i + 1;
+    }
+  }
+
+  simulate(time) {
+    var frame = [];
+    var i = 0;
+    while (i < len(this.aircraft) - 1) {
+      var cs0 = this.aircraft[i];
+      var cs1 = this.aircraft[i + 1];
+      frame.append(Aircraft(
+        cs0,
+        Vector3D(time, math.cos(time) * 2 + i * 3, 10)
+      ));
+      frame.append(Aircraft(
+        cs1,
+        Vector3D(time, math.sin(time) * 2 + i * 3, 10)
+      ));
+      i = i + 2;
+    }
+    return frame;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CD benchmark
+// ---------------------------------------------------------------------------
+class CD {
+  benchmark() {
+    return this.cd(2);
+  }
+
+  cd(numAircrafts) {
+    var numFrames = 200;
+    var simulator = Simulator(numAircrafts);
+    var detector  = CollisionDetector();
+
+    var actualCollisions = 0;
+    var i = 0;
+    while (i < numFrames) {
+      var time       = i / 10;
+      var collisions = detector.handleNewFrame(simulator.simulate(time));
+      actualCollisions = actualCollisions + len(collisions);
+      i = i + 1;
+    }
+    return actualCollisions;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Harness
+// ---------------------------------------------------------------------------
+var _bench = CD();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "CD: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "CD: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

@@ -1,0 +1,58 @@
+// Reverse-complement — produce the reverse complement of a DNA string.
+// CLBG benchmark: https://benchmarksgame-team.pages.debian.net/benchmarksgame/
+// Complement mapping: a<->t, c<->g (case-preserving lowercase).
+// Expected result: len(result) == len(input) == 1000.
+
+class ReverseComplement {
+  benchmark() {
+    var dna = this.makeDNA(1000);
+    var result = this.reverseComplement(dna);
+    return len(result);
+  }
+
+  makeDNA(n) {
+    var bases = ["a", "c", "g", "t"];
+    var result = "";
+    var i = 0;
+    while (i < n) {
+      result = result + bases[i % 4];
+      i = i + 1;
+    }
+    return result;
+  }
+
+  complement(c) {
+    if (c == "a") return "t";
+    if (c == "t") return "a";
+    if (c == "c") return "g";
+    if (c == "g") return "c";
+    return "n";
+  }
+
+  reverseComplement(dna) {
+    var n = len(dna);
+    var result = "";
+    var i = n - 1;
+    while (i >= 0) {
+      result = result + this.complement(dna[i]);
+      i = i - 1;
+    }
+    return result;
+  }
+}
+
+var _bench = ReverseComplement();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "ReverseComplement: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "ReverseComplement: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

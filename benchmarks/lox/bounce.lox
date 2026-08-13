@@ -1,0 +1,86 @@
+// Bounce — bouncing balls simulation. AWFY benchmark suite.
+// Copyright (c) 2015-2016 Stefan Marr. MIT License.
+
+class Random {
+  init() { this.seed = 74755; }
+  next() {
+    this.seed = (this.seed * 1309 + 13849) % 65536;
+    return this.seed;
+  }
+}
+
+class Ball {
+  init(random) {
+    this.x    = random.next() % 500;
+    this.y    = random.next() % 500;
+    this.xVel = (random.next() % 300) - 150;
+    this.yVel = (random.next() % 300) - 150;
+  }
+
+  bounce() {
+    var bounced = false;
+    this.x = this.x + this.xVel;
+    this.y = this.y + this.yVel;
+    if (this.x > 500) {
+      this.x = 500;
+      this.xVel = 0 - math.abs(this.xVel);
+      bounced = true;
+    }
+    if (this.x < 0) {
+      this.x = 0;
+      this.xVel = math.abs(this.xVel);
+      bounced = true;
+    }
+    if (this.y > 500) {
+      this.y = 500;
+      this.yVel = 0 - math.abs(this.yVel);
+      bounced = true;
+    }
+    if (this.y < 0) {
+      this.y = 0;
+      this.yVel = math.abs(this.yVel);
+      bounced = true;
+    }
+    return bounced;
+  }
+}
+
+class Bounce {
+  benchmark() {
+    var random = Random();
+    var ballCount = 100;
+    var bounces = 0;
+    var balls = [];
+    var i = 0;
+    while (i < ballCount) {
+      balls.append(Ball(random));
+      i = i + 1;
+    }
+    i = 0;
+    while (i < 50) {
+      var j = 0;
+      while (j < len(balls)) {
+        if (balls[j].bounce()) bounces = bounces + 1;
+        j = j + 1;
+      }
+      i = i + 1;
+    }
+    return bounces;
+  }
+}
+
+var _bench = Bounce();
+_bench.benchmark();
+
+var _iters = 5;
+var _total = 0;
+var _i = 0;
+while (_i < _iters) {
+  var _t = clock();
+  _bench.benchmark();
+  var _us = (clock() - _t) * 1000000;
+  _total = _total + _us;
+  print "Bounce: iterations=1 runtime: " + str(_us) + " us";
+  _i = _i + 1;
+}
+print "Bounce: iterations=" + str(_iters) + " average: " + str(_total / _iters) + " us total: " + str(_total) + " us";

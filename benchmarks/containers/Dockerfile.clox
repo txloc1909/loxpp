@@ -1,0 +1,22 @@
+FROM ubuntu:24.04
+
+# Pinned upstream commits — see benchmarks/SOURCES.md
+# Last commit of the book source (clox chapter — "A Virtual Machine")
+ARG CLOX_COMMIT=4a840f70f69c6ddd17cfef4f6964f8e1bcd8c3d4
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates gcc make libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build clox from source at pinned commit with maximum optimization
+RUN curl -fsSL "https://github.com/munificent/craftinginterpreters/archive/${CLOX_COMMIT}.tar.gz" \
+    | tar xz && \
+    cd "craftinginterpreters-${CLOX_COMMIT}" && \
+    CFLAGS="-O3 -march=native" make clox && \
+    mv clox /usr/local/bin/clox && \
+    cd / && rm -rf "craftinginterpreters-${CLOX_COMMIT}"
+
+# Copy clox-compatible Lox benchmark files
+COPY clox/ /benchmarks/clox/
+
+WORKDIR /benchmarks
