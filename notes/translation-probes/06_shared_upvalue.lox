@@ -1,0 +1,6 @@
+fun outer() {
+  var x = 0;
+  fun get() { return x; }
+  fun set(v) { x = v; }
+  return get;
+}

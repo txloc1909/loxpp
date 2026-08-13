@@ -1,0 +1,8 @@
+fun counter() {
+  var x = 0;
+  fun get() { return x; }
+  fun inc() { x = x + 1; }
+  inc(); inc();
+  return get();
+}
+print counter();

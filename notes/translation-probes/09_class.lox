@@ -1,0 +1,6 @@
+class C {
+  init(x) { this.x = x; }
+  get() { return this.x; }
+}
+var c = C(5);
+print c.get();
