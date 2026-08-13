@@ -74,8 +74,8 @@ the assemble→run path in CI. Facts it pins down for the nodes:
 - **Runtime-library build.** Build `lox-rt.jar` with plain `javac` + `jar` — the
   image has **no** maven/gradle; build `LoxRuntime.dll` with `dotnet build` (a
   dependency-free `net8.0` class library, so restore works offline). The JVM
-  plan's `pom.xml`/`mvn`/`gradle` mention is superseded and gets corrected at the
-  post-#94 rebase. This library-build path is *not* covered by the smoke test —
+  plan now specifies `javac`+`jar` for this (its `mvn`/`gradle` mention was
+  corrected). This library-build path is *not* covered by the smoke test —
   RT's own unit-test checkpoint is where `jar`/`dotnet build` are first exercised.
 - **EH harness — reuse, don't reinvent.** EH *is* PR #94's
   `tools/toolchain_smoke/{Hello.java,hello.j,hello.il}` + `check_managed_toolchains.sh`.

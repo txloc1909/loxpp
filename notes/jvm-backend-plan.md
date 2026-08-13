@@ -109,7 +109,9 @@ Key design decisions:
 - **`LoxClosure.upvals`** is `Object[][]` — an array of ref-cells, one per upvalue.
   The constructor receives them; generated subclasses call `super(upvals)`.
 
-Build: `mvn package` or `gradle jar` produces `lox-rt.jar`.
+Build: `javac src/lox/*.java` then `jar` the classes into `lox-rt.jar`. The
+`dev-managed` image has no maven/gradle, and the runtime is a flat, dependency-free
+library, so plain `javac`+`jar` (driven by the CMake custom command) is enough.
 
 ## Phase 2 — JVM Backend (`src/jvm_backend.h` / `src/jvm_backend.cpp`)
 
@@ -246,8 +248,7 @@ java -cp lox-rt.jar:build/jvm/ LoxMain
 ```
 runtime/jvm/
   src/lox/*.java        # runtime library source
-  pom.xml               # or build.gradle
-  lox-rt.jar            # built artifact (committed or built in CI)
+  lox-rt.jar            # built artifact via javac+jar (no maven/gradle); built in CI
 src/
   jvm_backend.h
   jvm_backend.cpp
