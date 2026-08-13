@@ -102,3 +102,33 @@ jobs:
               cd /tmp/craftinginterpreters &&
               dart tool/bin/test.dart jlox --interpreter /workspace/bootstrap/lox_wrapper.sh
             "
+
+  managed-toolchains:
+    name: Managed toolchains (JVM + CLR)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dev-managed image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          target: dev-managed
+          tags: loxpp-dev-managed:latest
+          # Also read the dev scope so this job reuses the base layers the
+          # C++-only jobs already built instead of rebuilding them.
+          cache-from: |
+            type=gha,scope=dev-managed
+            type=gha,scope=dev
+          cache-to: type=gha,mode=max,scope=dev-managed
+
+      - name: Check managed toolchains
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "tools/check_managed_toolchains.sh"
