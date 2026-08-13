@@ -397,7 +397,8 @@ one-to-one table.
   32: POP; 33: POP; 34: POP  ; reclaim bool?, `x`, iterator
   ```
 
-  The plans posit a "dedicated iter-local slot allocated by the backend." The
+  The plans originally posited a "dedicated iter-local slot allocated by the
+  backend" (since corrected). The
   compiler *already* makes the iterator an ordinary local; `ITER_HAS_NEXT`/
   `ITER_NEXT` operate on a copy loaded by the preceding `GET_LOCAL`. So the
   backend should treat it as a local like any other (P1), not invent a side
@@ -413,7 +414,11 @@ one-to-one table.
 
 ## Where the plans are wrong or incomplete — checklist
 
-Tie-back to the problems above; these are the concrete edits the plans need.
+Tie-back to the problems above. The "Plan claim" column records the *original*
+first-pass table entry. The plans now carry a Status note routing here as the
+authoritative correction list; rows marked ✔ have additionally been fixed directly
+in the plan tables, and the rest remain first-pass sketch (implement per the Fix
+column).
 
 | Plan claim | Verdict | Fix |
 |---|---|---|
@@ -423,11 +428,11 @@ Tie-back to the problems above; these are the concrete edits the plans need.
 | `JUMP_IF_FALSE → isFalsy; ifne` | **wrong** (P2/P3) | `dup; isFalsy; ifne` — value is peeked, needed at merge |
 | `POP → pop` | **wrong in general** (P1) | pop *only* temporaries; drop scope-reclaim pops |
 | `GET_LOCAL n → aload n` | **incomplete** (P1/P5) | needs slot-0/arg remapping + captured-slot cells |
-| `CLOSE_UPVALUE → no-op`, cells at fn entry | **wrong** (P4, proven by `V1`) | fresh cell at declaration; `CLOSE_UPVALUE` ends live range |
+| `CLOSE_UPVALUE → no-op`, cells at fn entry | **wrong** (P4, proven by `V1`) ✔ | fresh cell at declaration; `CLOSE_UPVALUE` ends live range |
 | `CONSTANT`: Number / String only | **incomplete** (P6) | also enum-ctor objects (materialise) |
 | `GET_INDEX` over List/String/Map | **incomplete** (P6) | also enum payload |
-| `JUMP_TABLE` | **missing** (P8) | `tableswitch`/`switch`; fuse with `GET_TAG`, default→`MATCH_ERROR` |
-| "iterator in a dedicated backend slot" | **misleading** (P8) | it is already an ordinary local |
+| `JUMP_TABLE` | **missing** (P8) ✔ | `tableswitch`/`switch`; fuse with `GET_TAG`, default→`MATCH_ERROR` |
+| "iterator in a dedicated backend slot" | **misleading** (P8) ✔ | it is already an ordinary local |
 | `RETURN → areturn` | **incomplete** (P5) | script-level `RETURN` → `return` (void `main`) |
 | `.maxstack` unaddressed (CLR) | **gap** (P1) | compute the operand high-water mark in the P1 walk |
 
