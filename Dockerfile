@@ -47,7 +47,8 @@ WORKDIR /workspace
 # Adds the JVM and CLR toolchains needed by the --target jvm / --target clr
 # backends. Kept out of `dev` so the C++-only jobs (lint, build matrix,
 # clang-tidy) don't pay to load ~1 GB of managed runtimes they never use.
-# Each toolchain gets its own layer so bumping one doesn't rebuild the other.
+# The CLR half sits below the JVM half, so bumping .NET or ilasm leaves the JVM
+# layers cached. Layers invalidate downward, so the reverse does not hold.
 FROM dev AS dev-managed
 
 # OpenJDK 21 (LTS). Only the major version is pinned; patch releases track the
