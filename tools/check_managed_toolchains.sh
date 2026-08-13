@@ -35,6 +35,11 @@ java -version 2>&1 | sed 's/^/  /' || true
 printf '  javac %s\n' "$(javac -version 2>&1 | awk '{print $2}' || true)"
 printf '  jasmin %s\n' \
     "$(java -jar /opt/jasmin/jasmin.jar -version 2>&1 | awk '/Jasmin/ {print $3; exit}' || true)"
+printf '  jasmin emits class file version %s\n' \
+    "$(cd "$work" && jasmin -d . "$fixtures/hello.j" >/dev/null 2>&1 \
+        && javap -v HelloJasmin.class 2>/dev/null \
+        | awk '/major version/ {maj = $3} /minor version/ {min = $3} END {print maj "." min}' \
+        || true)"
 printf '  dotnet sdk %s\n' "$(dotnet --version || true)"
 printf '  ilasm %s\n' \
     "$(ilasm -? 2>&1 | awk '/IL Assembler/ {print $NF; exit}' || true)"
@@ -51,6 +56,14 @@ check "javac -> java" "javac ok" "$(cd "$work" && java Hello)"
 cp "$fixtures/hello.j" "$work/"
 (cd "$work" && jasmin -d . hello.j >/dev/null)
 check "jasmin -> java" "jasmin ok" "$(cd "$work" && java HelloJasmin)"
+
+# 2b. Branching bytecode. Guards the assumption the backend rests on: that it
+#     never has to compute a StackMapTable. That holds only because Jasmin emits
+#     class file 45.3, below the version where frames became mandatory — so this
+#     verifying is the real evidence, not the straight-line case above.
+cp "$fixtures/branch.j" "$work/"
+(cd "$work" && jasmin -d . branch.j >/dev/null)
+check "jasmin -> java (branching)" "branching ok" "$(cd "$work" && java BranchProbe)"
 
 # 3. ilasm: the path the CLR backend emits into. Two Linux-specific traps here,
 #    both of which the backend's build step will hit as well:

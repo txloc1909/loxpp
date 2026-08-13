@@ -1,6 +1,5 @@
 ; Minimal Jasmin input: exercises the same .j -> .class -> java path the JVM
-; backend will use, including Jasmin's automatic stack map frame computation
-; (see notes/jvm-backend-plan.md Phase 2, step 5).
+; backend will use. Straight-line on purpose — branch.j covers the branching case.
 .class public HelloJasmin
 .super java/lang/Object
 
