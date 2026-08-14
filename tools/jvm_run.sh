@@ -58,11 +58,45 @@ if [ ! -e "${j_files[0]}" ]; then
     exit 1
 fi
 
-# Clear class files left by an earlier run against this same directory. A
-# stale one must not survive a failed run: below, we treat "no fresh .class"
-# as failure, and a leftover file would defeat that check (reported:
-# jvm_run.sh, R3). A packaged class assembles into a subdirectory of $j_dir
-# (".class public gen/LoxMain" writes "$j_dir/gen/LoxMain.class"), so the
+# Derive the class file each .j source must produce, from that source's own
+# ".class" directive, rather than trusting jasmin's exit code or its message
+# text afterward. Round 1, round 2, and round 3 review each found a new way
+# for text- or count-based proof to say "assembly succeeded" when it had
+# not: a directory name that matched the error scan (R1), a packaged class
+# that a shallow scan missed (R5), and two files naming one class, which
+# still print one "Generated:" line each even though the second overwrites
+# the first on disk (R8). Checking the exact expected path is immune to all
+# three, by construction, because it does not read jasmin's output at all.
+#
+# A ".class" directive reads "<access-spec...> <name>"; <name> is always
+# the last field, and may hold a package path ("gen/LoxMain"). Two files
+# that derive the same name are a source-level collision: report it before
+# jasmin runs, because jasmin does not reject that across separate files,
+# only within one file.
+declare -A owner_of_class=()
+derive_failed=0
+for f in "${j_files[@]}"; do
+    class_name="$(awk '
+        /^[[:space:]]*\.class[[:space:]]/ { sub(/;.*/, ""); print $NF; exit }
+    ' "$f")"
+    if [ -z "$class_name" ]; then
+        echo "jvm_run.sh: $f has no .class directive" >&2
+        derive_failed=1
+    elif [ -n "${owner_of_class[$class_name]+set}" ]; then
+        echo "jvm_run.sh: ${owner_of_class[$class_name]} and $f both declare class $class_name" >&2
+        derive_failed=1
+    else
+        owner_of_class[$class_name]="$f"
+    fi
+done
+if [ "$derive_failed" -eq 1 ]; then
+    echo "jvm_run.sh: jasmin assembly failed" >&2
+    exit 1
+fi
+
+# Clear class files left by an earlier run against this same directory, so
+# a leftover file cannot stand in for one jasmin was supposed to write this
+# time. A packaged class assembles into a subdirectory of $j_dir, so the
 # scan must walk the whole tree, not only its top level (reported:
 # jvm_run.sh, R5). A trailing slash makes find enter $j_dir even when the
 # caller passes it as a symbolic link, which find would not otherwise
@@ -72,44 +106,23 @@ if [ "${#stale_classes[@]}" -gt 0 ]; then
     rm -f -- "${stale_classes[@]}"
 fi
 
-# Jasmin 2.4 can print "Found N errors" for a bad file and still exit 0,
-# producing no .class for it (verified: a file with a genuine parse error
-# assembles "successfully" by exit code alone). Exit code is not enough, so
-# scan its own error summary line instead of the whole output: jasmin also
-# prints "Generated: <path>" for each class, and <path> is caller-supplied
-# (the j-dir argument), so a directory name that happens to contain "error"
-# would falsely trip a scan of the whole output (reported: jvm_run.sh, R1).
-jasmin_failed=0
-if ! jasmin_out="$(jasmin -d "$j_dir" "${j_files[@]}" 2>&1)"; then
-    jasmin_failed=1
-elif printf '%s\n' "$jasmin_out" | grep -qE 'Found [0-9]+ errors?'; then
-    jasmin_failed=1
-fi
+# Jasmin's own exit code is not proof of anything: a file with a genuine
+# parse error still assembles "successfully" by exit code alone (verified).
+# The real proof is the check below, so run jasmin and keep its output only
+# to show the caller, on failure, not to judge success by.
+jasmin_out="$(jasmin -d "$j_dir" "${j_files[@]}" 2>&1)" || true
 
-# Belt and suspenders: confirm jasmin actually wrote one class per input
-# file, even when it reports no error. Combined with the stale-file cleanup
-# above, a silent failure now leaves the directory empty, or short of the
-# full set, instead of looking like a pass (reported: jvm_run.sh, R3). The
-# tree walk matches the cleanup above, so a packaged class still counts
-# (reported: jvm_run.sh, R5). Count class files on disk, not "Generated:"
-# lines: jasmin prints one such line per input file even when two files
-# name the same class and the second silently overwrites the first on
-# disk, so a message count cannot catch that collision (reported:
-# jvm_run.sh, R8).
-if [ "$jasmin_failed" -eq 0 ]; then
-    mapfile -d '' class_files < <(find "$j_dir"/ -name '*.class' -print0)
-    if [ "${#class_files[@]}" -eq 0 ]; then
-        jasmin_failed=1
-        jasmin_out="${jasmin_out}
-jvm_run.sh: jasmin reported no error but wrote no class files"
-    elif [ "${#class_files[@]}" -ne "${#j_files[@]}" ]; then
-        jasmin_failed=1
-        jasmin_out="${jasmin_out}
-jvm_run.sh: expected ${#j_files[@]} class(es), one per .j file, but found ${#class_files[@]} on disk"
+# The one thing that must be true: every class a source declared exists at
+# the exact path its own ".class" directive named. This test needs no fact
+# about jasmin's output, so a false pass in that output cannot defeat it.
+missing_failed=0
+for class_name in "${!owner_of_class[@]}"; do
+    if [ ! -f "$j_dir/$class_name.class" ]; then
+        echo "jvm_run.sh: expected class file $j_dir/$class_name.class, from ${owner_of_class[$class_name]}, was not written" >&2
+        missing_failed=1
     fi
-fi
-
-if [ "$jasmin_failed" -eq 1 ]; then
+done
+if [ "$missing_failed" -eq 1 ]; then
     echo "jvm_run.sh: jasmin assembly failed" >&2
     printf '%s\n' "$jasmin_out" >&2
     exit 1
