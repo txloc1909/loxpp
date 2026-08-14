@@ -22,6 +22,7 @@ set(FULL_SRCS
     ${PROJECT_SOURCE_DIR}/src/parser.cpp
     ${PROJECT_SOURCE_DIR}/src/chunk.cpp
     ${PROJECT_SOURCE_DIR}/src/debug.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/chunk_decoder.cpp
     ${PROJECT_SOURCE_DIR}/src/value.cpp
     ${PROJECT_SOURCE_DIR}/src/object.cpp
     ${PROJECT_SOURCE_DIR}/src/container_objects.cpp
@@ -69,6 +70,7 @@ add_executable(test_list_pattern_gc test_list_pattern.cpp test_harness.cpp ${FUL
 add_executable(test_at_binding test_at_binding.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_at_binding_gc test_at_binding.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_profiler profiler_test.cpp test_harness.cpp ${FULL_SRCS})
+add_executable(test_chunk_decoder test_chunk_decoder.cpp test_harness.cpp ${FULL_SRCS})
 
 target_include_directories(test_main PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_scanner PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -102,6 +104,9 @@ target_include_directories(test_list_pattern_gc PRIVATE ${PROJECT_SOURCE_DIR}/sr
 target_include_directories(test_at_binding PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_at_binding_gc PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_profiler PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(test_chunk_decoder PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_compile_definitions(test_chunk_decoder PRIVATE
+    LOXPP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
 target_compile_definitions(test_stress_gc PRIVATE LOXPP_STRESS_GC)
 target_compile_definitions(test_gc_regression PRIVATE LOXPP_STRESS_GC)
@@ -145,6 +150,7 @@ target_link_libraries(test_list_pattern_gc PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_at_binding PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_at_binding_gc PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_profiler PRIVATE GTest::GTest GTest::Main)
+target_link_libraries(test_chunk_decoder PRIVATE GTest::GTest GTest::Main)
 
 # test_main is a hand-rolled main() (asserts), not a GTest binary.
 add_test(NAME TestMain COMMAND test_main)
@@ -160,7 +166,8 @@ set(LOXPP_GTEST_TARGETS
     test_map test_map_gc test_var_destructure test_enum test_enum_gc
     test_class_pattern test_class_pattern_gc test_match_expr test_slice
     test_or_pattern test_or_pattern_gc test_seq_destructure test_list_pattern
-    test_list_pattern_gc test_at_binding test_at_binding_gc test_profiler)
+    test_list_pattern_gc test_at_binding test_at_binding_gc test_profiler
+    test_chunk_decoder)
 foreach(t IN LISTS LOXPP_GTEST_TARGETS)
     gtest_discover_tests(${t} TEST_PREFIX "${t}.")
 endforeach()
