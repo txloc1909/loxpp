@@ -15,11 +15,15 @@ namespace {
 // ---------------------------------------------------------------------------
 // Provisional local CFG.
 //
-// N1 (CFG/label recovery) has not merged yet. Per N2.md's hazards, this node
-// computes its own leaders/edges rather than block on N1; a later node
-// unifies the two builders. This is intentionally minimal: only what the
-// stack walk needs (a successor list per instruction index), not a reusable
-// basic-block abstraction.
+// N1 (CFG/label recovery) has landed (src/backend/cfg.h, cfg.cpp, PR #100).
+// This node still keeps its own private leaders/edges builder: N2.md's
+// hazards section assigns the unification of the two builders to N5, not to
+// this node. This is intentionally minimal: only what the stack walk needs
+// (a successor list per instruction index), not a reusable basic-block
+// abstraction. The two builders agree on every edge rule today (verified by
+// hand against src/backend/cfg.cpp: JUMP/LOOP take one edge, JUMP_IF_FALSE/
+// JUMP_TABLE take the branch edges plus fallthrough, RETURN/MATCH_ERROR take
+// none) — N5's merge is a deduplication, not a semantic reconciliation.
 // ---------------------------------------------------------------------------
 
 struct LocalCfg {
@@ -207,6 +211,21 @@ StackEffect stackEffect(const DecodedInstruction& ins) {
 
 bool topIsLocal(const StackState& s) { return s.height - 1 < s.localCount; }
 
+// `localCount` after popping `popCount` cells off `s`, following the same
+// reclaim rule `advance()` applies one cell at a time (a popped cell frees
+// its slot only while it is still within the local region). Shared by
+// `advance()` and `validateNoInvisibleVarGaps` so the two can never drift
+// apart on what "the local count right before a recognition point" means.
+int localCountAfterPops(StackState s, int popCount) {
+    for (int i = 0; i < popCount; i++) {
+        if (topIsLocal(s)) {
+            s.localCount -= 1;
+        }
+        s.height -= 1;
+    }
+    return s.localCount;
+}
+
 // True when a CLOSURE's pushed value is consumed immediately rather than
 // bound to a local: `Compiler::method` always follows CLOSURE with
 // DEFINE_METHOD, and `Compiler::funDeclaration` at scope depth 0 (a
@@ -252,12 +271,8 @@ StackState advance(const std::vector<DecodedInstruction>& ins, size_t idx,
     StackEffect effect = stackEffect(instr);
 
     StackState after = before;
-    for (int i = 0; i < effect.popCount; i++) {
-        if (topIsLocal(after)) {
-            after.localCount -= 1; // reclaim: free the slot for a sibling scope
-        }
-        after.height -= 1;
-    }
+    after.localCount = localCountAfterPops(after, effect.popCount);
+    after.height -= effect.popCount;
     after.height += effect.pushCount;
 
     if (declaredSlotsAt != nullptr) {
@@ -286,13 +301,21 @@ StackState advance(const std::vector<DecodedInstruction>& ins, size_t idx,
 // local initialised by `a and b` lands via whichever branch of the
 // short-circuit was taken (bytecode-translation-problems.md P2's merge) — so
 // this explores every predecessor, not just one.
-void findDeclaringPushIndices(int fromIndex, int slot,
+//
+// Returns whether it found at least one declaring push, independent of
+// whether `sites` already held it — findInvisibleVarIndices's R8 backfill
+// (below) needs that to tell "this slot has no push instruction at all here
+// (an initial parameter — stop descending)" apart from "this slot's push was
+// already known from elsewhere", which look identical if judged only by
+// whether `sites` grew.
+bool findDeclaringPushIndices(int fromIndex, int slot,
                               const std::vector<DecodedInstruction>& ins,
                               const LocalCfg& cfg,
                               const std::vector<StackState>& before,
                               const std::vector<StackState>& after,
                               const std::vector<bool>& reached,
                               std::set<std::pair<int, int>>& sites) {
+    bool found = false;
     std::vector<bool> visited(ins.size(), false);
     std::deque<int> frontier(cfg.predecessors[fromIndex].begin(),
                              cfg.predecessors[fromIndex].end());
@@ -317,6 +340,7 @@ void findDeclaringPushIndices(int fromIndex, int slot,
                 // ...and `cur`'s own push lands back at `slot` — a new
                 // value born right here. Found it.
                 sites.insert({cur, slot});
+                found = true;
             }
             // Either way, stop: anything further back belongs to a value
             // `cur` already destroyed, not to the one live at `fromIndex`.
@@ -328,6 +352,110 @@ void findDeclaringPushIndices(int fromIndex, int slot,
         for (int pred : cfg.predecessors[cur]) {
             frontier.push_back(pred);
         }
+    }
+    return found;
+}
+
+// Chases declaring pushes for every slot from `topSlot` down to 0, using
+// `originIdx` as the search origin, and stops at the first slot with no
+// reachable declaring push — the parameter boundary (frame entry pushed no
+// instruction there), or a prefix some earlier call already fully covered.
+// Shared by the two backfills below: both need exactly this "walk down
+// until the well runs dry" search, only the origin and the starting slot
+// differ.
+void chaseSlotsDownward(int originIdx, int topSlot,
+                        const std::vector<DecodedInstruction>& ins,
+                        const LocalCfg& cfg,
+                        const std::vector<StackState>& before,
+                        const std::vector<StackState>& after,
+                        const std::vector<bool>& reached,
+                        std::set<std::pair<int, int>>& sites) {
+    for (int k = topSlot; k >= 0; k--) {
+        if (!findDeclaringPushIndices(originIdx, k, ins, cfg, before, after,
+                                      reached, sites)) {
+            return;
+        }
+    }
+}
+
+// R8: a local that no instruction ever names (no GET_LOCAL/SET_LOCAL, no
+// capture, no CLOSE_UPVALUE) gets no site from the reference-driven search
+// above — but a sibling local declared right after it in the same scope can
+// still be discovered there, and recognizing that sibling's slot bumps
+// `localCount` past the unread one too (advance()'s std::max), with no site
+// of its own. That silently turns an unrecorded cell into a "local" — the
+// same defect R1 fixed, in a shape R1's fix does not cover.
+//
+// Fix: whenever a site names slot `s`, also chase every lower slot down,
+// using the very instruction that named `s` as the search origin. That
+// instruction's own backward search needs no reference to find an unread
+// sibling's push either — it only needs a live value sitting at that slot
+// right before the search origin runs, and findDeclaringPushIndices already
+// answers exactly that question for any slot, not only a referenced one.
+// Iterates to a fixpoint: filling one gap can uncover an instruction with
+// further unread siblings below it (three or more unread locals in a row).
+//
+// A slot number is *not* a stable key across this whole search: mutually
+// exclusive scopes (sibling `match` arms, `if`/`else` branches) reuse the
+// same numeric slot for unrelated locals, so "slot 7 already has a site
+// somewhere in this function" says nothing about whether *this* arm's slot 7
+// does. Only the origin's own reachability answers that —
+// `findDeclaringPushIndices`'s return value, not set membership by slot
+// number — which is why this walks down from each origin every round
+// instead of caching a per-slot "done" flag.
+void backfillUnreadSiblingSites(const std::vector<DecodedInstruction>& ins,
+                                const LocalCfg& cfg,
+                                const std::vector<StackState>& before,
+                                const std::vector<StackState>& after,
+                                const std::vector<bool>& reached,
+                                std::set<std::pair<int, int>>& sites) {
+    bool addedNew = true;
+    while (addedNew) {
+        addedNew = false;
+        // Snapshot first: a slot discovered this round must wait for the
+        // *next* round before its own lower siblings are chased, so a run
+        // of N unread locals resolves outward one layer at a time instead
+        // of needing bespoke recursion here.
+        std::vector<std::pair<int, int>> snapshot(sites.begin(), sites.end());
+        for (const auto& [siteIdx, slot] : snapshot) {
+            size_t sizeBefore = sites.size();
+            chaseSlotsDownward(siteIdx, slot - 1, ins, cfg, before, after,
+                               reached, sites);
+            if (sites.size() > sizeBefore) {
+                addedNew = true;
+            }
+        }
+    }
+}
+
+// A local's frame can end with no explicit reclaim opcode at all: a
+// function's own top-level locals never run through endScope(), because
+// there is no enclosing block left to close there — the whole frame is
+// discarded at RETURN instead. A local that is both unread (no
+// GET_LOCAL/SET_LOCAL/capture — backfillUnreadSiblingSites's case) *and*
+// never reaches an explicit POP/CLOSE_UPVALUE either gets no site from
+// anything above, at any offset (function `f(){ var a=1; var never=99;
+// print a; }` — `never` has no POP in the whole chunk to backfill from).
+//
+// Checkpoint 3's own invariant gives the fix for free: operandDepth() is
+// exactly 1 immediately before every RETURN (the return value, and nothing
+// else, is ever a temporary there — vm.cpp tears down the rest of the frame
+// wholesale). So every slot below that one temporary is local, with no
+// reference needed to prove it; chase each one's declaring push from the
+// RETURN itself.
+void backfillFromFrameTeardown(const std::vector<DecodedInstruction>& ins,
+                               const LocalCfg& cfg,
+                               const std::vector<StackState>& before,
+                               const std::vector<StackState>& after,
+                               const std::vector<bool>& reached,
+                               std::set<std::pair<int, int>>& sites) {
+    for (size_t i = 0; i < ins.size(); i++) {
+        if (!reached[i] || ins[i].op != Op::RETURN) {
+            continue;
+        }
+        int idx = static_cast<int>(i);
+        chaseSlotsDownward(idx, before[i].height - 2, ins, cfg, before, after,
+                           reached, sites);
     }
 }
 
@@ -385,6 +513,17 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
             break;
         }
     }
+
+    // A local reachable at RETURN with no explicit reclaim anywhere (a
+    // function's own top-level scope) gets no site from the reference-driven
+    // loop above at all — see backfillFromFrameTeardown's own comment.
+    backfillFromFrameTeardown(ins, cfg, before, after, reached, sites);
+
+    // R8: recognize an unread sibling below every slot found above — see
+    // backfillUnreadSiblingSites's own comment for why this cannot be folded
+    // into the loop above (it needs the *complete* reference-driven set
+    // first, not one entry at a time).
+    backfillUnreadSiblingSites(ins, cfg, before, after, reached, sites);
     return sites;
 }
 
@@ -467,9 +606,29 @@ runFixpoint(const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
 // every incoming edge — the invariant the JVM/CLR verifier enforces at
 // every control-flow merge. Runs once, after pass 2 has fully converged,
 // using each predecessor's own final `after` state directly: recognition
-// is declaring-push-timed now (R1), not reference-timed, so a
-// predecessor's `after` state already reflects every declaration on its
-// own path with no further reconciliation needed at the point of use.
+// is declaring-push-timed now (R1) and reclaim/return-anchored (R8 — see
+// findInvisibleVarIndices), not reference-timed, so a predecessor's `after`
+// state already reflects every declaration on its own path with no further
+// reconciliation needed at the point of use.
+//
+// The orchestrator's round-3 guidance asked to compare raw (height,
+// localCount), not only operand depth, turning "the join becomes an
+// assertion, not a repair." Tried and measured: it does not hold on the
+// mission gate program. `bootstrap/loxpp_interpreter.lox`'s `resolveStmt`
+// has 16 `match` arms sharing one exit; the 14 written as a single
+// expression close only their own pattern bindings before the jump (raw
+// state (4,4) at the shared point), but the 2 written as a `{ ...; ...; }`
+// block (`WhileStmt`, `ForInStmt`) additionally close the match's own
+// hidden scrutinee slot inside their own block scope, arriving instead at
+// (3,3) — confirmed by hand at offset 705, both groups verified against the
+// real disassembly. Operand depth agrees (0 both ways) exactly as the
+// pre-existing comment on runFixpoint's join described; raw state does not,
+// and this is a real, compiler-emitted difference, not an analysis gap — so
+// operand depth remains the checkpoint 5 invariant. It is what the verifier
+// actually enforces (JVM/CLR track slots and the operand stack separately;
+// two arms may legitimately leave a different number of slots occupied at a
+// merge, only the operand stack itself must match), and it is what N4/N5
+// need for `.limit stack`/`.maxstack`.
 //
 // This must run post-convergence, not inside runFixpoint's join: mid-
 // fixpoint, a loop's back-edge can (temporarily) disagree with its
@@ -505,6 +664,48 @@ void validateMergeConsistency(const std::vector<DecodedInstruction>& ins,
                     std::to_string(*depth) + " vs " + std::to_string(d) +
                     ") — the JVM/CLR verifier would reject this merge");
             }
+        }
+    }
+}
+
+// R8's hard check, run once post-convergence for the same reason
+// validateMergeConsistency is: a recognition point can be advance()-ed
+// several times while the fixpoint is still converging (a loop's back-edge
+// has not propagated yet), and a transient, not-yet-final `before` there
+// must not be mistaken for a real gap. Using `result.before` — already the
+// fully converged state — removes that risk entirely; this is a pure
+// re-derivation with no dependence on iteration order.
+//
+// Checks that every recognized slot equals the local count computed by
+// popping the instruction's own operands, in the order declaredSlotsAt[i]
+// lists them (ascending, since it is built from a std::set<pair<int,int>>).
+// A gap means findInvisibleVarIndices's backfill (see its own comment)
+// missed a sibling; that is the exact silent failure R8 reported, so this
+// turns any recurrence into a loud, immediate throw instead of a wrong
+// number reaching N4.
+void validateNoInvisibleVarGaps(
+    const std::vector<DecodedInstruction>& ins,
+    const std::vector<StackState>& before, const std::vector<bool>& reached,
+    const std::vector<std::vector<int>>& declaredSlotsAt,
+    const std::string& functionId) {
+    for (size_t i = 0; i < ins.size(); i++) {
+        if (!reached[i] || declaredSlotsAt[i].empty()) {
+            continue;
+        }
+        int localCount =
+            localCountAfterPops(before[i], stackEffect(ins[i]).popCount);
+        for (int slot : declaredSlotsAt[i]) {
+            if (slot != localCount) {
+                throw std::runtime_error(
+                    "abstract_stack: invisible-var recognition gap in "
+                    "function '" +
+                    functionId + "' at offset " +
+                    std::to_string(ins[i].offset) + ": slot " +
+                    std::to_string(slot) + " recognized with local count " +
+                    std::to_string(localCount) +
+                    " — an unread sibling local has no declaring-push site");
+            }
+            localCount = slot + 1;
         }
     }
 }
@@ -611,6 +812,8 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
     }
 
     validateMergeConsistency(ins, cfg, result.after, reached, fn.id);
+    validateNoInvisibleVarGaps(ins, result.before, reached, declaredSlotsAt,
+                               fn.id);
 
     result.invisibleVars.reserve(siteIndices.size());
     for (const auto& [idx, slot] : siteIndices) {

@@ -101,9 +101,10 @@ struct FunctionStackAnalysis {
 // disagreement there means the decoder or this analysis has drifted from
 // the compiler; the input program is trusted to be compiler-correct.
 //
-// N1 (CFG/label recovery) has not landed yet at the time this was written;
-// this analysis computes its own local leaders/edges (see abstract_stack.cpp)
-// rather than depend on it. A later node unifies the two CFG builders.
+// N1 (CFG/label recovery) has landed (src/backend/cfg.h, cfg.cpp, PR #100).
+// This analysis still computes its own private local leaders/edges (see
+// abstract_stack.cpp) instead of depending on N1's builder, per N2.md's
+// hazards section: N5 unifies the two builders later, once both exist.
 FunctionStackAnalysis analyzeStack(const DecodedFunction& fn);
 
 // One node of the whole-tree analysis, mirroring DecodedFunction's shape.
