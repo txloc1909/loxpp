@@ -50,16 +50,40 @@ if [ ! -e "${j_files[0]}" ]; then
     exit 1
 fi
 
+# Clear class files left by an earlier run against this same directory. This
+# harness owns the .class files it writes here, so a stale one must not
+# survive a failed run: below, we treat "no fresh .class" as failure, and a
+# leftover file would defeat that check (reported: jvm_run.sh, R3).
+stale_classes=("$j_dir"/*.class)
+if [ -e "${stale_classes[0]}" ]; then
+    rm -f "${stale_classes[@]}"
+fi
+
 # Jasmin 2.4 can print "Found N errors" for a bad file and still exit 0,
 # producing no .class for it (verified: a file with a genuine parse error
 # assembles "successfully" by exit code alone). Exit code is not enough, so
-# also scan its own error summary. A clean run's only output line is
-# "Generated: <path>" per class, so this does not fire on success.
+# scan its own error summary line instead of the whole output: jasmin also
+# prints "Generated: <path>" for each class, and <path> is caller-supplied
+# (the j-dir argument), so a directory name that happens to contain "error"
+# would falsely trip a scan of the whole output (reported: jvm_run.sh, R1).
 jasmin_failed=0
 if ! jasmin_out="$(jasmin -d "$j_dir" "${j_files[@]}" 2>&1)"; then
     jasmin_failed=1
-elif printf '%s\n' "$jasmin_out" | grep -qi 'error'; then
+elif printf '%s\n' "$jasmin_out" | grep -qE 'Found [0-9]+ errors?'; then
     jasmin_failed=1
+fi
+
+# Belt and suspenders: confirm jasmin actually wrote a class file, even when
+# it reports no error. Combined with the stale-file cleanup above, a silent
+# failure now leaves the directory empty instead of looking like a pass
+# (reported: jvm_run.sh, R3).
+if [ "$jasmin_failed" -eq 0 ]; then
+    class_files=("$j_dir"/*.class)
+    if [ ! -e "${class_files[0]}" ]; then
+        jasmin_failed=1
+        jasmin_out="${jasmin_out}
+jvm_run.sh: jasmin reported no error but wrote no class files"
+    fi
 fi
 
 if [ "$jasmin_failed" -eq 1 ]; then
