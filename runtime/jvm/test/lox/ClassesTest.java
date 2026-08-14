@@ -91,6 +91,9 @@ public final class ClassesTest {
         checkEquals(null, globals.get("nilGlobal"), "a nil-valued global reads back as nil, not undefined");
         globals.set("nilGlobal", 5.0);
         checkEquals(5.0, globals.get("nilGlobal"), "set updates an existing global");
+        globals.set("nilGlobal", null); // R6: sentinel round-trip must survive a defined -> nil write
+        checkEquals(null, globals.get("nilGlobal"), "set can write nil back onto a defined global");
+        check(globals.isDefined("nilGlobal"), "isDefined stays true after set writes nil");
 
         LoxEnumCtor ok = new LoxEnumCtor(1, 1, "Ok", "Result");
         Object a = ok.call(new Object[] {5.0});
