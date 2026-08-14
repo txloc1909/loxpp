@@ -25,13 +25,14 @@ using OpenSlots = std::unordered_map<int, bool>;
 // CLOSE_UPVALUE for a different slot could then be misattributed to it. The
 // throw in recordClose (no open slot at all) does not catch that
 // misattribution — it catches only a CLOSE_UPVALUE with no open slot to
-// name, which is a different failure, and recordClose's lastClosedSlot
-// tolerance (see below) narrows that check further, not wider: it only
-// forgives a CLOSE_UPVALUE that matches the slot JUST closed, never an
-// arbitrary open slot. Guarding fully against a compiler regression here
-// would need per-offset stack tracking (N2), which this node deliberately
-// does not depend on; the actual guard against the scenario above is
-// Compiler::emitLoopCleanup itself matching endScope.
+// name, which is a different failure. recordClose's lastClosedSlot
+// tolerance (see below) does not widen the misattribution risk here: it
+// never picks an open slot at all, so it cannot pick the WRONG one — it
+// only decides whether to throw or stay silent when NO slot is open.
+// Guarding fully against a compiler regression here would need per-offset
+// stack tracking (N2), which this node deliberately does not depend on; the
+// actual guard against the scenario above is Compiler::emitLoopCleanup
+// itself matching endScope.
 int resolveCloseTarget(const OpenSlots& openSlots) {
     int target = -1;
     for (const auto& [slot, open] : openSlots) {
