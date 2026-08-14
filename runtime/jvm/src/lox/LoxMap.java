@@ -1,9 +1,11 @@
 package lox;
 
+import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Nil keys are plain {@code null} — {@code java.util.HashMap} (and
@@ -20,7 +22,23 @@ import java.util.Set;
  * inside ObjMap itself.
  */
 public final class LoxMap {
-    private final Map<Object, Object> entries = new LinkedHashMap<>();
+    // Keyed by the numerically-normalized key, so -0.0 and 0.0 land in the
+    // same slot (matching value.cpp's hashValue). Each Slot separately holds
+    // the exact key object the caller last wrote: CoreHashMap::set replaces
+    // the whole entry, key included, on a repeat write, not only the value,
+    // so a later write under -0.0 must still print as -0 (PR #97 review
+    // finding R11), even though it looks up the same slot as 0.0.
+    private static final class Slot {
+        final Object displayKey;
+        final Object value;
+
+        Slot(Object displayKey, Object value) {
+            this.displayKey = displayKey;
+            this.value = value;
+        }
+    }
+
+    private final Map<Object, Slot> entries = new LinkedHashMap<>();
 
     // Every LoxMap lazily grows its own per-instance cache the first time a
     // method is read as a property (not called) — see R3 in PR #97 review:
@@ -30,8 +48,9 @@ public final class LoxMap {
 
     // -0.0 and 0.0 must hash and look up identically, matching IEEE 754
     // numeric equality (value.cpp's hashValue canonicalizes the same way).
-    // java.lang.Double.equals/hashCode treat them as distinct, so map keys
-    // must be normalized on every access.
+    // java.lang.Double.equals/hashCode treat them as distinct, so lookups
+    // must normalize the key. This is a lookup-only concern: the Slot above
+    // still remembers the un-normalized key for display.
     private static Object normalizeKey(Object key) {
         if (key instanceof Double && (Double) key == 0.0) {
             return 0.0;
@@ -40,11 +59,12 @@ public final class LoxMap {
     }
 
     public void put(Object key, Object value) {
-        entries.put(normalizeKey(key), value);
+        entries.put(normalizeKey(key), new Slot(key, value));
     }
 
     public Object get(Object key) {
-        return entries.get(normalizeKey(key));
+        Slot slot = entries.get(normalizeKey(key));
+        return (slot == null) ? null : slot.value;
     }
 
     public boolean has(Object key) {
@@ -59,8 +79,13 @@ public final class LoxMap {
         return entries.size();
     }
 
-    public Set<Map.Entry<Object, Object>> entrySet() {
-        return entries.entrySet();
+    /** Insertion order, each entry's key exactly as the caller last wrote it. */
+    public List<Map.Entry<Object, Object>> entrySet() {
+        List<Map.Entry<Object, Object>> result = new ArrayList<>(entries.size());
+        for (Slot slot : entries.values()) {
+            result.add(new AbstractMap.SimpleImmutableEntry<>(slot.displayKey, slot.value));
+        }
+        return result;
     }
 
     public LoxCallable getMethod(String name) {
