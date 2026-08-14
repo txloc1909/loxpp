@@ -13,12 +13,22 @@
 // It ends a captured slot's live range, and the next time that slot's
 // declaration runs, it needs a fresh cell. See P4 and the V1/V3 probes.
 //
-// Scope note: this pass is a single linear walk over one chunk's decoded
-// instructions, in program order. It carries no control-flow graph (N1) and
-// no stack simulation (N2) by design, so every offset it reports is a bound
-// on a slot's capture, not a per-execution-path fact. See
+// Scope note: this pass walks the CFG (N1, buildCfg in cfg.h), not the flat
+// instruction list, and tracks captured-slot openness per basic block. A
+// CLOSE_UPVALUE carries no operand, so a flat, order-only walk cannot always
+// tell two mutually exclusive alternate exits of ONE live range (break,
+// continue, and the normal fall-through, each closing the same per-iteration
+// capture on its own path) apart from a real scope exit followed by a
+// genuinely different, later variable that reuses the same slot number. The
+// CFG resolves this: two CLOSURE instructions for the same slot share one
+// live range exactly when some CFG path connects them without crossing a
+// CLOSE_UPVALUE for that slot; a slot is open at a block's entry exactly when
+// every predecessor that reaches it agrees it is still open. This pass still
+// carries no stack simulation (N2), so every offset it reports is a bound on
+// a slot's capture, not a per-execution-path fact. See
 // FunctionCaptureInfo::firstCaptureOffset below for what that means for N7.
 
+#include "cfg.h"
 #include "chunk_decoder.h"
 
 #include <map>
@@ -37,16 +47,19 @@ struct CaptureLiveRange {
     // always immediately before it, and not always on every path that
     // reaches this offset.
     //
-    // Concretely, `firstCaptureOffset` is NOT guaranteed to dominate `end`:
-    // a jump can land inside (firstCaptureOffset, end] without ever having
-    // run firstCaptureOffset. V3_loopvar.lox is the standing counter-example
-    // — a zero-trip loop reaches this range's CLOSE_UPVALUE without ever
-    // running the CLOSURE that opened it, because the loop variable's real
+    // Concretely, `firstCaptureOffset` is NOT guaranteed to dominate every
+    // entry in `allCloseOffsets`: a jump can land inside
+    // (firstCaptureOffset, someEnd] without ever having run
+    // firstCaptureOffset. V3_loopvar.lox is the standing counter-example — a
+    // zero-trip loop reaches this range's CLOSE_UPVALUE without ever running
+    // the CLOSURE that opened it, because the loop variable's real
     // declaration (the init clause) runs once, before the loop, while the
-    // capturing CLOSURE sits inside the conditionally-skipped body. Recovering
-    // the exact declaration offset needs either the CFG (N1) or the abstract
-    // stack (N2); this node deliberately depends on neither, so it reports
-    // the bound it can prove from a single linear pass and no more.
+    // capturing CLOSURE sits inside the conditionally-skipped body. This
+    // pass uses the CFG (N1) to resolve WHICH slot a CLOSE_UPVALUE closes
+    // and which closures share one cell, but that is a different question
+    // from WHERE a slot's declaration runs on a given path — that needs the
+    // abstract stack (N2), which this node still does not depend on, so it
+    // reports the bound it can prove and no more.
     //
     // N7 must NOT use this field to decide where to insert cell-allocation
     // code. The safe algorithm is: walk the chunk once for codegen (as N7
@@ -59,42 +72,51 @@ struct CaptureLiveRange {
     // offset comparison.
     int firstCaptureOffset{-1};
 
-    // A real CLOSE_UPVALUE offset that ends this range. Meaningless when
-    // `closedImplicitly` is set — see that field. This is not guaranteed to
-    // be the ONLY point some execution path could close the range: break,
-    // continue, and a match arm's own exit each emit their OWN
-    // CLOSE_UPVALUE for the same captured local, on their own mutually
-    // exclusive path (see recordClose in the .cpp), and RETURN also closes
-    // every open upvalue in the frame. `end` is simply the last such offset
-    // this linear pass saw for this range — any one of the real alternates
-    // would do equally well, since only one of them ever fires per actual
-    // execution, and this pass verifies every one of them is accounted for
-    // (checkNoOrphanCloseUpvalues in test_backend_capture.cpp) even though
-    // only one is reported here. A RETURN among the alternates needs no
-    // CLOSE_UPVALUE of its own and reports no offset either way: it is
-    // frame-terminal, so no code after it in this chunk can observe the
-    // difference.
+    // A real CLOSE_UPVALUE offset that ends this range. Meaningless (left at
+    // -1) only when `allCloseOffsets` is empty AND `closedImplicitly` is
+    // false, which never happens for a committed range — see that field.
+    // `end` is `allCloseOffsets.back()`, or the chunk's length when
+    // `allCloseOffsets` is empty and the range is `closedImplicitly`.
     int end{-1};
 
-    // True when no CLOSE_UPVALUE closes this range anywhere in the chunk's
-    // linear instruction stream: every reachable path out of this range's
-    // own scope returns before that scope's close code ever runs, so the
-    // frame's RETURN (closeUpvalues(frame->slots)) is the only thing that
-    // ends it. The common case is the function's own top-level scope, which
-    // the compiler never wraps in an explicit close at all
-    // (06_shared_upvalue's `outer`) — but a captured local in a nested block
-    // scope can end up here too, if every path out of that specific block
-    // happens to return early; closedImplicitly follows from what the
-    // decoded instruction stream actually contains, not from scope nesting
-    // depth. `end` is then the chunk's own length, not a real instruction
-    // offset.
+    // Every real CLOSE_UPVALUE offset that resolves to this exact range, one
+    // per path that closes it. A range genuinely gets more than one when its
+    // scope has more than one mutually exclusive exit — break, continue, a
+    // match arm's own exit, and the normal fall-through can each emit their
+    // OWN CLOSE_UPVALUE for the same captured local, on their own path — and
+    // exactly one of them fires per real execution, never more than one and
+    // never zero (unless the range is closedImplicitly, in which case this
+    // is empty: see that field). `end` is always `allCloseOffsets.back()`.
+    // This field exists so a consumer (or a test — see
+    // checkNoOrphanCloseUpvalues in test_backend_capture.cpp) can verify
+    // every alternate is accounted for, not only the last one.
+    std::vector<int> allCloseOffsets;
+
+    // True when this range is still open (per the per-path dataflow) at
+    // SOME reachable RETURN or MATCH_ERROR: that path returns before any
+    // code closes it, so the frame's own teardown
+    // (closeUpvalues(frame->slots)) is what ends it on that path, not an
+    // explicit CLOSE_UPVALUE. This can COEXIST with a non-empty
+    // `allCloseOffsets`: one path can return with the range still open while
+    // a DIFFERENT path closes the very same range explicitly — both are
+    // real, mutually exclusive ways this one range ends, exactly like two
+    // entries in `allCloseOffsets` are. The common case with no explicit
+    // close at all is the function's own top-level scope, which the
+    // compiler never wraps in an explicit close on any path
+    // (06_shared_upvalue's `outer`) — there, `end` is the chunk's own
+    // length, not a real instruction offset, because there is no explicit
+    // close to report instead.
     bool closedImplicitly{false};
 
-    // True when a LOOP back-edge wraps [firstCaptureOffset, end]: this exact
-    // bytecode span re-executes every iteration, so the declaration re-runs
-    // and needs a fresh cell each time (V1_fresh_cell). False means one cell
-    // serves the whole range, however many times it runs (V3_loopvar, and
-    // any capture outside a loop).
+    // True when some LOOP's back-edge span [target, offset] contains
+    // `firstCaptureOffset` AND every entry in `allCloseOffsets` (there must
+    // be at least one): this exact bytecode span re-executes every
+    // iteration, so the declaration re-runs and needs a fresh cell each time
+    // (V1_fresh_cell). False when `allCloseOffsets` is empty (a
+    // closedImplicitly-only range is scoped to the whole call, never
+    // re-declared) or when no single loop's span covers every explicit end
+    // (V3_loopvar, and any capture outside a loop) — one cell serves the
+    // whole range in both of those cases, however many times it runs.
     bool perIteration{false};
 
     // Offsets of every CLOSURE instruction, in this chunk, that captures
@@ -120,6 +142,14 @@ struct FunctionCaptureInfo {
     // Copied from the CLOSURE instruction, in the PARENT chunk, that creates
     // this function. Empty for the root script, which no CLOSURE creates.
     std::vector<ClosureUpvalue> ownUpvalues;
+
+    // CLOSE_UPVALUE offsets found in a CFG block this pass never reaches
+    // from block 0 — dead code, for example scope-exit cleanup after an
+    // unconditional `return`. These never execute on any real run, so they
+    // are attributed to no range; this field exists only so a cross-check
+    // (checkNoOrphanCloseUpvalues in test_backend_capture.cpp) can tell
+    // "unreachable" apart from "this pass lost track of a real close".
+    std::vector<int> unreachableCloseOffsets;
 };
 
 // Capture info for a whole ObjFunction tree (see decodeFunctionTree),
@@ -129,15 +159,20 @@ struct CaptureAnalysis {
     std::map<std::string, FunctionCaptureInfo> functions;
 };
 
-// Walks every chunk in `root`'s tree and builds its capture map. A normal
-// program can legitimately have more than one real CLOSE_UPVALUE for the
-// same capture, on mutually exclusive break/continue/match-arm-exit paths;
-// the walk resolves each one to the slot it actually closes using the
-// JUMP_IF_FALSE spans those alternate paths sit inside (see SpanTracker in
-// the .cpp), and falls back to tolerating an unresolvable close as an
-// alternate exit of the most-recently-closed slot only for a shape that
-// mechanism does not cover. Throws std::runtime_error if a CLOSE_UPVALUE
-// names no open captured slot AND no slot has closed yet at all in the
-// chunk — every other CLOSE_UPVALUE resolves one of these two ways. A throw
-// here signals decoder or compiler drift, not a normal program.
+// Builds the CFG (N1) of every chunk in `root`'s tree and derives the
+// capture map per execution path (round-3 referee decision, PR #101): a
+// dataflow over the CFG, not a flat, order-only walk over the instruction
+// list. A normal program can legitimately have more than one real
+// CLOSE_UPVALUE for the same capture, on mutually exclusive
+// break/continue/match-arm-exit/fall-through paths; a flat walk cannot tell
+// that apart from a real scope exit followed by a genuinely different, later
+// variable that reuses the same slot number, because CLOSE_UPVALUE carries
+// no operand. The CFG resolves it: a slot is open at a block's entry exactly
+// when every predecessor that reaches it agrees it is still open (two
+// disagreeing predecessors is a real error, not an alternate exit), and
+// CLOSE_UPVALUE always closes the highest open captured slot on whichever
+// single path is being walked. Throws std::runtime_error if a CLOSE_UPVALUE
+// names no open captured slot on a REACHABLE block's fully-converged path,
+// or if two CFG paths reach one block disagreeing on which capture holds a
+// slot open. Either signals decoder or compiler drift, not a normal program.
 CaptureAnalysis analyzeCaptures(const DecodedFunction& root);
