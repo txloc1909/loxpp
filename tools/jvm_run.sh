@@ -23,7 +23,7 @@
 # unchanged, because later nodes diff this output against build/loxpp.
 set -euo pipefail
 
-if [ "$#" -lt 3 ]; then
+if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
     echo "usage: tools/jvm_run.sh <j-dir> <rt-jar> <main-class> [stack-size]" >&2
     exit 2
 fi
