@@ -303,6 +303,21 @@ void checkNode(const DecodedFunction& node, const MemoryManager& mm,
         << "walker found a different number of nested functions than the "
         << "chunk's own constant pool holds";
 
+    // R4 fix: a CLOSURE's nestedIndex must name its own target function, not
+    // some other same-shaped node.
+    for (const DecodedInstruction& ins : node.instructions) {
+        if (ins.op != Op::CLOSURE) {
+            continue;
+        }
+        ASSERT_GE(ins.nestedIndex, 0) << "CLOSURE has no nestedIndex";
+        ASSERT_LT(static_cast<size_t>(ins.nestedIndex), node.nested.size())
+            << "CLOSURE nestedIndex is out of range";
+        EXPECT_EQ(node.nested[static_cast<size_t>(ins.nestedIndex)].function,
+                  asObjFunction(chunk.getConstant(
+                      static_cast<uint16_t>(ins.constantIndex))))
+            << "CLOSURE nestedIndex does not name its own target function";
+    }
+
     for (const DecodedFunction& child : node.nested) {
         checkNode(child, mm, path + " > " + child.displayName);
     }

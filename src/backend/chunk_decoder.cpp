@@ -4,6 +4,7 @@
 #include "value.h"
 
 #include <stdexcept>
+#include <unordered_map>
 
 namespace {
 
@@ -177,14 +178,25 @@ DecodedFunction decodeFunctionNode(ObjFunction* fn, std::string id) {
     node.displayName = functionDisplayName(fn);
     node.instructions = decodeChunk(fn->chunk);
 
+    // constant-pool index -> position in node.nested. CLOSURE names its
+    // target by constant-pool index (below); `nested` is ordered by
+    // function-constant position instead, so this map links the two.
+    std::unordered_map<int, int> nestedIndexOf;
     const ValueArray& constants = fn->chunk.constants();
     int childIndex = 0;
     for (uint16_t i = 0; i < constants.size(); i++) {
         Value v = constants.at(i);
         if (is<Obj*>(v) && isObjType(as<Obj*>(v), ObjType::FUNCTION)) {
+            nestedIndexOf[i] = childIndex;
             node.nested.push_back(decodeFunctionNode(
                 asObjFunction(v), id + "." + std::to_string(childIndex)));
             childIndex++;
+        }
+    }
+
+    for (DecodedInstruction& ins : node.instructions) {
+        if (ins.op == Op::CLOSURE) {
+            ins.nestedIndex = nestedIndexOf.at(ins.constantIndex);
         }
     }
 

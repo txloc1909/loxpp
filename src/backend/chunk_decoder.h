@@ -61,6 +61,13 @@ struct DecodedInstruction {
     // Set by JUMP_TABLE: the switch base, plus one arm per tag in range.
     int minTag{-1};
     std::vector<JumpTableArm> jumpTable;
+
+    // Set by CLOSURE: the position of the target function inside the
+    // enclosing DecodedFunction::nested. `nested` is ordered by
+    // function-constant position, not by constant-pool index, so this saves
+    // every consumer from re-deriving the mapping by scanning `nested` for
+    // the constant `constantIndex` names.
+    int nestedIndex{-1};
 };
 
 // Decodes every instruction in `chunk`, in offset order. Throws
