@@ -116,6 +116,7 @@ graph TD
     DEC --> ABS
     DEC --> CFG
     DEC --> CAP
+    CFG --> CAP
 
     RT --> SL
     EH --> SL
@@ -182,7 +183,7 @@ and steps 4–6 are independent analyses.)
 | **N0** | enables P1/P3/P8 | Decoder for every op incl. variable-length `CLOSURE`, `JUMP_TABLE`, `INVOKE`; walks the `ObjFunction` tree | — | Re-disassemble each probe from the walker; **byte/structure-exact diff** against `loxpp -DLOXPP_DEBUG_PRINT_CODE`. No unknown/misaligned opcodes on any probe. |
 | **N1** | P3a | CFG via leaders algorithm; label at every jump target | N0 | `05_for` CFG has exactly **2 back-edges + 1 forward skip**; every jump/loop/table target is a block leader; **no target lands mid-instruction** (assert). |
 | **N2** | P1 | Symbolic stack sim: per-offset height, slot classification (named-local vs temporary), max-stack | N0 | `01_assign_local`: offset 8 `POP` → **TEMP**, offset 12 `POP` → **LOCAL-RECLAIM**. `15_nested_arith`: computed `.maxstack` equals independent count. Stack height == 0 at every `RETURN`. |
-| **N3** | P4a | Capture map: which slots are captured (→ ref-cell) + `CLOSE_UPVALUE` live-range ends | N0 | `06_shared_upvalue`: slot 1 captured by **both** get&set → 1 shared cell. `V1`: `snapshot` live-range = **loop body** (fresh/iter). `V3`: `i` live-range = **whole loop** (shared). |
+| **N3** | P4a | Capture map: which slots are captured (→ ref-cell) + `CLOSE_UPVALUE` live-range ends, derived **per CFG path** (a linear, order-only walk cannot tell apart two mutually exclusive alternate exits of one live range from a real scope exit followed by a different variable reusing the same slot — see the round-3 referee decision on PR #101) | N0, N1 | `06_shared_upvalue`: slot 1 captured by **both** get&set → 1 shared cell. `V1`: `snapshot` live-range = **loop body** (fresh/iter). `V3`: `i` live-range = **whole loop** (shared). A captured local inside an `if` inside a loop still gets its per-iteration verdict, and two different variables that reuse one slot across two unrelated blocks never share a cell. |
 | **N4** | P2 | Emit CONSTANT/arith/PRINT/POP/GET_LOCAL/SET_LOCAL with `dup`/`dup_x1`; insert the invisible-`var` stores; drop reclaim-POPs | RT, EH, N2 | `01_assign_local` and `15_nested_arith` produce **stdout identical to native loxpp** (`2` / `5.4`). |
 | **N5** | P3b | Emit JUMP / `JUMP_IF_FALSE`(→`dup;isFalsy;ifXX`) / LOOP to labels; all values boxed to `Object` at merges | N4, N1 | `02/03/04/05` match native output **and** the class passes the verifier (`java -Xverify:all` / ILVerify). Merge-depth consistency holds. |
 | **N6** | P5 | `CLOSURE` (0 upvalues), `CALL`→`Object[]`, arg-prologue (slot0=callee/receiver, args→locals), `RETURN` dual-role (fn `areturn` / script void) | N4, ABS | `08_call` prints `3`; a script-level program returns cleanly from `void main`. |
@@ -195,9 +196,12 @@ and steps 4–6 are independent analyses.)
 ## Critical path & parallelization
 
 - **Longest correctness chain:** `N0 → N2 → N4 → N5 → N9 → N10 → N11`.
-- **Closure chain (parallel to the above until N7):** `N0 → N3` and
+- **Closure chain (parallel to the above until N7):** `N0 → N1 → N3` and
   `N4 → N6 → N7 → N8`.
-- **Immediately parallel once N0 lands:** N1, N2, N3 (independent analyses).
+- **Immediately parallel once N0 lands:** N1 and N2. N3 needs N1's CFG (a
+  linear, order-only walk cannot soundly resolve which slot an operand-less
+  `CLOSE_UPVALUE` closes across alternate exits — see PR #101's round-3
+  referee decision), so it starts once N1 is green, not immediately with N0.
 - **RT and EH have no analysis dependencies** — build them first (or in parallel
   with N0). RT can even be test-driven to green before any codegen exists.
 - **N7 is the highest-value gate to reach early.** It is the only node whose
