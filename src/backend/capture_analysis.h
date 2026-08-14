@@ -126,12 +126,15 @@ struct CaptureAnalysis {
     std::map<std::string, FunctionCaptureInfo> functions;
 };
 
-// Walks every chunk in `root`'s tree and builds its capture map. Throws
-// std::runtime_error if a CLOSE_UPVALUE names no open captured slot AND no
-// slot has closed yet at all in the chunk — every other CLOSE_UPVALUE has an
-// open slot to close, or is tolerated as an alternate exit of the
-// most-recently-closed one (see recordClose in the .cpp; a normal program
-// can legitimately have more than one CLOSE_UPVALUE for the same capture, on
-// break/continue/match-arm-exit paths). A throw here signals decoder or
-// compiler drift, not a normal program.
+// Walks every chunk in `root`'s tree and builds its capture map. A normal
+// program can legitimately have more than one real CLOSE_UPVALUE for the
+// same capture, on mutually exclusive break/continue/match-arm-exit paths;
+// the walk resolves each one to the slot it actually closes using the
+// JUMP_IF_FALSE spans those alternate paths sit inside (see SpanTracker in
+// the .cpp), and falls back to tolerating an unresolvable close as an
+// alternate exit of the most-recently-closed slot only for a shape that
+// mechanism does not cover. Throws std::runtime_error if a CLOSE_UPVALUE
+// names no open captured slot AND no slot has closed yet at all in the
+// chunk — every other CLOSE_UPVALUE resolves one of these two ways. A throw
+// here signals decoder or compiler drift, not a normal program.
 CaptureAnalysis analyzeCaptures(const DecodedFunction& root);

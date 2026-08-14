@@ -10,29 +10,150 @@ namespace {
 // of one chunk.
 using OpenSlots = std::unordered_map<int, bool>;
 
+// One forward jump's (JUMP or JUMP_IF_FALSE) span: the address range whose
+// code some OTHER path skips past. See SpanTracker for why this exists and
+// how it is maintained.
+struct PendingSpan {
+    int target;
+    std::vector<int> reopenOnExit;
+};
+
+// Tracks the JUMP_IF_FALSE spans this walk is currently "inside": one entry
+// per jump whose target this walk has not reached yet. A CLOSE_UPVALUE seen
+// while a span is active is provisional: its slot is recorded on the
+// innermost active span (reopenOnExit) and reopened once that span's target
+// is reached, instead of staying closed for good — that is what lets a
+// later close on the fall-through path, or a later CLOSURE re-capturing the
+// same slot, resolve correctly instead of falling through to the next slot
+// up (R9/R10).
+//
+// Only JUMP_IF_FALSE opens a span: it is the one instruction that means
+// "some OTHER path skips this code and rejoins at my target," which is
+// exactly the ambiguity a CLOSE_UPVALUE inside it needs protecting against.
+//
+// A loop's own condition check is a JUMP_IF_FALSE too, but its target means
+// "the loop is exhausted," not "an alternate path rejoins here" — reopening
+// at it would incorrectly undo a per-iteration close that never had any
+// alternate. isLoopGuard excludes exactly this one shape: a JUMP_IF_FALSE
+// whose span contains the LOOP instruction that repeats it. A for-loop
+// compiles its condition check and its increment clause as two separate
+// regions, each closed by its OWN LOOP back-edge (one jumping past the
+// increment straight to the condition, one at the body's own bottom
+// jumping to the increment) — so more than one LOOP instruction can share
+// "being inside this same loop" with one JUMP_IF_FALSE, and a naive "is
+// this offset between some LOOP's target and its own offset" test matches
+// nested conditionals inside the body too (their own target sits between
+// two of the loop's OWN back-edges, not outside all of them). The one
+// relationship that isolates the loop's own condition-check JUMP_IF_FALSE:
+// among every LOOP back-edge whose target is at-or-before this
+// JUMP_IF_FALSE (candidates for "some loop already started by here"), take
+// the one with the HIGHEST own offset — the most recent back-edge this walk
+// has actually passed. A loop-guard's own skip-target lands at-or-after
+// that back-edge (it exits past the whole loop); a nested conditional's
+// target lands strictly before it (still inside the body the back-edge
+// just closed).
+//
+// A plain, unconditional JUMP never opens its own span (break's own exit
+// jump, or a match arm's own exit jump, needs none: with no span active
+// over it, its close simply commits, which is already correct — see
+// recordClose). The one JUMP that matters is the "skip `else`" jump
+// Compiler::ifStatement ALWAYS emits as `then`'s own last instruction —
+// even with no `else` clause in the source, since ifStatement emits it
+// unconditionally and only then compiles an optional `else` before patching
+// it. That JUMP's END (offset + length, not its own offset — the enclosing
+// JUMP_IF_FALSE's target is patched right after it) always lands EXACTLY on
+// the enclosing JUMP_IF_FALSE's target, and it EXTENDS that span to cover
+// `else` (or, with none, the one-instruction gap ifStatement still leaves
+// before its own target) instead of ending it, so a slot closed in `then`
+// stays unreachable through that whole region instead of being wrongly
+// reopened partway through it.
+class SpanTracker {
+  public:
+    explicit SpanTracker(const DecodedFunction& node) {
+        for (const DecodedInstruction& ins : node.instructions) {
+            if (ins.op == Op::LOOP) {
+                m_loopBackEdges.push_back({ins.offset, ins.jumpTarget});
+            }
+        }
+    }
+
+    // Reopens every span this walk has passed, then pushes a new span or
+    // extends the innermost active one if `ins` calls for it. Call this
+    // before acting on `ins` itself.
+    void advance(const DecodedInstruction& ins, OpenSlots& openSlots) {
+        popSpansEndingAt(ins.offset - 1, openSlots); // never ambiguous
+        if (extendsElseSkip(ins)) {
+            m_stack.back().target = ins.jumpTarget;
+            return;
+        }
+        popSpansEndingAt(ins.offset, openSlots);
+        if (ins.op == Op::JUMP_IF_FALSE && ins.jumpTarget > ins.offset &&
+            !isLoopGuard(ins)) {
+            m_stack.push_back({ins.jumpTarget, {}});
+        }
+    }
+
+    [[nodiscard]] bool active() const { return !m_stack.empty(); }
+
+    // Records that `slot`, just closed by the current instruction, should
+    // reopen once the innermost active span's target is reached. Call only
+    // when active().
+    void reopenOnExit(int slot) { m_stack.back().reopenOnExit.push_back(slot); }
+
+  private:
+    struct LoopBackEdge {
+        int offset;
+        int target;
+    };
+
+    // The enclosing JUMP_IF_FALSE's target is patched to right AFTER this
+    // JUMP (Compiler::ifStatement patches thenJump once elseJump and the
+    // optional `else` are both compiled), so the match is on where `ins`
+    // ENDS, not where it starts.
+    [[nodiscard]] bool extendsElseSkip(const DecodedInstruction& ins) const {
+        return !m_stack.empty() &&
+               m_stack.back().target == ins.offset + ins.length &&
+               ins.op == Op::JUMP && ins.jumpTarget > ins.offset;
+    }
+
+    [[nodiscard]] bool
+    isLoopGuard(const DecodedInstruction& jumpIfFalse) const {
+        const LoopBackEdge* mostRecent = nullptr;
+        for (const LoopBackEdge& edge : m_loopBackEdges) {
+            if (edge.target <= jumpIfFalse.offset &&
+                (mostRecent == nullptr || edge.offset > mostRecent->offset)) {
+                mostRecent = &edge;
+            }
+        }
+        return mostRecent != nullptr &&
+               jumpIfFalse.jumpTarget >= mostRecent->offset;
+    }
+
+    void popSpansEndingAt(int offset, OpenSlots& openSlots) {
+        while (!m_stack.empty() && m_stack.back().target <= offset) {
+            for (int slot : m_stack.back().reopenOnExit) {
+                openSlots[slot] = true;
+            }
+            m_stack.pop_back();
+        }
+    }
+
+    std::vector<LoopBackEdge> m_loopBackEdges;
+    std::vector<PendingSpan> m_stack;
+};
+
 // Resolves one CLOSE_UPVALUE to the slot it closes. Compiler::endScope and
 // Compiler::emitLoopCleanup (compiler.cpp) both reclaim locals in strictly
 // descending slot order, and a local's scope depth is monotonic in its slot
 // index, so among currently-open captured slots the highest index is always
-// the one that closes next. That holds globally, not just within one
-// scope-exit run, because block scopes nest strictly: an inner scope always
-// closes before the outer scope that contains it, so a lower slot cannot
-// still be waiting to close while a higher one, declared later, remains
-// open. This invariant depends on every early-exit path (break, continue,
-// match-arm exit) also closing a captured local with CLOSE_UPVALUE rather
-// than a plain POP; a compiler that reclaimed a captured slot with POP on
-// one of those paths would leave it open here, and a later, unrelated
-// CLOSE_UPVALUE for a different slot could then be misattributed to it. The
-// throw in recordClose (no open slot at all) does not catch that
-// misattribution — it catches only a CLOSE_UPVALUE with no open slot to
-// name, which is a different failure. recordClose's lastClosedSlot
-// tolerance (see below) does not widen the misattribution risk here: it
-// never picks an open slot at all, so it cannot pick the WRONG one — it
-// only decides whether to throw or stay silent when NO slot is open.
-// Guarding fully against a compiler regression here would need per-offset
-// stack tracking (N2), which this node deliberately does not depend on; the
-// actual guard against the scenario above is Compiler::emitLoopCleanup
-// itself matching endScope.
+// the one that closes next. That holds within one straight-line run of
+// reclaim instructions. It does NOT hold across two runs that close the same
+// slot on mutually exclusive paths (break/continue/match-arm exit vs. the
+// normal fall-through) — the first such close, taken alone, looks
+// permanent, and a later, unrelated CLOSE_UPVALUE for a different slot can
+// then be misattributed to it (R9/R10). SpanTracker exists to reopen a slot
+// once its alternate-exit window has genuinely closed, so that by the time
+// `resolveCloseTarget` runs, "currently open" again means what it says.
 int resolveCloseTarget(const OpenSlots& openSlots) {
     int target = -1;
     for (const auto& [slot, open] : openSlots) {
@@ -82,31 +203,35 @@ void recordCapture(const DecodedInstruction& ins, FunctionCaptureInfo& info,
 // on the break path, one on the continue path, and one on a match arm's own
 // exit, in addition to the normal fall-through's endScope. Those paths are
 // mutually exclusive at runtime — only one fires per actual execution — but
-// this linear scan sees all of them in program order, and an unrelated
-// closed-and-reopened capture can sit between two of them (an inner block's
-// own capture, fully opened and closed, in between a continue and a break
-// that both exit the same outer loop). The first CLOSE_UPVALUE for a slot
-// closes its range as usual, through the open-slot match below.
+// this linear scan sees all of them in program order.
 //
-// A later CLOSE_UPVALUE that matches no open slot is tolerated, not thrown,
+// When this instruction sits inside an active span (see SpanTracker), the
+// slot it resolves to is recorded in that span so it is reopened, not left
+// permanently closed, once the span's target proves every alternate path
+// has reconverged. That is what lets a later close on a different
+// mutually-exclusive path (or a later CLOSURE re-capturing the same slot,
+// R10) resolve correctly instead of falling through to the next slot up
+// (R9).
+//
+// A CLOSE_UPVALUE that matches no open slot at all is tolerated, not thrown,
 // as long as `lastClosedSlot` shows some slot has closed through a genuine
-// open-slot match since the most recent new capture. This pass cannot verify
-// that this specific instruction is that same slot's alternate exit — doing
-// that needs per-offset stack or control-flow tracking (N1/N2), which this
-// node deliberately does not depend on — so it does not attribute the close
-// to any range or touch `end` again. That is safe: every range's `end` was
-// already set by its own first, genuine close, so an untouched later close
-// changes no reported value. It only narrows, never removes, the original
-// safety net: a CLOSE_UPVALUE with no open slot AND no slot closed yet at
-// all in this chunk is still unexplained, and still throws.
+// open-slot match since the most recent new capture. SpanTracker handles
+// every alternate-exit shape this pass has a concrete counter-example for;
+// this tolerance remains as a narrower fallback for a shape it does not
+// model. It never attributes the close to any range, so it changes no
+// reported value. A CLOSE_UPVALUE with no open slot AND no slot closed yet
+// at all in this chunk is still unexplained, and still throws.
 void recordClose(const DecodedInstruction& ins, const std::string& functionId,
                  FunctionCaptureInfo& info, OpenSlots& openSlots,
-                 int& lastClosedSlot) {
+                 int& lastClosedSlot, SpanTracker& spans) {
     int slot = resolveCloseTarget(openSlots);
     if (slot != -1) {
         info.liveRangesBySlot.at(slot).back().end = ins.offset;
         openSlots[slot] = false;
         lastClosedSlot = slot;
+        if (spans.active()) {
+            spans.reopenOnExit(slot);
+        }
         return;
     }
     if (lastClosedSlot != -1) {
@@ -189,11 +314,15 @@ void analyzeOneChunk(const DecodedFunction& node, CaptureAnalysis& out) {
 
     OpenSlots openSlots;
     int lastClosedSlot = -1;
+    SpanTracker spans(node);
+
     for (const DecodedInstruction& ins : node.instructions) {
+        spans.advance(ins, openSlots);
+
         if (ins.op == Op::CLOSURE) {
             recordCapture(ins, info, openSlots, lastClosedSlot);
         } else if (ins.op == Op::CLOSE_UPVALUE) {
-            recordClose(ins, node.id, info, openSlots, lastClosedSlot);
+            recordClose(ins, node.id, info, openSlots, lastClosedSlot, spans);
         }
     }
 
