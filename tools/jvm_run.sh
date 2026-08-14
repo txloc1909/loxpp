@@ -12,8 +12,9 @@
 #   <rt-jar>     path to runtime/jvm/lox-rt.jar.
 #   <main-class> fully qualified name of the class with
 #                main([Ljava/lang/String;)V.
-#   [stack-size] -Xss value. Default 64m: bootstrap/loxpp_interpreter.lox
-#                recurses deeply and overflows the JVM's default thread stack.
+#   [stack-size] -Xss value, given as "64m" or "-Xss64m". Default 64m:
+#                bootstrap/loxpp_interpreter.lox recurses deeply and
+#                overflows the JVM's default thread stack.
 #
 # stdin, stdout, stderr, and the exit code all pass through to and from java
 # unchanged, because later nodes diff this output against build/loxpp.
@@ -28,6 +29,10 @@ j_dir="$1"
 rt_jar="$2"
 main_class="$3"
 stack_size="${4:-64m}"
+# Accept either a bare value ("64m") or a full flag ("-Xss64m"): a caller
+# that passes the whole flag must not get "-Xss-Xss64m" (reported:
+# jvm_run.sh, R4).
+stack_size="${stack_size#-Xss}"
 
 if [ ! -d "$j_dir" ]; then
     echo "jvm_run.sh: no such directory: $j_dir" >&2
