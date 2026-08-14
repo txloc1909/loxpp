@@ -1,0 +1,119 @@
+#pragma once
+
+// Abstract-stack reconstruction (node N2 of the JVM/CLR backend DAG). clox
+// fuses named locals and expression temporaries into one operand stack; the
+// JVM and CLR keep them apart (a local-variable array vs. an operand stack).
+// This pass symbolically executes a chunk to recover, at every offset, which
+// stack positions are locals and which are temporaries — the fact the
+// compiler discards (notes/bytecode-translation-problems.md, P1).
+//
+// Target-independent: no JVM or CLR knowledge. Both backends need the same
+// numbers, and the CLR backend must hand-compute `.maxstack` from this where
+// jasmin would otherwise do it for the JVM.
+
+#include "chunk_decoder.h"
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+// What a POP instruction discards. Two byte-identical POPs can mean opposite
+// things (P1): TEMP ends an expression-statement result and must become a
+// real `pop`; LOCAL_RECLAIM ends a named local's scope and must be dropped —
+// a JVM/CLR local slot needs no pop to go out of scope.
+enum class PopKind : std::uint8_t { TEMP, LOCAL_RECLAIM };
+
+// The abstract stack immediately before or after an instruction runs.
+// `height` counts every live cell (locals and temporaries together).
+// `localCount` is how many of the bottom cells are currently bound to a
+// declared variable; positions [localCount, height) are temporaries. clox's
+// scoping is strictly LIFO, so locals are always exactly the bottom cells —
+// no per-cell tag is needed, only these two numbers.
+struct StackState {
+    int height{0};
+    int localCount{0};
+
+    // What the JVM/CLR operand stack actually holds here, once locals move
+    // to slots and stop occupying stack cells.
+    [[nodiscard]] int operandDepth() const { return height - localCount; }
+
+    bool operator==(const StackState&) const = default;
+};
+
+// An offset where a value already on the stack becomes a named local with no
+// store instruction (P1's "invisible var" — `var a = 1;` compiles to just
+// CONSTANT; the compiler privately notes "slot 1 is now a" and emits no
+// store). `slot` is the frame-relative local index. The emitter must insert
+// a real store (`astore`/`stloc`) exactly at this offset.
+struct InvisibleVarSite {
+    int offset{0};
+    int slot{0};
+};
+
+// One POP instruction, classified.
+struct PopClassification {
+    int offset{0};
+    PopKind kind{};
+};
+
+// The full per-instruction analysis of one function's own chunk.
+struct FunctionStackAnalysis {
+    std::string functionId;
+
+    // Aligned 1:1 with the source DecodedFunction::instructions.
+    std::vector<StackState> before;
+    std::vector<StackState> after;
+
+    // Aligned 1:1 with instructions too. False for an instruction no path
+    // from function entry reaches — `before`/`after` are meaningless there.
+    // `compiler.cpp`'s endCompiler() unconditionally appends a trailing
+    // NIL;RETURN even when every path already returned explicitly, so this
+    // does happen in real chunks; it is not a decoder or analysis bug.
+    std::vector<bool> reached;
+
+    // In offset order.
+    std::vector<PopClassification> pops;
+
+    // In offset order, deduplicated: the same declaration can be reachable
+    // from more than one predecessor (e.g. a captured local initialised by
+    // a short-circuit `and`/`or` expression lands via either branch).
+    std::vector<InvisibleVarSite> invisibleVars;
+
+    // High-water mark of operandDepth() over the whole chunk — what a JVM
+    // `.limit stack` / CIL `.maxstack` must be at least as large as. Excludes
+    // the arity+1 bottom slots: those move to the local array, not the
+    // operand stack.
+    int maxOperandDepth{0};
+};
+
+// Analyzes one function's own chunk. Does not recurse into nested functions —
+// each has its own frame, analyzed independently, starting from
+// height = arity+1 (slot 0 = callee/receiver, slots 1..arity = parameters;
+// bytecode-translation-problems.md P5). A method's receiver and a plain
+// function's closure occupy slot 0 the same way, so no special-casing is
+// needed between them.
+//
+// Throws std::runtime_error if a control-flow merge disagrees on stack
+// height — the invariant the JVM/CLR verifier enforces at every merge. A
+// disagreement means the decoder or this analysis has drifted from the
+// compiler; the input program is trusted to be compiler-correct.
+//
+// N1 (CFG/label recovery) has not landed yet at the time this was written;
+// this analysis computes its own local leaders/edges (see abstract_stack.cpp)
+// rather than depend on it. A later node unifies the two CFG builders.
+FunctionStackAnalysis analyzeStack(const DecodedFunction& fn);
+
+// One node of the whole-tree analysis, mirroring DecodedFunction's shape.
+struct StackAnalysisTree {
+    FunctionStackAnalysis self;
+    std::vector<StackAnalysisTree> nested;
+};
+
+StackAnalysisTree analyzeStackTree(const DecodedFunction& root);
+
+// True for opcodes whose result stays on the stack instead of being consumed
+// — "assignment is an expression" (vm.cpp) plus JUMP_IF_FALSE's condition
+// peek. The short-circuit `and`/`or` idiom is not a separate opcode; it is
+// exactly a JUMP_IF_FALSE peek paired with a POP on the truthy path
+// (bytecode-translation-problems.md P2).
+bool peeksInsteadOfPops(Op op);
