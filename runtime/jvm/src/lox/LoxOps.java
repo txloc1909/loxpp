@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.math.MathContext;
 import java.math.RoundingMode;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -670,7 +671,7 @@ public final class LoxOps {
                 mantissa.append('.').append(digits, 1, digits.length());
             }
             body = stripTrailingZeros(mantissa.toString())
-                    + "e" + String.format("%+03d", exponent);
+                    + "e" + String.format(Locale.ROOT, "%+03d", exponent);
         } else {
             body = stripTrailingZeros(rounded.toPlainString());
         }

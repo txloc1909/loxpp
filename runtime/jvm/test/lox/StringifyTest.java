@@ -37,6 +37,18 @@ public final class StringifyTest {
         checkEquals("0.333333", LoxOps.stringify(LoxOps.divide(1.0, 3.0)), "stringify(1/3)");
         checkEquals("1.23457e+08", LoxOps.stringify(123456789.0), "stringify(123456789)");
 
+        // PR #97 review finding R14: the exponent must stay ASCII digits
+        // under every JVM default locale, not just en_US (the CI runner's
+        // default). ar-SA renders %d with Arabic-Indic digits when no
+        // explicit Locale is given to String.format.
+        java.util.Locale savedLocale = java.util.Locale.getDefault();
+        try {
+            java.util.Locale.setDefault(java.util.Locale.forLanguageTag("ar-SA"));
+            checkEquals("1e+06", LoxOps.stringify(1000000.0), "stringify(1e6) stays ASCII under a non-Latin locale");
+        } finally {
+            java.util.Locale.setDefault(savedLocale);
+        }
+
         checkEquals("true", LoxOps.stringify(true), "stringify(true)");
         checkEquals("false", LoxOps.stringify(false), "stringify(false)");
         checkEquals("nil", LoxOps.stringify(null), "stringify(nil)");
