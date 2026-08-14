@@ -11,6 +11,7 @@
 set -euo pipefail
 
 fixtures="$(cd "$(dirname "${BASH_SOURCE[0]}")/toolchain_smoke" && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -97,6 +98,18 @@ if step "jasmin assembly (branching)" jasmin -d . branch.j; then
     check "jasmin -> java (branching)" "branching ok" \
         "$(java BranchProbe 2>&1 || true)"
 fi
+
+# 2c. lox-rt link: a hand-written class calls lox.LoxOps.print and links
+# against lox-rt.jar, through tools/jvm_run.sh — the same harness a code
+# generator will call. This proves the assemble -> run -> link chain end to
+# end, before any code generator exists. Run through jvm_run.sh itself, not a
+# second copy of its jasmin/java calls, so a regression there shows up here
+# too. Must fail loudly, not skip, when the jar is missing: a passing check
+# must mean the link happened, not that it was never attempted.
+mkdir -p hellort
+cp "$fixtures/HelloRt.j" hellort/
+check "jvm_run.sh -> java (lox-rt link)" "lox-rt ok" \
+    "$("$repo_root/tools/jvm_run.sh" hellort "$repo_root/runtime/jvm/lox-rt.jar" HelloRt 2>&1 || true)"
 
 # 3. ilasm: the path the CLR backend emits into. Two Linux-specific traps here,
 #    both of which the backend's build step will hit as well:
