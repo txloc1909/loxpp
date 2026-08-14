@@ -1996,9 +1996,15 @@ void Compiler::emitLoop(int loopStart) {
 }
 
 void Compiler::emitLoopCleanup(int targetLocalCount) {
-    int toPop = m_localCount - targetLocalCount;
-    for (int i = 0; i < toPop; i++) {
-        emitByte(Op::POP);
+    // Mirrors endScope(): a captured local must close with CLOSE_UPVALUE, not
+    // a plain POP, or its cell stays open past this early exit and the next
+    // loop iteration (or the next match arm) reuses the same stale cell.
+    for (int i = m_localCount - 1; i >= targetLocalCount; i--) {
+        if (m_locals[i].isCaptured) {
+            emitByte(Op::CLOSE_UPVALUE);
+        } else {
+            emitByte(Op::POP);
+        }
     }
 }
 

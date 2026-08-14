@@ -200,3 +200,69 @@ TEST_F(ClosureTest, ClosedOverVarSurvivesBlockExit) {
     EXPECT_DOUBLE_EQ(as<Number>(*v), 99.0);
     EXPECT_EQ(h.stackDepth(), 0);
 }
+
+// ---------------------------------------------------------------------------
+// 6. A captured local must close correctly on every early-exit path
+//    (break/continue/match-arm), not just on normal scope exit.
+//    emitLoopCleanup used to POP a captured local instead of closing its
+//    upvalue, so the cell stayed open and the next iteration's write leaked
+//    through the stale upvalue.
+// ---------------------------------------------------------------------------
+
+TEST_F(ClosureTest, CapturedLoopVarClosesOnContinue) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun make() {
+            var fns = [nil, nil, nil];
+            for (var i = 0; i < 3; i = i + 1) {
+                var s = i;
+                fun f() { return s; }
+                fns[i] = f;
+                if (i == 1) continue;
+                if (i == 2) break;
+            }
+            return fns;
+        }
+        var fs = make();
+        var r0 = fs[0]();
+        var r1 = fs[1]();
+        var r2 = fs[2]();
+    )"),
+              InterpretResult::OK);
+    EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("r0")), 0.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("r1")), 1.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("r2")), 2.0);
+    EXPECT_EQ(h.stackDepth(), 0);
+}
+
+TEST_F(ClosureTest, CapturedMatchArmBindingClosesOnArmExit) {
+    VMTestHarness h;
+    // After the match, an unrelated local (`w`, also captured) reuses `v`'s
+    // old stack slot. If the match arm reclaimed `v` with a plain POP
+    // instead of CLOSE_UPVALUE, `f`'s upvalue for `v` would stay open on
+    // that slot and observe `w`'s later write instead.
+    ASSERT_EQ(h.run(R"(
+        enum Result { Ok(value) Err(msg) }
+        fun make() {
+            var box = [nil, nil];
+            var r = Ok(7);
+            var g = match r {
+                case Ok(v) => { fun f() { return v; } box[0] = f; 1 }
+                case Err(m) => 0
+            };
+            {
+                var w = 9;
+                fun gw() { return w; }
+                box[1] = gw;
+            }
+            return box;
+        }
+        var b = make();
+        var result0 = b[0]();
+        var result1 = b[1]();
+    )"),
+              InterpretResult::OK);
+    EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("result0")), 7.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("result1")), 9.0);
+    EXPECT_EQ(h.stackDepth(), 0);
+}
