@@ -124,7 +124,8 @@ void checkReturnHeightZero(const DecodedFunction& node,
     SCOPED_TRACE("function id=" + node.id + " path=" + path);
     FunctionStackAnalysis analysis = analyzeStack(node);
     for (size_t i = 0; i < node.instructions.size(); i++) {
-        if (!analysis.reached[i] || node.instructions[i].op != Op::RETURN) {
+        if (!static_cast<bool>(analysis.reached[i]) ||
+            node.instructions[i].op != Op::RETURN) {
             continue;
         }
         EXPECT_EQ(analysis.before[i].operandDepth(), 1)
