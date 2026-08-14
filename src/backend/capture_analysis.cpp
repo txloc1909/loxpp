@@ -2,6 +2,7 @@
 #include "exec_objects.h"
 
 #include <stdexcept>
+#include <unordered_map>
 
 namespace {
 
@@ -9,14 +10,28 @@ namespace {
 // of one chunk.
 using OpenSlots = std::unordered_map<int, bool>;
 
-// Resolves one CLOSE_UPVALUE to the slot it closes. Compiler::endScope
-// (compiler.cpp) always reclaims locals in strictly descending slot order,
-// and a local's scope depth is monotonic in its slot index, so among
-// currently-open captured slots the highest index is always the one that
-// closes next. That holds globally, not just within one scope-exit run,
-// because block scopes nest strictly: an inner scope always closes before
-// the outer scope that contains it, so a lower slot cannot still be waiting
-// to close while a higher one, declared later, remains open.
+// Resolves one CLOSE_UPVALUE to the slot it closes. Compiler::endScope and
+// Compiler::emitLoopCleanup (compiler.cpp) both reclaim locals in strictly
+// descending slot order, and a local's scope depth is monotonic in its slot
+// index, so among currently-open captured slots the highest index is always
+// the one that closes next. That holds globally, not just within one
+// scope-exit run, because block scopes nest strictly: an inner scope always
+// closes before the outer scope that contains it, so a lower slot cannot
+// still be waiting to close while a higher one, declared later, remains
+// open. This invariant depends on every early-exit path (break, continue,
+// match-arm exit) also closing a captured local with CLOSE_UPVALUE rather
+// than a plain POP; a compiler that reclaimed a captured slot with POP on
+// one of those paths would leave it open here, and a later, unrelated
+// CLOSE_UPVALUE for a different slot could then be misattributed to it. The
+// throw in recordClose (no open slot at all) does not catch that
+// misattribution — it catches only a CLOSE_UPVALUE with no open slot to
+// name, which is a different failure, and recordClose's lastClosedSlot
+// tolerance (see below) narrows that check further, not wider: it only
+// forgives a CLOSE_UPVALUE that matches the slot JUST closed, never an
+// arbitrary open slot. Guarding fully against a compiler regression here
+// would need per-offset stack tracking (N2), which this node deliberately
+// does not depend on; the actual guard against the scenario above is
+// Compiler::emitLoopCleanup itself matching endScope.
 int resolveCloseTarget(const OpenSlots& openSlots) {
     int target = -1;
     for (const auto& [slot, open] : openSlots) {
@@ -36,7 +51,7 @@ int resolveCloseTarget(const OpenSlots& openSlots) {
 // guarantees every tracked range is genuinely captured, so it is guaranteed
 // to close via CLOSE_UPVALUE, never a plain POP.
 void recordCapture(const DecodedInstruction& ins, FunctionCaptureInfo& info,
-                   OpenSlots& openSlots) {
+                   OpenSlots& openSlots, int& lastClosedSlot) {
     for (const ClosureUpvalue& up : ins.upvalues) {
         if (!up.isLocal) {
             continue; // names a slot in a grandparent's frame, not this chunk's
@@ -46,26 +61,49 @@ void recordCapture(const DecodedInstruction& ins, FunctionCaptureInfo& info,
         if (!openSlots[slot]) {
             CaptureLiveRange range;
             range.slot = slot;
-            range.start = ins.offset;
+            range.firstCaptureOffset = ins.offset;
             ranges.push_back(range);
             openSlots[slot] = true;
+            // A new range starting anywhere invalidates any pending
+            // "alternate early exit" tolerance for a slot closed earlier —
+            // see recordClose. Past this point a stray orphan CLOSE_UPVALUE
+            // is drift again, not a leftover exit path of the old range.
+            lastClosedSlot = -1;
         }
         ranges.back().capturingClosureOffsets.push_back(ins.offset);
     }
 }
 
 // Resolves one CLOSE_UPVALUE and closes the range it targets.
+//
+// One captured local can have more than one CLOSE_UPVALUE in the chunk when
+// its scope has more than one exit path: Compiler::emitLoopCleanup emits one
+// on the break path, one on the continue path, and one on a match arm's own
+// exit, in addition to the normal fall-through's endScope. Those paths are
+// mutually exclusive at runtime — only one fires per actual execution — but
+// this linear scan sees all of them in program order. The first one closes
+// the range as usual. A later one for the SAME slot, seen before any new
+// CLOSURE reopens it, is an alternate exit of that same still-most-recently-
+// closed range, not a new event, so it is a no-op rather than an error:
+// `lastClosedSlot` names it. A CLOSE_UPVALUE that matches neither an open
+// slot nor the last-closed one is genuine drift and still throws.
 void recordClose(const DecodedInstruction& ins, const std::string& functionId,
-                 FunctionCaptureInfo& info, OpenSlots& openSlots) {
+                 FunctionCaptureInfo& info, OpenSlots& openSlots,
+                 int& lastClosedSlot) {
     int slot = resolveCloseTarget(openSlots);
-    if (slot == -1) {
-        throw std::runtime_error("capture_analysis: CLOSE_UPVALUE at offset " +
-                                 std::to_string(ins.offset) +
-                                 " in function id=" + functionId +
-                                 " has no open captured live range to close");
+    if (slot != -1) {
+        info.liveRangesBySlot.at(slot).back().end = ins.offset;
+        openSlots[slot] = false;
+        lastClosedSlot = slot;
+        return;
     }
-    info.liveRangesBySlot.at(slot).back().end = ins.offset;
-    openSlots[slot] = false;
+    if (lastClosedSlot != -1) {
+        return; // an alternate early-exit path re-closing the same range
+    }
+    throw std::runtime_error("capture_analysis: CLOSE_UPVALUE at offset " +
+                             std::to_string(ins.offset) +
+                             " in function id=" + functionId +
+                             " has no open captured live range to close");
 }
 
 // A function's own top-level scope closes with the frame, not with an
@@ -86,6 +124,12 @@ void closeImplicitRanges(int chunkEnd, const OpenSlots& openSlots,
 // declaration every iteration, so it needs a fresh cell each time
 // (V1_fresh_cell), unlike a range no LOOP instruction wraps (V3_loopvar, and
 // any capture outside a loop).
+//
+// A closedImplicitly range never qualifies: its `end` is the chunk length,
+// which is always greater than any real instruction offset, so the
+// `range.end <= ins.offset` half of the test below already excludes it. That
+// makes it correct (if scoped to the whole call, it is by definition never
+// wholly inside one loop's back edge) without a separate early check.
 void markPerIterationRanges(const DecodedFunction& node,
                             FunctionCaptureInfo& info) {
     for (const DecodedInstruction& ins : node.instructions) {
@@ -94,11 +138,8 @@ void markPerIterationRanges(const DecodedFunction& node,
         }
         for (auto& [slot, ranges] : info.liveRangesBySlot) {
             for (CaptureLiveRange& range : ranges) {
-                if (range.closedImplicitly) {
-                    continue; // scoped to the whole call, never re-entered by a
-                              // back-edge
-                }
-                if (range.start >= ins.jumpTarget && range.end <= ins.offset) {
+                if (range.firstCaptureOffset >= ins.jumpTarget &&
+                    range.end <= ins.offset) {
                     range.perIteration = true;
                 }
             }
@@ -135,11 +176,12 @@ void analyzeOneChunk(const DecodedFunction& node, CaptureAnalysis& out) {
     info.id = node.id;
 
     OpenSlots openSlots;
+    int lastClosedSlot = -1;
     for (const DecodedInstruction& ins : node.instructions) {
         if (ins.op == Op::CLOSURE) {
-            recordCapture(ins, info, openSlots);
+            recordCapture(ins, info, openSlots, lastClosedSlot);
         } else if (ins.op == Op::CLOSE_UPVALUE) {
-            recordClose(ins, node.id, info, openSlots);
+            recordClose(ins, node.id, info, openSlots, lastClosedSlot);
         }
     }
 
