@@ -43,6 +43,7 @@ public final class MapTest {
 
         Object hasMethod = ordered.getMethod("has");
         checkEquals(true, ((LoxCallable) hasMethod).call(new Object[] {"a"}), "map.has via getMethod");
+        check(hasMethod == ordered.getMethod("has"), "getMethod caches: repeated access returns the same object");
         Object keysMethod = ordered.getMethod("keys");
         LoxList keys = (LoxList) ((LoxCallable) keysMethod).call(new Object[0]);
         checkEquals(3, keys.elements.size(), "map.keys() returns every key");

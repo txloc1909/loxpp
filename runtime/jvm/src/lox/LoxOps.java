@@ -363,18 +363,10 @@ public final class LoxOps {
             return invokeListMethod((LoxList) receiver, name, args);
         }
         if (receiver instanceof LoxFile) {
-            LoxCallable m = ((LoxFile) receiver).getMethod(name);
-            if (m == null) {
-                throw new LoxError("Undefined method '" + name + "' on file.");
-            }
-            return m.call(args);
+            return invokeFileMethod((LoxFile) receiver, name, args);
         }
         if (receiver instanceof LoxMap) {
-            LoxCallable m = ((LoxMap) receiver).getMethod(name);
-            if (m == null) {
-                throw new LoxError("Undefined method '" + name + "' on map.");
-            }
-            return m.call(args);
+            return invokeMapMethod((LoxMap) receiver, name, args);
         }
         throw new LoxError("Only instances, files, and maps have methods.");
     }
@@ -409,6 +401,99 @@ public final class LoxOps {
         default:
             throw new LoxError("Undefined method '" + name + "' on list.");
         }
+    }
+
+    /**
+     * Dispatches by name with no LoxNative allocation — the INVOKE fast path
+     * matches vm.cpp's own fast path, which calls the native C function
+     * directly and never builds an intermediate ObjNative per call (PR #97
+     * review finding R3). {@link LoxMap#getMethod} still allocates (once,
+     * cached) for the separate GET_PROPERTY case.
+     */
+    private static Object invokeMapMethod(LoxMap map, String name, Object[] args) {
+        switch (name) {
+        case "has":
+            requireArity(args, 1, "has");
+            checkMapKey(args[0]);
+            return map.has(args[0]);
+        case "del":
+            requireArity(args, 1, "del");
+            checkMapKey(args[0]);
+            map.remove(args[0]);
+            return null;
+        case "keys": {
+            requireArity(args, 0, "keys");
+            LoxList list = new LoxList();
+            for (Map.Entry<Object, Object> e : map.entrySet()) {
+                list.elements.add(e.getKey());
+            }
+            return list;
+        }
+        case "values": {
+            requireArity(args, 0, "values");
+            LoxList list = new LoxList();
+            for (Map.Entry<Object, Object> e : map.entrySet()) {
+                list.elements.add(e.getValue());
+            }
+            return list;
+        }
+        case "entries": {
+            requireArity(args, 0, "entries");
+            LoxList list = new LoxList();
+            for (Map.Entry<Object, Object> e : map.entrySet()) {
+                LoxList pair = new LoxList();
+                pair.elements.add(e.getKey());
+                pair.elements.add(e.getValue());
+                list.elements.add(pair);
+            }
+            return list;
+        }
+        default:
+            throw new LoxError("Undefined method '" + name + "' on map.");
+        }
+    }
+
+    /** Same no-allocation dispatch as {@link #invokeMapMethod}, for the file API. */
+    private static Object invokeFileMethod(LoxFile file, String name, Object[] args) {
+        switch (name) {
+        case "read":
+            requireArity(args, 0, "read");
+            return file.read();
+        case "readline":
+            requireArity(args, 0, "readline");
+            return file.readline();
+        case "readlines":
+            requireArity(args, 0, "readlines");
+            return file.readlines();
+        case "write":
+            requireArity(args, 1, "write");
+            file.write(checkStringArg(args[0], "write"));
+            return null;
+        case "writeline":
+            requireArity(args, 1, "writeline");
+            file.writeline(checkStringArg(args[0], "writeline"));
+            return null;
+        case "close":
+            requireArity(args, 0, "close");
+            file.close();
+            return null;
+        default:
+            throw new LoxError("Undefined method '" + name + "' on file.");
+        }
+    }
+
+    private static void requireArity(Object[] args, int arity, String method) {
+        if (args.length != arity) {
+            throw new LoxError(
+                    "'" + method + "' expects " + arity + " argument(s) but got " + args.length + ".");
+        }
+    }
+
+    private static String checkStringArg(Object v, String method) {
+        if (!(v instanceof String)) {
+            throw new LoxError("'" + method + "' argument must be a string.");
+        }
+        return (String) v;
     }
 
     public static Object getSuper(Object superclassVal, String name, Object self) {

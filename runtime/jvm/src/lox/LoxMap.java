@@ -2,6 +2,7 @@ package lox;
 
 import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -32,6 +33,12 @@ public final class LoxMap {
     private byte[] states = new byte[0];
     private int count; // live entries
     private int dead; // tombstones
+
+    // Every LoxMap lazily grows its own per-instance cache the first time a
+    // method is read as a property (not called) — see R3 in PR #97 review:
+    // the native VM hands back the same ObjNative on every GET_PROPERTY, so
+    // repeated `m.has == m.has` must read the identical Java object twice.
+    private final Map<String, LoxCallable> methodCache = new HashMap<>();
 
     // -0.0 and 0.0 must hash and look up identically, matching IEEE 754
     // numeric equality (value.cpp's hashValue canonicalizes the same way).
@@ -201,6 +208,18 @@ public final class LoxMap {
     }
 
     public LoxCallable getMethod(String name) {
+        LoxCallable cached = methodCache.get(name);
+        if (cached != null) {
+            return cached;
+        }
+        LoxCallable created = createMethod(name);
+        if (created != null) {
+            methodCache.put(name, created);
+        }
+        return created;
+    }
+
+    private LoxCallable createMethod(String name) {
         switch (name) {
         case "has":
             return new LoxNative("has", 1, a -> {

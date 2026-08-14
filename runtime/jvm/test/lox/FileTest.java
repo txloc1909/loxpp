@@ -14,6 +14,8 @@ public final class FileTest {
         String path = tmp.getAbsolutePath();
 
         LoxFile writer = LoxFile.open(path, "w");
+        check(writer.getMethod("write") == writer.getMethod("write"),
+                "getMethod caches: repeated access returns the same object (PR #97 R3)");
         writer.writeline("first");
         writer.writeline("second");
         writer.write("third-no-newline");
@@ -66,6 +68,11 @@ public final class FileTest {
         byteReader.close();
         checkEquals(1, byteBack.length(), "the byte reads back as one char, not a replacement pair");
         checkEquals((int) 0xE9, (int) byteBack.charAt(0), "the byte round-trips to its exact value");
+
+        // Same call, dispatched through LoxOps.invoke's no-allocation path (R3).
+        LoxFile forInvoke = LoxFile.open(rwTmp.getAbsolutePath(), "r");
+        checkEquals("seed", LoxOps.invoke(forInvoke, "read", new Object[0]), "invoke() dispatches file methods directly");
+        forInvoke.close();
 
         System.exit(TestSupport.finish("FileTest"));
     }
