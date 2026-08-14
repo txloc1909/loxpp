@@ -193,10 +193,25 @@ TEST(AbstractStackTest, MergeDisagreementThrows) {
 
     fn.instructions = {constant0, jumpIfFalse, constant1, print};
 
-    EXPECT_THROW(analyzeStack(fn), std::runtime_error)
-        << "the jump-taken edge reaches PRINT one cell shallower than the "
-        << "fallthrough edge; analyzeStack must not silently max its way "
-        << "past that";
+    // R9: assert the message, not only std::runtime_error's type.
+    // analyzeStack throws that type from three places (the unknown-opcode
+    // guard, the structural height/localCount guard, and
+    // validateMergeConsistency); a plain EXPECT_THROW(..., std::runtime_error)
+    // would stay green even if a future change made a *different* guard fire
+    // first on this chunk, silently retiring checkpoint 5's own assertion —
+    // exactly the failure mode R3 reported for this same test.
+    try {
+        analyzeStack(fn);
+        ADD_FAILURE() << "analyzeStack did not throw; the jump-taken edge "
+                      << "reaches PRINT one cell shallower than the "
+                      << "fallthrough edge, and analyzeStack must not "
+                      << "silently max its way past that";
+    } catch (const std::runtime_error& e) {
+        EXPECT_NE(std::string(e.what()).find("merge disagreement"),
+                  std::string::npos)
+            << "analyzeStack threw, but not from validateMergeConsistency: "
+            << e.what();
+    }
 }
 
 // Checkpoint 1. Quotes the disassembly straight from N2.md, which the
@@ -362,6 +377,164 @@ TEST(AbstractStackTest, ForInInvisibleVarsNameTheirOwnDeclaringPush) {
     // included so a regression that shifts *either* site trips this test.
     const std::vector<std::pair<int, int>> expected = {{9, 1}, {12, 2}};
     EXPECT_EQ(sites, expected);
+}
+
+// R8: a local that no instruction ever reads back must still get its own
+// invisible-var site. `a` here is never read; only its sibling `b` is. A
+// wrong implementation finds a site for `b` alone, and recognizing `b`'s
+// slot then jumps `localCount` past `a`'s cell with no site to explain it —
+// `a` silently becomes "local" with nothing marking where its store must go.
+// Asserts the complete invisibleVars list and the per-offset operand depth
+// at every offset, not only the final one, so a regression cannot hide
+// behind a state that happens to self-correct by the last instruction (see
+// this test's own comment on the second, non-corpus symptom below).
+TEST(AbstractStackTest, UnreadSiblingLocalGetsItsOwnDeclaringPushSite) {
+    MemoryManager mm;
+    DecodedFunction script = decodeSource(R"(
+{
+  var a = 1;
+  var b = 2;
+  print b;
+}
+)",
+                                          mm);
+    FunctionStackAnalysis analysis = analyzeStack(script);
+
+    std::vector<std::pair<int, int>> sites;
+    for (const InvisibleVarSite& site : analysis.invisibleVars) {
+        sites.emplace_back(site.offset, site.slot);
+    }
+    std::sort(sites.begin(), sites.end());
+    const std::vector<std::pair<int, int>> expected = {{0, 1}, {3, 2}};
+    EXPECT_EQ(sites, expected)
+        << "slot 1 (`a`, never read back) must get its own site at its own "
+        << "declaring push (offset 0), not be silently swept in by slot 2's "
+        << "(`b`'s) recognition at offset 3";
+
+    // The full per-offset trace (verified against the real disassembly):
+    //   0: CONSTANT '1'   before d=0 after d=0   <- invisible `a`, slot 1
+    //   3: CONSTANT '2'   before d=0 after d=0   <- invisible `b`, slot 2
+    //   6: GET_LOCAL 2    before d=0 after d=1   <- loads `b`, a real temp
+    //   8: PRINT          before d=1 after d=0   <- consumes that temp
+    //   9: POP            before d=0 after d=0   <- reclaims `b` (slot 2)
+    //  10: POP            before d=0 after d=0   <- reclaims `a` (slot 1)
+    //  11: NIL            before d=0 after d=1   <- implicit return value
+    //  12: RETURN         before d=1 after d=0
+    // Depth is never inflated to 2: if `a` were still misclassified as a
+    // temporary, offset 3's `after` would read d=1, not d=0 (R8's exact
+    // symptom — see the reviewer's own trace of this bug).
+    const std::vector<std::pair<int, int>> expectedDepths = {
+        {0, 0}, {0, 0}, {0, 1}, {1, 0}, {0, 0}, {0, 0}, {0, 1}, {1, 0}};
+    ASSERT_EQ(script.instructions.size(), expectedDepths.size());
+    for (size_t i = 0; i < script.instructions.size(); i++) {
+        SCOPED_TRACE("offset=" + std::to_string(script.instructions[i].offset));
+        EXPECT_EQ(analysis.before[i].operandDepth(), expectedDepths[i].first);
+        EXPECT_EQ(analysis.after[i].operandDepth(), expectedDepths[i].second);
+    }
+}
+
+// Orchestrator round-3 guidance: a local's frame can end with *no* explicit
+// reclaim opcode at all. `never` here is unread (like `a` above) *and* it is
+// never popped anywhere in the chunk — a function's own top-level scope has
+// no enclosing block left to close, so the whole frame is simply discarded
+// at RETURN. Nothing in the reference-driven search, and no sibling POP to
+// backfill from either: only RETURN's own operandDepth()==1 invariant
+// (checkpoint 3) proves every slot below it is local. A wrong implementation
+// leaves `never`'s cell an unrecognized temporary forever, inflating
+// maxOperandDepth and misclassifying any later POP that would have reclaimed
+// it — the same silent failure as R8, in a shape backfillUnreadSiblingSites
+// alone cannot reach (there is no sibling site to backfill *from*).
+TEST(AbstractStackTest, LocalWithNoExplicitReclaimIsStillFoundViaReturn) {
+    MemoryManager mm;
+    DecodedFunction script = decodeSource(R"(
+fun f() {
+  var a = 1;
+  var never = 99;
+  print a;
+}
+f();
+)",
+                                          mm);
+    ASSERT_FALSE(script.nested.empty());
+    const DecodedFunction* f = nullptr;
+    for (const DecodedFunction& fn : script.nested) {
+        if (fn.displayName == "f") {
+            f = &fn;
+        }
+    }
+    ASSERT_NE(f, nullptr) << "f not found among nested functions";
+    FunctionStackAnalysis analysis = analyzeStack(*f);
+
+    std::vector<std::pair<int, int>> sites;
+    for (const InvisibleVarSite& site : analysis.invisibleVars) {
+        sites.emplace_back(site.offset, site.slot);
+    }
+    std::sort(sites.begin(), sites.end());
+    const std::vector<std::pair<int, int>> expected = {{0, 1}, {3, 2}};
+    EXPECT_EQ(sites, expected)
+        << "slot 2 (`never`, unread and never explicitly popped) must still "
+        << "get a site, found by chasing down from RETURN's own operand "
+        << "depth of 1, not from any sibling reference or POP";
+
+    // Full trace: 0 CONSTANT '1' (a); 3 CONSTANT '99' (never); 6 GET_LOCAL 1
+    // (a); 8 PRINT; 9 NIL; 10 RETURN. Depth is 0 everywhere except the two
+    // genuine temporaries (the printed copy of `a`, and the return value).
+    const std::vector<std::pair<int, int>> expectedDepths = {
+        {0, 0}, {0, 0}, {0, 1}, {1, 0}, {0, 1}, {1, 0}};
+    ASSERT_EQ(f->instructions.size(), expectedDepths.size());
+    for (size_t i = 0; i < f->instructions.size(); i++) {
+        SCOPED_TRACE("offset=" + std::to_string(f->instructions[i].offset));
+        EXPECT_EQ(analysis.before[i].operandDepth(), expectedDepths[i].first);
+        EXPECT_EQ(analysis.after[i].operandDepth(), expectedDepths[i].second);
+    }
+}
+
+// Orchestrator round-3 guidance proposed deriving localCount from "a maximal
+// run of adjacent POP and CLOSE_UPVALUE is one scope-exit group, [whose]
+// size is exactly the number of locals that were live before it." This probe
+// is the counter-example: the expression-statement `a + 2;` discards an
+// unrelated *temporary* with a plain POP, and that POP sits immediately
+// next to the block's own single-local reclaim POP for `a`, with nothing
+// between them. A byte-adjacency-only "maximal run" reads this as size 2 and
+// concludes 2 locals were live, misidentifying the ADD's result as a second
+// declared local. This analysis does not use adjacency to size a reclaim
+// run at all — see backfillFromFrameTeardown's and
+// backfillUnreadSiblingSites's own comments — so it must still tell these
+// two, byte-identical POPs apart correctly.
+TEST(AbstractStackTest, AdjacentTempPopAndReclaimPopAreNotConflated) {
+    MemoryManager mm;
+    DecodedFunction script = decodeSource(R"(
+{
+  var a = 1;
+  a + 2;
+}
+)",
+                                          mm);
+    FunctionStackAnalysis analysis = analyzeStack(script);
+
+    std::vector<std::pair<int, int>> sites;
+    for (const InvisibleVarSite& site : analysis.invisibleVars) {
+        sites.emplace_back(site.offset, site.slot);
+    }
+    std::sort(sites.begin(), sites.end());
+    EXPECT_EQ(sites, (std::vector<std::pair<int, int>>{{0, 1}}))
+        << "only `a` is a local; the ADD result must not be misidentified "
+        << "as a second one";
+
+    // 9: POP discards a+2's unread result (TEMP). 10: POP reclaims `a`
+    // (LOCAL_RECLAIM). Byte-identical opcodes, adjacent, opposite meaning —
+    // P1 again, one instruction later.
+    EXPECT_EQ(popKindAtOffset(analysis, 9), PopKind::TEMP);
+    EXPECT_EQ(popKindAtOffset(analysis, 10), PopKind::LOCAL_RECLAIM);
+
+    const std::vector<std::pair<int, int>> expectedDepths = {
+        {0, 0}, {0, 1}, {1, 2}, {2, 1}, {1, 0}, {0, 0}, {0, 1}, {1, 0}};
+    ASSERT_EQ(script.instructions.size(), expectedDepths.size());
+    for (size_t i = 0; i < script.instructions.size(); i++) {
+        SCOPED_TRACE("offset=" + std::to_string(script.instructions[i].offset));
+        EXPECT_EQ(analysis.before[i].operandDepth(), expectedDepths[i].first);
+        EXPECT_EQ(analysis.after[i].operandDepth(), expectedDepths[i].second);
+    }
 }
 
 TEST(AbstractStackTest, PeeksInsteadOfPopsMatchesTheDocumentedFamily) {
