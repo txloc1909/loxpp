@@ -264,6 +264,23 @@ std::string oracleDisassembly(const DecodedFunction& node,
     return out.str();
 }
 
+// R2 fix: the number of function-typed constants in `chunk`'s own pool must
+// equal `nested.size()`, at every level of the walk — not only at the root.
+// A walker that silently drops functions below some depth (proven possible
+// by the reviewer) fails this at the first dropped level, even though every
+// node it does produce still renders correct text.
+int countFunctionConstants(const Chunk& chunk) {
+    int count = 0;
+    const ValueArray& constants = chunk.constants();
+    for (uint16_t i = 0; i < constants.size(); i++) {
+        Value v = constants.at(i);
+        if (is<Obj*>(v) && isObjType(as<Obj*>(v), ObjType::FUNCTION)) {
+            count++;
+        }
+    }
+    return count;
+}
+
 // Recursively checks one function node against the oracle, then its nested
 // functions. `path` accumulates display names for a readable failure trace.
 void checkNode(const DecodedFunction& node, const MemoryManager& mm,
@@ -280,6 +297,11 @@ void checkNode(const DecodedFunction& node, const MemoryManager& mm,
             : node.instructions.back().offset + node.instructions.back().length;
     EXPECT_EQ(cursor, static_cast<int>(chunk.size()))
         << "decoder did not land exactly on the chunk end";
+
+    EXPECT_EQ(static_cast<int>(node.nested.size()),
+              countFunctionConstants(chunk))
+        << "walker found a different number of nested functions than the "
+        << "chunk's own constant pool holds";
 
     for (const DecodedFunction& child : node.nested) {
         checkNode(child, mm, path + " > " + child.displayName);
