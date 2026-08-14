@@ -35,3 +35,8 @@ build/
 .cache/
 .vscode/
 .claude/worktrees/
+
+# JVM runtime library build output (tools/build_lox_rt.sh)
+runtime/jvm/classes/
+runtime/jvm/test-classes/
+runtime/jvm/lox-rt.jar
