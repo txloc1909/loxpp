@@ -52,6 +52,21 @@ public final class FileTest {
 
         checkThrows(() -> LoxFile.open(path, "bogus"), LoxError.class, "open() rejects an invalid mode");
 
+        // PR #97 R1: file I/O must round-trip a raw high byte 1:1, never as
+        // a 2-byte UTF-8 sequence — `open()`'s ISO-8859-1 boundary already
+        // guaranteed this; the fix was stdout/stdin catching up to it.
+        File byteTmp = File.createTempFile("lox-rt-file-bytes", ".bin");
+        byteTmp.deleteOnExit();
+        LoxFile byteWriter = LoxFile.open(byteTmp.getAbsolutePath(), "w");
+        byteWriter.write(String.valueOf((char) 0xE9));
+        byteWriter.close();
+        checkEquals(1L, byteTmp.length(), "one Lox++ char of value 0xE9 writes exactly one byte");
+        LoxFile byteReader = LoxFile.open(byteTmp.getAbsolutePath(), "r");
+        String byteBack = (String) byteReader.read();
+        byteReader.close();
+        checkEquals(1, byteBack.length(), "the byte reads back as one char, not a replacement pair");
+        checkEquals((int) 0xE9, (int) byteBack.charAt(0), "the byte round-trips to its exact value");
+
         System.exit(TestSupport.finish("FileTest"));
     }
 }

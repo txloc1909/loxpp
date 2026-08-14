@@ -1,16 +1,35 @@
 package lox;
 
+import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
-import java.io.BufferedReader;
 import java.io.FileDescriptor;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
 import java.io.PrintStream;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 
-/** Builds a fresh {@link LoxGlobals} populated with the full native stdlib surface. */
+/**
+ * Builds a fresh {@link LoxGlobals} populated with the full native stdlib
+ * surface.
+ *
+ * <p><b>Byte boundary rule:</b> a Lox++ string is a byte sequence
+ * (spec/03-types.md), not text. Every point where a string crosses into or
+ * out of the JVM process — stdout here, stdin here, file I/O in
+ * {@link LoxFile} — must read or write it as {@link #CHARSET}
+ * (ISO-8859-1: the one Java charset that maps every byte 0-255 to one char
+ * and back losslessly). The JVM's default charset is UTF-8 in the managed
+ * image, which re-encodes any byte 0x80-0xFF into two bytes and turns an
+ * unpaired high byte from stdin into U+FFFD (PR #97 review finding R1).
+ * N4/N5 (chunk constant decoding) must decode string constants with this
+ * same charset, or {@code len()} and {@code s[i]} will drift from the
+ * native VM on any non-ASCII byte.
+ */
 public final class LoxRuntime {
     private LoxRuntime() {}
+
+    public static final Charset CHARSET = StandardCharsets.ISO_8859_1;
 
     /**
      * Buffered stdout: PRINT fires millions of times in the self-hosted
@@ -18,12 +37,33 @@ public final class LoxRuntime {
      * hook flushes it, so generated code never has to remember to.
      */
     public static final PrintStream out = new PrintStream(
-            new BufferedOutputStream(new FileOutputStream(FileDescriptor.out), 1 << 16), false);
+            new BufferedOutputStream(new FileOutputStream(FileDescriptor.out), 1 << 16), false, CHARSET);
 
-    private static final BufferedReader STDIN = new BufferedReader(new InputStreamReader(System.in));
+    private static final InputStream STDIN = new BufferedInputStream(System.in);
 
     static {
         Runtime.getRuntime().addShutdownHook(new Thread(out::flush));
+    }
+
+    /**
+     * Reads one line as raw bytes (0-255), never decoding them as text.
+     * Returns nil at immediate EOF, matching std::getline's failure rule
+     * (globals.cpp): a partial trailing line with no terminator still
+     * counts as a line, and only a read that captures zero bytes is nil.
+     * Package-visible so a test can drive it without real stdin.
+     */
+    static String readByteLine(InputStream in) throws IOException {
+        StringBuilder line = new StringBuilder();
+        boolean sawByte = false;
+        int b;
+        while ((b = in.read()) != -1) {
+            sawByte = true;
+            if (b == '\n') {
+                break;
+            }
+            line.append((char) (b & 0xFF));
+        }
+        return sawByte ? line.toString() : null;
     }
 
     public static LoxGlobals init() {
@@ -40,7 +80,7 @@ public final class LoxRuntime {
         globals.define("clock", new LoxNative("clock", 0, args -> System.nanoTime() / 1.0e9));
         globals.define("input", new LoxNative("input", 0, args -> {
             try {
-                return STDIN.readLine(); // null at EOF becomes Lox nil directly
+                return readByteLine(STDIN); // null at EOF becomes Lox nil directly
             } catch (IOException e) {
                 return null;
             }

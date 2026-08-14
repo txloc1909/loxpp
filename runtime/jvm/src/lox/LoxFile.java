@@ -2,15 +2,12 @@ package lox;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.nio.charset.StandardCharsets;
 
 /**
  * Mirrors src/stdlib/file_api.cpp's ObjFile over a RandomAccessFile, which is
  * the one Java I/O class that supports both "r" and "r+" read/write access
- * the way a C FILE* does. Text is read/written as ISO-8859-1: Lox++ strings
- * are byte sequences (spec/03-types.md), and that charset is the one Java
- * encoding that maps every byte 0-255 to one char losslessly, so a
- * round-tripped file is byte-identical regardless of content.
+ * the way a C FILE* does. Text crosses this boundary as
+ * {@link LoxRuntime#CHARSET} — see that class's byte-boundary rule.
  */
 public final class LoxFile {
     private RandomAccessFile raf; // null once closed
@@ -79,7 +76,7 @@ public final class LoxFile {
         try {
             byte[] buf = new byte[(int) (raf.length() - raf.getFilePointer())];
             raf.readFully(buf);
-            return new String(buf, StandardCharsets.ISO_8859_1);
+            return new String(buf, LoxRuntime.CHARSET);
         } catch (IOException e) {
             throw new LoxError("read(): " + e.getMessage());
         }
@@ -127,7 +124,7 @@ public final class LoxFile {
             throw new LoxError("File is not open for writing.");
         }
         try {
-            raf.write(s.getBytes(StandardCharsets.ISO_8859_1));
+            raf.write(s.getBytes(LoxRuntime.CHARSET));
         } catch (IOException e) {
             throw new LoxError("write(): " + e.getMessage());
         }
