@@ -64,8 +64,10 @@ fi
 # jvm_run.sh, R3). A packaged class assembles into a subdirectory of $j_dir
 # (".class public gen/LoxMain" writes "$j_dir/gen/LoxMain.class"), so the
 # scan must walk the whole tree, not only its top level (reported:
-# jvm_run.sh, R5).
-mapfile -d '' stale_classes < <(find "$j_dir" -name '*.class' -print0)
+# jvm_run.sh, R5). A trailing slash makes find enter $j_dir even when the
+# caller passes it as a symbolic link, which find would not otherwise
+# follow as a path argument (reported: jvm_run.sh, R9).
+mapfile -d '' stale_classes < <(find "$j_dir"/ -name '*.class' -print0)
 if [ "${#stale_classes[@]}" -gt 0 ]; then
     rm -f -- "${stale_classes[@]}"
 fi
@@ -95,7 +97,7 @@ fi
 # disk, so a message count cannot catch that collision (reported:
 # jvm_run.sh, R8).
 if [ "$jasmin_failed" -eq 0 ]; then
-    mapfile -d '' class_files < <(find "$j_dir" -name '*.class' -print0)
+    mapfile -d '' class_files < <(find "$j_dir"/ -name '*.class' -print0)
     if [ "${#class_files[@]}" -eq 0 ]; then
         jasmin_failed=1
         jasmin_out="${jasmin_out}
