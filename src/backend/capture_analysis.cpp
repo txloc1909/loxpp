@@ -81,12 +81,23 @@ void recordCapture(const DecodedInstruction& ins, FunctionCaptureInfo& info,
 // on the break path, one on the continue path, and one on a match arm's own
 // exit, in addition to the normal fall-through's endScope. Those paths are
 // mutually exclusive at runtime — only one fires per actual execution — but
-// this linear scan sees all of them in program order. The first one closes
-// the range as usual. A later one for the SAME slot, seen before any new
-// CLOSURE reopens it, is an alternate exit of that same still-most-recently-
-// closed range, not a new event, so it is a no-op rather than an error:
-// `lastClosedSlot` names it. A CLOSE_UPVALUE that matches neither an open
-// slot nor the last-closed one is genuine drift and still throws.
+// this linear scan sees all of them in program order, and an unrelated
+// closed-and-reopened capture can sit between two of them (an inner block's
+// own capture, fully opened and closed, in between a continue and a break
+// that both exit the same outer loop). The first CLOSE_UPVALUE for a slot
+// closes its range as usual, through the open-slot match below.
+//
+// A later CLOSE_UPVALUE that matches no open slot is tolerated, not thrown,
+// as long as `lastClosedSlot` shows some slot has closed through a genuine
+// open-slot match since the most recent new capture. This pass cannot verify
+// that this specific instruction is that same slot's alternate exit — doing
+// that needs per-offset stack or control-flow tracking (N1/N2), which this
+// node deliberately does not depend on — so it does not attribute the close
+// to any range or touch `end` again. That is safe: every range's `end` was
+// already set by its own first, genuine close, so an untouched later close
+// changes no reported value. It only narrows, never removes, the original
+// safety net: a CLOSE_UPVALUE with no open slot AND no slot closed yet at
+// all in this chunk is still unexplained, and still throws.
 void recordClose(const DecodedInstruction& ins, const std::string& functionId,
                  FunctionCaptureInfo& info, OpenSlots& openSlots,
                  int& lastClosedSlot) {

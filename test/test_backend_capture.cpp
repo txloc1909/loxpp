@@ -368,6 +368,48 @@ TEST(CaptureAnalysisTest, PerIterationCaptureClosesOnBreakAndContinue) {
     EXPECT_FALSE(ranges[0].closedImplicitly);
 }
 
+// Regression: an unrelated capture that fully opens and closes BETWEEN two
+// of a loop-var capture's own alternate exit points must not confuse the
+// tolerance in recordClose. Here `t` is captured and closed, in its own
+// block, strictly between the `continue` path's close of `s` and the
+// `break` path's second (tolerated) close of the same `s` range -- so by
+// the time the break path's CLOSE_UPVALUE runs, the most recently closed
+// slot is `t`, not `s`. The pass must still not throw: it never tries to
+// verify that a tolerated close belongs to any particular slot (see
+// recordClose), so this shape is safe by construction, not by luck.
+TEST(CaptureAnalysisTest, ToleratesUnrelatedCaptureBetweenAlternateExits) {
+    Compiled c = compileAndAnalyze(R"(
+        fun make() {
+            var fns = [nil, nil, nil];
+            for (var i = 0; i < 3; i = i + 1) {
+                var s = i;
+                fun f() { return s; }
+                fns[i] = f;
+                if (i == 1) continue;
+                {
+                    var t = i * 10;
+                    fun g() { return t; }
+                    if (i == 0) { print g(); }
+                }
+                if (i == 2) break;
+            }
+            return fns;
+        }
+    )",
+                                   "unrelated_capture_between_exits");
+    const DecodedFunction* make = findByName(c.tree, "make");
+    const DecodedFunction* f = findByName(c.tree, "f");
+    ASSERT_NE(make, nullptr);
+    ASSERT_NE(f, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, make->id);
+    int sSlot = infoFor(c.captures, f->id).ownUpvalues.at(0).index;
+
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, sSlot);
+    ASSERT_EQ(ranges.size(), 1U);
+    EXPECT_TRUE(ranges[0].perIteration);
+    EXPECT_FALSE(ranges[0].closedImplicitly);
+}
+
 // Collects every (id -> DecodedFunction*) pair in `root`'s tree, so a check
 // can look up the decoded instructions that back one FunctionCaptureInfo.
 void collectById(const DecodedFunction& node,
