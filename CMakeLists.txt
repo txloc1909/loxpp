@@ -24,6 +24,7 @@ add_executable(loxpp
     src/main.cpp
     src/chunk.cpp
     src/debug.cpp
+    src/backend/chunk_decoder.cpp
     src/value.cpp
     src/object.cpp
     src/container_objects.cpp
