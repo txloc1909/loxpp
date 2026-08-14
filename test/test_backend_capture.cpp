@@ -5,10 +5,15 @@
 // live-range / sharing verdict their disassembly settles, and the pass must
 // not throw over the whole probe/example/bootstrap corpus.
 //
-// checkNoAssertionFailure additionally cross-checks every corpus file's
-// reported ranges against its own decoded CLOSE_UPVALUE offsets in both
-// directions (not just the analysis's own output) — see
-// checkCloseUpvaluesMatchDecodedChunk and checkNoOrphanCloseUpvalues.
+// validateCaptureAnalysis cross-checks every reported range against its own
+// decoded CLOSE_UPVALUE offsets in both directions (not just the analysis's
+// own output) — see checkCloseUpvaluesMatchDecodedChunk and
+// checkNoOrphanCloseUpvalues. compileAndAnalyze calls it on every result
+// before returning, so it runs over the corpus (probes, examples, bootstrap
+// interpreter) AND over every targeted regression test below, with no way
+// for a test to skip it (round-3 referee decision, item 4): a check that
+// only ever sees programs with zero orphans to find proves nothing about
+// the defect it exists to catch.
 // MatchArmBindingAndLaterBlockLocalDoNotCrossAttribute,
 // LoopVarRangeDoesNotDominateItsOwnEnd, and
 // PerIterationCaptureClosesOnBreakAndContinue pin down three review-round-1
@@ -20,6 +25,13 @@
 // cleaning up their own path) must not let a later, unrelated close, or a
 // later re-capture, resolve to the wrong slot or split one runtime cell into
 // two.
+// PerIterationCaptureInsideIfInsideLoop (R13) and
+// DifferentVariablesReusingOneSlotDoNotShareACell (R14) pin down two
+// review-round-3 findings, resolved by the round-3 referee decision: the
+// pass now derives live ranges per CFG execution path (see analyzeOneChunk
+// in capture_analysis.cpp), not a JUMP_IF_FALSE span heuristic over a flat
+// instruction walk, so a capture's verdict depends only on the CFG paths
+// that actually reach it.
 
 #include "backend/capture_analysis.h"
 #include "backend/chunk_decoder.h"
@@ -85,6 +97,123 @@ const DecodedFunction* findByName(const DecodedFunction& node,
     return nullptr;
 }
 
+// Collects every (id -> DecodedFunction*) pair in root's tree, so a check
+// can look up the decoded instructions that back one FunctionCaptureInfo.
+void collectById(const DecodedFunction& node,
+                 std::map<std::string, const DecodedFunction*>& out) {
+    out[node.id] = &node;
+    for (const DecodedFunction& child : node.nested) {
+        collectById(child, out);
+    }
+}
+
+// R4 / R9 / R15 / round-3 referee decision item 4: cross-checks every
+// reported range against the decoded chunk's own CLOSE_UPVALUE offsets, in
+// both directions -- a misattributed close (R1, R9) must not pass silently.
+//
+// Round 1's version of this check compared counts (decodedCloses.size() >=
+// nonImplicitRangeCount). That passed on the R9 program: the pass reported
+// one CLOSE_UPVALUE too many for the loop var's range (misattributing a
+// second alternate-exit close meant for a different slot) and, separately,
+// never attributed the loop var's own real close at all -- two errors that
+// canceled out in a size comparison. A count can hide exactly the defect
+// this check exists to catch, so it checks membership in both directions
+// instead: every reported close offset must be a real CLOSE_UPVALUE in the
+// chunk (below), AND every real CLOSE_UPVALUE in the chunk must be one
+// reported (checkNoOrphanCloseUpvalues), or listed as unreachable dead code.
+// Both directions check the FULL allCloseOffsets set, not only end -- R9's
+// and R10's ground-truth programs each have a range with two real alternate
+// closes, and checking end alone would call the earlier one an orphan.
+void checkCloseUpvaluesMatchDecodedChunk(const DecodedFunction& node,
+                                         const FunctionCaptureInfo& info) {
+    std::set<int> decodedCloses;
+    for (const DecodedInstruction& ins : node.instructions) {
+        if (ins.op == Op::CLOSE_UPVALUE) {
+            decodedCloses.insert(ins.offset);
+        }
+    }
+    for (const auto& [slot, ranges] : info.liveRangesBySlot) {
+        for (const CaptureLiveRange& range : ranges) {
+            for (int offset : range.allCloseOffsets) {
+                EXPECT_TRUE(decodedCloses.contains(offset))
+                    << "id=" << info.id << " slot=" << slot
+                    << ": reported close offset=" << offset
+                    << " is not a real CLOSE_UPVALUE offset in the chunk";
+            }
+        }
+    }
+}
+
+// R4 / R9 / R15: the other direction of the cross-check above. A
+// CLOSE_UPVALUE the chunk actually contains, but that matches no reported
+// range's close offsets and is not listed as unreachable dead code, is
+// exactly the R9 shape: the close was seen and misattributed elsewhere,
+// with no other check here noticing. This needs no CFG and no stack
+// simulation of its own -- only the analysis's own reported closes,
+// compared against the chunk it read.
+void checkNoOrphanCloseUpvalues(const DecodedFunction& node,
+                                const FunctionCaptureInfo& info) {
+    std::set<int> accountedFor(info.unreachableCloseOffsets.begin(),
+                               info.unreachableCloseOffsets.end());
+    for (const auto& [slot, ranges] : info.liveRangesBySlot) {
+        for (const CaptureLiveRange& range : ranges) {
+            for (int offset : range.allCloseOffsets) {
+                accountedFor.insert(offset);
+            }
+        }
+    }
+    for (const DecodedInstruction& ins : node.instructions) {
+        if (ins.op != Op::CLOSE_UPVALUE) {
+            continue;
+        }
+        EXPECT_TRUE(accountedFor.contains(ins.offset))
+            << "id=" << info.id << ": CLOSE_UPVALUE at offset " << ins.offset
+            << " is the end of no reported range, and is not reported "
+            << "unreachable either";
+    }
+}
+
+// R4 / round-3 referee decision item 4: checks that every live range is
+// internally consistent (non-negative, backed by at least one capturing
+// closure, non-overlapping with its slot's other ranges) and matches the
+// decoded chunk's own CLOSE_UPVALUE offsets in both directions. Called from
+// the shared compile-and-analyze helper below, so every test that builds a
+// Compiled gets this for free -- no test can skip it, and a check that only
+// ever runs on programs with zero orphans to find proves nothing about the
+// defect it exists to catch.
+void validateCaptureAnalysis(const DecodedFunction& tree,
+                             const CaptureAnalysis& captures) {
+    std::map<std::string, const DecodedFunction*> byId;
+    collectById(tree, byId);
+
+    for (const auto& [id, info] : captures.functions) {
+        for (const auto& [slot, ranges] : info.liveRangesBySlot) {
+            int previousEnd = -1;
+            for (const CaptureLiveRange& range : ranges) {
+                EXPECT_GE(range.firstCaptureOffset, 0)
+                    << "id=" << id << " slot=" << slot;
+                EXPECT_GE(range.end, range.firstCaptureOffset)
+                    << "id=" << id << " slot=" << slot;
+                EXPECT_FALSE(range.capturingClosureOffsets.empty())
+                    << "id=" << id << " slot=" << slot
+                    << ": a live range must have at least one capturing "
+                    << "closure, or it would never have opened";
+                EXPECT_TRUE(!range.allCloseOffsets.empty() ||
+                            range.closedImplicitly)
+                    << "id=" << id << " slot=" << slot
+                    << ": a range must close somehow -- explicitly, "
+                    << "implicitly, or both";
+                EXPECT_GE(range.firstCaptureOffset, previousEnd)
+                    << "id=" << id << " slot=" << slot
+                    << ": live ranges of one slot must not overlap";
+                previousEnd = range.end;
+            }
+        }
+        checkCloseUpvaluesMatchDecodedChunk(*byId.at(id), info);
+        checkNoOrphanCloseUpvalues(*byId.at(id), info);
+    }
+}
+
 // Bundles the compiled tree with the capture analysis and the MemoryManager
 // that owns every ObjFunction the tree points at, so all three stay alive
 // together for the length of a test.
@@ -97,7 +226,8 @@ struct Compiled {
 // Compiles `source`, decodes it (N0), and runs the capture pass (N3).
 // Throws on a compile failure, matching test_chunk_decoder.cpp's
 // convention: a corpus file that fails to compile is a corpus problem, not a
-// soft-fail case.
+// soft-fail case. Validates the result before returning it (see
+// validateCaptureAnalysis) -- every caller below gets this for free.
 Compiled compileAndAnalyze(const std::string& source,
                            const std::string& label) {
     Compiled result;
@@ -108,6 +238,7 @@ Compiled compileAndAnalyze(const std::string& source,
     }
     result.tree = decodeFunctionTree(script);
     result.captures = analyzeCaptures(result.tree);
+    validateCaptureAnalysis(result.tree, result.captures);
     return result;
 }
 
@@ -377,14 +508,13 @@ TEST(CaptureAnalysisTest, PerIterationCaptureClosesOnBreakAndContinue) {
 }
 
 // Regression: an unrelated capture that fully opens and closes BETWEEN two
-// of a loop-var capture's own alternate exit points must not confuse the
-// tolerance in recordClose. Here `t` is captured and closed, in its own
+// of a loop-var capture's own alternate exit points must not confuse
+// resolution of either one. Here `t` is captured and closed, in its own
 // block, strictly between the `continue` path's close of `s` and the
-// `break` path's second (tolerated) close of the same `s` range -- so by
-// the time the break path's CLOSE_UPVALUE runs, the most recently closed
-// slot is `t`, not `s`. The pass must still not throw: it never tries to
-// verify that a tolerated close belongs to any particular slot (see
-// recordClose), so this shape is safe by construction, not by luck.
+// `break` path's second close of the same `s` range. The CFG puts `t`'s
+// block on neither of `s`'s two paths (see analyzeOneChunk in
+// capture_analysis.cpp), so `t`'s unrelated open-then-close never reaches
+// the dataflow state either of `s`'s two alternate closes sees.
 TEST(CaptureAnalysisTest, ToleratesUnrelatedCaptureBetweenAlternateExits) {
     Compiled c = compileAndAnalyze(R"(
         fun make() {
@@ -460,6 +590,11 @@ TEST(CaptureAnalysisTest, LoopVarNotClosedEarlyByAlternateExit) {
     EXPECT_TRUE(sRanges[0].perIteration)
         << "s is declared inside the loop body — a fresh cell every "
         << "iteration, continue included";
+    EXPECT_EQ(iRanges[0].allCloseOffsets.size(), 1U)
+        << "i has exactly one real close, after the loop";
+    EXPECT_EQ(sRanges[0].allCloseOffsets.size(), 2U)
+        << "s has two real alternate closes -- the continue path and the "
+        << "normal fall-through -- per the multi-end model";
 }
 
 // R9 regression, failure case 2. Native output is 99: `a` is a function-scope
@@ -505,9 +640,15 @@ TEST(CaptureAnalysisTest, OuterCaptureNotClosedEarlyByLoopExit) {
         << "a is function scope — the frame's RETURN closes it, matching "
         << "native output 99: the write at `a = 99` must land before that "
         << "close, not after a wrongly-early one";
+    EXPECT_TRUE(aRanges[0].allCloseOffsets.empty())
+        << "a has no explicit close on any path -- closedImplicitly alone "
+        << "ends it";
     EXPECT_FALSE(sRanges[0].closedImplicitly)
         << "s's own scope (the loop body) closes it with a real "
         << "CLOSE_UPVALUE, on whichever of its two exit paths runs";
+    EXPECT_EQ(sRanges[0].allCloseOffsets.size(), 2U)
+        << "s has two real alternate closes -- the break path and the "
+        << "normal fall-through -- per the multi-end model";
 }
 
 // R10 regression. Native output is 42, 42: f and g share one cell. Before
@@ -544,116 +685,18 @@ TEST(CaptureAnalysisTest, RecapturedSlotAfterDeadEarlyExitSharesOneCell) {
         << "matching native output 42, 42";
     EXPECT_EQ(sRanges[0].capturingClosureOffsets.size(), 2U)
         << "f and g must both be recorded as sharing this one range";
+    EXPECT_EQ(sRanges[0].allCloseOffsets.size(), 2U)
+        << "s has two real alternate closes -- the dead continue path and "
+        << "the normal fall-through -- per the multi-end model";
 }
 
-// Collects every (id -> DecodedFunction*) pair in `root`'s tree, so a check
-// can look up the decoded instructions that back one FunctionCaptureInfo.
-void collectById(const DecodedFunction& node,
-                 std::map<std::string, const DecodedFunction*>& out) {
-    out[node.id] = &node;
-    for (const DecodedFunction& child : node.nested) {
-        collectById(child, out);
-    }
-}
-
-// R4/R9: the corpus test must not only check the analysis output in
-// isolation — it must cross-check it against the decoded chunk that
-// produced it, or a misattributed CLOSE_UPVALUE (R1, R9) passes every other
-// check here silently.
-//
-// Round 1's version of this check compared counts (decodedCloses.size() >=
-// nonImplicitRangeCount). That passed on the R9 program: the pass reported
-// one CLOSE_UPVALUE too many for the loop var's range (misattributing a
-// second alternate-exit close meant for a different slot) and, separately,
-// never attributed the loop var's own real close at all — two errors that
-// canceled out in a size comparison. A count can hide exactly the defect
-// this check exists to catch, so it checks membership in both directions
-// instead: every reported `end` must be a real CLOSE_UPVALUE in the chunk
-// (below), AND every real CLOSE_UPVALUE in the chunk must be some range's
-// reported `end` (checkNoOrphanCloseUpvalues) — an orphan on either side is
-// a misattribution, not a false positive from mutually exclusive alternate
-// exits, because every alternate exit for one range reports the SAME `end`
-// candidate set the pass tracks (see recordClose's spanStack tolerance).
-void checkCloseUpvaluesMatchDecodedChunk(const DecodedFunction& node,
-                                         const FunctionCaptureInfo& info) {
-    std::set<int> decodedCloses;
-    for (const DecodedInstruction& ins : node.instructions) {
-        if (ins.op == Op::CLOSE_UPVALUE) {
-            decodedCloses.insert(ins.offset);
-        }
-    }
-    for (const auto& [slot, ranges] : info.liveRangesBySlot) {
-        for (const CaptureLiveRange& range : ranges) {
-            if (range.closedImplicitly) {
-                continue;
-            }
-            EXPECT_TRUE(decodedCloses.contains(range.end))
-                << "id=" << info.id << " slot=" << slot
-                << ": reported end=" << range.end
-                << " is not a real CLOSE_UPVALUE offset in the chunk";
-        }
-    }
-}
-
-// R4/R9: the other direction of the cross-check above. A CLOSE_UPVALUE the
-// chunk actually contains, but that matches no reported range's `end` at
-// all, is exactly the R9 shape: the close was seen and silently swallowed
-// (the alternate-exit tolerance in recordClose) or misattributed elsewhere,
-// with no other check here noticing. This needs no CFG and no stack
-// simulation — only the analysis's own reported ends, compared against the
-// chunk it read.
-void checkNoOrphanCloseUpvalues(const DecodedFunction& node,
-                                const FunctionCaptureInfo& info) {
-    std::set<int> reportedEnds;
-    for (const auto& [slot, ranges] : info.liveRangesBySlot) {
-        for (const CaptureLiveRange& range : ranges) {
-            if (!range.closedImplicitly) {
-                reportedEnds.insert(range.end);
-            }
-        }
-    }
-    for (const DecodedInstruction& ins : node.instructions) {
-        if (ins.op != Op::CLOSE_UPVALUE) {
-            continue;
-        }
-        EXPECT_TRUE(reportedEnds.contains(ins.offset))
-            << "id=" << info.id << ": CLOSE_UPVALUE at offset " << ins.offset
-            << " is the end of no reported range";
-    }
-}
-
-// Runs the pass over one file and checks it never throws, and that every
-// live range it reports is internally consistent: non-negative, non-empty,
-// backed by at least one capturing closure, non-overlapping with its slot's
-// other ranges, and matches the decoded chunk's own CLOSE_UPVALUE offsets
-// (R4 — the oracle is the chunk, not the analysis's own output).
+// Runs the pass over one file and checks it never throws. compileFile
+// already runs validateCaptureAnalysis on the result (see compileAndAnalyze
+// above), so this only needs to name the file for a failing EXPECT_*.
 void checkNoAssertionFailure(const fs::path& path) {
     SCOPED_TRACE("file=" + path.string());
     Compiled c = compileFile(path);
-    std::map<std::string, const DecodedFunction*> byId;
-    collectById(c.tree, byId);
-
-    for (const auto& [id, info] : c.captures.functions) {
-        for (const auto& [slot, ranges] : info.liveRangesBySlot) {
-            int previousEnd = -1;
-            for (const CaptureLiveRange& range : ranges) {
-                EXPECT_GE(range.firstCaptureOffset, 0)
-                    << "id=" << id << " slot=" << slot;
-                EXPECT_GE(range.end, range.firstCaptureOffset)
-                    << "id=" << id << " slot=" << slot;
-                EXPECT_FALSE(range.capturingClosureOffsets.empty())
-                    << "id=" << id << " slot=" << slot
-                    << ": a live range must have at least one capturing "
-                    << "closure, or it would never have opened";
-                EXPECT_GE(range.firstCaptureOffset, previousEnd)
-                    << "id=" << id << " slot=" << slot
-                    << ": live ranges of one slot must not overlap";
-                previousEnd = range.end;
-            }
-        }
-        checkCloseUpvaluesMatchDecodedChunk(*byId.at(id), info);
-        checkNoOrphanCloseUpvalues(*byId.at(id), info);
-    }
+    (void)c;
 }
 
 TEST(CaptureAnalysisTest, NoAssertionFailureOnTranslationProbes) {
@@ -676,4 +719,100 @@ TEST(CaptureAnalysisTest, NoAssertionFailureOnExamples) {
 TEST(CaptureAnalysisTest, NoAssertionFailureOnBootstrapInterpreter) {
     checkNoAssertionFailure(projectRoot() / "bootstrap" /
                             "loxpp_interpreter.lox");
+}
+
+// R13 regression. Native output is 0, 1, 2: `a` is declared inside an `if`
+// that is itself inside the loop body, and its only CLOSE_UPVALUE (the
+// if-block's own endScope) sits before the loop's back-edge, so it needs a
+// fresh cell every iteration -- the exact V1_fresh_cell shape, one `if`
+// removed from it. Before the CFG rewrite, the pass reopened this slot at
+// the enclosing JUMP_IF_FALSE span's exit as though it might still be
+// captured by an unrelated later variable, so the range ran to the chunk's
+// end (closedImplicitly) and lost its perIteration verdict.
+TEST(CaptureAnalysisTest, PerIterationCaptureInsideIfInsideLoop) {
+    Compiled c = compileAndAnalyze(R"(
+        fun make() {
+            var fns = [nil, nil, nil];
+            for (var i = 0; i < 3; i = i + 1) {
+                if (i >= 0) {
+                    var a = i;
+                    fun f() { return a; }
+                    fns[i] = f;
+                }
+            }
+            return fns;
+        }
+    )",
+                                   "r13_capture_inside_if_inside_loop");
+    const DecodedFunction* make = findByName(c.tree, "make");
+    const DecodedFunction* f = findByName(c.tree, "f");
+    ASSERT_NE(make, nullptr);
+    ASSERT_NE(f, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, make->id);
+    int aSlot = infoFor(c.captures, f->id).ownUpvalues.at(0).index;
+
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, aSlot);
+    ASSERT_EQ(ranges.size(), 1U);
+    EXPECT_FALSE(ranges[0].closedImplicitly)
+        << "the if-block's own endScope closes a with a real CLOSE_UPVALUE "
+        << "every time the if-body runs";
+    EXPECT_TRUE(ranges[0].perIteration)
+        << "a is declared inside the loop body -- a fresh cell every "
+        << "iteration, matching native output 0, 1, 2";
+    EXPECT_EQ(ranges[0].allCloseOffsets.size(), 1U)
+        << "no break/continue here -- a has exactly one real close";
+}
+
+// R14 regression. Native output is 1, then 3: `f` captures `a` (an `if`
+// block's own local) and `h` captures `d` (a later, unrelated block's own
+// local that happens to reuse a's slot number once a's block truly ends).
+// Before the CFG rewrite, the pass reopened a's slot at the if's own
+// JUMP_IF_FALSE span exit -- even though a's own CLOSE_UPVALUE is not one of
+// several alternate exits, it is the ONE real, final end of a's scope -- so
+// d's later capture of the same slot number joined a's range instead of
+// starting its own, and the pass reported one shared cell for two closures
+// that must never share one.
+TEST(CaptureAnalysisTest, DifferentVariablesReusingOneSlotDoNotShareACell) {
+    Compiled c = compileAndAnalyze(R"(
+        fun make(c) {
+            var fns = [nil, nil];
+            if (c) {
+                var a = 1;
+                fun f() { return a; }
+                fns[0] = f;
+            }
+            {
+                var d = 3;
+                fun h() { return d; }
+                fns[1] = h;
+            }
+            return fns;
+        }
+    )",
+                                   "r14_distinct_variables_share_a_slot");
+    const DecodedFunction* make = findByName(c.tree, "make");
+    const DecodedFunction* f = findByName(c.tree, "f");
+    const DecodedFunction* h = findByName(c.tree, "h");
+    ASSERT_NE(make, nullptr);
+    ASSERT_NE(f, nullptr);
+    ASSERT_NE(h, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, make->id);
+    int aSlot = infoFor(c.captures, f->id).ownUpvalues.at(0).index;
+    int dSlot = infoFor(c.captures, h->id).ownUpvalues.at(0).index;
+    ASSERT_EQ(aSlot, dSlot) << "the test must exercise real slot reuse, or "
+                            << "it proves nothing about this defect";
+
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, aSlot);
+    ASSERT_EQ(ranges.size(), 2U)
+        << "a and d are different variables -- two live ranges, two cells, "
+        << "matching native output 1, 3";
+    EXPECT_EQ(ranges[0].capturingClosureOffsets.size(), 1U);
+    EXPECT_EQ(ranges[1].capturingClosureOffsets.size(), 1U);
+    EXPECT_EQ(ranges[0].allCloseOffsets.size(), 1U)
+        << "a's if-block has exactly one real close, its own endScope";
+    EXPECT_EQ(ranges[1].allCloseOffsets.size(), 1U)
+        << "d's block has exactly one real close, its own endScope";
+    EXPECT_LE(ranges[0].end, ranges[1].firstCaptureOffset)
+        << "a must close before d is even captured -- the two ranges must "
+        << "not overlap";
 }
