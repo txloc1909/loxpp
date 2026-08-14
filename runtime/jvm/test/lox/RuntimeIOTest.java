@@ -15,6 +15,12 @@ import java.io.PrintStream;
  */
 public final class RuntimeIOTest {
     public static void main(String[] args) throws Exception {
+        // Read the production object itself, not a copy built to the same
+        // recipe (PR #97 review finding R10: a check that rebuilds its own
+        // PrintStream cannot catch a bug in LoxRuntime.out's own charset).
+        checkEquals(LoxRuntime.CHARSET, LoxRuntime.out.charset(),
+                "LoxRuntime.out writes raw bytes, not the JVM default charset");
+
         // Output: a char in 0x80-0xFF must become exactly one byte, not the
         // two-byte UTF-8 sequence the JVM default charset would produce.
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
