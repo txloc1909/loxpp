@@ -13,6 +13,13 @@
 // LoopVarRangeDoesNotDominateItsOwnEnd, and
 // PerIterationCaptureClosesOnBreakAndContinue pin down three review-round-1
 // findings (R1/R2, R3, R5) as regression tests.
+// LoopVarNotClosedEarlyByAlternateExit, OuterCaptureNotClosedEarlyByLoopExit,
+// and RecapturedSlotAfterDeadEarlyExitSharesOneCell pin down review-round-2
+// findings R9 and R10: a captured slot with more than one real
+// CLOSE_UPVALUE in the same chunk (break/continue/fall-through each
+// cleaning up their own path) must not let a later, unrelated close, or a
+// later re-capture, resolve to the wrong slot or split one runtime cell into
+// two.
 
 #include "backend/capture_analysis.h"
 #include "backend/chunk_decoder.h"
@@ -409,6 +416,134 @@ TEST(CaptureAnalysisTest, ToleratesUnrelatedCaptureBetweenAlternateExits) {
     ASSERT_EQ(ranges.size(), 1U);
     EXPECT_TRUE(ranges[0].perIteration);
     EXPECT_FALSE(ranges[0].closedImplicitly);
+}
+
+// R9 regression, failure case 1. Native output is 3, 13, 23 (loxpp on
+// 642687e): `i` is one shared cell across all three iterations. Before the
+// fix, the loop body's own two alternate exits for `s` (continue's close,
+// then the fall-through close) left the SECOND close with no open slot of
+// its own to match, so it fell through to `i` — `i` was reported closed
+// inside the loop (perIteration=true), the V3_loopvar defect this whole node
+// exists to catch.
+TEST(CaptureAnalysisTest, LoopVarNotClosedEarlyByAlternateExit) {
+    Compiled c = compileAndAnalyze(R"(
+        fun make() {
+            var fns = [nil, nil, nil];
+            for (var i = 0; i < 3; i = i + 1) {
+                var s = i * 10;
+                fun f() { return i + s; }
+                fns[i] = f;
+                if (i == 1) continue;
+            }
+            return fns;
+        }
+    )",
+                                   "r9_loop_var_alternate_exit");
+    const DecodedFunction* make = findByName(c.tree, "make");
+    const DecodedFunction* f = findByName(c.tree, "f");
+    ASSERT_NE(make, nullptr);
+    ASSERT_NE(f, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, make->id);
+    const std::vector<ClosureUpvalue>& wiring =
+        infoFor(c.captures, f->id).ownUpvalues;
+    ASSERT_EQ(wiring.size(), 2U);
+    int iSlot = wiring[0].index;
+    int sSlot = wiring[1].index;
+
+    const std::vector<CaptureLiveRange>& iRanges = rangesFor(info, iSlot);
+    const std::vector<CaptureLiveRange>& sRanges = rangesFor(info, sSlot);
+    ASSERT_EQ(iRanges.size(), 1U);
+    ASSERT_EQ(sRanges.size(), 1U);
+    EXPECT_FALSE(iRanges[0].perIteration)
+        << "i's only real close is after the loop exits — one shared cell "
+        << "for the whole loop, matching native output 3, 13, 23";
+    EXPECT_TRUE(sRanges[0].perIteration)
+        << "s is declared inside the loop body — a fresh cell every "
+        << "iteration, continue included";
+}
+
+// R9 regression, failure case 2. Native output is 99: `a` is a function-scope
+// capture, closed only implicitly when the frame returns. Before the fix,
+// the loop body's own two alternate exits for `s` (break's close, then the
+// fall-through close) left the SECOND close with no open slot of its own,
+// so it fell through to `a` — `a` was reported closed inside the loop,
+// leaving `a = 99` (which runs after the loop) writing past the reported
+// end of its own cell.
+TEST(CaptureAnalysisTest, OuterCaptureNotClosedEarlyByLoopExit) {
+    Compiled c = compileAndAnalyze(R"(
+        fun make() {
+            var fns = [nil];
+            var a = 1;
+            fun outerCap() { return a; }
+            for (var i = 0; i < 2; i = i + 1) {
+                var s = i;
+                fun f() { return s; }
+                fns[0] = f;
+                if (i == 0) break;
+            }
+            a = 99;
+            return outerCap;
+        }
+    )",
+                                   "r9_outer_capture_loop_exit");
+    const DecodedFunction* make = findByName(c.tree, "make");
+    const DecodedFunction* outerCap = findByName(c.tree, "outerCap");
+    const DecodedFunction* f = findByName(c.tree, "f");
+    ASSERT_NE(make, nullptr);
+    ASSERT_NE(outerCap, nullptr);
+    ASSERT_NE(f, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, make->id);
+    int aSlot = infoFor(c.captures, outerCap->id).ownUpvalues.at(0).index;
+    int sSlot = infoFor(c.captures, f->id).ownUpvalues.at(0).index;
+    ASSERT_NE(aSlot, sSlot);
+
+    const std::vector<CaptureLiveRange>& aRanges = rangesFor(info, aSlot);
+    const std::vector<CaptureLiveRange>& sRanges = rangesFor(info, sSlot);
+    ASSERT_EQ(aRanges.size(), 1U);
+    ASSERT_EQ(sRanges.size(), 1U);
+    EXPECT_TRUE(aRanges[0].closedImplicitly)
+        << "a is function scope — the frame's RETURN closes it, matching "
+        << "native output 99: the write at `a = 99` must land before that "
+        << "close, not after a wrongly-early one";
+    EXPECT_FALSE(sRanges[0].closedImplicitly)
+        << "s's own scope (the loop body) closes it with a real "
+        << "CLOSE_UPVALUE, on whichever of its two exit paths runs";
+}
+
+// R10 regression. Native output is 42, 42: f and g share one cell. Before
+// the fix, `s`'s close on the dead `continue` path (never taken — `k` is
+// always 0) was treated as final, so g's later capture of the same slot
+// opened a SECOND, separate range instead of joining f's.
+TEST(CaptureAnalysisTest, RecapturedSlotAfterDeadEarlyExitSharesOneCell) {
+    Compiled c = compileAndAnalyze(R"(
+        fun make() {
+            var fns = [nil, nil];
+            for (var k = 0; k < 1; k = k + 1) {
+                var s = 5;
+                fun f() { return s; }
+                fns[0] = f;
+                if (k == 99) continue;
+                fun g() { return s; }
+                fns[1] = g;
+                s = 42;
+            }
+            return fns;
+        }
+    )",
+                                   "r10_recapture_after_dead_exit");
+    const DecodedFunction* make = findByName(c.tree, "make");
+    const DecodedFunction* f = findByName(c.tree, "f");
+    ASSERT_NE(make, nullptr);
+    ASSERT_NE(f, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, make->id);
+    int sSlot = infoFor(c.captures, f->id).ownUpvalues.at(0).index;
+
+    const std::vector<CaptureLiveRange>& sRanges = rangesFor(info, sSlot);
+    ASSERT_EQ(sRanges.size(), 1U)
+        << "f and g capture the SAME s -- one live range, one runtime cell, "
+        << "matching native output 42, 42";
+    EXPECT_EQ(sRanges[0].capturingClosureOffsets.size(), 2U)
+        << "f and g must both be recorded as sharing this one range";
 }
 
 // Collects every (id -> DecodedFunction*) pair in `root`'s tree, so a check
