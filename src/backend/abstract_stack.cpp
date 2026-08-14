@@ -226,63 +226,7 @@ bool closureIsConsumedImmediately(const std::vector<DecodedInstruction>& ins,
            ins[next].op == Op::DEFINE_METHOD;
 }
 
-// The "invisible var" recognition rule: a slot-referencing instruction
-// retroactively marks an already-pushed value as a named local. Locals are
-// always the bottom `localCount` cells, so recognizing position `slot`
-// pulls every lower position in with it too.
-//
-// This runs on the *incoming* state to `ins`, before `ins` advances it —
-// and, critically, on *every* edge feeding `ins`, before those edges are
-// compared against each other. A slot's first reference can sit exactly at
-// a merge (05_for's loop header: `GET_LOCAL 1` for `i` is both the
-// fallthrough target from function entry, which has not yet seen `i`
-// referenced, and the LOOP back-edge target, which has). Normalizing each
-// edge through `ins`'s own rule first means both arrive already agreeing —
-// the ambiguity is resolved by the very instruction that will resolve it at
-// runtime too, not left as a spurious mismatch for the merge check to trip
-// on.
-StackState normalizeForInstruction(const std::vector<DecodedInstruction>& ins,
-                                   size_t idx, StackState s) {
-    const DecodedInstruction& instr = ins[idx];
-    auto recognizeLocal = [&](int slot) {
-        if (slot >= s.localCount) {
-            s.localCount = slot + 1;
-        }
-    };
-
-    switch (instr.op) {
-    case Op::GET_LOCAL:
-    case Op::SET_LOCAL:
-        recognizeLocal(instr.byteOperand);
-        break;
-    case Op::CLOSURE:
-        // isLocal upvalue entries name slots in *this* function
-        // (chunk_decoder.h) — a local that is captured but never read back
-        // via plain GET_LOCAL/SET_LOCAL. (CLOSURE's *own* pushed result
-        // becoming a local — see closureIsConsumedImmediately — is handled
-        // in advance() below: the position it would occupy does not exist
-        // yet in `s`, the state *before* this instruction runs.)
-        for (const auto& uv : instr.upvalues) {
-            if (uv.isLocal) {
-                recognizeLocal(uv.index);
-            }
-        }
-        break;
-    case Op::CLOSE_UPVALUE:
-        // Always closes the current top of stack (vm.cpp), and only a
-        // captured local is ever closed — so the position is local by
-        // construction, before it is reclaimed below.
-        recognizeLocal(s.height - 1);
-        break;
-    default:
-        break;
-    }
-    return s;
-}
-
-// Advances an *already-normalized* `before` state (see
-// normalizeForInstruction) across `ins[idx]`, producing the state after it
-// runs.
+// Advances `before` across `ins[idx]`, producing the state after it runs.
 //
 // Pops are peeled off the top one at a time, in order, checking each
 // against the *current* local region before it shrinks — not just the
@@ -290,8 +234,20 @@ StackState normalizeForInstruction(const std::vector<DecodedInstruction>& ins,
 // only a temporary: `print match c {...};` has PRINT directly pop() a
 // match expression's synthetic result cell (P1's dual-meaning POP applies
 // just as well to any other instruction that plainly discards the top).
+//
+// `declaredSlotsAt`, when given, is a per-instruction-index list of slots
+// whose declaring push this instruction *is* (see findInvisibleVarIndices):
+// recognition happens here, on this instruction's own outgoing state, not
+// retroactively on some later referencing instruction's incoming state. A
+// local becomes visible to the analysis at the exact offset the emitter
+// must insert its store, closing the gap R1 found between `invisibleVars`
+// and the reported per-offset stack states. Null during the first,
+// height-only pass (see runFixpoint's two call sites in analyzeStack):
+// nothing is recognized as local yet, because the declaring-push sites
+// haven't been found (that search needs this same height data first).
 StackState advance(const std::vector<DecodedInstruction>& ins, size_t idx,
-                   StackState before) {
+                   StackState before,
+                   const std::vector<std::vector<int>>* declaredSlotsAt) {
     const DecodedInstruction& instr = ins[idx];
     StackEffect effect = stackEffect(instr);
 
@@ -304,29 +260,39 @@ StackState advance(const std::vector<DecodedInstruction>& ins, size_t idx,
     }
     after.height += effect.pushCount;
 
-    // A nested function declaration's own binding (see
-    // closureIsConsumedImmediately) — recognized only now, using the
-    // *post-push* height, since the position it occupies does not exist
-    // until this instruction's own push completes.
-    if (instr.op == Op::CLOSURE && !closureIsConsumedImmediately(ins, idx)) {
-        after.localCount = std::max(after.localCount, after.height);
+    if (declaredSlotsAt != nullptr) {
+        for (int slot : (*declaredSlotsAt)[idx]) {
+            after.localCount = std::max(after.localCount, slot + 1);
+        }
     }
     return after;
 }
 
-// Finds the declaring push(es) for `slot`, walking backward from `fromIndex`
-// over the CFG's predecessor edges. A slot can have more than one static
-// declaring push — e.g. a captured local initialised by `a and b` lands via
-// whichever branch of the short-circuit was taken (bytecode-translation-
-// problems.md P2's merge). The search stops at the boundary of `slot`'s
-// current lifetime: an edge where the position was not yet populated.
-void findDeclaringPushes(int fromIndex, int slot,
-                         const std::vector<DecodedInstruction>& ins,
-                         const LocalCfg& cfg,
-                         const std::vector<StackState>& before,
-                         const std::vector<StackState>& after,
-                         const std::vector<bool>& reached,
-                         std::set<std::pair<int, int>>& sites) {
+// Finds the declaring push(es) for `slot`'s *current value*, walking
+// backward from `fromIndex` over the CFG's predecessor edges.
+//
+// This follows the value, not the stack position (R7): an instruction whose
+// own pop reaches down to (or past) `slot` destroys whatever was there
+// before it ran. If its own push then lands back at `slot`, that is a brand
+// new value occupying the same numeric position — the declaring push — and
+// the search must not walk past it looking for the *earlier* value's origin
+// (11_for_in.lox: BUILD_LIST pops three cells and pushes the list back at
+// position 1; the list is a new value, not the first CONSTANT that once
+// lived there). An instruction whose pop does not reach `slot` leaves that
+// position's value untouched, so the search continues further back through
+// it.
+//
+// A slot can have more than one static declaring push — e.g. a captured
+// local initialised by `a and b` lands via whichever branch of the
+// short-circuit was taken (bytecode-translation-problems.md P2's merge) — so
+// this explores every predecessor, not just one.
+void findDeclaringPushIndices(int fromIndex, int slot,
+                              const std::vector<DecodedInstruction>& ins,
+                              const LocalCfg& cfg,
+                              const std::vector<StackState>& before,
+                              const std::vector<StackState>& after,
+                              const std::vector<bool>& reached,
+                              std::set<std::pair<int, int>>& sites) {
     std::vector<bool> visited(ins.size(), false);
     std::deque<int> frontier(cfg.predecessors[fromIndex].begin(),
                              cfg.predecessors[fromIndex].end());
@@ -338,52 +304,129 @@ void findDeclaringPushes(int fromIndex, int slot,
         }
         visited[cur] = true;
 
-        if (after[cur].height <= slot) {
-            // Position `slot` did not exist right after `cur` ran — we have
-            // walked past the start of this lifetime. Nothing beyond this
-            // edge belongs to the declaration we are looking for.
+        StackEffect effect = stackEffect(ins[cur]);
+        // Height right after `cur`'s pops, before its own push — equally
+        // `after[cur].height - effect.pushCount`, but computed from `before`
+        // so it needs no assumption about how `after` was derived.
+        int popReach = before[cur].height - effect.popCount;
+
+        if (popReach <= slot) {
+            // `cur`'s pop reached at least this deep: the value that sat at
+            // `slot` before `cur` ran is gone.
+            if (slot < after[cur].height) {
+                // ...and `cur`'s own push lands back at `slot` — a new
+                // value born right here. Found it.
+                sites.insert({cur, slot});
+            }
+            // Either way, stop: anything further back belongs to a value
+            // `cur` already destroyed, not to the one live at `fromIndex`.
             continue;
         }
-        if (before[cur].height <= slot) {
-            // `slot` did not exist before `cur` ran, but does after: this is
-            // (one of) the declaring push(es).
-            sites.insert({ins[cur].offset, slot});
-            continue;
-        }
+        // `slot` sat beneath everything `cur` touched — its value passed
+        // through `cur` unchanged. Keep searching further back for its
+        // origin.
         for (int pred : cfg.predecessors[cur]) {
             frontier.push_back(pred);
         }
     }
 }
 
+// Finds every invisible-var declaring push in the whole function,
+// deduplicated, keyed by instruction index (converted to source offset by
+// the caller). Needs before/after height for the *whole* function up front
+// — a backward search from an early offset can cross a LOOP instruction
+// physically later in the byte stream (05_for's back-edges) — which is why
+// this runs against a completed height-only fixpoint (see analyzeStack),
+// not interleaved with it.
+std::set<std::pair<int, int>> findInvisibleVarIndices(
+    const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
+    const std::vector<StackState>& before, const std::vector<StackState>& after,
+    const std::vector<bool>& reached) {
+    std::set<std::pair<int, int>> sites;
+    for (size_t i = 0; i < ins.size(); i++) {
+        if (!reached[i]) {
+            continue;
+        }
+        int idx = static_cast<int>(i);
+        switch (ins[i].op) {
+        case Op::GET_LOCAL:
+        case Op::SET_LOCAL:
+            findDeclaringPushIndices(idx, ins[i].byteOperand, ins, cfg, before,
+                                     after, reached, sites);
+            break;
+        case Op::CLOSURE:
+            // isLocal upvalue entries name slots in *this* function
+            // (chunk_decoder.h) — a local that is captured but never read
+            // back via plain GET_LOCAL/SET_LOCAL.
+            for (const auto& uv : ins[i].upvalues) {
+                if (uv.isLocal) {
+                    findDeclaringPushIndices(idx, uv.index, ins, cfg, before,
+                                             after, reached, sites);
+                }
+            }
+            // The CLOSURE's *own* pushed value can itself become a local
+            // (a nested `fun name() {...}` declaration) — its declaring
+            // push is this very instruction, at the position its own push
+            // lands (06_shared_upvalue's `set`: never captured, never read
+            // back, still a real local slot — findDeclaringPushIndices
+            // above would never find it, since nothing ever names its
+            // slot).
+            if (!closureIsConsumedImmediately(ins, i)) {
+                sites.insert({idx, after[i].height - 1});
+            }
+            break;
+        case Op::CLOSE_UPVALUE:
+            // Always closes the current top of stack (vm.cpp), and only a
+            // captured local is ever closed.
+            findDeclaringPushIndices(idx, before[i].height - 1, ins, cfg,
+                                     before, after, reached, sites);
+            break;
+        default:
+            break;
+        }
+    }
+    return sites;
+}
+
 // Forward data-flow fixpoint over the local CFG, from `initial` at
-// instruction 0. Every stored `state[i]` is normalized w.r.t. `ins[i]` (see
-// normalizeForInstruction) *before* it is compared or merged — this is what
-// keeps the fixpoint's own bookkeeping (raw height, localCount) reconcilable
-// at a merge even though neither is, by itself, guaranteed equal on every
-// incoming edge:
-//   - localCount is *inferred* bottom-up from slot references, so an edge
-//     that reaches a slot's first reference disagrees in raw numbers with
-//     one that already passed it — resolved by normalizing through that
-//     very reference (05_for's loop header: `GET_LOCAL 1` for `i` is
-//     reached both from function entry, which has not yet seen `i`, and
-//     the LOOP-31 back-edge, which has).
-//   - height itself can differ across two match arms that destructure a
-//     different number of pattern fields, reaching the shared post-match
-//     code with a different number of (still-local) fields live — observed
-//     in bootstrap/loxpp_interpreter.lox's `resolveStmt`. Different height,
-//     same operandDepth.
-// Taking the larger height/localCount pair after normalizing is monotone
-// and bounded (each dimension only grows, bounded by the chunk's size), so
-// the queue drains. A stricter "every edge must agree on operandDepth"
-// check was tried and abandoned — see analyzeStack's sanity-check comment
-// for why, and what is asserted instead.
+// instruction 0. Run twice by analyzeStack (see there):
+//
+//   Pass 1 — `declaredSlotsAt == nullptr`, `initial.localCount == 0`. Only
+//   height is meaningful; its purpose is solely to give
+//   findInvisibleVarIndices the before/after heights it needs to locate
+//   every declaring push. No recognition happens yet, so there is nothing
+//   for a recognition-timing bug to lag (R1's failure mode does not exist
+//   in this pass).
+//
+//   Pass 2 — `declaredSlotsAt` is pass 1's result. `advance()` now
+//   recognizes each local exactly at its declaring push (not at first
+//   reference), so `before`/`after` here are what analyzeStack reports.
+//
+// The merge join takes `max` of height and of localCount independently.
+// This remains necessary (not merely tolerated) even after pass 2's fix:
+// two arms of a `match` that destructure a different number of pattern
+// fields legitimately reach shared post-match code at different raw
+// heights and localCounts, with the *same* operand depth, because the
+// extra fields are still local on the longer arm (observed in
+// bootstrap/loxpp_interpreter.lox's `resolveStmt`). Taking the max of each
+// dimension independently is sound here because, in every such case, the
+// same edge supplies both maxima (the longer arm has strictly more of
+// everything, never a trade-off between the two) — the join only becomes
+// unsound (R4) when recognition timing itself, not genuine structure,
+// causes two edges to split one edge's cells between "local" and "temp"
+// differently at the *same* height. That split can't happen once
+// recognition is declaring-push-timed, and analyzeStack checks it isn't:
+// see validateMergeConsistency, which is the real assertion for checkpoint
+// 5 (R3) — a post-convergence check, not this join, because a join that
+// throws on every *transient* mid-fixpoint disagreement (before a
+// loop's back-edge has propagated) would reject legitimate programs.
 std::vector<std::optional<StackState>>
 runFixpoint(const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
-            StackState initial) {
+            StackState initial,
+            const std::vector<std::vector<int>>* declaredSlotsAt) {
     size_t n = ins.size();
     std::vector<std::optional<StackState>> state(n);
-    state[0] = normalizeForInstruction(ins, 0, initial);
+    state[0] = initial;
     std::deque<int> worklist{0};
     std::vector<bool> queued(n, false);
     queued[0] = true;
@@ -392,23 +435,22 @@ runFixpoint(const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
         int i = worklist.front();
         worklist.pop_front();
         queued[i] = false;
-        StackState after = advance(ins, i, *state[i]);
+        StackState after = advance(ins, i, *state[i], declaredSlotsAt);
         for (int succ : cfg.successors[i]) {
-            StackState candidate = normalizeForInstruction(ins, succ, after);
             if (!state[succ]) {
-                state[succ] = candidate;
+                state[succ] = after;
                 worklist.push_back(succ);
                 queued[succ] = true;
                 continue;
             }
             StackState& existing = *state[succ];
             bool changed = false;
-            if (candidate.height > existing.height) {
-                existing.height = candidate.height;
+            if (after.height > existing.height) {
+                existing.height = after.height;
                 changed = true;
             }
-            if (candidate.localCount > existing.localCount) {
-                existing.localCount = candidate.localCount;
+            if (after.localCount > existing.localCount) {
+                existing.localCount = after.localCount;
                 changed = true;
             }
             if (changed && !queued[succ]) {
@@ -420,52 +462,51 @@ runFixpoint(const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
     return state;
 }
 
-// Pass 2: finds every invisible-var declaring push in the whole function,
-// deduplicated (a captured or `and`/`or`-initialized local can have more
-// than one — see findDeclaringPushes). Needs before/after for the *whole*
-// function up front — a backward search from an early offset can cross a
-// LOOP instruction physically later in the byte stream (05_for's
-// back-edges), so the caller's pass 1 must already have filled those in.
-std::vector<InvisibleVarSite>
-findInvisibleVars(const std::vector<DecodedInstruction>& ins,
-                  const LocalCfg& cfg, const std::vector<StackState>& before,
-                  const std::vector<StackState>& after,
-                  const std::vector<bool>& reached) {
-    std::set<std::pair<int, int>> sites;
+// Checkpoint 5, asserted for real (R3/R4): every reached instruction with
+// two or more reached predecessors must see the *same* operand depth on
+// every incoming edge — the invariant the JVM/CLR verifier enforces at
+// every control-flow merge. Runs once, after pass 2 has fully converged,
+// using each predecessor's own final `after` state directly: recognition
+// is declaring-push-timed now (R1), not reference-timed, so a
+// predecessor's `after` state already reflects every declaration on its
+// own path with no further reconciliation needed at the point of use.
+//
+// This must run post-convergence, not inside runFixpoint's join: mid-
+// fixpoint, a loop's back-edge can (temporarily) disagree with its
+// fallthrough edge before the worklist has propagated the back-edge's
+// contribution all the way around, and throwing on that transient state
+// would reject legitimate programs. A disagreement that survives to
+// convergence is a real one.
+void validateMergeConsistency(const std::vector<DecodedInstruction>& ins,
+                              const LocalCfg& cfg,
+                              const std::vector<StackState>& after,
+                              const std::vector<bool>& reached,
+                              const std::string& functionId) {
     for (size_t i = 0; i < ins.size(); i++) {
         if (!reached[i]) {
             continue;
         }
-        int idx = static_cast<int>(i);
-        switch (ins[i].op) {
-        case Op::GET_LOCAL:
-        case Op::SET_LOCAL:
-            findDeclaringPushes(idx, ins[i].byteOperand, ins, cfg, before,
-                                after, reached, sites);
-            break;
-        case Op::CLOSURE:
-            for (const auto& uv : ins[i].upvalues) {
-                if (uv.isLocal) {
-                    findDeclaringPushes(idx, uv.index, ins, cfg, before, after,
-                                        reached, sites);
-                }
+        std::optional<int> depth;
+        for (int pred : cfg.predecessors[i]) {
+            if (!reached[pred]) {
+                continue;
             }
-            break;
-        case Op::CLOSE_UPVALUE:
-            findDeclaringPushes(idx, before[i].height - 1, ins, cfg, before,
-                                after, reached, sites);
-            break;
-        default:
-            break;
+            int d = after[pred].operandDepth();
+            if (!depth) {
+                depth = d;
+                continue;
+            }
+            if (*depth != d) {
+                throw std::runtime_error(
+                    "abstract_stack: merge disagreement in function '" +
+                    functionId + "' at offset " +
+                    std::to_string(ins[i].offset) +
+                    ": incoming operand depths disagree (" +
+                    std::to_string(*depth) + " vs " + std::to_string(d) +
+                    ") — the JVM/CLR verifier would reject this merge");
+            }
         }
     }
-
-    std::vector<InvisibleVarSite> result;
-    result.reserve(sites.size());
-    for (const auto& [offset, slot] : sites) {
-        result.push_back({offset, slot});
-    }
-    return result;
 }
 
 } // namespace
@@ -486,33 +527,51 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
     // (vm.cpp: VM::interpret calls it with argCount=0, just like any other
     // closure).
     int arity = fn.function->arity;
-    StackState initial{arity + 1, arity + 1};
-    std::vector<std::optional<StackState>> state =
-        runFixpoint(ins, cfg, initial);
+    int initialHeight = arity + 1;
+
+    // Pass 1: height-and-reachability only (see runFixpoint's comment).
+    std::vector<std::optional<StackState>> heightState =
+        runFixpoint(ins, cfg, StackState{initialHeight, 0}, nullptr);
 
     // `endCompiler()` (compiler.cpp) unconditionally appends a trailing
     // NIL;RETURN, even when every path already returned explicitly — that
-    // tail can be unreachable. Record reachability so the final pass can
-    // skip it instead of asserting on a state that was never propagated.
+    // tail can be unreachable. Record reachability so later passes can skip
+    // it instead of asserting on a state that was never propagated.
     std::vector<bool> reached(n);
     for (size_t i = 0; i < n; i++) {
-        reached[i] = state[i].has_value();
+        reached[i] = heightState[i].has_value();
     }
     result.reached = reached;
 
-    // Sanity check on the converged values. A strict "every predecessor's
-    // *freshly recomputed* contribution must equal the merged result"
-    // check was tried and abandoned: it produces false positives whenever a
-    // slot is discovered to be local partway around a back-edge (05_for,
-    // 11_for_in — the fallthrough edge from function entry has not yet
-    // seen the loop-body reference that the back-edge already reflects).
-    // Re-deriving a predecessor's contribution in isolation, after
-    // convergence, does not "see" that other edge's information the way
-    // the fixpoint above already correctly did; comparing them again is not
-    // meaningful. The invariant that *is* always true, and worth asserting
-    // as a guard against a stack-effect table or CFG-building bug, is
-    // structural: a position can never be local without existing, and
-    // height can never go negative.
+    std::vector<StackState> heightBefore(n);
+    std::vector<StackState> heightAfter(n);
+    for (size_t i = 0; i < n; i++) {
+        if (!reached[i]) {
+            continue;
+        }
+        heightBefore[i] = *heightState[i];
+        heightAfter[i] = advance(ins, i, heightBefore[i], nullptr);
+    }
+
+    // Locate every declaring push using pass 1's heights (R7-fixed search),
+    // then index them by instruction so pass 2 can recognize each local
+    // exactly there instead of at its first reference (R1).
+    std::set<std::pair<int, int>> siteIndices =
+        findInvisibleVarIndices(ins, cfg, heightBefore, heightAfter, reached);
+    std::vector<std::vector<int>> declaredSlotsAt(n);
+    for (const auto& [idx, slot] : siteIndices) {
+        declaredSlotsAt[idx].push_back(slot);
+    }
+
+    // Pass 2: full recognition-aware fixpoint.
+    StackState initial{initialHeight, initialHeight};
+    std::vector<std::optional<StackState>> state =
+        runFixpoint(ins, cfg, initial, &declaredSlotsAt);
+
+    // Structural sanity check on the converged values: a position can never
+    // be local without existing, and height can never go negative. Guards
+    // against a stack-effect table or CFG-building bug; not itself
+    // checkpoint 5 (see validateMergeConsistency below for that).
     for (size_t i = 0; i < n; i++) {
         if (!reached[i]) {
             continue;
@@ -527,11 +586,9 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
         }
     }
 
-    // Pass 1 over the converged states: derive before/after for every
-    // reached instruction, POP classifications, and the operand high-water
-    // mark. Kept separate from the fixpoint loop above because localCount
-    // there can still rise on a later iteration; only the converged value is
-    // meaningful to report.
+    // Derive before/after for every reached instruction, POP
+    // classifications, and the operand high-water mark from pass 2's
+    // converged, recognition-complete states.
     result.before.resize(n);
     result.after.resize(n);
     for (size_t i = 0; i < n; i++) {
@@ -539,7 +596,7 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
             continue;
         }
         StackState before = *state[i];
-        StackState after = advance(ins, i, before);
+        StackState after = advance(ins, i, before, &declaredSlotsAt);
         result.before[i] = before;
         result.after[i] = after;
 
@@ -553,8 +610,12 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
         }
     }
 
-    result.invisibleVars =
-        findInvisibleVars(ins, cfg, result.before, result.after, reached);
+    validateMergeConsistency(ins, cfg, result.after, reached, fn.id);
+
+    result.invisibleVars.reserve(siteIndices.size());
+    for (const auto& [idx, slot] : siteIndices) {
+        result.invisibleVars.push_back({ins[idx].offset, slot});
+    }
 
     return result;
 }

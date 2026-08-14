@@ -30,6 +30,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifndef LOXPP_PROJECT_SOURCE_DIR
@@ -154,6 +155,50 @@ void checkProbeFile(const fs::path& path) {
 
 } // namespace
 
+// Checkpoint 5, directly: analyzeStack must throw on a genuine merge
+// disagreement, not just complete without throwing on programs that happen
+// not to have one (R3 — this reviewer finding is why the corpus tests above
+// are worded to say the throw is what they are exercising). Bypasses the
+// compiler to hand-build a chunk no real compiler would ever emit: two
+// paths into one PRINT, one of which pushes an extra CONSTANT the other
+// does not, so the merge disagrees by one cell of height with nothing
+// recognized as local on either side (not the legitimate differing-arity
+// case runFixpoint's comment discusses — that one keeps operand depth
+// equal; this one deliberately does not).
+TEST(AbstractStackTest, MergeDisagreementThrows) {
+    ObjFunction fakeFn; // arity 0; never registered with a MemoryManager —
+                        // analyzeStack only reads `arity`, and Obj's
+                        // constructor needs no allocator.
+    DecodedFunction fn;
+    fn.function = &fakeFn;
+    fn.id = "0";
+    fn.displayName = "malformed";
+
+    DecodedInstruction constant0;
+    constant0.offset = 0;
+    constant0.op = Op::CONSTANT;
+
+    DecodedInstruction jumpIfFalse;
+    jumpIfFalse.offset = 3;
+    jumpIfFalse.op = Op::JUMP_IF_FALSE;
+    jumpIfFalse.jumpTarget = 9; // skips the extra CONSTANT below
+
+    DecodedInstruction constant1;
+    constant1.offset = 6;
+    constant1.op = Op::CONSTANT;
+
+    DecodedInstruction print;
+    print.offset = 9;
+    print.op = Op::PRINT;
+
+    fn.instructions = {constant0, jumpIfFalse, constant1, print};
+
+    EXPECT_THROW(analyzeStack(fn), std::runtime_error)
+        << "the jump-taken edge reaches PRINT one cell shallower than the "
+        << "fallthrough edge; analyzeStack must not silently max its way "
+        << "past that";
+}
+
 // Checkpoint 1. Quotes the disassembly straight from N2.md, which the
 // orchestrator verified against the real `-DLOXPP_DEBUG_PRINT_CODE` output.
 TEST(AbstractStackTest, AssignLocalClassifiesBothPopsByReasonNotJustLabel) {
@@ -221,6 +266,30 @@ TEST(AbstractStackTest, NestedArithMaxStackMatchesHandCount) {
     EXPECT_EQ(analysis.maxOperandDepth, 3);
 }
 
+// Checkpoint 2, a second probe (R2): 15_nested_arith declares no local, so it
+// cannot tell a correct maxOperandDepth from one inflated by counting a
+// not-yet-recognized local as an operand cell. `find_leaf`
+// (examples/at_binding_demo.lox) declares several: a wrong recognition-timing
+// implementation reports 4 here; correct is 3 (hand-verified against a
+// per-offset dump — every local's declaring push is recognized at the push
+// itself, so none of it is ever double-counted as a temporary).
+TEST(AbstractStackTest, MaxStackWithLocalsIsNotInflatedByLateRecognition) {
+    MemoryManager mm;
+    DecodedFunction script = decodeSource(
+        readFile(projectRoot() / "examples" / "at_binding_demo.lox"), mm);
+    ASSERT_FALSE(script.nested.empty());
+    const DecodedFunction* findLeaf = nullptr;
+    for (const DecodedFunction& fn : script.nested) {
+        if (fn.displayName == "find_leaf") {
+            findLeaf = &fn;
+        }
+    }
+    ASSERT_NE(findLeaf, nullptr)
+        << "find_leaf not found among nested functions";
+    FunctionStackAnalysis analysis = analyzeStack(*findLeaf);
+    EXPECT_EQ(analysis.maxOperandDepth, 3);
+}
+
 // Checkpoint 3 + 4 + 5 for the probe corpus specifically.
 TEST(AbstractStackTest, RunsOverEveryProbeWithNoInconsistency) {
     std::vector<fs::path> probes =
@@ -261,6 +330,38 @@ TEST(AbstractStackTest, FreshCellProbeHasNoUnexplainedTemporaries) {
     // iteration.
     FunctionStackAnalysis analysis = analyzeStack(script.nested[0]);
     EXPECT_GT(analysis.invisibleVars.size(), 0U);
+}
+
+// R7: findDeclaringPushes must follow a slot's *value*, not its stack
+// position. 11_for_in.lox is the sharpest probe for this: BUILD_LIST pops
+// three cells and pushes the list back at position 1, then GET_ITER
+// replaces it in place — a wrong, position-following implementation walks
+// past both and blames the first CONSTANT (offset 0) for slot 1, instead of
+// BUILD_LIST (offset 9), where the list value that actually becomes the
+// iterator local is born. Asserts the *entire* list, not one site, so a
+// regression can't hide behind an untested second entry the way the old
+// single-site assertion in AssignLocalClassifiesBothPopsByReasonNotJustLabel
+// did for this exact bug.
+TEST(AbstractStackTest, ForInInvisibleVarsNameTheirOwnDeclaringPush) {
+    MemoryManager mm;
+    DecodedFunction script =
+        decodeSource(readFile(projectRoot() / "notes" / "translation-probes" /
+                              "11_for_in.lox"),
+                     mm);
+    FunctionStackAnalysis analysis = analyzeStack(script);
+
+    std::vector<std::pair<int, int>> sites;
+    for (const InvisibleVarSite& site : analysis.invisibleVars) {
+        sites.emplace_back(site.offset, site.slot);
+    }
+    std::sort(sites.begin(), sites.end());
+
+    // slot 1 (the hidden iterator): BUILD_LIST's own push lands there, not
+    // the CONSTANT at offset 0 that BUILD_LIST later consumes and replaces.
+    // slot 2 (the loop variable `x`): NIL's push, unaffected by this bug —
+    // included so a regression that shifts *either* site trips this test.
+    const std::vector<std::pair<int, int>> expected = {{9, 1}, {12, 2}};
+    EXPECT_EQ(sites, expected);
 }
 
 TEST(AbstractStackTest, PeeksInsteadOfPopsMatchesTheDocumentedFamily) {

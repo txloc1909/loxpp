@@ -93,10 +93,13 @@ struct FunctionStackAnalysis {
 // function's closure occupy slot 0 the same way, so no special-casing is
 // needed between them.
 //
-// Throws std::runtime_error if a control-flow merge disagrees on stack
-// height — the invariant the JVM/CLR verifier enforces at every merge. A
-// disagreement means the decoder or this analysis has drifted from the
-// compiler; the input program is trusted to be compiler-correct.
+// Throws std::runtime_error if a control-flow merge disagrees on operand
+// depth (height minus local count) — the invariant the JVM/CLR verifier
+// enforces at every merge. Raw height and local count may legitimately
+// differ across incoming edges (e.g. two `match` arms that destructure a
+// different number of pattern fields); operand depth may not. A
+// disagreement there means the decoder or this analysis has drifted from
+// the compiler; the input program is trusted to be compiler-correct.
 //
 // N1 (CFG/label recovery) has not landed yet at the time this was written;
 // this analysis computes its own local leaders/edges (see abstract_stack.cpp)
@@ -111,9 +114,15 @@ struct StackAnalysisTree {
 
 StackAnalysisTree analyzeStackTree(const DecodedFunction& root);
 
-// True for opcodes whose result stays on the stack instead of being consumed
-// — "assignment is an expression" (vm.cpp) plus JUMP_IF_FALSE's condition
-// peek. The short-circuit `and`/`or` idiom is not a separate opcode; it is
+// True for opcodes where the assigned/tested value survives as the
+// instruction's own result — "assignment is an expression" (vm.cpp) plus
+// JUMP_IF_FALSE's condition peek. This is *not* "the stack shape is
+// unchanged": SET_PROPERTY and SET_INDEX consume more than they leave
+// behind (stackEffect: pop 2 push 1, pop 3 push 1 respectively) — they
+// belong to this family because the *value being assigned*, not the whole
+// input, reappears as the result. Only SET_LOCAL, SET_GLOBAL, SET_UPVALUE,
+// and JUMP_IF_FALSE leave the stack shape itself unchanged (pop 0, push 0).
+// The short-circuit `and`/`or` idiom is not a separate opcode; it is
 // exactly a JUMP_IF_FALSE peek paired with a POP on the truthy path
 // (bytecode-translation-problems.md P2).
 bool peeksInsteadOfPops(Op op);
