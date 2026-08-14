@@ -89,23 +89,21 @@ fi
 # above, a silent failure now leaves the directory empty, or short of the
 # full set, instead of looking like a pass (reported: jvm_run.sh, R3). The
 # tree walk matches the cleanup above, so a packaged class still counts
-# (reported: jvm_run.sh, R5). Jasmin assembles exactly one class per .j
-# file and prints one "Generated: <path>" line for it, so counting those
-# lines against the input file count catches the case where one file among
-# many silently produced nothing (reported: jvm_run.sh, R5).
+# (reported: jvm_run.sh, R5). Count class files on disk, not "Generated:"
+# lines: jasmin prints one such line per input file even when two files
+# name the same class and the second silently overwrites the first on
+# disk, so a message count cannot catch that collision (reported:
+# jvm_run.sh, R8).
 if [ "$jasmin_failed" -eq 0 ]; then
     mapfile -d '' class_files < <(find "$j_dir" -name '*.class' -print0)
     if [ "${#class_files[@]}" -eq 0 ]; then
         jasmin_failed=1
         jasmin_out="${jasmin_out}
 jvm_run.sh: jasmin reported no error but wrote no class files"
-    else
-        generated_count="$(printf '%s\n' "$jasmin_out" | grep -c '^Generated: ' || true)"
-        if [ "$generated_count" -ne "${#j_files[@]}" ]; then
-            jasmin_failed=1
-            jasmin_out="${jasmin_out}
-jvm_run.sh: expected ${#j_files[@]} class(es), one per .j file, but jasmin reported $generated_count"
-        fi
+    elif [ "${#class_files[@]}" -ne "${#j_files[@]}" ]; then
+        jasmin_failed=1
+        jasmin_out="${jasmin_out}
+jvm_run.sh: expected ${#j_files[@]} class(es), one per .j file, but found ${#class_files[@]} on disk"
     fi
 fi
 
