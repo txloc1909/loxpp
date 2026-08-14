@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -63,6 +64,65 @@ std::vector<fs::path> listLoxFiles(const fs::path& dir) {
     return files;
 }
 
+// Single source of truth for "every Op enumerator", used by both `mnemonic`
+// (below) and `allOps` (R1/R3 fix: the opcode-coverage test needs to name
+// every enumerator, and this list is also the reason `mnemonic`'s switch has
+// no `default:` — a new Op with no entry here is a compile-time -Wswitch
+// warning at that switch, not a silent decoder gap).
+#define LOXPP_FOR_EACH_OP(X)                                                   \
+    X(CONSTANT)                                                                \
+    X(NIL)                                                                     \
+    X(TRUE)                                                                    \
+    X(FALSE)                                                                   \
+    X(EQUAL)                                                                   \
+    X(GREATER)                                                                 \
+    X(LESS)                                                                    \
+    X(NEGATE)                                                                  \
+    X(ADD)                                                                     \
+    X(SUBTRACT)                                                                \
+    X(MULTIPLY)                                                                \
+    X(DIVIDE)                                                                  \
+    X(MODULO)                                                                  \
+    X(NOT)                                                                     \
+    X(PRINT)                                                                   \
+    X(POP)                                                                     \
+    X(GET_LOCAL)                                                               \
+    X(SET_LOCAL)                                                               \
+    X(DEFINE_GLOBAL)                                                           \
+    X(GET_GLOBAL)                                                              \
+    X(SET_GLOBAL)                                                              \
+    X(JUMP)                                                                    \
+    X(JUMP_IF_FALSE)                                                           \
+    X(LOOP)                                                                    \
+    X(CALL)                                                                    \
+    X(RETURN)                                                                  \
+    X(CLOSURE)                                                                 \
+    X(GET_UPVALUE)                                                             \
+    X(SET_UPVALUE)                                                             \
+    X(CLOSE_UPVALUE)                                                           \
+    X(CLASS)                                                                   \
+    X(GET_PROPERTY)                                                            \
+    X(SET_PROPERTY)                                                            \
+    X(DEFINE_METHOD)                                                           \
+    X(INVOKE)                                                                  \
+    X(INHERIT)                                                                 \
+    X(GET_SUPER)                                                               \
+    X(SUPER_INVOKE)                                                            \
+    X(BUILD_LIST)                                                              \
+    X(BUILD_MAP)                                                               \
+    X(GET_INDEX)                                                               \
+    X(SET_INDEX)                                                               \
+    X(SLICE)                                                                   \
+    X(IN)                                                                      \
+    X(GET_ITER)                                                                \
+    X(ITER_HAS_NEXT)                                                           \
+    X(ITER_NEXT)                                                               \
+    X(MATCH_ERROR)                                                             \
+    X(JUMP_TABLE)                                                              \
+    X(GET_TAG)                                                                 \
+    X(INSTANCEOF)                                                              \
+    X(IS_SEQ)
+
 // Re-renders one decoded instruction into the exact text
 // disassembleInstruction (src/debug.cpp) prints for it with color disabled.
 // The category groups mirror decodeOne() in chunk_decoder.cpp; each mnemonic
@@ -70,64 +130,23 @@ std::vector<fs::path> listLoxFiles(const fs::path& dir) {
 // uses that spelling verbatim.
 const char* mnemonic(Op op) {
     switch (op) {
-#define LOXPP_MNEMONIC(name)                                                   \
+#define LOXPP_MNEMONIC_CASE(name)                                              \
     case Op::name:                                                             \
         return #name;
-        LOXPP_MNEMONIC(CONSTANT)
-        LOXPP_MNEMONIC(NIL)
-        LOXPP_MNEMONIC(TRUE)
-        LOXPP_MNEMONIC(FALSE)
-        LOXPP_MNEMONIC(EQUAL)
-        LOXPP_MNEMONIC(GREATER)
-        LOXPP_MNEMONIC(LESS)
-        LOXPP_MNEMONIC(NEGATE)
-        LOXPP_MNEMONIC(ADD)
-        LOXPP_MNEMONIC(SUBTRACT)
-        LOXPP_MNEMONIC(MULTIPLY)
-        LOXPP_MNEMONIC(DIVIDE)
-        LOXPP_MNEMONIC(MODULO)
-        LOXPP_MNEMONIC(NOT)
-        LOXPP_MNEMONIC(PRINT)
-        LOXPP_MNEMONIC(POP)
-        LOXPP_MNEMONIC(GET_LOCAL)
-        LOXPP_MNEMONIC(SET_LOCAL)
-        LOXPP_MNEMONIC(DEFINE_GLOBAL)
-        LOXPP_MNEMONIC(GET_GLOBAL)
-        LOXPP_MNEMONIC(SET_GLOBAL)
-        LOXPP_MNEMONIC(JUMP)
-        LOXPP_MNEMONIC(JUMP_IF_FALSE)
-        LOXPP_MNEMONIC(LOOP)
-        LOXPP_MNEMONIC(CALL)
-        LOXPP_MNEMONIC(RETURN)
-        LOXPP_MNEMONIC(CLOSURE)
-        LOXPP_MNEMONIC(GET_UPVALUE)
-        LOXPP_MNEMONIC(SET_UPVALUE)
-        LOXPP_MNEMONIC(CLOSE_UPVALUE)
-        LOXPP_MNEMONIC(CLASS)
-        LOXPP_MNEMONIC(GET_PROPERTY)
-        LOXPP_MNEMONIC(SET_PROPERTY)
-        LOXPP_MNEMONIC(DEFINE_METHOD)
-        LOXPP_MNEMONIC(INVOKE)
-        LOXPP_MNEMONIC(INHERIT)
-        LOXPP_MNEMONIC(GET_SUPER)
-        LOXPP_MNEMONIC(SUPER_INVOKE)
-        LOXPP_MNEMONIC(BUILD_LIST)
-        LOXPP_MNEMONIC(BUILD_MAP)
-        LOXPP_MNEMONIC(GET_INDEX)
-        LOXPP_MNEMONIC(SET_INDEX)
-        LOXPP_MNEMONIC(SLICE)
-        LOXPP_MNEMONIC(IN)
-        LOXPP_MNEMONIC(GET_ITER)
-        LOXPP_MNEMONIC(ITER_HAS_NEXT)
-        LOXPP_MNEMONIC(ITER_NEXT)
-        LOXPP_MNEMONIC(MATCH_ERROR)
-        LOXPP_MNEMONIC(JUMP_TABLE)
-        LOXPP_MNEMONIC(GET_TAG)
-        LOXPP_MNEMONIC(INSTANCEOF)
-        LOXPP_MNEMONIC(IS_SEQ)
-#undef LOXPP_MNEMONIC
+        LOXPP_FOR_EACH_OP(LOXPP_MNEMONIC_CASE)
+#undef LOXPP_MNEMONIC_CASE
     }
     return "UNKNOWN";
+}
+
+// Every Op enumerator, in declaration order. Used by the opcode-coverage
+// test (R1) to fail when the corpus never exercises one of them.
+std::vector<Op> allOps() {
+    return {
+#define LOXPP_OP_VALUE(name) Op::name,
+        LOXPP_FOR_EACH_OP(LOXPP_OP_VALUE)
+#undef LOXPP_OP_VALUE
+    };
 }
 
 void renderInstruction(const Chunk& chunk, const DecodedInstruction& ins,
@@ -285,6 +304,28 @@ void checkFile(const fs::path& path) {
     checkSource(readFile(path), path.filename().string());
 }
 
+// Tallies one instruction's opcode into `counts`, then recurses into nested
+// functions. Used only by the opcode-coverage test below.
+void tallyOpCounts(const DecodedFunction& node, std::map<Op, int>& counts) {
+    for (const DecodedInstruction& ins : node.instructions) {
+        counts[ins.op]++;
+    }
+    for (const DecodedFunction& child : node.nested) {
+        tallyOpCounts(child, counts);
+    }
+}
+
+// Compiles and decodes `path`, then adds its opcodes to `counts`. Throws on a
+// compile failure, matching checkSource's convention.
+void accumulateOpCounts(const fs::path& path, std::map<Op, int>& counts) {
+    MemoryManager mm;
+    ObjFunction* script = compile(readFile(path), &mm);
+    if (script == nullptr) {
+        throw std::runtime_error("compilation failed for " + path.string());
+    }
+    tallyOpCounts(decodeFunctionTree(script), counts);
+}
+
 } // namespace
 
 TEST(ChunkDecoderTest, MatchesOracleOnTranslationProbes) {
@@ -326,4 +367,28 @@ TEST(ChunkDecoderTest, AssignsStableDeterministicIdentity) {
     EXPECT_EQ(tree.nested[0].displayName, "greet");
     EXPECT_EQ(tree.nested[1].displayName, "greet");
     EXPECT_NE(tree.nested[0].function, tree.nested[1].function);
+}
+
+// R1 fix: a decoder bug in one opcode's width shifts every later instruction
+// in the chunk to a wrong offset, but the three tests above cannot see that
+// for an opcode the corpus never emits. This test closes that gap for good:
+// it fails on any Op enumerator with a corpus-wide count of zero, for this
+// opcode and for every opcode the language gains later.
+TEST(ChunkDecoderTest, DecodesEveryOpcodeAtLeastOnce) {
+    std::map<Op, int> counts;
+
+    for (const fs::path& probe :
+         listLoxFiles(projectRoot() / "notes" / "translation-probes")) {
+        accumulateOpCounts(probe, counts);
+    }
+    for (const fs::path& example : listLoxFiles(projectRoot() / "examples")) {
+        accumulateOpCounts(example, counts);
+    }
+    accumulateOpCounts(projectRoot() / "bootstrap" / "loxpp_interpreter.lox",
+                       counts);
+
+    for (Op op : allOps()) {
+        EXPECT_GT(counts[op], 0)
+            << mnemonic(op) << " is never decoded anywhere in the corpus";
+    }
 }

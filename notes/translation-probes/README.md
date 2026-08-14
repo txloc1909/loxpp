@@ -51,6 +51,7 @@ each has an off-the-shelf solution.
 | `14_enum_payload` | enum payload read via `GET_INDEX`; `CALL` on an enum ctor | P6, P8 |
 | `15_nested_arith` | operand-stack high-water mark (CIL `.maxstack`) | P1 |
 | `16_slice_in` | `SLICE`/`IN` arg order and arity | P8 |
+| `17_super_value` | `GET_SUPER` reads a super method as a value, not a call | P4 |
 | `V1_fresh_cell` | body-local captured in a loop → **fresh cell/iter** → prints `0 1 2` | P4 |
 | `V2_shared` | mutable shared upvalue → prints `2` | P4 |
 | `V3_loopvar` | loop var captured directly → **one shared cell** → prints `3 3 3` | P4 |

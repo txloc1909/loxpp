@@ -1,0 +1,3 @@
+class A { greet() { return 1; } }
+class B < A { greet() { var f = super.greet; return f(); } }
+print B().greet();
