@@ -6,8 +6,9 @@
 // not throw over the whole probe/example/bootstrap corpus.
 //
 // checkNoAssertionFailure additionally cross-checks every corpus file's
-// reported ranges against its own decoded CLOSE_UPVALUE offsets (not just
-// the analysis's own output) — see checkCloseUpvaluesMatchDecodedChunk.
+// reported ranges against its own decoded CLOSE_UPVALUE offsets in both
+// directions (not just the analysis's own output) — see
+// checkCloseUpvaluesMatchDecodedChunk and checkNoOrphanCloseUpvalues.
 // MatchArmBindingAndLaterBlockLocalDoNotCrossAttribute,
 // LoopVarRangeDoesNotDominateItsOwnEnd, and
 // PerIterationCaptureClosesOnBreakAndContinue pin down three review-round-1
@@ -420,9 +421,24 @@ void collectById(const DecodedFunction& node,
     }
 }
 
-// R4: the corpus test must not only check the analysis output in isolation —
-// it must cross-check it against the decoded chunk that produced it, or a
-// misattributed CLOSE_UPVALUE (R1) passes every other check here silently.
+// R4/R9: the corpus test must not only check the analysis output in
+// isolation — it must cross-check it against the decoded chunk that
+// produced it, or a misattributed CLOSE_UPVALUE (R1, R9) passes every other
+// check here silently.
+//
+// Round 1's version of this check compared counts (decodedCloses.size() >=
+// nonImplicitRangeCount). That passed on the R9 program: the pass reported
+// one CLOSE_UPVALUE too many for the loop var's range (misattributing a
+// second alternate-exit close meant for a different slot) and, separately,
+// never attributed the loop var's own real close at all — two errors that
+// canceled out in a size comparison. A count can hide exactly the defect
+// this check exists to catch, so it checks membership in both directions
+// instead: every reported `end` must be a real CLOSE_UPVALUE in the chunk
+// (below), AND every real CLOSE_UPVALUE in the chunk must be some range's
+// reported `end` (checkNoOrphanCloseUpvalues) — an orphan on either side is
+// a misattribution, not a false positive from mutually exclusive alternate
+// exits, because every alternate exit for one range reports the SAME `end`
+// candidate set the pass tracks (see recordClose's spanStack tolerance).
 void checkCloseUpvaluesMatchDecodedChunk(const DecodedFunction& node,
                                          const FunctionCaptureInfo& info) {
     std::set<int> decodedCloses;
@@ -431,32 +447,44 @@ void checkCloseUpvaluesMatchDecodedChunk(const DecodedFunction& node,
             decodedCloses.insert(ins.offset);
         }
     }
-
-    // A range can have more than one real CLOSE_UPVALUE backing it: break,
-    // continue, and a match arm's own exit each clean up their scope
-    // independently, so one captured local can close on any of several
-    // mutually exclusive paths (see capture_analysis.cpp's recordClose).
-    // The pass keeps only the first one it sees in program order, so this
-    // checks a subset, not a one-to-one match: every reported `end` must be
-    // a real CLOSE_UPVALUE in the chunk, and the chunk must have at least as
-    // many CLOSE_UPVALUE instructions as non-implicit ranges — never fewer.
-    int nonImplicitRangeCount = 0;
     for (const auto& [slot, ranges] : info.liveRangesBySlot) {
         for (const CaptureLiveRange& range : ranges) {
             if (range.closedImplicitly) {
                 continue;
             }
-            nonImplicitRangeCount++;
-            EXPECT_TRUE(decodedCloses.count(range.end) > 0)
+            EXPECT_TRUE(decodedCloses.contains(range.end))
                 << "id=" << info.id << " slot=" << slot
                 << ": reported end=" << range.end
                 << " is not a real CLOSE_UPVALUE offset in the chunk";
         }
     }
-    EXPECT_GE(decodedCloses.size(), static_cast<size_t>(nonImplicitRangeCount))
-        << "id=" << info.id
-        << ": fewer CLOSE_UPVALUE instructions than non-implicit ranges — "
-        << "some range's close was never actually decoded";
+}
+
+// R4/R9: the other direction of the cross-check above. A CLOSE_UPVALUE the
+// chunk actually contains, but that matches no reported range's `end` at
+// all, is exactly the R9 shape: the close was seen and silently swallowed
+// (the alternate-exit tolerance in recordClose) or misattributed elsewhere,
+// with no other check here noticing. This needs no CFG and no stack
+// simulation — only the analysis's own reported ends, compared against the
+// chunk it read.
+void checkNoOrphanCloseUpvalues(const DecodedFunction& node,
+                                const FunctionCaptureInfo& info) {
+    std::set<int> reportedEnds;
+    for (const auto& [slot, ranges] : info.liveRangesBySlot) {
+        for (const CaptureLiveRange& range : ranges) {
+            if (!range.closedImplicitly) {
+                reportedEnds.insert(range.end);
+            }
+        }
+    }
+    for (const DecodedInstruction& ins : node.instructions) {
+        if (ins.op != Op::CLOSE_UPVALUE) {
+            continue;
+        }
+        EXPECT_TRUE(reportedEnds.contains(ins.offset))
+            << "id=" << info.id << ": CLOSE_UPVALUE at offset " << ins.offset
+            << " is the end of no reported range";
+    }
 }
 
 // Runs the pass over one file and checks it never throws, and that every
@@ -489,6 +517,7 @@ void checkNoAssertionFailure(const fs::path& path) {
             }
         }
         checkCloseUpvaluesMatchDecodedChunk(*byId.at(id), info);
+        checkNoOrphanCloseUpvalues(*byId.at(id), info);
     }
 }
 
