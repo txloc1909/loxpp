@@ -136,3 +136,11 @@ jobs:
             -w /workspace \
             loxpp-dev-managed:latest \
             bash -c "tools/check_managed_toolchains.sh"
+
+      - name: Build and test the JVM runtime library
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "tools/test_lox_rt.sh"
