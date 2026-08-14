@@ -7,10 +7,12 @@ import java.util.Map;
 /**
  * Backs the GET_ITER / ITER_HAS_NEXT / ITER_NEXT protocol. List and String
  * read the live collection by cursor (a growing list is visited further, as
- * in vm.cpp's ObjIterator). A Map instead snapshots its keys at construction:
- * LinkedHashMap's own iterator is fail-fast and would throw on a concurrent
- * `del`, and map-mutation-during-iteration is unspecified by the spec anyway,
- * so a snapshot is a safe, deterministic choice.
+ * in vm.cpp's ObjIterator). A Map instead snapshots its keys at construction.
+ * vm.cpp reads a map's live bucket cursor, so a concurrent write during a
+ * `for (var k in m)` loop can be visible there (PR #97 review finding R12).
+ * No example or bootstrap program mutates a map inside its own `for ... in`
+ * loop, and the spec leaves that case unspecified, so the snapshot is a
+ * safe, deterministic choice rather than a matched one.
  */
 public final class LoxIterator {
     public final Object collection;
