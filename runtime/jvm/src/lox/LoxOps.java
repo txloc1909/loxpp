@@ -126,7 +126,8 @@ public final class LoxOps {
     // Sequences: in / slice / index
     // ------------------------------------------------------------------
 
-    static void checkMapKey(Object key) {
+    /** Public for codegen (N6's BUILD_MAP): every key must pass this before the map is built, per vm.cpp. */
+    public static void checkMapKey(Object key) {
         if (key == null || key instanceof Boolean || key instanceof String) {
             return;
         }
@@ -340,6 +341,27 @@ public final class LoxOps {
 
     public static void defineMethod(LoxClass klass, String name, LoxClosure method) {
         klass.methods.put(name, method);
+    }
+
+    /**
+     * The INHERIT opcode's guard. Codegen would otherwise need a raw
+     * {@code checkcast} to LoxClass, which throws ClassCastException instead
+     * of LoxError (PR #97 review finding R5). Call this before constructing
+     * the subclass, so its superclass is already validated.
+     */
+    public static LoxClass inherit(Object superclassVal) {
+        if (!(superclassVal instanceof LoxClass)) {
+            throw new LoxError("Superclass must be a class.");
+        }
+        return (LoxClass) superclassVal;
+    }
+
+    /** The GET_TAG opcode's guard — same ClassCastException problem as {@link #inherit}. */
+    public static double getTag(Object v) {
+        if (!(v instanceof LoxEnum)) {
+            throw new LoxError("GET_TAG: expected an enum value.");
+        }
+        return ((LoxEnum) v).ctor.tag;
     }
 
     /** The INVOKE fast path: dispatches on the receiver's runtime kind (P6), not on one static type. */

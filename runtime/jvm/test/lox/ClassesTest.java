@@ -99,6 +99,14 @@ public final class ClassesTest {
         check(LoxOps.equal(a, a), "an enum value equals itself");
         checkThrows(() -> ok.call(new Object[0]), LoxError.class, "enum constructor arity is enforced");
 
+        // R5 (PR #97 review): codegen-facing guards for INHERIT and GET_TAG.
+        checkThrows(() -> LoxOps.inherit(1.0), LoxError.class, "inherit() rejects a non-class value");
+        check(LoxOps.inherit(animal) == animal, "inherit() returns the validated superclass");
+        checkThrows(() -> LoxOps.getTag(1.0), LoxError.class, "getTag() rejects a non-enum value");
+        checkEquals(1.0, LoxOps.getTag(a), "getTag() reads the constructor's tag as a Lox number");
+        LoxOps.checkMapKey("k"); // public for N6's BUILD_MAP — must not throw for a valid key
+        checkThrows(() -> LoxOps.checkMapKey(Double.NaN), LoxError.class, "checkMapKey() rejects NaN");
+
         System.exit(TestSupport.finish("ClassesTest"));
     }
 }
