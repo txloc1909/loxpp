@@ -59,32 +59,35 @@ struct CaptureLiveRange {
     // offset comparison.
     int firstCaptureOffset{-1};
 
-    // The CLOSE_UPVALUE offset that ends this range. Meaningless when
-    // `closedImplicitly` is set — see that field. Like
-    // `firstCaptureOffset`, this is the offset this pass can prove from a
-    // single linear pass; it is not guaranteed to be the only point some
-    // execution path could close the range (RETURN also closes every open
-    // upvalue in the frame — see `closedImplicitly`), but every such RETURN
-    // is frame-terminal, so no code after it in this chunk can observe the
+    // A real CLOSE_UPVALUE offset that ends this range. Meaningless when
+    // `closedImplicitly` is set — see that field. This is not guaranteed to
+    // be the ONLY point some execution path could close the range: break,
+    // continue, and a match arm's own exit each emit their OWN
+    // CLOSE_UPVALUE for the same captured local, on their own mutually
+    // exclusive path (see recordClose in the .cpp), and RETURN also closes
+    // every open upvalue in the frame. `end` is simply the last such offset
+    // this linear pass saw for this range — any one of the real alternates
+    // would do equally well, since only one of them ever fires per actual
+    // execution, and this pass verifies every one of them is accounted for
+    // (checkNoOrphanCloseUpvalues in test_backend_capture.cpp) even though
+    // only one is reported here. A RETURN among the alternates needs no
+    // CLOSE_UPVALUE of its own and reports no offset either way: it is
+    // frame-terminal, so no code after it in this chunk can observe the
     // difference.
     int end{-1};
 
-    // True when no CLOSE_UPVALUE closes this range in the chunk's linear
-    // instruction stream. Exactly one legitimate cause produces this, once
-    // the compiler emits CLOSE_UPVALUE for every captured local it reclaims
-    // (see Compiler::endScope and Compiler::emitLoopCleanup): the range is
-    // scoped to the function's own top-level scope, which the compiler never
-    // wraps in an explicit close — the native VM's RETURN closes it instead,
-    // via closeUpvalues(frame->slots) (06_shared_upvalue's `outer`). `end` is
-    // then the chunk's own length, not a real instruction offset.
-    //
-    // A captured local in a NESTED block scope always gets an explicit
-    // CLOSE_UPVALUE somewhere in the chunk (at that block's own endScope, or
-    // at emitLoopCleanup on every early-exit path out of it), so it is never
-    // closedImplicitly — even when some OTHER path out of that same block
-    // returns early. An early RETURN needs no explicit close of its own
-    // because it is frame-terminal: nothing in this chunk runs afterward, so
-    // there is nothing left that could read a stale cell.
+    // True when no CLOSE_UPVALUE closes this range anywhere in the chunk's
+    // linear instruction stream: every reachable path out of this range's
+    // own scope returns before that scope's close code ever runs, so the
+    // frame's RETURN (closeUpvalues(frame->slots)) is the only thing that
+    // ends it. The common case is the function's own top-level scope, which
+    // the compiler never wraps in an explicit close at all
+    // (06_shared_upvalue's `outer`) — but a captured local in a nested block
+    // scope can end up here too, if every path out of that specific block
+    // happens to return early; closedImplicitly follows from what the
+    // decoded instruction stream actually contains, not from scope nesting
+    // depth. `end` is then the chunk's own length, not a real instruction
+    // offset.
     bool closedImplicitly{false};
 
     // True when a LOOP back-edge wraps [firstCaptureOffset, end]: this exact
