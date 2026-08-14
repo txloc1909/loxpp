@@ -370,10 +370,17 @@ public final class LoxOps {
             LoxInstance instance = (LoxInstance) receiver;
             if (instance.fields.containsKey(name)) {
                 Object fieldVal = instance.fields.get(name);
-                if (!(fieldVal instanceof LoxCallable)) {
-                    throw new LoxError("Can only call functions, classes and enums.");
+                // vm.cpp lines 518-533 call only a closure or a native field
+                // this way; a class, an enum constructor, or a bound method
+                // is a runtime error here, even though all four implement
+                // LoxCallable (PR #97 review finding R4).
+                if (fieldVal instanceof LoxClosure) {
+                    return ((LoxClosure) fieldVal).call(args);
                 }
-                return ((LoxCallable) fieldVal).call(args);
+                if (fieldVal instanceof LoxNative) {
+                    return ((LoxNative) fieldVal).call(args);
+                }
+                throw new LoxError("Can only call functions, classes and enums.");
             }
             LoxClosure method = instance.klass.findMethod(name);
             if (method == null) {
