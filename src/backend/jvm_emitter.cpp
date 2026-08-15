@@ -899,59 +899,18 @@ void emitCall(Emitter& e, const DecodedInstruction& in) {
     e.b.emit(callSig, -1);
 }
 
-// BUILD_LIST (node N7 pulls this one N9 opcode family forward — see
-// notes/backend-implementation-dag.md's build-order note). N7's own
-// checkpoint (nodes/N7.md) cannot run to completion without it:
-// V1_fresh_cell.lox and V3_loopvar.lox — the two probes that prove or
-// disprove the fresh-cell-per-declaration model this whole node exists to
-// get right — both build a list of the closures under test and read it
-// back by index (`fns[i] = f`, `fs[0]()`), so an emitter that still throws
-// "not implemented" on BUILD_LIST/GET_INDEX/SET_INDEX cannot even reach the
-// closure bug this node is named for. GET_INDEX/SET_INDEX (emitSimpleOp)
-// need no shuffle of their own — LoxOps's parameter order already matches
-// vm.cpp's own operand order — so BUILD_LIST's own spill-to-scratch (same
-// P7 reasoning as emitCall: the elements sit on the stack BELOW where a
-// fresh array reference would land, count == 0 needs no scratch at all) is
-// the only new shuffle this addition needs. LoxOps.buildList (runtime/jvm)
-// copies the array into a fresh LoxList in the same order.
-void emitBuildList(Emitter& e, const DecodedInstruction& in) {
-    int count = in.byteOperand;
-    const char* buildSig =
-        "invokestatic lox/LoxOps/buildList([Ljava/lang/Object;)Llox/"
-        "LoxList;";
-    if (count == 0) {
-        e.b.emit(pushIntInstruction(0), +1);
-        e.b.emit("anewarray java/lang/Object", 0);
-        e.b.emit(buildSig, 0);
-        return;
-    }
-    for (int i = count - 1; i >= 0; i--) {
-        e.b.emit("astore " + std::to_string(e.argScratchBase + i), -1);
-    }
-    e.b.emit(pushIntInstruction(count), +1);
-    e.b.emit("anewarray java/lang/Object", 0);
-    for (int i = 0; i < count; i++) {
-        e.b.emit("dup", +1);
-        e.b.emit(pushIntInstruction(i), +1);
-        e.b.emit("aload " + std::to_string(e.argScratchBase + i), +1);
-        e.b.emit("aastore", -3);
-    }
-    e.b.emit(buildSig, 0);
-}
-
-// BUILD_MAP n: n key/value pairs already on the stack, pushed in source
-// order — key0, val0, key1, val1, ..., key_{n-1}, val_{n-1}
-// (compiler.cpp's mapLiteral) — so the same P7 reshape as emitBuildList
-// applies, just to 2n cells instead of n. vm.cpp validates every key
-// before writing any pair ("Validate all keys before any allocation");
-// LoxOps.buildMap (runtime/jvm) keeps that same two-pass shape.
-void emitBuildMap(Emitter& e, const DecodedInstruction& in) {
-    int pairCount = in.byteOperand;
-    int width = 2 * pairCount;
-    const char* buildSig =
-        "invokestatic lox/LoxOps/buildMap([Ljava/lang/Object;)Llox/"
-        "LoxMap;";
-    if (pairCount == 0) {
+// Shared P7 reshape for BUILD_LIST/BUILD_MAP (R4 fix, PR #112 round 1):
+// spill `width` values, already on the stack BELOW where a fresh array
+// reference would land, into `argScratchBase` (same reasoning as emitCall),
+// build a fresh Object[width], refill it ascending, then hand it to
+// `buildSig`. `width == 0` needs no scratch at all: the empty array builds
+// directly, with nothing to spill or refill. `buildSig` fixes only the
+// element count and the runtime call; the six-step shape is otherwise
+// identical for a list of N elements and a map of N pairs (2N cells). Node
+// N10 needs this same shape a third time, for an enum constructor's payload
+// array.
+void emitSpillToArray(Emitter& e, int width, const char* buildSig) {
+    if (width == 0) {
         e.b.emit(pushIntInstruction(0), +1);
         e.b.emit("anewarray java/lang/Object", 0);
         e.b.emit(buildSig, 0);
@@ -969,6 +928,37 @@ void emitBuildMap(Emitter& e, const DecodedInstruction& in) {
         e.b.emit("aastore", -3);
     }
     e.b.emit(buildSig, 0);
+}
+
+// BUILD_LIST (node N7 pulls this one N9 opcode family forward — see
+// notes/backend-implementation-dag.md's build-order note). N7's own
+// checkpoint (nodes/N7.md) cannot run to completion without it:
+// V1_fresh_cell.lox and V3_loopvar.lox — the two probes that prove or
+// disprove the fresh-cell-per-declaration model this whole node exists to
+// get right — both build a list of the closures under test and read it
+// back by index (`fns[i] = f`, `fs[0]()`), so an emitter that still throws
+// "not implemented" on BUILD_LIST/GET_INDEX/SET_INDEX cannot even reach the
+// closure bug this node is named for. GET_INDEX/SET_INDEX (emitSimpleOp)
+// need no shuffle of their own — LoxOps's parameter order already matches
+// vm.cpp's own operand order — so BUILD_LIST's own spill-to-scratch is the
+// only new shuffle this addition needs. LoxOps.buildList (runtime/jvm)
+// copies the array into a fresh LoxList in the same order.
+void emitBuildList(Emitter& e, const DecodedInstruction& in) {
+    emitSpillToArray(e, in.byteOperand,
+                     "invokestatic lox/LoxOps/buildList([Ljava/lang/"
+                     "Object;)Llox/LoxList;");
+}
+
+// BUILD_MAP n: n key/value pairs already on the stack, pushed in source
+// order — key0, val0, key1, val1, ..., key_{n-1}, val_{n-1}
+// (compiler.cpp's mapLiteral) — so the same P7 reshape as emitBuildList
+// applies, just to 2n cells instead of n. vm.cpp validates every key
+// before writing any pair ("Validate all keys before any allocation");
+// LoxOps.buildMap (runtime/jvm) keeps that same two-pass shape.
+void emitBuildMap(Emitter& e, const DecodedInstruction& in) {
+    emitSpillToArray(e, 2 * in.byteOperand,
+                     "invokestatic lox/LoxOps/buildMap([Ljava/lang/"
+                     "Object;)Llox/LoxMap;");
 }
 
 // Wraps `slot` in a fresh Object[1] ref-cell, seeded with the raw value
