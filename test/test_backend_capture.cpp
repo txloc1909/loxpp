@@ -212,7 +212,10 @@ void checkHeightMatchesAbstractStack(const DecodedFunction& node,
     ASSERT_EQ(stack.reached.size(), node.instructions.size())
         << "id=" << info.id;
     for (size_t i = 0; i < node.instructions.size(); i++) {
-        if (!stack.reached[i]) {
+        // stack.reached is std::vector<bool>; operator[] gives a proxy, and
+        // Value's implicit bool constructor makes `!` on that proxy
+        // ambiguous in the NaN-tagging-off build (R28). Cast first.
+        if (!static_cast<bool>(stack.reached[i])) {
             continue;
         }
         int offset = node.instructions[i].offset;
