@@ -208,8 +208,10 @@ and steps 4–6 are independent analyses.)
   locals vs. temporaries, for the JVM local-variable array). A later node
   may fold N3's height walk into N2's abstract stack so both read one
   shared number; until then the two stay independent, matching how N2
-  already keeps its own private CFG builder alongside N1's (N2.md's hazards
-  section assigns that unification to N5, not to N2 or N3).
+  already keeps its own private CFG builder alongside N1's. N2.md's hazards
+  section once assigned that unification to N5; N5 (PR #109) did not do it
+  and does not list it as a deliverable, so it stays unassigned — pick a
+  named owner before doing it, rather than repeating the stale claim.
 - **RT and EH have no analysis dependencies** — build them first (or in parallel
   with N0). RT can even be test-driven to green before any codegen exists.
 - **N7 is the highest-value gate to reach early.** It is the only node whose

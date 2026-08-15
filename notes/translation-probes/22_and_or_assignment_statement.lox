@@ -1,0 +1,4 @@
+var x = true;
+var y = 0;
+x and (y = 1);
+print y;

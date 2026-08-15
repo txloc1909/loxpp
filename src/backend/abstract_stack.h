@@ -127,8 +127,11 @@ struct FunctionStackAnalysis {
 //
 // N1 (CFG/label recovery) has landed (src/backend/cfg.h, cfg.cpp, PR #100).
 // This analysis still computes its own private local leaders/edges (see
-// abstract_stack.cpp) instead of depending on N1's builder, per N2.md's
-// hazards section: N5 unifies the two builders later, once both exist.
+// abstract_stack.cpp) instead of depending on N1's builder. N5 (PR #109)
+// added N1's CFG to the JVM emitter for labels, but does not list this
+// unification as a deliverable and does not do it — the two builders stay
+// independent. No later node owns this task yet; assign it explicitly to
+// one before doing it, rather than duplicating the note's stale claim.
 FunctionStackAnalysis analyzeStack(const DecodedFunction& fn);
 
 // One node of the whole-tree analysis, mirroring DecodedFunction's shape.

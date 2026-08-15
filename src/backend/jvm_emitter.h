@@ -1,11 +1,12 @@
 #pragma once
 
 // JVM code generator (node N4 of the JVM/CLR backend DAG, discharges P2 — the
-// "peek, don't pop" family, notes/bytecode-translation-problems.md). Lowers
-// one function's straight-line chunk to Jasmin (.j) text, consuming N0's
-// decoder and N2's abstract-stack analysis. No control flow (N5), no calls or
-// closures (N6/N7): this node handles only the opcodes named in N4.md, and
-// aborts loudly on any other opcode so a later node's gap fails loudly too.
+// "peek, don't pop" family; node N5 adds P3b, control flow and verifier
+// legality; notes/bytecode-translation-problems.md). Lowers one function's
+// chunk to Jasmin (.j) text, consuming N0's decoder, N1's CFG/labels, and
+// N2's abstract-stack analysis. No calls or closures (N6/N7): this node
+// handles only the opcodes named in N4.md and N5.md, and aborts loudly on any
+// other opcode so a later node's gap fails loudly too.
 //
 // JVM local-variable layout (script form): slot 0 is the `main` method's
 // `String[] args` parameter, slot 1 holds the LoxGlobals instance, slots
@@ -48,10 +49,11 @@ std::string formatDoubleBitsLiteral(double value);
 // come from the same compiled tree (decodeFunctionTree / analyzeStackTree on
 // the same ObjFunction).
 //
-// Throws std::runtime_error, with a message prefixed "not implemented in N4:
-// ", on any opcode this node does not lower — includes CLOSURE, so a program
-// with a nested `fun`/method aborts here rather than silently dropping it
-// (function bodies are N6's responsibility, not this node's).
+// Throws std::runtime_error, with a message prefixed "not implemented in N5:
+// ", on any opcode this node does not lower — includes CALL and CLOSURE, so a
+// program with a call or a nested `fun`/method aborts here rather than
+// silently dropping it (calls and closures are N6/N7's responsibility, not
+// this node's).
 std::string emitScript(const DecodedFunction& fn,
                        const FunctionStackAnalysis& analysis,
                        const std::string& className);
