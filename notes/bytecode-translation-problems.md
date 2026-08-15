@@ -498,3 +498,23 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
   shape). N4 must detect "the position at `RETURN` is a local, not a
   temporary" and emit an explicit load before the return, the same
   recognition N2 already performs for every other opcode.
+- **GAP, open, owner N10 — the "local, not a temp" family above is fixed at
+  `RETURN` only; every other consumer still assumes a temp is already on the
+  JVM operand stack.** N8 (PR #113) fixed `RETURN` alone, because that is the
+  one consumer `examples/class_dispatch.lox`'s checkpoint reaches: a function
+  `return`s a `match` expression whose result sits in a local at
+  `operandDepth() == 0`. `PRINT`, `DEFINE_GLOBAL`, `SET_GLOBAL`, `ADD`, `CALL`,
+  `BUILD_LIST`, and every other opcode that pops a value still emit a plain
+  pop-from-JVM-stack sequence with no such check, so the same shape at any of
+  those consumers underflows the JVM operand stack at emit time instead of
+  loading the local. Proof: `print match 1 { case x => x };` and
+  `var d = match 1 { case x => x };` both stop `--target jvm` with "operand
+  stack underflow" (at `PRINT` and at `DEFINE_GLOBAL` respectively), though
+  `build/loxpp` prints `1` for both. Two repo examples fail for exactly this
+  reason and not for a missing opcode: `examples/match_http_status.lox` and
+  `examples/match_state_machine.lox`. **N10 already owns closing this gap**:
+  its own checkpoint (`nodes/N10.md`, item 3) already lists both files, so
+  N10 cannot pass its own checkpoint without lowering this family at every
+  consumer its match-dispatch work reaches. N10 must generalize N8's
+  `operandDepth() == 0` check (`localCount - 1` names the slot) to every
+  opcode that consumes a value, not add a second RETURN-only patch.
