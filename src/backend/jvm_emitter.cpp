@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
+#include <cstdint>
 #include <cstdio>
 #include <sstream>
 #include <stdexcept>
@@ -198,15 +200,12 @@ std::string escapeJasminString(const std::string& raw) {
     return out;
 }
 
-std::string formatJasminDouble(double value) {
-    std::array<char, 64> buf{};
-    std::snprintf(buf.data(), buf.size(), "%.17g", value);
-    std::string s(buf.data());
-    if (s.find('.') == std::string::npos && s.find('e') == std::string::npos &&
-        s.find('E') == std::string::npos) {
-        s += ".0";
-    }
-    return s;
+std::string formatDoubleBitsLiteral(double value) {
+    // A bare decimal integer: jasmin 2.4 reads an `ldc2_w` operand shaped
+    // like this as a `long`, at full precision, never at float precision
+    // (PR #107 R6) and never rejected as "badly formatted" (R7) — both
+    // defects are specific to the decimal-point/exponent literal forms.
+    return std::to_string(std::bit_cast<int64_t>(value));
 }
 
 std::string emitScript(const DecodedFunction& fn,
@@ -329,7 +328,15 @@ std::string emitScript(const DecodedFunction& fn,
             Value v = fn.function->chunk.getConstant(
                 static_cast<uint16_t>(in.constantIndex));
             if (is<Number>(v)) {
-                b.emit("ldc2_w " + formatJasminDouble(as<Number>(v)), +2);
+                // Long bits in, exact double out (PR #107 R6/R7): see
+                // formatDoubleBitsLiteral. `ldc2_w` of a `long` pushes 2
+                // words; `longBitsToDouble(J)D` consumes 2 (the long) and
+                // produces 2 (the double) — net 0 words, so the 3-line net
+                // effect (+2, 0, -1) is the same +1 as before this fix.
+                b.emit("ldc2_w " + formatDoubleBitsLiteral(as<Number>(v)), +2);
+                b.emit("invokestatic "
+                       "java/lang/Double/longBitsToDouble(J)D",
+                       0);
                 b.emit("invokestatic "
                        "java/lang/Double/valueOf(D)Ljava/lang/Double;",
                        -1);
@@ -451,6 +458,15 @@ std::string emitScript(const DecodedFunction& fn,
             // instruction, never to this peek, and a further chained peek
             // reloads the same persistent slot fresh rather than depend on
             // a leftover operand.
+            // R9 (PR #107 round 2, nit): `localCount` below is exact only
+            // because no merge can reach here yet — every jump opcode
+            // aborts with "not implemented in N4" at a strictly earlier
+            // offset than any merge point it creates (abstract_stack.h:
+            // `operandDepth()` alone is exact at a merge; raw `localCount`
+            // is only an upper bound there). N5 adds JUMP/JUMP_IF_FALSE/
+            // LOOP: before this line can execute with `before[i]` at a
+            // merge, re-derive the source slot from something merge-exact,
+            // not from this field directly.
             if (analysis.before[i].operandDepth() == 0) {
                 int sourceSlot =
                     jvmSlotForLocal(analysis.before[i].localCount - 1);
@@ -483,6 +499,9 @@ std::string emitScript(const DecodedFunction& fn,
             // and always use the non-peek call: the plain store fully
             // consumes the loaded copy either way, so no separate
             // fuse/non-fuse split is needed on this branch.
+            // R9 (PR #107 round 2, nit): same merge caveat as SET_LOCAL
+            // above — `localCount` here is exact only while no jump opcode
+            // is implemented.
             if (analysis.before[i].operandDepth() == 0) {
                 int sourceSlot =
                     jvmSlotForLocal(analysis.before[i].localCount - 1);

@@ -30,11 +30,18 @@ namespace jvm {
 // read could reinterpret.
 std::string escapeJasminString(const std::string& raw);
 
-// Formats a double as a Jasmin `ldc2_w` operand that reads back to the exact
-// same bit pattern. 17 significant decimal digits round-trip any IEEE-754
-// double (Steele & White); a literal with no '.' or 'e' reads as an integer
-// to some assemblers, so one is added when the digits alone would omit it.
-std::string formatJasminDouble(double value);
+// Formats a double's raw IEEE-754 bit pattern as a Jasmin `ldc2_w` operand: a
+// bare decimal `long` literal, paired at the call site with
+// `invokestatic java/lang/Double/longBitsToDouble(J)D` to turn it back into
+// the exact original double.
+//
+// A decimal/exponent literal cannot do this job (PR #107 R6, R7): jasmin 2.4
+// parses an `ldc2_w` operand that has a '.' or an 'e' at 32-bit float
+// precision, then widens it — silently rounding every value a float cannot
+// hold exactly — and it rejects some valid `%g`-style exponent text outright
+// (`1e+17`, no decimal point) with "Badly formatted number". A bare integer
+// literal has neither defect: jasmin reads it as a `long`, verbatim.
+std::string formatDoubleBitsLiteral(double value);
 
 // Emits complete Jasmin source for the top-level script, as class
 // `className` (the CLI always passes "LoxMain"). `fn` and `analysis` must
