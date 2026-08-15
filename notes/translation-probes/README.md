@@ -52,6 +52,8 @@ each has an off-the-shelf solution.
 | `15_nested_arith` | operand-stack high-water mark (CIL `.maxstack`) | P1 |
 | `16_slice_in` | `SLICE`/`IN` arg order and arity | P8 |
 | `17_super_value` | `GET_SUPER` reads a super method as a value, not a call | P4 |
+| `18_peek_of_named_local` | a `SET_LOCAL` peek reads a value N2 already folded into a named local, not a stack temp | P1, P2 |
+| `19_peek_of_named_local_global` | same fact through `SET_GLOBAL`, inside a block scope | P1, P2 |
 | `V1_fresh_cell` | body-local captured in a loop → **fresh cell/iter** → prints `0 1 2` | P4 |
 | `V2_shared` | mutable shared upvalue → prints `2` | P4 |
 | `V3_loopvar` | loop var captured directly → **one shared cell** → prints `3 3 3` | P4 |

@@ -15,6 +15,8 @@ native_bin="${LOXPP_BIN:-$root/build/loxpp}"
 probes=(
     "notes/translation-probes/01_assign_local.lox"
     "notes/translation-probes/15_nested_arith.lox"
+    "notes/translation-probes/18_peek_of_named_local.lox"
+    "notes/translation-probes/19_peek_of_named_local_global.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

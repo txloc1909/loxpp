@@ -182,6 +182,65 @@ TEST(EmitScript, GlobalsRoundTripThroughDefineSetGet) {
     EXPECT_NE(j.find("ldc \"x\""), std::string::npos);
 }
 
+// ---------------------------------------------------------------------------
+// R1 regression (PR #107 round 1): a SET_LOCAL/SET_GLOBAL peek whose source
+// value N2 already folded into a named local (the eager invisible-var
+// materialization, abstract_stack.h) must load that local, not assume a JVM
+// stack temp that was never pushed. The bug produced a structurally invalid
+// method that still returned normally from emitScript, so these tests assert
+// the emitted text, not only the absence of a throw.
+// ---------------------------------------------------------------------------
+
+TEST(EmitScript, SetLocalPeekOfNamedLocalLoadsInsteadOfDup) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("{ var a = 1; var b = (a = 2); print a; print b; }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // Slots: 2 (args, globals) + 2 (a, b) + 1 (scratch, unused here) = 5;
+    // limit locals is scratchSlot + 1 = 6.
+    EXPECT_NE(j.find(".limit locals 6\n"), std::string::npos);
+    EXPECT_NE(j.find(".limit stack 2\n"), std::string::npos);
+    // No dup anywhere: before[SET_LOCAL(a)].operandDepth() == 0, so the fix
+    // takes the load-from-slot branch, never the dup branch.
+    EXPECT_EQ(countOccurrences(j, "dup"), 0);
+    // The fix in one line: load `b`'s slot (4), the value SET_LOCAL(a) is
+    // peeking, then store it into `a`'s slot (3).
+    EXPECT_NE(j.find("aload 4\n    astore 3\n"), std::string::npos);
+    // `a` gets its declaring store (invisible var) and the R1-fixed store;
+    // `b` gets only its declaring store.
+    EXPECT_EQ(countOccurrences(j, "astore 3\n"), 2);
+    EXPECT_EQ(countOccurrences(j, "astore 4\n"), 1);
+}
+
+TEST(EmitScript, SetGlobalPeekOfNamedLocalLoadsInsteadOfScratch) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("var g = 0; { var b = g = 9; print b; print g; }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // Slots: 2 (args, globals) + 1 (b) + 1 (scratch, unused here) = 4;
+    // limit locals is scratchSlot + 1 = 5.
+    EXPECT_NE(j.find(".limit locals 5\n"), std::string::npos);
+    // The fix: load `b`'s slot (3), then the non-peek LoxGlobals.set call —
+    // never the scratch-astore peek path (that astore is what previously
+    // underflowed with nothing on the operand stack to consume).
+    EXPECT_NE(j.find("aload 3\n"
+                     "    aload 1\n"
+                     "    swap\n"
+                     "    ldc \"g\"\n"
+                     "    swap\n"
+                     "    invokevirtual "
+                     "lox/LoxGlobals/set(Ljava/lang/String;Ljava/lang/"
+                     "Object;)V\n"),
+              std::string::npos);
+    // Slot 4 is this program's scratch slot; the peek path would have
+    // written to it. It must stay untouched.
+    EXPECT_EQ(countOccurrences(j, "astore 4"), 0);
+}
+
 TEST(EmitScript, StringConstantIsEscaped) {
     MemoryManager mm;
     DecodedFunction fn = decodeScript(R"(print "say \"hi\"\n";)", mm);
