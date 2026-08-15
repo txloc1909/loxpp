@@ -44,6 +44,9 @@ probes=(
     "notes/translation-probes/V4_mutate_through_upvalue.lox"
     "notes/translation-probes/V5_self_recursive_closure.lox"
     "notes/translation-probes/V6_self_recursive_closure_in_loop.lox"
+    "notes/translation-probes/11_for_in.lox"
+    "notes/translation-probes/12_list_map_index.lox"
+    "notes/translation-probes/16_slice_in.lox"
 )
 
 # Probes that must FAIL on both sides (node N6 checkpoint 4, PR #110 R2): a
