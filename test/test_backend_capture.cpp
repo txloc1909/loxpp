@@ -187,13 +187,22 @@ void validateCaptureAnalysis(const DecodedFunction& tree,
     collectById(tree, byId);
 
     for (const auto& [id, info] : captures.functions) {
+        const DecodedFunction& node = *byId.at(id);
+        // R18: CaptureLiveRange no longer carries an `end` field (it only
+        // ever duplicated allCloseOffsets.back(), or a chunk-length sentinel
+        // for a closedImplicitly-only range). This is the same bound the
+        // removed field's sentinel case gave, recomputed locally for the
+        // non-overlap check below.
+        int chunkEnd = static_cast<int>(node.function->chunk.size());
         for (const auto& [slot, ranges] : info.liveRangesBySlot) {
             int previousEnd = -1;
             for (const CaptureLiveRange& range : ranges) {
                 EXPECT_GE(range.firstCaptureOffset, 0)
                     << "id=" << id << " slot=" << slot;
-                EXPECT_GE(range.end, range.firstCaptureOffset)
-                    << "id=" << id << " slot=" << slot;
+                for (int offset : range.allCloseOffsets) {
+                    EXPECT_GE(offset, range.firstCaptureOffset)
+                        << "id=" << id << " slot=" << slot;
+                }
                 EXPECT_FALSE(range.capturingClosureOffsets.empty())
                     << "id=" << id << " slot=" << slot
                     << ": a live range must have at least one capturing "
@@ -206,11 +215,13 @@ void validateCaptureAnalysis(const DecodedFunction& tree,
                 EXPECT_GE(range.firstCaptureOffset, previousEnd)
                     << "id=" << id << " slot=" << slot
                     << ": live ranges of one slot must not overlap";
-                previousEnd = range.end;
+                previousEnd = range.allCloseOffsets.empty()
+                                  ? chunkEnd
+                                  : range.allCloseOffsets.back();
             }
         }
-        checkCloseUpvaluesMatchDecodedChunk(*byId.at(id), info);
-        checkNoOrphanCloseUpvalues(*byId.at(id), info);
+        checkCloseUpvaluesMatchDecodedChunk(node, info);
+        checkNoOrphanCloseUpvalues(node, info);
     }
 }
 
@@ -428,20 +439,20 @@ TEST(CaptureAnalysisTest,
     EXPECT_FALSE(wRanges[0].closedImplicitly)
         << "the later block's own endScope closes w with a real "
         << "CLOSE_UPVALUE";
-    EXPECT_LT(vRanges[0].end, wRanges[0].firstCaptureOffset)
+    EXPECT_LT(vRanges[0].allCloseOffsets.back(), wRanges[0].firstCaptureOffset)
         << "v must close before w is even captured -- the two ranges must "
         << "not overlap or share an end offset";
 }
 
 // R3 documentation: `firstCaptureOffset` is a bound, not the declaration
-// offset, and it does not dominate `end`. V3_loopvar.lox is the standing
-// counter-example: a zero-trip loop runs the CLOSE_UPVALUE that ends `i`'s
-// range without ever running the CLOSURE that opened it (the declaration,
-// the init clause's `var i = 0`, runs once before the loop and is not
-// reflected in either field). See capture_analysis.h for what this means for
-// N7. This test pins the exact counter-example down as an intentional,
-// tested contract, not a silent gap.
-TEST(CaptureAnalysisTest, LoopVarRangeDoesNotDominateItsOwnEnd) {
+// offset, and it does not dominate a range's own explicit closes.
+// V3_loopvar.lox is the standing counter-example: a zero-trip loop runs the
+// CLOSE_UPVALUE that ends `i`'s range without ever running the CLOSURE that
+// opened it (the declaration, the init clause's `var i = 0`, runs once
+// before the loop and is not reflected in either field). See
+// capture_analysis.h for what this means for N7. This test pins the exact
+// counter-example down as an intentional, tested contract, not a silent gap.
+TEST(CaptureAnalysisTest, LoopVarRangeDoesNotDominateItsOwnClose) {
     Compiled c = compileFile(projectRoot() / "notes" / "translation-probes" /
                              "V3_loopvar.lox");
     const DecodedFunction* make = findByName(c.tree, "make");
@@ -449,17 +460,19 @@ TEST(CaptureAnalysisTest, LoopVarRangeDoesNotDominateItsOwnEnd) {
     const FunctionCaptureInfo& info = infoFor(c.captures, make->id);
     const std::vector<CaptureLiveRange>& ranges = rangesFor(info, 2);
     ASSERT_EQ(ranges.size(), 1U);
+    ASSERT_FALSE(ranges[0].allCloseOffsets.empty());
+    int lastClose = ranges[0].allCloseOffsets.back();
 
     // The JUMP_IF_FALSE that skips the whole loop body on a zero-trip run
     // must jump to a target that is > firstCaptureOffset (inside the
-    // range) and <= end -- i.e. some path reaches the range without ever
-    // running the instruction firstCaptureOffset names.
+    // range) and <= its last explicit close -- i.e. some path reaches the
+    // range without ever running the instruction firstCaptureOffset names.
     bool foundSkipIntoRange = false;
     for (const DecodedInstruction& ins : make->instructions) {
         if (ins.op == Op::JUMP_IF_FALSE &&
             ins.offset < ranges[0].firstCaptureOffset &&
             ins.jumpTarget > ranges[0].firstCaptureOffset &&
-            ins.jumpTarget <= ranges[0].end) {
+            ins.jumpTarget <= lastClose) {
             foundSkipIntoRange = true;
         }
     }
@@ -812,7 +825,7 @@ TEST(CaptureAnalysisTest, DifferentVariablesReusingOneSlotDoNotShareACell) {
         << "a's if-block has exactly one real close, its own endScope";
     EXPECT_EQ(ranges[1].allCloseOffsets.size(), 1U)
         << "d's block has exactly one real close, its own endScope";
-    EXPECT_LE(ranges[0].end, ranges[1].firstCaptureOffset)
+    EXPECT_LE(ranges[0].allCloseOffsets.back(), ranges[1].firstCaptureOffset)
         << "a must close before d is even captured -- the two ranges must "
         << "not overlap";
 }

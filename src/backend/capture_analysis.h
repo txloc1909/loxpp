@@ -27,6 +27,23 @@
 // carries no stack simulation (N2), so every offset it reports is a bound on
 // a slot's capture, not a per-execution-path fact. See
 // FunctionCaptureInfo::firstCaptureOffset below for what that means for N7.
+//
+// Referee amendment 1 (PR #101, 2026-08-15): a per-path open set alone is not
+// sound. The compiler emits one CLOSE_UPVALUE per STATICALLY captured local
+// of a scope (decided at compile time from Local::isCaptured), while this
+// pass only opens a slot in its per-path state when a CLOSURE actually RUNS
+// on that path. A branch that captures a slot and then returns leaves a
+// SIBLING path running that scope's CLOSE_UPVALUE for a slot it never
+// dynamically opened. To resolve such a close soundly, the pass also
+// maintains a STATIC OVERLAY: one program-order map, threaded through every
+// block in offset order regardless of reachability, that mirrors the
+// compiler's own single-pass view of "captured and not yet closed" (see
+// analyzeOneChunk in capture_analysis.cpp). Each CLOSE_UPVALUE resolves
+// against the HIGHER of the per-path state and the overlay: state wins when
+// it holds the target (a real, dynamic close — vm.cpp's closeUpvalues
+// actually ends a cell there); the overlay wins only when state does not (a
+// static close — a genuine dynamic no-op on this path, because no cell ever
+// opened here to close).
 
 #include "cfg.h"
 #include "chunk_decoder.h"
@@ -72,13 +89,6 @@ struct CaptureLiveRange {
     // offset comparison.
     int firstCaptureOffset{-1};
 
-    // A real CLOSE_UPVALUE offset that ends this range. Meaningless (left at
-    // -1) only when `allCloseOffsets` is empty AND `closedImplicitly` is
-    // false, which never happens for a committed range — see that field.
-    // `end` is `allCloseOffsets.back()`, or the chunk's length when
-    // `allCloseOffsets` is empty and the range is `closedImplicitly`.
-    int end{-1};
-
     // Every real CLOSE_UPVALUE offset that resolves to this exact range, one
     // per path that closes it. A range genuinely gets more than one when its
     // scope has more than one mutually exclusive exit — break, continue, a
@@ -86,7 +96,14 @@ struct CaptureLiveRange {
     // OWN CLOSE_UPVALUE for the same captured local, on their own path — and
     // exactly one of them fires per real execution, never more than one and
     // never zero (unless the range is closedImplicitly, in which case this
-    // is empty: see that field). `end` is always `allCloseOffsets.back()`.
+    // is empty: see that field).
+    //
+    // R18 (referee amendment 1): earlier drafts also carried an `end` field,
+    // duplicating `allCloseOffsets.back()` and, for a closedImplicitly-only
+    // range, a chunk-length sentinel that was not a real offset. Removed —
+    // read `allCloseOffsets` and `closedImplicitly` instead, and neither
+    // mixes a real offset with a sentinel.
+    //
     // This field exists so a consumer (or a test — see
     // checkNoOrphanCloseUpvalues in test_backend_capture.cpp) can verify
     // every alternate is accounted for, not only the last one.
@@ -103,9 +120,7 @@ struct CaptureLiveRange {
     // entries in `allCloseOffsets` are. The common case with no explicit
     // close at all is the function's own top-level scope, which the
     // compiler never wraps in an explicit close on any path
-    // (06_shared_upvalue's `outer`) — there, `end` is the chunk's own
-    // length, not a real instruction offset, because there is no explicit
-    // close to report instead.
+    // (06_shared_upvalue's `outer`).
     bool closedImplicitly{false};
 
     // True when some LOOP's back-edge span [target, offset] contains
@@ -160,19 +175,23 @@ struct CaptureAnalysis {
 };
 
 // Builds the CFG (N1) of every chunk in `root`'s tree and derives the
-// capture map per execution path (round-3 referee decision, PR #101): a
-// dataflow over the CFG, not a flat, order-only walk over the instruction
-// list. A normal program can legitimately have more than one real
-// CLOSE_UPVALUE for the same capture, on mutually exclusive
-// break/continue/match-arm-exit/fall-through paths; a flat walk cannot tell
-// that apart from a real scope exit followed by a genuinely different, later
-// variable that reuses the same slot number, because CLOSE_UPVALUE carries
-// no operand. The CFG resolves it: a slot is open at a block's entry exactly
-// when every predecessor that reaches it agrees it is still open (two
-// disagreeing predecessors is a real error, not an alternate exit), and
-// CLOSE_UPVALUE always closes the highest open captured slot on whichever
-// single path is being walked. Throws std::runtime_error if a CLOSE_UPVALUE
-// names no open captured slot on a REACHABLE block's fully-converged path,
+// capture map per execution path (round-3 referee decision, amended by
+// referee amendment 1, PR #101): a dataflow over the CFG, not a flat,
+// order-only walk over the instruction list. A normal program can
+// legitimately have more than one real CLOSE_UPVALUE for the same capture,
+// on mutually exclusive break/continue/match-arm-exit/fall-through paths; a
+// flat walk cannot tell that apart from a real scope exit followed by a
+// genuinely different, later variable that reuses the same slot number,
+// because CLOSE_UPVALUE carries no operand. The CFG resolves it: a slot is
+// open at a block's entry exactly when every predecessor that reaches it
+// agrees it is still open (two disagreeing predecessors is a real error, not
+// an alternate exit). CLOSE_UPVALUE resolves against the higher of that
+// per-path state and a program-order static overlay (see the header comment
+// above and analyzeOneChunk in capture_analysis.cpp) — the per-path state
+// alone is not sound when a branch captures a slot and returns, leaving a
+// sibling path to run that scope's close for a slot it never dynamically
+// opened. Throws std::runtime_error if a CLOSE_UPVALUE names no open
+// captured slot in EITHER layer on a REACHABLE block's fully-converged path,
 // or if two CFG paths reach one block disagreeing on which capture holds a
 // slot open. Either signals decoder or compiler drift, not a normal program.
 CaptureAnalysis analyzeCaptures(const DecodedFunction& root);

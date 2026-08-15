@@ -8,14 +8,25 @@
 #include <map>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 
 namespace {
 
 // Slot -> the offset of the CLOSURE that opened the slot's currently-live
 // incarnation, at one point in the CFG. Absent means closed at that point.
 // A std::map so the highest-numbered open slot is reachable from rbegin(),
-// which is what resolving a CLOSE_UPVALUE needs (see advance).
+// which is what resolving a CLOSE_UPVALUE needs (see advanceCommit).
 using OpenOrigins = std::map<int, int>;
+
+// (slot, opening CLOSURE offset) -> that range's index in
+// FunctionCaptureInfo::liveRangesBySlot[slot]. Keyed by the PAIR, not the
+// offset alone (R16): one CLOSURE can capture more than one parent local in
+// a single instruction (one `isLocal=1` upvalue per captured slot), so two
+// DIFFERENT slots can share the same origin offset. Keying by offset alone
+// let the second slot's insertion silently overwrite the first's index,
+// naming the wrong range for one slot and, once the vector it pointed at
+// held fewer elements than the stale index, reading out of bounds.
+using RangeIndex = std::map<std::pair<int, int>, int>;
 
 // Joins one predecessor's exit state into a block's accumulated entry state.
 // A slot present in only one of the two stays open — the other predecessor
@@ -42,114 +53,48 @@ void joinInto(OpenOrigins& acc, const OpenOrigins& incoming,
     }
 }
 
-// Folds one CLOSURE instruction's local captures into `state`/`record`. See
-// `advance` for what `record == nullptr` (the dataflow probe) versus set
-// (the commit walk) means.
-void handleClosure(const DecodedInstruction& in, OpenOrigins& state,
-                   FunctionCaptureInfo* record,
-                   std::unordered_map<int, int>* rangeIndexByOrigin) {
-    for (const ClosureUpvalue& up : in.upvalues) {
-        if (!up.isLocal) {
-            continue; // a grandparent's slot, not this chunk's
-        }
-        int slot = up.index;
-        auto it = state.find(slot);
-        // During commit, "already open" is only trustworthy when that
-        // origin's range object actually exists yet. A loop header's
-        // stabilized entry state can show a slot open with THIS VERY
-        // CLOSURE's own offset as origin — the back-edge's echo of "still
-        // open on a later iteration" — before this, the walk's only visit
-        // to that offset, has run at all. Treat that as opening fresh, not
-        // sharing a range that is not there yet. The dataflow probe
-        // (record == nullptr) never builds range objects, so any open
-        // entry is shareable there — only the identity of the origin
-        // offset matters for the probe, not whether it has "a range" yet.
-        bool sharesExistingRange =
-            it != state.end() &&
-            (record == nullptr || rangeIndexByOrigin->count(it->second) > 0);
-        if (sharesExistingRange) {
-            if (record != nullptr) {
-                int idx = rangeIndexByOrigin->at(it->second);
-                record->liveRangesBySlot[slot][idx]
-                    .capturingClosureOffsets.push_back(in.offset);
-            }
-            continue;
-        }
-        state[slot] = in.offset;
-        if (record != nullptr) {
-            CaptureLiveRange range;
-            range.slot = slot;
-            range.firstCaptureOffset = in.offset;
-            range.capturingClosureOffsets.push_back(in.offset);
-            std::vector<CaptureLiveRange>& vec = record->liveRangesBySlot[slot];
-            vec.push_back(range);
-            (*rangeIndexByOrigin)[in.offset] = static_cast<int>(vec.size()) - 1;
-        }
-    }
-}
-
-// Resolves one CLOSE_UPVALUE against `state` and closes it. See `advance`
-// for what `record == nullptr` (the dataflow probe) versus set (the commit
-// walk) means.
+// Advances `state` across one block's own instructions for the DATAFLOW
+// PROBE only (see runDataflow) — a cheap, order-only advance that ignores
+// the static overlay entirely. It exists solely to converge the per-block
+// ENTRY states that seed the commit walk (analyzeOneChunk); it never builds
+// a CaptureLiveRange and is not itself the source of truth for which slot a
+// CLOSE_UPVALUE names — that resolution, including the overlay, happens once
+// in the commit walk, on each block's own fully-converged entry state.
 //
-// Referee decision (PR #101, round-3): CLOSE_UPVALUE closes the HIGHEST
-// open captured slot in the state. Compiler::endScope and
-// Compiler::emitLoopCleanup both reclaim locals in descending slot order,
-// one instruction per local, CLOSE_UPVALUE for each captured one. On one
-// real path, an earlier close in the same reclaim run already closed every
-// captured slot above this one, so the highest still-open slot is always
-// this instruction's target. This needs no group boundaries and no local
-// count — only the open set this pass already tracks.
-void handleCloseUpvalue(const DecodedInstruction& in, OpenOrigins& state,
-                        const std::string& functionId,
-                        FunctionCaptureInfo* record,
-                        std::unordered_map<int, int>* rangeIndexByOrigin) {
-    if (state.empty()) {
-        // The probe runs on entry states that are not yet at their fixed
-        // point: a block past a LOOP header can be probed before the
-        // back-edge has contributed that header's true entry state (the
-        // back-edge's own source sits later in the instruction stream than
-        // its target), so a close can transiently appear before this pass
-        // has learned its slot is open. That self-corrects on a later
-        // worklist iteration. The commit walk runs on the fully converged
-        // result of a REACHABLE block, so an empty state here can only mean
-        // decoder or compiler drift.
-        if (record == nullptr) {
-            return;
-        }
-        throw std::runtime_error("capture_analysis: CLOSE_UPVALUE at offset " +
-                                 std::to_string(in.offset) +
-                                 " in function id=" + functionId +
-                                 " has no open captured slot to close");
-    }
-    auto highest = std::prev(state.end());
-    int slot = highest->first;
-    int origin = highest->second;
-    if (record != nullptr) {
-        int idx = rangeIndexByOrigin->at(origin);
-        CaptureLiveRange& range = record->liveRangesBySlot[slot][idx];
-        range.end = in.offset;
-        range.allCloseOffsets.push_back(in.offset);
-    }
-    state.erase(highest);
-}
-
-// Advances `state` across one block's own instructions, in program order.
-// Pure state advance when `record` is null (the dataflow probe, run to a
-// fixed point before any range is recorded — see runDataflow); also builds
-// the real CaptureLiveRange records when `record` is set (the commit walk,
-// run once per reachable block on its stabilized entry state — see
-// analyzeOneChunk). Same open/close logic either way, so the commit walk
-// cannot disagree with the probe about which slot a CLOSE_UPVALUE names.
-void advance(const BasicBlock& block, OpenOrigins& state,
-             const std::string& functionId, FunctionCaptureInfo* record,
-             std::unordered_map<int, int>* rangeIndexByOrigin) {
+// This blind "always pop the current highest" rule can pop the WRONG slot at
+// a close that the commit walk will later resolve as a static, overlay-only
+// no-op (referee amendment 1) — but only within one scope-exit group, whose
+// N instructions the compiler always emits one per statically captured local
+// of that scope, in descending order. The group's real dynamically-open
+// slots are a SUBSET of that N; walking the group and blindly popping the
+// current top, N times, empties exactly that subset (each real pop removes
+// one of its own members, in the same descending order it would have been
+// removed in correctly) and lets every remaining pop no-op on empty state —
+// so the group's NET effect on `state` converges to the same result either
+// way. Only the per-instruction ATTRIBUTION can differ, and the probe never
+// attributes anything.
+void advanceProbe(const BasicBlock& block, OpenOrigins& state) {
     for (const DecodedInstruction& in : block.instructions) {
         if (in.op == Op::CLOSURE) {
-            handleClosure(in, state, record, rangeIndexByOrigin);
+            for (const ClosureUpvalue& up : in.upvalues) {
+                if (!up.isLocal) {
+                    continue; // a grandparent's slot, not this chunk's
+                }
+                if (!state.contains(up.index)) {
+                    state[up.index] = in.offset;
+                }
+            }
         } else if (in.op == Op::CLOSE_UPVALUE) {
-            handleCloseUpvalue(in, state, functionId, record,
-                               rangeIndexByOrigin);
+            if (state.empty()) {
+                // Entry states are not yet at their fixed point during the
+                // probe: a block past a LOOP header can be probed before the
+                // back-edge has contributed that header's true entry state,
+                // so a close can transiently appear before this pass has
+                // learned its slot is open. That self-corrects on a later
+                // worklist iteration.
+                continue;
+            }
+            state.erase(std::prev(state.end()));
         }
         // POP and everything else: no captured-slot effect.
     }
@@ -223,8 +168,8 @@ void recurseIntoChildren(const DecodedFunction& node, CaptureAnalysis& out) {
 // CLOSURE offset. `reachable[b]` is set the first time block b is ever
 // merged into, which happens only by following a real CFG edge from block 0
 // — a block this pass never visits is unreachable (for example, scope-exit
-// code after an unconditional `return`), and the commit walk must skip it,
-// not invent an entry state for it.
+// code after an unconditional `return`), and the commit walk must treat it
+// specially, not invent a real per-path entry state for it.
 //
 // A slot's openness at a block can depend on a LOOP back-edge that this pass
 // has not reached yet on a first forward pass (the back-edge's source sits
@@ -261,8 +206,7 @@ DataflowResult runDataflow(const Cfg& cfg, const std::string& functionId) {
         worklist.pop_front();
 
         OpenOrigins next = result.entryState[static_cast<size_t>(b)];
-        advance(cfg.blocks[static_cast<size_t>(b)], next, functionId, nullptr,
-                nullptr);
+        advanceProbe(cfg.blocks[static_cast<size_t>(b)], next);
 
         // A block's very first computation must propagate even when `next`
         // happens to equal a default-constructed (empty) exitState — that
@@ -294,6 +238,142 @@ DataflowResult runDataflow(const Cfg& cfg, const std::string& functionId) {
     return result;
 }
 
+// Folds one CLOSURE instruction's local captures into `state` and `overlay`
+// together, and (if `reachable`) into `info`. See advanceCommit for what the
+// two maps are and why a CLOSURE always updates both.
+void handleClosureCommit(const DecodedInstruction& in, OpenOrigins& state,
+                         OpenOrigins& overlay, bool reachable,
+                         FunctionCaptureInfo& info,
+                         RangeIndex& rangeIndexByOrigin) {
+    for (const ClosureUpvalue& up : in.upvalues) {
+        if (!up.isLocal) {
+            continue; // a grandparent's slot, not this chunk's
+        }
+        int slot = up.index;
+        auto it = state.find(slot);
+        // During commit, "already open" is only trustworthy when that
+        // origin's range object actually exists yet. A loop header's
+        // stabilized entry state can show a slot open with THIS VERY
+        // CLOSURE's own offset as origin — the back-edge's echo of "still
+        // open on a later iteration" — before this, the walk's only visit
+        // to that offset, has run at all. Treat that as opening fresh, not
+        // sharing a range that is not there yet.
+        bool joinsExistingRange =
+            reachable && it != state.end() &&
+            rangeIndexByOrigin.contains({slot, it->second});
+        if (joinsExistingRange) {
+            int idx = rangeIndexByOrigin.at({slot, it->second});
+            info.liveRangesBySlot[slot][idx].capturingClosureOffsets.push_back(
+                in.offset);
+            overlay[slot] = it->second;
+            continue;
+        }
+        state[slot] = in.offset;
+        if (reachable) {
+            CaptureLiveRange range;
+            range.slot = slot;
+            range.firstCaptureOffset = in.offset;
+            range.capturingClosureOffsets.push_back(in.offset);
+            std::vector<CaptureLiveRange>& vec = info.liveRangesBySlot[slot];
+            vec.push_back(range);
+            rangeIndexByOrigin[{slot, in.offset}] =
+                static_cast<int>(vec.size()) - 1;
+        }
+        overlay[slot] = in.offset;
+    }
+}
+
+// Resolves one CLOSE_UPVALUE against `state` and `overlay` together, and (if
+// `reachable`) records the outcome into `info`. See advanceCommit for the
+// two-layer resolution rule this implements (referee amendment 1).
+void handleCloseUpvalueCommit(const DecodedInstruction& in, OpenOrigins& state,
+                              OpenOrigins& overlay, bool reachable,
+                              const std::string& functionId,
+                              FunctionCaptureInfo& info,
+                              RangeIndex& rangeIndexByOrigin) {
+    bool hasState = !state.empty();
+    bool hasOverlay = !overlay.empty();
+    if (!hasState && !hasOverlay) {
+        if (!reachable) {
+            info.unreachableCloseOffsets.push_back(in.offset);
+            return;
+        }
+        throw std::runtime_error(
+            "capture_analysis: CLOSE_UPVALUE at offset " +
+            std::to_string(in.offset) + " in function id=" + functionId +
+            " has no open captured slot to close in either layer");
+    }
+    int stateTop = hasState ? std::prev(state.end())->first : -1;
+    int overlayTop = hasOverlay ? std::prev(overlay.end())->first : -1;
+    bool dynamic = hasState && stateTop >= overlayTop;
+    int slot = dynamic ? stateTop : overlayTop;
+    int origin = dynamic ? state.at(slot) : overlay.at(slot);
+    if (reachable) {
+        auto idxIt = rangeIndexByOrigin.find({slot, origin});
+        if (idxIt != rangeIndexByOrigin.end()) {
+            info.liveRangesBySlot[slot][idxIt->second]
+                .allCloseOffsets.push_back(in.offset);
+        }
+    } else {
+        info.unreachableCloseOffsets.push_back(in.offset);
+    }
+    if (dynamic) {
+        state.erase(slot);
+    }
+    overlay.erase(slot);
+}
+
+// Advances `state` (this block's own fully-converged per-path entry state)
+// and `overlay` (one program-order layer, SHARED across every block this
+// function is called for, in ascending block-index — i.e. ascending offset,
+// see Cfg::blocks — order) across one block's instructions, building the
+// real CaptureLiveRange records as it goes. Called once per block, in that
+// order, for every block of the chunk — reachable or not (referee amendment
+// 1, section on unreachable blocks: an unreachable CLOSE_UPVALUE still
+// updates the overlay, because the compiler's own single-pass bookkeeping
+// does not know or care whether the code it just emitted ever runs).
+//
+// `reachable` gates every OBSERVABLE effect on `info` (range creation, close
+// attribution, the unreachable-close report) — `state` and `overlay` still
+// advance for an unreachable block, purely so a LATER, reachable block's own
+// overlay lookups stay correctly threaded, but nothing at all is recorded
+// for the block itself.
+//
+// Referee amendment 1 (PR #101): the round-3 rule ("CLOSE_UPVALUE closes the
+// highest open captured slot in the per-path state") assumed every
+// statically captured local of a scope is dynamically open on the path that
+// reaches its close. That is false when a CLOSURE sits on a branch that
+// returns: a sibling path runs the scope's own CLOSE_UPVALUE for a slot its
+// own execution never opened. `overlay` tracks exactly that: the compiler's
+// single-pass, order-only view of "captured, not yet closed" (mirroring
+// Local::isCaptured), independent of which branch actually ran. A CLOSURE
+// updates BOTH layers together, to whatever origin `state` itself lands on
+// (already open on this path — the shared-cell case — or freshly opened
+// here). A CLOSE_UPVALUE resolves against whichever layer holds the HIGHER
+// slot number: `state` wins when it holds the target (a real, dynamic close
+// — the target is genuinely open on this exact path, so `state` loses it);
+// `overlay` wins only when `state` does not hold it (the target is captured
+// SOMEWHERE in this scope, per the compiler, but not on this path — a
+// dynamic no-op here, matching vm.cpp's closeUpvalues, which does nothing to
+// a slot with no open cell). The target is always removed from `overlay`
+// either way, because the compiler's own bookkeeping has now accounted for
+// it, on whichever path first reaches it in program order.
+void advanceCommit(const BasicBlock& block, OpenOrigins& state,
+                   OpenOrigins& overlay, bool reachable,
+                   const std::string& functionId, FunctionCaptureInfo& info,
+                   RangeIndex& rangeIndexByOrigin) {
+    for (const DecodedInstruction& in : block.instructions) {
+        if (in.op == Op::CLOSURE) {
+            handleClosureCommit(in, state, overlay, reachable, info,
+                                rangeIndexByOrigin);
+        } else if (in.op == Op::CLOSE_UPVALUE) {
+            handleCloseUpvalueCommit(in, state, overlay, reachable, functionId,
+                                     info, rangeIndexByOrigin);
+        }
+        // POP and everything else: no captured-slot effect.
+    }
+}
+
 void analyzeOneChunk(const DecodedFunction& node, CaptureAnalysis& out) {
     FunctionCaptureInfo info;
     info.id = node.id;
@@ -301,48 +381,40 @@ void analyzeOneChunk(const DecodedFunction& node, CaptureAnalysis& out) {
     Cfg cfg = buildCfg(node.instructions);
     DataflowResult dataflow = runDataflow(cfg, node.id);
 
-    // Commit walk: cfg.blocks is in byte order (see cfg.h), so ranges for
-    // one slot are appended to liveRangesBySlot in offset order here too —
-    // required for the determinism the mission brief's codegen-naming rule
-    // depends on, and for the non-overlap invariant the tests check.
-    std::unordered_map<int, int> rangeIndexByOrigin;
-    int chunkEnd = static_cast<int>(node.function->chunk.size());
+    // Commit walk: cfg.blocks is in byte order (see cfg.h), so this loop
+    // visits every instruction of the chunk exactly once, in program order
+    // — required both for ranges of one slot to land in liveRangesBySlot in
+    // offset order (the determinism the mission brief's codegen-naming rule
+    // depends on, and the non-overlap invariant the tests check) and for
+    // `overlay` below to correctly mirror the compiler's own single-pass
+    // view (referee amendment 1).
+    RangeIndex rangeIndexByOrigin;
+    OpenOrigins overlay;
     for (size_t b = 0; b < cfg.blocks.size(); b++) {
-        if (dataflow.reachable[b] == 0) {
-            // Never executes on any path from the chunk's entry (dead code
-            // after an unconditional return, for example). Attribute its
-            // CLOSE_UPVALUE instructions to no range, but still report them,
-            // so a cross-check can tell "unreachable" apart from "the pass
-            // lost track of a real close."
-            for (const DecodedInstruction& ins : cfg.blocks[b].instructions) {
-                if (ins.op == Op::CLOSE_UPVALUE) {
-                    info.unreachableCloseOffsets.push_back(ins.offset);
-                }
-            }
-            continue;
-        }
+        bool reachable = dataflow.reachable[b] != 0;
+        // An unreachable block never executes, so nothing is genuinely
+        // dynamically open there; only `overlay` (updated by advanceCommit
+        // regardless of `reachable`) can resolve a close inside it.
+        OpenOrigins state = reachable ? dataflow.entryState[b] : OpenOrigins{};
+        advanceCommit(cfg.blocks[b], state, overlay, reachable, node.id, info,
+                      rangeIndexByOrigin);
 
-        OpenOrigins state = dataflow.entryState[b];
-        advance(cfg.blocks[b], state, node.id, &info, &rangeIndexByOrigin);
-
-        if (!cfg.blocks[b].successors.empty()) {
+        if (!reachable || !cfg.blocks[b].successors.empty()) {
             continue;
         }
         // A reachable terminal block (RETURN or MATCH_ERROR): whatever is
-        // still open here closes with the frame, not with an explicit
-        // CLOSE_UPVALUE (06_shared_upvalue's `outer` never emits one on any
-        // path). This can coexist with a real explicit close recorded on a
-        // DIFFERENT path for the same range (one branch returns early while
-        // it is still open, another branch closes it properly) — so only
-        // fall back to the chunk's length when no explicit close exists yet;
-        // never overwrite a real one.
+        // still open in `state` here closes with the frame, not with an
+        // explicit CLOSE_UPVALUE (06_shared_upvalue's `outer` never emits
+        // one on any path). This can coexist with a real explicit close
+        // recorded on a DIFFERENT path for the same range (one branch
+        // returns early while it is still open, another branch closes it
+        // properly) — see FunctionCaptureInfo::closedImplicitly.
         for (const auto& [slot, origin] : state) {
-            int idx = rangeIndexByOrigin.at(origin);
-            CaptureLiveRange& range = info.liveRangesBySlot[slot][idx];
-            range.closedImplicitly = true;
-            if (range.allCloseOffsets.empty()) {
-                range.end = chunkEnd;
+            auto idxIt = rangeIndexByOrigin.find({slot, origin});
+            if (idxIt == rangeIndexByOrigin.end()) {
+                continue;
             }
+            info.liveRangesBySlot[slot][idxIt->second].closedImplicitly = true;
         }
     }
 
