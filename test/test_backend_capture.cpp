@@ -33,6 +33,7 @@
 // instruction walk, so a capture's verdict depends only on the CFG paths
 // that actually reach it.
 
+#include "backend/abstract_stack.h"
 #include "backend/capture_analysis.h"
 #include "backend/chunk_decoder.h"
 #include "compiler.h"
@@ -145,20 +146,25 @@ void checkCloseUpvaluesMatchDecodedChunk(const DecodedFunction& node,
     }
 }
 
-// R4 / R9 / R15 / referee amendment 1 item 4: the other direction of the
-// cross-check above, strengthened to count occurrences, not just presence. A
+// R4 / R9 / R15 / referee amendment 1 item 4, extended by amendment 4 item 4
+// (round 10) to a THIRD bucket: the other direction of the cross-check
+// above, strengthened to count occurrences, not just presence. A
 // CLOSE_UPVALUE the chunk actually contains, but that matches no reported
-// range's close offsets and is not listed as unreachable dead code, is
-// exactly the R9 shape: the close was seen and misattributed elsewhere, with
-// no other check here noticing. A CLOSE_UPVALUE reported more than once
-// (double-attributed to two ranges, or both a range and "unreachable") is
-// just as wrong, so every real close must appear EXACTLY once across the
-// whole report. This needs no CFG and no stack simulation of its own -- only
-// the analysis's own reported closes, compared against the chunk it read.
+// range's close offsets, no unreachableCloseOffsets entry, and no
+// staticallyDeadCloseOffsets entry, is exactly the R9 shape: the close was
+// seen and misattributed elsewhere, with no other check here noticing. A
+// CLOSE_UPVALUE reported more than once (double-attributed across any two
+// of the three buckets) is just as wrong, so every real close must appear
+// EXACTLY once across the whole report. This needs no CFG and no stack
+// simulation of its own -- only the analysis's own reported closes,
+// compared against the chunk it read.
 void checkNoOrphanCloseUpvalues(const DecodedFunction& node,
                                 const FunctionCaptureInfo& info) {
     std::map<int, int> occurrences;
     for (int offset : info.unreachableCloseOffsets) {
+        occurrences[offset]++;
+    }
+    for (int offset : info.staticallyDeadCloseOffsets) {
         occurrences[offset]++;
     }
     for (const auto& [slot, ranges] : info.liveRangesBySlot) {
@@ -176,36 +182,47 @@ void checkNoOrphanCloseUpvalues(const DecodedFunction& node,
             occurrences.contains(ins.offset) ? occurrences.at(ins.offset) : 0;
         EXPECT_EQ(count, 1)
             << "id=" << info.id << ": CLOSE_UPVALUE at offset " << ins.offset
-            << " must be the end of EXACTLY one reported range (or reported "
-            << "unreachable exactly once), got " << count;
+            << " must be the end of EXACTLY one reported range, or reported "
+            << "unreachable, or reported statically dead -- exactly once "
+            << "total across the three, got " << count;
     }
 }
 
-// R23 invariant 2 (referee amendment 3): a resolved close's reported slot
-// must equal the frame height immediately before it, minus one -- the
-// definitional fact the whole height-based design rests on
-// (capture_analysis.h). This is the check that catches a close attributed
-// to the WRONG slot (R22 case 2: the map named a real slot and a real
-// close, but the pairing was wrong) -- a check that only counts
-// attributions (checkNoOrphanCloseUpvalues) cannot see that class of bug at
-// all, because a swapped pairing still leaves every real close attributed
-// exactly once, just to the wrong range.
-void checkCloseSlotsMatchFrameHeight(const DecodedFunction& node,
+// R27 (round 10): checkCloseSlotsMatchFrameHeight (deleted) recomputed
+// `computeFrameHeights` and compared it against the very map key that same
+// expression produced -- an equality that holds by construction, for every
+// input, and so can never fail. Referee amendment 3's R23 ruling asked
+// invariant 2 to catch a close attributed to the WRONG slot (R22 case 2);
+// under the height design that class of bug is impossible BY CONSTRUCTION,
+// so the check added no signal. This replacement compares two
+// INDEPENDENTLY written per-opcode tables instead: for every instruction
+// N2's own analyzeStack (src/backend/abstract_stack.cpp, already on `main`)
+// marks reached, this pass's height must equal N2's height. A later edit to
+// either table alone, on any one opcode, fails at that exact instruction --
+// the reviewer proved this class of check has teeth by changing SET_INDEX's
+// effect and watching 14 tests fail, including the three corpus sweeps.
+// Test-only use of N2 is permitted here; the pass itself keeps zero N2
+// dependency (capture_analysis.cpp).
+void checkHeightMatchesAbstractStack(const DecodedFunction& node,
                                      const FunctionCaptureInfo& info) {
     std::unordered_map<int, int> heightBefore = computeFrameHeights(node);
-    for (const auto& [slot, ranges] : info.liveRangesBySlot) {
-        for (const CaptureLiveRange& range : ranges) {
-            for (int offset : range.allCloseOffsets) {
-                auto it = heightBefore.find(offset);
-                ASSERT_TRUE(it != heightBefore.end())
-                    << "id=" << info.id << ": close at offset " << offset
-                    << " has no computed frame height";
-                EXPECT_EQ(slot, it->second - 1)
-                    << "id=" << info.id << ": close at offset " << offset
-                    << " is reported against slot " << slot << ", but height("
-                    << offset << ")-1 = " << it->second - 1;
-            }
+    FunctionStackAnalysis stack = analyzeStack(node);
+    ASSERT_EQ(stack.before.size(), node.instructions.size())
+        << "id=" << info.id;
+    ASSERT_EQ(stack.reached.size(), node.instructions.size())
+        << "id=" << info.id;
+    for (size_t i = 0; i < node.instructions.size(); i++) {
+        if (!stack.reached[i]) {
+            continue;
         }
+        int offset = node.instructions[i].offset;
+        auto it = heightBefore.find(offset);
+        ASSERT_TRUE(it != heightBefore.end())
+            << "id=" << info.id << ": N2 reaches offset " << offset
+            << ", but this pass's own CFG walk never does";
+        EXPECT_EQ(it->second, stack.before[i].height)
+            << "id=" << info.id << ": this pass's height at offset " << offset
+            << " disagrees with N2's independent table";
     }
 }
 
@@ -287,7 +304,7 @@ void validateCaptureAnalysis(const DecodedFunction& tree,
         }
         checkCloseUpvaluesMatchDecodedChunk(node, info);
         checkNoOrphanCloseUpvalues(node, info);
-        checkCloseSlotsMatchFrameHeight(node, info);
+        checkHeightMatchesAbstractStack(node, info);
         checkNoEnclosingCaptureClosesInsideLoop(node, info);
     }
 }
