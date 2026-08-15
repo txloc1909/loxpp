@@ -354,6 +354,23 @@ std::string emitScript(const DecodedFunction& fn,
         b.emit("aload " + scratch, +1);
     };
 
+    // R4 fix (PR #109 nit): `lastInvisibleVarSlot`'s initial value, -1, is a
+    // sentinel for "no invisible-var site has run yet", not a real slot.
+    // `jvmSlotForLocal(-1)` is 1, the globals-receiver slot (`globalsSlot`
+    // above) — an unguarded read there would silently `aload` the
+    // `LoxGlobals` instance as if it were a Lox value instead of failing
+    // loudly, so every read of `lastInvisibleVarSlot` goes through here.
+    auto loadLastInvisibleVar = [&]() -> int {
+        if (lastInvisibleVarSlot < 0) {
+            throw std::runtime_error(
+                "jvm_emitter: peek of an invisible var before any "
+                "invisible-var site ran");
+        }
+        int sourceSlot = jvmSlotForLocal(lastInvisibleVarSlot);
+        b.emit("aload " + std::to_string(sourceSlot), +1);
+        return sourceSlot;
+    };
+
     b.emit("invokestatic lox/LoxRuntime/init()Llox/LoxGlobals;", +1);
     b.emit("astore " + std::to_string(globalsSlot), -1);
 
@@ -538,8 +555,7 @@ std::string emitScript(const DecodedFunction& fn,
             // and a further chained peek reloads the same persistent slot
             // fresh rather than depend on a leftover operand.
             if (analysis.before[i].operandDepth() == 0) {
-                int sourceSlot = jvmSlotForLocal(lastInvisibleVarSlot);
-                b.emit("aload " + std::to_string(sourceSlot), +1);
+                loadLastInvisibleVar();
                 b.emit("astore " + std::to_string(slot), -1);
             } else if (fuse) {
                 b.emit("astore " + std::to_string(slot), -1);
@@ -571,8 +587,7 @@ std::string emitScript(const DecodedFunction& fn,
             // R9 (PR #107 round 2, nit): resolved for N5 the same way as
             // SET_LOCAL above — `lastInvisibleVarSlot`, not `localCount`.
             if (analysis.before[i].operandDepth() == 0) {
-                int sourceSlot = jvmSlotForLocal(lastInvisibleVarSlot);
-                b.emit("aload " + std::to_string(sourceSlot), +1);
+                loadLastInvisibleVar();
                 globalsCall("set", constantString(in.constantIndex),
                             /*peek=*/false);
             } else {
