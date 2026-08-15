@@ -1622,3 +1622,294 @@ TEST(CaptureAnalysisTest, R22StaticCloseDoesNotStealAnOuterFunctionScopeSlot) {
         << "and the normal fall-through";
     EXPECT_TRUE(xRanges[0].perIteration);
 }
+
+// R25 regression 1 (referee amendment 4, round 10). Native output is 1:
+// `Compiler::endScope` emits the block's own CLOSE_UPVALUE AFTER the
+// `return f;`, so that close sits in a block block 0 never reaches.
+// Before amendment 4, `advanceCommit` looked the offset up in
+// `heightBefore` before checking reachability, and `heightBefore` (built by
+// `computeFrameHeightsForCfg`) holds no entry for an unreached block, so
+// the lookup threw `std::out_of_range` -- this program crashed the pass.
+TEST(CaptureAnalysisTest, DeadCloseAfterReturnFromBlockIsUnreachableNotAThrow) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer() {
+          {
+            var a = 1;
+            fun f() { return a; }
+            return f;
+          }
+        }
+        print outer()();
+    )",
+                                   "r25_1_dead_close_after_return_from_block");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* f = findByName(c.tree, "f");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(f, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int aSlot = infoFor(c.captures, f->id).ownUpvalues.at(0).index;
+
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, aSlot);
+    ASSERT_EQ(ranges.size(), 1U);
+    EXPECT_EQ(ranges[0].firstCaptureOffset, 3);
+    EXPECT_TRUE(ranges[0].allCloseOffsets.empty())
+        << "the block's own CLOSE_UPVALUE is dead code after `return f;`, "
+        << "never a real end of this range";
+    EXPECT_TRUE(ranges[0].closedImplicitly)
+        << "the only path that reaches RETURN still has a's cell open";
+    EXPECT_EQ(info.unreachableCloseOffsets, std::vector<int>{12})
+        << "the dead CLOSE_UPVALUE must be reported, not silently dropped "
+        << "and not thrown on";
+    EXPECT_TRUE(info.staticallyDeadCloseOffsets.empty());
+}
+
+// R25 regression 2 (referee amendment 4, round 10). Native output is 7: the
+// same shape as the previous test, one level deeper -- a method body's own
+// block, not a plain function's.
+TEST(CaptureAnalysisTest, DeadCloseAfterReturnFromMethodBlockIsUnreachable) {
+    Compiled c = compileAndAnalyze(R"(
+        class Box {
+          init(v) { this.v = v; }
+          getter() {
+            {
+              var w = this.v;
+              fun g() { return w; }
+              return g;
+            }
+          }
+        }
+        print Box(7).getter()();
+    )",
+                                   "r25_2_dead_close_after_return_from_method");
+    const DecodedFunction* getter = findByName(c.tree, "getter");
+    const DecodedFunction* g = findByName(c.tree, "g");
+    ASSERT_NE(getter, nullptr);
+    ASSERT_NE(g, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, getter->id);
+    int wSlot = infoFor(c.captures, g->id).ownUpvalues.at(0).index;
+
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, wSlot);
+    ASSERT_EQ(ranges.size(), 1U);
+    EXPECT_EQ(ranges[0].firstCaptureOffset, 5);
+    EXPECT_TRUE(ranges[0].allCloseOffsets.empty());
+    EXPECT_TRUE(ranges[0].closedImplicitly);
+    EXPECT_EQ(info.unreachableCloseOffsets, std::vector<int>{14});
+    EXPECT_TRUE(info.staticallyDeadCloseOffsets.empty());
+}
+
+// R25 regression 3 (referee amendment 4, round 10). Native output is 0: an
+// unconditional `return f;` inside a WHILE loop's body, so the loop's own
+// back-edge (LOOP) and the loop-body scope's own CLOSE_UPVALUE both become
+// dead code below the return. Pins that R25's fix generalizes past an `if`
+// block to an ordinary loop body.
+TEST(CaptureAnalysisTest, DeadCloseAfterReturnFromLoopBodyIsUnreachable) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer() {
+          var i = 0;
+          while (i < 3) {
+            var x = i;
+            fun f() { return x; }
+            return f;
+          }
+          return nil;
+        }
+        print outer()();
+    )",
+                                   "r25_3_dead_close_after_return_from_loop");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* f = findByName(c.tree, "f");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(f, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int xSlot = infoFor(c.captures, f->id).ownUpvalues.at(0).index;
+
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, xSlot);
+    ASSERT_EQ(ranges.size(), 1U);
+    EXPECT_EQ(ranges[0].firstCaptureOffset, 15);
+    EXPECT_TRUE(ranges[0].allCloseOffsets.empty());
+    EXPECT_TRUE(ranges[0].closedImplicitly);
+    EXPECT_EQ(info.unreachableCloseOffsets, std::vector<int>{24});
+    EXPECT_TRUE(info.staticallyDeadCloseOffsets.empty());
+}
+
+// R26 regression (referee amendment 4, round 10). Native output is nil:
+// `fun g` sits after `return r;`, so its CLOSURE is unreachable, but
+// program order still puts it before the enclosing block's own
+// CLOSE_UPVALUE for x -- a REACHABLE, STATIC close (the only path that
+// captures x, through `if (c)`, itself returns). Before amendment 4, this
+// close's static lookup named g's (range-less) origin and threw "resolved
+// to slot ... which has no recorded range". Now it is a statically dead
+// close.
+TEST(CaptureAnalysisTest, StaticCloseOfSlotWithOnlyUnreachableCaptureIsDead) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer(c, d) {
+          var r = nil;
+          {
+            var x = 1;
+            if (c) {
+              fun f() { return x; }
+              return f;
+            }
+            if (d) {
+              return r;
+              fun g() { return x; }
+            }
+          }
+          return r;
+        }
+        print outer(false, false);
+    )",
+                                   "r26_static_close_only_unreachable_capture");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* f = findByName(c.tree, "f");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(f, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int xSlot = infoFor(c.captures, f->id).ownUpvalues.at(0).index;
+
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, xSlot);
+    ASSERT_EQ(ranges.size(), 1U)
+        << "f's own (reachable) capture of x still opens exactly one range";
+    EXPECT_EQ(ranges[0].firstCaptureOffset, 10);
+    EXPECT_TRUE(ranges[0].allCloseOffsets.empty())
+        << "the only close reaching this scope is g's dead-code close, "
+        << "which must NOT attach here";
+    EXPECT_TRUE(ranges[0].closedImplicitly)
+        << "the c=true path returns through f with x's cell still open";
+    EXPECT_EQ(info.staticallyDeadCloseOffsets, std::vector<int>{42})
+        << "g's close resolves to g's own (range-less, unreachable) "
+        << "origin -- statically dead, not a throw and not f's close";
+    EXPECT_TRUE(info.unreachableCloseOffsets.empty())
+        << "this close is reachable -- only its ORIGIN is dead code";
+}
+
+// deadcap.lox (referee amendment 4, round 10). Native output is 1: x is
+// captured ONLY by a CLOSURE that sits after an unconditional `return nil;`
+// inside the `if`, so f's CLOSURE never opens a range at all. The block's
+// own CLOSE_UPVALUE for x, after the `if`, is reachable (the `if (c)`
+// false-branch reaches it directly) and static (x is never path-open
+// there) -- it resolves to f's origin, which the pass never gave a range,
+// so it is statically dead. No range for x's slot exists anywhere.
+TEST(CaptureAnalysisTest, DeadCapAllCapturesUnreachableLeavesNoRangeAtAll) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer(c) {
+          {
+            var x = 1;
+            if (c) {
+              return nil;
+              fun f() { return x; }
+            }
+          }
+          return 1;
+        }
+        print outer(false);
+    )",
+                                   "deadcap_all_captures_unreachable");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    ASSERT_NE(outer, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+
+    EXPECT_TRUE(info.liveRangesBySlot.empty())
+        << "x's only capturing CLOSURE never runs, so no slot ever gets a "
+        << "real range -- deadCloses must carry this fact instead";
+    EXPECT_EQ(info.staticallyDeadCloseOffsets, std::vector<int>{21});
+    EXPECT_TRUE(info.unreachableCloseOffsets.empty())
+        << "the close itself IS reached, from the if (c) false branch";
+}
+
+// steal.lox (referee amendment 4, round 10). Native output is 2: `a` and
+// `b` are two DIFFERENT variables that reuse the same slot in two sibling
+// scopes. `a` is really captured (by `f`, reachable) and really closes at
+// the end of its own scope. `b` is captured only by `g`, whose CLOSURE
+// sits after an unconditional `return nil;` (unreachable). The rejected
+// fix from R26 ("gate latestInstanceBySlot on reachable") makes b's own
+// scope-exit close silently resolve to a's ALREADY-CLOSED range instead
+// (because gating stops g's unreachable CLOSURE from ever overwriting the
+// map entry a's CLOSURE left behind) -- this test pins that a's range ends
+// at exactly {9}, never touching b's close at 31.
+TEST(CaptureAnalysisTest, SiblingScopeReusingSlotDoesNotStealClosedRange) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer(c) {
+          {
+            var a = 1;
+            fun f() { return a; }
+          }
+          {
+            var b = 2;
+            if (c) {
+              return nil;
+              fun g() { return b; }
+            }
+          }
+          return 2;
+        }
+        print outer(false);
+    )",
+                                   "steal_sibling_scope_reusing_slot");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* f = findByName(c.tree, "f");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(f, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int slot = infoFor(c.captures, f->id).ownUpvalues.at(0).index;
+
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, slot);
+    ASSERT_EQ(ranges.size(), 1U)
+        << "a is the only capture that ever opens a range on this slot -- "
+        << "b's own capture (g) never runs";
+    EXPECT_EQ(ranges[0].firstCaptureOffset, 3);
+    EXPECT_EQ(ranges[0].allCloseOffsets, std::vector<int>{9})
+        << "a's own scope-exit close ends this range; b's later close at "
+        << "31 must NOT appear here, or a's cell is stolen for b's use";
+    EXPECT_FALSE(ranges[0].closedImplicitly);
+    EXPECT_EQ(info.staticallyDeadCloseOffsets, std::vector<int>{31})
+        << "b's scope-exit close resolves to g's (range-less, unreachable) "
+        << "origin -- statically dead, not a's stolen range";
+}
+
+// corner.lox (referee amendment 4, round 10). Native output is 2 2 2: a
+// C-style `for` with an OMITTED condition and a captured loop var, whose
+// only exit is a `break` inside the body. `Compiler::emitLoopCleanup`
+// routes `break` THROUGH the loop's shared after-loop CLOSE_UPVALUE (the
+// break jump TARGETS the close itself, rather than emitting its own copy),
+// so that close stays reachable and dynamic whenever any break is -- this
+// is a positive regression, not a dead-code one: it pins that the fix
+// above does not disturb the ordinary, no-dead-code case.
+TEST(CaptureAnalysisTest, BreakOnlyForLoopRoutesThroughSharedAfterLoopClose) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer() {
+          var f0 = nil; var f1 = nil; var f2 = nil;
+          for (var i = 0;; i = i + 1) {
+            fun f() { return i; }
+            if (i == 0) f0 = f;
+            if (i == 1) f1 = f;
+            if (i >= 2) { f2 = f; break; }
+          }
+          print f0();
+          print f1();
+          print f2();
+        }
+        outer();
+    )",
+                                   "corner_break_only_for_shared_close");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* f = findByName(c.tree, "f");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(f, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int slot = infoFor(c.captures, f->id).ownUpvalues.at(0).index;
+
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, slot);
+    ASSERT_EQ(ranges.size(), 1U)
+        << "i is one loop variable, so one live range covers the whole loop";
+    EXPECT_EQ(ranges[0].firstCaptureOffset, 21);
+    EXPECT_EQ(ranges[0].allCloseOffsets, std::vector<int>{92})
+        << "break routes through the shared after-loop close -- one real "
+        << "close, not a separate copy per exit path";
+    EXPECT_FALSE(ranges[0].closedImplicitly);
+    EXPECT_FALSE(ranges[0].perIteration)
+        << "i is the loop variable itself -- one cell for the whole loop, "
+        << "matching native output 2, 2, 2";
+    EXPECT_TRUE(info.unreachableCloseOffsets.empty());
+    EXPECT_TRUE(info.staticallyDeadCloseOffsets.empty());
+}
