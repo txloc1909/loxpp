@@ -238,10 +238,11 @@ struct Emitter {
     int scratchSlot{0};
 
     // Set (to scratchSlot+1 / scratchSlot+2) only when this chunk contains a
-    // CALL with at least one argument or a BUILD_LIST with at least one
-    // element; -1 otherwise, so a stray use before emitChunk's own prologue
-    // computes them fails loudly instead of silently aliasing scratchSlot.
-    // emitBuildList only ever uses argScratchBase, never calleeScratchSlot —
+    // CALL with at least one argument, a BUILD_LIST with at least one
+    // element, or a BUILD_MAP with at least one pair; -1 otherwise, so a
+    // stray use before emitChunk's own prologue computes them fails loudly
+    // instead of silently aliasing scratchSlot. emitBuildList and
+    // emitBuildMap only ever use argScratchBase, never calleeScratchSlot —
     // see computeMaxSpillWidth's own note.
     int calleeScratchSlot{-1};
     int argScratchBase{-1};
@@ -521,6 +522,45 @@ bool emitSimpleOp(Emitter& e, Op op) {
                  "Ljava/lang/Object;)Ljava/lang/Object;",
                  -2);
         return true;
+    // SLICE pops [seq, start, end] bottom-to-top (vm.cpp: peek(2), peek(1),
+    // peek(0)) — LoxOps.slice's own parameter order already matches, so
+    // this is a plain call, no shuffle (same P2 exemption as GET_INDEX).
+    case Op::SLICE:
+        e.b.emit("invokestatic "
+                 "lox/LoxOps/slice(Ljava/lang/Object;Ljava/lang/Object;"
+                 "Ljava/lang/Object;)Ljava/lang/Object;",
+                 -2);
+        return true;
+    // IN pops [elem, seq] bottom-to-top (vm.cpp pops seq first, so seq sits
+    // on top) — LoxOps.in's own doc comment already matches that order.
+    case Op::IN:
+        e.b.emit("invokestatic lox/LoxOps/in(Ljava/lang/Object;Ljava/lang/"
+                 "Object;)Z",
+                 -1);
+        e.b.emit("invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/"
+                 "Boolean;",
+                 0);
+        return true;
+    // ITER_HAS_NEXT/ITER_NEXT consume the copy a preceding GET_LOCAL already
+    // loaded (P8 — the iterator lives in an ordinary chunk local, never a
+    // dedicated backend slot); the local itself is untouched.
+    case Op::ITER_HAS_NEXT:
+        e.b.emit("invokestatic lox/LoxOps/iterHasNext(Ljava/lang/Object;)Z", 0);
+        e.b.emit("invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/"
+                 "Boolean;",
+                 0);
+        return true;
+    case Op::ITER_NEXT:
+        e.b.emit("invokestatic lox/LoxOps/iterNext(Ljava/lang/Object;)"
+                 "Ljava/lang/Object;",
+                 0);
+        return true;
+    case Op::IS_SEQ:
+        e.b.emit("invokestatic lox/LoxOps/isSeq(Ljava/lang/Object;)Z", 0);
+        e.b.emit("invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/"
+                 "Boolean;",
+                 0);
+        return true;
     default:
         return false;
     }
@@ -605,6 +645,42 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
     e.b.resync(d - 1);
     if (peek) {
         e.b.emit("aload " + scratch, +1);
+    }
+}
+
+// GET_ITER replaces its own operand in place (vm.cpp: `stackTop[-1] = ...`).
+// It carries no operand byte of its own, so — like CLOSE_UPVALUE
+// (capture_analysis.h) — the position it replaces is computed the same
+// way: the frame's own stack height right before it runs, minus one. That
+// position is also this value's OWN declaring push (11_for_in.lox: the
+// iterable expression, e.g. BUILD_LIST, is what actually pushed it there),
+// and N2/N3 already hand THAT instruction's own offset the invisible-var
+// store for this slot (finishInstruction), one instruction earlier than
+// GET_ITER itself. By the time GET_ITER runs, the JVM operand stack is
+// therefore already empty at this position — the value already lives in
+// its own JVM local slot, not still sitting on the operand stack the way a
+// plain "simple op" (one invokestatic, no load/store) would assume. GET_ITER
+// must reload that slot, transform it, and store the result straight back,
+// through the same captured-slot check GET_LOCAL/SET_LOCAL use (a sibling
+// scope can reuse this same slot number for a variable some closure
+// elsewhere in the chunk captures — capturedSlots is keyed by slot number,
+// not by declaration), never a bare aload/astore.
+void emitGetIter(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    int loxSlot = e.analysis.before[i].height - 1;
+    int slot = e.jvmSlotForLocal(loxSlot);
+    bool captured = e.isCaptured(loxSlot);
+    if (captured) {
+        emitCapturedGetLocal(e, slot, in.offset);
+    } else {
+        e.b.emit("aload " + std::to_string(slot), +1);
+    }
+    e.b.emit("invokestatic "
+             "lox/LoxOps/getIter(Ljava/lang/Object;)Llox/LoxIterator;",
+             0);
+    if (captured) {
+        emitCapturedStore(e, slot, in.offset, /*peek=*/false);
+    } else {
+        e.b.emit("astore " + std::to_string(slot), -1);
     }
 }
 
@@ -834,6 +910,38 @@ void emitBuildList(Emitter& e, const DecodedInstruction& in) {
     e.b.emit(pushIntInstruction(count), +1);
     e.b.emit("anewarray java/lang/Object", 0);
     for (int i = 0; i < count; i++) {
+        e.b.emit("dup", +1);
+        e.b.emit(pushIntInstruction(i), +1);
+        e.b.emit("aload " + std::to_string(e.argScratchBase + i), +1);
+        e.b.emit("aastore", -3);
+    }
+    e.b.emit(buildSig, 0);
+}
+
+// BUILD_MAP n: n key/value pairs already on the stack, pushed in source
+// order — key0, val0, key1, val1, ..., key_{n-1}, val_{n-1}
+// (compiler.cpp's mapLiteral) — so the same P7 reshape as emitBuildList
+// applies, just to 2n cells instead of n. vm.cpp validates every key
+// before writing any pair ("Validate all keys before any allocation");
+// LoxOps.buildMap (runtime/jvm) keeps that same two-pass shape.
+void emitBuildMap(Emitter& e, const DecodedInstruction& in) {
+    int pairCount = in.byteOperand;
+    int width = 2 * pairCount;
+    const char* buildSig =
+        "invokestatic lox/LoxOps/buildMap([Ljava/lang/Object;)Llox/"
+        "LoxMap;";
+    if (pairCount == 0) {
+        e.b.emit(pushIntInstruction(0), +1);
+        e.b.emit("anewarray java/lang/Object", 0);
+        e.b.emit(buildSig, 0);
+        return;
+    }
+    for (int i = width - 1; i >= 0; i--) {
+        e.b.emit("astore " + std::to_string(e.argScratchBase + i), -1);
+    }
+    e.b.emit(pushIntInstruction(width), +1);
+    e.b.emit("anewarray java/lang/Object", 0);
+    for (int i = 0; i < width; i++) {
         e.b.emit("dup", +1);
         e.b.emit(pushIntInstruction(i), +1);
         e.b.emit("aload " + std::to_string(e.argScratchBase + i), +1);
@@ -1121,19 +1229,22 @@ int computeMaxLocalCount(const FunctionStackAnalysis& analysis) {
     return std::max(maxLocalCount, 1);
 }
 
-// The widest N-element spill this chunk needs — CALL's argCount, or
+// The widest N-element spill this chunk needs — CALL's argCount,
 // BUILD_LIST's element count (node N7 pulls BUILD_LIST forward from N9's
-// scope; see emitBuildList's own note) — ignoring a width of 0 (needs no
-// scratch slot at all: emitCall's argCount==0 path, and emitBuildList's own
-// count==0 path, each build directly with no spill). 0 here means the
-// chunk needs no scratch slots for either family, keeping `.limit locals`
-// byte-identical to pre-N6 output on every chunk that makes no call and
-// builds no list.
+// scope; see emitBuildList's own note), or BUILD_MAP's own width, twice its
+// pair count (emitBuildMap spills key and value separately) — ignoring a
+// width of 0 (needs no scratch slot at all: emitCall's argCount==0 path,
+// and emitBuildList's/emitBuildMap's own count==0 path, each build directly
+// with no spill). 0 here means the chunk needs no scratch slots for any
+// family, keeping `.limit locals` byte-identical to pre-N6 output on every
+// chunk that makes no call and builds no list or map.
 int computeMaxSpillWidth(const DecodedFunction& fn) {
     int maxWidth = 0;
     for (const DecodedInstruction& instr : fn.instructions) {
         if (instr.op == Op::CALL || instr.op == Op::BUILD_LIST) {
             maxWidth = std::max(maxWidth, instr.byteOperand);
+        } else if (instr.op == Op::BUILD_MAP) {
+            maxWidth = std::max(maxWidth, 2 * instr.byteOperand);
         }
     }
     return maxWidth;
@@ -1356,6 +1467,12 @@ void emitBody(Emitter& e, bool isScript,
             break;
         case Op::BUILD_LIST:
             emitBuildList(e, in);
+            break;
+        case Op::BUILD_MAP:
+            emitBuildMap(e, in);
+            break;
+        case Op::GET_ITER:
+            emitGetIter(e, i, in);
             break;
         case Op::CLOSURE:
             emitClosure(e, in, childClassNames);

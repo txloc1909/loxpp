@@ -15,9 +15,10 @@
 // for-in), pulled forward here because N7's own checkpoint
 // (notes/translation-probes/V1_fresh_cell.lox, V3_loopvar.lox) cannot run
 // to completion without them: both build a list of the closures under test
-// and read it back by index. N9 still owns BUILD_MAP, SLICE, IN, and the
-// for-in iterator protocol (GET_ITER/ITER_HAS_NEXT/ITER_NEXT) — see
-// emitBuildList's own note.
+// and read it back by index. N9 adds the rest of its own scope on top:
+// BUILD_MAP, SLICE, IN, IS_SEQ, and the for-in iterator protocol
+// (GET_ITER/ITER_HAS_NEXT/ITER_NEXT) — see emitBuildList's and
+// emitBuildMap's own notes.
 //
 // JVM local-variable layout — one fixed mapping for both entry shapes
 // (nodes/N6.md: "choose a fixed slot mapping ... and use it everywhere"),
@@ -34,11 +35,14 @@
 // Either way, the Lox frame's own slots [0, maxLocalCount) mirror 1:1 into
 // the JVM locals right after those fixed slots, then one scratch slot holds
 // a peeked SET_GLOBAL's value across the LoxGlobals.set() call (P2), and —
-// only in a chunk that contains a CALL with at least one argument — one more
-// scratch slot for the callee plus one per argument the chunk's widest CALL
-// needs (P7: the args are already on the operand stack below where a fresh
-// array reference would land, so building the Object[] needs every value
-// spilled to a local first).
+// only in a chunk that contains a CALL with at least one argument, a
+// BUILD_LIST with at least one element, or a BUILD_MAP with at least one
+// pair — one more scratch slot for the callee plus one per spilled value
+// the chunk's widest such instruction needs (P7: the values are already on
+// the operand stack below where a fresh array reference would land, so
+// building the Object[] needs every value spilled to a local first;
+// BUILD_MAP's own width is twice its pair count, one slot each for key and
+// value).
 
 #include "abstract_stack.h"
 #include "chunk_decoder.h"
