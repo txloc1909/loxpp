@@ -24,6 +24,7 @@ probes=(
     "notes/translation-probes/03_and_or.lox"
     "notes/translation-probes/04_while.lox"
     "notes/translation-probes/05_for.lox"
+    "notes/translation-probes/08_call.lox"
     "notes/translation-probes/15_nested_arith.lox"
     "notes/translation-probes/18_peek_of_named_local.lox"
     "notes/translation-probes/19_peek_of_named_local_global.lox"

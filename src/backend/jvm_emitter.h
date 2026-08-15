@@ -2,24 +2,40 @@
 
 // JVM code generator (node N4 of the JVM/CLR backend DAG, discharges P2 — the
 // "peek, don't pop" family; node N5 adds P3b, control flow and verifier
-// legality; notes/bytecode-translation-problems.md). Lowers one function's
-// chunk to Jasmin (.j) text, consuming N0's decoder, N1's CFG/labels, and
-// N2's abstract-stack analysis. No calls or closures (N6/N7): this node
-// handles only the opcodes named in N4.md and N5.md, and aborts loudly on any
-// other opcode so a later node's gap fails loudly too.
+// legality; node N6 adds P5, functions and calls;
+// notes/bytecode-translation-problems.md). Lowers one function's chunk to
+// Jasmin (.j) text, consuming N0's decoder, N1's CFG/labels, and N2's
+// abstract-stack analysis. Upvalue wiring (N7), classes (N8), aggregates and
+// for-in (N9), and match/enum (N10) are still out of scope: this node aborts
+// loudly on any opcode or CLOSURE shape none of N4/N5/N6 lowers, so a later
+// node's gap fails loudly too.
 //
-// JVM local-variable layout (script form): slot 0 is the `main` method's
-// `String[] args` parameter, slot 1 holds the LoxGlobals instance, slots
-// [2, 2+maxLocalCount) mirror the Lox++ frame's own slots 1:1 (frame slot 0 —
-// the never-named callee/receiver — gets a JVM slot too, just an unused one),
-// and one final scratch slot holds a peeked SET_GLOBAL's value across the
-// LoxGlobals.set() call (java.lang.String/Object have no "leave a value"
-// overload to call instead).
+// JVM local-variable layout — one fixed mapping for both entry shapes
+// (nodes/N6.md: "choose a fixed slot mapping ... and use it everywhere"),
+// differing only in how many JVM-only slots come before the Lox frame's own:
+//
+//   script (`main`):   slot 0 = String[] args, slot 1 = LoxGlobals.
+//   function (`invoke`): slot 0 = `this` (the LoxFn$<n> instance), slot 1 =
+//     `self` (the callee/receiver the Lox chunk's own frame slot 0 wants),
+//     slot 2 = Object[] args, slot 3 = LoxGlobals (read from `this.globals`
+//     via LoxRuntime.current() — a generated class has no field of its own
+//     for it; see jvm_emitter.cpp). A prologue copies `self` into the Lox
+//     frame's own slot-0 mirror and unpacks `args[i]` into slot i+1's.
+//
+// Either way, the Lox frame's own slots [0, maxLocalCount) mirror 1:1 into
+// the JVM locals right after those fixed slots, then one scratch slot holds
+// a peeked SET_GLOBAL's value across the LoxGlobals.set() call (P2), and —
+// only in a chunk that contains a CALL with at least one argument — one more
+// scratch slot for the callee plus one per argument the chunk's widest CALL
+// needs (P7: the args are already on the operand stack below where a fresh
+// array reference would land, so building the Object[] needs every value
+// spilled to a local first).
 
 #include "abstract_stack.h"
 #include "chunk_decoder.h"
 
 #include <string>
+#include <vector>
 
 namespace jvm {
 
@@ -44,16 +60,38 @@ std::string escapeJasminString(const std::string& raw);
 // literal has neither defect: jasmin reads it as a `long`, verbatim.
 std::string formatDoubleBitsLiteral(double value);
 
-// Emits complete Jasmin source for the top-level script, as class
-// `className` (the CLI always passes "LoxMain"). `fn` and `analysis` must
-// come from the same compiled tree (decodeFunctionTree / analyzeStackTree on
-// the same ObjFunction).
+// One generated compilation unit: the Jasmin source for one class, and the
+// class name its own `.class` directive declares. tools/jvm_run.sh derives
+// the expected `.class` file from that same directive and checks it was
+// really written, so `source`'s directive and `className` must agree — the
+// CLI (main.cpp) writes each one out as "<className>.j".
+struct EmittedClass {
+    std::string className;
+    std::string source;
+};
+
+// Emits the whole program reachable from `root`: the top-level script as
+// `scriptClassName`, plus one `LoxFn$<n>` class per function or method any
+// chunk in the tree constructs with a zero-upvalue CLOSURE (node N6 — a
+// CLOSURE that captures anything throws "not implemented", upvalue wiring is
+// N7). `root`/`tree` must come from the same compiled tree
+// (decodeFunctionTree / analyzeStackTree on the same ObjFunction).
 //
-// Throws std::runtime_error, with a message prefixed "not implemented in N5:
-// ", on any opcode this node does not lower — includes CALL and CLOSURE, so a
-// program with a call or a nested `fun`/method aborts here rather than
-// silently dropping it (calls and closures are N6/N7's responsibility, not
-// this node's).
+// Class names are assigned by one fixed pre-order walk of the decoded tree,
+// so two runs on the same compiled program always agree (brief.md section 9,
+// "deterministic naming") — this is the driver a real `loxpp --target jvm`
+// run uses; emitScript below is single-chunk and test-facing only.
+std::vector<EmittedClass> emitProgram(const DecodedFunction& root,
+                                      const StackAnalysisTree& tree,
+                                      const std::string& scriptClassName);
+
+// Emits complete Jasmin source for one chunk only, as the top-level script
+// class `className`. Equivalent to the one `EmittedClass` emitProgram would
+// produce for `root`, for a program that declares no nested function —
+// kept so the pre-N6 test suite (and any test that only needs one script
+// chunk's own text) does not have to unpack emitProgram's vector. A CLOSURE
+// throws "not implemented" here, because a lone chunk has no class name to
+// give the target; drive emitProgram instead for a program that has one.
 std::string emitScript(const DecodedFunction& fn,
                        const FunctionStackAnalysis& analysis,
                        const std::string& className);

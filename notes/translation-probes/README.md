@@ -58,6 +58,7 @@ each has an off-the-shelf solution.
 | `21_exponent_constant` | a number constant whose exponent text has no decimal point (jasmin rejects it) | P2 |
 | `22_and_or_assignment_statement` | an `and`/`or` right side ends in an assignment; the merge `POP` is also a CFG block leader | P2, P3 |
 | `23_and_or_local_initializer` | `JUMP_IF_FALSE` on a condition N2 already folded into a named local, not a stack temp | P2, P3 |
+| `24_call_before_closure` | a global function called before its own `fun` declaration has run: late-bound globals must fail, not silently succeed | P5 |
 | `V1_fresh_cell` | body-local captured in a loop → **fresh cell/iter** → prints `0 1 2` | P4 |
 | `V2_shared` | mutable shared upvalue → prints `2` | P4 |
 | `V3_loopvar` | loop var captured directly → **one shared cell** → prints `3 3 3` | P4 |

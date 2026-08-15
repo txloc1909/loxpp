@@ -146,14 +146,14 @@ TEST(FormatDoubleBitsLiteral, IsABareDecimalIntegerNeverADecimalOrExponent) {
 
 TEST(EmitScript, AbortsOnUnsupportedOpcode) {
     MemoryManager mm;
-    // A call compiles to CALL — N6's job, not N5's.
-    DecodedFunction fn = decodeScript("foo();", mm);
+    // A class declaration compiles to CLASS — node N8's job, not N6's.
+    DecodedFunction fn = decodeScript("class Foo {}", mm);
     FunctionStackAnalysis analysis = analyzeStack(fn);
     try {
         jvm::emitScript(fn, analysis, "LoxMain");
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& e) {
-        EXPECT_EQ(std::string(e.what()), "not implemented in N5: CALL");
+        EXPECT_EQ(std::string(e.what()), "not implemented in N6: CLASS");
     }
 }
 
@@ -510,4 +510,174 @@ TEST(EmitScript, PeekOfNamedLocalAfterAMergeStillLoadsTheRightSlot) {
     // reload-from-slot shape confirms it named the right one.
     EXPECT_NE(j.find("aload 4\n    astore 3\n"), std::string::npos) << j;
     expectEveryJumpTargetIsLabeled(j);
+}
+
+// ---------------------------------------------------------------------------
+// Functions and calls (node N6): CALL, zero-upvalue CLOSURE, RETURN's dual
+// role, and emitProgram's multi-class output.
+// ---------------------------------------------------------------------------
+
+TEST(EmitScript, CallWithZeroArgsBuildsEmptyArray) {
+    MemoryManager mm;
+    // `foo` is never declared — GET_GLOBAL throws at run time (late
+    // binding), but this pass only lowers text, it never executes the
+    // program, so an undefined callee is a fine probe for CALL's own shape.
+    DecodedFunction fn = decodeScript("foo();", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // argCount == 0: the callee is already the sole, topmost stack value, so
+    // the empty array builds directly on top of it — no spill, no scratch
+    // slot at all.
+    EXPECT_NE(j.find("iconst_0\n"
+                     "    anewarray java/lang/Object\n"
+                     "    invokestatic "
+                     "lox/LoxOps/call(Ljava/lang/Object;[Ljava/lang/Object;)"
+                     "Ljava/lang/Object;\n"),
+              std::string::npos)
+        << j;
+    // No locals, no call-arg scratch reserved: 2 (args, globals) + 1
+    // (forced minimum local) + 1 (SET_GLOBAL-peek scratch) = 4.
+    EXPECT_NE(j.find(".limit locals 4\n"), std::string::npos) << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+TEST(EmitScript, CallWithArgsSpillsToScratchSlotsAndBuildsArray) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("foo(1, 2, 3);", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // No locals: scratchSlot = 3 (2 args/globals + 1 forced minimum). The
+    // widest CALL takes 3 arguments, so one callee slot (4) plus one slot
+    // per argument (5, 6, 7) come on top of the usual +1 scratch: 3+1+4 = 8.
+    EXPECT_NE(j.find(".limit locals 8\n"), std::string::npos) << j;
+
+    // P7: the values are already on the stack in push order [callee, arg1,
+    // arg2, arg3], topmost first — so the topmost (arg3) is spilled first,
+    // then arg2, then arg1, then the callee underneath them all.
+    EXPECT_NE(j.find("astore 7\n"
+                     "    astore 6\n"
+                     "    astore 5\n"
+                     "    astore 4\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("aload 4\n"
+                     "    iconst_3\n"
+                     "    anewarray java/lang/Object\n"),
+              std::string::npos)
+        << j;
+    EXPECT_EQ(countOccurrences(j, "aastore"), 3);
+    EXPECT_EQ(countOccurrences(j, "dup"), 3);
+    EXPECT_NE(j.find("invokestatic "
+                     "lox/LoxOps/call(Ljava/lang/Object;[Ljava/lang/Object;)"
+                     "Ljava/lang/Object;"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+TEST(EmitProgram, ZeroUpvalueClosureConstructsGeneratedClass) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun add(a, b) { return a + b; } print add(1, 2);", mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(classes.size(), 2u);
+    EXPECT_EQ(classes[0].className, "LoxMain");
+    EXPECT_EQ(classes[1].className, "LoxFn$0");
+
+    const std::string& main = classes[0].source;
+    // Zero upvalues (node N6; a captured one is N7's wiring): new + an empty
+    // Object[][] + the one constructor every generated class shares.
+    EXPECT_NE(main.find("new LoxFn$0\n"
+                        "    dup\n"
+                        "    iconst_0\n"
+                        "    anewarray [Ljava/lang/Object;\n"
+                        "    invokespecial "
+                        "LoxFn$0/<init>([[Ljava/lang/Object;)V\n"),
+              std::string::npos)
+        << main;
+    expectEveryJumpTargetIsLabeled(main);
+
+    const std::string& fn0 = classes[1].source;
+    EXPECT_NE(fn0.find(".class public LoxFn$0\n"), std::string::npos) << fn0;
+    EXPECT_NE(fn0.find(".super lox/LoxClosure\n\n"), std::string::npos) << fn0;
+    EXPECT_NE(fn0.find(".method public <init>([[Ljava/lang/Object;)V\n"),
+              std::string::npos)
+        << fn0;
+    // <init>'s own literals: this function's compile-time name and arity.
+    EXPECT_NE(fn0.find("ldc \"add\"\n"), std::string::npos) << fn0;
+    EXPECT_NE(fn0.find("invokespecial "
+                       "lox/LoxClosure/<init>(Ljava/lang/String;I[[Ljava/"
+                       "lang/Object;)V\n"),
+              std::string::npos)
+        << fn0;
+    EXPECT_NE(fn0.find(".method protected invoke(Ljava/lang/Object;[Ljava/"
+                       "lang/Object;)Ljava/lang/Object;\n"),
+              std::string::npos)
+        << fn0;
+    // Argument prologue (P5): self (JVM slot 1) copied into slot 4 (`a`'s
+    // Lox-frame-slot-0 mirror, baseSlot=4 for a function chunk), then
+    // args[0]/args[1] unpacked into slots 5/6 (`a`, `b`).
+    EXPECT_NE(fn0.find("aload 1\n    astore 4\n"), std::string::npos) << fn0;
+    EXPECT_NE(fn0.find("aload 2\n"
+                       "    iconst_0\n"
+                       "    aaload\n"
+                       "    astore 5\n"),
+              std::string::npos)
+        << fn0;
+    EXPECT_NE(fn0.find("aload 2\n"
+                       "    iconst_1\n"
+                       "    aaload\n"
+                       "    astore 6\n"),
+              std::string::npos)
+        << fn0;
+    // RETURN's function role: areturn, not the script's void `return`.
+    EXPECT_NE(fn0.find("areturn\n"), std::string::npos) << fn0;
+    expectEveryJumpTargetIsLabeled(fn0);
+}
+
+TEST(EmitProgram, SiblingFunctionsGetSequentialClassNames) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("fun a() { return 1; }\n"
+                                      "fun b() { return 2; }\n"
+                                      "print a();\n"
+                                      "print b();\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    // Deterministic naming (brief.md section 9): one pre-order counter over
+    // the whole tree, not per parent — `a` and `b` are siblings, so they
+    // draw 0 and 1 in declaration order.
+    ASSERT_EQ(classes.size(), 3u);
+    EXPECT_EQ(classes[0].className, "LoxMain");
+    EXPECT_EQ(classes[1].className, "LoxFn$0");
+    EXPECT_EQ(classes[2].className, "LoxFn$1");
+}
+
+TEST(EmitProgram, ClosureWithUpvalueIsNotImplemented) {
+    // 06_shared_upvalue: `get` captures `x`, so its CLOSURE carries one
+    // upvalue entry. N6 only lowers the zero-upvalue construction; wiring a
+    // real cell into it is node N7 (jvm_emitter.h hazard note).
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("fun outer() {\n"
+                                      "  var x = 0;\n"
+                                      "  fun get() { return x; }\n"
+                                      "  return get;\n"
+                                      "}\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    try {
+        jvm::emitProgram(fn, tree, "LoxMain");
+        FAIL() << "expected std::runtime_error";
+    } catch (const std::runtime_error& e) {
+        EXPECT_EQ(std::string(e.what()),
+                  "not implemented in N6: CLOSURE with 1 upvalue(s) (upvalue "
+                  "wiring is node N7)");
+    }
 }

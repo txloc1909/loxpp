@@ -20,7 +20,7 @@ namespace jvm {
 
 namespace {
 
-// Every Op enumerator's own spelling — for the "not implemented in N5:"
+// Every Op enumerator's own spelling — for the "not implemented in N6:"
 // message only. Not the disassembly oracle (test_chunk_decoder.cpp owns
 // that); a name missing here still throws, just with "UNKNOWN_OP".
 std::string opName(Op op) {
@@ -134,7 +134,17 @@ std::string opName(Op op) {
 }
 
 [[noreturn]] void notImplemented(Op op) {
-    throw std::runtime_error("not implemented in N5: " + opName(op));
+    throw std::runtime_error("not implemented in N6: " + opName(op));
+}
+
+// CLOSURE itself is implemented (node N6), but only for the zero-upvalue
+// construction; wiring a captured cell into the generated <init> call is
+// node N7's job (jvm_emitter.h). Kept distinct from notImplemented(Op) so
+// the message names the actual gap instead of the whole opcode.
+[[noreturn]] void notImplementedClosureUpvalues(std::size_t count) {
+    throw std::runtime_error("not implemented in N6: CLOSURE with " +
+                             std::to_string(count) +
+                             " upvalue(s) (upvalue wiring is node N7)");
 }
 
 // Accumulates Jasmin instruction text for one method body while tracking the
@@ -178,11 +188,11 @@ struct Builder {
 // Everything one chunk's straight-line/control-flow lowering needs, threaded
 // through instead of captured by a wall of ad hoc lambdas (nodes/N6.md,
 // "split the opcode switch first" — PR #109 R8 measured emitScript's
-// cognitive complexity at 69 against a threshold of 25, and four more nodes
-// still add cases to it). Each opcode family below is its own function
-// taking this by reference, so emitScript's own body shrinks to a dispatch
-// table plus the parts genuinely specific to walking the instruction array
-// (labels, the R1 depth safety net, invisible-var stores).
+// cognitive complexity at 69 against a threshold of 25). Each opcode family
+// below is its own function taking this by reference, so emitChunk's own
+// body shrinks to a dispatch table plus the parts genuinely specific to
+// walking the instruction array (labels, the R1 depth safety net,
+// invisible-var stores).
 struct Emitter {
     const DecodedFunction& fn;
     const FunctionStackAnalysis& analysis;
@@ -192,8 +202,21 @@ struct Emitter {
     std::unordered_map<int, std::vector<int>> invisibleVarsByOffset;
     std::unordered_map<int, std::string> labelAtOffset;
 
+    // 2 for a script chunk (slot 0 = args, slot 1 = globals), 4 for a
+    // function chunk (slot 0 = this, slot 1 = self, slot 2 = args array,
+    // slot 3 = globals) — see jvm_emitter.h's layout comment. Every mapped
+    // slot below is `baseSlot` plus an offset, so the two entry shapes share
+    // one set of opcode-family functions.
+    int baseSlot{2};
     int globalsSlot{0};
     int scratchSlot{0};
+
+    // Set (to scratchSlot+1 / scratchSlot+2) only when this chunk contains a
+    // CALL with at least one argument; -1 otherwise, so a stray use before
+    // emitChunk's own prologue computes them fails loudly instead of
+    // silently aliasing scratchSlot.
+    int calleeScratchSlot{-1};
+    int argScratchBase{-1};
 
     // R4 fix (PR #109 nit): -1 is a sentinel for "no invisible-var site has
     // run yet", not a real slot — see loadLastInvisibleVar.
@@ -207,6 +230,10 @@ struct Emitter {
     // bridges that gap).
     bool prevCanFallThrough{false};
     int prevNaturalSuccessorOffset{-1};
+
+    [[nodiscard]] int jvmSlotForLocal(int loxSlot) const {
+        return baseSlot + loxSlot;
+    }
 
     [[nodiscard]] bool reached(std::size_t idx) const {
         return idx < analysis.reached.size() &&
@@ -295,7 +322,7 @@ struct Emitter {
                 "jvm_emitter: peek of an invisible var before any "
                 "invisible-var site ran");
         }
-        int sourceSlot = 2 + lastInvisibleVarSlot;
+        int sourceSlot = jvmSlotForLocal(lastInvisibleVarSlot);
         b.emit("aload " + std::to_string(sourceSlot), +1);
         return sourceSlot;
     }
@@ -309,18 +336,16 @@ struct Emitter {
 // invisible-var site just bound, updated only by this pass's own forward
 // walk in offset order, never by a count aggregated across incoming edges.
 //
-// PR #109 R3: no program in this node's opcode set (if/else, while, for —
-// no functions, no match) has yet made `lastInvisibleVarSlot` disagree with
-// `jvmSlotForLocal(before[i].localCount - 1)` at the offsets that read it.
-// The reason is the scope-exit rule (brief 5c): `endScope` and
-// `emitLoopCleanup` retire every local a block declared, on every path out
-// of that block, before control ever reaches a point outside it. Two edges
-// into one merge can therefore disagree on `localCount` only through a
-// construct that leaves a *different* number of locals live past that merge
-// on each path — a function frame or a `match` arm. `lastInvisibleVarSlot`
-// still stays, not `localCount`, because it costs nothing today and reads
-// correctly the moment either later node breaks that premise.
-
+// N6 tried to build a program where the two disagree (nodes/N6.md, "the
+// merge-divergence test becomes writable here") and could not: RETURN, like
+// JUMP/LOOP/MATCH_ERROR, never falls through (see prevCanFallThrough below
+// and abstract_stack.cpp's own terminator list), so a path that returns
+// contributes no edge to any later merge in this chunk at all — it is a
+// dead end, not one side of a join. CALL and CLOSURE are straight-line, no
+// new edges either. So a function frame's *own* body still merges only
+// through if/else/while/for, exactly the shapes N5 already showed agree.
+// See the PR body for the two programs tried and N10 (match arms) as the
+// next candidate construct.
 void emitConstant(Emitter& e, const DecodedInstruction& in) {
     Value v = e.fn.function->chunk.getConstant(
         static_cast<uint16_t>(in.constantIndex));
@@ -439,12 +464,12 @@ void emitPop(Emitter& e, const DecodedInstruction& in) {
 }
 
 void emitGetLocal(Emitter& e, const DecodedInstruction& in) {
-    e.b.emit("aload " + std::to_string(2 + in.byteOperand), +1);
+    e.b.emit("aload " + std::to_string(e.jvmSlotForLocal(in.byteOperand)), +1);
 }
 
 void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
                   bool& consumedFollowingPop) {
-    int slot = 2 + in.byteOperand;
+    int slot = e.jvmSlotForLocal(in.byteOperand);
     bool fuse = e.fusablePop(i);
     // R1 fix (PR #107 round 1): before[i].operandDepth() == 0 means N2
     // already folded the peeked value into a named local (the eager
@@ -528,6 +553,423 @@ void emitJumpIfFalse(Emitter& e, std::size_t i, const DecodedInstruction& in) {
     e.b.emit("ifne " + e.labelFor(in.jumpTarget), -1);
 }
 
+// Smallest-encoding int push. Reused for CALL's array-size/index operands
+// and a generated <init>'s literal arity; never asked for a value outside
+// [-1, 255] here (CALL argCount and ObjFunction::arity both fit a byte —
+// compiler.cpp enforces the 255 ceiling on each independently).
+std::string pushIntInstruction(int n) {
+    if (n == -1) {
+        return "iconst_m1";
+    }
+    if (n >= 0 && n <= 5) {
+        return "iconst_" + std::to_string(n);
+    }
+    if (n >= -128 && n <= 127) {
+        return "bipush " + std::to_string(n);
+    }
+    return "sipush " + std::to_string(n);
+}
+
+// P5 (calling convention) + P7 (aggregate construction): CALL argCount finds
+// [callee, arg0, ..., arg(argCount-1)] already loose on the operand stack
+// (arg(argCount-1) on top; vm.cpp's own bottom-to-top push order) and must
+// hand LoxOps.call one Object[]. argCount == 0 needs no reshaping at all —
+// the callee is already the sole, topmost value, so the empty array builds
+// directly on top of it. argCount >= 1 spills every value to a scratch
+// local first: the elements are already on the stack *below* where a fresh
+// array reference would land, so a dup-based build cannot reach them (P7).
+// emitChunk reserves one scratch slot per argument the chunk's widest CALL
+// needs, plus one for the callee, computed once before this pass starts —
+// reused across every CALL site in the chunk, because calls run one at a
+// time, never concurrently.
+void emitCall(Emitter& e, const DecodedInstruction& in) {
+    int argCount = in.byteOperand;
+    const char* callSig =
+        "invokestatic "
+        "lox/LoxOps/call(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/"
+        "Object;";
+    if (argCount == 0) {
+        e.b.emit(pushIntInstruction(0), +1);
+        e.b.emit("anewarray java/lang/Object", 0);
+        e.b.emit(callSig, -1);
+        return;
+    }
+    for (int i = argCount - 1; i >= 0; i--) {
+        e.b.emit("astore " + std::to_string(e.argScratchBase + i), -1);
+    }
+    e.b.emit("astore " + std::to_string(e.calleeScratchSlot), -1);
+
+    e.b.emit("aload " + std::to_string(e.calleeScratchSlot), +1);
+    e.b.emit(pushIntInstruction(argCount), +1);
+    e.b.emit("anewarray java/lang/Object", 0);
+    for (int i = 0; i < argCount; i++) {
+        e.b.emit("dup", +1);
+        e.b.emit(pushIntInstruction(i), +1);
+        e.b.emit("aload " + std::to_string(e.argScratchBase + i), +1);
+        e.b.emit("aastore", -3);
+    }
+    e.b.emit(callSig, -1);
+}
+
+// CLOSURE with zero upvalues (node N6; a captured upvalue is node N7's
+// wiring — see the hazard note in jvm_emitter.h). `childClassNames[i]` names
+// the class this chunk's own i-th nested function (chunk_decoder.h:
+// DecodedInstruction::nestedIndex) was assigned by emitProgram's pre-order
+// walk. emitScript (no nested functions in any pre-N6 caller) always passes
+// an empty vector, so a CLOSURE reaching this from there is a real bug,
+// caught below rather than silently mis-indexed.
+void emitClosure(Emitter& e, const DecodedInstruction& in,
+                 const std::vector<std::string>& childClassNames) {
+    if (!in.upvalues.empty()) {
+        notImplementedClosureUpvalues(in.upvalues.size());
+    }
+    if (in.nestedIndex < 0 ||
+        static_cast<std::size_t>(in.nestedIndex) >= childClassNames.size()) {
+        throw std::runtime_error("jvm_emitter: CLOSURE nestedIndex " +
+                                 std::to_string(in.nestedIndex) +
+                                 " has no assigned class name");
+    }
+    const std::string& cls =
+        childClassNames[static_cast<std::size_t>(in.nestedIndex)];
+    // <init>([[Ljava/lang/Object;)V — a zero-upvalue construction passes a
+    // fresh, empty Object[][] (jvm_emitter.h hazard note): every generated
+    // class's constructor always takes the array, so N7's wiring of
+    // non-empty upvalues later touches only this call site, never <init>.
+    e.b.emit("new " + cls, +1);
+    e.b.emit("dup", +1);
+    e.b.emit(pushIntInstruction(0), +1);
+    e.b.emit("anewarray [Ljava/lang/Object;", 0);
+    e.b.emit("invokespecial " + cls + "/<init>([[Ljava/lang/Object;)V", -2);
+}
+
+// RETURN's two roles (P5): a function's own RETURN hands its value back to
+// the caller through `invoke`'s own return type; the script's ends `void
+// main`, so the NIL;RETURN endCompiler() always appends there just drops
+// its value on the floor.
+void emitReturn(Emitter& e, bool isScript) {
+    if (isScript) {
+        // vm.cpp: frameCount reaches 0, result discarded.
+        e.b.emit("return", 0);
+    } else {
+        e.b.emit("areturn", -1);
+    }
+}
+
+// The `<init>` every generated LoxFn$<n> needs (jvm_emitter.h hazard note):
+// calls straight through to LoxClosure's own constructor with this
+// function's compile-time name/arity as literals, so only the upvalues
+// array is a real parameter. N7 fills that array with real cells later;
+// this shape does not change.
+std::string emitConstructorMethod(const DecodedFunction& fn) {
+    std::ostringstream out;
+    out << ".method public <init>([[Ljava/lang/Object;)V\n";
+    out << "    .limit stack 4\n";
+    out << "    .limit locals 2\n";
+    out << "    aload 0\n";
+    if (fn.function->name != nullptr) {
+        out << "    ldc \""
+            << escapeJasminString(std::string(fn.function->name->chars))
+            << "\"\n";
+    } else {
+        out << "    aconst_null\n";
+    }
+    out << "    " << pushIntInstruction(fn.function->arity) << "\n";
+    out << "    aload 1\n";
+    out << "    invokespecial "
+           "lox/LoxClosure/<init>(Ljava/lang/String;I[[Ljava/lang/Object;)V\n";
+    out << "    return\n";
+    out << ".end method\n\n";
+    return out.str();
+}
+
+// High-water mark of concurrently-bound Lox frame slots (arity+1 at entry,
+// growing with every `var`) — the JVM local array must hold all of them at
+// their fixed positions, same as the abstract stack does.
+int computeMaxLocalCount(const FunctionStackAnalysis& analysis) {
+    int maxLocalCount = 0;
+    for (std::size_t i = 0; i < analysis.before.size(); i++) {
+        if (i >= analysis.reached.size() ||
+            !static_cast<bool>(analysis.reached[i])) {
+            continue;
+        }
+        maxLocalCount = std::max({maxLocalCount, analysis.before[i].localCount,
+                                  analysis.after[i].localCount});
+    }
+    // slot 0: the callee/receiver, never named by itself, but always live.
+    return std::max(maxLocalCount, 1);
+}
+
+// The widest CALL in this chunk, ignoring argCount == 0 (needs no scratch
+// slot — see emitCall). 0 here means the chunk needs none at all, keeping
+// `.limit locals` byte-identical to pre-N6 output on every chunk that makes
+// no call.
+int computeMaxCallArgCount(const DecodedFunction& fn) {
+    int maxCallArgCount = 0;
+    for (const DecodedInstruction& instr : fn.instructions) {
+        if (instr.op == Op::CALL) {
+            maxCallArgCount = std::max(maxCallArgCount, instr.byteOperand);
+        }
+    }
+    return maxCallArgCount;
+}
+
+// Builds the Emitter for one chunk: the slot layout (jvm_emitter.h) plus
+// every per-offset lookup table the opcode-family functions above read from.
+Emitter buildEmitter(const DecodedFunction& fn,
+                     const FunctionStackAnalysis& analysis, bool isScript,
+                     int maxLocalCount, int maxCallArgCount) {
+    Emitter e{fn, analysis, {}};
+    e.baseSlot = isScript ? 2 : 4;
+    e.globalsSlot = e.baseSlot - 1;
+    e.scratchSlot = e.baseSlot + maxLocalCount;
+    if (maxCallArgCount > 0) {
+        e.calleeScratchSlot = e.scratchSlot + 1;
+        e.argScratchBase = e.scratchSlot + 2;
+    }
+
+    for (const PopClassification& p : analysis.pops) {
+        e.popKinds[p.offset] = p.kind;
+    }
+    for (const InvisibleVarSite& site : analysis.invisibleVars) {
+        e.invisibleVarsByOffset[site.offset].push_back(site.slot);
+    }
+
+    // N5: one jasmin label per N1 block leader. A leader with no predecessor
+    // (e.g. the fall-through after an unconditional JUMP) still gets a label;
+    // an unreferenced jasmin label is harmless, so this pass does not bother
+    // filtering to only-referenced offsets.
+    Cfg cfg = buildCfg(fn.instructions);
+    e.labelAtOffset.reserve(cfg.blocks.size());
+    for (const BasicBlock& block : cfg.blocks) {
+        e.labelAtOffset.emplace(block.leaderOffset, block.label);
+    }
+    return e;
+}
+
+// The globals reference and, for a function chunk only, the argument
+// prologue (P5): `invoke`'s own JVM parameters are `self` (slot 1) and
+// `args` (slot 2, an Object[]). Copies `self` into the Lox frame's own
+// slot-0 mirror and unpacks args[i] into slot i+1's — the fixed mapping
+// every opcode-family function above assumes. A script chunk has no
+// argument prologue at all (frame slot 0 is the script's own never-read
+// callee, same as before N6).
+void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isScript) {
+    if (isScript) {
+        e.b.emit("invokestatic lox/LoxRuntime/init()Llox/LoxGlobals;", +1);
+        e.b.emit("astore " + std::to_string(e.globalsSlot), -1);
+        return;
+    }
+    // A generated class has no field of its own for the shared globals
+    // instance (jvm_emitter.h) — read the one instance init() built.
+    e.b.emit("invokestatic lox/LoxRuntime/current()Llox/LoxGlobals;", +1);
+    e.b.emit("astore " + std::to_string(e.globalsSlot), -1);
+    e.b.emit("aload 1", +1);
+    e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(0)), -1);
+    int arity = fn.function->arity;
+    for (int i = 0; i < arity; i++) {
+        e.b.emit("aload 2", +1);
+        e.b.emit(pushIntInstruction(i), +1);
+        e.b.emit("aaload", -1);
+        e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(i + 1)), -1);
+    }
+}
+
+// Walks every instruction once, in offset order, dispatching each to its
+// opcode-family function. The parts that are not one opcode's own concern —
+// labels, the R1 depth safety net, invisible-var stores, and the
+// fall-through/pop-fusion bookkeeping that decides the next index — stay
+// here rather than in any one case.
+void emitBody(Emitter& e, bool isScript,
+              const std::vector<std::string>& childClassNames) {
+    const std::vector<DecodedInstruction>& ins = e.fn.instructions;
+    std::size_t n = ins.size();
+
+    for (std::size_t i = 0; i < n;) {
+        if (!e.reached(i)) {
+            i++;
+            continue; // endCompiler()'s trailing NIL;RETURN can be dead code.
+        }
+        const DecodedInstruction& in = ins[i];
+        bool consumedFollowingPop = false;
+
+        auto labelIt = e.labelAtOffset.find(in.offset);
+        if (labelIt != e.labelAtOffset.end()) {
+            e.b.label(labelIt->second);
+            bool trustCarryForward = e.prevCanFallThrough &&
+                                     e.prevNaturalSuccessorOffset == in.offset;
+            if (!trustCarryForward) {
+                // A block leader with no live fall-through predecessor: the
+                // array position right before it is a JUMP/LOOP/RETURN whose
+                // real successor is somewhere else entirely, or dead code
+                // that never executed, so this pass's own carry-forward is
+                // not this block's entry depth at all (the array is in
+                // byte-offset order, not control-flow order). N2 already
+                // proved operandDepth() exact at every merge, so resync to
+                // it here.
+                e.b.resync(e.analysis.before[i].operandDepth());
+            }
+        }
+
+        // R1 safety net (PR #107 round 1): every correctly-lowered opcode in
+        // this pass keeps the JVM operand stack's physical depth equal to
+        // N2's own operandDepth() at the same offset — a temp this emitter
+        // pushed is the only thing N2 counts as "on the stack". A mismatch
+        // here means a peek is about to dup or pop a cell that is not
+        // physically there, so abort loudly instead of letting jasmin or the
+        // JVM verifier find it.
+        if (e.b.depth != e.analysis.before[i].operandDepth()) {
+            throw std::runtime_error(
+                "jvm_emitter: simulated stack depth " +
+                std::to_string(e.b.depth) + " disagrees with analysis depth " +
+                std::to_string(e.analysis.before[i].operandDepth()) +
+                " at offset " + std::to_string(in.offset));
+        }
+
+        switch (in.op) {
+        case Op::CONSTANT:
+            emitConstant(e, in);
+            break;
+        case Op::POP:
+            emitPop(e, in);
+            break;
+        case Op::GET_LOCAL:
+            emitGetLocal(e, in);
+            break;
+        case Op::SET_LOCAL:
+            emitSetLocal(e, i, in, consumedFollowingPop);
+            break;
+        case Op::DEFINE_GLOBAL:
+            emitDefineGlobal(e, in);
+            break;
+        case Op::GET_GLOBAL:
+            emitGetGlobal(e, in);
+            break;
+        case Op::SET_GLOBAL:
+            emitSetGlobal(e, i, in, consumedFollowingPop);
+            break;
+        case Op::JUMP:
+        case Op::LOOP:
+            emitJumpOrLoop(e, in);
+            break;
+        case Op::JUMP_IF_FALSE:
+            emitJumpIfFalse(e, i, in);
+            break;
+        case Op::CALL:
+            emitCall(e, in);
+            break;
+        case Op::CLOSURE:
+            emitClosure(e, in, childClassNames);
+            break;
+        case Op::RETURN:
+            emitReturn(e, isScript);
+            break;
+        default:
+            if (!emitSimpleOp(e, in.op)) {
+                notImplemented(in.op);
+            }
+        }
+
+        auto varsIt = e.invisibleVarsByOffset.find(in.offset);
+        if (varsIt != e.invisibleVarsByOffset.end()) {
+            for (int slot : varsIt->second) {
+                e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(slot)),
+                         -1);
+                e.lastInvisibleVarSlot = slot;
+            }
+        }
+
+        std::size_t nextIndex = i + (consumedFollowingPop ? 2 : 1);
+        e.prevCanFallThrough = in.op != Op::JUMP && in.op != Op::LOOP &&
+                               in.op != Op::RETURN && in.op != Op::MATCH_ERROR;
+        e.prevNaturalSuccessorOffset =
+            (nextIndex < n) ? ins[nextIndex].offset : -1;
+        i = nextIndex;
+    }
+}
+
+// The class header, the method this chunk becomes (`main` or `invoke`, plus
+// `<init>` for a function chunk), and the `.limit` directives measured from
+// what emitBody actually produced.
+std::string assembleClass(const Emitter& e, const DecodedFunction& fn,
+                          const std::string& className, bool isScript,
+                          int extraCallSlots) {
+    std::ostringstream out;
+    out << ".class public " << className << "\n";
+    if (isScript) {
+        out << ".super java/lang/Object\n\n";
+        out << ".method public static main([Ljava/lang/String;)V\n";
+    } else {
+        out << ".super lox/LoxClosure\n\n";
+        out << emitConstructorMethod(fn);
+        out << ".method protected invoke(Ljava/lang/Object;[Ljava/lang/"
+               "Object;)Ljava/lang/Object;\n";
+    }
+    out << "    .limit stack " << std::max(1, e.b.maxDepth) << "\n";
+    out << "    .limit locals " << (e.scratchSlot + 1 + extraCallSlots)
+        << "\n\n";
+    out << e.b.text.str();
+    out << ".end method\n";
+    return out.str();
+}
+
+// The shared lowering pass for one chunk, script or function alike (node
+// N6 unifies what were two near-duplicate passes: see jvm_emitter.h's
+// layout comment for the slot-mapping difference the two `isScript` values
+// select). `childClassNames[i]` names the class this chunk's own i-th
+// nested function was assigned — see emitProgram.
+std::string emitChunk(const DecodedFunction& fn,
+                      const FunctionStackAnalysis& analysis,
+                      const std::string& className, bool isScript,
+                      const std::vector<std::string>& childClassNames) {
+    int maxLocalCount = computeMaxLocalCount(analysis);
+    int maxCallArgCount = computeMaxCallArgCount(fn);
+    int extraCallSlots = maxCallArgCount > 0 ? maxCallArgCount + 1 : 0;
+
+    Emitter e =
+        buildEmitter(fn, analysis, isScript, maxLocalCount, maxCallArgCount);
+    emitPrologue(e, fn, isScript);
+    emitBody(e, isScript, childClassNames);
+    return assembleClass(e, fn, className, isScript, extraCallSlots);
+}
+
+// Assigns every node in the decoded tree a stable class name, by one fixed
+// pre-order walk (brief.md section 9: "deterministic naming"): the root
+// becomes `scriptClassName`, and every other node becomes `LoxFn$<n>` in
+// visit order, counted across the *whole* tree, not per parent — two
+// sibling functions and a great-grandchild all draw from the same counter.
+// Keyed by DecodedFunction::id (stable, name-independent) rather than a
+// pointer, so the two passes below (naming, then emission) can each walk
+// the tree their own way without having to agree on traversal order.
+void assignClassNames(const DecodedFunction& fn, bool isRoot,
+                      const std::string& scriptClassName, int& counter,
+                      std::unordered_map<std::string, std::string>& names) {
+    names[fn.id] =
+        isRoot ? scriptClassName : ("LoxFn$" + std::to_string(counter++));
+    for (const DecodedFunction& child : fn.nested) {
+        assignClassNames(child, /*isRoot=*/false, scriptClassName, counter,
+                         names);
+    }
+}
+
+void emitAll(const DecodedFunction& fn, const StackAnalysisTree& node,
+             bool isRoot,
+             const std::unordered_map<std::string, std::string>& names,
+             std::vector<EmittedClass>& out) {
+    std::vector<std::string> childClassNames;
+    childClassNames.reserve(fn.nested.size());
+    for (const DecodedFunction& child : fn.nested) {
+        childClassNames.push_back(names.at(child.id));
+    }
+    const std::string& className = names.at(fn.id);
+    std::string source =
+        emitChunk(fn, node.self, className, isRoot, childClassNames);
+    out.push_back(EmittedClass{className, std::move(source)});
+
+    for (std::size_t i = 0; i < fn.nested.size(); i++) {
+        emitAll(fn.nested[i], node.nested[i], /*isRoot=*/false, names, out);
+    }
+}
+
 } // namespace
 
 std::string escapeJasminString(const std::string& raw) {
@@ -577,157 +1019,22 @@ std::string formatDoubleBitsLiteral(double value) {
     return std::to_string(std::bit_cast<int64_t>(value));
 }
 
+std::vector<EmittedClass> emitProgram(const DecodedFunction& root,
+                                      const StackAnalysisTree& tree,
+                                      const std::string& scriptClassName) {
+    std::unordered_map<std::string, std::string> names;
+    int counter = 0;
+    assignClassNames(root, /*isRoot=*/true, scriptClassName, counter, names);
+
+    std::vector<EmittedClass> out;
+    emitAll(root, tree, /*isRoot=*/true, names, out);
+    return out;
+}
+
 std::string emitScript(const DecodedFunction& fn,
                        const FunctionStackAnalysis& analysis,
                        const std::string& className) {
-    // High-water mark of concurrently-bound Lox frame slots (arity+1 at
-    // entry, growing with every `var`) — the JVM local array must hold all
-    // of them at their fixed positions, same as the abstract stack does.
-    int maxLocalCount = 0;
-    for (std::size_t i = 0; i < analysis.before.size(); i++) {
-        if (i >= analysis.reached.size() ||
-            !static_cast<bool>(analysis.reached[i])) {
-            continue;
-        }
-        maxLocalCount = std::max({maxLocalCount, analysis.before[i].localCount,
-                                  analysis.after[i].localCount});
-    }
-    maxLocalCount = std::max(maxLocalCount,
-                             1); // slot 0: the script's own unnamed callee slot
-
-    Emitter e{fn, analysis, {}};
-    e.globalsSlot = 1;
-    e.scratchSlot = 2 + maxLocalCount;
-
-    for (const PopClassification& p : analysis.pops) {
-        e.popKinds[p.offset] = p.kind;
-    }
-    for (const InvisibleVarSite& site : analysis.invisibleVars) {
-        e.invisibleVarsByOffset[site.offset].push_back(site.slot);
-    }
-
-    const std::vector<DecodedInstruction>& ins = fn.instructions;
-    std::size_t n = ins.size();
-
-    // N5: one jasmin label per N1 block leader. A leader with no predecessor
-    // (e.g. the fall-through after an unconditional JUMP) still gets a label;
-    // an unreferenced jasmin label is harmless, so this pass does not bother
-    // filtering to only-referenced offsets.
-    Cfg cfg = buildCfg(ins);
-    e.labelAtOffset.reserve(cfg.blocks.size());
-    for (const BasicBlock& block : cfg.blocks) {
-        e.labelAtOffset.emplace(block.leaderOffset, block.label);
-    }
-
-    e.b.emit("invokestatic lox/LoxRuntime/init()Llox/LoxGlobals;", +1);
-    e.b.emit("astore " + std::to_string(e.globalsSlot), -1);
-
-    for (std::size_t i = 0; i < n;) {
-        if (!e.reached(i)) {
-            i++;
-            continue; // endCompiler()'s trailing NIL;RETURN can be dead code.
-        }
-        const DecodedInstruction& in = ins[i];
-        bool consumedFollowingPop = false;
-
-        auto labelIt = e.labelAtOffset.find(in.offset);
-        if (labelIt != e.labelAtOffset.end()) {
-            e.b.label(labelIt->second);
-            bool trustCarryForward = e.prevCanFallThrough &&
-                                     e.prevNaturalSuccessorOffset == in.offset;
-            if (!trustCarryForward) {
-                // A block leader with no live fall-through predecessor: the
-                // array position right before it is a JUMP/LOOP/RETURN whose
-                // real successor is somewhere else entirely, or dead code
-                // that never executed, so this pass's own carry-forward is
-                // not this block's entry depth at all (the array is in
-                // byte-offset order, not control-flow order). N2 already
-                // proved operandDepth() exact at every merge, so resync to
-                // it here.
-                e.b.resync(analysis.before[i].operandDepth());
-            }
-        }
-
-        // R1 safety net (PR #107 round 1): every correctly-lowered opcode in
-        // this pass keeps the JVM operand stack's physical depth equal to
-        // N2's own operandDepth() at the same offset — a temp this emitter
-        // pushed is the only thing N2 counts as "on the stack". A mismatch
-        // here means a peek is about to dup or pop a cell that is not
-        // physically there, so abort loudly instead of letting jasmin or the
-        // JVM verifier find it.
-        if (e.b.depth != analysis.before[i].operandDepth()) {
-            throw std::runtime_error(
-                "jvm_emitter: simulated stack depth " +
-                std::to_string(e.b.depth) + " disagrees with analysis depth " +
-                std::to_string(analysis.before[i].operandDepth()) +
-                " at offset " + std::to_string(in.offset));
-        }
-
-        switch (in.op) {
-        case Op::CONSTANT:
-            emitConstant(e, in);
-            break;
-        case Op::POP:
-            emitPop(e, in);
-            break;
-        case Op::GET_LOCAL:
-            emitGetLocal(e, in);
-            break;
-        case Op::SET_LOCAL:
-            emitSetLocal(e, i, in, consumedFollowingPop);
-            break;
-        case Op::DEFINE_GLOBAL:
-            emitDefineGlobal(e, in);
-            break;
-        case Op::GET_GLOBAL:
-            emitGetGlobal(e, in);
-            break;
-        case Op::SET_GLOBAL:
-            emitSetGlobal(e, i, in, consumedFollowingPop);
-            break;
-        case Op::JUMP:
-        case Op::LOOP:
-            emitJumpOrLoop(e, in);
-            break;
-        case Op::JUMP_IF_FALSE:
-            emitJumpIfFalse(e, i, in);
-            break;
-        case Op::RETURN:
-            // Script form (vm.cpp: frameCount reaches 0, result discarded) —
-            // a function's RETURN (areturn) is N6's responsibility.
-            e.b.emit("return", 0);
-            break;
-        default:
-            if (!emitSimpleOp(e, in.op)) {
-                notImplemented(in.op);
-            }
-        }
-
-        auto varsIt = e.invisibleVarsByOffset.find(in.offset);
-        if (varsIt != e.invisibleVarsByOffset.end()) {
-            for (int slot : varsIt->second) {
-                e.b.emit("astore " + std::to_string(2 + slot), -1);
-                e.lastInvisibleVarSlot = slot;
-            }
-        }
-
-        std::size_t nextIndex = i + (consumedFollowingPop ? 2 : 1);
-        e.prevCanFallThrough = in.op != Op::JUMP && in.op != Op::LOOP &&
-                               in.op != Op::RETURN && in.op != Op::MATCH_ERROR;
-        e.prevNaturalSuccessorOffset =
-            (nextIndex < n) ? ins[nextIndex].offset : -1;
-        i = nextIndex;
-    }
-
-    std::ostringstream out;
-    out << ".class public " << className << "\n";
-    out << ".super java/lang/Object\n\n";
-    out << ".method public static main([Ljava/lang/String;)V\n";
-    out << "    .limit stack " << std::max(1, e.b.maxDepth) << "\n";
-    out << "    .limit locals " << (e.scratchSlot + 1) << "\n\n";
-    out << e.b.text.str();
-    out << ".end method\n";
-    return out.str();
+    return emitChunk(fn, analysis, className, /*isScript=*/true, {});
 }
 
 } // namespace jvm
