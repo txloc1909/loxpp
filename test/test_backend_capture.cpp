@@ -829,3 +829,313 @@ TEST(CaptureAnalysisTest, DifferentVariablesReusingOneSlotDoNotShareACell) {
         << "a must close before d is even captured -- the two ranges must "
         << "not overlap";
 }
+// R16 regression, failure case 1 (a silent wrong attribution, no crash).
+// Native output is 1, then 5: `g` captures `b` and `h` captures both `c`
+// and `a` -- ONE CLOSURE instruction with two `isLocal=1` upvalues, opening
+// two DIFFERENT ranges at the SAME origin offset. Before the fix,
+// rangeIndexByOrigin keyed on that shared offset alone, so the second
+// slot's insertion silently overwrote the first's index: `c`'s range (the
+// one written first) lost its own index and inherited whichever range `a`
+// happened to occupy.
+TEST(CaptureAnalysisTest,
+     OneClosureCapturingTwoSlotsAttributesEachToItsOwnRange) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer() {
+          { var b = 1; fun g() { return b; } print g(); }
+          { var c = 2; var a = 3; fun h() { return c + a; } print h(); }
+        }
+        outer();
+    )",
+                                   "r16_one_closure_two_slots");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* g = findByName(c.tree, "g");
+    const DecodedFunction* h = findByName(c.tree, "h");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(g, nullptr);
+    ASSERT_NE(h, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int bSlot = infoFor(c.captures, g->id).ownUpvalues.at(0).index;
+    const std::vector<ClosureUpvalue>& hWiring =
+        infoFor(c.captures, h->id).ownUpvalues;
+    ASSERT_EQ(hWiring.size(), 2U)
+        << "h must capture both c and a -- one CLOSURE, two isLocal "
+        << "upvalues -- or this test proves nothing about the defect";
+    int cSlot = hWiring[0].index;
+    int aSlot = hWiring[1].index;
+    ASSERT_EQ(bSlot, cSlot)
+        << "b and c legitimately reuse the same slot number once b's block "
+        << "ends -- the test must exercise a REUSED slot, or it does not "
+        << "reach the shape R16 exists to catch";
+    ASSERT_NE(cSlot, aSlot);
+
+    const std::vector<CaptureLiveRange>& slot1Ranges = rangesFor(info, bSlot);
+    const std::vector<CaptureLiveRange>& slot2Ranges = rangesFor(info, aSlot);
+    ASSERT_EQ(slot1Ranges.size(), 2U)
+        << "b's incarnation and c's incarnation of the reused slot -- two "
+        << "ranges, and neither may steal the other's close";
+    ASSERT_EQ(slot2Ranges.size(), 1U);
+    EXPECT_EQ(slot1Ranges[0].allCloseOffsets.size(), 1U)
+        << "b's block has exactly one real close, its own endScope -- not a "
+        << "second, false end at h's opening offset";
+    EXPECT_EQ(slot1Ranges[1].allCloseOffsets.size(), 1U)
+        << "c's incarnation must get its OWN real close, not lose it "
+        << "because h's single CLOSURE instruction also opened a's range "
+        << "at the identical offset and overwrote c's stored index";
+    EXPECT_EQ(slot2Ranges[0].allCloseOffsets.size(), 1U);
+    EXPECT_LE(slot1Ranges[0].allCloseOffsets.back(),
+              slot1Ranges[1].firstCaptureOffset)
+        << "b's incarnation must close before c's begins -- they must not "
+        << "overlap";
+    EXPECT_EQ(slot1Ranges[1].firstCaptureOffset,
+              slot2Ranges[0].firstCaptureOffset)
+        << "c and a are opened by the SAME CLOSURE instruction -- the exact "
+        << "shape R16 exists to catch";
+    EXPECT_NE(slot1Ranges[1].allCloseOffsets.back(),
+              slot2Ranges[0].allCloseOffsets.back())
+        << "c and a close at DIFFERENT offsets -- one must not silently "
+        << "read the other's stale index and report its end instead";
+}
+
+// R16 regression, failure case 2 (a heap-buffer-overflow / SIGSEGV before
+// the fix, on a fully legal program). A THIRD block whose own CLOSURE also
+// captures two slots makes the stale index -- left over from the SECOND
+// block's own two-slot CLOSURE overwriting the first slot's entry -- larger
+// than the vector it wrongly pointed into, so reading it read past the end
+// of that vector.
+TEST(CaptureAnalysisTest,
+     OneClosureCapturingTwoSlotsAcrossThreeBlocksDoesNotOverflow) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer() {
+          { var b = 1; fun g() { return b; } print g(); }
+          { var c = 2; fun h() { return c; } print h(); }
+          { var d = 3; var e = 4; fun k() { return e + d; } print k(); }
+        }
+        outer();
+    )",
+                                   "r16_three_blocks_stale_index");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* k = findByName(c.tree, "k");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(k, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    const std::vector<ClosureUpvalue>& kWiring =
+        infoFor(c.captures, k->id).ownUpvalues;
+    ASSERT_EQ(kWiring.size(), 2U);
+    int eSlot = kWiring[0].index;
+    int dSlot = kWiring[1].index;
+    ASSERT_NE(eSlot, dSlot);
+
+    const std::vector<CaptureLiveRange>& eRanges = rangesFor(info, eSlot);
+    const std::vector<CaptureLiveRange>& dRanges = rangesFor(info, dSlot);
+    ASSERT_FALSE(eRanges.empty());
+    ASSERT_FALSE(dRanges.empty());
+    EXPECT_EQ(eRanges.back().allCloseOffsets.size(), 1U)
+        << "e must get its own real close, at k's own CLOSURE offset -- not "
+        << "read out of bounds of a different slot's range vector";
+    EXPECT_EQ(dRanges.back().allCloseOffsets.size(), 1U);
+    EXPECT_EQ(eRanges.back().firstCaptureOffset,
+              dRanges.back().firstCaptureOffset)
+        << "e and d are opened by the SAME CLOSURE instruction -- the exact "
+        << "shape R16 exists to catch";
+    EXPECT_NE(eRanges.back().allCloseOffsets.back(),
+              dRanges.back().allCloseOffsets.back())
+        << "e and d close at DIFFERENT offsets";
+}
+
+// R17 regression, failure case 1 (a silent wrong answer before the fix).
+// Native output is 2, then 1: `f` captures `a`, a function-scope capture
+// with no close of its own on any path; `g` captures `b`, an if-block local
+// whose ONLY capturing CLOSURE runs on the branch that returns immediately,
+// while the if-block's own endScope CLOSE_UPVALUE only ever runs on the
+// SIBLING (false) path -- the one that never ran that CLOSURE. Before the
+// fix, "highest open slot" picked `a` -- the only slot dynamically open on
+// that sibling path -- ending `a`'s range early (a live cell a later read
+// still needed) and leaving `b`'s range with no end recorded at all.
+TEST(CaptureAnalysisTest,
+     CaptureOnEarlyReturnBranchClosesOnSiblingFallThrough) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer(cond) {
+          var a = 1;
+          fun f() { return a; }
+          {
+            var b = 2;
+            if (cond) { fun g() { return b; } return g; }
+          }
+          return f;
+        }
+        print outer(true)();
+        print outer(false)();
+    )",
+                                   "r17_early_return_sibling_close");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* f = findByName(c.tree, "f");
+    const DecodedFunction* g = findByName(c.tree, "g");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(f, nullptr);
+    ASSERT_NE(g, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int aSlot = infoFor(c.captures, f->id).ownUpvalues.at(0).index;
+    int bSlot = infoFor(c.captures, g->id).ownUpvalues.at(0).index;
+    ASSERT_NE(aSlot, bSlot);
+    ASSERT_LT(aSlot, bSlot)
+        << "a is declared before the if-block and b inside it -- b must get "
+        << "the HIGHER slot number, or this test does not reach the shape "
+        << "R17 exists to catch (the wrong pick only ever favours a LOWER "
+        << "slot that happens to be dynamically open)";
+
+    const std::vector<CaptureLiveRange>& aRanges = rangesFor(info, aSlot);
+    const std::vector<CaptureLiveRange>& bRanges = rangesFor(info, bSlot);
+    ASSERT_EQ(aRanges.size(), 1U);
+    ASSERT_EQ(bRanges.size(), 1U);
+    EXPECT_TRUE(aRanges[0].closedImplicitly)
+        << "a is function scope -- only the frame's RETURN ends it, on "
+        << "every path";
+    EXPECT_TRUE(aRanges[0].allCloseOffsets.empty())
+        << "a must not pick up the if-block's own endScope close -- that "
+        << "belongs to b, not a";
+    EXPECT_FALSE(bRanges[0].allCloseOffsets.empty())
+        << "b's range must record the if-block's own endScope close, even "
+        << "though the branch that captures b never dynamically reaches it";
+    EXPECT_TRUE(bRanges[0].closedImplicitly)
+        << "the branch that captures b returns before the if-block's own "
+        << "endScope runs, so b is ALSO still open at that RETURN, on the "
+        << "other path";
+}
+
+// R17 regression, failure case 2 (a thrown "no open captured slot to
+// close" error before the fix, on a fully legal program). A second,
+// unconditional capture (`a`) before the branch puts TWO CLOSE_UPVALUE
+// instructions in the common scope exit: one for `b` (the branch-only
+// capture) and one for `a` (unconditional). Before the fix, the FIRST of
+// the two closes mis-targeted `a` (the only slot dynamically open on the
+// sibling path), leaving the state empty by the time the SECOND close ran
+// -- which then had no open captured slot left to close at all.
+TEST(CaptureAnalysisTest, CaptureOnEarlyReturnBranchClosesInCommonScopeExit) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer(cond) {
+          var out = [];
+          {
+            var a = 1;
+            var b = 2;
+            fun f() { return a; }
+            out.append(f);
+            if (cond) { fun g() { return b; } return g; }
+          }
+          return out;
+        }
+        print outer(true)();
+        print outer(false)[0]();
+    )",
+                                   "r17_early_return_common_scope_exit");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* f = findByName(c.tree, "f");
+    const DecodedFunction* g = findByName(c.tree, "g");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(f, nullptr);
+    ASSERT_NE(g, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int aSlot = infoFor(c.captures, f->id).ownUpvalues.at(0).index;
+    int bSlot = infoFor(c.captures, g->id).ownUpvalues.at(0).index;
+    ASSERT_NE(aSlot, bSlot);
+    ASSERT_LT(aSlot, bSlot)
+        << "a is declared before b -- b must get the HIGHER slot number, "
+        << "or this test does not reach the shape R17 exists to catch";
+
+    const std::vector<CaptureLiveRange>& aRanges = rangesFor(info, aSlot);
+    const std::vector<CaptureLiveRange>& bRanges = rangesFor(info, bSlot);
+    ASSERT_EQ(aRanges.size(), 1U);
+    ASSERT_EQ(bRanges.size(), 1U);
+    EXPECT_EQ(aRanges[0].allCloseOffsets.size(), 1U)
+        << "a's own explicit close, the SECOND CLOSE_UPVALUE of the common "
+        << "scope exit -- reaching it must not throw";
+    EXPECT_EQ(bRanges[0].allCloseOffsets.size(), 1U)
+        << "b's own explicit close, the FIRST CLOSE_UPVALUE of the common "
+        << "scope exit -- even though the branch that captures b never "
+        << "dynamically reaches it";
+    EXPECT_TRUE(aRanges[0].closedImplicitly);
+    EXPECT_TRUE(bRanges[0].closedImplicitly);
+    EXPECT_LT(bRanges[0].allCloseOffsets.back(),
+              aRanges[0].allCloseOffsets.back())
+        << "the compiler reclaims locals in descending slot order -- b (the "
+        << "higher slot) must close before a (the lower slot) in the SAME "
+        << "common scope exit";
+}
+
+// Amendment 1's own adversarial shape ("a static close above a live outer
+// capture", referee amendment 1 section 7): two SEPARATE if-with-early-
+// return blocks, each needing the amended (static-overlay) resolution on its
+// own, one after the other, and BOTH reusing the same slot number once the
+// first if-block's own scope truly ends (the R14 shape, layered onto R17).
+// `keep` is a genuine, live, unconditional outer capture opened BEFORE
+// either if-block and never explicitly closed anywhere; its slot number is
+// necessarily lower than both if-block locals' (declared later). Before the
+// amendment, "highest open slot in the per-path state" would have picked
+// `keep` at BOTH if-blocks' own static-only closes -- it is the only slot
+// dynamically open on either sibling (false) path -- ending `keep` far too
+// early and leaving neither if-block local's own close recorded at all.
+TEST(CaptureAnalysisTest, TwoSiblingStaticClosesDoNotStealAnOuterCapturesSlot) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer(cond1, cond2) {
+          var keep = 1;
+          fun keepFn() { return keep; }
+          {
+            var x = 2;
+            if (cond1) { fun gx() { return x; } return gx; }
+          }
+          {
+            var y = 3;
+            if (cond2) { fun gy() { return y; } return gy; }
+          }
+          return keepFn;
+        }
+        print outer(true, false)();
+        print outer(false, true)();
+        print outer(false, false)();
+    )",
+                                   "outer_capture_steal");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* keepFn = findByName(c.tree, "keepFn");
+    const DecodedFunction* gx = findByName(c.tree, "gx");
+    const DecodedFunction* gy = findByName(c.tree, "gy");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(keepFn, nullptr);
+    ASSERT_NE(gx, nullptr);
+    ASSERT_NE(gy, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int keepSlot = infoFor(c.captures, keepFn->id).ownUpvalues.at(0).index;
+    int xSlot = infoFor(c.captures, gx->id).ownUpvalues.at(0).index;
+    int ySlot = infoFor(c.captures, gy->id).ownUpvalues.at(0).index;
+    ASSERT_LT(keepSlot, xSlot)
+        << "keep is declared first -- it must get the LOWEST slot, or a "
+        << "buggy pick that always favours the lowest open slot would not "
+        << "be caught here";
+    ASSERT_EQ(xSlot, ySlot)
+        << "x's block fully ends before y's begins -- the test must "
+        << "exercise a REUSED slot, layering R14 onto R17, or it does not "
+        << "reach the shape this test exists to catch";
+
+    const std::vector<CaptureLiveRange>& keepRanges = rangesFor(info, keepSlot);
+    const std::vector<CaptureLiveRange>& xyRanges = rangesFor(info, xSlot);
+    ASSERT_EQ(keepRanges.size(), 1U);
+    ASSERT_EQ(xyRanges.size(), 2U)
+        << "x's incarnation and y's incarnation of the reused slot -- two "
+        << "ranges, neither stolen by the other or by keep";
+    EXPECT_TRUE(keepRanges[0].closedImplicitly)
+        << "keep is function scope -- only the frame's RETURN ends it";
+    EXPECT_TRUE(keepRanges[0].allCloseOffsets.empty())
+        << "keep must not pick up EITHER if-block's own endScope close -- "
+        << "those belong to x and y, not to keep";
+    EXPECT_EQ(xyRanges[0].allCloseOffsets.size(), 1U)
+        << "x's if-block has exactly one real close, its own endScope";
+    EXPECT_EQ(xyRanges[1].allCloseOffsets.size(), 1U)
+        << "y's if-block has exactly one real close, its own endScope";
+    EXPECT_TRUE(xyRanges[0].closedImplicitly)
+        << "the branch that captures x returns before x's own endScope "
+        << "runs, so x is ALSO still open at that RETURN, on the other path";
+    EXPECT_TRUE(xyRanges[1].closedImplicitly)
+        << "same reasoning as x, for y's own early-return branch";
+    EXPECT_LE(xyRanges[0].allCloseOffsets.back(),
+              xyRanges[1].firstCaptureOffset)
+        << "x must fully close before y is even captured -- the two "
+        << "incarnations must not overlap";
+}
