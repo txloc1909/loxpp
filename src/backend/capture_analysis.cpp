@@ -374,8 +374,9 @@ DataflowResult runDataflow(const Cfg& cfg,
 
 // Folds one CLOSURE instruction's local captures into `state` together
 // (this walk's own path-local view) and, if `reachable`, into `info`. Also
-// updates `latestInstanceBySlot` unconditionally — see the header comment on
-// that map, just below.
+// updates `latestInstanceBySlot` unconditionally — see advanceCommit's own
+// header comment, below, for why that is correct even for an unreachable
+// CLOSURE (R26).
 //
 // Referee amendment 2 corrects range identity: a capture token (slot,
 // CLOSURE offset) is only a range's INITIAL NAME, not its identity. Three
@@ -445,13 +446,19 @@ void handleClosureCommit(const DecodedInstruction& in, OpenOrigins& state,
     }
 }
 
-// Resolves one CLOSE_UPVALUE and, if `reachable`, records the outcome into
-// `info`. `slot` is `heightBefore.at(in.offset) - 1` — a compile-time
-// constant, not inferred (referee amendment 3).
+// Resolves one REACHABLE CLOSE_UPVALUE and records the outcome into `info`.
+// `slot` is `heightBefore.at(in.offset) - 1` — a compile-time constant, not
+// inferred (referee amendment 3). The caller (advanceCommit) handles the
+// unreachable case itself, before it ever computes `slot`, because
+// `heightBefore` holds no entry for an unreachable offset (R25) — so this
+// function never receives one.
 //
 // A close whose slot `state` shows open on this exact path is a DYNAMIC
 // close: attribute it to that instance and erase it from `state`, exactly
-// like amendments 1 and 2 did.
+// like amendments 1 and 2 did. The emission contract (mission brief section
+// 5c) guarantees this origin always has a recorded range, because a
+// path-open slot was opened by a CLOSURE on a path this pass proved
+// reachable; a violation throws, as decoder or compiler drift.
 //
 // A close whose slot `state` does NOT show open is a STATIC one (R22): the
 // compiler emits one CLOSE_UPVALUE per exit path that crosses a captured
@@ -467,22 +474,27 @@ void handleClosureCommit(const DecodedInstruction& in, OpenOrigins& state,
 // (R22). Exact-slot matching (via height) makes stealing impossible: a
 // close for slot 7 can never consult, or touch, slot 3's entry.
 //
+// A static close's origin can itself have opened no range (R26): the
+// CLOSURE `latestInstanceBySlot` names is unreachable too, so every capture
+// of this incarnation is dead code and no cell can exist here at run time.
+// That is a STATICALLY DEAD close, not drift: record it in
+// `staticallyDeadCloseOffsets` and return with no throw.
+//
 // A REACHABLE close whose slot has no entry in `latestInstanceBySlot` at
-// all — no CLOSURE, anywhere in program order before it, ever captured this
-// slot — is compiler or decoder drift, not a normal program: throws.
+// all — no CLOSURE, anywhere in program order before it, reachable or not,
+// ever captured this slot — is compiler or decoder drift, not a normal
+// program: throws. (The emission contract guarantees every CLOSE_UPVALUE
+// has at least one program-order-earlier CLOSURE of its own incarnation, so
+// a legal program never reaches this throw.)
 void handleCloseUpvalueCommit(
-    const DecodedInstruction& in, int slot, OpenOrigins& state, bool reachable,
+    const DecodedInstruction& in, int slot, OpenOrigins& state,
     const std::string& functionId, FunctionCaptureInfo& info,
     RangeIndex& rangeIndexByOrigin,
     const std::unordered_map<int, int>& latestInstanceBySlot) {
-    if (!reachable) {
-        info.unreachableCloseOffsets.push_back(in.offset);
-        return;
-    }
-
     auto pathIt = state.find(slot);
+    bool dynamicClose = pathIt != state.end();
     int origin{};
-    if (pathIt != state.end()) {
+    if (dynamicClose) {
         origin = pathIt->second;
         state.erase(pathIt);
     } else {
@@ -499,6 +511,14 @@ void handleCloseUpvalueCommit(
 
     auto idxIt = rangeIndexByOrigin.find({slot, origin});
     if (idxIt == rangeIndexByOrigin.end()) {
+        if (!dynamicClose) {
+            // Static, and the origin it resolved to opened no range: every
+            // capture of this incarnation is unreachable too (R26). No cell
+            // can exist here at run time; the close's only real effect is
+            // its own pop.
+            info.staticallyDeadCloseOffsets.push_back(in.offset);
+            return;
+        }
         throw std::runtime_error(
             "capture_analysis: CLOSE_UPVALUE at offset " +
             std::to_string(in.offset) + " in function id=" + functionId +
@@ -513,11 +533,27 @@ void handleCloseUpvalueCommit(
 // from Pass 1) across one block's instructions, building the real
 // CaptureLiveRange records as it goes. Called once per block, in ascending
 // block-index (i.e. ascending offset, see Cfg::blocks) order, for every
-// block of the chunk — reachable or not: an unreachable CLOSE_UPVALUE still
-// needs to be reported (FunctionCaptureInfo::unreachableCloseOffsets), and
-// `latestInstanceBySlot` still advances for unreachable CLOSUREs, mirroring
-// the compiler's own single-pass bookkeeping, which does not know or care
-// whether the code it just emitted ever runs.
+// block of the chunk — reachable or not.
+//
+// An unreachable CLOSE_UPVALUE is recorded and skipped BEFORE any per-offset
+// map access (R25): `heightBefore` (computeFrameHeightsForCfg) holds no
+// entry for a block block 0 never reaches, so looking one up here first
+// would throw `std::out_of_range` before the unreachable case is even
+// distinguished. `handleCloseUpvalueCommit` below therefore only ever sees a
+// REACHABLE close.
+//
+// `latestInstanceBySlot` still advances for an unreachable CLOSURE too
+// (handleClosureCommit), and that is correct, not merely tolerated (R26):
+// the emission contract (mission brief section 5c) guarantees that cleanup
+// emitted before a local's first capture uses POP, never CLOSE_UPVALUE, so
+// every CLOSE_UPVALUE — reachable or not — has at least one
+// program-order-earlier CLOSURE of its own incarnation, in the same chunk.
+// The latest entry this map holds for a slot, at any close, therefore
+// always names that close's own incarnation, whether or not the CLOSURE
+// that wrote the entry itself ever runs. Gating the update on `reachable`
+// looks safer but is wrong: it makes the entry name a PREVIOUS incarnation
+// of the slot instead, which a later static close of a different
+// incarnation then silently steals (the referee's `steal.lox`).
 void advanceCommit(const BasicBlock& block, OpenOrigins& state, bool reachable,
                    const std::string& functionId, FunctionCaptureInfo& info,
                    RangeIndex& rangeIndexByOrigin, OriginUnionFind& aliases,
@@ -528,10 +564,13 @@ void advanceCommit(const BasicBlock& block, OpenOrigins& state, bool reachable,
             handleClosureCommit(in, state, reachable, info, rangeIndexByOrigin,
                                 aliases, latestInstanceBySlot);
         } else if (in.op == Op::CLOSE_UPVALUE) {
+            if (!reachable) {
+                info.unreachableCloseOffsets.push_back(in.offset);
+                continue;
+            }
             int slot = heightBefore.at(in.offset) - 1;
-            handleCloseUpvalueCommit(in, slot, state, reachable, functionId,
-                                     info, rangeIndexByOrigin,
-                                     latestInstanceBySlot);
+            handleCloseUpvalueCommit(in, slot, state, functionId, info,
+                                     rangeIndexByOrigin, latestInstanceBySlot);
         }
         // POP and everything else: no captured-slot effect.
     }

@@ -181,6 +181,16 @@ struct FunctionCaptureInfo {
     // (checkNoOrphanCloseUpvalues in test_backend_capture.cpp) can tell
     // "unreachable" apart from "this pass lost track of a real close".
     std::vector<int> unreachableCloseOffsets;
+
+    // A REACHABLE CLOSE_UPVALUE, closed on every path that reaches it (a
+    // static close, R22), whose most-recent same-slot CLOSURE is itself
+    // unreachable, so it opened no range (R26 — referee amendment 4, PR
+    // #101, round 10). Every capture of this incarnation is dead code, so
+    // no cell can exist at this offset on any real run: the close's only
+    // run-time effect is its own pop. N7 must lower an entry here the same
+    // way it lowers an unreachableCloseOffsets entry — the pop alone, with
+    // no cell operation.
+    std::vector<int> staticallyDeadCloseOffsets;
 };
 
 // Capture info for a whole ObjFunction tree (see decodeFunctionTree),
@@ -221,16 +231,26 @@ std::unordered_map<int, int> computeFrameHeights(const DecodedFunction& node);
 // fixpoint to find which slot is open at each point and which live
 // instances the union-find proves are one runtime cell (amendment 2,
 // unchanged), and one program-order pass to attribute every real
-// CLOSE_UPVALUE to the correct instance — dynamically, when the dataflow
-// shows the slot open on the path reaching it, or statically, against the
-// most recent CLOSURE this pass has seen for that exact slot in program
-// order, when it does not (R22: a captured local's scope can emit more than
-// one CLOSE_UPVALUE, one per exit path, and every one of them is real
-// bytecode that must resolve to the same instance).
+// CLOSE_UPVALUE to one of four total outcomes (referee amendment 4, PR #101,
+// round 10 — legal dead code makes these four exhaustive, not three):
+//   1. unreachable — the close is itself dead code
+//      (FunctionCaptureInfo::unreachableCloseOffsets);
+//   2. dynamic — the dataflow shows the slot open on the path reaching it
+//      (attributed to a real range's allCloseOffsets);
+//   3. static-attributed — the slot is closed on every path reaching it
+//      (R22: a captured local's scope can emit more than one CLOSE_UPVALUE,
+//      one per exit path, and every one of them is real bytecode that must
+//      resolve to the same instance), and the most recent CLOSURE this pass
+//      has seen for that exact slot, in program order, opened a real range
+//      (also allCloseOffsets);
+//   4. statically dead — the same as 3, except that most recent CLOSURE
+//      opened no range, because it is unreachable too (R26:
+//      FunctionCaptureInfo::staticallyDeadCloseOffsets).
 //
-// Throws std::runtime_error only if a CLOSE_UPVALUE's height-derived slot has
-// no CLOSURE anywhere in program order before it, on a REACHABLE block — that
-// signals decoder or compiler drift, not a normal program, because a captured
-// slot's very first CLOSE_UPVALUE can never precede the CLOSURE that made it
-// captured in the first place.
+// Throws std::runtime_error only for the two outcomes the emission contract
+// (mission brief section 5c) makes impossible for compiler-correct input: a
+// REACHABLE close whose height-derived slot has no CLOSURE anywhere in
+// program order before it (no incarnation of that slot was ever named), or a
+// DYNAMIC close (the slot was path-open) whose origin has no recorded range.
+// Either signals decoder or compiler drift, not a normal program.
 CaptureAnalysis analyzeCaptures(const DecodedFunction& root);
