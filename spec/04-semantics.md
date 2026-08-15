@@ -215,6 +215,11 @@ field value is not callable, that is a **runtime error**.
 `this` evaluates to the instance on which the enclosing method was invoked. It is only valid inside
 a method body. Using `this` outside any class method is a **static error**.
 
+`this` is **read-only**. Assigning to it is a **static error** ("Invalid
+assignment target."). It is a local binding for every other purpose: each method
+call makes a new one, and a nested function can capture it. See
+[Binding Identity](#binding-identity).
+
 ### `super` Expression
 
 ```
@@ -390,7 +395,10 @@ Iterates over the elements of a sequence in order.
    - For a **String**: `x` is bound to a single-character String.
 5. After the body, the cursor advances by one and the loop repeats from step 3.
 
-`x` is scoped to the loop body; it is not accessible after the loop exits.
+`x` is scoped to the loop statement; it is not accessible after the loop exits.
+One binding of `x` serves the whole execution of the loop, and each iteration
+assigns to it. It is not a new binding per iteration. See
+[Binding Identity](#binding-identity).
 
 **Mutation during iteration**: modifying the List while iterating is defined.
 Elements appended to the List at indices beyond the current cursor will be
@@ -545,8 +553,230 @@ print c(); // 1
 print c(); // 2
 ```
 
-Multiple closures created within the same scope share the same closed-over
-variable; mutating it through one closure is visible through all others.
+Multiple closures created in the **same execution** of a scope share the same
+closed-over variable; mutating it through one closure is visible through all
+others. Two closures made by **different** executions of the same source scope
+do not share anything. The next section makes this precise.
+
+### Binding Identity
+
+A closure captures a **binding**, not a value and not a copy. A closure reads
+and writes that binding when it is **called**. What it sees therefore depends on
+when you call it, not on when it was created.
+
+**This section is about LOCAL bindings. Globals are not bindings.** A global
+name is looked up in one global table when the access **runs**, not when the
+function that holds the access is created. A function can therefore read a
+global that did not exist when the function was made, and it always sees the
+current value.
+
+```lox
+fun get() { return later; }
+var later = 42;
+print get(); // 42
+```
+
+```lox
+var g = 1;
+fun get() { return g; }
+var g = 2;
+print get(); // 2
+```
+
+Nothing in the rest of this section applies to a global.
+
+**What creates a local binding.** All of these create local bindings:
+
+- a local `var` declaration;
+- the variable of a `for` initializer, and the variable of a `for ... in`
+  statement;
+- a function parameter;
+- the name of a local `fun` or `class` declaration;
+- `this`, inside a method;
+- a pattern binding in a `match` arm.
+
+A `match` pattern binding is a local binding, but no closure can capture it. A
+`match` arm body is an expression, and Lox++ has no function-expression form, so
+a `fun` cannot appear there.
+
+`super` is different again. It is captured lexically at class-definition time,
+as the [`super` Expression](#super-expression) section states.
+
+**Each execution of the construct that creates a binding makes a NEW binding.**
+One place in the source can therefore make many bindings, one per execution. A
+`var` declaration in a loop body makes a distinct binding on every iteration,
+and a closure made in one iteration keeps that iteration's binding.
+
+```lox
+var fns = [nil, nil, nil];
+for (var i = 0; i < 3; i = i + 1) {
+    var snapshot = i;
+    fun f() { return snapshot; }
+    fns[i] = f;
+}
+print fns[0](); // 0
+print fns[1](); // 1
+print fns[2](); // 2
+```
+
+A function parameter obeys the same rule. Each call makes a new one.
+
+```lox
+var fns = [nil, nil, nil];
+fun rec(n) {
+    fun get() { return n; }
+    fns[n] = get;
+    if (n > 0) rec(n - 1);
+}
+rec(2);
+print fns[0](); // 0
+print fns[1](); // 1
+print fns[2](); // 2
+```
+
+`this` obeys it too. Each method call makes a new binding of `this`.
+
+```lox
+class C {
+    init(v) { this.v = v; }
+    getter() {
+        fun g() { return this.v; }
+        return g;
+    }
+}
+var a = C(1).getter();
+var b = C(2).getter();
+print a(); // 1
+print b(); // 2
+```
+
+**A loop variable is one binding per execution of the loop statement.** The
+variable of a `for` initializer, and the variable of a `for ... in` statement,
+are each made once when that loop starts. The loop then assigns to that one
+binding: the `for` increment clause assigns to it if the loop has one, and
+`for ... in` assigns the next element to it on each iteration. A `for` with no
+increment clause never changes its variable. In every case the binding itself is
+**not** made again per iteration. Running the same loop
+statement a second time — a `for` inside a `while`, for example — makes a new
+binding.
+
+```lox
+var fns = [nil, nil, nil];
+for (var i = 0; i < 3; i = i + 1) {
+    fun f() { return i; }
+    fns[i] = f;
+}
+print fns[0](); // 3
+print fns[1](); // 3
+print fns[2](); // 3
+```
+
+```lox
+var fns = [nil, nil, nil];
+var n = 0;
+for (var x in [0, 1, 2]) {
+    fun f() { return x; }
+    fns[n] = f;
+    n = n + 1;
+}
+print fns[0](); // 2
+print fns[1](); // 2
+print fns[2](); // 2
+```
+
+In both examples above, every call happens after its loop ends, so each closure
+reads the one binding at the value it then holds: `3` for the counting loop, and
+`2` for the `for ... in` loop, whose variable holds the last element. A closure
+called **during** the loop reads the value at that moment instead, so do not
+read this rule as "a closure sees the final value".
+
+Sharing one binding across the iterations of a `for ... in` loop is a deliberate
+choice. It makes the `for ... in` variable behave like the `for` initializer
+variable.
+
+```lox
+var f = nil;
+for (var i = 0; i < 3; i = i + 1) {
+    if (i == 0) { fun g() { return i; } f = g; }
+    if (i == 1) print f(); // 1
+}
+print f(); // 3
+```
+
+A `for` inside a `while` shows that each execution of the loop statement makes
+its own binding.
+
+```lox
+var fns = [nil, nil];
+var k = 0;
+while (k < 2) {
+    for (var i = 0; i < k + 2; i = i + 1) {
+        fun f() { return i; }
+        fns[k] = f;
+    }
+    k = k + 1;
+}
+print fns[0](); // 2
+print fns[1](); // 3
+```
+
+To capture a per-iteration value, declare a variable in the loop body and
+capture that, as the first example does.
+
+**A binding ends when its scope exits, by any path.** A binding **ends** when
+its name goes out of scope and no later execution can reach that same binding
+again. Ending a binding does not destroy its storage: a closure that captured it
+keeps it alive and can still read and write it. Ending it means only that the
+next execution of the same declaration makes a **different** binding.
+
+Falling off the end of a block, `break`, `continue`, `return`, and leaving a
+`match` arm all end the bindings of the scopes they leave.
+
+```lox
+var fns = [nil, nil, nil];
+for (var i = 0; i < 3; i = i + 1) {
+    var snapshot = i;
+    fun f() { return snapshot; }
+    fns[i] = f;
+    continue;
+}
+print fns[0](); // 0
+print fns[1](); // 1
+print fns[2](); // 2
+```
+
+**Closures that capture one binding share it.** This holds for **any** two
+closures that capture the same binding, at any nesting depth. A capture made
+through an intermediate function reaches the same binding, not a copy of it, so
+a write through one closure is visible through the other.
+
+```lox
+fun makePair() {
+    var x = 0;
+    fun get() { return x; }
+    fun set(v) { x = v; }
+    return [get, set];
+}
+var p = makePair();
+p[1](5);
+print p[0](); // 5
+```
+
+A capture two levels deep reaches the same binding.
+
+```lox
+fun outer() {
+    var x = 0;
+    fun near() { return x; }
+    fun mid() {
+        fun inner() { x = x + 7; }
+        return inner;
+    }
+    mid()();
+    return near();
+}
+print outer(); // 7
+```
 
 ### List Literal
 
