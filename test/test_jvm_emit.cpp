@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -45,6 +46,12 @@ int countOccurrences(const std::string& haystack, const std::string& needle) {
     return count;
 }
 
+// The only two mnemonics this emitter writes as a jump (nodes N4/N5/N6).
+// N9 adds `ifeq` (for-in) and N10 adds `tableswitch`/`lookupswitch` (match);
+// whichever node adds a new jump form must add its mnemonic here too, or
+// that jump gets no label-integrity coverage from this helper.
+const std::vector<std::string> kJumpMnemonics = {"goto ", "ifne "};
+
 // N6.md (assigned nit, PR #109 R9): a `goto`/`ifne` to a jasmin label the
 // emitter never wrote assembles fine as far as ctest can see — only
 // tools/check_jvm_probes.sh (jasmin + java, container-only) would ever
@@ -53,18 +60,36 @@ int countOccurrences(const std::string& haystack, const std::string& needle) {
 // line exists for each one, so a plain unit test in this file catches the
 // same defect at zero runtime cost. Call at the end of every emitScript
 // test; every node after N6 that adds a jump inherits the net for free.
+//
+// PR #110 R6: an earlier version searched for the bare mnemonic anywhere in
+// `j`, so a string literal payload containing that text (`ldc "goto
+// L_0000"`) matched too, and the label search for that bogus operand then
+// failed on a correct program. Anchoring the search to "\n    " — the exact
+// indent Builder::emit writes for every real instruction — fixes this,
+// because escapeJasminString always renders a raw newline as the two
+// characters "\\n", so a real newline followed by four spaces can never
+// occur inside a string literal's payload. Prefixing `j` itself with one
+// "\n" gives a jump on the very first line the same leading newline to
+// anchor against, so no special case is needed there.
 void expectEveryJumpTargetIsLabeled(const std::string& j) {
-    for (const std::string& mnemonic :
-         {std::string("goto "), std::string("ifne ")}) {
+    const std::string text = "\n" + j;
+    for (const std::string& mnemonic : kJumpMnemonics) {
+        const std::string anchored = "\n    " + mnemonic;
         std::size_t pos = 0;
-        while ((pos = j.find(mnemonic, pos)) != std::string::npos) {
-            std::size_t nameStart = pos + mnemonic.size();
-            std::size_t nameEnd = j.find('\n', nameStart);
+        while ((pos = text.find(anchored, pos)) != std::string::npos) {
+            std::size_t nameStart = pos + anchored.size();
+            std::size_t nameEnd = text.find('\n', nameStart);
             ASSERT_NE(nameEnd, std::string::npos)
                 << mnemonic << "operand runs off the end of:\n"
                 << j;
-            std::string target = j.substr(nameStart, nameEnd - nameStart);
-            EXPECT_NE(j.find(target + ":\n"), std::string::npos)
+            // The operand is the first field: a defensive split, not a
+            // reaction to any real trailing content this emitter writes
+            // today (nodes/N6.md R6, point 2).
+            std::string rest = text.substr(nameStart, nameEnd - nameStart);
+            std::size_t sep = rest.find_first_of(" \t");
+            std::string target =
+                (sep == std::string::npos) ? rest : rest.substr(0, sep);
+            EXPECT_NE(text.find("\n" + target + ":\n"), std::string::npos)
                 << "jump to undefined label \"" << target << "\" in:\n"
                 << j;
             pos = nameEnd;
@@ -420,6 +445,21 @@ TEST(EmitScript, WhileLoopEmitsBackEdgeAndLabel) {
     std::string target =
         j.substr(nameStart, j.find('\n', nameStart) - nameStart);
     EXPECT_NE(j.find(target + ":"), std::string::npos) << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+TEST(EmitScript, JumpTargetHelperIgnoresJumpMnemonicInsideStringLiteral) {
+    // PR #110 R6: the string payload holds "goto " as ordinary text, not a
+    // jasmin instruction. A real back edge is also present, so the helper
+    // must find and confirm that one while ignoring the literal's payload.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "var i = 0; while (i < 1) { print \"goto L_0000\"; i = i + 1; }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    ASSERT_NE(j.find("ldc \"goto L_0000\""), std::string::npos) << j;
+    EXPECT_NE(j.find("goto L_"), std::string::npos) << j;
     expectEveryJumpTargetIsLabeled(j);
 }
 
