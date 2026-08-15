@@ -390,7 +390,10 @@ Iterates over the elements of a sequence in order.
    - For a **String**: `x` is bound to a single-character String.
 5. After the body, the cursor advances by one and the loop repeats from step 3.
 
-`x` is scoped to the loop body; it is not accessible after the loop exits.
+`x` is scoped to the loop statement; it is not accessible after the loop exits.
+One binding of `x` serves the whole execution of the loop, and each iteration
+assigns to it. It is not a new binding per iteration. See
+[Binding Identity](#binding-identity).
 
 **Mutation during iteration**: modifying the List while iterating is defined.
 Elements appended to the List at indices beyond the current cursor will be
@@ -550,12 +553,26 @@ variable; mutating it through one closure is visible through all others.
 
 ### Binding Identity
 
-A closure captures a **binding**, not a value and not a copy. Two rules define
-which binding it captures.
+A closure captures a **binding**, not a value and not a copy. A closure reads
+and writes that binding when it is **called**. What it sees therefore depends on
+when you call it, not on when it was created.
 
-**Each execution of a declaration creates a new binding.** A `var` declaration
-in a loop body therefore produces a distinct binding on every iteration, and a
-closure made in one iteration keeps that iteration's binding.
+**What creates a binding.** All of these create bindings:
+
+- a `var` declaration;
+- the variable of a `for` initializer, and the variable of a `for ... in`
+  statement;
+- a function parameter;
+- `this`, inside a method;
+- a pattern binding in a `match` arm.
+
+`super` is different. It is captured lexically at class-definition time, as the
+Inheritance section states.
+
+**Each execution of the construct that creates a binding makes a NEW binding.**
+One place in the source can therefore make many bindings, one per execution. A
+`var` declaration in a loop body makes a distinct binding on every iteration,
+and a closure made in one iteration keeps that iteration's binding.
 
 ```lox
 var fns = [nil, nil, nil];
@@ -569,10 +586,43 @@ print fns[1](); // 1
 print fns[2](); // 2
 ```
 
-**A loop variable is one binding for the whole loop.** The variable declared in
-a `for` initializer, and the variable of a `for ... in` statement, are each
-created once and updated on each iteration. A closure that captures the loop
-variable therefore observes its final value.
+A function parameter obeys the same rule. Each call makes a new one.
+
+```lox
+var fns = [nil, nil, nil];
+fun rec(n) {
+    fun get() { return n; }
+    fns[n] = get;
+    if (n > 0) rec(n - 1);
+}
+rec(2);
+print fns[0](); // 0
+print fns[1](); // 1
+print fns[2](); // 2
+```
+
+`this` obeys it too. Each method call makes a new binding of `this`.
+
+```lox
+class C {
+    init(v) { this.v = v; }
+    getter() {
+        fun g() { return this.v; }
+        return g;
+    }
+}
+var a = C(1).getter();
+var b = C(2).getter();
+print a(); // 1
+print b(); // 2
+```
+
+**A loop variable is one binding per execution of the loop statement.** The
+variable of a `for` initializer, and the variable of a `for ... in` statement,
+are each made once when that loop starts, and are then updated on each
+iteration. They are **not** made again per iteration. Running the same loop
+statement a second time — a `for` inside a `while`, for example — makes a new
+binding.
 
 ```lox
 var fns = [nil, nil, nil];
@@ -598,6 +648,36 @@ print fns[1](); // 2
 print fns[2](); // 2
 ```
 
+These closures print `3` because the calls happen after the loop ends, and the
+one binding then holds `3`. A closure called **during** the loop reads the value
+at that moment, so do not read this rule as "a closure sees the final value".
+
+```lox
+var f = nil;
+for (var i = 0; i < 3; i = i + 1) {
+    if (i == 0) { fun g() { return i; } f = g; }
+    if (i == 1) print f(); // 1
+}
+print f(); // 3
+```
+
+A `for` inside a `while` shows that each execution of the loop statement makes
+its own binding.
+
+```lox
+var fns = [nil, nil];
+var k = 0;
+while (k < 2) {
+    for (var i = 0; i < k + 2; i = i + 1) {
+        fun f() { return i; }
+        fns[k] = f;
+    }
+    k = k + 1;
+}
+print fns[0](); // 2
+print fns[1](); // 3
+```
+
 To capture a per-iteration value, declare a variable in the loop body and
 capture that, as the first example does.
 
@@ -619,9 +699,10 @@ print fns[1](); // 1
 print fns[2](); // 2
 ```
 
-**Closures over one binding share it.** Two closures made in the same execution
-of a scope capture the same binding, so a write through one is visible through
-the other.
+**Closures that capture one binding share it.** This holds for **any** two
+closures that capture the same binding, at any nesting depth. A capture made
+through an intermediate function reaches the same binding, not a copy of it, so
+a write through one closure is visible through the other.
 
 ```lox
 fun makePair() {
@@ -633,6 +714,22 @@ fun makePair() {
 var p = makePair();
 p[1](5);
 print p[0](); // 5
+```
+
+A capture two levels deep reaches the same binding.
+
+```lox
+fun outer() {
+    var x = 0;
+    fun near() { return x; }
+    fun mid() {
+        fun inner() { x = x + 7; }
+        return inner;
+    }
+    mid()();
+    return near();
+}
+print outer(); // 7
 ```
 
 ### List Literal
