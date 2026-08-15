@@ -548,6 +548,93 @@ print c(); // 2
 Multiple closures created within the same scope share the same closed-over
 variable; mutating it through one closure is visible through all others.
 
+### Binding Identity
+
+A closure captures a **binding**, not a value and not a copy. Two rules define
+which binding it captures.
+
+**Each execution of a declaration creates a new binding.** A `var` declaration
+in a loop body therefore produces a distinct binding on every iteration, and a
+closure made in one iteration keeps that iteration's binding.
+
+```lox
+var fns = [nil, nil, nil];
+for (var i = 0; i < 3; i = i + 1) {
+    var snapshot = i;
+    fun f() { return snapshot; }
+    fns[i] = f;
+}
+print fns[0](); // 0
+print fns[1](); // 1
+print fns[2](); // 2
+```
+
+**A loop variable is one binding for the whole loop.** The variable declared in
+a `for` initializer, and the variable of a `for ... in` statement, are each
+created once and updated on each iteration. A closure that captures the loop
+variable therefore observes its final value.
+
+```lox
+var fns = [nil, nil, nil];
+for (var i = 0; i < 3; i = i + 1) {
+    fun f() { return i; }
+    fns[i] = f;
+}
+print fns[0](); // 3
+print fns[1](); // 3
+print fns[2](); // 3
+```
+
+```lox
+var fns = [nil, nil, nil];
+var n = 0;
+for (var x in [0, 1, 2]) {
+    fun f() { return x; }
+    fns[n] = f;
+    n = n + 1;
+}
+print fns[0](); // 2
+print fns[1](); // 2
+print fns[2](); // 2
+```
+
+To capture a per-iteration value, declare a variable in the loop body and
+capture that, as the first example does.
+
+**A binding ends when its scope exits, by any path.** Falling off the end of a
+block, `break`, `continue`, `return`, and leaving a `match` arm all end the
+bindings of the scopes they leave. A closure that outlives the scope keeps its
+own binding alive, and the next execution of the declaration creates a new one.
+
+```lox
+var fns = [nil, nil, nil];
+for (var i = 0; i < 3; i = i + 1) {
+    var snapshot = i;
+    fun f() { return snapshot; }
+    fns[i] = f;
+    continue;
+}
+print fns[0](); // 0
+print fns[1](); // 1
+print fns[2](); // 2
+```
+
+**Closures over one binding share it.** Two closures made in the same execution
+of a scope capture the same binding, so a write through one is visible through
+the other.
+
+```lox
+fun makePair() {
+    var x = 0;
+    fun get() { return x; }
+    fun set(v) { x = v; }
+    return [get, set];
+}
+var p = makePair();
+p[1](5);
+print p[0](); // 5
+```
+
 ### List Literal
 
 ```lox
