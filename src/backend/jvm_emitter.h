@@ -17,9 +17,9 @@
 //   script (`main`):   slot 0 = String[] args, slot 1 = LoxGlobals.
 //   function (`invoke`): slot 0 = `this` (the LoxFn$<n> instance), slot 1 =
 //     `self` (the callee/receiver the Lox chunk's own frame slot 0 wants),
-//     slot 2 = Object[] args, slot 3 = LoxGlobals (read from `this.globals`
-//     via LoxRuntime.current() — a generated class has no field of its own
-//     for it; see jvm_emitter.cpp). A prologue copies `self` into the Lox
+//     slot 2 = Object[] args, slot 3 = LoxGlobals (from
+//     `LoxRuntime.current()`; a generated class has no field of its own for
+//     it; see jvm_emitter.cpp). A prologue copies `self` into the Lox
 //     frame's own slot-0 mirror and unpacks `args[i]` into slot i+1's.
 //
 // Either way, the Lox frame's own slots [0, maxLocalCount) mirror 1:1 into
