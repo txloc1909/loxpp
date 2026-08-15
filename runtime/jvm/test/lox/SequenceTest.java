@@ -14,6 +14,12 @@ public final class SequenceTest {
     }
 
     public static void main(String[] args) {
+        LoxList built = LoxOps.buildList(new Object[] {1.0, 2.0, 3.0});
+        checkEquals(3, built.elements.size(), "buildList size");
+        checkEquals(1.0, built.elements.get(0), "buildList keeps first-to-last order");
+        checkEquals(3.0, built.elements.get(2), "buildList keeps first-to-last order (last)");
+        checkEquals(0, LoxOps.buildList(new Object[0]).elements.size(), "buildList of zero elements");
+
         LoxList nums = listOf(1.0, 2.0, 3.0);
         check(LoxOps.in(1.0, nums), "in(1, [1,2,3])");
         check(!LoxOps.in(4.0, nums), "in(4, [1,2,3]) is false");
