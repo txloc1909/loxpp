@@ -85,9 +85,17 @@ struct FunctionStackAnalysis {
     // operand stack. Counts an invisible-var's declaring push itself (the
     // emitter's store has not run yet at that instruction), so it is a safe
     // lower bound, not the final number: an emission strategy that needs its
-    // own transient cell beyond what this pass sees (e.g. the `dup` a P2
-    // shuffle lowering adds) must add that on top. That is N4's
-    // responsibility, not this node's.
+    // own transient cell beyond what this pass sees must add it on top of
+    // this number before using it as `.limit stack`/`.maxstack`. That is
+    // N4's responsibility, not this node's. Two known cases, neither
+    // raising the bound on any of the 603 corpus chunks measured so far:
+    // an emission-strategy choice (e.g. the `dup` a P2 shuffle lowering
+    // adds), and a load this pass's own labels force — when an instruction
+    // pops a cell this pass calls a named local (RETURN does, at 33 sites
+    // across examples/ and bootstrap/loxpp_interpreter.lox;
+    // bytecode-translation-problems.md records the count), the emitter must
+    // load that local first, and that load needs a real operand cell this
+    // pass does not count.
     int maxOperandDepth{0};
 };
 
