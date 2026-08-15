@@ -314,6 +314,19 @@ std::string emitScript(const DecodedFunction& fn,
     // just bound, updated only by this pass's own forward walk in offset
     // order (below, alongside the existing invisible-var store), never by a
     // count aggregated across incoming edges.
+    //
+    // PR #109 R3: no program in this node's opcode set (if/else, while, for —
+    // no functions, no match) has yet made `lastInvisibleVarSlot` disagree
+    // with `jvmSlotForLocal(before[i].localCount - 1)` at the offsets that
+    // read it. The reason is the scope-exit rule (brief 5c): `endScope` and
+    // `emitLoopCleanup` retire every local a block declared, on every path
+    // out of that block, before control ever reaches a point outside it. Two
+    // edges into one merge can therefore disagree on `localCount` only
+    // through a construct that leaves a *different* number of locals live
+    // past that merge on each path — a function frame or a `match` arm,
+    // neither in scope here (N6, N10). `lastInvisibleVarSlot` still stays,
+    // not `localCount`, because it costs nothing today and reads correctly
+    // the moment either later node breaks that premise.
     int lastInvisibleVarSlot = -1;
     auto constantString = [&](int idx) -> std::string {
         Value v = fn.function->chunk.getConstant(static_cast<uint16_t>(idx));
