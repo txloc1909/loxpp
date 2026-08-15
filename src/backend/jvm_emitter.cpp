@@ -619,7 +619,21 @@ std::string emitScript(const DecodedFunction& fn,
             // real optimization (one word, briefly, on two probes) not a
             // correctness requirement — every probe here is nowhere near
             // .limit stack pressure.
-            b.emit("dup", +1);
+            //
+            // R2 fix (PR #109 round 1): before[i].operandDepth() == 0 is the
+            // same eager invisible-var materialization as the SET_LOCAL/
+            // SET_GLOBAL peek above (P2/P3 initializer whose top-level
+            // operator is `and`/`or`) — the condition is not on the JVM
+            // operand stack to `dup`, because N2 already moved it into
+            // `lastInvisibleVarSlot`. Load a fresh copy from there instead;
+            // `isFalsy`/`ifne` still only consume that one copy, so the
+            // depth-preserving contract holds on both edges (0 in, 0 out)
+            // exactly as the dup path holds it at (D, D) for D > 0.
+            if (analysis.before[i].operandDepth() == 0) {
+                loadLastInvisibleVar();
+            } else {
+                b.emit("dup", +1);
+            }
             b.emit("invokestatic lox/LoxOps/isFalsy(Ljava/lang/Object;)Z", 0);
             b.emit("ifne " + labelFor(in.jumpTarget), -1);
             break;
