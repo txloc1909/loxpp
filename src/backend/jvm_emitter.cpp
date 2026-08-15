@@ -1438,6 +1438,20 @@ void emitReturn(Emitter& e, std::size_t i, bool isScript) {
     }
     if (e.analysis.before[i].operandDepth() == 0) {
         int loxSlot = e.analysis.before[i].localCount - 1;
+        // R2 fix (PR #113 round 1): `localCount - 1` is exact only while
+        // every incoming edge agrees on it — abstract_stack.h forbids
+        // reading `before[i].localCount` alone at a merge. Measured today:
+        // every depth-0 RETURN in examples/ and bootstrap/ (35 sites) has a
+        // single physical predecessor, so none is a CFG block leader. A
+        // label at this offset means a shape this rule was never checked
+        // against; fail loudly rather than load a wrong slot.
+        int returnOffset = e.fn.instructions[i].offset;
+        if (e.labelAtOffset.contains(returnOffset)) {
+            throw std::runtime_error(
+                "jvm_emitter: RETURN at offset " +
+                std::to_string(returnOffset) +
+                " is a CFG merge; localCount - 1 is unverified there");
+        }
         e.b.emit("aload " + std::to_string(e.jvmSlotForLocal(loxSlot)), +1);
     }
     e.b.emit("areturn", -1);
