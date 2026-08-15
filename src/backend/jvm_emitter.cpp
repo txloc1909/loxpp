@@ -250,6 +250,15 @@ struct Emitter {
     // run yet", not a real slot — see loadLastInvisibleVar.
     int lastInvisibleVarSlot{-1};
 
+    // R1 fix (PR #111 round 2): true only right after emitClosure's
+    // self-capture path stores a CELL into `lastInvisibleVarSlot` instead of
+    // the raw closure a plain declaration always stores. No probe or
+    // example reaches a peek of a self-recursive local `fun`'s own value
+    // (the grammar makes such a declaration a statement, never an operand),
+    // so loadLastInvisibleVar throws there rather than silently handing out
+    // a cell where every other caller expects a raw value.
+    bool lastInvisibleVarIsSelfCell{false};
+
     // Every Lox local slot this chunk's OWN captures (FunctionCaptureInfo::
     // liveRangesBySlot) ever wrap in an Object[1] ref-cell — see the design
     // note above ensureCapturedCell for why membership, not the exact live
@@ -361,6 +370,12 @@ struct Emitter {
             throw std::runtime_error(
                 "jvm_emitter: peek of an invisible var before any "
                 "invisible-var site ran");
+        }
+        if (lastInvisibleVarIsSelfCell) {
+            throw std::runtime_error(
+                "jvm_emitter: peek of a self-capturing closure's own "
+                "invisible var is unsupported — the slot holds a cell, not "
+                "the raw closure a plain aload here would assume");
         }
         int sourceSlot = jvmSlotForLocal(lastInvisibleVarSlot);
         b.emit("aload " + std::to_string(sourceSlot), +1);
@@ -614,11 +629,14 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
     // `lastInvisibleVarSlot`, not `before[i].localCount`, names it (R9,
     // resolved for N5 — localCount is only an upper bound at a CFG merge,
     // but lastInvisibleVarSlot is this pass's own forward walk, so it is
-    // exact regardless of merges upstream). That declaring push is never
-    // itself a capture (a capture only ever starts at a CLOSURE, further
-    // along in program order — see ensureCapturedCell), so the value it
-    // reloads is always the raw one, whether or not THIS slot is captured
-    // somewhere else in the chunk.
+    // exact regardless of merges upstream). That declaring push reloads the
+    // raw value, whether or not THIS slot is captured somewhere else in the
+    // chunk — EXCEPT one case (PR #111 R1/R4): a local `fun` that captures
+    // itself stores a CELL there instead, through emitClosure's own
+    // self-capture path, not a plain astore. loadLastInvisibleVar throws in
+    // that one case rather than handing back a cell where every caller here
+    // expects the raw value (see the self-capture note above
+    // ensureCapturedCell, and lastInvisibleVarIsSelfCell's own comment).
     if (e.analysis.before[i].operandDepth() == 0) {
         e.loadLastInvisibleVar();
         if (captured) {
@@ -891,6 +909,99 @@ void ensureCapturedCell(Emitter& e, int slot, int offset, int subIndex) {
 // slot as generic Object, so `checkcast` narrows it before the `aastore`
 // into the Object[]-typed upvals array (the seed's OWN aastore, above, does
 // not need one: `anewarray` already gives it the exact array type).
+//
+// R2 fix (PR #111 round 1): `up.isLocal` and `e.capturedSlots` come from two
+// different sources that agree today by construction, not by any check —
+// the former is the CLOSURE instruction's own decoded operand bytes, the
+// latter is N3's `liveRangesBySlot`. Nothing makes a future drift between
+// the two impossible, and a silent one would seed a cell this pass never
+// marks captured, so GET_LOCAL/SET_LOCAL elsewhere would keep reading the
+// raw value while this closure reads the cell — a wrong VALUE, no verifier
+// error, no exception. Fail loudly instead, before N8 adds `super` as a
+// second path that can make this same claim.
+void checkAllCapturesAreReported(const Emitter& e,
+                                 const DecodedInstruction& in) {
+    for (const ClosureUpvalue& up : in.upvalues) {
+        if (up.isLocal && !e.isCaptured(up.index)) {
+            throw std::runtime_error(
+                "jvm_emitter: CLOSURE captures local slot " +
+                std::to_string(up.index) +
+                " that capture analysis does not report");
+        }
+    }
+}
+
+// The Lox slot THIS closure's own declaring push lands in, if any (only a
+// named local `fun` has one — findInvisibleVarIndices records it as an
+// invisible-var site at this very offset, never at any other, because
+// closureIsConsumedImmediately is false for every local declaration), AND
+// that same closure captures as an upvalue (direct recursion). -1 when this
+// CLOSURE is not that shape.
+int findSelfCaptureLoxSlot(const Emitter& e, const DecodedInstruction& in) {
+    auto ownSlotIt = e.invisibleVarsByOffset.find(in.offset);
+    if (ownSlotIt == e.invisibleVarsByOffset.end()) {
+        return -1;
+    }
+    for (int candidate : ownSlotIt->second) {
+        for (const ClosureUpvalue& up : in.upvalues) {
+            if (up.isLocal && up.index == candidate) {
+                return candidate;
+            }
+        }
+    }
+    return -1;
+}
+
+// Self-capture (PR #111 R1): a local `fun` that calls itself makes ONE of
+// this CLOSURE's isLocal entries name the very slot it is declaring.
+// `ensureCapturedCell` cannot run on that slot the normal way: at this
+// offset nothing has ever written it, so its `aload` reads an uninitialized
+// JVM register and the verifier rejects the class. The native VM sidesteps
+// this because its "local" IS the value stack slot: vm.cpp pushes the
+// closure first, and that push already IS the declaring store, so
+// `captureUpvalue` always finds a real value there. The JVM prologue gives
+// this pass no such order for free, so this seeds a fresh cell into the
+// slot BEFORE anything reads it — always a FRESH one, unconditionally,
+// since this offset IS the declaration, so whatever the slot currently
+// holds is a dead incarnation regardless (mission brief 5c). `anewarray`
+// default-initializes `[0]` to null; the real value lands there once the
+// closure exists, in storeClosureIntoSelfCell below. After this call the
+// array-build loop in emitClosure treats the slot exactly like any other
+// already-a-cell capture — no special case needed there.
+void seedSelfCaptureCell(Emitter& e, int selfJvmSlot) {
+    e.b.emit("iconst_1", +1);
+    e.b.emit("anewarray java/lang/Object", 0);
+    e.b.emit("astore " + std::to_string(selfJvmSlot), -1);
+}
+
+// The declaring store, redirected: write the closure just built into the
+// cell's own `[0]`, never into the JVM slot itself (which already holds
+// that cell, from seedSelfCaptureCell) — finishInstruction's ordinary plain
+// `astore` would undo the seed and hand every capturing sibling closure a
+// stale cell (R1's second, separate defect). Spilled to `scratchSlot` first
+// for the same reason emitCapturedStore does: building [cellRef, 0, value]
+// for `aastore` needs the value parked somewhere while the cell reference
+// is fetched.
+void storeClosureIntoSelfCell(Emitter& e, const DecodedInstruction& in,
+                              int selfJvmSlot, int selfLoxSlot) {
+    std::string scratch = std::to_string(e.scratchSlot);
+    e.b.emit("astore " + scratch, -1);
+    e.b.emit("aload " + std::to_string(selfJvmSlot), +1);
+    e.b.emit("iconst_0", +1);
+    e.b.emit("aload " + scratch, +1);
+    e.b.emit("aastore", -3);
+
+    // finishInstruction must not ALSO store this offset's invisible var: it
+    // would run its plain `astore` after the write above and put the raw
+    // closure back into the slot, undoing this fix. Erase it here instead
+    // of leaving finishInstruction to guess.
+    auto& slots = e.invisibleVarsByOffset[in.offset];
+    slots.erase(std::remove(slots.begin(), slots.end(), selfLoxSlot),
+                slots.end());
+    e.lastInvisibleVarSlot = selfLoxSlot;
+    e.lastInvisibleVarIsSelfCell = true;
+}
+
 void emitClosure(Emitter& e, const DecodedInstruction& in,
                  const std::vector<std::string>& childClassNames) {
     if (in.nestedIndex < 0 ||
@@ -902,9 +1013,18 @@ void emitClosure(Emitter& e, const DecodedInstruction& in,
     const std::string& cls =
         childClassNames[static_cast<std::size_t>(in.nestedIndex)];
 
+    checkAllCapturesAreReported(e, in);
+
+    int selfLoxSlot = findSelfCaptureLoxSlot(e, in);
+    int selfJvmSlot = -1;
+    if (selfLoxSlot >= 0) {
+        selfJvmSlot = e.jvmSlotForLocal(selfLoxSlot);
+        seedSelfCaptureCell(e, selfJvmSlot);
+    }
+
     for (std::size_t u = 0; u < in.upvalues.size(); u++) {
         const ClosureUpvalue& up = in.upvalues[u];
-        if (up.isLocal) {
+        if (up.isLocal && up.index != selfLoxSlot) {
             ensureCapturedCell(e, e.jvmSlotForLocal(up.index), in.offset,
                                static_cast<int>(u));
         }
@@ -919,6 +1039,9 @@ void emitClosure(Emitter& e, const DecodedInstruction& in,
         e.b.emit("dup", +1);
         e.b.emit(pushIntInstruction(static_cast<int>(u)), +1);
         if (up.isLocal) {
+            // `selfLoxSlot` already holds a fresh cell (seeded above), so
+            // this is the same lowering as any other already-a-cell
+            // capture — no special case needed here.
             e.b.emit("aload " + std::to_string(e.jvmSlotForLocal(up.index)),
                      +1);
             e.b.emit("checkcast [Ljava/lang/Object;", 0);
@@ -935,6 +1058,10 @@ void emitClosure(Emitter& e, const DecodedInstruction& in,
         e.b.emit("aastore", -3);
     }
     e.b.emit("invokespecial " + cls + "/<init>([[Ljava/lang/Object;)V", -2);
+
+    if (selfJvmSlot >= 0) {
+        storeClosureIntoSelfCell(e, in, selfJvmSlot, selfLoxSlot);
+    }
 }
 
 // RETURN's two roles (P5): a function's own RETURN hands its value back to
@@ -1101,6 +1228,12 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
         for (int slot : varsIt->second) {
             e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(slot)), -1);
             e.lastInvisibleVarSlot = slot;
+            // A plain declaration always stores the raw value here — the
+            // self-capture flag only ever means something right after
+            // emitClosure's own special-cased store (below), which erases
+            // its slot from this map before finishInstruction runs, so a
+            // normal site reaching this loop is never that case.
+            e.lastInvisibleVarIsSelfCell = false;
         }
     }
 
@@ -1202,6 +1335,14 @@ void emitBody(Emitter& e, bool isScript,
             // through ensureCapturedCell's check), which is what actually
             // puts the slot back to raw for whatever comes after — see
             // ensureCapturedCell's own note.
+            //
+            // This one `break` covers every close alike — reachable,
+            // unreachable, or statically dead (capture_analysis.h's own
+            // fields for those). It never reads any of them: emitting no
+            // bytecode at all already satisfies the "pop alone, no cell
+            // operation" rule those fields describe, for every kind of
+            // close, so there is nothing left for this case to branch on
+            // (PR #111 R7).
             break;
         case Op::JUMP:
         case Op::LOOP:
