@@ -482,3 +482,19 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
 - **No list concatenation.** `a + b` on two lists raises "Operands must be
   numbers" (hit while writing `V1`). `ADD` is numbers-and-strings only; worth
   stating in the `ADD` semantics so no backend invents list `+`.
+- **`RETURN` can return a named local, not only a temporary — N4 must load it
+  explicitly.** A `match` expression whose arm is a block of statements with
+  no trailing bare expression (every statement's value fully discarded)
+  leaves the match's synthetic result sitting in the hidden local slot the
+  compiler allocated for it, instead of on top as a temporary; `return`ing
+  that value does not follow it with the usual reclaim-`POP` a temporary
+  would need. `examples/or_pattern_demo.lox`, function `must_stop`: `RETURN`
+  at offset 58 sees height 3, localCount 3 — operand depth 0, not the 1 a
+  temporary return value would leave. The value that must be returned is
+  local slot 2, written earlier by `SET_LOCAL 2` at offset 30. Measured over
+  `examples/*.lox` and `bootstrap/loxpp_interpreter.lox` (N2's abstract-stack
+  pass, node N2): **33** such `RETURN` sites, zero among the translation
+  probes (P1's `01_assign_local`-style checkpoints never exercise this
+  shape). N4 must detect "the position at `RETURN` is a local, not a
+  temporary" and emit an explicit load before the return, the same
+  recognition N2 already performs for every other opcode.
