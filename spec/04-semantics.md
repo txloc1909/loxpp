@@ -557,17 +557,43 @@ A closure captures a **binding**, not a value and not a copy. A closure reads
 and writes that binding when it is **called**. What it sees therefore depends on
 when you call it, not on when it was created.
 
-**What creates a binding.** All of these create bindings:
+**This section is about LOCAL bindings. Globals are not bindings.** A global
+name is looked up in one global table when the access **runs**, not when the
+function that holds the access is created. A function can therefore read a
+global that did not exist when the function was made, and it always sees the
+current value.
 
-- a `var` declaration;
+```lox
+fun get() { return later; }
+var later = 42;
+print get(); // 42
+```
+
+```lox
+var g = 1;
+fun get() { return g; }
+var g = 2;
+print get(); // 2
+```
+
+Nothing in the rest of this section applies to a global.
+
+**What creates a local binding.** All of these create local bindings:
+
+- a local `var` declaration;
 - the variable of a `for` initializer, and the variable of a `for ... in`
   statement;
 - a function parameter;
+- the name of a local `fun` or `class` declaration;
 - `this`, inside a method;
 - a pattern binding in a `match` arm.
 
-`super` is different. It is captured lexically at class-definition time, as the
-Inheritance section states.
+A `match` pattern binding is a local binding, but no closure can capture it. A
+`match` arm body is an expression, and Lox++ has no function-expression form, so
+a `fun` cannot appear there.
+
+`super` is different again. It is captured lexically at class-definition time,
+as the Inheritance section states.
 
 **Each execution of the construct that creates a binding makes a NEW binding.**
 One place in the source can therefore make many bindings, one per execution. A
@@ -619,8 +645,11 @@ print b(); // 2
 
 **A loop variable is one binding per execution of the loop statement.** The
 variable of a `for` initializer, and the variable of a `for ... in` statement,
-are each made once when that loop starts, and are then updated on each
-iteration. They are **not** made again per iteration. Running the same loop
+are each made once when that loop starts. The loop then assigns to that one
+binding: the `for` increment clause assigns to it if the loop has one, and
+`for ... in` assigns the next element to it on each iteration. A `for` with no
+increment clause never changes its variable. In every case the binding itself is
+**not** made again per iteration. Running the same loop
 statement a second time — a `for` inside a `while`, for example — makes a new
 binding.
 
@@ -648,9 +677,15 @@ print fns[1](); // 2
 print fns[2](); // 2
 ```
 
-These closures print `3` because the calls happen after the loop ends, and the
-one binding then holds `3`. A closure called **during** the loop reads the value
-at that moment, so do not read this rule as "a closure sees the final value".
+In both examples above, every call happens after its loop ends, so each closure
+reads the one binding at the value it then holds: `3` for the counting loop, and
+`2` for the `for ... in` loop, whose variable holds the last element. A closure
+called **during** the loop reads the value at that moment instead, so do not
+read this rule as "a closure sees the final value".
+
+Sharing one binding across the iterations of a `for ... in` loop is a deliberate
+choice. It makes the `for ... in` variable behave like the `for` initializer
+variable.
 
 ```lox
 var f = nil;
@@ -681,10 +716,14 @@ print fns[1](); // 3
 To capture a per-iteration value, declare a variable in the loop body and
 capture that, as the first example does.
 
-**A binding ends when its scope exits, by any path.** Falling off the end of a
-block, `break`, `continue`, `return`, and leaving a `match` arm all end the
-bindings of the scopes they leave. A closure that outlives the scope keeps its
-own binding alive, and the next execution of the declaration creates a new one.
+**A binding ends when its scope exits, by any path.** A binding **ends** when
+its name goes out of scope and no later execution can reach that same binding
+again. Ending a binding does not destroy its storage: a closure that captured it
+keeps it alive and can still read and write it. Ending it means only that the
+next execution of the same declaration makes a **different** binding.
+
+Falling off the end of a block, `break`, `continue`, `return`, and leaving a
+`match` arm all end the bindings of the scopes they leave.
 
 ```lox
 var fns = [nil, nil, nil];
