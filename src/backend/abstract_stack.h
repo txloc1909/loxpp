@@ -106,6 +106,17 @@ struct FunctionStackAnalysis {
 // disagreement there means the decoder or this analysis has drifted from
 // the compiler; the input program is trusted to be compiler-correct.
 //
+// At such a merge, `before[i].height` and `before[i].localCount` are each
+// the maximum over incoming edges, taken independently — an upper bound
+// that need not match any single incoming edge's own raw pair. Two measured
+// cases: `bootstrap/loxpp_interpreter.lox`'s `resolveStmt` (offset 705) has
+// edges (h=3,L=3) and (h=4,L=4); `execStmt` (offset 630) has two edges both
+// (h=4,L=4) yet `before[630]` reports (5,5), so a third, unlisted edge
+// supplies the max on both dimensions there. Read `before[i].operandDepth()`
+// as exact on every edge (the property just above proves it); do not read
+// `before[i].height` or `before[i].localCount` alone as one edge's exact
+// state at a merge.
+//
 // N1 (CFG/label recovery) has landed (src/backend/cfg.h, cfg.cpp, PR #100).
 // This analysis still computes its own private local leaders/edges (see
 // abstract_stack.cpp) instead of depending on N1's builder, per N2.md's
