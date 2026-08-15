@@ -309,6 +309,21 @@ std::string emitScript(const DecodedFunction& fn,
         const DecodedInstruction& in = ins[i];
         bool consumedFollowingPop = false;
 
+        // R1 safety net (PR #107 round 1): every correctly-lowered opcode in
+        // this pass keeps the JVM operand stack's physical depth equal to
+        // N2's own operandDepth() at the same offset — a temp this emitter
+        // pushed is the only thing N2 counts as "on the stack". A mismatch
+        // here means a peek is about to dup or pop a cell that is not
+        // physically there (the SET_LOCAL/SET_GLOBAL bug below), so abort
+        // loudly instead of letting jasmin or the JVM verifier find it.
+        if (b.depth != analysis.before[i].operandDepth()) {
+            throw std::runtime_error(
+                "jvm_emitter: simulated stack depth " +
+                std::to_string(b.depth) + " disagrees with analysis depth " +
+                std::to_string(analysis.before[i].operandDepth()) +
+                " at offset " + std::to_string(in.offset));
+        }
+
         switch (in.op) {
         case Op::CONSTANT: {
             Value v = fn.function->chunk.getConstant(
@@ -426,13 +441,28 @@ std::string emitScript(const DecodedFunction& fn,
             break;
         case Op::SET_LOCAL: {
             int slot = jvmSlotForLocal(in.byteOperand);
-            if (fusablePop(i)) {
+            bool fuse = fusablePop(i);
+            // R1 fix (PR #107 round 1): before[i].operandDepth() == 0 means
+            // N2 already folded the peeked value into a named local (the
+            // eager invisible-var materialization, abstract_stack.h) —
+            // nothing sits on the JVM operand stack to `dup`. Load it back
+            // from its slot instead. No copy needs to survive this store: a
+            // later invisible-var site always attaches to the *producing*
+            // instruction, never to this peek, and a further chained peek
+            // reloads the same persistent slot fresh rather than depend on
+            // a leftover operand.
+            if (analysis.before[i].operandDepth() == 0) {
+                int sourceSlot =
+                    jvmSlotForLocal(analysis.before[i].localCount - 1);
+                b.emit("aload " + std::to_string(sourceSlot), +1);
                 b.emit("astore " + std::to_string(slot), -1);
-                consumedFollowingPop = true;
+            } else if (fuse) {
+                b.emit("astore " + std::to_string(slot), -1);
             } else {
                 b.emit("dup", +1);
                 b.emit("astore " + std::to_string(slot), -1);
             }
+            consumedFollowingPop = fuse;
             break;
         }
         case Op::DEFINE_GLOBAL:
@@ -448,8 +478,21 @@ std::string emitScript(const DecodedFunction& fn,
             break;
         case Op::SET_GLOBAL: {
             bool fuse = fusablePop(i);
-            globalsCall("set", constantString(in.constantIndex),
-                        /*peek=*/!fuse);
+            // R1 fix (PR #107 round 1): same reasoning as SET_LOCAL above.
+            // When the source is already a named local, load it explicitly
+            // and always use the non-peek call: the plain store fully
+            // consumes the loaded copy either way, so no separate
+            // fuse/non-fuse split is needed on this branch.
+            if (analysis.before[i].operandDepth() == 0) {
+                int sourceSlot =
+                    jvmSlotForLocal(analysis.before[i].localCount - 1);
+                b.emit("aload " + std::to_string(sourceSlot), +1);
+                globalsCall("set", constantString(in.constantIndex),
+                            /*peek=*/false);
+            } else {
+                globalsCall("set", constantString(in.constantIndex),
+                            /*peek=*/!fuse);
+            }
             consumedFollowingPop = fuse;
             break;
         }
