@@ -132,3 +132,16 @@ StackAnalysisTree analyzeStackTree(const DecodedFunction& root);
 // exactly a JUMP_IF_FALSE peek paired with a POP on the truthy path
 // (bytecode-translation-problems.md P2).
 bool peeksInsteadOfPops(Op op);
+
+// Internal to analyzeStack's own implementation (R11's safety-net guard,
+// abstract_stack.cpp). Declared here, not in the anonymous namespace it once
+// sat in, only so test_backend_abstract_stack.cpp can drive it directly
+// with a hand-built `declaredSlotsAt` (R15) — analyzeStack's own discovery
+// never produces the gap this checks for, so no real chunk can reach this
+// path through analyzeStack alone. Not part of the public analysis API:
+// N4/N5/N6 must not call this.
+void validateNoInvisibleVarGaps(
+    const std::vector<DecodedInstruction>& ins,
+    const std::vector<StackState>& before, const std::vector<bool>& reached,
+    const std::vector<std::vector<int>>& declaredSlotsAt,
+    const std::string& functionId);

@@ -232,6 +232,42 @@ TEST(AbstractStackTest, MergeDisagreementThrows) {
     }
 }
 
+// R15: validateNoInvisibleVarGaps is a safety net for a bug in discovery
+// (findInvisibleVarIndices), not a property any real chunk can trigger —
+// analyzeStack's own discovery never reports a slot that disagrees with the
+// local count at its own recognition point (that is what R8's redesign
+// establishes). So this drives the guard directly, with a `declaredSlotsAt`
+// built by hand to disagree on purpose, instead of hunting for a chunk that
+// cannot exist.
+TEST(AbstractStackTest, DirectlyBuiltGapThrowsWithTheRightMessage) {
+    DecodedInstruction constant0;
+    constant0.offset = 0;
+    constant0.op = Op::CONSTANT; // pops 0, so localCountAfterPops(before, 0)
+                                 // is just before.localCount, unchanged: 0.
+    std::vector<DecodedInstruction> ins{constant0};
+    std::vector<StackState> before{StackState{1, 0}};
+    std::vector<bool> reached{true};
+    // Claims slot 5 was recognized here, though the local count this
+    // instruction's own pops leave behind is 0 — a gap no real discovery
+    // result can produce.
+    std::vector<std::vector<int>> declaredSlotsAt{{5}};
+
+    try {
+        validateNoInvisibleVarGaps(ins, before, reached, declaredSlotsAt, "0");
+        ADD_FAILURE() << "validateNoInvisibleVarGaps did not throw on a "
+                      << "declaredSlotsAt entry that disagrees with the "
+                      << "local count at its own instruction";
+    } catch (const std::runtime_error& e) {
+        std::string what(e.what());
+        EXPECT_NE(what.find("invisible-var recognition gap"), std::string::npos)
+            << "wrong exception message: " << what;
+        EXPECT_NE(what.find("slot 5"), std::string::npos)
+            << "message must name the offending slot: " << what;
+        EXPECT_NE(what.find("local count 0"), std::string::npos)
+            << "message must name the local count it disagrees with: " << what;
+    }
+}
+
 // Checkpoint 1. Quotes the disassembly straight from N2.md, which the
 // orchestrator verified against the real `-DLOXPP_DEBUG_PRINT_CODE` output.
 TEST(AbstractStackTest, AssignLocalClassifiesBothPopsByReasonNotJustLabel) {

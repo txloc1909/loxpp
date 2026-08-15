@@ -749,6 +749,8 @@ void validateMergeConsistency(const std::vector<DecodedInstruction>& ins,
     }
 }
 
+} // namespace
+
 // R11 (referee ruling): this is a safety net for a *false* site, not a
 // detector for a *missing* one. It iterates only over the sites discovery
 // already found (`declaredSlotsAt[i].empty()` skips silently), so a slot
@@ -774,6 +776,14 @@ void validateMergeConsistency(const std::vector<DecodedInstruction>& ins,
 // Checks that every recognized slot equals the local count computed by
 // popping the instruction's own operands, in the order declaredSlotsAt[i]
 // lists them (ascending, since it is built from a std::set<pair<int,int>>).
+//
+// R15: given external linkage (not left in the anonymous namespace above),
+// so test_backend_abstract_stack.cpp can drive it directly with a
+// hand-built `declaredSlotsAt` and assert the throw — see
+// DirectlyBuiltGapThrowsWithTheRightMessage. A gap needs a genuinely
+// inconsistent `declaredSlotsAt` to fire (analyzeStack's own discovery
+// never produces one; that is the property R8's redesign establishes), so
+// no real chunk can drive this guard through analyzeStack alone.
 void validateNoInvisibleVarGaps(
     const std::vector<DecodedInstruction>& ins,
     const std::vector<StackState>& before, const std::vector<bool>& reached,
@@ -800,8 +810,6 @@ void validateNoInvisibleVarGaps(
         }
     }
 }
-
-} // namespace
 
 FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
     const auto& ins = fn.instructions;
