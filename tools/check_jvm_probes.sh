@@ -21,6 +21,7 @@ set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 native_bin="${LOXPP_BIN:-$root/build/loxpp}"
+lox_rt_jar="${LOX_RT_JAR:-$root/runtime/jvm/lox-rt.jar}"
 
 probes=(
     "notes/translation-probes/01_assign_local.lox"
@@ -88,8 +89,25 @@ for probe in "${error_probes[@]}"; do
         failed_probes+=("$probe")
         continue
     fi
-    "$root/tools/loxpp_jvm.sh" "$root/$probe" >"$jvm_out" 2>"$jvm_err"
+
+    # PR #110 R5: emission and execution are two separate facts. A probe
+    # must fail at RUN time, the same place the native side fails, not at
+    # emit time (an unimplemented opcode, say). The combined
+    # tools/loxpp_jvm.sh exits non-zero either way, so checking only its
+    # exit code let an emit-time abort satisfy this loop by accident.
+    j_dir="$(mktemp -d)"
+    if ! "$native_bin" --target jvm --out-dir "$j_dir" "$root/$probe" \
+        >/dev/null 2>"$jvm_err"; then
+        echo "check_jvm_probes.sh: FAIL $probe (JVM emit failed, not a runtime error)" >&2
+        cat "$jvm_err" >&2
+        rm -rf "$j_dir"
+        failed_probes+=("$probe")
+        continue
+    fi
+    "$root/tools/jvm_run.sh" "$j_dir" "$lox_rt_jar" LoxMain \
+        >"$jvm_out" 2>"$jvm_err"
     jvm_status=$?
+    rm -rf "$j_dir"
     if [ "$jvm_status" -eq 0 ]; then
         echo "check_jvm_probes.sh: FAIL $probe (JVM run did not fail)" >&2
         failed_probes+=("$probe")
