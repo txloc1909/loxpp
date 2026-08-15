@@ -823,6 +823,50 @@ TEST(EmitScript, GetIterReloadsAndRestoresItsOwnDeclaringSlot) {
     expectEveryJumpTargetIsLabeled(j);
 }
 
+TEST(EmitScript, GetIterAfterAMergeStillLoadsTheRightSlot) {
+    // R1 fix (PR #112 round 1): emitGetIter used to name its slot with
+    // `before[i].height - 1`, the same upper-bound-at-a-merge trap
+    // PeekOfNamedLocalAfterAMergeStillLoadsTheRightSlot already proves for
+    // SET_LOCAL. This test puts the for-in loop's own iterable push after an
+    // if-without-else merge, the same shape that test uses, so `emitGetIter`
+    // must read `lastInvisibleVarSlot`, not `before[i].height`, or the
+    // R1 guard below throws instead of a wrong slot silently compiling.
+    //
+    // A genuinely DIVERGENT merge (two edges disagreeing on live local
+    // count) needs a consumed match expression as the iterable, which does
+    // not emit yet (node N10's gap, recorded in this PR). This test cannot
+    // force that divergence on this branch; it proves the fix does not
+    // regress the ordinary, non-divergent merge instead — the same honest
+    // limit PeekOfNamedLocalAfterAMergeStillLoadsTheRightSlot already
+    // accepts for SET_LOCAL.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("{\n"
+                                      "  var a = 1;\n"
+                                      "  if (a == 1) { print 9; }\n"
+                                      "  for (var x in [1, 2, 3]) print x;\n"
+                                      "}\n",
+                                      mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // `a` is JVM slot 3 (2 fixed + Lox slot 0's implicit reserved local).
+    // Reaching this line at all already proves the R1 guard did not throw.
+    // The GET_ITER site's own reload/store slot is JVM slot 4 (Lox slot 2:
+    // implicit reserved, then `a`, then the for-in's own "(iter)" local).
+    EXPECT_NE(j.find("invokestatic "
+                     "lox/LoxOps/buildList([Ljava/lang/Object;)Llox/"
+                     "LoxList;\n"
+                     "    astore 4\n"
+                     "    aload 4\n"
+                     "    invokestatic "
+                     "lox/LoxOps/getIter(Ljava/lang/Object;)Llox/"
+                     "LoxIterator;\n"
+                     "    astore 4\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
 TEST(EmitScript, IsSeqEmitsOneInvokestatic) {
     // IS_SEQ is a match sequence-pattern's own type check (compiler.cpp).
     // An unguarded catch-all arm keeps this snippet inside N0-N9's opcode
