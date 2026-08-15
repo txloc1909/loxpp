@@ -45,6 +45,33 @@ int countOccurrences(const std::string& haystack, const std::string& needle) {
     return count;
 }
 
+// N6.md (assigned nit, PR #109 R9): a `goto`/`ifne` to a jasmin label the
+// emitter never wrote assembles fine as far as ctest can see — only
+// tools/check_jvm_probes.sh (jasmin + java, container-only) would ever
+// reject it. N5's own R1 was exactly this class of bug, on probe 22.
+// Collects every operand of `goto ` and `ifne `, then asserts a "<name>:"
+// line exists for each one, so a plain unit test in this file catches the
+// same defect at zero runtime cost. Call at the end of every emitScript
+// test; every node after N6 that adds a jump inherits the net for free.
+void expectEveryJumpTargetIsLabeled(const std::string& j) {
+    for (const std::string& mnemonic :
+         {std::string("goto "), std::string("ifne ")}) {
+        std::size_t pos = 0;
+        while ((pos = j.find(mnemonic, pos)) != std::string::npos) {
+            std::size_t nameStart = pos + mnemonic.size();
+            std::size_t nameEnd = j.find('\n', nameStart);
+            ASSERT_NE(nameEnd, std::string::npos)
+                << mnemonic << "operand runs off the end of:\n"
+                << j;
+            std::string target = j.substr(nameStart, nameEnd - nameStart);
+            EXPECT_NE(j.find(target + ":\n"), std::string::npos)
+                << "jump to undefined label \"" << target << "\" in:\n"
+                << j;
+            pos = nameEnd;
+        }
+    }
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -152,6 +179,7 @@ TEST(EmitScript, AssignLocalFusesSetLocalWithTempPop) {
     // both store to the same slot.
     EXPECT_EQ(countOccurrences(j, "astore 3\n"), 2);
     EXPECT_EQ(countOccurrences(j, "aload 3\n"), 1);
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 TEST(EmitScript, NestedArithHasNoLocalsAndNoGlobals) {
@@ -170,6 +198,7 @@ TEST(EmitScript, NestedArithHasNoLocalsAndNoGlobals) {
     // LoxRuntime.init() still runs (every script initializes globals up
     // front), but this probe never defines, reads, or sets one.
     EXPECT_EQ(j.find("invokevirtual lox/LoxGlobals"), std::string::npos);
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 TEST(EmitScript, NumberConstantUsesLongBitsRoundTrip) {
@@ -190,6 +219,7 @@ TEST(EmitScript, NumberConstantUsesLongBitsRoundTrip) {
                      "java/lang/Double/valueOf(D)Ljava/lang/Double;\n"),
               std::string::npos)
         << j;
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 TEST(EmitScript, GlobalsRoundTripThroughDefineSetGet) {
@@ -211,6 +241,7 @@ TEST(EmitScript, GlobalsRoundTripThroughDefineSetGet) {
                "lox/LoxGlobals/get(Ljava/lang/String;)Ljava/lang/Object;"),
         std::string::npos);
     EXPECT_NE(j.find("ldc \"x\""), std::string::npos);
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +274,7 @@ TEST(EmitScript, SetLocalPeekOfNamedLocalLoadsInsteadOfDup) {
     // `b` gets only its declaring store.
     EXPECT_EQ(countOccurrences(j, "astore 3\n"), 2);
     EXPECT_EQ(countOccurrences(j, "astore 4\n"), 1);
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 TEST(EmitScript, SetGlobalPeekOfNamedLocalLoadsInsteadOfScratch) {
@@ -270,6 +302,7 @@ TEST(EmitScript, SetGlobalPeekOfNamedLocalLoadsInsteadOfScratch) {
     // Slot 4 is this program's scratch slot; the peek path would have
     // written to it. It must stay untouched.
     EXPECT_EQ(countOccurrences(j, "astore 4"), 0);
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 TEST(EmitScript, StringConstantIsEscaped) {
@@ -279,6 +312,7 @@ TEST(EmitScript, StringConstantIsEscaped) {
     std::string j = jvm::emitScript(fn, analysis, "LoxMain");
 
     EXPECT_NE(j.find(R"(ldc "say \"hi\"\n")"), std::string::npos);
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +335,7 @@ TEST(EmitScript, IfElseDupsThePeekAndBothPopsAreReal) {
     EXPECT_NE(j.find("ifne L_"), std::string::npos);
     EXPECT_NE(j.find("goto L_"), std::string::npos); // skip the else branch
     EXPECT_EQ(countOccurrences(j, "\n    pop\n"), 2);
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 TEST(EmitScript, AndOrKeepsTheValue) {
@@ -314,6 +349,7 @@ TEST(EmitScript, AndOrKeepsTheValue) {
 
     EXPECT_NE(j.find("dup"), std::string::npos);
     EXPECT_EQ(countOccurrences(j, "\n    pop\n"), 1);
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 // ---------------------------------------------------------------------------
@@ -342,6 +378,7 @@ TEST(EmitScript, AndOrAssignmentStatementKeepsTheMergeLabelReal) {
     // not eat either one.
     EXPECT_NE(j.find(target + ":\n"), std::string::npos) << j;
     EXPECT_NE(j.find("\n    pop\n"), std::string::npos) << j;
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 TEST(EmitScript, JumpIfFalseOnAMaterializedConditionLoadsInsteadOfDup) {
@@ -360,6 +397,7 @@ TEST(EmitScript, JumpIfFalseOnAMaterializedConditionLoadsInsteadOfDup) {
     EXPECT_EQ(countOccurrences(j, "dup"), 0) << j;
     EXPECT_NE(j.find("invokestatic lox/LoxOps/isFalsy"), std::string::npos)
         << j;
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 TEST(EmitScript, WhileLoopEmitsBackEdgeAndLabel) {
@@ -382,6 +420,7 @@ TEST(EmitScript, WhileLoopEmitsBackEdgeAndLabel) {
     std::string target =
         j.substr(nameStart, j.find('\n', nameStart) - nameStart);
     EXPECT_NE(j.find(target + ":"), std::string::npos) << j;
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 TEST(EmitScript, ForLoopHasTwoBackEdges) {
@@ -394,6 +433,7 @@ TEST(EmitScript, ForLoopHasTwoBackEdges) {
     std::string j = jvm::emitScript(fn, analysis, "LoxMain");
 
     EXPECT_EQ(countOccurrences(j, "goto L_"), 3);
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 TEST(EmitScript, IfWithoutElseStillEmitsTheUnconditionalSkip) {
@@ -408,6 +448,7 @@ TEST(EmitScript, IfWithoutElseStillEmitsTheUnconditionalSkip) {
 
     EXPECT_NE(j.find("ifne L_"), std::string::npos);
     EXPECT_EQ(countOccurrences(j, "goto L_"), 1);
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 // ---------------------------------------------------------------------------
@@ -430,6 +471,7 @@ TEST(EmitScript, IfElseAssignsSameSlotOnBothBranches) {
     // `a` is the only local (slot 1 in Lox terms) -> JVM slot 3. Both
     // branches must store to it, not to two different slots.
     EXPECT_EQ(countOccurrences(j, "astore 3\n"), 3); // decl + both branches
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 TEST(EmitScript, LoopBodyAssignsSameSlotEveryIteration) {
@@ -443,6 +485,7 @@ TEST(EmitScript, LoopBodyAssignsSameSlotEveryIteration) {
     // `a` (JVM slot 3) is reassigned once per loop body pass; the same slot
     // must appear each time this pass walks the (single, static) body.
     EXPECT_NE(j.find("astore 3\n"), std::string::npos);
+    expectEveryJumpTargetIsLabeled(j);
 }
 
 TEST(EmitScript, PeekOfNamedLocalAfterAMergeStillLoadsTheRightSlot) {
@@ -466,4 +509,5 @@ TEST(EmitScript, PeekOfNamedLocalAfterAMergeStillLoadsTheRightSlot) {
     // proves lastInvisibleVarSlot tracked correctly across the merge; the
     // reload-from-slot shape confirms it named the right one.
     EXPECT_NE(j.find("aload 4\n    astore 3\n"), std::string::npos) << j;
+    expectEveryJumpTargetIsLabeled(j);
 }
