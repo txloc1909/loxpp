@@ -75,6 +75,40 @@ TEST_F(MatchExpressionTest, BracedBody) {
     expect_num(*v, 20);
 }
 
+// spec/02-syntax.md armBody requires a final expression. A body that ends
+// with a statement must be a compile error, not a silent value leak.
+TEST_F(MatchExpressionTest, StatementTerminatedArmBodyIsCompileError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run(R"(
+        var x = match 1 {
+            case 1 => { var t = 10; t = t * 2; }
+            case _ => 0
+        };
+    )"),
+              InterpretResult::COMPILE_ERROR);
+}
+
+// Pins the exact demo from the amendment-3 report. Before the fix, this
+// program compiled, and `x` received the pattern binding `v` (7) instead of
+// the arm value, printing "[7, 101]" with exit 0. It must now be a compile
+// error.
+TEST_F(MatchExpressionTest, ArmBodyDoesNotLeakPatternBinding) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run(R"(
+        enum E { A(v) B }
+        fun g() {
+          var keep = 100;
+          var x = match A(7) {
+            case A(v) => { keep = keep + 1; }
+            case B => 2
+          };
+          return [x, keep];
+        }
+        print g();
+    )"),
+              InterpretResult::COMPILE_ERROR);
+}
+
 TEST_F(MatchExpressionTest, StackNeutral) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(

@@ -283,7 +283,7 @@ TEST_F(MatchGCTest, EnumValueSurvivesGC) {
                 match l {
                     case Leaf(v) => got = v
                     case Node(a, b) => got = -1
-                };
+                }
             }
         };
     )"),

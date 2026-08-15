@@ -1218,6 +1218,8 @@ Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
     // Body — always expression mode.
     beginScope();
     if (m_parser->match(TokenType::LEFT_BRACE)) {
+        bool endsWithValue = false;
+        bool endsWithJump = false;
         while (!m_parser->check(TokenType::RIGHT_BRACE) &&
                !m_parser->check(TokenType::EOF_)) {
             if (m_parser->check(TokenType::VAR) ||
@@ -1231,6 +1233,7 @@ Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
                        !m_parser->check(TokenType::EOF_)) {
                     statement();
                 }
+                endsWithJump = true;
                 break;
             } else if (m_parser->match(TokenType::CONTINUE)) {
                 continueStatement();
@@ -1238,6 +1241,7 @@ Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
                        !m_parser->check(TokenType::EOF_)) {
                     statement();
                 }
+                endsWithJump = true;
                 break;
             } else if (m_parser->match(TokenType::RETURN)) {
                 returnStatement();
@@ -1245,18 +1249,27 @@ Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
                        !m_parser->check(TokenType::EOF_)) {
                     statement();
                 }
+                endsWithJump = true;
                 break;
             } else {
                 expression();
                 if (m_parser->match(TokenType::SEMICOLON)) {
                     emitByte(Op::POP);
                 } else {
+                    endsWithValue = true;
                     break;
                 }
             }
         }
         m_parser->consume(TokenType::RIGHT_BRACE,
                           "Expect '}' after match arm body.");
+        // spec/02-syntax.md armBody requires a final expression; without one
+        // the SET_LOCAL below would steal a pattern binding as the arm value
+        // and leave the frame one slot short.
+        if (!endsWithValue && !endsWithJump) {
+            m_parser->error("Match arm body must end with an expression.");
+            emitByte(Op::NIL); // keep the stack balanced while errors unwind
+        }
     } else {
         expression();
     }
