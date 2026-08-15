@@ -1,0 +1,5 @@
+// A number literal this large stringifies to the exponent form "1e+17",
+// with no decimal point. jasmin 2.4 rejects a decimal `ldc2_w` operand
+// shaped that way outright: "JAS Error: Badly formatted number"
+// (PR #107 R7). A correct backend must not hand jasmin that shape at all.
+print 100000000000000000;

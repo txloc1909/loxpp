@@ -76,28 +76,40 @@ TEST(EscapeJasminString, EscapesHighBytesAsOctal) {
 }
 
 // ---------------------------------------------------------------------------
-// formatJasminDouble
+// formatDoubleBitsLiteral
+//
+// PR #107 R6/R7 (round 2): the prior version of this helper formatted a
+// decimal/exponent literal for `ldc2_w`. jasmin 2.4 reads that literal shape
+// at 32-bit float precision (silently rounding, R6) or rejects some valid
+// `%g`-style exponent text outright (R7). std::stod is not the real
+// consumer and cannot see either fault (R8) — these tests decode the
+// literal the same way the paired `invokestatic .../longBitsToDouble(J)D`
+// does: reinterpret the bits, do not re-parse as a double.
 // ---------------------------------------------------------------------------
 
-TEST(FormatJasminDouble, IntegerValuedGetsDecimalPoint) {
-    EXPECT_EQ(jvm::formatJasminDouble(2.0), "2.0");
-    EXPECT_EQ(jvm::formatJasminDouble(-6.0), "-6.0");
-}
-
-TEST(FormatJasminDouble, AlreadyFractionalIsLeftAlone) {
-    // 0.5 is exact in binary, so 17 significant digits print no noise —
-    // unlike 5.4, whose 17-digit expansion is genuinely part of the value
-    // (%.17g exists for round-trip fidelity, not for pretty-printing; that
-    // is stringify's job in the runtime, not this constant encoding).
-    EXPECT_EQ(jvm::formatJasminDouble(0.5), "0.5");
-}
-
-TEST(FormatJasminDouble, RoundTripsExactly) {
-    double values[] = {0.1, 1.0 / 3.0, 1e300, -1e-300, 0.0, -0.0};
+TEST(FormatDoubleBitsLiteral, RoundTripsExactly) {
+    double values[] = {2.0,       -6.0,       0.5,  0.1,
+                       1.0 / 3.0, 0.0,        -0.0, 1e300,
+                       -1e-300,   16777217.0, 1e17, 3.14159265358979};
     for (double v : values) {
-        double parsed = std::stod(jvm::formatJasminDouble(v));
-        EXPECT_EQ(std::bit_cast<uint64_t>(parsed), std::bit_cast<uint64_t>(v))
-            << "value " << v;
+        std::string literal = jvm::formatDoubleBitsLiteral(v);
+        int64_t bits = std::stoll(literal);
+        double roundTripped = std::bit_cast<double>(bits);
+        EXPECT_EQ(std::bit_cast<uint64_t>(roundTripped),
+                  std::bit_cast<uint64_t>(v))
+            << "value " << v << " literal " << literal;
+    }
+}
+
+TEST(FormatDoubleBitsLiteral, IsABareDecimalIntegerNeverADecimalOrExponent) {
+    // The R6/R7 fix's entire point: no '.' and no 'e'/'E', on the exact
+    // values that used to break jasmin one way (R6) or the other (R7).
+    double values[] = {16777217.0, 1e17, 1e21, -1e-300, 0.1, 3.14159265358979};
+    for (double v : values) {
+        std::string literal = jvm::formatDoubleBitsLiteral(v);
+        EXPECT_EQ(literal.find('.'), std::string::npos) << literal;
+        EXPECT_EQ(literal.find('e'), std::string::npos) << literal;
+        EXPECT_EQ(literal.find('E'), std::string::npos) << literal;
     }
 }
 
@@ -159,6 +171,26 @@ TEST(EmitScript, NestedArithHasNoLocalsAndNoGlobals) {
     // LoxRuntime.init() still runs (every script initializes globals up
     // front), but this probe never defines, reads, or sets one.
     EXPECT_EQ(j.find("invokevirtual lox/LoxGlobals"), std::string::npos);
+}
+
+TEST(EmitScript, NumberConstantUsesLongBitsRoundTrip) {
+    // PR #107 R6/R7: a float-imprecise constant (16777217, the smallest
+    // integer a float cannot hold exactly) must not go through a
+    // decimal/exponent `ldc2_w` literal.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("print 16777217;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    std::string expectedBits =
+        std::to_string(std::bit_cast<int64_t>(static_cast<double>(16777217)));
+    EXPECT_NE(j.find("ldc2_w " + expectedBits +
+                     "\n"
+                     "    invokestatic java/lang/Double/longBitsToDouble(J)D\n"
+                     "    invokestatic "
+                     "java/lang/Double/valueOf(D)Ljava/lang/Double;\n"),
+              std::string::npos)
+        << j;
 }
 
 TEST(EmitScript, GlobalsRoundTripThroughDefineSetGet) {

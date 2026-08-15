@@ -17,6 +17,8 @@ probes=(
     "notes/translation-probes/15_nested_arith.lox"
     "notes/translation-probes/18_peek_of_named_local.lox"
     "notes/translation-probes/19_peek_of_named_local_global.lox"
+    "notes/translation-probes/20_float_imprecise_constant.lox"
+    "notes/translation-probes/21_exponent_constant.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
