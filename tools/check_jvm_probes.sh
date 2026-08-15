@@ -37,6 +37,10 @@ probes=(
     "notes/translation-probes/21_exponent_constant.lox"
     "notes/translation-probes/22_and_or_assignment_statement.lox"
     "notes/translation-probes/23_and_or_local_initializer.lox"
+    "notes/translation-probes/06_shared_upvalue.lox"
+    "notes/translation-probes/V1_fresh_cell.lox"
+    "notes/translation-probes/V2_shared.lox"
+    "notes/translation-probes/V3_loopvar.lox"
 )
 
 # Probes that must FAIL on both sides (node N6 checkpoint 4, PR #110 R2): a

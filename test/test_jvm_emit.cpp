@@ -46,11 +46,13 @@ int countOccurrences(const std::string& haystack, const std::string& needle) {
     return count;
 }
 
-// The only two mnemonics this emitter writes as a jump (nodes N4/N5/N6).
-// N9 adds `ifeq` (for-in) and N10 adds `tableswitch`/`lookupswitch` (match);
-// whichever node adds a new jump form must add its mnemonic here too, or
-// that jump gets no label-integrity coverage from this helper.
-const std::vector<std::string> kJumpMnemonics = {"goto ", "ifne "};
+// The mnemonics this emitter writes as a jump (nodes N4/N5/N6/N7). N7 adds
+// `ifeq` (the captured-slot raw/cell runtime check — emitCapturedGetLocal,
+// emitCapturedStore, ensureCapturedCell); N10 adds `tableswitch`/
+// `lookupswitch` (match). Whichever node adds a new jump form must add its
+// mnemonic here too, or that jump gets no label-integrity coverage from
+// this helper.
+const std::vector<std::string> kJumpMnemonics = {"goto ", "ifne ", "ifeq "};
 
 // N6.md (assigned nit, PR #109 R9): a `goto`/`ifne` to a jasmin label the
 // emitter never wrote assembles fine as far as ctest can see — only
@@ -617,6 +619,80 @@ TEST(EmitScript, CallWithArgsSpillsToScratchSlotsAndBuildsArray) {
     expectEveryJumpTargetIsLabeled(j);
 }
 
+// BUILD_LIST/GET_INDEX/SET_INDEX (node N7 pulls these three opcodes forward
+// from N9's own scope — see emitBuildList's own note and jvm_emitter.h).
+
+TEST(EmitScript, BuildListOfZeroElementsBuildsDirectly) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("var e = [];", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("iconst_0\n"
+                     "    anewarray java/lang/Object\n"
+                     "    invokestatic "
+                     "lox/LoxOps/buildList([Ljava/lang/Object;)Llox/"
+                     "LoxList;\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+TEST(EmitScript, BuildListSpillsToScratchSlotsAndBuildsArray) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("var xs = [1, 2, 3];", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // P7, same shape as CALL's own spill (emitCall): the elements are
+    // already on the stack in push order [e0, e1, e2], topmost (e2) first,
+    // so the topmost is spilled first.
+    EXPECT_NE(j.find("astore 7\n"
+                     "    astore 6\n"
+                     "    astore 5\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("iconst_3\n"
+                     "    anewarray java/lang/Object\n"
+                     "    dup\n"
+                     "    iconst_0\n"
+                     "    aload 5\n"
+                     "    aastore\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("invokestatic "
+                     "lox/LoxOps/buildList([Ljava/lang/Object;)Llox/"
+                     "LoxList;\n"),
+              std::string::npos)
+        << j;
+    EXPECT_EQ(countOccurrences(j, "aastore"), 3);
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+TEST(EmitScript, GetIndexAndSetIndexAreOneInvokestaticEach) {
+    // vm.cpp's own operand order already matches LoxOps's parameter order
+    // (emitSimpleOp's own note), so neither needs a shuffle — unlike
+    // SET_LOCAL/SET_GLOBAL/SET_UPVALUE, this is not a P2 peek.
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("var xs = [1]; print xs[0]; xs[0] = 9;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("invokestatic "
+                     "lox/LoxOps/getIndex(Ljava/lang/Object;Ljava/lang/"
+                     "Object;)Ljava/lang/Object;\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("invokestatic "
+                     "lox/LoxOps/setIndex(Ljava/lang/Object;Ljava/lang/"
+                     "Object;Ljava/lang/Object;)Ljava/lang/Object;\n"
+                     "    pop\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
 TEST(EmitProgram, ZeroUpvalueClosureConstructsGeneratedClass) {
     MemoryManager mm;
     DecodedFunction fn =
@@ -703,10 +779,16 @@ TEST(EmitProgram, SiblingFunctionsGetSequentialClassNames) {
     expectEveryJumpTargetIsLabeled(classes[2].source);
 }
 
-TEST(EmitProgram, ClosureWithUpvalueIsNotImplemented) {
-    // 06_shared_upvalue: `get` captures `x`, so its CLOSURE carries one
-    // upvalue entry. N6 only lowers the zero-upvalue construction; wiring a
-    // real cell into it is node N7 (jvm_emitter.h hazard note).
+// Node N7: closures and upvalues. The real, end-to-end proof that a captured
+// local behaves correctly (V1_fresh_cell, V2_shared, V3_loopvar,
+// 06_shared_upvalue) is tools/check_jvm_probes.sh, run inside the
+// dev-managed container — a plain unit test cannot assemble+run jasmin/java.
+// What follows checks the structural shape this pass promises: the
+// idempotent seed at a CLOSURE that captures a local, GET/SET_UPVALUE's own
+// lowering, and the isLocal=false pass-through for a grandparent's upvalue.
+
+TEST(EmitProgram, SingleUpvalueClosureSeedsAndWiresTheCell) {
+    // outer's own slot 1 is `x`. jvmSlotForLocal(1) with baseSlot=4 is 5.
     MemoryManager mm;
     DecodedFunction fn = decodeScript("fun outer() {\n"
                                       "  var x = 0;\n"
@@ -715,12 +797,141 @@ TEST(EmitProgram, ClosureWithUpvalueIsNotImplemented) {
                                       "}\n",
                                       mm);
     StackAnalysisTree tree = analyzeStackTree(fn);
-    try {
+    std::vector<jvm::EmittedClass> classes =
         jvm::emitProgram(fn, tree, "LoxMain");
-        FAIL() << "expected std::runtime_error";
-    } catch (const std::runtime_error& e) {
-        EXPECT_EQ(std::string(e.what()),
-                  "not implemented in N6: CLOSURE with 1 upvalue(s) (upvalue "
-                  "wiring is node N7)");
-    }
+
+    ASSERT_EQ(classes.size(), 3u);
+    EXPECT_EQ(classes[0].className, "LoxMain");
+    const std::string& outer = classes[1].source;
+    // The idempotent seed (ensureCapturedCell): check, seed only if not
+    // already a cell, then read the (now guaranteed) cell for wiring.
+    EXPECT_NE(outer.find("aload 5\n"
+                         "    instanceof [Ljava/lang/Object;\n"
+                         "    ifne Jcok3_0\n"
+                         "    iconst_1\n"
+                         "    anewarray java/lang/Object\n"
+                         "    dup\n"
+                         "    iconst_0\n"
+                         "    aload 5\n"
+                         "    aastore\n"
+                         "    astore 5\n"
+                         "Jcok3_0:\n"),
+              std::string::npos)
+        << outer;
+    EXPECT_NE(outer.find("new LoxFn$1\n"
+                         "    dup\n"
+                         "    iconst_1\n"
+                         "    anewarray [Ljava/lang/Object;\n"
+                         "    dup\n"
+                         "    iconst_0\n"
+                         "    aload 5\n"
+                         "    checkcast [Ljava/lang/Object;\n"
+                         "    aastore\n"
+                         "    invokespecial LoxFn$1/<init>([[Ljava/lang/"
+                         "Object;)V\n"),
+              std::string::npos)
+        << outer;
+    expectEveryJumpTargetIsLabeled(outer);
+
+    const std::string& get = classes[2].source;
+    // GET_UPVALUE 0: upvals[0][0].
+    EXPECT_NE(get.find("aload 0\n"
+                       "    getfield lox/LoxClosure/upvalues [[Ljava/lang/"
+                       "Object;\n"
+                       "    iconst_0\n"
+                       "    aaload\n"
+                       "    iconst_0\n"
+                       "    aaload\n"
+                       "    areturn\n"),
+              std::string::npos)
+        << get;
+}
+
+TEST(EmitProgram, TwoClosuresShareOneCaptureCell) {
+    // 06_shared_upvalue.lox: get and set both capture x. Each CLOSURE gets
+    // its OWN idempotent check (distinct labels, tied to its own offset —
+    // capLabel), because ensureCapturedCell cannot assume the other one ran
+    // first on every path (nodes/N7.md hazard: two closures sharing a cell
+    // is not always sequential — an if/else can capture the same outer on
+    // mutually exclusive arms). Here both run on the SAME straight-line
+    // path, so the second one's check is a real no-op at runtime, but the
+    // JVM bytecode still carries both checks.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("fun outer() {\n"
+                                      "  var x = 0;\n"
+                                      "  fun get() { return x; }\n"
+                                      "  fun set(v) { x = v; }\n"
+                                      "  return get;\n"
+                                      "}\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(classes.size(), 4u);
+    EXPECT_EQ(classes[0].className, "LoxMain");
+    const std::string& outer = classes[1].source;
+    EXPECT_NE(outer.find("Jcok3_0:"), std::string::npos) << outer;
+    EXPECT_NE(outer.find("Jcok8_0:"), std::string::npos) << outer;
+    // Both CLOSUREs read the SAME slot (5) for their cell — one shared cell.
+    EXPECT_EQ(countOccurrences(outer, "aload 5\n"
+                                      "    checkcast [Ljava/lang/Object;\n"
+                                      "    aastore\n"),
+              2);
+    expectEveryJumpTargetIsLabeled(outer);
+
+    // set(v): SET_UPVALUE 0 writes upvals[0][0], fused with its own trailing
+    // POP (the assignment is a bare statement) — no leftover `aload` of the
+    // spilled value.
+    const std::string& set = classes[3].source;
+    EXPECT_NE(set.find("getfield lox/LoxClosure/upvalues [[Ljava/lang/"
+                       "Object;\n"
+                       "    iconst_0\n"
+                       "    aaload\n"
+                       "    iconst_0\n"),
+              std::string::npos)
+        << set;
+    EXPECT_NE(set.find("aastore\n"
+                       "    aconst_null\n"
+                       "    areturn\n"),
+              std::string::npos)
+        << set;
+}
+
+TEST(EmitProgram, NestedClosureCopiesGrandparentUpvalue) {
+    // c captures x, which is a's local but b's own upvalue (isLocal=false):
+    // b's own CLOSURE-of-c wiring copies its OWN upvals[0] reference
+    // straight through, with no seed check at all — see emitClosure's own
+    // note. Only a's CLOSURE-of-b needs ensureCapturedCell.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("fun a() {\n"
+                                      "  var x = 1;\n"
+                                      "  fun b() {\n"
+                                      "    fun c() { return x; }\n"
+                                      "    return c;\n"
+                                      "  }\n"
+                                      "  return b;\n"
+                                      "}\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(classes.size(), 4u);
+    const std::string& bFn = classes[2].source;
+    EXPECT_EQ(bFn.find("instanceof"), std::string::npos) << bFn;
+    EXPECT_NE(bFn.find("dup\n"
+                       "    iconst_0\n"
+                       "    aload 0\n"
+                       "    getfield lox/LoxClosure/upvalues [[Ljava/lang/"
+                       "Object;\n"
+                       "    iconst_0\n"
+                       "    aaload\n"
+                       "    aastore\n"),
+              std::string::npos)
+        << bFn;
+    expectEveryJumpTargetIsLabeled(classes[0].source);
+    expectEveryJumpTargetIsLabeled(classes[1].source);
+    expectEveryJumpTargetIsLabeled(bFn);
+    expectEveryJumpTargetIsLabeled(classes[3].source);
 }
