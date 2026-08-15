@@ -48,6 +48,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #ifndef LOXPP_PROJECT_SOURCE_DIR
@@ -180,6 +181,63 @@ void checkNoOrphanCloseUpvalues(const DecodedFunction& node,
     }
 }
 
+// R23 invariant 2 (referee amendment 3): a resolved close's reported slot
+// must equal the frame height immediately before it, minus one -- the
+// definitional fact the whole height-based design rests on
+// (capture_analysis.h). This is the check that catches a close attributed
+// to the WRONG slot (R22 case 2: the map named a real slot and a real
+// close, but the pairing was wrong) -- a check that only counts
+// attributions (checkNoOrphanCloseUpvalues) cannot see that class of bug at
+// all, because a swapped pairing still leaves every real close attributed
+// exactly once, just to the wrong range.
+void checkCloseSlotsMatchFrameHeight(const DecodedFunction& node,
+                                     const FunctionCaptureInfo& info) {
+    std::unordered_map<int, int> heightBefore = computeFrameHeights(node);
+    for (const auto& [slot, ranges] : info.liveRangesBySlot) {
+        for (const CaptureLiveRange& range : ranges) {
+            for (int offset : range.allCloseOffsets) {
+                auto it = heightBefore.find(offset);
+                ASSERT_TRUE(it != heightBefore.end())
+                    << "id=" << info.id << ": close at offset " << offset
+                    << " has no computed frame height";
+                EXPECT_EQ(slot, it->second - 1)
+                    << "id=" << info.id << ": close at offset " << offset
+                    << " is reported against slot " << slot << ", but height("
+                    << offset << ")-1 = " << it->second - 1;
+            }
+        }
+    }
+}
+
+// R23 invariant 3 (the reviewer's own LOOP-span check, kept verbatim by
+// referee amendment 3): a range with a close inside some LOOP's back-edge
+// span, whose OWN first capture sits before that span, is a contradiction --
+// a capture that runs once, before the loop, cannot close inside a body that
+// re-executes every iteration. This needs no stack simulation and no N2.
+void checkNoEnclosingCaptureClosesInsideLoop(const DecodedFunction& node,
+                                             const FunctionCaptureInfo& info) {
+    for (const DecodedInstruction& ins : node.instructions) {
+        if (ins.op != Op::LOOP) {
+            continue;
+        }
+        for (const auto& [slot, ranges] : info.liveRangesBySlot) {
+            for (const CaptureLiveRange& range : ranges) {
+                if (range.firstCaptureOffset >= ins.jumpTarget) {
+                    continue; // captured inside (or at) this loop's own span
+                }
+                for (int close : range.allCloseOffsets) {
+                    EXPECT_FALSE(close >= ins.jumpTarget && close <= ins.offset)
+                        << "id=" << info.id << " slot=" << slot
+                        << ": range opened at " << range.firstCaptureOffset
+                        << " (before the loop span [" << ins.jumpTarget << ", "
+                        << ins.offset << "]) has a close at " << close
+                        << " inside it";
+                }
+            }
+        }
+    }
+}
+
 // R4 / round-3 referee decision item 4: checks that every live range is
 // internally consistent (non-negative, backed by at least one capturing
 // closure, non-overlapping with its slot's other ranges) and matches the
@@ -229,6 +287,8 @@ void validateCaptureAnalysis(const DecodedFunction& tree,
         }
         checkCloseUpvaluesMatchDecodedChunk(node, info);
         checkNoOrphanCloseUpvalues(node, info);
+        checkCloseSlotsMatchFrameHeight(node, info);
+        checkNoEnclosingCaptureClosesInsideLoop(node, info);
     }
 }
 
@@ -1438,4 +1498,110 @@ TEST(CaptureAnalysisTest, RecaptureAfterIfElseMergeJoinsTheMergedRange) {
     EXPECT_EQ(ranges[0].capturingClosureOffsets.size(), 3U)
         << "a, b, and d must all be recorded as sharing this one range";
     EXPECT_TRUE(ranges[0].closedImplicitly);
+}
+
+// R22 regression, failure case 1 (referee amendment 3). Native output is
+// [10, 11]: `x` is captured only on the `c` branch, which returns
+// immediately, so the loop body's own two alternate exits for its scope --
+// `continue`'s cleanup and the normal fall-through -- both emit a REAL
+// CLOSE_UPVALUE for x's slot, on every iteration, even though neither path
+// ever dynamically ran the CLOSURE that captured it. Before amendment 3,
+// the static overlay held one entry per slot; the first close (continue's)
+// erased it, and the second (the fall-through's) found nothing left in
+// either layer -- exactly this program made the pass throw.
+TEST(CaptureAnalysisTest, R22StaticSiblingClosesBothAttributeToTheOneInstance) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer(c, d) {
+          var acc = [];
+          for (var i = 0; i < 2; i = i + 1) {
+            var x = i + 10;
+            if (c) { fun gx() { return x; } return gx; }
+            if (d) { continue; }
+            acc.append(x);
+          }
+          return acc;
+        }
+        print outer(false, false);
+    )",
+                                   "r22_case1_static_sibling_closes");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* gx = findByName(c.tree, "gx");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(gx, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int xSlot = infoFor(c.captures, gx->id).ownUpvalues.at(0).index;
+
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, xSlot);
+    ASSERT_EQ(ranges.size(), 1U)
+        << "one static instance of x, or the pass split what is really one "
+        << "capturing CLOSURE's range into more than one";
+    EXPECT_EQ(ranges[0].capturingClosureOffsets.size(), 1U)
+        << "x is captured by exactly one CLOSURE, gx's own";
+    EXPECT_EQ(ranges[0].allCloseOffsets.size(), 2U)
+        << "the continue path and the normal fall-through each emit their "
+        << "own real CLOSE_UPVALUE for x's slot -- both must attribute to "
+        << "this one instance, or R22's defect is back";
+    EXPECT_TRUE(ranges[0].closedImplicitly)
+        << "the c=true path returns before either alternate exit runs, "
+        << "leaving that iteration's cell open at that RETURN";
+    EXPECT_TRUE(ranges[0].perIteration)
+        << "x is declared inside the loop body -- a fresh cell every "
+        << "iteration";
+}
+
+// R22 regression, failure case 2 (referee amendment 3). Native output is 5,
+// then 5: `keep` is a function-scope capture with no close of its own
+// anywhere; `x`, like case 1 above, is captured only on a branch that
+// returns, so both of the loop's alternate-exit closes are static, real
+// CLOSE_UPVALUE instructions for x's slot. Before amendment 3, the overlay
+// lost x's slot at the first (continue's) close, so the SECOND close (the
+// fall-through's) fell through to `keep` -- the only thing left open in
+// `state` -- and reported `keep`'s cell as dead inside the loop body, which
+// would make a backend read a stale value (1) where native reads 5.
+TEST(CaptureAnalysisTest, R22StaticCloseDoesNotStealAnOuterFunctionScopeSlot) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer(c, d) {
+          var keep = 1;
+          fun kf() { return keep; }
+          var acc = [];
+          for (var i = 0; i < 2; i = i + 1) {
+            var x = i + 10;
+            if (c) { fun gx() { return x; } return gx; }
+            if (d) { continue; }
+            acc.append(x);
+          }
+          keep = 5;
+          return kf;
+        }
+        print outer(false, false)();
+        print outer(false, true)();
+    )",
+                                   "r22_case2_static_close_does_not_steal");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* kf = findByName(c.tree, "kf");
+    const DecodedFunction* gx = findByName(c.tree, "gx");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(kf, nullptr);
+    ASSERT_NE(gx, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int keepSlot = infoFor(c.captures, kf->id).ownUpvalues.at(0).index;
+    int xSlot = infoFor(c.captures, gx->id).ownUpvalues.at(0).index;
+    ASSERT_NE(keepSlot, xSlot);
+
+    const std::vector<CaptureLiveRange>& keepRanges = rangesFor(info, keepSlot);
+    const std::vector<CaptureLiveRange>& xRanges = rangesFor(info, xSlot);
+    ASSERT_EQ(keepRanges.size(), 1U);
+    ASSERT_EQ(xRanges.size(), 1U);
+    EXPECT_TRUE(keepRanges[0].allCloseOffsets.empty())
+        << "keep must not pick up EITHER of the loop's own alternate-exit "
+        << "closes -- those belong to x, not to keep, so keep's own write "
+        << "at `keep = 5` (after the loop) must land before its implicit "
+        << "close, not after a wrongly-early one";
+    EXPECT_TRUE(keepRanges[0].closedImplicitly)
+        << "keep is function scope -- only the frame's RETURN ends it, "
+        << "matching native output 5, 5";
+    EXPECT_EQ(xRanges[0].allCloseOffsets.size(), 2U)
+        << "x must keep BOTH of its own real closes -- the continue path "
+        << "and the normal fall-through";
+    EXPECT_TRUE(xRanges[0].perIteration);
 }
