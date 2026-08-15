@@ -158,6 +158,17 @@ static int runJvmTarget(const std::string& outDir, const std::string& path) {
         return 74;
     }
 
+    // Remove every stale *.j file first (PR #110 R3): tools/jvm_run.sh
+    // assembles every *.j file it finds in outDir, so a class an earlier,
+    // larger run wrote here would still reach the classpath even after this
+    // run's own source no longer builds it.
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator(outDir, ec)) {
+        if (entry.path().extension() == ".j") {
+            std::filesystem::remove(entry.path(), ec);
+        }
+    }
+
     for (const jvm::EmittedClass& cls : classes) {
         std::string outPath = outDir + "/" + cls.className + ".j";
         std::ofstream out(outPath, std::ios::binary);
