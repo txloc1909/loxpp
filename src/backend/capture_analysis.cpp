@@ -3,6 +3,7 @@
 #include "exec_objects.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <stdexcept>
@@ -233,20 +234,25 @@ void recurseIntoChildren(const DecodedFunction& node, CaptureAnalysis& out) {
 // block's exit state changes anymore.
 struct DataflowResult {
     std::vector<OpenOrigins> entryState;
-    std::vector<bool> reachable;
+    // uint8_t, not bool: std::vector<bool>'s proxy reference makes `!v[i]`
+    // ambiguous against this codebase's `operator!(Value)` (Value has an
+    // implicit bool constructor) when the std::variant Value build
+    // (LOXPP_NAN_TAGGING=OFF) is active. Plain bytes sidestep the proxy
+    // entirely.
+    std::vector<uint8_t> reachable;
 };
 
 DataflowResult runDataflow(const Cfg& cfg, const std::string& functionId) {
     size_t n = cfg.blocks.size();
     DataflowResult result;
     result.entryState.resize(n);
-    result.reachable.assign(n, false);
+    result.reachable.assign(n, 0);
     std::vector<OpenOrigins> exitState(n);
-    std::vector<bool> exitComputed(n, false);
+    std::vector<uint8_t> exitComputed(n, 0);
     std::deque<int> worklist;
 
     if (n > 0) {
-        result.reachable[0] = true; // block 0 is the chunk's entry
+        result.reachable[0] = 1; // block 0 is the chunk's entry
         worklist.push_back(0);
     }
 
@@ -262,10 +268,10 @@ DataflowResult runDataflow(const Cfg& cfg, const std::string& functionId) {
         // happens to equal a default-constructed (empty) exitState — that
         // equality is coincidence, not evidence the successors already
         // heard about it.
-        bool changed = !exitComputed[static_cast<size_t>(b)] ||
+        bool changed = exitComputed[static_cast<size_t>(b)] == 0 ||
                        next != exitState[static_cast<size_t>(b)];
         exitState[static_cast<size_t>(b)] = next;
-        exitComputed[static_cast<size_t>(b)] = true;
+        exitComputed[static_cast<size_t>(b)] = 1;
         if (!changed) {
             continue;
         }
@@ -276,9 +282,9 @@ DataflowResult runDataflow(const Cfg& cfg, const std::string& functionId) {
             OpenOrigins merged = result.entryState[static_cast<size_t>(t)];
             joinInto(merged, next, functionId,
                      cfg.blocks[static_cast<size_t>(t)].leaderOffset);
-            if (!result.reachable[static_cast<size_t>(t)] ||
+            if (result.reachable[static_cast<size_t>(t)] == 0 ||
                 merged != result.entryState[static_cast<size_t>(t)]) {
-                result.reachable[static_cast<size_t>(t)] = true;
+                result.reachable[static_cast<size_t>(t)] = 1;
                 result.entryState[static_cast<size_t>(t)] = std::move(merged);
                 worklist.push_back(t);
             }
@@ -302,7 +308,7 @@ void analyzeOneChunk(const DecodedFunction& node, CaptureAnalysis& out) {
     std::unordered_map<int, int> rangeIndexByOrigin;
     int chunkEnd = static_cast<int>(node.function->chunk.size());
     for (size_t b = 0; b < cfg.blocks.size(); b++) {
-        if (!dataflow.reachable[b]) {
+        if (dataflow.reachable[b] == 0) {
             // Never executes on any path from the chunk's entry (dead code
             // after an unconditional return, for example). Attribute its
             // CLOSE_UPVALUE instructions to no range, but still report them,
