@@ -1,14 +1,14 @@
-// test_jvm_emit.cpp — JVM straight-line emitter (node N4).
+// test_jvm_emit.cpp — JVM straight-line + control-flow emitter (nodes N4/N5).
 //
-// Checkpoint (notes/backend-implementation-dag.md, node N4):
-//   tools/loxpp_jvm.sh notes/translation-probes/01_assign_local.lox
-//   tools/loxpp_jvm.sh notes/translation-probes/15_nested_arith.lox
-// must each print stdout identical to build/loxpp on the same file. That
-// full assemble-and-run comparison needs jasmin/java
-// (tools/check_jvm_probes.sh, run inside the dev-managed container); this file
-// covers what a plain C++ unit test can check without them: the
-// escaping/formatting helpers, the generated Jasmin's structural shape (limits,
-// fusion, abort-on-unsupported).
+// Checkpoint (notes/backend-implementation-dag.md, nodes N4/N5):
+//   tools/loxpp_jvm.sh notes/translation-probes/{01,02,03,04,05,15}_*.lox
+// must each print stdout identical to build/loxpp on the same file, and the
+// assembled class must pass `java -Xverify:all`. That full assemble-and-run
+// comparison needs jasmin/java (tools/check_jvm_probes.sh, run inside the
+// dev-managed container); this file covers what a plain C++ unit test can
+// check without them: the escaping/formatting helpers, the generated
+// Jasmin's structural shape (limits, fusion, labels, goto/ifne,
+// abort-on-unsupported).
 
 #include "backend/abstract_stack.h"
 #include "backend/chunk_decoder.h"
@@ -119,15 +119,14 @@ TEST(FormatDoubleBitsLiteral, IsABareDecimalIntegerNeverADecimalOrExponent) {
 
 TEST(EmitScript, AbortsOnUnsupportedOpcode) {
     MemoryManager mm;
-    // `if` compiles to JUMP_IF_FALSE — N5's job, not N4's.
-    DecodedFunction fn = decodeScript("if (true) { print 1; }", mm);
+    // A call compiles to CALL — N6's job, not N5's.
+    DecodedFunction fn = decodeScript("foo();", mm);
     FunctionStackAnalysis analysis = analyzeStack(fn);
     try {
         jvm::emitScript(fn, analysis, "LoxMain");
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& e) {
-        EXPECT_EQ(std::string(e.what()),
-                  "not implemented in N4: JUMP_IF_FALSE");
+        EXPECT_EQ(std::string(e.what()), "not implemented in N5: CALL");
     }
 }
 
@@ -280,4 +279,139 @@ TEST(EmitScript, StringConstantIsEscaped) {
     std::string j = jvm::emitScript(fn, analysis, "LoxMain");
 
     EXPECT_NE(j.find(R"(ldc "say \"hi\"\n")"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Control flow (node N5): JUMP, JUMP_IF_FALSE, LOOP, labels.
+// ---------------------------------------------------------------------------
+
+TEST(EmitScript, IfElseDupsThePeekAndBothPopsAreReal) {
+    // 02_if_else: `dup` preserves JUMP_IF_FALSE's peeked condition on the
+    // taken edge too, so each side's own, ordinary POP (the fall-through's
+    // and the else-target's) discards a real copy — two real `pop`
+    // instructions, not one fused away (see the JUMP_IF_FALSE case's own
+    // comment for why this pass does not fuse them).
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("if (true) print 1; else print 2;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_EQ(countOccurrences(j, "dup"), 1);
+    EXPECT_NE(j.find("invokestatic lox/LoxOps/isFalsy"), std::string::npos);
+    EXPECT_NE(j.find("ifne L_"), std::string::npos);
+    EXPECT_NE(j.find("goto L_"), std::string::npos); // skip the else branch
+    EXPECT_EQ(countOccurrences(j, "\n    pop\n"), 2);
+}
+
+TEST(EmitScript, AndOrKeepsTheValue) {
+    // 03_and_or: the jump target is PRINT (the merge that uses the
+    // short-circuit result), not a POP — the `dup`'d copy is what survives
+    // to be printed; only the fall-through side's own POP is real.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("print 1 and 2;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("dup"), std::string::npos);
+    EXPECT_EQ(countOccurrences(j, "\n    pop\n"), 1);
+}
+
+TEST(EmitScript, WhileLoopEmitsBackEdgeAndLabel) {
+    // 04_while: LOOP lowers to `goto`, at a label N1 placed at the
+    // condition. The back edge's own target must be a real, defined label
+    // in this same method — not merely present as `goto` text.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "{ var i = 0; while (i < 3) { print i; i = i + 1; } }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    std::size_t gotoPos = j.find("goto L_");
+    ASSERT_NE(gotoPos, std::string::npos);
+    std::string target = j.substr(gotoPos + 5, 6); // "L_" + 4 digits
+    EXPECT_NE(j.find(target + ":"), std::string::npos) << j;
+}
+
+TEST(EmitScript, ForLoopHasTwoBackEdges) {
+    // 05_for: the DAG's own verified fact (SESSION-LOG.md) — 2 back edges
+    // (LOOP at 25 and 31) plus 1 forward skip (JUMP at 13).
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("for (var i = 0; i < 3; i = i + 1) print i;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_EQ(countOccurrences(j, "goto L_"), 3);
+}
+
+TEST(EmitScript, IfWithoutElseStillEmitsTheUnconditionalSkip) {
+    // No else branch: Compiler::ifStatement (compiler.cpp) emits the
+    // unconditional "skip the else" JUMP unconditionally too, even with
+    // nothing to skip — this pass lowers whatever the compiler emitted, not
+    // a structural guess of when a JUMP "should" be there.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("if (true) print 1;\nprint 2;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("ifne L_"), std::string::npos);
+    EXPECT_EQ(countOccurrences(j, "goto L_"), 1);
+}
+
+// ---------------------------------------------------------------------------
+// R9 regression (N5.md, "inherited from N4"): a SET_LOCAL/SET_GLOBAL whose
+// merge-exact operandDepth() is 0 must resolve its source slot from
+// lastInvisibleVarSlot (this pass's own forward walk), never from
+// `before[i].localCount` — a mere upper bound once a CFG merge exists
+// upstream. These assert the store lands in the *same* slot on every path
+// and that the depth-consistency safety net (R1) does not trip, which is
+// exactly the check a wrong-slot store would fail.
+// ---------------------------------------------------------------------------
+
+TEST(EmitScript, IfElseAssignsSameSlotOnBothBranches) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "{ var a = 1; if (a == 1) { a = 2; } else { a = 3; } print a; }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // `a` is the only local (slot 1 in Lox terms) -> JVM slot 3. Both
+    // branches must store to it, not to two different slots.
+    EXPECT_EQ(countOccurrences(j, "astore 3\n"), 3); // decl + both branches
+}
+
+TEST(EmitScript, LoopBodyAssignsSameSlotEveryIteration) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "{ var a = 1; var i = 0; while (i < 3) { a = a + 1; i = i + 1; } }",
+        mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // `a` (JVM slot 3) is reassigned once per loop body pass; the same slot
+    // must appear each time this pass walks the (single, static) body.
+    EXPECT_NE(j.find("astore 3\n"), std::string::npos);
+}
+
+TEST(EmitScript, PeekOfNamedLocalAfterAMergeStillLoadsTheRightSlot) {
+    // The R1/R9 idiom (var b = (a = 2)) placed after an if-without-else
+    // merge: proves lastInvisibleVarSlot survives a preceding CFG join,
+    // where `before[i].localCount` would only be an upper bound.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("{\n"
+                                      "  var a = 1;\n"
+                                      "  if (a == 1) { print 9; }\n"
+                                      "  var b = (a = 2);\n"
+                                      "  print a;\n"
+                                      "  print b;\n"
+                                      "}\n",
+                                      mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // `a` is JVM slot 3, `b` is JVM slot 4 (2 args/globals + 2 locals).
+    // Reaching this line at all (no R1 depth-consistency throw) already
+    // proves lastInvisibleVarSlot tracked correctly across the merge; the
+    // reload-from-slot shape confirms it named the right one.
+    EXPECT_NE(j.find("aload 4\n    astore 3\n"), std::string::npos) << j;
 }
