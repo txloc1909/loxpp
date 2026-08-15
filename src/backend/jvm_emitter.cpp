@@ -774,11 +774,38 @@ void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isScript) {
     }
 }
 
+// The part of one instruction's handling that is not the opcode's own
+// concern: storing any invisible-var slot this offset assigns, then
+// computing the next walk index and the fall-through carry the *next*
+// iteration's label-resync test (see emitBody) reads. Split out of emitBody
+// itself (PR #110 R1) to keep that function's cognitive complexity below
+// the threshold N7, N9, and N10 still need room under.
+std::size_t finishInstruction(Emitter& e, std::size_t i,
+                              const DecodedInstruction& in,
+                              bool consumedFollowingPop) {
+    auto varsIt = e.invisibleVarsByOffset.find(in.offset);
+    if (varsIt != e.invisibleVarsByOffset.end()) {
+        for (int slot : varsIt->second) {
+            e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(slot)), -1);
+            e.lastInvisibleVarSlot = slot;
+        }
+    }
+
+    std::size_t nextIndex = i + (consumedFollowingPop ? 2 : 1);
+    e.prevCanFallThrough = in.op != Op::JUMP && in.op != Op::LOOP &&
+                           in.op != Op::RETURN && in.op != Op::MATCH_ERROR;
+    e.prevNaturalSuccessorOffset =
+        (nextIndex < e.fn.instructions.size())
+            ? e.fn.instructions[nextIndex].offset
+            : -1;
+    return nextIndex;
+}
+
 // Walks every instruction once, in offset order, dispatching each to its
 // opcode-family function. The parts that are not one opcode's own concern —
-// labels, the R1 depth safety net, invisible-var stores, and the
-// fall-through/pop-fusion bookkeeping that decides the next index — stay
-// here rather than in any one case.
+// labels, the R1 depth safety net, and the invisible-var/fall-through
+// bookkeeping finishInstruction does — stay here rather than in any one
+// case.
 void emitBody(Emitter& e, bool isScript,
               const std::vector<std::string>& childClassNames) {
     const std::vector<DecodedInstruction>& ins = e.fn.instructions;
@@ -869,21 +896,7 @@ void emitBody(Emitter& e, bool isScript,
             }
         }
 
-        auto varsIt = e.invisibleVarsByOffset.find(in.offset);
-        if (varsIt != e.invisibleVarsByOffset.end()) {
-            for (int slot : varsIt->second) {
-                e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(slot)),
-                         -1);
-                e.lastInvisibleVarSlot = slot;
-            }
-        }
-
-        std::size_t nextIndex = i + (consumedFollowingPop ? 2 : 1);
-        e.prevCanFallThrough = in.op != Op::JUMP && in.op != Op::LOOP &&
-                               in.op != Op::RETURN && in.op != Op::MATCH_ERROR;
-        e.prevNaturalSuccessorOffset =
-            (nextIndex < n) ? ins[nextIndex].offset : -1;
-        i = nextIndex;
+        i = finishInstruction(e, i, in, consumedFollowingPop);
     }
 }
 
