@@ -151,7 +151,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "cmake --preset release && cmake --build build"
+            bash -c "cmake --preset release && cmake --build build --target loxpp"
 
       - name: Check JVM straight-line emission probes (N4)
         run: |
