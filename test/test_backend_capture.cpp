@@ -1146,3 +1146,296 @@ TEST(CaptureAnalysisTest, TwoSiblingStaticClosesDoNotStealAnOuterCapturesSlot) {
         << "x must fully close before y is even captured -- the two "
         << "incarnations must not overlap";
 }
+
+// R19 regression, failure case 1. Native output is 99: `a` is a
+// function-scope capture (closed only implicitly at the frame's own
+// RETURN); `b` is captured only inside a nested if-with-early-return, and
+// its own scope's endScope close is a STATIC, overlay-only one (R17's
+// shape) on the sibling path. Before the fix, advanceProbe blindly popped
+// `state`'s own highest slot at every CLOSE_UPVALUE, including that static
+// close -- and on the sibling ("cond=false") path, `a` (an unrelated,
+// lower, still-open ENCLOSING capture) was the only thing open, so the
+// blind pop removed `a` instead of leaving it alone. That corrupted every
+// later block's entry state, so `s`'s later re-capture of `a` opened a
+// SECOND range instead of joining the first.
+TEST(CaptureAnalysisTest,
+     StaticCloseDoesNotStealAnEnclosingCaptureAcrossABlockBoundary) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer(cond) {
+          var a = 1;
+          fun g() { return a; }
+          {
+            var b = 2;
+            if (cond) { fun h() { return b; } return h; }
+          }
+          if (cond) { print "unused"; }
+          fun s() { a = 99; }
+          s();
+          return g;
+        }
+        print outer(false)();
+    )",
+                                   "r19_static_close_across_block_boundary");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* g = findByName(c.tree, "g");
+    const DecodedFunction* h = findByName(c.tree, "h");
+    const DecodedFunction* s = findByName(c.tree, "s");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(g, nullptr);
+    ASSERT_NE(h, nullptr);
+    ASSERT_NE(s, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int aSlot = infoFor(c.captures, g->id).ownUpvalues.at(0).index;
+    int bSlot = infoFor(c.captures, h->id).ownUpvalues.at(0).index;
+    int aSlotAgain = infoFor(c.captures, s->id).ownUpvalues.at(0).index;
+    ASSERT_EQ(aSlot, aSlotAgain)
+        << "s and g must capture the SAME variable, or this test does not "
+        << "reach the shape R19 exists to catch";
+    ASSERT_NE(aSlot, bSlot);
+
+    const std::vector<CaptureLiveRange>& aRanges = rangesFor(info, aSlot);
+    const std::vector<CaptureLiveRange>& bRanges = rangesFor(info, bSlot);
+    ASSERT_EQ(aRanges.size(), 1U)
+        << "g and s hold the same variable a -- ONE shared cell, or a "
+        << "backend that obeys the map prints 1 where native prints 99";
+    ASSERT_EQ(bRanges.size(), 1U);
+    EXPECT_EQ(aRanges[0].capturingClosureOffsets.size(), 2U)
+        << "both g and s must be recorded as sharing a's one range";
+    EXPECT_TRUE(aRanges[0].closedImplicitly);
+    EXPECT_TRUE(aRanges[0].allCloseOffsets.empty())
+        << "a has no explicit close on any path -- b's own static close "
+        << "must not steal it";
+    EXPECT_EQ(bRanges[0].allCloseOffsets.size(), 1U)
+        << "b's own static, overlay-only endScope close";
+}
+
+// R19 regression, failure case 2. Native output is 0, then 1: `snap` gets a
+// fresh cell each iteration, and its live range ends on whichever of the
+// loop body's own two alternate exits (continue, or the normal
+// fall-through) runs. Before the fix, advanceProbe's blind pop wrongly
+// consumed `snap` at `b`'s own static close (the same root cause as the
+// case above), corrupting state so that NEITHER later alternate exit found
+// anything open -- the second one reached throws
+// "has no open captured slot to close in either layer" on a legal program.
+TEST(CaptureAnalysisTest,
+     PerIterationCaptureSurvivesAStaticSiblingCloseInsideTheLoop) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer(cond) {
+          var acc = [];
+          for (var i = 0; i < 3; i = i + 1) {
+            var snap = i;
+            fun mk() { return snap; }
+            acc.append(mk);
+            {
+              var b = 0;
+              if (cond) { fun h() { return b; } return h; }
+            }
+            if (i == 1) { continue; }
+            acc.append(1);
+          }
+          return acc;
+        }
+        var r = outer(false);
+        print r[0]();
+        print r[2]();
+    )",
+                                   "r19_static_close_inside_loop_alternates");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* mk = findByName(c.tree, "mk");
+    const DecodedFunction* h = findByName(c.tree, "h");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(mk, nullptr);
+    ASSERT_NE(h, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int snapSlot = infoFor(c.captures, mk->id).ownUpvalues.at(0).index;
+    int bSlot = infoFor(c.captures, h->id).ownUpvalues.at(0).index;
+    ASSERT_NE(snapSlot, bSlot);
+
+    const std::vector<CaptureLiveRange>& snapRanges = rangesFor(info, snapSlot);
+    const std::vector<CaptureLiveRange>& bRanges = rangesFor(info, bSlot);
+    ASSERT_EQ(snapRanges.size(), 1U);
+    ASSERT_EQ(bRanges.size(), 1U);
+    EXPECT_TRUE(snapRanges[0].perIteration)
+        << "snap is declared inside the loop body -- a fresh cell every "
+        << "iteration, matching native output 0, 1";
+    EXPECT_EQ(snapRanges[0].allCloseOffsets.size(), 2U)
+        << "snap closes on whichever alternate loop exit runs -- continue "
+        << "or the normal fall-through";
+    EXPECT_TRUE(snapRanges[0].closedImplicitly)
+        << "the cond=true path returns before either alternate exit runs, "
+        << "leaving this iteration's cell open at that RETURN";
+    EXPECT_EQ(bRanges[0].allCloseOffsets.size(), 1U)
+        << "b's own static, overlay-only endScope close must still resolve, "
+        << "not steal snap's slot, and not leave snap's own closes with "
+        << "nothing left to find";
+}
+
+// R20 regression. Native output is 1, then 2: an ordinary if/else where
+// BOTH arms capture the same outer, never-redeclared local must share one
+// cell, not be treated as two conflicting incarnations. Before the fix,
+// joinInto threw where the two arms' exit states rejoined, because it saw
+// one slot open with two different CLOSURE offsets and assumed that meant
+// decoder or compiler drift.
+TEST(CaptureAnalysisTest, IfElseArmsCapturingOneOuterVariableShareOneCell) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer(c) {
+          var x = 1;
+          var f = nil;
+          if (c) { fun a() { return x; } f = a; }
+          else { fun b() { return x + 1; } f = b; }
+          return f;
+        }
+        print outer(true)();
+        print outer(false)();
+    )",
+                                   "r20_if_else_arms_share_one_outer_capture");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* a = findByName(c.tree, "a");
+    const DecodedFunction* b = findByName(c.tree, "b");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int aSlot = infoFor(c.captures, a->id).ownUpvalues.at(0).index;
+    int bSlot = infoFor(c.captures, b->id).ownUpvalues.at(0).index;
+    ASSERT_EQ(aSlot, bSlot)
+        << "a and b must capture the SAME slot, or this test does not "
+        << "reach the shape R20 exists to catch";
+
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, aSlot);
+    ASSERT_EQ(ranges.size(), 1U)
+        << "both if/else arms capture the same never-redeclared x -- ONE "
+        << "range, or the merge must have thrown or split it";
+    EXPECT_EQ(ranges[0].capturingClosureOffsets.size(), 2U)
+        << "both a and b must be recorded as sharing this one range";
+    EXPECT_TRUE(ranges[0].closedImplicitly)
+        << "x is function scope -- only the frame's RETURN ends it";
+}
+
+// R20 regression, layered onto a loop: the loop variable itself is
+// captured by both if/else arms, on every iteration. Native output is 2,
+// then 2 (both closures see the loop var's final value, one shared cell for
+// the whole loop).
+TEST(CaptureAnalysisTest,
+     IfElseArmsInsideALoopCapturingTheLoopVarShareOneCell) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer(c) {
+          var acc = [];
+          for (var i = 0; i < 2; i = i + 1) {
+            if (c) { fun a() { return i; } acc.append(a); }
+            else { fun b() { return i; } acc.append(b); }
+          }
+          return acc;
+        }
+        var r = outer(true);
+        print r[0]();
+        print r[1]();
+    )",
+                                   "r20_if_else_arms_in_loop_share_loop_var");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* a = findByName(c.tree, "a");
+    const DecodedFunction* b = findByName(c.tree, "b");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int aSlot = infoFor(c.captures, a->id).ownUpvalues.at(0).index;
+    int bSlot = infoFor(c.captures, b->id).ownUpvalues.at(0).index;
+    ASSERT_EQ(aSlot, bSlot);
+
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, aSlot);
+    ASSERT_EQ(ranges.size(), 1U)
+        << "one shared cell for the whole loop, matching native output "
+        << "2, 2";
+    EXPECT_EQ(ranges[0].capturingClosureOffsets.size(), 2U);
+    EXPECT_FALSE(ranges[0].perIteration)
+        << "the loop var's own close is after the loop exits, not inside "
+        << "its back-edge span";
+}
+
+// R20 regression, layered onto a loop a second way: a fresh, per-iteration
+// body local, captured by both if/else arms on each iteration. Native
+// output is 0, then 1 (each iteration's own fresh cell).
+TEST(CaptureAnalysisTest,
+     IfElseArmsInsideALoopCapturingAPerIterationLocalShareOneCell) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer(c) {
+          var acc = [];
+          for (var i = 0; i < 2; i = i + 1) {
+            var snap = i;
+            if (c) { fun a() { return snap; } acc.append(a); }
+            else { fun b() { return snap; } acc.append(b); }
+          }
+          return acc;
+        }
+        var r = outer(true);
+        print r[0]();
+        print r[1]();
+    )",
+                                   "r20_if_else_arms_in_loop_share_body_local");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* a = findByName(c.tree, "a");
+    const DecodedFunction* b = findByName(c.tree, "b");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int aSlot = infoFor(c.captures, a->id).ownUpvalues.at(0).index;
+    int bSlot = infoFor(c.captures, b->id).ownUpvalues.at(0).index;
+    ASSERT_EQ(aSlot, bSlot);
+
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, aSlot);
+    ASSERT_EQ(ranges.size(), 1U)
+        << "one fresh cell PER ITERATION, shared by both arms of that same "
+        << "iteration, matching native output 0, 1";
+    EXPECT_EQ(ranges[0].capturingClosureOffsets.size(), 2U);
+    EXPECT_TRUE(ranges[0].perIteration);
+}
+
+// R21 (nit): none of the shapes above capture a slot AGAIN after a static,
+// overlay-only close AND a block boundary -- the one shape that reads the
+// per-block entry state advanceProbe could have damaged. Native output is
+// 1, 3, then 2, 3: whichever if/else arm ran, x is still open afterward,
+// and d's later capture must join the SAME merged range, not open a third
+// one.
+TEST(CaptureAnalysisTest, RecaptureAfterIfElseMergeJoinsTheMergedRange) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer(c) {
+          var x = 1;
+          var f = nil;
+          if (c) { fun a() { return x; } f = a; }
+          else { fun b() { return x + 1; } f = b; }
+          fun d() { return x + 2; }
+          return [f, d];
+        }
+        var r1 = outer(true);
+        print r1[0]();
+        print r1[1]();
+        var r2 = outer(false);
+        print r2[0]();
+        print r2[1]();
+    )",
+                                   "r21_recapture_after_if_else_merge");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* a = findByName(c.tree, "a");
+    const DecodedFunction* b = findByName(c.tree, "b");
+    const DecodedFunction* d = findByName(c.tree, "d");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    ASSERT_NE(d, nullptr);
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    int aSlot = infoFor(c.captures, a->id).ownUpvalues.at(0).index;
+    int bSlot = infoFor(c.captures, b->id).ownUpvalues.at(0).index;
+    int dSlot = infoFor(c.captures, d->id).ownUpvalues.at(0).index;
+    ASSERT_EQ(aSlot, bSlot);
+    ASSERT_EQ(aSlot, dSlot);
+
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, aSlot);
+    ASSERT_EQ(ranges.size(), 1U)
+        << "a, b, and d all hold the same x -- one range, not a third one "
+        << "for d's later, post-merge recapture";
+    EXPECT_EQ(ranges[0].capturingClosureOffsets.size(), 3U)
+        << "a, b, and d must all be recorded as sharing this one range";
+    EXPECT_TRUE(ranges[0].closedImplicitly);
+}
