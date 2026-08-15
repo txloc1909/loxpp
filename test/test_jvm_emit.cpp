@@ -328,7 +328,13 @@ TEST(EmitScript, WhileLoopEmitsBackEdgeAndLabel) {
 
     std::size_t gotoPos = j.find("goto L_");
     ASSERT_NE(gotoPos, std::string::npos);
-    std::string target = j.substr(gotoPos + 5, 6); // "L_" + 4 digits
+    // R7 fix (PR #109 nit): `cfg.cpp`'s `"L_%04d"` is a minimum width, not a
+    // fixed one — a chunk past 9999 bytes prints a 5th digit. Read to the end
+    // of the line instead of a fixed 6 characters, so this test stays
+    // correct at any chunk size.
+    std::size_t nameStart = gotoPos + 5; // skip "goto "
+    std::string target =
+        j.substr(nameStart, j.find('\n', nameStart) - nameStart);
     EXPECT_NE(j.find(target + ":"), std::string::npos) << j;
 }
 
