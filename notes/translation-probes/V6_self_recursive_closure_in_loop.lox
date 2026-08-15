@@ -1,0 +1,17 @@
+// V6: a self-recursive local `fun`, declared fresh on every loop trip
+// (PR #111 R1's third failing program). Each trip must seed a NEW cell for
+// `down`'s own slot before `down` calls itself, the same way V1 needs a
+// fresh cell for a plain captured local on every trip. Native loxpp
+// prints 12.
+fun outer() {
+  var r = 0;
+  for (var i = 0; i < 2; i = i + 1) {
+    fun down(n) {
+      if (n <= 0) { return 0; }
+      return n + down(n - 1);
+    }
+    r = r + down(3);
+  }
+  return r;
+}
+print outer();
