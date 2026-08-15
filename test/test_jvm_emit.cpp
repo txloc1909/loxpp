@@ -802,6 +802,7 @@ TEST(EmitProgram, SingleUpvalueClosureSeedsAndWiresTheCell) {
 
     ASSERT_EQ(classes.size(), 3u);
     EXPECT_EQ(classes[0].className, "LoxMain");
+    expectEveryJumpTargetIsLabeled(classes[0].source);
     const std::string& outer = classes[1].source;
     // The idempotent seed (ensureCapturedCell): check, seed only if not
     // already a cell, then read the (now guaranteed) cell for wiring.
@@ -845,6 +846,7 @@ TEST(EmitProgram, SingleUpvalueClosureSeedsAndWiresTheCell) {
                        "    areturn\n"),
               std::string::npos)
         << get;
+    expectEveryJumpTargetIsLabeled(get);
 }
 
 TEST(EmitProgram, TwoClosuresShareOneCaptureCell) {
@@ -870,6 +872,7 @@ TEST(EmitProgram, TwoClosuresShareOneCaptureCell) {
 
     ASSERT_EQ(classes.size(), 4u);
     EXPECT_EQ(classes[0].className, "LoxMain");
+    expectEveryJumpTargetIsLabeled(classes[0].source);
     const std::string& outer = classes[1].source;
     EXPECT_NE(outer.find("Jcok3_0:"), std::string::npos) << outer;
     EXPECT_NE(outer.find("Jcok8_0:"), std::string::npos) << outer;
@@ -879,6 +882,9 @@ TEST(EmitProgram, TwoClosuresShareOneCaptureCell) {
                                       "    aastore\n"),
               2);
     expectEveryJumpTargetIsLabeled(outer);
+
+    const std::string& get = classes[2].source;
+    expectEveryJumpTargetIsLabeled(get);
 
     // set(v): SET_UPVALUE 0 writes upvals[0][0], fused with its own trailing
     // POP (the assignment is a bare statement) — no leftover `aload` of the
@@ -896,6 +902,7 @@ TEST(EmitProgram, TwoClosuresShareOneCaptureCell) {
                        "    areturn\n"),
               std::string::npos)
         << set;
+    expectEveryJumpTargetIsLabeled(set);
 }
 
 TEST(EmitProgram, NestedClosureCopiesGrandparentUpvalue) {
