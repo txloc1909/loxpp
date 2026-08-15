@@ -793,10 +793,25 @@ TEST(CaptureAnalysisTest, RecapturedSlotAfterDeadEarlyExitSharesOneCell) {
 // Runs the pass over one file and checks it never throws. compileFile
 // already runs validateCaptureAnalysis on the result (see compileAndAnalyze
 // above), so this only needs to name the file for a failing EXPECT_*.
+//
+// R29: also expect both dead-code buckets empty for every chunk. Measured
+// premise -- every chunk of every probe, every example, and the bootstrap
+// interpreter holds zero unreachable and zero statically dead closes today.
+// A future change that moves a real, live close into either bucket must fail
+// this check, even though the corpus itself carries no dead capture code.
 void checkNoAssertionFailure(const fs::path& path) {
     SCOPED_TRACE("file=" + path.string());
     Compiled c = compileFile(path);
-    (void)c;
+    for (const auto& [id, info] : c.captures.functions) {
+        EXPECT_TRUE(info.unreachableCloseOffsets.empty())
+            << "id=" << id
+            << ": no corpus file holds unreachable capture code -- a close "
+            << "landing here means a live close was mis-attributed";
+        EXPECT_TRUE(info.staticallyDeadCloseOffsets.empty())
+            << "id=" << id
+            << ": no corpus file holds statically dead capture code -- a "
+            << "close landing here means a live close was mis-attributed";
+    }
 }
 
 TEST(CaptureAnalysisTest, NoAssertionFailureOnTranslationProbes) {
