@@ -658,6 +658,9 @@ TEST(EmitProgram, SiblingFunctionsGetSequentialClassNames) {
     EXPECT_EQ(classes[0].className, "LoxMain");
     EXPECT_EQ(classes[1].className, "LoxFn$0");
     EXPECT_EQ(classes[2].className, "LoxFn$1");
+    expectEveryJumpTargetIsLabeled(classes[0].source);
+    expectEveryJumpTargetIsLabeled(classes[1].source);
+    expectEveryJumpTargetIsLabeled(classes[2].source);
 }
 
 TEST(EmitProgram, ClosureWithUpvalueIsNotImplemented) {
