@@ -82,7 +82,12 @@ struct FunctionStackAnalysis {
     // High-water mark of operandDepth() over the whole chunk — what a JVM
     // `.limit stack` / CIL `.maxstack` must be at least as large as. Excludes
     // the arity+1 bottom slots: those move to the local array, not the
-    // operand stack.
+    // operand stack. Counts an invisible-var's declaring push itself (the
+    // emitter's store has not run yet at that instruction), so it is a safe
+    // lower bound, not the final number: an emission strategy that needs its
+    // own transient cell beyond what this pass sees (e.g. the `dup` a P2
+    // shuffle lowering adds) must add that on top. That is N4's
+    // responsibility, not this node's.
     int maxOperandDepth{0};
 };
 
