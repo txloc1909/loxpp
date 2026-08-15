@@ -215,6 +215,11 @@ field value is not callable, that is a **runtime error**.
 `this` evaluates to the instance on which the enclosing method was invoked. It is only valid inside
 a method body. Using `this` outside any class method is a **static error**.
 
+`this` is **read-only**. Assigning to it is a **static error** ("Invalid
+assignment target."). It is a local binding for every other purpose: each method
+call makes a new one, and a nested function can capture it. See
+[Binding Identity](#binding-identity).
+
 ### `super` Expression
 
 ```
