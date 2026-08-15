@@ -19,13 +19,9 @@
 // tell two mutually exclusive alternate exits of ONE live range (break,
 // continue, and the normal fall-through, each closing the same per-iteration
 // capture on its own path) apart from a real scope exit followed by a
-// genuinely different, later variable that reuses the same slot number. The
-// CFG resolves this: two CLOSURE instructions for the same slot share one
-// live range exactly when some CFG path connects them without crossing a
-// CLOSE_UPVALUE for that slot; a slot is open at a block's entry exactly when
-// every predecessor that reaches it agrees it is still open. This pass still
-// carries no stack simulation (N2), so every offset it reports is a bound on
-// a slot's capture, not a per-execution-path fact. See
+// genuinely different, later variable that reuses the same slot number. This
+// pass still carries no stack simulation (N2), so every offset it reports is
+// a bound on a slot's capture, not a per-execution-path fact. See
 // FunctionCaptureInfo::firstCaptureOffset below for what that means for N7.
 //
 // Referee amendment 1 (PR #101, 2026-08-15): a per-path open set alone is not
@@ -43,7 +39,42 @@
 // it holds the target (a real, dynamic close — vm.cpp's closeUpvalues
 // actually ends a cell there); the overlay wins only when state does not (a
 // static close — a genuine dynamic no-op on this path, because no cell ever
-// opened here to close).
+// opened here to close). The one resolution table this produces (offset ->
+// target slot) must be found by iterating the path fixpoint and the
+// resolution together to a stable point — see analyzeOneChunk's own
+// iteration loop, and advanceProbe's doc comment for why a single pass is
+// not enough.
+//
+// Referee amendment 2 (PR #101, 2026-08-15) — RANGE IDENTITY IS A LIVE
+// INSTANCE, NOT A TOKEN. Amendment 1 keyed a range by the pair (slot,
+// CLOSURE offset). That is only a range's INITIAL NAME. Two different
+// CLOSURE offsets for the same slot can be the SAME live instance — one
+// runtime cell — exactly when `vm.cpp`'s own `captureUpvalue` would reuse an
+// already-open upvalue rather than create a new one: an ordinary if/else (or
+// match) where every arm captures the same, never-redeclared outer local
+// opens it with a DIFFERENT CLOSURE offset per arm, and all of them are the
+// SAME cell where the arms rejoin (06_shared_upvalue's two-closures-one-cell
+// fact, moved onto branches — see CaptureAnalysisTest.
+// IfElseArmsCapturingOneOuterVariableShareOneCell). The corrected rule:
+//   1. A capture token is (slot, CLOSURE offset) — a range's initial name,
+//      not its identity.
+//   2. A CLOSURE that finds its slot OPEN on the current path joins the
+//      instance the path already carries: it adds its own offset to
+//      capturingClosureOffsets: it does not open a new range.
+//   3. A CLOSURE that finds its slot CLOSED on every path reaching it starts
+//      a NEW instance.
+//   4. At a CFG merge where predecessors bring the SAME slot open under
+//      DIFFERENT tokens, those tokens name ONE instance (OriginUnionFind in
+//      capture_analysis.cpp) — whichever arm actually ran, the VM holds one
+//      open upvalue for that stack location at the merge, so there is one
+//      cell. This case is NOT decoder or compiler drift; joinInto unites the
+//      tokens instead of throwing.
+//   5. The only throw left is a CLOSE_UPVALUE that names no open slot in
+//      either the per-path state or the static overlay — R19's own
+//      "has no open captured slot to close in either layer".
+//   6. An instance's firstCaptureOffset is the MINIMUM capturing CLOSURE
+//      offset of its united class (OriginUnionFind::unite always keeps the
+//      smaller offset as canonical).
 
 #include "cfg.h"
 #include "chunk_decoder.h"
@@ -87,6 +118,12 @@ struct CaptureLiveRange {
     // this offset directly. That is correct regardless of how many paths
     // reach the write, because it is decided by execution, not by a static
     // offset comparison.
+    //
+    // Referee amendment 2, rule 6: when several CLOSURE offsets share this
+    // one live instance (see capturingClosureOffsets below — an ordinary
+    // if/else where every arm captures the same outer local), this field is
+    // the MINIMUM of them, which is also always the one program order
+    // reaches first.
     int firstCaptureOffset{-1};
 
     // Every real CLOSE_UPVALUE offset that resolves to this exact range, one
@@ -136,7 +173,13 @@ struct CaptureLiveRange {
 
     // Offsets of every CLOSURE instruction, in this chunk, that captures
     // this exact range. More than one entry means those closures share ONE
-    // cell (06_shared_upvalue, V2_shared) — do not allocate one per closure.
+    // cell — do not allocate one per closure. Two closures in the SAME
+    // block, capturing an already-open cell sequentially, is one way to get
+    // here (06_shared_upvalue, V2_shared). Two closures on MUTUALLY
+    // EXCLUSIVE if/else (or match) arms, each capturing the same outer,
+    // never-redeclared local, is another (referee amendment 2, rule 4) —
+    // whichever arm runs, the runtime holds one cell, so both offsets name
+    // the same instance here too.
     std::vector<int> capturingClosureOffsets;
 };
 
@@ -176,22 +219,33 @@ struct CaptureAnalysis {
 
 // Builds the CFG (N1) of every chunk in `root`'s tree and derives the
 // capture map per execution path (round-3 referee decision, amended by
-// referee amendment 1, PR #101): a dataflow over the CFG, not a flat,
+// referee amendments 1 and 2, PR #101): a dataflow over the CFG, not a flat,
 // order-only walk over the instruction list. A normal program can
 // legitimately have more than one real CLOSE_UPVALUE for the same capture,
 // on mutually exclusive break/continue/match-arm-exit/fall-through paths; a
 // flat walk cannot tell that apart from a real scope exit followed by a
 // genuinely different, later variable that reuses the same slot number,
 // because CLOSE_UPVALUE carries no operand. The CFG resolves it: a slot is
-// open at a block's entry exactly when every predecessor that reaches it
-// agrees it is still open (two disagreeing predecessors is a real error, not
-// an alternate exit). CLOSE_UPVALUE resolves against the higher of that
+// open at a block's entry exactly when some predecessor that reaches it
+// still has it open. CLOSE_UPVALUE resolves against the higher of that
 // per-path state and a program-order static overlay (see the header comment
 // above and analyzeOneChunk in capture_analysis.cpp) — the per-path state
 // alone is not sound when a branch captures a slot and returns, leaving a
 // sibling path to run that scope's close for a slot it never dynamically
-// opened. Throws std::runtime_error if a CLOSE_UPVALUE names no open
-// captured slot in EITHER layer on a REACHABLE block's fully-converged path,
-// or if two CFG paths reach one block disagreeing on which capture holds a
-// slot open. Either signals decoder or compiler drift, not a normal program.
+// opened. Throws std::runtime_error only if a CLOSE_UPVALUE names no open
+// captured slot in EITHER layer on a REACHABLE block's fully-converged path
+// — that signals decoder or compiler drift, not a normal program.
+//
+// Referee amendment 2, rule 4: two predecessors reaching one block CAN
+// disagree on which CLOSURE offset opened a slot without that being drift —
+// an ordinary if/else (or match) where both arms capture the same outer,
+// never-redeclared local opens it with two different offsets, one per arm,
+// and both are live where the arms rejoin. Whichever arm ran, `vm.cpp`'s
+// `captureUpvalue` reuses the slot's already-open cell, so the runtime holds
+// ONE cell at the merge, never two. This pass unites the two origins into
+// one live instance instead of throwing (see OriginUnionFind and joinInto in
+// capture_analysis.cpp) — the reported range then carries both CLOSURE
+// offsets in capturingClosureOffsets, exactly like two closures sharing one
+// already-open cell in the same block would. This supersedes amendment 1's
+// decision 1, item 5, which called this exact case an error.
 CaptureAnalysis analyzeCaptures(const DecodedFunction& root);

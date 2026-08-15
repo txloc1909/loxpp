@@ -28,52 +28,109 @@ using OpenOrigins = std::map<int, int>;
 // held fewer elements than the stale index, reading out of bounds.
 using RangeIndex = std::map<std::pair<int, int>, int>;
 
+// Canonicalizes (slot, CLOSURE offset) origins that two mutually exclusive
+// CFG paths prove are one live instance (referee amendment 2, rule 4 — see
+// joinInto). A classic union-find keyed by the pair, so a chain of merges
+// (an if/else nested inside another if/else, all capturing one outer local)
+// still resolves to one root. Slot is part of the key only so two different
+// slots' origins never compare equal by coincidence; every union unites two
+// origins of the SAME slot.
+class OriginUnionFind {
+  public:
+    int find(int slot, int origin) {
+        auto it = parent_.find({slot, origin});
+        if (it == parent_.end() || it->second == origin) {
+            return origin;
+        }
+        int root = find(slot, it->second);
+        it->second = root; // path compression
+        return root;
+    }
+
+    // Records that `a` and `b` name one incarnation of `slot`. The smaller
+    // offset wins, so the canonical origin is always the one CLOSURE, of the
+    // pair, that program order reaches first — matching
+    // CaptureLiveRange::firstCaptureOffset's own contract.
+    int unite(int slot, int a, int b) {
+        int ra = find(slot, a);
+        int rb = find(slot, b);
+        if (ra == rb) {
+            return ra;
+        }
+        int lo = std::min(ra, rb);
+        int hi = std::max(ra, rb);
+        parent_[{slot, hi}] = lo;
+        return lo;
+    }
+
+  private:
+    std::map<std::pair<int, int>, int> parent_;
+};
+
 // Joins one predecessor's exit state into a block's accumulated entry state.
 // A slot present in only one of the two stays open — the other predecessor
 // never touched it, so it cannot have closed it (V3_loopvar's loop head: the
 // pre-loop predecessor shows `i` closed, the back-edge predecessor shows it
-// open, and open wins). Two predecessors that both have the slot open must
-// agree on WHICH incarnation (the same origin offset): the compiler's own
-// scoping never lets two live incarnations of one slot reach a common point
-// without one first closing, so disagreement here means the decoder or this
-// pass has drifted from the compiler's real output, not a normal program.
+// open, and open wins).
+//
+// Referee amendment 2, rule 4: two predecessors CAN both have the slot open
+// with different origins, and that is not drift. An ordinary if/else (or
+// match) where both arms capture the same outer, never-redeclared local
+// opens it with two different CLOSURE offsets, one per arm, and both are
+// live where the arms rejoin. Whichever arm actually ran, `vm.cpp`'s
+// `captureUpvalue` finds the slot's cell already open and reuses it, so the
+// runtime holds ONE cell at the merge — never two. Unite the two origins
+// instead of throwing (amendment 1's decision 1, item 5, is superseded: it
+// called this exact case an error), and adopt the union's canonical origin
+// going forward, so a later lookup under either arm's own offset agrees.
 void joinInto(OpenOrigins& acc, const OpenOrigins& incoming,
-              const std::string& functionId, int blockLeaderOffset) {
+              OriginUnionFind& aliases) {
     for (const auto& [slot, origin] : incoming) {
         auto [it, inserted] = acc.emplace(slot, origin);
         if (!inserted && it->second != origin) {
-            throw std::runtime_error(
-                "capture_analysis: block at offset " +
-                std::to_string(blockLeaderOffset) +
-                " in function id=" + functionId + " is reachable with slot " +
-                std::to_string(slot) + " open from two different captures (" +
-                std::to_string(it->second) + " and " + std::to_string(origin) +
-                ")");
+            it->second = aliases.unite(slot, it->second, origin);
         }
     }
 }
 
 // Advances `state` across one block's own instructions for the DATAFLOW
-// PROBE only (see runDataflow) — a cheap, order-only advance that ignores
-// the static overlay entirely. It exists solely to converge the per-block
-// ENTRY states that seed the commit walk (analyzeOneChunk); it never builds
-// a CaptureLiveRange and is not itself the source of truth for which slot a
-// CLOSE_UPVALUE names — that resolution, including the overlay, happens once
-// in the commit walk, on each block's own fully-converged entry state.
+// PROBE only (see runDataflow) — a cheap advance whose sole job is to
+// converge the per-block ENTRY states that seed the commit walk
+// (analyzeOneChunk); it never builds a CaptureLiveRange and is not itself
+// the source of truth for range identity — that happens once in the commit
+// walk, on each block's own fully-converged entry state.
 //
-// This blind "always pop the current highest" rule can pop the WRONG slot at
-// a close that the commit walk will later resolve as a static, overlay-only
-// no-op (referee amendment 1) — but only within one scope-exit group, whose
-// N instructions the compiler always emits one per statically captured local
-// of that scope, in descending order. The group's real dynamically-open
-// slots are a SUBSET of that N; walking the group and blindly popping the
-// current top, N times, empties exactly that subset (each real pop removes
-// one of its own members, in the same descending order it would have been
-// removed in correctly) and lets every remaining pop no-op on empty state —
-// so the group's NET effect on `state` converges to the same result either
-// way. Only the per-instruction ATTRIBUTION can differ, and the probe never
-// attributes anything.
-void advanceProbe(const BasicBlock& block, OpenOrigins& state) {
+// R19 (referee amendment 1, item 3): an earlier version of this function
+// always popped `state`'s own highest slot at a CLOSE_UPVALUE. That is
+// wrong exactly when this close is a STATIC, overlay-only one (R17's
+// shape) and an unrelated, still-open ENCLOSING capture happens to sit at
+// `state`'s current top: the old rule popped the enclosing capture instead
+// of leaving `state` untouched, corrupting every later block's entry state.
+//
+// `staticCloseTargets` gives the correct target directly — a no-op erase
+// (`state` may not hold it: the static case) instead of a wrong one. It is
+// NOT a flat, whole-chunk simulation of its own (an earlier attempt at that
+// broke on R9's own regression: two SIBLING alternate closes of one
+// captured local, with an unrelated ENCLOSING capture also open, are not
+// safely resolvable by any simulation that treats them as sequential,
+// because the first sibling's own resolution would wrongly appear to
+// "use up" the target before the second sibling is ever reached — see
+// analyzeOneChunk for where this map actually comes from: the COMMIT walk's
+// own target resolution, from the previous iteration of a fixpoint between
+// the two, exactly as the amendment specifies). Only when
+// `staticCloseTargets` has nothing recorded for this exact offset (this
+// pass has not yet iterated far enough to know) does this function fall
+// back to `state`'s own highest slot, matching the pre-R19 rule.
+//
+// Referee amendment 2, section 4 (ruling on R19): "use ONE close rule in
+// every walk... The naive pop exists only to bootstrap the first iteration,
+// before a table exists. Iterate until the table is stable." This is that
+// rule: `staticCloseTargets` IS the resolution table from the previous
+// iteration (empty on the first), and the pop-`state`'s-own-top fallback is
+// only ever the bootstrap the ruling names, never the final word for an
+// offset the table already answers.
+void advanceProbe(const BasicBlock& block, OpenOrigins& state,
+                  const std::unordered_map<int, int>& staticCloseTargets) {
     for (const DecodedInstruction& in : block.instructions) {
         if (in.op == Op::CLOSURE) {
             for (const ClosureUpvalue& up : in.upvalues) {
@@ -85,7 +142,13 @@ void advanceProbe(const BasicBlock& block, OpenOrigins& state) {
                 }
             }
         } else if (in.op == Op::CLOSE_UPVALUE) {
-            if (state.empty()) {
+            auto targetIt = staticCloseTargets.find(in.offset);
+            int target = -1;
+            if (targetIt != staticCloseTargets.end()) {
+                target = targetIt->second;
+            } else if (!state.empty()) {
+                target = std::prev(state.end())->first;
+            } else {
                 // Entry states are not yet at their fixed point during the
                 // probe: a block past a LOOP header can be probed before the
                 // back-edge has contributed that header's true entry state,
@@ -94,7 +157,7 @@ void advanceProbe(const BasicBlock& block, OpenOrigins& state) {
                 // worklist iteration.
                 continue;
             }
-            state.erase(std::prev(state.end()));
+            state.erase(target); // a no-op if `state` does not hold `target`
         }
         // POP and everything else: no captured-slot effect.
     }
@@ -187,7 +250,10 @@ struct DataflowResult {
     std::vector<uint8_t> reachable;
 };
 
-DataflowResult runDataflow(const Cfg& cfg, const std::string& functionId) {
+DataflowResult
+runDataflow(const Cfg& cfg,
+            const std::unordered_map<int, int>& staticCloseTargets,
+            OriginUnionFind& aliases) {
     size_t n = cfg.blocks.size();
     DataflowResult result;
     result.entryState.resize(n);
@@ -206,7 +272,8 @@ DataflowResult runDataflow(const Cfg& cfg, const std::string& functionId) {
         worklist.pop_front();
 
         OpenOrigins next = result.entryState[static_cast<size_t>(b)];
-        advanceProbe(cfg.blocks[static_cast<size_t>(b)], next);
+        advanceProbe(cfg.blocks[static_cast<size_t>(b)], next,
+                     staticCloseTargets);
 
         // A block's very first computation must propagate even when `next`
         // happens to equal a default-constructed (empty) exitState — that
@@ -224,8 +291,7 @@ DataflowResult runDataflow(const Cfg& cfg, const std::string& functionId) {
              cfg.blocks[static_cast<size_t>(b)].successors) {
             int t = edge.targetBlock;
             OpenOrigins merged = result.entryState[static_cast<size_t>(t)];
-            joinInto(merged, next, functionId,
-                     cfg.blocks[static_cast<size_t>(t)].leaderOffset);
+            joinInto(merged, next, aliases);
             if (result.reachable[static_cast<size_t>(t)] == 0 ||
                 merged != result.entryState[static_cast<size_t>(t)]) {
                 result.reachable[static_cast<size_t>(t)] = 1;
@@ -235,21 +301,54 @@ DataflowResult runDataflow(const Cfg& cfg, const std::string& functionId) {
         }
     }
 
+    // R20's alias table is not final until the fixpoint above stops finding
+    // new unions, and a slot's entry state can still hold a pre-union raw
+    // origin from a block whose only edge in never revisited joinInto after
+    // the union that would have canonicalized it (a CLOSURE reached by
+    // exactly one predecessor never merges at all). Canonicalize every
+    // entry state once, here, after the fixpoint is done — the single point
+    // the commit walk (handleClosureCommit, handleCloseUpvalueCommit, and
+    // analyzeOneChunk's own closedImplicitly loop) can then trust `origin`
+    // values are already final, with no scattered re-lookup of its own.
+    for (OpenOrigins& entry : result.entryState) {
+        for (auto& [slot, origin] : entry) {
+            origin = aliases.find(slot, origin);
+        }
+    }
+
     return result;
 }
 
 // Folds one CLOSURE instruction's local captures into `state` and `overlay`
 // together, and (if `reachable`) into `info`. See advanceCommit for what the
 // two maps are and why a CLOSURE always updates both.
+//
+// Referee amendment 2 corrects range identity: a capture token (slot,
+// CLOSURE offset) is only a range's INITIAL NAME, not its identity (rules 1
+// and 6). Three cases, matching `vm.cpp`'s own `captureUpvalue` (reuse an
+// open upvalue, or create one):
+//   - joinsExistingRange (rule 2): this exact PATH already has the slot
+//     open -- add to that instance.
+//   - joinsSiblingRange (rule 4): this path does not, but a MUTUALLY
+//     EXCLUSIVE sibling path does, under a different token that joinInto's
+//     union-find already proved is the SAME instance -- add to it too, and
+//     canonicalize this path's own state/overlay to match, so the instance
+//     reads as one range regardless of which arm a later reader follows.
+//   - neither (rule 3): every path reaching here has the slot closed --
+//     start a genuinely new instance.
 void handleClosureCommit(const DecodedInstruction& in, OpenOrigins& state,
                          OpenOrigins& overlay, bool reachable,
                          FunctionCaptureInfo& info,
-                         RangeIndex& rangeIndexByOrigin) {
+                         RangeIndex& rangeIndexByOrigin,
+                         OriginUnionFind& aliases) {
     for (const ClosureUpvalue& up : in.upvalues) {
         if (!up.isLocal) {
             continue; // a grandparent's slot, not this chunk's
         }
         int slot = up.index;
+        int rawOrigin = in.offset;
+        int canonicalOrigin = aliases.find(slot, rawOrigin);
+
         auto it = state.find(slot);
         // During commit, "already open" is only trustworthy when that
         // origin's range object actually exists yet. A loop header's
@@ -264,33 +363,56 @@ void handleClosureCommit(const DecodedInstruction& in, OpenOrigins& state,
         if (joinsExistingRange) {
             int idx = rangeIndexByOrigin.at({slot, it->second});
             info.liveRangesBySlot[slot][idx].capturingClosureOffsets.push_back(
-                in.offset);
+                rawOrigin);
             overlay[slot] = it->second;
             continue;
         }
-        state[slot] = in.offset;
+        bool joinsSiblingRange =
+            reachable && rangeIndexByOrigin.contains({slot, canonicalOrigin});
+        if (joinsSiblingRange) {
+            int idx = rangeIndexByOrigin.at({slot, canonicalOrigin});
+            info.liveRangesBySlot[slot][idx].capturingClosureOffsets.push_back(
+                rawOrigin);
+            state[slot] = canonicalOrigin;
+            overlay[slot] = canonicalOrigin;
+            continue;
+        }
+        state[slot] = canonicalOrigin;
         if (reachable) {
             CaptureLiveRange range;
             range.slot = slot;
-            range.firstCaptureOffset = in.offset;
-            range.capturingClosureOffsets.push_back(in.offset);
+            range.firstCaptureOffset = canonicalOrigin;
+            range.capturingClosureOffsets.push_back(rawOrigin);
             std::vector<CaptureLiveRange>& vec = info.liveRangesBySlot[slot];
             vec.push_back(range);
-            rangeIndexByOrigin[{slot, in.offset}] =
+            rangeIndexByOrigin[{slot, canonicalOrigin}] =
                 static_cast<int>(vec.size()) - 1;
         }
-        overlay[slot] = in.offset;
+        overlay[slot] = canonicalOrigin;
     }
 }
 
 // Resolves one CLOSE_UPVALUE against `state` and `overlay` together, and (if
 // `reachable`) records the outcome into `info`. See advanceCommit for the
 // two-layer resolution rule this implements (referee amendment 1).
+//
+// R19: also records the resolved target slot into `resolvedTargets`, keyed
+// by this instruction's own offset — this walk's OWN resolution (state AND
+// the program-order overlay together) is authoritative, so analyzeOneChunk
+// feeds it back as the NEXT iteration's `staticCloseTargets` for
+// advanceProbe (referee amendment 1, item 3: iterate the two to a fixed
+// point). A close this walk cannot yet resolve (neither layer holds
+// anything, reachable) throws, same as before this map existed;
+// analyzeOneChunk catches that on every iteration but the last, because an
+// earlier iteration's `state` can still be wrong in exactly the way R19
+// describes, and a later iteration, seeded with whatever this one DID
+// resolve before the throw, corrects it.
 void handleCloseUpvalueCommit(const DecodedInstruction& in, OpenOrigins& state,
                               OpenOrigins& overlay, bool reachable,
                               const std::string& functionId,
                               FunctionCaptureInfo& info,
-                              RangeIndex& rangeIndexByOrigin) {
+                              RangeIndex& rangeIndexByOrigin,
+                              std::unordered_map<int, int>& resolvedTargets) {
     bool hasState = !state.empty();
     bool hasOverlay = !overlay.empty();
     if (!hasState && !hasOverlay) {
@@ -308,6 +430,7 @@ void handleCloseUpvalueCommit(const DecodedInstruction& in, OpenOrigins& state,
     bool dynamic = hasState && stateTop >= overlayTop;
     int slot = dynamic ? stateTop : overlayTop;
     int origin = dynamic ? state.at(slot) : overlay.at(slot);
+    resolvedTargets[in.offset] = slot;
     if (reachable) {
         auto idxIt = rangeIndexByOrigin.find({slot, origin});
         if (idxIt != rangeIndexByOrigin.end()) {
@@ -361,30 +484,45 @@ void handleCloseUpvalueCommit(const DecodedInstruction& in, OpenOrigins& state,
 void advanceCommit(const BasicBlock& block, OpenOrigins& state,
                    OpenOrigins& overlay, bool reachable,
                    const std::string& functionId, FunctionCaptureInfo& info,
-                   RangeIndex& rangeIndexByOrigin) {
+                   RangeIndex& rangeIndexByOrigin, OriginUnionFind& aliases,
+                   std::unordered_map<int, int>& resolvedTargets) {
     for (const DecodedInstruction& in : block.instructions) {
         if (in.op == Op::CLOSURE) {
             handleClosureCommit(in, state, overlay, reachable, info,
-                                rangeIndexByOrigin);
+                                rangeIndexByOrigin, aliases);
         } else if (in.op == Op::CLOSE_UPVALUE) {
             handleCloseUpvalueCommit(in, state, overlay, reachable, functionId,
-                                     info, rangeIndexByOrigin);
+                                     info, rangeIndexByOrigin, resolvedTargets);
         }
         // POP and everything else: no captured-slot effect.
     }
 }
 
-void analyzeOneChunk(const DecodedFunction& node, CaptureAnalysis& out) {
+// Runs one full fixpoint-plus-commit pass: the CFG dataflow (seeded with
+// `staticCloseTargets`, the previous pass's own resolution — empty on the
+// first call, matching the pre-R19 rule) and then the sequential commit
+// walk over every block, in program order, building `info` and reading back
+// every close's resolved target into `resolvedTargets` as it goes.
+//
+// A commit walk that reaches a close neither layer can yet resolve throws
+// (handleCloseUpvalueCommit) with whatever `resolvedTargets` this SAME call
+// had gathered before the throw left in place — the caller (analyzeOneChunk)
+// uses that partial map to seed the next call, exactly the failure case R19
+// describes (a target genuinely needs one more round to become visible).
+FunctionCaptureInfo
+runOnePass(const DecodedFunction& node, const Cfg& cfg,
+           const std::unordered_map<int, int>& staticCloseTargets,
+           std::unordered_map<int, int>& resolvedTargets) {
     FunctionCaptureInfo info;
     info.id = node.id;
 
-    Cfg cfg = buildCfg(node.instructions);
-    DataflowResult dataflow = runDataflow(cfg, node.id);
+    OriginUnionFind aliases;
+    DataflowResult dataflow = runDataflow(cfg, staticCloseTargets, aliases);
 
-    // Commit walk: cfg.blocks is in byte order (see cfg.h), so this loop
-    // visits every instruction of the chunk exactly once, in program order
-    // — required both for ranges of one slot to land in liveRangesBySlot in
-    // offset order (the determinism the mission brief's codegen-naming rule
+    // cfg.blocks is in byte order (see cfg.h), so this loop visits every
+    // instruction of the chunk exactly once, in program order — required
+    // both for ranges of one slot to land in liveRangesBySlot in offset
+    // order (the determinism the mission brief's codegen-naming rule
     // depends on, and the non-overlap invariant the tests check) and for
     // `overlay` below to correctly mirror the compiler's own single-pass
     // view (referee amendment 1).
@@ -397,7 +535,7 @@ void analyzeOneChunk(const DecodedFunction& node, CaptureAnalysis& out) {
         // regardless of `reachable`) can resolve a close inside it.
         OpenOrigins state = reachable ? dataflow.entryState[b] : OpenOrigins{};
         advanceCommit(cfg.blocks[b], state, overlay, reachable, node.id, info,
-                      rangeIndexByOrigin);
+                      rangeIndexByOrigin, aliases, resolvedTargets);
 
         if (!reachable || !cfg.blocks[b].successors.empty()) {
             continue;
@@ -416,6 +554,57 @@ void analyzeOneChunk(const DecodedFunction& node, CaptureAnalysis& out) {
             }
             info.liveRangesBySlot[slot][idxIt->second].closedImplicitly = true;
         }
+    }
+
+    return info;
+}
+
+void analyzeOneChunk(const DecodedFunction& node, CaptureAnalysis& out) {
+    Cfg cfg = buildCfg(node.instructions);
+
+    // R19 (referee amendment 1, item 3): the close-resolution rule and the
+    // per-path fixpoint depend on each other. advanceProbe needs to know
+    // which slot each CLOSE_UPVALUE targets to avoid corrupting an
+    // unrelated, lower slot's open state at a static close; the commit
+    // walk's own resolution (state and the program-order overlay together)
+    // is the authoritative source for that target, but it is only correct
+    // once the fixpoint it reads its `state` from is itself correct. Break
+    // the circularity by iterating: seed the fixpoint with the PREVIOUS
+    // pass's resolved targets (empty on the first pass, matching the
+    // pre-R19 rule exactly), and feed this pass's own resolution back in as
+    // the next seed. The referee's own prototype needed two passes on every
+    // program measured; this allows a few more before giving up on
+    // convergence.
+    std::unordered_map<int, int> staticCloseTargets;
+    FunctionCaptureInfo info;
+    constexpr int kMaxIterations = 6;
+    bool converged = false;
+    for (int iteration = 0; iteration < kMaxIterations && !converged;
+         iteration++) {
+        std::unordered_map<int, int> resolvedTargets;
+        bool isLastIteration = iteration == kMaxIterations - 1;
+        try {
+            info = runOnePass(node, cfg, staticCloseTargets, resolvedTargets);
+        } catch (const std::runtime_error&) {
+            // A close this pass could not yet resolve: keep whatever this
+            // SAME pass resolved before the throw (a superset of the seed
+            // it started from) and try again, unless this was the last
+            // allowed attempt, in which case the failure is real (R19's own
+            // "has no open captured slot" case, unrelated to iteration).
+            if (isLastIteration) {
+                throw;
+            }
+            staticCloseTargets = std::move(resolvedTargets);
+            continue;
+        }
+        converged = resolvedTargets == staticCloseTargets;
+        staticCloseTargets = std::move(resolvedTargets);
+    }
+    if (!converged) {
+        throw std::runtime_error(
+            "capture_analysis: close-target resolution did not reach a "
+            "fixed point for function id=" +
+            node.id);
     }
 
     markPerIterationRanges(node, info);
