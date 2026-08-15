@@ -173,14 +173,14 @@ TEST(FormatDoubleBitsLiteral, IsABareDecimalIntegerNeverADecimalOrExponent) {
 
 TEST(EmitScript, AbortsOnUnsupportedOpcode) {
     MemoryManager mm;
-    // A class declaration compiles to CLASS — node N8's job, not N6's.
-    DecodedFunction fn = decodeScript("class Foo {}", mm);
+    // An empty map literal compiles to BUILD_MAP — node N9's job, not N8's.
+    DecodedFunction fn = decodeScript("var m = {};", mm);
     FunctionStackAnalysis analysis = analyzeStack(fn);
     try {
         jvm::emitScript(fn, analysis, "LoxMain");
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& e) {
-        EXPECT_EQ(std::string(e.what()), "not implemented in N6: CLASS");
+        EXPECT_EQ(std::string(e.what()), "not implemented in N6: BUILD_MAP");
     }
 }
 

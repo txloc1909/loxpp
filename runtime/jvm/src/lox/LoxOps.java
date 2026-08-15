@@ -422,6 +422,19 @@ public final class LoxOps {
         return (LoxClass) superclassVal;
     }
 
+    /**
+     * The INHERIT opcode's own codegen entry point (node N8): mutates
+     * subclassVal in place through {@link LoxClass#inheritFrom} — see that
+     * method's own note for why a reconstructed object cannot stand in for
+     * it. Reuses {@link #inherit} for the exact same validation and error
+     * text as the guard above. Parameter order (subclass, then superclass)
+     * matches the codegen call site's own push order — see emitInherit.
+     */
+    public static void inheritInto(Object subclassVal, Object superclassVal) {
+        LoxClass superclass = inherit(superclassVal);
+        ((LoxClass) subclassVal).inheritFrom(superclass);
+    }
+
     /** The GET_TAG opcode's guard — same ClassCastException problem as {@link #inherit}. */
     public static double getTag(Object v) {
         if (!(v instanceof LoxEnum)) {
