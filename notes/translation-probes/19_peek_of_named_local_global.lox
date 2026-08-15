@@ -1,0 +1,6 @@
+var g = 0;
+{
+  var b = g = 9;
+  print b;
+  print g;
+}

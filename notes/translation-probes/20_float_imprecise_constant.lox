@@ -1,0 +1,7 @@
+// 16777217 is the smallest positive integer a 32-bit float cannot hold
+// exactly (2^24 + 1 rounds to 2^24). jasmin 2.4 parses a decimal `ldc2_w`
+// operand at float precision before it widens to double (PR #107 R6), so
+// this subtraction is the smallest case that tells the two encodings apart:
+// native and a correct JVM backend both print 1; a float-rounded constant
+// prints 0.
+print 16777217 - 16777216;

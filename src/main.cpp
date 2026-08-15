@@ -7,6 +7,17 @@
 #include <sstream>
 #include <string>
 
+#ifdef LOXPP_JVM_BACKEND
+#include "backend/abstract_stack.h"
+#include "backend/chunk_decoder.h"
+#include "backend/jvm_emitter.h"
+#include "compiler.h"
+#include "memory_manager.h"
+
+#include <filesystem>
+#include <system_error>
+#endif
+
 #ifdef LOXPP_USE_READLINE
 #include <readline/readline.h>
 #include <readline/history.h>
@@ -110,7 +121,80 @@ static void runFile(VM& vm, const std::string& path) {
     }
 }
 
+#ifdef LOXPP_JVM_BACKEND
+// Compiles `path` and writes the generated class as <outDir>/LoxMain.j. Does
+// not assemble or run it — tools/loxpp_jvm.sh chains jasmin and java on top.
+// Exit codes mirror runFile's: 65 for a compile error, 70 for an opcode this
+// node does not lower (see jvm_emitter.h), 74 for a file-system failure.
+static int runJvmTarget(const std::string& outDir, const std::string& path) {
+    std::string source = readFile(path);
+
+    MemoryManager mm;
+    ObjFunction* script = compile(source, &mm);
+    if (script == nullptr) {
+        return 65;
+    }
+
+    std::string jasminSource;
+    try {
+        DecodedFunction tree = decodeFunctionTree(script);
+        FunctionStackAnalysis analysis = analyzeStack(tree);
+        jasminSource = jvm::emitScript(tree, analysis, "LoxMain");
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "loxpp --target jvm: %s\n", e.what());
+        return 70;
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(outDir, ec);
+    if (ec) {
+        std::fprintf(stderr,
+                     "loxpp --target jvm: cannot create directory %s: %s\n",
+                     outDir.c_str(), ec.message().c_str());
+        return 74;
+    }
+
+    std::string outPath = outDir + "/LoxMain.j";
+    std::ofstream out(outPath, std::ios::binary);
+    if (!out) {
+        std::fprintf(stderr, "loxpp --target jvm: cannot write %s\n",
+                     outPath.c_str());
+        return 74;
+    }
+    out << jasminSource;
+    return 0;
+}
+#endif
+
 int main(int argc, const char* argv[]) {
+#ifdef LOXPP_JVM_BACKEND
+    // loxpp --target jvm --out-dir <dir> program.lox — compiles only, never
+    // runs the program. Only intercepted when the first argument is exactly
+    // "--target", so plain `loxpp [path]` keeps its existing behaviour.
+    if (argc >= 2 && std::string(argv[1]) == "--target") {
+        std::string target;
+        std::string outDir;
+        std::string scriptPath;
+        for (int i = 1; i < argc; i++) {
+            std::string arg = argv[i];
+            if (arg == "--target" && i + 1 < argc) {
+                target = argv[++i];
+            } else if (arg == "--out-dir" && i + 1 < argc) {
+                outDir = argv[++i];
+            } else {
+                scriptPath = arg;
+            }
+        }
+        if (target != "jvm" || outDir.empty() || scriptPath.empty()) {
+            std::fprintf(
+                stderr,
+                "Usage: loxpp --target jvm --out-dir <dir> program.lox\n");
+            return 64;
+        }
+        return runJvmTarget(outDir, scriptPath);
+    }
+#endif
+
     VM vm;
 
     if (argc == 1) {

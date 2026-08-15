@@ -47,6 +47,16 @@ add_executable(loxpp
     src/stdlib/math_module.cpp
 )
 
+# The JVM code generator (backend node N4 onward). Default ON so CI builds
+# and checks it; OFF drops --target jvm from the CLI for a build that wants
+# the native VM only.
+option(LOXPP_JVM_BACKEND
+    "Build the JVM backend code generator (--target jvm)" ON)
+if(LOXPP_JVM_BACKEND)
+    target_sources(loxpp PRIVATE src/backend/jvm_emitter.cpp)
+    target_compile_definitions(loxpp PRIVATE LOXPP_JVM_BACKEND)
+endif()
+
 # Debug output flags: default ON for Debug builds, OFF otherwise.
 string(TOUPPER "${CMAKE_BUILD_TYPE}" _build_type_upper)
 if(_build_type_upper STREQUAL "DEBUG")
