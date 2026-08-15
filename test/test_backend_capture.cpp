@@ -144,21 +144,26 @@ void checkCloseUpvaluesMatchDecodedChunk(const DecodedFunction& node,
     }
 }
 
-// R4 / R9 / R15: the other direction of the cross-check above. A
+// R4 / R9 / R15 / referee amendment 1 item 4: the other direction of the
+// cross-check above, strengthened to count occurrences, not just presence. A
 // CLOSE_UPVALUE the chunk actually contains, but that matches no reported
 // range's close offsets and is not listed as unreachable dead code, is
-// exactly the R9 shape: the close was seen and misattributed elsewhere,
-// with no other check here noticing. This needs no CFG and no stack
-// simulation of its own -- only the analysis's own reported closes,
-// compared against the chunk it read.
+// exactly the R9 shape: the close was seen and misattributed elsewhere, with
+// no other check here noticing. A CLOSE_UPVALUE reported more than once
+// (double-attributed to two ranges, or both a range and "unreachable") is
+// just as wrong, so every real close must appear EXACTLY once across the
+// whole report. This needs no CFG and no stack simulation of its own -- only
+// the analysis's own reported closes, compared against the chunk it read.
 void checkNoOrphanCloseUpvalues(const DecodedFunction& node,
                                 const FunctionCaptureInfo& info) {
-    std::set<int> accountedFor(info.unreachableCloseOffsets.begin(),
-                               info.unreachableCloseOffsets.end());
+    std::map<int, int> occurrences;
+    for (int offset : info.unreachableCloseOffsets) {
+        occurrences[offset]++;
+    }
     for (const auto& [slot, ranges] : info.liveRangesBySlot) {
         for (const CaptureLiveRange& range : ranges) {
             for (int offset : range.allCloseOffsets) {
-                accountedFor.insert(offset);
+                occurrences[offset]++;
             }
         }
     }
@@ -166,10 +171,12 @@ void checkNoOrphanCloseUpvalues(const DecodedFunction& node,
         if (ins.op != Op::CLOSE_UPVALUE) {
             continue;
         }
-        EXPECT_TRUE(accountedFor.contains(ins.offset))
+        int count =
+            occurrences.contains(ins.offset) ? occurrences.at(ins.offset) : 0;
+        EXPECT_EQ(count, 1)
             << "id=" << info.id << ": CLOSE_UPVALUE at offset " << ins.offset
-            << " is the end of no reported range, and is not reported "
-            << "unreachable either";
+            << " must be the end of EXACTLY one reported range (or reported "
+            << "unreachable exactly once), got " << count;
     }
 }
 
