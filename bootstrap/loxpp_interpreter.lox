@@ -1039,6 +1039,7 @@ class Resolver {
                 this.loopDepth = this.loopDepth + 1;
                 this.resolveStmt(body);
                 this.loopDepth = this.loopDepth - 1;
+                nil
             }
             case BreakStmt{line}    => this.resolveBreak(line)
             case ContinueStmt{line} => this.resolveContinue(line)
@@ -1052,6 +1053,7 @@ class Resolver {
                 this.resolveStmt(body);
                 this.loopDepth = this.loopDepth - 1;
                 this.endScope();
+                nil
             }
             case EnumDecl{name, ctor_names, ctor_fields_list} => this.resolveEnumDecl(name, ctor_names)
             case SeqDestructure{names, line, initializer}     => this.resolveDestructure(names, line, initializer)
@@ -1958,8 +1960,8 @@ class Interpreter {
             case ReturnStmt{line, value}                         => this.execReturn(line, value, env)
             case VarDecl{name, line, initializer}                => this.execVar(name, initializer, env)
             case WhileStmt{condition, body}                      => this.execWhile(condition, body, env)
-            case BreakStmt{line}                                 => { this.breakFlag = true; }
-            case ContinueStmt{line}                              => { this.continueFlag = true; }
+            case BreakStmt{line}                                 => { this.breakFlag = true; nil }
+            case ContinueStmt{line}                              => { this.continueFlag = true; nil }
             case ForStmt{init, condition, increment, body}       => this.execFor(init, condition, increment, body, env)
             case ForInStmt{varName, varLine, iterable, body}     => this.execForIn(varName, varLine, iterable, body, env)
             case EnumDecl{name, ctor_names, ctor_fields_list}    => this.execEnumDecl(name, ctor_names, ctor_fields_list, env)
