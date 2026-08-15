@@ -135,11 +135,10 @@ static int runJvmTarget(const std::string& outDir, const std::string& path) {
         return 65;
     }
 
-    DecodedFunction tree = decodeFunctionTree(script);
-    FunctionStackAnalysis analysis = analyzeStack(tree);
-
     std::string jasminSource;
     try {
+        DecodedFunction tree = decodeFunctionTree(script);
+        FunctionStackAnalysis analysis = analyzeStack(tree);
         jasminSource = jvm::emitScript(tree, analysis, "LoxMain");
     } catch (const std::exception& e) {
         std::fprintf(stderr, "loxpp --target jvm: %s\n", e.what());
