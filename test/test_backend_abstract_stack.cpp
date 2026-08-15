@@ -30,6 +30,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -84,6 +85,22 @@ PopKind popKindAtOffset(const FunctionStackAnalysis& analysis, int offset) {
     }
     ADD_FAILURE() << "no POP recorded at offset " << offset;
     return PopKind::TEMP;
+}
+
+// Recursively finds a nested function by its display name (a class method or
+// a nested `fun`), mirroring DecodedFunction's tree shape. Returns nullptr if
+// no such function exists anywhere under `root`.
+const DecodedFunction* findFunctionByName(const DecodedFunction& root,
+                                          const std::string& name) {
+    for (const DecodedFunction& child : root.nested) {
+        if (child.displayName == name) {
+            return &child;
+        }
+        if (const DecodedFunction* found = findFunctionByName(child, name)) {
+            return found;
+        }
+    }
+    return nullptr;
 }
 
 const StackState& stateBeforeOffset(const DecodedFunction& fn,
@@ -443,8 +460,9 @@ TEST(AbstractStackTest, UnreadSiblingLocalGetsItsOwnDeclaringPushSite) {
 // (checkpoint 3) proves every slot below it is local. A wrong implementation
 // leaves `never`'s cell an unrecognized temporary forever, inflating
 // maxOperandDepth and misclassifying any later POP that would have reclaimed
-// it — the same silent failure as R8, in a shape backfillUnreadSiblingSites
-// alone cannot reach (there is no sibling site to backfill *from*).
+// it — the same silent failure as R8, in a shape the persistence test at
+// every POP (findPersistentPopLocals) alone cannot reach either: `never` has
+// no POP anywhere in the chunk to run that test at.
 TEST(AbstractStackTest, LocalWithNoExplicitReclaimIsStillFoundViaReturn) {
     MemoryManager mm;
     DecodedFunction script = decodeSource(R"(
@@ -499,9 +517,10 @@ f();
 // between them. A byte-adjacency-only "maximal run" reads this as size 2 and
 // concludes 2 locals were live, misidentifying the ADD's result as a second
 // declared local. This analysis does not use adjacency to size a reclaim
-// run at all — see backfillFromFrameTeardown's and
-// backfillUnreadSiblingSites's own comments — so it must still tell these
-// two, byte-identical POPs apart correctly.
+// run at all — the persistence test at every POP (findPersistentPopLocals)
+// decides each POP on its own cover-witness evidence, not on its
+// neighbours — so it must still tell these two, byte-identical POPs apart
+// correctly.
 TEST(AbstractStackTest, AdjacentTempPopAndReclaimPopAreNotConflated) {
     MemoryManager mm;
     DecodedFunction script = decodeSource(R"(
@@ -536,6 +555,293 @@ TEST(AbstractStackTest, AdjacentTempPopAndReclaimPopAreNotConflated) {
         EXPECT_EQ(analysis.before[i].operandDepth(), expectedDepths[i].first);
         EXPECT_EQ(analysis.after[i].operandDepth(), expectedDepths[i].second);
     }
+}
+
+// R8 referee ruling, failure case 1 (N2.md section 5): `{ var a = 1; print
+// 2; }` is the sharpest counter-example to the old reference-driven search —
+// `a` is unread, and the only other slot in scope (the temporary `print 2`
+// pushes) never reaches a POP, so nothing near it looks like a sibling to
+// backfill from. The referee's prototype gave site (0,1), POP LOCAL_RECLAIM,
+// maxOperandDepth 1; the old code at 0a9ec4f gave none of the three.
+TEST(AbstractStackTest, ReferereFailureCase1AssignThenUnrelatedPrint) {
+    MemoryManager mm;
+    DecodedFunction script = decodeSource("{ var a = 1; print 2; }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(script);
+
+    std::vector<std::pair<int, int>> sites;
+    for (const InvisibleVarSite& site : analysis.invisibleVars) {
+        sites.emplace_back(site.offset, site.slot);
+    }
+    std::sort(sites.begin(), sites.end());
+    EXPECT_EQ(sites, (std::vector<std::pair<int, int>>{{0, 1}}))
+        << "`a`'s declaring push must be recognized with no sibling to "
+        << "backfill from";
+
+    bool foundReclaim = false;
+    for (const PopClassification& p : analysis.pops) {
+        EXPECT_EQ(p.kind, PopKind::LOCAL_RECLAIM)
+            << "the only POP in this chunk reclaims `a` at block exit; "
+            << "`print 2`'s operand is consumed by PRINT, not POP";
+        foundReclaim = true;
+    }
+    EXPECT_TRUE(foundReclaim)
+        << "expected exactly one POP (the block's own " << "scope exit)";
+    EXPECT_EQ(analysis.maxOperandDepth, 1);
+}
+
+// R8 referee ruling: the or-pattern `@`-binding case from the ruling's own
+// evidence (N2.md section 5, "unwrap_or"). `v` is never read in either arm —
+// only `x` is — so `v`'s two sites (one per or-pattern alternative, P2's
+// merge) depend entirely on the persistence test finding a cover witness on
+// *each* alternative's own path.
+TEST(AbstractStackTest, OrPatternAtBindingUnreadInBothArmsStillGetsBothSites) {
+    MemoryManager mm;
+    DecodedFunction script = decodeSource(
+        readFile(projectRoot() / "examples" / "at_binding_demo.lox"), mm);
+    const DecodedFunction* unwrapOr = findFunctionByName(script, "unwrap_or");
+    ASSERT_NE(unwrapOr, nullptr)
+        << "unwrap_or not found among nested functions";
+    FunctionStackAnalysis analysis = analyzeStack(*unwrapOr);
+
+    std::vector<std::pair<int, int>> vSites;
+    for (const InvisibleVarSite& site : analysis.invisibleVars) {
+        if (site.slot == 6) {
+            vSites.emplace_back(site.offset, site.slot);
+        }
+    }
+    std::sort(vSites.begin(), vSites.end());
+    EXPECT_EQ(vSites.size(), 2U)
+        << "`v` is bound on both or-pattern alternatives; each needs its own "
+        << "declaring-push site, and both must survive the persistence test "
+        << "even though `v` itself is never read back";
+}
+
+// R8 referee ruling: a multi-binding match arm where every binding is
+// unread, using bootstrap/loxpp_interpreter.lox's `resolveExpr` — the
+// referee's own third failure case (N2.md section 5). Structural, not
+// hand-counted offsets: the tail theorem (N2.md section 4) guarantees a
+// maximal POP/CLOSE_UPVALUE run reads all-TEMP-then-all-LOCAL_RECLAIM, so a
+// run with two or more leading TEMP labels is exactly the corpus invariant
+// the reviewer's detector checked (32 -> 0 over the real corpus). This
+// asserts that invariant holds for `resolveExpr` specifically, the function
+// the referee measured it on.
+TEST(AbstractStackTest, ResolveExprHasNoRunWithTwoOrMoreLeadingTempLabels) {
+    MemoryManager mm;
+    DecodedFunction script = decodeSource(
+        readFile(projectRoot() / "bootstrap" / "loxpp_interpreter.lox"), mm);
+    const DecodedFunction* resolveExpr =
+        findFunctionByName(script, "resolveExpr");
+    ASSERT_NE(resolveExpr, nullptr)
+        << "resolveExpr not found among nested functions";
+    FunctionStackAnalysis analysis = analyzeStack(*resolveExpr);
+
+    std::unordered_map<int, PopKind> kindByOffset;
+    for (const PopClassification& p : analysis.pops) {
+        kindByOffset[p.offset] = p.kind;
+    }
+
+    // The tail theorem needs adjacency by *instruction*, not by position in
+    // the filtered `analysis.pops` list: two POPs that are the closest two
+    // by offset are only the same scope-exit run if nothing reached lies
+    // between them but POP/CLOSE_UPVALUE. resolveExpr has many independent,
+    // single-POP expression-statement arms (each its own trivial run of
+    // size 1) sitting close together in the match's arm list; treating
+    // "next entry in analysis.pops" as "same run" wrongly merges unrelated
+    // runs and reports a leading-TEMP streak that was never one run at all.
+    // Walk `instructions` itself instead: a run is a maximal span of
+    // reached POP/CLOSE_UPVALUE instructions, and it ends the moment any
+    // other reached instruction (or the end of the function) appears.
+    // CLOSE_UPVALUE is always a reclaim (vm.cpp), never a TEMP.
+    size_t tempRun = 0;
+    bool sawReclaimThisRun = false;
+    bool inRun = false;
+    auto endRun = [&](int reportOffset) {
+        if (inRun) {
+            EXPECT_LT(tempRun, 2U)
+                << "the run ending at/before offset " << reportOffset << " has "
+                << tempRun << " leading TEMP labels — at least "
+                << "one local reclaim was misclassified as a temporary "
+                << "(R8's exact symptom)";
+        }
+        tempRun = 0;
+        sawReclaimThisRun = false;
+        inRun = false;
+    };
+    for (size_t idx = 0; idx < resolveExpr->instructions.size(); idx++) {
+        if (!static_cast<bool>(analysis.reached[idx])) {
+            continue;
+        }
+        const DecodedInstruction& ins = resolveExpr->instructions[idx];
+        if (ins.op != Op::POP && ins.op != Op::CLOSE_UPVALUE) {
+            endRun(ins.offset);
+            continue;
+        }
+        inRun = true;
+        bool isTemp =
+            ins.op == Op::POP && kindByOffset.at(ins.offset) == PopKind::TEMP;
+        if (isTemp) {
+            EXPECT_FALSE(sawReclaimThisRun)
+                << "TEMP at offset " << ins.offset << " follows a "
+                << "LOCAL_RECLAIM within the same run — the tail theorem "
+                << "(N2.md section 4) requires TEMP labels to come first";
+            tempRun++;
+        } else {
+            sawReclaimThisRun = true;
+        }
+    }
+    endRun(-1);
+}
+
+// R8 referee ruling exception: DEFINE_METHOD's own peek disqualifies a cell
+// from ever being recognized as a local via a cover witness, even when a
+// CLOSURE pushed on top of it looks exactly like one. `classDeclaration`
+// (compiler.cpp) pushes the class *twice* here: once as the real local `C`
+// (recognized correctly — a block-scoped class is declared like a nested
+// `fun`), and again via `namedVariable(className, false)` right after, as a
+// throwaway copy that only exists so DEFINE_METHOD can peek(1) at it. That
+// throwaway copy's own scope-exit POP is the one the exception must protect:
+// without it, the CLOSURE pushed before the *second* method's DEFINE_METHOD
+// would wrongly cover it. `C` itself is a separate slot and must still be
+// recognized, so this asserts both pops by their distinct reasons rather
+// than treating "the only POP" as a single case.
+TEST(AbstractStackTest, ClassValueStaysTempAcrossMultipleMethodDefinitions) {
+    MemoryManager mm;
+    DecodedFunction script = decodeSource(R"(
+{
+  class C {
+    m1() { return 1; }
+    m2() { return 2; }
+  }
+}
+)",
+                                          mm);
+    FunctionStackAnalysis analysis = analyzeStack(script);
+
+    ASSERT_EQ(analysis.invisibleVars.size(), 1U)
+        << "exactly one site: `C` itself, recognized at its own CLASS "
+        << "instruction; the DEFINE_METHOD-peeked throwaway copy must not "
+        << "get one";
+    int classSlot = analysis.invisibleVars[0].slot;
+
+    ASSERT_EQ(analysis.pops.size(), 2U)
+        << "one POP for the throwaway peek copy, one for the block's own "
+        << "scope exit over `C`";
+    EXPECT_EQ(analysis.pops[0].kind, PopKind::TEMP)
+        << "the first POP reclaims the throwaway copy `namedVariable` pushed "
+        << "for DEFINE_METHOD's peek — it must stay TEMP despite the "
+        << "CLOSURE pushed on top of it before the second method";
+    EXPECT_EQ(analysis.pops[1].kind, PopKind::LOCAL_RECLAIM)
+        << "the second POP is the block's real scope exit over `C` itself";
+
+    const StackState& beforeSecondPop =
+        stateBeforeOffset(script, analysis, analysis.pops[1].offset);
+    EXPECT_EQ(beforeSecondPop.localCount - 1, classSlot)
+        << "`C` must be the top local right before its own reclaim";
+}
+
+// R12 referee ruling (N2.md section 7): the depth term
+// `after.operandDepth() + declaredSlotsAt[i].size()`. Checkpoint 3
+// guarantees operand depth 1 immediately before every *reached* RETURN, so
+// any function with a reachable RETURN already masks the undercount this
+// term fixes — the referee's own measurement found the term changes no
+// reported number over the real corpus. To exercise it for real, this
+// function's only statement after its two invisible vars is `for (;;) {}`:
+// an omitted condition emits no exit test at all (Compiler::forStatement),
+// so the loop has no successor and the compiler's own trailing NIL;RETURN
+// is unreachable. `a` and `fun g(){}` are both declared, and both
+// reclaimed by ordinary POPs at the block's own (reachable) scope exit,
+// so — unlike a single lone declaration — neither is the undecidable
+// TEMP corner: `g`'s CLOSURE is itself an unconditional declaring push
+// (recognized with no cover-witness test needed at all), which doubles as
+// `a`'s cover witness, so both sites exist and nothing here reaches depth 1
+// except the term under test. The test recomputes both the pre-fix
+// ("naive") and the ruled ("corrected") formula from public state alone, so
+// it does not depend on hand-picked offsets: it would fail if the
+// `+ declaredSlotsAt[i].size()` term were ever reverted.
+TEST(AbstractStackTest, MaxOperandDepthCountsAnInvisibleVarsOwnDeclaringPush) {
+    MemoryManager mm;
+    DecodedFunction script = decodeSource(R"(
+fun f() {
+  { var a = 1; fun g() {} }
+  for (;;) {}
+}
+f();
+)",
+                                          mm);
+    const DecodedFunction* f = findFunctionByName(script, "f");
+    ASSERT_NE(f, nullptr) << "f not found among nested functions";
+    FunctionStackAnalysis analysis = analyzeStack(*f);
+
+    std::unordered_map<int, int> newSlotsAtOffset;
+    for (const InvisibleVarSite& site : analysis.invisibleVars) {
+        newSlotsAtOffset[site.offset]++;
+    }
+
+    int naiveMax = 0;
+    int correctedMax = 0;
+    for (size_t i = 0; i < f->instructions.size(); i++) {
+        if (!static_cast<bool>(analysis.reached[i])) {
+            continue;
+        }
+        int offset = f->instructions[i].offset;
+        int newSlots = newSlotsAtOffset.count(offset) != 0
+                           ? newSlotsAtOffset.at(offset)
+                           : 0;
+        int naive = std::max(analysis.before[i].operandDepth(),
+                             analysis.after[i].operandDepth());
+        int corrected = std::max(analysis.before[i].operandDepth(),
+                                 analysis.after[i].operandDepth() + newSlots);
+        naiveMax = std::max(naiveMax, naive);
+        correctedMax = std::max(correctedMax, corrected);
+    }
+
+    ASSERT_GT(correctedMax, naiveMax)
+        << "this program was chosen so the compiler's trailing NIL;RETURN "
+        << "is unreachable (an omitted for-condition has no exit edge) and "
+        << "cannot mask the undercount the R12 term fixes; if this fails, "
+        << "the chosen program no longer isolates the term";
+    EXPECT_EQ(analysis.maxOperandDepth, correctedMax)
+        << "analyzeStack must report the corrected bound, not the naive one";
+}
+
+// Found while building the R12 test above, not something the referee ruling
+// anticipated: a plain `var` at a function's own top-level scope, declared
+// *before* a nested `fun`, with the function itself never reaching RETURN
+// (an infinite `for (;;) {}` with no exit edge). The persistence test alone
+// cannot find such a `var` — there is no POP (it is not inside a block) and
+// no reachable RETURN to backfill from (backfillFromFrameTeardown never
+// runs). Only the downward chase from the nested `fun`'s own (unconditional)
+// CLOSURE site — sound because clox's scoping is strictly LIFO, so a
+// confirmed local proves every lower slot is local too — finds it. Without
+// that chase, `analyzeStack` throws `validateNoInvisibleVarGaps`'s gap error
+// instead of silently miscompiling; still a real regression, since the
+// pre-referee-ruling implementation handled this shape correctly.
+TEST(AbstractStackTest,
+     UnreadLocalBelowANestedFunDeclIsFoundEvenWhenReturnIsUnreachable) {
+    MemoryManager mm;
+    DecodedFunction script = decodeSource(R"(
+fun f() {
+  var a = 1;
+  fun g() {}
+  for (;;) {}
+}
+f();
+)",
+                                          mm);
+    const DecodedFunction* f = findFunctionByName(script, "f");
+    ASSERT_NE(f, nullptr) << "f not found among nested functions";
+    FunctionStackAnalysis analysis; // NOLINT(misc-const-correctness)
+    ASSERT_NO_THROW(analysis = analyzeStack(*f));
+
+    std::vector<std::pair<int, int>> sites;
+    for (const InvisibleVarSite& site : analysis.invisibleVars) {
+        sites.emplace_back(site.offset, site.slot);
+    }
+    std::sort(sites.begin(), sites.end());
+    EXPECT_EQ(sites.size(), 2U)
+        << "both `a` (slot 1) and `g` (slot 2) must be found; `a` has "
+        << "neither a POP nor a reachable RETURN, only the downward chase "
+        << "from `g`'s own declaring push";
 }
 
 TEST(AbstractStackTest, PeeksInsteadOfPopsMatchesTheDocumentedFamily) {
