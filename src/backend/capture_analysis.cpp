@@ -3,38 +3,206 @@
 #include "exec_objects.h"
 
 #include <algorithm>
-#include <cstdint>
 #include <deque>
 #include <map>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <utility>
 
 namespace {
 
+// ---------------------------------------------------------------------------
+// Pass 0 — frame stack heights (referee amendment 3).
+//
+// The net effect one instruction has on the frame's stack height. Mirrors
+// vm.cpp exactly, opcode by opcode — this is the same fact
+// src/backend/abstract_stack.cpp (N2) computes as pushCount - popCount, but
+// this pass tracks only the scalar net delta, not the locals/temporaries
+// split N2 needs, so it is reimplemented here rather than shared: N3 and N2
+// are independent analyses (notes/backend-implementation-dag.md), and the DAG
+// note records that N2 may fold into this walk later, not the other way
+// round.
+// ---------------------------------------------------------------------------
+
+int frameHeightEffect(const DecodedInstruction& ins) {
+    switch (ins.op) {
+    // Pure pushes.
+    case Op::CONSTANT:
+    case Op::NIL:
+    case Op::TRUE:
+    case Op::FALSE:
+    case Op::GET_LOCAL:
+    case Op::GET_GLOBAL:
+    case Op::GET_UPVALUE:
+    case Op::CLASS:
+    case Op::CLOSURE:
+        return 1;
+
+    // No net effect: a pop-then-push-in-place (NEGATE, NOT, GET_PROPERTY,
+    // GET_ITER, ITER_HAS_NEXT, ITER_NEXT, GET_TAG, INSTANCEOF, IS_SEQ), the
+    // peek family that leaves its operand where it found it (SET_LOCAL,
+    // SET_GLOBAL, SET_UPVALUE, JUMP_IF_FALSE — P2), or a pure control
+    // transfer with no stack effect of its own (JUMP, LOOP).
+    case Op::NEGATE:
+    case Op::NOT:
+    case Op::SET_LOCAL:
+    case Op::SET_GLOBAL:
+    case Op::SET_UPVALUE:
+    case Op::JUMP:
+    case Op::JUMP_IF_FALSE:
+    case Op::LOOP:
+    case Op::GET_PROPERTY:
+    case Op::GET_ITER:
+    case Op::ITER_HAS_NEXT:
+    case Op::ITER_NEXT:
+    case Op::GET_TAG:
+    case Op::INSTANCEOF:
+    case Op::IS_SEQ:
+        return 0;
+
+    // Pop 2 (or 1), push 1: net -1. JUMP_TABLE pops only the tag integer,
+    // whichever edge is taken (an arm, or the out-of-range fall-through).
+    case Op::EQUAL:
+    case Op::GREATER:
+    case Op::LESS:
+    case Op::ADD:
+    case Op::SUBTRACT:
+    case Op::MULTIPLY:
+    case Op::DIVIDE:
+    case Op::MODULO:
+    case Op::IN:
+    case Op::PRINT:
+    case Op::POP:
+    case Op::DEFINE_GLOBAL:
+    case Op::CLOSE_UPVALUE:
+    case Op::SET_PROPERTY:
+    case Op::DEFINE_METHOD:
+    case Op::INHERIT:
+    case Op::GET_INDEX:
+    case Op::GET_SUPER:
+    case Op::JUMP_TABLE:
+        return -1;
+
+    // Pop 3, push 1: net -2.
+    case Op::SET_INDEX:
+    case Op::SLICE:
+        return -2;
+
+    // Pop argCount (+1 for SUPER_INVOKE's superclass), push 1 result.
+    case Op::CALL:
+    case Op::INVOKE:
+        return -ins.byteOperand;
+    case Op::SUPER_INVOKE:
+        return -(ins.byteOperand + 1);
+
+    // Pop N (BUILD_LIST) or 2N (BUILD_MAP) elements, push 1 aggregate.
+    case Op::BUILD_LIST:
+        return 1 - ins.byteOperand;
+    case Op::BUILD_MAP:
+        return 1 - (2 * ins.byteOperand);
+
+    // Terminal: no successor edge ever reads a height past these, so their
+    // own net effect is never propagated anywhere.
+    case Op::RETURN:
+    case Op::MATCH_ERROR:
+        return 0;
+    }
+    throw std::runtime_error(
+        "capture_analysis: no frame-height effect for opcode " +
+        std::to_string(static_cast<int>(ins.op)) + " at offset " +
+        std::to_string(ins.offset));
+}
+
+// Computes the height immediately before every reachable instruction of one
+// already-built CFG, given the chunk's entry height (1 + arity). One forward
+// worklist walk: a block's entry height is fixed the first time some edge
+// reaches it, and every later edge into that same block must agree, or the
+// compiler/decoder have drifted from each other (see capture_analysis.h).
+// LOOP is always a back edge (P3a), so a loop header's height is always
+// fixed by a FORWARD edge before its own back edge is ever walked — no
+// widening or repeated re-visits are needed, unlike N2's abstract stack,
+// which also tracks a weaker (locals-vs-temporaries) invariant this pass
+// does not need.
+std::unordered_map<int, int>
+computeFrameHeightsForCfg(const Cfg& cfg, int entryHeight,
+                          const std::string& functionId) {
+    std::unordered_map<int, int> heightBefore;
+    size_t n = cfg.blocks.size();
+    std::vector<int> blockEntryHeight(n, -1);
+    std::vector<uint8_t> known(n, 0);
+    std::deque<int> worklist;
+
+    if (n > 0) {
+        blockEntryHeight[0] = entryHeight;
+        known[0] = 1;
+        worklist.push_back(0);
+    }
+
+    while (!worklist.empty()) {
+        int b = worklist.front();
+        worklist.pop_front();
+
+        int h = blockEntryHeight[static_cast<size_t>(b)];
+        for (const DecodedInstruction& ins :
+             cfg.blocks[static_cast<size_t>(b)].instructions) {
+            heightBefore[ins.offset] = h;
+            h += frameHeightEffect(ins);
+        }
+
+        for (const CfgEdge& edge :
+             cfg.blocks[static_cast<size_t>(b)].successors) {
+            int t = edge.targetBlock;
+            if (known[static_cast<size_t>(t)] == 0) {
+                known[static_cast<size_t>(t)] = 1;
+                blockEntryHeight[static_cast<size_t>(t)] = h;
+                worklist.push_back(t);
+            } else if (blockEntryHeight[static_cast<size_t>(t)] != h) {
+                throw std::runtime_error(
+                    "capture_analysis: frame height mismatch entering block " +
+                    std::to_string(t) + " in function id=" + functionId + " (" +
+                    std::to_string(blockEntryHeight[static_cast<size_t>(t)]) +
+                    " vs " + std::to_string(h) + ")");
+            }
+        }
+    }
+
+    return heightBefore;
+}
+
+// ---------------------------------------------------------------------------
+// Pass 1 — which instance of a captured slot is open at each point.
+//
+// Unchanged from referee amendment 2: a slot is open at a block's entry
+// exactly when some predecessor that reaches it still has it open
+// (mirroring the VM's own open-upvalue list), and a merge where two
+// predecessors bring the same slot open under different origins unites them
+// into one instance (mirroring captureUpvalue's reuse of an already-open
+// upvalue at one stack location). What amendment 3 removes is the static
+// overlay this fixpoint used to need to resolve a CLOSE_UPVALUE's target:
+// with the height rule, that target is now a compile-time constant
+// (closeSlotFor below), so a close is either found open on this path (erase
+// it) or not (a genuine no-op here, left for Pass 2's program-order
+// attribution) — no second layer, no iteration to a fixed point.
+// ---------------------------------------------------------------------------
+
 // Slot -> the offset of the CLOSURE that opened the slot's currently-live
 // incarnation, at one point in the CFG. Absent means closed at that point.
-// A std::map so the highest-numbered open slot is reachable from rbegin(),
-// which is what resolving a CLOSE_UPVALUE needs (see advanceCommit).
 using OpenOrigins = std::map<int, int>;
 
 // (slot, opening CLOSURE offset) -> that range's index in
 // FunctionCaptureInfo::liveRangesBySlot[slot]. Keyed by the PAIR, not the
 // offset alone (R16): one CLOSURE can capture more than one parent local in
 // a single instruction (one `isLocal=1` upvalue per captured slot), so two
-// DIFFERENT slots can share the same origin offset. Keying by offset alone
-// let the second slot's insertion silently overwrite the first's index,
-// naming the wrong range for one slot and, once the vector it pointed at
-// held fewer elements than the stale index, reading out of bounds.
+// DIFFERENT slots can share the same origin offset.
 using RangeIndex = std::map<std::pair<int, int>, int>;
 
 // Canonicalizes (slot, CLOSURE offset) origins that two mutually exclusive
-// CFG paths prove are one live instance (referee amendment 2, rule 4 — see
-// joinInto). A classic union-find keyed by the pair, so a chain of merges
-// (an if/else nested inside another if/else, all capturing one outer local)
-// still resolves to one root. Slot is part of the key only so two different
-// slots' origins never compare equal by coincidence; every union unites two
-// origins of the SAME slot.
+// CFG paths prove are one live instance (referee amendment 2, rule 4). A
+// classic union-find keyed by the pair, so a chain of merges (an if/else
+// nested inside another if/else, all capturing one outer local) still
+// resolves to one root. Slot is part of the key only so two different
+// slots' origins never compare equal by coincidence.
 class OriginUnionFind {
   public:
     int find(int slot, int origin) {
@@ -74,15 +242,8 @@ class OriginUnionFind {
 // open, and open wins).
 //
 // Referee amendment 2, rule 4: two predecessors CAN both have the slot open
-// with different origins, and that is not drift. An ordinary if/else (or
-// match) where both arms capture the same outer, never-redeclared local
-// opens it with two different CLOSURE offsets, one per arm, and both are
-// live where the arms rejoin. Whichever arm actually ran, `vm.cpp`'s
-// `captureUpvalue` finds the slot's cell already open and reuses it, so the
-// runtime holds ONE cell at the merge — never two. Unite the two origins
-// instead of throwing (amendment 1's decision 1, item 5, is superseded: it
-// called this exact case an error), and adopt the union's canonical origin
-// going forward, so a later lookup under either arm's own offset agrees.
+// with different origins, and that is not drift. Unite the two origins
+// instead of throwing.
 void joinInto(OpenOrigins& acc, const OpenOrigins& incoming,
               OriginUnionFind& aliases) {
     for (const auto& [slot, origin] : incoming) {
@@ -93,44 +254,19 @@ void joinInto(OpenOrigins& acc, const OpenOrigins& incoming,
     }
 }
 
-// Advances `state` across one block's own instructions for the DATAFLOW
-// PROBE only (see runDataflow) — a cheap advance whose sole job is to
-// converge the per-block ENTRY states that seed the commit walk
-// (analyzeOneChunk); it never builds a CaptureLiveRange and is not itself
-// the source of truth for range identity — that happens once in the commit
-// walk, on each block's own fully-converged entry state.
+// Advances `state` across one block's own instructions, for the DATAFLOW
+// FIXPOINT only (see runDataflow) — a cheap advance whose sole job is to
+// converge the per-block ENTRY states that seed the attribution walk
+// (analyzeOneChunk). It never builds a CaptureLiveRange.
 //
-// R19 (referee amendment 1, item 3): an earlier version of this function
-// always popped `state`'s own highest slot at a CLOSE_UPVALUE. That is
-// wrong exactly when this close is a STATIC, overlay-only one (R17's
-// shape) and an unrelated, still-open ENCLOSING capture happens to sit at
-// `state`'s current top: the old rule popped the enclosing capture instead
-// of leaving `state` untouched, corrupting every later block's entry state.
-//
-// `staticCloseTargets` gives the correct target directly — a no-op erase
-// (`state` may not hold it: the static case) instead of a wrong one. It is
-// NOT a flat, whole-chunk simulation of its own (an earlier attempt at that
-// broke on R9's own regression: two SIBLING alternate closes of one
-// captured local, with an unrelated ENCLOSING capture also open, are not
-// safely resolvable by any simulation that treats them as sequential,
-// because the first sibling's own resolution would wrongly appear to
-// "use up" the target before the second sibling is ever reached — see
-// analyzeOneChunk for where this map actually comes from: the COMMIT walk's
-// own target resolution, from the previous iteration of a fixpoint between
-// the two, exactly as the amendment specifies). Only when
-// `staticCloseTargets` has nothing recorded for this exact offset (this
-// pass has not yet iterated far enough to know) does this function fall
-// back to `state`'s own highest slot, matching the pre-R19 rule.
-//
-// Referee amendment 2, section 4 (ruling on R19): "use ONE close rule in
-// every walk... The naive pop exists only to bootstrap the first iteration,
-// before a table exists. Iterate until the table is stable." This is that
-// rule: `staticCloseTargets` IS the resolution table from the previous
-// iteration (empty on the first), and the pop-`state`'s-own-top fallback is
-// only ever the bootstrap the ruling names, never the final word for an
-// offset the table already answers.
-void advanceProbe(const BasicBlock& block, OpenOrigins& state,
-                  const std::unordered_map<int, int>& staticCloseTargets) {
+// CLOSE_UPVALUE's target slot is now a compile-time constant
+// (`heightBefore.at(offset) - 1`, referee amendment 3), so resolving it here
+// needs no history, no fallback, and no later reconciliation: erase that
+// exact slot if `state` has it open, otherwise leave `state` untouched — a
+// dynamic no-op on this path, exactly matching what `vm.cpp`'s
+// `closeUpvalues` does when nothing is open at that stack location.
+void advanceDataflow(const BasicBlock& block, OpenOrigins& state,
+                     const std::unordered_map<int, int>& heightBefore) {
     for (const DecodedInstruction& in : block.instructions) {
         if (in.op == Op::CLOSURE) {
             for (const ClosureUpvalue& up : in.upvalues) {
@@ -142,22 +278,260 @@ void advanceProbe(const BasicBlock& block, OpenOrigins& state,
                 }
             }
         } else if (in.op == Op::CLOSE_UPVALUE) {
-            auto targetIt = staticCloseTargets.find(in.offset);
-            int target = -1;
-            if (targetIt != staticCloseTargets.end()) {
-                target = targetIt->second;
-            } else if (!state.empty()) {
-                target = std::prev(state.end())->first;
-            } else {
-                // Entry states are not yet at their fixed point during the
-                // probe: a block past a LOOP header can be probed before the
-                // back-edge has contributed that header's true entry state,
-                // so a close can transiently appear before this pass has
-                // learned its slot is open. That self-corrects on a later
-                // worklist iteration.
-                continue;
+            int slot = heightBefore.at(in.offset) - 1;
+            state.erase(slot); // a no-op if `state` does not hold `slot`
+        }
+        // POP and everything else: no captured-slot effect.
+    }
+}
+
+// Runs the dataflow to a fixed point: for every block reachable from block
+// 0, the set of captured slots open at its entry, and with which origin
+// CLOSURE offset. `reachable[b]` is set the first time block b is ever
+// merged into — a block this pass never visits is unreachable (for example,
+// scope-exit code after an unconditional `return`).
+//
+// A slot's openness at a block can depend on a LOOP back-edge that this pass
+// has not reached yet on a first forward pass (V3_loopvar), so this is a
+// worklist fixpoint, not a single pass.
+struct DataflowResult {
+    std::vector<OpenOrigins> entryState;
+    // uint8_t, not bool: std::vector<bool>'s proxy reference makes `!v[i]`
+    // ambiguous against this codebase's `operator!(Value)` (Value has an
+    // implicit bool constructor) when the std::variant Value build
+    // (LOXPP_NAN_TAGGING=OFF) is active. Plain bytes sidestep the proxy
+    // entirely.
+    std::vector<uint8_t> reachable;
+};
+
+DataflowResult runDataflow(const Cfg& cfg,
+                           const std::unordered_map<int, int>& heightBefore,
+                           OriginUnionFind& aliases) {
+    size_t n = cfg.blocks.size();
+    DataflowResult result;
+    result.entryState.resize(n);
+    result.reachable.assign(n, 0);
+    std::vector<OpenOrigins> exitState(n);
+    std::vector<uint8_t> exitComputed(n, 0);
+    std::deque<int> worklist;
+
+    if (n > 0) {
+        result.reachable[0] = 1; // block 0 is the chunk's entry
+        worklist.push_back(0);
+    }
+
+    while (!worklist.empty()) {
+        int b = worklist.front();
+        worklist.pop_front();
+
+        OpenOrigins next = result.entryState[static_cast<size_t>(b)];
+        advanceDataflow(cfg.blocks[static_cast<size_t>(b)], next, heightBefore);
+
+        // A block's very first computation must propagate even when `next`
+        // happens to equal a default-constructed (empty) exitState — that
+        // equality is coincidence, not evidence the successors already
+        // heard about it.
+        bool changed = exitComputed[static_cast<size_t>(b)] == 0 ||
+                       next != exitState[static_cast<size_t>(b)];
+        exitState[static_cast<size_t>(b)] = next;
+        exitComputed[static_cast<size_t>(b)] = 1;
+        if (!changed) {
+            continue;
+        }
+
+        for (const CfgEdge& edge :
+             cfg.blocks[static_cast<size_t>(b)].successors) {
+            int t = edge.targetBlock;
+            OpenOrigins merged = result.entryState[static_cast<size_t>(t)];
+            joinInto(merged, next, aliases);
+            if (result.reachable[static_cast<size_t>(t)] == 0 ||
+                merged != result.entryState[static_cast<size_t>(t)]) {
+                result.reachable[static_cast<size_t>(t)] = 1;
+                result.entryState[static_cast<size_t>(t)] = std::move(merged);
+                worklist.push_back(t);
             }
-            state.erase(target); // a no-op if `state` does not hold `target`
+        }
+    }
+
+    // A slot's entry state can still hold a pre-union raw origin from a
+    // block whose only edge in never revisited joinInto after the union
+    // that would have canonicalized it (a CLOSURE reached by exactly one
+    // predecessor never merges at all). Canonicalize every entry state
+    // once, here, after the fixpoint is done — the single point the
+    // attribution walk can then trust `origin` values are already final.
+    for (OpenOrigins& entry : result.entryState) {
+        for (auto& [slot, origin] : entry) {
+            origin = aliases.find(slot, origin);
+        }
+    }
+
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Pass 2 — program-order attribution.
+// ---------------------------------------------------------------------------
+
+// Folds one CLOSURE instruction's local captures into `state` together
+// (this walk's own path-local view) and, if `reachable`, into `info`. Also
+// updates `latestInstanceBySlot` unconditionally — see the header comment on
+// that map, just below.
+//
+// Referee amendment 2 corrects range identity: a capture token (slot,
+// CLOSURE offset) is only a range's INITIAL NAME, not its identity. Three
+// cases, matching `vm.cpp`'s own `captureUpvalue` (reuse an open upvalue, or
+// create one):
+//   - joinsExistingRange (rule 2): this exact PATH already has the slot
+//     open -- add to that instance.
+//   - joinsSiblingRange (rule 4): this path does not, but a MUTUALLY
+//     EXCLUSIVE sibling path does, under a different token that the
+//     dataflow's own union-find already proved is the SAME instance -- add
+//     to it too.
+//   - neither (rule 3): every path reaching here has the slot closed --
+//     start a genuinely new instance.
+void handleClosureCommit(const DecodedInstruction& in, OpenOrigins& state,
+                         bool reachable, FunctionCaptureInfo& info,
+                         RangeIndex& rangeIndexByOrigin,
+                         OriginUnionFind& aliases,
+                         std::unordered_map<int, int>& latestInstanceBySlot) {
+    for (const ClosureUpvalue& up : in.upvalues) {
+        if (!up.isLocal) {
+            continue; // a grandparent's slot, not this chunk's
+        }
+        int slot = up.index;
+        int rawOrigin = in.offset;
+        int canonicalOrigin = aliases.find(slot, rawOrigin);
+
+        auto it = state.find(slot);
+        // During attribution, "already open" is only trustworthy when that
+        // origin's range object actually exists yet. A loop header's
+        // stabilized entry state can show a slot open with THIS VERY
+        // CLOSURE's own offset as origin — the back-edge's echo of "still
+        // open on a later iteration" — before this, the walk's only visit
+        // to that offset, has run at all. Treat that as opening fresh, not
+        // sharing a range that is not there yet.
+        bool joinsExistingRange =
+            reachable && it != state.end() &&
+            rangeIndexByOrigin.contains({slot, it->second});
+        if (joinsExistingRange) {
+            int idx = rangeIndexByOrigin.at({slot, it->second});
+            info.liveRangesBySlot[slot][idx].capturingClosureOffsets.push_back(
+                rawOrigin);
+            latestInstanceBySlot[slot] = it->second;
+            continue;
+        }
+        bool joinsSiblingRange =
+            reachable && rangeIndexByOrigin.contains({slot, canonicalOrigin});
+        if (joinsSiblingRange) {
+            int idx = rangeIndexByOrigin.at({slot, canonicalOrigin});
+            info.liveRangesBySlot[slot][idx].capturingClosureOffsets.push_back(
+                rawOrigin);
+            state[slot] = canonicalOrigin;
+            latestInstanceBySlot[slot] = canonicalOrigin;
+            continue;
+        }
+        state[slot] = canonicalOrigin;
+        if (reachable) {
+            CaptureLiveRange range;
+            range.slot = slot;
+            range.firstCaptureOffset = canonicalOrigin;
+            range.capturingClosureOffsets.push_back(rawOrigin);
+            std::vector<CaptureLiveRange>& vec = info.liveRangesBySlot[slot];
+            vec.push_back(range);
+            rangeIndexByOrigin[{slot, canonicalOrigin}] =
+                static_cast<int>(vec.size()) - 1;
+        }
+        latestInstanceBySlot[slot] = canonicalOrigin;
+    }
+}
+
+// Resolves one CLOSE_UPVALUE and, if `reachable`, records the outcome into
+// `info`. `slot` is `heightBefore.at(in.offset) - 1` — a compile-time
+// constant, not inferred (referee amendment 3).
+//
+// A close whose slot `state` shows open on this exact path is a DYNAMIC
+// close: attribute it to that instance and erase it from `state`, exactly
+// like amendments 1 and 2 did.
+//
+// A close whose slot `state` does NOT show open is a STATIC one (R22): the
+// compiler emits one CLOSE_UPVALUE per exit path that crosses a captured
+// local's scope (break, continue, the fall-through), and every path but the
+// one that dynamically captured it reaches its own copy of that instruction
+// with nothing open there — a real, dynamic no-op on this path, exactly
+// matching what `vm.cpp`'s `closeUpvalues` does. It still needs a real
+// instance to record against: `latestInstanceBySlot` names the most recent
+// CLOSURE this whole program-order walk has seen for this EXACT slot,
+// updated by every CLOSURE (handleClosureCommit) and never cleared by a
+// close — an earlier design (amendments 1 and 2's static overlay) erased
+// this on the FIRST close and broke on a slot's second, sibling close
+// (R22). Exact-slot matching (via height) makes stealing impossible: a
+// close for slot 7 can never consult, or touch, slot 3's entry.
+//
+// A REACHABLE close whose slot has no entry in `latestInstanceBySlot` at
+// all — no CLOSURE, anywhere in program order before it, ever captured this
+// slot — is compiler or decoder drift, not a normal program: throws.
+void handleCloseUpvalueCommit(
+    const DecodedInstruction& in, int slot, OpenOrigins& state, bool reachable,
+    const std::string& functionId, FunctionCaptureInfo& info,
+    RangeIndex& rangeIndexByOrigin,
+    const std::unordered_map<int, int>& latestInstanceBySlot) {
+    if (!reachable) {
+        info.unreachableCloseOffsets.push_back(in.offset);
+        return;
+    }
+
+    auto pathIt = state.find(slot);
+    int origin{};
+    if (pathIt != state.end()) {
+        origin = pathIt->second;
+        state.erase(pathIt);
+    } else {
+        auto latestIt = latestInstanceBySlot.find(slot);
+        if (latestIt == latestInstanceBySlot.end()) {
+            throw std::runtime_error(
+                "capture_analysis: CLOSE_UPVALUE at offset " +
+                std::to_string(in.offset) + " in function id=" + functionId +
+                " closes slot " + std::to_string(slot) +
+                ", which no CLOSURE ever captures");
+        }
+        origin = latestIt->second;
+    }
+
+    auto idxIt = rangeIndexByOrigin.find({slot, origin});
+    if (idxIt == rangeIndexByOrigin.end()) {
+        throw std::runtime_error(
+            "capture_analysis: CLOSE_UPVALUE at offset " +
+            std::to_string(in.offset) + " in function id=" + functionId +
+            " resolved to slot " + std::to_string(slot) + " origin " +
+            std::to_string(origin) + ", which has no recorded range");
+    }
+    info.liveRangesBySlot[slot][idxIt->second].allCloseOffsets.push_back(
+        in.offset);
+}
+
+// Advances `state` (this block's own fully-converged per-path entry state,
+// from Pass 1) across one block's instructions, building the real
+// CaptureLiveRange records as it goes. Called once per block, in ascending
+// block-index (i.e. ascending offset, see Cfg::blocks) order, for every
+// block of the chunk — reachable or not: an unreachable CLOSE_UPVALUE still
+// needs to be reported (FunctionCaptureInfo::unreachableCloseOffsets), and
+// `latestInstanceBySlot` still advances for unreachable CLOSUREs, mirroring
+// the compiler's own single-pass bookkeeping, which does not know or care
+// whether the code it just emitted ever runs.
+void advanceCommit(const BasicBlock& block, OpenOrigins& state, bool reachable,
+                   const std::string& functionId, FunctionCaptureInfo& info,
+                   RangeIndex& rangeIndexByOrigin, OriginUnionFind& aliases,
+                   const std::unordered_map<int, int>& heightBefore,
+                   std::unordered_map<int, int>& latestInstanceBySlot) {
+    for (const DecodedInstruction& in : block.instructions) {
+        if (in.op == Op::CLOSURE) {
+            handleClosureCommit(in, state, reachable, info, rangeIndexByOrigin,
+                                aliases, latestInstanceBySlot);
+        } else if (in.op == Op::CLOSE_UPVALUE) {
+            int slot = heightBefore.at(in.offset) - 1;
+            handleCloseUpvalueCommit(in, slot, state, reachable, functionId,
+                                     info, rangeIndexByOrigin,
+                                     latestInstanceBySlot);
         }
         // POP and everything else: no captured-slot effect.
     }
@@ -226,316 +600,32 @@ void recurseIntoChildren(const DecodedFunction& node, CaptureAnalysis& out) {
     }
 }
 
-// Runs the dataflow to a fixed point: for every block reachable from block
-// 0, the set of captured slots open at its entry, and with which origin
-// CLOSURE offset. `reachable[b]` is set the first time block b is ever
-// merged into, which happens only by following a real CFG edge from block 0
-// — a block this pass never visits is unreachable (for example, scope-exit
-// code after an unconditional `return`), and the commit walk must treat it
-// specially, not invent a real per-path entry state for it.
-//
-// A slot's openness at a block can depend on a LOOP back-edge that this pass
-// has not reached yet on a first forward pass (the back-edge's source sits
-// later in the instruction stream than its own target — V3_loopvar), so this
-// is a worklist fixpoint, not a single pass: a block whose computed exit
-// state changes re-queues every successor, and iteration stops only once no
-// block's exit state changes anymore.
-struct DataflowResult {
-    std::vector<OpenOrigins> entryState;
-    // uint8_t, not bool: std::vector<bool>'s proxy reference makes `!v[i]`
-    // ambiguous against this codebase's `operator!(Value)` (Value has an
-    // implicit bool constructor) when the std::variant Value build
-    // (LOXPP_NAN_TAGGING=OFF) is active. Plain bytes sidestep the proxy
-    // entirely.
-    std::vector<uint8_t> reachable;
-};
+void analyzeOneChunk(const DecodedFunction& node, CaptureAnalysis& out) {
+    Cfg cfg = buildCfg(node.instructions);
+    int entryHeight = 1 + node.function->arity;
+    std::unordered_map<int, int> heightBefore =
+        computeFrameHeightsForCfg(cfg, entryHeight, node.id);
 
-DataflowResult
-runDataflow(const Cfg& cfg,
-            const std::unordered_map<int, int>& staticCloseTargets,
-            OriginUnionFind& aliases) {
-    size_t n = cfg.blocks.size();
-    DataflowResult result;
-    result.entryState.resize(n);
-    result.reachable.assign(n, 0);
-    std::vector<OpenOrigins> exitState(n);
-    std::vector<uint8_t> exitComputed(n, 0);
-    std::deque<int> worklist;
+    OriginUnionFind aliases;
+    DataflowResult dataflow = runDataflow(cfg, heightBefore, aliases);
 
-    if (n > 0) {
-        result.reachable[0] = 1; // block 0 is the chunk's entry
-        worklist.push_back(0);
-    }
-
-    while (!worklist.empty()) {
-        int b = worklist.front();
-        worklist.pop_front();
-
-        OpenOrigins next = result.entryState[static_cast<size_t>(b)];
-        advanceProbe(cfg.blocks[static_cast<size_t>(b)], next,
-                     staticCloseTargets);
-
-        // A block's very first computation must propagate even when `next`
-        // happens to equal a default-constructed (empty) exitState — that
-        // equality is coincidence, not evidence the successors already
-        // heard about it.
-        bool changed = exitComputed[static_cast<size_t>(b)] == 0 ||
-                       next != exitState[static_cast<size_t>(b)];
-        exitState[static_cast<size_t>(b)] = next;
-        exitComputed[static_cast<size_t>(b)] = 1;
-        if (!changed) {
-            continue;
-        }
-
-        for (const CfgEdge& edge :
-             cfg.blocks[static_cast<size_t>(b)].successors) {
-            int t = edge.targetBlock;
-            OpenOrigins merged = result.entryState[static_cast<size_t>(t)];
-            joinInto(merged, next, aliases);
-            if (result.reachable[static_cast<size_t>(t)] == 0 ||
-                merged != result.entryState[static_cast<size_t>(t)]) {
-                result.reachable[static_cast<size_t>(t)] = 1;
-                result.entryState[static_cast<size_t>(t)] = std::move(merged);
-                worklist.push_back(t);
-            }
-        }
-    }
-
-    // R20's alias table is not final until the fixpoint above stops finding
-    // new unions, and a slot's entry state can still hold a pre-union raw
-    // origin from a block whose only edge in never revisited joinInto after
-    // the union that would have canonicalized it (a CLOSURE reached by
-    // exactly one predecessor never merges at all). Canonicalize every
-    // entry state once, here, after the fixpoint is done — the single point
-    // the commit walk (handleClosureCommit, handleCloseUpvalueCommit, and
-    // analyzeOneChunk's own closedImplicitly loop) can then trust `origin`
-    // values are already final, with no scattered re-lookup of its own.
-    for (OpenOrigins& entry : result.entryState) {
-        for (auto& [slot, origin] : entry) {
-            origin = aliases.find(slot, origin);
-        }
-    }
-
-    return result;
-}
-
-// Folds one CLOSURE instruction's local captures into `state` and `overlay`
-// together, and (if `reachable`) into `info`. See advanceCommit for what the
-// two maps are and why a CLOSURE always updates both.
-//
-// Referee amendment 2 corrects range identity: a capture token (slot,
-// CLOSURE offset) is only a range's INITIAL NAME, not its identity (rules 1
-// and 6). Three cases, matching `vm.cpp`'s own `captureUpvalue` (reuse an
-// open upvalue, or create one):
-//   - joinsExistingRange (rule 2): this exact PATH already has the slot
-//     open -- add to that instance.
-//   - joinsSiblingRange (rule 4): this path does not, but a MUTUALLY
-//     EXCLUSIVE sibling path does, under a different token that joinInto's
-//     union-find already proved is the SAME instance -- add to it too, and
-//     canonicalize this path's own state/overlay to match, so the instance
-//     reads as one range regardless of which arm a later reader follows.
-//   - neither (rule 3): every path reaching here has the slot closed --
-//     start a genuinely new instance.
-void handleClosureCommit(const DecodedInstruction& in, OpenOrigins& state,
-                         OpenOrigins& overlay, bool reachable,
-                         FunctionCaptureInfo& info,
-                         RangeIndex& rangeIndexByOrigin,
-                         OriginUnionFind& aliases) {
-    for (const ClosureUpvalue& up : in.upvalues) {
-        if (!up.isLocal) {
-            continue; // a grandparent's slot, not this chunk's
-        }
-        int slot = up.index;
-        int rawOrigin = in.offset;
-        int canonicalOrigin = aliases.find(slot, rawOrigin);
-
-        auto it = state.find(slot);
-        // During commit, "already open" is only trustworthy when that
-        // origin's range object actually exists yet. A loop header's
-        // stabilized entry state can show a slot open with THIS VERY
-        // CLOSURE's own offset as origin — the back-edge's echo of "still
-        // open on a later iteration" — before this, the walk's only visit
-        // to that offset, has run at all. Treat that as opening fresh, not
-        // sharing a range that is not there yet.
-        bool joinsExistingRange =
-            reachable && it != state.end() &&
-            rangeIndexByOrigin.contains({slot, it->second});
-        if (joinsExistingRange) {
-            int idx = rangeIndexByOrigin.at({slot, it->second});
-            info.liveRangesBySlot[slot][idx].capturingClosureOffsets.push_back(
-                rawOrigin);
-            overlay[slot] = it->second;
-            continue;
-        }
-        bool joinsSiblingRange =
-            reachable && rangeIndexByOrigin.contains({slot, canonicalOrigin});
-        if (joinsSiblingRange) {
-            int idx = rangeIndexByOrigin.at({slot, canonicalOrigin});
-            info.liveRangesBySlot[slot][idx].capturingClosureOffsets.push_back(
-                rawOrigin);
-            state[slot] = canonicalOrigin;
-            overlay[slot] = canonicalOrigin;
-            continue;
-        }
-        state[slot] = canonicalOrigin;
-        if (reachable) {
-            CaptureLiveRange range;
-            range.slot = slot;
-            range.firstCaptureOffset = canonicalOrigin;
-            range.capturingClosureOffsets.push_back(rawOrigin);
-            std::vector<CaptureLiveRange>& vec = info.liveRangesBySlot[slot];
-            vec.push_back(range);
-            rangeIndexByOrigin[{slot, canonicalOrigin}] =
-                static_cast<int>(vec.size()) - 1;
-        }
-        overlay[slot] = canonicalOrigin;
-    }
-}
-
-// Resolves one CLOSE_UPVALUE against `state` and `overlay` together, and (if
-// `reachable`) records the outcome into `info`. See advanceCommit for the
-// two-layer resolution rule this implements (referee amendment 1).
-//
-// R19: also records the resolved target slot into `resolvedTargets`, keyed
-// by this instruction's own offset — this walk's OWN resolution (state AND
-// the program-order overlay together) is authoritative, so analyzeOneChunk
-// feeds it back as the NEXT iteration's `staticCloseTargets` for
-// advanceProbe (referee amendment 1, item 3: iterate the two to a fixed
-// point). A close this walk cannot yet resolve (neither layer holds
-// anything, reachable) throws, same as before this map existed;
-// analyzeOneChunk catches that on every iteration but the last, because an
-// earlier iteration's `state` can still be wrong in exactly the way R19
-// describes, and a later iteration, seeded with whatever this one DID
-// resolve before the throw, corrects it.
-void handleCloseUpvalueCommit(const DecodedInstruction& in, OpenOrigins& state,
-                              OpenOrigins& overlay, bool reachable,
-                              const std::string& functionId,
-                              FunctionCaptureInfo& info,
-                              RangeIndex& rangeIndexByOrigin,
-                              std::unordered_map<int, int>& resolvedTargets) {
-    bool hasState = !state.empty();
-    bool hasOverlay = !overlay.empty();
-    if (!hasState && !hasOverlay) {
-        if (!reachable) {
-            info.unreachableCloseOffsets.push_back(in.offset);
-            return;
-        }
-        throw std::runtime_error(
-            "capture_analysis: CLOSE_UPVALUE at offset " +
-            std::to_string(in.offset) + " in function id=" + functionId +
-            " has no open captured slot to close in either layer");
-    }
-    int stateTop = hasState ? std::prev(state.end())->first : -1;
-    int overlayTop = hasOverlay ? std::prev(overlay.end())->first : -1;
-    bool dynamic = hasState && stateTop >= overlayTop;
-    int slot = dynamic ? stateTop : overlayTop;
-    int origin = dynamic ? state.at(slot) : overlay.at(slot);
-    resolvedTargets[in.offset] = slot;
-    if (reachable) {
-        auto idxIt = rangeIndexByOrigin.find({slot, origin});
-        if (idxIt != rangeIndexByOrigin.end()) {
-            info.liveRangesBySlot[slot][idxIt->second]
-                .allCloseOffsets.push_back(in.offset);
-        }
-    } else {
-        info.unreachableCloseOffsets.push_back(in.offset);
-    }
-    if (dynamic) {
-        state.erase(slot);
-    }
-    overlay.erase(slot);
-}
-
-// Advances `state` (this block's own fully-converged per-path entry state)
-// and `overlay` (one program-order layer, SHARED across every block this
-// function is called for, in ascending block-index — i.e. ascending offset,
-// see Cfg::blocks — order) across one block's instructions, building the
-// real CaptureLiveRange records as it goes. Called once per block, in that
-// order, for every block of the chunk — reachable or not (referee amendment
-// 1, section on unreachable blocks: an unreachable CLOSE_UPVALUE still
-// updates the overlay, because the compiler's own single-pass bookkeeping
-// does not know or care whether the code it just emitted ever runs).
-//
-// `reachable` gates every OBSERVABLE effect on `info` (range creation, close
-// attribution, the unreachable-close report) — `state` and `overlay` still
-// advance for an unreachable block, purely so a LATER, reachable block's own
-// overlay lookups stay correctly threaded, but nothing at all is recorded
-// for the block itself.
-//
-// Referee amendment 1 (PR #101): the round-3 rule ("CLOSE_UPVALUE closes the
-// highest open captured slot in the per-path state") assumed every
-// statically captured local of a scope is dynamically open on the path that
-// reaches its close. That is false when a CLOSURE sits on a branch that
-// returns: a sibling path runs the scope's own CLOSE_UPVALUE for a slot its
-// own execution never opened. `overlay` tracks exactly that: the compiler's
-// single-pass, order-only view of "captured, not yet closed" (mirroring
-// Local::isCaptured), independent of which branch actually ran. A CLOSURE
-// updates BOTH layers together, to whatever origin `state` itself lands on
-// (already open on this path — the shared-cell case — or freshly opened
-// here). A CLOSE_UPVALUE resolves against whichever layer holds the HIGHER
-// slot number: `state` wins when it holds the target (a real, dynamic close
-// — the target is genuinely open on this exact path, so `state` loses it);
-// `overlay` wins only when `state` does not hold it (the target is captured
-// SOMEWHERE in this scope, per the compiler, but not on this path — a
-// dynamic no-op here, matching vm.cpp's closeUpvalues, which does nothing to
-// a slot with no open cell). The target is always removed from `overlay`
-// either way, because the compiler's own bookkeeping has now accounted for
-// it, on whichever path first reaches it in program order.
-void advanceCommit(const BasicBlock& block, OpenOrigins& state,
-                   OpenOrigins& overlay, bool reachable,
-                   const std::string& functionId, FunctionCaptureInfo& info,
-                   RangeIndex& rangeIndexByOrigin, OriginUnionFind& aliases,
-                   std::unordered_map<int, int>& resolvedTargets) {
-    for (const DecodedInstruction& in : block.instructions) {
-        if (in.op == Op::CLOSURE) {
-            handleClosureCommit(in, state, overlay, reachable, info,
-                                rangeIndexByOrigin, aliases);
-        } else if (in.op == Op::CLOSE_UPVALUE) {
-            handleCloseUpvalueCommit(in, state, overlay, reachable, functionId,
-                                     info, rangeIndexByOrigin, resolvedTargets);
-        }
-        // POP and everything else: no captured-slot effect.
-    }
-}
-
-// Runs one full fixpoint-plus-commit pass: the CFG dataflow (seeded with
-// `staticCloseTargets`, the previous pass's own resolution — empty on the
-// first call, matching the pre-R19 rule) and then the sequential commit
-// walk over every block, in program order, building `info` and reading back
-// every close's resolved target into `resolvedTargets` as it goes.
-//
-// A commit walk that reaches a close neither layer can yet resolve throws
-// (handleCloseUpvalueCommit) with whatever `resolvedTargets` this SAME call
-// had gathered before the throw left in place — the caller (analyzeOneChunk)
-// uses that partial map to seed the next call, exactly the failure case R19
-// describes (a target genuinely needs one more round to become visible).
-FunctionCaptureInfo
-runOnePass(const DecodedFunction& node, const Cfg& cfg,
-           const std::unordered_map<int, int>& staticCloseTargets,
-           std::unordered_map<int, int>& resolvedTargets) {
     FunctionCaptureInfo info;
     info.id = node.id;
 
-    OriginUnionFind aliases;
-    DataflowResult dataflow = runDataflow(cfg, staticCloseTargets, aliases);
-
+    RangeIndex rangeIndexByOrigin;
+    std::unordered_map<int, int> latestInstanceBySlot;
     // cfg.blocks is in byte order (see cfg.h), so this loop visits every
     // instruction of the chunk exactly once, in program order — required
     // both for ranges of one slot to land in liveRangesBySlot in offset
     // order (the determinism the mission brief's codegen-naming rule
-    // depends on, and the non-overlap invariant the tests check) and for
-    // `overlay` below to correctly mirror the compiler's own single-pass
-    // view (referee amendment 1).
-    RangeIndex rangeIndexByOrigin;
-    OpenOrigins overlay;
+    // depends on) and for `latestInstanceBySlot` to correctly mirror the
+    // compiler's own single-pass view.
     for (size_t b = 0; b < cfg.blocks.size(); b++) {
         bool reachable = dataflow.reachable[b] != 0;
-        // An unreachable block never executes, so nothing is genuinely
-        // dynamically open there; only `overlay` (updated by advanceCommit
-        // regardless of `reachable`) can resolve a close inside it.
         OpenOrigins state = reachable ? dataflow.entryState[b] : OpenOrigins{};
-        advanceCommit(cfg.blocks[b], state, overlay, reachable, node.id, info,
-                      rangeIndexByOrigin, aliases, resolvedTargets);
+        advanceCommit(cfg.blocks[b], state, reachable, node.id, info,
+                      rangeIndexByOrigin, aliases, heightBefore,
+                      latestInstanceBySlot);
 
         if (!reachable || !cfg.blocks[b].successors.empty()) {
             continue;
@@ -543,10 +633,7 @@ runOnePass(const DecodedFunction& node, const Cfg& cfg,
         // A reachable terminal block (RETURN or MATCH_ERROR): whatever is
         // still open in `state` here closes with the frame, not with an
         // explicit CLOSE_UPVALUE (06_shared_upvalue's `outer` never emits
-        // one on any path). This can coexist with a real explicit close
-        // recorded on a DIFFERENT path for the same range (one branch
-        // returns early while it is still open, another branch closes it
-        // properly) — see FunctionCaptureInfo::closedImplicitly.
+        // one on any path).
         for (const auto& [slot, origin] : state) {
             auto idxIt = rangeIndexByOrigin.find({slot, origin});
             if (idxIt == rangeIndexByOrigin.end()) {
@@ -556,57 +643,6 @@ runOnePass(const DecodedFunction& node, const Cfg& cfg,
         }
     }
 
-    return info;
-}
-
-void analyzeOneChunk(const DecodedFunction& node, CaptureAnalysis& out) {
-    Cfg cfg = buildCfg(node.instructions);
-
-    // R19 (referee amendment 1, item 3): the close-resolution rule and the
-    // per-path fixpoint depend on each other. advanceProbe needs to know
-    // which slot each CLOSE_UPVALUE targets to avoid corrupting an
-    // unrelated, lower slot's open state at a static close; the commit
-    // walk's own resolution (state and the program-order overlay together)
-    // is the authoritative source for that target, but it is only correct
-    // once the fixpoint it reads its `state` from is itself correct. Break
-    // the circularity by iterating: seed the fixpoint with the PREVIOUS
-    // pass's resolved targets (empty on the first pass, matching the
-    // pre-R19 rule exactly), and feed this pass's own resolution back in as
-    // the next seed. The referee's own prototype needed two passes on every
-    // program measured; this allows a few more before giving up on
-    // convergence.
-    std::unordered_map<int, int> staticCloseTargets;
-    FunctionCaptureInfo info;
-    constexpr int kMaxIterations = 6;
-    bool converged = false;
-    for (int iteration = 0; iteration < kMaxIterations && !converged;
-         iteration++) {
-        std::unordered_map<int, int> resolvedTargets;
-        bool isLastIteration = iteration == kMaxIterations - 1;
-        try {
-            info = runOnePass(node, cfg, staticCloseTargets, resolvedTargets);
-        } catch (const std::runtime_error&) {
-            // A close this pass could not yet resolve: keep whatever this
-            // SAME pass resolved before the throw (a superset of the seed
-            // it started from) and try again, unless this was the last
-            // allowed attempt, in which case the failure is real (R19's own
-            // "has no open captured slot" case, unrelated to iteration).
-            if (isLastIteration) {
-                throw;
-            }
-            staticCloseTargets = std::move(resolvedTargets);
-            continue;
-        }
-        converged = resolvedTargets == staticCloseTargets;
-        staticCloseTargets = std::move(resolvedTargets);
-    }
-    if (!converged) {
-        throw std::runtime_error(
-            "capture_analysis: close-target resolution did not reach a "
-            "fixed point for function id=" +
-            node.id);
-    }
-
     markPerIterationRanges(node, info);
 
     out.functions[node.id] = std::move(info);
@@ -614,6 +650,11 @@ void analyzeOneChunk(const DecodedFunction& node, CaptureAnalysis& out) {
 }
 
 } // namespace
+
+std::unordered_map<int, int> computeFrameHeights(const DecodedFunction& node) {
+    Cfg cfg = buildCfg(node.instructions);
+    return computeFrameHeightsForCfg(cfg, 1 + node.function->arity, node.id);
+}
 
 CaptureAnalysis analyzeCaptures(const DecodedFunction& root) {
     CaptureAnalysis result;
