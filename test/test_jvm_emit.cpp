@@ -1544,10 +1544,13 @@ TEST(EmitProgram, MatchErrorCallsLoxOpsMatchError) {
 
     ASSERT_EQ(classes.size(), 2u);
     const std::string& f = classes[1].source;
-    // MATCH_ERROR: no operand, no successor this pass needs to reach — a
-    // single call, like RETURN never falls through past it.
+    // MATCH_ERROR: no operand, no successor this pass needs to reach. R4
+    // fix (PR #113 round 1): the call now leaves a real LoxError on the
+    // stack, and athrow — a genuine terminal instruction — follows it, so
+    // the verifier (not only this pass's own analysis) sees no fall-through.
     EXPECT_NE(f.find("pop\n"
-                     "    invokestatic lox/LoxOps/matchError()V\n"),
+                     "    invokestatic lox/LoxOps/matchError()Llox/LoxError;\n"
+                     "    athrow\n"),
               std::string::npos)
         << f;
     expectEveryJumpTargetIsLabeled(f);

@@ -1397,12 +1397,23 @@ void emitSuperInvoke(Emitter& e, const DecodedInstruction& in) {
 // compiles a real, reachable MATCH_ERROR, because the compiler never
 // proves a class pattern exhaustive over its own subclasses;
 // examples/class_dispatch.lox's `area` function is exactly this shape).
-// vm.cpp's own handler never returns — LoxOps.matchError() always throws —
-// so this is a single call with no operand and no successor this pass
-// needs to reach: like RETURN, nothing physically after it is entered by
-// fall-through (finishInstruction already excludes both alike).
+// vm.cpp's own handler never returns, so this pass has no successor it
+// needs to reach here either: like RETURN, nothing physically after it is
+// entered by fall-through (finishInstruction already excludes both alike).
+//
+// R4 fix (PR #113 round 1): that claim must be true of the EMITTED bytecode,
+// not only of this pass's own analysis. An earlier version called a plain
+// void `matchError()V`; the JVM verifier does not know a void call always
+// throws, so it still treats the next instruction as reachable from it,
+// even though this pass never emits a physical edge there. `LoxOps.
+// matchError` now BUILDS the error instead of throwing it, so the call
+// leaves the error object on the stack, and `athrow` — a real terminal
+// instruction, like `areturn` or `goto` — ends the block. The claim in this
+// comment is now true of the bytecode too, which N10 needs when
+// MATCH_ERROR becomes `tableswitch`'s default target.
 void emitMatchError(Emitter& e) {
-    e.b.emit("invokestatic lox/LoxOps/matchError()V", 0);
+    e.b.emit("invokestatic lox/LoxOps/matchError()Llox/LoxError;", +1);
+    e.b.emit("athrow", -1);
 }
 
 // RETURN's two roles (P5): a function's own RETURN hands its value back to
