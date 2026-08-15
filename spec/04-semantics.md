@@ -548,8 +548,10 @@ print c(); // 1
 print c(); // 2
 ```
 
-Multiple closures created within the same scope share the same closed-over
-variable; mutating it through one closure is visible through all others.
+Multiple closures created in the **same execution** of a scope share the same
+closed-over variable; mutating it through one closure is visible through all
+others. Two closures made by **different** executions of the same source scope
+do not share anything. The next section makes this precise.
 
 ### Binding Identity
 
@@ -593,7 +595,7 @@ A `match` pattern binding is a local binding, but no closure can capture it. A
 a `fun` cannot appear there.
 
 `super` is different again. It is captured lexically at class-definition time,
-as the Inheritance section states.
+as the [`super` Expression](#super-expression) section states.
 
 **Each execution of the construct that creates a binding makes a NEW binding.**
 One place in the source can therefore make many bindings, one per execution. A

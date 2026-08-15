@@ -70,9 +70,13 @@ evaluates its body and produces a return value. Functions are first-class: they
 can be stored in variables, passed as arguments, and returned from other
 functions.
 
-A function carries a **closure environment** — a snapshot of the lexical scope
-in which it was defined. Closures allow a function to access variables from
-enclosing scopes even after those scopes have exited.
+A function carries a **closure environment**. It holds the local bindings of the
+enclosing scopes, and it is not a snapshot: the function reads and writes the
+same storage as the scope it came from, so a write through the function is
+visible outside it, and a later write outside is visible to the function.
+Closures let a function reach those bindings even after the scopes have exited.
+See [Binding Identity](04-semantics.md#binding-identity) for which binding a
+closure captures, and when a binding ends.
 
 ### Class
 
