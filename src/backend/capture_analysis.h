@@ -7,7 +7,15 @@
 // slot, and which captured slots several closures share one cell for.
 //
 // This pass does not emit code and carries no JVM or CLR knowledge — node N7
-// is the only consumer, on whichever target it runs.
+// is the only consumer, on whichever target it runs. N7 reads only the SLOT
+// SET this pass reports (FunctionCaptureInfo::liveRangesBySlot's keys, via
+// jvm_emitter.cpp's capturedSlots) — a runtime `instanceof` check at every
+// CLOSURE/GET_LOCAL/SET_LOCAL of a captured slot replaces the per-range,
+// per-close, and per-path detail below (PR #111 R7). That detail stays here
+// because it is still the honest model of what the VM does, and a future
+// node — or a future N7 revision that trades the runtime check for a static
+// one — needs it. Each field below says, on its own line, whether today's
+// N7 reads it.
 //
 // The whole hazard this pass exists to catch: CLOSE_UPVALUE is not a no-op.
 // It ends a captured slot's live range, and the next time that slot's
@@ -166,6 +174,12 @@ struct FunctionCaptureInfo {
     // std::map (not unordered_map): N7's codegen must walk this in a stable
     // order so generated class/method names stay stable across runs (see the
     // mission brief's determinism rule).
+    //
+    // N7 reads only this map's KEYS (jvm_emitter.cpp's capturedSlots) — which
+    // slots are ever captured, not which range is open at which offset. The
+    // runtime `instanceof` check (see the file header above) settles raw-vs-
+    // cell at each site directly, so N7 does not walk `CaptureLiveRange`
+    // itself today.
     std::map<int, std::vector<CaptureLiveRange>> liveRangesBySlot;
 
     // How this function's OWN upvalue array is wired: entry i names either
@@ -179,7 +193,8 @@ struct FunctionCaptureInfo {
     // unconditional `return`. These never execute on any real run, so they
     // are attributed to no range; this field exists only so a cross-check
     // (checkNoOrphanCloseUpvalues in test_backend_capture.cpp) can tell
-    // "unreachable" apart from "this pass lost track of a real close".
+    // "unreachable" apart from "this pass lost track of a real close". N7
+    // does not read this field.
     std::vector<int> unreachableCloseOffsets;
 
     // A REACHABLE CLOSE_UPVALUE, closed on every path that reaches it (a
@@ -187,9 +202,15 @@ struct FunctionCaptureInfo {
     // unreachable, so it opened no range (R26 — referee amendment 4, PR
     // #101, round 10). Every capture of this incarnation is dead code, so
     // no cell can exist at this offset on any real run: the close's only
-    // run-time effect is its own pop. N7 must lower an entry here the same
-    // way it lowers an unreachableCloseOffsets entry — the pop alone, with
-    // no cell operation.
+    // run-time effect is its own pop.
+    //
+    // N7 does not read this field either (PR #111 R7). Its CLOSE_UPVALUE
+    // case in jvm_emitter.cpp emits NO bytecode at all, for every close on
+    // every path — reachable, unreachable, or statically dead alike — so
+    // the "pop alone, no cell operation" rule this comment used to hand N7
+    // holds by construction, not because N7 consults this list. A future
+    // lowering that treats CLOSE_UPVALUE cases differently by kind must
+    // read this field to keep that rule true.
     std::vector<int> staticallyDeadCloseOffsets;
 };
 
