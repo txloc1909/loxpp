@@ -794,10 +794,9 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
     std::size_t nextIndex = i + (consumedFollowingPop ? 2 : 1);
     e.prevCanFallThrough = in.op != Op::JUMP && in.op != Op::LOOP &&
                            in.op != Op::RETURN && in.op != Op::MATCH_ERROR;
-    e.prevNaturalSuccessorOffset =
-        (nextIndex < e.fn.instructions.size())
-            ? e.fn.instructions[nextIndex].offset
-            : -1;
+    e.prevNaturalSuccessorOffset = (nextIndex < e.fn.instructions.size())
+                                       ? e.fn.instructions[nextIndex].offset
+                                       : -1;
     return nextIndex;
 }
 
