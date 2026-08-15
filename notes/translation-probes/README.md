@@ -62,6 +62,9 @@ each has an off-the-shelf solution.
 | `V1_fresh_cell` | body-local captured in a loop → **fresh cell/iter** → prints `0 1 2` | P4 |
 | `V2_shared` | mutable shared upvalue → prints `2` | P4 |
 | `V3_loopvar` | loop var captured directly → **one shared cell** → prints `3 3 3` | P4 |
+| `V4_mutate_through_upvalue` | `set` writes a shared cell, `get` reads it back → prints `7 9` | P4 |
+| `V5_self_recursive_closure` | a local `fun` captures its own slot (direct recursion) → prints `120` | P4 |
+| `V6_self_recursive_closure_in_loop` | self-recursive local `fun`, fresh cell per loop trip → prints `12` | P4 |
 
 ## Are these problems solved in the literature?
 

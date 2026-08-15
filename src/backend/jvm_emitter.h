@@ -2,13 +2,22 @@
 
 // JVM code generator (node N4 of the JVM/CLR backend DAG, discharges P2 — the
 // "peek, don't pop" family; node N5 adds P3b, control flow and verifier
-// legality; node N6 adds P5, functions and calls;
-// notes/bytecode-translation-problems.md). Lowers one function's chunk to
-// Jasmin (.j) text, consuming N0's decoder, N1's CFG/labels, and N2's
-// abstract-stack analysis. Upvalue wiring (N7), classes (N8), aggregates and
-// for-in (N9), and match/enum (N10) are still out of scope: this node aborts
-// loudly on any opcode or CLOSURE shape none of N4/N5/N6 lowers, so a later
-// node's gap fails loudly too.
+// legality; node N6 adds P5, functions and calls; node N7 adds P4b, closures
+// and upvalues; notes/bytecode-translation-problems.md). Lowers one
+// function's chunk to Jasmin (.j) text, consuming N0's decoder, N1's
+// CFG/labels, N2's abstract-stack analysis, and N3's capture analysis.
+// Classes (N8) and match/enum (N10) are still out of scope: this node aborts
+// loudly on any opcode none of N4/N5/N6/N7 lowers, so a later node's gap
+// fails loudly too.
+//
+// N7 also lowers BUILD_LIST/GET_INDEX/SET_INDEX — three opcodes
+// notes/backend-implementation-dag.md assigns to N9 (aggregates and
+// for-in), pulled forward here because N7's own checkpoint
+// (notes/translation-probes/V1_fresh_cell.lox, V3_loopvar.lox) cannot run
+// to completion without them: both build a list of the closures under test
+// and read it back by index. N9 still owns BUILD_MAP, SLICE, IN, and the
+// for-in iterator protocol (GET_ITER/ITER_HAS_NEXT/ITER_NEXT) — see
+// emitBuildList's own note.
 //
 // JVM local-variable layout — one fixed mapping for both entry shapes
 // (nodes/N6.md: "choose a fixed slot mapping ... and use it everywhere"),
@@ -72,9 +81,8 @@ struct EmittedClass {
 
 // Emits the whole program reachable from `root`: the top-level script as
 // `scriptClassName`, plus one `LoxFn$<n>` class per function or method any
-// chunk in the tree constructs with a zero-upvalue CLOSURE (node N6 — a
-// CLOSURE that captures anything throws "not implemented", upvalue wiring is
-// N7). `root`/`tree` must come from the same compiled tree
+// chunk in the tree constructs with a CLOSURE, with its upvalues wired
+// (node N7). `root`/`tree` must come from the same compiled tree
 // (decodeFunctionTree / analyzeStackTree on the same ObjFunction).
 //
 // Class names are assigned by one fixed pre-order walk of the decoded tree,

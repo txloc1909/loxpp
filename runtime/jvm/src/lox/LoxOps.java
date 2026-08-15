@@ -216,6 +216,23 @@ public final class LoxOps {
         return idx;
     }
 
+    // BUILD_LIST's own helper (node N7 pulls this one opcode family forward
+    // from N9's scope: notes/backend-implementation-dag.md — V1_fresh_cell
+    // and V3_loopvar, N7's own closure-correctness probes, both build and
+    // index a list of the very closures under test, so N7's checkpoint
+    // cannot run to completion without it). `elements` arrives in
+    // first-to-last order already (vm.cpp's BUILD_LIST pops its operands
+    // top-to-bottom into a bottom-to-top array; the JVM emitter mirrors
+    // that same order building this one, same as it already does for
+    // LoxOps.call's args array).
+    public static LoxList buildList(Object[] elements) {
+        LoxList list = new LoxList();
+        for (Object e : elements) {
+            list.elements.add(e);
+        }
+        return list;
+    }
+
     public static Object getIndex(Object collection, Object index) {
         if (collection instanceof LoxList) {
             List<Object> elements = ((LoxList) collection).elements;

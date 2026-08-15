@@ -1,0 +1,14 @@
+// V4: two closures share one captured cell, and a SET through one closure
+// is visible through a GET on the other. 06_shared_upvalue only proves that
+// emission and verification succeed on this shape; it never calls get or
+// set, so it settles no value question (PR #111 R6). This probe does.
+fun outer() {
+  var x = 0;
+  fun get() { return x; }
+  fun set(v) { x = v; }
+  set(7);
+  print get();
+  set(9);
+  print get();
+}
+outer();
