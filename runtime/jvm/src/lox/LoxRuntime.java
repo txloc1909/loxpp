@@ -45,6 +45,15 @@ public final class LoxRuntime {
         Runtime.getRuntime().addShutdownHook(new Thread(out::flush));
     }
 
+    // The one LoxGlobals instance for this JVM process (design decision A2:
+    // one dynamic map, not one static field per global name — this is a
+    // different concern, "where does a generated method find the map").
+    // main's own frame holds a reference in a JVM local, but a generated
+    // LoxFn$<n>.invoke has no such local (nodes/N6.md), so it reads this
+    // static instead of threading the reference through every call. Safe
+    // because exactly one Lox++ program ever runs per JVM process here.
+    private static LoxGlobals current;
+
     /**
      * Reads one line as raw bytes (0-255), never decoding them as text.
      * Returns nil at immediate EOF, matching std::getline's failure rule
@@ -70,7 +79,13 @@ public final class LoxRuntime {
         LoxGlobals globals = new LoxGlobals();
         registerGlobals(globals);
         registerMath(globals);
+        current = globals;
         return globals;
+    }
+
+    /** The instance the script's own {@link #init} call built. Null before that call runs. */
+    public static LoxGlobals current() {
+        return current;
     }
 
     private static void registerGlobals(LoxGlobals globals) {

@@ -16,6 +16,7 @@
 
 #include <filesystem>
 #include <system_error>
+#include <vector>
 #endif
 
 #ifdef LOXPP_USE_READLINE
@@ -122,10 +123,13 @@ static void runFile(VM& vm, const std::string& path) {
 }
 
 #ifdef LOXPP_JVM_BACKEND
-// Compiles `path` and writes the generated class as <outDir>/LoxMain.j. Does
-// not assemble or run it — tools/loxpp_jvm.sh chains jasmin and java on top.
-// Exit codes mirror runFile's: 65 for a compile error, 70 for an opcode this
-// node does not lower (see jvm_emitter.h), 74 for a file-system failure.
+// Compiles `path` and writes one generated class per <outDir>/<name>.j:
+// LoxMain (the top-level script) plus one LoxFn$<n> per function or method
+// any chunk in the tree constructs (node N6). Does not assemble or run
+// anything — tools/loxpp_jvm.sh chains jasmin and java on top, assembling
+// every *.j file in the directory together. Exit codes mirror runFile's: 65
+// for a compile error, 70 for an opcode or CLOSURE shape this node does not
+// lower (see jvm_emitter.h), 74 for a file-system failure.
 static int runJvmTarget(const std::string& outDir, const std::string& path) {
     std::string source = readFile(path);
 
@@ -135,11 +139,11 @@ static int runJvmTarget(const std::string& outDir, const std::string& path) {
         return 65;
     }
 
-    std::string jasminSource;
+    std::vector<jvm::EmittedClass> classes;
     try {
         DecodedFunction tree = decodeFunctionTree(script);
-        FunctionStackAnalysis analysis = analyzeStack(tree);
-        jasminSource = jvm::emitScript(tree, analysis, "LoxMain");
+        StackAnalysisTree analysis = analyzeStackTree(tree);
+        classes = jvm::emitProgram(tree, analysis, "LoxMain");
     } catch (const std::exception& e) {
         std::fprintf(stderr, "loxpp --target jvm: %s\n", e.what());
         return 70;
@@ -154,14 +158,27 @@ static int runJvmTarget(const std::string& outDir, const std::string& path) {
         return 74;
     }
 
-    std::string outPath = outDir + "/LoxMain.j";
-    std::ofstream out(outPath, std::ios::binary);
-    if (!out) {
-        std::fprintf(stderr, "loxpp --target jvm: cannot write %s\n",
-                     outPath.c_str());
-        return 74;
+    // Remove every stale *.j file first (PR #110 R3): tools/jvm_run.sh
+    // assembles every *.j file it finds in outDir, so a class an earlier,
+    // larger run wrote here would still reach the classpath even after this
+    // run's own source no longer builds it.
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator(outDir, ec)) {
+        if (entry.path().extension() == ".j") {
+            std::filesystem::remove(entry.path(), ec);
+        }
     }
-    out << jasminSource;
+
+    for (const jvm::EmittedClass& cls : classes) {
+        std::string outPath = outDir + "/" + cls.className + ".j";
+        std::ofstream out(outPath, std::ios::binary);
+        if (!out) {
+            std::fprintf(stderr, "loxpp --target jvm: cannot write %s\n",
+                         outPath.c_str());
+            return 74;
+        }
+        out << cls.source;
+    }
     return 0;
 }
 #endif

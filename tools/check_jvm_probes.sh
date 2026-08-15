@@ -5,6 +5,10 @@
 # not by eye (notes/backend-implementation-dag.md, N4/N5). Later emission
 # nodes add their own probes to this same list as they add opcodes.
 #
+# error_probes (node N6, PR #110 R2) hold the opposite shape: both sides must
+# FAIL, with matching stdout. They check that an error stays an error on the
+# JVM backend too, not only that a success stays a success.
+#
 # Every probe runs even after an earlier one fails: a failing JVM run (a
 # verifier rejection, say) is caught and recorded as this probe's own
 # failure, not left to `set -e` at top level, which would otherwise stop the
@@ -17,6 +21,7 @@ set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 native_bin="${LOXPP_BIN:-$root/build/loxpp}"
+lox_rt_jar="${LOX_RT_JAR:-$root/runtime/jvm/lox-rt.jar}"
 
 probes=(
     "notes/translation-probes/01_assign_local.lox"
@@ -24,6 +29,7 @@ probes=(
     "notes/translation-probes/03_and_or.lox"
     "notes/translation-probes/04_while.lox"
     "notes/translation-probes/05_for.lox"
+    "notes/translation-probes/08_call.lox"
     "notes/translation-probes/15_nested_arith.lox"
     "notes/translation-probes/18_peek_of_named_local.lox"
     "notes/translation-probes/19_peek_of_named_local_global.lox"
@@ -31,6 +37,15 @@ probes=(
     "notes/translation-probes/21_exponent_constant.lox"
     "notes/translation-probes/22_and_or_assignment_statement.lox"
     "notes/translation-probes/23_and_or_local_initializer.lox"
+)
+
+# Probes that must FAIL on both sides (node N6 checkpoint 4, PR #110 R2): a
+# global function called before its own `fun` declaration has run is a
+# late-bound-global error, not a silent success. Each entry needs a non-zero
+# exit from build/loxpp AND from tools/loxpp_jvm.sh, with matching stdout
+# (both empty, here).
+error_probes=(
+    "notes/translation-probes/24_call_before_closure.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
@@ -66,6 +81,46 @@ for probe in "${probes[@]}"; do
     fi
 done
 
+for probe in "${error_probes[@]}"; do
+    "$native_bin" "$root/$probe" >"$native_out" 2>"$native_err"
+    native_status=$?
+    if [ "$native_status" -eq 0 ]; then
+        echo "check_jvm_probes.sh: FAIL $probe (native run did not fail)" >&2
+        failed_probes+=("$probe")
+        continue
+    fi
+
+    # PR #110 R5: emission and execution are two separate facts. A probe
+    # must fail at RUN time, the same place the native side fails, not at
+    # emit time (an unimplemented opcode, say). The combined
+    # tools/loxpp_jvm.sh exits non-zero either way, so checking only its
+    # exit code let an emit-time abort satisfy this loop by accident.
+    j_dir="$(mktemp -d)"
+    if ! "$native_bin" --target jvm --out-dir "$j_dir" "$root/$probe" \
+        >/dev/null 2>"$jvm_err"; then
+        echo "check_jvm_probes.sh: FAIL $probe (JVM emit failed, not a runtime error)" >&2
+        cat "$jvm_err" >&2
+        rm -rf "$j_dir"
+        failed_probes+=("$probe")
+        continue
+    fi
+    "$root/tools/jvm_run.sh" "$j_dir" "$lox_rt_jar" LoxMain \
+        >"$jvm_out" 2>"$jvm_err"
+    jvm_status=$?
+    rm -rf "$j_dir"
+    if [ "$jvm_status" -eq 0 ]; then
+        echo "check_jvm_probes.sh: FAIL $probe (JVM run did not fail)" >&2
+        failed_probes+=("$probe")
+        continue
+    fi
+    if diff -u "$native_out" "$jvm_out"; then
+        echo "check_jvm_probes.sh: OK $probe (both failed, stdout matches)"
+    else
+        echo "check_jvm_probes.sh: FAIL $probe (stdout mismatch)" >&2
+        failed_probes+=("$probe")
+    fi
+done
+
 if [ "${#failed_probes[@]}" -ne 0 ]; then
     echo "check_jvm_probes.sh: ${#failed_probes[@]} probe(s) failed:" >&2
     for probe in "${failed_probes[@]}"; do
@@ -74,4 +129,4 @@ if [ "${#failed_probes[@]}" -ne 0 ]; then
     exit 1
 fi
 
-echo "check_jvm_probes.sh: all ${#probes[@]} probes OK"
+echo "check_jvm_probes.sh: all $((${#probes[@]} + ${#error_probes[@]})) probes OK"
