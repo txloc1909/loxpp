@@ -1,12 +1,41 @@
 // N9 R2: end-to-end run of the parts of P7/P8 that 11/12/16 leave untouched:
-// IS_SEQ (via sequence destructuring), SLICE on a List, `in` on a String and
-// a Map, iteration over a String and a Map, and BUILD_MAP with three pairs.
-// Map keys are summed, never printed, so map bucket order cannot change this
-// probe's output (brief section 8: map iteration order is unspecified).
+// IS_SEQ (via a match sequence pattern), SLICE on a List, `in` on a String
+// and a Map, iteration over a String and a Map, and BUILD_MAP with three
+// pairs. Map keys are summed, never printed, so map bucket order cannot
+// change this probe's output (brief section 8: map iteration order is
+// unspecified).
+//
+// `var [a, b] = xs;` is a destructuring declaration, not a match arm. It
+// lowers to two GET_INDEX calls and emits no IS_SEQ
+// (Compiler::compileListPattern, compiler.cpp:2125, is the only emitter, and
+// only a match arm reaches it). Each match below stays a discarded
+// statement: a *consumed* match (assigned, printed, returned) does not yet
+// emit at all, on any target, and that gap belongs to N10
+// (notes/backend-implementation-dag.md, N10 row).
 
 var xs = [1, 2, 3];
-var [a, b] = xs;
+var a = xs[0];
+var b = xs[1];
 print a + b;
+
+var r = "none";
+match [xs[0], xs[1]] {
+    case [p, q] => r = p + q
+    case _      => r = 0
+};
+print r;
+
+match "hi" {
+    case [p, q] => r = p + q
+    case _      => r = "notseq"
+};
+print r;
+
+match {1: 2} {
+    case [p, q] => r = "seq"
+    case _      => r = "notseq"
+};
+print r;
 
 print xs[0:2];
 
