@@ -365,6 +365,21 @@ public final class LoxOps {
         return ((LoxEnum) v).ctor.tag;
     }
 
+    /**
+     * The CALL opcode's runtime dispatch (P6, vm.cpp callValue): a closure, a
+     * native, a bound method, a class (construction), and an enum
+     * constructor all already implement {@link LoxCallable}, so one
+     * {@code instanceof} covers every kind vm.cpp's callValue switches on.
+     * Generated code never branches on the callee's kind (nodes/N6.md) —
+     * this is the one place that does.
+     */
+    public static Object call(Object callee, Object[] args) {
+        if (callee instanceof LoxCallable) {
+            return ((LoxCallable) callee).call(args);
+        }
+        throw new LoxError("Can only call functions, classes and enums.");
+    }
+
     /** The INVOKE fast path: dispatches on the receiver's runtime kind (P6), not on one static type. */
     public static Object invoke(Object receiver, String name, Object[] args) {
         if (receiver instanceof LoxInstance) {
