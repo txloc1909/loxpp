@@ -1,5 +1,6 @@
 #include "jvm_emitter.h"
 
+#include "cfg.h"
 #include "exec_objects.h"
 #include "object.h"
 #include "value.h"
@@ -7,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <sstream>
@@ -132,7 +134,7 @@ std::string opName(Op op) {
 }
 
 [[noreturn]] void notImplemented(Op op) {
-    throw std::runtime_error("not implemented in N4: " + opName(op));
+    throw std::runtime_error("not implemented in N5: " + opName(op));
 }
 
 // Accumulates Jasmin instruction text for one method body while tracking the
@@ -155,6 +157,20 @@ struct Builder {
                 "jvm_emitter: operand stack underflow emitting '" +
                 instruction + "'");
         }
+        maxDepth = std::max(maxDepth, depth);
+    }
+
+    // A jasmin label marker. Unindented (jasmin convention) and zero stack
+    // effect — a label is a name for an offset, not an instruction.
+    void label(const std::string& name) { text << name << ":\n"; }
+
+    // Re-anchors `depth` to a value this pass did not itself derive by
+    // emitting instructions (N5: a CFG merge's entry depth, trusted from
+    // N2). Goes through here, not a bare assignment, so `maxDepth` still
+    // sees it — a merge can be the first place a wide expression's width
+    // becomes visible to this Builder.
+    void resync(int newDepth) {
+        depth = newDepth;
         maxDepth = std::max(maxDepth, depth);
     }
 };
@@ -245,6 +261,27 @@ std::string emitScript(const DecodedFunction& fn,
         return idx < analysis.reached.size() &&
                static_cast<bool>(analysis.reached[idx]);
     };
+
+    // N5: one jasmin label per N1 block leader. A leader with no predecessor
+    // (e.g. the fall-through after an unconditional JUMP) still gets a label;
+    // an unreferenced jasmin label is harmless, so this pass does not bother
+    // filtering to only-referenced offsets.
+    Cfg cfg = buildCfg(ins);
+    std::unordered_map<int, std::string> labelAtOffset;
+    labelAtOffset.reserve(cfg.blocks.size());
+    for (const BasicBlock& block : cfg.blocks) {
+        labelAtOffset.emplace(block.leaderOffset, block.label);
+    }
+    auto labelFor = [&](int offset) -> const std::string& {
+        auto it = labelAtOffset.find(offset);
+        if (it == labelAtOffset.end()) {
+            throw std::runtime_error(
+                "jvm_emitter: no CFG label at jump target " +
+                std::to_string(offset));
+        }
+        return it->second;
+    };
+
     // SET_LOCAL/SET_GLOBAL peek (the value stays on the stack); a following
     // POP that N2 already proved TEMP is exactly that peeked value being
     // discarded as a statement result, so folding the pair into one plain
@@ -258,6 +295,16 @@ std::string emitScript(const DecodedFunction& fn,
         auto it = popKinds.find(ins[j].offset);
         return it != popKinds.end() && it->second == PopKind::TEMP;
     };
+
+    // N5.md, "inherited from N4": `analysis.before[i].localCount` is only an
+    // upper bound at a CFG merge (abstract_stack.h), so the SET_LOCAL/
+    // SET_GLOBAL peek-of-a-named-local case (below) cannot use it to name the
+    // slot a peek reads once JUMP/JUMP_IF_FALSE/LOOP exist. This tracks the
+    // same fact a different, merge-safe way: the slot an invisible-var site
+    // just bound, updated only by this pass's own forward walk in offset
+    // order (below, alongside the existing invisible-var store), never by a
+    // count aggregated across incoming edges.
+    int lastInvisibleVarSlot = -1;
     auto constantString = [&](int idx) -> std::string {
         Value v = fn.function->chunk.getConstant(static_cast<uint16_t>(idx));
         if (!isString(v)) {
@@ -307,6 +354,24 @@ std::string emitScript(const DecodedFunction& fn,
         }
         const DecodedInstruction& in = ins[i];
         bool consumedFollowingPop = false;
+
+        auto labelIt = labelAtOffset.find(in.offset);
+        if (labelIt != labelAtOffset.end()) {
+            b.label(labelIt->second);
+            // A block leader's depth is set by whichever real CFG
+            // predecessor(s) feed it, not by this pass's own instruction-by-
+            // instruction carry-forward: the array position right before a
+            // leader is often a JUMP/LOOP/RETURN whose real successor is
+            // somewhere else entirely (the array is in byte-offset order,
+            // not control-flow order), so the naive carry-forward there is
+            // not this block's entry depth at all. N2 already proved
+            // operandDepth() exact at every merge (analyzeStack itself
+            // throws on any incoming-edge disagreement, before this pass
+            // ever runs), so resync to it here; the R1 check right below
+            // keeps verifying this pass's own arithmetic at every other
+            // (non-leader) offset within the block that follows.
+            b.resync(analysis.before[i].operandDepth());
+        }
 
         // R1 safety net (PR #107 round 1): every correctly-lowered opcode in
         // this pass keeps the JVM operand stack's physical depth equal to
@@ -453,23 +518,17 @@ std::string emitScript(const DecodedFunction& fn,
             // N2 already folded the peeked value into a named local (the
             // eager invisible-var materialization, abstract_stack.h) —
             // nothing sits on the JVM operand stack to `dup`. Load it back
-            // from its slot instead. No copy needs to survive this store: a
-            // later invisible-var site always attaches to the *producing*
-            // instruction, never to this peek, and a further chained peek
-            // reloads the same persistent slot fresh rather than depend on
-            // a leftover operand.
-            // R9 (PR #107 round 2, nit): `localCount` below is exact only
-            // because no merge can reach here yet — every jump opcode
-            // aborts with "not implemented in N4" at a strictly earlier
-            // offset than any merge point it creates (abstract_stack.h:
-            // `operandDepth()` alone is exact at a merge; raw `localCount`
-            // is only an upper bound there). N5 adds JUMP/JUMP_IF_FALSE/
-            // LOOP: before this line can execute with `before[i]` at a
-            // merge, re-derive the source slot from something merge-exact,
-            // not from this field directly.
+            // from its slot instead: `lastInvisibleVarSlot`, not
+            // `before[i].localCount`, names it (R9, PR #107 round 2;
+            // resolved for N5 — localCount is only an upper bound at a CFG
+            // merge, but lastInvisibleVarSlot is this pass's own forward
+            // walk, so it is exact regardless of merges upstream). No copy
+            // needs to survive this store: a later invisible-var site always
+            // attaches to the *producing* instruction, never to this peek,
+            // and a further chained peek reloads the same persistent slot
+            // fresh rather than depend on a leftover operand.
             if (analysis.before[i].operandDepth() == 0) {
-                int sourceSlot =
-                    jvmSlotForLocal(analysis.before[i].localCount - 1);
+                int sourceSlot = jvmSlotForLocal(lastInvisibleVarSlot);
                 b.emit("aload " + std::to_string(sourceSlot), +1);
                 b.emit("astore " + std::to_string(slot), -1);
             } else if (fuse) {
@@ -499,12 +558,10 @@ std::string emitScript(const DecodedFunction& fn,
             // and always use the non-peek call: the plain store fully
             // consumes the loaded copy either way, so no separate
             // fuse/non-fuse split is needed on this branch.
-            // R9 (PR #107 round 2, nit): same merge caveat as SET_LOCAL
-            // above — `localCount` here is exact only while no jump opcode
-            // is implemented.
+            // R9 (PR #107 round 2, nit): resolved for N5 the same way as
+            // SET_LOCAL above — `lastInvisibleVarSlot`, not `localCount`.
             if (analysis.before[i].operandDepth() == 0) {
-                int sourceSlot =
-                    jvmSlotForLocal(analysis.before[i].localCount - 1);
+                int sourceSlot = jvmSlotForLocal(lastInvisibleVarSlot);
                 b.emit("aload " + std::to_string(sourceSlot), +1);
                 globalsCall("set", constantString(in.constantIndex),
                             /*peek=*/false);
@@ -515,6 +572,32 @@ std::string emitScript(const DecodedFunction& fn,
             consumedFollowingPop = fuse;
             break;
         }
+        case Op::JUMP:
+        case Op::LOOP:
+            // Same lowering either direction: a `goto` carries no operand
+            // budget of its own, so nothing distinguishes a forward skip
+            // from a loop's back edge once N1 has resolved both to a label.
+            b.emit("goto " + labelFor(in.jumpTarget), 0);
+            break;
+        case Op::JUMP_IF_FALSE:
+            // P2/P3: JUMP_IF_FALSE peeks — the condition must still be
+            // present, on *both* outgoing edges, for whatever follows to see
+            // (03_and_or keeps it as the short-circuit result; 02/04/05
+            // discard it with their own, ordinary POP right after — that POP
+            // is not special-cased here). `dup` supplies that second,
+            // independent copy so the taken edge does not lose its copy to
+            // `isFalsy`'s pop; N2's abstract stack (this pass's own R1
+            // safety net, above) already models JUMP_IF_FALSE as depth-
+            // preserving on this assumption, so a leaner, fused lowering
+            // that dropped the dup would have to carry its own, separate
+            // bookkeeping to keep the two in step. Left as a follow-up: a
+            // real optimization (one word, briefly, on two probes) not a
+            // correctness requirement — every probe here is nowhere near
+            // .limit stack pressure.
+            b.emit("dup", +1);
+            b.emit("invokestatic lox/LoxOps/isFalsy(Ljava/lang/Object;)Z", 0);
+            b.emit("ifne " + labelFor(in.jumpTarget), -1);
+            break;
         case Op::RETURN:
             // Script form (vm.cpp: frameCount reaches 0, result discarded) —
             // a function's RETURN (areturn) is N6's responsibility.
@@ -528,6 +611,7 @@ std::string emitScript(const DecodedFunction& fn,
         if (varsIt != invisibleVarsByOffset.end()) {
             for (int slot : varsIt->second) {
                 b.emit("astore " + std::to_string(jvmSlotForLocal(slot)), -1);
+                lastInvisibleVarSlot = slot;
             }
         }
 
