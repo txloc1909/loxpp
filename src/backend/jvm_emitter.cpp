@@ -365,20 +365,28 @@ struct Emitter {
 
     // R4 fix (PR #109 nit): `jvmSlotForLocal(-1)` would silently `aload` the
     // globals-receiver slot as if it were a Lox value instead of failing
-    // loudly, so every read of `lastInvisibleVarSlot` goes through here.
-    int loadLastInvisibleVar() {
+    // loudly, so every reader of `lastInvisibleVarSlot` goes through here
+    // first (R1 fix, PR #112 round 1: emitGetIter is a second such reader,
+    // and it needs the raw slot number, not a load, so the sentinel check
+    // is split out rather than copied).
+    [[nodiscard]] int checkedInvisibleVarSlot() const {
         if (lastInvisibleVarSlot < 0) {
             throw std::runtime_error(
-                "jvm_emitter: peek of an invisible var before any "
+                "jvm_emitter: use of an invisible var before any "
                 "invisible-var site ran");
         }
+        return lastInvisibleVarSlot;
+    }
+
+    int loadLastInvisibleVar() {
+        int loxSlot = checkedInvisibleVarSlot();
         if (lastInvisibleVarIsSelfCell) {
             throw std::runtime_error(
                 "jvm_emitter: peek of a self-capturing closure's own "
                 "invisible var is unsupported — the slot holds a cell, not "
                 "the raw closure a plain aload here would assume");
         }
-        int sourceSlot = jvmSlotForLocal(lastInvisibleVarSlot);
+        int sourceSlot = jvmSlotForLocal(loxSlot);
         b.emit("aload " + std::to_string(sourceSlot), +1);
         return sourceSlot;
     }
@@ -649,24 +657,37 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
 }
 
 // GET_ITER replaces its own operand in place (vm.cpp: `stackTop[-1] = ...`).
-// It carries no operand byte of its own, so — like CLOSE_UPVALUE
-// (capture_analysis.h) — the position it replaces is computed the same
-// way: the frame's own stack height right before it runs, minus one. That
-// position is also this value's OWN declaring push (11_for_in.lox: the
-// iterable expression, e.g. BUILD_LIST, is what actually pushed it there),
-// and N2/N3 already hand THAT instruction's own offset the invisible-var
-// store for this slot (finishInstruction), one instruction earlier than
-// GET_ITER itself. By the time GET_ITER runs, the JVM operand stack is
-// therefore already empty at this position — the value already lives in
-// its own JVM local slot, not still sitting on the operand stack the way a
-// plain "simple op" (one invokestatic, no load/store) would assume. GET_ITER
-// must reload that slot, transform it, and store the result straight back,
+// It carries no operand byte of its own. The iterable expression's own
+// declaring push (11_for_in.lox: e.g. BUILD_LIST) is what put the value
+// there, and N2/N3 already hand THAT instruction's own offset the
+// invisible-var store for this slot (finishInstruction), one instruction
+// earlier than GET_ITER itself. By the time GET_ITER runs, the JVM operand
+// stack is therefore already empty at this position (`operandDepth() == 0`)
+// — the value already lives in its own JVM local slot, not still sitting on
+// the operand stack the way a plain "simple op" would assume. GET_ITER must
+// reload that slot, transform it, and store the result straight back,
 // through the same captured-slot check GET_LOCAL/SET_LOCAL use (a sibling
 // scope can reuse this same slot number for a variable some closure
 // elsewhere in the chunk captures — capturedSlots is keyed by slot number,
 // not by declaration), never a bare aload/astore.
+//
+// R1 fix (PR #112 round 1): `before[i].height - 1` named the WRONG slot at
+// a control-flow merge, because `height` is only an upper bound there
+// (abstract_stack.h) — the same fact PR #107 R9 and PR #109 R2 already
+// settled for SET_LOCAL/SET_GLOBAL/JUMP_IF_FALSE. `lastInvisibleVarSlot` is
+// this pass's own forward walk, so it is exact regardless of merges
+// upstream. The guard below turns the assumption in the paragraph above
+// into a checked fact: `operandDepth() == 0` is not merely expected here, it
+// is required, and a violation now fails loudly instead of silently
+// reading/writing the wrong slot with a true net effect of zero.
 void emitGetIter(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    int loxSlot = e.analysis.before[i].height - 1;
+    if (e.analysis.before[i].operandDepth() != 0) {
+        throw std::runtime_error(
+            "jvm_emitter: GET_ITER expected its iterable already folded "
+            "into an invisible-var slot (operand depth 0), but the JVM "
+            "operand stack was not empty here");
+    }
+    int loxSlot = e.checkedInvisibleVarSlot();
     int slot = e.jvmSlotForLocal(loxSlot);
     bool captured = e.isCaptured(loxSlot);
     if (captured) {
