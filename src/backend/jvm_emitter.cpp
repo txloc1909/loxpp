@@ -292,6 +292,16 @@ std::string emitScript(const DecodedFunction& fn,
         if (j >= n || !reached(j) || ins[j].op != Op::POP) {
             return false;
         }
+        // PR #109 R1 fix: a POP that is a CFG block leader must stay a real
+        // instruction. Every edge into that leader needs its jasmin label
+        // (fusing away the instruction fuses away the label with it — a
+        // jasmin assemble error, not a wrong result), and the short-circuit
+        // edge into this leader carries its own copy of the condition, which
+        // needs a real `pop` of its own regardless of what the fall-through
+        // edge does with its copy.
+        if (labelAtOffset.find(ins[j].offset) != labelAtOffset.end()) {
+            return false;
+        }
         auto it = popKinds.find(ins[j].offset);
         return it != popKinds.end() && it->second == PopKind::TEMP;
     };
