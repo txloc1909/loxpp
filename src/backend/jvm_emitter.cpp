@@ -1452,6 +1452,19 @@ void emitReturn(Emitter& e, std::size_t i, bool isScript) {
                 std::to_string(returnOffset) +
                 " is a CFG merge; localCount - 1 is unverified there");
         }
+        // R3 fix (PR #113 round 1): `capturedSlots` holds slot INDEXES, not
+        // live ranges — the compiler reuses an index once its scope closes
+        // — so this slot could in principle be a stale captured index still
+        // holding an Object[1] cell. emitGetLocal guards the identical slot
+        // with isCaptured (emitCapturedGetLocal); this consumer must too, or
+        // a future shape returns a bare cell with no verifier error (brief.md
+        // section 9). Unreachable today: the slot is always the compiler's
+        // own unnamed match-result local, so no CLOSURE can capture it.
+        if (e.isCaptured(loxSlot)) {
+            throw std::runtime_error(
+                "jvm_emitter: RETURN's local slot " + std::to_string(loxSlot) +
+                " is captured; the raw-vs-cell check is missing here");
+        }
         e.b.emit("aload " + std::to_string(e.jvmSlotForLocal(loxSlot)), +1);
     }
     e.b.emit("areturn", -1);
