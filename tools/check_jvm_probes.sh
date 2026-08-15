@@ -29,6 +29,8 @@ probes=(
     "notes/translation-probes/19_peek_of_named_local_global.lox"
     "notes/translation-probes/20_float_imprecise_constant.lox"
     "notes/translation-probes/21_exponent_constant.lox"
+    "notes/translation-probes/22_and_or_assignment_statement.lox"
+    "notes/translation-probes/23_and_or_local_initializer.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

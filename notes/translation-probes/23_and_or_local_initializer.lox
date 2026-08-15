@@ -1,0 +1,5 @@
+{
+  var c = true;
+  var b = c and 2;
+  print b;
+}

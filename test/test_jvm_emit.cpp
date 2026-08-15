@@ -316,6 +316,52 @@ TEST(EmitScript, AndOrKeepsTheValue) {
     EXPECT_EQ(countOccurrences(j, "\n    pop\n"), 1);
 }
 
+// ---------------------------------------------------------------------------
+// PR #109 round 1 regressions.
+// ---------------------------------------------------------------------------
+
+TEST(EmitScript, AndOrAssignmentStatementKeepsTheMergeLabelReal) {
+    // R1 (blocking): probe 22. The short-circuit merge's own POP can also be
+    // a CFG block leader when the right side is an assignment — every edge
+    // into it needs a real jasmin label there. `fusablePop` must not fuse
+    // that POP away, or the label disappears with it and jasmin fails to
+    // assemble ("Label ... has not been added to the code").
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("var x = true; var y = 0; x and (y = 1); print y;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    std::size_t ifnePos = j.find("ifne L_");
+    ASSERT_NE(ifnePos, std::string::npos) << j;
+    std::size_t nameStart = ifnePos + 5; // skip "ifne "
+    std::string target =
+        j.substr(nameStart, j.find('\n', nameStart) - nameStart);
+    // The label this `ifne` targets must exist as a real "name:" line, and
+    // the merge must still have its own, real `pop` — proof the fuse did
+    // not eat either one.
+    EXPECT_NE(j.find(target + ":\n"), std::string::npos) << j;
+    EXPECT_NE(j.find("\n    pop\n"), std::string::npos) << j;
+}
+
+TEST(EmitScript, JumpIfFalseOnAMaterializedConditionLoadsInsteadOfDup) {
+    // R2 (blocking): probe 23. When a local's initializer is a short-circuit
+    // expression, N2's eager invisible-var materialization (P2/P3) moves the
+    // condition off the JVM operand stack before JUMP_IF_FALSE runs —
+    // before[i].operandDepth() == 0. `dup` on that empty stack is a
+    // VerifyError ("Unable to pop operand off an empty stack"), not a wrong
+    // slot; the fix loads a fresh copy from lastInvisibleVarSlot instead.
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("{ var c = true; var b = c and 2; print b; }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_EQ(countOccurrences(j, "dup"), 0) << j;
+    EXPECT_NE(j.find("invokestatic lox/LoxOps/isFalsy"), std::string::npos)
+        << j;
+}
+
 TEST(EmitScript, WhileLoopEmitsBackEdgeAndLabel) {
     // 04_while: LOOP lowers to `goto`, at a label N1 placed at the
     // condition. The back edge's own target must be a real, defined label
