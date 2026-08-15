@@ -374,6 +374,18 @@ std::string emitScript(const DecodedFunction& fn,
     b.emit("invokestatic lox/LoxRuntime/init()Llox/LoxGlobals;", +1);
     b.emit("astore " + std::to_string(globalsSlot), -1);
 
+    // R5 fix (PR #109 nit): whether the position this walk is about to visit
+    // can be reached by fall-through from the instruction this pass most
+    // recently emitted — false at the very start, and reset every time a
+    // JUMP/LOOP/RETURN/MATCH_ERROR is emitted (none of those fall through) or
+    // dead code is skipped between two live instructions (nothing physical
+    // bridges that gap). Only under this condition is `b.depth`'s
+    // carry-forward not this block's real entry state, so only then does
+    // trusting N2's number over it stop being a live check on this pass's own
+    // arithmetic (see the R1 safety net right below).
+    bool prevCanFallThrough = false;
+    int prevNaturalSuccessorOffset = -1;
+
     for (std::size_t i = 0; i < n;) {
         if (!reached(i)) {
             i++;
@@ -385,19 +397,25 @@ std::string emitScript(const DecodedFunction& fn,
         auto labelIt = labelAtOffset.find(in.offset);
         if (labelIt != labelAtOffset.end()) {
             b.label(labelIt->second);
-            // A block leader's depth is set by whichever real CFG
-            // predecessor(s) feed it, not by this pass's own instruction-by-
-            // instruction carry-forward: the array position right before a
-            // leader is often a JUMP/LOOP/RETURN whose real successor is
-            // somewhere else entirely (the array is in byte-offset order,
-            // not control-flow order), so the naive carry-forward there is
-            // not this block's entry depth at all. N2 already proved
-            // operandDepth() exact at every merge (analyzeStack itself
-            // throws on any incoming-edge disagreement, before this pass
-            // ever runs), so resync to it here; the R1 check right below
-            // keeps verifying this pass's own arithmetic at every other
-            // (non-leader) offset within the block that follows.
-            b.resync(analysis.before[i].operandDepth());
+            bool trustCarryForward =
+                prevCanFallThrough && prevNaturalSuccessorOffset == in.offset;
+            if (!trustCarryForward) {
+                // A block leader with no live fall-through predecessor: the
+                // array position right before it is a JUMP/LOOP/RETURN whose
+                // real successor is somewhere else entirely, or dead code
+                // that never executed, so this pass's own carry-forward is
+                // not this block's entry depth at all (the array is in
+                // byte-offset order, not control-flow order). N2 already
+                // proved operandDepth() exact at every merge (analyzeStack
+                // itself throws on any incoming-edge disagreement, before
+                // this pass ever runs), so resync to it here.
+                b.resync(analysis.before[i].operandDepth());
+            }
+            // Every other leader — a real, live fall-through predecessor —
+            // keeps this pass's own carry-forward instead, so the R1 check
+            // right below compares two independently derived numbers there,
+            // catching a real disagreement instead of N2's own number
+            // trivially matching itself.
         }
 
         // R1 safety net (PR #107 round 1): every correctly-lowered opcode in
@@ -654,7 +672,12 @@ std::string emitScript(const DecodedFunction& fn,
             }
         }
 
-        i += consumedFollowingPop ? 2 : 1;
+        std::size_t nextIndex = i + (consumedFollowingPop ? 2 : 1);
+        prevCanFallThrough = in.op != Op::JUMP && in.op != Op::LOOP &&
+                             in.op != Op::RETURN && in.op != Op::MATCH_ERROR;
+        prevNaturalSuccessorOffset =
+            (nextIndex < n) ? ins[nextIndex].offset : -1;
+        i = nextIndex;
     }
 
     std::ostringstream out;
