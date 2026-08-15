@@ -844,6 +844,41 @@ f();
         << "from `g`'s own declaring push";
 }
 
+// R14: the test above needs only one downward chase step (`g` sits directly
+// above `a`), so it cannot tell `chaseSlotsDownward` apart from a version
+// that checks only its own starting slot. This program puts two unread
+// locals (`a`, `b`) below the nested `fun`'s own slot, so finding both
+// needs the descent to actually walk two slots down, not one.
+TEST(AbstractStackTest,
+     ChaseFindsEveryUnreadLocalBelowTheAnchorNotJustTheNearestOne) {
+    MemoryManager mm;
+    DecodedFunction script = decodeSource(R"(
+fun f() {
+  var a = 1;
+  var b = 2;
+  fun g() {}
+  for (;;) {}
+}
+f();
+)",
+                                          mm);
+    const DecodedFunction* f = findFunctionByName(script, "f");
+    ASSERT_NE(f, nullptr) << "f not found among nested functions";
+    FunctionStackAnalysis analysis; // NOLINT(misc-const-correctness)
+    ASSERT_NO_THROW(analysis = analyzeStack(*f));
+
+    std::vector<std::pair<int, int>> sites;
+    for (const InvisibleVarSite& site : analysis.invisibleVars) {
+        sites.emplace_back(site.offset, site.slot);
+    }
+    std::sort(sites.begin(), sites.end());
+    EXPECT_EQ(sites.size(), 3U)
+        << "`a` (slot 1), `b` (slot 2), and `g` (slot 3) must all be found; "
+        << "`a` is two slots below `g`'s own declaring push, so a chase "
+        << "that only checks its own starting slot finds `b` and misses "
+        << "`a`";
+}
+
 TEST(AbstractStackTest, PeeksInsteadOfPopsMatchesTheDocumentedFamily) {
     EXPECT_TRUE(peeksInsteadOfPops(Op::SET_LOCAL));
     EXPECT_TRUE(peeksInsteadOfPops(Op::SET_GLOBAL));
