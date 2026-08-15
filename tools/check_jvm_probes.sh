@@ -47,6 +47,7 @@ probes=(
     "notes/translation-probes/11_for_in.lox"
     "notes/translation-probes/12_list_map_index.lox"
     "notes/translation-probes/16_slice_in.lox"
+    "notes/translation-probes/25_seq_map_string_coverage.lox"
 )
 
 # Probes that must FAIL on both sides (node N6 checkpoint 4, PR #110 R2): a

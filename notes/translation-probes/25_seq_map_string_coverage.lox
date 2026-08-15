@@ -1,0 +1,26 @@
+// N9 R2: end-to-end run of the parts of P7/P8 that 11/12/16 leave untouched:
+// IS_SEQ (via sequence destructuring), SLICE on a List, `in` on a String and
+// a Map, iteration over a String and a Map, and BUILD_MAP with three pairs.
+// Map keys are summed, never printed, so map bucket order cannot change this
+// probe's output (brief section 8: map iteration order is unspecified).
+
+var xs = [1, 2, 3];
+var [a, b] = xs;
+print a + b;
+
+print xs[0:2];
+
+print "ell" in "hello";
+print "zz" in "hello";
+
+var m = {1: 10, 2: 20, 3: 30};
+print 2 in m;
+print 9 in m;
+
+var keySum = 0;
+for (var k in m) keySum = keySum + k;
+print keySum;
+
+var joined = "";
+for (var c in "ab") joined = joined + c;
+print joined;
