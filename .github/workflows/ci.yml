@@ -184,6 +184,20 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "python3 tools/check_examples.py tools/loxpp_jvm.sh examples/ --exclude tools/jvm_excluded_examples.txt"
 
+      # Permutation guard for the exclusion list itself. check_examples.py
+      # SKIPs an excluded name; it never runs it, so it cannot tell a real
+      # permutation from a content bug. This step runs diff_runtimes.py over
+      # exactly the names in tools/jvm_excluded_examples.txt (read from the
+      # file, so a new entry is covered with no CI edit) and fails the gate
+      # if any one of them stops being a permutation of native stdout.
+      - name: JVM differential suite - excluded examples stay permutations (N11)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh --exclude tools/jvm_excluded_examples.txt --only-excluded examples/"
+
       # Checkpoint 3: the self-hosted interpreter compiles, assembles, and
       # runs on the JVM backend, and interprets a Lox++ program correctly.
       - name: JVM differential suite - self-hosted interpreter on the JVM backend (N11)

@@ -30,10 +30,17 @@ this script's default. State that trade-off, do not hide it.
 Usage:
     python3 tools/diff_runtimes.py <native-loxpp> <jvm-runner> <path>...
         [--exclude <file>] [--timeout <seconds>]
+    python3 tools/diff_runtimes.py <native-loxpp> <jvm-runner>
+        --exclude <file> --only-excluded <dir>
 
 <path> is a .lox file, or a directory (every *.lox file inside it, sorted).
 A path that is neither a file nor a directory, or a program list that ends
 up empty, is an error (exit 2), not a silent zero-file pass.
+
+--only-excluded <dir> ignores <path> and runs only the programs named in
+--exclude, resolved under <dir>. This wires the permutation guard: an
+excluded program that starts to fail for a reason other than reordering
+turns DIVERGE, and the run exits 1.
 
 If <name>.input exists next to a .lox file, it is piped in as stdin, on both
 runtimes. Each runtime gets --timeout seconds (default 30); a runtime that
@@ -168,18 +175,48 @@ def collect_programs(paths: list[str]) -> list[Path]:
     return files
 
 
+def resolve_excluded_programs(excluded: dict[str, str], base_dir: Path) -> list[Path]:
+    """Resolves every name in the exclusion file under base_dir.
+
+    Used to run the permutation guard over exactly the excluded programs,
+    without scanning the rest of the corpus (notes/translation-probes, or
+    examples/huffman.lox, which diverges for a documented, non-permutation
+    reason and is not on this list).
+    """
+    files: list[Path] = []
+    for name in excluded:
+        p = base_dir / name
+        if not p.is_file():
+            print(f"error: excluded program not found: {p}", file=sys.stderr)
+            sys.exit(2)
+        files.append(p)
+    return files
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Differential runner: native loxpp vs the JVM backend, stdout only."
     )
     parser.add_argument("native", help="path to the native loxpp binary")
     parser.add_argument("jvm_runner", help="path to tools/loxpp_jvm.sh (or an equivalent runner)")
-    parser.add_argument("paths", nargs="+", help="a .lox file, or a directory of .lox files")
+    parser.add_argument(
+        "paths", nargs="*", default=[], help="a .lox file, or a directory of .lox files"
+    )
     parser.add_argument(
         "--exclude",
         type=Path,
         default=None,
         help="tools/jvm_excluded_examples.txt: permutation-only exclusions",
+    )
+    parser.add_argument(
+        "--only-excluded",
+        metavar="DIR",
+        default=None,
+        help=(
+            "ignore <paths>; run only the programs named in --exclude, resolved "
+            "under DIR. Wires the permutation guard to CI without scanning the "
+            "rest of the corpus."
+        ),
     )
     parser.add_argument(
         "--timeout",
@@ -190,10 +227,23 @@ def main() -> None:
     args = parser.parse_args()
 
     excluded = parse_exclude_file(args.exclude) if args.exclude else {}
-    programs = collect_programs(args.paths)
+
+    if args.only_excluded is not None:
+        if not args.exclude:
+            parser.error("--only-excluded requires --exclude")
+        if args.paths:
+            parser.error("--only-excluded and explicit <paths> are mutually exclusive")
+        programs = resolve_excluded_programs(excluded, Path(args.only_excluded))
+    else:
+        if not args.paths:
+            parser.error("provide at least one <path>, or use --only-excluded")
+        programs = collect_programs(args.paths)
 
     if not programs:
-        print("error: no programs to check (empty directory)", file=sys.stderr)
+        print(
+            "error: no programs to check (empty directory, or an empty exclusion list)",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     matched = permuted = diverged = 0
