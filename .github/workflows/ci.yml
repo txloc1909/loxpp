@@ -198,6 +198,27 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh --exclude tools/jvm_excluded_examples.txt --only-excluded examples/"
 
+      # Full-corpus differential, minus examples/huffman.lox. huffman.lox
+      # diverges for a documented, non-permutation reason (map iteration
+      # order breaks frequency ties differently on each runtime; N11.md,
+      # "huffman.lox - map-order-sensitive but NOT permutation-provable")
+      # and its disposition is a human-supervisor decision, not a defect, so
+      # it is kept out of this step rather than made to pass by construction.
+      # check_examples.py only checks each example's own CHECK directives,
+      # so an example with none (examples/bench_jump_table.lox,
+      # examples/remove.lox) could print a wrong answer with CI green. This
+      # step compares full stdout for every example instead.
+      - name: JVM differential suite - full example corpus, minus huffman.lox (N11)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c '
+              mapfile -t progs < <(ls examples/*.lox | grep -v "examples/huffman.lox")
+              python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh "${progs[@]}" --exclude tools/jvm_excluded_examples.txt
+            '
+
       # Checkpoint 3: the self-hosted interpreter compiles, assembles, and
       # runs on the JVM backend, and interprets a Lox++ program correctly.
       # An emptiness guard catches the case where both wrappers fail silently
