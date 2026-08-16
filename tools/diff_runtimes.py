@@ -32,6 +32,9 @@ Usage:
         [--exclude <file>]
 
 <path> is a .lox file, or a directory (every *.lox file inside it, sorted).
+A path that is neither a file nor a directory, or a program list that ends
+up empty, is an error (exit 2), not a silent zero-file pass.
+
 If <name>.input exists next to a .lox file, it is piped in as stdin, on both
 runtimes.
 """
@@ -136,13 +139,21 @@ def run_stdout(cmd: list[str], input_file: Path) -> str:
 
 
 def collect_programs(paths: list[str]) -> list[Path]:
+    """Resolves each path to a .lox file or every .lox file in a directory.
+
+    Exits with an error if a path is neither a file nor a directory, so a
+    rename or a typo fails the run instead of silently checking nothing.
+    """
     files: list[Path] = []
     for raw in paths:
         p = Path(raw)
         if p.is_dir():
             files.extend(sorted(p.glob("*.lox")))
-        else:
+        elif p.is_file():
             files.append(p)
+        else:
+            print(f"error: path is not a file or a directory: {p}", file=sys.stderr)
+            sys.exit(2)
     return files
 
 
@@ -163,6 +174,10 @@ def main() -> None:
 
     excluded = parse_exclude_file(args.exclude) if args.exclude else {}
     programs = collect_programs(args.paths)
+
+    if not programs:
+        print("error: no programs to check (empty directory)", file=sys.stderr)
+        sys.exit(2)
 
     matched = permuted = diverged = 0
 
