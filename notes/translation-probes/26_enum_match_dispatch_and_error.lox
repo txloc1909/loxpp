@@ -1,0 +1,50 @@
+// N10 checkpoint 2: a dense match over enum variants dispatches to the
+// correct arm, and a match with no accepting arm raises MATCH_ERROR at run
+// time.
+//
+// The literal JUMP_TABLE "out of [minTag, minTag+count) range" fallthrough
+// is NOT reachable from any program that compiles: previewEnumArms only
+// makes a match table-eligible when every arm is an unguarded constructor
+// pattern for the SAME enum, with no @-binding and no or-pattern
+// (compiler.cpp:1536), and checkEnumExhaustiveness then unconditionally
+// requires such a match to name every constructor of that enum or carry an
+// unguarded catch-all (compiler.cpp:1553-1568) — so a table-eligible match
+// is always exhaustive over its own enum's whole tag range, and a real
+// ObjEnum value of that enum type can never carry a tag outside it. See the
+// PR body for how this pass still proves the tableswitch's own default
+// label is wired correctly, despite that.
+//
+// A guard, though, defeats table eligibility (so this uses the sparse
+// GET_TAG/CONSTANT/EQUAL form, not JUMP_TABLE) WITHOUT defeating
+// checkEnumExhaustiveness, which only reads each arm's constructor NAME, not
+// its guard: a match with one arm per constructor, every guard false at run
+// time, compiles as "exhaustive" yet accepts nothing, and MATCH_ERROR is
+// exactly the real, reachable in-language shape that produces.
+//
+// Kept at script scope, printing each match directly (not `return`ed out of
+// a function): AbstractStackTest.RunsOverEveryProbeWithNoInconsistency
+// checks every probe's own RETURN sites have exactly the return value as a
+// genuine operand-stack temporary (test_backend_abstract_stack.cpp's own
+// checkReturnHeightZero) — a check this file's own header comment already
+// says does not hold program-wide once a match's result is `return`ed
+// (bytecode-translation-problems.md, "RETURN can return a named local"),
+// so a `return match ...;` shape belongs under examples/, the way
+// examples/or_pattern_demo.lox already uses it, not under
+// notes/translation-probes/.
+enum Status { A B C D E }
+
+print match C() {
+    case A => "a"
+    case B => "b"
+    case C => "c"
+    case D => "d"
+    case E => "e"
+};
+
+print match B() {
+    case A if false => "a"
+    case B if false => "b"
+    case C if false => "c"
+    case D if false => "d"
+    case E if false => "e"
+};
