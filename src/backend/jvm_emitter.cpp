@@ -333,14 +333,24 @@ struct Emitter {
     // nothing else between them, so this is the only shape a JUMP_TABLE is
     // ever found in — a GET_TAG that is not immediately followed by one is
     // the sparse, compare-and-branch match form instead (GET_TAG; CONSTANT;
-    // EQUAL, per arm), which needs no fusion. No CFG-label guard like
-    // fusablePop's own: nothing in the language ever jumps into the middle
-    // of a match's own dispatch preamble, so JUMP_TABLE's offset is never a
-    // block leader.
+    // EQUAL, per arm), which needs no fusion.
+    //
+    // R5 fix (PR #115 round 1): carries `fusablePop`'s own two guards —
+    // `reached(j)` and the block-leader test — even though no program today
+    // jumps into the middle of a match's own dispatch preamble, so JUMP_TABLE's
+    // offset is never actually a label yet. Without these guards, a future
+    // change that DID make it one would silently fuse away the label
+    // `emitBody` needs for every edge into it, and jasmin would fail far from
+    // the cause. With them, this returns false instead, and the ordinary,
+    // unfused GET_TAG path emits the label correctly.
     [[nodiscard]] bool fusableJumpTable(std::size_t i) const {
         std::size_t j = i + 1;
-        return j < fn.instructions.size() &&
-               fn.instructions[j].op == Op::JUMP_TABLE;
+        if (j >= fn.instructions.size() || !reached(j) ||
+            fn.instructions[j].op != Op::JUMP_TABLE) {
+            return false;
+        }
+        return labelAtOffset.find(fn.instructions[j].offset) ==
+               labelAtOffset.end();
     }
 
     [[nodiscard]] std::string constantString(int idx) const {
@@ -444,8 +454,12 @@ void emitConstant(Emitter& e, const DecodedInstruction& in) {
 }
 
 // True for the "pure stack effect, no operand" family: literals, arithmetic,
-// comparisons, NOT, PRINT. One `Emitter::b.emit` call each, none needing
-// anything from `in` beyond the opcode itself.
+// comparisons, GET_INDEX/SET_INDEX and peers. One `Emitter::b.emit` call
+// each, none needing anything from `in` beyond the opcode itself. NOT and
+// GET_INDEX moved out to their own functions (R3, PR #115 round 1) — see
+// emitNot's and emitGetIndex's own notes — because a folded `match` result
+// needs the instruction index this dispatch does not carry; PRINT moved out
+// the same way before this PR, for the same reason.
 bool emitSimpleOp(Emitter& e, Op op) {
     switch (op) {
     case Op::NIL:
@@ -511,11 +525,11 @@ bool emitSimpleOp(Emitter& e, Op op) {
                  "Object;)Ljava/lang/Object;",
                  -1);
         return true;
-    case Op::NOT:
-        e.b.emit("invokestatic lox/LoxOps/not(Ljava/lang/Object;)Ljava/lang/"
-                 "Object;",
-                 0);
-        return true;
+    // NOT is pulled out to its own function, emitNot (below emitDefineGlobal)
+    // — the same reason PRINT was pulled out: it needs an instruction index
+    // to route a folded `match` result through loadNamedLocalAtZeroDepth
+    // (R3, PR #115 round 1), and this dispatch has none to give it.
+    //
     // GET_INDEX/SET_INDEX (node N7 pulls these two opcodes forward from N9's
     // scope — see emitBuildList's own note: V1_fresh_cell/V3_loopvar, N7's
     // own checkpoint probes, both index a list of the closures under test).
@@ -525,12 +539,12 @@ bool emitSimpleOp(Emitter& e, Op op) {
     // P2 peek: vm.cpp pops SET_INDEX's operands whole and pushes a genuinely
     // new result cell (P2's own peek family list, abstract_stack.h, does not
     // include it), so a plain call with no dup is exactly right.
-    case Op::GET_INDEX:
-        e.b.emit("invokestatic "
-                 "lox/LoxOps/getIndex(Ljava/lang/Object;Ljava/lang/Object;)"
-                 "Ljava/lang/Object;",
-                 -1);
-        return true;
+    //
+    // GET_INDEX itself is also pulled out to its own function, emitGetIndex
+    // (below emitSpillToArray) — same reason as NOT/PRINT above: its own
+    // collection operand can be a folded `match` result too (R3), a case
+    // SET_INDEX's own checkpoint programs never reach (see emitGetIndex's
+    // own note for why SET_INDEX is not changed the same way).
     case Op::SET_INDEX:
         e.b.emit("invokestatic "
                  "lox/LoxOps/setIndex(Ljava/lang/Object;Ljava/lang/Object;"
@@ -812,19 +826,45 @@ void emitDefineGlobal(Emitter& e, std::size_t i, const DecodedInstruction& in) {
 
 // N10's own residue: same defect as emitDefineGlobal's own fix above, on the
 // most common shape of all — `print match ...;` (match_http_status.lox,
-// match_state_machine.lox, match_dispatch.lox all use exactly this).
-// Pulled out of emitSimpleOp (which has no instruction index to give
+// match_state_machine.lox, match_dispatch.lox all use exactly this). Pulled
+// out of emitSimpleOp (which has no instruction index to give
 // loadNamedLocalAtZeroDepth) rather than threading one through every case
-// there; PRINT is the only member of that family this node can prove reaches
-// operandDepth() == 0 in a real program (see the PR body for the ones this
-// node leaves as a documented, still-throwing gap: CALL, BUILD_LIST, and the
-// two-operand arithmetic/comparison family, none of which any checkpoint or
-// probe here exercises with a folded operand).
+// there — emitNot and emitGetIndex, below, are pulled out the same way.
+//
+// R3 fix (PR #115 round 1): ADD and CALL stay a documented, still-throwing
+// gap, but not because no checkpoint reaches them with a folded operand — a
+// program that sandwiches a `match` between another live operand and its own
+// consumer (`1 + match ...`, `id(match ...)`) does reach this pass with
+// operandDepth() == 0 there too. Both are ALSO broken on `build/loxpp`
+// itself, with no JVM backend involved: `compileMatchBody`'s own
+// resultSlot/subjectSlot allocation (compiler.cpp) uses `m_localCount` alone,
+// blind to a sibling operand already live on the real VM stack, so the two
+// collide at the same absolute slot. `1 + match 1 { case 1 => 2 case _ => 3
+// };` is legal per spec/02-syntax.md (`match` is `primary`, so `term` can
+// hold it directly either side of `+`) and native still raises "Operands
+// must be numbers." — a pre-existing compiler defect, out of a backend
+// node's charter (brief.md section 8: no compiler changes) and not owed a
+// matching JVM answer, because no correct native answer exists to match (PR
+// body has the full repro set and native output for all five).
 void emitPrint(Emitter& e, std::size_t i, const DecodedInstruction& in) {
     if (e.analysis.before[i].operandDepth() == 0) {
         loadNamedLocalAtZeroDepth(e, i, in.offset);
     }
     e.b.emit("invokestatic lox/LoxOps/print(Ljava/lang/Object;)V", -1);
+}
+
+// R3 fix (PR #115 round 1): `!match ...` reaches operandDepth() == 0 the same
+// way PRINT does — `print !(match 1 {...});` is one of R3's own repro
+// programs (PR body). No checkpoint example uses this exact shape today; see
+// emitPrint's own note for ADD/CALL, the two shapes this pass still does not
+// attempt.
+void emitNot(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (e.analysis.before[i].operandDepth() == 0) {
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
+    }
+    e.b.emit("invokestatic lox/LoxOps/not(Ljava/lang/Object;)Ljava/lang/"
+             "Object;",
+             0);
 }
 
 void emitGetGlobal(Emitter& e, const DecodedInstruction& in) {
@@ -1014,7 +1054,20 @@ void emitSpillToArray(Emitter& e, int width, const char* buildSig) {
 // vm.cpp's own operand order — so BUILD_LIST's own spill-to-scratch is the
 // only new shuffle this addition needs. LoxOps.buildList (runtime/jvm)
 // copies the array into a fresh LoxList in the same order.
-void emitBuildList(Emitter& e, const DecodedInstruction& in) {
+//
+// R3 fix (PR #115 round 1): a one-element list whose sole element is a
+// `match` (`print [match 1 {...}];`) reaches operandDepth() == 0 with
+// nothing else live on the stack, the same shape emitPrint already folds —
+// load it first, so emitSpillToArray finds a genuine value to spill instead
+// of underflowing. A width above 1 with the LAST element folded is left
+// alone: that is the same sandwiched shape emitPrint's own note rules ADD/
+// CALL out of scope for (an earlier, un-counted sibling element collides
+// with `compileMatchBody`'s own slot allocation on `build/loxpp` itself), so
+// it is not a case this pass owes a matching answer either.
+void emitBuildList(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (in.byteOperand == 1 && e.analysis.before[i].operandDepth() == 0) {
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
+    }
     emitSpillToArray(e, in.byteOperand,
                      "invokestatic lox/LoxOps/buildList([Ljava/lang/"
                      "Object;)Llox/LoxList;");
@@ -1030,6 +1083,48 @@ void emitBuildMap(Emitter& e, const DecodedInstruction& in) {
     emitSpillToArray(e, 2 * in.byteOperand,
                      "invokestatic lox/LoxOps/buildMap([Ljava/lang/"
                      "Object;)Llox/LoxMap;");
+}
+
+// R3 fix (PR #115 round 1): GET_INDEX's own collection operand can be a
+// `match`'s folded result while the index is a genuine, already-pushed
+// value — `call`'s own subscript grammar always compiles the index after the
+// collection, so `(match 1 {...})[0]` leaves the JVM operand stack holding
+// only the index (before[i].operandDepth() == 1, not 0) by the time this
+// instruction runs. loadNamedLocalAtZeroDepth's own operandDepth() == 0
+// check therefore never fires here — but `localCount - 1` still names the
+// right slot regardless, because nothing between the fold and here declares
+// a new invisible var or crosses a CFG merge (CONSTANT's own emission never
+// touches localCount or lastInvisibleVarSlot; finishInstruction only updates
+// the latter at a declaring push's own offset), so the value the cross-check
+// would guard is unchanged from whatever it was right after the fold.
+//
+// Spill the already-pushed index to e.scratchSlot (not argScratchBase: a
+// chunk with a folded-collection GET_INDEX and no CALL/BUILD_LIST/BUILD_MAP
+// anywhere never reserves that region — computeMaxSpillWidth does not scan
+// for GET_INDEX — while scratchSlot is always reserved), load the collection
+// by its named local, then restore the index on top: the same reorder
+// emitCall/emitSpillToArray use to rebuild an out-of-order operand set.
+//
+// operandDepth() == 0 here (both operands folded, e.g. a match indexed by
+// another match) is not reached by any checkpoint program; it is left as the
+// pre-existing underflow, the same documented gap as ADD/CALL (emitPrint's
+// own note). SET_INDEX is not changed the same way: its own checkpoint
+// programs (V1_fresh_cell.lox, V3_loopvar.lox, and every example that
+// mutates a list/map by index) never index-assign directly into a bare
+// match result, so there is no reached shape to prove a fix against.
+void emitGetIndex(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    const char* sig = "invokestatic "
+                      "lox/LoxOps/getIndex(Ljava/lang/Object;Ljava/lang/"
+                      "Object;)Ljava/lang/Object;";
+    if (e.analysis.before[i].operandDepth() == 1) {
+        std::string scratch = std::to_string(e.scratchSlot);
+        e.b.emit("astore " + scratch, -1);
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
+        e.b.emit("aload " + scratch, +1);
+        e.b.emit(sig, -1);
+        return;
+    }
+    e.b.emit(sig, -1);
 }
 
 // Wraps `slot` in a fresh Object[1] ref-cell, seeded with the raw value
@@ -1737,8 +1832,18 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
 
     std::size_t nextIndex =
         i + (consumedFollowingPop || consumedFollowingJumpTable ? 2 : 1);
+    // R6 fix (PR #115 round 1): `in.op` reads GET_TAG here whenever this
+    // instruction fused away a following JUMP_TABLE — GET_TAG alone falls
+    // through, but the emitted `tableswitch` never does (every arm and the
+    // default are real jump targets, same as JUMP/LOOP/MATCH_ERROR). Reading
+    // `in.op` alone would call this a fall-through and let the next block
+    // leader's `trustCarryForward` (emitBody) skip its resync for the wrong
+    // reason — today it stays right only because a table's own entry depth
+    // and this pass's post-fusion depth both happen to be equal (see
+    // emitFusedGetTagJumpTable's own note), not because the check is sound.
     e.prevCanFallThrough = in.op != Op::JUMP && in.op != Op::LOOP &&
-                           in.op != Op::RETURN && in.op != Op::MATCH_ERROR;
+                           in.op != Op::RETURN && in.op != Op::MATCH_ERROR &&
+                           !consumedFollowingJumpTable;
     e.prevNaturalSuccessorOffset = (nextIndex < e.fn.instructions.size())
                                        ? e.fn.instructions[nextIndex].offset
                                        : -1;
@@ -1858,10 +1963,16 @@ void emitBody(Emitter& e, bool isScript,
             emitCall(e, in);
             break;
         case Op::BUILD_LIST:
-            emitBuildList(e, in);
+            emitBuildList(e, i, in);
             break;
         case Op::BUILD_MAP:
             emitBuildMap(e, in);
+            break;
+        case Op::NOT:
+            emitNot(e, i, in);
+            break;
+        case Op::GET_INDEX:
+            emitGetIndex(e, i, in);
             break;
         case Op::GET_ITER:
             emitGetIter(e, i, in);
