@@ -2065,6 +2065,10 @@ TEST(EmitProgram, DenseEnumMatchTableswitchDefaultTargetsMatchError) {
               std::string::npos)
         << "the default label does not lead straight to MATCH_ERROR in:\n"
         << c;
+
+    // R9 fix (PR #115 round 1): every other test in this file that emits
+    // jasmin calls this helper; this one was the only exception.
+    expectEveryJumpTargetIsLabeled(c);
 }
 
 // The sparse, compare-and-branch match form (a guard defeats table
