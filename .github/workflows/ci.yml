@@ -200,6 +200,9 @@ jobs:
 
       # Checkpoint 3: the self-hosted interpreter compiles, assembles, and
       # runs on the JVM backend, and interprets a Lox++ program correctly.
+      # An emptiness guard catches the case where both wrappers fail silently
+      # with empty stdout, which a bare `diff <(a) <(b)` would report as a
+      # match.
       - name: JVM differential suite - self-hosted interpreter on the JVM backend (N11)
         run: |
           docker run --rm \
@@ -207,7 +210,15 @@ jobs:
             -w /workspace \
             -e LANGUAGE=LOXPP \
             loxpp-dev-managed:latest \
-            bash -c "diff <(bootstrap/lox_wrapper.sh examples/fibonacci.lox) <(tools/loxpp_jvm_bootstrap.sh examples/fibonacci.lox)"
+            bash -c '
+              native_out=$(bootstrap/lox_wrapper.sh examples/fibonacci.lox)
+              jvm_out=$(tools/loxpp_jvm_bootstrap.sh examples/fibonacci.lox)
+              if [ -z "$native_out" ] || [ -z "$jvm_out" ]; then
+                echo "one or both wrappers gave empty stdout; a silent failure would look like a match"
+                exit 1
+              fi
+              diff <(printf "%s\n" "$native_out") <(printf "%s\n" "$jvm_out")
+            '
 
       # Checkpoint 4: every example, run through the self-hosted
       # interpreter, with the interpreter itself running on the JVM backend.
