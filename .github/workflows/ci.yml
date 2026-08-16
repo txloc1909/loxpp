@@ -160,3 +160,49 @@ jobs:
             -w /workspace \
             loxpp-dev-managed:latest \
             bash -c "tools/check_jvm_probes.sh"
+
+      # Node N11, the parity gate. Checkpoint 1: every probe is
+      # byte-identical on native and JVM stdout (differential runner, not
+      # only the check_jvm_probes.sh diff loop above).
+      - name: JVM differential suite - probes (N11)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh notes/translation-probes/"
+
+      # Checkpoint 2: the full example corpus on the JVM backend, zero
+      # failures. --exclude skips the map-iteration-order-sensitive examples
+      # (tools/jvm_excluded_examples.txt); the native path below still runs
+      # every example, unchanged.
+      - name: JVM differential suite - examples (N11)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/check_examples.py tools/loxpp_jvm.sh examples/ --exclude tools/jvm_excluded_examples.txt"
+
+      # Checkpoint 3: the self-hosted interpreter compiles, assembles, and
+      # runs on the JVM backend, and interprets a Lox++ program correctly.
+      - name: JVM differential suite - self-hosted interpreter on the JVM backend (N11)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev-managed:latest \
+            bash -c "diff <(bootstrap/lox_wrapper.sh examples/fibonacci.lox) <(tools/loxpp_jvm_bootstrap.sh examples/fibonacci.lox)"
+
+      # Checkpoint 4: every example, run through the self-hosted
+      # interpreter, with the interpreter itself running on the JVM backend.
+      # Zero failures, same exclusion list as checkpoint 2.
+      - name: JVM differential suite - examples through the self-hosted interpreter on the JVM backend (N11)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/check_examples.py tools/loxpp_jvm_bootstrap.sh examples/ --exclude tools/jvm_excluded_examples.txt"
