@@ -534,28 +534,93 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     nested-match reproductions all now produce output identical to
     `build/loxpp` on this branch — the cross-check never had to fire on any
     known repro, but the throw path exists for the case it is built for.
-  - **Fixed, N10 (PR #115).** `emitPrint`, `emitDefineGlobal`, `emitNot`, a
-    one-element `emitBuildList`, and a folded-collection `emitGetIndex` all
-    now route through the same `loadNamedLocalAtZeroDepth` (or, for
-    `GET_INDEX`, a spill-then-load reorder built on it — see its own note).
-    `examples/match_http_status.lox` and `examples/match_state_machine.lox`
-    (both `print match ...;`) now match `build/loxpp`.
-  - **Still open, unowned — two residues, neither silent.** (i) `ADD` and
-    `CALL` still underflow the JVM operand stack at emit time on a match
-    result sandwiched below another live operand (`1 + match ...`,
-    `id(match ...)`). This is NOT owed a fix: `compileMatchBody`'s own
+  - **Fixed, N10 (PR #115 round 1).** `emitPrint`, `emitDefineGlobal`,
+    `emitNot`, a one-element `emitBuildList`, and a folded-collection
+    `emitGetIndex` all now route through the same `loadNamedLocalAtZeroDepth`
+    (or, for `GET_INDEX`, a spill-then-load reorder built on it — see its own
+    note). `examples/match_http_status.lox` and
+    `examples/match_state_machine.lox` (both `print match ...;`) now match
+    `build/loxpp`.
+  - **Fixed, N10 (PR #115 round 2, R11/R12).** A folded match result on the
+    LEFT of a two-operand op — `(match ...) + 1`, `* 10`, `< 5`, `== 2` — and
+    the one-operand `-(match ...)` were refused before this round, though
+    `build/loxpp` answers every one of them correctly (round 1's own
+    rebuttal for `ADD` only tested the match on the RIGHT, where `build/loxpp`
+    itself fails; it does not cover this, the LEFT-operand shape). Every
+    two-operand rule parses its left side first (compiler.cpp), so the
+    match's result is always the folded operand when this shape occurs, and
+    the RHS is always the one genuine value still on the JVM stack —
+    `emitAdd`, `emitSubtract`, `emitMultiply`, `emitDivide`, `emitModulo`,
+    `emitEqual`, `emitGreater`, and `emitLess` (`reorderFoldedLeftOperand`)
+    spill the genuine RHS, load the named LHS, then restore the RHS, the same
+    reorder `emitGetIndex` already used for its own depth-1 shape; `emitNegate`
+    is `emitNot`'s own one-operand twin. All nine repro programs (PR #115
+    round 2, R11/R12 threads) now match `build/loxpp` exactly, and one unit
+    test per shape (`test_jvm_emit.cpp`) proves each one fails when its own
+    guard is reverted.
+  - **Still open, unowned — two residues, neither silent.** (i) `CALL`'s own
+    sandwiched-argument shape, and `ADD`'s own mirror-image and
+    both-sides-folded shapes (`1 + match ...`, `(match ...) + (match ...)`,
+    the match NOT on the immediate left), still underflow the JVM operand
+    stack at emit time on a match result sandwiched below another live
+    operand. This is NOT owed a fix: `compileMatchBody`'s own
     `resultSlot`/`subjectSlot` allocation (compiler.cpp) uses `m_localCount`
     alone, blind to a sibling operand already live on the real VM stack, so
     the two collide at the same slot — a pre-existing defect in
     `build/loxpp` itself, proven by five one-line programs in PR #115's own
-    body, three of which run correctly natively while `ADD`/`CALL`'s two do
-    not (`Operands must be numbers.` / `Can only call functions, classes and
-    enums.`, both exit 70). `1 + match 1 { case 1 => 2 case _ => 3 };` is
-    legal per spec/02-syntax.md (`match` is `primary`). Fixing this is a
-    compiler change, out of any backend node's charter (brief.md section 8);
-    no later emission node owns it either, since N10 is the last one. (ii)
-    the theoretical case where `loadNamedLocalAtZeroDepth`'s two slot
-    estimates agree and are BOTH wrong is not ruled out by its cross-check —
-    only real, per-edge merge verification closes it, which no node has
-    attempted. Neither residue blocks the mission's definition of done: no
-    example or the bootstrap interpreter sandwiches a `match` this way.
+    body plus two more this round (`1 + (match ...)`,
+    `(match ...) + (match ...)`), all raising `Operands must be numbers.` /
+    `Can only call functions, classes and enums.` on `build/loxpp` (exit 70)
+    while the JVM backend raises its own loud, non-silent underflow for the
+    same shapes — verified at this PR's own head commit that the reorder
+    fix above never fires here (`operandDepth() == 1` never matches these,
+    only `== 0` does, the same underflow as before). `1 + match 1 { case 1
+    => 2 case _ => 3 };` is legal per spec/02-syntax.md (`match` is
+    `primary`). Fixing this is a compiler change, out of any backend node's
+    charter (brief.md section 8); no later emission node owns it either,
+    since N10 is the last one. (ii) the theoretical case where
+    `loadNamedLocalAtZeroDepth`'s two slot estimates agree and are BOTH
+    wrong is not ruled out by its cross-check — only real, per-edge merge
+    verification closes it, which no node has attempted. No known program
+    reaches either residue; the mission's definition of done is not blocked.
+  - **Still open, unowned, REACHABLE — a third residue outside this node's
+    own file (PR #115 round 2, R13).** `and`/`or` (`compiler.cpp`'s `and_`/
+    `or_`) compile `JUMP_IF_FALSE` then either `POP` (true path, falls
+    through into the right operand) or `JUMP` straight to the shared exit
+    (false path, the left operand's own value stays live). When the left
+    operand is a folded `match` result, the two paths reach that shared
+    exit at genuinely different operand depths: the jump-taken edge still
+    holds the folded value (depth contribution 0, a named local), the
+    fall-through edge holds the right operand's own fresh value (depth 1).
+    `abstract_stack.cpp`'s `validateMergeConsistency` — N2's own
+    target-independent merge check, in a file this PR does not touch —
+    catches the disagreement and throws at ANALYSIS time, before
+    `jvm_emitter.cpp` ever runs:
+    ```
+    abstract_stack: merge disagreement in function '0' at offset 43:
+    incoming operand depths disagree (0 vs 1) — the JVM/CLR verifier would
+    reject this merge
+    ```
+    for `var t = true; print (match 1 {case 1 => t case _ => false}) and
+    "yes";`, which `build/loxpp` runs correctly (prints `yes`). Two more
+    one-line repros in the R13 thread: `(match ...) or "yes"` and
+    `t and (match ...)`. Unlike residue (i), this is a REAL loss of parity
+    for a legal, correctly-answered native program, not a pre-existing
+    compiler bug — but fixing it means changing which expressions N2 folds
+    into an invisible local, or relaxing `validateMergeConsistency`'s own
+    equivalence rule, in `abstract_stack.cpp`, an already-reviewed,
+    target-independent file no diff in this PR touches; that is a change to
+    N2's own design, which brief.md section 8 reserves for a research
+    referee, not an in-PR edit smuggled through N10. **Verified unreached by
+    every required gate as of this PR's head commit:** a pattern search
+    over all of `examples/*.lox`, the nine N10 checkpoint files, every
+    numbered translation probe (`01`-`27`, 26 files — `07` was never
+    assigned), and `bootstrap/loxpp_interpreter.lox` (2583 lines)
+    found no program that places a `match` expression directly on either
+    side of `and`/`or` — every existing use of `and`/`or` inside a `match`
+    arm's own body is a different, unrelated shape that does not fold
+    anything at this merge. Owner: **N11**, the final differential gate,
+    the same way N11 already owns `huffman.lox`'s unresolved tie-break
+    divergence — N11 is positioned to prove or disprove reachability
+    against the full corpus as it grows, and to call a researcher referee
+    on N2's fold model if the corpus ever reaches this shape.

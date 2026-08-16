@@ -2226,19 +2226,20 @@ TEST(EmitScript, NotOfAPlainMatchLoadsTheResultNotTheSubject) {
     // Nothing left on the real JVM operand stack for NOT to consume
     // directly (N2 folded the match's result into a named local, slot 3):
     // it must reload before calling LoxOps.not.
-    EXPECT_NE(j.find("aload 3\n"
-                     "    invokestatic lox/LoxOps/not(Ljava/lang/Object;)Ljava/lang/"
-                     "Object;\n"
-                     "    invokestatic lox/LoxOps/print(Ljava/lang/Object;)V\n"),
-              std::string::npos)
+    EXPECT_NE(
+        j.find("aload 3\n"
+               "    invokestatic lox/LoxOps/not(Ljava/lang/Object;)Ljava/lang/"
+               "Object;\n"
+               "    invokestatic lox/LoxOps/print(Ljava/lang/Object;)V\n"),
+        std::string::npos)
         << j;
     expectEveryJumpTargetIsLabeled(j);
 }
 
 TEST(EmitScript, BuildListOfOneFoldedMatchElementLoadsTheResultNotTheSubject) {
     MemoryManager mm;
-    DecodedFunction fn = decodeScript(
-        "print [match 1 { case 1 => 2 case _ => 3 }];\n", mm);
+    DecodedFunction fn =
+        decodeScript("print [match 1 { case 1 => 2 case _ => 3 }];\n", mm);
     FunctionStackAnalysis analysis = analyzeStack(fn);
     std::string j;
     ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
@@ -2246,17 +2247,18 @@ TEST(EmitScript, BuildListOfOneFoldedMatchElementLoadsTheResultNotTheSubject) {
     // The match's own result (slot 3) must reload and spill to the scratch
     // slot emitSpillToArray expects, instead of underflowing on an empty
     // real operand stack.
-    EXPECT_NE(j.find("aload 3\n"
-                     "    astore 7\n"
-                     "    iconst_1\n"
-                     "    anewarray java/lang/Object\n"
-                     "    dup\n"
-                     "    iconst_0\n"
-                     "    aload 7\n"
-                     "    aastore\n"
-                     "    invokestatic "
-                     "lox/LoxOps/buildList([Ljava/lang/Object;)Llox/LoxList;\n"),
-              std::string::npos)
+    EXPECT_NE(
+        j.find("aload 3\n"
+               "    astore 7\n"
+               "    iconst_1\n"
+               "    anewarray java/lang/Object\n"
+               "    dup\n"
+               "    iconst_0\n"
+               "    aload 7\n"
+               "    aastore\n"
+               "    invokestatic "
+               "lox/LoxOps/buildList([Ljava/lang/Object;)Llox/LoxList;\n"),
+        std::string::npos)
         << j;
     expectEveryJumpTargetIsLabeled(j);
 }
@@ -2290,8 +2292,8 @@ TEST(EmitScript, GetIndexOfAFoldedMatchCollectionLoadsTheResultNotTheSubject) {
 // confirmed locally, then restored.
 TEST(EmitScript, AddOfAFoldedMatchLeftOperandReordersTheGenuineRightOperand) {
     MemoryManager mm;
-    DecodedFunction fn = decodeScript(
-        "print (match 1 { case 1 => 2 case _ => 3 }) + 1;\n", mm);
+    DecodedFunction fn =
+        decodeScript("print (match 1 { case 1 => 2 case _ => 3 }) + 1;\n", mm);
     FunctionStackAnalysis analysis = analyzeStack(fn);
     std::string j;
     ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
@@ -2299,12 +2301,13 @@ TEST(EmitScript, AddOfAFoldedMatchLeftOperandReordersTheGenuineRightOperand) {
     // The RHS (1) is spilled to the scratch slot (5), the folded LHS (slot
     // 3) reloads, then the RHS is restored on top — [LHS, RHS] in source
     // order, whichever one the real operand stack actually still held.
-    EXPECT_NE(j.find("astore 5\n"
-                     "    aload 3\n"
-                     "    aload 5\n"
-                     "    invokestatic lox/LoxOps/add(Ljava/lang/Object;Ljava/lang/"
-                     "Object;)Ljava/lang/Object;\n"),
-              std::string::npos)
+    EXPECT_NE(
+        j.find("astore 5\n"
+               "    aload 3\n"
+               "    aload 5\n"
+               "    invokestatic lox/LoxOps/add(Ljava/lang/Object;Ljava/lang/"
+               "Object;)Ljava/lang/Object;\n"),
+        std::string::npos)
         << j;
     expectEveryJumpTargetIsLabeled(j);
 }
@@ -2320,11 +2323,13 @@ TEST(EmitScript, NegateOfAPlainMatchLoadsTheResultNotTheSubject) {
     std::string j;
     ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
 
-    EXPECT_NE(j.find("aload 3\n"
-                     "    invokestatic lox/LoxOps/negate(Ljava/lang/Object;)Ljava/lang/"
-                     "Object;\n"
-                     "    invokestatic lox/LoxOps/print(Ljava/lang/Object;)V\n"),
-              std::string::npos)
+    EXPECT_NE(
+        j.find(
+            "aload 3\n"
+            "    invokestatic lox/LoxOps/negate(Ljava/lang/Object;)Ljava/lang/"
+            "Object;\n"
+            "    invokestatic lox/LoxOps/print(Ljava/lang/Object;)V\n"),
+        std::string::npos)
         << j;
     expectEveryJumpTargetIsLabeled(j);
 }
@@ -2337,20 +2342,21 @@ TEST(EmitScript, NegateOfAPlainMatchLoadsTheResultNotTheSubject) {
 // shared code path.
 TEST(EmitScript, EqualOfAFoldedMatchLeftOperandReordersTheGenuineRightOperand) {
     MemoryManager mm;
-    DecodedFunction fn = decodeScript(
-        "print (match 1 { case 1 => 2 case _ => 3 }) == 2;\n", mm);
+    DecodedFunction fn =
+        decodeScript("print (match 1 { case 1 => 2 case _ => 3 }) == 2;\n", mm);
     FunctionStackAnalysis analysis = analyzeStack(fn);
     std::string j;
     ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
 
-    EXPECT_NE(j.find("astore 5\n"
-                     "    aload 3\n"
-                     "    aload 5\n"
-                     "    invokestatic lox/LoxOps/equal(Ljava/lang/Object;Ljava/lang/"
-                     "Object;)Z\n"
-                     "    invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/"
-                     "Boolean;\n"),
-              std::string::npos)
+    EXPECT_NE(
+        j.find("astore 5\n"
+               "    aload 3\n"
+               "    aload 5\n"
+               "    invokestatic lox/LoxOps/equal(Ljava/lang/Object;Ljava/lang/"
+               "Object;)Z\n"
+               "    invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/"
+               "Boolean;\n"),
+        std::string::npos)
         << j;
     expectEveryJumpTargetIsLabeled(j);
 }

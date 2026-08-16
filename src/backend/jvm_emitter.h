@@ -6,20 +6,30 @@
 // and upvalues; node N8 adds P5+P4, classes/methods/super; node N9 adds
 // aggregates and for-in; node N10 adds P8, match/enum dispatch proper
 // (GET_TAG, JUMP_TABLE, enum-ctor CONSTANT) and its own residue (the
-// loadNamedLocalAtZeroDepth fix for PRINT, DEFINE_GLOBAL, NOT, one-element
-// BUILD_LIST, and a folded-collection GET_INDEX — see emitPrint's,
-// emitDefineGlobal's, emitNot's, emitBuildList's, and emitGetIndex's own
-// notes); notes/bytecode-translation-problems.md). Lowers one function's
-// chunk to Jasmin (.j) text, consuming N0's decoder, N1's CFG/labels, N2's
-// abstract-stack analysis, and N3's capture analysis. This is the last
-// emission node (N4-N10): every real Op the compiler emits now has a
-// handler, so this pass aborts loudly on a shape a real handler does not
-// cover yet (test_jvm_emit.cpp's own EmitScript.AbortsOnUnsupportedOpcode
-// documents one; ADD and CALL reaching a bare, unconsumed `match` result at
-// operand depth 0 are two more, and PR #115's own body records why: both
-// shapes are already broken on `build/loxpp` itself, so this pass is not
-// withholding a correct answer, only declining to invent one) — a real,
-// un-handled gap still fails loudly, the same as before.
+// loadNamedLocalAtZeroDepth fix for PRINT, DEFINE_GLOBAL, NOT, NEGATE,
+// one-element BUILD_LIST, a folded-collection GET_INDEX, and — via the
+// reorderFoldedLeftOperand spill-then-load, the same reorder GET_INDEX
+// already used — ADD, SUBTRACT, MULTIPLY, DIVIDE, MODULO, EQUAL, GREATER,
+// and LESS's own folded-LEFT-operand shape (`(match ...) + 1`, PR #115
+// round 2, R11/R12) — see emitPrint's, emitDefineGlobal's, emitNot's,
+// emitNegate's, emitBuildList's, emitGetIndex's, and
+// reorderFoldedLeftOperand's own notes);
+// notes/bytecode-translation-problems.md). Lowers one function's chunk to
+// Jasmin (.j) text, consuming N0's decoder, N1's CFG/labels, N2's
+// abstract-stack analysis, and N3's capture analysis. This is the last emission
+// node (N4-N10): every real Op the compiler emits now has a handler, so this
+// pass aborts loudly on a shape a real handler does not cover yet
+// (test_jvm_emit.cpp's own EmitScript.AbortsOnUnsupportedOpcode documents one;
+// CALL, and ADD's own mirror-image and both-sides-folded shapes, reaching a
+// bare, unconsumed `match` result at operand depth 0 are the ones still open,
+// and PR #115's own body records why: every one of them is already broken on
+// `build/loxpp` itself, so this pass is not withholding a correct answer,
+// only declining to invent one) — a real, un-handled gap still fails
+// loudly, the same as before. A separate, REACHABLE gap exists outside
+// this file: `and`/`or` over a folded `match` operand fails at analysis
+// time, in N2's own abstract_stack.cpp, before this pass ever runs — see
+// the GAP entry in notes/bytecode-translation-problems.md for the full
+// account and why N10 does not own the fix.
 //
 // N7 also lowers BUILD_LIST/GET_INDEX/SET_INDEX — three opcodes
 // notes/backend-implementation-dag.md assigns to N9 (aggregates and
