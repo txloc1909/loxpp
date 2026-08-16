@@ -54,6 +54,20 @@ probes=(
     "notes/translation-probes/17_super_value.lox"
     "examples/class_dispatch.lox"
     "examples/shapes.lox"
+    # Node N10: match/enum dispatch (GET_TAG, JUMP_TABLE, enum-ctor CONSTANT,
+    # the loadNamedLocalAtZeroDepth fix for PRINT/DEFINE_GLOBAL of a bare
+    # match result).
+    "notes/translation-probes/13_enum_match.lox"
+    "notes/translation-probes/14_enum_payload.lox"
+    "examples/enum_match.lox"
+    "examples/enum_result.lox"
+    "examples/enum_tree.lox"
+    "examples/match_dispatch.lox"
+    "examples/match_http_status.lox"
+    "examples/match_state_machine.lox"
+    "examples/or_pattern_demo.lox"
+    "examples/at_binding_demo.lox"
+    "examples/string_list_pattern_demo.lox"
 )
 
 # Probes that must FAIL on both sides (node N6 checkpoint 4, PR #110 R2): a
@@ -63,6 +77,13 @@ probes=(
 # (both empty, here).
 error_probes=(
     "notes/translation-probes/24_call_before_closure.lox"
+    # Node N10 checkpoint 2: every arm names a real constructor (so
+    # checkEnumExhaustiveness accepts it as exhaustive) but every guard is
+    # false at run time, so no arm actually accepts the value — a real,
+    # reachable MATCH_ERROR (see the probe's own header comment for why the
+    # JUMP_TABLE opcode's own default-branch fallthrough is not reachable
+    # this way instead).
+    "notes/translation-probes/26_enum_match_dispatch_and_error.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
