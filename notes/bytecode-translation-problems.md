@@ -532,8 +532,10 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     label, `localCount - 1` and `lastInvisibleVarSlot` must agree, or
     emission throws at emit time rather than guess. T1/T2/T3 and R9's three
     nested-match reproductions all now produce output identical to
-    `build/loxpp` on this branch — the cross-check never had to fire on any
-    known repro, but the throw path exists for the case it is built for.
+    `build/loxpp` on this branch — the cross-check did not fire on any of
+    these repros. **Correction (PR #115 round 4, R22): the cross-check DOES
+    fire on a later-found, reachable repro family — see the third residue in
+    the N10 GAP entry, below, for the four known programs that trigger it.**
   - **Fixed, N10 (PR #115 round 1).** `emitPrint`, `emitDefineGlobal`,
     `emitNot`, a one-element `emitBuildList`, and a folded-collection
     `emitGetIndex` all now route through the same `loadNamedLocalAtZeroDepth`
@@ -573,8 +575,10 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     to cover every opcode; R16 is the proof, disproving the THIRD version of
     this very GAP entry within one round.
     The fix is structural, not one more enumeration. `jvm_emitter.cpp`'s
-    `nativePops(Op, DecodedInstruction)` is an exhaustive `switch` over `Op`
-    (no `default`, so a missing opcode fails to compile) stating how many
+    `nativePops(Op, DecodedInstruction)` is an exhaustive `switch` over `Op`,
+    no `default` (clang's `-Wswitch` warns on a missing enumerator; this
+    project builds with neither `-Werror` nor `-Wall`, so a missing row
+    still compiles and throws only at run time) stating how many
     operand-stack cells `src/vm.cpp` pops for that instruction.
     `normalizeFoldedOperands`, one step in the dispatch loop every
     instruction passes through alike, compares that count against N2's own
@@ -651,7 +655,7 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     implementer, the reviewer, and the referee each independently verified no
     required gate reaches it: a pattern search over all of `examples/*.lox`,
     the nine N10 checkpoint files, every numbered translation probe
-    (`01`-`27`, 26 files — `07` was never assigned), and
+    (`01`-`28`, 27 files — `07` was never assigned), and
     `bootstrap/loxpp_interpreter.lox` (2583 lines) found no program that
     places a `match` expression directly on either side of `and`/`or`. N11
     does not fix this gap and does not own the fix; N11's own differential
@@ -660,3 +664,36 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     (brief.md section 7), not something N11 resolves alone. This gap stays
     unassigned until a program actually reaches it or a researcher rules
     on N2's fold model if the corpus ever reaches this shape.
+  - **Still open, unowned, REACHABLE, not silent — a folded operand plus a
+    sibling operand ending in `and`/`or` (R22, PR #115 round 4).** Distinct
+    from the residue above: there, `and`/`or` sits ABOVE the fold, and the
+    analysis-time merge check catches it. Here, a folded `match` result is
+    one operand of an ordinary consumer (`ADD`, `SET_PROPERTY`, `BUILD_LIST`,
+    …), and a LATER sibling operand of that SAME consumer ends in `and`/`or`.
+    The consumer's own offset is then the `and`/`or` join label.
+    `normalizeFoldedOperands` computes `deficit == 1` correctly and calls
+    `loadNamedLocalAtZeroDepth`, but that function's own cross-check, at a
+    label, compares `localCount - 1` against `lastInvisibleVarSlot` and the
+    two disagree at THIS join, so it refuses rather than guess. Four repros,
+    each `enum E { A B }` then one line, all correct on `build/loxpp`:
+    ```lox
+    print [match A() { case A => 1 case B => 2 }, (true and 5)];
+    print [match A() { case A => 1 case B => 2 }, (true or 5)];
+    print (match A() { case A => 1 case B => 2 }) + (true and 5);
+    class K { init(v) { this.v = v; } }
+    var k = K(3);
+    (match A() { case A => k case B => k }).v = (true and 8);
+    ```
+    Each throws `jvm_emitter: offset <n> is a CFG merge; localCount - 1 (1)
+    disagrees with the forward-walk tracker (2)` instead of matching
+    `build/loxpp`. Adding a THIRD, later sibling operand moves the join off
+    the consumer's own offset, and the program then works (`[match A() {
+    case A => 1 case B => 2 }, (false or 5), 9]` matches `build/loxpp`
+    exactly). No required gate reaches this shape — `check_jvm_probes.sh`
+    (44 probes), `check_examples.py` (56 examples), and
+    `bootstrap/loxpp_interpreter.lox` all stay green. The failure is loud,
+    so no output is silently wrong. The real fix is the same one the residue
+    above needs: real, per-edge merge verification in place of the
+    cross-check's two estimates, a recorded residue from PR #113, still
+    outside N10's charter. Not assigned to any node, for the same reason as
+    the residue above.

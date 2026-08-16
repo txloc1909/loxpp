@@ -1866,9 +1866,12 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
 // of them: `normalizeFoldedOperands`, below, is the ONE place that reads it.
 //
 // Exhaustive `switch` over `Op`, no `default` — clang's `-Wswitch` (on by
-// default) flags a missing enumerator here, so a new opcode needs a row
-// before it compiles, not a bespoke branch discovered by a fifth review
-// round. `std::nullopt` marks a CUSTOM row: the peek/locals-model family,
+// default) warns on a missing enumerator here (this project builds with
+// neither `-Werror` nor `-Wall`, so the warning does not stop the build; a
+// missing row instead throws below, at run time, the first time emission
+// reaches it), so a new opcode needs a row to run correctly, not a bespoke
+// branch discovered by a fifth review round. `std::nullopt` marks a CUSTOM
+// row: the peek/locals-model family,
 // where a value survives past the instruction instead of being net-popped
 // (P2's own family — SET_LOCAL/SET_GLOBAL/SET_UPVALUE/JUMP_IF_FALSE), a
 // reclaim that never touches the operand stack at all (POP/CLOSE_UPVALUE),
@@ -1880,19 +1883,28 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
 // implemented). `normalizeFoldedOperands` never inspects a CUSTOM row's own
 // handler at all — those keep working exactly as they already do.
 //
-// Every other row states a literal pop count, read straight off `chunk.h`'s
-// own per-opcode comments and confirmed against the `vm.cpp` case bodies
-// (jvm_emitter.h's own layout comment cites the ones that needed a second
-// look: SET_PROPERTY pops the value AND the instance, net 2; DEFINE_METHOD
-// pops only the closure, net 1, because the class survives via `peek(1)`
-// exactly the way P2's own peek family survives — but DEFINE_METHOD is not
-// itself a peek/locals-model row, because nothing about ITS OWN result
-// depends on a stale tracker the way SET_LOCAL's does). A row being ordinary
-// here does not mean its own operand is ever actually foldable in a real
-// program — GET_SUPER's and SUPER_INVOKE's own superclass/self operands are
-// never a `match` result, so `deficit` is always negative for them in any
-// program the compiler accepts; a plain, honest pop count costs nothing
-// there and needs no separate CUSTOM carve-out to stay safe.
+// Every other row states ONE number, and it is always the same measure: how
+// many operand-stack cells this instruction READS from the stack, whatever
+// it pushes back afterward. That is not always the instruction's net stack
+// change, and two rows once confused the two measures (R19/R23, PR #115
+// round 5). SET_PROPERTY reads the instance AND the value (2 cells: `peek(1)`,
+// `peek(0)`), pops both, then pushes the value back — net change -1, row
+// states 2. DEFINE_METHOD reads the class AND the closure (2 cells, the same
+// `peek(1)`/`peek(0)` shape), but pops only the closure and leaves the class
+// in place for the next `DEFINE_METHOD` to find — net change -1, row states
+// 2 as well: the class is a real cell this instruction needs physically
+// present, even though the instruction itself never removes it. GET_SUPER is
+// the same shape again: it pops the superclass itself, then `bindMethod`
+// pops `this` from underneath it (vm.cpp:1131) — 2 cells read, 1 pushed
+// back. Read straight off `chunk.h`'s own per-opcode comments and confirmed
+// against every `vm.cpp` case body, including any helper the case calls. A
+// row being ordinary here does not mean its own operand is ever actually
+// foldable in a real program — GET_SUPER's, SUPER_INVOKE's, and
+// DEFINE_METHOD's own class/superclass/self operands are never a `match`
+// result, so `deficit` is never positive for them (zero in the ordinary
+// case, negative under an outer expression) in any program the compiler
+// accepts; a plain, honest read count costs nothing there and needs no
+// separate CUSTOM carve-out to stay safe.
 std::optional<int> nativePops(Op op, const DecodedInstruction& in) {
     switch (op) {
     // Push-only, or a control-flow op with nothing of its own to net-pop.
@@ -1907,14 +1919,12 @@ std::optional<int> nativePops(Op op, const DecodedInstruction& in) {
     case Op::CLOSURE:
     case Op::MATCH_ERROR:
         return 0;
-    // One operand net-popped.
+    // One operand read.
     case Op::NEGATE:
     case Op::NOT:
     case Op::PRINT:
     case Op::DEFINE_GLOBAL:
     case Op::GET_PROPERTY:
-    case Op::DEFINE_METHOD: // pops the closure only; the class survives
-    case Op::GET_SUPER:     // pops the superclass only; never foldable
     case Op::GET_TAG:
     case Op::INSTANCEOF:
     case Op::IS_SEQ:
@@ -1922,7 +1932,7 @@ std::optional<int> nativePops(Op op, const DecodedInstruction& in) {
     case Op::ITER_HAS_NEXT:
     case Op::ITER_NEXT:
         return 1;
-    // Two operands net-popped.
+    // Two operands read.
     case Op::EQUAL:
     case Op::GREATER:
     case Op::LESS:
@@ -1933,9 +1943,14 @@ std::optional<int> nativePops(Op op, const DecodedInstruction& in) {
     case Op::MODULO:
     case Op::GET_INDEX:
     case Op::IN:
-    case Op::SET_PROPERTY:
+    case Op::SET_PROPERTY:  // reads the instance AND the value; pops both,
+                            // pushes the value back
+    case Op::DEFINE_METHOD: // reads the class AND the closure (`peek(1)`,
+                            // `peek(0)`); pops only the closure, class stays
+    case Op::GET_SUPER:     // pops the superclass AND `this` (bindMethod's own
+                            // pop, vm.cpp:1131); never foldable
         return 2;
-    // Three operands net-popped.
+    // Three operands read.
     case Op::SET_INDEX:
     case Op::SLICE:
         return 3;

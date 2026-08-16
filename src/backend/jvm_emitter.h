@@ -17,8 +17,10 @@
 // three-line program. The structural reason no enumeration can stay true:
 // nothing forced it to cover every opcode. This pass now states the fix as
 // a STRUCTURAL claim instead. `jvm_emitter.cpp`'s own `nativePops` is an
-// exhaustive table over `Op` (no `default`, so a missing opcode fails to
-// compile) stating how many operand-stack cells `src/vm.cpp` pops for each
+// exhaustive table over `Op`, no `default` (clang's `-Wswitch` warns on a
+// missing enumerator; this project builds with neither `-Werror` nor
+// `-Wall`, so a missing row still compiles and throws only at run time)
+// stating how many operand-stack cells `src/vm.cpp` pops for each
 // one; `normalizeFoldedOperands`, one pre-dispatch step every instruction
 // gets alike (see its own note, above `emitBody`), compares that count
 // against N2's own `operandDepth()` and repairs exactly the deficit. A
@@ -26,9 +28,11 @@
 // operands — `compileMatchBody` folds a `match` expression's result into its
 // own named local before any later sibling operand is even parsed — so a
 // deficit of 1 (the bottom operand missing, every genuine sibling still on
-// the real stack) always has a correct, matching native answer, and this
-// pass now supplies it for every `nativePops`-covered opcode alike, not
-// site by site.
+// the real stack) is repaired for every `nativePops`-covered opcode alike,
+// not site by site — EXCEPT when the consumer sits on a CFG merge where
+// `loadNamedLocalAtZeroDepth`'s own two slot estimates disagree, where it
+// stops loudly instead (R22, PR #115 round 4; see the third GAP residue
+// below).
 //
 // A deficit of 2 or more is not owed a fix, for one reason verified across
 // both the CALL/BUILD_LIST/BUILD_MAP family (round 1's R3) and the ADD
@@ -44,6 +48,19 @@
 // abstract_stack.cpp, before this pass ever runs — deferred by referee
 // ruling, PR #115 (see the GAP entry in notes/bytecode-translation-problems.md
 // for the full account).
+//
+// A third, REACHABLE gap exists inside this file (R22, PR #115 round 4).
+// When a folded match result is one operand of a consumer that itself sits
+// at an `and`/`or` join label, and a LATER sibling operand of the same
+// consumer is the other side of that `and`/`or`, `loadNamedLocalAtZeroDepth`
+// computes two disagreeing slot estimates for the join and refuses instead
+// of guessing — even though `deficit == 1` and `build/loxpp` answers the
+// program correctly. `print (match A() {case A => 1 case B => 2}) + (true
+// and 5);` is one repro; see the GAP entry in
+// notes/bytecode-translation-problems.md for the rest. The failure is loud,
+// not silent, and no required gate reaches it. The real fix is per-edge
+// merge verification, a recorded residue from PR #113, still outside this
+// node's charter.
 //
 // N7 also lowers BUILD_LIST/GET_INDEX/SET_INDEX — three opcodes
 // notes/backend-implementation-dag.md assigns to N9 (aggregates and
