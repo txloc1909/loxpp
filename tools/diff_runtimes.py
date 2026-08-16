@@ -71,8 +71,49 @@ FAMILY_RULES: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
+def strip_comments_and_strings(source: str) -> str:
+    """Removes '// ...' line comments and blanks string literal contents.
+
+    classify_opcode_family scans only code with this. A file header comment
+    such as "// Demonstrates: ... class-free ... in one file" must not name
+    the P5, P7, or P3 families; only real syntax may.
+    """
+    out: list[str] = []
+    in_string = False
+    i = 0
+    n = len(source)
+    while i < n:
+        ch = source[i]
+        if in_string:
+            if ch == "\\" and i + 1 < n:
+                out.append("xx")
+                i += 2
+                continue
+            if ch == '"':
+                in_string = False
+                out.append(ch)
+                i += 1
+                continue
+            out.append("x")
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "/" and i + 1 < n and source[i + 1] == "/":
+            while i < n and source[i] != "\n":
+                i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def classify_opcode_family(source: str) -> list[str]:
-    return [label for label, pattern in FAMILY_RULES if pattern.search(source)]
+    code_only = strip_comments_and_strings(source)
+    return [label for label, pattern in FAMILY_RULES if pattern.search(code_only)]
 
 
 def parse_exclude_file(path: Path) -> dict[str, str]:
