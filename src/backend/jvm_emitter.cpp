@@ -453,13 +453,16 @@ void emitConstant(Emitter& e, const DecodedInstruction& in) {
     }
 }
 
-// True for the "pure stack effect, no operand" family: literals, arithmetic,
-// comparisons, GET_INDEX/SET_INDEX and peers. One `Emitter::b.emit` call
-// each, none needing anything from `in` beyond the opcode itself. NOT and
-// GET_INDEX moved out to their own functions (R3, PR #115 round 1) — see
-// emitNot's and emitGetIndex's own notes — because a folded `match` result
-// needs the instruction index this dispatch does not carry; PRINT moved out
-// the same way before this PR, for the same reason.
+// True for the "pure stack effect, no operand" family: literals,
+// GET_INDEX/SET_INDEX and peers. One `Emitter::b.emit` call each, none
+// needing anything from `in` beyond the opcode itself. NOT, NEGATE, the two
+// index ops, and the eight two-operand arithmetic/comparison ops (ADD,
+// SUBTRACT, MULTIPLY, DIVIDE, MODULO, EQUAL, LESS, GREATER) all moved out to
+// their own functions (R3, PR #115 round 1; R11/R12, round 2) — see
+// emitNot's, emitNegate's, emitGetIndex's, and reorderFoldedLeftOperand's
+// own notes — because a folded `match` result needs the instruction index this
+// dispatch does not carry; PRINT moved out the same way before this PR, for
+// the same reason.
 bool emitSimpleOp(Emitter& e, Op op) {
     switch (op) {
     case Op::NIL:
@@ -470,60 +473,6 @@ bool emitSimpleOp(Emitter& e, Op op) {
         return true;
     case Op::FALSE:
         e.b.emit("getstatic java/lang/Boolean/FALSE Ljava/lang/Boolean;", +1);
-        return true;
-    case Op::EQUAL:
-        e.b.emit("invokestatic lox/LoxOps/equal(Ljava/lang/Object;Ljava/lang/"
-                 "Object;)Z",
-                 -1);
-        e.b.emit("invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/Boolean;",
-                 0);
-        return true;
-    case Op::GREATER:
-        e.b.emit("invokestatic lox/LoxOps/greater(Ljava/lang/Object;Ljava/lang/"
-                 "Object;)Z",
-                 -1);
-        e.b.emit("invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/Boolean;",
-                 0);
-        return true;
-    case Op::LESS:
-        e.b.emit("invokestatic lox/LoxOps/less(Ljava/lang/Object;Ljava/lang/"
-                 "Object;)Z",
-                 -1);
-        e.b.emit("invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/Boolean;",
-                 0);
-        return true;
-    case Op::NEGATE:
-        // Returns Object already (auto-boxed inside LoxOps.negate itself).
-        e.b.emit("invokestatic lox/LoxOps/negate(Ljava/lang/Object;)Ljava/lang/"
-                 "Object;",
-                 0);
-        return true;
-    case Op::ADD:
-        e.b.emit("invokestatic lox/LoxOps/add(Ljava/lang/Object;Ljava/lang/"
-                 "Object;)Ljava/lang/Object;",
-                 -1);
-        return true;
-    case Op::SUBTRACT:
-        e.b.emit(
-            "invokestatic lox/LoxOps/subtract(Ljava/lang/Object;Ljava/lang/"
-            "Object;)Ljava/lang/Object;",
-            -1);
-        return true;
-    case Op::MULTIPLY:
-        e.b.emit(
-            "invokestatic lox/LoxOps/multiply(Ljava/lang/Object;Ljava/lang/"
-            "Object;)Ljava/lang/Object;",
-            -1);
-        return true;
-    case Op::DIVIDE:
-        e.b.emit("invokestatic lox/LoxOps/divide(Ljava/lang/Object;Ljava/lang/"
-                 "Object;)Ljava/lang/Object;",
-                 -1);
-        return true;
-    case Op::MODULO:
-        e.b.emit("invokestatic lox/LoxOps/modulo(Ljava/lang/Object;Ljava/lang/"
-                 "Object;)Ljava/lang/Object;",
-                 -1);
         return true;
     // NOT is pulled out to its own function, emitNot (below emitDefineGlobal)
     // — the same reason PRINT was pulled out: it needs an instruction index
@@ -846,6 +795,10 @@ void emitDefineGlobal(Emitter& e, std::size_t i, const DecodedInstruction& in) {
 // node's charter (brief.md section 8: no compiler changes) and not owed a
 // matching JVM answer, because no correct native answer exists to match (PR
 // body has the full repro set and native output for all five).
+//
+// CALL's own sandwiched-argument shape is the one residue this stays true
+// for. ADD and its seven binary peers no longer belong on this list — see
+// reorderFoldedLeftOperand's own note (R11, PR #115 round 2).
 void emitPrint(Emitter& e, std::size_t i, const DecodedInstruction& in) {
     if (e.analysis.before[i].operandDepth() == 0) {
         loadNamedLocalAtZeroDepth(e, i, in.offset);
@@ -856,7 +809,7 @@ void emitPrint(Emitter& e, std::size_t i, const DecodedInstruction& in) {
 // R3 fix (PR #115 round 1): `!match ...` reaches operandDepth() == 0 the same
 // way PRINT does — `print !(match 1 {...});` is one of R3's own repro
 // programs (PR body). No checkpoint example uses this exact shape today; see
-// emitPrint's own note for ADD/CALL, the two shapes this pass still does not
+// emitPrint's own note for CALL, the one shape this pass still does not
 // attempt.
 void emitNot(Emitter& e, std::size_t i, const DecodedInstruction& in) {
     if (e.analysis.before[i].operandDepth() == 0) {
@@ -865,6 +818,124 @@ void emitNot(Emitter& e, std::size_t i, const DecodedInstruction& in) {
     e.b.emit("invokestatic lox/LoxOps/not(Ljava/lang/Object;)Ljava/lang/"
              "Object;",
              0);
+}
+
+// R12 fix (PR #115 round 2): NEGATE is NOT's own one-operand twin.
+// `-(match 1 {...})` reaches operandDepth() == 0 exactly the same way
+// `!(match 1 {...})` does, and it had no branch for it before this round —
+// the only difference from emitNot is the callee name and that
+// LoxOps.negate already returns a boxed Object.
+void emitNegate(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (e.analysis.before[i].operandDepth() == 0) {
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
+    }
+    e.b.emit("invokestatic lox/LoxOps/negate(Ljava/lang/Object;)Ljava/lang/"
+             "Object;",
+             0);
+}
+
+// R11 fix (PR #115 round 2): `(match ...) OP x` folds only the LEFT
+// operand. Every two-operand rule parses its left side before its right
+// (compiler.cpp's own binary/comparison precedence rules), so the match's
+// result is already folded into its own named local by the time the RHS
+// pushes a genuine value — `before[i].operandDepth() == 1` here means
+// exactly one real value sits on the JVM operand stack (the RHS).
+//
+// The reorder is the one emitGetIndex already uses for its own depth-1
+// shape: spill the genuine operand to e.scratchSlot, load the named LHS by
+// `loadNamedLocalAtZeroDepth`, then restore the genuine operand on top — so
+// the call below always sees [LHS, RHS] in source order, regardless of
+// which one the JVM operand stack actually still held.
+//
+// operandDepth() == 0 (BOTH operands folded, e.g. `(match ...) + (match
+// ...)`) is not reached by any checkpoint program. It stays the same
+// documented, pre-existing underflow as CALL's own sandwiched argument (see
+// the GAP entry in bytecode-translation-problems.md): `compileMatchBody`'s
+// own slot allocation collides with a sibling operand already on the stack,
+// on `build/loxpp` itself, so no correct native answer exists to match.
+void reorderFoldedLeftOperand(Emitter& e, std::size_t i,
+                              const DecodedInstruction& in) {
+    std::string scratch = std::to_string(e.scratchSlot);
+    e.b.emit("astore " + scratch, -1);
+    loadNamedLocalAtZeroDepth(e, i, in.offset);
+    e.b.emit("aload " + scratch, +1);
+}
+
+void emitAdd(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (e.analysis.before[i].operandDepth() == 1) {
+        reorderFoldedLeftOperand(e, i, in);
+    }
+    e.b.emit("invokestatic lox/LoxOps/add(Ljava/lang/Object;Ljava/lang/"
+             "Object;)Ljava/lang/Object;",
+             -1);
+}
+
+void emitSubtract(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (e.analysis.before[i].operandDepth() == 1) {
+        reorderFoldedLeftOperand(e, i, in);
+    }
+    e.b.emit("invokestatic lox/LoxOps/subtract(Ljava/lang/Object;Ljava/lang/"
+             "Object;)Ljava/lang/Object;",
+             -1);
+}
+
+void emitMultiply(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (e.analysis.before[i].operandDepth() == 1) {
+        reorderFoldedLeftOperand(e, i, in);
+    }
+    e.b.emit("invokestatic lox/LoxOps/multiply(Ljava/lang/Object;Ljava/lang/"
+             "Object;)Ljava/lang/Object;",
+             -1);
+}
+
+void emitDivide(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (e.analysis.before[i].operandDepth() == 1) {
+        reorderFoldedLeftOperand(e, i, in);
+    }
+    e.b.emit("invokestatic lox/LoxOps/divide(Ljava/lang/Object;Ljava/lang/"
+             "Object;)Ljava/lang/Object;",
+             -1);
+}
+
+void emitModulo(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (e.analysis.before[i].operandDepth() == 1) {
+        reorderFoldedLeftOperand(e, i, in);
+    }
+    e.b.emit("invokestatic lox/LoxOps/modulo(Ljava/lang/Object;Ljava/lang/"
+             "Object;)Ljava/lang/Object;",
+             -1);
+}
+
+// Same fold-reorder as emitAdd's peers, plus the shared bool-to-Boolean
+// box every comparison op already used before this round.
+void emitEqual(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (e.analysis.before[i].operandDepth() == 1) {
+        reorderFoldedLeftOperand(e, i, in);
+    }
+    e.b.emit("invokestatic lox/LoxOps/equal(Ljava/lang/Object;Ljava/lang/"
+             "Object;)Z",
+             -1);
+    e.b.emit("invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/Boolean;", 0);
+}
+
+void emitGreater(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (e.analysis.before[i].operandDepth() == 1) {
+        reorderFoldedLeftOperand(e, i, in);
+    }
+    e.b.emit("invokestatic lox/LoxOps/greater(Ljava/lang/Object;Ljava/lang/"
+             "Object;)Z",
+             -1);
+    e.b.emit("invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/Boolean;", 0);
+}
+
+void emitLess(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (e.analysis.before[i].operandDepth() == 1) {
+        reorderFoldedLeftOperand(e, i, in);
+    }
+    e.b.emit("invokestatic lox/LoxOps/less(Ljava/lang/Object;Ljava/lang/"
+             "Object;)Z",
+             -1);
+    e.b.emit("invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/Boolean;", 0);
 }
 
 void emitGetGlobal(Emitter& e, const DecodedInstruction& in) {
@@ -1970,6 +2041,33 @@ void emitBody(Emitter& e, bool isScript,
             break;
         case Op::NOT:
             emitNot(e, i, in);
+            break;
+        case Op::NEGATE:
+            emitNegate(e, i, in);
+            break;
+        case Op::ADD:
+            emitAdd(e, i, in);
+            break;
+        case Op::SUBTRACT:
+            emitSubtract(e, i, in);
+            break;
+        case Op::MULTIPLY:
+            emitMultiply(e, i, in);
+            break;
+        case Op::DIVIDE:
+            emitDivide(e, i, in);
+            break;
+        case Op::MODULO:
+            emitModulo(e, i, in);
+            break;
+        case Op::EQUAL:
+            emitEqual(e, i, in);
+            break;
+        case Op::GREATER:
+            emitGreater(e, i, in);
+            break;
+        case Op::LESS:
+            emitLess(e, i, in);
             break;
         case Op::GET_INDEX:
             emitGetIndex(e, i, in);
