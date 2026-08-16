@@ -369,12 +369,17 @@ one-to-one table.
 - **`JUMP_TABLE` is absent from both plans' tables entirely.** `13_enum_match`:
 
   ```
-  36: GET_TAG           ; pop enum, push tag as a Number (double)
-  37: JUMP_TABLE min=0 count=4
-              | tag 0 -> 49
-              | tag 1 -> 58 …
-  48: MATCH_ERROR       ; fall-through / out-of-range
+  38: GET_TAG           ; pop enum, push tag as a Number (double)
+  39: JUMP_TABLE min=0 count=4
+              | tag 0 -> 51
+              | tag 1 -> 60 …
+  50: MATCH_ERROR       ; fall-through / out-of-range
   ```
+
+  (R7 fix, PR #115 round 1: these offsets shift by 2 from an earlier version
+  of this bullet — commit 82df1fa added a `CALL 0` earlier in the same chunk,
+  to construct `Green()` instead of naming the bare constructor; see the
+  "Nullary enum variants" bullet below.)
 
   It lowers to `tableswitch` (JVM) / `switch` (CIL): `min` is the switch base,
   the count×2 forward offsets become case labels (offsets are relative to the
@@ -473,12 +478,14 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
   value from an initializer"). So the lowered `init` method unconditionally
   returns `this`; there is no value-return case to handle.
 - **Nullary enum variants do not auto-construct, and construct by identity.**
-  `13_enum_match` errored (`GET_TAG: expected an enum value`) because bare `Green`
-  is the *constructor object*, not an instance — `print Green` yields
-  `<ctor C::Green>`. You must call it: `Green()`. And two separate constructions
-  are **not** equal — `Green() == Green()` is `false`. So `LoxEnum` equality is
-  reference identity, not structural; the runtime and `GET_TAG`/`CONSTANT`-of-ctor
-  lowering must respect that. `spec/` does not state this — it is worth adding.
+  `13_enum_match` originally errored (`GET_TAG: expected an enum value`)
+  because bare `Green` is the *constructor object*, not an instance — `print
+  Green` yields `<ctor C::Green>`. You must call it: `Green()`. Commit
+  82df1fa fixed the probe to do that (R7, PR #115 round 1); it no longer
+  errors. And two separate constructions are **not** equal — `Green() ==
+  Green()` is `false`. So `LoxEnum` equality is reference identity, not
+  structural; the runtime and `GET_TAG`/`CONSTANT`-of-ctor lowering must
+  respect that. `spec/` does not state this — it is worth adding.
 - **No list concatenation.** `a + b` on two lists raises "Operands must be
   numbers" (hit while writing `V1`). `ADD` is numbers-and-strings only; worth
   stating in the `ADD` semantics so no backend invents list `+`.
@@ -527,23 +534,28 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     nested-match reproductions all now produce output identical to
     `build/loxpp` on this branch — the cross-check never had to fire on any
     known repro, but the throw path exists for the case it is built for.
-  - **Still open, owner N10.** Three residues remain, none of them silent:
-    (i) a consumer with no `operandDepth() == 0` branch at all — `PRINT`,
-    `DEFINE_GLOBAL`, `ADD`, `CALL`, `BUILD_LIST`, and peers — still underflows
-    the JVM operand stack at emit time on a bare, unconsumed match result.
-    Proof unchanged: `print match 1 { case x => x };` and
-    `var d = match 1 { case x => x };` both stop `--target jvm` with "operand
-    stack underflow" (at `PRINT` and at `DEFINE_GLOBAL`), though `build/loxpp`
-    prints `1` for both. `examples/match_http_status.lox` and
-    `examples/match_state_machine.lox` fail for exactly this reason.
-    (ii) a match result that reaches a routed consumer at a genuine CFG-label
-    offset where the two slot estimates disagree now stops with
-    `loadNamedLocalAtZeroDepth`'s cross-check throw, loud rather than silent,
-    but still not a running program. (iii) the theoretical case where both
-    estimates agree and are BOTH wrong is not ruled out by a cross-check —
-    only real, per-edge merge verification closes it, which this PR does not
-    attempt. `nodes/N10.md` item 3 already lists both failing examples, so
-    N10 cannot pass its own checkpoint without generalizing
-    `operandDepth() == 0` / `localCount - 1` to every consumer that lacks the
-    branch today, and without replacing the cross-check with a real per-edge
-    proof.
+  - **Fixed, N10 (PR #115).** `emitPrint`, `emitDefineGlobal`, `emitNot`, a
+    one-element `emitBuildList`, and a folded-collection `emitGetIndex` all
+    now route through the same `loadNamedLocalAtZeroDepth` (or, for
+    `GET_INDEX`, a spill-then-load reorder built on it — see its own note).
+    `examples/match_http_status.lox` and `examples/match_state_machine.lox`
+    (both `print match ...;`) now match `build/loxpp`.
+  - **Still open, unowned — two residues, neither silent.** (i) `ADD` and
+    `CALL` still underflow the JVM operand stack at emit time on a match
+    result sandwiched below another live operand (`1 + match ...`,
+    `id(match ...)`). This is NOT owed a fix: `compileMatchBody`'s own
+    `resultSlot`/`subjectSlot` allocation (compiler.cpp) uses `m_localCount`
+    alone, blind to a sibling operand already live on the real VM stack, so
+    the two collide at the same slot — a pre-existing defect in
+    `build/loxpp` itself, proven by five one-line programs in PR #115's own
+    body, three of which run correctly natively while `ADD`/`CALL`'s two do
+    not (`Operands must be numbers.` / `Can only call functions, classes and
+    enums.`, both exit 70). `1 + match 1 { case 1 => 2 case _ => 3 };` is
+    legal per spec/02-syntax.md (`match` is `primary`). Fixing this is a
+    compiler change, out of any backend node's charter (brief.md section 8);
+    no later emission node owns it either, since N10 is the last one. (ii)
+    the theoretical case where `loadNamedLocalAtZeroDepth`'s two slot
+    estimates agree and are BOTH wrong is not ruled out by its cross-check —
+    only real, per-edge merge verification closes it, which no node has
+    attempted. Neither residue blocks the mission's definition of done: no
+    example or the bootstrap interpreter sandwiches a `match` this way.
