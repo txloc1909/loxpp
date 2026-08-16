@@ -29,14 +29,16 @@ this script's default. State that trade-off, do not hide it.
 
 Usage:
     python3 tools/diff_runtimes.py <native-loxpp> <jvm-runner> <path>...
-        [--exclude <file>]
+        [--exclude <file>] [--timeout <seconds>]
 
 <path> is a .lox file, or a directory (every *.lox file inside it, sorted).
 A path that is neither a file nor a directory, or a program list that ends
 up empty, is an error (exit 2), not a silent zero-file pass.
 
 If <name>.input exists next to a .lox file, it is piped in as stdin, on both
-runtimes.
+runtimes. Each runtime gets --timeout seconds (default 30); a runtime that
+does not finish in time reports DIVERGE for that program, with a timeout
+reason, rather than hanging the whole run.
 """
 
 import argparse
@@ -132,9 +134,18 @@ def parse_exclude_file(path: Path) -> dict[str, str]:
     return reasons
 
 
-def run_stdout(cmd: list[str], input_file: Path) -> str:
+class RunTimeout(Exception):
+    """A runtime did not finish inside the allowed time."""
+
+
+def run_stdout(cmd: list[str], input_file: Path, timeout: float) -> str:
     stdin_data = input_file.read_text(encoding="utf-8") if input_file.exists() else None
-    result = subprocess.run(cmd, input=stdin_data, capture_output=True, text=True)
+    try:
+        result = subprocess.run(
+            cmd, input=stdin_data, capture_output=True, text=True, timeout=timeout
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RunTimeout(f"{cmd[0]} did not finish in {timeout:.0f}s") from exc
     return result.stdout
 
 
@@ -170,6 +181,12 @@ def main() -> None:
         default=None,
         help="tools/jvm_excluded_examples.txt: permutation-only exclusions",
     )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=30.0,
+        help="seconds to allow each runtime per program, default 30",
+    )
     args = parser.parse_args()
 
     excluded = parse_exclude_file(args.exclude) if args.exclude else {}
@@ -183,8 +200,13 @@ def main() -> None:
 
     for lox_file in programs:
         input_file = lox_file.with_suffix(".input")
-        native_out = run_stdout([args.native, str(lox_file)], input_file)
-        jvm_out = run_stdout([args.jvm_runner, str(lox_file)], input_file)
+        try:
+            native_out = run_stdout([args.native, str(lox_file)], input_file, args.timeout)
+            jvm_out = run_stdout([args.jvm_runner, str(lox_file)], input_file, args.timeout)
+        except RunTimeout as exc:
+            print(f"DIVERGE     {lox_file}  (timeout: {exc})")
+            diverged += 1
+            continue
 
         if native_out == jvm_out:
             print(f"MATCH       {lox_file}")
