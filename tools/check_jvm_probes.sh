@@ -68,6 +68,10 @@ probes=(
     "examples/or_pattern_demo.lox"
     "examples/at_binding_demo.lox"
     "examples/string_list_pattern_demo.lox"
+    # R21 (PR #115 round 4): run-parity proof for normalizeFoldedOperands's
+    # own required coverage — the nine R15 shapes, RETURN of a folded match,
+    # and a nested match subject.
+    "notes/translation-probes/28_folded_match_operand_family.lox"
 )
 
 # Probes that must FAIL on both sides (node N6 checkpoint 4, PR #110 R2): a

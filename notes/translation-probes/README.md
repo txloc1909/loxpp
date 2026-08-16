@@ -62,6 +62,7 @@ each has an off-the-shelf solution.
 | `25_seq_map_string_coverage` | `IS_SEQ` via a discarded `match` sequence pattern (list, string, map subject), `SLICE` on a List, `in` on a String and a Map, iteration over a String and a Map, `BUILD_MAP` with 3 pairs | P7, P8 |
 | `26_enum_match_dispatch_and_error` | dense enum `match` dispatches to the correct arm; every arm's guard false raises a real, reachable `MATCH_ERROR` through the sparse compare-and-branch form | P8 |
 | `27_jump_table_default_cross_enum` | the literal `JUMP_TABLE` "out of range" default, reached with a table-eligible match's subject from a DIFFERENT enum than its arms | P8 |
+| `28_folded_match_operand_family` | `normalizeFoldedOperands`'s own required coverage: the nine R15 shapes (`BUILD_LIST`, `BUILD_MAP`, `CALL`, `GET_PROPERTY`, `INVOKE`, `SET_PROPERTY`, `SET_INDEX`, `SLICE`, `IN`, each with a folded operand) plus one nested match subject; `RETURN` of a folded match is deliberately not repeated here (`checkReturnHeightZero` excludes probes by design) — `examples/or_pattern_demo.lox` already covers it | P8 |
 | `V1_fresh_cell` | body-local captured in a loop → **fresh cell/iter** → prints `0 1 2` | P4 |
 | `V2_shared` | mutable shared upvalue → prints `2` | P4 |
 | `V3_loopvar` | loop var captured directly → **one shared cell** → prints `3 3 3` | P4 |
