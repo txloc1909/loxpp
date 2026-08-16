@@ -1,5 +1,5 @@
 enum Color { Red Green Blue Yellow }
-var c = Green;
+var c = Green();
 var n = match c {
   case Red => 0
   case Green => 1
