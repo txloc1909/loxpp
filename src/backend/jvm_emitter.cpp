@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
@@ -341,8 +342,17 @@ struct Emitter {
     // offset is never actually a label yet. Without these guards, a future
     // change that DID make it one would silently fuse away the label
     // `emitBody` needs for every edge into it, and jasmin would fail far from
-    // the cause. With them, this returns false instead, and the ordinary,
-    // unfused GET_TAG path emits the label correctly.
+    // the cause.
+    //
+    // R17 fix (PR #115 round 3): with the guards, this returns false instead
+    // — but the ordinary, unfused GET_TAG path does not then emit the program
+    // correctly either. `emitBody` has no `case Op::JUMP_TABLE` of its own; a
+    // JUMP_TABLE that reaches the main dispatch falls to `default:`,
+    // `emitSimpleOp` returns false, and `notImplemented(Op::JUMP_TABLE)`
+    // throws (this file's own `EmitScript.AbortsOnUnsupportedOpcode` test
+    // documents that shape). The guards turn a SILENT wrong label into a
+    // LOUD emit-time abort, not into a correct emission — the failure mode
+    // this whole node exists to prevent, not a working fallback.
     [[nodiscard]] bool fusableJumpTable(std::size_t i) const {
         std::size_t j = i + 1;
         if (j >= fn.instructions.size() || !reached(j) ||
@@ -454,15 +464,15 @@ void emitConstant(Emitter& e, const DecodedInstruction& in) {
 }
 
 // True for the "pure stack effect, no operand" family: literals,
-// GET_INDEX/SET_INDEX and peers. One `Emitter::b.emit` call each, none
-// needing anything from `in` beyond the opcode itself. NOT, NEGATE, the two
-// index ops, and the eight two-operand arithmetic/comparison ops (ADD,
-// SUBTRACT, MULTIPLY, DIVIDE, MODULO, EQUAL, LESS, GREATER) all moved out to
-// their own functions (R3, PR #115 round 1; R11/R12, round 2) — see
-// emitNot's, emitNegate's, emitGetIndex's, and reorderFoldedLeftOperand's
-// own notes — because a folded `match` result needs the instruction index this
-// dispatch does not carry; PRINT moved out the same way before this PR, for
-// the same reason.
+// SET_INDEX/SLICE/IN and peers. One `Emitter::b.emit` call each, none
+// needing anything from `in` beyond the opcode itself. NOT, NEGATE,
+// GET_INDEX, and the eight two-operand arithmetic/comparison ops (ADD,
+// SUBTRACT, MULTIPLY, DIVIDE, MODULO, EQUAL, LESS, GREATER) live in their own
+// functions instead, purely for readability (PRINT, DEFINE_GLOBAL, and
+// RETURN do too) — none of them needs an instruction index any more (the
+// referee redesign, PR #115 round 3, moved every consumer's own fold-repair
+// into `normalizeFoldedOperands`, one pre-dispatch step every instruction
+// gets alike; see that function's own note, above emitBody).
 bool emitSimpleOp(Emitter& e, Op op) {
     switch (op) {
     case Op::NIL:
@@ -760,16 +770,16 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
 // never on the real JVM operand stack (compileMatchBody's own comment: "the
 // native VM's fused local/operand-stack model... leaves the already-stored
 // result local as the new top of stack", which the JVM backend does not
-// share). `loadNamedLocalAtZeroDepth` is the one shared mechanism every such
-// consumer routes through (RETURN, SET_LOCAL, SET_GLOBAL, SET_UPVALUE,
-// JUMP_IF_FALSE, GET_ITER already do); this opcode had no branch for it at
-// all before this fix, so a bare `var x = match ...;` at script scope threw
-// "operand stack underflow" on every enum/match example that assigns its
-// result to a top-level variable.
-void emitDefineGlobal(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (e.analysis.before[i].operandDepth() == 0) {
-        loadNamedLocalAtZeroDepth(e, i, in.offset);
-    }
+// share).
+//
+// Referee redesign (PR #115 round 3, researcher referee decision): the
+// fold-repair used to be a private `if (operandDepth() == 0)` branch here,
+// one of five nearly-identical branches R15 kept finding one more sibling
+// of. It is now `normalizeFoldedOperands` (above emitBody), driven by
+// `nativePops`'s own DEFINE_GLOBAL row — by the time this function runs, a
+// genuine value is already on the stack either way, so this function no
+// longer inspects depth at all.
+void emitDefineGlobal(Emitter& e, const DecodedInstruction& in) {
     e.globalsCall("define", e.constantString(in.constantIndex), /*peek=*/false);
 }
 
@@ -777,161 +787,83 @@ void emitDefineGlobal(Emitter& e, std::size_t i, const DecodedInstruction& in) {
 // most common shape of all — `print match ...;` (match_http_status.lox,
 // match_state_machine.lox, match_dispatch.lox all use exactly this). Pulled
 // out of emitSimpleOp (which has no instruction index to give
-// loadNamedLocalAtZeroDepth) rather than threading one through every case
+// normalizeFoldedOperands) rather than threading one through every case
 // there — emitNot and emitGetIndex, below, are pulled out the same way.
 //
-// R3 fix (PR #115 round 1): ADD and CALL stay a documented, still-throwing
-// gap, but not because no checkpoint reaches them with a folded operand — a
-// program that sandwiches a `match` between another live operand and its own
-// consumer (`1 + match ...`, `id(match ...)`) does reach this pass with
-// operandDepth() == 0 there too. Both are ALSO broken on `build/loxpp`
-// itself, with no JVM backend involved: `compileMatchBody`'s own
-// resultSlot/subjectSlot allocation (compiler.cpp) uses `m_localCount` alone,
-// blind to a sibling operand already live on the real VM stack, so the two
-// collide at the same absolute slot. `1 + match 1 { case 1 => 2 case _ => 3
-// };` is legal per spec/02-syntax.md (`match` is `primary`, so `term` can
-// hold it directly either side of `+`) and native still raises "Operands
-// must be numbers." — a pre-existing compiler defect, out of a backend
-// node's charter (brief.md section 8: no compiler changes) and not owed a
-// matching JVM answer, because no correct native answer exists to match (PR
-// body has the full repro set and native output for all five).
-//
-// CALL's own sandwiched-argument shape is the one residue this stays true
-// for. ADD and its seven binary peers no longer belong on this list — see
-// reorderFoldedLeftOperand's own note (R11, PR #115 round 2).
-void emitPrint(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (e.analysis.before[i].operandDepth() == 0) {
-        loadNamedLocalAtZeroDepth(e, i, in.offset);
-    }
+// Referee redesign (PR #115 round 3): see emitDefineGlobal's own note.
+void emitPrint(Emitter& e) {
     e.b.emit("invokestatic lox/LoxOps/print(Ljava/lang/Object;)V", -1);
 }
 
-// R3 fix (PR #115 round 1): `!match ...` reaches operandDepth() == 0 the same
-// way PRINT does — `print !(match 1 {...});` is one of R3's own repro
-// programs (PR body). No checkpoint example uses this exact shape today; see
-// emitPrint's own note for CALL, the one shape this pass still does not
-// attempt.
-void emitNot(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (e.analysis.before[i].operandDepth() == 0) {
-        loadNamedLocalAtZeroDepth(e, i, in.offset);
-    }
+// Referee redesign (PR #115 round 3): see emitDefineGlobal's own note.
+void emitNot(Emitter& e) {
     e.b.emit("invokestatic lox/LoxOps/not(Ljava/lang/Object;)Ljava/lang/"
              "Object;",
              0);
 }
 
-// R12 fix (PR #115 round 2): NEGATE is NOT's own one-operand twin.
-// `-(match 1 {...})` reaches operandDepth() == 0 exactly the same way
-// `!(match 1 {...})` does, and it had no branch for it before this round —
-// the only difference from emitNot is the callee name and that
-// LoxOps.negate already returns a boxed Object.
-void emitNegate(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (e.analysis.before[i].operandDepth() == 0) {
-        loadNamedLocalAtZeroDepth(e, i, in.offset);
-    }
+// Referee redesign (PR #115 round 3): see emitDefineGlobal's own note. NEGATE
+// is NOT's own one-operand twin; the only difference is the callee name and
+// that LoxOps.negate already returns a boxed Object.
+void emitNegate(Emitter& e) {
     e.b.emit("invokestatic lox/LoxOps/negate(Ljava/lang/Object;)Ljava/lang/"
              "Object;",
              0);
 }
 
-// R11 fix (PR #115 round 2): `(match ...) OP x` folds only the LEFT
-// operand. Every two-operand rule parses its left side before its right
-// (compiler.cpp's own binary/comparison precedence rules), so the match's
-// result is already folded into its own named local by the time the RHS
-// pushes a genuine value — `before[i].operandDepth() == 1` here means
-// exactly one real value sits on the JVM operand stack (the RHS).
-//
-// The reorder is the one emitGetIndex already uses for its own depth-1
-// shape: spill the genuine operand to e.scratchSlot, load the named LHS by
-// `loadNamedLocalAtZeroDepth`, then restore the genuine operand on top — so
-// the call below always sees [LHS, RHS] in source order, regardless of
-// which one the JVM operand stack actually still held.
-//
-// operandDepth() == 0 (BOTH operands folded, e.g. `(match ...) + (match
-// ...)`) is not reached by any checkpoint program. It stays the same
-// documented, pre-existing underflow as CALL's own sandwiched argument (see
-// the GAP entry in bytecode-translation-problems.md): `compileMatchBody`'s
-// own slot allocation collides with a sibling operand already on the stack,
-// on `build/loxpp` itself, so no correct native answer exists to match.
-void reorderFoldedLeftOperand(Emitter& e, std::size_t i,
-                              const DecodedInstruction& in) {
-    std::string scratch = std::to_string(e.scratchSlot);
-    e.b.emit("astore " + scratch, -1);
-    loadNamedLocalAtZeroDepth(e, i, in.offset);
-    e.b.emit("aload " + scratch, +1);
-}
-
-void emitAdd(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (e.analysis.before[i].operandDepth() == 1) {
-        reorderFoldedLeftOperand(e, i, in);
-    }
+// R11/R12 (PR #115 round 2) added `reorderFoldedLeftOperand` here, one
+// private spill-reload per two-operand op, to fold a LEFT-folded operand
+// back in. The referee redesign (round 3) deletes it: normalizeFoldedOperands
+// now does the same reorder, generically, for any op's own nativePops row —
+// see that function's own note (above emitBody) for why a shared table beats
+// one more per-site branch.
+void emitAdd(Emitter& e) {
     e.b.emit("invokestatic lox/LoxOps/add(Ljava/lang/Object;Ljava/lang/"
              "Object;)Ljava/lang/Object;",
              -1);
 }
 
-void emitSubtract(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (e.analysis.before[i].operandDepth() == 1) {
-        reorderFoldedLeftOperand(e, i, in);
-    }
+void emitSubtract(Emitter& e) {
     e.b.emit("invokestatic lox/LoxOps/subtract(Ljava/lang/Object;Ljava/lang/"
              "Object;)Ljava/lang/Object;",
              -1);
 }
 
-void emitMultiply(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (e.analysis.before[i].operandDepth() == 1) {
-        reorderFoldedLeftOperand(e, i, in);
-    }
+void emitMultiply(Emitter& e) {
     e.b.emit("invokestatic lox/LoxOps/multiply(Ljava/lang/Object;Ljava/lang/"
              "Object;)Ljava/lang/Object;",
              -1);
 }
 
-void emitDivide(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (e.analysis.before[i].operandDepth() == 1) {
-        reorderFoldedLeftOperand(e, i, in);
-    }
+void emitDivide(Emitter& e) {
     e.b.emit("invokestatic lox/LoxOps/divide(Ljava/lang/Object;Ljava/lang/"
              "Object;)Ljava/lang/Object;",
              -1);
 }
 
-void emitModulo(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (e.analysis.before[i].operandDepth() == 1) {
-        reorderFoldedLeftOperand(e, i, in);
-    }
+void emitModulo(Emitter& e) {
     e.b.emit("invokestatic lox/LoxOps/modulo(Ljava/lang/Object;Ljava/lang/"
              "Object;)Ljava/lang/Object;",
              -1);
 }
 
-// Same fold-reorder as emitAdd's peers, plus the shared bool-to-Boolean
-// box every comparison op already used before this round.
-void emitEqual(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (e.analysis.before[i].operandDepth() == 1) {
-        reorderFoldedLeftOperand(e, i, in);
-    }
+// Same as emitAdd's peers, plus the shared bool-to-Boolean box every
+// comparison op already used before this round.
+void emitEqual(Emitter& e) {
     e.b.emit("invokestatic lox/LoxOps/equal(Ljava/lang/Object;Ljava/lang/"
              "Object;)Z",
              -1);
     e.b.emit("invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/Boolean;", 0);
 }
 
-void emitGreater(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (e.analysis.before[i].operandDepth() == 1) {
-        reorderFoldedLeftOperand(e, i, in);
-    }
+void emitGreater(Emitter& e) {
     e.b.emit("invokestatic lox/LoxOps/greater(Ljava/lang/Object;Ljava/lang/"
              "Object;)Z",
              -1);
     e.b.emit("invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/Boolean;", 0);
 }
 
-void emitLess(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (e.analysis.before[i].operandDepth() == 1) {
-        reorderFoldedLeftOperand(e, i, in);
-    }
+void emitLess(Emitter& e) {
     e.b.emit("invokestatic lox/LoxOps/less(Ljava/lang/Object;Ljava/lang/"
              "Object;)Z",
              -1);
@@ -1126,19 +1058,15 @@ void emitSpillToArray(Emitter& e, int width, const char* buildSig) {
 // only new shuffle this addition needs. LoxOps.buildList (runtime/jvm)
 // copies the array into a fresh LoxList in the same order.
 //
-// R3 fix (PR #115 round 1): a one-element list whose sole element is a
-// `match` (`print [match 1 {...}];`) reaches operandDepth() == 0 with
-// nothing else live on the stack, the same shape emitPrint already folds —
-// load it first, so emitSpillToArray finds a genuine value to spill instead
-// of underflowing. A width above 1 with the LAST element folded is left
-// alone: that is the same sandwiched shape emitPrint's own note rules ADD/
-// CALL out of scope for (an earlier, un-counted sibling element collides
-// with `compileMatchBody`'s own slot allocation on `build/loxpp` itself), so
-// it is not a case this pass owes a matching answer either.
-void emitBuildList(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (in.byteOperand == 1 && e.analysis.before[i].operandDepth() == 0) {
-        loadNamedLocalAtZeroDepth(e, i, in.offset);
-    }
+// Referee redesign (PR #115 round 3): a one-element list whose sole element
+// is a `match`, and a wider list whose FIRST element is (R15 shape 1), both
+// used to need — or lack — a private branch here. `normalizeFoldedOperands`
+// (above emitBody) now spills every genuine element this instruction's own
+// `nativePops` row expects, loads the folded bottom element, and reloads the
+// genuine ones on top in order, for any width — so by the time this
+// function runs, `in.byteOperand` genuine values are always already on the
+// real stack, and this is a plain, unconditional spill-to-array.
+void emitBuildList(Emitter& e, const DecodedInstruction& in) {
     emitSpillToArray(e, in.byteOperand,
                      "invokestatic lox/LoxOps/buildList([Ljava/lang/"
                      "Object;)Llox/LoxList;");
@@ -1156,46 +1084,20 @@ void emitBuildMap(Emitter& e, const DecodedInstruction& in) {
                      "Object;)Llox/LoxMap;");
 }
 
-// R3 fix (PR #115 round 1): GET_INDEX's own collection operand can be a
-// `match`'s folded result while the index is a genuine, already-pushed
-// value — `call`'s own subscript grammar always compiles the index after the
-// collection, so `(match 1 {...})[0]` leaves the JVM operand stack holding
-// only the index (before[i].operandDepth() == 1, not 0) by the time this
-// instruction runs. loadNamedLocalAtZeroDepth's own operandDepth() == 0
-// check therefore never fires here — but `localCount - 1` still names the
-// right slot regardless, because nothing between the fold and here declares
-// a new invisible var or crosses a CFG merge (CONSTANT's own emission never
-// touches localCount or lastInvisibleVarSlot; finishInstruction only updates
-// the latter at a declaring push's own offset), so the value the cross-check
-// would guard is unchanged from whatever it was right after the fold.
-//
-// Spill the already-pushed index to e.scratchSlot (not argScratchBase: a
-// chunk with a folded-collection GET_INDEX and no CALL/BUILD_LIST/BUILD_MAP
-// anywhere never reserves that region — computeMaxSpillWidth does not scan
-// for GET_INDEX — while scratchSlot is always reserved), load the collection
-// by its named local, then restore the index on top: the same reorder
-// emitCall/emitSpillToArray use to rebuild an out-of-order operand set.
-//
-// operandDepth() == 0 here (both operands folded, e.g. a match indexed by
-// another match) is not reached by any checkpoint program; it is left as the
-// pre-existing underflow, the same documented gap as ADD/CALL (emitPrint's
-// own note). SET_INDEX is not changed the same way: its own checkpoint
-// programs (V1_fresh_cell.lox, V3_loopvar.lox, and every example that
-// mutates a list/map by index) never index-assign directly into a bare
-// match result, so there is no reached shape to prove a fix against.
-void emitGetIndex(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    const char* sig = "invokestatic "
-                      "lox/LoxOps/getIndex(Ljava/lang/Object;Ljava/lang/"
-                      "Object;)Ljava/lang/Object;";
-    if (e.analysis.before[i].operandDepth() == 1) {
-        std::string scratch = std::to_string(e.scratchSlot);
-        e.b.emit("astore " + scratch, -1);
-        loadNamedLocalAtZeroDepth(e, i, in.offset);
-        e.b.emit("aload " + scratch, +1);
-        e.b.emit(sig, -1);
-        return;
-    }
-    e.b.emit(sig, -1);
+// Referee redesign (PR #115 round 3): GET_INDEX's own collection operand
+// can be a `match`'s folded result while the index is a genuine,
+// already-pushed value (`(match 1 {...})[0]`) — `normalizeFoldedOperands`
+// (above emitBody) now reorders that for GET_INDEX the same way it does for
+// every other `nativePops` row, so this is a plain, unconditional call.
+// SET_INDEX/SLICE/IN never needed an instruction index of their own (no
+// private branch ever lived in emitSimpleOp for them), so the same
+// normalization reaches their own folded-bottom-operand shapes (R15 shapes
+// 6-9) without pulling them out of emitSimpleOp at all.
+void emitGetIndex(Emitter& e) {
+    e.b.emit("invokestatic "
+             "lox/LoxOps/getIndex(Ljava/lang/Object;Ljava/lang/"
+             "Object;)Ljava/lang/Object;",
+             -1);
 }
 
 // Wraps `slot` in a fresh Object[1] ref-cell, seeded with the raw value
@@ -1723,19 +1625,22 @@ void emitMatchError(Emitter& e) {
 // temp — measured at 33 sites across examples/ and
 // bootstrap/loxpp_interpreter.lox, zero among the translation probes, so
 // this node's checkpoint is the first to exercise it end-to-end.
-// `before[i].operandDepth() == 0` names the shape; `loadNamedLocalAtZeroDepth`
-// (this file, above emitGetLocal) names and loads the right slot — see its
-// own note for why `lastInvisibleVarSlot` alone is the wrong tracker (R6, PR
-// #113 round 2), and for the merge/captured-slot cross-check it now applies
-// instead (R2/R5, same PR; redesigned in round 3).
-void emitReturn(Emitter& e, std::size_t i, bool isScript) {
+//
+// Referee redesign (PR #115 round 3): the fold-repair used to be a private
+// `if (operandDepth() == 0)` branch here (R2/R5, PR #113; redesigned PR #113
+// round 3). It is now `normalizeFoldedOperands`'s own RETURN row, the same
+// mechanism every other consumer shares — a private branch here would now
+// load the named local a SECOND time, on top of normalizeFoldedOperands's
+// own load, so it is deleted rather than left alongside it. The isScript
+// path is untouched: `nativePops(RETURN)` charges 1 cell there too, but
+// `endCompiler`'s own trailing NIL;RETURN always pushes a genuine NIL first,
+// so the deficit is always 0 and normalizeFoldedOperands never has anything
+// to do before a script's own `return`.
+void emitReturn(Emitter& e, bool isScript) {
     if (isScript) {
         // vm.cpp: frameCount reaches 0, result discarded.
         e.b.emit("return", 0);
         return;
-    }
-    if (e.analysis.before[i].operandDepth() == 0) {
-        loadNamedLocalAtZeroDepth(e, i, e.fn.instructions[i].offset);
     }
     e.b.emit("areturn", -1);
 }
@@ -1795,14 +1700,43 @@ int computeMaxLocalCount(const FunctionStackAnalysis& analysis) {
 // these families, keeping `.limit locals` byte-identical to pre-N6 output
 // on every chunk that makes no call, invokes no method, and builds no list
 // or map.
-int computeMaxSpillWidth(const DecodedFunction& fn) {
+//
+// Referee redesign (PR #115 round 3): defined next to the dispatch loop,
+// below finishInstruction — forward-declared here because
+// computeMaxSpillWidth (immediately below) needs it too, to size the same
+// spill area for normalizeFoldedOperands's own deficit-1 shapes (SET_INDEX,
+// SLICE, a folded CALL/INVOKE callee, or a wide BUILD_LIST/BUILD_MAP with
+// its first element/key folded) that need two or more scratch slots.
+std::optional<int> nativePops(Op op, const DecodedInstruction& in);
+
+// The widest spill this chunk's own argScratchBase region needs — either
+// from the ordinary P7 calling convention (CALL's/INVOKE's/SUPER_INVOKE's
+// argCount, or BUILD_LIST's/BUILD_MAP's own element width, scanned below
+// exactly as before N10), or from normalizeFoldedOperands's own deficit == 1
+// repair, when it needs two or more genuine operands spilled (one genuine
+// operand reuses e.scratchSlot instead — see normalizeFoldedOperands's own
+// note). The second term only ever adds width to a chunk that actually
+// contains an instruction whose folded-operand deficit is exactly 1, so a
+// chunk with no such shape gets byte-identical `.limit locals` to before
+// this round.
+int computeMaxSpillWidth(const DecodedFunction& fn,
+                         const FunctionStackAnalysis& analysis) {
     int maxWidth = 0;
-    for (const DecodedInstruction& instr : fn.instructions) {
+    for (std::size_t i = 0; i < fn.instructions.size(); i++) {
+        const DecodedInstruction& instr = fn.instructions[i];
         if (instr.op == Op::CALL || instr.op == Op::BUILD_LIST ||
             instr.op == Op::INVOKE || instr.op == Op::SUPER_INVOKE) {
             maxWidth = std::max(maxWidth, instr.byteOperand);
         } else if (instr.op == Op::BUILD_MAP) {
             maxWidth = std::max(maxWidth, 2 * instr.byteOperand);
+        }
+        std::optional<int> pops = nativePops(instr.op, instr);
+        if (pops.has_value()) {
+            int deficit = *pops - analysis.before[i].operandDepth();
+            int genuineCount = *pops - 1;
+            if (deficit == 1 && genuineCount >= 2) {
+                maxWidth = std::max(maxWidth, genuineCount);
+            }
         }
     }
     return maxWidth;
@@ -1921,11 +1855,207 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
     return nextIndex;
 }
 
+// How many operand-stack cells `src/vm.cpp` pops for one instruction —
+// referee redesign, PR #115 round 3 (researcher referee decision on R15/R16).
+//
+// Four review rounds each found one more consumer opcode that assumed its
+// operands were genuine JVM operand-stack temps, when N2's own fold
+// (compileMatchBody leaves a `match` expression's result in a named local,
+// not a temp) had left the BOTTOM one missing. Each round added one more
+// private `if (operandDepth() == ...)` branch. This table replaces every one
+// of them: `normalizeFoldedOperands`, below, is the ONE place that reads it.
+//
+// Exhaustive `switch` over `Op`, no `default` — clang's `-Wswitch` (on by
+// default) flags a missing enumerator here, so a new opcode needs a row
+// before it compiles, not a bespoke branch discovered by a fifth review
+// round. `std::nullopt` marks a CUSTOM row: the peek/locals-model family,
+// where a value survives past the instruction instead of being net-popped
+// (P2's own family — SET_LOCAL/SET_GLOBAL/SET_UPVALUE/JUMP_IF_FALSE), a
+// reclaim that never touches the operand stack at all (POP/CLOSE_UPVALUE),
+// an instruction that already threads `loadNamedLocalAtZeroDepth`
+// unconditionally with no depth check to duplicate (GET_ITER/INHERIT), or
+// pure control transfer that never consumes a value (JUMP/LOOP/JUMP_TABLE —
+// JUMP_TABLE is only ever reached fused onto a preceding GET_TAG;
+// `fusableJumpTable` handles that, and a standalone JUMP_TABLE is not
+// implemented). `normalizeFoldedOperands` never inspects a CUSTOM row's own
+// handler at all — those keep working exactly as they already do.
+//
+// Every other row states a literal pop count, read straight off `chunk.h`'s
+// own per-opcode comments and confirmed against the `vm.cpp` case bodies
+// (jvm_emitter.h's own layout comment cites the ones that needed a second
+// look: SET_PROPERTY pops the value AND the instance, net 2; DEFINE_METHOD
+// pops only the closure, net 1, because the class survives via `peek(1)`
+// exactly the way P2's own peek family survives — but DEFINE_METHOD is not
+// itself a peek/locals-model row, because nothing about ITS OWN result
+// depends on a stale tracker the way SET_LOCAL's does). A row being ordinary
+// here does not mean its own operand is ever actually foldable in a real
+// program — GET_SUPER's and SUPER_INVOKE's own superclass/self operands are
+// never a `match` result, so `deficit` is always negative for them in any
+// program the compiler accepts; a plain, honest pop count costs nothing
+// there and needs no separate CUSTOM carve-out to stay safe.
+std::optional<int> nativePops(Op op, const DecodedInstruction& in) {
+    switch (op) {
+    // Push-only, or a control-flow op with nothing of its own to net-pop.
+    case Op::CONSTANT:
+    case Op::NIL:
+    case Op::TRUE:
+    case Op::FALSE:
+    case Op::GET_LOCAL:
+    case Op::GET_GLOBAL:
+    case Op::GET_UPVALUE:
+    case Op::CLASS:
+    case Op::CLOSURE:
+    case Op::MATCH_ERROR:
+        return 0;
+    // One operand net-popped.
+    case Op::NEGATE:
+    case Op::NOT:
+    case Op::PRINT:
+    case Op::DEFINE_GLOBAL:
+    case Op::GET_PROPERTY:
+    case Op::DEFINE_METHOD: // pops the closure only; the class survives
+    case Op::GET_SUPER:     // pops the superclass only; never foldable
+    case Op::GET_TAG:
+    case Op::INSTANCEOF:
+    case Op::IS_SEQ:
+    case Op::RETURN:
+    case Op::ITER_HAS_NEXT:
+    case Op::ITER_NEXT:
+        return 1;
+    // Two operands net-popped.
+    case Op::EQUAL:
+    case Op::GREATER:
+    case Op::LESS:
+    case Op::ADD:
+    case Op::SUBTRACT:
+    case Op::MULTIPLY:
+    case Op::DIVIDE:
+    case Op::MODULO:
+    case Op::GET_INDEX:
+    case Op::IN:
+    case Op::SET_PROPERTY:
+        return 2;
+    // Three operands net-popped.
+    case Op::SET_INDEX:
+    case Op::SLICE:
+        return 3;
+    // Width carried in the instruction's own operand byte.
+    case Op::BUILD_LIST:
+        return in.byteOperand;
+    case Op::BUILD_MAP:
+        return 2 * in.byteOperand;
+    case Op::CALL:
+    case Op::INVOKE: // receiver/callee plus argCount arguments
+        return in.byteOperand + 1;
+    case Op::SUPER_INVOKE: // self, superclass, plus argCount arguments —
+        return in.byteOperand + 2; // self/superclass are never foldable
+    // CUSTOM: the peek/locals-model family, a pure reclaim, an instruction
+    // that already threads loadNamedLocalAtZeroDepth unconditionally, or
+    // pure control transfer. See this function's own note above.
+    case Op::POP:
+    case Op::CLOSE_UPVALUE:
+    case Op::SET_LOCAL:
+    case Op::SET_GLOBAL:
+    case Op::SET_UPVALUE:
+    case Op::JUMP_IF_FALSE:
+    case Op::GET_ITER:
+    case Op::INHERIT:
+    case Op::JUMP:
+    case Op::LOOP:
+    case Op::JUMP_TABLE:
+        return std::nullopt;
+    }
+    // No `default:` above on purpose (this function's own note) — reachable
+    // only if `-Wswitch` was ignored, which is itself the bug to fix.
+    throw std::runtime_error("jvm_emitter: nativePops has no row for " +
+                             std::string(opName(op)));
+}
+
+// Referee redesign, PR #115 round 3 (researcher referee decision on R15).
+// The one place every `nativePops`-covered consumer gets its folded bottom
+// operand repaired, replacing what used to be one private
+// `if (operandDepth() == ...)` branch per consumer — R15's own nine new
+// shapes were the fourth review round to find one more such branch missing.
+//
+// `deficit` is how many of this instruction's own `nativePops` cells are
+// genuinely missing from the real JVM operand stack, because
+// `compileMatchBody` folded them into an invisible local instead of leaving
+// them as temps. A folded operand is always the BOTTOM-most of an
+// instruction's own operands — `compileMatchBody` folds a `match`
+// expression's result into its own named local the moment that expression
+// finishes compiling, before any later sibling operand of the same
+// instruction is even parsed — so `deficit` counts down from the bottom,
+// never from the middle.
+//
+// deficit <= 0: every operand this instruction needs is already, physically,
+// on the stack (any extra depth below belongs to an outer expression and is
+// untouched). This is the ordinary case, and it is also what every CUSTOM
+// row gets unconditionally — this function never computes a deficit for one.
+//
+// deficit == 1: spill the genuine operands already on the stack (there are
+// exactly `nativePops - 1` of them), load the missing bottom operand through
+// `loadNamedLocalAtZeroDepth` — the same cross-checked mechanism every
+// CUSTOM row already trusts — then reload the genuine operands on top, in
+// their original order. Zero or one genuine operand reuses `e.scratchSlot`,
+// the single slot the round-2 fix (R11/R12, the deleted
+// `reorderFoldedLeftOperand`, and `emitGetIndex`) already spilled into for
+// this exact shape; two or more (SET_INDEX, SLICE, a folded CALL/INVOKE
+// callee, or a wide BUILD_LIST/BUILD_MAP with its first element/key folded)
+// spill into `e.argScratchBase`, `computeMaxSpillWidth`'s own spill area,
+// sized for exactly this by its own `deficit == 1` scan.
+//
+// deficit >= 2: two or more of this instruction's own operands are missing
+// at once. R3's own round-1 rebuttal (PR #115) already proved why: a program
+// that puts a live sibling operand BELOW a match's own subject/result
+// collides with `compileMatchBody`'s own slot allocation (`compiler.cpp`,
+// `m_localCount`) on `build/loxpp` ITSELF, with no JVM backend involved — so
+// no correct native answer exists here to withhold. Throw loudly instead of
+// guessing.
+void normalizeFoldedOperands(Emitter& e, std::size_t i,
+                             const DecodedInstruction& in) {
+    std::optional<int> pops = nativePops(in.op, in);
+    if (!pops.has_value()) {
+        return;
+    }
+    int deficit = *pops - e.analysis.before[i].operandDepth();
+    if (deficit <= 0) {
+        return;
+    }
+    if (deficit >= 2) {
+        throw std::runtime_error(
+            "jvm_emitter: " + std::string(opName(in.op)) + " at offset " +
+            std::to_string(in.offset) + " needs " + std::to_string(deficit) +
+            " operands compileMatchBody folded below its topmost genuine "
+            "one; this shape is already broken on build/loxpp itself (see "
+            "the GAP entry in notes/bytecode-translation-problems.md), so no "
+            "correct native answer exists to match here");
+    }
+    int genuineCount = *pops - 1;
+    if (genuineCount <= 1) {
+        std::string scratch = std::to_string(e.scratchSlot);
+        if (genuineCount == 1) {
+            e.b.emit("astore " + scratch, -1);
+        }
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
+        if (genuineCount == 1) {
+            e.b.emit("aload " + scratch, +1);
+        }
+        return;
+    }
+    for (int k = 0; k < genuineCount; k++) {
+        e.b.emit("astore " + std::to_string(e.argScratchBase + k), -1);
+    }
+    loadNamedLocalAtZeroDepth(e, i, in.offset);
+    for (int k = genuineCount - 1; k >= 0; k--) {
+        e.b.emit("aload " + std::to_string(e.argScratchBase + k), +1);
+    }
+}
+
 // Walks every instruction once, in offset order, dispatching each to its
 // opcode-family function. The parts that are not one opcode's own concern —
-// labels, the R1 depth safety net, and the invisible-var/fall-through
-// bookkeeping finishInstruction does — stay here rather than in any one
-// case.
+// labels, the R1 depth safety net, `normalizeFoldedOperands`, and the
+// invisible-var/fall-through bookkeeping finishInstruction does — stay here
+// rather than in any one case.
 void emitBody(Emitter& e, bool isScript,
               const std::vector<std::string>& childClassNames) {
     const std::vector<DecodedInstruction>& ins = e.fn.instructions;
@@ -1973,6 +2103,8 @@ void emitBody(Emitter& e, bool isScript,
                 " at offset " + std::to_string(in.offset));
         }
 
+        normalizeFoldedOperands(e, i, in);
+
         switch (in.op) {
         case Op::CONSTANT:
             emitConstant(e, in);
@@ -1987,10 +2119,10 @@ void emitBody(Emitter& e, bool isScript,
             emitSetLocal(e, i, in, consumedFollowingPop);
             break;
         case Op::PRINT:
-            emitPrint(e, i, in);
+            emitPrint(e);
             break;
         case Op::DEFINE_GLOBAL:
-            emitDefineGlobal(e, i, in);
+            emitDefineGlobal(e, in);
             break;
         case Op::GET_GLOBAL:
             emitGetGlobal(e, in);
@@ -2034,43 +2166,43 @@ void emitBody(Emitter& e, bool isScript,
             emitCall(e, in);
             break;
         case Op::BUILD_LIST:
-            emitBuildList(e, i, in);
+            emitBuildList(e, in);
             break;
         case Op::BUILD_MAP:
             emitBuildMap(e, in);
             break;
         case Op::NOT:
-            emitNot(e, i, in);
+            emitNot(e);
             break;
         case Op::NEGATE:
-            emitNegate(e, i, in);
+            emitNegate(e);
             break;
         case Op::ADD:
-            emitAdd(e, i, in);
+            emitAdd(e);
             break;
         case Op::SUBTRACT:
-            emitSubtract(e, i, in);
+            emitSubtract(e);
             break;
         case Op::MULTIPLY:
-            emitMultiply(e, i, in);
+            emitMultiply(e);
             break;
         case Op::DIVIDE:
-            emitDivide(e, i, in);
+            emitDivide(e);
             break;
         case Op::MODULO:
-            emitModulo(e, i, in);
+            emitModulo(e);
             break;
         case Op::EQUAL:
-            emitEqual(e, i, in);
+            emitEqual(e);
             break;
         case Op::GREATER:
-            emitGreater(e, i, in);
+            emitGreater(e);
             break;
         case Op::LESS:
-            emitLess(e, i, in);
+            emitLess(e);
             break;
         case Op::GET_INDEX:
-            emitGetIndex(e, i, in);
+            emitGetIndex(e);
             break;
         case Op::GET_ITER:
             emitGetIter(e, i, in);
@@ -2079,7 +2211,7 @@ void emitBody(Emitter& e, bool isScript,
             emitClosure(e, in, childClassNames);
             break;
         case Op::RETURN:
-            emitReturn(e, i, isScript);
+            emitReturn(e, isScript);
             break;
         case Op::CLASS:
             emitClass(e, in);
@@ -2163,7 +2295,7 @@ std::string emitChunk(const DecodedFunction& fn,
                       const std::vector<std::string>& childClassNames,
                       const FunctionCaptureInfo& captureInfo) {
     int maxLocalCount = computeMaxLocalCount(analysis);
-    int maxSpillWidth = computeMaxSpillWidth(fn);
+    int maxSpillWidth = computeMaxSpillWidth(fn, analysis);
     int extraSpillSlots = maxSpillWidth > 0 ? maxSpillWidth + 1 : 0;
 
     Emitter e = buildEmitter(fn, analysis, isScript, maxLocalCount,

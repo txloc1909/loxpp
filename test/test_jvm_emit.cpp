@@ -2360,3 +2360,360 @@ TEST(EmitScript, EqualOfAFoldedMatchLeftOperandReordersTheGenuineRightOperand) {
         << j;
     expectEveryJumpTargetIsLabeled(j);
 }
+
+// R15 (PR #115 round 3) found nine more consumer opcodes with the same
+// defect class R11/R12 found: the folded operand is the BOTTOM one, and a
+// genuine sibling operand sits above it. The referee's round-3 decision
+// replaced every per-consumer branch (this file's own R3/R7/R11/R12 fixes
+// above) with one generic mechanism, `normalizeFoldedOperands`
+// (jvm_emitter.cpp, above emitBody), driven by one table, `nativePops`. The
+// eleven tests below are that decision's own required coverage: one per R15
+// shape (nine), one for RETURN of a folded match, and one for a nested
+// match subject (a nested match's own result feeding an enclosing GET_TAG).
+//
+// Proved-it-fails the same way every earlier round did: reverted
+// `nativePops`'s own row for the opcode under test to `std::nullopt`
+// (CUSTOM), rebuilt, and confirmed the matching test below — and only that
+// one — failed, with `ctest` and `check_jvm_probes.sh` otherwise unaffected;
+// then restored the row. Confirmed locally in loxpp-dev-env-managed.
+
+// R15 shape 1: BUILD_LIST, width above 1, FIRST element folded — the exact
+// mirror of R3's own one-element fix (round 1): `emitBuildList`'s old guard
+// tested `in.byteOperand == 1` only, so a wider list's own first-folded
+// shape (`[match ..., 5]`) never reached it.
+TEST(EmitScript,
+     BuildListOfTwoElementsWithFirstFoldedLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("print [match 1 { case 1 => 2 case _ => 3 }, 5];\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // "5" (the one genuine element) spills to scratch (slot 5) while the
+    // folded match result (slot 3) reloads, then "5" is restored on top —
+    // [match result, 5] in source order — before BUILD_LIST's own,
+    // unrelated width-2 spill (slots 7/8) runs.
+    EXPECT_NE(
+        j.find("astore 5\n"
+               "    aload 3\n"
+               "    aload 5\n"
+               "    astore 8\n"
+               "    astore 7\n"
+               "    iconst_2\n"
+               "    anewarray java/lang/Object\n"
+               "    dup\n"
+               "    iconst_0\n"
+               "    aload 7\n"
+               "    aastore\n"
+               "    dup\n"
+               "    iconst_1\n"
+               "    aload 8\n"
+               "    aastore\n"
+               "    invokestatic "
+               "lox/LoxOps/buildList([Ljava/lang/Object;)Llox/LoxList;\n"),
+        std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// R15 shape 2: BUILD_MAP, folded KEY.
+TEST(EmitScript, BuildMapOfAFoldedKeyLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "print {match 1 { case 1 => \"a\" case _ => \"b\" }: 1};\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // The one genuine value ("1", the map's own value) spills to scratch
+    // while the folded key (slot 3) reloads, then "1" is restored on top —
+    // [key, value] in source order.
+    EXPECT_NE(j.find("astore 5\n"
+                     "    aload 3\n"
+                     "    aload 5\n"
+                     "    astore 8\n"
+                     "    astore 7\n"
+                     "    iconst_2\n"
+                     "    anewarray java/lang/Object\n"
+                     "    dup\n"
+                     "    iconst_0\n"
+                     "    aload 7\n"
+                     "    aastore\n"
+                     "    dup\n"
+                     "    iconst_1\n"
+                     "    aload 8\n"
+                     "    aastore\n"
+                     "    invokestatic "
+                     "lox/LoxOps/buildMap([Ljava/lang/Object;)Llox/LoxMap;\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// R15 shape 3: CALL, folded CALLEE — the R3 rebuttal (round 1) covered only
+// a folded ARGUMENT (sandwiched between a genuine callee and CALL itself,
+// still broken on build/loxpp itself); a folded callee is a different shape,
+// and build/loxpp answers it correctly.
+TEST(EmitProgram, CallOfAFoldedMatchCalleeLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun f(x) { return x + 1; }\n"
+                     "fun g(x) { return x + 2; }\n"
+                     "print (match 1 { case 1 => f case _ => g })(10);\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    const std::string& main = classes[0].source;
+    // "10" (the one genuine argument) spills to scratch (slot 5) while the
+    // folded callee (slot 3) reloads, then "10" is restored on top —
+    // [callee, 10] — before CALL's own, unrelated argCount=1 spill runs.
+    EXPECT_NE(main.find("astore 5\n"
+                        "    aload 3\n"
+                        "    aload 5\n"
+                        "    astore 7\n"
+                        "    astore 6\n"
+                        "    aload 6\n"
+                        "    iconst_1\n"
+                        "    anewarray java/lang/Object\n"
+                        "    dup\n"
+                        "    iconst_0\n"
+                        "    aload 7\n"
+                        "    aastore\n"
+                        "    invokestatic "
+                        "lox/LoxOps/call(Ljava/lang/Object;[Ljava/lang/"
+                        "Object;)Ljava/lang/Object;\n"),
+              std::string::npos)
+        << main;
+    expectEveryJumpTargetIsLabeled(main);
+}
+
+// R15 shape 4: GET_PROPERTY, folded RECEIVER. GET_PROPERTY has no genuine
+// operand at all in this shape (nativePops == 1, so a folded receiver means
+// operandDepth() == 0) — the plainest possible normalizeFoldedOperands case,
+// a bare load with nothing to spill or reload.
+TEST(EmitProgram,
+     GetPropertyOfAFoldedMatchReceiverLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("class K { init(v) { this.v = v; } }\n"
+                                      "var k = K(7);\n"
+                                      "print (match 1 { case 1 => k case _ "
+                                      "=> k }).v;\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    const std::string& main = classes[0].source;
+    EXPECT_NE(main.find("aload 3\n"
+                        "    ldc \"v\"\n"
+                        "    invokestatic lox/LoxOps/getProperty(Ljava/lang/"
+                        "Object;Ljava/lang/String;)Ljava/lang/Object;\n"
+                        "    invokestatic lox/LoxOps/print(Ljava/lang/"
+                        "Object;)V\n"),
+              std::string::npos)
+        << main;
+    expectEveryJumpTargetIsLabeled(main);
+}
+
+// R15 shape 5: INVOKE, folded RECEIVER, argCount == 0 — the same bare-load
+// shape as GET_PROPERTY above, on the fused "get property then call" path.
+TEST(EmitProgram, InvokeOfAFoldedMatchReceiverLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("class K { init(v) { this.v = v; } get() { return "
+                     "this.v; } }\n"
+                     "var k = K(7);\n"
+                     "print (match 1 { case 1 => k case _ => k }).get();\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    const std::string& main = classes[0].source;
+    EXPECT_NE(main.find("aload 3\n"
+                        "    ldc \"get\"\n"
+                        "    iconst_0\n"
+                        "    anewarray java/lang/Object\n"
+                        "    invokestatic lox/LoxOps/invoke(Ljava/lang/"
+                        "Object;Ljava/lang/String;[Ljava/lang/Object;)Ljava/"
+                        "lang/Object;\n"),
+              std::string::npos)
+        << main;
+    expectEveryJumpTargetIsLabeled(main);
+}
+
+// R15 shape 6: SET_PROPERTY, folded RECEIVER (the assigned VALUE is the one
+// genuine operand — the mirror image of GET_PROPERTY's own shape, one level
+// up: SET_PROPERTY's own nativePops is 2, so a folded receiver leaves
+// operandDepth() == 1, same as ADD's own folded-left shape).
+TEST(EmitProgram,
+     SetPropertyOfAFoldedMatchReceiverLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("class K { init(v) { this.v = v; } }\n"
+                     "var k = K(7);\n"
+                     "(match 1 { case 1 => k case _ => k }).v = 9;\n"
+                     "print k.v;\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    const std::string& main = classes[0].source;
+    // "9" spills to scratch (slot 5) while the folded receiver (slot 3)
+    // reloads, then "9" is restored — [receiver, 9] — before
+    // emitSetProperty's own, unrelated value-spill (same slot 5, reused
+    // sequentially) runs.
+    EXPECT_NE(main.find("astore 5\n"
+                        "    aload 3\n"
+                        "    aload 5\n"
+                        "    astore 5\n"
+                        "    ldc \"v\"\n"
+                        "    aload 5\n"
+                        "    invokestatic lox/LoxOps/setProperty(Ljava/lang/"
+                        "Object;Ljava/lang/String;Ljava/lang/Object;)Ljava/"
+                        "lang/Object;\n"
+                        "    pop\n"),
+              std::string::npos)
+        << main;
+    expectEveryJumpTargetIsLabeled(main);
+}
+
+// R15 shape 7: SET_INDEX, folded COLLECTION — the first consumer whose
+// deficit-1 shape needs TWO genuine operands (index and value) spilled at
+// once, so this is the first test that exercises argScratchBase rather than
+// e.scratchSlot for normalizeFoldedOperands's own reorder.
+TEST(EmitScript, SetIndexOfAFoldedMatchCollectionLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("var l = [1, 2, 3];\n"
+                     "(match 1 { case 1 => l case _ => l })[0] = 9;\n"
+                     "print l;\n",
+                     mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // "0" and "9" (top) spill into argScratchBase (7, 8); the folded
+    // collection (slot 3) reloads; "0" then "9" restore on top, in source
+    // order — [collection, 0, 9] — matching setIndex's own parameter order.
+    EXPECT_NE(j.find("astore 7\n"
+                     "    astore 8\n"
+                     "    aload 3\n"
+                     "    aload 8\n"
+                     "    aload 7\n"
+                     "    invokestatic "
+                     "lox/LoxOps/setIndex(Ljava/lang/Object;Ljava/lang/"
+                     "Object;Ljava/lang/Object;)Ljava/lang/Object;\n"
+                     "    pop\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// R15 shape 8: SLICE, folded SEQ — the same two-genuine-operand
+// (argScratchBase) shape as SET_INDEX, above.
+TEST(EmitScript, SliceOfAFoldedMatchSeqLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("var l = [1, 2, 3];\n"
+                     "print (match 1 { case 1 => l case _ => l })[1:3];\n",
+                     mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    EXPECT_NE(j.find("astore 7\n"
+                     "    astore 8\n"
+                     "    aload 3\n"
+                     "    aload 8\n"
+                     "    aload 7\n"
+                     "    invokestatic "
+                     "lox/LoxOps/slice(Ljava/lang/Object;Ljava/lang/Object;"
+                     "Ljava/lang/Object;)Ljava/lang/Object;\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// R15 shape 9: IN, folded ELEM (the left operand of `in`, the one nearer
+// the bottom of the two vm.cpp pops — see emitSimpleOp's own IN note).
+TEST(EmitScript, InOfAFoldedMatchElemLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "print (match 1 { case 1 => 2 case _ => 3 }) in [1, 2, 3];\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // The list literal [1, 2, 3] (the one genuine operand, already built)
+    // spills to scratch (slot 5) while the folded elem (slot 3) reloads,
+    // then the list restores on top — [elem, seq] — matching `in`'s own
+    // parameter order.
+    EXPECT_NE(j.find("astore 5\n"
+                     "    aload 3\n"
+                     "    aload 5\n"
+                     "    invokestatic lox/LoxOps/in(Ljava/lang/Object;Ljava/"
+                     "lang/Object;)Z\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// RETURN of a folded match result — normalizeFoldedOperands's own RETURN
+// row replaces the private branch emitReturn used to carry (PR #113,
+// redesigned PR #113 round 3); this is that row's first dedicated test.
+TEST(EmitProgram, ReturnOfAFoldedMatchResultLoadsItOnce) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun f() { return match 1 { case 1 => 2 case _ => 3 }; }\n"
+                     "print f();\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    const std::string& fn0 = classes[1].source;
+    // Exactly one `aload` immediately before `areturn` — a stray private
+    // branch left in place, alongside normalizeFoldedOperands, would load
+    // the same local a SECOND time here and leave two copies on the stack.
+    EXPECT_NE(fn0.find("aload 5\n"
+                       "    areturn\n"),
+              std::string::npos)
+        << fn0;
+    EXPECT_EQ(countOccurrences(fn0, "areturn"), 1) << fn0;
+    expectEveryJumpTargetIsLabeled(fn0);
+}
+
+// A nested match subject: the OUTER match's own GET_TAG operand is the
+// INNER match's own folded result — the shape the round-3 referee decision
+// named as required coverage alongside R15's own nine. GET_TAG had no
+// private branch before this round (no checkpoint reached a folded subject
+// at all); `nativePops(GET_TAG) == 1` is new coverage, not a redundant-branch
+// deletion.
+TEST(EmitScript,
+     MatchOverAFoldedNestedMatchSubjectLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "enum E { A B }\n"
+        "print match (match A() { case A => A() case B => B() }) { "
+        "case A => 1 case B => 2 };\n",
+        mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // The inner match's own result (slot 4) reloads, then GET_TAG/tableswitch
+    // fuse on it exactly as they do on a genuine subject.
+    EXPECT_NE(j.find("aload 4\n"
+                     "    invokestatic lox/LoxOps/getTag(Ljava/lang/"
+                     "Object;)D\n"
+                     "    d2i\n"
+                     "    tableswitch 0\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}

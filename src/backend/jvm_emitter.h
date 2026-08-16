@@ -5,31 +5,45 @@
 // legality; node N6 adds P5, functions and calls; node N7 adds P4b, closures
 // and upvalues; node N8 adds P5+P4, classes/methods/super; node N9 adds
 // aggregates and for-in; node N10 adds P8, match/enum dispatch proper
-// (GET_TAG, JUMP_TABLE, enum-ctor CONSTANT) and its own residue (the
-// loadNamedLocalAtZeroDepth fix for PRINT, DEFINE_GLOBAL, NOT, NEGATE,
-// one-element BUILD_LIST, a folded-collection GET_INDEX, and — via the
-// reorderFoldedLeftOperand spill-then-load, the same reorder GET_INDEX
-// already used — ADD, SUBTRACT, MULTIPLY, DIVIDE, MODULO, EQUAL, GREATER,
-// and LESS's own folded-LEFT-operand shape (`(match ...) + 1`, PR #115
-// round 2, R11/R12) — see emitPrint's, emitDefineGlobal's, emitNot's,
-// emitNegate's, emitBuildList's, emitGetIndex's, and
-// reorderFoldedLeftOperand's own notes);
-// notes/bytecode-translation-problems.md). Lowers one function's chunk to
-// Jasmin (.j) text, consuming N0's decoder, N1's CFG/labels, N2's
-// abstract-stack analysis, and N3's capture analysis. This is the last emission
-// node (N4-N10): every real Op the compiler emits now has a handler, so this
-// pass aborts loudly on a shape a real handler does not cover yet
-// (test_jvm_emit.cpp's own EmitScript.AbortsOnUnsupportedOpcode documents one;
-// CALL, and ADD's own mirror-image and both-sides-folded shapes, reaching a
-// bare, unconsumed `match` result at operand depth 0 are the ones still open,
-// and PR #115's own body records why: every one of them is already broken on
-// `build/loxpp` itself, so this pass is not withholding a correct answer,
-// only declining to invent one) — a real, un-handled gap still fails
-// loudly, the same as before. A separate, REACHABLE gap exists outside
-// this file: `and`/`or` over a folded `match` operand fails at analysis
-// time, in N2's own abstract_stack.cpp, before this pass ever runs — see
-// the GAP entry in notes/bytecode-translation-problems.md for the full
-// account and why N10 does not own the fix.
+// (GET_TAG, JUMP_TABLE, enum-ctor CONSTANT) and its own residue: a `match`
+// expression's result can reach ANY consumer opcode as a value the native VM
+// treats as already on the operand stack, when N2 instead folded it into a
+// named local (compileMatchBody's own "fused local/operand-stack model").
+//
+// R16 fix (PR #115 round 3, researcher referee decision): three earlier
+// versions of this residue's own account (round 1's R7, round 2's R13, this
+// round's own R15) each enumerated a fixed list of "the shapes that are
+// still open" and each enumeration was disproved within one round by a
+// three-line program. The structural reason no enumeration can stay true:
+// nothing forced it to cover every opcode. This pass now states the fix as
+// a STRUCTURAL claim instead. `jvm_emitter.cpp`'s own `nativePops` is an
+// exhaustive table over `Op` (no `default`, so a missing opcode fails to
+// compile) stating how many operand-stack cells `src/vm.cpp` pops for each
+// one; `normalizeFoldedOperands`, one pre-dispatch step every instruction
+// gets alike (see its own note, above `emitBody`), compares that count
+// against N2's own `operandDepth()` and repairs exactly the deficit. A
+// folded operand can only ever be the BOTTOM-most of an instruction's own
+// operands — `compileMatchBody` folds a `match` expression's result into its
+// own named local before any later sibling operand is even parsed — so a
+// deficit of 1 (the bottom operand missing, every genuine sibling still on
+// the real stack) always has a correct, matching native answer, and this
+// pass now supplies it for every `nativePops`-covered opcode alike, not
+// site by site.
+//
+// A deficit of 2 or more is not owed a fix, for one reason verified across
+// both the CALL/BUILD_LIST/BUILD_MAP family (round 1's R3) and the ADD
+// family (round 2's R11): a program that puts a live sibling operand BELOW
+// a match's own subject/result collides with `compileMatchBody`'s own slot
+// allocation (`compiler.cpp`, `m_localCount`, blind to that sibling) on
+// `build/loxpp` ITSELF, with no JVM backend involved — so no correct native
+// answer exists there to withhold. `normalizeFoldedOperands` throws a named
+// error citing this file for that case, loudly, rather than guessing.
+//
+// A separate, REACHABLE gap exists outside this file: `and`/`or` over a
+// folded `match` operand fails at analysis time, in N2's own
+// abstract_stack.cpp, before this pass ever runs — deferred by referee
+// ruling, PR #115 (see the GAP entry in notes/bytecode-translation-problems.md
+// for the full account).
 //
 // N7 also lowers BUILD_LIST/GET_INDEX/SET_INDEX — three opcodes
 // notes/backend-implementation-dag.md assigns to N9 (aggregates and
