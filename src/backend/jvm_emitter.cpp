@@ -247,18 +247,19 @@ struct Emitter {
     int calleeScratchSlot{-1};
     int argScratchBase{-1};
 
-    // R4 fix (PR #109 nit): -1 is a sentinel for "no invisible-var site has
-    // run yet", not a real slot — see loadLastInvisibleVar.
+    // This pass's own forward walk, updated in offset order by
+    // finishInstruction: the slot the most RECENTLY DECLARED invisible-var
+    // site bound. -1 is a sentinel for "no site has run yet", not a real
+    // slot.
+    //
+    // Referee decision (PR #113 round 3): this field is no longer the
+    // primary source for "which local holds the zero-depth value" — it
+    // names the most recently DECLARED slot, not the topmost LIVE one, and a
+    // `match` separates the two (see loadNamedLocalAtZeroDepth). It survives
+    // only as loadNamedLocalAtZeroDepth's cross-check input at a CFG merge,
+    // where N2's own `localCount` is an upper bound and needs a second,
+    // independent estimate to confirm it.
     int lastInvisibleVarSlot{-1};
-
-    // R1 fix (PR #111 round 2): true only right after emitClosure's
-    // self-capture path stores a CELL into `lastInvisibleVarSlot` instead of
-    // the raw closure a plain declaration always stores. No probe or
-    // example reaches a peek of a self-recursive local `fun`'s own value
-    // (the grammar makes such a declaration a statement, never an operand),
-    // so loadLastInvisibleVar throws there rather than silently handing out
-    // a cell where every other caller expects a raw value.
-    bool lastInvisibleVarIsSelfCell{false};
 
     // Every Lox local slot this chunk's OWN captures (FunctionCaptureInfo::
     // liveRangesBySlot) ever wrap in an Object[1] ref-cell — see the design
@@ -362,54 +363,23 @@ struct Emitter {
         b.emit(call, -3);
         b.emit("aload " + scratch, +1);
     }
-
-    // R4 fix (PR #109 nit): `jvmSlotForLocal(-1)` would silently `aload` the
-    // globals-receiver slot as if it were a Lox value instead of failing
-    // loudly, so every reader of `lastInvisibleVarSlot` goes through here
-    // first (R1 fix, PR #112 round 1: emitGetIter is a second such reader,
-    // and it needs the raw slot number, not a load, so the sentinel check
-    // is split out rather than copied).
-    [[nodiscard]] int checkedInvisibleVarSlot() const {
-        if (lastInvisibleVarSlot < 0) {
-            throw std::runtime_error(
-                "jvm_emitter: use of an invisible var before any "
-                "invisible-var site ran");
-        }
-        return lastInvisibleVarSlot;
-    }
-
-    int loadLastInvisibleVar() {
-        int loxSlot = checkedInvisibleVarSlot();
-        if (lastInvisibleVarIsSelfCell) {
-            throw std::runtime_error(
-                "jvm_emitter: peek of a self-capturing closure's own "
-                "invisible var is unsupported — the slot holds a cell, not "
-                "the raw closure a plain aload here would assume");
-        }
-        int sourceSlot = jvmSlotForLocal(loxSlot);
-        b.emit("aload " + std::to_string(sourceSlot), +1);
-        return sourceSlot;
-    }
 };
 
 // N5.md, "inherited from N4": `analysis.before[i].localCount` is only an
 // upper bound at a CFG merge (abstract_stack.h), so the SET_LOCAL/
-// SET_GLOBAL peek-of-a-named-local case (below) cannot use it to name the
-// slot a peek reads once JUMP/JUMP_IF_FALSE/LOOP exist. `lastInvisibleVarSlot`
-// tracks the same fact a different, merge-safe way: the slot an
-// invisible-var site just bound, updated only by this pass's own forward
-// walk in offset order, never by a count aggregated across incoming edges.
+// SET_GLOBAL peek-of-a-named-local case cannot use it ALONE to name the slot
+// a peek reads once JUMP/JUMP_IF_FALSE/LOOP exist.
 //
-// N6 tried to build a program where the two disagree (nodes/N6.md, "the
-// merge-divergence test becomes writable here") and could not: RETURN, like
-// JUMP/LOOP/MATCH_ERROR, never falls through (see prevCanFallThrough below
-// and abstract_stack.cpp's own terminator list), so a path that returns
-// contributes no edge to any later merge in this chunk at all — it is a
-// dead end, not one side of a join. CALL and CLOSURE are straight-line, no
-// new edges either. So a function frame's *own* body still merges only
-// through if/else/while/for, exactly the shapes N5 already showed agree.
-// See the PR body for the two programs tried and N10 (match arms) as the
-// next candidate construct.
+// CORRECTED (referee decision, PR #113 round 3): an earlier version of this
+// note said `lastInvisibleVarSlot` tracked the same fact a merge-safe way,
+// and that N6 tried and failed to build a program where the two disagree.
+// That is false. `lastInvisibleVarSlot` names the most RECENTLY DECLARED
+// invisible var, not the topmost LIVE one, and a `match` expression declares
+// its own subject AFTER its own result (compiler.cpp, compileMatchBody) — so
+// the two DO disagree, on a plain, unnested match, with no CFG merge
+// involved at all (T1/T2/T3, test_jvm_emit.cpp). `loadNamedLocalAtZeroDepth`
+// (below emitCapturedStore) is the current mechanism: `localCount - 1` off a
+// CFG label, cross-checked against `lastInvisibleVarSlot` on one.
 void emitConstant(Emitter& e, const DecodedInstruction& in) {
     Value v = e.fn.function->chunk.getConstant(
         static_cast<uint16_t>(in.constantIndex));
@@ -686,9 +656,9 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
 // stays in the set once the compiler reuses the index for an unrelated
 // later local, such as a match result or GET_ITER's own iterable.
 // `emitCapturedGetLocal`'s runtime raw-or-cell test is correct either way,
-// including a self-recursive closure's own seeded cell: storeClosureIntoSelfCell
-// marks that slot captured the normal way, so no separate self-cell case is
-// needed here (V5/V6 verify it).
+// including a self-recursive closure's own seeded cell:
+// storeClosureIntoSelfCell marks that slot captured the normal way, so no
+// separate self-cell case is needed here (V5/V6 verify it).
 int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset) {
     int loxSlot = e.analysis.before[i].localCount - 1;
     if (e.labelAtOffset.contains(offset) && e.lastInvisibleVarSlot != loxSlot) {
@@ -802,7 +772,7 @@ void emitSetGlobal(Emitter& e, std::size_t i, const DecodedInstruction& in,
     // non-peek call: the plain store fully consumes the loaded copy either
     // way, so no separate fuse/non-fuse split is needed on this branch.
     if (e.analysis.before[i].operandDepth() == 0) {
-        e.loadLastInvisibleVar();
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
         e.globalsCall("set", e.constantString(in.constantIndex),
                       /*peek=*/false);
     } else {
@@ -848,7 +818,7 @@ void emitSetUpvalue(Emitter& e, std::size_t i, const DecodedInstruction& in,
                     bool& consumedFollowingPop) {
     bool fuse = e.fusablePop(i);
     if (e.analysis.before[i].operandDepth() == 0) {
-        e.loadLastInvisibleVar();
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
         emitUpvalueStore(e, in.byteOperand, /*peek=*/false);
     } else {
         emitUpvalueStore(e, in.byteOperand, /*peek=*/!fuse);
@@ -873,14 +843,14 @@ void emitJumpOrLoop(Emitter& e, const DecodedInstruction& in) {
 // R2 fix (PR #109 round 1): before[i].operandDepth() == 0 is the same eager
 // invisible-var materialization as the SET_LOCAL/SET_GLOBAL peek above
 // (P2/P3 initializer whose top-level operator is `and`/`or`) — the condition
-// is not on the JVM operand stack to `dup`, because N2 already moved it into
-// `lastInvisibleVarSlot`. Load a fresh copy from there instead; `isFalsy`/
-// `ifne` still only consume that one copy, so the depth-preserving contract
-// holds on both edges (0 in, 0 out) exactly as the dup path holds it at
-// (D, D) for D > 0.
+// is not on the JVM operand stack to `dup`, because N2 already folded it into
+// a named local. `loadNamedLocalAtZeroDepth` names and loads a fresh copy;
+// `isFalsy`/`ifne` still only consume that one copy, so the depth-preserving
+// contract holds on both edges (0 in, 0 out) exactly as the dup path holds it
+// at (D, D) for D > 0.
 void emitJumpIfFalse(Emitter& e, std::size_t i, const DecodedInstruction& in) {
     if (e.analysis.before[i].operandDepth() == 0) {
-        e.loadLastInvisibleVar();
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
     } else {
         e.b.emit("dup", +1);
     }
@@ -1147,8 +1117,12 @@ void storeClosureIntoSelfCell(Emitter& e, const DecodedInstruction& in,
     auto& slots = e.invisibleVarsByOffset[in.offset];
     slots.erase(std::remove(slots.begin(), slots.end(), selfLoxSlot),
                 slots.end());
+    // `capturedSlots` already marks `selfLoxSlot` captured (it is one of
+    // this CLOSURE's own upvalue entries), so `loadNamedLocalAtZeroDepth`'s
+    // ordinary raw-or-cell test handles this cell like any other captured
+    // slot — no separate self-cell flag or throw is needed here (referee
+    // decision, PR #113 round 3; V5/V6 verify it).
     e.lastInvisibleVarSlot = selfLoxSlot;
-    e.lastInvisibleVarIsSelfCell = true;
 }
 
 void emitClosure(Emitter& e, const DecodedInstruction& in,
@@ -1245,9 +1219,11 @@ void emitClass(Emitter& e, const DecodedInstruction& in) {
 // one (LoxClass.inheritFrom's own note) — and vm.cpp's own "superclass
 // stays on the stack as the super local" is already satisfied for free
 // here: the super local's JVM slot never changes, so nothing needs
-// pushing back for it.
-void emitInherit(Emitter& e) {
-    e.loadLastInvisibleVar();
+// pushing back for it. `loadNamedLocalAtZeroDepth` names and loads the
+// super local — the same mechanism every other zero-depth consumer shares
+// (referee decision, PR #113 round 3).
+void emitInherit(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    loadNamedLocalAtZeroDepth(e, i, in.offset);
     e.b.emit("invokestatic lox/LoxOps/inheritInto(Ljava/lang/Object;Ljava/lang/"
              "Object;)V",
              -2);
@@ -1460,9 +1436,9 @@ void emitMatchError(Emitter& e) {
 // this node's checkpoint is the first to exercise it end-to-end.
 // `before[i].operandDepth() == 0` names the shape; `loadNamedLocalAtZeroDepth`
 // (this file, above emitGetLocal) names and loads the right slot — see its
-// own note for why `lastInvisibleVarSlot` is the wrong tracker (R6, PR #113
-// round 2) and for the merge/captured-slot guards it applies (R2/R5, same
-// PR).
+// own note for why `lastInvisibleVarSlot` alone is the wrong tracker (R6, PR
+// #113 round 2), and for the merge/captured-slot cross-check it now applies
+// instead (R2/R5, same PR; redesigned in round 3).
 void emitReturn(Emitter& e, std::size_t i, bool isScript) {
     if (isScript) {
         // vm.cpp: frameCount reaches 0, result discarded.
@@ -1632,12 +1608,6 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
         for (int slot : varsIt->second) {
             e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(slot)), -1);
             e.lastInvisibleVarSlot = slot;
-            // A plain declaration always stores the raw value here — the
-            // self-capture flag only ever means something right after
-            // emitClosure's own special-cased store (below), which erases
-            // its slot from this map before finishInstruction runs, so a
-            // normal site reaching this loop is never that case.
-            e.lastInvisibleVarIsSelfCell = false;
         }
     }
 
@@ -1777,7 +1747,7 @@ void emitBody(Emitter& e, bool isScript,
             emitClass(e, in);
             break;
         case Op::INHERIT:
-            emitInherit(e);
+            emitInherit(e, i, in);
             break;
         case Op::GET_PROPERTY:
             emitGetProperty(e, in);
