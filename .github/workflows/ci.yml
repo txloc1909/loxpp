@@ -160,3 +160,95 @@ jobs:
             -w /workspace \
             loxpp-dev-managed:latest \
             bash -c "tools/check_jvm_probes.sh"
+
+      # Node N11, the parity gate. Checkpoint 1: every probe is
+      # byte-identical on native and JVM stdout (differential runner, not
+      # only the check_jvm_probes.sh diff loop above).
+      - name: JVM differential suite - probes (N11)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh notes/translation-probes/"
+
+      # Checkpoint 2: the full example corpus on the JVM backend, zero
+      # failures. --exclude skips the map-iteration-order-sensitive examples
+      # (tools/jvm_excluded_examples.txt); the native path below still runs
+      # every example, unchanged.
+      - name: JVM differential suite - examples (N11)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/check_examples.py tools/loxpp_jvm.sh examples/ --exclude tools/jvm_excluded_examples.txt"
+
+      # Permutation guard for the exclusion list itself. check_examples.py
+      # SKIPs an excluded name; it never runs it, so it cannot tell a real
+      # permutation from a content bug. This step runs diff_runtimes.py over
+      # exactly the names in tools/jvm_excluded_examples.txt (read from the
+      # file, so a new entry is covered with no CI edit) and fails the gate
+      # if any one of them stops being a permutation of native stdout.
+      - name: JVM differential suite - excluded examples stay permutations (N11)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh --exclude tools/jvm_excluded_examples.txt --only-excluded examples/"
+
+      # Full-corpus differential, minus examples/huffman.lox. huffman.lox
+      # diverges for a documented, non-permutation reason (map iteration
+      # order breaks frequency ties differently on each runtime; N11.md,
+      # "huffman.lox - map-order-sensitive but NOT permutation-provable")
+      # and its disposition is a human-supervisor decision, not a defect, so
+      # it is kept out of this step rather than made to pass by construction.
+      # check_examples.py only checks each example's own CHECK directives,
+      # so an example with none (examples/bench_jump_table.lox,
+      # examples/remove.lox) could print a wrong answer with CI green. This
+      # step compares full stdout for every example instead.
+      - name: JVM differential suite - full example corpus, minus huffman.lox (N11)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c '
+              mapfile -t progs < <(ls examples/*.lox | grep -v "examples/huffman.lox")
+              python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh "${progs[@]}" --exclude tools/jvm_excluded_examples.txt
+            '
+
+      # Checkpoint 3: the self-hosted interpreter compiles, assembles, and
+      # runs on the JVM backend, and interprets a Lox++ program correctly.
+      # An emptiness guard catches the case where both wrappers fail silently
+      # with empty stdout, which a bare `diff <(a) <(b)` would report as a
+      # match.
+      - name: JVM differential suite - self-hosted interpreter on the JVM backend (N11)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev-managed:latest \
+            bash -c '
+              native_out=$(bootstrap/lox_wrapper.sh examples/fibonacci.lox)
+              jvm_out=$(tools/loxpp_jvm_bootstrap.sh examples/fibonacci.lox)
+              if [ -z "$native_out" ] || [ -z "$jvm_out" ]; then
+                echo "one or both wrappers gave empty stdout; a silent failure would look like a match"
+                exit 1
+              fi
+              diff <(printf "%s\n" "$native_out") <(printf "%s\n" "$jvm_out")
+            '
+
+      # Checkpoint 4: every example, run through the self-hosted
+      # interpreter, with the interpreter itself running on the JVM backend.
+      # Zero failures, same exclusion list as checkpoint 2.
+      - name: JVM differential suite - examples through the self-hosted interpreter on the JVM backend (N11)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/check_examples.py tools/loxpp_jvm_bootstrap.sh examples/ --exclude tools/jvm_excluded_examples.txt"

@@ -12,13 +12,32 @@ For each examples/*.lox file (alphabetical order):
   6. Report PASS / FAIL / SKIP per file, then exit 1 if any failed.
 
 Usage:
-    python3 tools/check_examples.py <loxpp-binary> <examples-dir>
+    python3 tools/check_examples.py <loxpp-binary> <examples-dir> [--exclude <file>]
+
+--exclude <file> names a file with one excluded example per line: the file
+name, then a reason. tools/jvm_excluded_examples.txt is one such file — the
+map-order-sensitive examples the JVM backend legitimately reorders (spec
+leaves map iteration order unspecified). An excluded file is skipped, not
+run, and reported as SKIP with its reason.
 """
 
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+
+def parse_exclude_file(path: Path) -> dict[str, str]:
+    """Reads a 'name  reason' exclusion list. Blank lines and lines starting
+    with '#' are comments."""
+    reasons: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        name, _, reason = stripped.partition(" ")
+        reasons[name] = reason.strip()
+    return reasons
 
 
 def extract_checks(lox_file: Path) -> list[str]:
@@ -58,16 +77,31 @@ def match_checks(checks: list[str], lines: list[str]) -> tuple[bool, str | None]
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
-        print(f"Usage: {sys.argv[0]} <loxpp> <examples-dir>", file=sys.stderr)
+    args = sys.argv[1:]
+    exclude_path: Path | None = None
+    if "--exclude" in args:
+        i = args.index("--exclude")
+        if i + 1 >= len(args):
+            print(f"Usage: {sys.argv[0]} <loxpp> <examples-dir> [--exclude <file>]", file=sys.stderr)
+            sys.exit(2)
+        exclude_path = Path(args[i + 1])
+        del args[i : i + 2]
+
+    if len(args) != 2:
+        print(f"Usage: {sys.argv[0]} <loxpp> <examples-dir> [--exclude <file>]", file=sys.stderr)
         sys.exit(2)
 
-    loxpp = sys.argv[1]
-    examples_dir = Path(sys.argv[2])
+    loxpp, examples_dir = args[0], Path(args[1])
+    excluded = parse_exclude_file(exclude_path) if exclude_path else {}
 
     passed = failed = skipped = 0
 
     for lox_file in sorted(examples_dir.glob("*.lox")):
+        if lox_file.name in excluded:
+            print(f"SKIP  {lox_file.name}  (excluded: {excluded[lox_file.name]})")
+            skipped += 1
+            continue
+
         checks = extract_checks(lox_file)
         if not checks:
             print(f"SKIP  {lox_file.name}  (no CHECK directives)")
