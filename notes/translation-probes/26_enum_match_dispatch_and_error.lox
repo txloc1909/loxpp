@@ -2,17 +2,20 @@
 // correct arm, and a match with no accepting arm raises MATCH_ERROR at run
 // time.
 //
-// The literal JUMP_TABLE "out of [minTag, minTag+count) range" fallthrough
-// is NOT reachable from any program that compiles: previewEnumArms only
-// makes a match table-eligible when every arm is an unguarded constructor
-// pattern for the SAME enum, with no @-binding and no or-pattern
-// (compiler.cpp:1536), and checkEnumExhaustiveness then unconditionally
-// requires such a match to name every constructor of that enum or carry an
-// unguarded catch-all (compiler.cpp:1553-1568) — so a table-eligible match
-// is always exhaustive over its own enum's whole tag range, and a real
-// ObjEnum value of that enum type can never carry a tag outside it. See the
-// PR body for how this pass still proves the tableswitch's own default
-// label is wired correctly, despite that.
+// R1 fix (PR #115 round 1): an earlier version of this comment said the
+// literal JUMP_TABLE "out of [minTag, minTag+count) range" fallthrough is NOT
+// reachable from any program that compiles. That is false.
+// checkEnumExhaustiveness only checks that the ARMS name every constructor
+// of THEIR OWN enum (compiler.cpp:1553-1568); it does not constrain the
+// SUBJECT expression to that same enum. A subject of an unrelated enum type
+// flows into a table-eligible match just as freely, and its tag comes from a
+// different, wider tag space — so the literal default label IS reachable.
+// notes/translation-probes/27_jump_table_default_cross_enum.lox proves it:
+// two enums, A (2 variants) and B (3), a match that is table-eligible and
+// exhaustive over A's own 2 tags, given a real B() value at run time. B's
+// tag (2) is outside A's own [0, 2) range, and the literal tableswitch
+// default — not the sparse compare-and-branch form this file's own second
+// match below uses — is what raises MATCH_ERROR.
 //
 // A guard, though, defeats table eligibility (so this uses the sparse
 // GET_TAG/CONSTANT/EQUAL form, not JUMP_TABLE) WITHOUT defeating
