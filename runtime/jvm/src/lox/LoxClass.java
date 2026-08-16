@@ -11,7 +11,11 @@ import java.util.Map;
  */
 public final class LoxClass implements LoxCallable {
     public final String name;
-    public final LoxClass superclass;
+    // Not final: INHERIT (node N8) runs after CLASS already pushed and
+    // stored this object (compiler.cpp emits CLASS before the superclass
+    // clause is even parsed), so the superclass can only become known by
+    // mutating the SAME object identity in place — see inheritFrom.
+    public LoxClass superclass;
     public final Map<String, LoxClosure> methods = new LinkedHashMap<>();
 
     public LoxClass(String name, LoxClass superclass) {
@@ -20,6 +24,19 @@ public final class LoxClass implements LoxCallable {
         if (superclass != null) {
             methods.putAll(superclass.methods);
         }
+    }
+
+    /**
+     * INHERIT's mutation (node N8): copies the superclass's methods down and
+     * records it, in place, matching vm.cpp's {@code subclass->methods.
+     * addAll(superclass->methods); subclass->superclass = superclass;}
+     * exactly. Every later GET_GLOBAL/GET_LOCAL of this same class — the
+     * compiler re-reads the class value right after INHERIT so DEFINE_METHOD
+     * can find it — must see the merged state through this one identity.
+     */
+    public void inheritFrom(LoxClass superclass) {
+        this.superclass = superclass;
+        methods.putAll(superclass.methods);
     }
 
     public LoxClosure findMethod(String name) {

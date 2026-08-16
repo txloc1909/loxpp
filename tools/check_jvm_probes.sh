@@ -48,6 +48,12 @@ probes=(
     "notes/translation-probes/12_list_map_index.lox"
     "notes/translation-probes/16_slice_in.lox"
     "notes/translation-probes/25_seq_map_string_coverage.lox"
+    # Node N8: classes, methods, super.
+    "notes/translation-probes/09_class.lox"
+    "notes/translation-probes/10_super.lox"
+    "notes/translation-probes/17_super_value.lox"
+    "examples/class_dispatch.lox"
+    "examples/shapes.lox"
 )
 
 # Probes that must FAIL on both sides (node N6 checkpoint 4, PR #110 R2): a

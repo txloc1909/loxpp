@@ -498,3 +498,52 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
   shape). N4 must detect "the position at `RETURN` is a local, not a
   temporary" and emit an explicit load before the return, the same
   recognition N2 already performs for every other opcode.
+- **GAP, open, owner N10 — corrected (PR #113 round 4 referee decision).**
+  Two earlier versions of this bullet were wrong. The first said the "local,
+  not a temp" family was fixed at `RETURN` only; commit 84a8d5b also fixed
+  `SET_LOCAL` in the same PR, before this bullet was corrected. The second
+  said `SET_GLOBAL` "still emits a plain pop-from-JVM-stack sequence with no
+  such check" and "underflows the JVM operand stack at emit time" — both
+  false. `emitSetGlobal`, `emitSetUpvalue`, and `emitJumpIfFalse` all held the
+  `operandDepth() == 0` check already; the defect was not a missing check, it
+  was that the check read the wrong tracker (`lastInvisibleVarSlot`, this
+  pass's own forward walk over the most RECENTLY DECLARED invisible var, not
+  the topmost LIVE one) and so **emitted a class that loads, silently, the
+  wrong value — no underflow, no verifier error, no exception, just wrong
+  output**. `main` gave this wrong output for a `match` result reaching
+  `SET_GLOBAL`, `SET_UPVALUE`, `JUMP_IF_FALSE`, or `GET_ITER` (N9's own
+  reader of the same tracker) — proof: three plain, unnested `match`
+  programs, T1 (`SET_GLOBAL`), T2 (`JUMP_IF_FALSE`), T3 (`SET_UPVALUE`, see
+  `test/test_jvm_emit.cpp`) each disagree with `build/loxpp` on `main`
+  (commit `32991ff`), with exit code 0 and no diagnostic of any kind.
+  - **Fixed, this PR.** `loadNamedLocalAtZeroDepth` (jvm_emitter.cpp) is now
+    the one mechanism every zero-depth consumer shares —
+    `emitReturn`/`emitSetLocal` (already fixed) plus `emitSetGlobal`,
+    `emitSetUpvalue`, `emitJumpIfFalse`, `emitInherit`, and `emitGetIter`.
+    Away from a CFG label, `localCount - 1` (N2's reconstructed count) names
+    the slot outright — exact by construction, no tracker consulted. At a
+    label, `localCount - 1` and `lastInvisibleVarSlot` must agree, or
+    emission throws at emit time rather than guess. T1/T2/T3 and R9's three
+    nested-match reproductions all now produce output identical to
+    `build/loxpp` on this branch — the cross-check never had to fire on any
+    known repro, but the throw path exists for the case it is built for.
+  - **Still open, owner N10.** Three residues remain, none of them silent:
+    (i) a consumer with no `operandDepth() == 0` branch at all — `PRINT`,
+    `DEFINE_GLOBAL`, `ADD`, `CALL`, `BUILD_LIST`, and peers — still underflows
+    the JVM operand stack at emit time on a bare, unconsumed match result.
+    Proof unchanged: `print match 1 { case x => x };` and
+    `var d = match 1 { case x => x };` both stop `--target jvm` with "operand
+    stack underflow" (at `PRINT` and at `DEFINE_GLOBAL`), though `build/loxpp`
+    prints `1` for both. `examples/match_http_status.lox` and
+    `examples/match_state_machine.lox` fail for exactly this reason.
+    (ii) a match result that reaches a routed consumer at a genuine CFG-label
+    offset where the two slot estimates disagree now stops with
+    `loadNamedLocalAtZeroDepth`'s cross-check throw, loud rather than silent,
+    but still not a running program. (iii) the theoretical case where both
+    estimates agree and are BOTH wrong is not ruled out by a cross-check —
+    only real, per-edge merge verification closes it, which this PR does not
+    attempt. `nodes/N10.md` item 3 already lists both failing examples, so
+    N10 cannot pass its own checkpoint without generalizing
+    `operandDepth() == 0` / `localCount - 1` to every consumer that lacks the
+    branch today, and without replacing the cross-check with a real per-edge
+    proof.

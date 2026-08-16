@@ -21,6 +21,7 @@
 
 #include <bit>
 #include <cstdint>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -173,14 +174,20 @@ TEST(FormatDoubleBitsLiteral, IsABareDecimalIntegerNeverADecimalOrExponent) {
 
 TEST(EmitScript, AbortsOnUnsupportedOpcode) {
     MemoryManager mm;
-    // A class declaration compiles to CLASS — node N8's job, not N6's.
-    DecodedFunction fn = decodeScript("class Foo {}", mm);
+    // An enum declaration (node N10's job, not N8's) compiles each
+    // constructor to a CONSTANT holding an ObjEnumCtor — a Value kind
+    // emitConstant does not handle. An earlier version of this test used an
+    // empty map literal (BUILD_MAP); node N9 merged that opcode to main
+    // after this branch diverged, so BUILD_MAP no longer aborts here
+    // (PR #113 round 4, rebase onto main).
+    DecodedFunction fn =
+        decodeScript("enum Color { Red Green Blue Yellow }\n", mm);
     FunctionStackAnalysis analysis = analyzeStack(fn);
     try {
         jvm::emitScript(fn, analysis, "LoxMain");
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& e) {
-        EXPECT_EQ(std::string(e.what()), "not implemented in N6: CLASS");
+        EXPECT_EQ(std::string(e.what()), "not implemented in N6: CONSTANT");
     }
 }
 
@@ -1154,4 +1161,719 @@ TEST(EmitProgram, NestedClosureCopiesGrandparentUpvalue) {
     expectEveryJumpTargetIsLabeled(classes[1].source);
     expectEveryJumpTargetIsLabeled(bFn);
     expectEveryJumpTargetIsLabeled(classes[3].source);
+}
+
+// Node N7's own harness invariant (nodes/N8.md, "inherited from N7"): a local
+// `fun` that captures itself made the JVM verifier reject the class
+// ("Accessing value from uninitialized register") until N7's fix
+// (seedSelfCaptureCell) seeded the cell before anything read it. This node
+// extends the very same emitClosure path — `super` is captured the same
+// way (SuperInvokeZeroArgsUsesOneScratchSlot below) — so it is the node
+// most likely to break that fix and least likely to notice, since only
+// tools/check_jvm_probes.sh (container-only) would catch a regression.
+// Reverting seedSelfCaptureCell's seed locally and rerunning this test
+// confirms it FAILS first: without the seed, the very first "astore 5"
+// this test looks for does not exist before the closure's own array-build
+// read of that same slot (it is instead the aastore-redirect after
+// construction), so `firstReadPos` would sit ahead of a missing/later
+// `seedPos`, or `seedPos` would not be found at all.
+TEST(EmitProgram, SelfRecursiveClosureSeedsCellBeforeFirstRead) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("fun outer() {\n"
+                                      "  fun f() { f(); }\n"
+                                      "  return f;\n"
+                                      "}\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(classes.size(), 3u);
+    const std::string& outer = classes[1].source;
+    // f's own Lox slot 1 (jvmSlotForLocal(1) with baseSlot=4) is 5: the
+    // seed (`astore 5`) must precede every later `aload 5` that reads it as
+    // a cell — the array-build loop, and the redirected store of the
+    // closure itself into the cell.
+    std::size_t seedPos = outer.find("astore 5\n");
+    ASSERT_NE(seedPos, std::string::npos) << outer;
+    std::size_t firstReadPos = outer.find("aload 5\n");
+    ASSERT_NE(firstReadPos, std::string::npos) << outer;
+    EXPECT_LT(seedPos, firstReadPos)
+        << "the seed must run before the first read of the self-captured "
+           "slot, or the JVM verifier rejects an uninitialized register:\n"
+        << outer;
+    expectEveryJumpTargetIsLabeled(classes[0].source);
+    expectEveryJumpTargetIsLabeled(outer);
+    expectEveryJumpTargetIsLabeled(classes[2].source);
+}
+
+// Node N8: classes, methods, super (P5+P4).
+
+TEST(EmitScript, ClassOpcodeConstructsWithNullSuperclass) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("class Foo {}", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // CLASS builds with superclass=null; INHERIT (below), not CLASS, fills
+    // it in on a class that has one. `new;dup;...;invokespecial` leaves the
+    // un-dup'd reference as the pushed result — the same idiom emitClosure
+    // already uses to build a generated LoxFn$<n>.
+    EXPECT_NE(j.find("new lox/LoxClass\n"
+                     "    dup\n"
+                     "    ldc \"Foo\"\n"
+                     "    aconst_null\n"
+                     "    invokespecial lox/LoxClass/<init>(Ljava/lang/"
+                     "String;Llox/LoxClass;)V\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+TEST(EmitProgram, DefineMethodDupsClassAndChecksCastsBothOperands) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("class Foo { bar() { return 1; } }\n"
+                                      "var f = Foo();\n"
+                                      "print f.bar();\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(classes.size(), 2u);
+    const std::string& main = classes[0].source;
+    // DEFINE_METHOD 'bar': `[cls,fn] -> [cls]` (P2) — `dup` keeps the class
+    // value for the class body's own trailing POP; both operands need an
+    // explicit checkcast, since LoxOps.defineMethod takes concrete types
+    // (an existing, already-tested signature —
+    // runtime/jvm/test/lox/ClassesTest.java calls it directly).
+    EXPECT_NE(main.find("astore 3\n"
+                        "    dup\n"
+                        "    checkcast lox/LoxClass\n"
+                        "    ldc \"bar\"\n"
+                        "    aload 3\n"
+                        "    checkcast lox/LoxClosure\n"
+                        "    invokestatic lox/LoxOps/defineMethod(Llox/"
+                        "LoxClass;Ljava/lang/String;Llox/LoxClosure;)V\n"),
+              std::string::npos)
+        << main;
+    // INVOKE 'bar' 0: argCount==0 needs no reshuffle at all, same as
+    // emitCall's own argCount==0 path — the receiver is already the sole,
+    // topmost value.
+    EXPECT_NE(main.find("ldc \"bar\"\n"
+                        "    iconst_0\n"
+                        "    anewarray java/lang/Object\n"
+                        "    invokestatic lox/LoxOps/invoke(Ljava/lang/"
+                        "Object;Ljava/lang/String;[Ljava/lang/Object;)Ljava/"
+                        "lang/Object;\n"),
+              std::string::npos)
+        << main;
+    expectEveryJumpTargetIsLabeled(main);
+    expectEveryJumpTargetIsLabeled(classes[1].source);
+}
+
+TEST(EmitProgram, GetAndSetPropertyPeekCorrectly) {
+    // notes/translation-probes/09_class.lox verbatim.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("class C {\n"
+                                      "  init(x) { this.x = x; }\n"
+                                      "  get() { return this.x; }\n"
+                                      "}\n"
+                                      "var c = C(5);\n"
+                                      "print c.get();\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(classes.size(), 3u);
+    const std::string& init = classes[1].source;
+    // SET_PROPERTY 'x': `[obj,v] -> [v]` (P2 shuffle) — `v` spills to the
+    // scratch slot while the constant name is pushed between receiver and
+    // value; `init`'s own implicit `return this;` (GET_LOCAL 0) reuses the
+    // same `aload 4` right afterward.
+    EXPECT_NE(init.find("aload 4\n"
+                        "    aload 5\n"
+                        "    astore 6\n"
+                        "    ldc \"x\"\n"
+                        "    aload 6\n"
+                        "    invokestatic lox/LoxOps/setProperty(Ljava/lang/"
+                        "Object;Ljava/lang/String;Ljava/lang/Object;)Ljava/"
+                        "lang/Object;\n"
+                        "    pop\n"
+                        "    aload 4\n"
+                        "    areturn\n"),
+              std::string::npos)
+        << init;
+    expectEveryJumpTargetIsLabeled(init);
+
+    const std::string& get = classes[2].source;
+    // GET_PROPERTY 'x': the receiver (`this`, slot 0) is already on the
+    // stack; only the constant name needs pushing before the call.
+    EXPECT_NE(get.find("aload 4\n"
+                       "    ldc \"x\"\n"
+                       "    invokestatic lox/LoxOps/getProperty(Ljava/lang/"
+                       "Object;Ljava/lang/String;)Ljava/lang/Object;\n"
+                       "    areturn\n"),
+              std::string::npos)
+        << get;
+    expectEveryJumpTargetIsLabeled(get);
+    expectEveryJumpTargetIsLabeled(classes[0].source);
+}
+
+TEST(EmitProgram, InvokeWithArgsSpillsToScratchSlotsAndBuildsArray) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("class C { add(a, b) { return a + b; } }\n"
+                     "print C().add(1, 2);\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(classes.size(), 2u);
+    const std::string& main = classes[0].source;
+    // Same spill shape as CALL (emitCall): the receiver and both args are
+    // already loose on the stack, so they spill to scratch slots (in
+    // reverse pop order) before the array builds on top of the reloaded
+    // receiver.
+    EXPECT_NE(main.find("astore 6\n"
+                        "    astore 5\n"
+                        "    astore 4\n"
+                        "    aload 4\n"
+                        "    ldc \"add\"\n"
+                        "    iconst_2\n"
+                        "    anewarray java/lang/Object\n"
+                        "    dup\n"
+                        "    iconst_0\n"
+                        "    aload 5\n"
+                        "    aastore\n"
+                        "    dup\n"
+                        "    iconst_1\n"
+                        "    aload 6\n"
+                        "    aastore\n"
+                        "    invokestatic lox/LoxOps/invoke(Ljava/lang/"
+                        "Object;Ljava/lang/String;[Ljava/lang/Object;)Ljava/"
+                        "lang/Object;\n"),
+              std::string::npos)
+        << main;
+    expectEveryJumpTargetIsLabeled(main);
+    expectEveryJumpTargetIsLabeled(classes[1].source);
+}
+
+TEST(EmitProgram, InheritLoadsSuperclassFromInvisibleVarNotStack) {
+    // notes/translation-probes/10_super.lox verbatim.
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("class A { greet() { return 1; } }\n"
+                     "class B < A { greet() { return super.greet() + 1; } }\n"
+                     "print B().greet();\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(classes.size(), 3u);
+    const std::string& main = classes[0].source;
+    // compiler.cpp's fixed shape (namedVariable(superclass); beginScope();
+    // addLocal(super); ...; namedVariable(className); INHERIT) means the
+    // superclass value is ALWAYS already the "super" invisible var by the
+    // time INHERIT runs, not a live operand-stack temp — so this loads it
+    // back (slot 3) rather than assuming it still sits beneath the subclass
+    // on the physical stack.
+    //
+    // PR #113 round 4: `super` (slot 3) is also captured by B's own
+    // `greet` CLOSURE later in this same script (for `super.greet()`), so
+    // `loadNamedLocalAtZeroDepth` — the one mechanism INHERIT now shares
+    // with every other zero-depth consumer (referee decision) — wraps this
+    // load in the ordinary raw-or-cell dance. That is correct: INHERIT
+    // always runs before any method's own CLOSURE, so the slot is still
+    // raw here, and the runtime `instanceof` test confirms it. Assert the
+    // dance's shape, not a bare `aload 3`, which the old, INHERIT-only
+    // lowering assumed instead.
+    EXPECT_NE(main.find("ldc \"A\"\n"
+                        "    invokevirtual lox/LoxGlobals/get(Ljava/lang/"
+                        "String;)Ljava/lang/Object;\n"
+                        "    astore 3\n"
+                        "    aload 1\n"
+                        "    ldc \"B\"\n"
+                        "    invokevirtual lox/LoxGlobals/get(Ljava/lang/"
+                        "String;)Ljava/lang/Object;\n"),
+              std::string::npos)
+        << main;
+    static const std::regex kInheritCapturedSuperDance(
+        R"(    aload 3\n)"
+        R"(    instanceof \[Ljava/lang/Object;\n)"
+        R"(    ifeq \S+\n)"
+        R"(    aload 3\n)"
+        R"(    checkcast \[Ljava/lang/Object;\n)"
+        R"(    iconst_0\n)"
+        R"(    aaload\n)"
+        R"(    goto \S+\n)"
+        R"(\S+:\n)"
+        R"(    aload 3\n)"
+        R"(\S+:\n)"
+        R"(    invokestatic lox/LoxOps/inheritInto\(Ljava/lang/Object;Ljava/lang/Object;\)V\n)");
+    EXPECT_TRUE(std::regex_search(main, kInheritCapturedSuperDance)) << main;
+    expectEveryJumpTargetIsLabeled(main);
+    expectEveryJumpTargetIsLabeled(classes[1].source);
+    expectEveryJumpTargetIsLabeled(classes[2].source);
+}
+
+TEST(EmitProgram, SuperInvokeZeroArgsUsesSwapAndOneScratchSlot) {
+    // notes/translation-probes/10_super.lox verbatim — B's own `greet`.
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("class A { greet() { return 1; } }\n"
+                     "class B < A { greet() { return super.greet() + 1; } }\n"
+                     "print B().greet();\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(classes.size(), 3u);
+    const std::string& bGreet = classes[2].source;
+    // `this` (from a preceding GET_LOCAL 0) is pushed before `super` (from
+    // GET_UPVALUE 0), so a bare `swap` reorders them with no extra slot;
+    // `this` then spills to the scratch slot while the name and the empty
+    // args array build on top of the reloaded superclass.
+    EXPECT_NE(bGreet.find("aaload\n"
+                          "    swap\n"
+                          "    astore 5\n"
+                          "    ldc \"greet\"\n"
+                          "    aload 5\n"
+                          "    iconst_0\n"
+                          "    anewarray java/lang/Object\n"
+                          "    invokestatic lox/LoxOps/superInvoke(Ljava/"
+                          "lang/Object;Ljava/lang/String;Ljava/lang/Object;"
+                          "[Ljava/lang/Object;)Ljava/lang/Object;\n"),
+              std::string::npos)
+        << bGreet;
+    expectEveryJumpTargetIsLabeled(bGreet);
+    expectEveryJumpTargetIsLabeled(classes[0].source);
+    expectEveryJumpTargetIsLabeled(classes[1].source);
+}
+
+TEST(EmitProgram, SuperInvokeWithArgsSpillsThreeDistinctScratchSlots) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("class Shape { init(a, b) { this.a = a; this.b = b; } }\n"
+                     "class Sub < Shape { init(x) { super.init(x, x); } }\n"
+                     "print Sub(3).a;\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(classes.size(), 3u);
+    const std::string& subInit = classes[2].source;
+    // argCount >= 1 spills the superclass (e.scratchSlot), the args
+    // (e.argScratchBase, in reverse pop order), and self
+    // (e.calleeScratchSlot) — three DISTINCT, already-existing slots, since
+    // no other instruction's own shuffle is live at the same time.
+    EXPECT_NE(subInit.find("astore 6\n"
+                           "    astore 9\n"
+                           "    astore 8\n"
+                           "    astore 7\n"
+                           "    aload 6\n"
+                           "    ldc \"init\"\n"
+                           "    aload 7\n"
+                           "    iconst_2\n"
+                           "    anewarray java/lang/Object\n"
+                           "    dup\n"
+                           "    iconst_0\n"
+                           "    aload 8\n"
+                           "    aastore\n"
+                           "    dup\n"
+                           "    iconst_1\n"
+                           "    aload 9\n"
+                           "    aastore\n"
+                           "    invokestatic lox/LoxOps/superInvoke(Ljava/"
+                           "lang/Object;Ljava/lang/String;Ljava/lang/Object;"
+                           "[Ljava/lang/Object;)Ljava/lang/Object;\n"),
+              std::string::npos)
+        << subInit;
+    expectEveryJumpTargetIsLabeled(subInit);
+    expectEveryJumpTargetIsLabeled(classes[0].source);
+    expectEveryJumpTargetIsLabeled(classes[1].source);
+}
+
+TEST(EmitProgram, GetSuperBindsMethodAsValue) {
+    // notes/translation-probes/17_super_value.lox verbatim.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "class A { greet() { return 1; } }\n"
+        "class B < A { greet() { var f = super.greet; return f(); } }\n"
+        "print B().greet();\n",
+        mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(classes.size(), 3u);
+    const std::string& bGreet = classes[2].source;
+    // GET_SUPER 'greet': same swap-based reorder as SUPER_INVOKE's own
+    // zero-arg path, but the call binds a bound method instead of running
+    // it — LoxOps.getSuper's own result is what `f` holds.
+    EXPECT_NE(bGreet.find("aaload\n"
+                          "    swap\n"
+                          "    astore 6\n"
+                          "    ldc \"greet\"\n"
+                          "    aload 6\n"
+                          "    invokestatic lox/LoxOps/getSuper(Ljava/lang/"
+                          "Object;Ljava/lang/String;Ljava/lang/Object;)Ljava/"
+                          "lang/Object;\n"),
+              std::string::npos)
+        << bGreet;
+    expectEveryJumpTargetIsLabeled(bGreet);
+    expectEveryJumpTargetIsLabeled(classes[0].source);
+    expectEveryJumpTargetIsLabeled(classes[1].source);
+}
+
+TEST(EmitProgram, InstanceofChecksGlobalsByName) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "class A {}\n"
+        "fun f(x) { return match x { case A => 1 case _ => 2 }; }\n"
+        "print f(A());\n",
+        mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(classes.size(), 2u);
+    const std::string& f = classes[1].source;
+    // INSTANCEOF 'A': vm.cpp looks the class up BY NAME in globals, not
+    // from a constant-pool class reference, so this needs the already-open
+    // globals receiver (e.globalsSlot) plus the constant name — never a
+    // checkcast, since LoxOps.instanceOf takes Object.
+    EXPECT_NE(f.find("aload 3\n"
+                     "    ldc \"A\"\n"
+                     "    invokestatic lox/LoxOps/instanceOf(Ljava/lang/"
+                     "Object;Llox/LoxGlobals;Ljava/lang/String;)Z\n"
+                     "    invokestatic java/lang/Boolean/valueOf(Z)Ljava/"
+                     "lang/Boolean;\n"),
+              std::string::npos)
+        << f;
+    expectEveryJumpTargetIsLabeled(f);
+    expectEveryJumpTargetIsLabeled(classes[0].source);
+}
+
+TEST(EmitProgram, MatchErrorCallsLoxOpsMatchError) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun f(x) { return match x { case 1 => 1 }; }\n"
+                     "print 1;\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(classes.size(), 2u);
+    const std::string& f = classes[1].source;
+    // MATCH_ERROR: no operand, no successor this pass needs to reach. R4
+    // fix (PR #113 round 1): the call now leaves a real LoxError on the
+    // stack, and athrow — a genuine terminal instruction — follows it, so
+    // the verifier (not only this pass's own analysis) sees no fall-through.
+    EXPECT_NE(f.find("pop\n"
+                     "    invokestatic lox/LoxOps/matchError()Llox/LoxError;\n"
+                     "    athrow\n"),
+              std::string::npos)
+        << f;
+    expectEveryJumpTargetIsLabeled(f);
+    expectEveryJumpTargetIsLabeled(classes[0].source);
+}
+
+// bytecode-translation-problems.md, "RETURN can return a named local, not
+// only a temporary": examples/class_dispatch.lox's area()/describe() are
+// this node's own checkpoint proof that this is reachable. Reverting to a
+// bare `areturn` (no load), or loading `lastInvisibleVarSlot` instead of
+// `localCount - 1` (this node's own first, wrong attempt — it loaded the
+// Circle arm's own `r` binding, slot 8, instead of the match's result,
+// slot 6), both make this test FAIL: the second arm's own binding
+// ('color', ALSO slot 8, reused once the Circle arm's own binding is
+// reclaimed) proves the two are not interchangeable.
+TEST(EmitProgram, ReturnLoadsTheMatchResultNotTheLastArmBinding) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "class Shape { init(color) { this.color = color; } }\n"
+        "class Circle < Shape {\n"
+        "  init(color, r) { super.init(color); this.r = r; }\n"
+        "}\n"
+        "fun area(s) {\n"
+        "  return match s { case Circle{r} => r case Shape{color} => 0 };\n"
+        "}\n"
+        "print area(Circle(\"red\", 5));\n",
+        mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    // LoxMain, Shape.init, Circle.init, area — in pre-order declaration
+    // order.
+    ASSERT_EQ(classes.size(), 4u);
+    const std::string& area = classes[3].source;
+    EXPECT_NE(area.find("aload 6\n"
+                        "    areturn\n"),
+              std::string::npos)
+        << area;
+    // The wrong slot this bug actually produced, so a future regression
+    // that reintroduces it fails loudly rather than by coincidence.
+    EXPECT_EQ(area.find("aload 8\n"
+                        "    areturn\n"),
+              std::string::npos)
+        << area;
+    expectEveryJumpTargetIsLabeled(area);
+    for (const jvm::EmittedClass& cls : classes) {
+        expectEveryJumpTargetIsLabeled(cls.source);
+    }
+}
+
+// PR #113 round 2, R5 (blocking): `capturedSlots` holds slot INDEXES, not
+// live ranges. `x` is captured by `g`, then both go out of scope, and the
+// compiler reuses their index for the match's own result — a plain raw
+// value, never captured itself. The old RETURN code threw on this
+// (isCaptured(2) is true for the reused index); the fix is to load the
+// slot the same raw-or-cell way emitGetLocal already does, never to throw.
+//
+// Prove-it-fails (brief.md): reverting emitReturn's `isCaptured` branch to
+// the round-1 throw makes this test FAIL with the exact exception the
+// reviewer reproduced, "RETURN's local slot 2 is captured" — confirmed
+// locally before restoring the fix.
+TEST(EmitProgram, ReturnDoesNotFalselyRejectAReusedCapturedSlotIndex) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun f(a) {\n"
+                     "  { var x = 1; fun g() { return x; } g(); }\n"
+                     "  return match a { case 1 => 10 case _ => 20 };\n"
+                     "}\n"
+                     "print f(1);\n"
+                     "print f(2);\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes;
+    ASSERT_NO_THROW(classes = jvm::emitProgram(fn, tree, "LoxMain"));
+
+    // f is declared after LoxMain and after g's own LoxFn$n class; find it
+    // by its RETURN, not by a fixed index — this test does not need to
+    // know N7's own closure-lowering class count.
+    const jvm::EmittedClass* fClass = nullptr;
+    for (const jvm::EmittedClass& cls : classes) {
+        if (cls.source.find("areturn\n") != std::string::npos &&
+            cls.source.find("instanceof [Ljava/lang/Object;") !=
+                std::string::npos) {
+            fClass = &cls;
+        }
+    }
+    ASSERT_NE(fClass, nullptr) << "no class emits a captured-slot RETURN";
+    // R12 fix (PR #113 round 4): a plain `find` here repeats the very
+    // predicate that already selected fClass, so it cannot fail once
+    // ASSERT_NE above has passed — `f`'s own class holds an unrelated
+    // "instanceof [Ljava/lang/Object;" from emitClosure's cell-seed block
+    // (ensureCapturedCell, for `x`'s capture by `g`), many instructions
+    // before this RETURN. Assert adjacency instead: emitCapturedGetLocal's
+    // own raw-or-cell dance — aload; instanceof; ifeq; aload; checkcast;
+    // iconst_0; aaload; goto; label; aload; label — must stand immediately
+    // before the areturn, not merely appear somewhere earlier in the class.
+    // ensureCapturedCell's own shape (`ifne`/`aastore`/`astore`, never
+    // `checkcast`+`aaload`) cannot match this pattern by accident.
+    static const std::regex kCapturedReturnDance(
+        R"(    aload \d+\n)"
+        R"(    instanceof \[Ljava/lang/Object;\n)"
+        R"(    ifeq \S+\n)"
+        R"(    aload \d+\n)"
+        R"(    checkcast \[Ljava/lang/Object;\n)"
+        R"(    iconst_0\n)"
+        R"(    aaload\n)"
+        R"(    goto \S+\n)"
+        R"(\S+:\n)"
+        R"(    aload \d+\n)"
+        R"(\S+:\n)"
+        R"(    areturn\n)");
+    EXPECT_TRUE(std::regex_search(fClass->source, kCapturedReturnDance))
+        << "the raw-or-cell test must stand immediately before this "
+           "RETURN's own areturn, not merely appear earlier in the class\n"
+        << fClass->source;
+    expectEveryJumpTargetIsLabeled(fClass->source);
+}
+
+// PR #113 round 2, R6 (blocking): a `match` arm whose value is itself a
+// nested `match` used to return the WRONG value, silently. The outer arm's
+// own `SET_LOCAL` into its result slot reads `lastInvisibleVarSlot`, which
+// by then names the inner match's SUBJECT (declared after its own result,
+// compiler.cpp's compileMatchBody) — not its result. `localCount - 1`
+// (loadNamedLocalAtZeroDepth, shared with RETURN) is immune: N2 only
+// retires a slot on a bytecode POP classified LOCAL-RECLAIM, and the inner
+// match's own result retires with no POP at all (P1's invisible-var
+// trick), so `localCount - 1` still names it once the subject's one real
+// POP has run.
+//
+// Prove-it-fails (brief.md): reverting emitSetLocal's
+// `loadNamedLocalAtZeroDepth` call to `e.loadLastInvisibleVar()` makes this
+// test FAIL — it emits "aload 9" (the inner subject) where "aload 8" (the
+// inner result) belongs, exactly the reviewer's reproduction — confirmed
+// locally before restoring the fix.
+TEST(EmitProgram, ReturnOfNestedMatchLoadsTheInnerResultNotTheInnerSubject) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "fun f(x) {\n"
+        "  return match x {\n"
+        "    case 1 => match 2 { case 2 => \"inner\" case _ => \"?\" }\n"
+        "    case _ => \"other\"\n"
+        "  };\n"
+        "}\n"
+        "print f(1);\n"
+        "print f(9);\n",
+        mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes;
+    ASSERT_NO_THROW(classes = jvm::emitProgram(fn, tree, "LoxMain"));
+
+    // `f`'s own class, not LoxMain's script class — found by its own
+    // outer-arm SET_LOCAL, not by a fixed index or class count.
+    const jvm::EmittedClass* fClass = nullptr;
+    for (const jvm::EmittedClass& cls : classes) {
+        if (cls.source.find("astore 6\n") != std::string::npos) {
+            fClass = &cls;
+        }
+    }
+    ASSERT_NE(fClass, nullptr)
+        << "no class emits the outer match's result store";
+    const std::string& f = fClass->source;
+    // The outer arm's own SET_LOCAL must reload the inner match's RESULT
+    // slot (8), immediately before storing into the outer result slot (6).
+    EXPECT_NE(f.find("aload 8\n"
+                     "    astore 6\n"),
+              std::string::npos)
+        << f;
+    // The wrong slot this bug actually produced: the inner match's own
+    // SUBJECT (9), reused here so a future regression fails loudly rather
+    // than by coincidence.
+    EXPECT_EQ(f.find("aload 9\n"
+                     "    astore 6\n"),
+              std::string::npos)
+        << f;
+    expectEveryJumpTargetIsLabeled(f);
+}
+
+// T1/T2/T3 (referee decision, PR #113 round 4): a PLAIN, unnested `match`
+// reaching SET_GLOBAL, JUMP_IF_FALSE, or SET_UPVALUE gave silently wrong
+// output on `main` (commit 32991ff), not only on a nested match. `main`
+// prints `1` for T1 below (the match SUBJECT), where build/loxpp prints
+// `a` (the match RESULT) — confirmed by running both on `main` in a
+// separate worktree, in the dev-managed container, before this fix.
+//
+// Prove-it-fails (brief.md): pointing `emitSetGlobal` back at a bare
+// `e.jvmSlotForLocal(e.lastInvisibleVarSlot)` read (the pre-round-4 shape)
+// makes this test FAIL — it emits "aload 4" (the subject) where "aload 3"
+// (the result) belongs — confirmed locally before restoring the fix.
+TEST(EmitProgram, SetGlobalOfAPlainMatchLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("var g = 0;\n"
+                     "g = match 1 { case 1 => \"a\" case _ => \"b\" };\n"
+                     "print g;\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes;
+    ASSERT_NO_THROW(classes = jvm::emitProgram(fn, tree, "LoxMain"));
+    ASSERT_EQ(classes.size(), 1u);
+    const std::string& main = classes[0].source;
+    // The match's own result (slot 3) must reach SET_GLOBAL, immediately
+    // before the receiver/name/value shuffle globalsCall's non-peek form
+    // builds.
+    EXPECT_NE(main.find("aload 3\n"
+                        "    aload 1\n"
+                        "    swap\n"
+                        "    ldc \"g\"\n"),
+              std::string::npos)
+        << main;
+    // The wrong slot this bug actually produced on `main`: the match's own
+    // SUBJECT (slot 4), reused here so a future regression fails loudly
+    // rather than by coincidence.
+    EXPECT_EQ(main.find("aload 4\n"
+                        "    aload 1\n"
+                        "    swap\n"
+                        "    ldc \"g\"\n"),
+              std::string::npos)
+        << main;
+    expectEveryJumpTargetIsLabeled(main);
+}
+
+// Prove-it-fails: pointing `emitJumpIfFalse` back at a bare
+// `e.jvmSlotForLocal(e.lastInvisibleVarSlot)` read makes this test FAIL —
+// it emits "aload 5" (a stale, unrelated slot) where "aload 6" (the match
+// result) belongs — confirmed locally before restoring the fix.
+TEST(EmitProgram, JumpIfFalseOfAPlainMatchLoadsTheResultNotAStaleSlot) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun f(x) {\n"
+                     "  if (match x { case 1 => false case _ => true }) {\n"
+                     "    return \"yes\";\n"
+                     "  }\n"
+                     "  return \"no\";\n"
+                     "}\n"
+                     "print f(1);\n"
+                     "print f(9);\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes;
+    ASSERT_NO_THROW(classes = jvm::emitProgram(fn, tree, "LoxMain"));
+
+    const jvm::EmittedClass* fClass = nullptr;
+    for (const jvm::EmittedClass& cls : classes) {
+        if (cls.source.find("isFalsy(Ljava/lang/Object;)Z\n"
+                            "    ifne") != std::string::npos &&
+            cls.source.find("astore 6\n") != std::string::npos) {
+            fClass = &cls;
+        }
+    }
+    ASSERT_NE(fClass, nullptr) << "no class emits f's own match+if";
+    const std::string& f = fClass->source;
+    // The match's own result (slot 6) must reload right before the second
+    // (real) JUMP_IF_FALSE's own isFalsy test.
+    EXPECT_NE(f.find("aload 6\n"
+                     "    invokestatic lox/LoxOps/isFalsy"),
+              std::string::npos)
+        << f;
+    expectEveryJumpTargetIsLabeled(f);
+}
+
+// Prove-it-fails: pointing `emitSetUpvalue` back at a bare
+// `e.jvmSlotForLocal(e.lastInvisibleVarSlot)` read makes this test FAIL —
+// confirmed locally before restoring the fix.
+TEST(EmitProgram, SetUpvalueOfAPlainMatchLoadsTheResultNotAStaleSlot) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun outer() {\n"
+                     "  var g = 0;\n"
+                     "  fun setit() {\n"
+                     "    g = match 1 { case 1 => \"a\" case _ => \"b\" };\n"
+                     "  }\n"
+                     "  setit();\n"
+                     "  return g;\n"
+                     "}\n"
+                     "print outer();\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes;
+    ASSERT_NO_THROW(classes = jvm::emitProgram(fn, tree, "LoxMain"));
+
+    const jvm::EmittedClass* setitClass = nullptr;
+    for (const jvm::EmittedClass& cls : classes) {
+        if (cls.source.find("LoxClosure/upvalues") != std::string::npos &&
+            cls.source.find("astore 5\n") != std::string::npos) {
+            setitClass = &cls;
+        }
+    }
+    ASSERT_NE(setitClass, nullptr) << "no class emits setit's own match";
+    const std::string& setit = setitClass->source;
+    // The match's own result (slot 5) must reload right before the
+    // upvalue-store spill (emitUpvalueStore's own `astore` scratch).
+    EXPECT_NE(setit.find("aload 5\n"
+                         "    astore 7\n"),
+              std::string::npos)
+        << setit;
+    expectEveryJumpTargetIsLabeled(setit);
 }

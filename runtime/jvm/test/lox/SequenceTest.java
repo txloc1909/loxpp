@@ -98,7 +98,8 @@ public final class SequenceTest {
         check(!LoxOps.isSeq(new LoxMap()), "map is not IS_SEQ (matches Op::IS_SEQ, not the spec protocol)");
         check(!LoxOps.isSeq(1.0), "number is not a sequence");
 
-        checkThrows(LoxOps::matchError, LoxError.class, "matchError always throws");
+        checkEquals("MatchError: no matching arm.", LoxOps.matchError().getMessage(),
+                "matchError builds a LoxError with the vm.cpp message");
 
         System.exit(TestSupport.finish("SequenceTest"));
     }

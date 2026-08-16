@@ -3,11 +3,12 @@
 // JVM code generator (node N4 of the JVM/CLR backend DAG, discharges P2 — the
 // "peek, don't pop" family; node N5 adds P3b, control flow and verifier
 // legality; node N6 adds P5, functions and calls; node N7 adds P4b, closures
-// and upvalues; notes/bytecode-translation-problems.md). Lowers one
-// function's chunk to Jasmin (.j) text, consuming N0's decoder, N1's
-// CFG/labels, N2's abstract-stack analysis, and N3's capture analysis.
-// Classes (N8) and match/enum (N10) are still out of scope: this node aborts
-// loudly on any opcode none of N4/N5/N6/N7 lowers, so a later node's gap
+// and upvalues; node N8 adds P5+P4, classes/methods/super;
+// notes/bytecode-translation-problems.md). Lowers one function's chunk to
+// Jasmin (.j) text, consuming N0's decoder, N1's CFG/labels, N2's
+// abstract-stack analysis, and N3's capture analysis. Match/enum dispatch
+// proper (N10: GET_TAG, JUMP_TABLE) is still out of scope: this node aborts
+// loudly on any opcode none of N4/N5/N6/N7/N8 lowers, so a later node's gap
 // fails loudly too.
 //
 // N7 also lowers BUILD_LIST/GET_INDEX/SET_INDEX — three opcodes
@@ -19,6 +20,15 @@
 // BUILD_MAP, SLICE, IN, IS_SEQ, and the for-in iterator protocol
 // (GET_ITER/ITER_HAS_NEXT/ITER_NEXT) — see emitBuildList's and
 // emitBuildMap's own notes.
+//
+// N8 also lowers MATCH_ERROR, an N10 opcode pulled forward for the same
+// reason: a `match` whose arms are all class patterns (no literal wildcard
+// or plain binding) compiles a real, reachable MATCH_ERROR, because the
+// compiler never proves a class pattern exhaustive over its own subclasses
+// — examples/class_dispatch.lox is exactly this shape, and this node's own
+// checkpoint cannot run to completion without it. N10 still owns GET_TAG
+// and JUMP_TABLE, the enum-tag dispatch fast path — see emitMatchError's
+// own note.
 //
 // JVM local-variable layout — one fixed mapping for both entry shapes
 // (nodes/N6.md: "choose a fixed slot mapping ... and use it everywhere"),
