@@ -14,7 +14,12 @@
 # (PR #113) ran this proof after INVOKE first let these files emit at all
 # (they previously stopped at "not implemented in N6: INVOKE").
 #
+# tools/diff_runtimes.py checks the same proof for every entry on every run:
+# an entry here that stops being a permutation (a content change, not just a
+# reorder) reports DIVERGE, not PERMUTATION, and fails the gate.
+#
 # file                    reason
 anagram_groups.lox        map iteration order (groups print in map insertion order, not native bucket order)
 symbol_table.lox          map iteration order (symbol dump prints in map insertion order, not native bucket order)
 word_freq.lox             map iteration order (frequency table prints in map insertion order, not native bucket order)
+phonebook.lox             map iteration order (list command prints entries in map insertion order, not native bucket order — node N11, using the existing examples/phonebook.input)
