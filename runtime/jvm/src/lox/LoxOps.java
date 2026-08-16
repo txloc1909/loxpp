@@ -233,6 +233,39 @@ public final class LoxOps {
         return list;
     }
 
+    /**
+     * BUILD_MAP's own helper (node N9), same P7 spill-then-materialize shape
+     * as {@link #buildList}, doubled: {@code kv} holds {@code count * 2}
+     * elements, {@code [key0, val0, key1, val1, ...]}, in the same
+     * first-to-last order the JVM emitter already builds for buildList's own
+     * array (emitBuildMap, jvm_emitter.cpp). vm.cpp validates every key
+     * before writing any pair ("Validate all keys before any allocation");
+     * this keeps that same two-pass shape, so a bad key never leaves a
+     * partially-built map behind.
+     */
+    public static LoxMap buildMap(Object[] kv) {
+        for (int i = 0; i < kv.length; i += 2) {
+            checkMapKey(kv[i]);
+        }
+        LoxMap map = new LoxMap();
+        for (int i = 0; i < kv.length; i += 2) {
+            map.put(kv[i], kv[i + 1]);
+        }
+        return map;
+    }
+
+    // BINDING INVARIANT: no Lox value may be a bare Object[]. N7's captured-
+    // local discriminator (ensureCapturedCell, jvm_emitter.cpp) tells a
+    // ref-cell from a raw value at run time with `instanceof [Ljava/lang/
+    // Object;` on whatever a local slot holds. A bare Object[] stored into a
+    // slot reads as a cell, so every GET_LOCAL/SET_LOCAL of a captured slot
+    // in that program would silently read/write its element 0 instead of
+    // the value itself — no verifier error, no exception, just a wrong
+    // answer (PR #111 R9). Every aggregate here is a named class instead
+    // (LoxList, LoxMap, LoxEnum, LoxClosure, LoxInstance, LoxFile); the only
+    // Object[] uses in this runtime are LoxEnum.payload and CALL/BUILD_LIST/
+    // BUILD_MAP's own argument arrays, and none of those ever reaches a
+    // local slot. Wrap any new aggregate type in a named class too.
     public static Object getIndex(Object collection, Object index) {
         if (collection instanceof LoxList) {
             List<Object> elements = ((LoxList) collection).elements;
@@ -285,6 +318,21 @@ public final class LoxOps {
                     "Value is not iterable (expected list, string, or map).");
         }
         return new LoxIterator(iterable);
+    }
+
+    /**
+     * ITER_HAS_NEXT/ITER_NEXT operate on the copy a preceding GET_LOCAL
+     * already loaded (P8) — the iterator's own local slot is untouched, and
+     * neither opcode consumes it. A plain cast is enough: GET_ITER is the
+     * only producer of a {@link LoxIterator} value, so this cast can never
+     * see anything else.
+     */
+    public static boolean iterHasNext(Object it) {
+        return ((LoxIterator) it).hasNext();
+    }
+
+    public static Object iterNext(Object it) {
+        return ((LoxIterator) it).next();
     }
 
     /** Matches Op::IS_SEQ exactly: List and String only — Map is not included (vm.cpp). */

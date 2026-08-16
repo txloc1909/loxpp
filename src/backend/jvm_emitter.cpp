@@ -238,10 +238,11 @@ struct Emitter {
     int scratchSlot{0};
 
     // Set (to scratchSlot+1 / scratchSlot+2) only when this chunk contains a
-    // CALL with at least one argument or a BUILD_LIST with at least one
-    // element; -1 otherwise, so a stray use before emitChunk's own prologue
-    // computes them fails loudly instead of silently aliasing scratchSlot.
-    // emitBuildList only ever uses argScratchBase, never calleeScratchSlot —
+    // CALL with at least one argument, a BUILD_LIST with at least one
+    // element, or a BUILD_MAP with at least one pair; -1 otherwise, so a
+    // stray use before emitChunk's own prologue computes them fails loudly
+    // instead of silently aliasing scratchSlot. emitBuildList and
+    // emitBuildMap only ever use argScratchBase, never calleeScratchSlot —
     // see computeMaxSpillWidth's own note.
     int calleeScratchSlot{-1};
     int argScratchBase{-1};
@@ -364,20 +365,28 @@ struct Emitter {
 
     // R4 fix (PR #109 nit): `jvmSlotForLocal(-1)` would silently `aload` the
     // globals-receiver slot as if it were a Lox value instead of failing
-    // loudly, so every read of `lastInvisibleVarSlot` goes through here.
-    int loadLastInvisibleVar() {
+    // loudly, so every reader of `lastInvisibleVarSlot` goes through here
+    // first (R1 fix, PR #112 round 1: emitGetIter is a second such reader,
+    // and it needs the raw slot number, not a load, so the sentinel check
+    // is split out rather than copied).
+    [[nodiscard]] int checkedInvisibleVarSlot() const {
         if (lastInvisibleVarSlot < 0) {
             throw std::runtime_error(
-                "jvm_emitter: peek of an invisible var before any "
+                "jvm_emitter: use of an invisible var before any "
                 "invisible-var site ran");
         }
+        return lastInvisibleVarSlot;
+    }
+
+    int loadLastInvisibleVar() {
+        int loxSlot = checkedInvisibleVarSlot();
         if (lastInvisibleVarIsSelfCell) {
             throw std::runtime_error(
                 "jvm_emitter: peek of a self-capturing closure's own "
                 "invisible var is unsupported — the slot holds a cell, not "
                 "the raw closure a plain aload here would assume");
         }
-        int sourceSlot = jvmSlotForLocal(lastInvisibleVarSlot);
+        int sourceSlot = jvmSlotForLocal(loxSlot);
         b.emit("aload " + std::to_string(sourceSlot), +1);
         return sourceSlot;
     }
@@ -521,6 +530,45 @@ bool emitSimpleOp(Emitter& e, Op op) {
                  "Ljava/lang/Object;)Ljava/lang/Object;",
                  -2);
         return true;
+    // SLICE pops [seq, start, end] bottom-to-top (vm.cpp: peek(2), peek(1),
+    // peek(0)) — LoxOps.slice's own parameter order already matches, so
+    // this is a plain call, no shuffle (same P2 exemption as GET_INDEX).
+    case Op::SLICE:
+        e.b.emit("invokestatic "
+                 "lox/LoxOps/slice(Ljava/lang/Object;Ljava/lang/Object;"
+                 "Ljava/lang/Object;)Ljava/lang/Object;",
+                 -2);
+        return true;
+    // IN pops [elem, seq] bottom-to-top (vm.cpp pops seq first, so seq sits
+    // on top) — LoxOps.in's own doc comment already matches that order.
+    case Op::IN:
+        e.b.emit("invokestatic lox/LoxOps/in(Ljava/lang/Object;Ljava/lang/"
+                 "Object;)Z",
+                 -1);
+        e.b.emit("invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/"
+                 "Boolean;",
+                 0);
+        return true;
+    // ITER_HAS_NEXT/ITER_NEXT consume the copy a preceding GET_LOCAL already
+    // loaded (P8 — the iterator lives in an ordinary chunk local, never a
+    // dedicated backend slot); the local itself is untouched.
+    case Op::ITER_HAS_NEXT:
+        e.b.emit("invokestatic lox/LoxOps/iterHasNext(Ljava/lang/Object;)Z", 0);
+        e.b.emit("invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/"
+                 "Boolean;",
+                 0);
+        return true;
+    case Op::ITER_NEXT:
+        e.b.emit("invokestatic lox/LoxOps/iterNext(Ljava/lang/Object;)"
+                 "Ljava/lang/Object;",
+                 0);
+        return true;
+    case Op::IS_SEQ:
+        e.b.emit("invokestatic lox/LoxOps/isSeq(Ljava/lang/Object;)Z", 0);
+        e.b.emit("invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/"
+                 "Boolean;",
+                 0);
+        return true;
     default:
         return false;
     }
@@ -605,6 +653,55 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
     e.b.resync(d - 1);
     if (peek) {
         e.b.emit("aload " + scratch, +1);
+    }
+}
+
+// GET_ITER replaces its own operand in place (vm.cpp: `stackTop[-1] = ...`).
+// It carries no operand byte of its own. The iterable expression's own
+// declaring push (11_for_in.lox: e.g. BUILD_LIST) is what put the value
+// there, and N2/N3 already hand THAT instruction's own offset the
+// invisible-var store for this slot (finishInstruction), one instruction
+// earlier than GET_ITER itself. By the time GET_ITER runs, the JVM operand
+// stack is therefore already empty at this position (`operandDepth() == 0`)
+// — the value already lives in its own JVM local slot, not still sitting on
+// the operand stack the way a plain "simple op" would assume. GET_ITER must
+// reload that slot, transform it, and store the result straight back,
+// through the same captured-slot check GET_LOCAL/SET_LOCAL use (a sibling
+// scope can reuse this same slot number for a variable some closure
+// elsewhere in the chunk captures — capturedSlots is keyed by slot number,
+// not by declaration), never a bare aload/astore.
+//
+// R1 fix (PR #112 round 1): `before[i].height - 1` named the WRONG slot at
+// a control-flow merge, because `height` is only an upper bound there
+// (abstract_stack.h) — the same fact PR #107 R9 and PR #109 R2 already
+// settled for SET_LOCAL/SET_GLOBAL/JUMP_IF_FALSE. `lastInvisibleVarSlot` is
+// this pass's own forward walk, so it is exact regardless of merges
+// upstream. The guard below turns the assumption in the paragraph above
+// into a checked fact: `operandDepth() == 0` is not merely expected here, it
+// is required, and a violation now fails loudly instead of silently
+// reading/writing the wrong slot with a true net effect of zero.
+void emitGetIter(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (e.analysis.before[i].operandDepth() != 0) {
+        throw std::runtime_error(
+            "jvm_emitter: GET_ITER expected its iterable already folded "
+            "into an invisible-var slot (operand depth 0), but the JVM "
+            "operand stack was not empty here");
+    }
+    int loxSlot = e.checkedInvisibleVarSlot();
+    int slot = e.jvmSlotForLocal(loxSlot);
+    bool captured = e.isCaptured(loxSlot);
+    if (captured) {
+        emitCapturedGetLocal(e, slot, in.offset);
+    } else {
+        e.b.emit("aload " + std::to_string(slot), +1);
+    }
+    e.b.emit("invokestatic "
+             "lox/LoxOps/getIter(Ljava/lang/Object;)Llox/LoxIterator;",
+             0);
+    if (captured) {
+        emitCapturedStore(e, slot, in.offset, /*peek=*/false);
+    } else {
+        e.b.emit("astore " + std::to_string(slot), -1);
     }
 }
 
@@ -802,6 +899,37 @@ void emitCall(Emitter& e, const DecodedInstruction& in) {
     e.b.emit(callSig, -1);
 }
 
+// Shared P7 reshape for BUILD_LIST/BUILD_MAP (R4 fix, PR #112 round 1):
+// spill `width` values, already on the stack BELOW where a fresh array
+// reference would land, into `argScratchBase` (same reasoning as emitCall),
+// build a fresh Object[width], refill it ascending, then hand it to
+// `buildSig`. `width == 0` needs no scratch at all: the empty array builds
+// directly, with nothing to spill or refill. `buildSig` fixes only the
+// element count and the runtime call; the six-step shape is otherwise
+// identical for a list of N elements and a map of N pairs (2N cells). Node
+// N10 needs this same shape a third time, for an enum constructor's payload
+// array.
+void emitSpillToArray(Emitter& e, int width, const char* buildSig) {
+    if (width == 0) {
+        e.b.emit(pushIntInstruction(0), +1);
+        e.b.emit("anewarray java/lang/Object", 0);
+        e.b.emit(buildSig, 0);
+        return;
+    }
+    for (int i = width - 1; i >= 0; i--) {
+        e.b.emit("astore " + std::to_string(e.argScratchBase + i), -1);
+    }
+    e.b.emit(pushIntInstruction(width), +1);
+    e.b.emit("anewarray java/lang/Object", 0);
+    for (int i = 0; i < width; i++) {
+        e.b.emit("dup", +1);
+        e.b.emit(pushIntInstruction(i), +1);
+        e.b.emit("aload " + std::to_string(e.argScratchBase + i), +1);
+        e.b.emit("aastore", -3);
+    }
+    e.b.emit(buildSig, 0);
+}
+
 // BUILD_LIST (node N7 pulls this one N9 opcode family forward — see
 // notes/backend-implementation-dag.md's build-order note). N7's own
 // checkpoint (nodes/N7.md) cannot run to completion without it:
@@ -812,34 +940,25 @@ void emitCall(Emitter& e, const DecodedInstruction& in) {
 // "not implemented" on BUILD_LIST/GET_INDEX/SET_INDEX cannot even reach the
 // closure bug this node is named for. GET_INDEX/SET_INDEX (emitSimpleOp)
 // need no shuffle of their own — LoxOps's parameter order already matches
-// vm.cpp's own operand order — so BUILD_LIST's own spill-to-scratch (same
-// P7 reasoning as emitCall: the elements sit on the stack BELOW where a
-// fresh array reference would land, count == 0 needs no scratch at all) is
-// the only new shuffle this addition needs. LoxOps.buildList (runtime/jvm)
+// vm.cpp's own operand order — so BUILD_LIST's own spill-to-scratch is the
+// only new shuffle this addition needs. LoxOps.buildList (runtime/jvm)
 // copies the array into a fresh LoxList in the same order.
 void emitBuildList(Emitter& e, const DecodedInstruction& in) {
-    int count = in.byteOperand;
-    const char* buildSig =
-        "invokestatic lox/LoxOps/buildList([Ljava/lang/Object;)Llox/"
-        "LoxList;";
-    if (count == 0) {
-        e.b.emit(pushIntInstruction(0), +1);
-        e.b.emit("anewarray java/lang/Object", 0);
-        e.b.emit(buildSig, 0);
-        return;
-    }
-    for (int i = count - 1; i >= 0; i--) {
-        e.b.emit("astore " + std::to_string(e.argScratchBase + i), -1);
-    }
-    e.b.emit(pushIntInstruction(count), +1);
-    e.b.emit("anewarray java/lang/Object", 0);
-    for (int i = 0; i < count; i++) {
-        e.b.emit("dup", +1);
-        e.b.emit(pushIntInstruction(i), +1);
-        e.b.emit("aload " + std::to_string(e.argScratchBase + i), +1);
-        e.b.emit("aastore", -3);
-    }
-    e.b.emit(buildSig, 0);
+    emitSpillToArray(e, in.byteOperand,
+                     "invokestatic lox/LoxOps/buildList([Ljava/lang/"
+                     "Object;)Llox/LoxList;");
+}
+
+// BUILD_MAP n: n key/value pairs already on the stack, pushed in source
+// order — key0, val0, key1, val1, ..., key_{n-1}, val_{n-1}
+// (compiler.cpp's mapLiteral) — so the same P7 reshape as emitBuildList
+// applies, just to 2n cells instead of n. vm.cpp validates every key
+// before writing any pair ("Validate all keys before any allocation");
+// LoxOps.buildMap (runtime/jvm) keeps that same two-pass shape.
+void emitBuildMap(Emitter& e, const DecodedInstruction& in) {
+    emitSpillToArray(e, 2 * in.byteOperand,
+                     "invokestatic lox/LoxOps/buildMap([Ljava/lang/"
+                     "Object;)Llox/LoxMap;");
 }
 
 // Wraps `slot` in a fresh Object[1] ref-cell, seeded with the raw value
@@ -1121,19 +1240,22 @@ int computeMaxLocalCount(const FunctionStackAnalysis& analysis) {
     return std::max(maxLocalCount, 1);
 }
 
-// The widest N-element spill this chunk needs — CALL's argCount, or
+// The widest N-element spill this chunk needs — CALL's argCount,
 // BUILD_LIST's element count (node N7 pulls BUILD_LIST forward from N9's
-// scope; see emitBuildList's own note) — ignoring a width of 0 (needs no
-// scratch slot at all: emitCall's argCount==0 path, and emitBuildList's own
-// count==0 path, each build directly with no spill). 0 here means the
-// chunk needs no scratch slots for either family, keeping `.limit locals`
-// byte-identical to pre-N6 output on every chunk that makes no call and
-// builds no list.
+// scope; see emitBuildList's own note), or BUILD_MAP's own width, twice its
+// pair count (emitBuildMap spills key and value separately) — ignoring a
+// width of 0 (needs no scratch slot at all: emitCall's argCount==0 path,
+// and emitBuildList's/emitBuildMap's own count==0 path, each build directly
+// with no spill). 0 here means the chunk needs no scratch slots for any
+// family, keeping `.limit locals` byte-identical to pre-N6 output on every
+// chunk that makes no call and builds no list or map.
 int computeMaxSpillWidth(const DecodedFunction& fn) {
     int maxWidth = 0;
     for (const DecodedInstruction& instr : fn.instructions) {
         if (instr.op == Op::CALL || instr.op == Op::BUILD_LIST) {
             maxWidth = std::max(maxWidth, instr.byteOperand);
+        } else if (instr.op == Op::BUILD_MAP) {
+            maxWidth = std::max(maxWidth, 2 * instr.byteOperand);
         }
     }
     return maxWidth;
@@ -1356,6 +1478,12 @@ void emitBody(Emitter& e, bool isScript,
             break;
         case Op::BUILD_LIST:
             emitBuildList(e, in);
+            break;
+        case Op::BUILD_MAP:
+            emitBuildMap(e, in);
+            break;
+        case Op::GET_ITER:
+            emitGetIter(e, i, in);
             break;
         case Op::CLOSURE:
             emitClosure(e, in, childClassNames);

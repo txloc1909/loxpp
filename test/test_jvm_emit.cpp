@@ -693,6 +693,219 @@ TEST(EmitScript, GetIndexAndSetIndexAreOneInvokestaticEach) {
     expectEveryJumpTargetIsLabeled(j);
 }
 
+// BUILD_MAP/SLICE/IN/GET_ITER/ITER_HAS_NEXT/ITER_NEXT/IS_SEQ (node N9:
+// notes/backend-implementation-dag.md, "aggregates, indexing, iterators").
+
+TEST(EmitScript, BuildMapOfZeroPairsBuildsDirectly) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("var m = {};", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("iconst_0\n"
+                     "    anewarray java/lang/Object\n"
+                     "    invokestatic "
+                     "lox/LoxOps/buildMap([Ljava/lang/Object;)Llox/"
+                     "LoxMap;\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+TEST(EmitScript, BuildMapSpillsToScratchSlotsAndBuildsArray) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("var m = {\"a\": 1, \"b\": 2};", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // P7, same shape as BUILD_LIST's own spill, doubled: 2 pairs push 4
+    // cells [key0, val0, key1, val1], topmost (val1) first, so the topmost
+    // is spilled first.
+    EXPECT_NE(j.find("astore 8\n"
+                     "    astore 7\n"
+                     "    astore 6\n"
+                     "    astore 5\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("iconst_4\n"
+                     "    anewarray java/lang/Object\n"
+                     "    dup\n"
+                     "    iconst_0\n"
+                     "    aload 5\n"
+                     "    aastore\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("invokestatic "
+                     "lox/LoxOps/buildMap([Ljava/lang/Object;)Llox/"
+                     "LoxMap;\n"),
+              std::string::npos)
+        << j;
+    EXPECT_EQ(countOccurrences(j, "aastore"), 4);
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+TEST(EmitScript, SliceAndInAreOneInvokestaticEach) {
+    // vm.cpp's own operand order already matches each helper's own parameter
+    // order (LoxOps.slice's and LoxOps.in's own doc comments), so neither
+    // needs a shuffle.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "var s = \"hello\"; print s[1:3]; print 1 in [1, 2, 3];", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("invokestatic "
+                     "lox/LoxOps/slice(Ljava/lang/Object;Ljava/lang/Object;"
+                     "Ljava/lang/Object;)Ljava/lang/Object;\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("invokestatic lox/LoxOps/in(Ljava/lang/Object;Ljava/lang/"
+                     "Object;)Z\n"
+                     "    invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/"
+                     "Boolean;\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+TEST(EmitScript, GetIterReloadsAndRestoresItsOwnDeclaringSlot) {
+    // GET_ITER carries no operand byte and replaces its own operand in
+    // place (vm.cpp: `stackTop[-1] = ...`) — N2/N3 attribute the invisible-
+    // var store for that position to the iterable expression's OWN
+    // declaring push (here BUILD_LIST), one instruction earlier, so the JVM
+    // operand stack is already empty by the time GET_ITER runs. A plain
+    // one-`invokestatic` lowering (no reload, no store-back) calls
+    // LoxOps.getIter on an empty stack: jasmin's own net-word bookkeeping
+    // cannot catch this, because GET_ITER's declared effect is a true net
+    // zero (one popped, one pushed) — only `java -Xverify:all` does
+    // (`VerifyError: Unable to pop operand off an empty stack`,
+    // check_jvm_probes.sh on 11_for_in.lox). This test fails without the
+    // `aload <slot>` / `astore <slot>` wrap: reverting emitGetIter to a bare
+    // `invokestatic getIter` call, with no surrounding load/store, makes it
+    // fail (verified locally against this PR's own diff).
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("for (var x in [1, 2, 3]) print x;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // No locals of its own before the loop: scratchSlot = 3 (2 fixed +
+    // forced minimum 1), so argScratchBase = 5, and BUILD_LIST's 3-element
+    // spill occupies 5-7 (CallWithArgsSpillsToScratchSlotsAndBuildsArray's
+    // own numbering, one node earlier). The iterable's declaring push (and
+    // so GET_ITER's own reload/store slot) is the next one after that:
+    // JVM local 3 (Lox slot 1 — Lox slot 0 is the script's own callee).
+    EXPECT_NE(j.find("invokestatic "
+                     "lox/LoxOps/buildList([Ljava/lang/Object;)Llox/"
+                     "LoxList;\n"
+                     "    astore 3\n"
+                     "    aload 3\n"
+                     "    invokestatic "
+                     "lox/LoxOps/getIter(Ljava/lang/Object;)Llox/"
+                     "LoxIterator;\n"
+                     "    astore 3\n"),
+              std::string::npos)
+        << j;
+    // P8: the iterator lives in an ordinary chunk local; ITER_HAS_NEXT/
+    // ITER_NEXT each consume the copy a preceding GET_LOCAL (aload 3)
+    // loaded, never the slot itself.
+    EXPECT_NE(j.find("aload 3\n"
+                     "    invokestatic lox/LoxOps/iterHasNext(Ljava/lang/"
+                     "Object;)Z\n"
+                     "    invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/"
+                     "Boolean;\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("aload 3\n"
+                     "    invokestatic lox/LoxOps/iterNext(Ljava/lang/Object;)"
+                     "Ljava/lang/Object;\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+TEST(EmitScript, GetIterAfterAMergeStillLoadsTheRightSlot) {
+    // R1 fix (PR #112 round 1): emitGetIter used to name its slot with
+    // `before[i].height - 1`, the same upper-bound-at-a-merge trap
+    // PeekOfNamedLocalAfterAMergeStillLoadsTheRightSlot already proves for
+    // SET_LOCAL. This test puts the for-in loop's own iterable push after an
+    // if-without-else merge, the same shape that test uses, so `emitGetIter`
+    // must read `lastInvisibleVarSlot`, not `before[i].height`, or the
+    // R1 guard below throws instead of a wrong slot silently compiling.
+    //
+    // A genuinely DIVERGENT merge (two edges disagreeing on live local
+    // count) needs a consumed match expression as the iterable, which does
+    // not emit yet (node N10's gap, recorded in this PR). This test cannot
+    // force that divergence on this branch; it proves the fix does not
+    // regress the ordinary, non-divergent merge instead — the same honest
+    // limit PeekOfNamedLocalAfterAMergeStillLoadsTheRightSlot already
+    // accepts for SET_LOCAL.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("{\n"
+                                      "  var a = 1;\n"
+                                      "  if (a == 1) { print 9; }\n"
+                                      "  for (var x in [1, 2, 3]) print x;\n"
+                                      "}\n",
+                                      mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // `a` is JVM slot 3 (2 fixed + Lox slot 0's implicit reserved local).
+    // Reaching this line at all already proves the R1 guard did not throw.
+    // The GET_ITER site's own reload/store slot is JVM slot 4 (Lox slot 2:
+    // implicit reserved, then `a`, then the for-in's own "(iter)" local).
+    EXPECT_NE(j.find("invokestatic "
+                     "lox/LoxOps/buildList([Ljava/lang/Object;)Llox/"
+                     "LoxList;\n"
+                     "    astore 4\n"
+                     "    aload 4\n"
+                     "    invokestatic "
+                     "lox/LoxOps/getIter(Ljava/lang/Object;)Llox/"
+                     "LoxIterator;\n"
+                     "    astore 4\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+TEST(EmitScript, IsSeqEmitsOneInvokestatic) {
+    // IS_SEQ is a match sequence-pattern's own type check (compiler.cpp).
+    // An unguarded catch-all arm keeps this snippet inside N0-N9's opcode
+    // set: no JUMP_TABLE/GET_TAG (those need an enum arm, previewEnumArms
+    // rejects a sequence pattern on sight) and no MATCH_ERROR (only emitted
+    // when no arm is an unguarded catch-all).
+    //
+    // The match is a bare statement, its result discarded, not assigned to a
+    // variable: assigning it (`var n = match ...;`, also `13_enum_match.lox`'s
+    // own shape) hits a separate, pre-existing gap this node does not own —
+    // compileMatchBody exposes its result with one native POP that reclaims
+    // only the synthetic "subject" local, trusting the native VM's fused
+    // local/operand-stack model to leave the already-stored "result" local
+    // as the new top of stack (compiler.cpp: "Pop the subject; result_value
+    // becomes the match expression result"). The JVM backend has no such
+    // fused model, and nothing re-loads the result local afterward, so
+    // emission fails with an operand-stack underflow on WHATEVER instruction
+    // tries to consume it next — for any match expression, with or without
+    // enum tags or sequence patterns. Verified with a minimal repro outside
+    // this node's own opcodes: `var n = match 1 { case _ => 5 };` fails
+    // identically. That is P8 (match/enum dispatch), N10's own scope, not
+    // P7's; recorded for N10 in notes/backend-implementation-dag.md so it is
+    // not rediscovered by collision. A match used as a bare, fully-discarded
+    // statement does not reach that gap, which is all this opcode-shape test
+    // needs.
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("match [1, 2] { case [a, b] => a + b case _ => 0 };", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("invokestatic lox/LoxOps/isSeq(Ljava/lang/Object;)Z\n"
+                     "    invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/"
+                     "Boolean;\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
 TEST(EmitProgram, ZeroUpvalueClosureConstructsGeneratedClass) {
     MemoryManager mm;
     DecodedFunction fn =
