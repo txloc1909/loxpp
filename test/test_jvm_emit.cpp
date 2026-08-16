@@ -1601,3 +1601,49 @@ TEST(EmitProgram, ReturnLoadsTheMatchResultNotTheLastArmBinding) {
         expectEveryJumpTargetIsLabeled(cls.source);
     }
 }
+
+// PR #113 round 2, R5 (blocking): `capturedSlots` holds slot INDEXES, not
+// live ranges. `x` is captured by `g`, then both go out of scope, and the
+// compiler reuses their index for the match's own result — a plain raw
+// value, never captured itself. The old RETURN code threw on this
+// (isCaptured(2) is true for the reused index); the fix is to load the
+// slot the same raw-or-cell way emitGetLocal already does, never to throw.
+//
+// Prove-it-fails (brief.md): reverting emitReturn's `isCaptured` branch to
+// the round-1 throw makes this test FAIL with the exact exception the
+// reviewer reproduced, "RETURN's local slot 2 is captured" — confirmed
+// locally before restoring the fix.
+TEST(EmitProgram, ReturnDoesNotFalselyRejectAReusedCapturedSlotIndex) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun f(a) {\n"
+                     "  { var x = 1; fun g() { return x; } g(); }\n"
+                     "  return match a { case 1 => 10 case _ => 20 };\n"
+                     "}\n"
+                     "print f(1);\n"
+                     "print f(2);\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes;
+    ASSERT_NO_THROW(classes = jvm::emitProgram(fn, tree, "LoxMain"));
+
+    // f is declared after LoxMain and after g's own LoxFn$n class; find it
+    // by its RETURN, not by a fixed index — this test does not need to
+    // know N7's own closure-lowering class count.
+    const jvm::EmittedClass* fClass = nullptr;
+    for (const jvm::EmittedClass& cls : classes) {
+        if (cls.source.find("areturn\n") != std::string::npos &&
+            cls.source.find("instanceof [Ljava/lang/Object;") !=
+                std::string::npos) {
+            fClass = &cls;
+        }
+    }
+    ASSERT_NE(fClass, nullptr) << "no class emits a captured-slot RETURN";
+    // emitCapturedGetLocal's own raw-or-cell test, immediately feeding the
+    // eventual areturn — not a bare, unguarded `aload N; areturn` that
+    // would assume the slot is always raw.
+    EXPECT_NE(fClass->source.find("instanceof [Ljava/lang/Object;"),
+              std::string::npos)
+        << fClass->source;
+    expectEveryJumpTargetIsLabeled(fClass->source);
+}

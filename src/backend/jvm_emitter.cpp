@@ -1463,20 +1463,25 @@ void emitReturn(Emitter& e, std::size_t i, bool isScript) {
                 std::to_string(returnOffset) +
                 " is a CFG merge; localCount - 1 is unverified there");
         }
-        // R3 fix (PR #113 round 1): `capturedSlots` holds slot INDEXES, not
-        // live ranges — the compiler reuses an index once its scope closes
-        // — so this slot could in principle be a stale captured index still
-        // holding an Object[1] cell. emitGetLocal guards the identical slot
-        // with isCaptured (emitCapturedGetLocal); this consumer must too, or
-        // a future shape returns a bare cell with no verifier error (brief.md
-        // section 9). Unreachable today: the slot is always the compiler's
-        // own unnamed match-result local, so no CLOSURE can capture it.
+        // R5 fix (PR #113 round 2): `capturedSlots` holds slot INDEXES, not
+        // live ranges — the compiler reuses an index once its scope closes,
+        // so this slot can be a STALE captured index that currently holds a
+        // plain raw value, not a cell. R3 (round 1) made this throw
+        // instead, on the assumption the shape was unreachable; four
+        // programs prove it is not (the reviewer's own reproduction, PR
+        // #113 round 2): a captured local goes out of scope and the
+        // compiler reuses its index for an unrelated match result. Use the
+        // same runtime raw-or-cell test emitGetLocal already applies to
+        // this slot (emitCapturedGetLocal) instead of trusting the static
+        // membership test either way — it is correct whether the slot is
+        // currently a cell (a live, still-open capture reusing the index)
+        // or raw (the common case here), and it never throws on it.
+        int slot = e.jvmSlotForLocal(loxSlot);
         if (e.isCaptured(loxSlot)) {
-            throw std::runtime_error(
-                "jvm_emitter: RETURN's local slot " + std::to_string(loxSlot) +
-                " is captured; the raw-vs-cell check is missing here");
+            emitCapturedGetLocal(e, slot, returnOffset);
+        } else {
+            e.b.emit("aload " + std::to_string(slot), +1);
         }
-        e.b.emit("aload " + std::to_string(e.jvmSlotForLocal(loxSlot)), +1);
     }
     e.b.emit("areturn", -1);
 }
