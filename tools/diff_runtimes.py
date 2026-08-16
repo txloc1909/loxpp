@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""
+Differential runner: native loxpp vs. the JVM backend, stdout only.
+
+Runs each Lox++ program on the native binary and on tools/loxpp_jvm.sh, then
+compares stdout. It does not compare stderr and does not compare the exit
+code (notes/backend-implementation-dag.md, N11 row: "Differential scope ->
+stdout only").
+
+Three outcomes per program:
+  MATCH        stdout is byte-identical on both runtimes.
+  PERMUTATION  stdout differs only in line order, and the program is on the
+               exclusion list (tools/jvm_excluded_examples.txt). Map
+               iteration order is unspecified (spec/03-types.md), so a
+               reordering alone is not a defect.
+  DIVERGE      a real difference: content differs (not only order), or the
+               program is not on the exclusion list. Exit code 1.
+
+A program on the exclusion list still reports DIVERGE if its stdout stops
+being a permutation of the native stdout — the exclusion list excuses a
+reordering, never a content change.
+
+On a DIVERGE, this script prints a short diff excerpt and a best-effort guess
+at which opcode family (P1-P8, see notes/bytecode-translation-problems.md) is
+involved, from a syntax scan of the program. This is a hint, not a proof: a
+faithful answer needs a real bytecode disassembly, which needs a debug-preset
+build; a syntax scan needs no extra build and runs on every program, so it is
+this script's default. State that trade-off, do not hide it.
+
+Usage:
+    python3 tools/diff_runtimes.py <native-loxpp> <jvm-runner> <path>...
+        [--exclude <file>]
+
+<path> is a .lox file, or a directory (every *.lox file inside it, sorted).
+If <name>.input exists next to a .lox file, it is piped in as stdin, on both
+runtimes.
+"""
+
+import argparse
+import difflib
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+FAMILY_RULES: list[tuple[str, re.Pattern[str]]] = [
+    (
+        "P8 match/enum dispatch (GET_TAG, JUMP_TABLE, MATCH_ERROR, INSTANCEOF, IS_SEQ)",
+        re.compile(r"\b(match|enum)\b"),
+    ),
+    (
+        "P5+P4 classes (CLASS, GET_PROPERTY, SET_PROPERTY, DEFINE_METHOD, INVOKE, INHERIT, GET_SUPER, SUPER_INVOKE)",
+        re.compile(r"\b(class|super)\b"),
+    ),
+    (
+        "P4 closures & upvalues (CLOSURE, GET_UPVALUE, SET_UPVALUE, CLOSE_UPVALUE)",
+        re.compile(r"\bfun\b"),
+    ),
+    (
+        "P7 aggregates & iteration (BUILD_LIST, BUILD_MAP, GET_INDEX, SET_INDEX, SLICE, IN, GET_ITER, ITER_HAS_NEXT, ITER_NEXT)",
+        re.compile(r"\bin\b|\[[^\]\n]*\]|\{[^{}\n]*:"),
+    ),
+    (
+        "P3 control flow (JUMP, JUMP_IF_FALSE, LOOP)",
+        re.compile(r"\b(if|while|for|and|or)\b"),
+    ),
+    (
+        "P6 stdlib / runtime polymorphism (globals, math_module, map_api, file_api)",
+        re.compile(r"\b(clock|input|File)\s*\(|\.(has|del|keys|values|entries)\s*\("),
+    ),
+]
+
+
+def classify_opcode_family(source: str) -> list[str]:
+    return [label for label, pattern in FAMILY_RULES if pattern.search(source)]
+
+
+def parse_exclude_file(path: Path) -> dict[str, str]:
+    """Reads a 'name  reason' exclusion list. Blank lines and lines starting
+    with '#' are comments."""
+    reasons: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        name, _, reason = stripped.partition(" ")
+        reasons[name] = reason.strip()
+    return reasons
+
+
+def run_stdout(cmd: list[str], input_file: Path) -> str:
+    stdin_data = input_file.read_text(encoding="utf-8") if input_file.exists() else None
+    result = subprocess.run(cmd, input=stdin_data, capture_output=True, text=True)
+    return result.stdout
+
+
+def collect_programs(paths: list[str]) -> list[Path]:
+    files: list[Path] = []
+    for raw in paths:
+        p = Path(raw)
+        if p.is_dir():
+            files.extend(sorted(p.glob("*.lox")))
+        else:
+            files.append(p)
+    return files
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Differential runner: native loxpp vs the JVM backend, stdout only."
+    )
+    parser.add_argument("native", help="path to the native loxpp binary")
+    parser.add_argument("jvm_runner", help="path to tools/loxpp_jvm.sh (or an equivalent runner)")
+    parser.add_argument("paths", nargs="+", help="a .lox file, or a directory of .lox files")
+    parser.add_argument(
+        "--exclude",
+        type=Path,
+        default=None,
+        help="tools/jvm_excluded_examples.txt: permutation-only exclusions",
+    )
+    args = parser.parse_args()
+
+    excluded = parse_exclude_file(args.exclude) if args.exclude else {}
+    programs = collect_programs(args.paths)
+
+    matched = permuted = diverged = 0
+
+    for lox_file in programs:
+        input_file = lox_file.with_suffix(".input")
+        native_out = run_stdout([args.native, str(lox_file)], input_file)
+        jvm_out = run_stdout([args.jvm_runner, str(lox_file)], input_file)
+
+        if native_out == jvm_out:
+            print(f"MATCH       {lox_file}")
+            matched += 1
+            continue
+
+        native_lines = native_out.splitlines()
+        jvm_lines = jvm_out.splitlines()
+        is_permutation = sorted(native_lines) == sorted(jvm_lines)
+
+        if lox_file.name in excluded and is_permutation:
+            print(f"PERMUTATION {lox_file}  (excluded: {excluded[lox_file.name]})")
+            permuted += 1
+            continue
+
+        if lox_file.name in excluded:
+            print(f"DIVERGE     {lox_file}  (excluded for map order, but this is NOT a permutation)")
+        else:
+            print(f"DIVERGE     {lox_file}")
+
+        families = classify_opcode_family(lox_file.read_text(encoding="utf-8"))
+        family_text = ", ".join(families) if families else "none matched (P2 straight-line only)"
+        print(f"            likely opcode family (heuristic, not a bytecode decode): {family_text}")
+        diff_lines = list(
+            difflib.unified_diff(native_lines, jvm_lines, fromfile="native", tofile="jvm", lineterm="")
+        )
+        for line in diff_lines[:20]:
+            print(f"            {line}")
+        if len(diff_lines) > 20:
+            print(f"            ... ({len(diff_lines) - 20} more diff line(s))")
+        diverged += 1
+
+    print()
+    print(f"{matched} matched, {permuted} permutation-excused, {diverged} diverged")
+    sys.exit(1 if diverged else 0)
+
+
+if __name__ == "__main__":
+    main()
