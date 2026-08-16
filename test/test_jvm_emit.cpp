@@ -47,11 +47,14 @@ int countOccurrences(const std::string& haystack, const std::string& needle) {
     return count;
 }
 
-// The mnemonics this emitter writes as a jump (nodes N4/N5/N6/N7). N7 adds
-// `ifeq` (the captured-slot raw/cell runtime check — emitCapturedGetLocal,
-// emitCapturedStore, ensureCapturedCell); N10 adds `tableswitch`/
-// `lookupswitch` (match). Whichever node adds a new jump form must add its
-// mnemonic here too, or that jump gets no label-integrity coverage from
+// The mnemonics this emitter writes as a jump (nodes N4/N5/N6/N7), each
+// carrying exactly one label operand. N7 adds `ifeq` (the captured-slot
+// raw/cell runtime check — emitCapturedGetLocal, emitCapturedStore,
+// ensureCapturedCell). `tableswitch` (N10) does not fit this shape — it
+// carries one label per arm plus a `default :` label, none of them prefixed
+// by a mnemonic-and-space the way `goto <label>` is — so it gets its own
+// scan, below. Whichever node adds a new single-operand jump form must add
+// its mnemonic here too, or that jump gets no label-integrity coverage from
 // this helper.
 const std::vector<std::string> kJumpMnemonics = {"goto ", "ifne ", "ifeq "};
 
@@ -74,6 +77,60 @@ const std::vector<std::string> kJumpMnemonics = {"goto ", "ifne ", "ifeq "};
 // occur inside a string literal's payload. Prefixing `j` itself with one
 // "\n" gives a jump on the very first line the same leading newline to
 // anchor against, so no special case is needed there.
+// tableswitch (N10): one label per arm, then a `default : <label>` line,
+// none of them prefixed by a mnemonic — kJumpMnemonics' own "mnemonic space
+// label" shape does not fit, so this is a dedicated scan, anchored the same
+// way (PR #110 R6): a string literal payload can never contain a real
+// newline followed by four spaces, so "\n    tableswitch " can only be a
+// real instruction. Every line after the header, up to and including the
+// first "default" line, is one more label operand.
+void expectEveryTableSwitchTargetIsLabeled(const std::string& j) {
+    const std::string text = "\n" + j;
+    const std::string anchor = "\n    tableswitch ";
+    std::size_t pos = 0;
+    while ((pos = text.find(anchor, pos)) != std::string::npos) {
+        std::size_t lineEnd = text.find('\n', pos + 1);
+        ASSERT_NE(lineEnd, std::string::npos)
+            << "tableswitch's own header runs off the end of:\n"
+            << j;
+        std::size_t cursor = lineEnd + 1;
+        bool sawDefault = false;
+        while (!sawDefault) {
+            std::size_t nextEnd = text.find('\n', cursor);
+            ASSERT_NE(nextEnd, std::string::npos)
+                << "tableswitch's own arm list runs off the end of:\n"
+                << j;
+            std::string line = text.substr(cursor, nextEnd - cursor);
+            std::size_t firstNonSpace = line.find_first_not_of(" \t");
+            ASSERT_NE(firstNonSpace, std::string::npos)
+                << "blank line inside a tableswitch's own arm list in:\n"
+                << j;
+            std::string rest = line.substr(firstNonSpace);
+            std::string target;
+            if (rest.rfind("default", 0) == 0) {
+                std::size_t colon = rest.find(':');
+                ASSERT_NE(colon, std::string::npos)
+                    << "tableswitch's own default has no ':' in:\n"
+                    << j;
+                std::string afterColon = rest.substr(colon + 1);
+                std::size_t labelStart = afterColon.find_first_not_of(" \t");
+                target = (labelStart == std::string::npos)
+                             ? ""
+                             : afterColon.substr(labelStart);
+                sawDefault = true;
+            } else {
+                target = rest;
+            }
+            EXPECT_NE(text.find("\n" + target + ":\n"), std::string::npos)
+                << "tableswitch target to undefined label \"" << target
+                << "\" in:\n"
+                << j;
+            cursor = nextEnd + 1;
+        }
+        pos = cursor;
+    }
+}
+
 void expectEveryJumpTargetIsLabeled(const std::string& j) {
     const std::string text = "\n" + j;
     for (const std::string& mnemonic : kJumpMnemonics) {
@@ -98,6 +155,7 @@ void expectEveryJumpTargetIsLabeled(const std::string& j) {
             pos = nameEnd;
         }
     }
+    expectEveryTableSwitchTargetIsLabeled(j);
 }
 
 } // namespace
@@ -172,22 +230,54 @@ TEST(FormatDoubleBitsLiteral, IsABareDecimalIntegerNeverADecimalOrExponent) {
 // emitScript
 // ---------------------------------------------------------------------------
 
+// An earlier version of this test used an enum declaration's own CONSTANT
+// (an ObjEnumCtor) as the still-unsupported opcode-family shape; node N10's
+// own CONSTANT fix (materialising one, emitConstant's own isEnumCtor branch)
+// closed that gap, so `enum Color { Red Green Blue Yellow }` alone now
+// emits cleanly. BUILD_MAP was the shape before that (PR #113 round 4).
+//
+// Every real Op the compiler emits now has a handler (this is the last
+// backend-emission node, per notes/backend-implementation-dag.md's N4-N10
+// chain), so no source program compiles down to an opcode this pass still
+// refuses. The one shape that still refuses is JUMP_TABLE reached without an
+// immediately preceding GET_TAG: compiler.cpp's compileMatchBody has exactly
+// one call site for JUMP_TABLE, and it always emits GET_TAG right before it,
+// so `emitGetTagOrFused`'s own fusion check (`Emitter::fusableJumpTable`)
+// never leaves JUMP_TABLE's own array slot for the main dispatch switch to
+// see — a hand-built instruction list drives this directly instead, the
+// same way AbstractStackTest.DirectlyBuiltGapThrowsWithTheRightMessage
+// drives its own safety net rather than hunting for a chunk that cannot
+// exist.
 TEST(EmitScript, AbortsOnUnsupportedOpcode) {
     MemoryManager mm;
-    // An enum declaration (node N10's job, not N8's) compiles each
-    // constructor to a CONSTANT holding an ObjEnumCtor — a Value kind
-    // emitConstant does not handle. An earlier version of this test used an
-    // empty map literal (BUILD_MAP); node N9 merged that opcode to main
-    // after this branch diverged, so BUILD_MAP no longer aborts here
-    // (PR #113 round 4, rebase onto main).
-    DecodedFunction fn =
-        decodeScript("enum Color { Red Green Blue Yellow }\n", mm);
-    FunctionStackAnalysis analysis = analyzeStack(fn);
+    DecodedInstruction table;
+    table.offset = 0;
+    table.op = Op::JUMP_TABLE;
+    table.minTag = 0;
+    table.length = 3; // min_tag (1 byte) + count (1 byte), zero arms.
+
+    // analyzeCaptures (emitScript's own first call) reads fn.function->arity
+    // before this pass ever sees an instruction, so a real (if otherwise
+    // empty) ObjFunction is needed, not a null one.
+    DecodedFunction fn;
+    fn.id = "0";
+    fn.function = mm.create<ObjFunction>();
+    fn.instructions = {table};
+
+    FunctionStackAnalysis analysis;
+    analysis.functionId = "0";
+    // JUMP_TABLE pops the tag alone (stackEffect: {1, 0}) — one temporary in,
+    // zero out. Nothing here declares a local, so `reached` alone needs to
+    // be true for emitBody to dispatch this instruction at all.
+    analysis.before = {StackState{1, 0}};
+    analysis.after = {StackState{0, 0}};
+    analysis.reached = {true};
+
     try {
         jvm::emitScript(fn, analysis, "LoxMain");
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& e) {
-        EXPECT_EQ(std::string(e.what()), "not implemented in N6: CONSTANT");
+        EXPECT_EQ(std::string(e.what()), "not implemented in N6: JUMP_TABLE");
     }
 }
 
@@ -1876,4 +1966,241 @@ TEST(EmitProgram, SetUpvalueOfAPlainMatchLoadsTheResultNotAStaleSlot) {
               std::string::npos)
         << setit;
     expectEveryJumpTargetIsLabeled(setit);
+}
+
+// ---------------------------------------------------------------------------
+// N10: match/enum dispatch — GET_TAG, JUMP_TABLE, enum-ctor CONSTANT, and
+// the two residue consumers (PRINT, DEFINE_GLOBAL) this node's own checkpoint
+// needs a real fix for.
+// ---------------------------------------------------------------------------
+
+// P8's own hazard: GET_TAG pushes a boxed double and JUMP_TABLE wants an
+// int. Fusing them (emitFusedGetTagJumpTable) must never box the tag at
+// all — the tag stays a primitive double, then `int`, the whole way.
+//
+// Prove-it-fails (brief.md): reverting emitFusedGetTagJumpTable to the
+// context-free box-then-unbox shape P8 warns against (`getTag()D;
+// invokestatic Double/valueOf(D)Ljava/lang/Double; invokevirtual
+// doubleValue()D; d2i; tableswitch`) still assembles and still dispatches
+// every in-range tag to its correct arm — the three-line adjacency this
+// test checks for is the only thing that shape breaks, and it does break
+// it — confirmed locally before restoring the fix.
+TEST(EmitProgram, DenseEnumMatchFusesGetTagWithTableswitch) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("enum Color { Red Green Blue Yellow }\n"
+                                      "fun classify(c) {\n"
+                                      "  return match c {\n"
+                                      "    case Red => 0\n"
+                                      "    case Green => 1\n"
+                                      "    case Blue => 2\n"
+                                      "    case Yellow => 3\n"
+                                      "  };\n"
+                                      "}\n"
+                                      "print classify(Green());\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes;
+    ASSERT_NO_THROW(classes = jvm::emitProgram(fn, tree, "LoxMain"));
+
+    const jvm::EmittedClass* classifyClass = nullptr;
+    for (const jvm::EmittedClass& cls : classes) {
+        if (cls.source.find("tableswitch") != std::string::npos) {
+            classifyClass = &cls;
+        }
+    }
+    ASSERT_NE(classifyClass, nullptr) << "no class emits a tableswitch";
+    const std::string& c = classifyClass->source;
+
+    // getTag()D; d2i; tableswitch, back to back — no Double/valueOf boxing
+    // in between (each arm's own literal body still boxes ITS OWN result,
+    // 0/1/2/3, further down; that boxing belongs to CONSTANT, not to this
+    // fusion, so this check is anchored to the three adjacent lines, not to
+    // the whole method).
+    EXPECT_NE(c.find("invokestatic lox/LoxOps/getTag(Ljava/lang/Object;)D\n"
+                     "    d2i\n"
+                     "    tableswitch 0\n"),
+              std::string::npos)
+        << c;
+    expectEveryJumpTargetIsLabeled(c);
+    expectEveryJumpTargetIsLabeled(classes[0].source);
+}
+
+TEST(EmitProgram, DenseEnumMatchTableswitchDefaultTargetsMatchError) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("enum Color { Red Green Blue Yellow }\n"
+                                      "fun classify(c) {\n"
+                                      "  return match c {\n"
+                                      "    case Red => 0\n"
+                                      "    case Green => 1\n"
+                                      "    case Blue => 2\n"
+                                      "    case Yellow => 3\n"
+                                      "  };\n"
+                                      "}\n"
+                                      "print classify(Green());\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    const jvm::EmittedClass* classifyClass = nullptr;
+    for (const jvm::EmittedClass& cls : classes) {
+        if (cls.source.find("tableswitch") != std::string::npos) {
+            classifyClass = &cls;
+        }
+    }
+    ASSERT_NE(classifyClass, nullptr);
+    const std::string& c = classifyClass->source;
+
+    // The default label's own target must be MATCH_ERROR's call, not one of
+    // the four real arms.
+    std::size_t defaultPos = c.find("default : ");
+    ASSERT_NE(defaultPos, std::string::npos) << c;
+    std::size_t labelStart = defaultPos + std::string("default : ").size();
+    std::size_t labelEnd = c.find('\n', labelStart);
+    ASSERT_NE(labelEnd, std::string::npos) << c;
+    std::string defaultLabel = c.substr(labelStart, labelEnd - labelStart);
+    EXPECT_NE(c.find(defaultLabel + ":\n"
+                                    "    invokestatic "
+                                    "lox/LoxOps/matchError()Llox/LoxError;\n"),
+              std::string::npos)
+        << "the default label does not lead straight to MATCH_ERROR in:\n"
+        << c;
+}
+
+// The sparse, compare-and-branch match form (a guard defeats table
+// eligibility — previewEnumArms, compiler.cpp:1536): GET_TAG runs alone,
+// so it must box its own result, the same way CONSTANT boxes a number
+// literal, for the CONSTANT/EQUAL pair right after it to compare against.
+TEST(EmitProgram, SparseConstructorMatchBoxesGetTagForCompareAndBranch) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("enum Color { Red Green Blue Yellow }\n"
+                                      "fun classify(c) {\n"
+                                      "  return match c {\n"
+                                      "    case Red if true => 0\n"
+                                      "    case Green => 1\n"
+                                      "    case Blue => 2\n"
+                                      "    case Yellow => 3\n"
+                                      "  };\n"
+                                      "}\n"
+                                      "print classify(Green());\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes;
+    ASSERT_NO_THROW(classes = jvm::emitProgram(fn, tree, "LoxMain"));
+
+    const jvm::EmittedClass* classifyClass = nullptr;
+    for (const jvm::EmittedClass& cls : classes) {
+        if (cls.source.find("getTag") != std::string::npos) {
+            classifyClass = &cls;
+        }
+    }
+    ASSERT_NE(classifyClass, nullptr) << "no class emits GET_TAG";
+    const std::string& c = classifyClass->source;
+
+    EXPECT_EQ(c.find("tableswitch"), std::string::npos)
+        << "a guard must defeat table eligibility:\n"
+        << c;
+    EXPECT_NE(c.find("invokestatic lox/LoxOps/getTag(Ljava/lang/Object;)D\n"
+                     "    invokestatic "
+                     "java/lang/Double/valueOf(D)Ljava/lang/Double;\n"),
+              std::string::npos)
+        << c;
+    expectEveryJumpTargetIsLabeled(c);
+    expectEveryJumpTargetIsLabeled(classes[0].source);
+}
+
+// CONSTANT materialising an ObjEnumCtor (P6/P8): enumDeclaration compiles
+// each variant to CONSTANT then DEFINE_GLOBAL (compiler.cpp), the same
+// shape a plain number or string literal uses.
+TEST(EmitScript, EnumConstantMaterializesLoxEnumCtor) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("enum Result { Ok(value) Err(msg) }\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // Ok: tag 0, arity 1.
+    EXPECT_NE(j.find("new lox/LoxEnumCtor\n"
+                     "    dup\n"
+                     "    iconst_0\n"
+                     "    iconst_1\n"
+                     "    ldc \"Ok\"\n"
+                     "    ldc \"Result\"\n"
+                     "    invokespecial lox/LoxEnumCtor/<init>(IILjava/lang/"
+                     "String;Ljava/lang/String;)V\n"),
+              std::string::npos)
+        << j;
+    // Err: tag 1, arity 1.
+    EXPECT_NE(j.find("new lox/LoxEnumCtor\n"
+                     "    dup\n"
+                     "    iconst_1\n"
+                     "    iconst_1\n"
+                     "    ldc \"Err\"\n"
+                     "    ldc \"Result\"\n"
+                     "    invokespecial lox/LoxEnumCtor/<init>(IILjava/lang/"
+                     "String;Ljava/lang/String;)V\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// N10's own residue (referee decision, PR #113 round 3): DEFINE_GLOBAL had
+// no operandDepth() == 0 branch at all, so a script-scope `var n = match
+// ...;` — 13_enum_match.lox's own shape — underflowed at emit time. Every
+// other zero-depth consumer already routes through loadNamedLocalAtZeroDepth
+// (RETURN, SET_LOCAL, SET_GLOBAL, SET_UPVALUE, JUMP_IF_FALSE, GET_ITER); this
+// is the same fix, for the one opcode family none of them share.
+//
+// Prove-it-fails (brief.md): removing emitDefineGlobal's own `if
+// (operandDepth() == 0)` branch makes emitScript throw "operand stack
+// underflow emitting 'aload 1'" instead of returning — confirmed locally
+// before restoring the fix.
+TEST(EmitScript, DefineGlobalOfAPlainMatchLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("var n = match 1 { case 1 => \"a\" case _ => \"b\" };\n"
+                     "print n;\n",
+                     mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // The match's own result must reach DEFINE_GLOBAL, immediately before
+    // the receiver/name/value shuffle globalsCall's non-peek form builds.
+    EXPECT_NE(j.find("aload 1\n"
+                     "    swap\n"
+                     "    ldc \"n\"\n"
+                     "    swap\n"
+                     "    invokevirtual lox/LoxGlobals/define(Ljava/lang/"
+                     "String;Ljava/lang/Object;)V\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// Same residue, for PRINT: `print match ...;` is match_http_status.lox's,
+// match_state_machine.lox's, and match_dispatch.lox's own shape.
+//
+// Prove-it-fails: removing emitPrint's own `if (operandDepth() == 0)` branch
+// makes this test's own emitScript call throw "operand stack underflow
+// emitting 'invokestatic lox/LoxOps/print(Ljava/lang/Object;)V'" instead of
+// returning — confirmed locally before restoring the fix.
+TEST(EmitScript, PrintOfAPlainMatchLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "print match 1 { case 1 => \"a\" case _ => \"b\" };\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // The match's own result (JVM slot 3: baseSlot 2 + Lox slot 1, the
+    // "(match_result)" invisible var) must reload right before PRINT's own
+    // call — nothing is left on the real JVM operand stack for PRINT to
+    // consume directly (N2 folded the result into a named local).
+    EXPECT_NE(j.find("aload 3\n"
+                     "    invokestatic lox/LoxOps/print(Ljava/lang/"
+                     "Object;)V\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
 }
