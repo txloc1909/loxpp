@@ -2,6 +2,7 @@
 
 #include "capture_analysis.h"
 #include "cfg.h"
+#include "container_objects.h"
 #include "exec_objects.h"
 #include "object.h"
 #include "value.h"
@@ -327,6 +328,21 @@ struct Emitter {
         return it != popKinds.end() && it->second == PopKind::TEMP;
     }
 
+    // GET_TAG followed immediately by JUMP_TABLE (P8): compileMatchBody's
+    // only call site for JUMP_TABLE emits the pair back to back, with
+    // nothing else between them, so this is the only shape a JUMP_TABLE is
+    // ever found in — a GET_TAG that is not immediately followed by one is
+    // the sparse, compare-and-branch match form instead (GET_TAG; CONSTANT;
+    // EQUAL, per arm), which needs no fusion. No CFG-label guard like
+    // fusablePop's own: nothing in the language ever jumps into the middle
+    // of a match's own dispatch preamble, so JUMP_TABLE's offset is never a
+    // block leader.
+    [[nodiscard]] bool fusableJumpTable(std::size_t i) const {
+        std::size_t j = i + 1;
+        return j < fn.instructions.size() &&
+               fn.instructions[j].op == Op::JUMP_TABLE;
+    }
+
     [[nodiscard]] std::string constantString(int idx) const {
         Value v = fn.function->chunk.getConstant(static_cast<uint16_t>(idx));
         if (!isString(v)) {
@@ -398,6 +414,30 @@ void emitConstant(Emitter& e, const DecodedInstruction& in) {
                      escapeJasminString(std::string(asObjString(v)->chars)) +
                      "\"",
                  +1);
+    } else if (isEnumCtor(v)) {
+        // P8/P6: an enum declaration compiles each variant to a CONSTANT
+        // (compiler.cpp's enumDeclaration) that names an ObjEnumCtor, then a
+        // DEFINE_GLOBAL — the same shape a plain number or string literal
+        // uses. This pass must materialise a real LoxEnumCtor here, once,
+        // so every later CALL of it (LoxOps.call, since LoxEnumCtor already
+        // implements LoxCallable) needs no case of its own for "the callee
+        // came from a CONSTANT, not a CLOSURE".
+        ObjEnumCtor* ctor = asObjEnumCtor(as<Obj*>(v));
+        e.b.emit("new lox/LoxEnumCtor", +1);
+        e.b.emit("dup", +1);
+        e.b.emit(pushIntInstruction(ctor->tag), +1);
+        e.b.emit(pushIntInstruction(ctor->arity), +1);
+        e.b.emit("ldc \"" +
+                     escapeJasminString(std::string(ctor->ctorName->chars)) +
+                     "\"",
+                 +1);
+        e.b.emit("ldc \"" +
+                     escapeJasminString(std::string(ctor->enumName->chars)) +
+                     "\"",
+                 +1);
+        e.b.emit("invokespecial lox/LoxEnumCtor/<init>(IILjava/lang/String;"
+                 "Ljava/lang/String;)V",
+                 -5);
     } else {
         notImplemented(in.op);
     }
@@ -475,9 +515,6 @@ bool emitSimpleOp(Emitter& e, Op op) {
         e.b.emit("invokestatic lox/LoxOps/not(Ljava/lang/Object;)Ljava/lang/"
                  "Object;",
                  0);
-        return true;
-    case Op::PRINT:
-        e.b.emit("invokestatic lox/LoxOps/print(Ljava/lang/Object;)V", -1);
         return true;
     // GET_INDEX/SET_INDEX (node N7 pulls these two opcodes forward from N9's
     // scope — see emitBuildList's own note: V1_fresh_cell/V3_loopvar, N7's
@@ -752,8 +789,42 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
     consumedFollowingPop = fuse;
 }
 
-void emitDefineGlobal(Emitter& e, const DecodedInstruction& in) {
+// R7 fix (N10's own residue, PR #113 round 3 referee decision): a `var` at
+// script scope compiles to CONSTANT/expr then DEFINE_GLOBAL
+// (compiler.cpp's varDeclaration, m_scopeDepth == 0), so `var n = match
+// c {...};` at the top level — 13_enum_match.lox's own shape — reaches this
+// opcode with a match's result still sitting only in its own JVM local slot,
+// never on the real JVM operand stack (compileMatchBody's own comment: "the
+// native VM's fused local/operand-stack model... leaves the already-stored
+// result local as the new top of stack", which the JVM backend does not
+// share). `loadNamedLocalAtZeroDepth` is the one shared mechanism every such
+// consumer routes through (RETURN, SET_LOCAL, SET_GLOBAL, SET_UPVALUE,
+// JUMP_IF_FALSE, GET_ITER already do); this opcode had no branch for it at
+// all before this fix, so a bare `var x = match ...;` at script scope threw
+// "operand stack underflow" on every enum/match example that assigns its
+// result to a top-level variable.
+void emitDefineGlobal(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (e.analysis.before[i].operandDepth() == 0) {
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
+    }
     e.globalsCall("define", e.constantString(in.constantIndex), /*peek=*/false);
+}
+
+// N10's own residue: same defect as emitDefineGlobal's own fix above, on the
+// most common shape of all — `print match ...;` (match_http_status.lox,
+// match_state_machine.lox, match_dispatch.lox all use exactly this).
+// Pulled out of emitSimpleOp (which has no instruction index to give
+// loadNamedLocalAtZeroDepth) rather than threading one through every case
+// there; PRINT is the only member of that family this node can prove reaches
+// operandDepth() == 0 in a real program (see the PR body for the ones this
+// node leaves as a documented, still-throwing gap: CALL, BUILD_LIST, and the
+// two-operand arithmetic/comparison family, none of which any checkpoint or
+// probe here exercises with a folded operand).
+void emitPrint(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (e.analysis.before[i].operandDepth() == 0) {
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
+    }
+    e.b.emit("invokestatic lox/LoxOps/print(Ljava/lang/Object;)V", -1);
 }
 
 void emitGetGlobal(Emitter& e, const DecodedInstruction& in) {
@@ -1398,6 +1469,58 @@ void emitSuperInvoke(Emitter& e, const DecodedInstruction& in) {
     e.b.emit(superInvokeSig, -3);
 }
 
+// GET_TAG's own instruction, standalone (node N10): the sparse,
+// compare-and-branch match form (compiler.cpp: GET_TAG, then CONSTANT, then
+// EQUAL, once per arm), used when previewEnumArms rejects the table
+// dispatch — a guard, an or-pattern, an @-binding, or a non-dense tag set
+// all fall back to this shape (compiler.cpp:1536's own comment). LoxOps.
+// getTag returns the tag as a primitive double, the same as vm.cpp's own
+// Number result; box it exactly the way emitConstant boxes a number
+// literal, so the CONSTANT/EQUAL pair right after sees the same
+// Ljava/lang/Object; shape any other comparison operand does.
+void emitGetTag(Emitter& e) {
+    e.b.emit("invokestatic lox/LoxOps/getTag(Ljava/lang/Object;)D", +1);
+    e.b.emit("invokestatic java/lang/Double/valueOf(D)Ljava/lang/Double;", -1);
+}
+
+// GET_TAG fused with an immediately following JUMP_TABLE (P8's own hazard:
+// GET_TAG pushes a boxed double and JUMP_TABLE wants an int — a
+// context-free lowering would box, then immediately unbox, for nothing).
+// `getTag()D; d2i; tableswitch` keeps the tag a primitive the whole way.
+// `min` is the switch base; one label per arm, in tag order — chunk_
+// decoder.cpp already resolved every arm's own absolute target from the raw
+// forward-offset bytes, so this reads that, not the bytes themselves.
+// `default` targets the offset right after the table: compileMatchBody
+// always places a real MATCH_ERROR there (emitMatchError, below), and the
+// CFG (N1) already gave that offset its own label, the same as any other
+// block leader — this pass does not special-case it.
+void emitFusedGetTagJumpTable(Emitter& e, const DecodedInstruction& table) {
+    e.b.emit("invokestatic lox/LoxOps/getTag(Ljava/lang/Object;)D", +1);
+    e.b.emit("d2i", -1);
+    std::ostringstream sw;
+    sw << "tableswitch " << table.minTag << "\n";
+    for (const JumpTableArm& arm : table.jumpTable) {
+        sw << "        " << e.labelFor(arm.target) << "\n";
+    }
+    sw << "        default : " << e.labelFor(table.offset + table.length);
+    e.b.emit(sw.str(), -1);
+}
+
+// GET_TAG's own dispatch case: fuse with a following JUMP_TABLE when one is
+// there (`fusableJumpTable`'s own note), matching SET_LOCAL/SET_GLOBAL/
+// SET_UPVALUE's own POP-fusion shape (`consumedFollowingPop`) — the caller
+// skips the JUMP_TABLE's own array slot instead of dispatching it a second
+// time.
+void emitGetTagOrFused(Emitter& e, std::size_t i,
+                       bool& consumedFollowingJumpTable) {
+    if (e.fusableJumpTable(i)) {
+        emitFusedGetTagJumpTable(e, e.fn.instructions[i + 1]);
+        consumedFollowingJumpTable = true;
+    } else {
+        emitGetTag(e);
+    }
+}
+
 // MATCH_ERROR (node N8 pulls this one N10 opcode forward — see
 // jvm_emitter.h's own note: a `match` whose arms are all class patterns
 // compiles a real, reachable MATCH_ERROR, because the compiler never
@@ -1602,7 +1725,8 @@ void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isScript) {
 // the threshold N7, N9, and N10 still need room under.
 std::size_t finishInstruction(Emitter& e, std::size_t i,
                               const DecodedInstruction& in,
-                              bool consumedFollowingPop) {
+                              bool consumedFollowingPop,
+                              bool consumedFollowingJumpTable) {
     auto varsIt = e.invisibleVarsByOffset.find(in.offset);
     if (varsIt != e.invisibleVarsByOffset.end()) {
         for (int slot : varsIt->second) {
@@ -1611,7 +1735,8 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
         }
     }
 
-    std::size_t nextIndex = i + (consumedFollowingPop ? 2 : 1);
+    std::size_t nextIndex =
+        i + (consumedFollowingPop || consumedFollowingJumpTable ? 2 : 1);
     e.prevCanFallThrough = in.op != Op::JUMP && in.op != Op::LOOP &&
                            in.op != Op::RETURN && in.op != Op::MATCH_ERROR;
     e.prevNaturalSuccessorOffset = (nextIndex < e.fn.instructions.size())
@@ -1637,6 +1762,7 @@ void emitBody(Emitter& e, bool isScript,
         }
         const DecodedInstruction& in = ins[i];
         bool consumedFollowingPop = false;
+        bool consumedFollowingJumpTable = false;
 
         auto labelIt = e.labelAtOffset.find(in.offset);
         if (labelIt != e.labelAtOffset.end()) {
@@ -1684,8 +1810,11 @@ void emitBody(Emitter& e, bool isScript,
         case Op::SET_LOCAL:
             emitSetLocal(e, i, in, consumedFollowingPop);
             break;
+        case Op::PRINT:
+            emitPrint(e, i, in);
+            break;
         case Op::DEFINE_GLOBAL:
-            emitDefineGlobal(e, in);
+            emitDefineGlobal(e, i, in);
             break;
         case Op::GET_GLOBAL:
             emitGetGlobal(e, in);
@@ -1773,13 +1902,17 @@ void emitBody(Emitter& e, bool isScript,
         case Op::MATCH_ERROR:
             emitMatchError(e);
             break;
+        case Op::GET_TAG:
+            emitGetTagOrFused(e, i, consumedFollowingJumpTable);
+            break;
         default:
             if (!emitSimpleOp(e, in.op)) {
                 notImplemented(in.op);
             }
         }
 
-        i = finishInstruction(e, i, in, consumedFollowingPop);
+        i = finishInstruction(e, i, in, consumedFollowingPop,
+                              consumedFollowingJumpTable);
     }
 }
 

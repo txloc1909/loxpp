@@ -3,13 +3,19 @@
 // JVM code generator (node N4 of the JVM/CLR backend DAG, discharges P2 — the
 // "peek, don't pop" family; node N5 adds P3b, control flow and verifier
 // legality; node N6 adds P5, functions and calls; node N7 adds P4b, closures
-// and upvalues; node N8 adds P5+P4, classes/methods/super;
+// and upvalues; node N8 adds P5+P4, classes/methods/super; node N9 adds
+// aggregates and for-in; node N10 adds P8, match/enum dispatch proper
+// (GET_TAG, JUMP_TABLE, enum-ctor CONSTANT) and its own residue (the
+// loadNamedLocalAtZeroDepth fix for PRINT and DEFINE_GLOBAL — see
+// emitPrint's and emitDefineGlobal's own notes);
 // notes/bytecode-translation-problems.md). Lowers one function's chunk to
 // Jasmin (.j) text, consuming N0's decoder, N1's CFG/labels, N2's
-// abstract-stack analysis, and N3's capture analysis. Match/enum dispatch
-// proper (N10: GET_TAG, JUMP_TABLE) is still out of scope: this node aborts
-// loudly on any opcode none of N4/N5/N6/N7/N8 lowers, so a later node's gap
-// fails loudly too.
+// abstract-stack analysis, and N3's capture analysis. This is the last
+// emission node (N4-N10): every real Op the compiler emits now has a
+// handler, so this pass aborts loudly only on a shape no compiled program
+// can produce (test_jvm_emit.cpp's own EmitScript.AbortsOnUnsupportedOpcode
+// documents the one that remains) — a real, un-handled gap still fails
+// loudly, the same as before.
 //
 // N7 also lowers BUILD_LIST/GET_INDEX/SET_INDEX — three opcodes
 // notes/backend-implementation-dag.md assigns to N9 (aggregates and
@@ -26,9 +32,10 @@
 // or plain binding) compiles a real, reachable MATCH_ERROR, because the
 // compiler never proves a class pattern exhaustive over its own subclasses
 // — examples/class_dispatch.lox is exactly this shape, and this node's own
-// checkpoint cannot run to completion without it. N10 still owns GET_TAG
-// and JUMP_TABLE, the enum-tag dispatch fast path — see emitMatchError's
-// own note.
+// checkpoint cannot run to completion without it. N10 owns GET_TAG and
+// JUMP_TABLE, the enum-tag dispatch fast path, and lowers them straight to
+// this same MATCH_ERROR call as the `tableswitch`'s own `default` target —
+// see emitFusedGetTagJumpTable's own note.
 //
 // JVM local-variable layout — one fixed mapping for both entry shapes
 // (nodes/N6.md: "choose a fixed slot mapping ... and use it everywhere"),
