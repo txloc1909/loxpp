@@ -656,6 +656,57 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
     }
 }
 
+// The one mechanism every zero-operand-depth consumer shares — P1/P2 says
+// the value to consume is a NAMED LOCAL, not a genuine JVM operand-stack
+// temp, whenever `before[i].operandDepth() == 0`.
+//
+// Cross-check design (referee decision, PR #113 round 3): N2's own
+// reconstructed `localCount` and this pass's own forward-walking
+// `lastInvisibleVarSlot` tracker used to be two separate mechanisms for
+// answering "which local holds it". Every consumer that trusted the tracker
+// alone gave silently wrong output on a `match`, because the tracker names
+// the most RECENTLY DECLARED slot, while `compileMatchBody` declares a
+// match's own subject AFTER its own result — the result, not the subject,
+// is what an enclosing consumer wants (PR #113 R6). T1/T2/T3
+// (test_jvm_emit.cpp) prove the same defect for a PLAIN, unnested match, on
+// `main`, so this was never only a nesting defect.
+//
+// `localCount - 1` is exact away from a CFG merge (abstract_stack.h). At a
+// merge it is only an upper bound, so the tracker now serves as a second,
+// independent estimate that must confirm it. Agreement emits exactly what
+// the tracker path used to emit alone, so no green shape regresses.
+// Disagreement means the old, unconditional tracker read gave silently
+// wrong output (T1-T3) — so this throws at emit time instead, loud rather
+// than silent. See the GAP entry in bytecode-translation-problems.md for
+// the residual cases this still does not cover.
+//
+// The captured-slot check (R5, PR #113 round 2) applies to either estimate:
+// `capturedSlots` holds slot INDEXES, not live ranges (isCaptured's own
+// note) — a slot this chunk captured earlier, in a scope already closed,
+// stays in the set once the compiler reuses the index for an unrelated
+// later local, such as a match result or GET_ITER's own iterable.
+// `emitCapturedGetLocal`'s runtime raw-or-cell test is correct either way,
+// including a self-recursive closure's own seeded cell: storeClosureIntoSelfCell
+// marks that slot captured the normal way, so no separate self-cell case is
+// needed here (V5/V6 verify it).
+int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset) {
+    int loxSlot = e.analysis.before[i].localCount - 1;
+    if (e.labelAtOffset.contains(offset) && e.lastInvisibleVarSlot != loxSlot) {
+        throw std::runtime_error(
+            "jvm_emitter: offset " + std::to_string(offset) +
+            " is a CFG merge; localCount - 1 (" + std::to_string(loxSlot) +
+            ") disagrees with the forward-walk tracker (" +
+            std::to_string(e.lastInvisibleVarSlot) + ")");
+    }
+    int slot = e.jvmSlotForLocal(loxSlot);
+    if (e.isCaptured(loxSlot)) {
+        emitCapturedGetLocal(e, slot, offset);
+    } else {
+        e.b.emit("aload " + std::to_string(slot), +1);
+    }
+    return slot;
+}
+
 // GET_ITER replaces its own operand in place (vm.cpp: `stackTop[-1] = ...`).
 // It carries no operand byte of its own. The iterable expression's own
 // declaring push (11_for_in.lox: e.g. BUILD_LIST) is what put the value
@@ -665,21 +716,9 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
 // stack is therefore already empty at this position (`operandDepth() == 0`)
 // — the value already lives in its own JVM local slot, not still sitting on
 // the operand stack the way a plain "simple op" would assume. GET_ITER must
-// reload that slot, transform it, and store the result straight back,
-// through the same captured-slot check GET_LOCAL/SET_LOCAL use (a sibling
-// scope can reuse this same slot number for a variable some closure
-// elsewhere in the chunk captures — capturedSlots is keyed by slot number,
-// not by declaration), never a bare aload/astore.
-//
-// R1 fix (PR #112 round 1): `before[i].height - 1` named the WRONG slot at
-// a control-flow merge, because `height` is only an upper bound there
-// (abstract_stack.h) — the same fact PR #107 R9 and PR #109 R2 already
-// settled for SET_LOCAL/SET_GLOBAL/JUMP_IF_FALSE. `lastInvisibleVarSlot` is
-// this pass's own forward walk, so it is exact regardless of merges
-// upstream. The guard below turns the assumption in the paragraph above
-// into a checked fact: `operandDepth() == 0` is not merely expected here, it
-// is required, and a violation now fails loudly instead of silently
-// reading/writing the wrong slot with a true net effect of zero.
+// reload that slot, transform it, and store the result straight back —
+// `loadNamedLocalAtZeroDepth` names and loads it, with the same
+// merge/captured-slot guards every other zero-depth consumer shares.
 void emitGetIter(Emitter& e, std::size_t i, const DecodedInstruction& in) {
     if (e.analysis.before[i].operandDepth() != 0) {
         throw std::runtime_error(
@@ -687,18 +726,12 @@ void emitGetIter(Emitter& e, std::size_t i, const DecodedInstruction& in) {
             "into an invisible-var slot (operand depth 0), but the JVM "
             "operand stack was not empty here");
     }
-    int loxSlot = e.checkedInvisibleVarSlot();
-    int slot = e.jvmSlotForLocal(loxSlot);
-    bool captured = e.isCaptured(loxSlot);
-    if (captured) {
-        emitCapturedGetLocal(e, slot, in.offset);
-    } else {
-        e.b.emit("aload " + std::to_string(slot), +1);
-    }
+    int loxSlot = e.analysis.before[i].localCount - 1;
+    int slot = loadNamedLocalAtZeroDepth(e, i, in.offset);
     e.b.emit("invokestatic "
              "lox/LoxOps/getIter(Ljava/lang/Object;)Llox/LoxIterator;",
              0);
-    if (captured) {
+    if (e.isCaptured(loxSlot)) {
         emitCapturedStore(e, slot, in.offset, /*peek=*/false);
     } else {
         e.b.emit("astore " + std::to_string(slot), -1);
@@ -722,20 +755,17 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
     // R1 fix (PR #107 round 1): before[i].operandDepth() == 0 means N2
     // already folded the peeked value into a named local (the eager
     // invisible-var materialization, abstract_stack.h) — nothing sits on the
-    // JVM operand stack to `dup`. Load it back from its slot instead:
-    // `lastInvisibleVarSlot`, not `before[i].localCount`, names it (R9,
-    // resolved for N5 — localCount is only an upper bound at a CFG merge,
-    // but lastInvisibleVarSlot is this pass's own forward walk, so it is
-    // exact regardless of merges upstream). That declaring push reloads the
-    // raw value, whether or not THIS slot is captured somewhere else in the
-    // chunk — EXCEPT one case (PR #111 R1/R4): a local `fun` that captures
-    // itself stores a CELL there instead, through emitClosure's own
-    // self-capture path, not a plain astore. loadLastInvisibleVar throws in
-    // that one case rather than handing back a cell where every caller here
-    // expects the raw value (see the self-capture note above
-    // ensureCapturedCell, and lastInvisibleVarIsSelfCell's own comment).
+    // JVM operand stack to `dup`. Load it back from its slot instead.
+    //
+    // R6 fix (PR #113 round 2): that slot is `loadNamedLocalAtZeroDepth`'s
+    // `localCount - 1`, not `lastInvisibleVarSlot` — a nested match's own
+    // result defeats the tracker (see that function's own note) with no
+    // error, only a wrong value. This site is exactly where R6's
+    // reproduction (a `match` arm whose value is itself a nested `match`)
+    // surfaced the defect: the OUTER arm's own `SET_LOCAL` into its result
+    // slot is this instruction.
     if (e.analysis.before[i].operandDepth() == 0) {
-        e.loadLastInvisibleVar();
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
         if (captured) {
             emitCapturedStore(e, slot, in.offset, /*peek=*/false);
         } else {
@@ -1428,19 +1458,11 @@ void emitMatchError(Emitter& e) {
 // temp — measured at 33 sites across examples/ and
 // bootstrap/loxpp_interpreter.lox, zero among the translation probes, so
 // this node's checkpoint is the first to exercise it end-to-end.
-// `before[i].operandDepth() == 0` names the shape; `lastInvisibleVarSlot`
-// is the WRONG slot to load here, though — it tracks the MOST RECENT
-// declaration in program order, and a match's own arms each declare (then
-// reclaim) their own pattern bindings AFTER the result slot, so by the time
-// RETURN runs it has long since been overwritten by one of those, not the
-// result. The right slot is a structural fact of N2's own model instead
-// (abstract_stack.h): when operandDepth() is 0, height == localCount, so
-// the local sitting at the current top is exactly `localCount - 1` —
-// true on every incoming edge here, because every arm's own cleanup
-// reclaims its bindings back down to the SAME fixed count (subjectSlot+1)
-// before its shared-exit jump, so this is not the kind of merge
-// abstract_stack.h warns against (independent per-edge maxima that
-// disagree) — every edge already agrees.
+// `before[i].operandDepth() == 0` names the shape; `loadNamedLocalAtZeroDepth`
+// (this file, above emitGetLocal) names and loads the right slot — see its
+// own note for why `lastInvisibleVarSlot` is the wrong tracker (R6, PR #113
+// round 2) and for the merge/captured-slot guards it applies (R2/R5, same
+// PR).
 void emitReturn(Emitter& e, std::size_t i, bool isScript) {
     if (isScript) {
         // vm.cpp: frameCount reaches 0, result discarded.
@@ -1448,40 +1470,7 @@ void emitReturn(Emitter& e, std::size_t i, bool isScript) {
         return;
     }
     if (e.analysis.before[i].operandDepth() == 0) {
-        int loxSlot = e.analysis.before[i].localCount - 1;
-        // R2 fix (PR #113 round 1): `localCount - 1` is exact only while
-        // every incoming edge agrees on it — abstract_stack.h forbids
-        // reading `before[i].localCount` alone at a merge. Measured today:
-        // every depth-0 RETURN in examples/ and bootstrap/ (35 sites) has a
-        // single physical predecessor, so none is a CFG block leader. A
-        // label at this offset means a shape this rule was never checked
-        // against; fail loudly rather than load a wrong slot.
-        int returnOffset = e.fn.instructions[i].offset;
-        if (e.labelAtOffset.contains(returnOffset)) {
-            throw std::runtime_error(
-                "jvm_emitter: RETURN at offset " +
-                std::to_string(returnOffset) +
-                " is a CFG merge; localCount - 1 is unverified there");
-        }
-        // R5 fix (PR #113 round 2): `capturedSlots` holds slot INDEXES, not
-        // live ranges — the compiler reuses an index once its scope closes,
-        // so this slot can be a STALE captured index that currently holds a
-        // plain raw value, not a cell. R3 (round 1) made this throw
-        // instead, on the assumption the shape was unreachable; four
-        // programs prove it is not (the reviewer's own reproduction, PR
-        // #113 round 2): a captured local goes out of scope and the
-        // compiler reuses its index for an unrelated match result. Use the
-        // same runtime raw-or-cell test emitGetLocal already applies to
-        // this slot (emitCapturedGetLocal) instead of trusting the static
-        // membership test either way — it is correct whether the slot is
-        // currently a cell (a live, still-open capture reusing the index)
-        // or raw (the common case here), and it never throws on it.
-        int slot = e.jvmSlotForLocal(loxSlot);
-        if (e.isCaptured(loxSlot)) {
-            emitCapturedGetLocal(e, slot, returnOffset);
-        } else {
-            e.b.emit("aload " + std::to_string(slot), +1);
-        }
+        loadNamedLocalAtZeroDepth(e, i, e.fn.instructions[i].offset);
     }
     e.b.emit("areturn", -1);
 }

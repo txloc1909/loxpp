@@ -1647,3 +1647,62 @@ TEST(EmitProgram, ReturnDoesNotFalselyRejectAReusedCapturedSlotIndex) {
         << fClass->source;
     expectEveryJumpTargetIsLabeled(fClass->source);
 }
+
+// PR #113 round 2, R6 (blocking): a `match` arm whose value is itself a
+// nested `match` used to return the WRONG value, silently. The outer arm's
+// own `SET_LOCAL` into its result slot reads `lastInvisibleVarSlot`, which
+// by then names the inner match's SUBJECT (declared after its own result,
+// compiler.cpp's compileMatchBody) — not its result. `localCount - 1`
+// (loadNamedLocalAtZeroDepth, shared with RETURN) is immune: N2 only
+// retires a slot on a bytecode POP classified LOCAL-RECLAIM, and the inner
+// match's own result retires with no POP at all (P1's invisible-var
+// trick), so `localCount - 1` still names it once the subject's one real
+// POP has run.
+//
+// Prove-it-fails (brief.md): reverting emitSetLocal's
+// `loadNamedLocalAtZeroDepth` call to `e.loadLastInvisibleVar()` makes this
+// test FAIL — it emits "aload 9" (the inner subject) where "aload 8" (the
+// inner result) belongs, exactly the reviewer's reproduction — confirmed
+// locally before restoring the fix.
+TEST(EmitProgram, ReturnOfNestedMatchLoadsTheInnerResultNotTheInnerSubject) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "fun f(x) {\n"
+        "  return match x {\n"
+        "    case 1 => match 2 { case 2 => \"inner\" case _ => \"?\" }\n"
+        "    case _ => \"other\"\n"
+        "  };\n"
+        "}\n"
+        "print f(1);\n"
+        "print f(9);\n",
+        mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes;
+    ASSERT_NO_THROW(classes = jvm::emitProgram(fn, tree, "LoxMain"));
+
+    // `f`'s own class, not LoxMain's script class — found by its own
+    // outer-arm SET_LOCAL, not by a fixed index or class count.
+    const jvm::EmittedClass* fClass = nullptr;
+    for (const jvm::EmittedClass& cls : classes) {
+        if (cls.source.find("astore 6\n") != std::string::npos) {
+            fClass = &cls;
+        }
+    }
+    ASSERT_NE(fClass, nullptr)
+        << "no class emits the outer match's result store";
+    const std::string& f = fClass->source;
+    // The outer arm's own SET_LOCAL must reload the inner match's RESULT
+    // slot (8), immediately before storing into the outer result slot (6).
+    EXPECT_NE(f.find("aload 8\n"
+                     "    astore 6\n"),
+              std::string::npos)
+        << f;
+    // The wrong slot this bug actually produced: the inner match's own
+    // SUBJECT (9), reused here so a future regression fails loudly rather
+    // than by coincidence.
+    EXPECT_EQ(f.find("aload 9\n"
+                     "    astore 6\n"),
+              std::string::npos)
+        << f;
+    expectEveryJumpTargetIsLabeled(f);
+}
