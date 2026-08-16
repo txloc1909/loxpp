@@ -369,12 +369,17 @@ one-to-one table.
 - **`JUMP_TABLE` is absent from both plans' tables entirely.** `13_enum_match`:
 
   ```
-  36: GET_TAG           ; pop enum, push tag as a Number (double)
-  37: JUMP_TABLE min=0 count=4
-              | tag 0 -> 49
-              | tag 1 -> 58 …
-  48: MATCH_ERROR       ; fall-through / out-of-range
+  38: GET_TAG           ; pop enum, push tag as a Number (double)
+  39: JUMP_TABLE min=0 count=4
+              | tag 0 -> 51
+              | tag 1 -> 60 …
+  50: MATCH_ERROR       ; fall-through / out-of-range
   ```
+
+  (R7 fix, PR #115 round 1: these offsets shift by 2 from an earlier version
+  of this bullet — commit 82df1fa added a `CALL 0` earlier in the same chunk,
+  to construct `Green()` instead of naming the bare constructor; see the
+  "Nullary enum variants" bullet below.)
 
   It lowers to `tableswitch` (JVM) / `switch` (CIL): `min` is the switch base,
   the count×2 forward offsets become case labels (offsets are relative to the
@@ -473,12 +478,14 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
   value from an initializer"). So the lowered `init` method unconditionally
   returns `this`; there is no value-return case to handle.
 - **Nullary enum variants do not auto-construct, and construct by identity.**
-  `13_enum_match` errored (`GET_TAG: expected an enum value`) because bare `Green`
-  is the *constructor object*, not an instance — `print Green` yields
-  `<ctor C::Green>`. You must call it: `Green()`. And two separate constructions
-  are **not** equal — `Green() == Green()` is `false`. So `LoxEnum` equality is
-  reference identity, not structural; the runtime and `GET_TAG`/`CONSTANT`-of-ctor
-  lowering must respect that. `spec/` does not state this — it is worth adding.
+  `13_enum_match` originally errored (`GET_TAG: expected an enum value`)
+  because bare `Green` is the *constructor object*, not an instance — `print
+  Green` yields `<ctor C::Green>`. You must call it: `Green()`. Commit
+  82df1fa fixed the probe to do that (R7, PR #115 round 1); it no longer
+  errors. And two separate constructions are **not** equal — `Green() ==
+  Green()` is `false`. So `LoxEnum` equality is reference identity, not
+  structural; the runtime and `GET_TAG`/`CONSTANT`-of-ctor lowering must
+  respect that. `spec/` does not state this — it is worth adding.
 - **No list concatenation.** `a + b` on two lists raises "Operands must be
   numbers" (hit while writing `V1`). `ADD` is numbers-and-strings only; worth
   stating in the `ADD` semantics so no backend invents list `+`.
@@ -525,25 +532,168 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     label, `localCount - 1` and `lastInvisibleVarSlot` must agree, or
     emission throws at emit time rather than guess. T1/T2/T3 and R9's three
     nested-match reproductions all now produce output identical to
-    `build/loxpp` on this branch — the cross-check never had to fire on any
-    known repro, but the throw path exists for the case it is built for.
-  - **Still open, owner N10.** Three residues remain, none of them silent:
-    (i) a consumer with no `operandDepth() == 0` branch at all — `PRINT`,
-    `DEFINE_GLOBAL`, `ADD`, `CALL`, `BUILD_LIST`, and peers — still underflows
-    the JVM operand stack at emit time on a bare, unconsumed match result.
-    Proof unchanged: `print match 1 { case x => x };` and
-    `var d = match 1 { case x => x };` both stop `--target jvm` with "operand
-    stack underflow" (at `PRINT` and at `DEFINE_GLOBAL`), though `build/loxpp`
-    prints `1` for both. `examples/match_http_status.lox` and
-    `examples/match_state_machine.lox` fail for exactly this reason.
-    (ii) a match result that reaches a routed consumer at a genuine CFG-label
-    offset where the two slot estimates disagree now stops with
-    `loadNamedLocalAtZeroDepth`'s cross-check throw, loud rather than silent,
-    but still not a running program. (iii) the theoretical case where both
-    estimates agree and are BOTH wrong is not ruled out by a cross-check —
-    only real, per-edge merge verification closes it, which this PR does not
-    attempt. `nodes/N10.md` item 3 already lists both failing examples, so
-    N10 cannot pass its own checkpoint without generalizing
-    `operandDepth() == 0` / `localCount - 1` to every consumer that lacks the
-    branch today, and without replacing the cross-check with a real per-edge
-    proof.
+    `build/loxpp` on this branch — the cross-check did not fire on any of
+    these repros. **Correction (PR #115 round 4, R22): the cross-check DOES
+    fire on a later-found, reachable repro family — see the third residue in
+    the N10 GAP entry, below, for the four known programs that trigger it.**
+  - **Fixed, N10 (PR #115 round 1).** `emitPrint`, `emitDefineGlobal`,
+    `emitNot`, a one-element `emitBuildList`, and a folded-collection
+    `emitGetIndex` all now route through the same `loadNamedLocalAtZeroDepth`
+    (or, for `GET_INDEX`, a spill-then-load reorder built on it — see its own
+    note). `examples/match_http_status.lox` and
+    `examples/match_state_machine.lox` (both `print match ...;`) now match
+    `build/loxpp`.
+  - **Fixed, N10 (PR #115 round 2, R11/R12).** A folded match result on the
+    LEFT of a two-operand op — `(match ...) + 1`, `* 10`, `< 5`, `== 2` — and
+    the one-operand `-(match ...)` were refused before this round, though
+    `build/loxpp` answers every one of them correctly (round 1's own
+    rebuttal for `ADD` only tested the match on the RIGHT, where `build/loxpp`
+    itself fails; it does not cover this, the LEFT-operand shape). Every
+    two-operand rule parses its left side first (compiler.cpp), so the
+    match's result is always the folded operand when this shape occurs, and
+    the RHS is always the one genuine value still on the JVM stack —
+    `emitAdd`, `emitSubtract`, `emitMultiply`, `emitDivide`, `emitModulo`,
+    `emitEqual`, `emitGreater`, and `emitLess` (`reorderFoldedLeftOperand`)
+    spill the genuine RHS, load the named LHS, then restore the RHS, the same
+    reorder `emitGetIndex` already used for its own depth-1 shape; `emitNegate`
+    is `emitNot`'s own one-operand twin. All nine repro programs (PR #115
+    round 2, R11/R12 threads) now matched `build/loxpp` exactly, each with its
+    own unit test proving it failed when its guard was reverted.
+    `reorderFoldedLeftOperand` and its eight call sites no longer exist —
+    superseded by the round-3 redesign below, which generalizes the same
+    reorder to any operand count.
+  - **Redesigned, N10 (PR #115 round 3, researcher referee decision on
+    R15/R16).** Three site-by-site rounds (R3/R7 round 1, R11/R12/R13 round
+    2) each closed the consumers a review round happened to name, and a
+    fourth round (R15) named nine more: `BUILD_LIST` with width above 1 and
+    its FIRST element folded, `BUILD_MAP` with a folded key, `CALL`/`INVOKE`
+    with a folded callee/receiver, `GET_PROPERTY`, `SET_PROPERTY`,
+    `SET_INDEX`, `SLICE`, and `IN`. Every one of the nine is legal and
+    correct on `build/loxpp`. The referee's diagnosis: the design itself —
+    one private `if (operandDepth() == ...)` branch per consumer — could
+    never state a completeness claim, because nothing forced the enumeration
+    to cover every opcode; R16 is the proof, disproving the THIRD version of
+    this very GAP entry within one round.
+    The fix is structural, not one more enumeration. `jvm_emitter.cpp`'s
+    `nativePops(Op, DecodedInstruction)` is an exhaustive `switch` over `Op`,
+    no `default` (clang's `-Wswitch` warns on a missing enumerator; this
+    project builds with neither `-Werror` nor `-Wall`, so a missing row
+    still compiles and throws only at run time) stating how many
+    operand-stack cells `src/vm.cpp` pops for that instruction.
+    `normalizeFoldedOperands`, one step in the dispatch loop every
+    instruction passes through alike, compares that count against N2's own
+    `operandDepth()` and repairs exactly the shortfall: it spills whatever
+    genuine operands are already on the real stack, loads the missing bottom
+    operand through `loadNamedLocalAtZeroDepth` (the same cross-checked
+    mechanism the peek/locals-model family already trusted), then reloads
+    the genuine operands on top, in order. A folded operand can only ever be
+    the bottom-most of an instruction's own operands — `compileMatchBody`
+    folds a `match` expression's result into its own named local before any
+    later sibling operand is even parsed — so this covers every
+    `nativePops`-covered opcode's own single-folded-operand shape at once,
+    including `GET_TAG`'s own (a match nested directly inside another
+    match's subject) and `RETURN`'s own, neither of which any review round
+    had named yet. The nine R15 programs, a `RETURN`-of-a-folded-match
+    program, and a nested-match-subject program all now match `build/loxpp`
+    exactly; one unit test per shape proves it fails when its own
+    `nativePops` row is reverted to `std::nullopt`.
+  - **Still open, unowned, not silent — a deficit of two or more.** A
+    `match` result sandwiched below TWO OR MORE live sibling operands of its
+    own consumer (`CALL`'s own sandwiched-argument shape, `ADD`'s own
+    mirror-image and both-sides-folded shapes — `1 + match ...`,
+    `(match ...) + (match ...)`) still gets no answer, and `normalizeFoldedOperands`
+    now throws a named, loud error for it instead of underflowing silently
+    at emit time. This is NOT owed a fix: `compileMatchBody`'s own
+    `resultSlot`/`subjectSlot` allocation (compiler.cpp) uses `m_localCount`
+    alone, blind to a sibling operand already live on the real VM stack, so
+    the two collide at the same slot — a pre-existing defect in
+    `build/loxpp` itself, proven by seven one-line programs across PR #115's
+    three rounds, all raising `Operands must be numbers.` /
+    `Can only call functions, classes and enums.` on `build/loxpp` (exit 70).
+    `1 + match 1 { case 1 => 2 case _ => 3 };` is legal per spec/02-syntax.md
+    (`match` is `primary`). Fixing this is a compiler change, out of any
+    backend node's charter (brief.md section 8); no later emission node owns
+    it either, since N10 is the last one. A second, theoretical residue is
+    unchanged by this round: the case where `loadNamedLocalAtZeroDepth`'s two
+    slot estimates agree and are BOTH wrong is not ruled out by its
+    cross-check — only real, per-edge merge verification closes it, which no
+    node has attempted. No known program reaches either residue; the
+    mission's definition of done is not blocked.
+  - **Still open, unowned, REACHABLE — deferred by referee ruling, PR #115
+    (originally R13, PR #115 round 2; disposition ruled at round 3).**
+    `and`/`or` (`compiler.cpp`'s `and_`/`or_`) compile `JUMP_IF_FALSE` then
+    either `POP` (true path, falls through into the right operand) or `JUMP`
+    straight to the shared exit (false path, the left operand's own value
+    stays live). When either operand is a folded `match` result, the two
+    paths reach that shared exit at genuinely different operand depths.
+    `abstract_stack.cpp`'s `validateMergeConsistency` — N2's own
+    target-independent merge check, in a file this PR does not touch —
+    catches the disagreement and throws at ANALYSIS time, before
+    `jvm_emitter.cpp` ever runs:
+    ```
+    abstract_stack: merge disagreement in function '0' at offset 43:
+    incoming operand depths disagree (0 vs 1) — the JVM/CLR verifier would
+    reject this merge
+    ```
+    for `var t = true; print (match 1 {case 1 => t case _ => false}) and
+    "yes";`, which `build/loxpp` runs correctly (prints `yes`). More one-line
+    repros in the R13 thread put the folded operand on either side, with
+    both `and` and `or`. Unlike the deficit-of-two-or-more residue above,
+    this is a REAL loss of parity for a legal, correctly-answered native
+    program, not a pre-existing compiler bug — but fixing it means changing
+    which expressions N2 folds into an invisible local, or relaxing
+    `validateMergeConsistency`'s own equivalence rule, in
+    `abstract_stack.cpp`, an already-reviewed, target-independent file no
+    diff in this PR touches; that is a change to N2's own design, which
+    brief.md section 8 reserves for a research referee, not an in-PR edit
+    smuggled through N10.
+    **Disposition (round-3 referee ruling).** The round-2 implementer named
+    N11 the owner; the referee ruled that call out of procedure (brief.md
+    section 7 gives an unanticipated-problem ruling to the researcher, not to
+    the implementer that hit it) and resolved it on substance instead: this
+    gap is **not assigned an owning node**. It does not block N10 — the
+    implementer, the reviewer, and the referee each independently verified no
+    required gate reaches it: a pattern search over all of `examples/*.lox`,
+    the nine N10 checkpoint files, every numbered translation probe
+    (`01`-`28`, 27 files — `07` was never assigned), and
+    `bootstrap/loxpp_interpreter.lox` (2583 lines) found no program that
+    places a `match` expression directly on either side of `and`/`or`. N11
+    does not fix this gap and does not own the fix; N11's own differential
+    runs against the growing corpus will detect it loudly if any program ever
+    reaches it, and that event is itself a researcher-unblock condition
+    (brief.md section 7), not something N11 resolves alone. This gap stays
+    unassigned until a program actually reaches it or a researcher rules
+    on N2's fold model if the corpus ever reaches this shape.
+  - **Still open, unowned, REACHABLE, not silent — a folded operand plus a
+    sibling operand ending in `and`/`or` (R22, PR #115 round 4).** Distinct
+    from the residue above: there, `and`/`or` sits ABOVE the fold, and the
+    analysis-time merge check catches it. Here, a folded `match` result is
+    one operand of an ordinary consumer (`ADD`, `SET_PROPERTY`, `BUILD_LIST`,
+    …), and a LATER sibling operand of that SAME consumer ends in `and`/`or`.
+    The consumer's own offset is then the `and`/`or` join label.
+    `normalizeFoldedOperands` computes `deficit == 1` correctly and calls
+    `loadNamedLocalAtZeroDepth`, but that function's own cross-check, at a
+    label, compares `localCount - 1` against `lastInvisibleVarSlot` and the
+    two disagree at THIS join, so it refuses rather than guess. Four repros,
+    each `enum E { A B }` then one line, all correct on `build/loxpp`:
+    ```lox
+    print [match A() { case A => 1 case B => 2 }, (true and 5)];
+    print [match A() { case A => 1 case B => 2 }, (true or 5)];
+    print (match A() { case A => 1 case B => 2 }) + (true and 5);
+    class K { init(v) { this.v = v; } }
+    var k = K(3);
+    (match A() { case A => k case B => k }).v = (true and 8);
+    ```
+    Each throws `jvm_emitter: offset <n> is a CFG merge; localCount - 1 (1)
+    disagrees with the forward-walk tracker (2)` instead of matching
+    `build/loxpp`. Adding a THIRD, later sibling operand moves the join off
+    the consumer's own offset, and the program then works (`[match A() {
+    case A => 1 case B => 2 }, (false or 5), 9]` matches `build/loxpp`
+    exactly). No required gate reaches this shape — `check_jvm_probes.sh`
+    (44 probes), `check_examples.py` (56 examples), and
+    `bootstrap/loxpp_interpreter.lox` all stay green. The failure is loud,
+    so no output is silently wrong. The real fix is the same one the residue
+    above needs: real, per-edge merge verification in place of the
+    cross-check's two estimates, a recorded residue from PR #113, still
+    outside N10's charter. Not assigned to any node, for the same reason as
+    the residue above.

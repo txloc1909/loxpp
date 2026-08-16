@@ -31,9 +31,18 @@ match "hi" {
 };
 print r;
 
-match {1: 2} {
-    case [p, q] => r = "seq"
-    case _      => r = "notseq"
+// R2 fix (PR #115 round 1): a 2-element pattern here can never prove IS_SEQ
+// runs at all — compileListPattern's own length check (compiler.cpp:2129-
+// 2148) rejects a 1-pair map on width alone, so IS_SEQ's own answer never
+// reaches stdout either way (proof: mutating LoxOps.isSeq to `return true`
+// left this probe passing, unchanged, before this fix). A 1-element pattern
+// over a 1-pair map closes that hole: `len({0: 2})` is 1, matching the
+// pattern's own width, so a broken IS_SEQ that always accepts reaches the
+// bind step, and GET_INDEX's own key lookup on a Map (vm.cpp) resolves
+// `{0: 2}[0]` to 2 — accepting the arm and printing 2, not "notseq".
+match {0: 2} {
+    case [p] => r = p
+    case _   => r = "notseq"
 };
 print r;
 

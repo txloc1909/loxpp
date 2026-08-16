@@ -3,13 +3,64 @@
 // JVM code generator (node N4 of the JVM/CLR backend DAG, discharges P2 — the
 // "peek, don't pop" family; node N5 adds P3b, control flow and verifier
 // legality; node N6 adds P5, functions and calls; node N7 adds P4b, closures
-// and upvalues; node N8 adds P5+P4, classes/methods/super;
-// notes/bytecode-translation-problems.md). Lowers one function's chunk to
-// Jasmin (.j) text, consuming N0's decoder, N1's CFG/labels, N2's
-// abstract-stack analysis, and N3's capture analysis. Match/enum dispatch
-// proper (N10: GET_TAG, JUMP_TABLE) is still out of scope: this node aborts
-// loudly on any opcode none of N4/N5/N6/N7/N8 lowers, so a later node's gap
-// fails loudly too.
+// and upvalues; node N8 adds P5+P4, classes/methods/super; node N9 adds
+// aggregates and for-in; node N10 adds P8, match/enum dispatch proper
+// (GET_TAG, JUMP_TABLE, enum-ctor CONSTANT) and its own residue: a `match`
+// expression's result can reach ANY consumer opcode as a value the native VM
+// treats as already on the operand stack, when N2 instead folded it into a
+// named local (compileMatchBody's own "fused local/operand-stack model").
+//
+// R16 fix (PR #115 round 3, researcher referee decision): three earlier
+// versions of this residue's own account (round 1's R7, round 2's R13, this
+// round's own R15) each enumerated a fixed list of "the shapes that are
+// still open" and each enumeration was disproved within one round by a
+// three-line program. The structural reason no enumeration can stay true:
+// nothing forced it to cover every opcode. This pass now states the fix as
+// a STRUCTURAL claim instead. `jvm_emitter.cpp`'s own `nativePops` is an
+// exhaustive table over `Op`, no `default` (clang's `-Wswitch` warns on a
+// missing enumerator; this project builds with neither `-Werror` nor
+// `-Wall`, so a missing row still compiles and throws only at run time)
+// stating how many operand-stack cells `src/vm.cpp` pops for each
+// one; `normalizeFoldedOperands`, one pre-dispatch step every instruction
+// gets alike (see its own note, above `emitBody`), compares that count
+// against N2's own `operandDepth()` and repairs exactly the deficit. A
+// folded operand can only ever be the BOTTOM-most of an instruction's own
+// operands — `compileMatchBody` folds a `match` expression's result into its
+// own named local before any later sibling operand is even parsed — so a
+// deficit of 1 (the bottom operand missing, every genuine sibling still on
+// the real stack) is repaired for every `nativePops`-covered opcode alike,
+// not site by site — EXCEPT when the consumer sits on a CFG merge where
+// `loadNamedLocalAtZeroDepth`'s own two slot estimates disagree, where it
+// stops loudly instead (R22, PR #115 round 4; see the third GAP residue
+// below).
+//
+// A deficit of 2 or more is not owed a fix, for one reason verified across
+// both the CALL/BUILD_LIST/BUILD_MAP family (round 1's R3) and the ADD
+// family (round 2's R11): a program that puts a live sibling operand BELOW
+// a match's own subject/result collides with `compileMatchBody`'s own slot
+// allocation (`compiler.cpp`, `m_localCount`, blind to that sibling) on
+// `build/loxpp` ITSELF, with no JVM backend involved — so no correct native
+// answer exists there to withhold. `normalizeFoldedOperands` throws a named
+// error citing this file for that case, loudly, rather than guessing.
+//
+// A separate, REACHABLE gap exists outside this file: `and`/`or` over a
+// folded `match` operand fails at analysis time, in N2's own
+// abstract_stack.cpp, before this pass ever runs — deferred by referee
+// ruling, PR #115 (see the GAP entry in notes/bytecode-translation-problems.md
+// for the full account).
+//
+// A third, REACHABLE gap exists inside this file (R22, PR #115 round 4).
+// When a folded match result is one operand of a consumer that itself sits
+// at an `and`/`or` join label, and a LATER sibling operand of the same
+// consumer is the other side of that `and`/`or`, `loadNamedLocalAtZeroDepth`
+// computes two disagreeing slot estimates for the join and refuses instead
+// of guessing — even though `deficit == 1` and `build/loxpp` answers the
+// program correctly. `print (match A() {case A => 1 case B => 2}) + (true
+// and 5);` is one repro; see the GAP entry in
+// notes/bytecode-translation-problems.md for the rest. The failure is loud,
+// not silent, and no required gate reaches it. The real fix is per-edge
+// merge verification, a recorded residue from PR #113, still outside this
+// node's charter.
 //
 // N7 also lowers BUILD_LIST/GET_INDEX/SET_INDEX — three opcodes
 // notes/backend-implementation-dag.md assigns to N9 (aggregates and
@@ -26,9 +77,10 @@
 // or plain binding) compiles a real, reachable MATCH_ERROR, because the
 // compiler never proves a class pattern exhaustive over its own subclasses
 // — examples/class_dispatch.lox is exactly this shape, and this node's own
-// checkpoint cannot run to completion without it. N10 still owns GET_TAG
-// and JUMP_TABLE, the enum-tag dispatch fast path — see emitMatchError's
-// own note.
+// checkpoint cannot run to completion without it. N10 owns GET_TAG and
+// JUMP_TABLE, the enum-tag dispatch fast path, and lowers them straight to
+// this same MATCH_ERROR call as the `tableswitch`'s own `default` target —
+// see emitFusedGetTagJumpTable's own note.
 //
 // JVM local-variable layout — one fixed mapping for both entry shapes
 // (nodes/N6.md: "choose a fixed slot mapping ... and use it everywhere"),

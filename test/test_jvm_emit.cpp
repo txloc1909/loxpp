@@ -47,11 +47,14 @@ int countOccurrences(const std::string& haystack, const std::string& needle) {
     return count;
 }
 
-// The mnemonics this emitter writes as a jump (nodes N4/N5/N6/N7). N7 adds
-// `ifeq` (the captured-slot raw/cell runtime check — emitCapturedGetLocal,
-// emitCapturedStore, ensureCapturedCell); N10 adds `tableswitch`/
-// `lookupswitch` (match). Whichever node adds a new jump form must add its
-// mnemonic here too, or that jump gets no label-integrity coverage from
+// The mnemonics this emitter writes as a jump (nodes N4/N5/N6/N7), each
+// carrying exactly one label operand. N7 adds `ifeq` (the captured-slot
+// raw/cell runtime check — emitCapturedGetLocal, emitCapturedStore,
+// ensureCapturedCell). `tableswitch` (N10) does not fit this shape — it
+// carries one label per arm plus a `default :` label, none of them prefixed
+// by a mnemonic-and-space the way `goto <label>` is — so it gets its own
+// scan, below. Whichever node adds a new single-operand jump form must add
+// its mnemonic here too, or that jump gets no label-integrity coverage from
 // this helper.
 const std::vector<std::string> kJumpMnemonics = {"goto ", "ifne ", "ifeq "};
 
@@ -74,6 +77,60 @@ const std::vector<std::string> kJumpMnemonics = {"goto ", "ifne ", "ifeq "};
 // occur inside a string literal's payload. Prefixing `j` itself with one
 // "\n" gives a jump on the very first line the same leading newline to
 // anchor against, so no special case is needed there.
+// tableswitch (N10): one label per arm, then a `default : <label>` line,
+// none of them prefixed by a mnemonic — kJumpMnemonics' own "mnemonic space
+// label" shape does not fit, so this is a dedicated scan, anchored the same
+// way (PR #110 R6): a string literal payload can never contain a real
+// newline followed by four spaces, so "\n    tableswitch " can only be a
+// real instruction. Every line after the header, up to and including the
+// first "default" line, is one more label operand.
+void expectEveryTableSwitchTargetIsLabeled(const std::string& j) {
+    const std::string text = "\n" + j;
+    const std::string anchor = "\n    tableswitch ";
+    std::size_t pos = 0;
+    while ((pos = text.find(anchor, pos)) != std::string::npos) {
+        std::size_t lineEnd = text.find('\n', pos + 1);
+        ASSERT_NE(lineEnd, std::string::npos)
+            << "tableswitch's own header runs off the end of:\n"
+            << j;
+        std::size_t cursor = lineEnd + 1;
+        bool sawDefault = false;
+        while (!sawDefault) {
+            std::size_t nextEnd = text.find('\n', cursor);
+            ASSERT_NE(nextEnd, std::string::npos)
+                << "tableswitch's own arm list runs off the end of:\n"
+                << j;
+            std::string line = text.substr(cursor, nextEnd - cursor);
+            std::size_t firstNonSpace = line.find_first_not_of(" \t");
+            ASSERT_NE(firstNonSpace, std::string::npos)
+                << "blank line inside a tableswitch's own arm list in:\n"
+                << j;
+            std::string rest = line.substr(firstNonSpace);
+            std::string target;
+            if (rest.rfind("default", 0) == 0) {
+                std::size_t colon = rest.find(':');
+                ASSERT_NE(colon, std::string::npos)
+                    << "tableswitch's own default has no ':' in:\n"
+                    << j;
+                std::string afterColon = rest.substr(colon + 1);
+                std::size_t labelStart = afterColon.find_first_not_of(" \t");
+                target = (labelStart == std::string::npos)
+                             ? ""
+                             : afterColon.substr(labelStart);
+                sawDefault = true;
+            } else {
+                target = rest;
+            }
+            EXPECT_NE(text.find("\n" + target + ":\n"), std::string::npos)
+                << "tableswitch target to undefined label \"" << target
+                << "\" in:\n"
+                << j;
+            cursor = nextEnd + 1;
+        }
+        pos = cursor;
+    }
+}
+
 void expectEveryJumpTargetIsLabeled(const std::string& j) {
     const std::string text = "\n" + j;
     for (const std::string& mnemonic : kJumpMnemonics) {
@@ -98,6 +155,7 @@ void expectEveryJumpTargetIsLabeled(const std::string& j) {
             pos = nameEnd;
         }
     }
+    expectEveryTableSwitchTargetIsLabeled(j);
 }
 
 } // namespace
@@ -172,22 +230,54 @@ TEST(FormatDoubleBitsLiteral, IsABareDecimalIntegerNeverADecimalOrExponent) {
 // emitScript
 // ---------------------------------------------------------------------------
 
+// An earlier version of this test used an enum declaration's own CONSTANT
+// (an ObjEnumCtor) as the still-unsupported opcode-family shape; node N10's
+// own CONSTANT fix (materialising one, emitConstant's own isEnumCtor branch)
+// closed that gap, so `enum Color { Red Green Blue Yellow }` alone now
+// emits cleanly. BUILD_MAP was the shape before that (PR #113 round 4).
+//
+// Every real Op the compiler emits now has a handler (this is the last
+// backend-emission node, per notes/backend-implementation-dag.md's N4-N10
+// chain), so no source program compiles down to an opcode this pass still
+// refuses. The one shape that still refuses is JUMP_TABLE reached without an
+// immediately preceding GET_TAG: compiler.cpp's compileMatchBody has exactly
+// one call site for JUMP_TABLE, and it always emits GET_TAG right before it,
+// so `emitGetTagOrFused`'s own fusion check (`Emitter::fusableJumpTable`)
+// never leaves JUMP_TABLE's own array slot for the main dispatch switch to
+// see — a hand-built instruction list drives this directly instead, the
+// same way AbstractStackTest.DirectlyBuiltGapThrowsWithTheRightMessage
+// drives its own safety net rather than hunting for a chunk that cannot
+// exist.
 TEST(EmitScript, AbortsOnUnsupportedOpcode) {
     MemoryManager mm;
-    // An enum declaration (node N10's job, not N8's) compiles each
-    // constructor to a CONSTANT holding an ObjEnumCtor — a Value kind
-    // emitConstant does not handle. An earlier version of this test used an
-    // empty map literal (BUILD_MAP); node N9 merged that opcode to main
-    // after this branch diverged, so BUILD_MAP no longer aborts here
-    // (PR #113 round 4, rebase onto main).
-    DecodedFunction fn =
-        decodeScript("enum Color { Red Green Blue Yellow }\n", mm);
-    FunctionStackAnalysis analysis = analyzeStack(fn);
+    DecodedInstruction table;
+    table.offset = 0;
+    table.op = Op::JUMP_TABLE;
+    table.minTag = 0;
+    table.length = 3; // min_tag (1 byte) + count (1 byte), zero arms.
+
+    // analyzeCaptures (emitScript's own first call) reads fn.function->arity
+    // before this pass ever sees an instruction, so a real (if otherwise
+    // empty) ObjFunction is needed, not a null one.
+    DecodedFunction fn;
+    fn.id = "0";
+    fn.function = mm.create<ObjFunction>();
+    fn.instructions = {table};
+
+    FunctionStackAnalysis analysis;
+    analysis.functionId = "0";
+    // JUMP_TABLE pops the tag alone (stackEffect: {1, 0}) — one temporary in,
+    // zero out. Nothing here declares a local, so `reached` alone needs to
+    // be true for emitBody to dispatch this instruction at all.
+    analysis.before = {StackState{1, 0}};
+    analysis.after = {StackState{0, 0}};
+    analysis.reached = {true};
+
     try {
         jvm::emitScript(fn, analysis, "LoxMain");
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& e) {
-        EXPECT_EQ(std::string(e.what()), "not implemented in N6: CONSTANT");
+        EXPECT_EQ(std::string(e.what()), "not implemented in N6: JUMP_TABLE");
     }
 }
 
@@ -1876,4 +1966,754 @@ TEST(EmitProgram, SetUpvalueOfAPlainMatchLoadsTheResultNotAStaleSlot) {
               std::string::npos)
         << setit;
     expectEveryJumpTargetIsLabeled(setit);
+}
+
+// ---------------------------------------------------------------------------
+// N10: match/enum dispatch — GET_TAG, JUMP_TABLE, enum-ctor CONSTANT, and
+// the two residue consumers (PRINT, DEFINE_GLOBAL) this node's own checkpoint
+// needs a real fix for.
+// ---------------------------------------------------------------------------
+
+// P8's own hazard: GET_TAG pushes a boxed double and JUMP_TABLE wants an
+// int. Fusing them (emitFusedGetTagJumpTable) must never box the tag at
+// all — the tag stays a primitive double, then `int`, the whole way.
+//
+// Prove-it-fails (brief.md): reverting emitFusedGetTagJumpTable to the
+// context-free box-then-unbox shape P8 warns against (`getTag()D;
+// invokestatic Double/valueOf(D)Ljava/lang/Double; invokevirtual
+// doubleValue()D; d2i; tableswitch`) still assembles and still dispatches
+// every in-range tag to its correct arm — the three-line adjacency this
+// test checks for is the only thing that shape breaks, and it does break
+// it — confirmed locally before restoring the fix.
+TEST(EmitProgram, DenseEnumMatchFusesGetTagWithTableswitch) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("enum Color { Red Green Blue Yellow }\n"
+                                      "fun classify(c) {\n"
+                                      "  return match c {\n"
+                                      "    case Red => 0\n"
+                                      "    case Green => 1\n"
+                                      "    case Blue => 2\n"
+                                      "    case Yellow => 3\n"
+                                      "  };\n"
+                                      "}\n"
+                                      "print classify(Green());\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes;
+    ASSERT_NO_THROW(classes = jvm::emitProgram(fn, tree, "LoxMain"));
+
+    const jvm::EmittedClass* classifyClass = nullptr;
+    for (const jvm::EmittedClass& cls : classes) {
+        if (cls.source.find("tableswitch") != std::string::npos) {
+            classifyClass = &cls;
+        }
+    }
+    ASSERT_NE(classifyClass, nullptr) << "no class emits a tableswitch";
+    const std::string& c = classifyClass->source;
+
+    // getTag()D; d2i; tableswitch, back to back — no Double/valueOf boxing
+    // in between (each arm's own literal body still boxes ITS OWN result,
+    // 0/1/2/3, further down; that boxing belongs to CONSTANT, not to this
+    // fusion, so this check is anchored to the three adjacent lines, not to
+    // the whole method).
+    EXPECT_NE(c.find("invokestatic lox/LoxOps/getTag(Ljava/lang/Object;)D\n"
+                     "    d2i\n"
+                     "    tableswitch 0\n"),
+              std::string::npos)
+        << c;
+    expectEveryJumpTargetIsLabeled(c);
+    expectEveryJumpTargetIsLabeled(classes[0].source);
+}
+
+TEST(EmitProgram, DenseEnumMatchTableswitchDefaultTargetsMatchError) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("enum Color { Red Green Blue Yellow }\n"
+                                      "fun classify(c) {\n"
+                                      "  return match c {\n"
+                                      "    case Red => 0\n"
+                                      "    case Green => 1\n"
+                                      "    case Blue => 2\n"
+                                      "    case Yellow => 3\n"
+                                      "  };\n"
+                                      "}\n"
+                                      "print classify(Green());\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    const jvm::EmittedClass* classifyClass = nullptr;
+    for (const jvm::EmittedClass& cls : classes) {
+        if (cls.source.find("tableswitch") != std::string::npos) {
+            classifyClass = &cls;
+        }
+    }
+    ASSERT_NE(classifyClass, nullptr);
+    const std::string& c = classifyClass->source;
+
+    // The default label's own target must be MATCH_ERROR's call, not one of
+    // the four real arms.
+    std::size_t defaultPos = c.find("default : ");
+    ASSERT_NE(defaultPos, std::string::npos) << c;
+    std::size_t labelStart = defaultPos + std::string("default : ").size();
+    std::size_t labelEnd = c.find('\n', labelStart);
+    ASSERT_NE(labelEnd, std::string::npos) << c;
+    std::string defaultLabel = c.substr(labelStart, labelEnd - labelStart);
+    EXPECT_NE(c.find(defaultLabel + ":\n"
+                                    "    invokestatic "
+                                    "lox/LoxOps/matchError()Llox/LoxError;\n"),
+              std::string::npos)
+        << "the default label does not lead straight to MATCH_ERROR in:\n"
+        << c;
+
+    // R9 fix (PR #115 round 1): every other test in this file that emits
+    // jasmin calls this helper; this one was the only exception.
+    expectEveryJumpTargetIsLabeled(c);
+}
+
+// The sparse, compare-and-branch match form (a guard defeats table
+// eligibility — previewEnumArms, compiler.cpp:1536): GET_TAG runs alone,
+// so it must box its own result, the same way CONSTANT boxes a number
+// literal, for the CONSTANT/EQUAL pair right after it to compare against.
+TEST(EmitProgram, SparseConstructorMatchBoxesGetTagForCompareAndBranch) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("enum Color { Red Green Blue Yellow }\n"
+                                      "fun classify(c) {\n"
+                                      "  return match c {\n"
+                                      "    case Red if true => 0\n"
+                                      "    case Green => 1\n"
+                                      "    case Blue => 2\n"
+                                      "    case Yellow => 3\n"
+                                      "  };\n"
+                                      "}\n"
+                                      "print classify(Green());\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes;
+    ASSERT_NO_THROW(classes = jvm::emitProgram(fn, tree, "LoxMain"));
+
+    const jvm::EmittedClass* classifyClass = nullptr;
+    for (const jvm::EmittedClass& cls : classes) {
+        if (cls.source.find("getTag") != std::string::npos) {
+            classifyClass = &cls;
+        }
+    }
+    ASSERT_NE(classifyClass, nullptr) << "no class emits GET_TAG";
+    const std::string& c = classifyClass->source;
+
+    EXPECT_EQ(c.find("tableswitch"), std::string::npos)
+        << "a guard must defeat table eligibility:\n"
+        << c;
+    EXPECT_NE(c.find("invokestatic lox/LoxOps/getTag(Ljava/lang/Object;)D\n"
+                     "    invokestatic "
+                     "java/lang/Double/valueOf(D)Ljava/lang/Double;\n"),
+              std::string::npos)
+        << c;
+    expectEveryJumpTargetIsLabeled(c);
+    expectEveryJumpTargetIsLabeled(classes[0].source);
+}
+
+// CONSTANT materialising an ObjEnumCtor (P6/P8): enumDeclaration compiles
+// each variant to CONSTANT then DEFINE_GLOBAL (compiler.cpp), the same
+// shape a plain number or string literal uses.
+TEST(EmitScript, EnumConstantMaterializesLoxEnumCtor) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("enum Result { Ok(value) Err(msg) }\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // Ok: tag 0, arity 1.
+    EXPECT_NE(j.find("new lox/LoxEnumCtor\n"
+                     "    dup\n"
+                     "    iconst_0\n"
+                     "    iconst_1\n"
+                     "    ldc \"Ok\"\n"
+                     "    ldc \"Result\"\n"
+                     "    invokespecial lox/LoxEnumCtor/<init>(IILjava/lang/"
+                     "String;Ljava/lang/String;)V\n"),
+              std::string::npos)
+        << j;
+    // Err: tag 1, arity 1.
+    EXPECT_NE(j.find("new lox/LoxEnumCtor\n"
+                     "    dup\n"
+                     "    iconst_1\n"
+                     "    iconst_1\n"
+                     "    ldc \"Err\"\n"
+                     "    ldc \"Result\"\n"
+                     "    invokespecial lox/LoxEnumCtor/<init>(IILjava/lang/"
+                     "String;Ljava/lang/String;)V\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// N10's own residue (referee decision, PR #113 round 3): DEFINE_GLOBAL had
+// no operandDepth() == 0 branch at all, so a script-scope `var n = match
+// ...;` — 13_enum_match.lox's own shape — underflowed at emit time. Every
+// other zero-depth consumer already routes through loadNamedLocalAtZeroDepth
+// (RETURN, SET_LOCAL, SET_GLOBAL, SET_UPVALUE, JUMP_IF_FALSE, GET_ITER); this
+// is the same fix, for the one opcode family none of them share.
+//
+// Prove-it-fails (brief.md): removing emitDefineGlobal's own `if
+// (operandDepth() == 0)` branch makes emitScript throw "operand stack
+// underflow emitting 'aload 1'" instead of returning — confirmed locally
+// before restoring the fix.
+TEST(EmitScript, DefineGlobalOfAPlainMatchLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("var n = match 1 { case 1 => \"a\" case _ => \"b\" };\n"
+                     "print n;\n",
+                     mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // The match's own result must reach DEFINE_GLOBAL, immediately before
+    // the receiver/name/value shuffle globalsCall's non-peek form builds.
+    EXPECT_NE(j.find("aload 1\n"
+                     "    swap\n"
+                     "    ldc \"n\"\n"
+                     "    swap\n"
+                     "    invokevirtual lox/LoxGlobals/define(Ljava/lang/"
+                     "String;Ljava/lang/Object;)V\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// Same residue, for PRINT: `print match ...;` is match_http_status.lox's,
+// match_state_machine.lox's, and match_dispatch.lox's own shape.
+//
+// Prove-it-fails: removing emitPrint's own `if (operandDepth() == 0)` branch
+// makes this test's own emitScript call throw "operand stack underflow
+// emitting 'invokestatic lox/LoxOps/print(Ljava/lang/Object;)V'" instead of
+// returning — confirmed locally before restoring the fix.
+TEST(EmitScript, PrintOfAPlainMatchLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "print match 1 { case 1 => \"a\" case _ => \"b\" };\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // The match's own result (JVM slot 3: baseSlot 2 + Lox slot 1, the
+    // "(match_result)" invisible var) must reload right before PRINT's own
+    // call — nothing is left on the real JVM operand stack for PRINT to
+    // consume directly (N2 folded the result into a named local).
+    EXPECT_NE(j.find("aload 3\n"
+                     "    invokestatic lox/LoxOps/print(Ljava/lang/"
+                     "Object;)V\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// R14 fix (PR #115 round 2): the three R3-round-1 fixes (NOT, one-element
+// BUILD_LIST, folded-collection GET_INDEX) had no test at all. Proved this
+// the same way the reviewer did: reverted each guard to a value it can
+// never take (`operandDepth() == -1`), rebuilt, and watched `ctest` and
+// `check_jvm_probes.sh` stay green while these three tests below failed —
+// then restored the guards. These three tests are that missing net.
+TEST(EmitScript, NotOfAPlainMatchLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "print !(match 1 { case 1 => false case _ => true });\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // Nothing left on the real JVM operand stack for NOT to consume
+    // directly (N2 folded the match's result into a named local, slot 3):
+    // it must reload before calling LoxOps.not.
+    EXPECT_NE(
+        j.find("aload 3\n"
+               "    invokestatic lox/LoxOps/not(Ljava/lang/Object;)Ljava/lang/"
+               "Object;\n"
+               "    invokestatic lox/LoxOps/print(Ljava/lang/Object;)V\n"),
+        std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+TEST(EmitScript, BuildListOfOneFoldedMatchElementLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("print [match 1 { case 1 => 2 case _ => 3 }];\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // The match's own result (slot 3) must reload and spill to the scratch
+    // slot emitSpillToArray expects, instead of underflowing on an empty
+    // real operand stack.
+    EXPECT_NE(
+        j.find("aload 3\n"
+               "    astore 7\n"
+               "    iconst_1\n"
+               "    anewarray java/lang/Object\n"
+               "    dup\n"
+               "    iconst_0\n"
+               "    aload 7\n"
+               "    aastore\n"
+               "    invokestatic "
+               "lox/LoxOps/buildList([Ljava/lang/Object;)Llox/LoxList;\n"),
+        std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+TEST(EmitScript, GetIndexOfAFoldedMatchCollectionLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "print (match 1 { case 1 => \"ab\" case _ => \"cd\" })[0];\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // The index (0) is the one genuine operand on the JVM stack
+    // (operandDepth() == 1); the collection is folded into slot 3. Load
+    // slot 3 after the index, so LoxOps.getIndex sees [collection, index].
+    EXPECT_NE(j.find("astore 5\n"
+                     "    aload 3\n"
+                     "    aload 5\n"
+                     "    invokestatic "
+                     "lox/LoxOps/getIndex(Ljava/lang/Object;Ljava/lang/"
+                     "Object;)Ljava/lang/Object;\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// R11 fix (PR #115 round 2): `(match ...) + 1` folds only the LEFT operand.
+// Proved-it-fails the same way: reverting emitAdd's own `operandDepth() ==
+// 1` guard to `== -1` made `ctest`/`check_jvm_probes.sh` stay green while
+// this test failed, with the reorder gone from the emitted jasmin —
+// confirmed locally, then restored.
+TEST(EmitScript, AddOfAFoldedMatchLeftOperandReordersTheGenuineRightOperand) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("print (match 1 { case 1 => 2 case _ => 3 }) + 1;\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // The RHS (1) is spilled to the scratch slot (5), the folded LHS (slot
+    // 3) reloads, then the RHS is restored on top — [LHS, RHS] in source
+    // order, whichever one the real operand stack actually still held.
+    EXPECT_NE(
+        j.find("astore 5\n"
+               "    aload 3\n"
+               "    aload 5\n"
+               "    invokestatic lox/LoxOps/add(Ljava/lang/Object;Ljava/lang/"
+               "Object;)Ljava/lang/Object;\n"),
+        std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// R12 fix (PR #115 round 2): NEGATE is NOT's own one-operand twin, and it
+// had no operandDepth() == 0 branch before this round. Proved-it-fails the
+// same way as emitAdd, above; confirmed locally, then restored.
+TEST(EmitScript, NegateOfAPlainMatchLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("print -(match 1 { case 1 => 2 case _ => 3 });\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    EXPECT_NE(
+        j.find(
+            "aload 3\n"
+            "    invokestatic lox/LoxOps/negate(Ljava/lang/Object;)Ljava/lang/"
+            "Object;\n"
+            "    invokestatic lox/LoxOps/print(Ljava/lang/Object;)V\n"),
+        std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// Same fold-reorder as ADD, plus the bool-to-Boolean box: proves the fix
+// reaches every one of `reorderFoldedLeftOperand`'s eight call sites, not
+// only the arithmetic ones. SUBTRACT, MULTIPLY, DIVIDE, MODULO, GREATER,
+// and LESS share this exact function body (`emitEqual`'s own peers), so one
+// comparison op here plus emitAdd's own test above cover the whole family's
+// shared code path.
+TEST(EmitScript, EqualOfAFoldedMatchLeftOperandReordersTheGenuineRightOperand) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("print (match 1 { case 1 => 2 case _ => 3 }) == 2;\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    EXPECT_NE(
+        j.find("astore 5\n"
+               "    aload 3\n"
+               "    aload 5\n"
+               "    invokestatic lox/LoxOps/equal(Ljava/lang/Object;Ljava/lang/"
+               "Object;)Z\n"
+               "    invokestatic java/lang/Boolean/valueOf(Z)Ljava/lang/"
+               "Boolean;\n"),
+        std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// R15 (PR #115 round 3) found nine more consumer opcodes with the same
+// defect class R11/R12 found: the folded operand is the BOTTOM one, and a
+// genuine sibling operand sits above it. The referee's round-3 decision
+// replaced every per-consumer branch (this file's own R3/R7/R11/R12 fixes
+// above) with one generic mechanism, `normalizeFoldedOperands`
+// (jvm_emitter.cpp, above emitBody), driven by one table, `nativePops`. The
+// eleven tests below are that decision's own required coverage: one per R15
+// shape (nine), one for RETURN of a folded match, and one for a nested
+// match subject (a nested match's own result feeding an enclosing GET_TAG).
+//
+// Proved-it-fails the same way every earlier round did: reverted
+// `nativePops`'s own row for the opcode under test to `std::nullopt`
+// (CUSTOM), rebuilt, and confirmed the matching test below — and only that
+// one — failed, with `ctest` and `check_jvm_probes.sh` otherwise unaffected;
+// then restored the row. Confirmed locally in loxpp-dev-env-managed.
+
+// R15 shape 1: BUILD_LIST, width above 1, FIRST element folded — the exact
+// mirror of R3's own one-element fix (round 1): `emitBuildList`'s old guard
+// tested `in.byteOperand == 1` only, so a wider list's own first-folded
+// shape (`[match ..., 5]`) never reached it.
+TEST(EmitScript,
+     BuildListOfTwoElementsWithFirstFoldedLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("print [match 1 { case 1 => 2 case _ => 3 }, 5];\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // "5" (the one genuine element) spills to scratch (slot 5) while the
+    // folded match result (slot 3) reloads, then "5" is restored on top —
+    // [match result, 5] in source order — before BUILD_LIST's own,
+    // unrelated width-2 spill (slots 7/8) runs.
+    EXPECT_NE(
+        j.find("astore 5\n"
+               "    aload 3\n"
+               "    aload 5\n"
+               "    astore 8\n"
+               "    astore 7\n"
+               "    iconst_2\n"
+               "    anewarray java/lang/Object\n"
+               "    dup\n"
+               "    iconst_0\n"
+               "    aload 7\n"
+               "    aastore\n"
+               "    dup\n"
+               "    iconst_1\n"
+               "    aload 8\n"
+               "    aastore\n"
+               "    invokestatic "
+               "lox/LoxOps/buildList([Ljava/lang/Object;)Llox/LoxList;\n"),
+        std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// R15 shape 2: BUILD_MAP, folded KEY.
+TEST(EmitScript, BuildMapOfAFoldedKeyLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "print {match 1 { case 1 => \"a\" case _ => \"b\" }: 1};\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // The one genuine value ("1", the map's own value) spills to scratch
+    // while the folded key (slot 3) reloads, then "1" is restored on top —
+    // [key, value] in source order.
+    EXPECT_NE(j.find("astore 5\n"
+                     "    aload 3\n"
+                     "    aload 5\n"
+                     "    astore 8\n"
+                     "    astore 7\n"
+                     "    iconst_2\n"
+                     "    anewarray java/lang/Object\n"
+                     "    dup\n"
+                     "    iconst_0\n"
+                     "    aload 7\n"
+                     "    aastore\n"
+                     "    dup\n"
+                     "    iconst_1\n"
+                     "    aload 8\n"
+                     "    aastore\n"
+                     "    invokestatic "
+                     "lox/LoxOps/buildMap([Ljava/lang/Object;)Llox/LoxMap;\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// R15 shape 3: CALL, folded CALLEE — the R3 rebuttal (round 1) covered only
+// a folded ARGUMENT (sandwiched between a genuine callee and CALL itself,
+// still broken on build/loxpp itself); a folded callee is a different shape,
+// and build/loxpp answers it correctly.
+TEST(EmitProgram, CallOfAFoldedMatchCalleeLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun f(x) { return x + 1; }\n"
+                     "fun g(x) { return x + 2; }\n"
+                     "print (match 1 { case 1 => f case _ => g })(10);\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    const std::string& main = classes[0].source;
+    // "10" (the one genuine argument) spills to scratch (slot 5) while the
+    // folded callee (slot 3) reloads, then "10" is restored on top —
+    // [callee, 10] — before CALL's own, unrelated argCount=1 spill runs.
+    EXPECT_NE(main.find("astore 5\n"
+                        "    aload 3\n"
+                        "    aload 5\n"
+                        "    astore 7\n"
+                        "    astore 6\n"
+                        "    aload 6\n"
+                        "    iconst_1\n"
+                        "    anewarray java/lang/Object\n"
+                        "    dup\n"
+                        "    iconst_0\n"
+                        "    aload 7\n"
+                        "    aastore\n"
+                        "    invokestatic "
+                        "lox/LoxOps/call(Ljava/lang/Object;[Ljava/lang/"
+                        "Object;)Ljava/lang/Object;\n"),
+              std::string::npos)
+        << main;
+    expectEveryJumpTargetIsLabeled(main);
+}
+
+// R15 shape 4: GET_PROPERTY, folded RECEIVER. GET_PROPERTY has no genuine
+// operand at all in this shape (nativePops == 1, so a folded receiver means
+// operandDepth() == 0) — the plainest possible normalizeFoldedOperands case,
+// a bare load with nothing to spill or reload.
+TEST(EmitProgram,
+     GetPropertyOfAFoldedMatchReceiverLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("class K { init(v) { this.v = v; } }\n"
+                                      "var k = K(7);\n"
+                                      "print (match 1 { case 1 => k case _ "
+                                      "=> k }).v;\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    const std::string& main = classes[0].source;
+    EXPECT_NE(main.find("aload 3\n"
+                        "    ldc \"v\"\n"
+                        "    invokestatic lox/LoxOps/getProperty(Ljava/lang/"
+                        "Object;Ljava/lang/String;)Ljava/lang/Object;\n"
+                        "    invokestatic lox/LoxOps/print(Ljava/lang/"
+                        "Object;)V\n"),
+              std::string::npos)
+        << main;
+    expectEveryJumpTargetIsLabeled(main);
+}
+
+// R15 shape 5: INVOKE, folded RECEIVER, argCount == 0 — the same bare-load
+// shape as GET_PROPERTY above, on the fused "get property then call" path.
+TEST(EmitProgram, InvokeOfAFoldedMatchReceiverLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("class K { init(v) { this.v = v; } get() { return "
+                     "this.v; } }\n"
+                     "var k = K(7);\n"
+                     "print (match 1 { case 1 => k case _ => k }).get();\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    const std::string& main = classes[0].source;
+    EXPECT_NE(main.find("aload 3\n"
+                        "    ldc \"get\"\n"
+                        "    iconst_0\n"
+                        "    anewarray java/lang/Object\n"
+                        "    invokestatic lox/LoxOps/invoke(Ljava/lang/"
+                        "Object;Ljava/lang/String;[Ljava/lang/Object;)Ljava/"
+                        "lang/Object;\n"),
+              std::string::npos)
+        << main;
+    expectEveryJumpTargetIsLabeled(main);
+}
+
+// R15 shape 6: SET_PROPERTY, folded RECEIVER (the assigned VALUE is the one
+// genuine operand — the mirror image of GET_PROPERTY's own shape, one level
+// up: SET_PROPERTY's own nativePops is 2, so a folded receiver leaves
+// operandDepth() == 1, same as ADD's own folded-left shape).
+TEST(EmitProgram,
+     SetPropertyOfAFoldedMatchReceiverLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("class K { init(v) { this.v = v; } }\n"
+                     "var k = K(7);\n"
+                     "(match 1 { case 1 => k case _ => k }).v = 9;\n"
+                     "print k.v;\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    const std::string& main = classes[0].source;
+    // "9" spills to scratch (slot 5) while the folded receiver (slot 3)
+    // reloads, then "9" is restored — [receiver, 9] — before
+    // emitSetProperty's own, unrelated value-spill (same slot 5, reused
+    // sequentially) runs.
+    EXPECT_NE(main.find("astore 5\n"
+                        "    aload 3\n"
+                        "    aload 5\n"
+                        "    astore 5\n"
+                        "    ldc \"v\"\n"
+                        "    aload 5\n"
+                        "    invokestatic lox/LoxOps/setProperty(Ljava/lang/"
+                        "Object;Ljava/lang/String;Ljava/lang/Object;)Ljava/"
+                        "lang/Object;\n"
+                        "    pop\n"),
+              std::string::npos)
+        << main;
+    expectEveryJumpTargetIsLabeled(main);
+}
+
+// R15 shape 7: SET_INDEX, folded COLLECTION — the first consumer whose
+// deficit-1 shape needs TWO genuine operands (index and value) spilled at
+// once, so this is the first test that exercises argScratchBase rather than
+// e.scratchSlot for normalizeFoldedOperands's own reorder.
+TEST(EmitScript, SetIndexOfAFoldedMatchCollectionLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("var l = [1, 2, 3];\n"
+                     "(match 1 { case 1 => l case _ => l })[0] = 9;\n"
+                     "print l;\n",
+                     mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // "0" and "9" (top) spill into argScratchBase (7, 8); the folded
+    // collection (slot 3) reloads; "0" then "9" restore on top, in source
+    // order — [collection, 0, 9] — matching setIndex's own parameter order.
+    EXPECT_NE(j.find("astore 7\n"
+                     "    astore 8\n"
+                     "    aload 3\n"
+                     "    aload 8\n"
+                     "    aload 7\n"
+                     "    invokestatic "
+                     "lox/LoxOps/setIndex(Ljava/lang/Object;Ljava/lang/"
+                     "Object;Ljava/lang/Object;)Ljava/lang/Object;\n"
+                     "    pop\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// R15 shape 8: SLICE, folded SEQ — the same two-genuine-operand
+// (argScratchBase) shape as SET_INDEX, above.
+TEST(EmitScript, SliceOfAFoldedMatchSeqLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("var l = [1, 2, 3];\n"
+                     "print (match 1 { case 1 => l case _ => l })[1:3];\n",
+                     mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    EXPECT_NE(j.find("astore 7\n"
+                     "    astore 8\n"
+                     "    aload 3\n"
+                     "    aload 8\n"
+                     "    aload 7\n"
+                     "    invokestatic "
+                     "lox/LoxOps/slice(Ljava/lang/Object;Ljava/lang/Object;"
+                     "Ljava/lang/Object;)Ljava/lang/Object;\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// R15 shape 9: IN, folded ELEM (the left operand of `in`, the one nearer
+// the bottom of the two vm.cpp pops — see emitSimpleOp's own IN note).
+TEST(EmitScript, InOfAFoldedMatchElemLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "print (match 1 { case 1 => 2 case _ => 3 }) in [1, 2, 3];\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // The list literal [1, 2, 3] (the one genuine operand, already built)
+    // spills to scratch (slot 5) while the folded elem (slot 3) reloads,
+    // then the list restores on top — [elem, seq] — matching `in`'s own
+    // parameter order.
+    EXPECT_NE(j.find("astore 5\n"
+                     "    aload 3\n"
+                     "    aload 5\n"
+                     "    invokestatic lox/LoxOps/in(Ljava/lang/Object;Ljava/"
+                     "lang/Object;)Z\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// RETURN of a folded match result — normalizeFoldedOperands's own RETURN
+// row replaces the private branch emitReturn used to carry (PR #113,
+// redesigned PR #113 round 3); this is that row's first dedicated test.
+TEST(EmitProgram, ReturnOfAFoldedMatchResultLoadsItOnce) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun f() { return match 1 { case 1 => 2 case _ => 3 }; }\n"
+                     "print f();\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    const std::string& fn0 = classes[1].source;
+    // Exactly one `aload` immediately before `areturn` — a stray private
+    // branch left in place, alongside normalizeFoldedOperands, would load
+    // the same local a SECOND time here and leave two copies on the stack.
+    EXPECT_NE(fn0.find("aload 5\n"
+                       "    areturn\n"),
+              std::string::npos)
+        << fn0;
+    EXPECT_EQ(countOccurrences(fn0, "areturn"), 1) << fn0;
+    expectEveryJumpTargetIsLabeled(fn0);
+}
+
+// A nested match subject: the OUTER match's own GET_TAG operand is the
+// INNER match's own folded result — the shape the round-3 referee decision
+// named as required coverage alongside R15's own nine. GET_TAG had no
+// private branch before this round (no checkpoint reached a folded subject
+// at all); `nativePops(GET_TAG) == 1` is new coverage, not a redundant-branch
+// deletion.
+TEST(EmitScript,
+     MatchOverAFoldedNestedMatchSubjectLoadsTheResultNotTheSubject) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "enum E { A B }\n"
+        "print match (match A() { case A => A() case B => B() }) { "
+        "case A => 1 case B => 2 };\n",
+        mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    // The inner match's own result (slot 4) reloads, then GET_TAG/tableswitch
+    // fuse on it exactly as they do on a genuine subject.
+    EXPECT_NE(j.find("aload 4\n"
+                     "    invokestatic lox/LoxOps/getTag(Ljava/lang/"
+                     "Object;)D\n"
+                     "    d2i\n"
+                     "    tableswitch 0\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
 }

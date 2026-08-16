@@ -1,0 +1,53 @@
+// N10 checkpoint 2: a dense match over enum variants dispatches to the
+// correct arm, and a match with no accepting arm raises MATCH_ERROR at run
+// time.
+//
+// R1 fix (PR #115 round 1): an earlier version of this comment said the
+// literal JUMP_TABLE "out of [minTag, minTag+count) range" fallthrough is NOT
+// reachable from any program that compiles. That is false.
+// checkEnumExhaustiveness only checks that the ARMS name every constructor
+// of THEIR OWN enum (compiler.cpp:1553-1568); it does not constrain the
+// SUBJECT expression to that same enum. A subject of an unrelated enum type
+// flows into a table-eligible match just as freely, and its tag comes from a
+// different, wider tag space — so the literal default label IS reachable.
+// notes/translation-probes/27_jump_table_default_cross_enum.lox proves it:
+// two enums, A (2 variants) and B (3), a match that is table-eligible and
+// exhaustive over A's own 2 tags, given a real B() value at run time. B's
+// tag (2) is outside A's own [0, 2) range, and the literal tableswitch
+// default — not the sparse compare-and-branch form this file's own second
+// match below uses — is what raises MATCH_ERROR.
+//
+// A guard, though, defeats table eligibility (so this uses the sparse
+// GET_TAG/CONSTANT/EQUAL form, not JUMP_TABLE) WITHOUT defeating
+// checkEnumExhaustiveness, which only reads each arm's constructor NAME, not
+// its guard: a match with one arm per constructor, every guard false at run
+// time, compiles as "exhaustive" yet accepts nothing, and MATCH_ERROR is
+// exactly the real, reachable in-language shape that produces.
+//
+// Kept at script scope, printing each match directly (not `return`ed out of
+// a function): AbstractStackTest.RunsOverEveryProbeWithNoInconsistency
+// checks every probe's own RETURN sites have exactly the return value as a
+// genuine operand-stack temporary (test_backend_abstract_stack.cpp's own
+// checkReturnHeightZero) — a check this file's own header comment already
+// says does not hold program-wide once a match's result is `return`ed
+// (bytecode-translation-problems.md, "RETURN can return a named local"),
+// so a `return match ...;` shape belongs under examples/, the way
+// examples/or_pattern_demo.lox already uses it, not under
+// notes/translation-probes/.
+enum Status { A B C D E }
+
+print match C() {
+    case A => "a"
+    case B => "b"
+    case C => "c"
+    case D => "d"
+    case E => "e"
+};
+
+print match B() {
+    case A if false => "a"
+    case B if false => "b"
+    case C if false => "c"
+    case D if false => "d"
+    case E if false => "e"
+};

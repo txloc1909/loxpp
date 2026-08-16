@@ -54,15 +54,46 @@ probes=(
     "notes/translation-probes/17_super_value.lox"
     "examples/class_dispatch.lox"
     "examples/shapes.lox"
+    # Node N10: match/enum dispatch (GET_TAG, JUMP_TABLE, enum-ctor CONSTANT,
+    # the loadNamedLocalAtZeroDepth fix for PRINT/DEFINE_GLOBAL of a bare
+    # match result).
+    "notes/translation-probes/13_enum_match.lox"
+    "notes/translation-probes/14_enum_payload.lox"
+    "examples/enum_match.lox"
+    "examples/enum_result.lox"
+    "examples/enum_tree.lox"
+    "examples/match_dispatch.lox"
+    "examples/match_http_status.lox"
+    "examples/match_state_machine.lox"
+    "examples/or_pattern_demo.lox"
+    "examples/at_binding_demo.lox"
+    "examples/string_list_pattern_demo.lox"
+    # R21 (PR #115 round 4): run-parity proof for normalizeFoldedOperands's
+    # own required coverage — the nine R15 shapes, RETURN of a folded match,
+    # and a nested match subject.
+    "notes/translation-probes/28_folded_match_operand_family.lox"
 )
 
 # Probes that must FAIL on both sides (node N6 checkpoint 4, PR #110 R2): a
 # global function called before its own `fun` declaration has run is a
 # late-bound-global error, not a silent success. Each entry needs a non-zero
-# exit from build/loxpp AND from tools/loxpp_jvm.sh, with matching stdout
-# (both empty, here).
+# exit from build/loxpp AND from tools/loxpp_jvm.sh, with matching stdout —
+# empty for 24, but 26 and 27 below each print something before they error,
+# and that printed text must match exactly too.
 error_probes=(
     "notes/translation-probes/24_call_before_closure.lox"
+    # Node N10 checkpoint 2: every arm names a real constructor (so
+    # checkEnumExhaustiveness accepts it as exhaustive) but every guard is
+    # false at run time, so no arm actually accepts the value — a real,
+    # reachable MATCH_ERROR, through the sparse compare-and-branch form (the
+    # match carries a guard, so it is not table-eligible — see 27, below, for
+    # the literal JUMP_TABLE default's own reachable case instead).
+    "notes/translation-probes/26_enum_match_dispatch_and_error.lox"
+    # R1 fix (PR #115 round 1): the literal JUMP_TABLE "out of range"
+    # fallthrough itself, reached through a table-eligible match whose
+    # subject is a value of a DIFFERENT enum than the arms name — see the
+    # probe's own header comment.
+    "notes/translation-probes/27_jump_table_default_cross_enum.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

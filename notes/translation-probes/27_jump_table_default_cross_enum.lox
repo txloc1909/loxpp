@@ -1,0 +1,26 @@
+// N10 checkpoint 2, R1 fix (PR #115 round 1): proves the literal JUMP_TABLE
+// "out of [minTag, minTag+count) range" fallthrough is reachable.
+//
+// 26_enum_match_dispatch_and_error.lox's own header once claimed this path
+// is NOT reachable from any program that compiles, reasoning that a
+// table-eligible match is always exhaustive over its own enum's whole tag
+// range. That reasoning covers only the ARMS: checkEnumExhaustiveness
+// (compiler.cpp:1553-1568) checks that the arms name every constructor of
+// THEIR OWN enum. It does not check the SUBJECT expression's own enum. Here
+// the arms are exhaustive and dense over enum A (2 variants, tags 0 and 1),
+// but the subject is R(), a value of the unrelated enum B (3 variants). B's
+// own tag for R is 2 — outside A's [0, 2) range — so the emitted
+// `tableswitch`'s own literal default label, not the sparse
+// compare-and-branch form, is what raises MATCH_ERROR at run time.
+//
+// "before" proves the print above the match ran (so the match itself, not
+// some earlier failure, is what raises the error); the emitted jasmin for
+// this exact shape is in the PR body.
+enum A { X Y }
+enum B { P Q R }
+
+print "before";
+print match R() {
+    case X => "x"
+    case Y => "y"
+};

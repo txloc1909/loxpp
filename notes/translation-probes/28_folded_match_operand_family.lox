@@ -1,0 +1,75 @@
+// N10 checkpoint (R21, PR #115 round 4): run-parity coverage for
+// `normalizeFoldedOperands` (jvm_emitter.cpp, referee redesign, PR #115
+// round 3), the one mechanism that repairs a folded `match` result sitting
+// below a genuine sibling operand of its own consumer.
+//
+// The eleven unit tests in test/test_jvm_emit.cpp (added the same round)
+// already prove each shape below emits the right jasmin text, and fails
+// under its own `nativePops` row reverted to CUSTOM. Those tests read
+// emitted text only; they do not assemble a class file and run it (R21).
+// This probe is the missing automated proof that the RUN result, not only
+// the text, stays correct: `tools/check_jvm_probes.sh` diffs this file's
+// own stdout against `build/loxpp`, byte for byte, the same gate every
+// other numbered probe uses.
+//
+// Nine shapes (the referee's own "R15 shapes") plus one nested match
+// subject — ten print statements below, one per shape, in the same order
+// the unit tests list them.
+//
+// The `RETURN`-of-a-folded-match shape is NOT repeated here on purpose.
+// `AbstractStackTest.RunsOverEveryProbeWithNoInconsistency`
+// (test_backend_abstract_stack.cpp) globs this whole directory and asserts
+// every `RETURN` it finds has `operandDepth() == 1` — checkReturnHeightZero's
+// own header comment states this does NOT hold once a `match` result is
+// `return`ed, by design (P1 is scoped to "a temporary on the stack", not to
+// this fused-local shape), so a `return match ...;` program belongs under
+// `examples/`, never here (`26_enum_match_dispatch_and_error.lox`'s own
+// header already makes the same call for the same reason).
+// `examples/or_pattern_demo.lox`'s `must_stop`/`describe`/`classify`
+// functions already `return match ...;` with simple expression arms, and
+// that file is already both a checkpoint example and a
+// `check_jvm_probes.sh` entry — the RETURN row's own run-parity coverage,
+// so adding it a second time here would only duplicate that file, not add
+// new coverage.
+
+// Shape 1: BUILD_LIST, width above 1, first element folded.
+print [match 1 { case 1 => 2 case _ => 3 }, 5];
+
+// Shape 2: BUILD_MAP, folded key.
+print {match 1 { case 1 => "a" case _ => "b" }: 1};
+
+// Shape 3: CALL, folded callee.
+fun f(x) { return x + 1; }
+fun g(x) { return x + 2; }
+print (match 1 { case 1 => f case _ => g })(10);
+
+// Shape 4: GET_PROPERTY, folded receiver.
+class K { init(v) { this.v = v; } get() { return this.v; } }
+var k = K(7);
+print (match 1 { case 1 => k case _ => k }).v;
+
+// Shape 5: INVOKE, folded receiver, argCount == 0.
+print (match 1 { case 1 => k case _ => k }).get();
+
+// Shape 6: SET_PROPERTY, folded receiver.
+(match 1 { case 1 => k case _ => k }).v = 9;
+print k.v;
+
+// Shape 7: SET_INDEX, folded collection.
+var l = [1, 2, 3];
+(match 1 { case 1 => l case _ => l })[0] = 9;
+print l;
+
+// Shape 8: SLICE, folded seq.
+print (match 1 { case 1 => l case _ => l })[1:3];
+
+// Shape 9: IN, folded elem.
+print (match 1 { case 1 => 2 case _ => 3 }) in [1, 2, 3];
+
+// Nested match subject: the outer match's own GET_TAG operand is the inner
+// match's own folded result.
+enum E { A B }
+print match (match A() { case A => A() case B => B() }) {
+    case A => 1
+    case B => 2
+};
