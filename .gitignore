@@ -40,3 +40,5 @@ build/
 runtime/jvm/classes/
 runtime/jvm/test-classes/
 runtime/jvm/lox-rt.jar
+__pycache__/
+*.pyc

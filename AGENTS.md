@@ -126,3 +126,48 @@ If you'd write "and" in the subject, split the commit. Add a body only when the
 Comment only the non-obvious *why* — a subtle invariant, a constraint not
 visible locally, a deliberate trade-off. Don't narrate *what* the code already
 states or restate the obvious; redundant comments are noise, not help.
+
+A code comment must stand on its own for a reader who cannot see the pull
+request or the review thread that produced it. If a comment needs that thread
+to make sense, it is in the wrong place:
+
+- The **invariant, constraint, or trade-off** goes in the code comment.
+- The **reason a change happened at a particular time** — a review finding, a
+  referee decision — goes in the commit message body and the PR reply, not in
+  the source.
+
+---
+
+## Engineering rules
+
+These apply to any contributor, human or agent, in any kind of work.
+
+- **Prove that a new check can fail.** Remove the fix, run the test, watch it
+  fail, then put the fix back. A check nobody has seen fail is unproven.
+- **Call a new helper at every site that needs it.** A helper only some call
+  sites use is not complete.
+- **Connect each new probe to something that runs it.** A probe file that
+  nothing reads catches nothing.
+- **Do not report a tool result you did not just produce.** Run the tool; a
+  remembered "it was clean last time" is not evidence.
+- **If a check cannot be made to fail, say so, and name where the defect
+  becomes reachable instead.** An honest gap beats a false completeness claim.
+- **A reviewer must run the programs, not only read the diff.** Defects that
+  only show up at runtime don't show up in a diff.
+- **Commit when the code compiles. Push after each commit.** Work that sits
+  uncommitted for hours is work that can be lost.
+
+Any AI agent's external communication in this project — PR descriptions,
+issue comments, commit messages, review replies, and so on, not only
+messages between agents on a multi-agent run — uses ASD-STE100 Simplified
+Technical English. If a person can read it, it must stay simple.
+
+### Multi-agent conventions
+
+When more than one agent works a task under the same GitHub account, every
+public message (PR comment, review, commit trailer) is tagged with its
+author's role: `[Implementer]`, `[Reviewer]`, or `[Researcher]`.
+
+See `notes/multi-agent-playbook.md` for the full workflow these conventions
+support (roles, escalation limits, node specification structure, referee
+format).
