@@ -157,14 +157,16 @@ These apply to any contributor, human or agent, in any kind of work.
 - **Commit when the code compiles. Push after each commit.** Work that sits
   uncommitted for hours is work that can be lost.
 
+Any AI agent's external communication in this project — PR descriptions,
+issue comments, commit messages, review replies, and so on, not only
+messages between agents on a multi-agent run — uses ASD-STE100 Simplified
+Technical English. If a person can read it, it must stay simple.
+
 ### Multi-agent conventions
 
-When more than one agent works a task under the same GitHub account:
-
-- Every public message (PR comment, review, commit trailer) is tagged with
-  its author's role: `[Implementer]`, `[Reviewer]`, or `[Researcher]`.
-- All agent messages, in public and in private, use ASD-STE100 Simplified
-  Technical English.
+When more than one agent works a task under the same GitHub account, every
+public message (PR comment, review, commit trailer) is tagged with its
+author's role: `[Implementer]`, `[Reviewer]`, or `[Researcher]`.
 
 See `notes/multi-agent-playbook.md` for the full workflow these conventions
 support (roles, escalation limits, node specification structure, referee

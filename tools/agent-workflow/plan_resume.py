@@ -22,7 +22,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = os.environ.get("LOXPP_REPO", "/var/home/loctran/personal/loxpp")
+REPO = os.path.expanduser(os.environ.get("LOXPP_REPO", "~/personal/loxpp"))
 GH_REPO = os.environ.get("LOXPP_GH_REPO", "txloc1909/loxpp")
 
 

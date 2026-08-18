@@ -7,8 +7,7 @@ maintainer plans a CLR backend next — so it does not need to be rebuilt from
 scratch.
 
 This file describes the workflow. Engineering rules that apply outside a
-multi-agent run too (prove a check can fail, commit often, and so on) live in
-`AGENTS.md`, not here.
+multi-agent run live in `AGENTS.md`, not here.
 
 ---
 
@@ -35,12 +34,10 @@ account:
 via `args`:
 
 - `missionDir` — absolute path to the mission directory holding `brief.md`
-  and `nodes/*.md`. **Point this at a durable directory, never at `/tmp`.**
-  On the host that ran the JVM mission, `/tmp` is a memory filesystem that a
-  service cleans; a symlink into it disappeared mid-run, and agents that lost
-  their instructions this way did not report the failure — they just carried
-  on without them. An agent that cannot read its brief must treat that as a
-  hard failure and say so, not proceed as if the file were optional.
+  and `nodes/*.md`. **Never point this at `/tmp`** — on some hosts it is a
+  memory filesystem a service cleans, and an agent that loses its brief this
+  way may not notice. Treat a missing or unreadable brief as a hard failure,
+  not as optional.
 - `nodes` — a map of node id → `{ branch, title }`.
 - `stages` — an array of node-id groups; each group runs in parallel, groups
   run in sequence.
@@ -53,14 +50,13 @@ a literal, so it cannot be derived from `args.nodes` automatically.
 
 ## Escalation limits
 
-Two defaults, both tested across the JVM mission's 14 nodes:
+Two defaults, both tested across the past mission's nodes:
 
 - **3-round dispute limit.** A reviewer finding the implementer disputes goes
   to a referee after 3 rounds without agreement.
-- **3-round stagnation limit.** The same file yielding a new *blocking*
-  finding for 3 rounds in a row — even with implementer and reviewer in full
-  agreement each round — also goes to a referee. See "Escalate on stagnation"
-  below for why this second trigger matters as much as the first.
+- **3-round stagnation limit.** The same file yields a new blocking finding
+  for 3 rounds straight, even with no dispute. See "Escalate on stagnation"
+  below.
 
 ## Implementers do not wait on CI
 
@@ -72,7 +68,7 @@ once, at the merge step, by the merge step alone.
 
 ## Escalate on stagnation, not only on dispute
 
-Both design-changing referee decisions in the JVM mission (`#113`, `#115`)
+Both design-changing referee decisions in the past mission (`#113`, `#115`)
 started while the implementer and reviewer *agreed with each other* every
 round — nothing was in dispute. Each round just found one more consumer of
 the same wrong mechanism. A referee trigger that only fires on disagreement
@@ -138,7 +134,7 @@ it. Do not batch nodes into one PR, and do not open a second PR for a node
 that already has one — an implementer resuming a node checks for an existing
 open PR first and pushes to it.
 
-## State comes from GitHub and git, never from a written progress file
+## State comes from persistent storage (commonly GitHub and git), never from a written progress file
 
 `tools/agent-workflow/plan_resume.py` reconstructs each node's status by
 querying GitHub (PR state, review state) and git (branch existence, ahead/
