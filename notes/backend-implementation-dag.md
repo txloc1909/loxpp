@@ -1,5 +1,10 @@
 # Backend implementation DAG
 
+**Historical.** This was the build plan for the JVM backend, which is
+complete and merged. It is kept as the reference for the still-pending CLR
+half of the plan, and as a record of the completed JVM half — not as a
+current design document.
+
 A dependency graph for building the JVM/CLR backends, derived from the problem
 analysis in `bytecode-translation-problems.md` and the literature verdicts in
 `translation-probes/README.md`. Each node is a **problem+solution pair** with a

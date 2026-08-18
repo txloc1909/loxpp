@@ -1,18 +1,16 @@
 # Examples excluded from the JVM differential path only.
 #
 # The native path (build/loxpp) still runs every one of these, unchanged.
-# spec/03-types.md leaves map iteration order unspecified (human supervisor
-# ruling, 2026-08-14, brief.md section 8). LoxMap uses LinkedHashMap
-# (insertion order); the native ObjMap uses bucket order. A program that
-# for-in's or entries()'s a Map, then prints, can legitimately print the
-# same lines in a different order on the two runtimes.
+# spec/03-types.md leaves map iteration order unspecified (maintainer
+# ruling, 2026-08-14). LoxMap uses LinkedHashMap (insertion order); the
+# native ObjMap uses bucket order. A program that for-in's or entries()'s a
+# Map, then prints, can legitimately print the same lines in a different
+# order on the two runtimes.
 #
 # The only permitted reason is map iteration order. Each entry below was
 # added only after this proof: the JVM path's stdout is a PERMUTATION of the
 # native path's stdout — the same lines, in a different order — checked with
-# `diff <(sort native.out) <(sort jvm.out)` showing no difference. Node N8
-# (PR #113) ran this proof after INVOKE first let these files emit at all
-# (they previously stopped at "not implemented in N6: INVOKE").
+# `diff <(sort native.out) <(sort jvm.out)` showing no difference.
 #
 # tools/diff_runtimes.py checks the same proof for every entry on every run:
 # an entry here that stops being a permutation (a content change, not just a
@@ -22,4 +20,4 @@
 anagram_groups.lox        map iteration order (groups print in map insertion order, not native bucket order)
 symbol_table.lox          map iteration order (symbol dump prints in map insertion order, not native bucket order)
 word_freq.lox             map iteration order (frequency table prints in map insertion order, not native bucket order)
-phonebook.lox             map iteration order (list command prints entries in map insertion order, not native bucket order — node N11, using the existing examples/phonebook.input)
+phonebook.lox             map iteration order (list command prints entries in map insertion order, not native bucket order, using the existing examples/phonebook.input)

@@ -21,10 +21,10 @@ import java.nio.charset.StandardCharsets;
  * (ISO-8859-1: the one Java charset that maps every byte 0-255 to one char
  * and back losslessly). The JVM's default charset is UTF-8 in the managed
  * image, which re-encodes any byte 0x80-0xFF into two bytes and turns an
- * unpaired high byte from stdin into U+FFFD (PR #97 review finding R1).
- * N4/N5 (chunk constant decoding) must decode string constants with this
- * same charset, or {@code len()} and {@code s[i]} will drift from the
- * native VM on any non-ASCII byte.
+ * unpaired high byte from stdin into U+FFFD.
+ * The bytecode decoder that reads string constants out of the chunk must
+ * decode them with this same charset, or {@code len()} and {@code s[i]}
+ * will drift from the native VM on any non-ASCII byte.
  */
 public final class LoxRuntime {
     private LoxRuntime() {}
@@ -49,8 +49,8 @@ public final class LoxRuntime {
     // one dynamic map, not one static field per global name — this is a
     // different concern, "where does a generated method find the map").
     // main's own frame holds a reference in a JVM local, but a generated
-    // LoxFn$<n>.invoke has no such local (nodes/N6.md), so it reads this
-    // static instead of threading the reference through every call. Safe
+    // LoxFn$<n>.invoke has no such local, so it reads this static instead
+    // of threading the reference through every call. Safe
     // because exactly one Lox++ program ever runs per JVM process here.
     private static LoxGlobals current;
 

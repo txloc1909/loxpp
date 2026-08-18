@@ -13,16 +13,16 @@
 namespace {
 
 // ---------------------------------------------------------------------------
-// Pass 0 — frame stack heights (referee amendment 3).
+// Pass 0 — frame stack heights.
 //
 // The net effect one instruction has on the frame's stack height. Mirrors
 // vm.cpp exactly, opcode by opcode — this is the same fact
-// src/backend/abstract_stack.cpp (N2) computes as pushCount - popCount, but
-// this pass tracks only the scalar net delta, not the locals/temporaries
-// split N2 needs, so it is reimplemented here rather than shared: N3 and N2
-// are independent analyses (notes/backend-implementation-dag.md), and the DAG
-// note records that N2 may fold into this walk later, not the other way
-// round.
+// src/backend/abstract_stack.cpp computes as pushCount - popCount, but this
+// pass tracks only the scalar net delta, not the locals/temporaries split
+// the full abstract-stack analysis needs, so it is reimplemented here
+// rather than shared: the two are independent analyses (notes/backend-
+// implementation-dag.md), and the design note records that the full
+// analysis may fold into this walk later, not the other way round.
 // ---------------------------------------------------------------------------
 
 int frameHeightEffect(const DecodedInstruction& ins) {
@@ -121,9 +121,9 @@ int frameHeightEffect(const DecodedInstruction& ins) {
 // compiler/decoder have drifted from each other (see capture_analysis.h).
 // LOOP is always a back edge (P3a), so a loop header's height is always
 // fixed by a FORWARD edge before its own back edge is ever walked — no
-// widening or repeated re-visits are needed, unlike N2's abstract stack,
-// which also tracks a weaker (locals-vs-temporaries) invariant this pass
-// does not need.
+// widening or repeated re-visits are needed, unlike the full abstract-stack
+// analysis, which also tracks a weaker (locals-vs-temporaries) invariant
+// this pass does not need.
 std::unordered_map<int, int>
 computeFrameHeightsForCfg(const Cfg& cfg, int entryHeight,
                           const std::string& functionId) {
@@ -454,11 +454,11 @@ void handleClosureCommit(const DecodedInstruction& in, OpenOrigins& state,
 // function never receives one.
 //
 // A close whose slot `state` shows open on this exact path is a DYNAMIC
-// close: attribute it to that instance and erase it from `state`, exactly
-// like amendments 1 and 2 did. The emission contract (mission brief section
-// 5c) guarantees this origin always has a recorded range, because a
-// path-open slot was opened by a CLOSURE on a path this pass proved
-// reachable; a violation throws, as decoder or compiler drift.
+// close: attribute it to that instance and erase it from `state`. The
+// emission contract (notes/jvm-emission-contract.md) guarantees this
+// origin always has a recorded range, because a path-open slot was opened
+// by a CLOSURE on a path this pass proved reachable; a violation throws,
+// as decoder or compiler drift.
 //
 // A close whose slot `state` does NOT show open is a STATIC one (R22): the
 // compiler emits one CLOSE_UPVALUE per exit path that crosses a captured
@@ -544,8 +544,9 @@ void handleCloseUpvalueCommit(
 //
 // `latestInstanceBySlot` still advances for an unreachable CLOSURE too
 // (handleClosureCommit), and that is correct, not merely tolerated (R26):
-// the emission contract (mission brief section 5c) guarantees that cleanup
-// emitted before a local's first capture uses POP, never CLOSE_UPVALUE, so
+// the emission contract (notes/jvm-emission-contract.md) guarantees that
+// cleanup emitted before a local's first capture uses POP, never
+// CLOSE_UPVALUE, so
 // every CLOSE_UPVALUE — reachable or not — has at least one
 // program-order-earlier CLOSURE of its own incarnation, in the same chunk.
 // The latest entry this map holds for a slot, at any close, therefore
@@ -656,8 +657,8 @@ void analyzeOneChunk(const DecodedFunction& node, CaptureAnalysis& out) {
     // cfg.blocks is in byte order (see cfg.h), so this loop visits every
     // instruction of the chunk exactly once, in program order — required
     // both for ranges of one slot to land in liveRangesBySlot in offset
-    // order (the determinism the mission brief's codegen-naming rule
-    // depends on) and for `latestInstanceBySlot` to correctly mirror the
+    // order (the determinism the codegen-naming rule depends on) and for
+    // `latestInstanceBySlot` to correctly mirror the
     // compiler's own single-pass view.
     for (size_t b = 0; b < cfg.blocks.size(); b++) {
         bool reachable = dataflow.reachable[b] != 0;

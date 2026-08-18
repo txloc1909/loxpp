@@ -11,7 +11,7 @@ import java.util.Map;
  */
 public final class LoxClass implements LoxCallable {
     public final String name;
-    // Not final: INHERIT (node N8) runs after CLASS already pushed and
+    // Not final: INHERIT runs after CLASS already pushed and
     // stored this object (compiler.cpp emits CLASS before the superclass
     // clause is even parsed), so the superclass can only become known by
     // mutating the SAME object identity in place — see inheritFrom.
@@ -27,7 +27,7 @@ public final class LoxClass implements LoxCallable {
     }
 
     /**
-     * INHERIT's mutation (node N8): copies the superclass's methods down and
+     * INHERIT's mutation: copies the superclass's methods down and
      * records it, in place, matching vm.cpp's {@code subclass->methods.
      * addAll(superclass->methods); subclass->superclass = superclass;}
      * exactly. Every later GET_GLOBAL/GET_LOCAL of this same class — the

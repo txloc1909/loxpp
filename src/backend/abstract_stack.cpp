@@ -15,15 +15,16 @@ namespace {
 // ---------------------------------------------------------------------------
 // Provisional local CFG.
 //
-// N1 (CFG/label recovery) has landed (src/backend/cfg.h, cfg.cpp, PR #100).
-// This node still keeps its own private leaders/edges builder: N2.md's
-// hazards section assigns the unification of the two builders to N5, not to
-// this node. This is intentionally minimal: only what the stack walk needs
+// src/backend/cfg.{h,cpp} builds a general CFG/label-recovery pass. This
+// file still keeps its own private leaders/edges builder — see
+// abstract_stack.h's note on unifying the two. This is intentionally
+// minimal: only what the stack walk needs
 // (a successor list per instruction index), not a reusable basic-block
 // abstraction. The two builders agree on every edge rule today (verified by
 // hand against src/backend/cfg.cpp: JUMP/LOOP take one edge, JUMP_IF_FALSE/
 // JUMP_TABLE take the branch edges plus fallthrough, RETURN/MATCH_ERROR take
-// none) — N5's merge is a deduplication, not a semantic reconciliation.
+// none) — a later merge of the two builders is a deduplication, not a
+// semantic reconciliation.
 // ---------------------------------------------------------------------------
 
 struct LocalCfg {
@@ -384,12 +385,13 @@ void chaseSlotsDownward(int originIdx, int topSlot,
     }
 }
 
-// R8 (referee ruling, N2.md section 4 — binding, replaces an earlier
-// reference-driven backfill this same finding defeated): whether a POP
-// discards a named local or a compiler temporary cannot be read off the POP
-// itself. `{ var a = 1; }` and `1;` compile to byte-identical chunks with
-// opposite source truth, so no reference-driven rule can recover it; N2
-// needs a canonical rule instead. The rule is a *persistence test*: walk
+// R8, the binding design rule (replaces an earlier reference-driven backfill
+// a counter-example defeated): whether a POP discards a named local or a
+// compiler temporary cannot be read off the POP itself. `{ var a = 1; }`
+// and `1;` compile to byte-identical chunks with opposite source truth
+// (see notes/jvm-emission-contract.md), so no reference-driven rule can
+// recover it; this analysis needs a canonical rule instead. The rule is a
+// *persistence test*: walk
 // backward from the POP for the cell it discards, looking for a **cover
 // witness** — some instruction that later pushed a new value directly on
 // top of that cell while it sat untouched at the exposed top of stack
@@ -598,8 +600,8 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
     // loop above at all — see backfillFromFrameTeardown's own comment.
     backfillFromFrameTeardown(ins, cfg, before, after, reached, sites);
 
-    // R8 (referee ruling): the persistence test at every POP — see
-    // findPersistentPopLocals's own comment. Independent of the
+    // R8: the persistence test at every POP — see findPersistentPopLocals's
+    // own comment. Independent of the
     // reference-driven loop above; it can add a site the loop above never
     // could reach (no GET_LOCAL/SET_LOCAL/capture at all) and it can
     // re-derive one the loop above already found (deduplicated by `sites`
@@ -692,10 +694,10 @@ runFixpoint(const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
 // state already reflects every declaration on its own path with no further
 // reconciliation needed at the point of use.
 //
-// The orchestrator's round-3 guidance asked to compare raw (height,
-// localCount), not only operand depth, turning "the join becomes an
-// assertion, not a repair." Tried and measured: it does not hold on the
-// mission gate program. `bootstrap/loxpp_interpreter.lox`'s `resolveStmt`
+// An alternative design compares raw (height, localCount) at a merge, not
+// only operand depth, turning "the join becomes an assertion, not a
+// repair." Tried and measured: it does not hold on the differential-test
+// corpus. `bootstrap/loxpp_interpreter.lox`'s `resolveStmt`
 // has 16 `match` arms sharing one exit; the 14 written as a single
 // expression close only their own pattern bindings before the jump (raw
 // state (4,4) at the shared point), but the 2 written as a `{ ...; ...; }`
@@ -705,11 +707,11 @@ runFixpoint(const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
 // real disassembly. Operand depth agrees (0 both ways) exactly as the
 // pre-existing comment on runFixpoint's join described; raw state does not,
 // and this is a real, compiler-emitted difference, not an analysis gap — so
-// operand depth remains the checkpoint 5 invariant. It is what the verifier
-// actually enforces (JVM/CLR track slots and the operand stack separately;
-// two arms may legitimately leave a different number of slots occupied at a
-// merge, only the operand stack itself must match), and it is what N4/N5
-// need for `.limit stack`/`.maxstack`.
+// operand depth remains the invariant this analysis guarantees. It is what
+// the verifier actually enforces (JVM/CLR track slots and the operand stack
+// separately; two arms may legitimately leave a different number of slots
+// occupied at a merge, only the operand stack itself must match), and it is
+// what the emitter needs for `.limit stack`/`.maxstack`.
 //
 // This must run post-convergence, not inside runFixpoint's join: mid-
 // fixpoint, a loop's back-edge can (temporarily) disagree with its
@@ -751,19 +753,18 @@ void validateMergeConsistency(const std::vector<DecodedInstruction>& ins,
 
 } // namespace
 
-// R11 (referee ruling): this is a safety net for a *false* site, not a
-// detector for a *missing* one. It iterates only over the sites discovery
-// already found (`declaredSlotsAt[i].empty()` skips silently), so a slot
-// R8 fails to recognize at all is invisible to this loop by construction —
-// it is not what caught R8, and an earlier round's PR text claimed
-// otherwise; that claim was wrong. What it does catch: if some future
-// change makes findInvisibleVarIndices report a slot that does not match
-// the true local count at its own recognition point, this throws
-// immediately instead of letting a wrong number reach N4. With the
-// persistence test in place (findPersistentPopLocals), every POP receives a
-// direct, decidable classification at the reclaim site itself, so no silent
-// gap class remains for a bogus site to hide behind either — this guard is
-// now a real net, not a false promise.
+// R11: this is a safety net for a *false* site, not a detector for a
+// *missing* one. It iterates only over the sites discovery already found
+// (`declaredSlotsAt[i].empty()` skips silently), so a slot R8 fails to
+// recognize at all is invisible to this loop by construction — it is not
+// what catches a slot R8 misses. What it does catch: if some future change
+// makes findInvisibleVarIndices report a slot that does not match the true
+// local count at its own recognition point, this throws immediately instead
+// of letting a wrong number reach the JVM emitter. With the persistence test
+// in place (findPersistentPopLocals), every POP receives a direct, decidable
+// classification at the reclaim site itself, so no silent gap class remains
+// for a bogus site to hide behind either — this guard is now a real net,
+// not a false promise.
 //
 // Runs once post-convergence for the same reason validateMergeConsistency
 // does: a recognition point can be advance()-ed several times while the
@@ -900,7 +901,7 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
         result.before[i] = before;
         result.after[i] = after;
 
-        // R12 (referee ruling, section 7): when this instruction's own push
+        // R12: when this instruction's own push
         // is an invisible var's declaring push (declaredSlotsAt[i] non-
         // empty), the emitter's store has not run yet at this exact point —
         // the value still needs real operand-stack room here, even though

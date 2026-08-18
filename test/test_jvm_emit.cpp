@@ -277,7 +277,7 @@ TEST(EmitScript, AbortsOnUnsupportedOpcode) {
         jvm::emitScript(fn, analysis, "LoxMain");
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& e) {
-        EXPECT_EQ(std::string(e.what()), "not implemented in N6: JUMP_TABLE");
+        EXPECT_EQ(std::string(e.what()), "not implemented: JUMP_TABLE");
     }
 }
 

@@ -4,8 +4,7 @@ Differential runner: native loxpp vs. the JVM backend, stdout only.
 
 Runs each Lox++ program on the native binary and on tools/loxpp_jvm.sh, then
 compares stdout. It does not compare stderr and does not compare the exit
-code (notes/backend-implementation-dag.md, N11 row: "Differential scope ->
-stdout only").
+code: differential scope is stdout only.
 
 Three outcomes per program:
   MATCH        stdout is byte-identical on both runtimes.
