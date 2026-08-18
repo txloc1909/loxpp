@@ -1,89 +1,83 @@
 #pragma once
 
-// JVM code generator (node N4 of the JVM/CLR backend DAG, discharges P2 — the
-// "peek, don't pop" family; node N5 adds P3b, control flow and verifier
-// legality; node N6 adds P5, functions and calls; node N7 adds P4b, closures
-// and upvalues; node N8 adds P5+P4, classes/methods/super; node N9 adds
-// aggregates and for-in; node N10 adds P8, match/enum dispatch proper
-// (GET_TAG, JUMP_TABLE, enum-ctor CONSTANT) and its own residue: a `match`
-// expression's result can reach ANY consumer opcode as a value the native VM
-// treats as already on the operand stack, when N2 instead folded it into a
-// named local (compileMatchBody's own "fused local/operand-stack model").
+// JVM code generator. Covers P2 (the "peek, don't pop" family), P3b (control
+// flow and verifier legality), P5 (functions and calls), P4b (closures and
+// upvalues), P4 (classes/methods/super), aggregates and for-in, and P8
+// (match/enum dispatch proper: GET_TAG, JUMP_TABLE, enum-ctor CONSTANT) — see
+// notes/bytecode-translation-problems.md for what each P-number means. Match/
+// enum dispatch carries its own residue: a `match` expression's result can
+// reach ANY consumer opcode as a value the native VM treats as already on the
+// operand stack, when the abstract-stack analysis (abstract_stack.cpp)
+// instead folded it into a named local (compileMatchBody's own "fused local/
+// operand-stack model").
 //
-// R16 fix (PR #115 round 3, researcher referee decision): three earlier
-// versions of this residue's own account (round 1's R7, round 2's R13, this
-// round's own R15) each enumerated a fixed list of "the shapes that are
-// still open" and each enumeration was disproved within one round by a
-// three-line program. The structural reason no enumeration can stay true:
-// nothing forced it to cover every opcode. This pass now states the fix as
-// a STRUCTURAL claim instead. `jvm_emitter.cpp`'s own `nativePops` is an
-// exhaustive table over `Op`, no `default` (clang's `-Wswitch` warns on a
+// The fix is stated as a STRUCTURAL claim, not a per-opcode enumeration:
+// earlier per-opcode-shape enumerations of "which consumers need this fixed
+// up" kept being disproved by a three-line program, because nothing forced
+// such a list to cover every opcode. `jvm_emitter.cpp`'s own `nativePops` is
+// an exhaustive table over `Op`, no `default` (clang's `-Wswitch` warns on a
 // missing enumerator; this project builds with neither `-Werror` nor
 // `-Wall`, so a missing row still compiles and throws only at run time)
-// stating how many operand-stack cells `src/vm.cpp` pops for each
-// one; `normalizeFoldedOperands`, one pre-dispatch step every instruction
-// gets alike (see its own note, above `emitBody`), compares that count
-// against N2's own `operandDepth()` and repairs exactly the deficit. A
-// folded operand can only ever be the BOTTOM-most of an instruction's own
+// stating how many operand-stack cells `src/vm.cpp` pops for each one;
+// `normalizeFoldedOperands`, one pre-dispatch step every instruction gets
+// alike (see its own note, above `emitBody`), compares that count against
+// abstract_stack.cpp's own `operandDepth()` and repairs exactly the deficit.
+// A folded operand can only ever be the BOTTOM-most of an instruction's own
 // operands — `compileMatchBody` folds a `match` expression's result into its
 // own named local before any later sibling operand is even parsed — so a
 // deficit of 1 (the bottom operand missing, every genuine sibling still on
 // the real stack) is repaired for every `nativePops`-covered opcode alike,
 // not site by site — EXCEPT when the consumer sits on a CFG merge where
 // `loadNamedLocalAtZeroDepth`'s own two slot estimates disagree, where it
-// stops loudly instead (R22, PR #115 round 4; see the third GAP residue
-// below).
+// stops loudly instead (see the third GAP residue below).
 //
-// A deficit of 2 or more is not owed a fix, for one reason verified across
-// both the CALL/BUILD_LIST/BUILD_MAP family (round 1's R3) and the ADD
-// family (round 2's R11): a program that puts a live sibling operand BELOW
-// a match's own subject/result collides with `compileMatchBody`'s own slot
-// allocation (`compiler.cpp`, `m_localCount`, blind to that sibling) on
-// `build/loxpp` ITSELF, with no JVM backend involved — so no correct native
-// answer exists there to withhold. `normalizeFoldedOperands` throws a named
-// error citing this file for that case, loudly, rather than guessing.
+// A deficit of 2 or more is not owed a fix: a program that puts a live
+// sibling operand BELOW a match's own subject/result collides with
+// `compileMatchBody`'s own slot allocation (`compiler.cpp`, `m_localCount`,
+// blind to that sibling) on `build/loxpp` ITSELF, with no JVM backend
+// involved — so no correct native answer exists there to withhold.
+// `normalizeFoldedOperands` throws a named error citing this file for that
+// case, loudly, rather than guessing.
 //
 // A separate, REACHABLE gap exists outside this file: `and`/`or` over a
-// folded `match` operand fails at analysis time, in N2's own
-// abstract_stack.cpp, before this pass ever runs — deferred by referee
-// ruling, PR #115 (see the GAP entry in notes/bytecode-translation-problems.md
-// for the full account).
+// folded `match` operand fails at analysis time, in abstract_stack.cpp,
+// before this pass ever runs — a deliberately deferred gap (see the GAP
+// entry in notes/bytecode-translation-problems.md for the full account).
 //
-// A third, REACHABLE gap exists inside this file (R22, PR #115 round 4).
-// When a folded match result is one operand of a consumer that itself sits
-// at an `and`/`or` join label, and a LATER sibling operand of the same
-// consumer is the other side of that `and`/`or`, `loadNamedLocalAtZeroDepth`
-// computes two disagreeing slot estimates for the join and refuses instead
-// of guessing — even though `deficit == 1` and `build/loxpp` answers the
-// program correctly. `print (match A() {case A => 1 case B => 2}) + (true
-// and 5);` is one repro; see the GAP entry in
-// notes/bytecode-translation-problems.md for the rest. The failure is loud,
-// not silent, and no required gate reaches it. The real fix is per-edge
-// merge verification, a recorded residue from PR #113, still outside this
-// node's charter.
+// A third, REACHABLE gap exists inside this file. When a folded match result
+// is one operand of a consumer that itself sits at an `and`/`or` join label,
+// and a LATER sibling operand of the same consumer is the other side of that
+// `and`/`or`, `loadNamedLocalAtZeroDepth` computes two disagreeing slot
+// estimates for the join and refuses instead of guessing — even though
+// `deficit == 1` and `build/loxpp` answers the program correctly. `print
+// (match A() {case A => 1 case B => 2}) + (true and 5);` is one repro; see
+// the GAP entry in notes/bytecode-translation-problems.md for the rest. The
+// failure is loud, not silent, and no required gate reaches it. The real fix
+// is per-edge merge verification, a known residue from an earlier design
+// pass, still outside this file's scope.
 //
-// N7 also lowers BUILD_LIST/GET_INDEX/SET_INDEX — three opcodes
-// notes/backend-implementation-dag.md assigns to N9 (aggregates and
-// for-in), pulled forward here because N7's own checkpoint
-// (notes/translation-probes/V1_fresh_cell.lox, V3_loopvar.lox) cannot run
-// to completion without them: both build a list of the closures under test
-// and read it back by index. N9 adds the rest of its own scope on top:
-// BUILD_MAP, SLICE, IN, IS_SEQ, and the for-in iterator protocol
+// This file also lowers BUILD_LIST/GET_INDEX/SET_INDEX ahead of the rest of
+// the aggregates/for-in scope they conceptually belong to
+// (notes/backend-implementation-dag.md), because the closures/upvalues
+// checkpoint (notes/translation-probes/V1_fresh_cell.lox, V3_loopvar.lox)
+// cannot run to completion without them: both build a list of the closures
+// under test and read it back by index. The rest of that scope layers on
+// top: BUILD_MAP, SLICE, IN, IS_SEQ, and the for-in iterator protocol
 // (GET_ITER/ITER_HAS_NEXT/ITER_NEXT) — see emitBuildList's and
 // emitBuildMap's own notes.
 //
-// N8 also lowers MATCH_ERROR, an N10 opcode pulled forward for the same
-// reason: a `match` whose arms are all class patterns (no literal wildcard
-// or plain binding) compiles a real, reachable MATCH_ERROR, because the
-// compiler never proves a class pattern exhaustive over its own subclasses
-// — examples/class_dispatch.lox is exactly this shape, and this node's own
-// checkpoint cannot run to completion without it. N10 owns GET_TAG and
-// JUMP_TABLE, the enum-tag dispatch fast path, and lowers them straight to
-// this same MATCH_ERROR call as the `tableswitch`'s own `default` target —
-// see emitFusedGetTagJumpTable's own note.
+// This file also lowers MATCH_ERROR ahead of the rest of the match/enum
+// dispatch scope it conceptually belongs to, for the same reason: a `match`
+// whose arms are all class patterns (no literal wildcard or plain binding)
+// compiles a real, reachable MATCH_ERROR, because the compiler never proves
+// a class pattern exhaustive over its own subclasses — examples/
+// class_dispatch.lox is exactly this shape, and the classes/methods/super
+// checkpoint cannot run to completion without it. GET_TAG and JUMP_TABLE,
+// the enum-tag dispatch fast path, lower straight to this same MATCH_ERROR
+// call as the `tableswitch`'s own `default` target — see
+// emitFusedGetTagJumpTable's own note.
 //
-// JVM local-variable layout — one fixed mapping for both entry shapes
-// (nodes/N6.md: "choose a fixed slot mapping ... and use it everywhere"),
+// JVM local-variable layout — one fixed mapping for both entry shapes,
 // differing only in how many JVM-only slots come before the Lox frame's own:
 //
 //   script (`main`):   slot 0 = String[] args, slot 1 = LoxGlobals.
@@ -127,8 +121,8 @@ std::string escapeJasminString(const std::string& raw);
 // `invokestatic java/lang/Double/longBitsToDouble(J)D` to turn it back into
 // the exact original double.
 //
-// A decimal/exponent literal cannot do this job (PR #107 R6, R7): jasmin 2.4
-// parses an `ldc2_w` operand that has a '.' or an 'e' at 32-bit float
+// A decimal/exponent literal cannot do this job: jasmin 2.4 parses an
+// `ldc2_w` operand that has a '.' or an 'e' at 32-bit float
 // precision, then widens it — silently rounding every value a float cannot
 // hold exactly — and it rejects some valid `%g`-style exponent text outright
 // (`1e+17`, no decimal point) with "Badly formatted number". A bare integer
@@ -147,14 +141,14 @@ struct EmittedClass {
 
 // Emits the whole program reachable from `root`: the top-level script as
 // `scriptClassName`, plus one `LoxFn$<n>` class per function or method any
-// chunk in the tree constructs with a CLOSURE, with its upvalues wired
-// (node N7). `root`/`tree` must come from the same compiled tree
-// (decodeFunctionTree / analyzeStackTree on the same ObjFunction).
+// chunk in the tree constructs with a CLOSURE, with its upvalues wired.
+// `root`/`tree` must come from the same compiled tree (decodeFunctionTree /
+// analyzeStackTree on the same ObjFunction).
 //
 // Class names are assigned by one fixed pre-order walk of the decoded tree,
-// so two runs on the same compiled program always agree (brief.md section 9,
-// "deterministic naming") — this is the driver a real `loxpp --target jvm`
-// run uses; emitScript below is single-chunk and test-facing only.
+// so two runs on the same compiled program always agree ("deterministic
+// naming") — this is the driver a real `loxpp --target jvm` run uses;
+// emitScript below is single-chunk and test-facing only.
 std::vector<EmittedClass> emitProgram(const DecodedFunction& root,
                                       const StackAnalysisTree& tree,
                                       const std::string& scriptClassName);
@@ -162,7 +156,7 @@ std::vector<EmittedClass> emitProgram(const DecodedFunction& root,
 // Emits complete Jasmin source for one chunk only, as the top-level script
 // class `className`. Equivalent to the one `EmittedClass` emitProgram would
 // produce for `root`, for a program that declares no nested function —
-// kept so the pre-N6 test suite (and any test that only needs one script
+// kept so the single-chunk test suite (and any test that only needs one script
 // chunk's own text) does not have to unpack emitProgram's vector. A CLOSURE
 // throws "not implemented" here, because a lone chunk has no class name to
 // give the target; drive emitProgram instead for a program that has one.

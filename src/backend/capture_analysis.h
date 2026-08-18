@@ -2,69 +2,72 @@
 
 // Target-independent capture analysis (P4a in
 // notes/bytecode-translation-problems.md). It consumes the decoded
-// instruction tree from chunk_decoder.h (N0) and answers, per chunk: which
-// local slots a nested closure captures, the live range of each captured
-// slot, and which captured slots several closures share one cell for.
+// instruction tree from chunk_decoder.h and answers, per chunk: which local
+// slots a nested closure captures, the live range of each captured slot, and
+// which captured slots several closures share one cell for.
 //
-// This pass does not emit code and carries no JVM or CLR knowledge — node N7
-// is the only consumer, on whichever target it runs. N7 reads only the SLOT
-// SET this pass reports (FunctionCaptureInfo::liveRangesBySlot's keys, via
+// This pass does not emit code and carries no JVM or CLR knowledge — the
+// JVM emitter's closure lowering (jvm_emitter.cpp) is the only consumer
+// today, on whichever target it runs. It reads only the SLOT SET this pass
+// reports (FunctionCaptureInfo::liveRangesBySlot's keys, via
 // jvm_emitter.cpp's capturedSlots) — a runtime `instanceof` check at every
 // CLOSURE/GET_LOCAL/SET_LOCAL of a captured slot replaces the per-range,
-// per-close, and per-path detail below (PR #111 R7). That detail stays here
-// because it is still the honest model of what the VM does, and a future
-// node — or a future N7 revision that trades the runtime check for a static
-// one — needs it. Each field below says, on its own line, whether today's
-// N7 reads it.
+// per-close, and per-path detail below. That detail stays here because it
+// is still the honest model of what the VM does, and a future consumer — or
+// a future revision that trades the runtime check for a static one — needs
+// it. Each field below says, on its own line, whether today's JVM emitter
+// reads it.
 //
 // The whole hazard this pass exists to catch: CLOSE_UPVALUE is not a no-op.
 // It ends a captured slot's live range, and the next time that slot's
 // declaration runs, it needs a fresh cell. See P4 and the V1/V3 probes.
 //
-// THE FINAL DESIGN (referee amendment 3, PR #101, 2026-08-15). Three review
-// rounds (amendments 1 and 2) tried to INFER which slot a CLOSE_UPVALUE
-// closes, from tracked dataflow state and a static overlay. That inference
-// was never needed, and the overlay it required had a real gap (R22): the
-// compiler emits one CLOSE_UPVALUE per exit path that crosses a captured
-// local's scope (one for each of `break`, `continue`, and the fall-through),
-// so a slot can close more than once, and an overlay that keeps one entry
-// per slot loses every close after the first.
+// THE FINAL DESIGN (2026-08-15). Two earlier design passes tried to INFER
+// which slot a CLOSE_UPVALUE closes, from tracked dataflow state and a
+// static overlay. That inference was never needed, and the overlay it
+// required had a real gap: the compiler emits one CLOSE_UPVALUE per exit
+// path that crosses a captured local's scope (one for each of `break`,
+// `continue`, and the fall-through), so a slot can close more than once, and
+// an overlay that keeps one entry per slot loses every close after the
+// first.
 //
 // The fix is a fact, not a heuristic: `vm.cpp` runs
 // `closeUpvalues(stackTop - 1); pop();` for CLOSE_UPVALUE. The closed slot
 // *is* the frame stack height, right before the instruction runs, minus one.
-// This pass computes that height exactly, over the CFG (N1), with a fixed
-// per-opcode effect table and a throw on any control-flow merge that
-// disagrees — see computeFrameHeights below. `closeSlot(offset) =
+// This pass computes that height exactly, over the CFG (src/backend/cfg.h),
+// with a fixed per-opcode effect table and a throw on any control-flow merge
+// that disagrees — see computeFrameHeights below. `closeSlot(offset) =
 // heightBefore(offset) - 1` then names every CLOSE_UPVALUE's target
 // unambiguously, with no reference to what this pass's own dataflow thinks
 // is open. That deleted the static overlay, the offset-resolution table, and
-// the iteration-to-a-fixed-point that amendments 1 and 2 needed to make the
-// overlay's own two-layer resolution converge.
+// the iteration-to-a-fixed-point the earlier design passes needed to make
+// the overlay's own two-layer resolution converge.
 //
-// What survives from amendments 1 and 2: the CFG dataflow (mirrors the VM's
-// open-upvalue list: a slot is open at a block's entry exactly when some
-// predecessor that reaches it still has it open) and the union-find instance
-// identity (mirrors `captureUpvalue`'s reuse of an already-open upvalue at
-// one stack location — two closures that capture the same live incarnation
-// share one cell, however many CFG paths bring them together). Both restate
-// a real VM mechanism; the overlay did not, and it is gone.
+// What survives from the earlier design passes: the CFG dataflow (mirrors
+// the VM's open-upvalue list: a slot is open at a block's entry exactly
+// when some predecessor that reaches it still has it open) and the
+// union-find instance identity (mirrors `captureUpvalue`'s reuse of an
+// already-open upvalue at one stack location — two closures that capture
+// the same live incarnation share one cell, however many CFG paths bring
+// them together). Both restate a real VM mechanism; the overlay did not,
+// and it is gone.
 //
-// This pass still carries no full stack simulation (N2): it computes only
-// the raw height needed to resolve CLOSE_UPVALUE, not the local/temporary
-// split N2 needs for JVM locals vs. the operand stack. Every offset this pass
-// reports beyond a resolved close is still a bound on a slot's capture, not a
-// per-execution-path fact — see FunctionCaptureInfo::firstCaptureOffset below
-// for what that means for N7.
+// This pass still carries no full stack simulation: it computes only the
+// raw height needed to resolve CLOSE_UPVALUE, not the local/temporary split
+// the full abstract-stack analysis (abstract_stack.h) needs for JVM locals
+// vs. the operand stack. Every offset this pass reports beyond a resolved
+// close is still a bound on a slot's capture, not a per-execution-path fact
+// — see FunctionCaptureInfo::firstCaptureOffset below for what that means
+// for a consumer.
 //
-// Height is a per-node-3 concept (N2 and N3 are independent analyses; see
-// notes/backend-implementation-dag.md), but computeFrameHeights is exposed
-// publicly, not kept file-private, for two reasons: N9 (and any later node
-// that needs the live local set at an offset) can reuse it instead of
-// re-deriving the same per-opcode effect table, and it lets a test verify,
-// independently of this pass's own bookkeeping, that every resolved close's
-// slot really is height-before minus one — the definitional fact the whole
-// design rests on.
+// Frame height and the full abstract-stack analysis are independent
+// analyses (see notes/backend-implementation-dag.md), but
+// computeFrameHeights is exposed publicly, not kept file-private, for two
+// reasons: another pass that needs the live local set at an offset can
+// reuse it instead of re-deriving the same per-opcode effect table, and it
+// lets a test verify, independently of this pass's own bookkeeping, that
+// every resolved close's slot really is height-before minus one — the
+// definitional fact the whole design rests on.
 
 #include "cfg.h"
 #include "chunk_decoder.h"
@@ -94,11 +97,12 @@ struct CaptureLiveRange {
     // the CLOSURE that opened it, because the loop variable's real
     // declaration (the init clause) runs once, before the loop, while the
     // capturing CLOSURE sits inside the conditionally-skipped body. This
-    // pass uses the CFG (N1) and frame heights to resolve WHICH slot a
-    // CLOSE_UPVALUE closes and which closures share one cell, but that is a
-    // different question from WHERE a slot's declaration runs on a given
-    // path — that needs the abstract stack (N2), which this node still does
-    // not depend on, so it reports the bound it can prove and no more.
+    // pass uses the CFG (src/backend/cfg.h) and frame heights to resolve
+    // WHICH slot a CLOSE_UPVALUE closes and which closures share one cell,
+    // but that is a different question from WHERE a slot's declaration runs
+    // on a given path — that needs the full abstract-stack analysis
+    // (abstract_stack.h), which this pass still does not depend on, so it
+    // reports the bound it can prove and no more.
     //
     // When several CLOSURE offsets share this one live instance (see
     // capturingClosureOffsets below — an ordinary if/else where every arm
@@ -115,7 +119,8 @@ struct CaptureLiveRange {
     // never zero (unless the range is closedImplicitly, in which case this
     // is empty: see that field). One captured slot's incarnation can also
     // rack up more than one entry here from CLOSE_UPVALUE instructions that
-    // never dynamically reach this range at all (R22): the compiler emits
+    // never dynamically reach this range at all (R22, a static close): the
+    // compiler emits
     // one close per exit path regardless of which branch a real run takes,
     // so a close that this pass's own dataflow finds closed on every
     // reachable path still names this range, by height, as a genuine no-op
@@ -158,8 +163,8 @@ struct CaptureLiveRange {
     // block, capturing an already-open cell sequentially, is one way to get
     // here (06_shared_upvalue, V2_shared). Two closures on MUTUALLY
     // EXCLUSIVE if/else (or match) arms, each capturing the same outer,
-    // never-redeclared local, is another (referee amendment 2, rule 4) —
-    // whichever arm runs, the runtime holds one cell, so both offsets name
+    // never-redeclared local, is another — whichever arm runs, the runtime
+    // holds one cell, so both offsets name
     // the same instance here too.
     std::vector<int> capturingClosureOffsets;
 };
@@ -171,15 +176,15 @@ struct FunctionCaptureInfo {
 
     // Captured slot -> its live ranges, in offset order. A slot absent from
     // this map is never captured in this chunk and needs no ref-cell.
-    // std::map (not unordered_map): N7's codegen must walk this in a stable
-    // order so generated class/method names stay stable across runs (see the
-    // mission brief's determinism rule).
+    // std::map (not unordered_map): the JVM emitter's codegen must walk this
+    // in a stable order so generated class/method names stay stable across
+    // runs.
     //
-    // N7 reads only this map's KEYS (jvm_emitter.cpp's capturedSlots) — which
-    // slots are ever captured, not which range is open at which offset. The
-    // runtime `instanceof` check (see the file header above) settles raw-vs-
-    // cell at each site directly, so N7 does not walk `CaptureLiveRange`
-    // itself today.
+    // The JVM emitter reads only this map's KEYS (jvm_emitter.cpp's
+    // capturedSlots) — which slots are ever captured, not which range is
+    // open at which offset. The runtime `instanceof` check (see the file
+    // header above) settles raw-vs-cell at each site directly, so it does
+    // not walk `CaptureLiveRange` itself today.
     std::map<int, std::vector<CaptureLiveRange>> liveRangesBySlot;
 
     // How this function's OWN upvalue array is wired: entry i names either
@@ -193,24 +198,23 @@ struct FunctionCaptureInfo {
     // unconditional `return`. These never execute on any real run, so they
     // are attributed to no range; this field exists only so a cross-check
     // (checkNoOrphanCloseUpvalues in test_backend_capture.cpp) can tell
-    // "unreachable" apart from "this pass lost track of a real close". N7
-    // does not read this field.
+    // "unreachable" apart from "this pass lost track of a real close". The
+    // JVM emitter does not read this field.
     std::vector<int> unreachableCloseOffsets;
 
     // A REACHABLE CLOSE_UPVALUE, closed on every path that reaches it (a
     // static close, R22), whose most-recent same-slot CLOSURE is itself
-    // unreachable, so it opened no range (R26 — referee amendment 4, PR
-    // #101, round 10). Every capture of this incarnation is dead code, so
-    // no cell can exist at this offset on any real run: the close's only
-    // run-time effect is its own pop.
+    // unreachable, so it opened no range (R26). Every capture of this
+    // incarnation is dead code, so no cell can exist at this offset on any
+    // real run: the close's only run-time effect is its own pop.
     //
-    // N7 does not read this field either (PR #111 R7). Its CLOSE_UPVALUE
+    // The JVM emitter does not read this field either. Its CLOSE_UPVALUE
     // case in jvm_emitter.cpp emits NO bytecode at all, for every close on
     // every path — reachable, unreachable, or statically dead alike — so
-    // the "pop alone, no cell operation" rule this comment used to hand N7
-    // holds by construction, not because N7 consults this list. A future
-    // lowering that treats CLOSE_UPVALUE cases differently by kind must
-    // read this field to keep that rule true.
+    // the "pop alone, no cell operation" rule this comment used to hand it
+    // holds by construction, not because the emitter consults this list. A
+    // future lowering that treats CLOSE_UPVALUE cases differently by kind
+    // must read this field to keep that rule true.
     std::vector<int> staticallyDeadCloseOffsets;
 };
 
@@ -224,36 +228,36 @@ struct CaptureAnalysis {
 // Computes, for one function's own chunk (not recursing into nested
 // functions — each has its own frame and its own call to this), the frame
 // stack height immediately BEFORE every instruction reachable from offset 0,
-// over the CFG (N1). Entry height is 1 + arity (slot 0 = callee/receiver,
-// slots 1..arity = parameters; bytecode-translation-problems.md P5, and
-// notes/backend-implementation-dag.md's abstract-stack node N2 documents the
-// same convention independently). Each opcode has a fixed net stack effect —
-// see frameHeightEffect in capture_analysis.cpp, mirroring vm.cpp exactly.
+// over the CFG (src/backend/cfg.h). Entry height is 1 + arity (slot 0 =
+// callee/receiver, slots 1..arity = parameters; bytecode-translation-
+// problems.md P5, and the full abstract-stack analysis, abstract_stack.h,
+// documents the same convention independently). Each opcode has a fixed net
+// stack effect — see frameHeightEffect in capture_analysis.cpp, mirroring
+// vm.cpp exactly.
 //
 // Throws std::runtime_error if two edges into one block disagree on the
 // height they bring — a real compiler/decoder stack-balance bug, not a
-// modelling gap this pass tolerates (unlike N2's abstract stack, this pass
-// tracks raw height only, with no locals/temporaries split, so it has no
-// weaker invariant to fall back on). This check caught a real compiler
-// defect during this pass's own development: a match arm body that ends in
-// a statement, not an expression, left the frame one slot short on some
-// paths (see the PR that fixed src/compiler.cpp's compileMatchArm).
+// modelling gap this pass tolerates (unlike the full abstract-stack
+// analysis, this pass tracks raw height only, with no locals/temporaries
+// split, so it has no weaker invariant to fall back on). This check caught
+// a real compiler defect during this pass's own development: a match arm
+// body that ends in a statement, not an expression, left the frame one slot
+// short on some paths (see src/compiler.cpp's compileMatchArm and
+// spec/*.md's match-arm grammar).
 //
 // An offset no path from function entry reaches has no entry in the
 // returned map; querying one is a caller bug, not a case this function
 // handles softly.
 std::unordered_map<int, int> computeFrameHeights(const DecodedFunction& node);
 
-// Builds the CFG (N1) of every chunk in `root`'s tree and derives the
-// capture map (referee amendment 3, PR #101, 2026-08-15 — the final design;
-// see the header comment above): compute exact per-offset frame heights,
-// resolve every CLOSE_UPVALUE's target slot directly from
-// `computeFrameHeights(...) [offset] - 1`, then run one CFG dataflow
-// fixpoint to find which slot is open at each point and which live
-// instances the union-find proves are one runtime cell (amendment 2,
-// unchanged), and one program-order pass to attribute every real
-// CLOSE_UPVALUE to one of four total outcomes (referee amendment 4, PR #101,
-// round 10 — legal dead code makes these four exhaustive, not three):
+// Builds the CFG (src/backend/cfg.h) of every chunk in `root`'s tree and
+// derives the capture map (the final design; see the header comment above):
+// compute exact per-offset frame heights, resolve every CLOSE_UPVALUE's
+// target slot directly from `computeFrameHeights(...) [offset] - 1`, then
+// run one CFG dataflow fixpoint to find which slot is open at each point and
+// which live instances the union-find proves are one runtime cell, and one
+// program-order pass to attribute every real CLOSE_UPVALUE to one of four
+// total outcomes (legal dead code makes these four exhaustive, not three):
 //   1. unreachable — the close is itself dead code
 //      (FunctionCaptureInfo::unreachableCloseOffsets);
 //   2. dynamic — the dataflow shows the slot open on the path reaching it
@@ -269,7 +273,8 @@ std::unordered_map<int, int> computeFrameHeights(const DecodedFunction& node);
 //      FunctionCaptureInfo::staticallyDeadCloseOffsets).
 //
 // Throws std::runtime_error only for the two outcomes the emission contract
-// (mission brief section 5c) makes impossible for compiler-correct input: a
+// (notes/jvm-emission-contract.md) makes impossible for compiler-correct
+// input: a
 // REACHABLE close whose height-derived slot has no CLOSURE anywhere in
 // program order before it (no incarnation of that slot was ever named), or a
 // DYNAMIC close (the slot was path-open) whose origin has no recorded range.

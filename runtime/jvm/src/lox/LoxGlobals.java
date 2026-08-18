@@ -12,8 +12,8 @@ public final class LoxGlobals {
     // Stands in for Lox nil inside the table, so a stored entry is never
     // real Java null. That makes "absent" (values.get == null) and "defined
     // as nil" distinguishable from one hashCode/equals lookup, instead of a
-    // containsKey call followed by a second get call (PR #97 review finding
-    // R6: GET_GLOBAL is the hottest opcode in the self-hosted interpreter).
+    // containsKey call followed by a second get call — GET_GLOBAL is the
+    // hottest opcode in the self-hosted interpreter.
     private static final Object NIL = new Object();
     private final Map<String, Object> values = new HashMap<>();
 

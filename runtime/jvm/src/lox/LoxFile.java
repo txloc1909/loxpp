@@ -17,8 +17,8 @@ public final class LoxFile {
     public final boolean writable;
 
     // Per-instance cache so repeated GET_PROPERTY reads of the same method
-    // name give back the identical Java object (native's ObjNative identity
-    // — see PR #97 review finding R3): `f.read == f.read` must be true.
+    // name give back the identical Java object, matching native's ObjNative
+    // identity: `f.read == f.read` must be true.
     private final Map<String, LoxCallable> methodCache = new HashMap<>();
 
     private LoxFile(RandomAccessFile raf, boolean readable, boolean writable) {

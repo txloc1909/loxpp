@@ -1,6 +1,6 @@
 #pragma once
 
-// Abstract-stack reconstruction (node N2 of the JVM/CLR backend DAG). clox
+// Abstract-stack reconstruction. clox
 // fuses named locals and expression temporaries into one operand stack; the
 // JVM and CLR keep them apart (a local-variable array vs. an operand stack).
 // This pass symbolically executes a chunk to recover, at every offset, which
@@ -87,7 +87,7 @@ struct FunctionStackAnalysis {
     // lower bound, not the final number: an emission strategy that needs its
     // own transient cell beyond what this pass sees must add it on top of
     // this number before using it as `.limit stack`/`.maxstack`. That is
-    // N4's responsibility, not this node's. Two known cases, neither
+    // the emitter's responsibility, not this pass's. Two known cases, neither
     // raising the bound on any of the 603 corpus chunks measured so far:
     // an emission-strategy choice (e.g. the `dup` a P2 shuffle lowering
     // adds), and a load this pass's own labels force — when an instruction
@@ -125,13 +125,12 @@ struct FunctionStackAnalysis {
 // `before[i].height` or `before[i].localCount` alone as one edge's exact
 // state at a merge.
 //
-// N1 (CFG/label recovery) has landed (src/backend/cfg.h, cfg.cpp, PR #100).
-// This analysis still computes its own private local leaders/edges (see
-// abstract_stack.cpp) instead of depending on N1's builder. N5 (PR #109)
-// added N1's CFG to the JVM emitter for labels, but does not list this
-// unification as a deliverable and does not do it — the two builders stay
-// independent. No later node owns this task yet; assign it explicitly to
-// one before doing it, rather than duplicating the note's stale claim.
+// src/backend/cfg.{h,cpp} builds a general CFG/label-recovery pass, used by
+// the JVM emitter for labels. This analysis still computes its own private
+// local leaders/edges (see abstract_stack.cpp) instead of depending on that
+// CFG builder — the two builders stay independent, and nothing unifies them
+// yet. This is an open task with no owner; assign it explicitly before
+// doing it, rather than assuming it is already covered.
 FunctionStackAnalysis analyzeStack(const DecodedFunction& fn);
 
 // One node of the whole-tree analysis, mirroring DecodedFunction's shape.
@@ -160,8 +159,8 @@ bool peeksInsteadOfPops(Op op);
 // sat in, only so test_backend_abstract_stack.cpp can drive it directly
 // with a hand-built `declaredSlotsAt` (R15) — analyzeStack's own discovery
 // never produces the gap this checks for, so no real chunk can reach this
-// path through analyzeStack alone. Not part of the public analysis API:
-// N4/N5/N6 must not call this.
+// path through analyzeStack alone. Not part of the public analysis API: no
+// emitter code may call this.
 void validateNoInvisibleVarGaps(
     const std::vector<DecodedInstruction>& ins,
     const std::vector<StackState>& before, const std::vector<bool>& reached,

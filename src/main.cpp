@@ -125,10 +125,10 @@ static void runFile(VM& vm, const std::string& path) {
 #ifdef LOXPP_JVM_BACKEND
 // Compiles `path` and writes one generated class per <outDir>/<name>.j:
 // LoxMain (the top-level script) plus one LoxFn$<n> per function or method
-// any chunk in the tree constructs (node N6). Does not assemble or run
-// anything — tools/loxpp_jvm.sh chains jasmin and java on top, assembling
-// every *.j file in the directory together. Exit codes mirror runFile's: 65
-// for a compile error, 70 for an opcode or CLOSURE shape this node does not
+// any chunk in the tree constructs. Does not assemble or run anything —
+// tools/loxpp_jvm.sh chains jasmin and java on top, assembling every *.j
+// file in the directory together. Exit codes mirror runFile's: 65 for a
+// compile error, 70 for an opcode or CLOSURE shape the emitter does not
 // lower (see jvm_emitter.h), 74 for a file-system failure.
 static int runJvmTarget(const std::string& outDir, const std::string& path) {
     std::string source = readFile(path);
@@ -158,10 +158,10 @@ static int runJvmTarget(const std::string& outDir, const std::string& path) {
         return 74;
     }
 
-    // Remove every stale *.j file first (PR #110 R3): tools/jvm_run.sh
-    // assembles every *.j file it finds in outDir, so a class an earlier,
-    // larger run wrote here would still reach the classpath even after this
-    // run's own source no longer builds it.
+    // Remove every stale *.j file first: tools/jvm_run.sh assembles every
+    // *.j file it finds in outDir, so a class an earlier, larger run wrote
+    // here would still reach the classpath even after this run's own source
+    // no longer builds it.
     for (const std::filesystem::directory_entry& entry :
          std::filesystem::directory_iterator(outDir, ec)) {
         if (entry.path().extension() == ".j") {

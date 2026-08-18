@@ -4,9 +4,9 @@
 // into structured instructions, and walks the ObjFunction tree those chunks
 // belong to. It carries no JVM or CLR knowledge — both backends consume it.
 //
-// This is a decode pass only. It does not compute a CFG (N1), an abstract
-// stack (N2), or a capture map (N3); those passes consume the instructions
-// decoded here.
+// This is a decode pass only. It does not compute a CFG (cfg.h), an
+// abstract stack (abstract_stack.h), or a capture map (capture_analysis.h);
+// those passes consume the instructions decoded here.
 
 #include "chunk.h"
 

@@ -1,12 +1,13 @@
 #pragma once
 
-// Target-independent control-flow graph over one decoded chunk (N0's
-// chunk_decoder). Recovers basic blocks with the leaders algorithm (Dragon
-// book 2e, section 8.4) and classifies every edge. It carries no JVM or CLR
-// knowledge — both backends consume it unchanged.
+// Target-independent control-flow graph over one decoded chunk
+// (chunk_decoder.h). Recovers basic blocks with the leaders algorithm
+// (Dragon book 2e, section 8.4) and classifies every edge. It carries no
+// JVM or CLR knowledge — both backends consume it unchanged.
 //
 // This is a structural pass only. It does not reconstruct the operand stack
-// (N2) or capture upvalues (N3); those passes consume the blocks built here.
+// (abstract_stack.h) or capture upvalues (capture_analysis.h); those passes
+// consume the blocks built here.
 
 #include "backend/chunk_decoder.h"
 

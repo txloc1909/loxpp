@@ -13,9 +13,9 @@ import java.util.Map;
  * LinkedHashMap keeps insertion order reproducible across runs. spec/03-
  * types.md leaves map iteration order unspecified; the native ObjMap gives
  * bucket order instead, so the two runtimes may print keys() in different
- * orders on the same program. That gap is not a defect (binding supervisor
- * ruling on PR #97 finding R2, 2026-08-14) and node N11 excludes the
- * order-sensitive examples from the JVM test path for that reason.
+ * orders on the same program. That gap is not a defect (maintainer ruling,
+ * 2026-08-14); the order-sensitive examples are excluded from the JVM
+ * differential test path for that reason (see tools/jvm_excluded_examples.txt).
  *
  * Key validity (nil/bool/number-not-NaN/string only) is enforced by callers
  * (LoxOps), matching vm.cpp: the check happens at each opcode site, not
@@ -26,8 +26,8 @@ public final class LoxMap {
     // same slot (matching value.cpp's hashValue). Each Slot separately holds
     // the exact key object the caller last wrote: CoreHashMap::set replaces
     // the whole entry, key included, on a repeat write, not only the value,
-    // so a later write under -0.0 must still print as -0 (PR #97 review
-    // finding R11), even though it looks up the same slot as 0.0.
+    // so a later write under -0.0 must still print as -0, even though it
+    // looks up the same slot as 0.0.
     private static final class Slot {
         final Object displayKey;
         final Object value;
@@ -41,9 +41,9 @@ public final class LoxMap {
     private final Map<Object, Slot> entries = new LinkedHashMap<>();
 
     // Every LoxMap lazily grows its own per-instance cache the first time a
-    // method is read as a property (not called) — see R3 in PR #97 review:
-    // the native VM hands back the same ObjNative on every GET_PROPERTY, so
-    // repeated `m.has == m.has` must read the identical Java object twice.
+    // method is read as a property (not called): the native VM hands back
+    // the same ObjNative on every GET_PROPERTY, so repeated `m.has == m.has`
+    // must read the identical Java object twice.
     private final Map<String, LoxCallable> methodCache = new HashMap<>();
 
     // -0.0 and 0.0 must hash and look up identically, matching IEEE 754

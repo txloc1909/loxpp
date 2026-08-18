@@ -1,19 +1,17 @@
 #!/usr/bin/env bash
 #
-# Node N4/N5 checkpoint: tools/loxpp_jvm.sh's stdout on each probe must be
-# identical to build/loxpp's own stdout, byte for byte. Compares with diff,
-# not by eye (notes/backend-implementation-dag.md, N4/N5). Later emission
-# nodes add their own probes to this same list as they add opcodes.
+# tools/loxpp_jvm.sh's stdout on each probe must be identical to build/
+# loxpp's own stdout, byte for byte. Compares with diff, not by eye. New
+# opcode support adds its own probes to this same list.
 #
-# error_probes (node N6, PR #110 R2) hold the opposite shape: both sides must
-# FAIL, with matching stdout. They check that an error stays an error on the
-# JVM backend too, not only that a success stays a success.
+# error_probes hold the opposite shape: both sides must FAIL, with matching
+# stdout. They check that an error stays an error on the JVM backend too,
+# not only that a success stays a success.
 #
 # Every probe runs even after an earlier one fails: a failing JVM run (a
 # verifier rejection, say) is caught and recorded as this probe's own
 # failure, not left to `set -e` at top level, which would otherwise stop the
-# loop at the first failure and hide every later probe (N5.md — PR #107 R11,
-# left open at merge).
+# loop at the first failure and hide every later probe.
 #
 # Requires build/loxpp (LOXPP_JVM_BACKEND, default ON) and
 # runtime/jvm/lox-rt.jar (tools/build_lox_rt.sh) already built.
@@ -48,15 +46,15 @@ probes=(
     "notes/translation-probes/12_list_map_index.lox"
     "notes/translation-probes/16_slice_in.lox"
     "notes/translation-probes/25_seq_map_string_coverage.lox"
-    # Node N8: classes, methods, super.
+    # Classes, methods, super.
     "notes/translation-probes/09_class.lox"
     "notes/translation-probes/10_super.lox"
     "notes/translation-probes/17_super_value.lox"
     "examples/class_dispatch.lox"
     "examples/shapes.lox"
-    # Node N10: match/enum dispatch (GET_TAG, JUMP_TABLE, enum-ctor CONSTANT,
-    # the loadNamedLocalAtZeroDepth fix for PRINT/DEFINE_GLOBAL of a bare
-    # match result).
+    # Match/enum dispatch (GET_TAG, JUMP_TABLE, enum-ctor CONSTANT, the
+    # loadNamedLocalAtZeroDepth fix for PRINT/DEFINE_GLOBAL of a bare match
+    # result).
     "notes/translation-probes/13_enum_match.lox"
     "notes/translation-probes/14_enum_payload.lox"
     "examples/enum_match.lox"
@@ -68,31 +66,31 @@ probes=(
     "examples/or_pattern_demo.lox"
     "examples/at_binding_demo.lox"
     "examples/string_list_pattern_demo.lox"
-    # R21 (PR #115 round 4): run-parity proof for normalizeFoldedOperands's
-    # own required coverage — the nine R15 shapes, RETURN of a folded match,
-    # and a nested match subject.
+    # R21: run-parity proof for normalizeFoldedOperands's own required
+    # coverage — the nine R15 shapes, RETURN of a folded match, and a nested
+    # match subject.
     "notes/translation-probes/28_folded_match_operand_family.lox"
 )
 
-# Probes that must FAIL on both sides (node N6 checkpoint 4, PR #110 R2): a
-# global function called before its own `fun` declaration has run is a
+# Probes that must FAIL on both sides: a global function called before its
+# own `fun` declaration has run is a
 # late-bound-global error, not a silent success. Each entry needs a non-zero
 # exit from build/loxpp AND from tools/loxpp_jvm.sh, with matching stdout —
 # empty for 24, but 26 and 27 below each print something before they error,
 # and that printed text must match exactly too.
 error_probes=(
     "notes/translation-probes/24_call_before_closure.lox"
-    # Node N10 checkpoint 2: every arm names a real constructor (so
+    # Every arm names a real constructor (so
     # checkEnumExhaustiveness accepts it as exhaustive) but every guard is
     # false at run time, so no arm actually accepts the value — a real,
     # reachable MATCH_ERROR, through the sparse compare-and-branch form (the
     # match carries a guard, so it is not table-eligible — see 27, below, for
     # the literal JUMP_TABLE default's own reachable case instead).
     "notes/translation-probes/26_enum_match_dispatch_and_error.lox"
-    # R1 fix (PR #115 round 1): the literal JUMP_TABLE "out of range"
-    # fallthrough itself, reached through a table-eligible match whose
-    # subject is a value of a DIFFERENT enum than the arms name — see the
-    # probe's own header comment.
+    # R1 fix: the literal JUMP_TABLE "out of range" fallthrough itself,
+    # reached through a table-eligible match whose subject is a value of a
+    # DIFFERENT enum than the arms name — see the probe's own header
+    # comment.
     "notes/translation-probes/27_jump_table_default_cross_enum.lox"
 )
 
@@ -138,9 +136,9 @@ for probe in "${error_probes[@]}"; do
         continue
     fi
 
-    # PR #110 R5: emission and execution are two separate facts. A probe
-    # must fail at RUN time, the same place the native side fails, not at
-    # emit time (an unimplemented opcode, say). The combined
+    # Emission and execution are two separate facts. A probe must fail at
+    # RUN time, the same place the native side fails, not at emit time (an
+    # unimplemented opcode, say). The combined
     # tools/loxpp_jvm.sh exits non-zero either way, so checking only its
     # exit code let an emit-time abort satisfy this loop by accident.
     j_dir="$(mktemp -d)"

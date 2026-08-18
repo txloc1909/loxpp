@@ -3,7 +3,7 @@
 # Assembles a directory of Jasmin (.j) files, then runs one class from the
 # result against the JVM runtime library. This is the fixed harness a code
 # generator plugs into: it does not know or care how the .j files were
-# produced, so N4 and later nodes can call it unchanged.
+# produced, so any emitter code can call it unchanged.
 #
 # Usage: tools/jvm_run.sh <j-dir> <rt-jar> <main-class> [stack-size]
 #
@@ -60,13 +60,13 @@ fi
 
 # Derive the class file each .j source must produce, from that source's own
 # ".class" directive, rather than trusting jasmin's exit code or its message
-# text afterward. Round 1, round 2, and round 3 review each found a new way
-# for text- or count-based proof to say "assembly succeeded" when it had
-# not: a directory name that matched the error scan (R1), a packaged class
-# that a shallow scan missed (R5), and two files naming one class, which
-# still print one "Generated:" line each even though the second overwrites
-# the first on disk (R8). Checking the exact expected path is immune to all
-# three, by construction, because it does not read jasmin's output at all.
+# text afterward. Text- or count-based proof can say "assembly succeeded"
+# when it had not, three different ways: a directory name that matched the
+# error scan (R1), a packaged class that a shallow scan missed (R5), and two
+# files naming one class, which still print one "Generated:" line each even
+# though the second overwrites the first on disk (R8). Checking the exact
+# expected path is immune to all three, by construction, because it does
+# not read jasmin's output at all.
 #
 # A ".class" directive reads "<access-spec...> <name>"; <name> is always
 # the last field, and may hold a package path ("gen/LoxMain"). Two files
