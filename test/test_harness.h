@@ -75,6 +75,11 @@ class VMTestHarness {
     // Convenience: get the string representation of a global variable's value.
     std::string getGlobalStr(const std::string& name) const;
 
+    // Set the command-line arguments exposed to the program via args().
+    void setArgs(std::vector<std::string> args) {
+        m_vm.setArgs(std::move(args));
+    }
+
   private:
     VM m_vm;
 };
