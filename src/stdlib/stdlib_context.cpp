@@ -6,6 +6,11 @@ static thread_local StdlibContext* t_activeCtx = nullptr;
 void setActiveContext(StdlibContext* ctx) { t_activeCtx = ctx; }
 MemoryManager* getActiveMM() { return t_activeCtx ? t_activeCtx->mm : nullptr; }
 
+const std::vector<std::string>& getActiveArgs() {
+    static const std::vector<std::string> empty;
+    return t_activeCtx ? t_activeCtx->args : empty;
+}
+
 // implements the declaration in exec_objects.h
 void nativeRuntimeError(const char* msg) {
     if (t_activeCtx)
