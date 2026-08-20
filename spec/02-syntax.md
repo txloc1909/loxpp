@@ -166,7 +166,8 @@ The three clauses of a `for` statement are each optional:
 ### `for`-in loop
 
 `for (var x in seq) body` iterates over the elements of `seq` in order,
-binding each element to `x` for each iteration of `body`.
+binding each element to `x` for each iteration of `body`. The precise binding
+rule is in [Binding Identity](04-semantics.md#binding-identity).
 
 - `seq` is evaluated once before the loop begins and stored internally.
 - `x` is scoped to the loop; it is not accessible after the loop exits.
