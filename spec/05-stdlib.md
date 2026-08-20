@@ -108,7 +108,8 @@ Returns the command-line arguments that followed the program's file name, as a
 List of Strings. The list is empty when the program was run without arguments.
 
 ```lox
-print args();   // [], [] or e.g. ["alpha", "beta"]
+// loxpp prog.lox alpha beta
+print args();   // [alpha, beta]
 ```
 
 **Arity:** 0  
@@ -130,6 +131,11 @@ if the variable is not defined.
 
 Terminates the program immediately with exit code `code`.
 
+The numeric value of `code` is truncated toward zero to an integer, matching
+C's integral conversion. `code` must be a finite Number within the range of a
+signed 32-bit integer (`-2147483648` to `2147483647`); any other value is a
+runtime error.
+
 **Arity:** 1  
 **Returns:** never returns
 
@@ -146,8 +152,9 @@ var start = time();
 var elapsed = time() - start;
 ```
 
-Unlike `clock()`, which measures processor time, `time()` measures wall-clock
-time.
+Unlike `clock()`, which measures time elapsed while the program runs, `time()`
+returns a value anchored to the Unix epoch — so it can be used to read the
+calendar date, while `clock()` is for measuring durations.
 
 **Arity:** 0  
 **Returns:** Number
