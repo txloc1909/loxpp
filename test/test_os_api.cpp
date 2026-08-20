@@ -111,6 +111,36 @@ TEST_F(OsApiTest, Exit_NonNumber_RuntimeError) {
     EXPECT_EQ(h.run("exit(\"no\");"), InterpretResult::RUNTIME_ERROR);
 }
 
+// exit() must not trigger the undefined integral conversion for values a
+// 32-bit int cannot represent — these reject in-process, never reaching
+// std::exit. The scanner has no exponent literals, so out-of-range finite
+// values are written longhand and non-finite ones come from the math module.
+TEST_F(OsApiTest, Exit_OutOfRange_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("exit(2147483648);"), InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.run("exit(-2147483649);"), InterpretResult::RUNTIME_ERROR);
+}
+
+TEST_F(OsApiTest, Exit_NonFinite_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("exit(math.inf);"), InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.run("exit(math.nan);"), InterpretResult::RUNTIME_ERROR);
+}
+
+TEST_F(OsApiTest, Exit_TruncatesFraction) {
+    pid_t pid = fork();
+    ASSERT_GE(pid, 0);
+    if (pid == 0) {
+        VMTestHarness h;
+        static_cast<void>(h.run("exit(3.7);"));
+        std::_Exit(0); // never reached: exit() must terminate the process
+    }
+    int status = 0;
+    ASSERT_EQ(waitpid(pid, &status, 0), pid);
+    ASSERT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(WEXITSTATUS(status), 3);
+}
+
 TEST_F(OsApiTest, Exit_TerminatesWithCode) {
     pid_t pid = fork();
     ASSERT_GE(pid, 0);

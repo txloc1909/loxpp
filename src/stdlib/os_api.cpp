@@ -5,6 +5,8 @@
 #include "../value.h"
 
 #include <cerrno>
+#include <climits>
+#include <cmath>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -17,8 +19,6 @@
 // metadata map so it dispatches to the shared Map methods.
 static ObjClass* s_mapClass = nullptr;
 
-// Convert a Value to a std::string. Returns false (and reports a runtime
-// error) if the value is not a String.
 // Convert a filesystem clock time to seconds since the Unix epoch. The
 // file_clock epoch is implementation-defined, so shift by the live offset
 // between the file_clock and the system clock rather than assuming they align.
@@ -31,9 +31,11 @@ unixSecondsFromFileTime(const std::filesystem::file_time_type& t) {
     return duration<double>(t.time_since_epoch() + clockOffset).count();
 }
 
+// Convert a Value to a std::string. Returns false (and reports a runtime
+// error) if the value is not a String.
 static bool asPathString(const Value& v, std::string& out) {
     if (!isString(v)) {
-        nativeRuntimeError("Path argument must be a string.");
+        nativeRuntimeError("Expected a string argument.");
         return false;
     }
     auto* s = asObjString(as<Obj*>(v));
@@ -68,14 +70,20 @@ static Value envNative(int /*argc*/, Value* argv) {
 }
 
 static Value exitNative(int /*argc*/, Value* argv) {
-    int code = 0;
-    if (is<Number>(argv[0])) {
-        code = static_cast<int>(as<Number>(argv[0]));
-    } else {
+    if (!is<Number>(argv[0])) {
         nativeRuntimeError("exit() code must be a number.");
         return from<Nil>(Nil{});
     }
-    std::exit(code);
+    double raw = as<Number>(argv[0]);
+    // Truncate toward zero, the C-style integral conversion. Reject any value
+    // for which that conversion is undefined behaviour — a non-finite number
+    // or one outside the int range — before it happens.
+    if (!std::isfinite(raw) || raw > INT_MAX || raw < INT_MIN) {
+        nativeRuntimeError("exit() code must be a finite number in the "
+                           "integer range.");
+        return from<Nil>(Nil{});
+    }
+    std::exit(static_cast<int>(std::trunc(raw)));
     return from<Nil>(Nil{});
 }
 
