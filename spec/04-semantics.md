@@ -289,6 +289,12 @@ All arms must be written so that their body expressions leave exactly one value;
 
 When a `match` expression is used as a statement (`exprStmt`), the result value is discarded.
 
+**`break`** and **`continue`** inside a match arm body behave like in a loop. `break`
+exits the `match` immediately (see the `break` statement); it does **not** exit any
+enclosing loop. `continue` searches upward for the nearest enclosing loop and continues
+that loop; if there is no enclosing loop, this is a **static error** (see the `continue`
+statement).
+
 **@-bindings.** A pattern of the form `name @ subPat` evaluates `subPat` against the subject; if it matches, `name` is bound to the whole subject value. Both `name` and any bindings introduced by `subPat` are visible in the arm body. `_` is not allowed as an @-binding name. The sub-pattern must be a structural pattern (constructor, class, or sequence); a plain binding or wildcard sub-pattern is a compile error.
 
 
@@ -412,9 +418,9 @@ visited. Removing elements is not directly possible (List has no `remove`).
 break ;
 ```
 
-Immediately exits the innermost enclosing `while`, `for`, or `for`-in
-statement. Any local variables declared inside the construct since its opening
-are destroyed. Executing `break` outside a loop is a **static error**.
+Immediately exits the innermost enclosing `while`, `for`, `for`-in, or `match`.
+Any local variables declared inside the construct since its opening
+are destroyed. Executing `break` outside a loop or match is a **static error**.
 
 ### `continue` Statement
 
@@ -430,8 +436,9 @@ Skips the remainder of the current loop body and jumps to the next iteration:
   element (cursor advance already happened via `ITER_NEXT` before the body).
 
 Any local variables declared inside the loop body since the top of the current
-iteration are destroyed. Executing `continue` with no enclosing loop is a
-**static error**.
+iteration are destroyed. Executing `continue` inside a `match` that is itself
+inside a loop targets that enclosing loop. Executing `continue` with no
+enclosing loop (even if inside a match) is a **static error**.
 
 ### Class Declaration
 
