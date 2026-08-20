@@ -156,6 +156,9 @@ Unlike `clock()`, which measures time elapsed while the program runs, `time()`
 returns a value anchored to the Unix epoch — so it can be used to read the
 calendar date, while `clock()` is for measuring durations.
 
+The precision of the returned value is not part of the contract: an
+implementation may report whole seconds, milliseconds, or finer.
+
 **Arity:** 0  
 **Returns:** Number
 
@@ -208,6 +211,9 @@ does not exist. The Map contains the following keys:
 - `is_file`: `true` if `path` is a regular file
 - `size`: size in bytes (present only for regular files)
 - `mtime`: last modification time in seconds since the Unix epoch
+
+The precision of `mtime` is not part of the contract; an implementation may
+report whole seconds, milliseconds, or finer.
 
 **Arity:** 1  
 **Returns:** Map on success, Nil if `path` does not exist
