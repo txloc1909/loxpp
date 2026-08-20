@@ -1857,6 +1857,10 @@ void Compiler::listLiteral() {
     if (!m_parser->check(TokenType::RIGHT_BRACKET)) {
         do {
             expression();
+            if (count == 255) {
+                m_parser->error(
+                    "Cannot have more than 255 elements in a list literal.");
+            }
             count++;
         } while (m_parser->match(TokenType::COMMA));
     }

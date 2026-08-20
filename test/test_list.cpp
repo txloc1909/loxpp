@@ -542,3 +542,41 @@ TEST(List, UndefinedMethod) {
     ASSERT_EQ(h.run("var xs = [1, 2]; xs.foo();"),
               InterpretResult::RUNTIME_ERROR);
 }
+
+// ---------------------------------------------------------------------------
+// List literal element-count limit
+// ---------------------------------------------------------------------------
+
+// Builds a source string holding a list literal of `n` elements. Each element
+// is a distinct number literal so no two collide in the constant pool.
+std::string listLiteralSource(int n) {
+    std::string source = "var xs = [";
+    for (int i = 0; i < n; ++i) {
+        if (i > 0)
+            source += ", ";
+        source += std::to_string(i);
+    }
+    source += "];";
+    return source;
+}
+
+class ListLiteralLimitTest : public ::testing::Test {};
+
+TEST_F(ListLiteralLimitTest, MaxElementsCompiles) {
+    // The largest legal list literal — 255 elements.
+    VMTestHarness h;
+    EXPECT_EQ(h.run(listLiteralSource(255)), InterpretResult::OK);
+}
+
+TEST_F(ListLiteralLimitTest, OnePastLimitIsCompileError) {
+    // 256 elements wraps a uint8 count to 0, silently building an empty list.
+    // It must now be a compile error, matching the map literal guard.
+    VMTestHarness h;
+    EXPECT_EQ(h.run(listLiteralSource(256)), InterpretResult::COMPILE_ERROR);
+}
+
+TEST_F(ListLiteralLimitTest, TwoPastLimitIsCompileError) {
+    // 257 elements wraps a uint8 count to 1. It must also be a compile error.
+    VMTestHarness h;
+    EXPECT_EQ(h.run(listLiteralSource(257)), InterpretResult::COMPILE_ERROR);
+}
