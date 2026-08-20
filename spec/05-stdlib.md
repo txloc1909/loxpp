@@ -99,3 +99,121 @@ String so that it can be concatenated with `+`.
 
 **Arity:** 1  
 **Returns:** String
+
+---
+
+## `args() → List[String]`
+
+Returns the command-line arguments that followed the program's file name, as a
+List of Strings. The list is empty when the program was run without arguments.
+
+```lox
+// loxpp prog.lox alpha beta
+print args();   // [alpha, beta]
+```
+
+**Arity:** 0  
+**Returns:** List of String
+
+---
+
+## `env(name) → String | Nil`
+
+Returns the value of the environment variable `name` as a String. Returns `nil`
+if the variable is not defined.
+
+**Arity:** 1  
+**Returns:** String on success, Nil if undefined
+
+---
+
+## `exit(code)`
+
+Terminates the program immediately with exit code `code`.
+
+The numeric value of `code` is truncated toward zero to an integer, matching
+C's integral conversion. `code` must be a finite Number within the range of a
+signed 32-bit integer (`-2147483648` to `2147483647`); any other value is a
+runtime error.
+
+**Arity:** 1  
+**Returns:** never returns
+
+---
+
+## `time() → Number`
+
+Returns the current calendar time as seconds since the Unix epoch (January 1,
+1970 00:00:00 UTC), as a Number.
+
+```lox
+var start = time();
+// ... work ...
+var elapsed = time() - start;
+```
+
+Unlike `clock()`, which measures time elapsed while the program runs, `time()`
+returns a value anchored to the Unix epoch — so it can be used to read the
+calendar date, while `clock()` is for measuring durations.
+
+The precision of the returned value is not part of the contract: an
+implementation may report whole seconds, milliseconds, or finer.
+
+**Arity:** 0  
+**Returns:** Number
+
+---
+
+## `sleep(seconds) → Nil`
+
+Suspends the program for at least `seconds` seconds. `seconds` may be a
+fractional Number.
+
+**Arity:** 1  
+**Returns:** Nil
+
+---
+
+## `exists(path) → Bool`
+
+Returns `true` if the file or directory at `path` exists.
+
+**Arity:** 1  
+**Returns:** Bool
+
+---
+
+## `is_dir(path) → Bool`
+
+Returns `true` if `path` exists and is a directory.
+
+**Arity:** 1  
+**Returns:** Bool
+
+---
+
+## `is_file(path) → Bool`
+
+Returns `true` if `path` exists and is a regular file.
+
+**Arity:** 1  
+**Returns:** Bool
+
+---
+
+## `stat(path) → Map | Nil`
+
+Returns a Map describing the file or directory at `path`, or `nil` if `path`
+does not exist. The Map contains the following keys:
+
+- `exists`: `true`
+- `is_dir`: `true` if `path` is a directory
+- `is_file`: `true` if `path` is a regular file
+- `size`: size in bytes (present only for regular files)
+- `mtime`: last modification time in seconds since the Unix epoch
+
+The precision of `mtime` is not part of the contract; an implementation may
+report whole seconds, milliseconds, or finer.
+
+**Arity:** 1  
+**Returns:** Map on success, Nil if `path` does not exist

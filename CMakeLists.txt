@@ -45,6 +45,7 @@ add_executable(loxpp
     src/stdlib/file_api.cpp
     src/stdlib/map_api.cpp
     src/stdlib/math_module.cpp
+    src/stdlib/os_api.cpp
 )
 
 # The JVM code generator (backend node N4 onward). Default ON so CI builds

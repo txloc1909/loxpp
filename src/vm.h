@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 enum class InterpretResult : std::uint8_t {
     OK,
@@ -51,6 +52,11 @@ class VM {
     }
     [[nodiscard]] int frameCount() const { return m_frameCount; }
     [[nodiscard]] std::optional<Value> getGlobal(const std::string& name) const;
+
+    // Sets the command-line arguments exposed to the program via args().
+    void setArgs(std::vector<std::string> args) {
+        m_stdlibCtx.args = std::move(args);
+    }
 
   private:
     Byte readByte();

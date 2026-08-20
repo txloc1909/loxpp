@@ -4,10 +4,13 @@
 # then tools/jvm_run.sh. One command, in place of `build/loxpp program.lox`,
 # so later nodes and CI can diff its output against the native binary.
 #
-# Usage: tools/loxpp_jvm.sh program.lox [stack-size]
+# Usage: tools/loxpp_jvm.sh program.lox [stack-size] [arg...]
 #
 #   program.lox   the Lox++ source file to run.
 #   [stack-size]  -Xss value passed through to tools/jvm_run.sh. Default 64m.
+#   [arg...]      program arguments, forwarded to tools/jvm_run.sh and so to
+#                 main() — the JVM-side equivalent of `build/loxpp program.lox
+#                 [arg...]` on the native binary.
 #
 # stdin, stdout, and stderr all pass through unchanged: fds are inherited,
 # not redirected. The exit code passes through too, but not via `exec` — this
@@ -24,12 +27,13 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 loxpp_bin="${LOXPP_BIN:-$root/build/loxpp}"
 rt_jar="${LOX_RT_JAR:-$root/runtime/jvm/lox-rt.jar}"
 
-if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
-    echo "usage: tools/loxpp_jvm.sh program.lox [stack-size]" >&2
+if [ "$#" -lt 1 ]; then
+    echo "usage: tools/loxpp_jvm.sh program.lox [stack-size] [arg...]" >&2
     exit 2
 fi
 program="$1"
 stack_size="${2:-64m}"
+program_args=("${@:3}")
 
 if [ ! -x "$loxpp_bin" ]; then
     echo "loxpp_jvm.sh: no loxpp binary at $loxpp_bin (build it, or set LOXPP_BIN)" >&2
@@ -45,4 +49,4 @@ trap 'rm -rf "$j_dir"' EXIT
 
 "$loxpp_bin" --target jvm --out-dir "$j_dir" "$program"
 
-"$root/tools/jvm_run.sh" "$j_dir" "$rt_jar" LoxMain "$stack_size"
+"$root/tools/jvm_run.sh" "$j_dir" "$rt_jar" LoxMain "$stack_size" "${program_args[@]}"

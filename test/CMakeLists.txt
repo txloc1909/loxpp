@@ -40,6 +40,7 @@ set(FULL_SRCS
     ${PROJECT_SOURCE_DIR}/src/stdlib/file_api.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/map_api.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/math_module.cpp
+    ${PROJECT_SOURCE_DIR}/src/stdlib/os_api.cpp
 )
 
 add_executable(test_main test_main.cpp)
@@ -51,6 +52,7 @@ add_executable(test_allocator test_allocator.cpp ${FULL_SRCS})
 add_executable(test_local_variables test_local_variables.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_control_flow test_control_flow.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_vm_runtime test_vm_runtime.cpp test_harness.cpp ${FULL_SRCS})
+add_executable(test_os_api test_os_api.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_closures test_closures.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_stress_gc test_stress_gc.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_gc_regression test_gc_regression.cpp test_harness.cpp ${FULL_SRCS})
@@ -89,6 +91,7 @@ target_include_directories(test_allocator PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_local_variables PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_control_flow PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_vm_runtime PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(test_os_api PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_closures PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_stress_gc PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_gc_regression PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -147,6 +150,7 @@ target_link_libraries(test_allocator PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_local_variables PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_control_flow PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_vm_runtime PRIVATE GTest::GTest GTest::Main)
+target_link_libraries(test_os_api PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_closures PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_stress_gc PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_gc_regression PRIVATE GTest::GTest GTest::Main)
@@ -185,7 +189,7 @@ add_test(NAME TestMain COMMAND test_main)
 # names would otherwise collide.
 set(LOXPP_GTEST_TARGETS
     test_scanner test_parser_vm test_parser_bytecode test_table test_allocator
-    test_local_variables test_control_flow test_vm_runtime test_closures
+    test_local_variables test_control_flow test_vm_runtime test_os_api test_closures
     test_stress_gc test_gc_regression test_inheritance test_list test_list_gc
     test_map test_map_gc test_var_destructure test_enum test_enum_gc
     test_class_pattern test_class_pattern_gc test_match_expr test_slice

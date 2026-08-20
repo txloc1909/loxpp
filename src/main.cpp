@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #ifdef LOXPP_JVM_BACKEND
 #include "backend/abstract_stack.h"
@@ -216,12 +217,15 @@ int main(int argc, const char* argv[]) {
 
     if (argc == 1) {
         repl(vm);
-    } else if (argc == 2) {
-        runFile(vm, argv[1]);
-    } else {
-        std::fprintf(stderr, "Usage: loxpp [path]\n");
-        std::exit(64);
+        return 0;
     }
+
+    std::vector<std::string> progArgs;
+    for (int i = 2; i < argc; i++) {
+        progArgs.emplace_back(argv[i]);
+    }
+    vm.setArgs(std::move(progArgs));
+    runFile(vm, argv[1]);
 
     return 0;
 }
