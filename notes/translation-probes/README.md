@@ -63,6 +63,7 @@ each has an off-the-shelf solution.
 | `26_enum_match_dispatch_and_error` | dense enum `match` dispatches to the correct arm; every arm's guard false raises a real, reachable `MATCH_ERROR` through the sparse compare-and-branch form | P8 |
 | `27_jump_table_default_cross_enum` | the literal `JUMP_TABLE` "out of range" default, reached with a table-eligible match's subject from a DIFFERENT enum than its arms | P8 |
 | `28_folded_match_operand_family` | `normalizeFoldedOperands`'s own required coverage: the nine R15 shapes (`BUILD_LIST`, `BUILD_MAP`, `CALL`, `GET_PROPERTY`, `INVOKE`, `SET_PROPERTY`, `SET_INDEX`, `SLICE`, `IN`, each with a folded operand) plus one nested match subject; `RETURN` of a folded match is deliberately not repeated here (`checkReturnHeightZero` excludes probes by design) — `examples/or_pattern_demo.lox` already covers it | P8 |
+| `29_os_access` | the OS/world access natives (`args`, `env`, `exists`, `is_dir`, `is_file`, `stat`, `sleep`) must run byte-identically on both runtimes — the JVM runtime registers them too (`LoxRuntime`), and this probe guards against a future drift | none (parity gate, N11) |
 | `V1_fresh_cell` | body-local captured in a loop → **fresh cell/iter** → prints `0 1 2` | P4 |
 | `V2_shared` | mutable shared upvalue → prints `2` | P4 |
 | `V3_loopvar` | loop var captured directly → **one shared cell** → prints `3 3 3` | P4 |

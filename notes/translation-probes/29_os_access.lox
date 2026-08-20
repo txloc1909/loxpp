@@ -1,0 +1,12 @@
+// OS / world access natives (src/stdlib/os_api.cpp). A program using them
+// must print byte-identically on the native VM and the JVM backend, or the
+// differential suite (tools/diff_runtimes.py, N11) DIVERGEs. Every call here
+// is chosen to be deterministic across the two runtimes: nothing prints a
+// wall-clock or a file mtime (those change between the two back-to-back runs).
+print args();
+print exists("/tmp");
+print is_dir("/tmp");
+print is_file("/tmp");
+print env("PATH") != nil;
+print stat("/tmp/loxpp_missing_probe_xyz_never_created") == nil;
+print sleep(0.01);
