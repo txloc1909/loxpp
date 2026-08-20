@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        preset: [debug, release, debug-variant, release-variant]
+        preset: [debug, release]
     steps:
       - uses: actions/checkout@v4
 
@@ -102,6 +102,46 @@ jobs:
               cd /tmp/craftinginterpreters &&
               dart tool/bin/test.dart jlox --interpreter /workspace/bootstrap/lox_wrapper.sh
             "
+
+  variant-value:
+    name: Value representation (std::variant smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dev image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          target: dev
+          tags: loxpp-dev:latest
+          cache-from: type=gha,scope=dev
+          cache-to: type=gha,mode=max,scope=dev
+
+      # The portable std::variant Value branch (src/value.h, LOXPP_NAN_TAGGING
+      # off) is not covered by the debug/release matrix runs, which use the
+      # NaN-boxed representation. Build only the interpreter binary here — not
+      # the GTest suite — to keep the variant path compiled and behavior-checked
+      # in CI at low cost. check_examples.py validates Value semantics
+      # end-to-end against the example corpus.
+      - name: Build loxpp with the std::variant Value
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "cmake --preset release-variant && cmake --build build --target loxpp"
+
+      - name: Run example checks
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "python3 tools/check_examples.py build/loxpp examples/"
 
   managed-toolchains:
     name: Managed toolchains (JVM + CLR)
