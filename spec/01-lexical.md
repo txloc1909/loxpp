@@ -82,11 +82,11 @@ names:
 | Keyword | Notes |
 |---|---|
 | `and` | Logical conjunction |
-| `break` | Loop/switch exit |
-| `case` | Switch arm label |
+| `break` | Loop exit |
+| `case` | Match arm label |
 | `class` | Class declaration |
 | `continue` | Loop next-iteration |
-| `default` | Switch fallback arm label |
+| `default` | Match fallback arm label |
 | `else` | Alternate branch |
 | `false` | Boolean literal |
 | `for` | For loop |
@@ -98,7 +98,6 @@ names:
 | `print` | Print statement |
 | `return` | Function return |
 | `super` | Superclass accessor inside a method |
-| `switch` | Switch statement |
 | `this` | Current instance reference inside a method |
 | `true` | Boolean literal |
 | `var` | Variable declaration |

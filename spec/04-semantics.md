@@ -289,6 +289,12 @@ All arms must be written so that their body expressions leave exactly one value;
 
 When a `match` expression is used as a statement (`exprStmt`), the result value is discarded.
 
+**`break`** and **`continue`** inside a match arm body behave like in a loop. `break`
+exits the `match` immediately (see the `break` statement); it does **not** exit any
+enclosing loop. `continue` searches upward for the nearest enclosing loop and continues
+that loop; if there is no enclosing loop, this is a **static error** (see the `continue`
+statement).
+
 **@-bindings.** A pattern of the form `name @ subPat` evaluates `subPat` against the subject; if it matches, `name` is bound to the whole subject value. Both `name` and any bindings introduced by `subPat` are visible in the arm body. `_` is not allowed as an @-binding name. The sub-pattern must be a structural pattern (constructor, class, or sequence); a plain binding or wildcard sub-pattern is a compile error.
 
 
@@ -412,10 +418,9 @@ visited. Removing elements is not directly possible (List has no `remove`).
 break ;
 ```
 
-Immediately exits the innermost enclosing `while`, `for`, `for`-in, or
-`switch` statement. Any local variables declared inside the construct since its opening
-are destroyed. Executing `break` outside a loop or switch is a **static
-error**.
+Immediately exits the innermost enclosing `while`, `for`, `for`-in, or `match`.
+Any local variables declared inside the construct since its opening
+are destroyed. Executing `break` outside a loop or match is a **static error**.
 
 ### `continue` Statement
 
@@ -431,53 +436,9 @@ Skips the remainder of the current loop body and jumps to the next iteration:
   element (cursor advance already happened via `ITER_NEXT` before the body).
 
 Any local variables declared inside the loop body since the top of the current
-iteration are destroyed. Executing `continue` inside a `switch` that is itself
-inside a loop targets that enclosing loop (not the switch). Executing
-`continue` with no enclosing loop (even if inside a switch) is a **static
-error**.
-
-### `switch` Statement
-
-```
-switch ( subject ) {
-    case value1 : statement*
-    case value2, value3 : statement*
-    default : statement*
-}
-```
-
-1. Evaluate `subject` exactly once. The result is the **switch value**.
-2. Arms are tested in source order. For each `case` arm, its values are
-   evaluated left-to-right. As soon as a value equals the switch value
-   (using `==` semantics), the remaining values in that arm and all subsequent
-   arms are **not evaluated**; the arm's statements execute and control jumps
-   to after the switch.
-3. If no `case` arm matched and a `default` arm is present, execute its
-   statements.
-4. If no arm matched and there is no `default`, the switch body is a no-op.
-
-**No fall-through**: only the first matching arm executes. There is no implicit
-flow from one arm to the next.
-
-**Multiple values per arm** (`case v1, v2:`): values are tested left-to-right;
-the first match wins and the rest are not evaluated.
-
-**Side effects**: because evaluation short-circuits on the first match,
-case-value expressions after the matching position are never evaluated.
-Programs must not rely on side effects of unmatched case expressions.
-
-**`default` placement**: the `default` arm, if present, must be the last arm
-in the switch body. A `case` arm after `default` is a **static error**.
-
-**`break`** inside a switch exits the switch immediately (see `break`
-statement). It does **not** exit any enclosing loop.
-
-**`continue`** inside a switch searches upward for the nearest enclosing loop
-and continues that loop. If there is no enclosing loop, this is a **static
-error**.
-
-**Duplicate `default`**: more than one `default` label in the same switch is a
-**static error**.
+iteration are destroyed. Executing `continue` inside a `match` that is itself
+inside a loop targets that enclosing loop. Executing `continue` with no
+enclosing loop (even if inside a match) is a **static error**.
 
 ### Class Declaration
 
