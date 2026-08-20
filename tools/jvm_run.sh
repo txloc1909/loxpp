@@ -5,7 +5,7 @@
 # generator plugs into: it does not know or care how the .j files were
 # produced, so any emitter code can call it unchanged.
 #
-# Usage: tools/jvm_run.sh <j-dir> <rt-jar> <main-class> [stack-size]
+# Usage: tools/jvm_run.sh <j-dir> <rt-jar> <main-class> [stack-size] [arg...]
 #
 #   <j-dir>      directory holding one or more *.j files. Classes assemble
 #                into this same directory, in a package subdirectory when a
@@ -18,13 +18,16 @@
 #   [stack-size] -Xss value, given as "64m" or "-Xss64m". Default 64m:
 #                bootstrap/loxpp_interpreter.lox recurses deeply and
 #                overflows the JVM's default thread stack.
+#   [arg...]     program arguments, passed to main() unchanged. The native
+#                binary takes them after the script path (src/main.cpp), so
+#                they must land here for args() to agree between runtimes.
 #
 # stdin, stdout, stderr, and the exit code all pass through to and from java
 # unchanged, because later nodes diff this output against build/loxpp.
 set -euo pipefail
 
-if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
-    echo "usage: tools/jvm_run.sh <j-dir> <rt-jar> <main-class> [stack-size]" >&2
+if [ "$#" -lt 3 ]; then
+    echo "usage: tools/jvm_run.sh <j-dir> <rt-jar> <main-class> [stack-size] [arg...]" >&2
     exit 2
 fi
 
@@ -36,6 +39,7 @@ stack_size="${4:-64m}"
 # that passes the whole flag must not get "-Xss-Xss64m" (reported:
 # jvm_run.sh, R4).
 stack_size="${stack_size#-Xss}"
+program_args=("${@:5}")
 
 if [ ! -d "$j_dir" ]; then
     echo "jvm_run.sh: no such directory: $j_dir" >&2
@@ -130,4 +134,4 @@ fi
 
 # exec, not a captured call: it replaces this script with java, so stdin,
 # stdout, stderr, and the exit code are java's own, not a copy.
-exec java -Xss"$stack_size" -cp "$rt_jar:$j_dir" "$main_class"
+exec java -Xss"$stack_size" -cp "$rt_jar:$j_dir" "$main_class" "${program_args[@]}"

@@ -9,6 +9,10 @@ import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
 
 /**
  * Builds a fresh {@link LoxGlobals} populated with the full native stdlib
@@ -53,6 +57,16 @@ public final class LoxRuntime {
     // of threading the reference through every call. Safe
     // because exactly one Lox++ program ever runs per JVM process here.
     private static LoxGlobals current;
+
+    // Command-line arguments after the program name, forwarded by the
+    // generated script's main() before the first script statement runs. An
+    // empty array when main received none, as in the differential harness.
+    private static String[] programArgs = new String[0];
+
+    /** The generated script's main() forwards its own argv here before the script body runs. */
+    public static void setProgramArgs(String[] args) {
+        programArgs = args;
+    }
 
     /**
      * Reads one line as raw bytes (0-255), never decoding them as text.
@@ -119,6 +133,103 @@ public final class LoxRuntime {
                 throw new LoxError("open() requires string path and mode.");
             }
             return LoxFile.open((String) args[0], (String) args[1]);
+        }));
+        registerOsAccess(globals);
+    }
+
+    // Mirrors src/stdlib/os_api.cpp: args, env, exit, time, sleep, and the
+    // file-system predicates exists()/is_dir()/is_file()/stat(). Kept in the
+    // JVM runtime so a program using them does not DIVERGE in the differential
+    // suite (tools/diff_runtimes.py) against the native VM.
+    private static void registerOsAccess(LoxGlobals globals) {
+        globals.define("args", new LoxNative("args", 0, unused -> {
+            LoxList list = new LoxList();
+            for (String s : programArgs) {
+                list.elements.add(s);
+            }
+            return list;
+        }));
+        globals.define("env", new LoxNative("env", 1, args -> {
+            if (!(args[0] instanceof String)) {
+                throw new LoxError("Expected a string argument.");
+            }
+            return System.getenv((String) args[0]); // null -> Lox nil, matching getenv(3)
+        }));
+        globals.define("exit", new LoxNative("exit", 1, args -> {
+            if (!(args[0] instanceof Double)) {
+                throw new LoxError("exit() code must be a number.");
+            }
+            double raw = (Double) args[0];
+            // Truncate toward zero, the C-style integral conversion (os_api.cpp).
+            // Reject a value Java's cast cannot represent, mirroring the
+            // native VM's finite/int-range guard.
+            if (Double.isNaN(raw) || Double.isInfinite(raw)
+                    || raw > Integer.MAX_VALUE || raw < Integer.MIN_VALUE) {
+                throw new LoxError(
+                        "exit() code must be a finite number in the integer range.");
+            }
+            System.exit((int) raw); // range-guarded above, so the cast truncates toward zero, matching C
+            throw new AssertionError("System.exit must not return");
+        }));
+        globals.define("time", new LoxNative("time", 0, unused -> System.currentTimeMillis() / 1000.0));
+        globals.define("sleep", new LoxNative("sleep", 1, args -> {
+            if (!(args[0] instanceof Double)) {
+                throw new LoxError("sleep() duration must be a number.");
+            }
+            double seconds = (Double) args[0];
+            if (seconds > 0) {
+                try {
+                    Thread.sleep((long) (seconds * 1000.0));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            return null;
+        }));
+        globals.define("exists", new LoxNative("exists", 1, args -> {
+            if (!(args[0] instanceof String)) {
+                throw new LoxError("Expected a string argument.");
+            }
+            return Files.exists(Paths.get((String) args[0]));
+        }));
+        globals.define("is_dir", new LoxNative("is_dir", 1, args -> {
+            if (!(args[0] instanceof String)) {
+                throw new LoxError("Expected a string argument.");
+            }
+            return Files.isDirectory(Paths.get((String) args[0]));
+        }));
+        globals.define("is_file", new LoxNative("is_file", 1, args -> {
+            if (!(args[0] instanceof String)) {
+                throw new LoxError("Expected a string argument.");
+            }
+            return Files.isRegularFile(Paths.get((String) args[0]));
+        }));
+        globals.define("stat", new LoxNative("stat", 1, args -> {
+            if (!(args[0] instanceof String)) {
+                throw new LoxError("Expected a string argument.");
+            }
+            Path p = Paths.get((String) args[0]);
+            if (!Files.exists(p)) {
+                return null; // Lox nil, matching os_api.cpp's statNative
+            }
+            LoxMap map = new LoxMap();
+            map.put("exists", true);
+            map.put("is_dir", Files.isDirectory(p));
+            map.put("is_file", Files.isRegularFile(p));
+            if (Files.isRegularFile(p)) {
+                try {
+                    map.put("size", (double) Files.size(p));
+                } catch (IOException e) {
+                    // size key omitted, matching statNative when file_size errs
+                }
+            }
+            try {
+                FileTime mtime = Files.getLastModifiedTime(p);
+                map.put("mtime", (double) (mtime.toMillis() / 1000.0));
+            } catch (IOException e) {
+                // mtime key omitted, matching statNative when last_write_time errs
+            }
+            return map;
         }));
     }
 

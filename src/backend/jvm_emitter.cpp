@@ -1809,6 +1809,13 @@ Emitter buildEmitter(const DecodedFunction& fn,
 // callee, same as before functions/calls support existed).
 void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isScript) {
     if (isScript) {
+        // Forward main's argv (JVM slot 0 — see jvm_emitter.h's layout) so
+        // the args() native answers the same way the native VM's does. Runs
+        // before init() because the script body reads globals from slot 1.
+        e.b.emit("aload 0", +1);
+        e.b.emit("invokestatic lox/LoxRuntime/setProgramArgs"
+                 "([Ljava/lang/String;)V",
+                 -1);
         e.b.emit("invokestatic lox/LoxRuntime/init()Llox/LoxGlobals;", +1);
         e.b.emit("astore " + std::to_string(e.globalsSlot), -1);
         return;
