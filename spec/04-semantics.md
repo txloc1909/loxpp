@@ -513,10 +513,10 @@ of the class is created (see "Instance Creation" above).
 fun name ( params ) { body }
 ```
 
-Binds the name to a new Function value in the current scope. The function
-captures its lexical environment at the point of declaration (closure
-semantics). A function declared at the top level is a global; one declared
-inside a block is a local.
+Binds the name to a new Function value in the current scope. A function
+captures the bindings it uses at the point of declaration (closure semantics;
+see [Binding Identity](#binding-identity)). A function declared at the top
+level is a global; one declared inside a block is a local.
 
 ### `return` Statement
 
