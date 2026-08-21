@@ -39,6 +39,12 @@ public static class LoxRuntime {
 
     static LoxRuntime() {
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Out.Flush();
+        // ProcessExit does not fire when an exception (a LoxError left
+        // uncaught by generated code, say) terminates the process - only
+        // UnhandledException does. Without this, every line already printed
+        // before that point is lost, where the native VM keeps it (it
+        // writes stdout unbuffered by comparison, via straight std::printf).
+        AppDomain.CurrentDomain.UnhandledException += (_, _) => Out.Flush();
     }
 
     // The one LoxGlobals instance for this process (design decision A2: one
