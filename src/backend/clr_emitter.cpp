@@ -217,9 +217,13 @@ struct Emitter {
 
     // Whether the position this walk is about to visit is reachable by
     // fall-through from the instruction most recently emitted — false at
-    // the very start, and reset every time a JUMP/LOOP/RETURN is emitted
-    // (none of those fall through) or dead code is skipped between two live
-    // instructions (nothing physical bridges that gap).
+    // the very start, and set false whenever that instruction was a
+    // JUMP/LOOP/RETURN (none of those fall through). A dead-code gap
+    // between two live instructions is not closed by resetting this flag;
+    // it is closed by `prevNaturalSuccessorOffset` holding the skipped
+    // instruction's array successor offset, which then fails to match the
+    // next LIVE instruction's offset, so the label-resync test in
+    // `emitBody` still refuses to trust the carry-forward across the gap.
     bool prevCanFallThrough{false};
     int prevNaturalSuccessorOffset{-1};
 
