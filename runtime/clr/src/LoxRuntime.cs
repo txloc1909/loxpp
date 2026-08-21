@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 
 [assembly: InternalsVisibleTo("LoxRuntimeTests")]
@@ -175,17 +176,24 @@ public static class LoxRuntime {
             }
             return null;
         }));
-        globals.Define("exists", new LoxNative("exists", 1, args => {
-            string p = RequirePathArg(args[0]);
-            return File.Exists(p) || Directory.Exists(p);
-        }));
-        globals.Define("is_dir", new LoxNative("is_dir", 1, args => Directory.Exists(RequirePathArg(args[0]))));
-        globals.Define("is_file", new LoxNative("is_file", 1, args => File.Exists(RequirePathArg(args[0]))));
+        // exists/is_dir/is_file/stat all resolve through PosixInterop.TryStat,
+        // never through File.Exists/Directory.Exists: those two follow a
+        // symbolic link on some platforms and not others, and .NET 8 on Linux
+        // reports File.Exists true for a symbolic link whose target is
+        // missing. std::filesystem::exists/is_regular_file (os_api.cpp)
+        // always resolve the link first and then test the real file type -
+        // TryStat's statx(2) call does the same in one syscall, so a named
+        // pipe, a character device, or a dangling symlink reads the same
+        // way here as it does on the native VM.
+        globals.Define("exists", new LoxNative("exists", 1, args =>
+            PosixInterop.TryStat(RequirePathArg(args[0]), out _, out _, out _, out _)));
+        globals.Define("is_dir", new LoxNative("is_dir", 1, args =>
+            PosixInterop.TryStat(RequirePathArg(args[0]), out bool isDir, out _, out _, out _) && isDir));
+        globals.Define("is_file", new LoxNative("is_file", 1, args =>
+            PosixInterop.TryStat(RequirePathArg(args[0]), out _, out bool isFile, out _, out _) && isFile));
         globals.Define("stat", new LoxNative("stat", 1, args => {
             string p = RequirePathArg(args[0]);
-            bool isDir = Directory.Exists(p);
-            bool isFile = File.Exists(p);
-            if (!isDir && !isFile) {
+            if (!PosixInterop.TryStat(p, out bool isDir, out bool isFile, out ulong size, out double mtimeSeconds)) {
                 return null; // Lox nil, matching os_api.cpp's statNative
             }
             var map = new LoxMap();
@@ -193,18 +201,9 @@ public static class LoxRuntime {
             map.Put("is_dir", isDir);
             map.Put("is_file", isFile);
             if (isFile) {
-                try {
-                    map.Put("size", (double)new FileInfo(p).Length);
-                } catch (IOException) {
-                    // size key omitted, matching statNative when file_size errs
-                }
+                map.Put("size", (double)size);
             }
-            try {
-                DateTime mtimeUtc = File.GetLastWriteTimeUtc(p);
-                map.Put("mtime", new DateTimeOffset(mtimeUtc, TimeSpan.Zero).ToUnixTimeMilliseconds() / 1000.0);
-            } catch (IOException) {
-                // mtime key omitted, matching statNative when last_write_time errs
-            }
+            map.Put("mtime", mtimeSeconds);
             return map;
         }));
     }
