@@ -1,12 +1,15 @@
 #include "clr_emitter.h"
 
+#include "cfg.h"
 #include "exec_objects.h"
 #include "object.h"
 #include "value.h"
+#include "zero_depth_local.h"
 
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <sstream>
@@ -165,6 +168,20 @@ struct Builder {
         depth += netDelta;
         maxDepth = std::max(maxDepth, depth);
     }
+
+    // An ilasm label marker. Unindented (matching jvm_emitter.cpp's own
+    // jasmin convention) and zero stack effect — a label is a name for an
+    // offset, not an instruction.
+    void label(const std::string& name) { text << name << ":\n"; }
+
+    // Re-anchors `depth` to a value this pass did not itself derive by
+    // emitting instructions — a CFG merge's entry depth, trusted from the
+    // shared abstract-stack analysis. Goes through here, not a bare
+    // assignment, so `maxDepth` still sees it.
+    void resync(int newDepth) {
+        depth = newDepth;
+        maxDepth = std::max(maxDepth, depth);
+    }
 };
 
 // Everything one chunk's straight-line lowering needs, threaded through by
@@ -178,6 +195,7 @@ struct Emitter {
 
     std::unordered_map<int, PopKind> popKinds;
     std::unordered_map<int, std::vector<int>> invisibleVarsByOffset;
+    std::unordered_map<int, std::string> labelAtOffset;
 
     // Local index 0 holds the LoxGlobals instance; Lox frame slot `n` maps
     // to local index `baseSlot + n`; `scratchSlot` is one shared shuffle
@@ -188,6 +206,27 @@ struct Emitter {
     int globalsSlot{0};
     int scratchSlot{0};
 
+    // This pass's own forward walk, updated in offset order alongside every
+    // invisible-var store: the Lox slot the most RECENTLY DECLARED
+    // invisible-var site bound. -1 is a sentinel for "no site has run yet".
+    // `resolveZeroDepthLocalSlot` (zero_depth_local.h) cross-checks this
+    // against `before[i].localCount - 1` at a CFG merge, where the latter is
+    // only an upper bound (abstract_stack.h) — see this file's own
+    // top-of-file note.
+    int lastInvisibleVarSlot{-1};
+
+    // Whether the position this walk is about to visit is reachable by
+    // fall-through from the instruction most recently emitted — false at
+    // the very start, and set false whenever that instruction was a
+    // JUMP/LOOP/RETURN (none of those fall through). A dead-code gap
+    // between two live instructions is not closed by resetting this flag;
+    // it is closed by `prevNaturalSuccessorOffset` holding the skipped
+    // instruction's array successor offset, which then fails to match the
+    // next LIVE instruction's offset, so the label-resync test in
+    // `emitBody` still refuses to trust the carry-forward across the gap.
+    bool prevCanFallThrough{false};
+    int prevNaturalSuccessorOffset{-1};
+
     [[nodiscard]] int slotForLocal(int loxSlot) const {
         return baseSlot + loxSlot;
     }
@@ -197,17 +236,37 @@ struct Emitter {
                static_cast<bool>(analysis.reached[idx]);
     }
 
+    [[nodiscard]] const std::string& labelFor(int offset) const {
+        auto it = labelAtOffset.find(offset);
+        if (it == labelAtOffset.end()) {
+            throw std::runtime_error(
+                "clr_emitter: no CFG label at jump target " +
+                std::to_string(offset));
+        }
+        return it->second;
+    }
+
     // SET_LOCAL/SET_GLOBAL peek (the value stays on the stack); a following
     // POP the shared abstract-stack analysis already proved TEMP is exactly
     // that peeked value being discarded as a statement result, so folding
     // the pair into one plain store needs no dup and no separate pop
-    // (bytecode-translation-problems.md P2). No CFG-label guard is needed
-    // here, unlike jvm_emitter.cpp's own `fusablePop`: this node emits no
-    // jump target and so no label ever lands on the following POP's offset.
+    // (bytecode-translation-problems.md P2).
+    //
+    // A POP that is a CFG block leader must stay a real instruction: every
+    // edge into that leader needs its ilasm label (fusing away the
+    // instruction fuses away the label with it — an ilasm assemble error,
+    // not a wrong result), and the short-circuit edge into this leader
+    // carries its own copy of the condition, which needs a real `pop` of
+    // its own regardless of what the fall-through edge does with its copy
+    // (probe 22 is exactly this shape).
     [[nodiscard]] bool fusablePop(std::size_t i) const {
         std::size_t j = i + 1;
         if (j >= fn.instructions.size() || !reached(j) ||
             fn.instructions[j].op != Op::POP) {
+            return false;
+        }
+        if (labelAtOffset.find(fn.instructions[j].offset) !=
+            labelAtOffset.end()) {
             return false;
         }
         auto it = popKinds.find(fn.instructions[j].offset);
@@ -248,13 +307,21 @@ void emitGlobalsCall(Emitter& e, const char* method,
     }
 }
 
-// `analysis.before[i].localCount - 1` names the topmost live local exactly,
-// with no cross-check needed: unlike jvm_emitter.cpp's
-// `loadNamedLocalAtZeroDepth`, this pass never places a CFG label (no
-// jumps in this node's scope), so `localCount - 1` is never merely an
-// upper bound here — see this file's own top-of-file note.
-int topLiveLocalSlot(const Emitter& e, std::size_t i) {
-    return e.slotForLocal(e.analysis.before[i].localCount - 1);
+// The CLR twin of jvm_emitter.cpp's own `loadNamedLocalAtZeroDepth`: at a
+// peek-family consumer whose operand depth is zero, the value to consume
+// is not a genuine evaluation-stack temporary — the shared abstract-stack
+// pass already folded it into a named local (P2). `resolveZeroDepthLocalSlot`
+// (zero_depth_local.h) is the one authority for naming that local: exact
+// away from a CFG merge, and cross-checked against this pass's own forward
+// tracker at a merge (see this file's own top-of-file note); this function
+// only adds the CLR-specific `ldloc`.
+int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset) {
+    int loxSlot = resolveZeroDepthLocalSlot(
+        e.analysis.before[i].localCount - 1, e.labelAtOffset.contains(offset),
+        e.lastInvisibleVarSlot, offset, "clr_emitter");
+    int slot = e.slotForLocal(loxSlot);
+    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    return slot;
 }
 
 void emitConstant(Emitter& e, const DecodedInstruction& in) {
@@ -289,8 +356,8 @@ void emitGetLocal(Emitter& e, const DecodedInstruction& in) {
     e.b.emit("ldloc " + std::to_string(e.slotForLocal(in.byteOperand)), 0, +1);
 }
 
-// See this file's own top-of-file note and `topLiveLocalSlot`'s: when the
-// value SET_LOCAL peeks was already folded into a named local by the
+// See this file's own top-of-file note and `loadNamedLocalAtZeroDepth`'s:
+// when the value SET_LOCAL peeks was already folded into a named local by the
 // shared abstract-stack pass (`before[i].operandDepth() == 0`), nothing
 // physically sits on the CIL stack to `dup` — the emitter for whichever
 // earlier instruction produced that value already stored it straight into
@@ -305,7 +372,7 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
     int slot = e.slotForLocal(in.byteOperand);
     bool fuse = e.fusablePop(i);
     if (e.analysis.before[i].operandDepth() == 0) {
-        e.b.emit("ldloc " + std::to_string(topLiveLocalSlot(e, i)), 0, +1);
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
         e.b.emit("stloc " + std::to_string(slot), 1, -1);
     } else if (fuse) {
         e.b.emit("stloc " + std::to_string(slot), 1, -1);
@@ -334,7 +401,7 @@ void emitSetGlobal(Emitter& e, std::size_t i, const DecodedInstruction& in,
                    bool& consumedFollowingPop) {
     bool fuse = e.fusablePop(i);
     if (e.analysis.before[i].operandDepth() == 0) {
-        e.b.emit("ldloc " + std::to_string(topLiveLocalSlot(e, i)), 0, +1);
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
         emitGlobalsCall(e, "Set", e.globalNameLiteral(in.constantIndex),
                         /*peek=*/false);
     } else {
@@ -369,6 +436,38 @@ void emitComparisonOp(Emitter& e, const char* method) {
     e.b.emit("box [System.Runtime]System.Boolean", 1, 0);
 }
 
+// JUMP and LOOP share the same lowering: an unconditional `br` carries no
+// operand budget of its own, so nothing distinguishes a forward skip from a
+// loop's back edge once the CFG pass has resolved both to a label.
+void emitJumpOrLoop(Emitter& e, const DecodedInstruction& in) {
+    e.b.emit("br " + e.labelFor(in.jumpTarget), 0, 0);
+}
+
+// P2/P3: JUMP_IF_FALSE peeks — the condition must still be present, on
+// *both* outgoing edges, for whatever follows to see (03_and_or keeps it as
+// the short-circuit result; 02/04/05 discard it with their own, ordinary
+// POP right after). `dup` supplies that second, independent copy so the
+// taken edge does not lose its copy to `IsFalsy`'s own read.
+//
+// `before[i].operandDepth() == 0` is the same eager invisible-var
+// materialization `emitSetLocal`/`emitSetGlobal` handle (a local
+// initializer whose top-level operator is `and`/`or`, probe 23) — the
+// condition is not on the CIL evaluation stack to `dup`, because the
+// shared abstract-stack analysis already folded it into a named local.
+// `loadNamedLocalAtZeroDepth` names and loads a fresh copy; `IsFalsy`/
+// `brtrue` still only consume that one copy, so the depth-preserving
+// contract holds on both edges (0 in, 0 out) exactly as the dup path holds
+// it at (D, D) for D > 0.
+void emitJumpIfFalse(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (e.analysis.before[i].operandDepth() == 0) {
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
+    } else {
+        e.b.emit("dup", 1, +1);
+    }
+    e.b.emit("call bool [LoxRuntime]Lox.LoxOps::IsFalsy(object)", 1, 0);
+    e.b.emit("brtrue " + e.labelFor(in.jumpTarget), 1, -1);
+}
+
 // The script's own `RETURN`: `Compiler::endCompiler()` always appends a
 // trailing NIL before it, so this instruction's own operand is always a
 // genuine evaluation-stack temporary here — never a name-folded local (see
@@ -393,17 +492,27 @@ void emitReturn(Emitter& e) {
 // The part of one instruction's handling that is not the opcode's own
 // concern: storing any invisible-var slot this offset declares (P1 — the
 // value already sits where the store above just left it; nothing about
-// this is opcode-specific), then computing the next walk index from
-// whether this instruction fused away a following POP.
+// this is opcode-specific), updating the forward-walk tracker
+// `resolveZeroDepthLocalSlot` cross-checks (this file's own top-of-file
+// note), then computing the next walk index and the fall-through carry the
+// *next* iteration's label-resync test (see emitBody) reads.
 std::size_t finishInstruction(Emitter& e, const DecodedInstruction& in,
                               std::size_t i, bool consumedFollowingPop) {
     auto varsIt = e.invisibleVarsByOffset.find(in.offset);
     if (varsIt != e.invisibleVarsByOffset.end()) {
         for (int slot : varsIt->second) {
             e.b.emit("stloc " + std::to_string(e.slotForLocal(slot)), 1, -1);
+            e.lastInvisibleVarSlot = slot;
         }
     }
-    return i + (consumedFollowingPop ? 2 : 1);
+
+    std::size_t nextIndex = i + (consumedFollowingPop ? 2 : 1);
+    e.prevCanFallThrough =
+        in.op != Op::JUMP && in.op != Op::LOOP && in.op != Op::RETURN;
+    e.prevNaturalSuccessorOffset = (nextIndex < e.fn.instructions.size())
+                                       ? e.fn.instructions[nextIndex].offset
+                                       : -1;
+    return nextIndex;
 }
 
 void emitBody(Emitter& e) {
@@ -417,6 +526,23 @@ void emitBody(Emitter& e) {
         }
         const DecodedInstruction& in = ins[i];
         bool consumedFollowingPop = false;
+
+        auto labelIt = e.labelAtOffset.find(in.offset);
+        if (labelIt != e.labelAtOffset.end()) {
+            e.b.label(labelIt->second);
+            bool trustCarryForward = e.prevCanFallThrough &&
+                                     e.prevNaturalSuccessorOffset == in.offset;
+            if (!trustCarryForward) {
+                // A block leader with no live fall-through predecessor: the
+                // array position right before it is a JUMP/LOOP/RETURN
+                // whose real successor is somewhere else entirely, or dead
+                // code that never executed, so this pass's own
+                // carry-forward is not this block's entry depth at all.
+                // The shared abstract-stack analysis already proved
+                // operandDepth() exact at every merge, so resync to it.
+                e.b.resync(e.analysis.before[i].operandDepth());
+            }
+        }
 
         // Safety net: every correctly-lowered opcode in this pass keeps the
         // CIL evaluation stack's physical depth equal to the shared
@@ -498,6 +624,13 @@ void emitBody(Emitter& e) {
         case Op::LESS:
             emitComparisonOp(e, "Less");
             break;
+        case Op::JUMP:
+        case Op::LOOP:
+            emitJumpOrLoop(e, in);
+            break;
+        case Op::JUMP_IF_FALSE:
+            emitJumpIfFalse(e, i, in);
+            break;
         case Op::RETURN:
             emitReturn(e);
             break;
@@ -537,6 +670,16 @@ Emitter buildEmitter(const DecodedFunction& fn,
     }
     for (const InvisibleVarSite& site : analysis.invisibleVars) {
         e.invisibleVarsByOffset[site.offset].push_back(site.slot);
+    }
+
+    // One ilasm label per CFG block leader. A leader with no predecessor
+    // (e.g. the fall-through after an unconditional JUMP) still gets a
+    // label; an unreferenced ilasm label is harmless, so this pass does not
+    // bother filtering to only-referenced offsets.
+    Cfg cfg = buildCfg(fn.instructions);
+    e.labelAtOffset.reserve(cfg.blocks.size());
+    for (const BasicBlock& block : cfg.blocks) {
+        e.labelAtOffset.emplace(block.leaderOffset, block.label);
     }
     return e;
 }

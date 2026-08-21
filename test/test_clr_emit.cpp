@@ -12,6 +12,7 @@
 #include "backend/abstract_stack.h"
 #include "backend/chunk_decoder.h"
 #include "backend/clr_emitter.h"
+#include "backend/zero_depth_local.h"
 #include "compiler.h"
 #include "memory_manager.h"
 #include "object.h"
@@ -43,6 +44,39 @@ int countOccurrences(const std::string& haystack, const std::string& needle) {
         pos += needle.size();
     }
     return count;
+}
+
+// Every branch mnemonic this pass emits. A new one needs its own entry
+// here too, or that branch gets no label-integrity coverage from this
+// helper (test_jvm_emit.cpp's own kJumpMnemonics note).
+const std::vector<std::string> kBranchMnemonics = {"br ", "brtrue "};
+
+// For every branch instruction in `il`, confirms its own target text names
+// a label this pass actually wrote (a "<name>:" line) — not merely that a
+// `br`/`brtrue` text token is present. `br`/`brtrue` to a label ilasm never
+// wrote assembles as a hard ilasm error ("Unable to find forward reference
+// label"), only caught by tools/check_clr_probes.sh (ilasm, container-only)
+// — a plain C++ unit test that stopped at "does the text contain 'br '"
+// would miss exactly this class of bug (the fusablePop CFG-label guard's
+// own hazard, probe 22).
+void expectEveryBranchTargetIsLabeled(const std::string& il) {
+    const std::string text = "\n" + il;
+    for (const std::string& mnemonic : kBranchMnemonics) {
+        const std::string anchored = "\n    " + mnemonic;
+        std::size_t pos = 0;
+        while ((pos = text.find(anchored, pos)) != std::string::npos) {
+            std::size_t nameStart = pos + anchored.size();
+            std::size_t nameEnd = text.find('\n', nameStart);
+            ASSERT_NE(nameEnd, std::string::npos)
+                << mnemonic << " operand runs off the end of:\n"
+                << il;
+            std::string target = text.substr(nameStart, nameEnd - nameStart);
+            EXPECT_NE(text.find("\n" + target + ":\n"), std::string::npos)
+                << "branch to undefined label \"" << target << "\" in:\n"
+                << il;
+            pos = nameEnd;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -138,17 +172,19 @@ TEST(IlasmDoubleLiteral, RoundTripsExactly) {
 // hunting for a real Lox++ program that reaches an opcode this pass has no
 // case for.
 TEST(EmitScript, AbortsOnUnsupportedOpcode) {
+    // JUMP/JUMP_IF_FALSE/LOOP are no longer unsupported (this node); CALL
+    // is the nearest opcode still outside this pass's scope.
     MemoryManager mm;
-    DecodedInstruction jump;
-    jump.offset = 0;
-    jump.op = Op::JUMP;
-    jump.length = 3;
-    jump.jumpTarget = 0;
+    DecodedInstruction call;
+    call.offset = 0;
+    call.op = Op::CALL;
+    call.length = 2;
+    call.byteOperand = 0;
 
     DecodedFunction fn;
     fn.id = "0";
     fn.function = mm.create<ObjFunction>();
-    fn.instructions = {jump};
+    fn.instructions = {call};
 
     FunctionStackAnalysis analysis;
     analysis.functionId = "0";
@@ -160,7 +196,7 @@ TEST(EmitScript, AbortsOnUnsupportedOpcode) {
         clr::emitScript(fn, analysis, "LoxMain");
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& e) {
-        EXPECT_NE(std::string(e.what()).find("JUMP"), std::string::npos)
+        EXPECT_NE(std::string(e.what()).find("CALL"), std::string::npos)
             << e.what();
     }
 }
@@ -512,6 +548,227 @@ TEST(EmitScript, ScriptReturnPopsTheTrailingNilBeforeRet) {
     // evaluation stack — the trailing NIL `endCompiler()` always appends
     // must be discarded first.
     EXPECT_NE(j.find("ldnull\n    pop\n    ret\n"), std::string::npos) << j;
+}
+
+// ---------------------------------------------------------------------------
+// Control flow: JUMP, JUMP_IF_FALSE, LOOP (this node). See
+// notes/translation-probes/{02,03,04,05,22,23}_*.lox for the checkpoint
+// this ties to at the assemble-and-run level (tools/check_clr_probes.sh).
+// ---------------------------------------------------------------------------
+
+TEST(EmitScript, IfElseDupsThePeekAndBothPopsAreReal) {
+    // 02_if_else: `dup` preserves JUMP_IF_FALSE's peeked condition on the
+    // taken edge too, so each side's own, ordinary POP (the fall-through's
+    // and the else-target's) discards a real copy.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("if (true) print 1; else print 2;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_EQ(countOccurrences(j, "dup"), 1) << j;
+    EXPECT_NE(j.find("call bool [LoxRuntime]Lox.LoxOps::IsFalsy"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("brtrue L_"), std::string::npos) << j;
+    EXPECT_NE(j.find("br L_"), std::string::npos) << j; // skip the else branch
+    // 2 real pops (one per branch's own discard of its condition copy) +
+    // 1 for the script's own trailing "ldnull; pop; ret" (every chunk
+    // ends this way, unrelated to control flow).
+    EXPECT_EQ(countOccurrences(j, "\n    pop\n"), 3) << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitScript, AndOrKeepsTheValue) {
+    // 03_and_or: the branch target is PRINT (the merge that uses the
+    // short-circuit result), not a POP — the `dup`'d copy is what
+    // survives to be printed; only the fall-through side's own POP is
+    // real.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("print 1 and 2;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("dup"), std::string::npos) << j;
+    // 1 real pop (the fall-through side's own discard) + 1 for the
+    // script's own trailing "ldnull; pop; ret".
+    EXPECT_EQ(countOccurrences(j, "\n    pop\n"), 2) << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitScript, AndOrAssignmentStatementKeepsTheMergeLabelReal) {
+    // Probe 22: the short-circuit merge's own POP can also be a CFG block
+    // leader when the right side is an assignment — every edge into it
+    // needs a real ilasm label there. `fusablePop` must not fuse that POP
+    // away, or the label disappears with it and ilasm fails to assemble
+    // ("Unable to find forward reference label").
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("var x = true; var y = 0; x and (y = 1); print y;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    std::size_t brtruePos = j.find("brtrue L_");
+    ASSERT_NE(brtruePos, std::string::npos) << j;
+    std::size_t nameStart = brtruePos + 7; // skip "brtrue "
+    std::string target =
+        j.substr(nameStart, j.find('\n', nameStart) - nameStart);
+    // The label this `brtrue` targets must exist as a real "name:" line,
+    // and the merge must still have its own, real `pop` — proof the fuse
+    // did not eat either one.
+    EXPECT_NE(j.find(target + ":\n"), std::string::npos) << j;
+    EXPECT_NE(j.find("\n    pop\n"), std::string::npos) << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitScript, JumpIfFalseOnAMaterializedConditionLoadsInsteadOfDup) {
+    // Probe 23: when a local's initializer is a short-circuit expression,
+    // the shared abstract-stack pass's eager invisible-var materialization
+    // (P2/P3) moves the condition off the CIL evaluation stack before
+    // JUMP_IF_FALSE runs — before[i].operandDepth() == 0. `dup` on that
+    // empty stack would trip the depth != operandDepth() safety net in
+    // emitBody (proven by temporarily disabling the fix); the actual fix
+    // reloads a fresh copy through `loadNamedLocalAtZeroDepth` instead.
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("{ var c = true; var b = c and 2; print b; }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_EQ(countOccurrences(j, "dup"), 0) << j;
+    EXPECT_NE(j.find("call bool [LoxRuntime]Lox.LoxOps::IsFalsy"),
+              std::string::npos)
+        << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitScript, WhileLoopEmitsBackEdgeAndLabel) {
+    // 04_while: LOOP lowers to `br`, at a label the shared CFG pass placed
+    // at the condition. The back edge's own target must be a real, defined
+    // label in this same method — not merely present as `br` text.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "{ var i = 0; while (i < 3) { print i; i = i + 1; } }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    std::size_t brPos = j.find("br L_");
+    ASSERT_NE(brPos, std::string::npos) << j;
+    std::size_t nameStart = brPos + 3; // skip "br "
+    std::string target =
+        j.substr(nameStart, j.find('\n', nameStart) - nameStart);
+    EXPECT_NE(j.find(target + ":"), std::string::npos) << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitScript, ForLoopHasTwoBackEdges) {
+    // 05_for: 2 back edges (LOOP) plus 1 forward skip (JUMP) — 3 `br`
+    // instructions total (the leaders algorithm's own verified fact for
+    // this desugaring, cfg.cpp).
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("for (var i = 0; i < 3; i = i + 1) print i;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_EQ(countOccurrences(j, "br L_"), 3) << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitScript, IfWithoutElseStillEmitsTheUnconditionalSkip) {
+    // No else branch: Compiler::ifStatement (compiler.cpp) emits the
+    // unconditional "skip the else" JUMP unconditionally too, even with
+    // nothing to skip — this pass lowers whatever the compiler emitted,
+    // not a structural guess of when a JUMP "should" be there.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("if (true) print 1;\nprint 2;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("brtrue L_"), std::string::npos) << j;
+    EXPECT_EQ(countOccurrences(j, "br L_"), 1) << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+// ---------------------------------------------------------------------------
+// A SET_LOCAL whose merge-exact operandDepth() is nonzero must resolve its
+// slot the same way on every incoming edge (the block-leader depth-resync
+// fix, proven to matter by temporarily disabling it: the depth !=
+// operandDepth() safety net in emitBody then tripped with "simulated stack
+// depth 0 disagrees with analysis depth 1" on 02_if_else).
+// ---------------------------------------------------------------------------
+
+TEST(EmitScript, IfElseAssignsSameSlotOnBothBranches) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "{ var a = 1; if (a == 1) { a = 2; } else { a = 3; } print a; }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    // `a` is the only local (Lox slot 1) -> CLR slot 2. Both branches must
+    // store to it, not to two different slots.
+    EXPECT_EQ(countOccurrences(j, "stloc 2\n"), 3) << j; // decl + both branches
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitScript, LoopBodyAssignsSameSlotEveryIteration) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "{ var a = 1; var i = 0; while (i < 3) { a = a + 1; i = i + 1; } }",
+        mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    // `a` (CLR slot 2) is reassigned once per loop body pass; the same
+    // slot must appear each time this pass walks the (single, static)
+    // body.
+    EXPECT_NE(j.find("stloc 2\n"), std::string::npos) << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+// ---------------------------------------------------------------------------
+// resolveZeroDepthLocalSlot (zero_depth_local.h): the one, target-
+// independent authority both this file and jvm_emitter.cpp call into for
+// the depth-0 named-local cross-check (clr_emitter.h's own top-of-file
+// note). No program in this node's own opcode set (if/else, and/or, while,
+// for) makes the two estimates disagree — the scope-exit rule retires
+// every local a block declared before control reaches outside it, so a
+// disagreement needs a function frame or a `match` arm (neither in this
+// node's scope) — so this exercises the cross-check directly rather than
+// asserting it can never be reached indirectly.
+// ---------------------------------------------------------------------------
+
+TEST(ResolveZeroDepthLocalSlot, AwayFromAMergeReadsLocalCountDirectly) {
+    // atCfgMergeLabel == false: the tracker is never consulted, even when
+    // it holds a nonsense sentinel (-1, "no invisible-var site has run
+    // yet").
+    EXPECT_EQ(resolveZeroDepthLocalSlot(/*exactLocalCountMinusOne=*/2,
+                                        /*atCfgMergeLabel=*/false,
+                                        /*lastInvisibleVarSlot=*/-1,
+                                        /*offset=*/9, "clr_emitter"),
+              2);
+}
+
+TEST(ResolveZeroDepthLocalSlot, AtAMergeAgreementIsSilent) {
+    EXPECT_EQ(resolveZeroDepthLocalSlot(/*exactLocalCountMinusOne=*/2,
+                                        /*atCfgMergeLabel=*/true,
+                                        /*lastInvisibleVarSlot=*/2,
+                                        /*offset=*/9, "clr_emitter"),
+              2);
+}
+
+TEST(ResolveZeroDepthLocalSlot, AtAMergeDisagreementThrows) {
+    try {
+        resolveZeroDepthLocalSlot(/*exactLocalCountMinusOne=*/2,
+                                  /*atCfgMergeLabel=*/true,
+                                  /*lastInvisibleVarSlot=*/1, /*offset=*/9,
+                                  "clr_emitter");
+        FAIL() << "expected std::runtime_error";
+    } catch (const std::runtime_error& e) {
+        std::string what = e.what();
+        EXPECT_NE(what.find("clr_emitter"), std::string::npos) << what;
+        EXPECT_NE(what.find("CFG merge"), std::string::npos) << what;
+        EXPECT_NE(what.find('9'), std::string::npos) << what;
+    }
 }
 
 } // namespace

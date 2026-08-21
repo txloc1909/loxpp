@@ -1,34 +1,36 @@
 #pragma once
 
-// CLR code generator, first pass (straight-line emission only). Covers
-// CONSTANT (number, string), NIL/TRUE/FALSE, the arithmetic and comparison
-// family, NEGATE, NOT, PRINT, POP, GET_LOCAL, SET_LOCAL, DEFINE_GLOBAL,
-// GET_GLOBAL, SET_GLOBAL, and RETURN in its script form — see
-// notes/bytecode-translation-problems.md for what P1/P2 mean.
+// CLR code generator. Covers CONSTANT (number, string), NIL/TRUE/FALSE, the
+// arithmetic and comparison family, NEGATE, NOT, PRINT, POP, GET_LOCAL,
+// SET_LOCAL, DEFINE_GLOBAL, GET_GLOBAL, SET_GLOBAL, RETURN in its script
+// form, and JUMP/JUMP_IF_FALSE/LOOP (P3b) — see
+// notes/bytecode-translation-problems.md for what each P-number means.
 //
-// Scope: no jumps, no calls, no closures, no classes, no aggregates, no
-// match. Every opcode outside that set throws std::runtime_error, naming
-// the opcode, instead of falling through silently — a later CLR emission
-// node lowers it for real.
+// Scope: no calls, no closures, no classes, no aggregates, no match. Every
+// opcode outside that set throws std::runtime_error, naming the opcode,
+// instead of falling through silently — a later CLR emission node lowers
+// it for real.
 //
-// This node's opcode set never folds a peek-family value's result into a
-// consumer other than the SET_LOCAL/SET_GLOBAL peek itself: P2's "eager
-// invisible-var materialization" (abstract_stack.h) still applies here —
-// `{ var a = 1; var b = (a = 2); }` folds `b`'s value into a named local
-// before the SET_LOCAL that assigns `a` even runs (probes 18/19 exist for
-// exactly this) — but nothing in this opcode set can fold a value into a
-// GENUINE OPERAND-STACK CONSUMER the way a `match` expression's result
-// does on the JVM backend (jvm_emitter.h). Reaching operandDepth()==0 at a
-// consumer other than SET_LOCAL/SET_GLOBAL, or at either of those while a
-// CFG label sits on the same offset, needs the cross-checked
-// `loadNamedLocalAtZeroDepth`/`nativePops`/`normalizeFoldedOperands`
-// machinery jvm_emitter.cpp already owns (brief.md section 3: one shared
-// authority, not two) — this node has no CFG labels and no match, so it
-// reads `before[i].localCount - 1` directly, with no forward tracker and
-// no cross-check, and does not carry a second copy of that machinery. A
-// later CLR node that adds control flow or match must reuse
-// jvm_emitter.cpp's mechanism (by extracting it or calling into it) rather
-// than re-deriving its own.
+// JUMP/LOOP lower to CIL `br` at a label `src/backend/cfg.{h,cpp}` already
+// recovered; JUMP_IF_FALSE lowers to `dup; call LoxOps::IsFalsy; brtrue` so
+// the peeked condition survives on both outgoing edges (P2/P3). Every value
+// is already `object` (CONSTANT's own boxing), which is what lets a merge
+// between two different code paths carry a value at all.
+//
+// This opcode set can still fold a peek-family value's result into a named
+// local ahead of a genuine consumer — P2's "eager invisible-var
+// materialization" (abstract_stack.h): `{ var a = 1; var b = (a = 2); }`
+// folds `b`'s value before the SET_LOCAL that assigns `a` even runs (probes
+// 18/19), and `x and (y = 1);` or a local initializer whose value is itself
+// a short-circuit expression folds JUMP_IF_FALSE's own condition the same
+// way (probes 22/23). Once this pass places its own CFG labels, resolving
+// that fold at operandDepth() == 0 needs the same cross-check the JVM
+// backend needed the moment ITS jumps could create a merge:
+// `before[i].localCount - 1` is only an upper bound AT a CFG merge
+// (abstract_stack.h), not an exact slot. `resolveZeroDepthLocalSlot`
+// (zero_depth_local.h) is the one, target-independent authority for this
+// cross-check: one shared authority, not two. This pass calls into it
+// rather than re-deriving its own copy, the same way jvm_emitter.cpp does.
 
 #include "abstract_stack.h"
 #include "chunk_decoder.h"

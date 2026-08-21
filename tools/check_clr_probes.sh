@@ -5,8 +5,9 @@
 # tools/check_jvm_probes.sh, scoped today to the straight-line opcode set
 # (CONSTANT, NIL/TRUE/FALSE, arithmetic/comparison, NEGATE, NOT, PRINT, POP,
 # GET_LOCAL, SET_LOCAL, DEFINE_GLOBAL, GET_GLOBAL, SET_GLOBAL, script-form
-# RETURN) — later CLR backend work grows this list the same way
-# check_jvm_probes.sh grew as the JVM backend gained opcodes.
+# RETURN) plus control flow (JUMP, JUMP_IF_FALSE, LOOP) — later CLR backend
+# work grows this list the same way check_jvm_probes.sh grew as the JVM
+# backend gained opcodes.
 #
 # Every probe runs even after an earlier one fails: a failing CLR run (an
 # ilasm assembly error, say) is caught and recorded as this probe's own
@@ -28,6 +29,16 @@ probes=(
     "notes/translation-probes/20_float_imprecise_constant.lox"
     "notes/translation-probes/21_exponent_constant.lox"
     "notes/translation-probes/30_bool_compare_and_string_literal.lox"
+    # Control flow (JUMP, JUMP_IF_FALSE, LOOP): if/else, and/or, while, for,
+    # and the two short-circuit merge shapes that broke the JVM emitter
+    # after it first looked correct (the merge POP staying real, and the
+    # peek-of-a-materialized-condition reload).
+    "notes/translation-probes/02_if_else.lox"
+    "notes/translation-probes/03_and_or.lox"
+    "notes/translation-probes/04_while.lox"
+    "notes/translation-probes/05_for.lox"
+    "notes/translation-probes/22_and_or_assignment_statement.lox"
+    "notes/translation-probes/23_and_or_local_initializer.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

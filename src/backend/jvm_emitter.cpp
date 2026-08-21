@@ -6,6 +6,7 @@
 #include "exec_objects.h"
 #include "object.h"
 #include "value.h"
+#include "zero_depth_local.h"
 
 #include <algorithm>
 #include <array>
@@ -666,6 +667,13 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
 // than silent. See the GAP entry in bytecode-translation-problems.md for
 // the residual cases this still does not cover.
 //
+// The cross-check itself (resolveZeroDepthLocalSlot, zero_depth_local.h) is
+// target-independent: any backend that lowers this opcode family once CFG
+// merges exist shares this one authority instead of re-deriving its own.
+// What differs per backend is only the load this function performs once
+// the slot is known — `aload`/captured-cell test here, the CLR backend's
+// own load elsewhere.
+//
 // The captured-slot check (R5) applies to either estimate:
 // `capturedSlots` holds slot INDEXES, not live ranges (isCaptured's own
 // note) — a slot this chunk captured earlier, in a scope already closed,
@@ -676,14 +684,9 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
 // storeClosureIntoSelfCell marks that slot captured the normal way, so no
 // separate self-cell case is needed here (V5/V6 verify it).
 int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset) {
-    int loxSlot = e.analysis.before[i].localCount - 1;
-    if (e.labelAtOffset.contains(offset) && e.lastInvisibleVarSlot != loxSlot) {
-        throw std::runtime_error(
-            "jvm_emitter: offset " + std::to_string(offset) +
-            " is a CFG merge; localCount - 1 (" + std::to_string(loxSlot) +
-            ") disagrees with the forward-walk tracker (" +
-            std::to_string(e.lastInvisibleVarSlot) + ")");
-    }
+    int loxSlot = resolveZeroDepthLocalSlot(
+        e.analysis.before[i].localCount - 1, e.labelAtOffset.contains(offset),
+        e.lastInvisibleVarSlot, offset, "jvm_emitter");
     int slot = e.jvmSlotForLocal(loxSlot);
     if (e.isCaptured(loxSlot)) {
         emitCapturedGetLocal(e, slot, offset);
