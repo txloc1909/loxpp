@@ -4,16 +4,17 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 using Lox;
 
 namespace LoxRuntimeTests;
 
 /// <summary>
-/// The %g parity test is differential, not a fixed list (see RT.md
-/// checkpoint 3): native build/loxpp is the oracle. This generates a set of
-/// doubles, writes a Lox++ program that prints each one as a literal, runs
-/// it on the native binary, and compares each line against
-/// LoxOps.Stringify(the same double) - byte for byte, or the test fails.
+/// The %g parity test is differential, not a fixed list: native
+/// build/loxpp is the oracle. This generates a set of doubles, writes a
+/// Lox++ program that prints each one as a literal, runs it on the native
+/// binary, and compares each line against LoxOps.Stringify(the same
+/// double) - byte for byte, or the test fails.
 ///
 /// Every literal is written with no exponent (the scanner's own NUMBER
 /// grammar has none) as the exact decimal value the double's round-trip
@@ -30,10 +31,14 @@ namespace LoxRuntimeTests;
 /// for a literal that parses to a SUBNORMAL double, even though that
 /// result is a perfectly valid double. This is a pre-existing native
 /// parser limitation, unrelated to number formatting and out of this
-/// runtime's scope (RT.md: "No change to src/"); this generator avoids it
-/// rather than working around it here.</para>
+/// runtime's scope; this generator avoids it rather than working around it
+/// here.</para>
 /// </summary>
 public static class StringifyDifferentialTest {
+    // Generous, but finite: a hang here must fail the test loudly instead
+    // of hanging the whole suite (and CI) forever.
+    private const int NativeTimeoutMs = 30000;
+
     public static int Run() {
         var t = new TestSupport();
 
@@ -45,26 +50,23 @@ public static class StringifyDifferentialTest {
             return t.Finish("StringifyDifferentialTest");
         }
 
+        if (!CheckOracleFitness(t, nativeBin)) {
+            return t.Finish("StringifyDifferentialTest");
+        }
+
         List<double> values = GenerateValues();
         string scriptPath = Path.Combine(Path.GetTempPath(), $"lox-rt-stringify-diff-{Guid.NewGuid():N}.lox");
         try {
             File.WriteAllText(scriptPath, BuildScript(values), Encoding.ASCII);
 
-            var psi = new ProcessStartInfo {
-                FileName = nativeBin,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                StandardOutputEncoding = LoxRuntime.Charset,
-            };
-            psi.ArgumentList.Add(scriptPath);
-
-            using Process proc = Process.Start(psi);
-            string stdout = proc.StandardOutput.ReadToEnd();
-            string stderr = proc.StandardError.ReadToEnd();
-            proc.WaitForExit();
-            if (proc.ExitCode != 0) {
-                t.Check(false, $"native run of the generated differential script failed (exit {proc.ExitCode}): {stderr}");
+            (int exitCode, string stdout, string stderr, bool timedOut) = RunNative(nativeBin, scriptPath);
+            if (timedOut) {
+                t.Check(false,
+                    $"native run of the generated differential script did not finish within {NativeTimeoutMs}ms");
+                return t.Finish("StringifyDifferentialTest");
+            }
+            if (exitCode != 0) {
+                t.Check(false, $"native run of the generated differential script failed (exit {exitCode}): {stderr}");
                 return t.Finish("StringifyDifferentialTest");
             }
 
@@ -84,6 +86,78 @@ public static class StringifyDifferentialTest {
         }
 
         return t.Finish("StringifyDifferentialTest");
+    }
+
+    /// <summary>
+    /// Proves the oracle binary is fit to compare against before spending
+    /// the real (large, slow) sweep on it. A build with
+    /// LOXPP_DEBUG_PRINT_CODE or LOXPP_DEBUG_TRACE_EXECUTION on - the
+    /// CMake debug preset's own default - interleaves a chunk disassembly
+    /// and a per-instruction stack trace into stdout alongside the
+    /// program's own `print` output, so splitting stdout one line per
+    /// value would silently read the wrong line instead of failing. A
+    /// single known-good `print 1;` catches that build here, loudly,
+    /// before the real sweep can misread it.
+    /// </summary>
+    private static bool CheckOracleFitness(TestSupport t, string nativeBin) {
+        string probePath = Path.Combine(Path.GetTempPath(), $"lox-rt-stringify-fitness-{Guid.NewGuid():N}.lox");
+        try {
+            File.WriteAllText(probePath, "print 1;\n", Encoding.ASCII);
+            (int exitCode, string stdout, string _, bool timedOut) = RunNative(nativeBin, probePath);
+            if (timedOut) {
+                t.Check(false,
+                    $"the oracle binary at {nativeBin} did not finish a single `print 1;` within {NativeTimeoutMs}ms");
+                return false;
+            }
+            bool fit = exitCode == 0 && stdout == "1\n";
+            t.Check(fit,
+                $"the oracle binary at {nativeBin} must print exactly \"1\" for `print 1;` and exit 0 " +
+                $"(got exit {exitCode}, stdout {Summarize(stdout)}) - rebuild it with " +
+                "`cmake --preset release && cmake --build build --target loxpp`, " +
+                "since LOXPP_DEBUG_PRINT_CODE/LOXPP_DEBUG_TRACE_EXECUTION (the debug preset's default) " +
+                "put extra disassembly and trace text on this same stream");
+            return fit;
+        } finally {
+            File.Delete(probePath);
+        }
+    }
+
+    private static string Summarize(string s) => s.Length <= 120 ? $"\"{s}\"" : $"\"{s.Substring(0, 120)}...\" ({s.Length} bytes)";
+
+    /// <summary>
+    /// Runs the native binary on <paramref name="scriptPath"/> and drains
+    /// both stdout and stderr concurrently. Reading one stream fully with
+    /// <see cref="System.IO.StreamReader.ReadToEnd"/> before starting the
+    /// other deadlocks the moment the unread pipe fills (64 KiB on Linux):
+    /// the child blocks on its next write to that pipe and never reaches
+    /// the point where it closes the stream this method is waiting on. A
+    /// debug build's LOXPP_DEBUG_LOG_GC output reaches that on any
+    /// nontrivial script.
+    /// </summary>
+    private static (int ExitCode, string Stdout, string Stderr, bool TimedOut) RunNative(string nativeBin, string scriptPath) {
+        var psi = new ProcessStartInfo {
+            FileName = nativeBin,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            StandardOutputEncoding = LoxRuntime.Charset,
+        };
+        psi.ArgumentList.Add(scriptPath);
+
+        using Process proc = Process.Start(psi);
+        Task<string> stdoutTask = proc.StandardOutput.ReadToEndAsync();
+        Task<string> stderrTask = proc.StandardError.ReadToEndAsync();
+        if (!proc.WaitForExit(NativeTimeoutMs)) {
+            try {
+                proc.Kill(entireProcessTree: true);
+            } catch {
+                // best effort - the process may have exited between the
+                // WaitForExit timeout and this Kill call
+            }
+            return (-1, "", "", true);
+        }
+        Task.WaitAll(stdoutTask, stderrTask);
+        return (proc.ExitCode, stdoutTask.Result, stderrTask.Result, false);
     }
 
     private static string BuildScript(List<double> values) {
