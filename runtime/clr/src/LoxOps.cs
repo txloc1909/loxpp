@@ -69,8 +69,23 @@ public static class LoxOps {
     /// <summary>Floor-division sign: the result takes the sign of `b` (Python/Lua rule), matching vm.cpp exactly.</summary>
     public static object Modulo(object a, object b) {
         CheckNumbers(a, b);
+        double ad = (double)a;
         double bd = (double)b;
-        double result = (double)a % bd; // C#'s `%` on doubles is fmod, matching C's fmod
+        // glibc's fmod (src/vm.cpp Op::MODULO) returns a NaN OPERAND
+        // unchanged, bit pattern and all, before it looks at the other
+        // operand. C#'s `%` does not take that shortcut: a NaN dividend
+        // loses its sign bit to the CLR's own canonical NaN instead of
+        // keeping the one it was given. Domain-error NaNs (e.g. an
+        // infinite dividend) are not affected by this - neither operand
+        // is NaN there, so both runtimes already reach the same hardware
+        // "invalid operation" result on this platform.
+        if (double.IsNaN(ad)) {
+            return ad;
+        }
+        if (double.IsNaN(bd)) {
+            return bd;
+        }
+        double result = ad % bd; // C#'s `%` on doubles is fmod, matching C's fmod
         if (result != 0 && (result < 0) != (bd < 0)) {
             result += bd;
         }

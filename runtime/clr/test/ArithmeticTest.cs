@@ -1,3 +1,4 @@
+using System;
 using Lox;
 
 namespace LoxRuntimeTests;
@@ -5,6 +6,22 @@ namespace LoxRuntimeTests;
 public static class ArithmeticTest {
     public static int Run() {
         var t = new TestSupport();
+
+        // A NaN OPERAND to `%` keeps its own bit pattern through
+        // LoxOps.Modulo, matching glibc's fmod (src/vm.cpp Op::MODULO):
+        // confirmed against native build/loxpp, `math.nan % 3` prints
+        // "nan" and `math.inf % math.nan` prints "nan" too, both keeping
+        // math.nan's own (positive) sign. A domain-error NaN with NEITHER
+        // operand NaN (an infinite dividend) is a different case - native
+        // prints "-nan" there, and this runtime already agreed before
+        // this fix, so that line is unaffected by it.
+        double positiveNan = BitConverter.Int64BitsToDouble(0x7FF8000000000000);
+        t.CheckEquals("nan", LoxOps.Stringify(LoxOps.Modulo(positiveNan, 3.0)),
+            "a NaN dividend keeps its own sign through modulo");
+        t.CheckEquals("nan", LoxOps.Stringify(LoxOps.Modulo(double.PositiveInfinity, positiveNan)),
+            "a NaN divisor keeps its own sign through modulo");
+        t.CheckEquals("-nan", LoxOps.Stringify(LoxOps.Modulo(double.PositiveInfinity, 3.0)),
+            "an infinite dividend with no NaN operand still hits the domain-error NaN");
 
         t.CheckEquals(3.0, LoxOps.Add(1.0, 2.0), "add(1,2)");
         t.CheckEquals("ab", LoxOps.Add("a", "b"), "add strings concatenates");
