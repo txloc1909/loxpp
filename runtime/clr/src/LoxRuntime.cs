@@ -100,11 +100,15 @@ public static class LoxRuntime {
     public static LoxGlobals Current() => s_current;
 
     private static void RegisterGlobals(LoxGlobals globals) {
-        // clock()'s epoch is unspecified by the spec (only elapsed time
-        // between two calls is meaningful), so a monotonic high-resolution
-        // timestamp stands in for std::clock()'s process CPU time.
-        double ticksToSeconds = 1.0 / Stopwatch.Frequency;
-        globals.Define("clock", new LoxNative("clock", 0, args => Stopwatch.GetTimestamp() * ticksToSeconds));
+        // spec/05-stdlib.md: clock() is processor time, not wall-clock
+        // time - only its epoch is unspecified. src/stdlib/globals.cpp's
+        // clockNative reads std::clock(), which on Linux is the calling
+        // process's own user+system CPU time, unaffected by e.g. a
+        // sleep(). TotalProcessorTime is the net8.0 analogue of that same
+        // quantity; Stopwatch (used here previously) is wall-clock time
+        // and keeps advancing while the process is merely blocked.
+        globals.Define("clock", new LoxNative("clock", 0,
+            args => Process.GetCurrentProcess().TotalProcessorTime.TotalSeconds));
         globals.Define("input", new LoxNative("input", 0, args => ReadByteLine(s_stdin)));
         globals.Define("str", new LoxNative("str", 1, args => LoxOps.Stringify(args[0])));
         globals.Define("len", new LoxNative("len", 1, args => {

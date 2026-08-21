@@ -26,6 +26,7 @@ public static class RuntimeStdlibTest {
         LoxGlobals globals = LoxRuntime.Init();
 
         t.Check(Call(globals, "clock") is double, "clock() returns a number");
+        CheckClockIsProcessorTime(t, globals);
         t.CheckEquals("42", Call(globals, "str", 42.0), "str(42)");
         t.CheckEquals("true", Call(globals, "str", true), "str(true)");
         t.CheckEquals(3.0, Call(globals, "len", ListOf(1.0, 2.0, 3.0)), "len(list)");
@@ -135,6 +136,31 @@ public static class RuntimeStdlibTest {
         } finally {
             Directory.Delete(tmpDir, recursive: true);
         }
+    }
+
+    /// <summary>
+    /// spec/05-stdlib.md: clock() is processor time, not wall-clock time -
+    /// only its epoch is unspecified. A pure wall-clock stand-in would
+    /// advance by nearly the full sleep duration below with no CPU work
+    /// done; real processor time must not.
+    /// </summary>
+    private static void CheckClockIsProcessorTime(TestSupport t, LoxGlobals globals) {
+        double beforeBusy = (double)Call(globals, "clock");
+        var busy = System.Diagnostics.Stopwatch.StartNew();
+        double sink = 0;
+        while (busy.Elapsed.TotalMilliseconds < 30) {
+            sink += Math.Sqrt(sink + 1);
+        }
+        double afterBusy = (double)Call(globals, "clock");
+        t.Check(afterBusy > beforeBusy, "clock() advances while the CPU is actually busy");
+
+        double beforeSleep = (double)Call(globals, "clock");
+        System.Threading.Thread.Sleep(300);
+        double afterSleep = (double)Call(globals, "clock");
+        t.Check(afterSleep - beforeSleep < 0.2,
+            $"clock() must not advance by anywhere near a 300ms sleep's wall-clock duration " +
+            $"(advanced by {afterSleep - beforeSleep:F3}s) - it measures processor time, matching " +
+            "std::clock(), not wall-clock time");
     }
 
     private static void CheckOpenRoundtrip(TestSupport t, LoxGlobals globals) {
