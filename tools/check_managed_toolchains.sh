@@ -48,7 +48,7 @@ step() {
 
 cd "$work"
 cp "$fixtures/Hello.java" "$fixtures/hello.j" "$fixtures/branch.j" \
-   "$fixtures/hello.il" "$fixtures/hello_rt.il" .
+   "$fixtures/hello.il" "$fixtures/hello_rt.il" "$fixtures/stack_mismatch.il" .
 
 # Jasmin and ilasm print their banner and exit nonzero when invoked with no
 # arguments, so these probes must not be allowed to trip `set -e` — the banner
@@ -162,6 +162,42 @@ elif step "ilasm assembly (lox-rt link)" ilasm -exe -output:HelloRt.dll hello_rt
 }
 JSON
     check "ilasm -> dotnet (lox-rt link)" "lox-rt ok" "$(dotnet HelloRt.dll 2>&1 || true)"
+fi
+
+# 3c. Malformed-IL rejection: proves CoreCLR's own load-time check still
+# catches a stack-depth mismatch across a control-flow merge on this image,
+# the gap the CLR backend's IL-legality answer depends on in the absence of
+# ILVerify (see stack_mismatch.il for why the branch condition must stay
+# opaque). A pass here means CoreCLR still rejects; ilasm assembling the
+# fixture with no complaint is expected, not a failure — ilasm does not
+# check control-flow stack depth.
+if [ -z "$runtime_version" ]; then
+    printf '  FAIL  malformed IL rejection (no dotnet runtime discovered; see the ilasm check above)\n'
+    failures=$((failures + 1))
+elif step "ilasm assembly (malformed IL fixture)" ilasm -exe -output:StackMismatch.dll stack_mismatch.il; then
+    cat > StackMismatch.runtimeconfig.json <<JSON
+{
+  "runtimeOptions": {
+    "tfm": "net${runtime_version%%.*}.0",
+    "framework": {
+      "name": "Microsoft.NETCore.App",
+      "version": "${runtime_version}"
+    }
+  }
+}
+JSON
+    mismatch_out="$(dotnet StackMismatch.dll 2>&1)" && mismatch_status=0 \
+        || mismatch_status=$?
+    if [ "$mismatch_status" -ne 0 ] \
+        && printf '%s' "$mismatch_out" | grep -q InvalidProgramException; then
+        printf '  ok    dotnet rejects malformed IL (stack depth mismatch)\n'
+    else
+        printf '  FAIL  dotnet rejects malformed IL (stack depth mismatch)\n'
+        printf '          expected: nonzero exit, InvalidProgramException\n'
+        printf '          exit:     %s\n' "$mismatch_status"
+        printf '%s\n' "$mismatch_out" | sed 's/^/          actual:   /'
+        failures=$((failures + 1))
+    fi
 fi
 
 echo
