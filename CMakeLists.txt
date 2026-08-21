@@ -28,6 +28,7 @@ add_executable(loxpp
     src/backend/cfg.cpp
     src/backend/abstract_stack.cpp
     src/backend/capture_analysis.cpp
+    src/backend/zero_depth_local.cpp
     src/value.cpp
     src/object.cpp
     src/container_objects.cpp
