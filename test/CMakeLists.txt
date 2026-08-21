@@ -27,6 +27,7 @@ set(FULL_SRCS
     ${PROJECT_SOURCE_DIR}/src/backend/abstract_stack.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/capture_analysis.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/jvm_emitter.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/clr_emitter.cpp
     ${PROJECT_SOURCE_DIR}/src/value.cpp
     ${PROJECT_SOURCE_DIR}/src/object.cpp
     ${PROJECT_SOURCE_DIR}/src/container_objects.cpp
@@ -81,6 +82,7 @@ add_executable(test_backend_cfg test_backend_cfg.cpp test_harness.cpp ${FULL_SRC
 add_executable(test_backend_abstract_stack test_backend_abstract_stack.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_backend_capture test_backend_capture.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_jvm_emit test_jvm_emit.cpp test_harness.cpp ${FULL_SRCS})
+add_executable(test_clr_emit test_clr_emit.cpp test_harness.cpp ${FULL_SRCS})
 
 target_include_directories(test_main PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(test_scanner PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -129,6 +131,9 @@ target_compile_definitions(test_backend_capture PRIVATE
     LOXPP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_include_directories(test_jvm_emit PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_compile_definitions(test_jvm_emit PRIVATE
+    LOXPP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_include_directories(test_clr_emit PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_compile_definitions(test_clr_emit PRIVATE
     LOXPP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
 target_compile_definitions(test_stress_gc PRIVATE LOXPP_STRESS_GC)
@@ -179,6 +184,7 @@ target_link_libraries(test_backend_cfg PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_backend_abstract_stack PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_backend_capture PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_jvm_emit PRIVATE GTest::GTest GTest::Main)
+target_link_libraries(test_clr_emit PRIVATE GTest::GTest GTest::Main)
 
 # test_main is a hand-rolled main() (asserts), not a GTest binary.
 add_test(NAME TestMain COMMAND test_main)
@@ -196,7 +202,7 @@ set(LOXPP_GTEST_TARGETS
     test_or_pattern test_or_pattern_gc test_seq_destructure test_list_pattern
     test_list_pattern_gc test_at_binding test_at_binding_gc test_profiler
     test_chunk_decoder test_backend_cfg test_backend_abstract_stack
-    test_backend_capture test_jvm_emit)
+    test_backend_capture test_jvm_emit test_clr_emit)
 foreach(t IN LISTS LOXPP_GTEST_TARGETS)
     gtest_discover_tests(${t} TEST_PREFIX "${t}.")
 endforeach()
