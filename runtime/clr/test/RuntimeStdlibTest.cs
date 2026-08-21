@@ -154,6 +154,22 @@ public static class RuntimeStdlibTest {
         double afterBusy = (double)Call(globals, "clock");
         t.Check(afterBusy > beforeBusy, "clock() advances while the CPU is actually busy");
 
+        // clock() must step far below a 10ms tick: std::clock() on Linux
+        // reads clock_gettime(CLOCK_PROCESS_CPUTIME_ID), whose resolution
+        // is nanoseconds, not the coarser tick a /proc-based reading
+        // (Process.TotalProcessorTime) is limited to. 2ms of real CPU
+        // work is comfortably inside one 10ms tick, so this only passes
+        // when clock() resolves finer than that.
+        double beforeShortBusy = (double)Call(globals, "clock");
+        var shortBusy = System.Diagnostics.Stopwatch.StartNew();
+        double shortSink = 0;
+        while (shortBusy.Elapsed.TotalMilliseconds < 2) {
+            shortSink += Math.Sqrt(shortSink + 1);
+        }
+        double afterShortBusy = (double)Call(globals, "clock");
+        t.Check(afterShortBusy > beforeShortBusy,
+            "clock() advances for 2ms of CPU work - it must resolve far below a 10ms tick");
+
         double beforeSleep = (double)Call(globals, "clock");
         System.Threading.Thread.Sleep(300);
         double afterSleep = (double)Call(globals, "clock");

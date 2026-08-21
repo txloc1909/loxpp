@@ -4,17 +4,26 @@ using System.Runtime.InteropServices;
 namespace Lox;
 
 /// <summary>
-/// A P/Invoke of <c>statx(2)</c> for the real file type LoxRuntime's
-/// exists/is_dir/is_file/stat need, which no managed BCL call gives
-/// faithfully: <c>File.Exists</c>/<c>Directory.Exists</c> report true for
-/// a symbolic link whose target is missing, and neither call can tell a
+/// The two libc calls LoxRuntime needs a real file type and a real
+/// processor-time reading for, neither of which a managed BCL call can
+/// give faithfully on its own:
+///
+/// <list type="bullet">
+/// <item><description><c>File.Exists</c>/<c>Directory.Exists</c> report
+/// true for a symbolic link whose target is missing, and cannot tell a
 /// character device or a named pipe from a regular file - the managed
 /// layer never resolves the link and reads the real inode's type.
-/// <c>statx</c> does both in one syscall.
+/// <c>statx(2)</c> does both in one syscall.</description></item>
+/// <item><description><c>Process.TotalProcessorTime</c> reads
+/// <c>/proc/self/stat</c>, whose clock-tick unit is 10&#160;ms on this
+/// platform - far coarser than <c>std::clock()</c>'s microsecond steps.
+/// <c>clock_gettime(CLOCK_PROCESS_CPUTIME_ID)</c> is the exact call
+/// glibc's own <c>clock()</c> uses.</description></item>
+/// </list>
 ///
 /// <c>DllImport</c> adds no package reference, so this keeps
-/// <c>LoxRuntime.csproj</c> dependency-free. The call is Linux-only;
-/// <see cref="TryStat"/> throws <see cref="PlatformNotSupportedException"/>
+/// <c>LoxRuntime.csproj</c> dependency-free. Both calls are Linux-only;
+/// every entry point here throws <see cref="PlatformNotSupportedException"/>
 /// up front on any other OS rather than silently mis-answering.
 /// </summary>
 internal static class PosixInterop {
@@ -75,6 +84,17 @@ internal static class PosixInterop {
     [DllImport("libc", SetLastError = true, CharSet = CharSet.Ansi)]
     private static extern int statx(int dirfd, string pathname, int flags, uint mask, out Statx statxbuf);
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Timespec {
+        public long TvSec;
+        public long TvNsec;
+    }
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int clock_gettime(int clockId, out Timespec tp);
+
+    private const int ClockProcessCpuTimeId = 2;
+
     private static void RequireLinux(string surface) {
         if (!OperatingSystem.IsLinux()) {
             throw new PlatformNotSupportedException(
@@ -109,5 +129,21 @@ internal static class PosixInterop {
         size = buf.Size;
         mtimeSeconds = buf.Mtime.TvSec + buf.Mtime.TvNsec / 1.0e9;
         return true;
+    }
+
+    /// <summary>
+    /// This process's own user+system CPU time, in seconds, at
+    /// <c>clock_gettime</c>'s own resolution (nanoseconds) - the same
+    /// syscall glibc's <c>clock()</c> reads, so it matches
+    /// <c>std::clock()</c>'s step size instead of
+    /// <c>Process.TotalProcessorTime</c>'s 10&#160;ms <c>/proc</c> tick,
+    /// and allocates nothing per call.
+    /// </summary>
+    public static double ProcessCpuTimeSeconds() {
+        RequireLinux("clock()");
+        if (clock_gettime(ClockProcessCpuTimeId, out Timespec ts) != 0) {
+            throw new LoxError("clock() failed: clock_gettime(CLOCK_PROCESS_CPUTIME_ID) returned an error.");
+        }
+        return ts.TvSec + ts.TvNsec / 1.0e9;
     }
 }

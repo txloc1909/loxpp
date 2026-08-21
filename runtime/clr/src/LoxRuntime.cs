@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -105,11 +104,12 @@ public static class LoxRuntime {
         // time - only its epoch is unspecified. src/stdlib/globals.cpp's
         // clockNative reads std::clock(), which on Linux is the calling
         // process's own user+system CPU time, unaffected by e.g. a
-        // sleep(). TotalProcessorTime is the net8.0 analogue of that same
-        // quantity; Stopwatch (used here previously) is wall-clock time
-        // and keeps advancing while the process is merely blocked.
-        globals.Define("clock", new LoxNative("clock", 0,
-            args => Process.GetCurrentProcess().TotalProcessorTime.TotalSeconds));
+        // sleep(). PosixInterop.ProcessCpuTimeSeconds reads the same
+        // syscall glibc's clock() itself reads, at that call's own
+        // (sub-millisecond) resolution and with no per-call allocation;
+        // Process.TotalProcessorTime (used here previously) steps only
+        // once per 10ms /proc tick and allocates a Process per call.
+        globals.Define("clock", new LoxNative("clock", 0, args => PosixInterop.ProcessCpuTimeSeconds()));
         globals.Define("input", new LoxNative("input", 0, args => ReadByteLine(s_stdin)));
         globals.Define("str", new LoxNative("str", 1, args => LoxOps.Stringify(args[0])));
         globals.Define("len", new LoxNative("len", 1, args => {
