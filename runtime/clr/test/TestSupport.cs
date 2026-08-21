@@ -2,7 +2,7 @@ using System;
 
 namespace LoxRuntimeTests;
 
-/// <summary>No test framework in the image (see RT.md) - a tiny shared checker instead. Each suite gets its own instance.</summary>
+/// <summary>No test framework in the build container - a tiny shared checker instead. Each suite gets its own instance.</summary>
 public sealed class TestSupport {
     private int m_checks;
     private int m_failures;

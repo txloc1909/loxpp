@@ -11,8 +11,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- No test framework package: the image has no network at test time
-         (see RT.md), so this project stays dependency-free and restores
+    <!-- No test framework package: the build container has no network at
+         test time, so this project stays dependency-free and restores
          entirely from the SDK's own reference assemblies. -->
     <ProjectReference Include="../LoxRuntime.csproj" />
   </ItemGroup>

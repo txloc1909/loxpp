@@ -5,7 +5,7 @@ using System.Reflection;
 namespace LoxRuntimeTests;
 
 /// <summary>
-/// No test framework in the image (see RT.md) - suites are discovered by
+/// No test framework in the build container - suites are discovered by
 /// name instead of hardcoded, so a new `*Test.cs` file with a public
 /// `static int Run()` is picked up on its own, matching
 /// tools/test_lox_rt.sh's own `*Test.java` discovery for the JVM runtime.

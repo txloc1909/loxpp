@@ -193,9 +193,8 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "cmake --preset release && cmake --build build --target loxpp"
 
-      # Needs build/loxpp (built above): its own %g parity test is
-      # differential against the native binary, not a fixed list (RT.md
-      # checkpoint 3).
+      # Needs build/loxpp (built above, release preset): its own %g parity
+      # test is differential against the native binary, not a fixed list.
       - name: Build and test the CLR runtime library
         run: |
           docker run --rm \

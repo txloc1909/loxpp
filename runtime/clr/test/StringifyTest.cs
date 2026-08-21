@@ -7,7 +7,7 @@ namespace LoxRuntimeTests;
 
 /// <summary>
 /// A fixed set of number cases, each captured from build/loxpp itself (the
-/// oracle - see RT.md) via a probe run inside the dev-managed container.
+/// %g oracle) via a probe run inside the build container.
 /// LoxOps.Stringify must match byte for byte. StringifyDifferentialTest
 /// covers the same claim over a much larger generated set, run against the
 /// native binary directly rather than a captured list.
