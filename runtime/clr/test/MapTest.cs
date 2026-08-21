@@ -59,6 +59,18 @@ public static class MapTest {
         t.CheckEquals(2, firstPair.Elements.Count, "each entries() pair is [key, value]");
         t.Check(ordered.GetMethod("nonexistent") == null, "getMethod returns null for an unknown name");
 
+        // The native VM keeps one ObjNative per method name in a class-wide
+        // table shared by every ObjMap, so `m1.has == m2.has` is true there
+        // even though m1 and m2 are different maps - not by reference (two
+        // different maps' method values are two different C# objects), but
+        // through LoxOps.Equal's Lox-level notion of equality.
+        var otherMap = new LoxMap();
+        otherMap.Put("z", 1.0);
+        t.Check(LoxOps.Equal(ordered.GetMethod("has"), otherMap.GetMethod("has")),
+            "two different maps' 'has' method values are Lox-equal");
+        t.Check(!LoxOps.Equal(ordered.GetMethod("has"), otherMap.GetMethod("keys")),
+            "two different method names on maps are not Lox-equal");
+
         return t.Finish("MapTest");
     }
 

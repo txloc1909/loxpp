@@ -66,6 +66,23 @@ public static class FileTest {
                 "open(missing path, \"r+\") fails instead of creating the file");
             t.Check(!File.Exists(missingPath), "open(missing path, \"r+\") leaves no file behind even after it fails");
 
+            // The native VM keeps one ObjNative per method name in a
+            // class-wide table shared by every ObjFile, so
+            // `f1.write == f2.write` is true there even though f1 and f2
+            // are different files - through LoxOps.Equal's Lox-level
+            // notion of equality, not C# reference equality.
+            string otherPath = Path.Combine(Path.GetTempPath(), $"lox-rt-file-other-{System.Guid.NewGuid():N}.txt");
+            try {
+                LoxFile other = LoxFile.Open(otherPath, "w");
+                t.Check(LoxOps.Equal(writer.GetMethod("write"), other.GetMethod("write")),
+                    "two different files' 'write' method values are Lox-equal");
+                t.Check(!LoxOps.Equal(writer.GetMethod("write"), other.GetMethod("close")),
+                    "two different method names on files are not Lox-equal");
+                other.Close();
+            } finally {
+                File.Delete(otherPath);
+            }
+
             // File I/O must round-trip a raw high byte 1:1, never as a
             // 2-byte UTF-8 sequence - open()'s Latin1 boundary guarantees
             // this.

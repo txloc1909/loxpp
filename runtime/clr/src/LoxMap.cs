@@ -101,9 +101,10 @@ public sealed class LoxMap {
     }
 
     // Every LoxMap lazily grows its own per-instance cache the first time a
-    // method is read as a property (not called): the native VM hands back
-    // the same ObjNative on every GET_PROPERTY, so repeated `m.has == m.has`
-    // must read the identical object twice.
+    // method is read as a property (not called), so a repeat read gives back
+    // the identical object rather than reallocating. Cross-instance identity
+    // (`m1.has == m2.has`) does not come from this cache being shared - it
+    // isn't - but from LoxMapMethod's name-based equality: see LoxOps.Equal.
     private readonly Dictionary<string, ILoxCallable> m_methodCache = new();
 
     public ILoxCallable GetMethod(string name) {
@@ -120,18 +121,18 @@ public sealed class LoxMap {
     private ILoxCallable CreateMethod(string name) {
         switch (name) {
         case "has":
-            return new LoxNative("has", 1, a => {
+            return new LoxMapMethod("has", 1, a => {
                 LoxOps.CheckMapKey(a[0]);
                 return Has(a[0]);
             });
         case "del":
-            return new LoxNative("del", 1, a => {
+            return new LoxMapMethod("del", 1, a => {
                 LoxOps.CheckMapKey(a[0]);
                 Remove(a[0]);
                 return null;
             });
         case "keys":
-            return new LoxNative("keys", 0, a => {
+            return new LoxMapMethod("keys", 0, a => {
                 var list = new LoxList();
                 foreach (var e in Entries()) {
                     list.Elements.Add(e.Key);
@@ -139,7 +140,7 @@ public sealed class LoxMap {
                 return list;
             });
         case "values":
-            return new LoxNative("values", 0, a => {
+            return new LoxMapMethod("values", 0, a => {
                 var list = new LoxList();
                 foreach (var e in Entries()) {
                     list.Elements.Add(e.Value);
@@ -147,7 +148,7 @@ public sealed class LoxMap {
                 return list;
             });
         case "entries":
-            return new LoxNative("entries", 0, a => {
+            return new LoxMapMethod("entries", 0, a => {
                 var list = new LoxList();
                 foreach (var e in Entries()) {
                     var pair = new LoxList();
@@ -161,4 +162,26 @@ public sealed class LoxMap {
             return null;
         }
     }
+}
+
+/// <summary>
+/// A map's native method, read as a value through GET_PROPERTY (e.g.
+/// <c>m.has</c>) rather than called immediately. The native VM keeps one
+/// ObjNative per method name in a class-wide table shared by every ObjMap
+/// (src/vm.cpp, Op::GET_PROPERTY's <c>isMap</c> branch), so
+/// <c>m1.has == m2.has</c> is true there even though <c>m1</c> and
+/// <c>m2</c> are different maps. LoxMap has no such shared table - each
+/// instance's closure still binds to that one instance - so this class
+/// carries its method name for LoxOps.Equal to compare instead.
+/// </summary>
+internal sealed class LoxMapMethod : ILoxCallable {
+    public readonly string Name;
+    private readonly LoxNative m_native;
+
+    public LoxMapMethod(string name, int arity, LoxNative.Fn fn) {
+        Name = name;
+        m_native = new LoxNative(name, arity, fn);
+    }
+
+    public object Call(object[] args) => m_native.Call(args);
 }

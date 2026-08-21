@@ -103,6 +103,16 @@ public static class LoxOps {
         if (a is string sa && b is string sb) {
             return sa == sb;
         }
+        // A map/file method value is a fresh, per-instance closure here (no
+        // class-wide method table to share, unlike src/vm.cpp's ObjClass),
+        // so its identity is carried in its name instead - see LoxMapMethod
+        // and LoxFileMethod.
+        if (a is LoxMapMethod ma && b is LoxMapMethod mb) {
+            return ma.Name == mb.Name;
+        }
+        if (a is LoxFileMethod fa && b is LoxFileMethod fb) {
+            return fa.Name == fb.Name;
+        }
         return ReferenceEquals(a, b); // nil (null == null) and every identity-equality object type
     }
 

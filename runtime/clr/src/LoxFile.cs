@@ -16,9 +16,11 @@ public sealed class LoxFile {
     public readonly bool Readable;
     public readonly bool Writable;
 
-    // Per-instance cache so repeated GET_PROPERTY reads of the same method
-    // name give back the identical object, matching native's ObjNative
-    // identity: `f.read == f.read` must be true.
+    // Per-instance cache so a repeat GET_PROPERTY read of the same method
+    // name gives back the identical object rather than reallocating.
+    // Cross-instance identity (`f1.write == f2.write`) does not come from
+    // this cache being shared - it isn't - but from LoxFileMethod's
+    // name-based equality: see LoxOps.Equal.
     private readonly Dictionary<string, ILoxCallable> m_methodCache = new();
 
     private LoxFile(FileStream stream, bool readable, bool writable) {
@@ -173,23 +175,23 @@ public sealed class LoxFile {
     private ILoxCallable CreateMethod(string name) {
         switch (name) {
         case "read":
-            return new LoxNative("read", 0, a => Read());
+            return new LoxFileMethod("read", 0, a => Read());
         case "readline":
-            return new LoxNative("readline", 0, a => Readline());
+            return new LoxFileMethod("readline", 0, a => Readline());
         case "readlines":
-            return new LoxNative("readlines", 0, a => Readlines());
+            return new LoxFileMethod("readlines", 0, a => Readlines());
         case "write":
-            return new LoxNative("write", 1, a => {
+            return new LoxFileMethod("write", 1, a => {
                 Write(CheckStringArg(a[0], "write"));
                 return null;
             });
         case "writeline":
-            return new LoxNative("writeline", 1, a => {
+            return new LoxFileMethod("writeline", 1, a => {
                 Writeline(CheckStringArg(a[0], "writeline"));
                 return null;
             });
         case "close":
-            return new LoxNative("close", 0, a => {
+            return new LoxFileMethod("close", 0, a => {
                 Close();
                 return null;
             });
@@ -204,4 +206,26 @@ public sealed class LoxFile {
         }
         return s;
     }
+}
+
+/// <summary>
+/// A file's native method, read as a value through GET_PROPERTY (e.g.
+/// <c>f.write</c>) rather than called immediately. The native VM keeps one
+/// ObjNative per method name in a class-wide table shared by every ObjFile
+/// (src/vm.cpp, Op::GET_PROPERTY's <c>isFile</c> branch), so
+/// <c>f1.write == f2.write</c> is true there even though <c>f1</c> and
+/// <c>f2</c> are different files. LoxFile has no such shared table - each
+/// instance's closure still binds to that one instance - so this class
+/// carries its method name for LoxOps.Equal to compare instead.
+/// </summary>
+internal sealed class LoxFileMethod : ILoxCallable {
+    public readonly string Name;
+    private readonly LoxNative m_native;
+
+    public LoxFileMethod(string name, int arity, LoxNative.Fn fn) {
+        Name = name;
+        m_native = new LoxNative(name, arity, fn);
+    }
+
+    public object Call(object[] args) => m_native.Call(args);
 }
