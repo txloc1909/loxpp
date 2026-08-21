@@ -675,7 +675,12 @@ public static class LoxOps {
         if (v is LoxClosure closure) {
             return closure.Name == null ? "<script>" : $"<fn {closure.Name}>";
         }
-        if (v is LoxNative) {
+        // src/vm.cpp's Op::GET_PROPERTY pushes an unbound ObjNative for
+        // both a map method and a file method (the map/file branches
+        // there), and stringifyObj gives every ObjType::NATIVE the same
+        // text - so a map or file method value prints identically to any
+        // other native function.
+        if (v is LoxNative || v is LoxMapMethod || v is LoxFileMethod) {
             return "<native fn>";
         }
         if (v is LoxBoundMethod bound) {
