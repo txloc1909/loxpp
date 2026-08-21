@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>LoxRuntimeTests</RootNamespace>
+    <AssemblyName>LoxRuntimeTests</AssemblyName>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- No test framework package: the image has no network at test time
+         (see RT.md), so this project stays dependency-free and restores
+         entirely from the SDK's own reference assemblies. -->
+    <ProjectReference Include="../LoxRuntime.csproj" />
+  </ItemGroup>
+
+</Project>
