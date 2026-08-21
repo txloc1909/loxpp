@@ -58,6 +58,16 @@ if(LOXPP_JVM_BACKEND)
     target_compile_definitions(loxpp PRIVATE LOXPP_JVM_BACKEND)
 endif()
 
+# The CLR code generator (backend node C-N4 onward). Default ON so CI builds
+# and checks it; OFF drops --target clr from the CLI for a build that wants
+# the native VM (and, independently, the JVM backend) only.
+option(LOXPP_CLR_BACKEND
+    "Build the CLR backend code generator (--target clr)" ON)
+if(LOXPP_CLR_BACKEND)
+    target_sources(loxpp PRIVATE src/backend/clr_emitter.cpp)
+    target_compile_definitions(loxpp PRIVATE LOXPP_CLR_BACKEND)
+endif()
+
 # Debug output flags: default ON for Debug builds, OFF otherwise.
 string(TOUPPER "${CMAKE_BUILD_TYPE}" _build_type_upper)
 if(_build_type_upper STREQUAL "DEBUG")
