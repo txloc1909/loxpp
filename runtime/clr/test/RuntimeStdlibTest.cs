@@ -41,6 +41,11 @@ public static class RuntimeStdlibTest {
         t.CheckEquals(5.0, ((ILoxCallable)((LoxInstance)math).Fields["min"])
             .Call(new object[] { double.NaN, 5.0 }), "math.min ignores a NaN operand");
         t.Check((double)((LoxInstance)math).Fields["pi"] > 3.14, "math.pi is present");
+        // Bits, not value: double.IsNaN is true for both signs of NaN, but
+        // FormatNumber reads the sign bit, so the bit pattern is what must
+        // match src/math.cpp's std::numeric_limits<double>::quiet_NaN().
+        t.CheckEquals(0x7FF8000000000000L, BitConverter.DoubleToInt64Bits((double)((LoxInstance)math).Fields["nan"]),
+            "math.nan has the same bit pattern as C's quiet_NaN(), not .NET's negative-signed double.NaN");
 
         CheckOpenRoundtrip(t, globals);
         CheckOsAccess(t, globals);

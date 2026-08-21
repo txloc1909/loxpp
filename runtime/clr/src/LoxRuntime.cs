@@ -236,7 +236,11 @@ public static class LoxRuntime {
         math.Fields["pi"] = Math.PI;
         math.Fields["e"] = Math.E;
         math.Fields["inf"] = double.PositiveInfinity;
-        math.Fields["nan"] = double.NaN;
+        // Not double.NaN: its bit pattern is 0xFFF8000000000000 (sign bit
+        // set), so FormatNumber prints "-nan". src/math.cpp defines this
+        // constant with std::numeric_limits<double>::quiet_NaN(), bits
+        // 0x7FF8000000000000 (sign bit clear), which prints "nan".
+        math.Fields["nan"] = BitConverter.Int64BitsToDouble(0x7FF8000000000000);
         globals.Define("math", math);
     }
 
