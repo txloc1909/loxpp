@@ -54,10 +54,13 @@ namespace clr {
 std::string ilasmStringLiteral(const std::string& raw);
 
 // Formats a double's raw IEEE-754 bit pattern as a complete ilasm `ldc.r8`
-// operand: `(b0 b1 ... b7)`, little-endian (this project's build and CI
-// hosts are x86_64/ARM64, matching the byte order the CLI keeps a double
-// in memory). Measured against ilasm 8.0.0: its own decimal/exponent
-// `ldc.r8` lexer round-tripped every value this pass tried, including
+// operand: `(b0 b1 ... b7)`, little-endian per ECMA-335's fixed byte order
+// for a `ldc.r8` byte-array operand in the IL stream — a rule of the format,
+// not a fact about the host. Each byte is produced by shifting the integer
+// bit pattern, not by reading host memory, so the output is the same on
+// every host regardless of its native byte order. Measured against ilasm
+// 8.0.0: its own decimal/exponent `ldc.r8` lexer round-tripped every value
+// this pass tried, including
 // 16777217.0 (the float-precision trap that forces the JVM/jasmin backend
 // to a similar bits-based literal, jvm_emitter.h) — but the byte-array form
 // is exact by construction for every double, including subnormals and a

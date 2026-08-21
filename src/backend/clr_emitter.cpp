@@ -8,6 +8,7 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <cstdio>
 #include <sstream>
 #include <stdexcept>
 #include <string>
