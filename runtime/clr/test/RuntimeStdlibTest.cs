@@ -78,6 +78,7 @@ public static class RuntimeStdlibTest {
             : true, "env() reads the environment");
         t.Check(Call(globals, "env", "LOXPP_OS_API_NO_SUCH_VAR_XYZ") == null, "env() returns nil for an unknown name");
         t.CheckThrows(() => Call(globals, "env", 42.0), typeof(LoxError), "env() rejects a non-string");
+        CheckEnvOfEmptyValueIsNotNil(t, globals);
 
         // exit(): the terminating path cannot be asserted in-process; the
         // rejection paths can be.
@@ -94,6 +95,23 @@ public static class RuntimeStdlibTest {
         t.CheckThrows(() => Call(globals, "sleep", "long"), typeof(LoxError), "sleep() rejects a non-number");
 
         CheckFsOsAccess(t, globals);
+    }
+
+    /// <summary>
+    /// A variable the shell exports empty is still DEFINED, so env() must
+    /// return the empty string for it, not nil - the same distinction
+    /// getenv(3) and the native VM make. tools/test_lox_rt_clr.sh exports
+    /// LOXPP_EMPTY_PROBE this way; running the test binary directly, with
+    /// no such export, must fail this one check loudly rather than pass
+    /// on a fixture that was never there, so this asserts the fixture's
+    /// own presence first.
+    /// </summary>
+    private static void CheckEnvOfEmptyValueIsNotNil(TestSupport t, LoxGlobals globals) {
+        const string name = "LOXPP_EMPTY_PROBE";
+        t.CheckEquals("", Environment.GetEnvironmentVariable(name),
+            $"{name} must be exported empty (not unset) before this test runs - " +
+            "see tools/test_lox_rt_clr.sh, which exports it this way");
+        t.CheckEquals("", Call(globals, "env", name), "env() returns the empty string for a variable defined empty");
     }
 
     private static void CheckFsOsAccess(TestSupport t, LoxGlobals globals) {
