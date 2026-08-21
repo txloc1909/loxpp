@@ -59,6 +59,13 @@ public static class FileTest {
 
             t.CheckThrows(() => LoxFile.Open(path, "bogus"), typeof(LoxError), "open() rejects an invalid mode");
 
+            // r+ must behave like C fopen(path, "r+"): fail when the path
+            // does not exist, and - just as importantly - not create it.
+            string missingPath = Path.Combine(Path.GetTempPath(), $"lox-rt-file-rplus-missing-{System.Guid.NewGuid():N}.txt");
+            t.CheckThrows(() => LoxFile.Open(missingPath, "r+"), typeof(LoxError),
+                "open(missing path, \"r+\") fails instead of creating the file");
+            t.Check(!File.Exists(missingPath), "open(missing path, \"r+\") leaves no file behind even after it fails");
+
             // File I/O must round-trip a raw high byte 1:1, never as a
             // 2-byte UTF-8 sequence - open()'s Latin1 boundary guarantees
             // this.

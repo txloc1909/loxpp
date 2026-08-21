@@ -54,7 +54,10 @@ public sealed class LoxFile {
         case "r+":
             readable = true;
             writable = true;
-            fileMode = FileMode.OpenOrCreate;
+            // FileMode.Open, not OpenOrCreate: C fopen(path, "r+") fails
+            // when path does not exist, and this mode must fail the same
+            // way rather than create the file.
+            fileMode = FileMode.Open;
             access = FileAccess.ReadWrite;
             break;
         default:
