@@ -55,6 +55,16 @@ public static class SequenceTest {
         t.CheckThrows(() => LoxOps.Slice("hello", -1.0, 2.0), typeof(LoxError), "slice rejects negative index");
         t.CheckThrows(() => LoxOps.Slice("hello", 1.5, 2.0), typeof(LoxError), "slice rejects non-integer index");
         t.CheckThrows(() => LoxOps.Slice(true, 0.0, 1.0), typeof(LoxError), "slice requires list or string");
+        // An index past int.MaxValue must clamp to the sequence length like
+        // any other out-of-range index, not cast to an unrelated (possibly
+        // negative) int first and throw a raw ArgumentOutOfRangeException.
+        double pastIntMax = (double)int.MaxValue + 1000.0;
+        t.CheckEquals("ello", LoxOps.Slice("hello", 1.0, pastIntMax),
+            "slice clamps an end past int.MaxValue instead of throwing");
+        t.CheckEquals("hello", LoxOps.Slice("hello", 0.0, pastIntMax),
+            "slice(0, past int.MaxValue) still returns the whole string");
+        t.CheckEquals("", LoxOps.Slice("hello", pastIntMax, pastIntMax + 1.0),
+            "slice with both indices past int.MaxValue clamps to an empty result, not a thrown exception");
 
         t.CheckEquals(2.0, LoxOps.GetIndex(nums, 1.0), "getIndex(list,1)");
         t.CheckEquals("e", LoxOps.GetIndex("hello", 1.0), "getIndex(string,1)");

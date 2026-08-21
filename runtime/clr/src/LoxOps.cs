@@ -164,7 +164,8 @@ public static class LoxOps {
         throw new LoxError("Right operand of 'in' must be a list, string, or map.");
     }
 
-    private static int SliceIndex(object v) {
+    /// <summary>Validates a slice index down to a non-negative integral double - no upper bound yet, matching Op::SLICE (src/vm.cpp) before the sequence length is known.</summary>
+    private static double ValidateSliceIndex(object v) {
         if (v is not double d) {
             throw new LoxError("Slice index must be a number.");
         }
@@ -174,7 +175,18 @@ public static class LoxOps {
         if (d < 0.0) {
             throw new LoxError("Slice index must be non-negative.");
         }
-        return (int)d;
+        return d;
+    }
+
+    /// <summary>
+    /// Clamps in the double domain, matching Op::SLICE's
+    /// <c>std::min(startD, (double)n)</c>, then converts to int. Casting to
+    /// int before clamping (the previous bug here) is unchecked in C#: a
+    /// double past int.MaxValue becomes an unrelated, possibly negative int
+    /// instead of a clamped, in-range one.
+    /// </summary>
+    private static int ClampSliceIndex(double d, int size) {
+        return (int)Math.Min(d, (double)size);
     }
 
     /// <summary>[seq, start, end] - the same parameter order the operand stack holds bottom-up.</summary>
@@ -182,13 +194,13 @@ public static class LoxOps {
         if (seq is not LoxList && seq is not string) {
             throw new LoxError("Slice requires a List or String.");
         }
-        int start = SliceIndex(startVal);
-        int end = SliceIndex(endVal);
+        double startD = ValidateSliceIndex(startVal);
+        double endD = ValidateSliceIndex(endVal);
         if (seq is LoxList list) {
             List<object> src = list.Elements;
             int n = src.Count;
-            int s = Math.Min(start, n);
-            int e = Math.Min(end, n);
+            int s = ClampSliceIndex(startD, n);
+            int e = ClampSliceIndex(endD, n);
             var result = new LoxList();
             if (s < e) {
                 result.Elements.AddRange(src.GetRange(s, e - s));
@@ -197,8 +209,8 @@ public static class LoxOps {
         }
         string str = (string)seq;
         int strN = str.Length;
-        int strS = Math.Min(start, strN);
-        int strE = Math.Min(end, strN);
+        int strS = ClampSliceIndex(startD, strN);
+        int strE = ClampSliceIndex(endD, strN);
         return (strS < strE) ? str.Substring(strS, strE - strS) : "";
     }
 
