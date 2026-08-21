@@ -8,16 +8,23 @@
 #include <string>
 #include <vector>
 
-#ifdef LOXPP_JVM_BACKEND
+#if defined(LOXPP_JVM_BACKEND) || defined(LOXPP_CLR_BACKEND)
 #include "backend/abstract_stack.h"
 #include "backend/chunk_decoder.h"
-#include "backend/jvm_emitter.h"
 #include "compiler.h"
 #include "memory_manager.h"
 
 #include <filesystem>
 #include <system_error>
 #include <vector>
+#endif
+
+#ifdef LOXPP_JVM_BACKEND
+#include "backend/jvm_emitter.h"
+#endif
+
+#ifdef LOXPP_CLR_BACKEND
+#include "backend/clr_emitter.h"
 #endif
 
 #ifdef LOXPP_USE_READLINE
@@ -184,11 +191,68 @@ static int runJvmTarget(const std::string& outDir, const std::string& path) {
 }
 #endif
 
+#ifdef LOXPP_CLR_BACKEND
+// Compiles `path` and writes <outDir>/LoxMain.il — the top-level script,
+// straight-line code only (clr_emitter.h). Does not assemble or run
+// anything — tools/loxpp_clr.sh chains ilasm and dotnet on top. Exit codes
+// mirror runJvmTarget's: 65 for a compile error, 70 for an opcode this node
+// does not lower yet, 74 for a file-system failure.
+static int runClrTarget(const std::string& outDir, const std::string& path) {
+    std::string source = readFile(path);
+
+    MemoryManager mm;
+    ObjFunction* script = compile(source, &mm);
+    if (script == nullptr) {
+        return 65;
+    }
+
+    std::string ilSource;
+    try {
+        DecodedFunction tree = decodeFunctionTree(script);
+        FunctionStackAnalysis analysis = analyzeStack(tree);
+        ilSource = clr::emitScript(tree, analysis, "LoxMain");
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "loxpp --target clr: %s\n", e.what());
+        return 70;
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(outDir, ec);
+    if (ec) {
+        std::fprintf(stderr,
+                     "loxpp --target clr: cannot create directory %s: %s\n",
+                     outDir.c_str(), ec.message().c_str());
+        return 74;
+    }
+
+    // Remove every stale *.il file first, same reason runJvmTarget clears
+    // *.j: tools/clr_run.sh assembles every *.il file it finds in outDir.
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator(outDir, ec)) {
+        if (entry.path().extension() == ".il") {
+            std::filesystem::remove(entry.path(), ec);
+        }
+    }
+
+    std::string outPath = outDir + "/LoxMain.il";
+    std::ofstream out(outPath, std::ios::binary);
+    if (!out) {
+        std::fprintf(stderr, "loxpp --target clr: cannot write %s\n",
+                     outPath.c_str());
+        return 74;
+    }
+    out << ilSource;
+    return 0;
+}
+#endif
+
 int main(int argc, const char* argv[]) {
-#ifdef LOXPP_JVM_BACKEND
-    // loxpp --target jvm --out-dir <dir> program.lox — compiles only, never
-    // runs the program. Only intercepted when the first argument is exactly
-    // "--target", so plain `loxpp [path]` keeps its existing behaviour.
+#if defined(LOXPP_JVM_BACKEND) || defined(LOXPP_CLR_BACKEND)
+    // loxpp --target {jvm,clr} --out-dir <dir> program.lox — compiles only,
+    // never runs the program. Only intercepted when the first argument is
+    // exactly "--target", so plain `loxpp [path]` keeps its existing
+    // behaviour. Which `target` values are recognized here depends on which
+    // backends this build was configured with.
     if (argc >= 2 && std::string(argv[1]) == "--target") {
         std::string target;
         std::string outDir;
@@ -203,13 +267,25 @@ int main(int argc, const char* argv[]) {
                 scriptPath = arg;
             }
         }
-        if (target != "jvm" || outDir.empty() || scriptPath.empty()) {
-            std::fprintf(
-                stderr,
-                "Usage: loxpp --target jvm --out-dir <dir> program.lox\n");
+        if (outDir.empty() || scriptPath.empty()) {
+            std::fprintf(stderr, "Usage: loxpp --target {jvm,clr} --out-dir "
+                                 "<dir> program.lox\n");
             return 64;
         }
-        return runJvmTarget(outDir, scriptPath);
+#ifdef LOXPP_JVM_BACKEND
+        if (target == "jvm") {
+            return runJvmTarget(outDir, scriptPath);
+        }
+#endif
+#ifdef LOXPP_CLR_BACKEND
+        if (target == "clr") {
+            return runClrTarget(outDir, scriptPath);
+        }
+#endif
+        std::fprintf(
+            stderr,
+            "Usage: loxpp --target {jvm,clr} --out-dir <dir> program.lox\n");
+        return 64;
     }
 #endif
 
