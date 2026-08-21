@@ -3,12 +3,21 @@ export const meta = {
   description: 'Drive a DAG of backend implementation nodes to green, one PR per node, via implementer/reviewer/researcher agents. See notes/multi-agent-playbook.md.',
   whenToUse: 'Building a new Lox++ compiler backend (or any DAG-shaped, node-by-node implementation effort) with a multi-agent implementer/reviewer/researcher loop.',
   phases: [
-    // Template only — meta.phases must stay a literal, so it cannot be
-    // derived from args.nodes. Before a run, replace this with that
-    // mission's real node ids/titles so the progress-tree preview is
-    // accurate. A phase() call for an id missing here still works; it just
-    // gets its own unlabeled progress group instead of a named preview.
-    { title: '<NODE-ID>', detail: '<one-line node description>' },
+    // meta.phases must stay a literal, so it cannot be derived from
+    // args.nodes. Replace this list with the running mission's real node
+    // ids/titles so the progress-tree preview is accurate. A phase() call
+    // for an id missing here still works; it just gets its own unlabeled
+    // progress group instead of a named preview.
+    { title: 'C-RT', detail: 'C# runtime library, its tests, and the CLR link smoke test' },
+    { title: 'C-N4', detail: 'straight-line CIL emit, --target clr, and the run harness' },
+    { title: 'C-N5', detail: 'control flow, labels, and IL legality' },
+    { title: 'C-N6', detail: 'functions and calls' },
+    { title: 'C-N7', detail: 'closures and upvalues [BUG GATE]' },
+    { title: 'C-N8', detail: 'classes, methods, super, and the shared depth-0 authority' },
+    { title: 'C-N9', detail: 'aggregates, slices, membership, and iterators' },
+    { title: 'C-N10', detail: 'match and enum dispatch' },
+    { title: 'C-N11', detail: 'differential corpus gate, native vs JVM vs CLR' },
+    { title: 'C-N12', detail: 'self-hosted interpreter gate [MISSION GATE]' },
   ],
 }
 
@@ -59,6 +68,7 @@ const IMPL_SCHEMA = {
     branch: { type: 'string' },
     summary: { type: 'string', description: 'Simplified Technical English. What you built and how you proved it.' },
     checkpoint_evidence: { type: 'string', description: 'The real command output that proves the node checkpoint.' },
+    head_sha: { type: 'string', description: 'The commit SHA now at the tip of the pushed branch on origin. Read it back with `git rev-parse origin/<branch>` after you push; do not report a local-only commit.' },
     blocker: { type: 'string', description: 'Only when status is blocked_surprise or abort_dependency. State the exact problem and what you already tried.' },
   },
   required: ['status', 'summary'],
@@ -96,6 +106,7 @@ const FIX_SCHEMA = {
     addressed_tags: { type: 'array', items: { type: 'string' } },
     rebutted_tags: { type: 'array', items: { type: 'string' } },
     summary: { type: 'string' },
+    head_sha: { type: 'string', description: 'The commit SHA now at the tip of the pushed branch on origin. Read it back with `git rev-parse origin/<branch>` after you push; do not report a local-only commit.' },
     blocker: { type: 'string' },
   },
   required: ['status', 'summary'],
@@ -204,6 +215,13 @@ function implPrompt(id) {
     '     that predates this mission — do not copy a defect or a mission-scoped habit (like citing a',
     '     review-round number) from a recent, mission-authored change just because it is nearby.',
     '  3. Write the code. Commit atomically with Conventional Commits. Every commit must build.',
+    '     Commit as soon as the code compiles, and push after each commit. Do not hold a large',
+    '     unit of work uncommitted; an agent that reaches its step limit before it commits loses',
+    '     the work and costs a full review round.',
+    '     Write each code comment for a maintainer who cannot see this pull request, this review',
+    '     thread, or this mission. A comment that needs the thread to make sense is in the wrong',
+    '     place: the invariant or trade-off goes in the code, the reason the code changed at this',
+    '     time goes in the commit message body and the pull request reply.',
     '  4. Verify your node checkpoint inside the container. Capture the real command output.',
     '  5. Format and lint: clang-format on src and test, clang-tidy on src.',
     '  6. Push the branch, then handle the PR:',
@@ -364,6 +382,35 @@ function fixPrompt(id, pr, round, reviewSummary) {
     '  7. Post one summary comment that lists every tag and its state.',
     '',
     'Do not merge. Escalate with "blocked_surprise" or "abort_dependency" only under the brief rules.',
+  ].join('\n')
+}
+
+function repushPrompt(id, pr, sha) {
+  return common(id) + [
+    'ROLE: IMPLEMENTER. Tag every GitHub message with "[Implementer]".',
+    'PULL REQUEST: #' + pr,
+    '',
+    'The branch tip on origin is still ' + sha + '. That is the same commit the last review',
+    'round already read. So one of these is true, and you must find out which:',
+    '  a. You finished work in your worktree and it is not committed.',
+    '  b. You committed and did not push.',
+    '  c. You pushed to the wrong branch or the wrong remote.',
+    '  d. The work is really pushed and the reported SHA was wrong.',
+    '',
+    'TASK: get the real state onto origin, then report the true SHA.',
+    '',
+    'Steps:',
+    '  1. Go to your worktree: `' + REPO + '/.claude/worktrees/loxpp-<branch-with-dashes>`.',
+    '     Run `git status`, `git log --oneline -5`, and `git log --oneline origin/' + NODES[id].branch + ' -3`.',
+    '  2. If uncommitted work is present and it compiles, commit it now, atomically.',
+    '     Do not wait to finish a larger unit of work first. That is how two full review',
+    '     rounds were lost on the last mission.',
+    '  3. Push to `origin ' + NODES[id].branch + '`.',
+    '  4. Read the tip back: `git fetch origin && git rev-parse origin/' + NODES[id].branch + '`.',
+    '     Return that value in head_sha. Do not report a local-only commit.',
+    '  5. If case (d) is true and nothing needed a push, return the real SHA and say so.',
+    '',
+    'Return status "pushed" with the true head_sha.',
   ].join('\n')
 }
 
@@ -571,14 +618,40 @@ async function runNode(id, res) {
   const disputeStreak = {}
   const fileStreak = {}   // consecutive rounds a file yielded a blocking finding
   let approved = false
+  let reviewedSha = null  // branch tip the last review round actually read
+  let lastFixSha = impl.head_sha || null
 
   for (let round = 1; round <= MAX_REVIEW_ROUNDS; round++) {
     result.rounds = round
+
+    // A review round against an unchanged branch tip can only repeat its own
+    // findings, and a review round is the most expensive step in this loop.
+    // Three rounds were lost this way on the last mission, each time an
+    // implementer reached its step limit after the code compiled but before it
+    // could commit, push, or reply. Send the implementer back for the push
+    // instead of paying for a review that reads the same commit twice.
+    let repushes = 0
+    while (round > 1 && lastFixSha && lastFixSha === reviewedSha && repushes < 2) {
+      repushes += 1
+      log('node ' + id + ': branch tip did not move; implementer re-pushes (attempt ' + repushes + ')')
+      const rp = await agent(repushPrompt(id, pr, reviewedSha), {
+        model: 'sonnet', label: 'impl:' + id + ':repush' + round + '-' + repushes, phase: ph, schema: FIX_SCHEMA,
+      })
+      if (!rp) { result.status = 'agent_died'; return result }
+      result.log.push('repush-' + round + '-' + repushes + ': ' + rp.status + ' sha=' + (rp.head_sha || '?'))
+      if (isAbort(rp)) {
+        result.status = 'abort'
+        result.abort_report = rp.blocker || rp.summary
+        return result
+      }
+      if (rp.head_sha) lastFixSha = rp.head_sha
+    }
 
     const rev = await agent(reviewPrompt(id, pr, round), {
       model: 'opus', label: 'review:' + id + ':r' + round, phase: ph, schema: REVIEW_SCHEMA,
     })
     if (!rev) { result.status = 'agent_died'; return result }
+    reviewedSha = lastFixSha
     result.log.push('review-' + round + ': approved=' + rev.approved + ' verified=' + rev.verified_independently + ' - ' + rev.summary)
 
     if (rev.approved && rev.verified_independently) { approved = true; break }
@@ -645,6 +718,7 @@ async function runNode(id, res) {
     })
     if (!fix) { result.status = 'agent_died'; return result }
     result.log.push('fix-' + round + ': ' + fix.status + ' - ' + fix.summary)
+    if (fix.head_sha) lastFixSha = fix.head_sha
 
     let fixUnblocks = 0
     while (fix && fix.status === 'blocked_surprise' && fixUnblocks < MAX_UNBLOCKS) {
@@ -664,6 +738,7 @@ async function runNode(id, res) {
       })
       if (!fix) { result.status = 'agent_died'; return result }
       result.log.push('fix-resume-' + round + '-' + fixUnblocks + ': ' + fix.status)
+      if (fix.head_sha) lastFixSha = fix.head_sha
     }
 
     if (isAbort(fix)) {
