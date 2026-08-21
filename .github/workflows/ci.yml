@@ -211,6 +211,16 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "tools/check_jvm_probes.sh"
 
+      # Needs build/loxpp (LOXPP_CLR_BACKEND, default ON; built above) and
+      # runtime/clr/LoxRuntime.dll (built above by tools/build_lox_rt_clr.sh).
+      - name: Check CLR emission probes
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "tools/check_clr_probes.sh"
+
       # Node N11, the parity gate. Checkpoint 1: every probe is
       # byte-identical on native and JVM stdout (differential runner, not
       # only the check_jvm_probes.sh diff loop above).
