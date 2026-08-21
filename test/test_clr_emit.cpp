@@ -308,6 +308,77 @@ TEST(EmitScript, SetGlobalPeekOfNamedLocalLoadsInsteadOfDup) {
 }
 
 // ---------------------------------------------------------------------------
+// Comparisons, MODULO, NOT, and the TRUE/FALSE/NIL literals — the opcode
+// family notes/translation-probes/30_bool_compare_and_string_literal.lox
+// drives end to end through ilasm/dotnet; these tie the same family to the
+// exact instruction text at the C++ level.
+// ---------------------------------------------------------------------------
+
+TEST(EmitScript, ComparisonOpsCallLoxOpsAndBoxTheResult) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("print 1 == 1;\nprint 1 > 2;\nprint 1 < 2;\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("call bool [LoxRuntime]Lox.LoxOps::Equal(object, "
+                     "object)\n    box [System.Runtime]System.Boolean"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("call bool [LoxRuntime]Lox.LoxOps::Greater(object, "
+                     "object)\n    box [System.Runtime]System.Boolean"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("call bool [LoxRuntime]Lox.LoxOps::Less(object, "
+                     "object)\n    box [System.Runtime]System.Boolean"),
+              std::string::npos)
+        << j;
+}
+
+TEST(EmitScript, NotEqualGreaterEqualAndLessEqualComposeWithNot) {
+    // compiler.cpp's Compiler::binary: != is EQUAL+NOT, >= is LESS+NOT, <=
+    // is GREATER+NOT — no dedicated opcode of its own.
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("print 1 != 2;\nprint 1 >= 2;\nprint 1 <= 2;\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_EQ(countOccurrences(j, "LoxOps::Equal"), 1);
+    EXPECT_EQ(countOccurrences(j, "LoxOps::Less"), 1);
+    EXPECT_EQ(countOccurrences(j, "LoxOps::Greater"), 1);
+    EXPECT_EQ(countOccurrences(j, "LoxOps::Not(object)"), 3);
+}
+
+TEST(EmitScript, ModuloCallsLoxOpsModulo) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("print 7 % 3;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("call object [LoxRuntime]Lox.LoxOps::Modulo(object, "
+                     "object)"),
+              std::string::npos)
+        << j;
+}
+
+TEST(EmitScript, TrueFalseAndNilLoadTheirOwnLiteralAndBoxWhereNeeded) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("print true;\nprint false;\nprint nil;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("ldc.i4.1\n    box [System.Runtime]System.Boolean\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("ldc.i4.0\n    box [System.Runtime]System.Boolean\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("ldnull\n"), std::string::npos) << j;
+}
+
+// ---------------------------------------------------------------------------
 // Builder::emit's underflow guard, generalized: a hand-built chunk drives an
 // instruction whose read count exceeds what its net stack delta alone would
 // reveal (NOT/NEGATE net 0 but read 1; a binary/comparison op nets -1 but

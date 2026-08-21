@@ -1,0 +1,25 @@
+// Every comparison compiles to one of EQUAL, GREATER, or LESS, sometimes
+// paired with a following NOT for the "not" spellings (compiler.cpp's
+// Compiler::binary): != is EQUAL+NOT, >= is LESS+NOT, <= is GREATER+NOT.
+// A standalone NOT, MODULO, the TRUE/FALSE/NIL literals printed on their
+// own (not just as a branch condition), and a string CONSTANT with the
+// bytes an assembler's own literal syntax treats specially (a quote, a
+// backslash, a tab) round out this file. No probe before this one reaches
+// any of these.
+print 1 == 1;
+print 1 != 2;
+print 2 > 1;
+print 1 > 2;
+print 1 >= 1;
+print 2 >= 3;
+print 1 < 2;
+print 2 < 1;
+print 1 <= 1;
+print 2 <= 1;
+print 7 % 3;
+print !true;
+print !false;
+print true;
+print false;
+print nil;
+print "quote \" backslash \\ tab\tend";
