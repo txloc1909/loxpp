@@ -1,4 +1,4 @@
-// test_clr_emit.cpp — CLR straight-line emitter (node C-N4).
+// test_clr_emit.cpp — CLR straight-line emitter.
 //
 // Checkpoint (see the node's own specification):
 //   tools/loxpp_clr.sh notes/translation-probes/{01,15,18,19,20,21}_*.lox
@@ -258,10 +258,10 @@ TEST(EmitScript, GlobalsRoundTripThroughDefineSetGet) {
 }
 
 // ---------------------------------------------------------------------------
-// R1-equivalent regression: a SET_LOCAL/SET_GLOBAL peek whose source value
-// the shared abstract-stack pass already folded into a named local (the
-// eager invisible-var materialization, abstract_stack.h) must reload that
-// local, not assume a CIL evaluation-stack temporary that was never pushed.
+// Regression: a SET_LOCAL/SET_GLOBAL peek whose source value the shared
+// abstract-stack pass already folded into a named local (the eager
+// invisible-var materialization, abstract_stack.h) must reload that local,
+// not assume a CIL evaluation-stack temporary that was never pushed.
 // See clr_emitter.h's own top-of-file note.
 // ---------------------------------------------------------------------------
 

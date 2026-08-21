@@ -65,7 +65,7 @@ rm -f "$output_dll"
 # not proof of anything beyond "ilasm did not crash" — the real proof is
 # the file-existence check below, so run it and keep its output only to
 # show the caller, on failure, not to judge success by (mirrors
-# tools/jvm_run.sh's own reasoning about jasmin's exit code, R1/R8 there).
+# tools/jvm_run.sh's own reasoning about jasmin's exit code).
 ilasm_out="$(ilasm -exe -output:"$output_dll" "${il_files[@]}" 2>&1)" || true
 
 if [ ! -f "$output_dll" ]; then
@@ -82,7 +82,7 @@ if [ -z "$runtime_version" ]; then
 fi
 
 # ilasm emits no runtimeconfig.json, and dotnet refuses to run an assembly
-# without one (notes/backend-implementation-dag.md, PR #94). The tfm here is
+# without one (notes/backend-implementation-dag.md). The tfm here is
 # derived from the discovered runtime, not hardcoded, so a runtime upgrade
 # in the image cannot silently pair a stale tfm with a newer framework
 # version (mirrors tools/check_managed_toolchains.sh's own derivation).

@@ -213,7 +213,7 @@ jobs:
 
       # Needs build/loxpp (LOXPP_CLR_BACKEND, default ON; built above) and
       # runtime/clr/LoxRuntime.dll (built above by tools/build_lox_rt_clr.sh).
-      - name: Check CLR emission probes (C-N4)
+      - name: Check CLR emission probes
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \

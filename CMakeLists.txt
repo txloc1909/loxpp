@@ -58,9 +58,9 @@ if(LOXPP_JVM_BACKEND)
     target_compile_definitions(loxpp PRIVATE LOXPP_JVM_BACKEND)
 endif()
 
-# The CLR code generator (backend node C-N4 onward). Default ON so CI builds
-# and checks it; OFF drops --target clr from the CLI for a build that wants
-# the native VM (and, independently, the JVM backend) only.
+# The CLR code generator. Default ON so CI builds and checks it; OFF drops
+# --target clr from the CLI for a build that wants the native VM (and,
+# independently, the JVM backend) only.
 option(LOXPP_CLR_BACKEND
     "Build the CLR backend code generator (--target clr)" ON)
 if(LOXPP_CLR_BACKEND)

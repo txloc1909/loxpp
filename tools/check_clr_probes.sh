@@ -2,11 +2,11 @@
 #
 # tools/loxpp_clr.sh's stdout on each probe must be identical to build/loxpp's
 # own stdout, byte for byte. Compares with diff, not by eye. The CLR twin of
-# tools/check_jvm_probes.sh, scoped to this node's straight-line opcode set
+# tools/check_jvm_probes.sh, scoped today to the straight-line opcode set
 # (CONSTANT, NIL/TRUE/FALSE, arithmetic/comparison, NEGATE, NOT, PRINT, POP,
 # GET_LOCAL, SET_LOCAL, DEFINE_GLOBAL, GET_GLOBAL, SET_GLOBAL, script-form
-# RETURN) — a later CLR emission node grows this list the same way
-# check_jvm_probes.sh grew across N4-N10.
+# RETURN) — later CLR backend work grows this list the same way
+# check_jvm_probes.sh grew as the JVM backend gained opcodes.
 #
 # Every probe runs even after an earlier one fails: a failing CLR run (an
 # ilasm assembly error, say) is caught and recorded as this probe's own
