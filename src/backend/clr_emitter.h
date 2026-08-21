@@ -2,14 +2,39 @@
 
 // CLR code generator. Covers CONSTANT (number, string), NIL/TRUE/FALSE, the
 // arithmetic and comparison family, NEGATE, NOT, PRINT, POP, GET_LOCAL,
-// SET_LOCAL, DEFINE_GLOBAL, GET_GLOBAL, SET_GLOBAL, RETURN in its script
-// form, and JUMP/JUMP_IF_FALSE/LOOP (P3b) — see
-// notes/bytecode-translation-problems.md for what each P-number means.
+// SET_LOCAL, DEFINE_GLOBAL, GET_GLOBAL, SET_GLOBAL, JUMP/JUMP_IF_FALSE/LOOP
+// (P3b), CALL, zero-upvalue CLOSURE, and RETURN in both of its roles (P5) —
+// see notes/bytecode-translation-problems.md for what each P-number means.
 //
-// Scope: no calls, no closures, no classes, no aggregates, no match. Every
-// opcode outside that set throws std::runtime_error, naming the opcode,
-// instead of falling through silently — a later CLR emission node lowers
-// it for real.
+// Scope: no closures with a captured upvalue, no classes, no aggregates, no
+// match. Every opcode outside that set throws std::runtime_error, naming
+// the opcode, instead of falling through silently — a later CLR emission
+// node lowers it for real. A CLOSURE with one or more upvalues throws for
+// the same reason, even though CLOSURE itself is otherwise implemented:
+// wiring a captured cell into the generated constructor is a later node's
+// job.
+//
+// A function becomes its own CIL class, `extends [LoxRuntime]Lox.LoxClosure`
+// (P6's one `Call(object[])` interface — every callable kind implements it,
+// so generated code never branches on the callee's kind). Its constructor
+// takes the upvalue array (always empty in this pass's own construction —
+// see emitClosure) and forwards the function's compile-time name/arity to
+// the base class; `Invoke(object self, object[] args)` overrides the base
+// class's own abstract slot with this chunk's lowered body. `self` (P5:
+// "the callee itself — or, in a method, the receiver") and each unpacked
+// `args[i]` copy into the same Lox-frame-slot mapping GET_LOCAL/SET_LOCAL
+// already use for the script chunk — CIL's own argument slots (`ldarg.1`,
+// `ldarg.2`) hold them only long enough for the prologue to copy them in,
+// so (unlike the JVM backend, whose local-variable array has no separate
+// argument space) a CLR function chunk's local layout is byte-for-byte the
+// SAME as the script chunk's: local 0 is always LoxGlobals, and the Lox
+// frame's own slots start at local 1 either way.
+//
+// `emitProgram` assembles the whole reachable tree into ONE ilasm source:
+// one shared `.assembly`/`.module` header, then one `.class` block per
+// function (the script's own plus one per nested `fun`/method), in one
+// fixed pre-order walk — ilasm assembles more than one class from a single
+// module without any per-class assembly manifest of its own.
 //
 // JUMP/LOOP lower to CIL `br` at a label `src/backend/cfg.{h,cpp}` already
 // recovered; JUMP_IF_FALSE lowers to `dup; call LoxOps::IsFalsy; brtrue` so
@@ -73,12 +98,26 @@ std::string ilasmDoubleLiteral(double value);
 // Emits complete ilasm source for one script chunk, as the top-level class
 // `className` with a static, parameterless `Main` entry point.
 // `analysis` must come from `analyzeStack` on the same `fn`. Does not
-// recurse into nested functions — CLOSURE is not lowered by this pass (a
-// lone chunk has no class name to give a nested function's target
-// anyway); a chunk that contains one throws when the dispatch loop reaches
-// it, the same as any other opcode outside this file's scope.
+// recurse into nested functions: a CLOSURE reaching this throws "has no
+// assigned class name", because a lone chunk has no name to give a nested
+// function's target — kept so the single-chunk test suite does not have
+// to build a whole `StackAnalysisTree` for a program with no nested
+// function; drive `emitProgram` instead for one that has one.
 std::string emitScript(const DecodedFunction& fn,
                        const FunctionStackAnalysis& analysis,
                        const std::string& className);
+
+// Emits the whole program reachable from `root` as one complete ilasm
+// source: the top-level script as `scriptClassName`, plus one `LoxFn$<n>`
+// class per function or method any chunk in the tree constructs with a
+// CLOSURE, in one fixed pre-order walk of the decoded tree (so two runs on
+// the same compiled program always agree — "deterministic naming",
+// clr_emitter.h's own hazard). `root`/`tree` must come from the same
+// compiled tree (`decodeFunctionTree` / `analyzeStackTree` on the same
+// `ObjFunction`). This is the driver a real `loxpp --target clr` run uses;
+// `emitScript` above is single-chunk and test-facing only.
+std::string emitProgram(const DecodedFunction& root,
+                        const StackAnalysisTree& tree,
+                        const std::string& scriptClassName);
 
 } // namespace clr

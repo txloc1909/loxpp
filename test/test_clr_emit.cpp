@@ -1,13 +1,15 @@
-// test_clr_emit.cpp — CLR straight-line emitter.
+// test_clr_emit.cpp — CLR emitter: straight-line code, control flow, and
+// functions and calls.
 //
-// Checkpoint (see the node's own specification):
-//   tools/loxpp_clr.sh notes/translation-probes/{01,15,18,19,20,21}_*.lox
-// must each print stdout identical to build/loxpp on the same file. That
-// full assemble-and-run comparison needs ilasm/dotnet
-// (tools/check_clr_probes.sh, run inside the dev-managed container); this
-// file covers what a plain C++ unit test can check without them: the
-// bytearray/bit-pattern literal helpers, and the generated ilasm's
-// structural shape (locals, maxstack, fusion, abort-on-unsupported).
+// Checkpoint (see the node's own specification): `tools/loxpp_clr.sh
+// notes/translation-probes/{01,...,05,08,15,...,23,30}_*.lox` must each
+// print stdout identical to build/loxpp on the same file, and
+// `24_call_before_closure.lox` must FAIL identically on both. That full
+// assemble-and-run comparison needs ilasm/dotnet (tools/check_clr_probes.sh,
+// run inside the dev-managed container); this file covers what a plain C++
+// unit test can check without them: the bytearray/bit-pattern literal
+// helpers, and the generated ilasm's structural shape (locals, maxstack,
+// fusion, abort-on-unsupported, multi-class programs via emitProgram).
 
 #include "backend/abstract_stack.h"
 #include "backend/chunk_decoder.h"
@@ -164,39 +166,39 @@ TEST(IlasmDoubleLiteral, RoundTripsExactly) {
 // emitScript
 // ---------------------------------------------------------------------------
 
-// This node's own opcode set (clr_emitter.h) has no CALL, no CLOSURE, no
-// control flow, and no match — so JUMP is one of many opcodes this pass
+// This node's own opcode set (clr_emitter.h) has no classes, no
+// aggregates, and no match — so CLASS is one of many opcodes this pass
 // must refuse rather than silently mis-lower. A hand-built single-
 // instruction chunk drives the refusal directly, the same way
 // test_jvm_emit.cpp's own `AbortsOnUnsupportedOpcode` does, rather than
 // hunting for a real Lox++ program that reaches an opcode this pass has no
 // case for.
 TEST(EmitScript, AbortsOnUnsupportedOpcode) {
-    // JUMP/JUMP_IF_FALSE/LOOP are no longer unsupported (this node); CALL
-    // is the nearest opcode still outside this pass's scope.
+    // CALL/CLOSURE/RETURN are no longer unsupported (this node); CLASS is
+    // the nearest opcode still outside this pass's scope.
     MemoryManager mm;
-    DecodedInstruction call;
-    call.offset = 0;
-    call.op = Op::CALL;
-    call.length = 2;
-    call.byteOperand = 0;
+    DecodedInstruction cls;
+    cls.offset = 0;
+    cls.op = Op::CLASS;
+    cls.length = 2;
+    cls.constantIndex = 0;
 
     DecodedFunction fn;
     fn.id = "0";
     fn.function = mm.create<ObjFunction>();
-    fn.instructions = {call};
+    fn.instructions = {cls};
 
     FunctionStackAnalysis analysis;
     analysis.functionId = "0";
     analysis.before = {StackState{0, 0}};
-    analysis.after = {StackState{0, 0}};
+    analysis.after = {StackState{1, 0}};
     analysis.reached = {true};
 
     try {
         clr::emitScript(fn, analysis, "LoxMain");
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& e) {
-        EXPECT_NE(std::string(e.what()).find("CALL"), std::string::npos)
+        EXPECT_NE(std::string(e.what()).find("CLASS"), std::string::npos)
             << e.what();
     }
 }
@@ -726,15 +728,335 @@ TEST(EmitScript, LoopBodyAssignsSameSlotEveryIteration) {
 }
 
 // ---------------------------------------------------------------------------
+// Functions and calls (this node): CALL, zero-upvalue CLOSURE, RETURN's
+// dual role, and emitProgram's multi-class output. See
+// notes/translation-probes/{08,24}_*.lox for the checkpoint this ties to at
+// the assemble-and-run level (tools/check_clr_probes.sh).
+// ---------------------------------------------------------------------------
+
+TEST(EmitScript, CallWithZeroArgsBuildsEmptyArray) {
+    MemoryManager mm;
+    // `foo` is never declared — LoxGlobals.Get throws at run time (late
+    // binding), but this pass only lowers text, it never executes the
+    // program, so an undefined callee is a fine probe for CALL's own shape.
+    DecodedFunction fn = decodeScript("foo();", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    // argCount == 0: the callee is already the sole, topmost evaluation-
+    // stack value, so the empty array builds directly on top of it — no
+    // spill, no scratch slot at all.
+    EXPECT_NE(j.find("ldc.i4.0\n"
+                     "    newarr [System.Runtime]System.Object\n"
+                     "    call object [LoxRuntime]Lox.LoxOps::Call(object, "
+                     "object[])\n"),
+              std::string::npos)
+        << j;
+    // globals(1) + frame slots [callee](1) + scratch(1); no call-arg
+    // scratch reserved for a zero-argument CALL.
+    EXPECT_NE(j.find(".locals init (object, object, object)\n"),
+              std::string::npos)
+        << j;
+}
+
+TEST(EmitScript, CallWithArgsSpillsToScratchSlotsAndBuildsArray) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("foo(1, 2, 3);", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    // globals(1) + frame slots [callee](1) + scratch(1) + the widest CALL's
+    // own spill area (1 callee-scratch slot + 3 argument slots).
+    EXPECT_NE(j.find(".locals init (object, object, object, object, object, "
+                     "object, object)\n"),
+              std::string::npos)
+        << j;
+
+    // P7: the values are already on the stack in push order
+    // [callee, arg1, arg2, arg3], topmost first — so the topmost (arg3) is
+    // spilled first, then arg2, then arg1, then the callee underneath them
+    // all.
+    EXPECT_NE(j.find("stloc 6\n"
+                     "    stloc 5\n"
+                     "    stloc 4\n"
+                     "    stloc 3\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("ldloc 3\n"
+                     "    ldc.i4.3\n"
+                     "    newarr [System.Runtime]System.Object\n"),
+              std::string::npos)
+        << j;
+    EXPECT_EQ(countOccurrences(j, "stelem.ref"), 3);
+    EXPECT_EQ(countOccurrences(j, "dup"), 3);
+    EXPECT_NE(j.find("call object [LoxRuntime]Lox.LoxOps::Call(object, "
+                     "object[])"),
+              std::string::npos)
+        << j;
+}
+
+TEST(EmitProgram, ZeroUpvalueClosureConstructsGeneratedClass) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun add(a, b) { return a + b; } print add(1, 2);", mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(countOccurrences(il, ".assembly extern LoxRuntime"), 1);
+    ASSERT_EQ(countOccurrences(il, ".class public auto ansi"), 2);
+    EXPECT_NE(il.find(".class public auto ansi LoxMain"), std::string::npos)
+        << il;
+    EXPECT_NE(il.find(".class public auto ansi LoxFn$0"), std::string::npos)
+        << il;
+
+    // Zero upvalues (this node's own top-of-file note; a captured one is a
+    // later node's wiring): an empty object[][], then one `newobj` builds
+    // and constructs the generated class in a single instruction.
+    EXPECT_NE(il.find("ldc.i4.0\n"
+                      "    newarr object[]\n"
+                      "    newobj instance void LoxFn$0::.ctor(object[][])\n"),
+              std::string::npos)
+        << il;
+
+    EXPECT_NE(il.find("LoxFn$0 extends [LoxRuntime]Lox.LoxClosure"),
+              std::string::npos)
+        << il;
+    EXPECT_NE(il.find(".ctor(object[][] upvalues)"), std::string::npos) << il;
+    // <ctor>'s own literals: this function's compile-time name and arity.
+    EXPECT_NE(il.find("ldstr " + clr::ilasmStringLiteral("add")),
+              std::string::npos)
+        << il;
+    EXPECT_NE(il.find("call instance void [LoxRuntime]Lox.LoxClosure::.ctor("
+                      "string, int32, object[][])"),
+              std::string::npos)
+        << il;
+    EXPECT_NE(il.find("Invoke(object self, object[] args)"), std::string::npos)
+        << il;
+
+    // Argument prologue (P5): `self` (arg 1) copied into slot 1 (`a`'s
+    // Lox-frame-slot-0 mirror, baseSlot=1 for either role), then
+    // args[0]/args[1] unpacked into slots 2/3 (`a`, `b`).
+    EXPECT_NE(il.find("ldarg.1\n    stloc 1\n"), std::string::npos) << il;
+    EXPECT_NE(il.find("ldarg.2\n"
+                      "    ldc.i4.0\n"
+                      "    ldelem.ref\n"
+                      "    stloc 2\n"),
+              std::string::npos)
+        << il;
+    EXPECT_NE(il.find("ldarg.2\n"
+                      "    ldc.i4.1\n"
+                      "    ldelem.ref\n"
+                      "    stloc 3\n"),
+              std::string::npos)
+        << il;
+    // RETURN's function role: exactly the one return value on the
+    // evaluation stack, then `ret` — never the script's `pop; ret`.
+    // LoxMain's script `ret`, LoxFn$0's own <ctor> `ret`, and Invoke's own.
+    EXPECT_EQ(countOccurrences(il, "\n    ret\n"), 3);
+    expectEveryBranchTargetIsLabeled(il);
+}
+
+TEST(EmitProgram, SiblingFunctionsGetSequentialClassNames) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("fun a() { return 1; }\n"
+                                      "fun b() { return 2; }\n"
+                                      "print a();\n"
+                                      "print b();\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    // Deterministic naming (clr_emitter.h): one pre-order counter over the
+    // whole tree, not per parent — `a` and `b` are siblings, so they draw 0
+    // and 1 in declaration order.
+    ASSERT_EQ(countOccurrences(il, ".class public auto ansi"), 3);
+    EXPECT_NE(il.find(".class public auto ansi LoxMain"), std::string::npos)
+        << il;
+    EXPECT_NE(il.find(".class public auto ansi LoxFn$0"), std::string::npos)
+        << il;
+    EXPECT_NE(il.find(".class public auto ansi LoxFn$1"), std::string::npos)
+        << il;
+    expectEveryBranchTargetIsLabeled(il);
+}
+
+TEST(EmitProgram, ClosureWithUpvalueIsNotImplemented) {
+    // 06_shared_upvalue: `get` captures `x`, so its CLOSURE carries one
+    // upvalue entry. This node only lowers the zero-upvalue construction;
+    // wiring a real cell into it is a later node's job.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("fun outer() {\n"
+                                      "  var x = 0;\n"
+                                      "  fun get() { return x; }\n"
+                                      "  return get;\n"
+                                      "}\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    try {
+        clr::emitProgram(fn, tree, "LoxMain");
+        FAIL() << "expected std::runtime_error";
+    } catch (const std::runtime_error& e) {
+        std::string what = e.what();
+        EXPECT_NE(what.find("CLOSURE"), std::string::npos) << what;
+        EXPECT_NE(what.find('1'), std::string::npos) << what;
+    }
+}
+
+// RETURN's function-role hazard (node specification): the shared
+// abstract-stack analysis can fold the returned value into a named local
+// rather than leave it as a genuine evaluation-stack temporary — 33 sites
+// in the corpus (bytecode-translation-problems.md), none reachable from
+// this node's own opcode set alone (it needs a `match` expression), so
+// this hand-builds the shape directly rather than waiting for a later
+// node's program to reach it. Mirrors this file's own
+// `SetLocalPeekOfNamedLocalLoadsInsteadOfDup` technique, one level deeper
+// (a function's own RETURN instead of a script's SET_LOCAL).
+TEST(EmitProgram, ReturnOfAFoldedLocalLoadsInsteadOfAssumingATemp) {
+    MemoryManager mm;
+
+    DecodedInstruction nil;
+    nil.offset = 0;
+    nil.op = Op::NIL;
+    nil.length = 1;
+    DecodedInstruction ret;
+    ret.offset = 1;
+    ret.op = Op::RETURN;
+    ret.length = 1;
+
+    DecodedFunction child;
+    child.id = "0.0";
+    child.function = mm.create<ObjFunction>();
+    child.function->arity = 0;
+    child.instructions = {nil, ret};
+
+    FunctionStackAnalysis childAnalysis;
+    childAnalysis.functionId = "0.0";
+    // The NIL's own push lands directly in local slot 1 (an invisible-var
+    // site at this very offset — no separate store instruction), so by
+    // RETURN's own offset the evaluation stack already reads back to depth
+    // 0: nothing genuine sits above the newly-declared local.
+    childAnalysis.before = {StackState{1, 1}, StackState{2, 2}};
+    childAnalysis.after = {StackState{2, 2}, StackState{1, 1}};
+    childAnalysis.reached = {true, true};
+    childAnalysis.invisibleVars = {InvisibleVarSite{0, 1}};
+
+    DecodedFunction root;
+    root.id = "0";
+    root.function = mm.create<ObjFunction>();
+    root.nested = {child};
+
+    DecodedInstruction rootNil;
+    rootNil.offset = 0;
+    rootNil.op = Op::NIL;
+    rootNil.length = 1;
+    DecodedInstruction rootRet;
+    rootRet.offset = 1;
+    rootRet.op = Op::RETURN;
+    rootRet.length = 1;
+    root.instructions = {rootNil, rootRet};
+
+    FunctionStackAnalysis rootAnalysis;
+    rootAnalysis.functionId = "0";
+    rootAnalysis.before = {StackState{0, 0}, StackState{1, 0}};
+    rootAnalysis.after = {StackState{1, 0}, StackState{0, 0}};
+    rootAnalysis.reached = {true, true};
+
+    StackAnalysisTree tree;
+    tree.self = rootAnalysis;
+    tree.nested = {StackAnalysisTree{childAnalysis, {}}};
+
+    std::string il = clr::emitProgram(root, tree, "LoxMain");
+
+    ASSERT_NE(il.find("LoxFn$0 extends [LoxRuntime]Lox.LoxClosure"),
+              std::string::npos)
+        << il;
+    std::size_t fnStart = il.find("LoxFn$0 extends");
+    std::string fn0 = il.substr(fnStart);
+
+    // The fix: load slot 2 (baseSlot=1 + Lox slot 1) explicitly, then
+    // return it directly — never a bare `ret` that assumes a physical
+    // temporary was already sitting on the evaluation stack.
+    EXPECT_NE(fn0.find("ldloc 2\n    ret\n"), std::string::npos) << fn0;
+}
+
+TEST(EmitProgram, ReturnWithMoreThanTheReturnValueOnTheStackThrows) {
+    // The mirror image of ReturnWithANonEmptyEvaluationStackThrows (script
+    // role): a function's own `ret` must find EXACTLY the return value —
+    // this hand-built chunk gives it two, so the check must fire rather
+    // than silently returning the wrong one of the two.
+    MemoryManager mm;
+
+    DecodedInstruction nil0;
+    nil0.offset = 0;
+    nil0.op = Op::NIL;
+    nil0.length = 1;
+    DecodedInstruction nil1;
+    nil1.offset = 1;
+    nil1.op = Op::NIL;
+    nil1.length = 1;
+    DecodedInstruction ret;
+    ret.offset = 2;
+    ret.op = Op::RETURN;
+    ret.length = 1;
+
+    DecodedFunction child;
+    child.id = "0.0";
+    child.function = mm.create<ObjFunction>();
+    child.instructions = {nil0, nil1, ret};
+
+    FunctionStackAnalysis childAnalysis;
+    childAnalysis.functionId = "0.0";
+    childAnalysis.before = {StackState{1, 1}, StackState{2, 1},
+                            StackState{3, 1}};
+    childAnalysis.after = {StackState{2, 1}, StackState{3, 1},
+                           StackState{2, 1}};
+    childAnalysis.reached = {true, true, true};
+
+    DecodedFunction root;
+    root.id = "0";
+    root.function = mm.create<ObjFunction>();
+    root.nested = {child};
+    DecodedInstruction rootNil;
+    rootNil.offset = 0;
+    rootNil.op = Op::NIL;
+    rootNil.length = 1;
+    DecodedInstruction rootRet;
+    rootRet.offset = 1;
+    rootRet.op = Op::RETURN;
+    rootRet.length = 1;
+    root.instructions = {rootNil, rootRet};
+
+    FunctionStackAnalysis rootAnalysis;
+    rootAnalysis.functionId = "0";
+    rootAnalysis.before = {StackState{0, 0}, StackState{1, 0}};
+    rootAnalysis.after = {StackState{1, 0}, StackState{0, 0}};
+    rootAnalysis.reached = {true, true};
+
+    StackAnalysisTree tree;
+    tree.self = rootAnalysis;
+    tree.nested = {StackAnalysisTree{childAnalysis, {}}};
+
+    try {
+        clr::emitProgram(root, tree, "LoxMain");
+        FAIL() << "expected std::runtime_error";
+    } catch (const std::runtime_error& e) {
+        EXPECT_NE(std::string(e.what()).find("exactly the return value"),
+                  std::string::npos)
+            << e.what();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // resolveZeroDepthLocalSlot (zero_depth_local.h): the one, target-
 // independent authority both this file and jvm_emitter.cpp call into for
 // the depth-0 named-local cross-check (clr_emitter.h's own top-of-file
 // note). No program in this node's own opcode set (if/else, and/or, while,
-// for) makes the two estimates disagree — the scope-exit rule retires
-// every local a block declared before control reaches outside it, so a
-// disagreement needs a function frame or a `match` arm (neither in this
-// node's scope) — so this exercises the cross-check directly rather than
-// asserting it can never be reached indirectly.
+// for, function bodies) makes the two estimates disagree — the scope-exit
+// rule retires every local a block declared before control reaches
+// outside it, and a function's own body merges through the same if/else/
+// while/for shapes as a script chunk, so a disagreement still needs a
+// `match` arm (out of this node's scope) — so this exercises the
+// cross-check directly rather than asserting it can never be reached
+// indirectly.
 // ---------------------------------------------------------------------------
 
 TEST(ResolveZeroDepthLocalSlot, AwayFromAMergeReadsLocalCountDirectly) {
