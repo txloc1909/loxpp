@@ -175,7 +175,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "tools/build_lox_rt.sh && tools/check_managed_toolchains.sh"
+            bash -c "tools/build_lox_rt.sh && tools/build_lox_rt_clr.sh && tools/check_managed_toolchains.sh"
 
       - name: Build and test the JVM runtime library
         run: |
@@ -192,6 +192,16 @@ jobs:
             -w /workspace \
             loxpp-dev-managed:latest \
             bash -c "cmake --preset release && cmake --build build --target loxpp"
+
+      # Needs build/loxpp (built above, release preset): its own %g parity
+      # test is differential against the native binary, not a fixed list.
+      - name: Build and test the CLR runtime library
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "tools/test_lox_rt_clr.sh"
 
       - name: Check JVM emission probes (N4/N5)
         run: |

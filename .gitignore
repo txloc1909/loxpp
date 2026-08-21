@@ -40,5 +40,10 @@ build/
 runtime/jvm/classes/
 runtime/jvm/test-classes/
 runtime/jvm/lox-rt.jar
+
+# CLR runtime library build output (tools/build_lox_rt_clr.sh)
+runtime/clr/**/bin/
+runtime/clr/**/obj/
+runtime/clr/LoxRuntime.dll
 __pycache__/
 *.pyc
