@@ -1,3 +1,4 @@
+using System;
 using Lox;
 
 namespace LoxRuntimeTests;
@@ -40,8 +41,34 @@ public static class ObjectArrayInvariantTest {
         t.Check(built is LoxEnum, "an enum constructor's result is a LoxEnum, not its raw payload");
 
         var box = new LoxClass("Box", null);
-        object instance = LoxOps.Call(box, System.Array.Empty<object>());
+        object instance = LoxOps.Call(box, Array.Empty<object>());
         CheckNotBareObjectArray(t, instance, "constructing a class");
+
+        LoxList sliceSrc = LoxOps.BuildList(new object[] { 1.0, 2.0, 3.0 });
+        CheckNotBareObjectArray(t, LoxOps.Slice(sliceSrc, 0.0, 2.0), "Slice on a list");
+        CheckNotBareObjectArray(t, LoxOps.Slice("hello", 1.0, 3.0), "Slice on a string");
+
+        LoxList popSrc = LoxOps.BuildList(new object[] { 1.0, 2.0 });
+        CheckNotBareObjectArray(t, LoxOps.Invoke(popSrc, "pop", Array.Empty<object>()), "Invoke 'pop' on a list");
+
+        LoxMap invokeMap = LoxOps.BuildMap(new object[] { "a", 1.0, "b", 2.0 });
+        CheckNotBareObjectArray(t, LoxOps.Invoke(invokeMap, "keys", Array.Empty<object>()), "Invoke 'keys' on a map");
+        CheckNotBareObjectArray(t, LoxOps.Invoke(invokeMap, "values", Array.Empty<object>()), "Invoke 'values' on a map");
+        CheckNotBareObjectArray(t, LoxOps.Invoke(invokeMap, "entries", Array.Empty<object>()), "Invoke 'entries' on a map");
+        CheckNotBareObjectArray(t, LoxOps.GetProperty(invokeMap, "has"), "GetProperty of a map method value");
+
+        LoxIterator listIter = LoxOps.GetIter(LoxOps.BuildList(new object[] { "x" }));
+        CheckNotBareObjectArray(t, LoxOps.IterNext(listIter), "IterNext over a list");
+        LoxIterator mapIter = LoxOps.GetIter(LoxOps.BuildMap(new object[] { "k", 1.0 }));
+        CheckNotBareObjectArray(t, LoxOps.IterNext(mapIter), "IterNext over a map");
+
+        var greeter = new LoxClass("Greeter", null);
+        greeter.Methods["greet"] = new DelegateClosure("greet", 0, Array.Empty<object[]>(), (self, a) => "hi");
+        object greeterInstance = LoxOps.Call(greeter, Array.Empty<object>());
+        CheckNotBareObjectArray(t, LoxOps.GetProperty(greeterInstance, "greet"), "GetProperty of a bound instance method");
+
+        var identity = new DelegateClosure("identity", 1, Array.Empty<object[]>(), (self, a) => a[0]);
+        CheckNotBareObjectArray(t, LoxOps.Call(identity, new object[] { 1.0 }), "Call on a closure");
 
         return t.Finish("ObjectArrayInvariantTest");
     }
