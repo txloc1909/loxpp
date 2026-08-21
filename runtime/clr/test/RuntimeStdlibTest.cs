@@ -38,6 +38,13 @@ public static class RuntimeStdlibTest {
         t.CheckEquals(2.0, CallField((LoxInstance)math, "sqrt", 4.0), "math.sqrt(4)");
         t.CheckEquals(-1.0, CallField((LoxInstance)math, "round", -0.5), "math.round(-0.5) rounds away from zero");
         t.CheckEquals(1.0, CallField((LoxInstance)math, "round", 0.5), "math.round(0.5) rounds away from zero");
+        // Both guard against Math.Abs(x) + 0.5 rounding to a tie before
+        // Math.Floor runs, which tips these two cases one too high.
+        t.CheckEquals(0.0, CallField((LoxInstance)math, "round", 0.49999999999999994),
+            "math.round(0.49999999999999994) is not a true tie, so it stays 0");
+        double justAbove2Pow52 = 4503599627370497.0; // 2^52 + 1: already integral, spacing is 1 here
+        t.CheckEquals(justAbove2Pow52, CallField((LoxInstance)math, "round", justAbove2Pow52),
+            "math.round leaves an already-integral value at 2^52+1 unchanged");
         t.CheckEquals(5.0, ((ILoxCallable)((LoxInstance)math).Fields["min"])
             .Call(new object[] { double.NaN, 5.0 }), "math.min ignores a NaN operand");
         t.Check((double)((LoxInstance)math).Fields["pi"] > 3.14, "math.pi is present");

@@ -264,8 +264,13 @@ public static class LoxRuntime {
 
     // std::round rounds half away from zero; Math.Round(double) defaults to
     // round-half-to-even (Math.Round(-0.5) == 0, but C's round(-0.5) == -1.0).
+    // Math.Round(x, MidpointRounding.AwayFromZero) matches std::round
+    // exactly; Math.Abs(x) + 0.5 (the previous formula here) does not: the
+    // addition itself rounds to the nearest representable double before
+    // Math.Floor runs, tipping ties like 0.49999999999999994 and every odd
+    // integer at or above 2^52 up by one where std::round leaves them alone.
     private static double RoundHalfAwayFromZero(double x) {
-        return Math.CopySign(Math.Floor(Math.Abs(x) + 0.5), x);
+        return Math.Round(x, MidpointRounding.AwayFromZero);
     }
 
     // std::fmin/fmax ignore a NaN operand when the other is a number;
