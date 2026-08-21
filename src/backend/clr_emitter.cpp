@@ -145,29 +145,24 @@ struct Builder {
     int depth{0};
     int maxDepth{0};
 
-    void emit(const std::string& instruction, int slotDelta) {
-        text << "    " << instruction << "\n";
-        depth += slotDelta;
-        if (depth < 0) {
+    // `cellsRead` is how many cells this instruction consumes as input,
+    // independent of `netDelta` (its net effect on depth). The two diverge
+    // for `dup` (reads 1, net +1) and for `box` (reads 1, net 0) exactly as
+    // much as for a plain `pop` (reads 1, net -1) — checking depth against
+    // `cellsRead` before applying `netDelta` catches every one of those
+    // reads, not only a net-negative one. A single earlier version of this
+    // check compared post-apply depth against zero instead, which passes
+    // `dup`/`box` on an undersized stack and only lets CoreCLR's later
+    // InvalidProgramException find it at JIT time.
+    void emit(const std::string& instruction, int cellsRead, int netDelta) {
+        if (depth < cellsRead) {
             throw std::runtime_error(
                 "clr_emitter: evaluation stack underflow emitting '" +
                 instruction + "'");
         }
+        text << "    " << instruction << "\n";
+        depth += netDelta;
         maxDepth = std::max(maxDepth, depth);
-    }
-
-    // `emit`'s own underflow check runs after it applies the delta, so it
-    // cannot see an instruction that reads a cell without netting it out of
-    // depth — `dup`'s delta is `+1`, so depth can only grow. Route every
-    // `dup` through here instead of through `emit` directly, so a `dup` on
-    // an empty evaluation stack fails at emission time, not at JIT time via
-    // CoreCLR's InvalidProgramException.
-    void emitDup() {
-        if (depth < 1) {
-            throw std::runtime_error(
-                "clr_emitter: evaluation stack underflow emitting 'dup'");
-        }
-        emit("dup", +1);
     }
 };
 
@@ -240,15 +235,15 @@ struct Emitter {
 void emitGlobalsCall(Emitter& e, const char* method,
                      const std::string& nameLiteral, bool peek) {
     std::string scratch = std::to_string(e.scratchSlot);
-    e.b.emit("stloc " + scratch, -1);
-    e.b.emit("ldloc " + std::to_string(e.globalsSlot), +1);
-    e.b.emit("ldstr " + nameLiteral, +1);
-    e.b.emit("ldloc " + scratch, +1);
+    e.b.emit("stloc " + scratch, 1, -1);
+    e.b.emit("ldloc " + std::to_string(e.globalsSlot), 0, +1);
+    e.b.emit("ldstr " + nameLiteral, 0, +1);
+    e.b.emit("ldloc " + scratch, 0, +1);
     e.b.emit(std::string("call instance void [LoxRuntime]Lox.LoxGlobals::") +
                  method + "(string, object)",
-             -3);
+             3, -3);
     if (peek) {
-        e.b.emit("ldloc " + scratch, +1);
+        e.b.emit("ldloc " + scratch, 0, +1);
     }
 }
 
@@ -265,12 +260,12 @@ void emitConstant(Emitter& e, const DecodedInstruction& in) {
     Value v = e.fn.function->chunk.getConstant(
         static_cast<uint16_t>(in.constantIndex));
     if (is<Number>(v)) {
-        e.b.emit("ldc.r8 " + ilasmDoubleLiteral(as<Number>(v)), +1);
-        e.b.emit("box [System.Runtime]System.Double", 0);
+        e.b.emit("ldc.r8 " + ilasmDoubleLiteral(as<Number>(v)), 0, +1);
+        e.b.emit("box [System.Runtime]System.Double", 1, 0);
     } else if (isString(v)) {
         e.b.emit("ldstr " +
                      ilasmStringLiteral(std::string(asObjString(v)->chars)),
-                 +1);
+                 0, +1);
     } else {
         notImplemented(in.op);
     }
@@ -283,14 +278,14 @@ void emitPop(Emitter& e, const DecodedInstruction& in) {
         kind = it->second;
     }
     if (kind == PopKind::TEMP) {
-        e.b.emit("pop", -1);
+        e.b.emit("pop", 1, -1);
     }
     // LOCAL_RECLAIM: the slot lives in the local array, not on the
     // evaluation stack — nothing to pop.
 }
 
 void emitGetLocal(Emitter& e, const DecodedInstruction& in) {
-    e.b.emit("ldloc " + std::to_string(e.slotForLocal(in.byteOperand)), +1);
+    e.b.emit("ldloc " + std::to_string(e.slotForLocal(in.byteOperand)), 0, +1);
 }
 
 // See this file's own top-of-file note and `topLiveLocalSlot`'s: when the
@@ -309,13 +304,13 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
     int slot = e.slotForLocal(in.byteOperand);
     bool fuse = e.fusablePop(i);
     if (e.analysis.before[i].operandDepth() == 0) {
-        e.b.emit("ldloc " + std::to_string(topLiveLocalSlot(e, i)), +1);
-        e.b.emit("stloc " + std::to_string(slot), -1);
+        e.b.emit("ldloc " + std::to_string(topLiveLocalSlot(e, i)), 0, +1);
+        e.b.emit("stloc " + std::to_string(slot), 1, -1);
     } else if (fuse) {
-        e.b.emit("stloc " + std::to_string(slot), -1);
+        e.b.emit("stloc " + std::to_string(slot), 1, -1);
     } else {
-        e.b.emitDup();
-        e.b.emit("stloc " + std::to_string(slot), -1);
+        e.b.emit("dup", 1, +1);
+        e.b.emit("stloc " + std::to_string(slot), 1, -1);
     }
     consumedFollowingPop = fuse;
 }
@@ -326,9 +321,9 @@ void emitDefineGlobal(Emitter& e, const DecodedInstruction& in) {
 }
 
 void emitGetGlobal(Emitter& e, const DecodedInstruction& in) {
-    e.b.emit("ldloc " + std::to_string(e.globalsSlot), +1);
-    e.b.emit("ldstr " + e.globalNameLiteral(in.constantIndex), +1);
-    e.b.emit("call instance object [LoxRuntime]Lox.LoxGlobals::Get(string)",
+    e.b.emit("ldloc " + std::to_string(e.globalsSlot), 0, +1);
+    e.b.emit("ldstr " + e.globalNameLiteral(in.constantIndex), 0, +1);
+    e.b.emit("call instance object [LoxRuntime]Lox.LoxGlobals::Get(string)", 2,
              -1);
 }
 
@@ -338,7 +333,7 @@ void emitSetGlobal(Emitter& e, std::size_t i, const DecodedInstruction& in,
                    bool& consumedFollowingPop) {
     bool fuse = e.fusablePop(i);
     if (e.analysis.before[i].operandDepth() == 0) {
-        e.b.emit("ldloc " + std::to_string(topLiveLocalSlot(e, i)), +1);
+        e.b.emit("ldloc " + std::to_string(topLiveLocalSlot(e, i)), 0, +1);
         emitGlobalsCall(e, "Set", e.globalNameLiteral(in.constantIndex),
                         /*peek=*/false);
     } else {
@@ -349,28 +344,28 @@ void emitSetGlobal(Emitter& e, std::size_t i, const DecodedInstruction& in,
 }
 
 void emitPrint(Emitter& e) {
-    e.b.emit("call void [LoxRuntime]Lox.LoxOps::Print(object)", -1);
+    e.b.emit("call void [LoxRuntime]Lox.LoxOps::Print(object)", 1, -1);
 }
 
 void emitNot(Emitter& e) {
-    e.b.emit("call object [LoxRuntime]Lox.LoxOps::Not(object)", 0);
+    e.b.emit("call object [LoxRuntime]Lox.LoxOps::Not(object)", 1, 0);
 }
 
 void emitNegate(Emitter& e) {
-    e.b.emit("call object [LoxRuntime]Lox.LoxOps::Negate(object)", 0);
+    e.b.emit("call object [LoxRuntime]Lox.LoxOps::Negate(object)", 1, 0);
 }
 
 void emitBinaryOp(Emitter& e, const char* method) {
     e.b.emit(std::string("call object [LoxRuntime]Lox.LoxOps::") + method +
                  "(object, object)",
-             -1);
+             2, -1);
 }
 
 void emitComparisonOp(Emitter& e, const char* method) {
     e.b.emit(std::string("call bool [LoxRuntime]Lox.LoxOps::") + method +
                  "(object, object)",
-             -1);
-    e.b.emit("box [System.Runtime]System.Boolean", 0);
+             2, -1);
+    e.b.emit("box [System.Runtime]System.Boolean", 1, 0);
 }
 
 // The script's own `RETURN`: `Compiler::endCompiler()` always appends a
@@ -378,10 +373,20 @@ void emitComparisonOp(Emitter& e, const char* method) {
 // genuine evaluation-stack temporary here — never a name-folded local (see
 // this file's own top-of-file note) — and `Main` is `void`, so ECMA-335's
 // own `ret` rule (III.3.40: the stack must hold only the value being
-// returned, none for `void`) needs that value discarded first.
+// returned, none for `void`) needs that value discarded first. The
+// explicit depth check (rather than folding it into `emit`'s own
+// `cellsRead`) is deliberate: `ret` does not merely need N cells present,
+// it needs the stack completely empty, a stronger condition `cellsRead`
+// alone cannot express.
 void emitReturn(Emitter& e) {
-    e.b.emit("pop", -1);
-    e.b.emit("ret", 0);
+    e.b.emit("pop", 1, -1);
+    if (e.b.depth != 0) {
+        throw std::runtime_error(
+            "clr_emitter: evaluation stack must be empty before 'ret' from "
+            "a void method, got depth " +
+            std::to_string(e.b.depth));
+    }
+    e.b.emit("ret", 0, 0);
 }
 
 // The part of one instruction's handling that is not the opcode's own
@@ -394,7 +399,7 @@ std::size_t finishInstruction(Emitter& e, const DecodedInstruction& in,
     auto varsIt = e.invisibleVarsByOffset.find(in.offset);
     if (varsIt != e.invisibleVarsByOffset.end()) {
         for (int slot : varsIt->second) {
-            e.b.emit("stloc " + std::to_string(e.slotForLocal(slot)), -1);
+            e.b.emit("stloc " + std::to_string(e.slotForLocal(slot)), 1, -1);
         }
     }
     return i + (consumedFollowingPop ? 2 : 1);
@@ -431,15 +436,15 @@ void emitBody(Emitter& e) {
             emitConstant(e, in);
             break;
         case Op::NIL:
-            e.b.emit("ldnull", +1);
+            e.b.emit("ldnull", 0, +1);
             break;
         case Op::TRUE:
-            e.b.emit("ldc.i4.1", +1);
-            e.b.emit("box [System.Runtime]System.Boolean", 0);
+            e.b.emit("ldc.i4.1", 0, +1);
+            e.b.emit("box [System.Runtime]System.Boolean", 1, 0);
             break;
         case Op::FALSE:
-            e.b.emit("ldc.i4.0", +1);
-            e.b.emit("box [System.Runtime]System.Boolean", 0);
+            e.b.emit("ldc.i4.0", 0, +1);
+            e.b.emit("box [System.Runtime]System.Boolean", 1, 0);
             break;
         case Op::POP:
             emitPop(e, in);
@@ -538,8 +543,8 @@ Emitter buildEmitter(const DecodedFunction& fn,
 void emitPrologue(Emitter& e) {
     e.b.emit("call class [LoxRuntime]Lox.LoxGlobals "
              "[LoxRuntime]Lox.LoxRuntime::Init()",
-             +1);
-    e.b.emit("stloc " + std::to_string(e.globalsSlot), -1);
+             0, +1);
+    e.b.emit("stloc " + std::to_string(e.globalsSlot), 1, -1);
 }
 
 std::string assembleClass(const Emitter& e, const std::string& className,

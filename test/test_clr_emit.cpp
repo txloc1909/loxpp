@@ -307,6 +307,118 @@ TEST(EmitScript, SetGlobalPeekOfNamedLocalLoadsInsteadOfDup) {
         << j;
 }
 
+// ---------------------------------------------------------------------------
+// Builder::emit's underflow guard, generalized: a hand-built chunk drives an
+// instruction whose read count exceeds what its net stack delta alone would
+// reveal (NOT/NEGATE net 0 but read 1; a binary/comparison op nets -1 but
+// reads 2), the same shape AbortsOnUnsupportedOpcode uses to drive a refusal
+// with no real Lox++ program that reaches the case. A single-instruction
+// analysis, matching this node's own opcode set (no CALL, no control flow),
+// stands in for the earlier, narrower `dup`-only guard.
+// ---------------------------------------------------------------------------
+
+TEST(EmitScript, NotOnAnEmptyEvaluationStackThrows) {
+    MemoryManager mm;
+    DecodedInstruction notOp;
+    notOp.offset = 0;
+    notOp.op = Op::NOT;
+    notOp.length = 1;
+
+    DecodedFunction fn;
+    fn.id = "0";
+    fn.function = mm.create<ObjFunction>();
+    fn.instructions = {notOp};
+
+    FunctionStackAnalysis analysis;
+    analysis.functionId = "0";
+    analysis.before = {StackState{0, 0}};
+    analysis.after = {StackState{0, 0}};
+    analysis.reached = {true};
+
+    try {
+        clr::emitScript(fn, analysis, "LoxMain");
+        FAIL() << "expected std::runtime_error";
+    } catch (const std::runtime_error& e) {
+        EXPECT_NE(std::string(e.what()).find("underflow"), std::string::npos)
+            << e.what();
+    }
+}
+
+TEST(EmitScript, ComparisonOnAnUndersizedEvaluationStackThrows) {
+    // A single NIL first, to give the CIL evaluation stack a real depth of
+    // 1 — the same depth GREATER's own analysis.before reports — so this
+    // exercises the two-cell read the boxed-bool call needs, not the
+    // one-cell net delta a weaker check would settle for.
+    MemoryManager mm;
+    DecodedInstruction nilOp;
+    nilOp.offset = 0;
+    nilOp.op = Op::NIL;
+    nilOp.length = 1;
+    DecodedInstruction greaterOp;
+    greaterOp.offset = 1;
+    greaterOp.op = Op::GREATER;
+    greaterOp.length = 1;
+
+    DecodedFunction fn;
+    fn.id = "0";
+    fn.function = mm.create<ObjFunction>();
+    fn.instructions = {nilOp, greaterOp};
+
+    FunctionStackAnalysis analysis;
+    analysis.functionId = "0";
+    analysis.before = {StackState{0, 0}, StackState{1, 0}};
+    analysis.after = {StackState{1, 0}, StackState{0, 0}};
+    analysis.reached = {true, true};
+
+    try {
+        clr::emitScript(fn, analysis, "LoxMain");
+        FAIL() << "expected std::runtime_error";
+    } catch (const std::runtime_error& e) {
+        EXPECT_NE(std::string(e.what()).find("underflow"), std::string::npos)
+            << e.what();
+    }
+}
+
+TEST(EmitScript, ReturnWithANonEmptyEvaluationStackThrows) {
+    // Two NILs give the simulated stack a real depth of 2 entering RETURN,
+    // matching an analysis that (incorrectly, for this test's purpose)
+    // reports the same depth there — RETURN's own trailing `pop` only
+    // discards one of the two, and `ret` from a void method must not run
+    // with the other still present.
+    MemoryManager mm;
+    DecodedInstruction nil0;
+    nil0.offset = 0;
+    nil0.op = Op::NIL;
+    nil0.length = 1;
+    DecodedInstruction nil1;
+    nil1.offset = 1;
+    nil1.op = Op::NIL;
+    nil1.length = 1;
+    DecodedInstruction ret;
+    ret.offset = 2;
+    ret.op = Op::RETURN;
+    ret.length = 1;
+
+    DecodedFunction fn;
+    fn.id = "0";
+    fn.function = mm.create<ObjFunction>();
+    fn.instructions = {nil0, nil1, ret};
+
+    FunctionStackAnalysis analysis;
+    analysis.functionId = "0";
+    analysis.before = {StackState{0, 0}, StackState{1, 0}, StackState{2, 0}};
+    analysis.after = {StackState{1, 0}, StackState{2, 0}, StackState{1, 0}};
+    analysis.reached = {true, true, true};
+
+    try {
+        clr::emitScript(fn, analysis, "LoxMain");
+        FAIL() << "expected std::runtime_error";
+    } catch (const std::runtime_error& e) {
+        EXPECT_NE(std::string(e.what()).find("empty"), std::string::npos)
+            << e.what();
+    }
+}
+
 TEST(EmitScript, StringConstantUsesTheByteArrayLiteral) {
     MemoryManager mm;
     DecodedFunction fn = decodeScript(R"(print "say \"hi\"\n";)", mm);
