@@ -29,9 +29,8 @@
 // `before[i].localCount - 1` is only an upper bound AT a CFG merge
 // (abstract_stack.h), not an exact slot. `resolveZeroDepthLocalSlot`
 // (zero_depth_local.h) is the one, target-independent authority for this
-// cross-check (brief.md section 3: one shared authority, not two) — this
-// pass calls into it rather than re-deriving its own copy, the same way
-// jvm_emitter.cpp does.
+// cross-check: one shared authority, not two. This pass calls into it
+// rather than re-deriving its own copy, the same way jvm_emitter.cpp does.
 
 #include "abstract_stack.h"
 #include "chunk_decoder.h"

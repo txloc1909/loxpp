@@ -21,9 +21,9 @@
 // silently before this cross-check existed (a plain, unnested `match`
 // disagreeing with `build/loxpp` with exit code 0 and no diagnostic).
 //
-// One authority for this rule, not one private copy per backend
-// (notes/... brief.md section 3): do not re-derive this cross-check
-// independently inside a new emitter.
+// One authority for this rule; a second, independently derived copy in
+// another emitter is a defect. Call into this function rather than
+// re-deriving the cross-check inside a new emitter.
 int resolveZeroDepthLocalSlot(int exactLocalCountMinusOne, bool atCfgMergeLabel,
                               int lastInvisibleVarSlot, int offset,
                               const char* backendTag);
