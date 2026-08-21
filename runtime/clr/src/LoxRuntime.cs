@@ -236,7 +236,7 @@ public static class LoxRuntime {
         math.Fields["atan"] = MathUnary("atan", Math.Atan);
         math.Fields["pow"] = MathBinary("pow", Math.Pow);
         math.Fields["atan2"] = MathBinary("atan2", Math.Atan2);
-        math.Fields["hypot"] = MathBinary("hypot", double.Hypot);
+        math.Fields["hypot"] = MathBinary("hypot", Hypot);
         math.Fields["min"] = MathBinary("min", Fmin);
         math.Fields["max"] = MathBinary("max", Fmax);
         math.Fields["pi"] = Math.PI;
@@ -277,6 +277,26 @@ public static class LoxRuntime {
     // integer at or above 2^52 up by one where std::round leaves them alone.
     private static double RoundHalfAwayFromZero(double x) {
         return Math.Round(x, MidpointRounding.AwayFromZero);
+    }
+
+    // std::hypot (glibc) gives +infinity when either operand is infinite,
+    // even if the other is NaN, and otherwise returns a NaN OPERAND
+    // unchanged when neither is infinite. double.Hypot already matches
+    // the first rule (confirmed: Hypot(PositiveInfinity, NaN) is
+    // Infinity), so this only intercepts the second: a finite/NaN or
+    // NaN/NaN call, where double.Hypot instead returns the CLR's own
+    // canonical NaN and loses the input's sign bit.
+    private static double Hypot(double x, double y) {
+        if (double.IsInfinity(x) || double.IsInfinity(y)) {
+            return double.Hypot(x, y);
+        }
+        if (double.IsNaN(x)) {
+            return x;
+        }
+        if (double.IsNaN(y)) {
+            return y;
+        }
+        return double.Hypot(x, y);
     }
 
     // std::fmin/fmax ignore a NaN operand when the other is a number;
