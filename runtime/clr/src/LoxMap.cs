@@ -27,10 +27,12 @@ public sealed class LoxMap {
     private sealed class Slot {
         public readonly object DisplayKey;
         public readonly object Value;
+        public readonly LinkedListNode<object> OrderNode;
 
-        public Slot(object displayKey, object value) {
+        public Slot(object displayKey, object value, LinkedListNode<object> orderNode) {
             DisplayKey = displayKey;
             Value = value;
+            OrderNode = orderNode;
         }
     }
 
@@ -44,7 +46,10 @@ public sealed class LoxMap {
 
     // Insertion order of the live keys, kept alongside m_entries so
     // iteration order is deterministic within one run (see class summary).
-    private readonly List<object> m_order = new();
+    // A LinkedList, not a List: each Slot holds the LinkedListNode a `del`
+    // must unlink, so removal is O(1) - matching ObjMap::mapDel - instead of
+    // the O(n) scan a plain List.Remove(key) would need.
+    private readonly LinkedList<object> m_order = new();
 
     private static object NormalizeKey(object key) {
         if (key == null) {
@@ -64,12 +69,13 @@ public sealed class LoxMap {
         object normalized = NormalizeKey(key);
         // A repeat write still replaces the displayed key (e.g. a later
         // write under -0.0 must display as -0, not the earlier 0.0), so the
-        // whole Slot is replaced rather than only its value.
-        bool isNewKey = !m_entries.ContainsKey(normalized);
-        m_entries[normalized] = new Slot(key, value);
-        if (isNewKey) {
-            m_order.Add(normalized);
-        }
+        // whole Slot is replaced rather than only its value. The order node
+        // itself is reused on a repeat write, so the key keeps its original
+        // insertion position instead of moving to the end.
+        LinkedListNode<object> orderNode = m_entries.TryGetValue(normalized, out Slot existing)
+            ? existing.OrderNode
+            : m_order.AddLast(normalized);
+        m_entries[normalized] = new Slot(key, value, orderNode);
     }
 
     public object Get(object key) {
@@ -82,8 +88,8 @@ public sealed class LoxMap {
 
     public void Remove(object key) {
         object normalized = NormalizeKey(key);
-        if (m_entries.Remove(normalized)) {
-            m_order.Remove(normalized);
+        if (m_entries.Remove(normalized, out Slot slot)) {
+            m_order.Remove(slot.OrderNode); // O(1): unlinks the node directly, no scan
         }
     }
 
