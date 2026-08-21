@@ -299,8 +299,12 @@ public static class LoxRuntime {
         return double.Hypot(x, y);
     }
 
-    // std::fmin/fmax ignore a NaN operand when the other is a number;
-    // Math.Min/Max instead propagate NaN.
+    // std::fmin/fmax ignore a NaN operand when the other is a number, and
+    // on a tie (including the +0.0/-0.0 tie) return the LEFT operand
+    // unchanged. Math.Min/Max instead propagate NaN, and each has its own
+    // documented zero-sign preference (Min favors -0.0, Max favors +0.0)
+    // that does not depend on operand order, so a tied call is handled
+    // before either BCL method ever runs.
     private static double Fmin(double a, double b) {
         if (double.IsNaN(a)) {
             return b;
@@ -308,7 +312,10 @@ public static class LoxRuntime {
         if (double.IsNaN(b)) {
             return a;
         }
-        return Math.Min(a, b);
+        if (a == b) {
+            return a;
+        }
+        return a < b ? a : b;
     }
 
     private static double Fmax(double a, double b) {
@@ -318,6 +325,9 @@ public static class LoxRuntime {
         if (double.IsNaN(b)) {
             return a;
         }
-        return Math.Max(a, b);
+        if (a == b) {
+            return a;
+        }
+        return a > b ? a : b;
     }
 }
