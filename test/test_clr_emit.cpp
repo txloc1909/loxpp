@@ -625,9 +625,9 @@ TEST(EmitScript, JumpIfFalseOnAMaterializedConditionLoadsInsteadOfDup) {
     // the shared abstract-stack pass's eager invisible-var materialization
     // (P2/P3) moves the condition off the CIL evaluation stack before
     // JUMP_IF_FALSE runs — before[i].operandDepth() == 0. `dup` on that
-    // empty stack would trip the R1 depth safety net at emit time (proven
-    // by temporarily disabling the fix); the actual fix reloads a fresh
-    // copy through `loadNamedLocalAtZeroDepth` instead.
+    // empty stack would trip the depth != operandDepth() safety net in
+    // emitBody (proven by temporarily disabling the fix); the actual fix
+    // reloads a fresh copy through `loadNamedLocalAtZeroDepth` instead.
     MemoryManager mm;
     DecodedFunction fn =
         decodeScript("{ var c = true; var b = c and 2; print b; }", mm);
@@ -692,9 +692,9 @@ TEST(EmitScript, IfWithoutElseStillEmitsTheUnconditionalSkip) {
 // ---------------------------------------------------------------------------
 // A SET_LOCAL whose merge-exact operandDepth() is nonzero must resolve its
 // slot the same way on every incoming edge (the block-leader depth-resync
-// fix, proven to matter by temporarily disabling it: the R1 depth safety
-// net then tripped with "simulated stack depth 0 disagrees with analysis
-// depth 1" on 02_if_else).
+// fix, proven to matter by temporarily disabling it: the depth !=
+// operandDepth() safety net in emitBody then tripped with "simulated stack
+// depth 0 disagrees with analysis depth 1" on 02_if_else).
 // ---------------------------------------------------------------------------
 
 TEST(EmitScript, IfElseAssignsSameSlotOnBothBranches) {
