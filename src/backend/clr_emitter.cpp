@@ -155,6 +155,20 @@ struct Builder {
         }
         maxDepth = std::max(maxDepth, depth);
     }
+
+    // `emit`'s own underflow check runs after it applies the delta, so it
+    // cannot see an instruction that reads a cell without netting it out of
+    // depth — `dup`'s delta is `+1`, so depth can only grow. Route every
+    // `dup` through here instead of through `emit` directly, so a `dup` on
+    // an empty evaluation stack fails at emission time, not at JIT time via
+    // CoreCLR's InvalidProgramException.
+    void emitDup() {
+        if (depth < 1) {
+            throw std::runtime_error(
+                "clr_emitter: evaluation stack underflow emitting 'dup'");
+        }
+        emit("dup", +1);
+    }
 };
 
 // Everything one chunk's straight-line lowering needs, threaded through by
@@ -300,7 +314,7 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
     } else if (fuse) {
         e.b.emit("stloc " + std::to_string(slot), -1);
     } else {
-        e.b.emit("dup", +1);
+        e.b.emitDup();
         e.b.emit("stloc " + std::to_string(slot), -1);
     }
     consumedFollowingPop = fuse;
