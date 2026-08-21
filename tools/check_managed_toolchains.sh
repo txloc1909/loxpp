@@ -48,7 +48,7 @@ step() {
 
 cd "$work"
 cp "$fixtures/Hello.java" "$fixtures/hello.j" "$fixtures/branch.j" \
-   "$fixtures/hello.il" .
+   "$fixtures/hello.il" "$fixtures/hello_rt.il" .
 
 # Jasmin and ilasm print their banner and exit nonzero when invoked with no
 # arguments, so these probes must not be allowed to trip `set -e` — the banner
@@ -133,6 +133,35 @@ elif step "ilasm assembly" ilasm -exe -output:HelloIl.dll hello.il; then
 }
 JSON
     check "ilasm -> dotnet" "ilasm ok" "$(dotnet HelloIl.dll 2>&1 || true)"
+fi
+
+# 3b. CLR lox-rt link: a hand-written class calls Lox.LoxOps.Print and links
+# against LoxRuntime.dll — the CLR counterpart of 2c above. This proves the
+# assemble -> run -> link chain end to end, before any code generator
+# exists. Must fail loudly, not skip, when the DLL is missing: a passing
+# check must mean the link happened, not that it was never attempted.
+lox_rt_dll="$repo_root/runtime/clr/LoxRuntime.dll"
+if [ ! -f "$lox_rt_dll" ]; then
+    printf '  FAIL  clr lox-rt link (no such runtime dll: %s)\n' "$lox_rt_dll"
+    printf '          run tools/build_lox_rt_clr.sh first\n'
+    failures=$((failures + 1))
+elif [ -z "$runtime_version" ]; then
+    printf '  FAIL  clr lox-rt link (no dotnet runtime discovered; see the ilasm check above)\n'
+    failures=$((failures + 1))
+elif step "ilasm assembly (lox-rt link)" ilasm -exe -output:HelloRt.dll hello_rt.il; then
+    cp "$lox_rt_dll" .
+    cat > HelloRt.runtimeconfig.json <<JSON
+{
+  "runtimeOptions": {
+    "tfm": "net${runtime_version%%.*}.0",
+    "framework": {
+      "name": "Microsoft.NETCore.App",
+      "version": "${runtime_version}"
+    }
+  }
+}
+JSON
+    check "ilasm -> dotnet (lox-rt link)" "lox-rt ok" "$(dotnet HelloRt.dll 2>&1 || true)"
 fi
 
 echo
