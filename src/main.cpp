@@ -246,6 +246,17 @@ static int runClrTarget(const std::string& outDir, const std::string& path) {
 }
 #endif
 
+// The set of `--target` values this build recognizes, in usage-message form.
+// Must list only backends this translation unit actually compiled in, so the
+// message never offers a target the two #ifdef dispatch arms below refuse.
+#if defined(LOXPP_JVM_BACKEND) && defined(LOXPP_CLR_BACKEND)
+#define LOXPP_TARGET_USAGE_LIST "{jvm,clr}"
+#elif defined(LOXPP_JVM_BACKEND)
+#define LOXPP_TARGET_USAGE_LIST "{jvm}"
+#elif defined(LOXPP_CLR_BACKEND)
+#define LOXPP_TARGET_USAGE_LIST "{clr}"
+#endif
+
 int main(int argc, const char* argv[]) {
 #if defined(LOXPP_JVM_BACKEND) || defined(LOXPP_CLR_BACKEND)
     // loxpp --target {jvm,clr} --out-dir <dir> program.lox — compiles only,
@@ -268,8 +279,9 @@ int main(int argc, const char* argv[]) {
             }
         }
         if (outDir.empty() || scriptPath.empty()) {
-            std::fprintf(stderr, "Usage: loxpp --target {jvm,clr} --out-dir "
-                                 "<dir> program.lox\n");
+            std::fprintf(stderr,
+                         "Usage: loxpp --target " LOXPP_TARGET_USAGE_LIST
+                         " --out-dir <dir> program.lox\n");
             return 64;
         }
 #ifdef LOXPP_JVM_BACKEND
@@ -282,9 +294,8 @@ int main(int argc, const char* argv[]) {
             return runClrTarget(outDir, scriptPath);
         }
 #endif
-        std::fprintf(
-            stderr,
-            "Usage: loxpp --target {jvm,clr} --out-dir <dir> program.lox\n");
+        std::fprintf(stderr, "Usage: loxpp --target " LOXPP_TARGET_USAGE_LIST
+                             " --out-dir <dir> program.lox\n");
         return 64;
     }
 #endif
