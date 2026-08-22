@@ -1115,6 +1115,69 @@ TEST(EmitProgram, TwoClosuresShareOneCaptureCell) {
     expectEveryBranchTargetIsLabeled(set);
 }
 
+// emitCapturedGetLocal and emitCapturedStore each guard with their own
+// isinst object[] test (this file's own top-of-file note), but neither
+// closure test above reaches them directly: SingleUpvalueClosureSeedsAnd
+// WiresTheCell only reaches GET_UPVALUE (inside get's own body) and
+// TwoClosuresShareOneCaptureCell only reaches SET_UPVALUE (inside set's
+// own body). This pins the shape of both functions where they actually
+// run: outer's OWN GET_LOCAL/SET_LOCAL of its captured `x`, after the
+// CLOSURE that captures it.
+TEST(EmitProgram, CapturedLocalGetAndSetLocalGuardWithIsinstAfterCapture) {
+    // outer's own slot 1 is `x`. slotForLocal(1) with baseSlot=1 is 2.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("fun outer() {\n"
+                                      "  var x = 0;\n"
+                                      "  fun get() { return x; }\n"
+                                      "  x = x + 1;\n"
+                                      "  print x;\n"
+                                      "  return get;\n"
+                                      "}\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(countOccurrences(il, ".class public auto ansi"), 3);
+    std::size_t outerStart = il.find(".class public auto ansi LoxFn$0");
+    std::size_t getStart = il.find(".class public auto ansi LoxFn$1");
+    ASSERT_NE(outerStart, std::string::npos) << il;
+    ASSERT_NE(getStart, std::string::npos) << il;
+    std::string outer = il.substr(outerStart, getStart - outerStart);
+
+    // emitCapturedGetLocal's own shape, the read side of `x + 1`: isinst,
+    // brfalse to its own raw label, castclass+ldelem.ref on the cell
+    // branch.
+    EXPECT_NE(outer.find("isinst object[]\n"
+                         "    brfalse Ccapgr"),
+              std::string::npos)
+        << outer;
+    EXPECT_NE(outer.find("castclass object[]\n"
+                         "    ldc.i4.0\n"
+                         "    ldelem.ref\n"
+                         "    br Ccapge"),
+              std::string::npos)
+        << outer;
+
+    // emitCapturedStore's own shape, the write side of `x = x + 1`: the
+    // value spills to scratch first (P2, emitCapturedStore's own note),
+    // then the same isinst guard picks stelem.ref-into-the-cell or a bare
+    // stloc.
+    EXPECT_NE(outer.find("isinst object[]\n"
+                         "    brfalse Ccapsr"),
+              std::string::npos)
+        << outer;
+    EXPECT_NE(outer.find("castclass object[]\n"
+                         "    ldc.i4.0\n"
+                         "    ldloc "),
+              std::string::npos)
+        << outer;
+    EXPECT_NE(outer.find("stelem.ref\n"
+                         "    br Ccapse"),
+              std::string::npos)
+        << outer;
+    expectEveryBranchTargetIsLabeled(outer);
+}
+
 TEST(EmitProgram, NestedClosureCopiesGrandparentUpvalue) {
     // c captures x, which is a's local but b's own upvalue (isLocal=false):
     // b's own CLOSURE-of-c wiring copies its OWN upvals[0] reference
