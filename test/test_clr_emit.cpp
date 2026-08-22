@@ -1,15 +1,17 @@
-// test_clr_emit.cpp — CLR emitter: straight-line code, control flow, and
-// functions and calls.
+// test_clr_emit.cpp — CLR emitter: straight-line code, control flow,
+// functions and calls, and closures and upvalues (the bug gate).
 //
-// Checkpoint (see the node's own specification): `tools/loxpp_clr.sh
-// notes/translation-probes/{01,...,05,08,15,...,23,30}_*.lox` must each
-// print stdout identical to build/loxpp on the same file, and
-// `24_call_before_closure.lox` must FAIL identically on both. That full
-// assemble-and-run comparison needs ilasm/dotnet (tools/check_clr_probes.sh,
-// run inside the dev-managed container); this file covers what a plain C++
-// unit test can check without them: the bytearray/bit-pattern literal
-// helpers, and the generated ilasm's structural shape (locals, maxstack,
-// fusion, abort-on-unsupported, multi-class programs via emitProgram).
+// Checkpoint (see the node's own specification): `tools/loxpp_clr.sh` on
+// every probe in `tools/check_clr_probes.sh`'s accumulated list must print
+// stdout identical to build/loxpp, `V1_fresh_cell` must print `0 1 2` (never
+// `2 2 2`), and the error probes must FAIL identically on both sides. That
+// full assemble-and-run comparison needs ilasm/dotnet
+// (tools/check_clr_probes.sh, run inside the dev-managed container); this
+// file covers what a plain C++ unit test can check without them: the
+// bytearray/bit-pattern literal helpers, and the generated ilasm's
+// structural shape (locals, maxstack, fusion, abort-on-unsupported,
+// multi-class programs via emitProgram, the idempotent captured-cell seed,
+// and the upvalue array wiring).
 
 #include "backend/abstract_stack.h"
 #include "backend/chunk_decoder.h"
@@ -51,7 +53,8 @@ int countOccurrences(const std::string& haystack, const std::string& needle) {
 // Every branch mnemonic this pass emits. A new one needs its own entry
 // here too, or that branch gets no label-integrity coverage from this
 // helper (test_jvm_emit.cpp's own kJumpMnemonics note).
-const std::vector<std::string> kBranchMnemonics = {"br ", "brtrue "};
+const std::vector<std::string> kBranchMnemonics = {"br ", "brtrue ",
+                                                   "brfalse "};
 
 // For every branch instruction in `il`, confirms its own target text names
 // a label this pass actually wrote (a "<name>:" line) — not merely that a
@@ -821,6 +824,85 @@ TEST(EmitScript, CallWithArgsSpillsToScratchSlotsAndBuildsArray) {
         << j;
 }
 
+// BUILD_LIST/GET_INDEX/SET_INDEX (this node pulls these three opcodes
+// forward from the aggregates scope they conceptually belong to — see
+// emitBuildList's own note): V1_fresh_cell and V3_loopvar each build a
+// list of the closures under test and read it back by index, so this
+// node's own checkpoint needs list and index support to run at all.
+
+TEST(EmitScript, BuildListOfZeroElementsBuildsDirectly) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("var e = [];", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("ldc.i4.0\n"
+                     "    newarr [System.Runtime]System.Object\n"
+                     "    call class [LoxRuntime]Lox.LoxList "
+                     "[LoxRuntime]Lox.LoxOps::BuildList(object[])\n"),
+              std::string::npos)
+        << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitScript, BuildListSpillsToScratchSlotsAndBuildsArray) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("var xs = [1, 2, 3];", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    // globals(1) + frame slots [xs](1) + scratch(1) + CALL's own unused
+    // callee scratch(1) + the widest BUILD_LIST/CALL's own 3-element spill
+    // area, so argScratchBase is baseSlot(1) + maxLocalCount(1) + scratch(1)
+    // + callee(1) = 4.
+    //
+    // P7, same shuffle CALL's own argument array needs: the elements are
+    // already on the stack in push order [e0, e1, e2], topmost (e2) first,
+    // so the topmost is spilled first.
+    EXPECT_NE(j.find("stloc 6\n"
+                     "    stloc 5\n"
+                     "    stloc 4\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("ldc.i4.3\n"
+                     "    newarr [System.Runtime]System.Object\n"
+                     "    dup\n"
+                     "    ldc.i4.0\n"
+                     "    ldloc 4\n"
+                     "    stelem.ref\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("call class [LoxRuntime]Lox.LoxList "
+                     "[LoxRuntime]Lox.LoxOps::BuildList(object[])\n"),
+              std::string::npos)
+        << j;
+    EXPECT_EQ(countOccurrences(j, "stelem.ref"), 3);
+    EXPECT_EQ(countOccurrences(j, "dup"), 3);
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitScript, GetIndexAndSetIndexAreOneCallEach) {
+    // vm.cpp's own operand order already matches LoxOps's parameter order
+    // (emitGetIndex/emitSetIndex's own note), so neither needs a shuffle —
+    // unlike SET_LOCAL/SET_GLOBAL/SET_UPVALUE, this is not a P2 peek.
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("var xs = [1]; print xs[0]; xs[0] = 9;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("call object [LoxRuntime]Lox.LoxOps::GetIndex(object, "
+                     "object)\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("call object [LoxRuntime]Lox.LoxOps::SetIndex(object, "
+                     "object, object)\n"
+                     "    pop\n"),
+              std::string::npos)
+        << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
 TEST(EmitProgram, ZeroUpvalueClosureConstructsGeneratedClass) {
     MemoryManager mm;
     DecodedFunction fn =
@@ -905,10 +987,18 @@ TEST(EmitProgram, SiblingFunctionsGetSequentialClassNames) {
     expectEveryBranchTargetIsLabeled(il);
 }
 
-TEST(EmitProgram, ClosureWithUpvalueIsNotImplemented) {
-    // 06_shared_upvalue: `get` captures `x`, so its CLOSURE carries one
-    // upvalue entry. This node only lowers the zero-upvalue construction;
-    // wiring a real cell into it is a later node's job.
+// Closures and upvalues (this node, the bug gate). The real, end-to-end
+// proof that a captured local behaves correctly (V1_fresh_cell, V2_shared,
+// V3_loopvar, V4_mutate_through_upvalue, V5/V6_self_recursive_closure,
+// 06_shared_upvalue) is tools/check_clr_probes.sh, run inside the
+// dev-managed container — a plain unit test cannot assemble+run ilasm/
+// dotnet. What follows checks the structural shape this pass promises: the
+// idempotent seed at a CLOSURE that captures a local, GET/SET_UPVALUE's own
+// lowering, and the isLocal=false pass-through for a grandparent's upvalue
+// — mirroring test_jvm_emit.cpp's own coverage of the same shapes.
+
+TEST(EmitProgram, SingleUpvalueClosureSeedsAndWiresTheCell) {
+    // outer's own slot 1 is `x`. slotForLocal(1) with baseSlot=1 is 2.
     MemoryManager mm;
     DecodedFunction fn = decodeScript("fun outer() {\n"
                                       "  var x = 0;\n"
@@ -917,14 +1007,190 @@ TEST(EmitProgram, ClosureWithUpvalueIsNotImplemented) {
                                       "}\n",
                                       mm);
     StackAnalysisTree tree = analyzeStackTree(fn);
-    try {
-        clr::emitProgram(fn, tree, "LoxMain");
-        FAIL() << "expected std::runtime_error";
-    } catch (const std::runtime_error& e) {
-        std::string what = e.what();
-        EXPECT_NE(what.find("CLOSURE"), std::string::npos) << what;
-        EXPECT_NE(what.find('1'), std::string::npos) << what;
-    }
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(countOccurrences(il, ".class public auto ansi"), 3);
+    std::size_t outerStart = il.find(".class public auto ansi LoxFn$0");
+    ASSERT_NE(outerStart, std::string::npos) << il;
+    std::size_t getStart = il.find(".class public auto ansi LoxFn$1");
+    ASSERT_NE(getStart, std::string::npos) << il;
+    std::string outer = il.substr(outerStart, getStart - outerStart);
+    std::string get = il.substr(getStart);
+
+    // The idempotent seed (ensureCapturedCell): check, seed only if not
+    // already a cell, then read the (now guaranteed) cell for wiring.
+    EXPECT_NE(outer.find("ldloc 2\n"
+                         "    isinst object[]\n"
+                         "    brtrue Ccapok3_0\n"
+                         "    ldc.i4.1\n"
+                         "    newarr [System.Runtime]System.Object\n"
+                         "    dup\n"
+                         "    ldc.i4.0\n"
+                         "    ldloc 2\n"
+                         "    stelem.ref\n"
+                         "    stloc 2\n"
+                         "Ccapok3_0:\n"),
+              std::string::npos)
+        << outer;
+    EXPECT_NE(
+        outer.find("newarr object[]\n"
+                   "    dup\n"
+                   "    ldc.i4.0\n"
+                   "    ldloc 2\n"
+                   "    castclass object[]\n"
+                   "    stelem.ref\n"
+                   "    newobj instance void LoxFn$1::.ctor(object[][])\n"),
+        std::string::npos)
+        << outer;
+    expectEveryBranchTargetIsLabeled(outer);
+
+    // GET_UPVALUE 0: upvals[0][0].
+    EXPECT_NE(get.find("ldarg.0\n"
+                       "    ldfld object[][] [LoxRuntime]Lox.LoxClosure::"
+                       "Upvalues\n"
+                       "    ldc.i4.0\n"
+                       "    ldelem.ref\n"
+                       "    ldc.i4.0\n"
+                       "    ldelem.ref\n"
+                       "    ret\n"),
+              std::string::npos)
+        << get;
+    expectEveryBranchTargetIsLabeled(get);
+}
+
+TEST(EmitProgram, TwoClosuresShareOneCaptureCell) {
+    // 06_shared_upvalue: get and set both capture x. Each CLOSURE gets its
+    // OWN idempotent check (distinct labels, tied to its own offset —
+    // captureLabel), because ensureCapturedCell cannot assume the other one
+    // ran first on every path (this node's own hazard: two closures
+    // sharing a cell is not always sequential — an if/else can capture the
+    // same outer on mutually exclusive arms). Here both run on the SAME
+    // straight-line path, so the second one's check is a real no-op at
+    // runtime, but the CIL still carries both checks.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("fun outer() {\n"
+                                      "  var x = 0;\n"
+                                      "  fun get() { return x; }\n"
+                                      "  fun set(v) { x = v; }\n"
+                                      "  return get;\n"
+                                      "}\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(countOccurrences(il, ".class public auto ansi"), 4);
+    std::size_t outerStart = il.find(".class public auto ansi LoxFn$0");
+    std::size_t getStart = il.find(".class public auto ansi LoxFn$1");
+    std::size_t setStart = il.find(".class public auto ansi LoxFn$2");
+    ASSERT_NE(outerStart, std::string::npos) << il;
+    ASSERT_NE(getStart, std::string::npos) << il;
+    ASSERT_NE(setStart, std::string::npos) << il;
+    std::string outer = il.substr(outerStart, getStart - outerStart);
+    std::string set = il.substr(setStart);
+
+    EXPECT_NE(outer.find("Ccapok3_0:"), std::string::npos) << outer;
+    EXPECT_NE(outer.find("Ccapok8_0:"), std::string::npos) << outer;
+    // Both CLOSUREs read the SAME slot (2) for their cell — one shared cell.
+    EXPECT_EQ(countOccurrences(outer, "ldloc 2\n"
+                                      "    castclass object[]\n"
+                                      "    stelem.ref\n"),
+              2);
+    expectEveryBranchTargetIsLabeled(outer);
+
+    // set(v): SET_UPVALUE 0 writes upvals[0][0], fused with its own
+    // trailing POP (the assignment is a bare statement) — no leftover
+    // reload of the spilled value.
+    EXPECT_NE(set.find("ldfld object[][] [LoxRuntime]Lox.LoxClosure::"
+                       "Upvalues\n"
+                       "    ldc.i4.0\n"
+                       "    ldelem.ref\n"
+                       "    ldc.i4.0\n"),
+              std::string::npos)
+        << set;
+    EXPECT_NE(set.find("stelem.ref\n"
+                       "    ldnull\n"
+                       "    ret\n"),
+              std::string::npos)
+        << set;
+    expectEveryBranchTargetIsLabeled(set);
+}
+
+TEST(EmitProgram, NestedClosureCopiesGrandparentUpvalue) {
+    // c captures x, which is a's local but b's own upvalue (isLocal=false):
+    // b's own CLOSURE-of-c wiring copies its OWN upvals[0] reference
+    // straight through, with no seed check at all — see emitClosure's own
+    // note. Only a's CLOSURE-of-b needs ensureCapturedCell.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("fun a() {\n"
+                                      "  var x = 1;\n"
+                                      "  fun b() {\n"
+                                      "    fun c() { return x; }\n"
+                                      "    return c;\n"
+                                      "  }\n"
+                                      "  return b;\n"
+                                      "}\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(countOccurrences(il, ".class public auto ansi"), 4);
+    std::size_t bStart = il.find(".class public auto ansi LoxFn$1");
+    std::size_t cStart = il.find(".class public auto ansi LoxFn$2");
+    ASSERT_NE(bStart, std::string::npos) << il;
+    ASSERT_NE(cStart, std::string::npos) << il;
+    std::string bFn = il.substr(bStart, cStart - bStart);
+
+    EXPECT_EQ(bFn.find("isinst"), std::string::npos) << bFn;
+    EXPECT_NE(bFn.find("dup\n"
+                       "    ldc.i4.0\n"
+                       "    ldarg.0\n"
+                       "    ldfld object[][] [LoxRuntime]Lox.LoxClosure::"
+                       "Upvalues\n"
+                       "    ldc.i4.0\n"
+                       "    ldelem.ref\n"
+                       "    stelem.ref\n"),
+              std::string::npos)
+        << bFn;
+    expectEveryBranchTargetIsLabeled(bFn);
+}
+
+// A local `fun` that captures itself makes an uninitialized-register read
+// of its own slot until seedSelfCaptureCell seeds the cell before anything
+// reads it. Reverting that seed locally and rerunning this
+// test confirms it FAILS first: without the seed, the very first "stloc 2"
+// this test looks for does not exist before the closure's own array-build
+// read of that same slot (it is instead the stelem.ref-redirect after
+// construction), so `firstReadPos` would sit ahead of a missing/later
+// `seedPos`, or `seedPos` would not be found at all.
+TEST(EmitProgram, SelfRecursiveClosureSeedsCellBeforeFirstRead) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("fun outer() {\n"
+                                      "  fun f() { f(); }\n"
+                                      "  return f;\n"
+                                      "}\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_EQ(countOccurrences(il, ".class public auto ansi"), 3);
+    std::size_t outerStart = il.find(".class public auto ansi LoxFn$0");
+    std::size_t fStart = il.find(".class public auto ansi LoxFn$1");
+    ASSERT_NE(outerStart, std::string::npos) << il;
+    std::string outer = il.substr(outerStart, fStart - outerStart);
+
+    // f's own Lox slot 1 (slotForLocal(1) with baseSlot=1) is 2: the seed
+    // (`stloc 2`) must precede every later `ldloc 2` that reads it as a
+    // cell — the array-build loop, and the redirected store of the closure
+    // itself into the cell.
+    std::size_t seedPos = outer.find("stloc 2\n");
+    ASSERT_NE(seedPos, std::string::npos) << outer;
+    std::size_t firstReadPos = outer.find("ldloc 2\n");
+    ASSERT_NE(firstReadPos, std::string::npos) << outer;
+    EXPECT_LT(seedPos, firstReadPos)
+        << "the seed must run before the first read of the self-captured "
+           "slot, or a bare local read is uninitialized:\n"
+        << outer;
+    expectEveryBranchTargetIsLabeled(outer);
 }
 
 // RETURN's function-role hazard (node specification): the shared
