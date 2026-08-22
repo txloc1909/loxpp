@@ -790,8 +790,8 @@ void emitSetIndex(Emitter& e) {
 // after, because nothing else in this chunk ever turns a cell back into a
 // raw value once created — CLOSE_UPVALUE emits no CIL at all (see its own
 // case in emitBody) — and a fresh DECLARATION always re-`stloc`s the slot
-// directly (finishInstruction, emitSetLocal), never through this check, so
-// it is exactly what puts a slot back to raw for the NEXT incarnation
+// directly (finishInstruction), never through this check, so it is exactly
+// what puts a slot back to raw for the NEXT incarnation
 // (V1_fresh_cell.lox: `var snapshot` re-declares, hence re-seeds, on every
 // trip of ITS loop).
 void ensureCapturedCell(Emitter& e, int slot, int offset, int subIndex) {
