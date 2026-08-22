@@ -41,6 +41,8 @@ Compiler::Compiler(ObjFunction* function, Parser* parser, MemoryManager* mm,
     // receiver.
     Local* implicit = &m_locals[m_localCount++];
     implicit->depth = 0;
+    // The runtime stack already holds the callee/receiver at slot 0.
+    m_stackHeight = m_localCount;
     if (type == FunctionType::METHOD || type == FunctionType::INITIALIZER) {
         implicit->name = Token{TokenType::THIS, "this", 0};
     } else {
@@ -564,6 +566,13 @@ void Compiler::expressionStatement() {
 }
 
 void Compiler::ifStatement() {
+    // Control-flow statements are net-temp-neutral: the condition's pushed
+    // bool is consumed by exactly one of the mutually exclusive POPs, so the
+    // linear m_stackHeight counter would drift through the branch cleanup.
+    // Anchor on the live temp count instead: save it, and restore it after
+    // the construct so the counter re-aligns with the real runtime stack.
+    int savedOperandDepth = m_stackHeight - m_localCount;
+
     m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after 'if'.");
     expression();
     m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after condition.");
@@ -575,14 +584,21 @@ void Compiler::ifStatement() {
     int elseJump = emitJump(Op::JUMP);
     patchJump(thenJump);
     emitByte(Op::POP);
+    // Both paths have now popped the condition bool; re-anchor so the else
+    // body compiles at the same height the then body saw.
+    m_stackHeight = m_localCount + savedOperandDepth;
 
     if (m_parser->match(TokenType::ELSE)) {
         statement();
     }
     patchJump(elseJump);
+
+    m_stackHeight = m_localCount + savedOperandDepth;
 }
 
 void Compiler::whileStatement() {
+    int savedOperandDepth = m_stackHeight - m_localCount;
+
     int loopStart = static_cast<int>(getCurrentChunk()->size());
     m_loopStack.push_back({loopStart, m_localCount, {}});
 
@@ -602,10 +618,13 @@ void Compiler::whileStatement() {
         patchJump(offset);
     }
     m_loopStack.pop_back();
+
+    m_stackHeight = m_localCount + savedOperandDepth;
 }
 
 void Compiler::forStatement() {
     beginScope();
+    int savedOperandDepth = m_stackHeight - m_localCount;
 
     m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after 'for'.");
 
@@ -678,11 +697,13 @@ void Compiler::forStatement() {
     m_loopStack.pop_back();
 
     endScope();
+    m_stackHeight = m_localCount + savedOperandDepth;
 }
 
 void Compiler::forInStatement(const Token& itemName) {
     // At entry: 'for' '(' 'var' itemName 'in' have been consumed.
     // Caller (forStatement) owns beginScope()/endScope().
+    int savedOperandDepth = m_stackHeight - m_localCount;
 
     // 1. Evaluate iterable expression; GET_ITER replaces it with an
     // ObjIterator.
@@ -729,6 +750,7 @@ void Compiler::forInStatement(const Token& itemName) {
         patchJump(offset);
     }
     m_loopStack.pop_back();
+    m_stackHeight = m_localCount + savedOperandDepth;
 }
 
 void Compiler::breakStatement() {
@@ -777,6 +799,19 @@ void Compiler::compileMatchBody() {
         pendingSaved[i] = m_locals[m_localCount - numPending + i];
     }
     m_localCount -= numPending;
+
+    // A match expression always leaves exactly one cell on the operand stack
+    // (its result value) above whatever was already there. The body's own
+    // control flow (JUMP_TABLE, arm jumps) is not linearly height-balanced,
+    // so a running counter would drift through it; capture the entry height
+    // and re-anchor the exit to entry+1 instead.
+    int entryStackHeight = m_stackHeight;
+    int operandSlots = entryStackHeight - m_localCount;
+    for (int i = 0; i < operandSlots; i++) {
+        Token phantom{TokenType::IDENTIFIER, "(match_operand)",
+                      m_parser->m_previous.line};
+        addLocal(phantom);
+    }
 
     beginScope();
 
@@ -929,6 +964,12 @@ void Compiler::compileMatchBody() {
            m_locals[m_localCount - 1].depth > m_scopeDepth) {
         m_localCount--;
     }
+    // Retire the operand phantoms without a POP: their runtime slots belong to
+    // the enclosing expression's siblings, which stay live below the result.
+    m_localCount -= operandSlots;
+    // Re-anchor the operand-stack height: the match left exactly one result
+    // cell above the siblings that were live on entry.
+    m_stackHeight = entryStackHeight + 1;
     // Stack: [..., result_value]
 
     // Restore the pending locals. The internal allocations (result, subject,
@@ -1818,6 +1859,8 @@ void Compiler::super_() {
         namedVariable(Token{TokenType::SUPER, "super", 0}, false);
         emitConstantOp(Op::SUPER_INVOKE, nameConst);
         emitByte(argCount);
+        m_stackHeight -= argCount;
+        m_stackHeight--; // pop self, superclass, args; push result
     } else {
         namedVariable(Token{TokenType::SUPER, "super", 0}, false);
         emitConstantOp(Op::GET_SUPER, nameConst);
@@ -1847,6 +1890,7 @@ void Compiler::dot() {
                           "Expect ')' after arguments.");
         emitConstantOp(Op::INVOKE, nameConst);
         emitByte(argCount);
+        m_stackHeight -= argCount; // pop receiver+args, push result
     } else {
         emitConstantOp(Op::GET_PROPERTY, nameConst);
     }
@@ -1942,6 +1986,8 @@ void Compiler::parseFunction(FunctionType /*type*/) {
         } while (m_parser->match(TokenType::COMMA));
     }
     m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after parameters.");
+    // Caller-pushed args occupy slots 1..arity at runtime; sync the height.
+    m_stackHeight = m_localCount;
     m_parser->consume(TokenType::LEFT_BRACE,
                       "Expect '{' before function body.");
     block();
@@ -1977,11 +2023,98 @@ void Compiler::emitByte(Byte byte) {
     getCurrentChunk()->write(byte, m_parser->m_previous.line);
 }
 
-void Compiler::emitByte(Op op) { emitByte(static_cast<Byte>(op)); }
+// Net effect of `op` on the number of runtime stack cells. Mirrors the
+// per-opcode stackEffect table on the backend (abstract_stack.cpp) so the
+// compiler's own view of the operand stack never drifts from what the VM
+// will do. The caller accounts for the operand-carrying opcodes (CALL,
+// INVOKE, SUPER_INVOKE, BUILD_LIST, BUILD_MAP) where the count is known.
+void Compiler::trackOperandStack(Op op) {
+    switch (op) {
+    case Op::CONSTANT:
+    case Op::NIL:
+    case Op::TRUE:
+    case Op::FALSE:
+    case Op::GET_GLOBAL:
+    case Op::GET_LOCAL:
+    case Op::GET_UPVALUE:
+    case Op::CLOSURE:
+    case Op::CLASS:
+        m_stackHeight++;
+        break;
+    case Op::NEGATE:
+    case Op::NOT:
+    case Op::GET_TAG:
+    case Op::IS_SEQ:
+    case Op::INSTANCEOF:
+    case Op::GET_PROPERTY:
+    case Op::ITER_HAS_NEXT:
+    case Op::ITER_NEXT:
+    case Op::SET_LOCAL:
+    case Op::SET_GLOBAL:
+    case Op::SET_UPVALUE:
+    case Op::JUMP_IF_FALSE:
+    case Op::JUMP:
+    case Op::LOOP:
+    case Op::MATCH_ERROR:
+    case Op::GET_ITER:
+        break;
+    case Op::EQUAL:
+    case Op::GREATER:
+    case Op::LESS:
+    case Op::ADD:
+    case Op::SUBTRACT:
+    case Op::MULTIPLY:
+    case Op::DIVIDE:
+    case Op::MODULO:
+    case Op::GET_INDEX:
+    case Op::IN:
+    case Op::SET_PROPERTY:
+    case Op::GET_SUPER:
+    case Op::PRINT:
+    case Op::POP:
+    case Op::DEFINE_GLOBAL:
+    case Op::CLOSE_UPVALUE:
+    case Op::RETURN:
+    case Op::DEFINE_METHOD:
+    case Op::INHERIT:
+    case Op::JUMP_TABLE:
+        m_stackHeight--;
+        break;
+    case Op::SET_INDEX:
+    case Op::SLICE:
+        m_stackHeight -= 2;
+        break;
+    case Op::CALL:
+    case Op::INVOKE:
+    case Op::SUPER_INVOKE:
+    case Op::BUILD_LIST:
+    case Op::BUILD_MAP:
+        // Operand count is not known here; the caller adjusts m_stackHeight.
+        break;
+    }
+}
+
+void Compiler::emitByte(Op op) {
+    emitByte(static_cast<Byte>(op));
+    trackOperandStack(op);
+}
 
 void Compiler::emitBytes(Op op, Byte byte) {
     emitByte(op);
     emitByte(byte);
+    switch (op) {
+    case Op::CALL:
+        m_stackHeight -= byte; // pop callee+args, push result
+        break;
+    case Op::BUILD_LIST:
+        m_stackHeight -= static_cast<int>(byte) - 1;
+        break;
+    case Op::BUILD_MAP:
+        m_stackHeight -= 2 * static_cast<int>(byte) - 1;
+        break;
+    default:
+        break;
+    }
 }
 
 int Compiler::emitJump(Op op) {
