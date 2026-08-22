@@ -18,10 +18,16 @@
 // note for the operand-stack hazard specific to GET_ITER) — see
 // notes/bytecode-translation-problems.md for what each P-number means.
 //
-// Scope: no enum tag dispatch (GET_TAG, JUMP_TABLE), no match/enum result
-// exposure. Every opcode outside that set throws std::runtime_error, naming
-// the opcode, instead of falling through silently — a later CLR emission node
-// lowers it for real.
+// Scope: no enum tag dispatch (GET_TAG, JUMP_TABLE) — a later CLR emission
+// node lowers those. A folded match/enum result DOES reach every consumer
+// already routed through loadNamedLocalAtZeroDepth (GET_ITER included). The
+// one gap this node leaves: SLICE and IN have no general fold repair yet
+// (the nativePops/normalizeFoldedOperands mechanism, brief section 3), so a
+// folded operand reaching either of THEM specifically fails loudly at emit
+// time — an evaluation-stack-underflow error naming the opcode — rather than
+// lowering to a silently wrong value. Every opcode outside the covered set
+// throws std::runtime_error, naming the opcode, instead of falling through
+// silently — a later CLR emission node lowers it for real.
 //
 // A captured local lowers to a one-element `object[]` ref cell (P4). The
 // cell allocation is idempotent, not a static declaration-point seed: an
