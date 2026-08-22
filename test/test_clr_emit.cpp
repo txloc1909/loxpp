@@ -1966,13 +1966,14 @@ TEST(EmitProgram, GetIterGoesThroughTheCapturedSlotGuardWhenItsSlotIsReused) {
     // because the guard actually runs, not because this call site somehow
     // knew in advance that this particular slot never really needed it.
     MemoryManager mm;
-    DecodedFunction fn = decodeScript("fun outer() {\n"
-                                      "  { for (var x in [1, 2, 3]) print x; }\n"
-                                      "  var y = 0;\n"
-                                      "  fun get() { return y; }\n"
-                                      "  return get;\n"
-                                      "}\n",
-                                      mm);
+    DecodedFunction fn =
+        decodeScript("fun outer() {\n"
+                     "  { for (var x in [1, 2, 3]) print x; }\n"
+                     "  var y = 0;\n"
+                     "  fun get() { return y; }\n"
+                     "  return get;\n"
+                     "}\n",
+                     mm);
     StackAnalysisTree tree = analyzeStackTree(fn);
     std::string il = clr::emitProgram(fn, tree, "LoxMain");
 
