@@ -162,12 +162,10 @@ examples=(
     "examples/guessing_game.lox"
     "examples/hanoi.lox"
     "examples/leap_year.lox"
-    # This node's own newly runnable examples: each one exercises
-    # BUILD_LIST, GET_INDEX, or SET_INDEX (a list or string literal,
-    # indexed or index-assigned) that a prior node's emitter would reject
-    # outright. Whether these nine plus the six above are the whole set
-    # the CLR backend can currently run is what the corpus sweep below
-    # checks, not this comment.
+    # Aggregate literals and indexing: each of these nine needs BUILD_LIST,
+    # GET_INDEX, or SET_INDEX to run — a list or string literal, indexed or
+    # index-assigned. Whether this group is complete is what the corpus
+    # sweep below checks, not this comment.
     "examples/digital_root.lox"
     "examples/gcd_lcm.lox"
     "examples/to_binary.lox"
@@ -177,12 +175,12 @@ examples=(
     "examples/anagram.lox"
     "examples/caesar.lox"
     "examples/linear_regression.lox"
-    # This node's own newly runnable examples: each one exercises classes,
-    # methods, or super. class_dispatch.lox is the first program whose
-    # `return match {...}` reaches the RETURN-of-a-named-local case end to
-    # end (bytecode-translation-problems.md); shapes.lox additionally
-    # exercises inheritance, dynamic dispatch through INVOKE, and
-    # `math.pi` through GET_PROPERTY on a native-function-bearing instance.
+    # Classes, methods, and super: class_dispatch.lox is the first program
+    # whose `return match {...}` reaches the RETURN-of-a-named-local case
+    # end to end (bytecode-translation-problems.md); shapes.lox
+    # additionally exercises inheritance, dynamic dispatch through
+    # INVOKE, and `math.pi` through GET_PROPERTY on a
+    # native-function-bearing instance.
     "examples/class_dispatch.lox"
     "examples/shapes.lox"
     "examples/ast_eval.lox"
@@ -191,9 +189,10 @@ examples=(
     "examples/multi_return.lox"
     "examples/quiz.lox"
     "examples/stack_queue.lox"
-    # This node's own PRINT/DEFINE_GLOBAL fold fix (emitPrint's own note):
-    # both print a match expression's result directly, with nothing in
-    # between to re-expose it as a genuine evaluation-stack value first.
+    # Folded match-result exposure through PRINT and DEFINE_GLOBAL
+    # (emitPrint's own note): both print a match expression's result
+    # directly, with nothing in between to re-expose it as a genuine
+    # evaluation-stack value first.
     "examples/match_http_status.lox"
     "examples/match_state_machine.lox"
     "examples/csv_reader.lox"
@@ -210,13 +209,9 @@ examples=(
     "examples/sieve.lox"
     "examples/stats.lox"
     "examples/wc.lox"
-    # This node's own newly runnable examples: each one exercises the `in`
-    # operator, SLICE syntax (`xs[a:b]`), or a match sequence pattern
-    # (IS_SEQ) that a prior node's emitter rejects outright. Measured
-    # against origin/main's emitter, one at a time: config_parser.lox,
-    # grep_lite.lox, match_dispatch.lox, run_length.lox, scanner.lox, and
-    # sequences.lox stop on IN; merge_sort.lox and sorting.lox stop on
-    # SLICE; string_list_pattern_demo.lox stops on IS_SEQ.
+    # Membership, slicing, and sequence patterns: each of these nine needs
+    # the `in` operator, SLICE syntax (`xs[a:b]`), or a match sequence
+    # pattern (IS_SEQ) to run.
     "examples/config_parser.lox"
     "examples/grep_lite.lox"
     "examples/match_dispatch.lox"
