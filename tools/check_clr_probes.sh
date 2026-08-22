@@ -118,6 +118,14 @@ probes=(
     # DEFINE_GLOBAL, or SET_GLOBAL with nothing in between to re-expose it
     # as a genuine evaluation-stack value first.
     "notes/translation-probes/34_match_consumed_result.lox"
+    # Aggregates, slices, membership, and iterators: the for-in protocol
+    # (GET_ITER/ITER_HAS_NEXT/ITER_NEXT — GET_ITER's own hazard is that it
+    # runs on an already-empty evaluation stack, see emitGetIter's own
+    # note), SLICE and IN over a List/String/Map, and IS_SEQ (a match
+    # sequence pattern's own type check).
+    "notes/translation-probes/11_for_in.lox"
+    "notes/translation-probes/16_slice_in.lox"
+    "notes/translation-probes/25_seq_map_string_coverage.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -202,6 +210,21 @@ examples=(
     "examples/sieve.lox"
     "examples/stats.lox"
     "examples/wc.lox"
+    # This node's own newly runnable examples: each one exercises the `in`
+    # operator, a match sequence pattern (IS_SEQ), or SLICE syntax
+    # (sequences.lox's own `xs[a:b]`) that a prior node's emitter would
+    # reject outright. merge_sort.lox needs none of this node's own
+    # opcodes; the corpus sweep below is what actually found it missing
+    # from this list, not a dependency on this node's own work.
+    "examples/config_parser.lox"
+    "examples/grep_lite.lox"
+    "examples/match_dispatch.lox"
+    "examples/merge_sort.lox"
+    "examples/run_length.lox"
+    "examples/scanner.lox"
+    "examples/sequences.lox"
+    "examples/sorting.lox"
+    "examples/string_list_pattern_demo.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
