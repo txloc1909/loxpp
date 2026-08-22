@@ -263,10 +263,11 @@ struct Emitter {
     int globalsSlot{0};
     int scratchSlot{0};
 
-    // Set (to scratchSlot+1 / scratchSlot+2) only when this chunk contains
-    // a CALL with at least one argument; -1 otherwise, so a stray use
-    // before buildEmitter's own computation fails loudly instead of
-    // silently aliasing scratchSlot.
+    // Set (to scratchSlot+1 / scratchSlot+2) whenever this chunk contains
+    // a CALL, a BUILD_LIST, or a BUILD_MAP with a non-zero width
+    // (computeMaxAggregateWidth); -1 otherwise, so a stray use before
+    // buildEmitter's own computation fails loudly instead of silently
+    // aliasing scratchSlot.
     int calleeScratchSlot{-1};
     int argScratchBase{-1};
 
