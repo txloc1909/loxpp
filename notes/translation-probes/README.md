@@ -65,12 +65,21 @@ each has an off-the-shelf solution.
 | `28_folded_match_operand_family` | `normalizeFoldedOperands`'s own required coverage: the nine R15 shapes (`BUILD_LIST`, `BUILD_MAP`, `CALL`, `GET_PROPERTY`, `INVOKE`, `SET_PROPERTY`, `SET_INDEX`, `SLICE`, `IN`, each with a folded operand) plus one nested match subject; `RETURN` of a folded match is deliberately not repeated here (`checkReturnHeightZero` excludes probes by design) — `examples/or_pattern_demo.lox` already covers it | P8 |
 | `29_os_access` | the OS/world access natives (`args`, `env`, `exists`, `is_dir`, `is_file`, `stat`, `sleep`) must run byte-identically on both runtimes — the JVM runtime registers them too (`LoxRuntime`), and this probe guards against a future drift | none (parity gate, N11) |
 | `30_bool_compare_and_string_literal` | every comparison spelling (`==`, `!=`, `>`, `>=`, `<`, `<=`, each lowering to EQUAL/GREATER/LESS optionally paired with NOT), a standalone `!`, `%`, the `true`/`false`/`nil` literals printed as values in their own right, and a string constant with a quote, a backslash, and a tab | P2 |
+| `clr-only/31_deep_recursion` | native's own frame-count ceiling (`src/vm.h` `FRAMES_MAX`), reached through ordinary self-recursive `CALL`s, must fail identically on a backend whose calling convention has no ceiling of its own — CLR-only, see the note below the table | P5, P6 |
 | `V1_fresh_cell` | body-local captured in a loop → **fresh cell/iter** → prints `0 1 2` | P4 |
 | `V2_shared` | mutable shared upvalue → prints `2` | P4 |
 | `V3_loopvar` | loop var captured directly → **one shared cell** → prints `3 3 3` | P4 |
 | `V4_mutate_through_upvalue` | `set` writes a shared cell, `get` reads it back → prints `7 9` | P4 |
 | `V5_self_recursive_closure` | a local `fun` captures its own slot (direct recursion) → prints `120` | P4 |
 | `V6_self_recursive_closure_in_loop` | self-recursive local `fun`, fresh cell per loop trip → prints `12` | P4 |
+
+`clr-only/31_deep_recursion` is the one probe not directly in this directory.
+`tools/diff_runtimes.py`'s CI probes step walks this directory's own files
+(non-recursively) and compares native against the JVM backend; the JVM
+backend has no frame-count ceiling of its own, so a probe that needs native
+to fail here would read as a new JVM divergence on every run. Placing it one
+level down keeps it out of that walk while `tools/check_clr_probes.sh` still
+runs it by name for the CLR checkpoint.
 
 ## Are these problems solved in the literature?
 

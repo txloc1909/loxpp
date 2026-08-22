@@ -193,10 +193,12 @@ static int runJvmTarget(const std::string& outDir, const std::string& path) {
 
 #ifdef LOXPP_CLR_BACKEND
 // Compiles `path` and writes <outDir>/LoxMain.il — the top-level script,
-// straight-line code only (clr_emitter.h). Does not assemble or run
+// the whole reachable program (clr_emitter.h): the script's own class plus
+// one generated class per function or method. Does not assemble or run
 // anything — tools/loxpp_clr.sh chains ilasm and dotnet on top. Exit codes
-// mirror runJvmTarget's: 65 for a compile error, 70 for an opcode this node
-// does not lower yet, 74 for a file-system failure.
+// mirror runJvmTarget's: 65 for a compile error, 70 for an opcode or
+// CLOSURE shape the emitter does not lower (see clr_emitter.h), 74 for a
+// file-system failure.
 static int runClrTarget(const std::string& outDir, const std::string& path) {
     std::string source = readFile(path);
 
@@ -209,8 +211,8 @@ static int runClrTarget(const std::string& outDir, const std::string& path) {
     std::string ilSource;
     try {
         DecodedFunction tree = decodeFunctionTree(script);
-        FunctionStackAnalysis analysis = analyzeStack(tree);
-        ilSource = clr::emitScript(tree, analysis, "LoxMain");
+        StackAnalysisTree analysis = analyzeStackTree(tree);
+        ilSource = clr::emitProgram(tree, analysis, "LoxMain");
     } catch (const std::exception& e) {
         std::fprintf(stderr, "loxpp --target clr: %s\n", e.what());
         return 70;

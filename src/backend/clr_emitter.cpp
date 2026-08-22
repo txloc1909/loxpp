@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace clr {
 
@@ -138,6 +139,18 @@ std::string opName(Op op) {
                              opName(op) + " yet");
 }
 
+// CLOSURE itself is implemented, but only for the zero-upvalue
+// construction (this file's own top-of-file note): wiring a captured cell
+// into the generated constructor is a later node's job. Kept distinct from
+// notImplemented(Op) so the message names the actual gap instead of the
+// whole opcode.
+[[noreturn]] void notImplementedClosureUpvalues(std::size_t count) {
+    throw std::runtime_error(
+        "clr_emitter: the CLR backend does not lower CLOSURE with " +
+        std::to_string(count) +
+        " upvalue(s) yet (upvalue wiring is a later node)");
+}
+
 // Accumulates ilasm instruction text for one method body while tracking the
 // CIL evaluation stack's depth in slots. Unlike the JVM operand stack, CIL's
 // `.maxstack` counts one slot per value regardless of its underlying width —
@@ -184,6 +197,24 @@ struct Builder {
     }
 };
 
+// Smallest-encoding int push. Reused for CALL's array-size/index operands,
+// a generated constructor's own literal arity, and the argument-prologue
+// unpacking loop; never asked for a value outside [-1, 255] here (CALL
+// argCount and ObjFunction::arity both fit a byte — compiler.cpp enforces
+// each ceiling independently).
+std::string pushIntInstruction(int n) {
+    if (n == -1) {
+        return "ldc.i4.m1";
+    }
+    if (n >= 0 && n <= 8) {
+        return "ldc.i4." + std::to_string(n);
+    }
+    if (n >= -128 && n <= 127) {
+        return "ldc.i4.s " + std::to_string(n);
+    }
+    return "ldc.i4 " + std::to_string(n);
+}
+
 // Everything one chunk's straight-line lowering needs, threaded through by
 // reference (jvm_emitter.cpp's own `Emitter` does the same, for the same
 // reason: one dispatch function per opcode family instead of a single
@@ -200,11 +231,21 @@ struct Emitter {
     // Local index 0 holds the LoxGlobals instance; Lox frame slot `n` maps
     // to local index `baseSlot + n`; `scratchSlot` is one shared shuffle
     // slot for the SET_GLOBAL/DEFINE_GLOBAL P2 shuffle (globalsCall) — see
-    // that function's own note. No calleeScratchSlot/argScratchBase: this
-    // node lowers no CALL, BUILD_LIST, or BUILD_MAP.
+    // that function's own note. This mapping is the SAME for a script
+    // chunk and a function chunk (clr_emitter.h's own top-of-file note):
+    // unlike the JVM local-variable array, CIL keeps `self`/`args` in their
+    // own argument slots, so the Lox frame never has to share space with
+    // them.
     int baseSlot{1};
     int globalsSlot{0};
     int scratchSlot{0};
+
+    // Set (to scratchSlot+1 / scratchSlot+2) only when this chunk contains
+    // a CALL with at least one argument; -1 otherwise, so a stray use
+    // before buildEmitter's own computation fails loudly instead of
+    // silently aliasing scratchSlot.
+    int calleeScratchSlot{-1};
+    int argScratchBase{-1};
 
     // This pass's own forward walk, updated in offset order alongside every
     // invisible-var store: the Lox slot the most RECENTLY DECLARED
@@ -324,6 +365,18 @@ int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset) {
     return slot;
 }
 
+// The one test every peek-family consumer below (SET_LOCAL, SET_GLOBAL,
+// JUMP_IF_FALSE, RETURN, and any later one that peeks or returns a value
+// the abstract-stack pass may have folded) must run before it decides
+// between `loadNamedLocalAtZeroDepth` and its own ordinary
+// stack-value path. Centralized so a future consumer calls this instead
+// of re-deriving the raw `operandDepth() == 0` expression inline — the
+// resolution it guards (`resolveZeroDepthLocalSlot`) is already the one
+// shared authority; this is the one shared guard in front of it.
+bool isFoldedAtZeroDepth(const Emitter& e, std::size_t i) {
+    return e.analysis.before[i].operandDepth() == 0;
+}
+
 void emitConstant(Emitter& e, const DecodedInstruction& in) {
     Value v = e.fn.function->chunk.getConstant(
         static_cast<uint16_t>(in.constantIndex));
@@ -371,7 +424,7 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
                   bool& consumedFollowingPop) {
     int slot = e.slotForLocal(in.byteOperand);
     bool fuse = e.fusablePop(i);
-    if (e.analysis.before[i].operandDepth() == 0) {
+    if (isFoldedAtZeroDepth(e, i)) {
         loadNamedLocalAtZeroDepth(e, i, in.offset);
         e.b.emit("stloc " + std::to_string(slot), 1, -1);
     } else if (fuse) {
@@ -400,7 +453,7 @@ void emitGetGlobal(Emitter& e, const DecodedInstruction& in) {
 void emitSetGlobal(Emitter& e, std::size_t i, const DecodedInstruction& in,
                    bool& consumedFollowingPop) {
     bool fuse = e.fusablePop(i);
-    if (e.analysis.before[i].operandDepth() == 0) {
+    if (isFoldedAtZeroDepth(e, i)) {
         loadNamedLocalAtZeroDepth(e, i, in.offset);
         emitGlobalsCall(e, "Set", e.globalNameLiteral(in.constantIndex),
                         /*peek=*/false);
@@ -459,7 +512,7 @@ void emitJumpOrLoop(Emitter& e, const DecodedInstruction& in) {
 // contract holds on both edges (0 in, 0 out) exactly as the dup path holds
 // it at (D, D) for D > 0.
 void emitJumpIfFalse(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (e.analysis.before[i].operandDepth() == 0) {
+    if (isFoldedAtZeroDepth(e, i)) {
         loadNamedLocalAtZeroDepth(e, i, in.offset);
     } else {
         e.b.emit("dup", 1, +1);
@@ -468,25 +521,123 @@ void emitJumpIfFalse(Emitter& e, std::size_t i, const DecodedInstruction& in) {
     e.b.emit("brtrue " + e.labelFor(in.jumpTarget), 1, -1);
 }
 
-// The script's own `RETURN`: `Compiler::endCompiler()` always appends a
-// trailing NIL before it, so this instruction's own operand is always a
-// genuine evaluation-stack temporary here — never a name-folded local (see
-// this file's own top-of-file note) — and `Main` is `void`, so ECMA-335's
-// own `ret` rule (III.3.40: the stack must hold only the value being
-// returned, none for `void`) needs that value discarded first. The
-// explicit depth check (rather than folding it into `emit`'s own
-// `cellsRead`) is deliberate: `ret` does not merely need N cells present,
-// it needs the stack completely empty, a stronger condition `cellsRead`
-// alone cannot express.
-void emitReturn(Emitter& e) {
-    e.b.emit("pop", 1, -1);
-    if (e.b.depth != 0) {
+// P5 (calling convention): CALL argCount finds [callee, arg0, ...,
+// arg(argCount-1)] already loose on the evaluation stack (arg(argCount-1)
+// on top; vm.cpp's own bottom-to-top push order) and must hand
+// LoxOps.Call one object[]. argCount == 0 needs no reshaping at all — the
+// callee is already the sole, topmost value, so the empty array builds
+// directly on top of it. argCount >= 1 spills every value to a scratch
+// local first: the elements are already on the stack BELOW where a fresh
+// array reference would land, so a dup-based build cannot reach them.
+// buildEmitter reserves one scratch slot per argument the chunk's widest
+// CALL needs, plus one for the callee, computed once before this pass
+// starts — reused across every CALL site in the chunk, because calls run
+// one at a time, never concurrently.
+void emitCall(Emitter& e, const DecodedInstruction& in) {
+    int argCount = in.byteOperand;
+    const char* callSig =
+        "call object [LoxRuntime]Lox.LoxOps::Call(object, object[])";
+    if (argCount == 0) {
+        e.b.emit(pushIntInstruction(0), 0, +1);
+        e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
+        e.b.emit(callSig, 2, -1);
+        return;
+    }
+    for (int i = argCount - 1; i >= 0; i--) {
+        e.b.emit("stloc " + std::to_string(e.argScratchBase + i), 1, -1);
+    }
+    e.b.emit("stloc " + std::to_string(e.calleeScratchSlot), 1, -1);
+
+    e.b.emit("ldloc " + std::to_string(e.calleeScratchSlot), 0, +1);
+    e.b.emit(pushIntInstruction(argCount), 0, +1);
+    e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
+    for (int i = 0; i < argCount; i++) {
+        e.b.emit("dup", 1, +1);
+        e.b.emit(pushIntInstruction(i), 0, +1);
+        e.b.emit("ldloc " + std::to_string(e.argScratchBase + i), 0, +1);
+        e.b.emit("stelem.ref", 3, -3);
+    }
+    e.b.emit(callSig, 2, -1);
+}
+
+// CLOSURE with zero upvalues (this file's own top-of-file note; a captured
+// upvalue is a later node's wiring). `childClassNames[i]` names the class
+// this chunk's own i-th nested function (chunk_decoder.h:
+// DecodedInstruction::nestedIndex) was assigned by emitProgram's pre-order
+// walk. emitScript (no nested functions in any caller) always passes an
+// empty vector, so a CLOSURE reaching this from there is a real bug,
+// caught below rather than silently mis-indexed.
+//
+// `newobj` builds the whole `object[][]` (always empty here) and calls the
+// generated class's own constructor in one instruction — unlike the JVM
+// backend's `new; dup; ...; invokespecial <init>` idiom, CIL's `newobj`
+// pops its constructor arguments and pushes the fresh reference itself, so
+// no `dup` is needed to keep a copy of the still-uninitialized object
+// around.
+void emitClosure(Emitter& e, const DecodedInstruction& in,
+                 const std::vector<std::string>& childClassNames) {
+    if (!in.upvalues.empty()) {
+        notImplementedClosureUpvalues(in.upvalues.size());
+    }
+    if (in.nestedIndex < 0 ||
+        static_cast<std::size_t>(in.nestedIndex) >= childClassNames.size()) {
+        throw std::runtime_error("clr_emitter: CLOSURE nestedIndex " +
+                                 std::to_string(in.nestedIndex) +
+                                 " has no assigned class name");
+    }
+    const std::string& cls =
+        childClassNames[static_cast<std::size_t>(in.nestedIndex)];
+    e.b.emit(pushIntInstruction(0), 0, +1);
+    e.b.emit("newarr object[]", 1, 0);
+    e.b.emit("newobj instance void " + cls + "::.ctor(object[][])", 1, 0);
+}
+
+// RETURN's two roles (P5). The script's own RETURN: `Compiler::
+// endCompiler()` always appends a trailing NIL before it, so this
+// instruction's own operand is always a genuine evaluation-stack temporary
+// here — never a name-folded local (this file's own top-of-file note) —
+// and `Main` is `void`, so ECMA-335's own `ret` rule (III.3.40: the stack
+// must hold only the value being returned, none for `void`) needs that
+// value discarded first. The explicit depth check (rather than folding it
+// into `emit`'s own `cellsRead`) is deliberate: `ret` does not merely need
+// N cells present, it needs the stack completely empty, a stronger
+// condition `cellsRead` alone cannot express.
+//
+// A function's own RETURN hands its value back through `Invoke`'s own
+// non-`void` return type instead — `ret` there needs the stack to hold
+// EXACTLY the one value being returned, the mirror image of the script's
+// "exactly empty" rule. That value is not always a genuine evaluation-stack
+// temporary: `bytecode-translation-problems.md` documents 33 corpus sites
+// where the shared abstract-stack analysis already folded the returned
+// value into a named local before RETURN runs (`before[i].operandDepth()
+// == 0`), with no separate load in the bytecode — the same eager
+// invisible-var materialization SET_LOCAL/SET_GLOBAL/JUMP_IF_FALSE already
+// handle. This node's own checkpoint never reaches that shape (its `return
+// a + b;` is an ordinary temporary), but the check here does not assume
+// the stack case just because it is the only one exercised end to end yet.
+void emitReturn(Emitter& e, std::size_t i, const DecodedInstruction& in,
+                bool isFunction) {
+    if (!isFunction) {
+        e.b.emit("pop", 1, -1);
+        if (e.b.depth != 0) {
+            throw std::runtime_error(
+                "clr_emitter: evaluation stack must be empty before 'ret' "
+                "from a void method, got depth " +
+                std::to_string(e.b.depth));
+        }
+        e.b.emit("ret", 0, 0);
+        return;
+    }
+    if (isFoldedAtZeroDepth(e, i)) {
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
+    }
+    if (e.b.depth != 1) {
         throw std::runtime_error(
-            "clr_emitter: evaluation stack must be empty before 'ret' from "
-            "a void method, got depth " +
+            "clr_emitter: evaluation stack must hold exactly the return "
+            "value before 'ret' from a function, got depth " +
             std::to_string(e.b.depth));
     }
-    e.b.emit("ret", 0, 0);
+    e.b.emit("ret", 1, -1);
 }
 
 // The part of one instruction's handling that is not the opcode's own
@@ -515,7 +666,8 @@ std::size_t finishInstruction(Emitter& e, const DecodedInstruction& in,
     return nextIndex;
 }
 
-void emitBody(Emitter& e) {
+void emitBody(Emitter& e, bool isFunction,
+              const std::vector<std::string>& childClassNames) {
     const std::vector<DecodedInstruction>& ins = e.fn.instructions;
     std::size_t n = ins.size();
 
@@ -631,8 +783,14 @@ void emitBody(Emitter& e) {
         case Op::JUMP_IF_FALSE:
             emitJumpIfFalse(e, i, in);
             break;
+        case Op::CALL:
+            emitCall(e, in);
+            break;
+        case Op::CLOSURE:
+            emitClosure(e, in, childClassNames);
+            break;
         case Op::RETURN:
-            emitReturn(e);
+            emitReturn(e, i, in, isFunction);
             break;
         default:
             notImplemented(in.op);
@@ -656,14 +814,39 @@ int computeMaxLocalCount(const FunctionStackAnalysis& analysis) {
         maxLocalCount = std::max({maxLocalCount, analysis.before[i].localCount,
                                   analysis.after[i].localCount});
     }
-    // slot 0: the script's own never-read callee, always live.
+    // slot 0: the callee/receiver, never named by itself, but always live.
     return std::max(maxLocalCount, 1);
 }
 
+// The widest aggregate this chunk builds by spilling loose operand-stack
+// values to scratch locals before assembling one aggregate object —
+// CALL's own argument count today. A later opcode with the same
+// N-loose-values-then-one-aggregate shape (BUILD_LIST, BUILD_MAP) widens
+// this same std::max scan instead of opening a second, parallel
+// scratch-slot area — jvm_emitter.cpp's own computeMaxSpillWidth is the
+// JVM twin of this rule. Ignores argCount == 0 (needs no scratch slot —
+// see emitCall); 0 here means the chunk needs none at all, keeping
+// `.locals init` byte-identical to pre-this-node output on every chunk
+// that builds no aggregate.
+int computeMaxAggregateWidth(const DecodedFunction& fn) {
+    int maxWidth = 0;
+    for (const DecodedInstruction& instr : fn.instructions) {
+        if (instr.op == Op::CALL) {
+            maxWidth = std::max(maxWidth, instr.byteOperand);
+        }
+    }
+    return maxWidth;
+}
+
 Emitter buildEmitter(const DecodedFunction& fn,
-                     const FunctionStackAnalysis& analysis, int maxLocalCount) {
+                     const FunctionStackAnalysis& analysis, int maxLocalCount,
+                     int maxAggregateWidth) {
     Emitter e{fn, analysis, {}};
     e.scratchSlot = e.baseSlot + maxLocalCount;
+    if (maxAggregateWidth > 0) {
+        e.calleeScratchSlot = e.scratchSlot + 1;
+        e.argScratchBase = e.scratchSlot + 2;
+    }
 
     for (const PopClassification& p : analysis.pops) {
         e.popKinds[p.offset] = p.kind;
@@ -684,24 +867,117 @@ Emitter buildEmitter(const DecodedFunction& fn,
     return e;
 }
 
-void emitPrologue(Emitter& e) {
+// The globals reference and, for a function chunk only, the argument
+// prologue (P5): `Invoke`'s own CIL argument slots are `self` (arg 1,
+// `ldarg.1`) and `args` (arg 2, an object[], `ldarg.2`). Copies `self` into
+// the Lox frame's own slot-0 mirror and unpacks `args[i]` into slot
+// `i + 1`'s — the fixed mapping every opcode-family function above
+// assumes. A script chunk's own prologue instead forwards `Main`'s own
+// `string[]` argument (arg 0) to `LoxRuntime.SetProgramArgs` before
+// `Init()` runs, so the native `args()` global answers the program's real
+// command-line arguments once CALL makes it reachable, the same as the
+// JVM backend's own script prologue.
+//
+// A generated class has no field of its own for the shared LoxGlobals
+// instance (clr_emitter.h's own top-of-file note: the Lox frame mapping is
+// identical for both roles, and adding a per-instance field would not be),
+// so a function chunk reads the one instance the script's own `Init()`
+// call already built, through `LoxRuntime.Current()`.
+void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isFunction) {
+    if (!isFunction) {
+        e.b.emit("ldarg.0", 0, +1);
+        e.b.emit("call void [LoxRuntime]Lox.LoxRuntime::SetProgramArgs"
+                 "(string[])",
+                 1, -1);
+        e.b.emit("call class [LoxRuntime]Lox.LoxGlobals "
+                 "[LoxRuntime]Lox.LoxRuntime::Init()",
+                 0, +1);
+        e.b.emit("stloc " + std::to_string(e.globalsSlot), 1, -1);
+        return;
+    }
     e.b.emit("call class [LoxRuntime]Lox.LoxGlobals "
-             "[LoxRuntime]Lox.LoxRuntime::Init()",
+             "[LoxRuntime]Lox.LoxRuntime::Current()",
              0, +1);
     e.b.emit("stloc " + std::to_string(e.globalsSlot), 1, -1);
+    e.b.emit("ldarg.1", 0, +1);
+    e.b.emit("stloc " + std::to_string(e.slotForLocal(0)), 1, -1);
+    int arity = fn.function->arity;
+    for (int i = 0; i < arity; i++) {
+        e.b.emit("ldarg.2", 0, +1);
+        e.b.emit(pushIntInstruction(i), 0, +1);
+        e.b.emit("ldelem.ref", 2, -1);
+        e.b.emit("stloc " + std::to_string(e.slotForLocal(i + 1)), 1, -1);
+    }
 }
 
-std::string assembleClass(const Emitter& e, const std::string& className,
-                          int totalLocals) {
+// The constructor every generated function class needs (clr_emitter.h's
+// own top-of-file note): calls straight through to LoxClosure's own
+// constructor with this function's compile-time name/arity as literals,
+// so only the upvalues array is a real parameter — always empty from this
+// pass's own construction (emitClosure); a later node fills it with real
+// cells without changing this shape.
+std::string emitConstructorMethod(const DecodedFunction& fn) {
+    std::ostringstream out;
+    out << "  .method public specialname rtspecialname instance void "
+           ".ctor(object[][] upvalues) cil managed\n";
+    out << "  {\n";
+    out << "    .maxstack 4\n";
+    out << "    ldarg.0\n";
+    if (fn.function->name != nullptr) {
+        out << "    ldstr "
+            << ilasmStringLiteral(std::string(fn.function->name->chars))
+            << "\n";
+    } else {
+        out << "    ldnull\n";
+    }
+    out << "    " << pushIntInstruction(fn.function->arity) << "\n";
+    out << "    ldarg.1\n";
+    out << "    call instance void "
+           "[LoxRuntime]Lox.LoxClosure::.ctor(string, int32, object[][])\n";
+    out << "    ret\n";
+    out << "  }\n\n";
+    return out.str();
+}
+
+// The four header directives one whole program shares — the externs this
+// pass's own opcode set touches, plus the one assembly manifest and module
+// every class in the program lives in. Written once per program
+// (emitProgram), not once per class: CoreCLR has no single mscorlib
+// umbrella (notes/backend-implementation-dag.md), but a single module can
+// hold more than one class without each one repeating its own manifest.
+std::string emitHeader(const std::string& moduleClassName) {
     std::ostringstream out;
     out << ".assembly extern System.Runtime { .ver 8:0:0:0 }\n";
     out << ".assembly extern LoxRuntime {}\n";
-    out << ".assembly " << className << " {}\n";
-    out << ".module " << className << ".dll\n\n";
-    out << ".class public auto ansi " << className
-        << " extends [System.Runtime]System.Object\n{\n";
-    out << "  .method public static void Main() cil managed\n  {\n";
-    out << "    .entrypoint\n";
+    out << ".assembly " << moduleClassName << " {}\n";
+    out << ".module " << moduleClassName << ".dll\n\n";
+    return out.str();
+}
+
+// The class header and the method(s) this chunk becomes, plus the
+// `.maxstack`/`.locals init` directives measured from what emitBody
+// actually produced. A script chunk becomes a static `Main(string[] args)`
+// with `.entrypoint` — the parameter is CoreCLR's own standard entry-point
+// shape, and `dotnet` binds the process's own command-line arguments to it
+// with no extra wiring; a function chunk becomes a class extending
+// [LoxRuntime]Lox.LoxClosure, with the constructor every such class needs
+// plus the `Invoke` override that holds this chunk's own lowered body.
+std::string emitClassBody(const Emitter& e, const DecodedFunction& fn,
+                          const std::string& className, bool isFunction,
+                          int totalLocals) {
+    std::ostringstream out;
+    out << ".class public auto ansi " << className;
+    if (isFunction) {
+        out << " extends [LoxRuntime]Lox.LoxClosure\n{\n";
+        out << emitConstructorMethod(fn);
+        out << "  .method family virtual instance object "
+               "Invoke(object self, object[] args) cil managed\n  {\n";
+    } else {
+        out << " extends [System.Runtime]System.Object\n{\n";
+        out << "  .method public static void Main(string[] args) cil "
+               "managed\n  {\n";
+        out << "    .entrypoint\n";
+    }
     out << "    .maxstack " << std::max(1, e.b.maxDepth) << "\n";
     out << "    .locals init (";
     for (int i = 0; i < totalLocals; i++) {
@@ -715,6 +991,81 @@ std::string assembleClass(const Emitter& e, const std::string& className,
     out << "  }\n";
     out << "}\n";
     return out.str();
+}
+
+// The shared lowering pass for one chunk, script or function alike:
+// clr_emitter.h's own top-of-file note explains why the Lox-frame slot
+// mapping needs no isFunction split here, unlike the JVM backend's own
+// analogous pass. `childClassNames[i]` names the class this chunk's own
+// i-th nested function was assigned — see emitProgram.
+std::string emitChunk(const DecodedFunction& fn,
+                      const FunctionStackAnalysis& analysis,
+                      const std::string& className, bool isFunction,
+                      const std::vector<std::string>& childClassNames) {
+    int maxLocalCount = computeMaxLocalCount(analysis);
+    int maxAggregateWidth = computeMaxAggregateWidth(fn);
+    int extraSpillSlots = maxAggregateWidth > 0 ? maxAggregateWidth + 1 : 0;
+
+    Emitter e = buildEmitter(fn, analysis, maxLocalCount, maxAggregateWidth);
+    emitPrologue(e, fn, isFunction);
+    emitBody(e, isFunction, childClassNames);
+
+    // globals (1) + the Lox frame's own slots + the shuffle scratch (1) +
+    // the aggregate spill area, if this chunk builds one.
+    int totalLocals = 1 + maxLocalCount + 1 + extraSpillSlots;
+    return emitClassBody(e, fn, className, isFunction, totalLocals);
+}
+
+// Assigns every node in the decoded tree a stable class name, by one fixed
+// pre-order walk (clr_emitter.h: "deterministic naming"): the root becomes
+// `scriptClassName`, and every other node becomes `LoxFn$<n>` in visit
+// order, counted across the WHOLE tree, not per parent — two sibling
+// functions and a great-grandchild all draw from the same counter. Keyed
+// by DecodedFunction::id (stable, name-independent) rather than a
+// pointer, so the two passes below (naming, then emission) can each walk
+// the tree their own way without having to agree on traversal order.
+void assignClassNames(const DecodedFunction& fn, bool isRoot,
+                      const std::string& scriptClassName, int& counter,
+                      std::unordered_map<std::string, std::string>& names) {
+    names[fn.id] =
+        isRoot ? scriptClassName : ("LoxFn$" + std::to_string(counter++));
+    for (const DecodedFunction& child : fn.nested) {
+        assignClassNames(child, /*isRoot=*/false, scriptClassName, counter,
+                         names);
+    }
+}
+
+void emitAll(const DecodedFunction& fn, const StackAnalysisTree& node,
+             bool isRoot,
+             const std::unordered_map<std::string, std::string>& names,
+             std::ostringstream& out) {
+    // decodeFunctionTree (fn.nested) and analyzeStackTree (node.nested) are
+    // two independently-walked passes over the same ObjFunction tree. They
+    // agree today because both use one fixed traversal order, but nothing
+    // enforces that at the type level — an unchecked node.nested[i] below
+    // would read out of range with no diagnostic the moment they ever
+    // disagreed, instead of failing loudly like every other consumer in
+    // this file.
+    if (fn.nested.size() != node.nested.size()) {
+        throw std::runtime_error(
+            "clr_emitter: decoded function tree and stack analysis tree "
+            "disagree on child count (" +
+            std::to_string(fn.nested.size()) + " vs " +
+            std::to_string(node.nested.size()) + ")");
+    }
+
+    std::vector<std::string> childClassNames;
+    childClassNames.reserve(fn.nested.size());
+    for (const DecodedFunction& child : fn.nested) {
+        childClassNames.push_back(names.at(child.id));
+    }
+    const std::string& className = names.at(fn.id);
+    out << emitChunk(fn, node.self, className, /*isFunction=*/!isRoot,
+                     childClassNames);
+
+    for (std::size_t i = 0; i < fn.nested.size(); i++) {
+        emitAll(fn.nested[i], node.nested[i], /*isRoot=*/false, names, out);
+    }
 }
 
 } // namespace
@@ -755,13 +1106,21 @@ std::string ilasmDoubleLiteral(double value) {
 std::string emitScript(const DecodedFunction& fn,
                        const FunctionStackAnalysis& analysis,
                        const std::string& className) {
-    int maxLocalCount = computeMaxLocalCount(analysis);
-    Emitter e = buildEmitter(fn, analysis, maxLocalCount);
-    emitPrologue(e);
-    emitBody(e);
-    // globals (1) + the Lox frame's own slots + the shuffle scratch (1).
-    int totalLocals = 1 + maxLocalCount + 1;
-    return assembleClass(e, className, totalLocals);
+    return emitHeader(className) +
+           emitChunk(fn, analysis, className, /*isFunction=*/false, {});
+}
+
+std::string emitProgram(const DecodedFunction& root,
+                        const StackAnalysisTree& tree,
+                        const std::string& scriptClassName) {
+    std::unordered_map<std::string, std::string> names;
+    int counter = 0;
+    assignClassNames(root, /*isRoot=*/true, scriptClassName, counter, names);
+
+    std::ostringstream out;
+    out << emitHeader(scriptClassName);
+    emitAll(root, tree, /*isRoot=*/true, names, out);
+    return out.str();
 }
 
 } // namespace clr
