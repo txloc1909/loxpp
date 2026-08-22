@@ -854,8 +854,11 @@ Emitter buildEmitter(const DecodedFunction& fn,
 // `ldarg.1`) and `args` (arg 2, an object[], `ldarg.2`). Copies `self` into
 // the Lox frame's own slot-0 mirror and unpacks `args[i]` into slot
 // `i + 1`'s — the fixed mapping every opcode-family function above
-// assumes. A script chunk has no argument prologue at all (frame slot 0 is
-// the script's own never-read callee, unchanged from before this node).
+// assumes. A script chunk's own prologue instead forwards `Main`'s own
+// `string[]` argument (arg 0) to `LoxRuntime.SetProgramArgs` before
+// `Init()` runs, so the native `args()` global answers the program's real
+// command-line arguments once CALL makes it reachable, the same as the
+// JVM backend's own script prologue.
 //
 // A generated class has no field of its own for the shared LoxGlobals
 // instance (clr_emitter.h's own top-of-file note: the Lox frame mapping is
@@ -864,6 +867,10 @@ Emitter buildEmitter(const DecodedFunction& fn,
 // call already built, through `LoxRuntime.Current()`.
 void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isFunction) {
     if (!isFunction) {
+        e.b.emit("ldarg.0", 0, +1);
+        e.b.emit("call void [LoxRuntime]Lox.LoxRuntime::SetProgramArgs"
+                 "(string[])",
+                 1, -1);
         e.b.emit("call class [LoxRuntime]Lox.LoxGlobals "
                  "[LoxRuntime]Lox.LoxRuntime::Init()",
                  0, +1);
@@ -931,8 +938,10 @@ std::string emitHeader(const std::string& moduleClassName) {
 
 // The class header and the method(s) this chunk becomes, plus the
 // `.maxstack`/`.locals init` directives measured from what emitBody
-// actually produced. A script chunk becomes a static, parameterless
-// `Main` with `.entrypoint`; a function chunk becomes a class extending
+// actually produced. A script chunk becomes a static `Main(string[] args)`
+// with `.entrypoint` — the parameter is CoreCLR's own standard entry-point
+// shape, and `dotnet` binds the process's own command-line arguments to it
+// with no extra wiring; a function chunk becomes a class extending
 // [LoxRuntime]Lox.LoxClosure, with the constructor every such class needs
 // plus the `Invoke` override that holds this chunk's own lowered body.
 std::string emitClassBody(const Emitter& e, const DecodedFunction& fn,
@@ -947,7 +956,8 @@ std::string emitClassBody(const Emitter& e, const DecodedFunction& fn,
                "Invoke(object self, object[] args) cil managed\n  {\n";
     } else {
         out << " extends [System.Runtime]System.Object\n{\n";
-        out << "  .method public static void Main() cil managed\n  {\n";
+        out << "  .method public static void Main(string[] args) cil "
+               "managed\n  {\n";
         out << "    .entrypoint\n";
     }
     out << "    .maxstack " << std::max(1, e.b.maxDepth) << "\n";

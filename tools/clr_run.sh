@@ -16,15 +16,14 @@
 #                image). Give a scratch directory: this harness writes
 #                <il-dir>/<main-class>.dll and its runtimeconfig.json.
 #   <rt-dll>     path to runtime/clr/LoxRuntime.dll.
-#   <main-class> name of the class whose static parameterless Main() is the
+#   <main-class> name of the class whose static Main(string[] args) is the
 #                entry point — the same name the emitted *.il file's own
 #                `.assembly`/`.module` directives use (loxpp --target clr
 #                names it "LoxMain", matching --target jvm's "LoxMain").
-#   [arg...]     program arguments. Not yet forwarded to the running
-#                process: this node's `Main()` takes no parameters (no CALL,
-#                so no native `args()` is reachable yet) — accepted for
-#                interface symmetry with tools/jvm_run.sh and left unused
-#                until a later node wires argv through.
+#   [arg...]     program arguments. dotnet binds these to Main's own
+#                `args` parameter, and the emitted prologue forwards that
+#                array to LoxRuntime.SetProgramArgs before the script body
+#                runs, so the native `args()` global answers them.
 #
 # stdin, stdout, stderr, and the exit code all pass through to and from
 # dotnet unchanged, because later checks diff this output against

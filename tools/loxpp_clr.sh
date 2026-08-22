@@ -8,9 +8,9 @@
 # Usage: tools/loxpp_clr.sh program.lox [arg...]
 #
 #   program.lox   the Lox++ source file to run.
-#   [arg...]      program arguments, forwarded to tools/clr_run.sh (see its
-#                 own note on why they are not yet wired to the running
-#                 process).
+#   [arg...]      program arguments, forwarded to tools/clr_run.sh, which
+#                 hands them to dotnet so the native `args()` global
+#                 answers them (see its own note).
 #
 # stdin, stdout, and stderr all pass through unchanged: fds are inherited,
 # not redirected. The exit code passes through too, but not via `exec` —

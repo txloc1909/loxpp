@@ -552,6 +552,33 @@ TEST(EmitScript, ScriptReturnPopsTheTrailingNilBeforeRet) {
     EXPECT_NE(j.find("ldnull\n    pop\n    ret\n"), std::string::npos) << j;
 }
 
+TEST(EmitScript, MainForwardsItsOwnArgvToSetProgramArgsBeforeInit) {
+    // Before this node's own fix, a program could never reach the native
+    // `args()` global at all (no CALL); once CALL made it reachable,
+    // `Main` still declared no parameter and forwarded nothing, so
+    // `args()` always answered empty regardless of the real command line.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("print 1;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find(".method public static void Main(string[] args) cil "
+                     "managed"),
+              std::string::npos)
+        << j;
+    // Order matters: SetProgramArgs must run before Init(), which is the
+    // globals prologue the rest of the script body depends on.
+    std::size_t argsCall = j.find(
+        "ldarg.0\n    call void [LoxRuntime]Lox.LoxRuntime::SetProgramArgs"
+        "(string[])\n");
+    std::size_t initCall =
+        j.find("call class [LoxRuntime]Lox.LoxGlobals "
+               "[LoxRuntime]Lox.LoxRuntime::Init()");
+    ASSERT_NE(argsCall, std::string::npos) << j;
+    ASSERT_NE(initCall, std::string::npos) << j;
+    EXPECT_LT(argsCall, initCall) << j;
+}
+
 // ---------------------------------------------------------------------------
 // Control flow: JUMP, JUMP_IF_FALSE, LOOP (this node). See
 // notes/translation-probes/{02,03,04,05,22,23}_*.lox for the checkpoint
