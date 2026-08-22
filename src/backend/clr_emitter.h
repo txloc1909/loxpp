@@ -9,8 +9,8 @@
 // aggregates scope — see emitBuildList's and emitBuildMap's own notes) —
 // see notes/bytecode-translation-problems.md for what each P-number means.
 //
-// Scope: no classes, no SLICE/IN/for-in, no match. Every opcode outside
-// that set throws std::runtime_error, naming the opcode, instead of
+// Scope: no classes, no INVOKE, no SLICE/IN/for-in, no match. Every opcode
+// outside that set throws std::runtime_error, naming the opcode, instead of
 // falling through silently — a later CLR emission node lowers it for real.
 //
 // A captured local lowers to a one-element `object[]` ref cell (P4). The
