@@ -188,12 +188,15 @@ struct Builder {
 };
 
 // Smallest-encoding int push. Reused for CALL's array-size/index operands,
-// BUILD_LIST's element count, GET_UPVALUE/SET_UPVALUE's array index, a
-// generated constructor's own literal arity, and CLOSURE's upvalue-wiring
-// loop; never asked for a value outside [-1, 255] here (CALL argCount,
-// BUILD_LIST's element count, ObjFunction::arity, and the UINT8_COUNT-bounded
-// upvalue index all fit a byte — compiler.cpp enforces each ceiling
-// independently).
+// BUILD_LIST's element count, BUILD_MAP's doubled width and element
+// indices (2 * in.byteOperand, through emitSpillToArray/
+// newObjectArrayFromScratch — up to 510 for the 255-pair compiler ceiling),
+// GET_UPVALUE/SET_UPVALUE's array index, a generated constructor's own
+// literal arity, and CLOSURE's upvalue-wiring loop. CALL argCount,
+// BUILD_LIST's element count, ObjFunction::arity, and the UINT8_COUNT-
+// bounded upvalue index all fit a byte, but BUILD_MAP's doubled width does
+// not; the last branch below (a bare `ldc.i4 n`) covers any int, so every
+// caller stays correct regardless of which range it falls in.
 std::string pushIntInstruction(int n) {
     if (n == -1) {
         return "ldc.i4.m1";
