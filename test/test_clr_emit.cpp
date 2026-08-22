@@ -14,6 +14,7 @@
 // and the upvalue array wiring).
 
 #include "backend/abstract_stack.h"
+#include "backend/cfg.h"
 #include "backend/chunk_decoder.h"
 #include "backend/clr_emitter.h"
 #include "backend/zero_depth_local.h"
@@ -1915,14 +1916,16 @@ TEST(EmitScript, GetIterReloadsAndRestoresItsOwnDeclaringSlot) {
 
 TEST(EmitScript, GetIterAfterAMergeStillLoadsTheRightSlot) {
     // Puts the for-in loop's own iterable push after an if-without-else
-    // merge, the same shape
-    // SetLocalPeekOfNamedLocalLoadsInsteadOfDup's own SET_LOCAL sibling
-    // uses — proving emitGetIter's own `loadNamedLocalAtZeroDepth` call
-    // resolves the right slot at an ordinary, non-divergent merge, not
-    // only away from one. A genuinely DIVERGENT merge needs a consumed
-    // match expression as the iterable, which does not emit yet (a later
-    // node's own gap); this test cannot force that divergence on this
-    // branch.
+    // merge earlier in the same function. The merge label itself lands on
+    // the if-statement's own condition POP, not on GET_ITER's offset — the
+    // BuildList/GetIter pair below it runs strictly after the merge, on
+    // straight-line code, the same AWAY-FROM-A-LABEL case
+    // GetIterReloadsAndRestoresItsOwnDeclaringSlot already covers. It
+    // proves an earlier, unrelated merge in the function does not perturb
+    // `loadNamedLocalAtZeroDepth`'s resolution at a later, ordinary site —
+    // it does NOT put GET_ITER itself at a CFG label, so it cannot exercise
+    // `resolveZeroDepthLocalSlot`'s own cross-check. See
+    // GetIterAtACfgMergeLabelRunsTheCrossCheck, below, for that case.
     MemoryManager mm;
     DecodedFunction fn = decodeScript("{\n"
                                       "  var a = 1;\n"
@@ -1944,6 +1947,60 @@ TEST(EmitScript, GetIterAfterAMergeStillLoadsTheRightSlot) {
                      "    call class [LoxRuntime]Lox.LoxIterator "
                      "[LoxRuntime]Lox.LoxOps::GetIter(object)\n"
                      "    stloc 3\n"),
+              std::string::npos)
+        << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitScript, GetIterAtACfgMergeLabelRunsTheCrossCheck) {
+    // `ys or xs` makes the iterable expression itself an `or`, whose two
+    // paths (short-circuit vs. evaluate xs) rejoin exactly at the point
+    // GET_ITER runs — the compiler's own JUMP_IF_FALSE/JUMP pair for `or`
+    // places a genuine CFG merge label AT the GET_ITER offset, unlike
+    // GetIterAfterAMergeStillLoadsTheRightSlot's merge, which lands earlier
+    // and leaves GET_ITER on ordinary straight-line code. This is the case
+    // `resolveZeroDepthLocalSlot`'s own cross-check (localCount - 1 vs. the
+    // forward invisible-var tracker) actually runs on.
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("var xs = [1, 2];\n"
+                     "var ys = nil;\n"
+                     "for (var x in ys or xs) print x;\n",
+                     mm);
+    Cfg cfg = buildCfg(fn.instructions);
+
+    int getIterOffset = -1;
+    for (const DecodedInstruction& in : fn.instructions) {
+        if (in.op == Op::GET_ITER) {
+            getIterOffset = in.offset;
+            break;
+        }
+    }
+    ASSERT_NE(getIterOffset, -1) << "GET_ITER not found in the decoded script";
+
+    std::string mergeLabel;
+    for (const BasicBlock& block : cfg.blocks) {
+        if (block.leaderOffset == getIterOffset) {
+            mergeLabel = block.label;
+            break;
+        }
+    }
+    ASSERT_FALSE(mergeLabel.empty())
+        << "GET_ITER's own offset is not a CFG block leader in this "
+           "program — the shape this test relies on (an `or` merge landing "
+           "exactly on GET_ITER) did not happen; the test needs a new "
+           "program, not a code fix";
+
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    // The label sits directly on GET_ITER's own reload, proving the merge
+    // path — not just the away-from-a-label path — resolves the slot and
+    // reaches the runtime call.
+    EXPECT_NE(j.find(mergeLabel + ":\n"
+                     "    ldloc 2\n"
+                     "    call class [LoxRuntime]Lox.LoxIterator "
+                     "[LoxRuntime]Lox.LoxOps::GetIter(object)\n"),
               std::string::npos)
         << j;
     expectEveryBranchTargetIsLabeled(j);
