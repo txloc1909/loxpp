@@ -4,6 +4,7 @@
 #include "cfg.h"
 #include "container_objects.h"
 #include "exec_objects.h"
+#include "native_pops.h"
 #include "object.h"
 #include "value.h"
 #include "zero_depth_local.h"
@@ -1714,13 +1715,12 @@ int computeMaxLocalCount(const FunctionStackAnalysis& analysis) {
 // before functions/calls support existed, on every chunk that makes no
 // call, invokes no method, and builds no list or map.
 //
-// Defined next to the dispatch loop, below finishInstruction —
-// forward-declared here because
-// computeMaxSpillWidth (immediately below) needs it too, to size the same
-// spill area for normalizeFoldedOperands's own deficit-1 shapes (SET_INDEX,
-// SLICE, a folded CALL/INVOKE callee, or a wide BUILD_LIST/BUILD_MAP with
-// its first element/key folded) that need two or more scratch slots.
-std::optional<int> nativePops(Op op, const DecodedInstruction& in);
+// `nativePops` (native_pops.h) is the target-independent source for this —
+// computeMaxSpillWidth (immediately below) needs the same per-opcode count,
+// to size the same spill area for normalizeFoldedOperands's own deficit-1
+// shapes (SET_INDEX, SLICE, a folded CALL/INVOKE callee, or a wide
+// BUILD_LIST/BUILD_MAP with its first element/key folded) that need two or
+// more scratch slots.
 
 // The widest spill this chunk's own argScratchBase region needs — either
 // from the ordinary P7 calling convention (CALL's/INVOKE's/SUPER_INVOKE's
@@ -1876,138 +1876,11 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
     return nextIndex;
 }
 
-// How many operand-stack cells `src/vm.cpp` pops for one instruction.
-//
-// A per-opcode, per-site enumeration of "which consumers assume their
-// operands are genuine JVM operand-stack temps" kept growing one more
-// branch every time a new counter-example surfaced, because the full
-// abstract-stack analysis's own fold (compileMatchBody leaves a `match`
-// expression's result in a named local, not a temp) had left the BOTTOM
-// operand missing, and nothing forced an enumeration of consumers to be
-// complete. This table replaces every private `if (operandDepth() ==
-// ...)` branch: `normalizeFoldedOperands`, below, is the ONE place that
-// reads it.
-//
-// Exhaustive `switch` over `Op`, no `default` — clang's `-Wswitch` (on by
-// default) warns on a missing enumerator here (this project builds with
-// neither `-Werror` nor `-Wall`, so the warning does not stop the build; a
-// missing row instead throws below, at run time, the first time emission
-// reaches it), so a new opcode needs a row to run correctly, not a bespoke
-// branch discovered by a fifth review round. `std::nullopt` marks a CUSTOM
-// row: the peek/locals-model family,
-// where a value survives past the instruction instead of being net-popped
-// (P2's own family — SET_LOCAL/SET_GLOBAL/SET_UPVALUE/JUMP_IF_FALSE), a
-// reclaim that never touches the operand stack at all (POP/CLOSE_UPVALUE),
-// an instruction that already threads `loadNamedLocalAtZeroDepth`
-// unconditionally with no depth check to duplicate (GET_ITER/INHERIT), or
-// pure control transfer that never consumes a value (JUMP/LOOP/JUMP_TABLE —
-// JUMP_TABLE is only ever reached fused onto a preceding GET_TAG;
-// `fusableJumpTable` handles that, and a standalone JUMP_TABLE is not
-// implemented). `normalizeFoldedOperands` never inspects a CUSTOM row's own
-// handler at all — those keep working exactly as they already do.
-//
-// Every other row states ONE number, and it is always the same measure: how
-// many operand-stack cells this instruction READS from the stack, whatever
-// it pushes back afterward. That is not always the instruction's net stack
-// change, and two rows once confused the two measures (R19/R23).
-// SET_PROPERTY reads the instance AND the value (2 cells: `peek(1)`,
-// `peek(0)`), pops both, then pushes the value back — net change -1, row
-// states 2. DEFINE_METHOD reads the class AND the closure (2 cells, the same
-// `peek(1)`/`peek(0)` shape), but pops only the closure and leaves the class
-// in place for the next `DEFINE_METHOD` to find — net change -1, row states
-// 2 as well: the class is a real cell this instruction needs physically
-// present, even though the instruction itself never removes it. GET_SUPER is
-// the same shape again: it pops the superclass itself, then `bindMethod`
-// pops `this` from underneath it (vm.cpp:1131) — 2 cells read, 1 pushed
-// back. Read straight off `chunk.h`'s own per-opcode comments and confirmed
-// against every `vm.cpp` case body, including any helper the case calls. A
-// row being ordinary here does not mean its own operand is ever actually
-// foldable in a real program — GET_SUPER's, SUPER_INVOKE's, and
-// DEFINE_METHOD's own class/superclass/self operands are never a `match`
-// result, so `deficit` is never positive for them (zero in the ordinary
-// case, negative under an outer expression) in any program the compiler
-// accepts; a plain, honest read count costs nothing there and needs no
-// separate CUSTOM carve-out to stay safe.
-std::optional<int> nativePops(Op op, const DecodedInstruction& in) {
-    switch (op) {
-    // Push-only, or a control-flow op with nothing of its own to net-pop.
-    case Op::CONSTANT:
-    case Op::NIL:
-    case Op::TRUE:
-    case Op::FALSE:
-    case Op::GET_LOCAL:
-    case Op::GET_GLOBAL:
-    case Op::GET_UPVALUE:
-    case Op::CLASS:
-    case Op::CLOSURE:
-    case Op::MATCH_ERROR:
-        return 0;
-    // One operand read.
-    case Op::NEGATE:
-    case Op::NOT:
-    case Op::PRINT:
-    case Op::DEFINE_GLOBAL:
-    case Op::GET_PROPERTY:
-    case Op::GET_TAG:
-    case Op::INSTANCEOF:
-    case Op::IS_SEQ:
-    case Op::RETURN:
-    case Op::ITER_HAS_NEXT:
-    case Op::ITER_NEXT:
-        return 1;
-    // Two operands read.
-    case Op::EQUAL:
-    case Op::GREATER:
-    case Op::LESS:
-    case Op::ADD:
-    case Op::SUBTRACT:
-    case Op::MULTIPLY:
-    case Op::DIVIDE:
-    case Op::MODULO:
-    case Op::GET_INDEX:
-    case Op::IN:
-    case Op::SET_PROPERTY:  // reads the instance AND the value; pops both,
-                            // pushes the value back
-    case Op::DEFINE_METHOD: // reads the class AND the closure (`peek(1)`,
-                            // `peek(0)`); pops only the closure, class stays
-    case Op::GET_SUPER:     // pops the superclass AND `this` (bindMethod's own
-                            // pop, vm.cpp:1131); never foldable
-        return 2;
-    // Three operands read.
-    case Op::SET_INDEX:
-    case Op::SLICE:
-        return 3;
-    // Width carried in the instruction's own operand byte.
-    case Op::BUILD_LIST:
-        return in.byteOperand;
-    case Op::BUILD_MAP:
-        return 2 * in.byteOperand;
-    case Op::CALL:
-    case Op::INVOKE: // receiver/callee plus argCount arguments
-        return in.byteOperand + 1;
-    case Op::SUPER_INVOKE: // self, superclass, plus argCount arguments —
-        return in.byteOperand + 2; // self/superclass are never foldable
-    // CUSTOM: the peek/locals-model family, a pure reclaim, an instruction
-    // that already threads loadNamedLocalAtZeroDepth unconditionally, or
-    // pure control transfer. See this function's own note above.
-    case Op::POP:
-    case Op::CLOSE_UPVALUE:
-    case Op::SET_LOCAL:
-    case Op::SET_GLOBAL:
-    case Op::SET_UPVALUE:
-    case Op::JUMP_IF_FALSE:
-    case Op::GET_ITER:
-    case Op::INHERIT:
-    case Op::JUMP:
-    case Op::LOOP:
-    case Op::JUMP_TABLE:
-        return std::nullopt;
-    }
-    // No `default:` above on purpose (this function's own note) — reachable
-    // only if `-Wswitch` was ignored, which is itself the bug to fix.
-    throw std::runtime_error("jvm_emitter: nativePops has no row for " +
-                             std::string(opName(op)));
-}
+// `nativePops` (native_pops.h) states how many operand-stack cells
+// `src/vm.cpp` pops for one instruction, target-independent — the CLR
+// backend reads the same table for its own fold repair (clr_emitter.cpp's
+// own `normalizeFoldedOperands`), so the fact lives there once rather than
+// once per backend.
 
 // The one place every `nativePops`-covered consumer gets its folded bottom
 // operand repaired, replacing what used to be one private
@@ -2035,20 +1908,22 @@ std::optional<int> nativePops(Op op, const DecodedInstruction& in) {
 // `loadNamedLocalAtZeroDepth` — the same cross-checked mechanism every
 // CUSTOM row already trusts — then reload the genuine operands on top, in
 // their original order. Zero or one genuine operand reuses `e.scratchSlot`,
-// the single slot R11/R12 (the deleted `reorderFoldedLeftOperand`, and
-// `emitGetIndex`) already spilled into for this exact shape; two or more
-// (SET_INDEX, SLICE, a folded CALL/INVOKE
-// callee, or a wide BUILD_LIST/BUILD_MAP with its first element/key folded)
-// spill into `e.argScratchBase`, `computeMaxSpillWidth`'s own spill area,
-// sized for exactly this by its own `deficit == 1` scan.
+// the single slot `emitGetIndex` already spilled into for this exact shape;
+// two or more (SET_INDEX, SLICE, a folded CALL/INVOKE callee, or a wide
+// BUILD_LIST/BUILD_MAP with its first element/key folded) spill into
+// `e.argScratchBase`, `computeMaxSpillWidth`'s own spill area, sized for
+// exactly this by its own `deficit == 1` scan.
 //
 // deficit >= 2: two or more of this instruction's own operands are missing
-// at once. R3 already proved why: a program that puts a live sibling
-// operand BELOW a match's own subject/result
-// collides with `compileMatchBody`'s own slot allocation (`compiler.cpp`,
-// `m_localCount`) on `build/loxpp` ITSELF, with no JVM backend involved — so
-// no correct native answer exists here to withhold. Throw loudly instead of
-// guessing.
+// at once — a program that puts a live sibling operand BELOW a match's own
+// subject/result. `compileMatchBody`'s own slot allocation now reserves one
+// phantom local per live sibling operand before allocating the match's own
+// result/subject slots (compiler.cpp), so `build/loxpp` itself answers this
+// shape correctly; this function still throws rather than repairing it,
+// because that reservation was not carried into a second, matching load
+// here. `notes/bytecode-translation-problems.md`'s own GAP entry records
+// the measurement; the CLR backend's own fold repair (clr_emitter.cpp) does
+// not carry this ceiling.
 void normalizeFoldedOperands(Emitter& e, std::size_t i,
                              const DecodedInstruction& in) {
     std::optional<int> pops = nativePops(in.op, in);
@@ -2064,9 +1939,8 @@ void normalizeFoldedOperands(Emitter& e, std::size_t i,
             "jvm_emitter: " + std::string(opName(in.op)) + " at offset " +
             std::to_string(in.offset) + " needs " + std::to_string(deficit) +
             " operands compileMatchBody folded below its topmost genuine "
-            "one; this shape is already broken on build/loxpp itself (see "
-            "the GAP entry in notes/bytecode-translation-problems.md), so no "
-            "correct native answer exists to match here");
+            "one; this backend does not repair a deficit above one (see "
+            "the GAP entry in notes/bytecode-translation-problems.md)");
     }
     int genuineCount = *pops - 1;
     if (genuineCount <= 1) {

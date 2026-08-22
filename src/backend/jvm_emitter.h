@@ -14,11 +14,12 @@
 // The fix is stated as a STRUCTURAL claim, not a per-opcode enumeration:
 // earlier per-opcode-shape enumerations of "which consumers need this fixed
 // up" kept being disproved by a three-line program, because nothing forced
-// such a list to cover every opcode. `jvm_emitter.cpp`'s own `nativePops` is
-// an exhaustive table over `Op`, no `default` (clang's `-Wswitch` warns on a
-// missing enumerator; this project builds with neither `-Werror` nor
-// `-Wall`, so a missing row still compiles and throws only at run time)
-// stating how many operand-stack cells `src/vm.cpp` pops for each one;
+// such a list to cover every opcode. `native_pops.h`'s `nativePops`,
+// target-independent and shared with the CLR backend, is an exhaustive table
+// over `Op`, no `default` (clang's `-Wswitch` warns on a missing
+// enumerator; this project builds with neither `-Werror` nor `-Wall`, so a
+// missing row still compiles and throws only at run time) stating how many
+// operand-stack cells `src/vm.cpp` pops for each one;
 // `normalizeFoldedOperands`, one pre-dispatch step every instruction gets
 // alike (see its own note, above `emitBody`), compares that count against
 // abstract_stack.cpp's own `operandDepth()` and repairs exactly the deficit.
@@ -31,13 +32,15 @@
 // `loadNamedLocalAtZeroDepth`'s own two slot estimates disagree, where it
 // stops loudly instead (see the third GAP residue below).
 //
-// A deficit of 2 or more is not owed a fix: a program that puts a live
-// sibling operand BELOW a match's own subject/result collides with
-// `compileMatchBody`'s own slot allocation (`compiler.cpp`, `m_localCount`,
-// blind to that sibling) on `build/loxpp` ITSELF, with no JVM backend
-// involved — so no correct native answer exists there to withhold.
-// `normalizeFoldedOperands` throws a named error citing this file for that
-// case, loudly, rather than guessing.
+// A deficit of 2 or more throws rather than repairing: a program that puts
+// a live sibling operand BELOW a match's own subject/result once collided
+// with `compileMatchBody`'s own slot allocation on `build/loxpp` itself
+// (`compiler.cpp`); that allocation now reserves one phantom local per live
+// sibling operand first, so native answers this shape correctly, but this
+// file's own repair was not extended to match it — `normalizeFoldedOperands`
+// throws a named error citing this file for that case instead of guessing.
+// `notes/bytecode-translation-problems.md`'s own GAP entry records the
+// measurement.
 //
 // A separate, REACHABLE gap exists outside this file: `and`/`or` over a
 // folded `match` operand fails at analysis time, in abstract_stack.cpp,
