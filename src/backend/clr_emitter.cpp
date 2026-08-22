@@ -263,11 +263,10 @@ struct Emitter {
     int globalsSlot{0};
     int scratchSlot{0};
 
-    // Set (to scratchSlot+1 / scratchSlot+2) whenever this chunk contains
-    // a CALL, a BUILD_LIST, or a BUILD_MAP with a non-zero width
-    // (computeMaxAggregateWidth); -1 otherwise, so a stray use before
-    // buildEmitter's own computation fails loudly instead of silently
-    // aliasing scratchSlot.
+    // Set (to scratchSlot+1 / scratchSlot+2) whenever this chunk needs the
+    // shared callee/self spill area (computeAggregateNeeds); -1 otherwise,
+    // so a stray use before buildEmitter's own computation fails loudly
+    // instead of silently aliasing scratchSlot.
     int calleeScratchSlot{-1};
     int argScratchBase{-1};
 
@@ -338,12 +337,22 @@ struct Emitter {
         return it != popKinds.end() && it->second == PopKind::TEMP;
     }
 
-    [[nodiscard]] std::string globalNameLiteral(int constantIndex) const {
+    // Every name-bearing opcode's 2-byte operand indexes the SAME constant
+    // pool as CONSTANT itself; this fetches that constant, ensures it is a
+    // string (a mismatch here is a compiler bug, not a runtime condition,
+    // hence a thrown error rather than a checked cast), and formats it as a
+    // complete ilasm string-literal operand. Shared by DEFINE_GLOBAL/
+    // GET_GLOBAL/SET_GLOBAL's own global name and by every class/property/
+    // method name (CLASS, GET_PROPERTY, SET_PROPERTY, DEFINE_METHOD,
+    // GET_SUPER, INSTANCEOF, INVOKE, SUPER_INVOKE) — one opcode's constant
+    // index means the same thing regardless of which of those reads it.
+    [[nodiscard]] std::string constantStringLiteral(int constantIndex) const {
         Value v = fn.function->chunk.getConstant(
             static_cast<uint16_t>(constantIndex));
         if (!isString(v)) {
-            throw std::runtime_error("clr_emitter: DEFINE/GET/SET_GLOBAL "
-                                     "constant is not a name string");
+            throw std::runtime_error("clr_emitter: constant " +
+                                     std::to_string(constantIndex) +
+                                     " is not a name string");
         }
         return ilasmStringLiteral(std::string(asObjString(v)->chars));
     }
@@ -548,14 +557,22 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
     consumedFollowingPop = fuse;
 }
 
-void emitDefineGlobal(Emitter& e, const DecodedInstruction& in) {
-    emitGlobalsCall(e, "Define", e.globalNameLiteral(in.constantIndex),
+// A top-level `var n = match {...};` hands DEFINE_GLOBAL a match result the
+// same way `print match {...};` hands one to PRINT (emitPrint's own note):
+// the shared abstract-stack pass already folded it into a named local, so
+// nothing is physically on the CIL evaluation stack to pop until it is
+// reloaded through the same zero-depth check.
+void emitDefineGlobal(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (isFoldedAtZeroDepth(e, i)) {
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
+    }
+    emitGlobalsCall(e, "Define", e.constantStringLiteral(in.constantIndex),
                     /*peek=*/false);
 }
 
 void emitGetGlobal(Emitter& e, const DecodedInstruction& in) {
     e.b.emit("ldloc " + std::to_string(e.globalsSlot), 0, +1);
-    e.b.emit("ldstr " + e.globalNameLiteral(in.constantIndex), 0, +1);
+    e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
     e.b.emit("call instance object [LoxRuntime]Lox.LoxGlobals::Get(string)", 2,
              -1);
 }
@@ -567,16 +584,29 @@ void emitSetGlobal(Emitter& e, std::size_t i, const DecodedInstruction& in,
     bool fuse = e.fusablePop(i);
     if (isFoldedAtZeroDepth(e, i)) {
         loadNamedLocalAtZeroDepth(e, i, in.offset);
-        emitGlobalsCall(e, "Set", e.globalNameLiteral(in.constantIndex),
+        emitGlobalsCall(e, "Set", e.constantStringLiteral(in.constantIndex),
                         /*peek=*/false);
     } else {
-        emitGlobalsCall(e, "Set", e.globalNameLiteral(in.constantIndex),
+        emitGlobalsCall(e, "Set", e.constantStringLiteral(in.constantIndex),
                         /*peek=*/!fuse);
     }
     consumedFollowingPop = fuse;
 }
 
-void emitPrint(Emitter& e) {
+// PRINT ordinarily consumes a genuine evaluation-stack value, but a `match`
+// expression's own result can reach it already folded into a named local —
+// the same eager invisible-var materialization the peek family
+// (SET_LOCAL/SET_GLOBAL/JUMP_IF_FALSE/RETURN) already handles.
+// `compileMatchBody`'s own closing POP retires only the synthetic "subject"
+// local; that shrinks the fused local/stack count and exposes the arm's own
+// result local as the new top, with no separate value ever pushed for a
+// genuine consumer to read. `print match 1 { case 1 => "a" case _ => "b"
+// };` is exactly this shape, with nothing in between to declare a real
+// local first.
+void emitPrint(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (isFoldedAtZeroDepth(e, i)) {
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
+    }
     e.b.emit("call void [LoxRuntime]Lox.LoxOps::Print(object)", 1, -1);
 }
 
@@ -732,7 +762,7 @@ void emitCall(Emitter& e, const DecodedInstruction& in) {
 // closure bug being tested for). The same P7 shuffle CALL's own argument
 // array needs (spill loose values below where a fresh array would land,
 // build the array, refill it) — reusing CALL's own SCRATCH-SLOT
-// allocation (computeMaxAggregateWidth), not a second one, even though the
+// allocation (computeAggregateNeeds), not a second one, even though the
 // two opcodes' own emitted shapes stay distinct (emitCall's own note).
 // LoxOps.BuildList (runtime/clr) copies the array into a fresh LoxList in
 // the same order.
@@ -773,6 +803,211 @@ void emitSetIndex(Emitter& e) {
     e.b.emit("call object [LoxRuntime]Lox.LoxOps::SetIndex(object, object, "
              "object)",
              3, -2);
+}
+
+// CLASS name (P5/P6): builds a fresh, still-superclass-less LoxClass —
+// vm.cpp's own CLASS handler does the same (an empty method table, no
+// superclass yet); INHERIT (below) is what later fills either in, on the
+// classes that have one. CIL's `newobj` pops its constructor arguments and
+// pushes the fresh reference itself (unlike the JVM backend's own `new;
+// dup; ...; invokespecial <init>` idiom), so this needs no `dup` to keep an
+// extra reference around.
+void emitClass(Emitter& e, const DecodedInstruction& in) {
+    e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
+    e.b.emit("ldnull", 0, +1);
+    e.b.emit("newobj instance void [LoxRuntime]Lox.LoxClass::.ctor(string, "
+             "class [LoxRuntime]Lox.LoxClass)",
+             2, -1);
+}
+
+// INHERIT: compiler.cpp's fixed shape — `namedVariable(superclass);
+// beginScope(); addLocal(super); markInitialized(); namedVariable(className);
+// INHERIT` — means the superclass value is ALWAYS already the "super"
+// invisible var by the time this instruction runs (the eager-materialization
+// rule every other peek site in this file already assumes). It is never a
+// live evaluation-stack temporary here, so the shared abstract-stack pass
+// counts INHERIT as consuming only the ONE thing that genuinely is one: the
+// subclass, pushed by the immediately preceding, non-declaring
+// `namedVariable(className)`. vm.cpp mutates the subclass IN PLACE
+// (`subclass->methods.addAll(superclass->methods); subclass->superclass =
+// superclass;`) — the merge LoxOps.InheritInto performs must land on the
+// exact object identity DEFINE_GLOBAL/markInitialized already stored, not a
+// freshly reconstructed one (LoxClass.InheritFrom's own note) — and vm.cpp's
+// own "superclass stays on the stack as the super local" is already
+// satisfied for free here: the super local's CIL slot never changes, so
+// nothing needs pushing back for it. `loadNamedLocalAtZeroDepth` names and
+// loads the super local — the same mechanism every other zero-depth
+// consumer shares.
+void emitInherit(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    loadNamedLocalAtZeroDepth(e, i, in.offset);
+    e.b.emit("call void [LoxRuntime]Lox.LoxOps::InheritInto(object, object)", 2,
+             -2);
+}
+
+// GET_PROPERTY name: field-before-method order and the exact error text
+// live in LoxOps.GetProperty (runtime/clr) — this pass only supplies the
+// receiver (already on the stack) and the constant name.
+void emitGetProperty(Emitter& e, const DecodedInstruction& in) {
+    e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
+    e.b.emit("call object [LoxRuntime]Lox.LoxOps::GetProperty(object, string)",
+             2, -1);
+}
+
+// SET_PROPERTY name (P2): `[obj,v] -> [v]` — the assigned value must
+// survive the call, but it already sits ON TOP of the instance (not beneath
+// it, the way GET_PROPERTY's receiver does), so it is spilled to
+// `e.scratchSlot` while the constant name is pushed between them — the same
+// shuffle `emitGlobalsCall`'s own peek path uses for the identical reason.
+void emitSetProperty(Emitter& e, const DecodedInstruction& in) {
+    std::string scratch = std::to_string(e.scratchSlot);
+    e.b.emit("stloc " + scratch, 1, -1);
+    e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
+    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit("call object [LoxRuntime]Lox.LoxOps::SetProperty(object, "
+             "string, object)",
+             3, -2);
+}
+
+// DEFINE_METHOD name (P2): `[cls,fn] -> [cls]` — the class value must
+// survive (the next method in the same class body, or the class body's own
+// trailing POP, reads it again), so `dup` keeps a copy while the closure
+// spills to `e.scratchSlot`. LoxOps.DefineMethod takes concrete types, so
+// both operands need an explicit `castclass` here: the compiler guarantees
+// this exact shape (a CLASS's own value, a CLOSURE's own result) on every
+// real program, so a mismatch can only be an emitter bug, and a raw
+// InvalidCastException is an acceptable way to fail loudly on one.
+void emitDefineMethod(Emitter& e, const DecodedInstruction& in) {
+    std::string scratch = std::to_string(e.scratchSlot);
+    e.b.emit("stloc " + scratch, 1, -1);
+    e.b.emit("dup", 1, +1);
+    e.b.emit("castclass [LoxRuntime]Lox.LoxClass", 1, 0);
+    e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
+    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit("castclass [LoxRuntime]Lox.LoxClosure", 1, 0);
+    e.b.emit("call void [LoxRuntime]Lox.LoxOps::DefineMethod(class "
+             "[LoxRuntime]Lox.LoxClass, string, class "
+             "[LoxRuntime]Lox.LoxClosure)",
+             3, -3);
+}
+
+// GET_SUPER name: vm.cpp pops the superclass (top), then binds `this` (now
+// on top) to the found method. `this` was pushed by a PRECEDING GET_LOCAL 0
+// — `super_()` in compiler.cpp always pushes `this` before `super` — so
+// both values are already genuine evaluation-stack operands, never a
+// zero-depth fold. CIL has no `swap` (unlike the JVM backend's own
+// `emitGetSuper`, which reorders with one `swap` plus a single scratch
+// slot), so both values are spilled to their own scratch slot instead, then
+// reloaded in `LoxOps.GetSuper`'s own parameter order (superclassVal, name,
+// self).
+void emitGetSuper(Emitter& e, const DecodedInstruction& in) {
+    std::string superScratch = std::to_string(e.scratchSlot);
+    std::string selfScratch = std::to_string(e.calleeScratchSlot);
+    e.b.emit("stloc " + superScratch, 1, -1);
+    e.b.emit("stloc " + selfScratch, 1, -1);
+    e.b.emit("ldloc " + superScratch, 0, +1);
+    e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
+    e.b.emit("ldloc " + selfScratch, 0, +1);
+    e.b.emit("call object [LoxRuntime]Lox.LoxOps::GetSuper(object, string, "
+             "object)",
+             3, -2);
+}
+
+// INSTANCEOF name: vm.cpp looks the class up BY NAME in globals, not from a
+// constant-pool class reference (`m_globals.get(className, classVal)`) —
+// LoxOps.InstanceOf mirrors that exactly, so this pass only supplies the
+// already-open globals receiver (e.globalsSlot, never re-typed away from
+// [LoxRuntime]Lox.LoxGlobals) and the constant name.
+void emitInstanceof(Emitter& e, const DecodedInstruction& in) {
+    e.b.emit("ldloc " + std::to_string(e.globalsSlot), 0, +1);
+    e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
+    e.b.emit("call bool [LoxRuntime]Lox.LoxOps::InstanceOf(object, class "
+             "[LoxRuntime]Lox.LoxGlobals, string)",
+             3, -2);
+    e.b.emit("box [System.Runtime]System.Boolean", 1, 0);
+}
+
+// INVOKE name argc (P5+P6): the fused "get property then call" fast path —
+// LoxOps.Invoke keeps the field-before-method order (a field holding a
+// function is called, never treated as a method, matching vm.cpp). argCount
+// == 0 needs no reshuffle at all, same as `emitCall`'s own argCount == 0
+// path: the receiver is already the sole, topmost value, so the name and
+// the empty array build directly on top of it. argCount >= 1 reuses the
+// exact same scratch slots `emitCall` does (e.calleeScratchSlot for the
+// receiver, e.argScratchBase for the args) — `computeAggregateNeeds` counts
+// this opcode's own argCount alongside CALL's and BUILD_LIST's, so those
+// slots are always wide enough.
+void emitInvoke(Emitter& e, const DecodedInstruction& in) {
+    int argCount = in.byteOperand;
+    std::string name = e.constantStringLiteral(in.constantIndex);
+    const char* invokeSig = "call object [LoxRuntime]Lox.LoxOps::Invoke("
+                            "object, string, object[])";
+    if (argCount == 0) {
+        e.b.emit("ldstr " + name, 0, +1);
+        e.b.emit(pushIntInstruction(0), 0, +1);
+        e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
+        e.b.emit(invokeSig, 3, -2);
+        return;
+    }
+    spillLooseValues(e, e.argScratchBase, argCount);
+    e.b.emit("stloc " + std::to_string(e.calleeScratchSlot), 1, -1);
+
+    e.b.emit("ldloc " + std::to_string(e.calleeScratchSlot), 0, +1);
+    e.b.emit("ldstr " + name, 0, +1);
+    newObjectArrayFromScratch(e, e.argScratchBase, argCount);
+    e.b.emit(invokeSig, 3, -2);
+}
+
+// SUPER_INVOKE name argc: `[self,arg0..argN-1,superclassVal] -> [result]` —
+// vm.cpp pops the superclass first (top), then calls with self at its usual
+// receiver position. Unlike the JVM backend's own `emitSuperInvoke` (which
+// reduces the argCount == 0 case to one `swap` plus a single scratch slot),
+// CIL's missing `swap` means both self and the superclass always need their
+// own scratch slot here — `e.scratchSlot` for the superclass,
+// `e.calleeScratchSlot` for self (the exact slot `emitInvoke`'s own
+// argCount >= 1 path uses for a receiver) — plus `e.argScratchBase` for the
+// arguments when argCount >= 1: three DISTINCT, already-existing slots,
+// since one instruction runs to completion before the next starts.
+void emitSuperInvoke(Emitter& e, const DecodedInstruction& in) {
+    int argCount = in.byteOperand;
+    std::string name = e.constantStringLiteral(in.constantIndex);
+    std::string superScratch = std::to_string(e.scratchSlot);
+    std::string selfScratch = std::to_string(e.calleeScratchSlot);
+    const char* superInvokeSig =
+        "call object [LoxRuntime]Lox.LoxOps::SuperInvoke(object, string, "
+        "object, object[])";
+    if (argCount == 0) {
+        e.b.emit("stloc " + superScratch, 1, -1); // superclassVal (top)
+        e.b.emit("stloc " + selfScratch, 1, -1);  // self
+        e.b.emit("ldloc " + superScratch, 0, +1);
+        e.b.emit("ldstr " + name, 0, +1);
+        e.b.emit("ldloc " + selfScratch, 0, +1);
+        e.b.emit(pushIntInstruction(0), 0, +1);
+        e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
+        e.b.emit(superInvokeSig, 4, -3);
+        return;
+    }
+    e.b.emit("stloc " + superScratch, 1, -1); // superclassVal (top)
+    spillLooseValues(e, e.argScratchBase, argCount);
+    e.b.emit("stloc " + selfScratch, 1, -1); // self
+
+    e.b.emit("ldloc " + superScratch, 0, +1);
+    e.b.emit("ldstr " + name, 0, +1);
+    e.b.emit("ldloc " + selfScratch, 0, +1);
+    newObjectArrayFromScratch(e, e.argScratchBase, argCount);
+    e.b.emit(superInvokeSig, 4, -3);
+}
+
+// MATCH_ERROR: a match with no accepting arm raises a real, reachable
+// runtime error (compiler.cpp emits this whenever no arm is an unguarded
+// catch-all). `LoxOps.MatchError` BUILDS the error rather than throwing it,
+// so the call leaves a real value on the stack and `throw` — a genuine
+// terminal instruction — ends the block; a plain void-returning call here
+// would leave the CLR JIT unable to prove this path never falls through.
+void emitMatchError(Emitter& e) {
+    e.b.emit("call class [LoxRuntime]Lox.LoxError [LoxRuntime]Lox.LoxOps::"
+             "MatchError()",
+             0, +1);
+    e.b.emit("throw", 1, -1);
 }
 
 // Wraps `slot` in a fresh `object[1]` ref-cell, seeded with the raw value
@@ -1110,8 +1345,8 @@ std::size_t finishInstruction(Emitter& e, const DecodedInstruction& in,
     }
 
     std::size_t nextIndex = i + (consumedFollowingPop ? 2 : 1);
-    e.prevCanFallThrough =
-        in.op != Op::JUMP && in.op != Op::LOOP && in.op != Op::RETURN;
+    e.prevCanFallThrough = in.op != Op::JUMP && in.op != Op::LOOP &&
+                           in.op != Op::RETURN && in.op != Op::MATCH_ERROR;
     e.prevNaturalSuccessorOffset = (nextIndex < e.fn.instructions.size())
                                        ? e.fn.instructions[nextIndex].offset
                                        : -1;
@@ -1187,7 +1422,7 @@ void emitBody(Emitter& e, bool isFunction,
             emitSetLocal(e, i, in, consumedFollowingPop);
             break;
         case Op::DEFINE_GLOBAL:
-            emitDefineGlobal(e, in);
+            emitDefineGlobal(e, i, in);
             break;
         case Op::GET_GLOBAL:
             emitGetGlobal(e, in);
@@ -1196,7 +1431,7 @@ void emitBody(Emitter& e, bool isFunction,
             emitSetGlobal(e, i, in, consumedFollowingPop);
             break;
         case Op::PRINT:
-            emitPrint(e);
+            emitPrint(e, i, in);
             break;
         case Op::NOT:
             emitNot(e);
@@ -1274,6 +1509,36 @@ void emitBody(Emitter& e, bool isFunction,
         case Op::RETURN:
             emitReturn(e, i, in, isFunction);
             break;
+        case Op::CLASS:
+            emitClass(e, in);
+            break;
+        case Op::INHERIT:
+            emitInherit(e, i, in);
+            break;
+        case Op::GET_PROPERTY:
+            emitGetProperty(e, in);
+            break;
+        case Op::SET_PROPERTY:
+            emitSetProperty(e, in);
+            break;
+        case Op::DEFINE_METHOD:
+            emitDefineMethod(e, in);
+            break;
+        case Op::GET_SUPER:
+            emitGetSuper(e, in);
+            break;
+        case Op::INSTANCEOF:
+            emitInstanceof(e, in);
+            break;
+        case Op::INVOKE:
+            emitInvoke(e, in);
+            break;
+        case Op::SUPER_INVOKE:
+            emitSuperInvoke(e, in);
+            break;
+        case Op::MATCH_ERROR:
+            emitMatchError(e);
+            break;
         default:
             notImplemented(in.op);
         }
@@ -1300,42 +1565,64 @@ int computeMaxLocalCount(const FunctionStackAnalysis& analysis) {
     return std::max(maxLocalCount, 1);
 }
 
-// The widest aggregate this chunk builds by spilling loose operand-stack
-// values to scratch locals before assembling one aggregate object — CALL's
-// own argument count, BUILD_LIST's own element count, or BUILD_MAP's own
-// pair count doubled (key, value per pair), whichever is wider — reusing
-// this same std::max scan instead of opening a second, parallel
-// scratch-slot area for each new opcode with the same
-// N-loose-values-then-one-aggregate shape; jvm_emitter.cpp's own
-// computeMaxSpillWidth is the JVM twin of this rule. Ignores a width of 0
-// (needs no scratch slot — see emitCall/emitBuildList/emitBuildMap); 0 here
-// means the chunk needs none at all, keeping `.locals init` byte-identical
-// to pre-this-node output on every chunk that builds no aggregate.
-int computeMaxAggregateWidth(const DecodedFunction& fn) {
-    int maxWidth = 0;
+// What this chunk needs from the shared scratch area: `maxWidth` is the
+// widest aggregate it builds by spilling loose operand-stack values to
+// scratch locals before assembling one aggregate object — CALL's/INVOKE's/
+// SUPER_INVOKE's own argument count, BUILD_LIST's own element count, or
+// BUILD_MAP's own pair count doubled (key, value per pair), whichever is
+// wider (jvm_emitter.cpp's own computeMaxSpillWidth is the JVM twin of this
+// scan). `needsCalleeSlot` is true whenever some instruction in the chunk
+// needs `e.calleeScratchSlot` itself even at width 0: GET_SUPER and
+// SUPER_INVOKE always spill self into it (CIL has no `swap`, so even their
+// own zero-argument shape needs a second scratch slot alongside
+// `e.scratchSlot`'s superclass hold — the JVM backend's own `swap` avoids
+// this second slot, so this flag has no JVM twin). A plain CALL/INVOKE only
+// needs it once its own argCount is at least 1 (its own argCount == 0 path
+// never touches it), which `maxWidth > 0` already captures below.
+struct AggregateNeeds {
+    int maxWidth{0};
+    bool needsCalleeSlot{false};
+};
+
+AggregateNeeds computeAggregateNeeds(const DecodedFunction& fn) {
+    AggregateNeeds needs;
     for (const DecodedInstruction& instr : fn.instructions) {
-        if (instr.op == Op::CALL || instr.op == Op::BUILD_LIST) {
-            maxWidth = std::max(maxWidth, instr.byteOperand);
-        } else if (instr.op == Op::BUILD_MAP) {
-            maxWidth = std::max(maxWidth, 2 * instr.byteOperand);
+        switch (instr.op) {
+        case Op::CALL:
+        case Op::BUILD_LIST:
+        case Op::INVOKE:
+            needs.maxWidth = std::max(needs.maxWidth, instr.byteOperand);
+            break;
+        case Op::BUILD_MAP:
+            needs.maxWidth = std::max(needs.maxWidth, 2 * instr.byteOperand);
+            break;
+        case Op::SUPER_INVOKE:
+            needs.maxWidth = std::max(needs.maxWidth, instr.byteOperand);
+            needs.needsCalleeSlot = true;
+            break;
+        case Op::GET_SUPER:
+            needs.needsCalleeSlot = true;
+            break;
+        default:
+            break;
         }
     }
-    return maxWidth;
+    return needs;
 }
 
 // `captureInfo` is this chunk's own entry from `analyzeCaptures`
 // (capture_analysis.h) — see emitChunk's callers.
 Emitter buildEmitter(const DecodedFunction& fn,
                      const FunctionStackAnalysis& analysis, int maxLocalCount,
-                     int maxAggregateWidth,
+                     const AggregateNeeds& aggregateNeeds,
                      const FunctionCaptureInfo& captureInfo) {
     Emitter e{fn, analysis, {}};
     e.scratchSlot = e.baseSlot + maxLocalCount;
-    if (maxAggregateWidth > 0) {
+    if (aggregateNeeds.needsCalleeSlot || aggregateNeeds.maxWidth > 0) {
         // emitBuildList spills only into argScratchBase, one slot per
         // element, and never touches calleeScratchSlot; reserving it
-        // unconditionally here is simpler than tracking whether THIS
-        // chunk's widest spill came from a CALL or a BUILD_LIST.
+        // unconditionally here is simpler than tracking exactly which
+        // opcode in THIS chunk is the one that needs it.
         e.calleeScratchSlot = e.scratchSlot + 1;
         e.argScratchBase = e.scratchSlot + 2;
     }
@@ -1506,16 +1793,18 @@ std::string emitChunk(const DecodedFunction& fn,
                       const std::vector<std::string>& childClassNames,
                       const FunctionCaptureInfo& captureInfo) {
     int maxLocalCount = computeMaxLocalCount(analysis);
-    int maxAggregateWidth = computeMaxAggregateWidth(fn);
-    int extraSpillSlots = maxAggregateWidth > 0 ? maxAggregateWidth + 1 : 0;
+    AggregateNeeds aggregateNeeds = computeAggregateNeeds(fn);
+    bool needsScratchArea =
+        aggregateNeeds.needsCalleeSlot || aggregateNeeds.maxWidth > 0;
+    int extraSpillSlots = needsScratchArea ? aggregateNeeds.maxWidth + 1 : 0;
 
-    Emitter e = buildEmitter(fn, analysis, maxLocalCount, maxAggregateWidth,
-                             captureInfo);
+    Emitter e =
+        buildEmitter(fn, analysis, maxLocalCount, aggregateNeeds, captureInfo);
     emitPrologue(e, fn, isFunction);
     emitBody(e, isFunction, childClassNames);
 
     // globals (1) + the Lox frame's own slots + the shuffle scratch (1) +
-    // the aggregate spill area, if this chunk builds one.
+    // the aggregate spill area, if this chunk needs one.
     int totalLocals = 1 + maxLocalCount + 1 + extraSpillSlots;
     return emitClassBody(e, fn, className, isFunction, totalLocals);
 }

@@ -169,39 +169,42 @@ TEST(IlasmDoubleLiteral, RoundTripsExactly) {
 // emitScript
 // ---------------------------------------------------------------------------
 
-// This node's own opcode set (clr_emitter.h) has no classes, no
-// aggregates, and no match — so CLASS is one of many opcodes this pass
-// must refuse rather than silently mis-lower. A hand-built single-
+// This node's own opcode set (clr_emitter.h) has no enum tag dispatch and
+// no SLICE/IN/for-in — so JUMP_TABLE is one of the opcodes this pass must
+// still refuse rather than silently mis-lower. A hand-built single-
 // instruction chunk drives the refusal directly, the same way
 // test_jvm_emit.cpp's own `AbortsOnUnsupportedOpcode` does, rather than
 // hunting for a real Lox++ program that reaches an opcode this pass has no
 // case for.
 TEST(EmitScript, AbortsOnUnsupportedOpcode) {
-    // CALL/CLOSURE/RETURN are no longer unsupported (this node); CLASS is
-    // the nearest opcode still outside this pass's scope.
+    // CALL/CLOSURE/RETURN/CLASS/INVOKE/MATCH_ERROR are no longer
+    // unsupported (this node); JUMP_TABLE is the nearest opcode still
+    // outside this pass's scope.
     MemoryManager mm;
-    DecodedInstruction cls;
-    cls.offset = 0;
-    cls.op = Op::CLASS;
-    cls.length = 2;
-    cls.constantIndex = 0;
+    DecodedInstruction table;
+    table.offset = 0;
+    table.op = Op::JUMP_TABLE;
+    table.minTag = 0;
+    table.length = 3; // min_tag (1 byte) + count (1 byte), zero arms.
 
     DecodedFunction fn;
     fn.id = "0";
     fn.function = mm.create<ObjFunction>();
-    fn.instructions = {cls};
+    fn.instructions = {table};
 
     FunctionStackAnalysis analysis;
     analysis.functionId = "0";
-    analysis.before = {StackState{0, 0}};
-    analysis.after = {StackState{1, 0}};
+    // JUMP_TABLE pops the tag alone (stackEffect: {1, 0}) — one temporary
+    // in, zero out.
+    analysis.before = {StackState{1, 0}};
+    analysis.after = {StackState{0, 0}};
     analysis.reached = {true};
 
     try {
         clr::emitScript(fn, analysis, "LoxMain");
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& e) {
-        EXPECT_NE(std::string(e.what()).find("CLASS"), std::string::npos)
+        EXPECT_NE(std::string(e.what()).find("JUMP_TABLE"), std::string::npos)
             << e.what();
     }
 }
@@ -898,6 +901,353 @@ TEST(EmitScript, GetIndexAndSetIndexAreOneCallEach) {
     EXPECT_NE(j.find("call object [LoxRuntime]Lox.LoxOps::SetIndex(object, "
                      "object, object)\n"
                      "    pop\n"),
+              std::string::npos)
+        << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+// ---------------------------------------------------------------------------
+// Classes, methods, and super (this node)
+// ---------------------------------------------------------------------------
+
+TEST(EmitScript, ClassOpcodeConstructsWithNullSuperclass) {
+    // CLASS builds with superclass=null; INHERIT (below), not CLASS, fills
+    // it in on a class that has one. CIL's `newobj` pops its constructor
+    // arguments and pushes the fresh reference itself — unlike the JVM
+    // backend's own `new;dup;...;invokespecial` idiom, no `dup` is needed
+    // to keep an extra reference around.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("class Foo {}", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("ldstr " + clr::ilasmStringLiteral("Foo") +
+                     "\n"
+                     "    ldnull\n"
+                     "    newobj instance void [LoxRuntime]Lox.LoxClass::"
+                     ".ctor(string, class [LoxRuntime]Lox.LoxClass)\n"),
+              std::string::npos)
+        << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitProgram, DefineMethodDupsClassAndCastsBothOperands) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("class Foo { bar() { return 1; } }\n"
+                                      "var f = Foo();\n"
+                                      "print f.bar();\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    // DEFINE_METHOD 'bar': `[cls,fn] -> [cls]` (P2) — `dup` keeps the class
+    // value for the class body's own trailing POP; both operands need an
+    // explicit `castclass`, since LoxOps.DefineMethod takes concrete types.
+    EXPECT_NE(il.find("dup\n"
+                      "    castclass [LoxRuntime]Lox.LoxClass\n"
+                      "    ldstr " +
+                      clr::ilasmStringLiteral("bar") +
+                      "\n"
+                      "    ldloc 2\n"
+                      "    castclass [LoxRuntime]Lox.LoxClosure\n"
+                      "    call void [LoxRuntime]Lox.LoxOps::DefineMethod("
+                      "class [LoxRuntime]Lox.LoxClass, string, class "
+                      "[LoxRuntime]Lox.LoxClosure)\n"),
+              std::string::npos)
+        << il;
+    // INVOKE 'bar' 0: argCount==0 needs no reshuffle at all, same as
+    // emitCall's own argCount==0 path — the receiver is already the sole,
+    // topmost value.
+    EXPECT_NE(il.find("ldstr " + clr::ilasmStringLiteral("bar") +
+                      "\n"
+                      "    ldc.i4.0\n"
+                      "    newarr [System.Runtime]System.Object\n"
+                      "    call object [LoxRuntime]Lox.LoxOps::Invoke(object, "
+                      "string, object[])\n"),
+              std::string::npos)
+        << il;
+    expectEveryBranchTargetIsLabeled(il);
+}
+
+TEST(EmitProgram, GetAndSetPropertyPeekCorrectly) {
+    // notes/translation-probes/09_class.lox verbatim.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("class C {\n"
+                                      "  init(x) { this.x = x; }\n"
+                                      "  get() { return this.x; }\n"
+                                      "}\n"
+                                      "var c = C(5);\n"
+                                      "print c.get();\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    // SET_PROPERTY 'x': `[obj,v] -> [v]` (P2 shuffle) — `v` spills to the
+    // scratch slot while the constant name is pushed between receiver and
+    // value; `init`'s own implicit `return this;` (`ldloc 1`) reuses the
+    // same slot right afterward.
+    EXPECT_NE(il.find("stloc 3\n"
+                      "    ldstr " +
+                      clr::ilasmStringLiteral("x") +
+                      "\n"
+                      "    ldloc 3\n"
+                      "    call object [LoxRuntime]Lox.LoxOps::"
+                      "SetProperty(object, string, object)\n"
+                      "    pop\n"
+                      "    ldloc 1\n"
+                      "    ret\n"),
+              std::string::npos)
+        << il;
+    // GET_PROPERTY 'x': the receiver (`this`, slot 1) is already loaded;
+    // only the constant name needs pushing before the call.
+    EXPECT_NE(il.find("ldstr " + clr::ilasmStringLiteral("x") +
+                      "\n"
+                      "    call object [LoxRuntime]Lox.LoxOps::GetProperty("
+                      "object, string)\n"
+                      "    ret\n"),
+              std::string::npos)
+        << il;
+    expectEveryBranchTargetIsLabeled(il);
+}
+
+TEST(EmitProgram, InvokeWithArgsSpillsToScratchSlotsAndBuildsArray) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("class C { add(a, b) { return a + b; } }\n"
+                     "print C().add(1, 2);\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    // Same spill shape as CALL (emitCall): the receiver and both args are
+    // already loose on the stack, so they spill to scratch slots (in
+    // reverse pop order) before the array builds on top of the reloaded
+    // receiver.
+    EXPECT_NE(il.find("stloc 5\n"
+                      "    stloc 4\n"
+                      "    stloc 3\n"
+                      "    ldloc 3\n"
+                      "    ldstr " +
+                      clr::ilasmStringLiteral("add") +
+                      "\n"
+                      "    ldc.i4.2\n"
+                      "    newarr [System.Runtime]System.Object\n"
+                      "    dup\n"
+                      "    ldc.i4.0\n"
+                      "    ldloc 4\n"
+                      "    stelem.ref\n"
+                      "    dup\n"
+                      "    ldc.i4.1\n"
+                      "    ldloc 5\n"
+                      "    stelem.ref\n"
+                      "    call object [LoxRuntime]Lox.LoxOps::Invoke("
+                      "object, string, object[])\n"),
+              std::string::npos)
+        << il;
+    expectEveryBranchTargetIsLabeled(il);
+}
+
+TEST(EmitProgram, InheritLoadsSuperclassFromInvisibleVarNotStack) {
+    // notes/translation-probes/10_super.lox verbatim.
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("class A { greet() { return 1; } }\n"
+                     "class B < A { greet() { return super.greet() + 1; } }\n"
+                     "print B().greet();\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    // compiler.cpp's fixed shape (namedVariable(superclass); beginScope();
+    // addLocal(super); ...; namedVariable(className); INHERIT) means the
+    // superclass value is ALWAYS already the "super" invisible var by the
+    // time INHERIT runs, not a live evaluation-stack temp — so this loads
+    // it back rather than assuming it still sits beneath the subclass on
+    // the physical stack. `super` is also captured by B's own `greet`
+    // CLOSURE later in this same chunk (for `super.greet()`), so by the
+    // time INHERIT reads it back, it is already wrapped in a ref-cell — the
+    // same `isinst object[]` test every other captured-slot read shares.
+    EXPECT_NE(il.find("isinst object[]\n"
+                      "    brfalse Ccapgr"),
+              std::string::npos)
+        << il;
+    EXPECT_NE(il.find("call void [LoxRuntime]Lox.LoxOps::InheritInto(object, "
+                      "object)\n"),
+              std::string::npos)
+        << il;
+    expectEveryBranchTargetIsLabeled(il);
+}
+
+TEST(EmitProgram, SuperInvokeZeroArgsUsesTwoScratchSlots) {
+    // notes/translation-probes/10_super.lox's own method body: CIL has no
+    // `swap` (unlike the JVM backend's own emitSuperInvoke, which reduces
+    // this shape to one `swap` plus a single scratch slot), so both self
+    // and the superclass need their own scratch slot here.
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("class A { greet() { return 1; } }\n"
+                     "class B < A { greet() { return super.greet() + 1; } }\n"
+                     "print B().greet();\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    EXPECT_NE(il.find("stloc 2\n"
+                      "    stloc 3\n"
+                      "    ldloc 2\n"
+                      "    ldstr " +
+                      clr::ilasmStringLiteral("greet") +
+                      "\n"
+                      "    ldloc 3\n"
+                      "    ldc.i4.0\n"
+                      "    newarr [System.Runtime]System.Object\n"
+                      "    call object [LoxRuntime]Lox.LoxOps::"
+                      "SuperInvoke(object, string, object, object[])\n"),
+              std::string::npos)
+        << il;
+    expectEveryBranchTargetIsLabeled(il);
+}
+
+TEST(EmitProgram, SuperInvokeWithArgsSpillsThreeDistinctScratchSlots) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("class A { add(a, b) { return a + b; } }\n"
+                     "class B < A { add(a, b) { return super.add(a, b); } }\n"
+                     "print B().add(1, 2);\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    // `e.scratchSlot` holds the superclass, `e.calleeScratchSlot` holds
+    // self, `e.argScratchBase` holds the spilled arguments — three
+    // DISTINCT slots, since one instruction runs to completion before the
+    // next starts.
+    EXPECT_NE(il.find("call object [LoxRuntime]Lox.LoxOps::SuperInvoke("
+                      "object, string, object, object[])\n"),
+              std::string::npos)
+        << il;
+    expectEveryBranchTargetIsLabeled(il);
+}
+
+TEST(EmitProgram, GetSuperBindsMethodAsValue) {
+    // notes/translation-probes/17_super_value.lox verbatim.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "class A { greet() { return 1; } }\n"
+        "class B < A { greet() { var f = super.greet; return f(); } }\n"
+        "print B().greet();\n",
+        mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    EXPECT_NE(il.find("ldstr " + clr::ilasmStringLiteral("greet") +
+                      "\n"
+                      "    ldloc 4\n"
+                      "    call object [LoxRuntime]Lox.LoxOps::GetSuper("
+                      "object, string, object)\n"),
+              std::string::npos)
+        << il;
+    expectEveryBranchTargetIsLabeled(il);
+}
+
+TEST(EmitScript, InstanceofChecksGlobalsByName) {
+    // A class pattern is INSTANCEOF's only source (compiler.cpp) — there is
+    // no standalone `is` operator to reach it any other way.
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("class A {}\n"
+                     "var a = A();\n"
+                     "print match a { case A => true case _ => false };\n",
+                     mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    // vm.cpp looks the class up BY NAME in globals, not from a
+    // constant-pool class reference — this pass only supplies the
+    // already-open globals receiver and the constant name.
+    EXPECT_NE(j.find("ldloc 0\n"
+                     "    ldstr " +
+                     clr::ilasmStringLiteral("A") +
+                     "\n"
+                     "    call bool [LoxRuntime]Lox.LoxOps::InstanceOf("
+                     "object, class [LoxRuntime]Lox.LoxGlobals, "
+                     "string)\n"
+                     "    box [System.Runtime]System.Boolean\n"),
+              std::string::npos)
+        << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitScript, MatchErrorBuildsThenThrows) {
+    // notes/translation-probes/33_class_pattern_match_error.lox's own
+    // shape: a match whose arms are all class patterns, no unguarded
+    // catch-all.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("class A {}\n"
+                                      "class B {}\n"
+                                      "print match A() { case B => 1 };\n",
+                                      mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    // LoxOps.MatchError BUILDS the error rather than throwing it, so the
+    // call leaves a real value on the stack and `throw` — a genuine
+    // terminal instruction — ends the block, the same way the JVM
+    // backend's own athrow does.
+    EXPECT_NE(j.find("call class [LoxRuntime]Lox.LoxError "
+                     "[LoxRuntime]Lox.LoxOps::MatchError()\n"
+                     "    throw\n"),
+              std::string::npos)
+        << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+// The consumed-match case (this node's own checkpoint,
+// notes/translation-probes/32_match_consumed_result.lox): a match
+// expression's own closing POP retires only the synthetic "subject"
+// local, exposing the arm's own result local as the new top with no
+// separate value ever pushed — so PRINT and DEFINE_GLOBAL need the same
+// zero-depth fold check the peek family (SET_LOCAL/SET_GLOBAL/
+// JUMP_IF_FALSE/RETURN) already has.
+
+TEST(EmitScript, DefineGlobalOfAFoldedMatchResultLoadsInsteadOfAssumingATemp) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("var n = match 1 { case _ => 5 };", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    // The match's own arm stores its result in its own named local (slot
+    // 2); DEFINE_GLOBAL reloads that exact slot (through the scratch slot
+    // `emitGlobalsCall`'s own shuffle uses) rather than assuming a value
+    // already sits on the CIL stack — which would pop whatever
+    // coincidentally sits there instead.
+    EXPECT_NE(j.find("ldloc 2\n"
+                     "    stloc 4\n"
+                     "    ldloc 0\n"
+                     "    ldstr " +
+                     clr::ilasmStringLiteral("n") +
+                     "\n"
+                     "    ldloc 4\n"
+                     "    call instance void [LoxRuntime]Lox.LoxGlobals::"
+                     "Define(string, object)\n"),
+              std::string::npos)
+        << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitScript, PrintOfAFoldedMatchResultLoadsInsteadOfAssumingATemp) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("print match 1 { case 1 => \"a\" case _ => \"b\" };", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    // Both arms store their result into the same named local (the fold);
+    // the final merge label reloads that local right before PRINT, which
+    // would otherwise underflow the CIL evaluation stack (nothing was ever
+    // pushed there for a genuine consumer to read).
+    EXPECT_NE(j.find("ldloc 2\n"
+                     "    call void [LoxRuntime]Lox.LoxOps::Print(object)\n"),
               std::string::npos)
         << j;
     expectEveryBranchTargetIsLabeled(j);
