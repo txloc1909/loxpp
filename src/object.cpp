@@ -119,4 +119,7 @@ std::string stringifyObj(Obj* obj) {
     return "<obj>";
 }
 
-void printObject(Obj* obj) { std::printf("%s", stringifyObj(obj).c_str()); }
+void printObject(Obj* obj) {
+    std::string s = stringifyObj(obj);
+    std::fwrite(s.data(), 1, s.size(), stdout);
+}

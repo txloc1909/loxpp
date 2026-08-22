@@ -1,0 +1,6 @@
+// Differential parity for a string literal that holds an embedded NUL byte.
+// A managed string keeps every byte, so the text after the NUL reaches
+// stdout; the native print path must do the same instead of truncating at
+// the first NUL. Native stdout and each managed backend's stdout must both
+// be the four bytes a\0b\n (issue #129).
+print "a\0b";
