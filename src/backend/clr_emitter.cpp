@@ -915,8 +915,13 @@ void emitGetSuper(Emitter& e, const DecodedInstruction& in) {
 // INSTANCEOF name: vm.cpp looks the class up BY NAME in globals, not from a
 // constant-pool class reference (`m_globals.get(className, classVal)`) —
 // LoxOps.InstanceOf mirrors that exactly, so this pass only supplies the
-// already-open globals receiver (e.globalsSlot, never re-typed away from
-// [LoxRuntime]Lox.LoxGlobals) and the constant name.
+// already-open globals receiver and the constant name. INVARIANT:
+// e.globalsSlot holds the one LoxGlobals instance LoxRuntime::Init()
+// returned, and nothing else ever writes it — even though every local,
+// slot 0 included, is declared `object` in `.locals init`. CoreCLR does
+// not check reference assignability at an unverified call site, so the
+// declared CIL type here is not evidence of the invariant; the emitter's
+// own write discipline is.
 void emitInstanceof(Emitter& e, const DecodedInstruction& in) {
     e.b.emit("ldloc " + std::to_string(e.globalsSlot), 0, +1);
     e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);

@@ -187,12 +187,6 @@ examples=(
     # between to re-expose it as a genuine evaluation-stack value first.
     "examples/match_http_status.lox"
     "examples/match_state_machine.lox"
-    # Not new to this node: these use no class, method, super, or match —
-    # the corpus sweep below is the first check to notice a prior node's
-    # emitter already ran them to completion correctly, with no example
-    # entry recording that fact. Added here so the sweep's own
-    # completeness claim is true, not because this node changed anything
-    # they depend on.
     "examples/csv_reader.lox"
     "examples/data_pipeline.lox"
     "examples/graph_bfs_dfs.lox"
