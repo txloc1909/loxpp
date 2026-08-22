@@ -51,7 +51,8 @@ std::string stringify(const Value& value) {
 }
 
 void printValue(const Value& value) {
-    std::printf("%s", stringify(value).c_str());
+    std::string s = stringify(value);
+    std::fwrite(s.data(), 1, s.size(), stdout);
 }
 
 uint16_t ValueArray::size() const { return m_count; }

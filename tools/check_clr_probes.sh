@@ -50,6 +50,7 @@ probes=(
     "notes/translation-probes/20_float_imprecise_constant.lox"
     "notes/translation-probes/21_exponent_constant.lox"
     "notes/translation-probes/30_bool_compare_and_string_literal.lox"
+    "notes/translation-probes/32_string_nul.lox"
     # Control flow (JUMP, JUMP_IF_FALSE, LOOP): if/else, and/or, while, for,
     # and the two short-circuit merge shapes that broke the JVM emitter
     # after it first looked correct (the merge POP staying real, and the
