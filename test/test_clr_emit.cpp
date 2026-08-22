@@ -1121,9 +1121,30 @@ TEST(EmitProgram, SuperInvokeWithArgsSpillsThreeDistinctScratchSlots) {
     // `e.scratchSlot` holds the superclass, `e.calleeScratchSlot` holds
     // self, `e.argScratchBase` holds the spilled arguments — three
     // DISTINCT slots, since one instruction runs to completion before the
-    // next starts.
-    EXPECT_NE(il.find("call object [LoxRuntime]Lox.LoxOps::SuperInvoke("
-                      "object, string, object, object[])\n"),
+    // next starts. Pin the real slot numbers, the way
+    // SuperInvokeZeroArgsUsesTwoScratchSlots pins slots 2/3 above: slot 4
+    // is the superclass, slot 5 is self, slots 6 and 7 are the two args.
+    EXPECT_NE(il.find("stloc 4\n"
+                      "    stloc 7\n"
+                      "    stloc 6\n"
+                      "    stloc 5\n"
+                      "    ldloc 4\n"
+                      "    ldstr " +
+                      clr::ilasmStringLiteral("add") +
+                      "\n"
+                      "    ldloc 5\n"
+                      "    ldc.i4.2\n"
+                      "    newarr [System.Runtime]System.Object\n"
+                      "    dup\n"
+                      "    ldc.i4.0\n"
+                      "    ldloc 6\n"
+                      "    stelem.ref\n"
+                      "    dup\n"
+                      "    ldc.i4.1\n"
+                      "    ldloc 7\n"
+                      "    stelem.ref\n"
+                      "    call object [LoxRuntime]Lox.LoxOps::"
+                      "SuperInvoke(object, string, object, object[])\n"),
               std::string::npos)
         << il;
     expectEveryBranchTargetIsLabeled(il);
