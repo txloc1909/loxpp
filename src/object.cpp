@@ -3,7 +3,6 @@
 #include "table.h"
 
 #include <algorithm>
-#include <cstdio>
 #include <string>
 
 std::string stringifyObj(Obj* obj) {
@@ -118,5 +117,3 @@ std::string stringifyObj(Obj* obj) {
     }
     return "<obj>";
 }
-
-void printObject(Obj* obj) { std::printf("%s", stringifyObj(obj).c_str()); }

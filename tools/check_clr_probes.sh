@@ -66,6 +66,7 @@ probes=(
     "notes/translation-probes/20_float_imprecise_constant.lox"
     "notes/translation-probes/21_exponent_constant.lox"
     "notes/translation-probes/30_bool_compare_and_string_literal.lox"
+    "notes/translation-probes/32_string_nul.lox"
     # Control flow (JUMP, JUMP_IF_FALSE, LOOP): if/else, and/or, while, for,
     # and the two short-circuit merge shapes that broke the JVM emitter
     # after it first looked correct (the merge POP staying real, and the
@@ -116,7 +117,7 @@ probes=(
     # The consumed-match case: a match expression's result reaching PRINT,
     # DEFINE_GLOBAL, or SET_GLOBAL with nothing in between to re-expose it
     # as a genuine evaluation-stack value first.
-    "notes/translation-probes/32_match_consumed_result.lox"
+    "notes/translation-probes/34_match_consumed_result.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its

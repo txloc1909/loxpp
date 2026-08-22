@@ -1224,7 +1224,7 @@ TEST(EmitScript, MatchErrorBuildsThenThrows) {
 }
 
 // The consumed-match case (this node's own checkpoint,
-// notes/translation-probes/32_match_consumed_result.lox): a match
+// notes/translation-probes/34_match_consumed_result.lox): a match
 // expression's own closing POP retires only the synthetic "subject"
 // local, exposing the arm's own result local as the new top with no
 // separate value ever pushed — so PRINT and DEFINE_GLOBAL need the same

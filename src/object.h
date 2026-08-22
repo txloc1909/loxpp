@@ -48,7 +48,6 @@ struct ObjString : public Obj {
 };
 
 std::string stringifyObj(Obj* obj);
-void printObject(Obj* obj);
 
 inline bool isObjType(Obj* obj, ObjType type) { return obj->type == type; }
 inline ObjString* asObjString(Obj* obj) { return static_cast<ObjString*>(obj); }
