@@ -179,8 +179,7 @@ def resolve_excluded_programs(excluded: dict[str, str], base_dir: Path) -> list[
 
     Used to run the permutation guard over exactly the excluded programs,
     without scanning the rest of the corpus (notes/translation-probes, or
-    examples/huffman.lox, which diverges for a documented, non-permutation
-    reason and is not on this list).
+    any example not on this list).
     """
     files: list[Path] = []
     for name in excluded:

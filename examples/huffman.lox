@@ -8,7 +8,7 @@
 //   5. Encode the input; report bits saved vs raw 8-bit ASCII.
 //
 // Demonstrates: Map as frequency counter, Map as code table, List as
-//               priority queue, recursive tree traversal, for-in on Map.
+//               priority queue, recursive tree traversal.
 
 class HuffNode {
     init(ch, freq, left, right) {
