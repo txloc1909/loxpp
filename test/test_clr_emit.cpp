@@ -1072,6 +1072,54 @@ TEST(EmitProgram, ReturnWithMoreThanTheReturnValueOnTheStackThrows) {
     }
 }
 
+TEST(EmitProgram, MismatchedNestedChildCountThrowsInsteadOfReadingOutOfRange) {
+    // decodeFunctionTree and analyzeStackTree are two independently walked
+    // passes over the same ObjFunction tree; emitAll assumes they agree on
+    // child count at every node. This hand-builds a root whose decoded
+    // tree has one nested function but whose stack-analysis tree has none,
+    // the one disagreement shape a real chunk decode/analyze pair never
+    // produces, to prove the size check fires instead of the loop reading
+    // node.nested[0] out of range.
+    MemoryManager mm;
+
+    DecodedFunction child;
+    child.id = "0.0";
+    child.function = mm.create<ObjFunction>();
+
+    DecodedFunction root;
+    root.id = "0";
+    root.function = mm.create<ObjFunction>();
+    root.nested = {child};
+    DecodedInstruction rootNil;
+    rootNil.offset = 0;
+    rootNil.op = Op::NIL;
+    rootNil.length = 1;
+    DecodedInstruction rootRet;
+    rootRet.offset = 1;
+    rootRet.op = Op::RETURN;
+    rootRet.length = 1;
+    root.instructions = {rootNil, rootRet};
+
+    FunctionStackAnalysis rootAnalysis;
+    rootAnalysis.functionId = "0";
+    rootAnalysis.before = {StackState{0, 0}, StackState{1, 0}};
+    rootAnalysis.after = {StackState{1, 0}, StackState{0, 0}};
+    rootAnalysis.reached = {true, true};
+
+    StackAnalysisTree tree;
+    tree.self = rootAnalysis;
+    // Deliberately empty: root.nested has one entry, tree.nested has none.
+
+    try {
+        clr::emitProgram(root, tree, "LoxMain");
+        FAIL() << "expected std::runtime_error";
+    } catch (const std::runtime_error& e) {
+        EXPECT_NE(std::string(e.what()).find("disagree on child count"),
+                  std::string::npos)
+            << e.what();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // resolveZeroDepthLocalSlot (zero_depth_local.h): the one, target-
 // independent authority both this file and jvm_emitter.cpp call into for

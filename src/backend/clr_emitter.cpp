@@ -1021,6 +1021,21 @@ void emitAll(const DecodedFunction& fn, const StackAnalysisTree& node,
              bool isRoot,
              const std::unordered_map<std::string, std::string>& names,
              std::ostringstream& out) {
+    // decodeFunctionTree (fn.nested) and analyzeStackTree (node.nested) are
+    // two independently-walked passes over the same ObjFunction tree. They
+    // agree today because both use one fixed traversal order, but nothing
+    // enforces that at the type level — an unchecked node.nested[i] below
+    // would read out of range with no diagnostic the moment they ever
+    // disagreed, instead of failing loudly like every other consumer in
+    // this file.
+    if (fn.nested.size() != node.nested.size()) {
+        throw std::runtime_error(
+            "clr_emitter: decoded function tree and stack analysis tree "
+            "disagree on child count (" +
+            std::to_string(fn.nested.size()) + " vs " +
+            std::to_string(node.nested.size()) + ")");
+    }
+
     std::vector<std::string> childClassNames;
     childClassNames.reserve(fn.nested.size());
     for (const DecodedFunction& child : fn.nested) {
