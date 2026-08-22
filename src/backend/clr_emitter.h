@@ -3,32 +3,45 @@
 // CLR code generator. Covers CONSTANT (number, string), NIL/TRUE/FALSE, the
 // arithmetic and comparison family, NEGATE, NOT, PRINT, POP, GET_LOCAL,
 // SET_LOCAL, DEFINE_GLOBAL, GET_GLOBAL, SET_GLOBAL, JUMP/JUMP_IF_FALSE/LOOP
-// (P3b), CALL, zero-upvalue CLOSURE, and RETURN in both of its roles (P5) —
+// (P3b), CALL, CLOSURE (including a captured upvalue), GET_UPVALUE,
+// SET_UPVALUE, CLOSE_UPVALUE, RETURN in both of its roles (P5), and
+// BUILD_LIST/BUILD_MAP/GET_INDEX/SET_INDEX (pulled forward from the
+// aggregates scope — see emitBuildList's and emitBuildMap's own notes) —
 // see notes/bytecode-translation-problems.md for what each P-number means.
 //
-// Scope: no closures with a captured upvalue, no classes, no aggregates, no
-// match. Every opcode outside that set throws std::runtime_error, naming
-// the opcode, instead of falling through silently — a later CLR emission
-// node lowers it for real. A CLOSURE with one or more upvalues throws for
-// the same reason, even though CLOSURE itself is otherwise implemented:
-// wiring a captured cell into the generated constructor is a later node's
-// job.
+// Scope: no classes, no INVOKE, no SLICE/IN/for-in, no match. Every opcode
+// outside that set throws std::runtime_error, naming the opcode, instead of
+// falling through silently — a later CLR emission node lowers it for real.
+//
+// A captured local lowers to a one-element `object[]` ref cell (P4). The
+// cell allocation is idempotent, not a static declaration-point seed: an
+// `isinst object[]` type test runs at every CLOSURE, GET_LOCAL, and
+// SET_LOCAL of a captured slot, because a `for` loop's condition or
+// increment clause can revisit the slot through the back edge, on a later
+// trip, before the slot's own re-declaration runs — program order alone
+// cannot fix raw-vs-cell at code-generation time. See ensureCapturedCell's
+// own note (clr_emitter.cpp) for the standing counter-example. No Lox value
+// is ever itself a bare `object[]` (every aggregate the runtime exposes
+// wraps its storage in a named class — LoxOps.GetIndex's own BINDING
+// INVARIANT comment, runtime/clr/src), so the type test can never mistake a
+// real Lox value for a cell or the reverse.
 //
 // A function becomes its own CIL class, `extends [LoxRuntime]Lox.LoxClosure`
 // (P6's one `Call(object[])` interface — every callable kind implements it,
 // so generated code never branches on the callee's kind). Its constructor
-// takes the upvalue array (always empty in this pass's own construction —
-// see emitClosure) and forwards the function's compile-time name/arity to
-// the base class; `Invoke(object self, object[] args)` overrides the base
-// class's own abstract slot with this chunk's lowered body. `self` (P5:
-// "the callee itself — or, in a method, the receiver") and each unpacked
-// `args[i]` copy into the same Lox-frame-slot mapping GET_LOCAL/SET_LOCAL
-// already use for the script chunk — CIL's own argument slots (`ldarg.1`,
-// `ldarg.2`) hold them only long enough for the prologue to copy them in,
-// so (unlike the JVM backend, whose local-variable array has no separate
-// argument space) a CLR function chunk's local layout is byte-for-byte the
-// SAME as the script chunk's: local 0 is always LoxGlobals, and the Lox
-// frame's own slots start at local 1 either way.
+// takes the upvalue array (each entry either a freshly-seeded cell or a
+// parent's own cell/upvalue, wired by emitClosure) and forwards the
+// function's compile-time name/arity to the base class; `Invoke(object
+// self, object[] args)` overrides the base class's own abstract slot with
+// this chunk's lowered body. `self` (P5: "the callee itself — or, in a
+// method, the receiver") and each unpacked `args[i]` copy into the same
+// Lox-frame-slot mapping GET_LOCAL/SET_LOCAL already use for the script
+// chunk — CIL's own argument slots (`ldarg.1`, `ldarg.2`) hold them only
+// long enough for the prologue to copy them in, so (unlike the JVM backend,
+// whose local-variable array has no separate argument space) a CLR function
+// chunk's local layout is byte-for-byte the SAME as the script chunk's:
+// local 0 is always LoxGlobals, and the Lox frame's own slots start at
+// local 1 either way.
 //
 // `emitProgram` assembles the whole reachable tree into ONE ilasm source:
 // one shared `.assembly`/`.module` header, then one `.class` block per

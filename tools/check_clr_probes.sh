@@ -5,9 +5,13 @@
 # tools/check_jvm_probes.sh, scoped today to the straight-line opcode set
 # (CONSTANT, NIL/TRUE/FALSE, arithmetic/comparison, NEGATE, NOT, PRINT, POP,
 # GET_LOCAL, SET_LOCAL, DEFINE_GLOBAL, GET_GLOBAL, SET_GLOBAL), control flow
-# (JUMP, JUMP_IF_FALSE, LOOP), and functions and calls (CALL, zero-upvalue
-# CLOSURE, RETURN's dual role) — later CLR backend work grows this list the
-# same way check_jvm_probes.sh grew as the JVM backend gained opcodes.
+# (JUMP, JUMP_IF_FALSE, LOOP), functions and calls (CALL, RETURN's dual
+# role), and closures and upvalues (CLOSURE with a captured cell,
+# GET_UPVALUE, SET_UPVALUE, CLOSE_UPVALUE, plus BUILD_LIST, BUILD_MAP,
+# GET_INDEX, and SET_INDEX, pulled forward because the closure probes need
+# a list to hold the closures under test) — later CLR backend work grows
+# this list the same way check_jvm_probes.sh grew as the JVM backend gained
+# opcodes.
 #
 # error_probes hold the opposite shape: both sides must FAIL, with matching
 # stdout. They check that an error stays an error on the CLR backend too, not
@@ -15,6 +19,14 @@
 #
 # examples holds whole example programs from examples/, each one exercising
 # more of the accumulated CLR surface at once than a single probe does.
+#
+# The corpus sweep, below the examples loop, checks that the examples group
+# stays complete. It runs every examples/*.lox file NOT already in the
+# examples array, the same way the loop above runs the ones that are, and
+# fails the script if one of them runs to completion on both backends and
+# matches — that example belongs in the group and is missing. This turns
+# "the group holds every example the CLR backend can run" from a sentence
+# a person writes by hand into something the script checks on every run.
 #
 
 # Every probe runs even after an earlier one fails: a failing CLR run (an
@@ -56,6 +68,28 @@ probes=(
     # native through its own argument-count check, a different path than a
     # closure's, and no earlier probe in this list exercises it.
     "notes/translation-probes/29_os_access.lox"
+    # Closures and upvalues (the bug gate): V1_fresh_cell is the standing
+    # counter-example a naive one-cell-per-local-at-function-entry design
+    # gets WRONG (2 2 2) while V3_loopvar's shared cell (3 3 3) looks
+    # right — see ensureCapturedCell's own note. V2_shared and
+    # 06_shared_upvalue prove two closures over the same live incarnation
+    # share one cell; V4 proves the shared cell is really shared, by
+    # mutating it through one closure and reading it through another (06
+    # alone proves only that the module loads). V5/V6 prove a local `fun`
+    # that captures itself seeds its own cell before its first read.
+    # BUILD_LIST, BUILD_MAP, GET_INDEX, and SET_INDEX are pulled forward
+    # here too: V1 and V3 each build a list of the closures under test and
+    # read it back by index, and 12_list_map_index needs a map as well as
+    # a list to run at all — none of these probes can even compile without
+    # aggregate and index support.
+    "notes/translation-probes/06_shared_upvalue.lox"
+    "notes/translation-probes/V1_fresh_cell.lox"
+    "notes/translation-probes/V2_shared.lox"
+    "notes/translation-probes/V3_loopvar.lox"
+    "notes/translation-probes/V4_mutate_through_upvalue.lox"
+    "notes/translation-probes/V5_self_recursive_closure.lox"
+    "notes/translation-probes/V6_self_recursive_closure_in_loop.lox"
+    "notes/translation-probes/12_list_map_index.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -88,6 +122,21 @@ examples=(
     "examples/guessing_game.lox"
     "examples/hanoi.lox"
     "examples/leap_year.lox"
+    # This node's own newly runnable examples: each one exercises
+    # BUILD_LIST, GET_INDEX, or SET_INDEX (a list or string literal,
+    # indexed or index-assigned) that a prior node's emitter would reject
+    # outright. Whether these nine plus the six above are the whole set
+    # the CLR backend can currently run is what the corpus sweep below
+    # checks, not this comment.
+    "examples/digital_root.lox"
+    "examples/gcd_lcm.lox"
+    "examples/to_binary.lox"
+    "examples/palindrome.lox"
+    "examples/luhn.lox"
+    "examples/clock_arithmetic.lox"
+    "examples/anagram.lox"
+    "examples/caesar.lox"
+    "examples/linear_regression.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
@@ -214,6 +263,77 @@ for example in "${examples[@]}"; do
     fi
 done
 
+# --- corpus sweep --------------------------------------------------------
+# Enforces the completeness claim the comment above no longer makes in
+# prose. Every examples/*.lox file NOT already in the examples array runs
+# on both backends here, with the same .input rule as the loop above. A
+# program that runs to completion (exit 0) on BOTH sides and prints
+# byte-identical stdout belongs in the examples group above and is
+# missing from it — the script fails and names it, instead of relying on
+# a hand-written sentence that the next opcode this backend gains would
+# make false without anyone noticing.
+#
+# Map iteration order is unspecified (spec 03-types.md); a map-order
+# mismatch would show up here as a false non-match, not a false miss, so
+# it cannot make this check wrongly pass an example in. No example in the
+# corpus both iterates a map and runs to completion on the CLR backend
+# today, so no permutation exclusion exists yet — the first node that
+# meets one adds it, the way the JVM gate's own exclusion list does.
+in_examples_group() {
+    local candidate="$1"
+    for known in "${examples[@]}"; do
+        if [ "$known" = "$candidate" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+sweep_missing=()
+for example_path in "$root"/examples/*.lox; do
+    example="examples/$(basename "$example_path")"
+    if in_examples_group "$example"; then
+        continue
+    fi
+
+    input_file="$root/${example%.lox}.input"
+    if [ -f "$input_file" ]; then
+        native_ok=1; "$native_bin" "$root/$example" <"$input_file" \
+            >"$native_out" 2>"$native_err" || native_ok=0
+    else
+        native_ok=1; "$native_bin" "$root/$example" \
+            >"$native_out" 2>"$native_err" || native_ok=0
+    fi
+    if [ "$native_ok" -eq 0 ]; then
+        continue
+    fi
+
+    if [ -f "$input_file" ]; then
+        clr_ok=1; "$root/tools/loxpp_clr.sh" "$root/$example" <"$input_file" \
+            >"$clr_out" 2>"$clr_err" || clr_ok=0
+    else
+        clr_ok=1; "$root/tools/loxpp_clr.sh" "$root/$example" \
+            >"$clr_out" 2>"$clr_err" || clr_ok=0
+    fi
+    if [ "$clr_ok" -eq 0 ]; then
+        continue
+    fi
+
+    if diff -q "$native_out" "$clr_out" >/dev/null; then
+        sweep_missing+=("$example")
+    fi
+done
+
+if [ "${#sweep_missing[@]}" -ne 0 ]; then
+    echo "check_clr_probes.sh: ${#sweep_missing[@]} example(s) run to completion and match native, but are missing from the examples group:" >&2
+    for example in "${sweep_missing[@]}"; do
+        echo "  $example" >&2
+    done
+    failed_probes+=("${sweep_missing[@]}")
+else
+    echo "check_clr_probes.sh: corpus sweep OK, the examples group is complete"
+fi
+
 if [ "${#failed_probes[@]}" -ne 0 ]; then
     echo "check_clr_probes.sh: ${#failed_probes[@]} probe(s) failed:" >&2
     for probe in "${failed_probes[@]}"; do
@@ -222,4 +342,4 @@ if [ "${#failed_probes[@]}" -ne 0 ]; then
     exit 1
 fi
 
-echo "check_clr_probes.sh: all $((${#probes[@]} + ${#error_probes[@]} + ${#examples[@]})) probes OK"
+echo "check_clr_probes.sh: all $((${#probes[@]} + ${#error_probes[@]} + ${#examples[@]})) probes OK, corpus sweep confirms the examples group is complete"

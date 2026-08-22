@@ -1,5 +1,6 @@
 #include "clr_emitter.h"
 
+#include "capture_analysis.h"
 #include "cfg.h"
 #include "exec_objects.h"
 #include "object.h"
@@ -16,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace clr {
@@ -139,18 +141,6 @@ std::string opName(Op op) {
                              opName(op) + " yet");
 }
 
-// CLOSURE itself is implemented, but only for the zero-upvalue
-// construction (this file's own top-of-file note): wiring a captured cell
-// into the generated constructor is a later node's job. Kept distinct from
-// notImplemented(Op) so the message names the actual gap instead of the
-// whole opcode.
-[[noreturn]] void notImplementedClosureUpvalues(std::size_t count) {
-    throw std::runtime_error(
-        "clr_emitter: the CLR backend does not lower CLOSURE with " +
-        std::to_string(count) +
-        " upvalue(s) yet (upvalue wiring is a later node)");
-}
-
 // Accumulates ilasm instruction text for one method body while tracking the
 // CIL evaluation stack's depth in slots. Unlike the JVM operand stack, CIL's
 // `.maxstack` counts one slot per value regardless of its underlying width —
@@ -198,10 +188,15 @@ struct Builder {
 };
 
 // Smallest-encoding int push. Reused for CALL's array-size/index operands,
-// a generated constructor's own literal arity, and the argument-prologue
-// unpacking loop; never asked for a value outside [-1, 255] here (CALL
-// argCount and ObjFunction::arity both fit a byte — compiler.cpp enforces
-// each ceiling independently).
+// BUILD_LIST's element count, BUILD_MAP's doubled width and element
+// indices (2 * in.byteOperand, through emitSpillToArray/
+// newObjectArrayFromScratch — up to 510 for the 255-pair compiler ceiling),
+// GET_UPVALUE/SET_UPVALUE's array index, a generated constructor's own
+// literal arity, and CLOSURE's upvalue-wiring loop. CALL argCount,
+// BUILD_LIST's element count, ObjFunction::arity, and the UINT8_COUNT-
+// bounded upvalue index all fit a byte, but BUILD_MAP's doubled width does
+// not; the last branch below (a bare `ldc.i4 n`) covers any int, so every
+// caller stays correct regardless of which range it falls in.
 std::string pushIntInstruction(int n) {
     if (n == -1) {
         return "ldc.i4.m1";
@@ -213,6 +208,22 @@ std::string pushIntInstruction(int n) {
         return "ldc.i4.s " + std::to_string(n);
     }
     return "ldc.i4 " + std::to_string(n);
+}
+
+// A short, offset-anchored ilasm label for a micro-branch this emitter
+// inserts on top of what the CFG pass (cfg.h) already labeled — see
+// ensureCapturedCell and the captured GET_LOCAL/SET_LOCAL lowering below.
+// cfg.cpp's own labels are "L_<offset>" (zero-padded decimal); the distinct
+// prefix here can never collide with one, and `offset` (always unique in
+// one chunk) plus an optional sub-index (a CLOSURE can open more than one
+// cell in one instruction, one per upvalue) keeps every one of THESE
+// labels unique too.
+std::string captureLabel(const char* tag, int offset, int sub = -1) {
+    std::string s = std::string("Ccap") + tag + std::to_string(offset);
+    if (sub >= 0) {
+        s += "_" + std::to_string(sub);
+    }
+    return s;
 }
 
 // Everything one chunk's straight-line lowering needs, threaded through by
@@ -228,6 +239,18 @@ struct Emitter {
     std::unordered_map<int, std::vector<int>> invisibleVarsByOffset;
     std::unordered_map<int, std::string> labelAtOffset;
 
+    // Every Lox local slot this chunk's OWN captures (capture_analysis.h's
+    // FunctionCaptureInfo::liveRangesBySlot) ever backs with an object[1]
+    // ref-cell. Membership only, not the live range: GET_LOCAL, SET_LOCAL,
+    // and CLOSURE each settle raw-vs-cell at run time with an `isinst
+    // object[]` test (this file's own top-of-file note), so all this set
+    // needs to answer is "does this slot ever need that test at all".
+    std::unordered_set<int> capturedSlots;
+
+    [[nodiscard]] bool isCaptured(int loxSlot) const {
+        return capturedSlots.contains(loxSlot);
+    }
+
     // Local index 0 holds the LoxGlobals instance; Lox frame slot `n` maps
     // to local index `baseSlot + n`; `scratchSlot` is one shared shuffle
     // slot for the SET_GLOBAL/DEFINE_GLOBAL P2 shuffle (globalsCall) — see
@@ -240,10 +263,11 @@ struct Emitter {
     int globalsSlot{0};
     int scratchSlot{0};
 
-    // Set (to scratchSlot+1 / scratchSlot+2) only when this chunk contains
-    // a CALL with at least one argument; -1 otherwise, so a stray use
-    // before buildEmitter's own computation fails loudly instead of
-    // silently aliasing scratchSlot.
+    // Set (to scratchSlot+1 / scratchSlot+2) whenever this chunk contains
+    // a CALL, a BUILD_LIST, or a BUILD_MAP with a non-zero width
+    // (computeMaxAggregateWidth); -1 otherwise, so a stray use before
+    // buildEmitter's own computation fails loudly instead of silently
+    // aliasing scratchSlot.
     int calleeScratchSlot{-1};
     int argScratchBase{-1};
 
@@ -348,6 +372,77 @@ void emitGlobalsCall(Emitter& e, const char* method,
     }
 }
 
+// A captured local's CIL slot is not one fixed representation for its
+// whole life: before its first capture it holds the raw Lox value (this
+// file's own top-of-file note); from there through the matching
+// CLOSE_UPVALUE it holds an `object[1]` ref-cell instead. GET_LOCAL/
+// SET_LOCAL on a captured slot cannot pick which one applies by this
+// instruction's OWN offset: a `for` loop's condition/increment clauses sit,
+// in byte order, BEFORE the body that captures the loop variable, yet the
+// LOOP back-edge revisits them on every later iteration, by which point
+// the slot IS a cell (V3_loopvar.lox) — program order and runtime order
+// are not the same thing once a back-edge exists. `isinst object[]` asks
+// the one question that is always true regardless of which trip this is:
+// no Lox value is ever itself a bare `object[]` (every aggregate the
+// runtime exposes wraps its storage in a named class — LoxOps.GetIndex's
+// own BINDING INVARIANT comment, runtime/clr/src), so this test can never
+// mistake a real Lox value for a cell or the reverse. `isinst` (unlike the
+// JVM's `instanceof`) leaves null-or-the-reference on the stack rather than
+// a boolean, so `brfalse`/`brtrue` read that result directly with no
+// separate comparison.
+void emitCapturedGetLocal(Emitter& e, int slot, int offset) {
+    std::string rawLbl = captureLabel("gr", offset);
+    std::string endLbl = captureLabel("ge", offset);
+    int d = e.b.depth;
+    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit("isinst object[]", 1, 0);
+    e.b.emit("brfalse " + rawLbl, 1, -1);
+    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit("castclass object[]", 1, 0);
+    e.b.emit("ldc.i4.0", 0, +1);
+    e.b.emit("ldelem.ref", 2, -1);
+    e.b.emit("br " + endLbl, 0, 0);
+    e.b.label(rawLbl);
+    e.b.resync(d);
+    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.label(endLbl);
+    e.b.resync(d + 1);
+}
+
+// SET_LOCAL's captured-slot lowering: the value to store already sits on
+// top of the stack (`peek` decides whether it must still be there after —
+// P2), but deciding raw-vs-cell needs the SLOT's own current content, a
+// second value with nowhere free to sit without disturbing the first —
+// spilled to `scratchSlot` for the same reason `emitGlobalsCall`'s peek
+// variant spills there. Never a scratch-slot conflict with a CALL, a
+// BUILD_LIST, or another SET_LOCAL/SET_GLOBAL/SET_UPVALUE's own use of it:
+// one instruction runs to completion before the next starts.
+void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
+    std::string rawLbl = captureLabel("sr", offset);
+    std::string endLbl = captureLabel("se", offset);
+    std::string scratch = std::to_string(e.scratchSlot);
+    int d = e.b.depth;
+    e.b.emit("stloc " + scratch, 1, -1);
+    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit("isinst object[]", 1, 0);
+    e.b.emit("brfalse " + rawLbl, 1, -1);
+    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit("castclass object[]", 1, 0);
+    e.b.emit("ldc.i4.0", 0, +1);
+    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit("stelem.ref", 3, -3);
+    e.b.emit("br " + endLbl, 0, 0);
+    e.b.label(rawLbl);
+    e.b.resync(d - 1);
+    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit("stloc " + std::to_string(slot), 1, -1);
+    e.b.label(endLbl);
+    e.b.resync(d - 1);
+    if (peek) {
+        e.b.emit("ldloc " + scratch, 0, +1);
+    }
+}
+
 // The CLR twin of jvm_emitter.cpp's own `loadNamedLocalAtZeroDepth`: at a
 // peek-family consumer whose operand depth is zero, the value to consume
 // is not a genuine evaluation-stack temporary — the shared abstract-stack
@@ -355,13 +450,18 @@ void emitGlobalsCall(Emitter& e, const char* method,
 // (zero_depth_local.h) is the one authority for naming that local: exact
 // away from a CFG merge, and cross-checked against this pass's own forward
 // tracker at a merge (see this file's own top-of-file note); this function
-// only adds the CLR-specific `ldloc`.
+// adds the CLR-specific `ldloc`, routed through the same captured-slot test
+// GET_LOCAL/SET_LOCAL use whenever the named local is itself captured.
 int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset) {
     int loxSlot = resolveZeroDepthLocalSlot(
         e.analysis.before[i].localCount - 1, e.labelAtOffset.contains(offset),
         e.lastInvisibleVarSlot, offset, "clr_emitter");
     int slot = e.slotForLocal(loxSlot);
-    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    if (e.isCaptured(loxSlot)) {
+        emitCapturedGetLocal(e, slot, offset);
+    } else {
+        e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    }
     return slot;
 }
 
@@ -406,7 +506,12 @@ void emitPop(Emitter& e, const DecodedInstruction& in) {
 }
 
 void emitGetLocal(Emitter& e, const DecodedInstruction& in) {
-    e.b.emit("ldloc " + std::to_string(e.slotForLocal(in.byteOperand)), 0, +1);
+    int slot = e.slotForLocal(in.byteOperand);
+    if (e.isCaptured(in.byteOperand)) {
+        emitCapturedGetLocal(e, slot, in.offset);
+    } else {
+        e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    }
 }
 
 // See this file's own top-of-file note and `loadNamedLocalAtZeroDepth`'s:
@@ -424,9 +529,16 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
                   bool& consumedFollowingPop) {
     int slot = e.slotForLocal(in.byteOperand);
     bool fuse = e.fusablePop(i);
+    bool captured = e.isCaptured(in.byteOperand);
     if (isFoldedAtZeroDepth(e, i)) {
         loadNamedLocalAtZeroDepth(e, i, in.offset);
-        e.b.emit("stloc " + std::to_string(slot), 1, -1);
+        if (captured) {
+            emitCapturedStore(e, slot, in.offset, /*peek=*/false);
+        } else {
+            e.b.emit("stloc " + std::to_string(slot), 1, -1);
+        }
+    } else if (captured) {
+        emitCapturedStore(e, slot, in.offset, /*peek=*/!fuse);
     } else if (fuse) {
         e.b.emit("stloc " + std::to_string(slot), 1, -1);
     } else {
@@ -521,6 +633,54 @@ void emitJumpIfFalse(Emitter& e, std::size_t i, const DecodedInstruction& in) {
     e.b.emit("brtrue " + e.labelFor(in.jumpTarget), 1, -1);
 }
 
+// Spills `width` values, already loose on the stack (topmost = last
+// index), into consecutive scratch slots starting at `scratchBase` — the
+// one step every reshape below needs before it can build a fresh array
+// reference on top of where those values used to sit.
+void spillLooseValues(Emitter& e, int scratchBase, int width) {
+    for (int i = width - 1; i >= 0; i--) {
+        e.b.emit("stloc " + std::to_string(scratchBase + i), 1, -1);
+    }
+}
+
+// Builds a fresh `object[width]` and refills it ascending from the
+// scratch slots `spillLooseValues` (or an equivalent spill) already
+// filled, leaving the array as the new top of stack. Shared by every
+// P7-shaped reshape — BUILD_LIST's own spill-and-refill and CALL's
+// argument array both need this exact loop, so a change to the element
+// type or the index-push instruction updates once for both.
+void newObjectArrayFromScratch(Emitter& e, int scratchBase, int width) {
+    e.b.emit(pushIntInstruction(width), 0, +1);
+    e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
+    for (int i = 0; i < width; i++) {
+        e.b.emit("dup", 1, +1);
+        e.b.emit(pushIntInstruction(i), 0, +1);
+        e.b.emit("ldloc " + std::to_string(scratchBase + i), 0, +1);
+        e.b.emit("stelem.ref", 3, -3);
+    }
+}
+
+// The P7 reshape BUILD_LIST needs: spill `width` values, already loose on
+// the stack, into `argScratchBase`, build a fresh `object[width]`, refill
+// it ascending, then hand it to `call` (a complete ilasm `call` instruction
+// text; `callCellsRead`/`callNetDelta` describe its own stack effect).
+// `width == 0` needs no scratch at all: the empty array builds directly,
+// with nothing to spill or refill. Not CALL's own helper too — see
+// emitCall's own note for why a value sitting BENEATH the ones this
+// function spills (CALL's callee) does not fit this shape.
+void emitSpillToArray(Emitter& e, int width, const std::string& call,
+                      int callCellsRead, int callNetDelta) {
+    if (width == 0) {
+        e.b.emit(pushIntInstruction(0), 0, +1);
+        e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
+        e.b.emit(call, callCellsRead, callNetDelta);
+        return;
+    }
+    spillLooseValues(e, e.argScratchBase, width);
+    newObjectArrayFromScratch(e, e.argScratchBase, width);
+    e.b.emit(call, callCellsRead, callNetDelta);
+}
+
 // P5 (calling convention): CALL argCount finds [callee, arg0, ...,
 // arg(argCount-1)] already loose on the evaluation stack (arg(argCount-1)
 // on top; vm.cpp's own bottom-to-top push order) and must hand
@@ -530,9 +690,21 @@ void emitJumpIfFalse(Emitter& e, std::size_t i, const DecodedInstruction& in) {
 // local first: the elements are already on the stack BELOW where a fresh
 // array reference would land, so a dup-based build cannot reach them.
 // buildEmitter reserves one scratch slot per argument the chunk's widest
-// CALL needs, plus one for the callee, computed once before this pass
-// starts — reused across every CALL site in the chunk, because calls run
-// one at a time, never concurrently.
+// CALL/BUILD_LIST needs, plus one for CALL's own callee, computed once
+// before this pass starts — reused across every CALL/BUILD_LIST site in
+// the chunk, because they run one at a time, never concurrently.
+//
+// Not routed through `emitSpillToArray`: the callee sits UNDERNEATH the
+// arguments on the stack, so it must be popped to its own scratch slot
+// AFTER the argument-spill loop, then reloaded BEFORE the array is built —
+// one more step sandwiched inside the shape `emitSpillToArray` gives
+// BUILD_LIST whole, with no element beneath the ones it spills. Forcing
+// CALL through that helper would either spill the callee as if it were
+// argument 0 (wrong value in the array) or re-spill the arguments a second
+// time once they no longer sit on the stack (evaluation stack underflow).
+// The spill and the array-build themselves are the same two loops
+// `emitSpillToArray` runs, factored into `spillLooseValues`/
+// `newObjectArrayFromScratch` so both call sites share one copy.
 void emitCall(Emitter& e, const DecodedInstruction& in) {
     int argCount = in.byteOperand;
     const char* callSig =
@@ -543,42 +715,226 @@ void emitCall(Emitter& e, const DecodedInstruction& in) {
         e.b.emit(callSig, 2, -1);
         return;
     }
-    for (int i = argCount - 1; i >= 0; i--) {
-        e.b.emit("stloc " + std::to_string(e.argScratchBase + i), 1, -1);
-    }
+    spillLooseValues(e, e.argScratchBase, argCount);
     e.b.emit("stloc " + std::to_string(e.calleeScratchSlot), 1, -1);
 
     e.b.emit("ldloc " + std::to_string(e.calleeScratchSlot), 0, +1);
-    e.b.emit(pushIntInstruction(argCount), 0, +1);
-    e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
-    for (int i = 0; i < argCount; i++) {
-        e.b.emit("dup", 1, +1);
-        e.b.emit(pushIntInstruction(i), 0, +1);
-        e.b.emit("ldloc " + std::to_string(e.argScratchBase + i), 0, +1);
-        e.b.emit("stelem.ref", 3, -3);
-    }
+    newObjectArrayFromScratch(e, e.argScratchBase, argCount);
     e.b.emit(callSig, 2, -1);
 }
 
-// CLOSURE with zero upvalues (this file's own top-of-file note; a captured
-// upvalue is a later node's wiring). `childClassNames[i]` names the class
-// this chunk's own i-th nested function (chunk_decoder.h:
-// DecodedInstruction::nestedIndex) was assigned by emitProgram's pre-order
-// walk. emitScript (no nested functions in any caller) always passes an
-// empty vector, so a CLOSURE reaching this from there is a real bug,
-// caught below rather than silently mis-indexed.
+// BUILD_LIST (pulled forward from the aggregates scope this opcode
+// conceptually belongs to: V1_fresh_cell.lox and V3_loopvar.lox, the two
+// probes that prove or disprove the fresh-cell-per-declaration model this
+// node exists to get right, each build a list of the closures under test
+// and read it back by index, so an emitter that still throws "not
+// implemented" on BUILD_LIST/GET_INDEX/SET_INDEX cannot even reach the
+// closure bug being tested for). The same P7 shuffle CALL's own argument
+// array needs (spill loose values below where a fresh array would land,
+// build the array, refill it) — reusing CALL's own SCRATCH-SLOT
+// allocation (computeMaxAggregateWidth), not a second one, even though the
+// two opcodes' own emitted shapes stay distinct (emitCall's own note).
+// LoxOps.BuildList (runtime/clr) copies the array into a fresh LoxList in
+// the same order.
+void emitBuildList(Emitter& e, const DecodedInstruction& in) {
+    emitSpillToArray(e, in.byteOperand,
+                     "call class [LoxRuntime]Lox.LoxList "
+                     "[LoxRuntime]Lox.LoxOps::BuildList(object[])",
+                     /*callCellsRead=*/1, /*callNetDelta=*/0);
+}
+
+// BUILD_MAP n: n key/value pairs already loose on the stack, pushed in
+// source order (key0, val0, key1, val1, ..., matching compiler.cpp's map
+// literal) — the same P7 reshape as BUILD_LIST, over 2n cells instead of n.
+// `12_list_map_index` — this node's own checkpoint — indexes a map literal
+// as well as a list, so this opcode is pulled forward here for the same
+// reason BUILD_LIST/GET_INDEX/SET_INDEX are: the probe cannot compile
+// without it. LoxOps.BuildMap (runtime/clr) validates every key before
+// writing any pair, matching vm.cpp's own two-pass shape.
+void emitBuildMap(Emitter& e, const DecodedInstruction& in) {
+    emitSpillToArray(e, 2 * in.byteOperand,
+                     "call class [LoxRuntime]Lox.LoxMap "
+                     "[LoxRuntime]Lox.LoxOps::BuildMap(object[])",
+                     /*callCellsRead=*/1, /*callNetDelta=*/0);
+}
+
+// GET_INDEX/SET_INDEX: vm.cpp's own operand order already matches
+// LoxOps's parameter order ([collection, index] and [collection, index,
+// value], bottom to top), so neither needs a shuffle — unlike SET_LOCAL/
+// SET_GLOBAL/SET_UPVALUE, SET_INDEX is not a P2 peek: vm.cpp pops its
+// operands whole and pushes a genuinely new result cell (LoxOps.SetIndex's
+// own return), so a plain call with no dup is exactly right.
+void emitGetIndex(Emitter& e) {
+    e.b.emit("call object [LoxRuntime]Lox.LoxOps::GetIndex(object, object)", 2,
+             -1);
+}
+
+void emitSetIndex(Emitter& e) {
+    e.b.emit("call object [LoxRuntime]Lox.LoxOps::SetIndex(object, object, "
+             "object)",
+             3, -2);
+}
+
+// Wraps `slot` in a fresh `object[1]` ref-cell, seeded with the raw value
+// already there, UNLESS `slot` already holds one — an idempotent seed, not
+// an unconditional one, and that is the load-bearing choice of this whole
+// design (the bug gate). See this file's own top-of-file note and
+// `emitCapturedGetLocal`'s: V3_loopvar.lox declares its captured local
+// ONCE, outside the loop, while the CLOSURE that captures it sits inside
+// the loop body — one static offset, reached once per iteration, with no
+// CLOSE_UPVALUE between trips (the range spans the whole loop). An
+// unconditional seed here would hand every iteration's closure its OWN
+// fresh cell instead of the one shared cell V3_loopvar's checkpoint
+// (3, 3, 3) requires. The idempotent check is what makes ONE emitted
+// instruction correct on both trips: seed on the first, no-op on every one
+// after, because nothing else in this chunk ever turns a cell back into a
+// raw value once created — CLOSE_UPVALUE emits no CIL at all (see its own
+// case in emitBody) — and a fresh DECLARATION always re-`stloc`s the slot
+// directly (finishInstruction), never through this check, so it is exactly
+// what puts a slot back to raw for the NEXT incarnation
+// (V1_fresh_cell.lox: `var snapshot` re-declares, hence re-seeds, on every
+// trip of ITS loop).
+void ensureCapturedCell(Emitter& e, int slot, int offset, int subIndex) {
+    std::string readyLbl = captureLabel("ok", offset, subIndex);
+    int d = e.b.depth;
+    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit("isinst object[]", 1, 0);
+    e.b.emit("brtrue " + readyLbl, 1, -1);
+    e.b.emit(pushIntInstruction(1), 0, +1);
+    e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
+    e.b.emit("dup", 1, +1);
+    e.b.emit("ldc.i4.0", 0, +1);
+    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit("stelem.ref", 3, -3);
+    e.b.emit("stloc " + std::to_string(slot), 1, -1);
+    e.b.label(readyLbl);
+    e.b.resync(d);
+}
+
+// CLOSURE's decoded `isLocal=1` entries name only slots the capture
+// analysis (capture_analysis.h) also reports captured — `up.isLocal` comes
+// from the CLOSURE instruction's own decoded operand bytes, `e.capturedSlots`
+// from the capture analysis's `liveRangesBySlot`; nothing makes a future
+// drift between the two impossible, and a silent one would seed a cell
+// this pass never marks captured, so GET_LOCAL/SET_LOCAL elsewhere would
+// keep reading the raw value while this closure reads the cell — a wrong
+// VALUE, no assembler error, no exception. Fail loudly instead. Both sides
+// read the same decoded CLOSURE operand bytes today (capture_analysis.cpp's
+// own dataflow walks `in.upvalues` directly), so no input through
+// emitScript/emitProgram can make this check fire; it stands ready for the
+// day one of the two derivations changes to read a different source.
+void checkAllCapturesAreReported(const Emitter& e,
+                                 const DecodedInstruction& in) {
+    for (const ClosureUpvalue& up : in.upvalues) {
+        if (up.isLocal && !e.isCaptured(up.index)) {
+            throw std::runtime_error(
+                "clr_emitter: CLOSURE captures local slot " +
+                std::to_string(up.index) +
+                " that capture analysis does not report");
+        }
+    }
+}
+
+// The Lox slot THIS closure's own declaring push lands in, if any (only a
+// named local `fun` has one — an invisible-var site at this very offset),
+// AND that same closure captures as an upvalue (direct recursion). -1 when
+// this CLOSURE is not that shape.
+int findSelfCaptureLoxSlot(const Emitter& e, const DecodedInstruction& in) {
+    auto ownSlotIt = e.invisibleVarsByOffset.find(in.offset);
+    if (ownSlotIt == e.invisibleVarsByOffset.end()) {
+        return -1;
+    }
+    for (int candidate : ownSlotIt->second) {
+        for (const ClosureUpvalue& up : in.upvalues) {
+            if (up.isLocal && up.index == candidate) {
+                return candidate;
+            }
+        }
+    }
+    return -1;
+}
+
+// Self-capture: a local `fun` that calls itself makes ONE of this CLOSURE's
+// isLocal entries name the very slot it is declaring. `ensureCapturedCell`
+// cannot run on that slot: its idempotent check keeps whatever cell is
+// already in the slot, and that is wrong here for two reasons at once. On
+// this method's very first pass through this declaration, the slot's CIL
+// local has never been stored to; `.locals init` zero-initializes it, so a
+// read there gives a silent `null`, not a build or run failure — CoreCLR
+// does not fault an unwritten local, it only zero-initializes it. On any
+// later pass (this declaration sits in a loop body), the slot instead holds
+// the PREVIOUS trip's cell, because `storeClosureIntoSelfCell` below
+// permanently redirects this slot's declaring store into `cell[0]` and
+// never falls back to the plain raw `stloc` that would let
+// `ensureCapturedCell` see a fresh raw value to wrap. Either way, the
+// idempotent check would keep a stale or empty cell instead of starting
+// fresh, so this seeds a brand-new cell into the slot unconditionally,
+// bypassing that check, on every pass regardless of what the slot
+// currently holds. `newarr` default-initializes `[0]` to null; the real
+// value lands there once the closure exists, in `storeClosureIntoSelfCell`
+// below. After this call the array-build loop in `emitClosure` treats the
+// slot exactly like any other already-a-cell capture — no special case
+// needed there.
+void seedSelfCaptureCell(Emitter& e, int selfSlot) {
+    e.b.emit(pushIntInstruction(1), 0, +1);
+    e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
+    e.b.emit("stloc " + std::to_string(selfSlot), 1, -1);
+}
+
+// The declaring store, redirected: write the closure just built into the
+// cell's own `[0]`, never into the CIL slot itself (which already holds
+// that cell, from `seedSelfCaptureCell`) — `finishInstruction`'s ordinary
+// plain `stloc` would undo the seed and hand every capturing sibling
+// closure a stale cell. Spilled to `scratchSlot` first for the same reason
+// `emitCapturedStore` does: building [cellRef, 0, value] for `stelem.ref`
+// needs the value parked somewhere while the cell reference is fetched.
+void storeClosureIntoSelfCell(Emitter& e, const DecodedInstruction& in,
+                              int selfSlot, int selfLoxSlot) {
+    std::string scratch = std::to_string(e.scratchSlot);
+    e.b.emit("stloc " + scratch, 1, -1);
+    e.b.emit("ldloc " + std::to_string(selfSlot), 0, +1);
+    e.b.emit("ldc.i4.0", 0, +1);
+    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit("stelem.ref", 3, -3);
+
+    // finishInstruction must not ALSO store this offset's invisible var: it
+    // would run its plain `stloc` after the write above and put the raw
+    // closure back into the slot, undoing this fix. Erase it here instead
+    // of leaving finishInstruction to guess.
+    auto& slots = e.invisibleVarsByOffset[in.offset];
+    slots.erase(std::remove(slots.begin(), slots.end(), selfLoxSlot),
+                slots.end());
+    // `capturedSlots` already marks `selfLoxSlot` captured (it is one of
+    // this CLOSURE's own upvalue entries), so `loadNamedLocalAtZeroDepth`'s
+    // ordinary raw-or-cell test handles this cell like any other captured
+    // slot — no separate self-cell flag or throw is needed here (V5/V6
+    // verify it).
+    e.lastInvisibleVarSlot = selfLoxSlot;
+}
+
+// `childClassNames[i]` names the class this chunk's own i-th nested
+// function (chunk_decoder.h: DecodedInstruction::nestedIndex) was assigned
+// by emitProgram's pre-order walk. emitScript (no nested functions in any
+// caller) always passes an empty vector, so a CLOSURE reaching this from
+// there is a real bug, caught below rather than silently mis-indexed.
 //
-// `newobj` builds the whole `object[][]` (always empty here) and calls the
-// generated class's own constructor in one instruction — unlike the JVM
-// backend's `new; dup; ...; invokespecial <init>` idiom, CIL's `newobj`
+// Every isLocal=1 entry's slot gets `ensureCapturedCell`'s idempotent seed
+// BEFORE the array-build loop below reads it — building the `object[][]`
+// upvals array must see a cell in that slot, never the raw value, whether
+// this is the FIRST closure to capture that incarnation or a later one
+// that only needs to share it: two closures that capture the same slot in
+// the same live range must share one cell (V2_shared.lox,
+// 06_shared_upvalue.lox). `up.index`, after the seed, IS the cell, read
+// with a plain `ldloc`; this pass only ever tracks that slot as generic
+// `object`, so `castclass` narrows it before the `stelem.ref` into the
+// `object[]`-typed upvals array. `newobj` builds the whole array and calls
+// the generated class's own constructor in one instruction — unlike the
+// JVM backend's `new; dup; ...; invokespecial <init>` idiom, CIL's `newobj`
 // pops its constructor arguments and pushes the fresh reference itself, so
 // no `dup` is needed to keep a copy of the still-uninitialized object
 // around.
 void emitClosure(Emitter& e, const DecodedInstruction& in,
                  const std::vector<std::string>& childClassNames) {
-    if (!in.upvalues.empty()) {
-        notImplementedClosureUpvalues(in.upvalues.size());
-    }
     if (in.nestedIndex < 0 ||
         static_cast<std::size_t>(in.nestedIndex) >= childClassNames.size()) {
         throw std::runtime_error("clr_emitter: CLOSURE nestedIndex " +
@@ -587,9 +943,105 @@ void emitClosure(Emitter& e, const DecodedInstruction& in,
     }
     const std::string& cls =
         childClassNames[static_cast<std::size_t>(in.nestedIndex)];
-    e.b.emit(pushIntInstruction(0), 0, +1);
+
+    checkAllCapturesAreReported(e, in);
+
+    int selfLoxSlot = findSelfCaptureLoxSlot(e, in);
+    int selfSlot = -1;
+    if (selfLoxSlot >= 0) {
+        selfSlot = e.slotForLocal(selfLoxSlot);
+        seedSelfCaptureCell(e, selfSlot);
+    }
+
+    for (std::size_t u = 0; u < in.upvalues.size(); u++) {
+        const ClosureUpvalue& up = in.upvalues[u];
+        if (up.isLocal && up.index != selfLoxSlot) {
+            ensureCapturedCell(e, e.slotForLocal(up.index), in.offset,
+                               static_cast<int>(u));
+        }
+    }
+
+    e.b.emit(pushIntInstruction(static_cast<int>(in.upvalues.size())), 0, +1);
     e.b.emit("newarr object[]", 1, 0);
+    for (std::size_t u = 0; u < in.upvalues.size(); u++) {
+        const ClosureUpvalue& up = in.upvalues[u];
+        e.b.emit("dup", 1, +1);
+        e.b.emit(pushIntInstruction(static_cast<int>(u)), 0, +1);
+        if (up.isLocal) {
+            // `selfLoxSlot` already holds a fresh cell (seeded above), so
+            // this is the same lowering as any other already-a-cell
+            // capture — no special case needed here.
+            e.b.emit("ldloc " + std::to_string(e.slotForLocal(up.index)), 0,
+                     +1);
+            e.b.emit("castclass object[]", 1, 0);
+        } else {
+            // A grandparent's own upvalue, already a cell — copy the
+            // reference straight through, no seed: isLocal = 0 takes the
+            // parent's own upvalue at that index.
+            e.b.emit("ldarg.0", 0, +1);
+            e.b.emit("ldfld object[][] [LoxRuntime]Lox.LoxClosure::Upvalues", 1,
+                     0);
+            e.b.emit(pushIntInstruction(up.index), 0, +1);
+            e.b.emit("ldelem.ref", 2, -1);
+        }
+        e.b.emit("stelem.ref", 3, -3);
+    }
     e.b.emit("newobj instance void " + cls + "::.ctor(object[][])", 1, 0);
+
+    if (selfSlot >= 0) {
+        storeClosureIntoSelfCell(e, in, selfSlot, selfLoxSlot);
+    }
+}
+
+// GET_UPVALUE n reads upvals[n][0]: the `Upvalues` field LoxClosure
+// declares (runtime/clr/src/LoxClosure.cs) is already typed `object[][]`,
+// so `ldelem.ref` on it needs no cast — unlike a captured LOCAL slot, which
+// this pass only ever tracks as plain `object` (see
+// `emitCapturedGetLocal`). `ldarg.0` is `this` — the LoxClosure instance
+// itself, distinct from `Invoke`'s own `self` parameter (`ldarg.1`).
+void emitGetUpvalue(Emitter& e, const DecodedInstruction& in) {
+    e.b.emit("ldarg.0", 0, +1);
+    e.b.emit("ldfld object[][] [LoxRuntime]Lox.LoxClosure::Upvalues", 1, 0);
+    e.b.emit(pushIntInstruction(in.byteOperand), 0, +1);
+    e.b.emit("ldelem.ref", 2, -1);
+    e.b.emit("ldc.i4.0", 0, +1);
+    e.b.emit("ldelem.ref", 2, -1);
+}
+
+// SET_UPVALUE's own P2 peek/fuse shuffle: the assigned value already sits
+// on top of the stack, so it is spilled to `scratchSlot` (same reasoning as
+// `emitCapturedStore`) while `upvals[index]` is fetched, then written back
+// into that cell's slot 0.
+void emitUpvalueStore(Emitter& e, int index, bool peek) {
+    std::string scratch = std::to_string(e.scratchSlot);
+    e.b.emit("stloc " + scratch, 1, -1);
+    e.b.emit("ldarg.0", 0, +1);
+    e.b.emit("ldfld object[][] [LoxRuntime]Lox.LoxClosure::Upvalues", 1, 0);
+    e.b.emit(pushIntInstruction(index), 0, +1);
+    e.b.emit("ldelem.ref", 2, -1);
+    e.b.emit("ldc.i4.0", 0, +1);
+    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit("stelem.ref", 3, -3);
+    if (peek) {
+        e.b.emit("ldloc " + scratch, 0, +1);
+    }
+}
+
+// SET_UPVALUE is a peek-family consumer (an assignment expression), so it
+// asks `isFoldedAtZeroDepth` rather than re-deriving
+// `before[i].operandDepth() == 0` inline — the one shared guard SET_LOCAL/
+// SET_GLOBAL/JUMP_IF_FALSE already use (clr_emitter.h's own top-of-file
+// note).
+void emitSetUpvalue(Emitter& e, std::size_t i, const DecodedInstruction& in,
+                    bool& consumedFollowingPop) {
+    bool fuse = e.fusablePop(i);
+    if (isFoldedAtZeroDepth(e, i)) {
+        loadNamedLocalAtZeroDepth(e, i, in.offset);
+        emitUpvalueStore(e, in.byteOperand, /*peek=*/false);
+    } else {
+        emitUpvalueStore(e, in.byteOperand, /*peek=*/!fuse);
+    }
+    consumedFollowingPop = fuse;
 }
 
 // RETURN's two roles (P5). The script's own RETURN: `Compiler::
@@ -786,8 +1238,38 @@ void emitBody(Emitter& e, bool isFunction,
         case Op::CALL:
             emitCall(e, in);
             break;
+        case Op::BUILD_LIST:
+            emitBuildList(e, in);
+            break;
+        case Op::BUILD_MAP:
+            emitBuildMap(e, in);
+            break;
+        case Op::GET_INDEX:
+            emitGetIndex(e);
+            break;
+        case Op::SET_INDEX:
+            emitSetIndex(e);
+            break;
         case Op::CLOSURE:
             emitClosure(e, in, childClassNames);
+            break;
+        case Op::GET_UPVALUE:
+            emitGetUpvalue(e, in);
+            break;
+        case Op::SET_UPVALUE:
+            emitSetUpvalue(e, i, in, consumedFollowingPop);
+            break;
+        case Op::CLOSE_UPVALUE:
+            // A local reclaim (notes/jvm-emission-contract.md's
+            // scope-exit rule: endScope emits this exactly where a POP
+            // would otherwise retire a captured local) — nothing on the
+            // CIL evaluation stack to pop, same as emitPop's own
+            // LOCAL_RECLAIM case. The cell it ends stays wherever it
+            // already sits; the NEXT declaration into that same slot
+            // always re-`stloc`s it directly (never through
+            // ensureCapturedCell's check), which is what actually puts the
+            // slot back to raw for whatever comes after — see
+            // ensureCapturedCell's own note.
             break;
         case Op::RETURN:
             emitReturn(e, i, in, isFunction);
@@ -819,31 +1301,41 @@ int computeMaxLocalCount(const FunctionStackAnalysis& analysis) {
 }
 
 // The widest aggregate this chunk builds by spilling loose operand-stack
-// values to scratch locals before assembling one aggregate object —
-// CALL's own argument count today. A later opcode with the same
-// N-loose-values-then-one-aggregate shape (BUILD_LIST, BUILD_MAP) widens
+// values to scratch locals before assembling one aggregate object — CALL's
+// own argument count, BUILD_LIST's own element count, or BUILD_MAP's own
+// pair count doubled (key, value per pair), whichever is wider — reusing
 // this same std::max scan instead of opening a second, parallel
-// scratch-slot area — jvm_emitter.cpp's own computeMaxSpillWidth is the
-// JVM twin of this rule. Ignores argCount == 0 (needs no scratch slot —
-// see emitCall); 0 here means the chunk needs none at all, keeping
-// `.locals init` byte-identical to pre-this-node output on every chunk
-// that builds no aggregate.
+// scratch-slot area for each new opcode with the same
+// N-loose-values-then-one-aggregate shape; jvm_emitter.cpp's own
+// computeMaxSpillWidth is the JVM twin of this rule. Ignores a width of 0
+// (needs no scratch slot — see emitCall/emitBuildList/emitBuildMap); 0 here
+// means the chunk needs none at all, keeping `.locals init` byte-identical
+// to pre-this-node output on every chunk that builds no aggregate.
 int computeMaxAggregateWidth(const DecodedFunction& fn) {
     int maxWidth = 0;
     for (const DecodedInstruction& instr : fn.instructions) {
-        if (instr.op == Op::CALL) {
+        if (instr.op == Op::CALL || instr.op == Op::BUILD_LIST) {
             maxWidth = std::max(maxWidth, instr.byteOperand);
+        } else if (instr.op == Op::BUILD_MAP) {
+            maxWidth = std::max(maxWidth, 2 * instr.byteOperand);
         }
     }
     return maxWidth;
 }
 
+// `captureInfo` is this chunk's own entry from `analyzeCaptures`
+// (capture_analysis.h) — see emitChunk's callers.
 Emitter buildEmitter(const DecodedFunction& fn,
                      const FunctionStackAnalysis& analysis, int maxLocalCount,
-                     int maxAggregateWidth) {
+                     int maxAggregateWidth,
+                     const FunctionCaptureInfo& captureInfo) {
     Emitter e{fn, analysis, {}};
     e.scratchSlot = e.baseSlot + maxLocalCount;
     if (maxAggregateWidth > 0) {
+        // emitBuildList spills only into argScratchBase, one slot per
+        // element, and never touches calleeScratchSlot; reserving it
+        // unconditionally here is simpler than tracking whether THIS
+        // chunk's widest spill came from a CALL or a BUILD_LIST.
         e.calleeScratchSlot = e.scratchSlot + 1;
         e.argScratchBase = e.scratchSlot + 2;
     }
@@ -853,6 +1345,14 @@ Emitter buildEmitter(const DecodedFunction& fn,
     }
     for (const InvisibleVarSite& site : analysis.invisibleVars) {
         e.invisibleVarsByOffset[site.offset].push_back(site.slot);
+    }
+    // Which of this chunk's OWN local slots ever back an object[1] cell —
+    // every slot some reachable CLOSURE in this chunk captures
+    // (capture_analysis.h). Membership only; see ensureCapturedCell's own
+    // note for why the exact live range is not what GET_LOCAL/SET_LOCAL/
+    // CLOSURE need from the capture analysis here.
+    for (const auto& entry : captureInfo.liveRangesBySlot) {
+        e.capturedSlots.insert(entry.first);
     }
 
     // One ilasm label per CFG block leader. A leader with no predecessor
@@ -913,9 +1413,9 @@ void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isFunction) {
 // The constructor every generated function class needs (clr_emitter.h's
 // own top-of-file note): calls straight through to LoxClosure's own
 // constructor with this function's compile-time name/arity as literals,
-// so only the upvalues array is a real parameter — always empty from this
-// pass's own construction (emitClosure); a later node fills it with real
-// cells without changing this shape.
+// so only the upvalues array is a real parameter — each entry either a
+// freshly-seeded cell or a parent's own cell/upvalue, wired by
+// emitClosure; this shape does not change with the array's contents.
 std::string emitConstructorMethod(const DecodedFunction& fn) {
     std::ostringstream out;
     out << "  .method public specialname rtspecialname instance void "
@@ -997,16 +1497,20 @@ std::string emitClassBody(const Emitter& e, const DecodedFunction& fn,
 // clr_emitter.h's own top-of-file note explains why the Lox-frame slot
 // mapping needs no isFunction split here, unlike the JVM backend's own
 // analogous pass. `childClassNames[i]` names the class this chunk's own
-// i-th nested function was assigned — see emitProgram.
+// i-th nested function was assigned — see emitProgram. `captureInfo` is
+// this same chunk's own entry from `analyzeCaptures` (capture_analysis.h)
+// — see buildEmitter's use of it.
 std::string emitChunk(const DecodedFunction& fn,
                       const FunctionStackAnalysis& analysis,
                       const std::string& className, bool isFunction,
-                      const std::vector<std::string>& childClassNames) {
+                      const std::vector<std::string>& childClassNames,
+                      const FunctionCaptureInfo& captureInfo) {
     int maxLocalCount = computeMaxLocalCount(analysis);
     int maxAggregateWidth = computeMaxAggregateWidth(fn);
     int extraSpillSlots = maxAggregateWidth > 0 ? maxAggregateWidth + 1 : 0;
 
-    Emitter e = buildEmitter(fn, analysis, maxLocalCount, maxAggregateWidth);
+    Emitter e = buildEmitter(fn, analysis, maxLocalCount, maxAggregateWidth,
+                             captureInfo);
     emitPrologue(e, fn, isFunction);
     emitBody(e, isFunction, childClassNames);
 
@@ -1038,7 +1542,7 @@ void assignClassNames(const DecodedFunction& fn, bool isRoot,
 void emitAll(const DecodedFunction& fn, const StackAnalysisTree& node,
              bool isRoot,
              const std::unordered_map<std::string, std::string>& names,
-             std::ostringstream& out) {
+             const CaptureAnalysis& captures, std::ostringstream& out) {
     // decodeFunctionTree (fn.nested) and analyzeStackTree (node.nested) are
     // two independently-walked passes over the same ObjFunction tree. They
     // agree today because both use one fixed traversal order, but nothing
@@ -1061,10 +1565,11 @@ void emitAll(const DecodedFunction& fn, const StackAnalysisTree& node,
     }
     const std::string& className = names.at(fn.id);
     out << emitChunk(fn, node.self, className, /*isFunction=*/!isRoot,
-                     childClassNames);
+                     childClassNames, captures.functions.at(fn.id));
 
     for (std::size_t i = 0; i < fn.nested.size(); i++) {
-        emitAll(fn.nested[i], node.nested[i], /*isRoot=*/false, names, out);
+        emitAll(fn.nested[i], node.nested[i], /*isRoot=*/false, names, captures,
+                out);
     }
 }
 
@@ -1106,8 +1611,10 @@ std::string ilasmDoubleLiteral(double value) {
 std::string emitScript(const DecodedFunction& fn,
                        const FunctionStackAnalysis& analysis,
                        const std::string& className) {
-    return emitHeader(className) +
-           emitChunk(fn, analysis, className, /*isFunction=*/false, {});
+    CaptureAnalysis captures = analyzeCaptures(fn);
+    return emitHeader(className) + emitChunk(fn, analysis, className,
+                                             /*isFunction=*/false, {},
+                                             captures.functions.at(fn.id));
 }
 
 std::string emitProgram(const DecodedFunction& root,
@@ -1117,9 +1624,11 @@ std::string emitProgram(const DecodedFunction& root,
     int counter = 0;
     assignClassNames(root, /*isRoot=*/true, scriptClassName, counter, names);
 
+    CaptureAnalysis captures = analyzeCaptures(root);
+
     std::ostringstream out;
     out << emitHeader(scriptClassName);
-    emitAll(root, tree, /*isRoot=*/true, names, out);
+    emitAll(root, tree, /*isRoot=*/true, names, captures, out);
     return out.str();
 }
 
