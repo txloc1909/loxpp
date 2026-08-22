@@ -7,8 +7,13 @@ namespace LoxRuntimeTests;
 /// FRAMES_MAX (256) and src/vm.cpp's "Stack overflow." error. The boundary
 /// below (254 succeeds, 255 throws) matches native exactly, because
 /// src/vm.cpp's own top-level script call already occupies one of the 256
-/// CallFrame slots before any user call runs - verified against
-/// build-release/loxpp on the same recursive program.
+/// CallFrame slots before any user call runs - verified against the
+/// release-preset native binary (build/loxpp) on the same recursive
+/// program. This covers only the frame ceiling: native also has a
+/// separate, unguarded value-stack ceiling (src/vm.h STACK_MAX) that a
+/// frame with many locals can reach first, well below depth 256 - that
+/// path is a native buffer overflow with no defined result to match, and
+/// is tracked as a native defect, not exercised here.
 /// </summary>
 public static class StackDepthTest {
     public static int Run() {

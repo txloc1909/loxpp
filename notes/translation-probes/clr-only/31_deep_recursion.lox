@@ -1,0 +1,22 @@
+// src/vm.h's FRAMES_MAX (256) bounds nested Lox calls with a controlled
+// runtime error, not a real machine stack fault: src/vm.cpp's own
+// interpret() pushes the top-level script as CallFrame 0 before the body
+// runs, so 254 nested calls from within the script is the deepest that
+// stays under the ceiling, and 255 overflows it (verified against the
+// release-preset native binary, build/loxpp). A backend whose calling
+// convention recurses its own host call stack has no such ceiling on its
+// own, and must build one to match, or this depth silently succeeds where
+// native fails.
+//
+// This file lives outside the parent translation-probes directory on
+// purpose: tools/diff_runtimes.py's CI probes step walks that directory's
+// own files, non-recursively, comparing native against the JVM backend.
+// The JVM backend has no frame-count ceiling of its own, an existing gap
+// this file would otherwise make every such run report as a new
+// divergence. check_clr_probes.sh names this file directly, so the CLR
+// checkpoint still runs it.
+fun down(n) {
+    if (n == 0) return 0;
+    return down(n - 1);
+}
+print down(255);
