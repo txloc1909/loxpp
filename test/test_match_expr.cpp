@@ -389,3 +389,42 @@ TEST_F(MatchExpressionTest, MatchAsNestedSubject) {
               InterpretResult::OK);
     expect_num(*h.getGlobal("r"), 1);
 }
+
+// Review finding: a match nested in an arm body that follows an or-alternative
+// used to read a negative operand depth, corrupting slot bookkeeping. The
+// nested match must read the subject and the arm value must be correct on
+// both operand sides.
+TEST_F(MatchExpressionTest, MatchInArmAfterOrAlternative) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        var r = match A() { case A or B => (match A() { case A => 1 case B => 2 }) + 10 };
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r"), 11);
+}
+
+TEST_F(MatchExpressionTest, MatchInArmAfterOrAlternativeRightOperand) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        var r = match A() { case A or B => 10 + (match A() { case A => 1 case B => 2 }) };
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r"), 11);
+}
+
+// Review finding: the same regression for a guarded arm whose guard fails,
+// when the next arm body contains a match.
+TEST_F(MatchExpressionTest, MatchInArmAfterFailedGuard) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        var r = match B() {
+            case A if false => 0
+            case B => (match A() { case A => 1 case B => 2 }) + 10
+        };
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r"), 11);
+}

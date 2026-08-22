@@ -875,6 +875,10 @@ void Compiler::compileMatchBody() {
             m_parser->error("Unreachable arm after catch-all.");
         }
 
+        // The previous arm's miss/guard cleanup ran on a disjoint runtime
+        // path, so the linear counter drifted. At the top of an arm the stack
+        // holds only locals (result, subject); re-anchor the counter there.
+        m_stackHeight = m_localCount;
         int armLocalBase_iter = m_localCount;
 
         if (jtc.eligible) {
@@ -1245,7 +1249,11 @@ Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
         }
     }
 
-    // Guard clause (optional).
+    // Guard clause (optional). Pattern checks above popped every temporary; the
+    // stack holds only result, subject, and binding locals, so the counter is
+    // re-anchored here once for both the guard and the arm body. A match
+    // nested in either reads the correct operand depth.
+    m_stackHeight = m_localCount;
     int guardMiss = -1;
     hasGuard = m_parser->match(TokenType::IF);
     if (hasGuard) {
@@ -2016,7 +2024,7 @@ void Compiler::emitReturn() {
     } else {
         emitByte(Op::NIL);
     }
-    emitByte(static_cast<Byte>(Op::RETURN));
+    emitByte(Op::RETURN); // pops the pushed value, net zero
 }
 
 void Compiler::emitByte(Byte byte) {
