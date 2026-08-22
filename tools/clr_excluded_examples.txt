@@ -1,0 +1,22 @@
+# Examples excluded from the CLR differential path only.
+#
+# The native path (build/loxpp) still runs every one of these, unchanged.
+# spec/03-types.md leaves map iteration order unspecified, the same rule
+# tools/jvm_excluded_examples.txt documents for the JVM backend. The CLR
+# runtime's map type does not promise the native ObjMap's bucket order
+# either.
+#
+# The only permitted reason is map iteration order. Each entry below was
+# added only after this proof: the CLR path's stdout is a PERMUTATION of
+# the native path's stdout — the same lines, in a different order —
+# checked with `diff <(sort native.out) <(sort clr.out)` showing no
+# difference.
+#
+# tools/diff_runtimes.py checks the same proof for every entry on every
+# run: an entry here that stops being a permutation (a content change, not
+# just a reorder) reports DIVERGE, not PERMUTATION, and fails the gate.
+# tools/check_clr_probes.sh also reads this list, so an entry here is
+# never re-flagged by the corpus sweep as a missing example.
+#
+# file                    reason
+symbol_table.lox           map iteration order (scope dump prints in map insertion order, not native bucket order)

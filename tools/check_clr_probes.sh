@@ -26,11 +26,23 @@
 #
 # The corpus sweep, below the examples loop, checks that the examples group
 # stays complete. It runs every examples/*.lox file NOT already in the
-# examples array, the same way the loop above runs the ones that are, and
-# fails the script if one of them runs to completion on both backends and
-# matches — that example belongs in the group and is missing. This turns
-# "the group holds every example the CLR backend can run" from a sentence
-# a person writes by hand into something the script checks on every run.
+# examples array and NOT in tools/clr_excluded_examples.txt, the same way
+# the loop above runs the ones that are, and fails the script naming the
+# file whenever one of them runs to completion on both backends: a
+# byte-identical match belongs in the examples array, and any other
+# same-outcome difference (a map-order permutation or a real divergence)
+# belongs in tools/clr_excluded_examples.txt or is a live defect — either
+# way, the sweep reports it rather than passing over it in silence. This
+# turns "the group holds every example the CLR backend can run" from a
+# sentence a person writes by hand into something the script checks on
+# every run.
+#
+# tools/clr_excluded_examples.txt names the map-order permutations the CLR
+# gate accepts (spec/03-types.md leaves map iteration order unspecified),
+# the CLR twin of tools/jvm_excluded_examples.txt. Every run of this
+# script re-checks each entry with tools/diff_runtimes.py --only-excluded:
+# an entry whose CLR stdout stops being a permutation of native stdout
+# fails the gate as a real divergence, not a silently-forgiven exclusion.
 #
 
 # Every probe runs even after an earlier one fails: a failing CLR run (an
@@ -321,22 +333,40 @@ for example in "${examples[@]}"; do
     fi
 done
 
+# --- CLR permutation guard -------------------------------------------------
+# Re-proves, on every run, that each tools/clr_excluded_examples.txt entry's
+# CLR stdout is still a permutation of native stdout, not a content change
+# that the exclusion is silently hiding. tools/diff_runtimes.py already
+# does exactly this for tools/jvm_excluded_examples.txt; --only-excluded
+# runs it over exactly the excluded programs, resolved under examples/.
+excluded_list="$root/tools/clr_excluded_examples.txt"
+if ! python3 "$root/tools/diff_runtimes.py" "$native_bin" \
+        "$root/tools/loxpp_clr.sh" --exclude "$excluded_list" \
+        --only-excluded "$root/examples"; then
+    echo "check_clr_probes.sh: FAIL CLR permutation guard (tools/clr_excluded_examples.txt)" >&2
+    failed_probes+=("clr_excluded_examples_permutation_guard")
+else
+    echo "check_clr_probes.sh: CLR permutation guard OK, every exclusion is still a map-order permutation"
+fi
+
 # --- corpus sweep --------------------------------------------------------
 # Enforces the completeness claim the comment above no longer makes in
-# prose. Every examples/*.lox file NOT already in the examples array runs
-# on both backends here, with the same .input rule as the loop above. A
-# program that runs to completion (exit 0) on BOTH sides and prints
-# byte-identical stdout belongs in the examples group above and is
-# missing from it — the script fails and names it, instead of relying on
-# a hand-written sentence that the next opcode this backend gains would
-# make false without anyone noticing.
+# prose. Every examples/*.lox file NOT already in the examples array, and
+# NOT in tools/clr_excluded_examples.txt (covered by the permutation guard
+# above instead), runs on both backends here, with the same .input rule as
+# the loop above. Three outcomes when a program runs to completion (exit 0)
+# on BOTH sides:
 #
-# Map iteration order is unspecified (spec 03-types.md); a map-order
-# mismatch would show up here as a false non-match, not a false miss, so
-# it cannot make this check wrongly pass an example in. No example in the
-# corpus both iterates a map and runs to completion on the CLR backend
-# today, so no permutation exclusion exists yet — the first node that
-# meets one adds it, the way the JVM gate's own exclusion list does.
+#   - byte-identical stdout: belongs in the examples array and is missing
+#     from it.
+#   - a map-order permutation (sorted lines match, unsorted lines do not):
+#     belongs in tools/clr_excluded_examples.txt and is missing from it.
+#   - any other difference: a real divergence — a live emitter defect the
+#     sweep just found, not a gate to add an example to.
+#
+# All three are reported by name, not silently passed over. A hand-written
+# sentence claiming completeness cannot make this true; the next opcode
+# this backend gains would make it false without anyone noticing.
 in_examples_group() {
     local candidate="$1"
     for known in "${examples[@]}"; do
@@ -347,10 +377,24 @@ in_examples_group() {
     return 1
 }
 
+in_excluded_list() {
+    local candidate_name="$1"
+    awk '!/^[[:space:]]*#/ && NF {print $1}' "$excluded_list" | grep -qxF "$candidate_name"
+}
+
+is_permutation() {
+    diff <(sort "$1") <(sort "$2") >/dev/null
+}
+
 sweep_missing=()
+sweep_permutation_missing=()
+sweep_diverging=()
 for example_path in "$root"/examples/*.lox; do
     example="examples/$(basename "$example_path")"
     if in_examples_group "$example"; then
+        continue
+    fi
+    if in_excluded_list "$(basename "$example_path")"; then
         continue
     fi
 
@@ -379,17 +423,40 @@ for example_path in "$root"/examples/*.lox; do
 
     if diff -q "$native_out" "$clr_out" >/dev/null; then
         sweep_missing+=("$example")
+    elif is_permutation "$native_out" "$clr_out"; then
+        sweep_permutation_missing+=("$example")
+    else
+        sweep_diverging+=("$example")
     fi
 done
 
+sweep_ok=1
 if [ "${#sweep_missing[@]}" -ne 0 ]; then
-    echo "check_clr_probes.sh: ${#sweep_missing[@]} example(s) run to completion and match native, but are missing from the examples group:" >&2
+    sweep_ok=0
+    echo "check_clr_probes.sh: ${#sweep_missing[@]} example(s) run to completion and match native byte for byte, but are missing from the examples group:" >&2
     for example in "${sweep_missing[@]}"; do
         echo "  $example" >&2
     done
     failed_probes+=("${sweep_missing[@]}")
-else
-    echo "check_clr_probes.sh: corpus sweep OK, the examples group is complete"
+fi
+if [ "${#sweep_permutation_missing[@]}" -ne 0 ]; then
+    sweep_ok=0
+    echo "check_clr_probes.sh: ${#sweep_permutation_missing[@]} example(s) run to completion on both sides as a map-order permutation of each other, but are missing from tools/clr_excluded_examples.txt:" >&2
+    for example in "${sweep_permutation_missing[@]}"; do
+        echo "  $example" >&2
+    done
+    failed_probes+=("${sweep_permutation_missing[@]}")
+fi
+if [ "${#sweep_diverging[@]}" -ne 0 ]; then
+    sweep_ok=0
+    echo "check_clr_probes.sh: ${#sweep_diverging[@]} example(s) run to completion on both sides with DIFFERENT stdout that is NOT a map-order permutation — a real divergence, not a missing gate entry:" >&2
+    for example in "${sweep_diverging[@]}"; do
+        echo "  $example" >&2
+    done
+    failed_probes+=("${sweep_diverging[@]}")
+fi
+if [ "$sweep_ok" -eq 1 ]; then
+    echo "check_clr_probes.sh: corpus sweep OK, the examples group and the exclusion list are both complete"
 fi
 
 if [ "${#failed_probes[@]}" -ne 0 ]; then
