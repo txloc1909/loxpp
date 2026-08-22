@@ -571,9 +571,8 @@ TEST(EmitScript, MainForwardsItsOwnArgvToSetProgramArgsBeforeInit) {
     std::size_t argsCall = j.find(
         "ldarg.0\n    call void [LoxRuntime]Lox.LoxRuntime::SetProgramArgs"
         "(string[])\n");
-    std::size_t initCall =
-        j.find("call class [LoxRuntime]Lox.LoxGlobals "
-               "[LoxRuntime]Lox.LoxRuntime::Init()");
+    std::size_t initCall = j.find("call class [LoxRuntime]Lox.LoxGlobals "
+                                  "[LoxRuntime]Lox.LoxRuntime::Init()");
     ASSERT_NE(argsCall, std::string::npos) << j;
     ASSERT_NE(initCall, std::string::npos) << j;
     EXPECT_LT(argsCall, initCall) << j;
