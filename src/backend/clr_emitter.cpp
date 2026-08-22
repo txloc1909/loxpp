@@ -461,10 +461,17 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
 // tracker at a merge (see this file's own top-of-file note); this function
 // adds the CLR-specific `ldloc`, routed through the same captured-slot test
 // GET_LOCAL/SET_LOCAL use whenever the named local is itself captured.
-int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset) {
+// `outLoxSlot`, when given, receives the Lox slot `resolveZeroDepthLocalSlot`
+// resolved — so a caller that also needs the Lox-numbered slot (GET_ITER's
+// own captured-slot test) reads it from here instead of re-deriving it.
+int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset,
+                              int* outLoxSlot = nullptr) {
     int loxSlot = resolveZeroDepthLocalSlot(
         e.analysis.before[i].localCount - 1, e.labelAtOffset.contains(offset),
         e.lastInvisibleVarSlot, offset, "clr_emitter");
+    if (outLoxSlot != nullptr) {
+        *outLoxSlot = loxSlot;
+    }
     int slot = e.slotForLocal(loxSlot);
     if (e.isCaptured(loxSlot)) {
         emitCapturedGetLocal(e, slot, offset);
@@ -803,6 +810,77 @@ void emitSetIndex(Emitter& e) {
     e.b.emit("call object [LoxRuntime]Lox.LoxOps::SetIndex(object, object, "
              "object)",
              3, -2);
+}
+
+// SLICE pops [seq, start, end] bottom-to-top (vm.cpp: peek(2), peek(1),
+// peek(0)) — LoxOps.Slice's own parameter order already matches that, so
+// this is a plain call, no shuffle (the same P2 exemption GET_INDEX/
+// SET_INDEX get, for the same reason: vm.cpp pops these operands whole and
+// pushes a genuinely new result).
+void emitSlice(Emitter& e) {
+    e.b.emit("call object [LoxRuntime]Lox.LoxOps::Slice(object, object, "
+             "object)",
+             3, -2);
+}
+
+// IN pops [elem, seq] bottom-to-top (vm.cpp pops seq first, so seq sits on
+// top) — LoxOps.In's own doc comment already matches that order. Returns
+// bool; boxed the same way emitComparisonOp boxes EQUAL/GREATER/LESS,
+// since every Lox value on the CIL evaluation stack is `object`.
+void emitIn(Emitter& e) {
+    e.b.emit("call bool [LoxRuntime]Lox.LoxOps::In(object, object)", 2, -1);
+    e.b.emit("box [System.Runtime]System.Boolean", 1, 0);
+}
+
+// IS_SEQ: a match sequence pattern's own type check (compiler.cpp). Matches
+// Op::IS_SEQ exactly (vm.cpp) — List and String only, Map is excluded.
+void emitIsSeq(Emitter& e) {
+    e.b.emit("call bool [LoxRuntime]Lox.LoxOps::IsSeq(object)", 1, 0);
+    e.b.emit("box [System.Runtime]System.Boolean", 1, 0);
+}
+
+// ITER_HAS_NEXT/ITER_NEXT operate on the copy a preceding GET_LOCAL already
+// loaded (P8 — the for-in iterator lives in an ordinary chunk local, never
+// a dedicated backend slot); the local itself is untouched.
+void emitIterHasNext(Emitter& e) {
+    e.b.emit("call bool [LoxRuntime]Lox.LoxOps::IterHasNext(object)", 1, 0);
+    e.b.emit("box [System.Runtime]System.Boolean", 1, 0);
+}
+
+void emitIterNext(Emitter& e) {
+    e.b.emit("call object [LoxRuntime]Lox.LoxOps::IterNext(object)", 1, 0);
+}
+
+// GET_ITER replaces its own operand in place (vm.cpp: `stackTop[-1] =
+// ...`). It carries no operand byte of its own. The iterable expression's
+// own declaring push (11_for_in.lox: e.g. BUILD_LIST) is what put the
+// value there, and the shared abstract-stack analysis already attributes
+// THAT instruction's own offset the invisible-var store for this stack
+// position (finishInstruction), one instruction earlier than GET_ITER
+// itself. By the time GET_ITER runs, the CIL evaluation stack is therefore
+// already empty at this position (`operandDepth() == 0`) — the value
+// already lives in its own local slot, not still sitting on the evaluation
+// stack the way a plain "one call, no reload" lowering would assume.
+// GET_ITER must reload that slot, transform it, and store the result
+// straight back — `loadNamedLocalAtZeroDepth` names and loads it, with the
+// same merge/captured-slot guards every other zero-depth consumer shares.
+void emitGetIter(Emitter& e, std::size_t i, const DecodedInstruction& in) {
+    if (!isFoldedAtZeroDepth(e, i)) {
+        throw std::runtime_error(
+            "clr_emitter: GET_ITER expected its iterable already folded "
+            "into an invisible-var slot (operand depth 0), but the CIL "
+            "evaluation stack was not empty here");
+    }
+    int loxSlot = 0;
+    int slot = loadNamedLocalAtZeroDepth(e, i, in.offset, &loxSlot);
+    e.b.emit("call class [LoxRuntime]Lox.LoxIterator "
+             "[LoxRuntime]Lox.LoxOps::GetIter(object)",
+             1, 0);
+    if (e.isCaptured(loxSlot)) {
+        emitCapturedStore(e, slot, in.offset, /*peek=*/false);
+    } else {
+        e.b.emit("stloc " + std::to_string(slot), 1, -1);
+    }
 }
 
 // CLASS name (P5/P6): builds a fresh, still-superclass-less LoxClass —
@@ -1489,6 +1567,24 @@ void emitBody(Emitter& e, bool isFunction,
             break;
         case Op::SET_INDEX:
             emitSetIndex(e);
+            break;
+        case Op::SLICE:
+            emitSlice(e);
+            break;
+        case Op::IN:
+            emitIn(e);
+            break;
+        case Op::IS_SEQ:
+            emitIsSeq(e);
+            break;
+        case Op::GET_ITER:
+            emitGetIter(e, i, in);
+            break;
+        case Op::ITER_HAS_NEXT:
+            emitIterHasNext(e);
+            break;
+        case Op::ITER_NEXT:
+            emitIterNext(e);
             break;
         case Op::CLOSURE:
             emitClosure(e, in, childClassNames);

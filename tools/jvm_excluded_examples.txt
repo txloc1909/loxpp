@@ -21,3 +21,4 @@ anagram_groups.lox        map iteration order (groups print in map insertion ord
 symbol_table.lox          map iteration order (symbol dump prints in map insertion order, not native bucket order)
 word_freq.lox             map iteration order (frequency table prints in map insertion order, not native bucket order)
 phonebook.lox             map iteration order (list command prints entries in map insertion order, not native bucket order, using the existing examples/phonebook.input)
+huffman.lox               map iteration order (a same-code-length tie in the printed code table sorts by map insertion order, not native bucket order; the underlying codes are identical on both sides)

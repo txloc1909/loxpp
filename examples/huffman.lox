@@ -8,7 +8,7 @@
 //   5. Encode the input; report bits saved vs raw 8-bit ASCII.
 //
 // Demonstrates: Map as frequency counter, Map as code table, List as
-//               priority queue, recursive tree traversal, for-in on Map.
+//               priority queue, recursive tree traversal.
 
 class HuffNode {
     init(ch, freq, left, right) {
@@ -69,10 +69,23 @@ fun encode(text) {
         i = i + 1;
     }
 
-    // --- 2. Build initial priority queue ---
+    // --- 2. Build initial priority queue, in first-occurrence-in-text
+    // order. Map iteration order is unspecified (spec/03-types.md), and
+    // pqPop below breaks a frequency tie by picking whichever node sits
+    // EARLIEST in this list — so building the list by scanning `freq`
+    // itself would make the tree, and every code it produces, depend on
+    // that unspecified order. Scanning `text` instead is deterministic on
+    // every backend.
     var pq = [];
-    for (var c in freq) {
-        pq.append(HuffNode(c, freq[c], nil, nil));
+    var seen = {};
+    i = 0;
+    while (i < len(text)) {
+        var c = text[i];
+        if (!seen.has(c)) {
+            pq.append(HuffNode(c, freq[c], nil, nil));
+            seen[c] = true;
+        }
+        i = i + 1;
     }
 
     // --- 3. Build Huffman tree ---

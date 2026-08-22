@@ -10,15 +10,29 @@
 // CLASS/INHERIT/DEFINE_METHOD/GET_PROPERTY/SET_PROPERTY/INVOKE/GET_SUPER/
 // SUPER_INVOKE/INSTANCEOF (P5+P4 — `init` returns `this` at the bytecode
 // level already, per compiler.cpp's own emitReturn, so this pass needs no
-// separate initializer case), and MATCH_ERROR (pulled forward from the
+// separate initializer case), MATCH_ERROR (pulled forward from the
 // match/enum scope — a match whose arms are all class or literal patterns
-// reaches it without any GET_TAG/JUMP_TABLE support) — see
+// reaches it without any GET_TAG/JUMP_TABLE support), SLICE, IN, IS_SEQ
+// (a match sequence pattern's own type check), and the for-in iterator
+// protocol GET_ITER/ITER_HAS_NEXT/ITER_NEXT (P8 — see emitGetIter's own
+// note for the operand-stack hazard specific to GET_ITER) — see
 // notes/bytecode-translation-problems.md for what each P-number means.
 //
-// Scope: no enum tag dispatch (GET_TAG, JUMP_TABLE), no SLICE/IN/for-in.
-// Every opcode outside that set throws std::runtime_error, naming the
-// opcode, instead of falling through silently — a later CLR emission node
-// lowers it for real.
+// Scope: this emitter has no enum tag dispatch — GET_TAG and JUMP_TABLE
+// throw the same "does not lower <opcode> yet" error every other unlowered
+// opcode throws (notImplemented, above). It also has no general repair for
+// a folded match/enum result: the JVM backend's repair is
+// `normalizeFoldedOperands` (src/backend/jvm_emitter.cpp), and a CLR
+// repair, when one exists, must call into that one authority rather than
+// carry an independently derived copy of it. A folded result is safe to
+// consume exactly where the code routes it through
+// `isFoldedAtZeroDepth`/`loadNamedLocalAtZeroDepth` (clr_emitter.cpp) —
+// that routing is the authoritative list of safe consumers, not this
+// comment. Every other consumer of a folded operand fails at emit time
+// with an evaluation-stack-underflow `std::runtime_error`, never a
+// silently wrong value; the thrown message names the CIL instruction
+// being assembled, which is not always the same token as the Lox opcode
+// that produced it.
 //
 // A captured local lowers to a one-element `object[]` ref cell (P4). The
 // cell allocation is idempotent, not a static declaration-point seed: an
