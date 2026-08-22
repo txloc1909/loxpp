@@ -139,6 +139,7 @@ class Compiler {
     void emitByte(Byte byte);
     void emitByte(Op op);
     void emitBytes(Op op, Byte byte);
+    void trackOperandStack(Op op);
     void emitReturn();
     int emitJump(Op op);
     void patchJump(int offset);
@@ -194,6 +195,14 @@ class Compiler {
     Local m_locals[UINT8_COUNT];
     int m_localCount{0};
     int m_scopeDepth{0};
+    // Absolute runtime stack-cell count at the current emit point: the
+    // function's base (this + params) plus every push minus every pop the
+    // compiler has emitted. The number of live temporaries above the named
+    // locals is then m_stackHeight - m_localCount, which compileMatchBody
+    // needs to allocate its slots above any sibling operand of the enclosing
+    // expression. Mirrors the backend's stackEffect table so the compiler's
+    // view never drifts from the VM.
+    int m_stackHeight{0};
     Upvalue m_upvalues[UINT8_COUNT];
     int m_upvalueCount{0};
     std::vector<LoopContext> m_loopStack;

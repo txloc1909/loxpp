@@ -312,3 +312,119 @@ TEST_F(JumpTableTest, MatchErrorOnNoMatch) {
               InterpretResult::OK);
     expect_num(*h.getGlobal("r"), 1);
 }
+
+// issue #117: a match used as the RIGHT operand of a binary operator used to
+// allocate its result/subject slots below the already-live left operand, so
+// GET_TAG read the sibling instead of the subject. The reported shapes:
+// right operand, sandwiched call argument, and both-sides-folded. Each
+// program must now run to completion and store the correct value.
+TEST_F(MatchExpressionTest, MatchAsRightOperandOfBinary) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        var r = 1 + (match A() { case A => 1 case B => 2 });
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r"), 2);
+}
+
+TEST_F(MatchExpressionTest, MatchAsSandwichedCallArgument) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        fun f(x) { return x + 1; }
+        var r = f(1 + (match A() { case A => 1 case B => 2 }));
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r"), 3);
+}
+
+TEST_F(MatchExpressionTest, MatchBothSidesOfBinary) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        var r = (match A() { case A => 1 case B => 2 }) +
+                (match B() { case A => 10 case B => 20 });
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r"), 21);
+}
+
+TEST_F(MatchExpressionTest, MatchAsFirstCallArgument) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        fun f(a, b) { return a * 10 + b; }
+        var r = f((match A() { case A => 1 case B => 2 }), 5);
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r"), 15);
+}
+
+TEST_F(MatchExpressionTest, MatchAsListElementAndMapValue) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        var list = [1, (match A() { case A => 7 case B => 8 })];
+        var m = { "k": match A() { case A => 9 case B => 10 } };
+        var a = list[1];
+        var b = m["k"];
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("a"), 7);
+    expect_num(*h.getGlobal("b"), 9);
+}
+
+// A match as the subject of another match (nested match), the shape the
+// backend's own tests already exercise via the corpus.
+TEST_F(MatchExpressionTest, MatchAsNestedSubject) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        var r = match (match A() { case A => A() case B => B() }) {
+            case A => 1
+            case B => 2
+        };
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r"), 1);
+}
+
+// Review finding: a match nested in an arm body that follows an or-alternative
+// used to read a negative operand depth, corrupting slot bookkeeping. The
+// nested match must read the subject and the arm value must be correct on
+// both operand sides.
+TEST_F(MatchExpressionTest, MatchInArmAfterOrAlternative) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        var r = match A() { case A or B => (match A() { case A => 1 case B => 2 }) + 10 };
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r"), 11);
+}
+
+TEST_F(MatchExpressionTest, MatchInArmAfterOrAlternativeRightOperand) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        var r = match A() { case A or B => 10 + (match A() { case A => 1 case B => 2 }) };
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r"), 11);
+}
+
+// Review finding: the same regression for a guarded arm whose guard fails,
+// when the next arm body contains a match.
+TEST_F(MatchExpressionTest, MatchInArmAfterFailedGuard) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        var r = match B() {
+            case A if false => 0
+            case B => (match A() { case A => 1 case B => 2 }) + 10
+        };
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r"), 11);
+}
