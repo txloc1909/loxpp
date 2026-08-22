@@ -461,10 +461,17 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
 // tracker at a merge (see this file's own top-of-file note); this function
 // adds the CLR-specific `ldloc`, routed through the same captured-slot test
 // GET_LOCAL/SET_LOCAL use whenever the named local is itself captured.
-int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset) {
+// `outLoxSlot`, when given, receives the Lox slot `resolveZeroDepthLocalSlot`
+// resolved — so a caller that also needs the Lox-numbered slot (GET_ITER's
+// own captured-slot test) reads it from here instead of re-deriving it.
+int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset,
+                               int* outLoxSlot = nullptr) {
     int loxSlot = resolveZeroDepthLocalSlot(
         e.analysis.before[i].localCount - 1, e.labelAtOffset.contains(offset),
         e.lastInvisibleVarSlot, offset, "clr_emitter");
+    if (outLoxSlot != nullptr) {
+        *outLoxSlot = loxSlot;
+    }
     int slot = e.slotForLocal(loxSlot);
     if (e.isCaptured(loxSlot)) {
         emitCapturedGetLocal(e, slot, offset);
@@ -858,14 +865,14 @@ void emitIterNext(Emitter& e) {
 // straight back — `loadNamedLocalAtZeroDepth` names and loads it, with the
 // same merge/captured-slot guards every other zero-depth consumer shares.
 void emitGetIter(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (e.analysis.before[i].operandDepth() != 0) {
+    if (!isFoldedAtZeroDepth(e, i)) {
         throw std::runtime_error(
             "clr_emitter: GET_ITER expected its iterable already folded "
             "into an invisible-var slot (operand depth 0), but the CIL "
             "evaluation stack was not empty here");
     }
-    int loxSlot = e.analysis.before[i].localCount - 1;
-    int slot = loadNamedLocalAtZeroDepth(e, i, in.offset);
+    int loxSlot = 0;
+    int slot = loadNamedLocalAtZeroDepth(e, i, in.offset, &loxSlot);
     e.b.emit("call class [LoxRuntime]Lox.LoxIterator "
              "[LoxRuntime]Lox.LoxOps::GetIter(object)",
              1, 0);
