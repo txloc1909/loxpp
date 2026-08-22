@@ -18,16 +18,21 @@
 // note for the operand-stack hazard specific to GET_ITER) — see
 // notes/bytecode-translation-problems.md for what each P-number means.
 //
-// Scope: no enum tag dispatch (GET_TAG, JUMP_TABLE) — a later CLR emission
-// node lowers those. A folded match/enum result DOES reach every consumer
-// already routed through loadNamedLocalAtZeroDepth (GET_ITER included). The
-// one gap this node leaves: SLICE and IN have no general fold repair yet
-// (the nativePops/normalizeFoldedOperands mechanism, brief section 3), so a
-// folded operand reaching either of THEM specifically fails loudly at emit
-// time — an evaluation-stack-underflow error naming the opcode — rather than
-// lowering to a silently wrong value. Every opcode outside the covered set
-// throws std::runtime_error, naming the opcode, instead of falling through
-// silently — a later CLR emission node lowers it for real.
+// Scope: this emitter has no enum tag dispatch — GET_TAG and JUMP_TABLE
+// throw the same "does not lower <opcode> yet" error every other unlowered
+// opcode throws (notImplemented, above). It also has no general repair for
+// a folded match/enum result: the JVM backend's repair is
+// `normalizeFoldedOperands` (src/backend/jvm_emitter.cpp), and a CLR
+// repair, when one exists, must call into that one authority rather than
+// carry an independently derived copy of it. A folded result is safe to
+// consume exactly where the code routes it through
+// `isFoldedAtZeroDepth`/`loadNamedLocalAtZeroDepth` (clr_emitter.cpp) —
+// that routing is the authoritative list of safe consumers, not this
+// comment. Every other consumer of a folded operand fails at emit time
+// with an evaluation-stack-underflow `std::runtime_error`, never a
+// silently wrong value; the thrown message names the CIL instruction
+// being assembled, which is not always the same token as the Lox opcode
+// that produced it.
 //
 // A captured local lowers to a one-element `object[]` ref cell (P4). The
 // cell allocation is idempotent, not a static declaration-point seed: an
