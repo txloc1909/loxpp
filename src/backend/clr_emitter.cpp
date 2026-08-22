@@ -1409,9 +1409,9 @@ void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isFunction) {
 // The constructor every generated function class needs (clr_emitter.h's
 // own top-of-file note): calls straight through to LoxClosure's own
 // constructor with this function's compile-time name/arity as literals,
-// so only the upvalues array is a real parameter — always empty from this
-// pass's own construction (emitClosure); a later node fills it with real
-// cells without changing this shape.
+// so only the upvalues array is a real parameter — each entry either a
+// freshly-seeded cell or a parent's own cell/upvalue, wired by
+// emitClosure; this shape does not change with the array's contents.
 std::string emitConstructorMethod(const DecodedFunction& fn) {
     std::ostringstream out;
     out << "  .method public specialname rtspecialname instance void "
