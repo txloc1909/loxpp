@@ -24,6 +24,14 @@ public abstract class LoxClosure : ILoxCallable {
     // same message, instead of only diverging once a real stack fault (an
     // uncatchable StackOverflowException) hits some larger, host-dependent
     // depth.
+    //
+    // Native actually has TWO ceilings, not one: src/vm.h's STACK_MAX
+    // (2048 value-stack slots, shared by every live frame) can be reached
+    // first by a frame with many locals, well below 256 frames deep -
+    // src/vm.cpp guards no push against it, so that path is a native
+    // buffer overflow with no defined result to match. This counter
+    // reproduces only the frame ceiling; the value-stack one is a native
+    // defect (tracked separately), not a gap in this class.
     private const int FramesMax = 256;
 
     // Starts at 1, not 0: src/vm.cpp's own interpret() pushes the
