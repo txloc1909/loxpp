@@ -4,14 +4,21 @@
 // arithmetic and comparison family, NEGATE, NOT, PRINT, POP, GET_LOCAL,
 // SET_LOCAL, DEFINE_GLOBAL, GET_GLOBAL, SET_GLOBAL, JUMP/JUMP_IF_FALSE/LOOP
 // (P3b), CALL, CLOSURE (including a captured upvalue), GET_UPVALUE,
-// SET_UPVALUE, CLOSE_UPVALUE, RETURN in both of its roles (P5), and
+// SET_UPVALUE, CLOSE_UPVALUE, RETURN in both of its roles (P5),
 // BUILD_LIST/BUILD_MAP/GET_INDEX/SET_INDEX (pulled forward from the
-// aggregates scope — see emitBuildList's and emitBuildMap's own notes) —
-// see notes/bytecode-translation-problems.md for what each P-number means.
+// aggregates scope — see emitBuildList's and emitBuildMap's own notes),
+// CLASS/INHERIT/DEFINE_METHOD/GET_PROPERTY/SET_PROPERTY/INVOKE/GET_SUPER/
+// SUPER_INVOKE/INSTANCEOF (P5+P4 — `init` returns `this` at the bytecode
+// level already, per compiler.cpp's own emitReturn, so this pass needs no
+// separate initializer case), and MATCH_ERROR (pulled forward from the
+// match/enum scope — a match whose arms are all class or literal patterns
+// reaches it without any GET_TAG/JUMP_TABLE support) — see
+// notes/bytecode-translation-problems.md for what each P-number means.
 //
-// Scope: no classes, no INVOKE, no SLICE/IN/for-in, no match. Every opcode
-// outside that set throws std::runtime_error, naming the opcode, instead of
-// falling through silently — a later CLR emission node lowers it for real.
+// Scope: no enum tag dispatch (GET_TAG, JUMP_TABLE), no SLICE/IN/for-in.
+// Every opcode outside that set throws std::runtime_error, naming the
+// opcode, instead of falling through silently — a later CLR emission node
+// lowers it for real.
 //
 // A captured local lowers to a one-element `object[]` ref cell (P4). The
 // cell allocation is idempotent, not a static declaration-point seed: an

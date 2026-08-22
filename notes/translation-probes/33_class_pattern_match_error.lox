@@ -1,0 +1,13 @@
+// This node's own checkpoint: a match whose arms are all class patterns
+// raises a real, reachable MATCH_ERROR when no arm matches. The compiler
+// never proves a class pattern exhaustive over its own subclasses (unlike
+// an enum's constructor set, checkEnumExhaustiveness does not run for a
+// class pattern at all), so a value of an unrelated class reaching this
+// match is ordinary, in-language behavior, not a corner case.
+class A {}
+class B {}
+
+print "before";
+print match A() {
+    case B => "b"
+};

@@ -67,6 +67,8 @@ each has an off-the-shelf solution.
 | `30_bool_compare_and_string_literal` | every comparison spelling (`==`, `!=`, `>`, `>=`, `<`, `<=`, each lowering to EQUAL/GREATER/LESS optionally paired with NOT), a standalone `!`, `%`, the `true`/`false`/`nil` literals printed as values in their own right, and a string constant with a quote, a backslash, and a tab | P2 |
 | `clr-only/31_deep_recursion` | native's own frame-count ceiling (`src/vm.h` `FRAMES_MAX`), reached through ordinary self-recursive `CALL`s, must fail identically on a backend whose calling convention has no ceiling of its own — CLR-only, see the note below the table | P5, P6 |
 | `32_string_nul` | a string literal holding an embedded NUL byte (`\0`): `print` must write every byte, including the text after the NUL, on native and on each managed backend (issue #129) | none (parity gate, N11) |
+| `33_class_pattern_match_error` | a `match` whose arms are all class patterns raises a real, reachable `MATCH_ERROR` when no arm matches, through the same fused opcode as the enum case | P8 |
+| `34_match_consumed_result` | a `match` expression's result, once its own closing `POP` retires the synthetic subject local, is exposed as a named local's own value — `PRINT` and `DEFINE_GLOBAL` each need their own fold-aware read, the same way `RETURN` and `SET_GLOBAL` already do | P1, P2 |
 | `V1_fresh_cell` | body-local captured in a loop → **fresh cell/iter** → prints `0 1 2` | P4 |
 | `V2_shared` | mutable shared upvalue → prints `2` | P4 |
 | `V3_loopvar` | loop var captured directly → **one shared cell** → prints `3 3 3` | P4 |

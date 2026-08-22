@@ -6,12 +6,16 @@
 # (CONSTANT, NIL/TRUE/FALSE, arithmetic/comparison, NEGATE, NOT, PRINT, POP,
 # GET_LOCAL, SET_LOCAL, DEFINE_GLOBAL, GET_GLOBAL, SET_GLOBAL), control flow
 # (JUMP, JUMP_IF_FALSE, LOOP), functions and calls (CALL, RETURN's dual
-# role), and closures and upvalues (CLOSURE with a captured cell,
+# role), closures and upvalues (CLOSURE with a captured cell,
 # GET_UPVALUE, SET_UPVALUE, CLOSE_UPVALUE, plus BUILD_LIST, BUILD_MAP,
 # GET_INDEX, and SET_INDEX, pulled forward because the closure probes need
-# a list to hold the closures under test) — later CLR backend work grows
-# this list the same way check_jvm_probes.sh grew as the JVM backend gained
-# opcodes.
+# a list to hold the closures under test), and classes, methods, and super
+# (CLASS, INHERIT, DEFINE_METHOD, GET_PROPERTY, SET_PROPERTY, INVOKE,
+# GET_SUPER, SUPER_INVOKE, INSTANCEOF, and MATCH_ERROR pulled forward from
+# the match/enum scope — a match whose arms are all class or literal
+# patterns needs no GET_TAG/JUMP_TABLE support to reach it) — later CLR
+# backend work grows this list the same way check_jvm_probes.sh grew as the
+# JVM backend gained opcodes.
 #
 # error_probes hold the opposite shape: both sides must FAIL, with matching
 # stdout. They check that an error stays an error on the CLR backend too, not
@@ -22,11 +26,23 @@
 #
 # The corpus sweep, below the examples loop, checks that the examples group
 # stays complete. It runs every examples/*.lox file NOT already in the
-# examples array, the same way the loop above runs the ones that are, and
-# fails the script if one of them runs to completion on both backends and
-# matches — that example belongs in the group and is missing. This turns
-# "the group holds every example the CLR backend can run" from a sentence
-# a person writes by hand into something the script checks on every run.
+# examples array and NOT in tools/clr_excluded_examples.txt, the same way
+# the loop above runs the ones that are, and fails the script naming the
+# file whenever one of them runs to completion on both backends: a
+# byte-identical match belongs in the examples array, and any other
+# same-outcome difference (a map-order permutation or a real divergence)
+# belongs in tools/clr_excluded_examples.txt or is a live defect — either
+# way, the sweep reports it rather than passing over it in silence. This
+# turns "the group holds every example the CLR backend can run" from a
+# sentence a person writes by hand into something the script checks on
+# every run.
+#
+# tools/clr_excluded_examples.txt names the map-order permutations the CLR
+# gate accepts (spec/03-types.md leaves map iteration order unspecified),
+# the CLR twin of tools/jvm_excluded_examples.txt. Every run of this
+# script re-checks each entry with tools/diff_runtimes.py --only-excluded:
+# an entry whose CLR stdout stops being a permutation of native stdout
+# fails the gate as a real divergence, not a silently-forgiven exclusion.
 #
 
 # Every probe runs even after an earlier one fails: a failing CLR run (an
@@ -91,6 +107,17 @@ probes=(
     "notes/translation-probes/V5_self_recursive_closure.lox"
     "notes/translation-probes/V6_self_recursive_closure_in_loop.lox"
     "notes/translation-probes/12_list_map_index.lox"
+    # Classes, methods, and super: `this` = slot 0, `init` returns `this`,
+    # SET_PROPERTY/DEFINE_METHOD leave a value (P2), and `super` is compiled
+    # as an upvalue capture of the superclass (P4) — GET_SUPER reads it as
+    # a value, not only through a call.
+    "notes/translation-probes/09_class.lox"
+    "notes/translation-probes/10_super.lox"
+    "notes/translation-probes/17_super_value.lox"
+    # The consumed-match case: a match expression's result reaching PRINT,
+    # DEFINE_GLOBAL, or SET_GLOBAL with nothing in between to re-expose it
+    # as a genuine evaluation-stack value first.
+    "notes/translation-probes/34_match_consumed_result.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -108,6 +135,10 @@ error_probes=(
     # walk against the JVM backend does not see it (see the probe file's
     # own header comment for why).
     "notes/translation-probes/clr-only/31_deep_recursion.lox"
+    # A match whose arms are all class patterns raises a real, reachable
+    # MATCH_ERROR when no arm matches (this node's own checkpoint) — both
+    # sides print "before" then fail.
+    "notes/translation-probes/33_class_pattern_match_error.lox"
 )
 
 # Whole example programs, not single-opcode probes: each one exercises more
@@ -138,6 +169,39 @@ examples=(
     "examples/anagram.lox"
     "examples/caesar.lox"
     "examples/linear_regression.lox"
+    # This node's own newly runnable examples: each one exercises classes,
+    # methods, or super. class_dispatch.lox is the first program whose
+    # `return match {...}` reaches the RETURN-of-a-named-local case end to
+    # end (bytecode-translation-problems.md); shapes.lox additionally
+    # exercises inheritance, dynamic dispatch through INVOKE, and
+    # `math.pi` through GET_PROPERTY on a native-function-bearing instance.
+    "examples/class_dispatch.lox"
+    "examples/shapes.lox"
+    "examples/ast_eval.lox"
+    "examples/flatten.lox"
+    "examples/higher_order.lox"
+    "examples/multi_return.lox"
+    "examples/quiz.lox"
+    "examples/stack_queue.lox"
+    # This node's own PRINT/DEFINE_GLOBAL fold fix (emitPrint's own note):
+    # both print a match expression's result directly, with nothing in
+    # between to re-expose it as a genuine evaluation-stack value first.
+    "examples/match_http_status.lox"
+    "examples/match_state_machine.lox"
+    "examples/csv_reader.lox"
+    "examples/data_pipeline.lox"
+    "examples/graph_bfs_dfs.lox"
+    "examples/histogram.lox"
+    "examples/line_sorter.lox"
+    "examples/log_writer.lox"
+    "examples/math_demo.lox"
+    "examples/memo_fib.lox"
+    "examples/newton_sqrt.lox"
+    "examples/polar.lox"
+    "examples/remove.lox"
+    "examples/sieve.lox"
+    "examples/stats.lox"
+    "examples/wc.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
@@ -264,22 +328,40 @@ for example in "${examples[@]}"; do
     fi
 done
 
+# --- CLR permutation guard -------------------------------------------------
+# Re-proves, on every run, that each tools/clr_excluded_examples.txt entry's
+# CLR stdout is still a permutation of native stdout, not a content change
+# that the exclusion is silently hiding. tools/diff_runtimes.py already
+# does exactly this for tools/jvm_excluded_examples.txt; --only-excluded
+# runs it over exactly the excluded programs, resolved under examples/.
+excluded_list="$root/tools/clr_excluded_examples.txt"
+if ! python3 "$root/tools/diff_runtimes.py" "$native_bin" \
+        "$root/tools/loxpp_clr.sh" --exclude "$excluded_list" \
+        --only-excluded "$root/examples"; then
+    echo "check_clr_probes.sh: FAIL CLR permutation guard (tools/clr_excluded_examples.txt)" >&2
+    failed_probes+=("clr_excluded_examples_permutation_guard")
+else
+    echo "check_clr_probes.sh: CLR permutation guard OK, every exclusion is still a map-order permutation"
+fi
+
 # --- corpus sweep --------------------------------------------------------
 # Enforces the completeness claim the comment above no longer makes in
-# prose. Every examples/*.lox file NOT already in the examples array runs
-# on both backends here, with the same .input rule as the loop above. A
-# program that runs to completion (exit 0) on BOTH sides and prints
-# byte-identical stdout belongs in the examples group above and is
-# missing from it — the script fails and names it, instead of relying on
-# a hand-written sentence that the next opcode this backend gains would
-# make false without anyone noticing.
+# prose. Every examples/*.lox file NOT already in the examples array, and
+# NOT in tools/clr_excluded_examples.txt (covered by the permutation guard
+# above instead), runs on both backends here, with the same .input rule as
+# the loop above. Three outcomes when a program runs to completion (exit 0)
+# on BOTH sides:
 #
-# Map iteration order is unspecified (spec 03-types.md); a map-order
-# mismatch would show up here as a false non-match, not a false miss, so
-# it cannot make this check wrongly pass an example in. No example in the
-# corpus both iterates a map and runs to completion on the CLR backend
-# today, so no permutation exclusion exists yet — the first node that
-# meets one adds it, the way the JVM gate's own exclusion list does.
+#   - byte-identical stdout: belongs in the examples array and is missing
+#     from it.
+#   - a map-order permutation (sorted lines match, unsorted lines do not):
+#     belongs in tools/clr_excluded_examples.txt and is missing from it.
+#   - any other difference: a real divergence — a live emitter defect the
+#     sweep just found, not a gate to add an example to.
+#
+# All three are reported by name, not silently passed over. A hand-written
+# sentence claiming completeness cannot make this true; the next opcode
+# this backend gains would make it false without anyone noticing.
 in_examples_group() {
     local candidate="$1"
     for known in "${examples[@]}"; do
@@ -290,10 +372,24 @@ in_examples_group() {
     return 1
 }
 
+in_excluded_list() {
+    local candidate_name="$1"
+    awk '!/^[[:space:]]*#/ && NF {print $1}' "$excluded_list" | grep -qxF "$candidate_name"
+}
+
+is_permutation() {
+    diff <(sort "$1") <(sort "$2") >/dev/null
+}
+
 sweep_missing=()
+sweep_permutation_missing=()
+sweep_diverging=()
 for example_path in "$root"/examples/*.lox; do
     example="examples/$(basename "$example_path")"
     if in_examples_group "$example"; then
+        continue
+    fi
+    if in_excluded_list "$(basename "$example_path")"; then
         continue
     fi
 
@@ -322,17 +418,40 @@ for example_path in "$root"/examples/*.lox; do
 
     if diff -q "$native_out" "$clr_out" >/dev/null; then
         sweep_missing+=("$example")
+    elif is_permutation "$native_out" "$clr_out"; then
+        sweep_permutation_missing+=("$example")
+    else
+        sweep_diverging+=("$example")
     fi
 done
 
+sweep_ok=1
 if [ "${#sweep_missing[@]}" -ne 0 ]; then
-    echo "check_clr_probes.sh: ${#sweep_missing[@]} example(s) run to completion and match native, but are missing from the examples group:" >&2
+    sweep_ok=0
+    echo "check_clr_probes.sh: ${#sweep_missing[@]} example(s) run to completion and match native byte for byte, but are missing from the examples group:" >&2
     for example in "${sweep_missing[@]}"; do
         echo "  $example" >&2
     done
     failed_probes+=("${sweep_missing[@]}")
-else
-    echo "check_clr_probes.sh: corpus sweep OK, the examples group is complete"
+fi
+if [ "${#sweep_permutation_missing[@]}" -ne 0 ]; then
+    sweep_ok=0
+    echo "check_clr_probes.sh: ${#sweep_permutation_missing[@]} example(s) run to completion on both sides as a map-order permutation of each other, but are missing from tools/clr_excluded_examples.txt:" >&2
+    for example in "${sweep_permutation_missing[@]}"; do
+        echo "  $example" >&2
+    done
+    failed_probes+=("${sweep_permutation_missing[@]}")
+fi
+if [ "${#sweep_diverging[@]}" -ne 0 ]; then
+    sweep_ok=0
+    echo "check_clr_probes.sh: ${#sweep_diverging[@]} example(s) run to completion on both sides with DIFFERENT stdout that is NOT a map-order permutation — a real divergence, not a missing gate entry:" >&2
+    for example in "${sweep_diverging[@]}"; do
+        echo "  $example" >&2
+    done
+    failed_probes+=("${sweep_diverging[@]}")
+fi
+if [ "$sweep_ok" -eq 1 ]; then
+    echo "check_clr_probes.sh: corpus sweep OK, the examples group and the exclusion list are both complete"
 fi
 
 if [ "${#failed_probes[@]}" -ne 0 ]; then
