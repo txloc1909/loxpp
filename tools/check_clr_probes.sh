@@ -48,6 +48,10 @@ probes=(
     # CLOSURE building a generated class, and RETURN's function-role value
     # return.
     "notes/translation-probes/08_call.lox"
+    # CALL of a LoxNative, not only a LoxClosure — LoxOps.Call reaches a
+    # native through its own argument-count check, a different path than a
+    # closure's, and no earlier probe in this list exercises it.
+    "notes/translation-probes/29_os_access.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
