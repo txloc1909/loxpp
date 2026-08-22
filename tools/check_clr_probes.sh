@@ -20,6 +20,14 @@
 # examples holds whole example programs from examples/, each one exercising
 # more of the accumulated CLR surface at once than a single probe does.
 #
+# The corpus sweep, below the examples loop, checks that the examples group
+# stays complete. It runs every examples/*.lox file NOT already in the
+# examples array, the same way the loop above runs the ones that are, and
+# fails the script if one of them runs to completion on both backends and
+# matches — that example belongs in the group and is missing. This turns
+# "the group holds every example the CLR backend can run" from a sentence
+# a person writes by hand into something the script checks on every run.
+#
 
 # Every probe runs even after an earlier one fails: a failing CLR run (an
 # ilasm assembly error, say) is caught and recorded as this probe's own
@@ -117,13 +125,9 @@ examples=(
     # This node's own newly runnable examples: each one exercises
     # BUILD_LIST, GET_INDEX, or SET_INDEX (a list or string literal,
     # indexed or index-assigned) that a prior node's emitter would reject
-    # outright. Confirmed by running the whole corpus through
-    # tools/loxpp_clr.sh: these nine, with the six above, are every
-    # example that runs to completion on the CLR backend and matches
-    # native byte for byte. Every other example in the corpus still needs
-    # an opcode this pass does not yet lower (INVOKE for a list/map
-    # method, IN, BUILD_MAP through a Map method, classes, or match) and
-    # exits with an error on this backend today.
+    # outright. Whether these nine plus the six above are the whole set
+    # the CLR backend can currently run is what the corpus sweep below
+    # checks, not this comment.
     "examples/digital_root.lox"
     "examples/gcd_lcm.lox"
     "examples/to_binary.lox"
@@ -259,6 +263,77 @@ for example in "${examples[@]}"; do
     fi
 done
 
+# --- corpus sweep --------------------------------------------------------
+# Enforces the completeness claim the comment above no longer makes in
+# prose. Every examples/*.lox file NOT already in the examples array runs
+# on both backends here, with the same .input rule as the loop above. A
+# program that runs to completion (exit 0) on BOTH sides and prints
+# byte-identical stdout belongs in the examples group above and is
+# missing from it — the script fails and names it, instead of relying on
+# a hand-written sentence that the next opcode this backend gains would
+# make false without anyone noticing.
+#
+# Map iteration order is unspecified (spec 03-types.md); a map-order
+# mismatch would show up here as a false non-match, not a false miss, so
+# it cannot make this check wrongly pass an example in. No example in the
+# corpus both iterates a map and runs to completion on the CLR backend
+# today, so no permutation exclusion exists yet — the first node that
+# meets one adds it, the way the JVM gate's own exclusion list does.
+in_examples_group() {
+    local candidate="$1"
+    for known in "${examples[@]}"; do
+        if [ "$known" = "$candidate" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+sweep_missing=()
+for example_path in "$root"/examples/*.lox; do
+    example="examples/$(basename "$example_path")"
+    if in_examples_group "$example"; then
+        continue
+    fi
+
+    input_file="$root/${example%.lox}.input"
+    if [ -f "$input_file" ]; then
+        native_ok=1; "$native_bin" "$root/$example" <"$input_file" \
+            >"$native_out" 2>"$native_err" || native_ok=0
+    else
+        native_ok=1; "$native_bin" "$root/$example" \
+            >"$native_out" 2>"$native_err" || native_ok=0
+    fi
+    if [ "$native_ok" -eq 0 ]; then
+        continue
+    fi
+
+    if [ -f "$input_file" ]; then
+        clr_ok=1; "$root/tools/loxpp_clr.sh" "$root/$example" <"$input_file" \
+            >"$clr_out" 2>"$clr_err" || clr_ok=0
+    else
+        clr_ok=1; "$root/tools/loxpp_clr.sh" "$root/$example" \
+            >"$clr_out" 2>"$clr_err" || clr_ok=0
+    fi
+    if [ "$clr_ok" -eq 0 ]; then
+        continue
+    fi
+
+    if diff -q "$native_out" "$clr_out" >/dev/null; then
+        sweep_missing+=("$example")
+    fi
+done
+
+if [ "${#sweep_missing[@]}" -ne 0 ]; then
+    echo "check_clr_probes.sh: ${#sweep_missing[@]} example(s) run to completion and match native, but are missing from the examples group:" >&2
+    for example in "${sweep_missing[@]}"; do
+        echo "  $example" >&2
+    done
+    failed_probes+=("${sweep_missing[@]}")
+else
+    echo "check_clr_probes.sh: corpus sweep OK, the examples group is complete"
+fi
+
 if [ "${#failed_probes[@]}" -ne 0 ]; then
     echo "check_clr_probes.sh: ${#failed_probes[@]} probe(s) failed:" >&2
     for probe in "${failed_probes[@]}"; do
@@ -267,4 +342,4 @@ if [ "${#failed_probes[@]}" -ne 0 ]; then
     exit 1
 fi
 
-echo "check_clr_probes.sh: all $((${#probes[@]} + ${#error_probes[@]} + ${#examples[@]})) probes OK"
+echo "check_clr_probes.sh: all $((${#probes[@]} + ${#error_probes[@]} + ${#examples[@]})) probes OK, corpus sweep confirms the examples group is complete"
