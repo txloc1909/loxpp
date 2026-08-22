@@ -211,11 +211,12 @@ examples=(
     "examples/stats.lox"
     "examples/wc.lox"
     # This node's own newly runnable examples: each one exercises the `in`
-    # operator, a match sequence pattern (IS_SEQ), or SLICE syntax
-    # (sequences.lox's own `xs[a:b]`) that a prior node's emitter would
-    # reject outright. merge_sort.lox needs none of this node's own
-    # opcodes; the corpus sweep below is what actually found it missing
-    # from this list, not a dependency on this node's own work.
+    # operator, SLICE syntax (`xs[a:b]`), or a match sequence pattern
+    # (IS_SEQ) that a prior node's emitter rejects outright. Measured
+    # against origin/main's emitter, one at a time: config_parser.lox,
+    # grep_lite.lox, match_dispatch.lox, run_length.lox, scanner.lox, and
+    # sequences.lox stop on IN; merge_sort.lox and sorting.lox stop on
+    # SLICE; string_list_pattern_demo.lox stops on IS_SEQ.
     "examples/config_parser.lox"
     "examples/grep_lite.lox"
     "examples/match_dispatch.lox"
