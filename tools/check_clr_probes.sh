@@ -115,19 +115,24 @@ examples=(
     "examples/hanoi.lox"
     "examples/leap_year.lox"
     # This node's own newly runnable examples: each one exercises
-    # BUILD_LIST/GET_INDEX (a list literal, indexed) that a prior node's
-    # emitter would reject outright. Every other example in the corpus
-    # still needs an opcode this pass does not yet lower (INVOKE for a
-    # list/map method, IN, BUILD_MAP through a Map method, classes, or
-    # match), confirmed by running the whole corpus through
-    # tools/loxpp_clr.sh and keeping only the ones that already match
-    # native byte for byte.
+    # BUILD_LIST, GET_INDEX, or SET_INDEX (a list or string literal,
+    # indexed or index-assigned) that a prior node's emitter would reject
+    # outright. Confirmed by running the whole corpus through
+    # tools/loxpp_clr.sh: these nine are every example that runs to
+    # completion on the CLR backend and matches native byte for byte.
+    # Every other example in the corpus still needs an opcode this pass
+    # does not yet lower (INVOKE for a list/map method, IN, BUILD_MAP
+    # through a Map method, classes, or match) and exits with an error on
+    # this backend today.
     "examples/digital_root.lox"
     "examples/gcd_lcm.lox"
     "examples/to_binary.lox"
     "examples/palindrome.lox"
     "examples/luhn.lox"
     "examples/clock_arithmetic.lox"
+    "examples/anagram.lox"
+    "examples/caesar.lox"
+    "examples/linear_regression.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
