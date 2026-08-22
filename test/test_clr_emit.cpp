@@ -1820,6 +1820,184 @@ TEST(EmitProgram, MismatchedNestedChildCountThrowsInsteadOfReadingOutOfRange) {
 }
 
 // ---------------------------------------------------------------------------
+// Aggregates, slices, membership, and iterators (this node)
+// ---------------------------------------------------------------------------
+
+TEST(EmitScript, SliceAndInAreOneCallEach) {
+    // vm.cpp's own operand order already matches each helper's own
+    // parameter order (LoxOps.Slice's and LoxOps.In's own doc comments in
+    // runtime/clr/src/LoxOps.cs), so neither needs a shuffle.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "var s = \"hello\"; print s[1:3]; print 1 in [1, 2, 3];", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("call object [LoxRuntime]Lox.LoxOps::Slice(object, "
+                     "object, object)\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("call bool [LoxRuntime]Lox.LoxOps::In(object, object)\n"
+                     "    box [System.Runtime]System.Boolean\n"),
+              std::string::npos)
+        << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitScript, IsSeqEmitsOneCallAndBoxes) {
+    // IS_SEQ is a match sequence-pattern's own type check (compiler.cpp).
+    // An unguarded catch-all arm keeps this snippet inside this node's own
+    // opcode set: no JUMP_TABLE/GET_TAG (an enum arm needs those, out of
+    // scope until a later node) and no MATCH_ERROR (only emitted when no
+    // arm is an unguarded catch-all). The match is a bare, fully-discarded
+    // statement — a match expression whose result is actually consumed
+    // (assigned, printed, returned) is a separate, pre-existing gap this
+    // node does not own (P8, match/enum dispatch, a later node's scope).
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("match [1, 2] { case [a, b] => a + b case _ => 0 };", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(j.find("call bool [LoxRuntime]Lox.LoxOps::IsSeq(object)\n"
+                     "    box [System.Runtime]System.Boolean\n"),
+              std::string::npos)
+        << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitScript, GetIterReloadsAndRestoresItsOwnDeclaringSlot) {
+    // GET_ITER carries no operand byte and replaces its own operand in
+    // place (vm.cpp: `stackTop[-1] = ...`) — the shared abstract-stack pass
+    // attributes the invisible-var store for that stack position to the
+    // iterable expression's OWN declaring push (here BUILD_LIST), one
+    // instruction earlier, so the CIL evaluation stack is already empty by
+    // the time GET_ITER runs. A plain one-`call` lowering (no reload, no
+    // store-back) calls LoxOps.GetIter on an empty stack — `Builder::emit`'s
+    // own `cellsRead` check (this file's own top-of-file note) catches
+    // that at EMIT time, so this test also proves emitGetIter does not
+    // regress to that shape by checking the exact reload/store-back
+    // sequence, not only that emission succeeds.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("for (var x in [1, 2, 3]) print x;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    // No locals before the loop besides slot 0 (reserved): the iterable's
+    // declaring push lands in Lox slot 1, CIL local 2 (local 0 is globals,
+    // local 1 is slot 0's own reserved local) — the same local GET_ITER
+    // must reload from and store back into.
+    EXPECT_NE(j.find("call class [LoxRuntime]Lox.LoxList "
+                     "[LoxRuntime]Lox.LoxOps::BuildList(object[])\n"
+                     "    stloc 2\n"
+                     "    ldloc 2\n"
+                     "    call class [LoxRuntime]Lox.LoxIterator "
+                     "[LoxRuntime]Lox.LoxOps::GetIter(object)\n"
+                     "    stloc 2\n"),
+              std::string::npos)
+        << j;
+    // P8: the iterator lives in an ordinary chunk local; ITER_HAS_NEXT/
+    // ITER_NEXT each consume the copy a preceding GET_LOCAL (ldloc 2)
+    // loaded, never the slot itself.
+    EXPECT_NE(j.find("ldloc 2\n"
+                     "    call bool [LoxRuntime]Lox.LoxOps::IterHasNext"
+                     "(object)\n"
+                     "    box [System.Runtime]System.Boolean\n"),
+              std::string::npos)
+        << j;
+    EXPECT_NE(j.find("ldloc 2\n"
+                     "    call object [LoxRuntime]Lox.LoxOps::IterNext"
+                     "(object)\n"),
+              std::string::npos)
+        << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitScript, GetIterAfterAMergeStillLoadsTheRightSlot) {
+    // Puts the for-in loop's own iterable push after an if-without-else
+    // merge, the same shape
+    // SetLocalPeekOfNamedLocalLoadsInsteadOfDup's own SET_LOCAL sibling
+    // uses — proving emitGetIter's own `loadNamedLocalAtZeroDepth` call
+    // resolves the right slot at an ordinary, non-divergent merge, not
+    // only away from one. A genuinely DIVERGENT merge needs a consumed
+    // match expression as the iterable, which does not emit yet (a later
+    // node's own gap); this test cannot force that divergence on this
+    // branch.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("{\n"
+                                      "  var a = 1;\n"
+                                      "  if (a == 1) { print 9; }\n"
+                                      "  for (var x in [1, 2, 3]) print x;\n"
+                                      "}\n",
+                                      mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    // `a` is CIL local 2 (local 0 globals, local 1 slot 0's own reserved
+    // local). The for-in's own iterable push lands one Lox slot later,
+    // CIL local 3 — reaching this line at all already proves the merge
+    // resolution did not throw.
+    EXPECT_NE(j.find("call class [LoxRuntime]Lox.LoxList "
+                     "[LoxRuntime]Lox.LoxOps::BuildList(object[])\n"
+                     "    stloc 3\n"
+                     "    ldloc 3\n"
+                     "    call class [LoxRuntime]Lox.LoxIterator "
+                     "[LoxRuntime]Lox.LoxOps::GetIter(object)\n"
+                     "    stloc 3\n"),
+              std::string::npos)
+        << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+TEST(EmitProgram, GetIterGoesThroughTheCapturedSlotGuardWhenItsSlotIsReused) {
+    // The for-in loop's own iterator never itself gets captured — its slot
+    // has no name in source. But `capturedSlots` (this file's own
+    // top-of-file note) is membership over slot INDEXES, not over which
+    // variable currently owns one: once the loop's own block scope ends,
+    // the compiler frees its slot, and `y`, declared right after, reuses
+    // that exact index. `y` IS captured by `get`, so this whole index
+    // counts as captured for the rest of the function — including at the
+    // GET_ITER site that ran earlier, before `y` even existed. emitGetIter
+    // must still route through the same `isinst object[]` guard
+    // GET_LOCAL/SET_LOCAL use, the same way `resolveZeroDepthLocalSlot`'s
+    // own hazard note requires: the runtime test is always safe (a
+    // LoxIterator is never a bare `object[]`, this file's own top-of-file
+    // invariant), so it always takes the raw branch here — but only
+    // because the guard actually runs, not because this call site somehow
+    // knew in advance that this particular slot never really needed it.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("fun outer() {\n"
+                                      "  { for (var x in [1, 2, 3]) print x; }\n"
+                                      "  var y = 0;\n"
+                                      "  fun get() { return y; }\n"
+                                      "  return get;\n"
+                                      "}\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    std::size_t outerStart = il.find(".class public auto ansi LoxFn$0");
+    std::size_t getStart = il.find(".class public auto ansi LoxFn$1");
+    ASSERT_NE(outerStart, std::string::npos) << il;
+    ASSERT_NE(getStart, std::string::npos) << il;
+    std::string outer = il.substr(outerStart, getStart - outerStart);
+
+    EXPECT_NE(outer.find("isinst object[]\n"
+                         "    brfalse Ccapgr"),
+              std::string::npos)
+        << outer;
+    EXPECT_NE(outer.find("call class [LoxRuntime]Lox.LoxIterator "
+                         "[LoxRuntime]Lox.LoxOps::GetIter(object)\n"),
+              std::string::npos)
+        << outer;
+    EXPECT_NE(outer.find("isinst object[]\n"
+                         "    brfalse Ccapsr"),
+              std::string::npos)
+        << outer;
+    expectEveryBranchTargetIsLabeled(outer);
+}
+
+// ---------------------------------------------------------------------------
 // resolveZeroDepthLocalSlot (zero_depth_local.h): the one, target-
 // independent authority both this file and jvm_emitter.cpp call into for
 // the depth-0 named-local cross-check (clr_emitter.h's own top-of-file
