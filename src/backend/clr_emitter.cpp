@@ -818,26 +818,32 @@ int computeMaxLocalCount(const FunctionStackAnalysis& analysis) {
     return std::max(maxLocalCount, 1);
 }
 
-// The widest CALL in this chunk, ignoring argCount == 0 (needs no scratch
-// slot — see emitCall). 0 here means the chunk needs none at all, keeping
+// The widest aggregate this chunk builds by spilling loose operand-stack
+// values to scratch locals before assembling one aggregate object —
+// CALL's own argument count today. A later opcode with the same
+// N-loose-values-then-one-aggregate shape (BUILD_LIST, BUILD_MAP) widens
+// this same std::max scan instead of opening a second, parallel
+// scratch-slot area — jvm_emitter.cpp's own computeMaxSpillWidth is the
+// JVM twin of this rule. Ignores argCount == 0 (needs no scratch slot —
+// see emitCall); 0 here means the chunk needs none at all, keeping
 // `.locals init` byte-identical to pre-this-node output on every chunk
-// that makes no call.
-int computeMaxCallArgCount(const DecodedFunction& fn) {
-    int maxCallArgCount = 0;
+// that builds no aggregate.
+int computeMaxAggregateWidth(const DecodedFunction& fn) {
+    int maxWidth = 0;
     for (const DecodedInstruction& instr : fn.instructions) {
         if (instr.op == Op::CALL) {
-            maxCallArgCount = std::max(maxCallArgCount, instr.byteOperand);
+            maxWidth = std::max(maxWidth, instr.byteOperand);
         }
     }
-    return maxCallArgCount;
+    return maxWidth;
 }
 
 Emitter buildEmitter(const DecodedFunction& fn,
                      const FunctionStackAnalysis& analysis, int maxLocalCount,
-                     int maxCallArgCount) {
+                     int maxAggregateWidth) {
     Emitter e{fn, analysis, {}};
     e.scratchSlot = e.baseSlot + maxLocalCount;
-    if (maxCallArgCount > 0) {
+    if (maxAggregateWidth > 0) {
         e.calleeScratchSlot = e.scratchSlot + 1;
         e.argScratchBase = e.scratchSlot + 2;
     }
@@ -997,16 +1003,16 @@ std::string emitChunk(const DecodedFunction& fn,
                       const std::string& className, bool isFunction,
                       const std::vector<std::string>& childClassNames) {
     int maxLocalCount = computeMaxLocalCount(analysis);
-    int maxCallArgCount = computeMaxCallArgCount(fn);
-    int extraCallSlots = maxCallArgCount > 0 ? maxCallArgCount + 1 : 0;
+    int maxAggregateWidth = computeMaxAggregateWidth(fn);
+    int extraSpillSlots = maxAggregateWidth > 0 ? maxAggregateWidth + 1 : 0;
 
-    Emitter e = buildEmitter(fn, analysis, maxLocalCount, maxCallArgCount);
+    Emitter e = buildEmitter(fn, analysis, maxLocalCount, maxAggregateWidth);
     emitPrologue(e, fn, isFunction);
     emitBody(e, isFunction, childClassNames);
 
     // globals (1) + the Lox frame's own slots + the shuffle scratch (1) +
-    // the CALL spill area, if this chunk needs one.
-    int totalLocals = 1 + maxLocalCount + 1 + extraCallSlots;
+    // the aggregate spill area, if this chunk builds one.
+    int totalLocals = 1 + maxLocalCount + 1 + extraSpillSlots;
     return emitClassBody(e, fn, className, isFunction, totalLocals);
 }
 
