@@ -118,12 +118,12 @@ examples=(
     # BUILD_LIST, GET_INDEX, or SET_INDEX (a list or string literal,
     # indexed or index-assigned) that a prior node's emitter would reject
     # outright. Confirmed by running the whole corpus through
-    # tools/loxpp_clr.sh: these nine are every example that runs to
-    # completion on the CLR backend and matches native byte for byte.
-    # Every other example in the corpus still needs an opcode this pass
-    # does not yet lower (INVOKE for a list/map method, IN, BUILD_MAP
-    # through a Map method, classes, or match) and exits with an error on
-    # this backend today.
+    # tools/loxpp_clr.sh: these nine, with the six above, are every
+    # example that runs to completion on the CLR backend and matches
+    # native byte for byte. Every other example in the corpus still needs
+    # an opcode this pass does not yet lower (INVOKE for a list/map
+    # method, IN, BUILD_MAP through a Map method, classes, or match) and
+    # exits with an error on this backend today.
     "examples/digital_root.lox"
     "examples/gcd_lcm.lox"
     "examples/to_binary.lox"
