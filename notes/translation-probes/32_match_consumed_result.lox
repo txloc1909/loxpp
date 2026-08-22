@@ -1,0 +1,18 @@
+// This node's own checkpoint: a match expression's result, once its own
+// closing POP retires the synthetic "subject" local, is exposed as a named
+// local's own value — the fused local/stack model has no separate cell to
+// push for a genuine consumer to read (bytecode-translation-problems.md,
+// "RETURN can return a named local"). RETURN and SET_GLOBAL already share
+// this fold check with the rest of the peek family; PRINT and a plain local
+// declaration are the two shapes this probe adds:
+//
+// line 1: the match's result flows into a local DECLARATION (`var n = ...`)
+// before anything reads it — an ordinary GET_LOCAL reads it back
+// afterward, so this line alone would already pass with no fold-aware fix.
+// line 2: the match's result is printed with nothing in between to declare
+// a real local first — the shape that needs PRINT's own fold check.
+// line 3: the match's result flows into a global assignment (`g = ...`,
+// SET_GLOBAL), already fold-aware.
+var n = match 1 { case _ => 5 }; print n;
+print match 1 { case 1 => "a" case _ => "b" };
+var g = 0; g = match 1 { case 1 => "a" case _ => "b" }; print g;

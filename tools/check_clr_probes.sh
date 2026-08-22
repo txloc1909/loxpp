@@ -6,12 +6,16 @@
 # (CONSTANT, NIL/TRUE/FALSE, arithmetic/comparison, NEGATE, NOT, PRINT, POP,
 # GET_LOCAL, SET_LOCAL, DEFINE_GLOBAL, GET_GLOBAL, SET_GLOBAL), control flow
 # (JUMP, JUMP_IF_FALSE, LOOP), functions and calls (CALL, RETURN's dual
-# role), and closures and upvalues (CLOSURE with a captured cell,
+# role), closures and upvalues (CLOSURE with a captured cell,
 # GET_UPVALUE, SET_UPVALUE, CLOSE_UPVALUE, plus BUILD_LIST, BUILD_MAP,
 # GET_INDEX, and SET_INDEX, pulled forward because the closure probes need
-# a list to hold the closures under test) — later CLR backend work grows
-# this list the same way check_jvm_probes.sh grew as the JVM backend gained
-# opcodes.
+# a list to hold the closures under test), and classes, methods, and super
+# (CLASS, INHERIT, DEFINE_METHOD, GET_PROPERTY, SET_PROPERTY, INVOKE,
+# GET_SUPER, SUPER_INVOKE, INSTANCEOF, and MATCH_ERROR pulled forward from
+# the match/enum scope — a match whose arms are all class or literal
+# patterns needs no GET_TAG/JUMP_TABLE support to reach it) — later CLR
+# backend work grows this list the same way check_jvm_probes.sh grew as the
+# JVM backend gained opcodes.
 #
 # error_probes hold the opposite shape: both sides must FAIL, with matching
 # stdout. They check that an error stays an error on the CLR backend too, not
@@ -90,6 +94,17 @@ probes=(
     "notes/translation-probes/V5_self_recursive_closure.lox"
     "notes/translation-probes/V6_self_recursive_closure_in_loop.lox"
     "notes/translation-probes/12_list_map_index.lox"
+    # Classes, methods, and super: `this` = slot 0, `init` returns `this`,
+    # SET_PROPERTY/DEFINE_METHOD leave a value (P2), and `super` is compiled
+    # as an upvalue capture of the superclass (P4) — GET_SUPER reads it as
+    # a value, not only through a call.
+    "notes/translation-probes/09_class.lox"
+    "notes/translation-probes/10_super.lox"
+    "notes/translation-probes/17_super_value.lox"
+    # The consumed-match case: a match expression's result reaching PRINT,
+    # DEFINE_GLOBAL, or SET_GLOBAL with nothing in between to re-expose it
+    # as a genuine evaluation-stack value first.
+    "notes/translation-probes/32_match_consumed_result.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -107,6 +122,10 @@ error_probes=(
     # walk against the JVM backend does not see it (see the probe file's
     # own header comment for why).
     "notes/translation-probes/clr-only/31_deep_recursion.lox"
+    # A match whose arms are all class patterns raises a real, reachable
+    # MATCH_ERROR when no arm matches (this node's own checkpoint) — both
+    # sides print "before" then fail.
+    "notes/translation-probes/33_class_pattern_match_error.lox"
 )
 
 # Whole example programs, not single-opcode probes: each one exercises more
@@ -137,6 +156,45 @@ examples=(
     "examples/anagram.lox"
     "examples/caesar.lox"
     "examples/linear_regression.lox"
+    # This node's own newly runnable examples: each one exercises classes,
+    # methods, or super. class_dispatch.lox is the first program whose
+    # `return match {...}` reaches the RETURN-of-a-named-local case end to
+    # end (bytecode-translation-problems.md); shapes.lox additionally
+    # exercises inheritance, dynamic dispatch through INVOKE, and
+    # `math.pi` through GET_PROPERTY on a native-function-bearing instance.
+    "examples/class_dispatch.lox"
+    "examples/shapes.lox"
+    "examples/ast_eval.lox"
+    "examples/flatten.lox"
+    "examples/higher_order.lox"
+    "examples/multi_return.lox"
+    "examples/quiz.lox"
+    "examples/stack_queue.lox"
+    # This node's own PRINT/DEFINE_GLOBAL fold fix (emitPrint's own note):
+    # both print a match expression's result directly, with nothing in
+    # between to re-expose it as a genuine evaluation-stack value first.
+    "examples/match_http_status.lox"
+    "examples/match_state_machine.lox"
+    # Not new to this node: these use no class, method, super, or match —
+    # the corpus sweep below is the first check to notice a prior node's
+    # emitter already ran them to completion correctly, with no example
+    # entry recording that fact. Added here so the sweep's own
+    # completeness claim is true, not because this node changed anything
+    # they depend on.
+    "examples/csv_reader.lox"
+    "examples/data_pipeline.lox"
+    "examples/graph_bfs_dfs.lox"
+    "examples/histogram.lox"
+    "examples/line_sorter.lox"
+    "examples/log_writer.lox"
+    "examples/math_demo.lox"
+    "examples/memo_fib.lox"
+    "examples/newton_sqrt.lox"
+    "examples/polar.lox"
+    "examples/remove.lox"
+    "examples/sieve.lox"
+    "examples/stats.lox"
+    "examples/wc.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
