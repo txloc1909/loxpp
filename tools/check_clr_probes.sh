@@ -5,9 +5,13 @@
 # tools/check_jvm_probes.sh, scoped today to the straight-line opcode set
 # (CONSTANT, NIL/TRUE/FALSE, arithmetic/comparison, NEGATE, NOT, PRINT, POP,
 # GET_LOCAL, SET_LOCAL, DEFINE_GLOBAL, GET_GLOBAL, SET_GLOBAL), control flow
-# (JUMP, JUMP_IF_FALSE, LOOP), and functions and calls (CALL, zero-upvalue
-# CLOSURE, RETURN's dual role) — later CLR backend work grows this list the
-# same way check_jvm_probes.sh grew as the JVM backend gained opcodes.
+# (JUMP, JUMP_IF_FALSE, LOOP), functions and calls (CALL, RETURN's dual
+# role), and closures and upvalues (CLOSURE with a captured cell,
+# GET_UPVALUE, SET_UPVALUE, CLOSE_UPVALUE, plus BUILD_LIST, BUILD_MAP,
+# GET_INDEX, and SET_INDEX, pulled forward because the closure probes need
+# a list to hold the closures under test) — later CLR backend work grows
+# this list the same way check_jvm_probes.sh grew as the JVM backend gained
+# opcodes.
 #
 # error_probes hold the opposite shape: both sides must FAIL, with matching
 # stdout. They check that an error stays an error on the CLR backend too, not
@@ -56,6 +60,28 @@ probes=(
     # native through its own argument-count check, a different path than a
     # closure's, and no earlier probe in this list exercises it.
     "notes/translation-probes/29_os_access.lox"
+    # Closures and upvalues (the bug gate): V1_fresh_cell is the standing
+    # counter-example a naive one-cell-per-local-at-function-entry design
+    # gets WRONG (2 2 2) while V3_loopvar's shared cell (3 3 3) looks
+    # right — see ensureCapturedCell's own note. V2_shared and
+    # 06_shared_upvalue prove two closures over the same live incarnation
+    # share one cell; V4 proves the shared cell is really shared, by
+    # mutating it through one closure and reading it through another (06
+    # alone proves only that the module loads). V5/V6 prove a local `fun`
+    # that captures itself seeds its own cell before its first read.
+    # BUILD_LIST, BUILD_MAP, GET_INDEX, and SET_INDEX are pulled forward
+    # here too: V1 and V3 each build a list of the closures under test and
+    # read it back by index, and 12_list_map_index needs a map as well as
+    # a list to run at all — none of these probes can even compile without
+    # aggregate and index support.
+    "notes/translation-probes/06_shared_upvalue.lox"
+    "notes/translation-probes/V1_fresh_cell.lox"
+    "notes/translation-probes/V2_shared.lox"
+    "notes/translation-probes/V3_loopvar.lox"
+    "notes/translation-probes/V4_mutate_through_upvalue.lox"
+    "notes/translation-probes/V5_self_recursive_closure.lox"
+    "notes/translation-probes/V6_self_recursive_closure_in_loop.lox"
+    "notes/translation-probes/12_list_map_index.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -88,6 +114,20 @@ examples=(
     "examples/guessing_game.lox"
     "examples/hanoi.lox"
     "examples/leap_year.lox"
+    # This node's own newly runnable examples: each one exercises
+    # BUILD_LIST/GET_INDEX (a list literal, indexed) that a prior node's
+    # emitter would reject outright. Every other example in the corpus
+    # still needs an opcode this pass does not yet lower (INVOKE for a
+    # list/map method, IN, BUILD_MAP through a Map method, classes, or
+    # match), confirmed by running the whole corpus through
+    # tools/loxpp_clr.sh and keeping only the ones that already match
+    # native byte for byte.
+    "examples/digital_root.lox"
+    "examples/gcd_lcm.lox"
+    "examples/to_binary.lox"
+    "examples/palindrome.lox"
+    "examples/luhn.lox"
+    "examples/clock_arithmetic.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
