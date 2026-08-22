@@ -96,7 +96,7 @@ std::string ilasmStringLiteral(const std::string& raw);
 std::string ilasmDoubleLiteral(double value);
 
 // Emits complete ilasm source for one script chunk, as the top-level class
-// `className` with a static, parameterless `Main` entry point.
+// `className` with a static `Main(string[] args)` entry point.
 // `analysis` must come from `analyzeStack` on the same `fn`. Does not
 // recurse into nested functions: a CLOSURE reaching this throws "has no
 // assigned class name", because a lone chunk has no name to give a nested
