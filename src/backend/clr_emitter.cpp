@@ -629,6 +629,33 @@ void emitJumpIfFalse(Emitter& e, std::size_t i, const DecodedInstruction& in) {
     e.b.emit("brtrue " + e.labelFor(in.jumpTarget), 1, -1);
 }
 
+// Spills `width` values, already loose on the stack (topmost = last
+// index), into consecutive scratch slots starting at `scratchBase` — the
+// one step every reshape below needs before it can build a fresh array
+// reference on top of where those values used to sit.
+void spillLooseValues(Emitter& e, int scratchBase, int width) {
+    for (int i = width - 1; i >= 0; i--) {
+        e.b.emit("stloc " + std::to_string(scratchBase + i), 1, -1);
+    }
+}
+
+// Builds a fresh `object[width]` and refills it ascending from the
+// scratch slots `spillLooseValues` (or an equivalent spill) already
+// filled, leaving the array as the new top of stack. Shared by every
+// P7-shaped reshape — BUILD_LIST's own spill-and-refill and CALL's
+// argument array both need this exact loop, so a change to the element
+// type or the index-push instruction updates once for both.
+void newObjectArrayFromScratch(Emitter& e, int scratchBase, int width) {
+    e.b.emit(pushIntInstruction(width), 0, +1);
+    e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
+    for (int i = 0; i < width; i++) {
+        e.b.emit("dup", 1, +1);
+        e.b.emit(pushIntInstruction(i), 0, +1);
+        e.b.emit("ldloc " + std::to_string(scratchBase + i), 0, +1);
+        e.b.emit("stelem.ref", 3, -3);
+    }
+}
+
 // The P7 reshape BUILD_LIST needs: spill `width` values, already loose on
 // the stack, into `argScratchBase`, build a fresh `object[width]`, refill
 // it ascending, then hand it to `call` (a complete ilasm `call` instruction
@@ -645,17 +672,8 @@ void emitSpillToArray(Emitter& e, int width, const std::string& call,
         e.b.emit(call, callCellsRead, callNetDelta);
         return;
     }
-    for (int i = width - 1; i >= 0; i--) {
-        e.b.emit("stloc " + std::to_string(e.argScratchBase + i), 1, -1);
-    }
-    e.b.emit(pushIntInstruction(width), 0, +1);
-    e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
-    for (int i = 0; i < width; i++) {
-        e.b.emit("dup", 1, +1);
-        e.b.emit(pushIntInstruction(i), 0, +1);
-        e.b.emit("ldloc " + std::to_string(e.argScratchBase + i), 0, +1);
-        e.b.emit("stelem.ref", 3, -3);
-    }
+    spillLooseValues(e, e.argScratchBase, width);
+    newObjectArrayFromScratch(e, e.argScratchBase, width);
     e.b.emit(call, callCellsRead, callNetDelta);
 }
 
@@ -680,6 +698,9 @@ void emitSpillToArray(Emitter& e, int width, const std::string& call,
 // CALL through that helper would either spill the callee as if it were
 // argument 0 (wrong value in the array) or re-spill the arguments a second
 // time once they no longer sit on the stack (evaluation stack underflow).
+// The spill and the array-build themselves are the same two loops
+// `emitSpillToArray` runs, factored into `spillLooseValues`/
+// `newObjectArrayFromScratch` so both call sites share one copy.
 void emitCall(Emitter& e, const DecodedInstruction& in) {
     int argCount = in.byteOperand;
     const char* callSig =
@@ -690,20 +711,11 @@ void emitCall(Emitter& e, const DecodedInstruction& in) {
         e.b.emit(callSig, 2, -1);
         return;
     }
-    for (int i = argCount - 1; i >= 0; i--) {
-        e.b.emit("stloc " + std::to_string(e.argScratchBase + i), 1, -1);
-    }
+    spillLooseValues(e, e.argScratchBase, argCount);
     e.b.emit("stloc " + std::to_string(e.calleeScratchSlot), 1, -1);
 
     e.b.emit("ldloc " + std::to_string(e.calleeScratchSlot), 0, +1);
-    e.b.emit(pushIntInstruction(argCount), 0, +1);
-    e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
-    for (int i = 0; i < argCount; i++) {
-        e.b.emit("dup", 1, +1);
-        e.b.emit(pushIntInstruction(i), 0, +1);
-        e.b.emit("ldloc " + std::to_string(e.argScratchBase + i), 0, +1);
-        e.b.emit("stelem.ref", 3, -3);
-    }
+    newObjectArrayFromScratch(e, e.argScratchBase, argCount);
     e.b.emit(callSig, 2, -1);
 }
 
