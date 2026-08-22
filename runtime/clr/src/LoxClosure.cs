@@ -15,6 +15,25 @@ namespace Lox;
 /// matching ObjFunction::arity.
 /// </summary>
 public abstract class LoxClosure : ILoxCallable {
+    // vm.cpp's own CallFrame ceiling (src/vm.h FRAMES_MAX). Generated CIL
+    // recurses the real CLR call stack one frame per Lox call - unlike
+    // vm.cpp's fixed CallFrame array, nothing here bounds that on its own,
+    // and the real stack tolerates far more than 256 nested calls before
+    // it would fault. Counting here keeps every recursion depth that
+    // native accepts or rejects agreeing on the CLR backend too, with the
+    // same message, instead of only diverging once a real stack fault (an
+    // uncatchable StackOverflowException) hits some larger, host-dependent
+    // depth.
+    private const int FramesMax = 256;
+
+    // Starts at 1, not 0: src/vm.cpp's own interpret() pushes the
+    // top-level script itself as CallFrame 0 through the very same call()
+    // this class's CallAsSelf mirrors, before the script body ever runs,
+    // and that frame is never popped until the whole program ends. A
+    // counter starting at 0 here would let one more nested Lox call
+    // succeed than FRAMES_MAX allows natively.
+    private static int s_frameCount = 1;
+
     public readonly string Name; // null for the top-level script, per <script>
     public readonly int Arity;
     public readonly object[][] Upvalues;
@@ -31,7 +50,15 @@ public abstract class LoxClosure : ILoxCallable {
         if (args.Length != Arity) {
             throw new LoxError($"Expected {Arity} arguments but got {args.Length}.");
         }
-        return Invoke(self, args);
+        if (s_frameCount == FramesMax) {
+            throw new LoxError("Stack overflow.");
+        }
+        s_frameCount++;
+        try {
+            return Invoke(self, args);
+        } finally {
+            s_frameCount--;
+        }
     }
 
     protected abstract object Invoke(object self, object[] args);

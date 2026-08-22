@@ -57,10 +57,15 @@ probes=(
 # Probes that must FAIL on both sides: a global function called before its
 # own `fun` declaration has run is a late-bound-global error, not a silent
 # success. Each entry needs a non-zero exit from build/loxpp AND from
-# tools/loxpp_clr.sh, with matching stdout — empty for 24, since neither side
-# prints anything before the error.
+# tools/loxpp_clr.sh, with matching stdout — empty for 24 and 31, since
+# neither side prints anything before the error.
 error_probes=(
     "notes/translation-probes/24_call_before_closure.lox"
+    # Native's own frame-count ceiling (src/vm.h FRAMES_MAX): a backend
+    # whose calling convention recurses its own host call stack has no
+    # such ceiling unless it builds one, and a wrong build here is a
+    # silent success on stdout otherwise.
+    "notes/translation-probes/31_deep_recursion.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
