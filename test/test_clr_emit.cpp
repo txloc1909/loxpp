@@ -1154,12 +1154,12 @@ TEST(EmitProgram, NestedClosureCopiesGrandparentUpvalue) {
     expectEveryBranchTargetIsLabeled(bFn);
 }
 
-// A local `fun` that captures itself makes an uninitialized-register read
-// of its own slot until seedSelfCaptureCell seeds the cell before anything
-// reads it. Reverting that seed locally and rerunning this
-// test confirms it FAILS first: without the seed, the very first "stloc 2"
-// this test looks for does not exist before the closure's own array-build
-// read of that same slot (it is instead the stelem.ref-redirect after
+// A local `fun` that captures itself needs seedSelfCaptureCell to bind a
+// fresh cell to its own slot before the closure's array-build loop reads
+// that slot. Reverting that seed locally and rerunning this test confirms
+// it FAILS first: without the seed, the very first "stloc 2" this test
+// looks for does not exist before the closure's own array-build read of
+// that same slot (it is instead the stelem.ref-redirect after
 // construction), so `firstReadPos` would sit ahead of a missing/later
 // `seedPos`, or `seedPos` would not be found at all.
 TEST(EmitProgram, SelfRecursiveClosureSeedsCellBeforeFirstRead) {

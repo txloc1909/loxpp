@@ -840,21 +840,25 @@ int findSelfCaptureLoxSlot(const Emitter& e, const DecodedInstruction& in) {
 
 // Self-capture: a local `fun` that calls itself makes ONE of this CLOSURE's
 // isLocal entries name the very slot it is declaring. `ensureCapturedCell`
-// cannot run on that slot the normal way: at this offset nothing has ever
-// written it, so its `ldloc` reads an uninitialized local, and CoreCLR
-// rejects that at JIT time (InvalidProgramException — brief.md section 5;
-// there is no ILVerify in this image to catch it earlier). The native VM
-// sidesteps this because its "local" IS the value stack slot: vm.cpp
-// pushes the closure first, and that push already IS the declaring store,
-// so `captureUpvalue` always finds a real value there. This pass has no
-// such order for free, so this seeds a fresh cell into the slot BEFORE
-// anything reads it — always a FRESH one, unconditionally, since this
-// offset IS the declaration, so whatever the slot currently holds is a
-// dead incarnation regardless. `newarr` default-initializes `[0]` to null;
-// the real value lands there once the closure exists, in
-// `storeClosureIntoSelfCell` below. After this call the array-build loop
-// in `emitClosure` treats the slot exactly like any other already-a-cell
-// capture — no special case needed there.
+// cannot run on that slot: its idempotent check keeps whatever cell is
+// already in the slot, and that is wrong here for two reasons at once. On
+// this method's very first pass through this declaration, the slot's CIL
+// local has never been stored to; `.locals init` zero-initializes it, so a
+// read there gives a silent `null`, not a build or run failure — CoreCLR
+// does not fault an unwritten local, it only zero-initializes it. On any
+// later pass (this declaration sits in a loop body), the slot instead holds
+// the PREVIOUS trip's cell, because `storeClosureIntoSelfCell` below
+// permanently redirects this slot's declaring store into `cell[0]` and
+// never falls back to the plain raw `stloc` that would let
+// `ensureCapturedCell` see a fresh raw value to wrap. Either way, the
+// idempotent check would keep a stale or empty cell instead of starting
+// fresh, so this seeds a brand-new cell into the slot unconditionally,
+// bypassing that check, on every pass regardless of what the slot
+// currently holds. `newarr` default-initializes `[0]` to null; the real
+// value lands there once the closure exists, in `storeClosureIntoSelfCell`
+// below. After this call the array-build loop in `emitClosure` treats the
+// slot exactly like any other already-a-cell capture — no special case
+// needed there.
 void seedSelfCaptureCell(Emitter& e, int selfSlot) {
     e.b.emit(pushIntInstruction(1), 0, +1);
     e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
