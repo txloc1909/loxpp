@@ -1962,11 +1962,10 @@ TEST(EmitScript, GetIterAtACfgMergeLabelRunsTheCrossCheck) {
     // `resolveZeroDepthLocalSlot`'s own cross-check (localCount - 1 vs. the
     // forward invisible-var tracker) actually runs on.
     MemoryManager mm;
-    DecodedFunction fn =
-        decodeScript("var xs = [1, 2];\n"
-                     "var ys = nil;\n"
-                     "for (var x in ys or xs) print x;\n",
-                     mm);
+    DecodedFunction fn = decodeScript("var xs = [1, 2];\n"
+                                      "var ys = nil;\n"
+                                      "for (var x in ys or xs) print x;\n",
+                                      mm);
     Cfg cfg = buildCfg(fn.instructions);
 
     int getIterOffset = -1;
@@ -1998,9 +1997,9 @@ TEST(EmitScript, GetIterAtACfgMergeLabelRunsTheCrossCheck) {
     // path — not just the away-from-a-label path — resolves the slot and
     // reaches the runtime call.
     EXPECT_NE(j.find(mergeLabel + ":\n"
-                     "    ldloc 2\n"
-                     "    call class [LoxRuntime]Lox.LoxIterator "
-                     "[LoxRuntime]Lox.LoxOps::GetIter(object)\n"),
+                                  "    ldloc 2\n"
+                                  "    call class [LoxRuntime]Lox.LoxIterator "
+                                  "[LoxRuntime]Lox.LoxOps::GetIter(object)\n"),
               std::string::npos)
         << j;
     expectEveryBranchTargetIsLabeled(j);

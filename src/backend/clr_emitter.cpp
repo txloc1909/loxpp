@@ -465,7 +465,7 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
 // resolved — so a caller that also needs the Lox-numbered slot (GET_ITER's
 // own captured-slot test) reads it from here instead of re-deriving it.
 int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset,
-                               int* outLoxSlot = nullptr) {
+                              int* outLoxSlot = nullptr) {
     int loxSlot = resolveZeroDepthLocalSlot(
         e.analysis.before[i].localCount - 1, e.labelAtOffset.contains(offset),
         e.lastInvisibleVarSlot, offset, "clr_emitter");
