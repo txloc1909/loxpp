@@ -1,6 +1,7 @@
 #pragma once
 
-// CLR code generator. Covers CONSTANT (number, string), NIL/TRUE/FALSE, the
+// CLR code generator. Covers CONSTANT (number, string, and an enum
+// constructor materialised as a fresh `LoxEnumCtor`), NIL/TRUE/FALSE, the
 // arithmetic and comparison family, NEGATE, NOT, PRINT, POP, GET_LOCAL,
 // SET_LOCAL, DEFINE_GLOBAL, GET_GLOBAL, SET_GLOBAL, JUMP/JUMP_IF_FALSE/LOOP
 // (P3b), CALL, CLOSURE (including a captured upvalue), GET_UPVALUE,
@@ -10,29 +11,32 @@
 // CLASS/INHERIT/DEFINE_METHOD/GET_PROPERTY/SET_PROPERTY/INVOKE/GET_SUPER/
 // SUPER_INVOKE/INSTANCEOF (P5+P4 — `init` returns `this` at the bytecode
 // level already, per compiler.cpp's own emitReturn, so this pass needs no
-// separate initializer case), MATCH_ERROR (pulled forward from the
-// match/enum scope — a match whose arms are all class or literal patterns
-// reaches it without any GET_TAG/JUMP_TABLE support), SLICE, IN, IS_SEQ
-// (a match sequence pattern's own type check), and the for-in iterator
-// protocol GET_ITER/ITER_HAS_NEXT/ITER_NEXT (P8 — see emitGetIter's own
-// note for the operand-stack hazard specific to GET_ITER) — see
-// notes/bytecode-translation-problems.md for what each P-number means.
+// separate initializer case), MATCH_ERROR, SLICE, IN, IS_SEQ (a match
+// sequence pattern's own type check), the for-in iterator protocol
+// GET_ITER/ITER_HAS_NEXT/ITER_NEXT (P8 — see emitGetIter's own note for the
+// operand-stack hazard specific to GET_ITER), and GET_TAG together with
+// JUMP_TABLE (P8's own match/enum dispatch — see emitFusedGetTagJumpTable's
+// own note) — see notes/bytecode-translation-problems.md for what each
+// P-number means.
 //
-// Scope: this emitter has no enum tag dispatch — GET_TAG and JUMP_TABLE
-// throw the same "does not lower <opcode> yet" error every other unlowered
-// opcode throws (notImplemented, above). It also has no general repair for
-// a folded match/enum result: the JVM backend's repair is
-// `normalizeFoldedOperands` (src/backend/jvm_emitter.cpp), and a CLR
-// repair, when one exists, must call into that one authority rather than
-// carry an independently derived copy of it. A folded result is safe to
-// consume exactly where the code routes it through
-// `isFoldedAtZeroDepth`/`loadNamedLocalAtZeroDepth` (clr_emitter.cpp) —
-// that routing is the authoritative list of safe consumers, not this
-// comment. Every other consumer of a folded operand fails at emit time
-// with an evaluation-stack-underflow `std::runtime_error`, never a
-// silently wrong value; the thrown message names the CIL instruction
-// being assembled, which is not always the same token as the Lox opcode
-// that produced it.
+// A folded operand's repair is not one code path. `native_pops.h`'s own
+// `nativePops` table states how many operand-stack cells a consumer reads;
+// `normalizeFoldedOperands` (clr_emitter.cpp) repairs any deficit for every
+// row that states a plain count, sharing that one table with
+// `jvm_emitter.cpp`'s own mechanism of the same name. A row marked CUSTOM
+// instead (a value that survives past its own instruction rather than
+// being net-popped, or an instruction that already threads its own
+// zero-depth load unconditionally) is not `normalizeFoldedOperands`'s
+// concern; whichever opcode needs to consume a possibly-folded value that
+// way routes through `isFoldedAtZeroDepth`/`loadNamedLocalAtZeroDepth`
+// (clr_emitter.cpp) instead — checkable directly against each such
+// function's own callers, not against this comment. GET_TAG immediately
+// followed by JUMP_TABLE (`fusableJumpTable`, clr_emitter.cpp) lowers to a
+// CIL `switch` with an explicit base subtraction ilasm needs and jasmin's
+// own `tableswitch` does not; a JUMP_TABLE that reaches the dispatch switch
+// unfused falls to the same failure mode as any opcode with neither a case
+// in that switch nor a `nativePops` row: `notImplemented` (clr_emitter.cpp)
+// throws rather than silently emitting nothing.
 //
 // A captured local lowers to a one-element `object[]` ref cell (P4). The
 // cell allocation is idempotent, not a static declaration-point seed: an
