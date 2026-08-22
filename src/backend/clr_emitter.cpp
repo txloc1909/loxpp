@@ -365,6 +365,18 @@ int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset) {
     return slot;
 }
 
+// The one test every peek-family consumer below (SET_LOCAL, SET_GLOBAL,
+// JUMP_IF_FALSE, RETURN, and any later one that peeks or returns a value
+// the abstract-stack pass may have folded) must run before it decides
+// between `loadNamedLocalAtZeroDepth` and its own ordinary
+// stack-value path. Centralized so a future consumer calls this instead
+// of re-deriving the raw `operandDepth() == 0` expression inline — the
+// resolution it guards (`resolveZeroDepthLocalSlot`) is already the one
+// shared authority; this is the one shared guard in front of it.
+bool isFoldedAtZeroDepth(const Emitter& e, std::size_t i) {
+    return e.analysis.before[i].operandDepth() == 0;
+}
+
 void emitConstant(Emitter& e, const DecodedInstruction& in) {
     Value v = e.fn.function->chunk.getConstant(
         static_cast<uint16_t>(in.constantIndex));
@@ -412,7 +424,7 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
                   bool& consumedFollowingPop) {
     int slot = e.slotForLocal(in.byteOperand);
     bool fuse = e.fusablePop(i);
-    if (e.analysis.before[i].operandDepth() == 0) {
+    if (isFoldedAtZeroDepth(e, i)) {
         loadNamedLocalAtZeroDepth(e, i, in.offset);
         e.b.emit("stloc " + std::to_string(slot), 1, -1);
     } else if (fuse) {
@@ -441,7 +453,7 @@ void emitGetGlobal(Emitter& e, const DecodedInstruction& in) {
 void emitSetGlobal(Emitter& e, std::size_t i, const DecodedInstruction& in,
                    bool& consumedFollowingPop) {
     bool fuse = e.fusablePop(i);
-    if (e.analysis.before[i].operandDepth() == 0) {
+    if (isFoldedAtZeroDepth(e, i)) {
         loadNamedLocalAtZeroDepth(e, i, in.offset);
         emitGlobalsCall(e, "Set", e.globalNameLiteral(in.constantIndex),
                         /*peek=*/false);
@@ -500,7 +512,7 @@ void emitJumpOrLoop(Emitter& e, const DecodedInstruction& in) {
 // contract holds on both edges (0 in, 0 out) exactly as the dup path holds
 // it at (D, D) for D > 0.
 void emitJumpIfFalse(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (e.analysis.before[i].operandDepth() == 0) {
+    if (isFoldedAtZeroDepth(e, i)) {
         loadNamedLocalAtZeroDepth(e, i, in.offset);
     } else {
         e.b.emit("dup", 1, +1);
@@ -616,7 +628,7 @@ void emitReturn(Emitter& e, std::size_t i, const DecodedInstruction& in,
         e.b.emit("ret", 0, 0);
         return;
     }
-    if (e.analysis.before[i].operandDepth() == 0) {
+    if (isFoldedAtZeroDepth(e, i)) {
         loadNamedLocalAtZeroDepth(e, i, in.offset);
     }
     if (e.b.depth != 1) {
