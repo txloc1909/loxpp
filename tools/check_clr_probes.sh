@@ -11,11 +11,11 @@
 # GET_INDEX, and SET_INDEX, pulled forward because the closure probes need
 # a list to hold the closures under test), and classes, methods, and super
 # (CLASS, INHERIT, DEFINE_METHOD, GET_PROPERTY, SET_PROPERTY, INVOKE,
-# GET_SUPER, SUPER_INVOKE, INSTANCEOF, and MATCH_ERROR pulled forward from
-# the match/enum scope — a match whose arms are all class or literal
-# patterns needs no GET_TAG/JUMP_TABLE support to reach it) — later CLR
-# backend work grows this list the same way check_jvm_probes.sh grew as the
-# JVM backend gained opcodes.
+# GET_SUPER, SUPER_INVOKE, INSTANCEOF, and MATCH_ERROR), and match/enum
+# dispatch (GET_TAG and JUMP_TABLE, an enum-constructor CONSTANT and CALL,
+# and an enum payload read through GET_INDEX) — later CLR backend work
+# grows this list the same way check_jvm_probes.sh grew as the JVM backend
+# gained opcodes.
 #
 # error_probes hold the opposite shape: both sides must FAIL, with matching
 # stdout. They check that an error stays an error on the CLR backend too, not
@@ -126,6 +126,14 @@ probes=(
     "notes/translation-probes/11_for_in.lox"
     "notes/translation-probes/16_slice_in.lox"
     "notes/translation-probes/25_seq_map_string_coverage.lox"
+    # Match/enum dispatch: a dense match over enum variants (GET_TAG fused
+    # with JUMP_TABLE, a CIL `switch`), an enum-constructor CONSTANT and
+    # CALL, an enum payload read through GET_INDEX, and
+    # normalizeFoldedOperands's own repair for a folded match operand
+    # reaching a genuine sibling operand of the same consumer.
+    "notes/translation-probes/13_enum_match.lox"
+    "notes/translation-probes/14_enum_payload.lox"
+    "notes/translation-probes/28_folded_match_operand_family.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -144,9 +152,18 @@ error_probes=(
     # own header comment for why).
     "notes/translation-probes/clr-only/31_deep_recursion.lox"
     # A match whose arms are all class patterns raises a real, reachable
-    # MATCH_ERROR when no arm matches (this node's own checkpoint) — both
-    # sides print "before" then fail.
+    # MATCH_ERROR when no arm matches — both sides print "before" then fail.
     "notes/translation-probes/33_class_pattern_match_error.lox"
+    # A dense, table-eligible match over enum A's own tags, given a subject
+    # of an unrelated enum B: the literal JUMP_TABLE default, not the sparse
+    # compare-and-branch form, raises MATCH_ERROR — both sides print
+    # "before" then fail.
+    "notes/translation-probes/27_jump_table_default_cross_enum.lox"
+    # A dense enum match that dispatches correctly, then a second match
+    # whose guard defeats every arm despite naming every constructor once
+    # (exhaustive by name, accepting nothing at run time) — both sides
+    # print the first match's own arm value, then fail on the second.
+    "notes/translation-probes/26_enum_match_dispatch_and_error.lox"
 )
 
 # Whole example programs, not single-opcode probes: each one exercises more
@@ -222,6 +239,16 @@ examples=(
     "examples/sorting.lox"
     "examples/string_list_pattern_demo.lox"
     "examples/huffman.lox"
+    # Match/enum dispatch: each of these needs GET_TAG/JUMP_TABLE, an
+    # enum-constructor CONSTANT and CALL, or an or-pattern/@-binding over an
+    # enum to run.
+    "examples/enum_match.lox"
+    "examples/enum_result.lox"
+    "examples/enum_tree.lox"
+    "examples/at_binding_demo.lox"
+    "examples/bench_jump_table.lox"
+    "examples/or_pattern_demo.lox"
+    "examples/parser.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
