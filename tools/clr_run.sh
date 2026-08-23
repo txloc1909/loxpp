@@ -14,16 +14,23 @@
 #                share this one assembly — proven with a two-file, two-class
 #                probe against ilasm 8.0.0 in this project's dev-managed
 #                image). Give a scratch directory: this harness writes
-#                <il-dir>/<main-class>.dll and its runtimeconfig.json.
+#                <il-dir>/<main-class>.dll.
 #   <rt-dll>     path to runtime/clr/LoxRuntime.dll.
 #   <main-class> name of the class whose static Main(string[] args) is the
 #                entry point — the same name the emitted *.il file's own
 #                `.assembly`/`.module` directives use (loxpp --target clr
 #                names it "LoxMain", matching --target jvm's "LoxMain").
-#   [arg...]     program arguments. dotnet binds these to Main's own
-#                `args` parameter, and the emitted prologue forwards that
-#                array to LoxRuntime.SetProgramArgs before the script body
-#                runs, so the native `args()` global answers them.
+#   [arg...]     program arguments. LoxHost (runtime/clr/host/LoxHost.cs)
+#                binds these to the entry point's own `args` parameter, and
+#                the emitted prologue forwards that array to
+#                LoxRuntime.SetProgramArgs before the script body runs, so
+#                the native `args()` global answers them.
+#
+# The assembled program does not run as its own process. It runs through
+# LoxHost, on a thread LoxHost sizes itself (LOX_RT_CLR_HOST_DLL overrides
+# its path; LOX_CLR_STACK_BYTES overrides the stack size, default 256 MiB) —
+# see LoxHost.cs for why every CLR run goes through this indirection, not
+# only the self-hosted interpreter that first needed it.
 #
 # stdin, stdout, stderr, and the exit code all pass through to and from
 # dotnet unchanged, because later checks diff this output against
@@ -40,6 +47,11 @@ rt_dll="$2"
 main_class="$3"
 program_args=("${@:4}")
 
+# Sibling of rt_dll by default: tools/build_lox_rt_clr.sh writes both into
+# the same runtime/clr/ directory.
+host_dll="${LOX_RT_CLR_HOST_DLL:-$(dirname "$rt_dll")/LoxHost.dll}"
+stack_bytes="${LOX_CLR_STACK_BYTES:-268435456}"
+
 if [ ! -d "$il_dir" ]; then
     echo "clr_run.sh: no such directory: $il_dir" >&2
     exit 1
@@ -47,6 +59,12 @@ fi
 
 if [ ! -f "$rt_dll" ]; then
     echo "clr_run.sh: no such runtime dll: $rt_dll" >&2
+    echo "clr_run.sh: run tools/build_lox_rt_clr.sh first." >&2
+    exit 1
+fi
+
+if [ ! -f "$host_dll" ]; then
+    echo "clr_run.sh: no such host dll: $host_dll" >&2
     echo "clr_run.sh: run tools/build_lox_rt_clr.sh first." >&2
     exit 1
 fi
@@ -73,35 +91,19 @@ if [ ! -f "$output_dll" ]; then
     exit 1
 fi
 
-runtime_version="$(dotnet --list-runtimes 2>/dev/null \
-    | awk '$1 == "Microsoft.NETCore.App" { print $2 }' | sort -V | tail -1)"
-if [ -z "$runtime_version" ]; then
-    echo "clr_run.sh: no Microsoft.NETCore.App runtime found (dotnet --list-runtimes)" >&2
-    exit 1
-fi
-
 # ilasm emits no runtimeconfig.json, and dotnet refuses to run an assembly
-# without one (notes/backend-implementation-dag.md). The tfm here is
-# derived from the discovered runtime, not hardcoded, so a runtime upgrade
-# in the image cannot silently pair a stale tfm with a newer framework
-# version (mirrors tools/check_managed_toolchains.sh's own derivation).
-cat > "$il_dir/$main_class.runtimeconfig.json" <<JSON
-{
-  "runtimeOptions": {
-    "tfm": "net${runtime_version%%.*}.0",
-    "framework": {
-      "name": "Microsoft.NETCore.App",
-      "version": "${runtime_version}"
-    }
-  }
-}
-JSON
+# with no such file for its own entry assembly (notes/backend-implementation-
+# dag.md) — but $output_dll is no longer dotnet's own entry assembly, only a
+# dependency LoxHost loads by reflection, so it needs none of its own; only
+# LoxHost.dll does, and `dotnet build` already wrote that one
+# (tools/build_lox_rt_clr.sh).
 
-# dotnet resolves an `.assembly extern LoxRuntime {}` reference by probing
-# next to the running assembly, so the runtime dll needs a copy right there
-# too, not only on ilasm's own assemble-time search path.
+# LoxHost loads $output_dll with Assembly.LoadFrom, which also probes that
+# assembly's own directory for its dependencies — so the runtime dll needs a
+# copy right there too, not only next to LoxHost.dll (tools/build_lox_rt_clr.sh
+# already puts one there) or on ilasm's own assemble-time search path.
 cp "$rt_dll" "$il_dir/"
 
 # exec, not a captured call: it replaces this script with dotnet, so stdin,
 # stdout, stderr, and the exit code are dotnet's own, not a copy.
-exec dotnet "$output_dll" "${program_args[@]}"
+exec dotnet "$host_dll" "$stack_bytes" "$output_dll" "${program_args[@]}"

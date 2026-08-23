@@ -119,6 +119,11 @@ probes=(
     # that half at the runtime level. Lives in clr-only/ (see the probe
     # file's own header comment for why); named here directly.
     "notes/translation-probes/clr-only/38_bound_native_method_identity.lox"
+    # A deeply nested list, printed: LoxOps.Stringify's own unbounded C#
+    # recursion over list nesting, past the default CLR thread stack's own
+    # headroom. Lives in clr-only/ (see the probe file's own header
+    # comment for why); named here directly.
+    "notes/translation-probes/clr-only/39_deep_nested_stringify.lox"
     # The consumed-match case: a match expression's result reaching PRINT,
     # DEFINE_GLOBAL, or SET_GLOBAL with nothing in between to re-expose it
     # as a genuine evaluation-stack value first.
