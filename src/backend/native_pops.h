@@ -39,5 +39,12 @@
 #include "chunk_decoder.h"
 
 #include <optional>
+#include <string>
 
 std::optional<int> nativePops(Op op, const DecodedInstruction& in);
+
+// Every Op enumerator's own spelling, for a diagnostic message only — never
+// the disassembly oracle (test_chunk_decoder.cpp owns that). An enumerator
+// missing from the switch still returns a name, "UNKNOWN_OP", rather than
+// leaving a caller building an error string with nothing to print.
+std::string opName(Op op);
