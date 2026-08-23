@@ -1855,8 +1855,8 @@ struct AggregateNeeds {
 AggregateNeeds computeAggregateNeeds(const DecodedFunction& fn,
                                      const FunctionStackAnalysis& analysis) {
     AggregateNeeds needs;
-    for (std::size_t i = 0; i < fn.instructions.size(); i++) {
-        const DecodedInstruction& instr = fn.instructions[i];
+    std::size_t i = 0;
+    for (const DecodedInstruction& instr : fn.instructions) {
         switch (instr.op) {
         case Op::CALL:
         case Op::BUILD_LIST:
@@ -1886,6 +1886,7 @@ AggregateNeeds computeAggregateNeeds(const DecodedFunction& fn,
                 }
             }
         }
+        i++;
     }
     return needs;
 }
