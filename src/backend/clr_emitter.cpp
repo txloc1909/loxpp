@@ -423,10 +423,13 @@ void emitGlobalsCall(Emitter& e, const char* method,
 // mistake a real Lox value for a cell or the reverse. `isinst` (unlike the
 // JVM's `instanceof`) leaves null-or-the-reference on the stack rather than
 // a boolean, so `brfalse`/`brtrue` read that result directly with no
-// separate comparison.
-void emitCapturedGetLocal(Emitter& e, int slot, int offset) {
-    std::string rawLbl = captureLabel("gr", offset);
-    std::string endLbl = captureLabel("ge", offset);
+// separate comparison. `sub` disambiguates two calls at the SAME offset —
+// `normalizeFoldedOperands`'s multi-slot repair loop reads several folded
+// Lox slots for one instruction, and a shared offset with no sub index
+// would hand two of those reads the same ilasm label pair.
+void emitCapturedGetLocal(Emitter& e, int slot, int offset, int sub = -1) {
+    std::string rawLbl = captureLabel("gr", offset, sub);
+    std::string endLbl = captureLabel("ge", offset, sub);
     int d = e.b.depth;
     e.b.emit("ldloc " + std::to_string(slot), 0, +1);
     e.b.emit("isinst object[]", 1, 0);
@@ -498,10 +501,13 @@ int resolveTopLoxSlot(const Emitter& e, std::size_t i, int offset) {
 // Shared by `loadNamedLocalAtZeroDepth` (below) and
 // `normalizeFoldedOperands`'s own multi-slot repair, both of which load a
 // Lox slot they did not reach through an ordinary GET_LOCAL instruction.
-int loadLoxSlot(Emitter& e, int loxSlot, int offset) {
+// `sub` forwards to `emitCapturedGetLocal` unchanged — see its own note —
+// so a caller that issues more than one load at the same offset gives each
+// one a distinct value.
+int loadLoxSlot(Emitter& e, int loxSlot, int offset, int sub = -1) {
     int slot = e.slotForLocal(loxSlot);
     if (e.isCaptured(loxSlot)) {
-        emitCapturedGetLocal(e, slot, offset);
+        emitCapturedGetLocal(e, slot, offset, sub);
     } else {
         e.b.emit("ldloc " + std::to_string(slot), 0, +1);
     }
@@ -1636,8 +1642,13 @@ void normalizeFoldedOperands(Emitter& e, std::size_t i,
     }
 
     int topLoxSlot = resolveTopLoxSlot(e, i, in.offset);
+    // `k` also serves as the captured-slot label sub-index: this loop can
+    // call loadLoxSlot more than once at this SAME offset, and two of those
+    // calls landing on a captured slot would otherwise both ask
+    // emitCapturedGetLocal for the offset-only label pair ("gr"+offset /
+    // "ge"+offset), which ilasm rejects as a duplicate the second time.
     for (int k = deficit - 1; k >= 0; k--) {
-        loadLoxSlot(e, topLoxSlot - k, in.offset);
+        loadLoxSlot(e, topLoxSlot - k, in.offset, k);
     }
 
     if (genuineCount == 1) {
