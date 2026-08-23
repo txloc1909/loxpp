@@ -50,6 +50,20 @@ fun buildCodes(node, prefix, codes) {
     if (node.right != nil) buildCodes(node.right, prefix + "1", codes);
 }
 
+// Printable-ASCII order table. Lox++ comparison operators accept Numbers
+// only (spec/04-semantics.md), so the code-table tie-break below turns each
+// char into its position here before it compares.
+var ASCII_ORDER = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+
+fun charOrd(ch) {
+    var k = 0;
+    while (k < len(ASCII_ORDER)) {
+        if (ASCII_ORDER[k] == ch) return k;
+        k = k + 1;
+    }
+    return len(ASCII_ORDER);   // non-printable chars sort last
+}
+
 fun encode(text) {
     if (len(text) == 0) {
         print "(empty input)";
@@ -130,7 +144,10 @@ fun encode(text) {
     while (pass < n) {
         var e = entries[pass];
         var j = pass - 1;
-        while (j >= 0 and len(entries[j][1]) > len(e[1])) {
+        while (j >= 0 and
+               (len(entries[j][1]) > len(e[1]) or
+                (len(entries[j][1]) == len(e[1]) and
+                 charOrd(entries[j][0]) > charOrd(e[0])))) {
             entries[j + 1] = entries[j];
             j = j - 1;
         }

@@ -221,6 +221,7 @@ examples=(
     "examples/sequences.lox"
     "examples/sorting.lox"
     "examples/string_list_pattern_demo.lox"
+    "examples/huffman.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

@@ -258,16 +258,11 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh --exclude tools/jvm_excluded_examples.txt --only-excluded examples/"
 
-      # Full-corpus differential, every example. examples/huffman.lox is a
-      # proven permutation (a same-code-length tie in the printed code table
-      # sorts by map insertion order, not native bucket order; the codes
-      # themselves are identical on both runtimes) and is an ordinary entry
-      # in tools/jvm_excluded_examples.txt, so --exclude handles it the same
-      # way it handles every other map-order example — no per-name carve-out
-      # in this step. check_examples.py only checks each example's own CHECK
-      # directives, so an example with none (examples/bench_jump_table.lox,
-      # examples/remove.lox) could print a wrong answer with CI green. This
-      # step compares full stdout for every example instead.
+      # Full-corpus differential, every example. check_examples.py only
+      # checks each example's own CHECK directives, so an example with none
+      # (examples/bench_jump_table.lox, examples/remove.lox) could print a
+      # wrong answer with CI green. This step compares full stdout for every
+      # example instead.
       - name: JVM differential suite - full example corpus (N11)
         run: |
           docker run --rm \
