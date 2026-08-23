@@ -1,23 +1,12 @@
 #pragma once
 
-// CLR code generator. Covers CONSTANT (number, string, and an enum
-// constructor materialised as a fresh `LoxEnumCtor`), NIL/TRUE/FALSE, the
-// arithmetic and comparison family, NEGATE, NOT, PRINT, POP, GET_LOCAL,
-// SET_LOCAL, DEFINE_GLOBAL, GET_GLOBAL, SET_GLOBAL, JUMP/JUMP_IF_FALSE/LOOP
-// (P3b), CALL, CLOSURE (including a captured upvalue), GET_UPVALUE,
-// SET_UPVALUE, CLOSE_UPVALUE, RETURN in both of its roles (P5),
-// BUILD_LIST/BUILD_MAP/GET_INDEX/SET_INDEX (pulled forward from the
-// aggregates scope — see emitBuildList's and emitBuildMap's own notes),
-// CLASS/INHERIT/DEFINE_METHOD/GET_PROPERTY/SET_PROPERTY/INVOKE/GET_SUPER/
-// SUPER_INVOKE/INSTANCEOF (P5+P4 — `init` returns `this` at the bytecode
-// level already, per compiler.cpp's own emitReturn, so this pass needs no
-// separate initializer case), MATCH_ERROR, SLICE, IN, IS_SEQ (a match
-// sequence pattern's own type check), the for-in iterator protocol
-// GET_ITER/ITER_HAS_NEXT/ITER_NEXT (P8 — see emitGetIter's own note for the
-// operand-stack hazard specific to GET_ITER), and GET_TAG together with
-// JUMP_TABLE (P8's own match/enum dispatch — see emitFusedGetTagJumpTable's
-// own note) — see notes/bytecode-translation-problems.md for what each
-// P-number means.
+// CLR code generator: walks the ObjFunction tree (chunk_decoder.h) and
+// emits ilasm text, one CIL class per function. The dispatch switch
+// (clr_emitter.cpp) is the one place that states which opcodes this pass
+// lowers; an opcode with no case there and no `nativePops` row reaches
+// `notImplemented` (clr_emitter.cpp), which throws rather than silently
+// emitting nothing. See notes/bytecode-translation-problems.md for the
+// per-opcode semantics this pass targets.
 //
 // A folded operand's repair is not one code path. `native_pops.h`'s own
 // `nativePops` table states how many operand-stack cells a consumer reads;
@@ -34,9 +23,8 @@
 // followed by JUMP_TABLE (`fusableJumpTable`, clr_emitter.cpp) lowers to a
 // CIL `switch` with an explicit base subtraction ilasm needs and jasmin's
 // own `tableswitch` does not; a JUMP_TABLE that reaches the dispatch switch
-// unfused falls to the same failure mode as any opcode with neither a case
-// in that switch nor a `nativePops` row: `notImplemented` (clr_emitter.cpp)
-// throws rather than silently emitting nothing.
+// unfused hits the same `notImplemented` failure this file's opening
+// paragraph names.
 //
 // A captured local lowers to a one-element `object[]` ref cell (P4). The
 // cell allocation is idempotent, not a static declaration-point seed: an

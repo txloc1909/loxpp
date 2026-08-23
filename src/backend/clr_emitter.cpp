@@ -193,9 +193,8 @@ struct Emitter {
     }
 
     // The one choke point every CIL local slot index passes through before
-    // it becomes ilasm text. A slot number here is always the sum of one
-    // or more of this struct's own base fields (baseSlot, scratchSlot,
-    // calleeScratchSlot, argScratchBase) — nothing stops one of those bases
+    // it becomes ilasm text. A slot number here is always built from one or
+    // more of this struct's own fields — nothing stops one of those fields
     // from staying at its own -1 sentinel, or from a sizing pass leaving
     // `declaredLocalCount` too small for a width some consumer actually
     // writes, so this is checked here rather than trusted from the
