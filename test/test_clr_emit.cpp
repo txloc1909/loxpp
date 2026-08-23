@@ -2282,8 +2282,14 @@ TEST(EmitProgram, FoldedCalleeWithGenuineArgsLoadsCalleeThenSpilledArgs) {
     StackAnalysisTree tree = analyzeStackTree(fn);
     std::string il = clr::emitProgram(fn, tree, "LoxMain");
 
-    EXPECT_NE(il.find("call object [LoxRuntime]Lox.LoxOps::Call(object, "
-                      "object[])\n"),
+    // The two genuine arguments spill to scratch slots 6 (arg "2") and 7
+    // (arg "3") before the folded callee loads from slot 2; the reload
+    // right after that load must put them back in their ORIGINAL
+    // left-to-right order (2, then 3), which needs slot 7 read before
+    // slot 6 — the reverse of the order they were popped off the stack.
+    EXPECT_NE(il.find("ldloc 2\n"
+                      "    ldloc 7\n"
+                      "    ldloc 6\n"),
               std::string::npos)
         << il;
     expectEveryBranchTargetIsLabeled(il);
