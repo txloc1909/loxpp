@@ -161,6 +161,12 @@ struct Emitter {
     int calleeScratchSlot{-1};
     int argScratchBase{-1};
 
+    // The exact slot count `.locals init` declares for this chunk (set by
+    // buildEmitter, from the same computation emitClassBody uses for the
+    // directive itself) — the upper bound `localOp` checks every slot
+    // index against before it becomes ilasm text.
+    int declaredLocalCount{0};
+
     // This pass's own forward walk, updated in offset order alongside every
     // invisible-var store: the Lox slot the most RECENTLY DECLARED
     // invisible-var site bound. -1 is a sentinel for "no site has run yet".
@@ -184,6 +190,39 @@ struct Emitter {
 
     [[nodiscard]] int slotForLocal(int loxSlot) const {
         return baseSlot + loxSlot;
+    }
+
+    // The one choke point every CIL local slot index passes through before
+    // it becomes ilasm text. A slot number here is always the sum of one
+    // or more of this struct's own base fields (baseSlot, scratchSlot,
+    // calleeScratchSlot, argScratchBase) — nothing stops one of those bases
+    // from staying at its own -1 sentinel, or from a sizing pass leaving
+    // `declaredLocalCount` too small for a width some consumer actually
+    // writes, so this is checked here rather than trusted from the
+    // arithmetic that produced it. `mnemonic` is the bare instruction text
+    // ("stloc" or "ldloc"); the return value is that text with the slot
+    // number appended, ready for Builder::emit. ilasm accepts a negative or
+    // out-of-range slot number in a uniformly `object`-typed `.locals init`
+    // with no diagnostic of its own; only CoreCLR's later
+    // InvalidProgramException would otherwise catch it, and that exception
+    // names no instruction.
+    [[nodiscard]] std::string localOp(const char* mnemonic, int slot) const {
+        if (slot < 0 || slot >= declaredLocalCount) {
+            throw std::runtime_error(
+                std::string("clr_emitter: ") + mnemonic + " " +
+                std::to_string(slot) +
+                " is outside the declared .locals init range [0, " +
+                std::to_string(declaredLocalCount) + ")");
+        }
+        return std::string(mnemonic) + " " + std::to_string(slot);
+    }
+
+    [[nodiscard]] std::string stloc(int slot) const {
+        return localOp("stloc", slot);
+    }
+
+    [[nodiscard]] std::string ldloc(int slot) const {
+        return localOp("ldloc", slot);
     }
 
     [[nodiscard]] bool reached(std::size_t idx) const {
@@ -281,16 +320,16 @@ struct Emitter {
 // once more afterward.
 void emitGlobalsCall(Emitter& e, const char* method,
                      const std::string& nameLiteral, bool peek) {
-    std::string scratch = std::to_string(e.scratchSlot);
-    e.b.emit("stloc " + scratch, 1, -1);
-    e.b.emit("ldloc " + std::to_string(e.globalsSlot), 0, +1);
+    int scratch = e.scratchSlot;
+    e.b.emit(e.stloc(scratch), 1, -1);
+    e.b.emit(e.ldloc(e.globalsSlot), 0, +1);
     e.b.emit("ldstr " + nameLiteral, 0, +1);
-    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit(e.ldloc(scratch), 0, +1);
     e.b.emit(std::string("call instance void [LoxRuntime]Lox.LoxGlobals::") +
                  method + "(string, object)",
              3, -3);
     if (peek) {
-        e.b.emit("ldloc " + scratch, 0, +1);
+        e.b.emit(e.ldloc(scratch), 0, +1);
     }
 }
 
@@ -319,17 +358,17 @@ void emitCapturedGetLocal(Emitter& e, int slot, int offset, int sub = -1) {
     std::string rawLbl = captureLabel("gr", offset, sub);
     std::string endLbl = captureLabel("ge", offset, sub);
     int d = e.b.depth;
-    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit(e.ldloc(slot), 0, +1);
     e.b.emit("isinst object[]", 1, 0);
     e.b.emit("brfalse " + rawLbl, 1, -1);
-    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit(e.ldloc(slot), 0, +1);
     e.b.emit("castclass object[]", 1, 0);
     e.b.emit("ldc.i4.0", 0, +1);
     e.b.emit("ldelem.ref", 2, -1);
     e.b.emit("br " + endLbl, 0, 0);
     e.b.label(rawLbl);
     e.b.resync(d);
-    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit(e.ldloc(slot), 0, +1);
     e.b.label(endLbl);
     e.b.resync(d + 1);
 }
@@ -345,26 +384,26 @@ void emitCapturedGetLocal(Emitter& e, int slot, int offset, int sub = -1) {
 void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
     std::string rawLbl = captureLabel("sr", offset);
     std::string endLbl = captureLabel("se", offset);
-    std::string scratch = std::to_string(e.scratchSlot);
+    int scratch = e.scratchSlot;
     int d = e.b.depth;
-    e.b.emit("stloc " + scratch, 1, -1);
-    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit(e.stloc(scratch), 1, -1);
+    e.b.emit(e.ldloc(slot), 0, +1);
     e.b.emit("isinst object[]", 1, 0);
     e.b.emit("brfalse " + rawLbl, 1, -1);
-    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit(e.ldloc(slot), 0, +1);
     e.b.emit("castclass object[]", 1, 0);
     e.b.emit("ldc.i4.0", 0, +1);
-    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit(e.ldloc(scratch), 0, +1);
     e.b.emit("stelem.ref", 3, -3);
     e.b.emit("br " + endLbl, 0, 0);
     e.b.label(rawLbl);
     e.b.resync(d - 1);
-    e.b.emit("ldloc " + scratch, 0, +1);
-    e.b.emit("stloc " + std::to_string(slot), 1, -1);
+    e.b.emit(e.ldloc(scratch), 0, +1);
+    e.b.emit(e.stloc(slot), 1, -1);
     e.b.label(endLbl);
     e.b.resync(d - 1);
     if (peek) {
-        e.b.emit("ldloc " + scratch, 0, +1);
+        e.b.emit(e.ldloc(scratch), 0, +1);
     }
 }
 
@@ -397,7 +436,7 @@ int loadLoxSlot(Emitter& e, int loxSlot, int offset, int sub = -1) {
     if (e.isCaptured(loxSlot)) {
         emitCapturedGetLocal(e, slot, offset, sub);
     } else {
-        e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+        e.b.emit(e.ldloc(slot), 0, +1);
     }
     return slot;
 }
@@ -485,7 +524,7 @@ void emitGetLocal(Emitter& e, const DecodedInstruction& in) {
     if (e.isCaptured(in.byteOperand)) {
         emitCapturedGetLocal(e, slot, in.offset);
     } else {
-        e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+        e.b.emit(e.ldloc(slot), 0, +1);
     }
 }
 
@@ -510,15 +549,15 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
         if (captured) {
             emitCapturedStore(e, slot, in.offset, /*peek=*/false);
         } else {
-            e.b.emit("stloc " + std::to_string(slot), 1, -1);
+            e.b.emit(e.stloc(slot), 1, -1);
         }
     } else if (captured) {
         emitCapturedStore(e, slot, in.offset, /*peek=*/!fuse);
     } else if (fuse) {
-        e.b.emit("stloc " + std::to_string(slot), 1, -1);
+        e.b.emit(e.stloc(slot), 1, -1);
     } else {
         e.b.emit("dup", 1, +1);
-        e.b.emit("stloc " + std::to_string(slot), 1, -1);
+        e.b.emit(e.stloc(slot), 1, -1);
     }
     consumedFollowingPop = fuse;
 }
@@ -535,7 +574,7 @@ void emitDefineGlobal(Emitter& e, const DecodedInstruction& in) {
 }
 
 void emitGetGlobal(Emitter& e, const DecodedInstruction& in) {
-    e.b.emit("ldloc " + std::to_string(e.globalsSlot), 0, +1);
+    e.b.emit(e.ldloc(e.globalsSlot), 0, +1);
     e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
     e.b.emit("call instance object [LoxRuntime]Lox.LoxGlobals::Get(string)", 2,
              -1);
@@ -630,7 +669,7 @@ void emitJumpIfFalse(Emitter& e, std::size_t i, const DecodedInstruction& in) {
 // reference on top of where those values used to sit.
 void spillLooseValues(Emitter& e, int scratchBase, int width) {
     for (int i = width - 1; i >= 0; i--) {
-        e.b.emit("stloc " + std::to_string(scratchBase + i), 1, -1);
+        e.b.emit(e.stloc(scratchBase + i), 1, -1);
     }
 }
 
@@ -646,7 +685,7 @@ void newObjectArrayFromScratch(Emitter& e, int scratchBase, int width) {
     for (int i = 0; i < width; i++) {
         e.b.emit("dup", 1, +1);
         e.b.emit(pushIntInstruction(i), 0, +1);
-        e.b.emit("ldloc " + std::to_string(scratchBase + i), 0, +1);
+        e.b.emit(e.ldloc(scratchBase + i), 0, +1);
         e.b.emit("stelem.ref", 3, -3);
     }
 }
@@ -707,9 +746,9 @@ void emitCall(Emitter& e, const DecodedInstruction& in) {
         return;
     }
     spillLooseValues(e, e.argScratchBase, argCount);
-    e.b.emit("stloc " + std::to_string(e.calleeScratchSlot), 1, -1);
+    e.b.emit(e.stloc(e.calleeScratchSlot), 1, -1);
 
-    e.b.emit("ldloc " + std::to_string(e.calleeScratchSlot), 0, +1);
+    e.b.emit(e.ldloc(e.calleeScratchSlot), 0, +1);
     newObjectArrayFromScratch(e, e.argScratchBase, argCount);
     e.b.emit(callSig, 2, -1);
 }
@@ -833,7 +872,7 @@ void emitGetIter(Emitter& e, std::size_t i, const DecodedInstruction& in) {
     if (e.isCaptured(loxSlot)) {
         emitCapturedStore(e, slot, in.offset, /*peek=*/false);
     } else {
-        e.b.emit("stloc " + std::to_string(slot), 1, -1);
+        e.b.emit(e.stloc(slot), 1, -1);
     }
 }
 
@@ -891,10 +930,10 @@ void emitGetProperty(Emitter& e, const DecodedInstruction& in) {
 // `e.scratchSlot` while the constant name is pushed between them — the same
 // shuffle `emitGlobalsCall`'s own peek path uses for the identical reason.
 void emitSetProperty(Emitter& e, const DecodedInstruction& in) {
-    std::string scratch = std::to_string(e.scratchSlot);
-    e.b.emit("stloc " + scratch, 1, -1);
+    int scratch = e.scratchSlot;
+    e.b.emit(e.stloc(scratch), 1, -1);
     e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
-    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit(e.ldloc(scratch), 0, +1);
     e.b.emit("call object [LoxRuntime]Lox.LoxOps::SetProperty(object, "
              "string, object)",
              3, -2);
@@ -909,12 +948,12 @@ void emitSetProperty(Emitter& e, const DecodedInstruction& in) {
 // real program, so a mismatch can only be an emitter bug, and a raw
 // InvalidCastException is an acceptable way to fail loudly on one.
 void emitDefineMethod(Emitter& e, const DecodedInstruction& in) {
-    std::string scratch = std::to_string(e.scratchSlot);
-    e.b.emit("stloc " + scratch, 1, -1);
+    int scratch = e.scratchSlot;
+    e.b.emit(e.stloc(scratch), 1, -1);
     e.b.emit("dup", 1, +1);
     e.b.emit("castclass [LoxRuntime]Lox.LoxClass", 1, 0);
     e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
-    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit(e.ldloc(scratch), 0, +1);
     e.b.emit("castclass [LoxRuntime]Lox.LoxClosure", 1, 0);
     e.b.emit("call void [LoxRuntime]Lox.LoxOps::DefineMethod(class "
              "[LoxRuntime]Lox.LoxClass, string, class "
@@ -932,13 +971,13 @@ void emitDefineMethod(Emitter& e, const DecodedInstruction& in) {
 // reloaded in `LoxOps.GetSuper`'s own parameter order (superclassVal, name,
 // self).
 void emitGetSuper(Emitter& e, const DecodedInstruction& in) {
-    std::string superScratch = std::to_string(e.scratchSlot);
-    std::string selfScratch = std::to_string(e.calleeScratchSlot);
-    e.b.emit("stloc " + superScratch, 1, -1);
-    e.b.emit("stloc " + selfScratch, 1, -1);
-    e.b.emit("ldloc " + superScratch, 0, +1);
+    int superScratch = e.scratchSlot;
+    int selfScratch = e.calleeScratchSlot;
+    e.b.emit(e.stloc(superScratch), 1, -1);
+    e.b.emit(e.stloc(selfScratch), 1, -1);
+    e.b.emit(e.ldloc(superScratch), 0, +1);
     e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
-    e.b.emit("ldloc " + selfScratch, 0, +1);
+    e.b.emit(e.ldloc(selfScratch), 0, +1);
     e.b.emit("call object [LoxRuntime]Lox.LoxOps::GetSuper(object, string, "
              "object)",
              3, -2);
@@ -955,7 +994,7 @@ void emitGetSuper(Emitter& e, const DecodedInstruction& in) {
 // declared CIL type here is not evidence of the invariant; the emitter's
 // own write discipline is.
 void emitInstanceof(Emitter& e, const DecodedInstruction& in) {
-    e.b.emit("ldloc " + std::to_string(e.globalsSlot), 0, +1);
+    e.b.emit(e.ldloc(e.globalsSlot), 0, +1);
     e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
     e.b.emit("call bool [LoxRuntime]Lox.LoxOps::InstanceOf(object, class "
              "[LoxRuntime]Lox.LoxGlobals, string)",
@@ -986,9 +1025,9 @@ void emitInvoke(Emitter& e, const DecodedInstruction& in) {
         return;
     }
     spillLooseValues(e, e.argScratchBase, argCount);
-    e.b.emit("stloc " + std::to_string(e.calleeScratchSlot), 1, -1);
+    e.b.emit(e.stloc(e.calleeScratchSlot), 1, -1);
 
-    e.b.emit("ldloc " + std::to_string(e.calleeScratchSlot), 0, +1);
+    e.b.emit(e.ldloc(e.calleeScratchSlot), 0, +1);
     e.b.emit("ldstr " + name, 0, +1);
     newObjectArrayFromScratch(e, e.argScratchBase, argCount);
     e.b.emit(invokeSig, 3, -2);
@@ -1007,29 +1046,29 @@ void emitInvoke(Emitter& e, const DecodedInstruction& in) {
 void emitSuperInvoke(Emitter& e, const DecodedInstruction& in) {
     int argCount = in.byteOperand;
     std::string name = e.constantStringLiteral(in.constantIndex);
-    std::string superScratch = std::to_string(e.scratchSlot);
-    std::string selfScratch = std::to_string(e.calleeScratchSlot);
+    int superScratch = e.scratchSlot;
+    int selfScratch = e.calleeScratchSlot;
     const char* superInvokeSig =
         "call object [LoxRuntime]Lox.LoxOps::SuperInvoke(object, string, "
         "object, object[])";
     if (argCount == 0) {
-        e.b.emit("stloc " + superScratch, 1, -1); // superclassVal (top)
-        e.b.emit("stloc " + selfScratch, 1, -1);  // self
-        e.b.emit("ldloc " + superScratch, 0, +1);
+        e.b.emit(e.stloc(superScratch), 1, -1); // superclassVal (top)
+        e.b.emit(e.stloc(selfScratch), 1, -1);  // self
+        e.b.emit(e.ldloc(superScratch), 0, +1);
         e.b.emit("ldstr " + name, 0, +1);
-        e.b.emit("ldloc " + selfScratch, 0, +1);
+        e.b.emit(e.ldloc(selfScratch), 0, +1);
         e.b.emit(pushIntInstruction(0), 0, +1);
         e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
         e.b.emit(superInvokeSig, 4, -3);
         return;
     }
-    e.b.emit("stloc " + superScratch, 1, -1); // superclassVal (top)
+    e.b.emit(e.stloc(superScratch), 1, -1); // superclassVal (top)
     spillLooseValues(e, e.argScratchBase, argCount);
-    e.b.emit("stloc " + selfScratch, 1, -1); // self
+    e.b.emit(e.stloc(selfScratch), 1, -1); // self
 
-    e.b.emit("ldloc " + superScratch, 0, +1);
+    e.b.emit(e.ldloc(superScratch), 0, +1);
     e.b.emit("ldstr " + name, 0, +1);
-    e.b.emit("ldloc " + selfScratch, 0, +1);
+    e.b.emit(e.ldloc(selfScratch), 0, +1);
     newObjectArrayFromScratch(e, e.argScratchBase, argCount);
     e.b.emit(superInvokeSig, 4, -3);
 }
@@ -1126,16 +1165,16 @@ void emitGetTagOrFused(Emitter& e, std::size_t i,
 void ensureCapturedCell(Emitter& e, int slot, int offset, int subIndex) {
     std::string readyLbl = captureLabel("ok", offset, subIndex);
     int d = e.b.depth;
-    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit(e.ldloc(slot), 0, +1);
     e.b.emit("isinst object[]", 1, 0);
     e.b.emit("brtrue " + readyLbl, 1, -1);
     e.b.emit(pushIntInstruction(1), 0, +1);
     e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
     e.b.emit("dup", 1, +1);
     e.b.emit("ldc.i4.0", 0, +1);
-    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit(e.ldloc(slot), 0, +1);
     e.b.emit("stelem.ref", 3, -3);
-    e.b.emit("stloc " + std::to_string(slot), 1, -1);
+    e.b.emit(e.stloc(slot), 1, -1);
     e.b.label(readyLbl);
     e.b.resync(d);
 }
@@ -1207,7 +1246,7 @@ int findSelfCaptureLoxSlot(const Emitter& e, const DecodedInstruction& in) {
 void seedSelfCaptureCell(Emitter& e, int selfSlot) {
     e.b.emit(pushIntInstruction(1), 0, +1);
     e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
-    e.b.emit("stloc " + std::to_string(selfSlot), 1, -1);
+    e.b.emit(e.stloc(selfSlot), 1, -1);
 }
 
 // The declaring store, redirected: write the closure just built into the
@@ -1219,11 +1258,11 @@ void seedSelfCaptureCell(Emitter& e, int selfSlot) {
 // needs the value parked somewhere while the cell reference is fetched.
 void storeClosureIntoSelfCell(Emitter& e, const DecodedInstruction& in,
                               int selfSlot, int selfLoxSlot) {
-    std::string scratch = std::to_string(e.scratchSlot);
-    e.b.emit("stloc " + scratch, 1, -1);
-    e.b.emit("ldloc " + std::to_string(selfSlot), 0, +1);
+    int scratch = e.scratchSlot;
+    e.b.emit(e.stloc(scratch), 1, -1);
+    e.b.emit(e.ldloc(selfSlot), 0, +1);
     e.b.emit("ldc.i4.0", 0, +1);
-    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit(e.ldloc(scratch), 0, +1);
     e.b.emit("stelem.ref", 3, -3);
 
     // finishInstruction must not ALSO store this offset's invisible var: it
@@ -1300,8 +1339,7 @@ void emitClosure(Emitter& e, const DecodedInstruction& in,
             // `selfLoxSlot` already holds a fresh cell (seeded above), so
             // this is the same lowering as any other already-a-cell
             // capture — no special case needed here.
-            e.b.emit("ldloc " + std::to_string(e.slotForLocal(up.index)), 0,
-                     +1);
+            e.b.emit(e.ldloc(e.slotForLocal(up.index)), 0, +1);
             e.b.emit("castclass object[]", 1, 0);
         } else {
             // A grandparent's own upvalue, already a cell — copy the
@@ -1342,17 +1380,17 @@ void emitGetUpvalue(Emitter& e, const DecodedInstruction& in) {
 // `emitCapturedStore`) while `upvals[index]` is fetched, then written back
 // into that cell's slot 0.
 void emitUpvalueStore(Emitter& e, int index, bool peek) {
-    std::string scratch = std::to_string(e.scratchSlot);
-    e.b.emit("stloc " + scratch, 1, -1);
+    int scratch = e.scratchSlot;
+    e.b.emit(e.stloc(scratch), 1, -1);
     e.b.emit("ldarg.0", 0, +1);
     e.b.emit("ldfld object[][] [LoxRuntime]Lox.LoxClosure::Upvalues", 1, 0);
     e.b.emit(pushIntInstruction(index), 0, +1);
     e.b.emit("ldelem.ref", 2, -1);
     e.b.emit("ldc.i4.0", 0, +1);
-    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit(e.ldloc(scratch), 0, +1);
     e.b.emit("stelem.ref", 3, -3);
     if (peek) {
-        e.b.emit("ldloc " + scratch, 0, +1);
+        e.b.emit(e.ldloc(scratch), 0, +1);
     }
 }
 
@@ -1432,7 +1470,7 @@ std::size_t finishInstruction(Emitter& e, const DecodedInstruction& in,
     auto varsIt = e.invisibleVarsByOffset.find(in.offset);
     if (varsIt != e.invisibleVarsByOffset.end()) {
         for (int slot : varsIt->second) {
-            e.b.emit("stloc " + std::to_string(e.slotForLocal(slot)), 1, -1);
+            e.b.emit(e.stloc(e.slotForLocal(slot)), 1, -1);
             e.lastInvisibleVarSlot = slot;
         }
     }
@@ -1522,10 +1560,10 @@ void normalizeFoldedOperands(Emitter& e, std::size_t i,
     }
     int genuineCount = *pops - deficit;
     if (genuineCount == 1) {
-        e.b.emit("stloc " + std::to_string(e.scratchSlot), 1, -1);
+        e.b.emit(e.stloc(e.scratchSlot), 1, -1);
     } else if (genuineCount >= 2) {
         for (int k = 0; k < genuineCount; k++) {
-            e.b.emit("stloc " + std::to_string(e.argScratchBase + k), 1, -1);
+            e.b.emit(e.stloc(e.argScratchBase + k), 1, -1);
         }
     }
 
@@ -1540,10 +1578,10 @@ void normalizeFoldedOperands(Emitter& e, std::size_t i,
     }
 
     if (genuineCount == 1) {
-        e.b.emit("ldloc " + std::to_string(e.scratchSlot), 0, +1);
+        e.b.emit(e.ldloc(e.scratchSlot), 0, +1);
     } else if (genuineCount >= 2) {
         for (int k = genuineCount - 1; k >= 0; k--) {
-            e.b.emit("ldloc " + std::to_string(e.argScratchBase + k), 0, +1);
+            e.b.emit(e.ldloc(e.argScratchBase + k), 0, +1);
         }
     }
 }
@@ -1844,6 +1882,20 @@ AggregateNeeds computeAggregateNeeds(const DecodedFunction& fn,
     return needs;
 }
 
+// The one authority for how many `.locals init` slots one chunk needs:
+// globals (1) + the Lox frame's own slots + the shuffle scratch (1) + the
+// aggregate spill area, if this chunk needs one. buildEmitter calls this
+// to bound `Emitter::localOp` before a single instruction emits, and
+// emitClassBody calls it again, unchanged, for the `.locals init`
+// directive itself — one computation, not two that could drift apart.
+int computeTotalLocalSlots(int maxLocalCount,
+                           const AggregateNeeds& aggregateNeeds) {
+    bool needsScratchArea =
+        aggregateNeeds.needsCalleeSlot || aggregateNeeds.maxWidth > 0;
+    int extraSpillSlots = needsScratchArea ? aggregateNeeds.maxWidth + 1 : 0;
+    return 1 + maxLocalCount + 1 + extraSpillSlots;
+}
+
 // `captureInfo` is this chunk's own entry from `analyzeCaptures`
 // (capture_analysis.h) — see emitChunk's callers.
 Emitter buildEmitter(const DecodedFunction& fn,
@@ -1852,6 +1904,8 @@ Emitter buildEmitter(const DecodedFunction& fn,
                      const FunctionCaptureInfo& captureInfo) {
     Emitter e{fn, analysis, {}};
     e.scratchSlot = e.baseSlot + maxLocalCount;
+    e.declaredLocalCount =
+        computeTotalLocalSlots(maxLocalCount, aggregateNeeds);
     if (aggregateNeeds.needsCalleeSlot || aggregateNeeds.maxWidth > 0) {
         // emitBuildList spills only into argScratchBase, one slot per
         // element, and never touches calleeScratchSlot; reserving it
@@ -1913,21 +1967,21 @@ void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isFunction) {
         e.b.emit("call class [LoxRuntime]Lox.LoxGlobals "
                  "[LoxRuntime]Lox.LoxRuntime::Init()",
                  0, +1);
-        e.b.emit("stloc " + std::to_string(e.globalsSlot), 1, -1);
+        e.b.emit(e.stloc(e.globalsSlot), 1, -1);
         return;
     }
     e.b.emit("call class [LoxRuntime]Lox.LoxGlobals "
              "[LoxRuntime]Lox.LoxRuntime::Current()",
              0, +1);
-    e.b.emit("stloc " + std::to_string(e.globalsSlot), 1, -1);
+    e.b.emit(e.stloc(e.globalsSlot), 1, -1);
     e.b.emit("ldarg.1", 0, +1);
-    e.b.emit("stloc " + std::to_string(e.slotForLocal(0)), 1, -1);
+    e.b.emit(e.stloc(e.slotForLocal(0)), 1, -1);
     int arity = fn.function->arity;
     for (int i = 0; i < arity; i++) {
         e.b.emit("ldarg.2", 0, +1);
         e.b.emit(pushIntInstruction(i), 0, +1);
         e.b.emit("ldelem.ref", 2, -1);
-        e.b.emit("stloc " + std::to_string(e.slotForLocal(i + 1)), 1, -1);
+        e.b.emit(e.stloc(e.slotForLocal(i + 1)), 1, -1);
     }
 }
 
@@ -2028,18 +2082,13 @@ std::string emitChunk(const DecodedFunction& fn,
                       const FunctionCaptureInfo& captureInfo) {
     int maxLocalCount = computeMaxLocalCount(analysis);
     AggregateNeeds aggregateNeeds = computeAggregateNeeds(fn, analysis);
-    bool needsScratchArea =
-        aggregateNeeds.needsCalleeSlot || aggregateNeeds.maxWidth > 0;
-    int extraSpillSlots = needsScratchArea ? aggregateNeeds.maxWidth + 1 : 0;
 
     Emitter e =
         buildEmitter(fn, analysis, maxLocalCount, aggregateNeeds, captureInfo);
     emitPrologue(e, fn, isFunction);
     emitBody(e, isFunction, childClassNames);
 
-    // globals (1) + the Lox frame's own slots + the shuffle scratch (1) +
-    // the aggregate spill area, if this chunk needs one.
-    int totalLocals = 1 + maxLocalCount + 1 + extraSpillSlots;
+    int totalLocals = computeTotalLocalSlots(maxLocalCount, aggregateNeeds);
     return emitClassBody(e, fn, className, isFunction, totalLocals);
 }
 
