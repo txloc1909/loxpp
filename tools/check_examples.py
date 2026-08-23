@@ -20,6 +20,11 @@ tools/clr_excluded_examples.txt are two such files — the map-order-sensitive
 examples each managed backend legitimately reorders (spec leaves map
 iteration order unspecified). An excluded file is skipped, not run, and
 reported as SKIP with its reason.
+
+<examples-dir> that resolves to zero .lox files — because it does not
+exist, or is empty — is an error (exit 2), not a silent zero-file pass:
+Path.glob raises nothing on a missing directory, so a typo'd path would
+otherwise report "0 passed, 0 failed, 0 skipped" and exit 0.
 """
 
 import re
