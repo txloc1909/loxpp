@@ -4,11 +4,10 @@
 // an instance field and invoking it through the field name (`k.g()`) drives
 // the INVOKE opcode's field-shadow arm, not GET_PROPERTY followed by CALL.
 //
-// This file lives under clr-only/ for the same reason
-// clr-only/31_deep_recursion.lox does: tools/diff_runtimes.py's CI probes
-// step walks notes/translation-probes/ non-recursively, so a file placed
-// here runs only through tools/check_clr_probes.sh, which names it
-// directly.
+// This file lives under clr-only/ because the JVM gates read
+// notes/translation-probes/ non-recursively and their curated list does
+// not name this file, so a file in clr-only/ runs only against the CLR
+// backend.
 var m = {"a": 1};
 class K {}
 var k = K();

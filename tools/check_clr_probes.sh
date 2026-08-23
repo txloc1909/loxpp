@@ -109,9 +109,8 @@ probes=(
     # INVOKE's field-shadow arm called on a bound built-in method value (a
     # map or file method read through GET_PROPERTY, then stored in an
     # instance field and called through the field name), not only a
-    # closure or an unbound native. No JVM twin: the shape reaches a
-    # different code path on each runtime, so it lives in clr-only/ and is
-    # named here directly.
+    # closure or an unbound native. Lives in clr-only/ (see the probe
+    # file's own header comment for why); named here directly.
     "notes/translation-probes/clr-only/37_invoke_field_bound_native_method.lox"
     # Equal on a map or file method value read through GET_PROPERTY: a
     # fresh object on every read, so `==` gives false whether the two
