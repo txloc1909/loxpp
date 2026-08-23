@@ -118,16 +118,13 @@ public static class LoxOps {
         if (a is string sa && b is string sb) {
             return sa == sb;
         }
-        // A map/file method value is a fresh, per-instance closure here (no
-        // class-wide method table to share, unlike src/vm.cpp's ObjClass),
-        // so its identity is carried in its name instead - see LoxMapMethod
-        // and LoxFileMethod.
-        if (a is LoxMapMethod ma && b is LoxMapMethod mb) {
-            return ma.Name == mb.Name;
-        }
-        if (a is LoxFileMethod fa && b is LoxFileMethod fb) {
-            return fa.Name == fb.Name;
-        }
+        // A map or file method value (LoxMapMethod, LoxFileMethod) falls
+        // through to here on purpose: src/vm.cpp's Op::GET_PROPERTY wraps a
+        // fresh ObjBoundNative on every read (the isMap and isFile branches
+        // both call m_mm.create<ObjBoundNative>), and Value operator==
+        // compares Obj* by pointer, so two reads are equal only when they
+        // are literally the same object - the same rule LoxBoundMethod
+        // already follows for a user-class bound method.
         return ReferenceEquals(a, b); // nil (null == null) and every identity-equality object type
     }
 
@@ -556,7 +553,7 @@ public static class LoxOps {
     /// Dispatches by name with no LoxNative allocation - the INVOKE fast
     /// path matches vm.cpp's own fast path, which calls the native C
     /// function directly and never builds an intermediate ObjNative per
-    /// call. <see cref="LoxMap.GetMethod"/> still allocates (once, cached)
+    /// call. <see cref="LoxMap.GetMethod"/> still allocates, on every read,
     /// for the separate GET_PROPERTY case.
     /// </summary>
     private static object InvokeMapMethod(LoxMap map, string name, object[] args) {
@@ -685,11 +682,11 @@ public static class LoxOps {
         if (v is LoxClosure closure) {
             return closure.Name == null ? "<script>" : $"<fn {closure.Name}>";
         }
-        // src/vm.cpp's Op::GET_PROPERTY pushes an unbound ObjNative for
+        // src/vm.cpp's Op::GET_PROPERTY wraps a fresh ObjBoundNative for
         // both a map method and a file method (the map/file branches
-        // there), and stringifyObj gives every ObjType::NATIVE the same
-        // text - so a map or file method value prints identically to any
-        // other native function.
+        // there), and stringifyObj gives ObjType::BOUND_NATIVE the same
+        // text as ObjType::NATIVE - so a map or file method value prints
+        // identically to any other native function.
         if (v is LoxNative || v is LoxMapMethod || v is LoxFileMethod) {
             return "<native fn>";
         }

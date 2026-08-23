@@ -17,13 +17,6 @@ public sealed class LoxFile {
     public readonly bool Writable;
     private bool m_isDirectory; // true only for a directory opened with "r" mode
 
-    // Per-instance cache so a repeat GET_PROPERTY read of the same method
-    // name gives back the identical object rather than reallocating.
-    // Cross-instance identity (`f1.write == f2.write`) does not come from
-    // this cache being shared - it isn't - but from LoxFileMethod's
-    // name-based equality: see LoxOps.Equal.
-    private readonly Dictionary<string, ILoxCallable> m_methodCache = new();
-
     private LoxFile(FileStream stream, bool readable, bool writable, bool isDirectory = false) {
         m_stream = stream;
         Readable = readable;
@@ -188,16 +181,15 @@ public sealed class LoxFile {
         m_isDirectory = false;
     }
 
-    public ILoxCallable GetMethod(string name) {
-        if (m_methodCache.TryGetValue(name, out ILoxCallable cached)) {
-            return cached;
-        }
-        ILoxCallable created = CreateMethod(name);
-        if (created != null) {
-            m_methodCache[name] = created;
-        }
-        return created;
-    }
+    /// <summary>
+    /// A fresh method value on every call, matching src/vm.cpp's
+    /// Op::GET_PROPERTY, which wraps a new ObjBoundNative on every read
+    /// (the isFile branch). No two reads are ever the same object, so
+    /// LoxOps.Equal's reference-identity rule gives false for both a
+    /// repeat read of the same file and a read of two different files -
+    /// the same rule a user-class bound method already follows.
+    /// </summary>
+    public ILoxCallable GetMethod(string name) => CreateMethod(name);
 
     private ILoxCallable CreateMethod(string name) {
         switch (name) {
@@ -237,13 +229,8 @@ public sealed class LoxFile {
 
 /// <summary>
 /// A file's native method, read as a value through GET_PROPERTY (e.g.
-/// <c>f.write</c>) rather than called immediately. The native VM keeps one
-/// ObjNative per method name in a class-wide table shared by every ObjFile
-/// (src/vm.cpp, Op::GET_PROPERTY's <c>isFile</c> branch), so
-/// <c>f1.write == f2.write</c> is true there even though <c>f1</c> and
-/// <c>f2</c> are different files. LoxFile has no such shared table - each
-/// instance's closure still binds to that one instance - so this class
-/// carries its method name for LoxOps.Equal to compare instead.
+/// <c>f.write</c>) rather than called immediately. Equal only by reference
+/// (LoxOps.Equal's default arm) - see <see cref="LoxFile.GetMethod"/>.
 /// </summary>
 internal sealed class LoxFileMethod : ILoxCallable {
     public readonly string Name;

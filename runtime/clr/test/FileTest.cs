@@ -11,8 +11,8 @@ public static class FileTest {
         string path = Path.Combine(Path.GetTempPath(), $"lox-rt-file-test-{System.Guid.NewGuid():N}.txt");
         try {
             LoxFile writer = LoxFile.Open(path, "w");
-            t.Check(ReferenceEquals(writer.GetMethod("write"), writer.GetMethod("write")),
-                "getMethod caches: repeated access returns the same object");
+            t.Check(!ReferenceEquals(writer.GetMethod("write"), writer.GetMethod("write")),
+                "getMethod returns a fresh object on every read, matching src/vm.cpp's per-read ObjBoundNative wrap");
             writer.Writeline("first");
             writer.Writeline("second");
             writer.Write("third-no-newline");
@@ -67,16 +67,17 @@ public static class FileTest {
                 "open(missing path, \"r+\") fails instead of creating the file");
             t.Check(!File.Exists(missingPath), "open(missing path, \"r+\") leaves no file behind even after it fails");
 
-            // The native VM keeps one ObjNative per method name in a
-            // class-wide table shared by every ObjFile, so
-            // `f1.write == f2.write` is true there even though f1 and f2
-            // are different files - through LoxOps.Equal's Lox-level
-            // notion of equality, not C# reference equality.
+            // src/vm.cpp's Op::GET_PROPERTY wraps a fresh ObjBoundNative on
+            // every read, so `f1.write == f1.write` is false there, the
+            // same as `f1.write == f2.write` - LoxOps.Equal's
+            // reference-identity rule gives false for both.
             string otherPath = Path.Combine(Path.GetTempPath(), $"lox-rt-file-other-{System.Guid.NewGuid():N}.txt");
             try {
                 LoxFile other = LoxFile.Open(otherPath, "w");
-                t.Check(LoxOps.Equal(writer.GetMethod("write"), other.GetMethod("write")),
-                    "two different files' 'write' method values are Lox-equal");
+                t.Check(!LoxOps.Equal(writer.GetMethod("write"), writer.GetMethod("write")),
+                    "two reads of the same file's 'write' method are not Lox-equal (fresh object per read)");
+                t.Check(!LoxOps.Equal(writer.GetMethod("write"), other.GetMethod("write")),
+                    "two different files' 'write' method values are not Lox-equal");
                 t.Check(!LoxOps.Equal(writer.GetMethod("write"), other.GetMethod("close")),
                     "two different method names on files are not Lox-equal");
                 other.Close();

@@ -48,7 +48,8 @@ public static class MapTest {
 
         object hasMethod = ordered.GetMethod("has");
         t.CheckEquals(true, ((ILoxCallable)hasMethod).Call(new object[] { "a" }), "map.has via getMethod");
-        t.Check(hasMethod == ordered.GetMethod("has"), "getMethod caches: repeated access returns the same object");
+        t.Check(!ReferenceEquals(hasMethod, ordered.GetMethod("has")),
+            "getMethod returns a fresh object on every read, matching src/vm.cpp's per-read ObjBoundNative wrap");
         object keysMethod = ordered.GetMethod("keys");
         var keys = (LoxList)((ILoxCallable)keysMethod).Call(System.Array.Empty<object>());
         t.CheckEquals(3, keys.Elements.Count, "map.keys() returns every key");
@@ -59,15 +60,16 @@ public static class MapTest {
         t.CheckEquals(2, firstPair.Elements.Count, "each entries() pair is [key, value]");
         t.Check(ordered.GetMethod("nonexistent") == null, "getMethod returns null for an unknown name");
 
-        // The native VM keeps one ObjNative per method name in a class-wide
-        // table shared by every ObjMap, so `m1.has == m2.has` is true there
-        // even though m1 and m2 are different maps - not by reference (two
-        // different maps' method values are two different C# objects), but
-        // through LoxOps.Equal's Lox-level notion of equality.
+        // src/vm.cpp's Op::GET_PROPERTY wraps a fresh ObjBoundNative on
+        // every read, so `m1.has == m1.has` is false there, the same as
+        // `m1.has == m2.has` - LoxOps.Equal's reference-identity rule
+        // gives false for both.
         var otherMap = new LoxMap();
         otherMap.Put("z", 1.0);
-        t.Check(LoxOps.Equal(ordered.GetMethod("has"), otherMap.GetMethod("has")),
-            "two different maps' 'has' method values are Lox-equal");
+        t.Check(!LoxOps.Equal(ordered.GetMethod("has"), ordered.GetMethod("has")),
+            "two reads of the same map's 'has' method are not Lox-equal (fresh object per read)");
+        t.Check(!LoxOps.Equal(ordered.GetMethod("has"), otherMap.GetMethod("has")),
+            "two different maps' 'has' method values are not Lox-equal");
         t.Check(!LoxOps.Equal(ordered.GetMethod("has"), otherMap.GetMethod("keys")),
             "two different method names on maps are not Lox-equal");
 

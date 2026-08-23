@@ -113,6 +113,11 @@ probes=(
     # different code path on each runtime, so it lives in clr-only/ and is
     # named here directly.
     "notes/translation-probes/clr-only/37_invoke_field_bound_native_method.lox"
+    # Equal on a map or file method value read through GET_PROPERTY: a
+    # fresh object on every read, so `==` gives false whether the two
+    # reads share a receiver or not. Lives in clr-only/ (see the probe
+    # file's own header comment for why); named here directly.
+    "notes/translation-probes/clr-only/38_bound_native_method_identity.lox"
     # The consumed-match case: a match expression's result reaching PRINT,
     # DEFINE_GLOBAL, or SET_GLOBAL with nothing in between to re-expose it
     # as a genuine evaluation-stack value first.
