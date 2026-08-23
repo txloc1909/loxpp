@@ -572,3 +572,46 @@ TEST_F(ModuloTest, ZeroDividend) {
     ASSERT_EQ(h.run("0 % 5;"), InterpretResult::OK);
     EXPECT_NEAR(as<Number>(h.lastResult()), 0.0, 1e-9);
 }
+
+// ===========================================================================
+// Stack overflow guard tests
+// ===========================================================================
+
+class StackOverflowTest : public ::testing::Test {};
+
+// Deep recursion that exceeds STACK_MAX should produce RUNTIME_ERROR, not
+// crash. The down(n) function declares 10 local variables per frame, causing
+// stack usage to grow faster than a simple counter. n=200 exceeds the 2048-slot
+// limit and must trigger VM::push's STACK_MAX guard.
+TEST_F(StackOverflowTest, DeepRecursionExceedsStackMax_RuntimeError) {
+    VMTestHarness h;
+    std::string src =
+        "fun down(n) {"
+        "  var a = 1; var b = 2; var c = 3; var d = 4; var e = 5;"
+        "  var g = 6; var h = 7; var i = 8; var j = 9; var k = 10;"
+        "  if (n == 0) return a + b + c + d + e + g + h + i + j + k;"
+        "  return down(n - 1);"
+        "}"
+        "down(200);";
+    EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR);
+    // Stack must be clean after a runtime error.
+    EXPECT_EQ(h.stackDepth(), 0);
+}
+
+// Recursion at a safe depth (down(50)) must still succeed with correct result.
+// The guard must not reject a legitimate deep call chain. down(50) returns
+// the sum of its 10 local variables: 1+2+3+4+5+6+7+8+9+10 = 55.
+TEST_F(StackOverflowTest, SafeDepthRecursion_Succeeds) {
+    VMTestHarness h;
+    std::string src =
+        "fun down(n) {"
+        "  var a = 1; var b = 2; var c = 3; var d = 4; var e = 5;"
+        "  var g = 6; var h = 7; var i = 8; var j = 9; var k = 10;"
+        "  if (n == 0) return a + b + c + d + e + g + h + i + j + k;"
+        "  return down(n - 1);"
+        "}"
+        "down(50);";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.lastResult(), from<Number>(55.0));
+    EXPECT_EQ(h.stackDepth(), 0);
+}
