@@ -28,11 +28,13 @@ doubles). Instruction count is a text-based proxy for the actual assembled
 `CodeSize`; the `dev-managed` image has no IL disassembler (`ildasm`,
 `monodis`, `dotnet-ildasm`, and `ikdasm` are all absent) to measure the true
 post-assembly byte count directly, and no IL verifier either — the same gap
-applies to verifying a method's IL as to disassembling it. The proxy runs
-safely high — one line of IL text is at least as costly as, and
-usually costlier than, the one to five bytes its assembled opcode/operand
-pair takes — so a number this far under a 16- or 32-bit field leaves no
-realistic doubt.
+applies to verifying a method's IL as to disassembling it. The line count is
+a LOWER bound on `CodeSize`, not an upper one: each assembled opcode/operand
+pair takes one to five bytes, so `CodeSize` is at least the line count and
+some small multiple of it, never less. Even a generous 10x multiplier on
+every row in the table above leaves it five orders of magnitude under the
+32-bit field it is compared against, so the direction of the bound does not
+change the conclusion.
 
 ## Branch range: not a number, a mechanism
 
