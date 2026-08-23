@@ -134,6 +134,13 @@ probes=(
     "notes/translation-probes/13_enum_match.lox"
     "notes/translation-probes/14_enum_payload.lox"
     "notes/translation-probes/28_folded_match_operand_family.lox"
+    # A fold deficit of two or more: every operand the multi-slot repair
+    # reloads is itself folded, with no genuine value between them on the
+    # real CIL evaluation stack, over ADD/CALL/BUILD_LIST/BUILD_MAP, plus
+    # two of the folded slots also being captured-closure slots. No JVM
+    # twin: the JVM side's own repair refuses a deficit above one, so this
+    # file lives in clr-only/ and is named here directly.
+    "notes/translation-probes/clr-only/35_folded_match_deficit_two_plus.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
