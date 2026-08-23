@@ -1145,10 +1145,7 @@ bool VM::callNative(ObjNative* native, int argCount) {
 bool VM::callBoundNative(ObjBoundNative* bn, int argCount) {
     ObjNative* fn = bn->native;             // read before the slot changes
     stackTop[-argCount - 1] = bn->receiver; // natives read args[-1]
-    if (!callNative(fn, argCount)) {
-        return false;
-    }
-    return true;
+    return callNative(fn, argCount);
 }
 
 bool VM::bindMethod(ObjClass* klass, ObjString* name) {
