@@ -112,9 +112,11 @@ probes=(
     # closure or an unbound native. Lives in clr-only/ (see the probe
     # file's own header comment for why); named here directly.
     "notes/translation-probes/clr-only/37_invoke_field_bound_native_method.lox"
-    # Equal on a map or file method value read through GET_PROPERTY: a
-    # fresh object on every read, so `==` gives false whether the two
-    # reads share a receiver or not. Lives in clr-only/ (see the probe
+    # Equal on a map method value read through GET_PROPERTY: a fresh
+    # object on every read, so `==` gives false whether the two reads
+    # share a receiver or not. The file method value follows the same
+    # rule through the same Equal arm; runtime/clr/test/FileTest.cs pins
+    # that half at the runtime level. Lives in clr-only/ (see the probe
     # file's own header comment for why); named here directly.
     "notes/translation-probes/clr-only/38_bound_native_method_identity.lox"
     # The consumed-match case: a match expression's result reaching PRINT,

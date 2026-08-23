@@ -233,11 +233,9 @@ public sealed class LoxFile {
 /// (LoxOps.Equal's default arm) - see <see cref="LoxFile.GetMethod"/>.
 /// </summary>
 internal sealed class LoxFileMethod : ILoxCallable {
-    public readonly string Name;
     private readonly LoxNative m_native;
 
     public LoxFileMethod(string name, int arity, LoxNative.Fn fn) {
-        Name = name;
         m_native = new LoxNative(name, arity, fn);
     }
 

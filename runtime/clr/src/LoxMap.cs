@@ -168,11 +168,9 @@ public sealed class LoxMap {
 /// (LoxOps.Equal's default arm) - see <see cref="LoxMap.GetMethod"/>.
 /// </summary>
 internal sealed class LoxMapMethod : ILoxCallable {
-    public readonly string Name;
     private readonly LoxNative m_native;
 
     public LoxMapMethod(string name, int arity, LoxNative.Fn fn) {
-        Name = name;
         m_native = new LoxNative(name, arity, fn);
     }
 
