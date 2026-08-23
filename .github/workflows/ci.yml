@@ -305,16 +305,20 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "python3 tools/check_examples.py tools/loxpp_jvm_bootstrap.sh examples/ --exclude tools/jvm_excluded_examples.txt"
 
-      # CLR twin of checkpoint 1: every probe is byte-identical on native and
-      # CLR stdout (differential runner, not only the check_clr_probes.sh
-      # diff loop above). Zero exclusions on the probes.
+      # CLR twin of checkpoint 1: byte-identical on native and CLR stdout
+      # (differential runner, not only the check_clr_probes.sh diff loop
+      # above). Zero exclusions. Reads both notes/translation-probes/ and
+      # its clr-only/ subdirectory — Path.glob("*.lox") does not recurse
+      # into subdirectories on its own, and the CLR-specific probes
+      # (deep-recursion frame ceiling, multi-slot fold repair) live there
+      # precisely because the JVM twin of this step must not run them.
       - name: CLR differential suite - probes (N11)
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_clr.sh notes/translation-probes/"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_clr.sh notes/translation-probes/ notes/translation-probes/clr-only/"
 
       # CLR twin of checkpoint 2: the full example corpus on the CLR backend,
       # zero failures. --exclude skips the map-iteration-order-sensitive
