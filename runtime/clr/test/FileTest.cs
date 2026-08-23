@@ -104,6 +104,73 @@ public static class FileTest {
             File.Delete(path);
         }
 
+        // Directory-opening tests: on Linux, fopen(dir, "r") succeeds but
+        // read(2) fails with EISDIR. Here, LoxFile.Open must return a LoxFile
+        // and defer the error to read()/readline()/readlines() methods.
+        // These tests guard against future changes to Directory.Exists.
+        if (OperatingSystem.IsLinux()) {
+            string dirPath = Path.Combine(Path.GetTempPath(), $"lox-rt-file-dir-test-{System.Guid.NewGuid():N}");
+            Directory.CreateDirectory(dirPath);
+            try {
+                // Test 1: open(dir, "r") succeeds and gives a LoxFile.
+                LoxFile dirReader = LoxFile.Open(dirPath, "r");
+                t.Check(dirReader != null, "open(directory, \"r\") succeeds and returns a LoxFile");
+
+                // Test 2 & 3: read() returns "" each time.
+                t.CheckEquals("", dirReader.Read(), "read() on a directory gives empty string");
+                t.CheckEquals("", dirReader.Read(), "read() on a directory again gives empty string");
+
+                // Test 4: readline() gives null.
+                t.CheckEquals(null, dirReader.Readline(), "readline() on a directory gives nil");
+
+                // Test 5: readlines() gives an empty list.
+                var emptyList = (LoxList)dirReader.Readlines();
+                t.CheckEquals(0, emptyList.Elements.Count, "readlines() on a directory gives an empty list");
+
+                // Test 6: write() fails (file is not open for writing).
+                t.CheckThrows(() => dirReader.Write("x"), typeof(LoxError),
+                    "write() on a read-only directory file raises LoxError");
+
+                // Test 7: after close(), read() fails (file is closed).
+                dirReader.Close();
+                t.CheckThrows(() => dirReader.Read(), typeof(LoxError),
+                    "read() on a closed directory file raises LoxError");
+
+                // Test 8: modes "w", "a", "r+" still raise LoxError on a directory.
+                t.CheckThrows(() => LoxFile.Open(dirPath, "w"), typeof(LoxError),
+                    "open(directory, \"w\") raises LoxError");
+                t.CheckThrows(() => LoxFile.Open(dirPath, "a"), typeof(LoxError),
+                    "open(directory, \"a\") raises LoxError");
+                t.CheckThrows(() => LoxFile.Open(dirPath, "r+"), typeof(LoxError),
+                    "open(directory, \"r+\") raises LoxError");
+
+                // Test 9: invalid mode still fails.
+                t.CheckThrows(() => LoxFile.Open(dirPath, "bogus"), typeof(LoxError),
+                    "open(directory, \"bogus\") raises LoxError for invalid mode");
+
+                // Test 10: symbolic link to directory behaves the same.
+                string symlinkPath = Path.Combine(Path.GetTempPath(), $"lox-rt-file-symlink-dir-{System.Guid.NewGuid():N}");
+                try {
+                    File.CreateSymbolicLink(symlinkPath, dirPath);
+                    LoxFile symlinkReader = LoxFile.Open(symlinkPath, "r");
+                    t.Check(symlinkReader != null, "open(symlink to directory, \"r\") succeeds");
+                    t.CheckEquals("", symlinkReader.Read(), "read() on a symlink to directory gives empty string");
+                    symlinkReader.Close();
+                } finally {
+                    if (File.Exists(symlinkPath)) {
+                        File.Delete(symlinkPath);
+                    }
+                }
+
+                // Test 11: missing path still fails with mode "r".
+                string missingPath = Path.Combine(Path.GetTempPath(), $"lox-rt-file-dir-missing-{System.Guid.NewGuid():N}");
+                t.CheckThrows(() => LoxFile.Open(missingPath, "r"), typeof(LoxError),
+                    "open(missing path, \"r\") raises LoxError even with directory check in place");
+            } finally {
+                Directory.Delete(dirPath);
+            }
+        }
+
         return t.Finish("FileTest");
     }
 }

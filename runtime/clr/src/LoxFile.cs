@@ -15,6 +15,7 @@ public sealed class LoxFile {
     private FileStream m_stream; // null once closed
     public readonly bool Readable;
     public readonly bool Writable;
+    private bool m_isDirectory; // true only for a directory opened with "r" mode
 
     // Per-instance cache so a repeat GET_PROPERTY read of the same method
     // name gives back the identical object rather than reallocating.
@@ -23,10 +24,11 @@ public sealed class LoxFile {
     // name-based equality: see LoxOps.Equal.
     private readonly Dictionary<string, ILoxCallable> m_methodCache = new();
 
-    private LoxFile(FileStream stream, bool readable, bool writable) {
+    private LoxFile(FileStream stream, bool readable, bool writable, bool isDirectory = false) {
         m_stream = stream;
         Readable = readable;
         Writable = writable;
+        m_isDirectory = isDirectory;
     }
 
     public static LoxFile Open(string path, string mode) {
@@ -65,6 +67,18 @@ public sealed class LoxFile {
         default:
             throw new LoxError("open(): invalid mode. Expected \"r\", \"w\", \"a\", or \"r+\".");
         }
+        // Linux fopen(path, "r") succeeds on a directory; only a later read(2)
+        // fails with EISDIR. On .NET, FileStream throws at construction time for
+        // a directory. Detect the directory before the open so Open returns a
+        // LoxFile and defers the error to the read methods, matching native
+        // fopen/read semantics. On non-Linux systems, FileStream's native exception
+        // is the fallback behaviour. Only mode "r" can open a directory per fopen
+        // semantics (modes "w", "a", "r+" must still raise LoxError).
+        if (mode == "r" && OperatingSystem.IsLinux()) {
+            if (PosixInterop.TryStat(path, out bool isDir, out _, out _, out _) && isDir) {
+                return new LoxFile(null, readable: true, writable: false, isDirectory: true);
+            }
+        }
         try {
             var stream = new FileStream(path, fileMode, access);
             return new LoxFile(stream, readable, writable);
@@ -74,7 +88,7 @@ public sealed class LoxFile {
     }
 
     private void CheckOpen(string method) {
-        if (m_stream == null) {
+        if (m_stream == null && !m_isDirectory) {
             throw new LoxError($"Cannot call '{method}' on a closed file.");
         }
     }
@@ -83,6 +97,12 @@ public sealed class LoxFile {
         CheckOpen("read");
         if (!Readable) {
             throw new LoxError("File is not open for reading.");
+        }
+        // A directory opened with "r" mode: read(2) would fail with EISDIR
+        // on Linux. Here we defer that error and return empty string to match
+        // native fopen/read semantics - each read() on a directory gives "".
+        if (m_isDirectory) {
+            return "";
         }
         try {
             var buf = new List<byte>();
@@ -101,6 +121,12 @@ public sealed class LoxFile {
         CheckOpen("readline");
         if (!Readable) {
             throw new LoxError("File is not open for reading.");
+        }
+        // A directory opened with "r" mode: read(2) would fail with EISDIR
+        // on Linux. Here we defer that error and return nil (EOF) to match
+        // native fopen/readline semantics.
+        if (m_isDirectory) {
+            return null;
         }
         try {
             var line = new StringBuilder();
@@ -159,6 +185,7 @@ public sealed class LoxFile {
             }
             m_stream = null;
         }
+        m_isDirectory = false;
     }
 
     public ILoxCallable GetMethod(string name) {
