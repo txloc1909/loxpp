@@ -69,6 +69,7 @@ each has an off-the-shelf solution.
 | `32_string_nul` | a string literal holding an embedded NUL byte (`\0`): `print` must write every byte, including the text after the NUL, on native and on each managed backend (issue #129) | none (parity gate, N11) |
 | `33_class_pattern_match_error` | a `match` whose arms are all class patterns raises a real, reachable `MATCH_ERROR` when no arm matches, through the same fused opcode as the enum case | P8 |
 | `34_match_consumed_result` | a `match` expression's result, once its own closing `POP` retires the synthetic subject local, is exposed as a named local's own value — `PRINT` and `DEFINE_GLOBAL` each need their own fold-aware read, the same way `RETURN` and `SET_GLOBAL` already do | P1, P2 |
+| `clr-only/35_folded_match_deficit_two_plus` | `normalizeFoldedOperands`'s own multi-slot repair with a fold deficit of two or more (`ADD`, `CALL`, `BUILD_LIST`, `BUILD_MAP`), plus two folded slots that are also captured-closure slots — CLR-only, see the note below the table | P8 |
 | `V1_fresh_cell` | body-local captured in a loop → **fresh cell/iter** → prints `0 1 2` | P4 |
 | `V2_shared` | mutable shared upvalue → prints `2` | P4 |
 | `V3_loopvar` | loop var captured directly → **one shared cell** → prints `3 3 3` | P4 |
@@ -76,13 +77,17 @@ each has an off-the-shelf solution.
 | `V5_self_recursive_closure` | a local `fun` captures its own slot (direct recursion) → prints `120` | P4 |
 | `V6_self_recursive_closure_in_loop` | self-recursive local `fun`, fresh cell per loop trip → prints `12` | P4 |
 
-`clr-only/31_deep_recursion` is the one probe not directly in this directory.
-`tools/diff_runtimes.py`'s CI probes step walks this directory's own files
-(non-recursively) and compares native against the JVM backend; the JVM
-backend has no frame-count ceiling of its own, so a probe that needs native
-to fail here would read as a new JVM divergence on every run. Placing it one
-level down keeps it out of that walk while `tools/check_clr_probes.sh` still
-runs it by name for the CLR checkpoint.
+`clr-only/31_deep_recursion` and `clr-only/35_folded_match_deficit_two_plus`
+are the two probes not directly in this directory. `tools/diff_runtimes.py`'s
+CI probes step walks this directory's own files (non-recursively) and
+compares native against the JVM backend. `31_deep_recursion` needs native
+itself to fail (`src/vm.h`'s `FRAMES_MAX`), which the JVM backend has no
+ceiling of its own to match, so that walk would read it as a new JVM
+divergence. `35_folded_match_deficit_two_plus` needs a fold deficit above
+one, which the JVM backend's own repair refuses outright, so every shape in
+it would abort at JVM emit time instead. Placing both one level down keeps
+them out of that walk while `tools/check_clr_probes.sh` still runs each one
+by name for the CLR checkpoint.
 
 ## Are these problems solved in the literature?
 

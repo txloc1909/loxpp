@@ -2,7 +2,9 @@
 
 #include "capture_analysis.h"
 #include "cfg.h"
+#include "container_objects.h"
 #include "exec_objects.h"
+#include "native_pops.h"
 #include "object.h"
 #include "value.h"
 #include "zero_depth_local.h"
@@ -13,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -23,118 +26,6 @@
 namespace clr {
 
 namespace {
-
-// Every Op enumerator's own spelling — for the "not implemented:" message
-// only. A name missing here still throws, just with "UNKNOWN_OP".
-std::string opName(Op op) {
-    switch (op) {
-    case Op::CONSTANT:
-        return "CONSTANT";
-    case Op::NIL:
-        return "NIL";
-    case Op::TRUE:
-        return "TRUE";
-    case Op::FALSE:
-        return "FALSE";
-    case Op::EQUAL:
-        return "EQUAL";
-    case Op::GREATER:
-        return "GREATER";
-    case Op::LESS:
-        return "LESS";
-    case Op::NEGATE:
-        return "NEGATE";
-    case Op::ADD:
-        return "ADD";
-    case Op::SUBTRACT:
-        return "SUBTRACT";
-    case Op::MULTIPLY:
-        return "MULTIPLY";
-    case Op::DIVIDE:
-        return "DIVIDE";
-    case Op::MODULO:
-        return "MODULO";
-    case Op::NOT:
-        return "NOT";
-    case Op::PRINT:
-        return "PRINT";
-    case Op::POP:
-        return "POP";
-    case Op::GET_LOCAL:
-        return "GET_LOCAL";
-    case Op::SET_LOCAL:
-        return "SET_LOCAL";
-    case Op::DEFINE_GLOBAL:
-        return "DEFINE_GLOBAL";
-    case Op::GET_GLOBAL:
-        return "GET_GLOBAL";
-    case Op::SET_GLOBAL:
-        return "SET_GLOBAL";
-    case Op::JUMP:
-        return "JUMP";
-    case Op::JUMP_IF_FALSE:
-        return "JUMP_IF_FALSE";
-    case Op::LOOP:
-        return "LOOP";
-    case Op::CALL:
-        return "CALL";
-    case Op::RETURN:
-        return "RETURN";
-    case Op::CLOSURE:
-        return "CLOSURE";
-    case Op::GET_UPVALUE:
-        return "GET_UPVALUE";
-    case Op::SET_UPVALUE:
-        return "SET_UPVALUE";
-    case Op::CLOSE_UPVALUE:
-        return "CLOSE_UPVALUE";
-    case Op::CLASS:
-        return "CLASS";
-    case Op::GET_PROPERTY:
-        return "GET_PROPERTY";
-    case Op::SET_PROPERTY:
-        return "SET_PROPERTY";
-    case Op::DEFINE_METHOD:
-        return "DEFINE_METHOD";
-    case Op::INVOKE:
-        return "INVOKE";
-    case Op::INHERIT:
-        return "INHERIT";
-    case Op::GET_SUPER:
-        return "GET_SUPER";
-    case Op::SUPER_INVOKE:
-        return "SUPER_INVOKE";
-    case Op::BUILD_LIST:
-        return "BUILD_LIST";
-    case Op::BUILD_MAP:
-        return "BUILD_MAP";
-    case Op::GET_INDEX:
-        return "GET_INDEX";
-    case Op::SET_INDEX:
-        return "SET_INDEX";
-    case Op::SLICE:
-        return "SLICE";
-    case Op::IN:
-        return "IN";
-    case Op::GET_ITER:
-        return "GET_ITER";
-    case Op::ITER_HAS_NEXT:
-        return "ITER_HAS_NEXT";
-    case Op::ITER_NEXT:
-        return "ITER_NEXT";
-    case Op::MATCH_ERROR:
-        return "MATCH_ERROR";
-    case Op::JUMP_TABLE:
-        return "JUMP_TABLE";
-    case Op::GET_TAG:
-        return "GET_TAG";
-    case Op::INSTANCEOF:
-        return "INSTANCEOF";
-    case Op::IS_SEQ:
-        return "IS_SEQ";
-    }
-    return "UNKNOWN_OP";
-}
 
 [[noreturn]] void notImplemented(Op op) {
     throw std::runtime_error("clr_emitter: the CLR backend does not lower " +
@@ -270,6 +161,12 @@ struct Emitter {
     int calleeScratchSlot{-1};
     int argScratchBase{-1};
 
+    // The exact slot count `.locals init` declares for this chunk (set by
+    // buildEmitter, from the same computation emitClassBody uses for the
+    // directive itself) — the upper bound `localOp` checks every slot
+    // index against before it becomes ilasm text.
+    int declaredLocalCount{0};
+
     // This pass's own forward walk, updated in offset order alongside every
     // invisible-var store: the Lox slot the most RECENTLY DECLARED
     // invisible-var site bound. -1 is a sentinel for "no site has run yet".
@@ -293,6 +190,38 @@ struct Emitter {
 
     [[nodiscard]] int slotForLocal(int loxSlot) const {
         return baseSlot + loxSlot;
+    }
+
+    // The one choke point every CIL local slot index passes through before
+    // it becomes ilasm text. A slot number here is always built from one or
+    // more of this struct's own fields — nothing stops one of those fields
+    // from staying at its own -1 sentinel, or from a sizing pass leaving
+    // `declaredLocalCount` too small for a width some consumer actually
+    // writes, so this is checked here rather than trusted from the
+    // arithmetic that produced it. `mnemonic` is the bare instruction text
+    // ("stloc" or "ldloc"); the return value is that text with the slot
+    // number appended, ready for Builder::emit. ilasm accepts a negative or
+    // out-of-range slot number in a uniformly `object`-typed `.locals init`
+    // with no diagnostic of its own; only CoreCLR's later
+    // InvalidProgramException would otherwise catch it, and that exception
+    // names no instruction.
+    [[nodiscard]] std::string localOp(const char* mnemonic, int slot) const {
+        if (slot < 0 || slot >= declaredLocalCount) {
+            throw std::runtime_error(
+                std::string("clr_emitter: ") + mnemonic + " " +
+                std::to_string(slot) +
+                " is outside the declared .locals init range [0, " +
+                std::to_string(declaredLocalCount) + ")");
+        }
+        return std::string(mnemonic) + " " + std::to_string(slot);
+    }
+
+    [[nodiscard]] std::string stloc(int slot) const {
+        return localOp("stloc", slot);
+    }
+
+    [[nodiscard]] std::string ldloc(int slot) const {
+        return localOp("ldloc", slot);
     }
 
     [[nodiscard]] bool reached(std::size_t idx) const {
@@ -337,6 +266,28 @@ struct Emitter {
         return it != popKinds.end() && it->second == PopKind::TEMP;
     }
 
+    // GET_TAG followed immediately by JUMP_TABLE (P8): compileMatchBody's
+    // only call site for JUMP_TABLE emits the pair back to back, with
+    // nothing else between them, so this is the only shape a JUMP_TABLE is
+    // ever found in — a GET_TAG not immediately followed by one is the
+    // sparse, compare-and-branch match form instead, which needs no fusion.
+    // Carries `fusablePop`'s own two guards (`reached(j)`, no CFG label at
+    // the JUMP_TABLE's own offset) for the same reason: no program today
+    // jumps into the middle of a match's own dispatch preamble, but should
+    // one ever do so, these guards turn that into a loud emit-time abort
+    // (the ordinary, unfused GET_TAG path has no case for `Op::JUMP_TABLE`
+    // reaching the dispatch switch on its own) rather than a silently wrong
+    // label.
+    [[nodiscard]] bool fusableJumpTable(std::size_t i) const {
+        std::size_t j = i + 1;
+        if (j >= fn.instructions.size() || !reached(j) ||
+            fn.instructions[j].op != Op::JUMP_TABLE) {
+            return false;
+        }
+        return labelAtOffset.find(fn.instructions[j].offset) ==
+               labelAtOffset.end();
+    }
+
     // Every name-bearing opcode's 2-byte operand indexes the SAME constant
     // pool as CONSTANT itself; this fetches that constant, ensures it is a
     // string (a mismatch here is a compiler bug, not a runtime condition,
@@ -368,16 +319,16 @@ struct Emitter {
 // once more afterward.
 void emitGlobalsCall(Emitter& e, const char* method,
                      const std::string& nameLiteral, bool peek) {
-    std::string scratch = std::to_string(e.scratchSlot);
-    e.b.emit("stloc " + scratch, 1, -1);
-    e.b.emit("ldloc " + std::to_string(e.globalsSlot), 0, +1);
+    int scratch = e.scratchSlot;
+    e.b.emit(e.stloc(scratch), 1, -1);
+    e.b.emit(e.ldloc(e.globalsSlot), 0, +1);
     e.b.emit("ldstr " + nameLiteral, 0, +1);
-    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit(e.ldloc(scratch), 0, +1);
     e.b.emit(std::string("call instance void [LoxRuntime]Lox.LoxGlobals::") +
                  method + "(string, object)",
              3, -3);
     if (peek) {
-        e.b.emit("ldloc " + scratch, 0, +1);
+        e.b.emit(e.ldloc(scratch), 0, +1);
     }
 }
 
@@ -398,22 +349,25 @@ void emitGlobalsCall(Emitter& e, const char* method,
 // mistake a real Lox value for a cell or the reverse. `isinst` (unlike the
 // JVM's `instanceof`) leaves null-or-the-reference on the stack rather than
 // a boolean, so `brfalse`/`brtrue` read that result directly with no
-// separate comparison.
-void emitCapturedGetLocal(Emitter& e, int slot, int offset) {
-    std::string rawLbl = captureLabel("gr", offset);
-    std::string endLbl = captureLabel("ge", offset);
+// separate comparison. `sub` disambiguates two calls at the SAME offset —
+// `normalizeFoldedOperands`'s multi-slot repair loop reads several folded
+// Lox slots for one instruction, and a shared offset with no sub index
+// would hand two of those reads the same ilasm label pair.
+void emitCapturedGetLocal(Emitter& e, int slot, int offset, int sub = -1) {
+    std::string rawLbl = captureLabel("gr", offset, sub);
+    std::string endLbl = captureLabel("ge", offset, sub);
     int d = e.b.depth;
-    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit(e.ldloc(slot), 0, +1);
     e.b.emit("isinst object[]", 1, 0);
     e.b.emit("brfalse " + rawLbl, 1, -1);
-    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit(e.ldloc(slot), 0, +1);
     e.b.emit("castclass object[]", 1, 0);
     e.b.emit("ldc.i4.0", 0, +1);
     e.b.emit("ldelem.ref", 2, -1);
     e.b.emit("br " + endLbl, 0, 0);
     e.b.label(rawLbl);
     e.b.resync(d);
-    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit(e.ldloc(slot), 0, +1);
     e.b.label(endLbl);
     e.b.resync(d + 1);
 }
@@ -429,66 +383,95 @@ void emitCapturedGetLocal(Emitter& e, int slot, int offset) {
 void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
     std::string rawLbl = captureLabel("sr", offset);
     std::string endLbl = captureLabel("se", offset);
-    std::string scratch = std::to_string(e.scratchSlot);
+    int scratch = e.scratchSlot;
     int d = e.b.depth;
-    e.b.emit("stloc " + scratch, 1, -1);
-    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit(e.stloc(scratch), 1, -1);
+    e.b.emit(e.ldloc(slot), 0, +1);
     e.b.emit("isinst object[]", 1, 0);
     e.b.emit("brfalse " + rawLbl, 1, -1);
-    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit(e.ldloc(slot), 0, +1);
     e.b.emit("castclass object[]", 1, 0);
     e.b.emit("ldc.i4.0", 0, +1);
-    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit(e.ldloc(scratch), 0, +1);
     e.b.emit("stelem.ref", 3, -3);
     e.b.emit("br " + endLbl, 0, 0);
     e.b.label(rawLbl);
     e.b.resync(d - 1);
-    e.b.emit("ldloc " + scratch, 0, +1);
-    e.b.emit("stloc " + std::to_string(slot), 1, -1);
+    e.b.emit(e.ldloc(scratch), 0, +1);
+    e.b.emit(e.stloc(slot), 1, -1);
     e.b.label(endLbl);
     e.b.resync(d - 1);
     if (peek) {
-        e.b.emit("ldloc " + scratch, 0, +1);
+        e.b.emit(e.ldloc(scratch), 0, +1);
     }
+}
+
+// The Lox slot a peek-family consumer at offset `offset` reads once its own
+// operand depth is zero — exact away from a CFG merge, and cross-checked by
+// `resolveZeroDepthLocalSlot` (zero_depth_local.h, the one shared authority
+// for this resolution) against this pass's own forward tracker at a merge
+// (see this file's own top-of-file note). Split out from
+// `loadNamedLocalAtZeroDepth` (below) so `normalizeFoldedOperands` can name
+// this SAME topmost folded slot without also emitting its load: a deficit
+// above 1 needs every folded slot from here down to
+// `topLoxSlot - (deficit - 1)`, loaded bottom first, not only this one.
+int resolveTopLoxSlot(const Emitter& e, std::size_t i, int offset) {
+    return resolveZeroDepthLocalSlot(
+        e.analysis.before[i].localCount - 1, e.labelAtOffset.contains(offset),
+        e.lastInvisibleVarSlot, offset, "clr_emitter");
+}
+
+// Loads Lox frame slot `loxSlot` onto the CIL evaluation stack, routed
+// through the same captured-slot test (`isinst object[]`) GET_LOCAL/
+// SET_LOCAL use whenever the capture analysis marks that slot captured.
+// Shared by `loadNamedLocalAtZeroDepth` (below) and
+// `normalizeFoldedOperands`'s own multi-slot repair, both of which load a
+// Lox slot they did not reach through an ordinary GET_LOCAL instruction.
+// `sub` forwards to `emitCapturedGetLocal` unchanged — see its own note —
+// so a caller that issues more than one load at the same offset gives each
+// one a distinct value.
+int loadLoxSlot(Emitter& e, int loxSlot, int offset, int sub = -1) {
+    int slot = e.slotForLocal(loxSlot);
+    if (e.isCaptured(loxSlot)) {
+        emitCapturedGetLocal(e, slot, offset, sub);
+    } else {
+        e.b.emit(e.ldloc(slot), 0, +1);
+    }
+    return slot;
 }
 
 // The CLR twin of jvm_emitter.cpp's own `loadNamedLocalAtZeroDepth`: at a
 // peek-family consumer whose operand depth is zero, the value to consume
 // is not a genuine evaluation-stack temporary — the shared abstract-stack
-// pass already folded it into a named local (P2). `resolveZeroDepthLocalSlot`
-// (zero_depth_local.h) is the one authority for naming that local: exact
-// away from a CFG merge, and cross-checked against this pass's own forward
-// tracker at a merge (see this file's own top-of-file note); this function
-// adds the CLR-specific `ldloc`, routed through the same captured-slot test
-// GET_LOCAL/SET_LOCAL use whenever the named local is itself captured.
-// `outLoxSlot`, when given, receives the Lox slot `resolveZeroDepthLocalSlot`
-// resolved — so a caller that also needs the Lox-numbered slot (GET_ITER's
-// own captured-slot test) reads it from here instead of re-deriving it.
+// pass already folded it into a named local (P2). `outLoxSlot`, when given,
+// receives the Lox slot this call resolved — so a caller that also needs
+// the Lox-numbered slot (GET_ITER's own captured-slot test) reads it from
+// here instead of re-deriving it.
 int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset,
                               int* outLoxSlot = nullptr) {
-    int loxSlot = resolveZeroDepthLocalSlot(
-        e.analysis.before[i].localCount - 1, e.labelAtOffset.contains(offset),
-        e.lastInvisibleVarSlot, offset, "clr_emitter");
+    int loxSlot = resolveTopLoxSlot(e, i, offset);
     if (outLoxSlot != nullptr) {
         *outLoxSlot = loxSlot;
     }
-    int slot = e.slotForLocal(loxSlot);
-    if (e.isCaptured(loxSlot)) {
-        emitCapturedGetLocal(e, slot, offset);
-    } else {
-        e.b.emit("ldloc " + std::to_string(slot), 0, +1);
-    }
-    return slot;
+    return loadLoxSlot(e, loxSlot, offset);
 }
 
-// The one test every peek-family consumer below (SET_LOCAL, SET_GLOBAL,
-// JUMP_IF_FALSE, RETURN, and any later one that peeks or returns a value
-// the abstract-stack pass may have folded) must run before it decides
-// between `loadNamedLocalAtZeroDepth` and its own ordinary
-// stack-value path. Centralized so a future consumer calls this instead
-// of re-deriving the raw `operandDepth() == 0` expression inline — the
+// The test a CUSTOM `nativePops` consumer runs ONLY when its own operand
+// can genuinely come from either of two sources — a named local already
+// folded at zero depth, or an ordinary stack value — and it must pick
+// which one applies before it dispatches. A CUSTOM consumer whose operand
+// is ALWAYS the zero-depth fold (INHERIT is the one example today) instead
+// calls `loadNamedLocalAtZeroDepth` unconditionally, with no guard needed;
+// a CUSTOM consumer that reads no operand of its own calls neither. Naming
+// every consumer in each of these three groups here would drift out of
+// date the moment a future CUSTOM row changes which group it is in —
+// `native_pops.cpp`'s own CUSTOM rows are the complete, checkable list.
+// Centralized so a future two-source CUSTOM consumer calls this instead of
+// re-deriving the raw `operandDepth() == 0` expression inline — the
 // resolution it guards (`resolveZeroDepthLocalSlot`) is already the one
-// shared authority; this is the one shared guard in front of it.
+// shared authority; this is the one shared guard in front of it. An
+// opcode with an ordinary (non-CUSTOM) row never calls this test directly:
+// `normalizeFoldedOperands` repairs its fold before dispatch.
 bool isFoldedAtZeroDepth(const Emitter& e, std::size_t i) {
     return e.analysis.before[i].operandDepth() == 0;
 }
@@ -503,6 +486,28 @@ void emitConstant(Emitter& e, const DecodedInstruction& in) {
         e.b.emit("ldstr " +
                      ilasmStringLiteral(std::string(asObjString(v)->chars)),
                  0, +1);
+    } else if (isEnumCtor(v)) {
+        // P8/P6: an enum declaration compiles each variant to a CONSTANT
+        // (compiler.cpp's enumDeclaration) that names an ObjEnumCtor, then a
+        // DEFINE_GLOBAL — the same shape a plain number or string literal
+        // uses. This materialises a real LoxEnumCtor here, once, so a later
+        // CALL of it (LoxOps.Call, since LoxEnumCtor already implements
+        // ILoxCallable) needs no case of its own for "the callee came from a
+        // CONSTANT, not a CLOSURE". `newobj` pops its four constructor
+        // arguments and pushes the fresh reference itself, so this needs no
+        // `dup` (unlike emitClosure's own array-building idiom).
+        ObjEnumCtor* ctor = asObjEnumCtor(as<Obj*>(v));
+        e.b.emit(pushIntInstruction(ctor->tag), 0, +1);
+        e.b.emit(pushIntInstruction(ctor->arity), 0, +1);
+        e.b.emit("ldstr " +
+                     ilasmStringLiteral(std::string(ctor->ctorName->chars)),
+                 0, +1);
+        e.b.emit("ldstr " +
+                     ilasmStringLiteral(std::string(ctor->enumName->chars)),
+                 0, +1);
+        e.b.emit("newobj instance void [LoxRuntime]Lox.LoxEnumCtor::.ctor"
+                 "(int32, int32, string, string)",
+                 4, -3);
     } else {
         notImplemented(in.op);
     }
@@ -526,7 +531,7 @@ void emitGetLocal(Emitter& e, const DecodedInstruction& in) {
     if (e.isCaptured(in.byteOperand)) {
         emitCapturedGetLocal(e, slot, in.offset);
     } else {
-        e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+        e.b.emit(e.ldloc(slot), 0, +1);
     }
 }
 
@@ -551,34 +556,32 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
         if (captured) {
             emitCapturedStore(e, slot, in.offset, /*peek=*/false);
         } else {
-            e.b.emit("stloc " + std::to_string(slot), 1, -1);
+            e.b.emit(e.stloc(slot), 1, -1);
         }
     } else if (captured) {
         emitCapturedStore(e, slot, in.offset, /*peek=*/!fuse);
     } else if (fuse) {
-        e.b.emit("stloc " + std::to_string(slot), 1, -1);
+        e.b.emit(e.stloc(slot), 1, -1);
     } else {
         e.b.emit("dup", 1, +1);
-        e.b.emit("stloc " + std::to_string(slot), 1, -1);
+        e.b.emit(e.stloc(slot), 1, -1);
     }
     consumedFollowingPop = fuse;
 }
 
-// A top-level `var n = match {...};` hands DEFINE_GLOBAL a match result the
-// same way `print match {...};` hands one to PRINT (emitPrint's own note):
-// the shared abstract-stack pass already folded it into a named local, so
-// nothing is physically on the CIL evaluation stack to pop until it is
-// reloaded through the same zero-depth check.
-void emitDefineGlobal(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (isFoldedAtZeroDepth(e, i)) {
-        loadNamedLocalAtZeroDepth(e, i, in.offset);
-    }
+// A top-level `var n = match {...};` can hand DEFINE_GLOBAL a match result
+// the shared abstract-stack pass already folded into a named local, with
+// nothing physically on the CIL evaluation stack to pop — the same shape
+// `normalizeFoldedOperands` (driven by `nativePops`'s own DEFINE_GLOBAL row)
+// already repairs before this function runs, so a genuine value is on the
+// stack either way by the time this runs.
+void emitDefineGlobal(Emitter& e, const DecodedInstruction& in) {
     emitGlobalsCall(e, "Define", e.constantStringLiteral(in.constantIndex),
                     /*peek=*/false);
 }
 
 void emitGetGlobal(Emitter& e, const DecodedInstruction& in) {
-    e.b.emit("ldloc " + std::to_string(e.globalsSlot), 0, +1);
+    e.b.emit(e.ldloc(e.globalsSlot), 0, +1);
     e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
     e.b.emit("call instance object [LoxRuntime]Lox.LoxGlobals::Get(string)", 2,
              -1);
@@ -602,18 +605,15 @@ void emitSetGlobal(Emitter& e, std::size_t i, const DecodedInstruction& in,
 
 // PRINT ordinarily consumes a genuine evaluation-stack value, but a `match`
 // expression's own result can reach it already folded into a named local —
-// the same eager invisible-var materialization the peek family
-// (SET_LOCAL/SET_GLOBAL/JUMP_IF_FALSE/RETURN) already handles.
 // `compileMatchBody`'s own closing POP retires only the synthetic "subject"
-// local; that shrinks the fused local/stack count and exposes the arm's own
-// result local as the new top, with no separate value ever pushed for a
-// genuine consumer to read. `print match 1 { case 1 => "a" case _ => "b"
-// };` is exactly this shape, with nothing in between to declare a real
-// local first.
-void emitPrint(Emitter& e, std::size_t i, const DecodedInstruction& in) {
-    if (isFoldedAtZeroDepth(e, i)) {
-        loadNamedLocalAtZeroDepth(e, i, in.offset);
-    }
+// local, exposing the arm's own result local as the new top with no
+// separate value ever pushed for a genuine consumer to read. `print match 1
+// { case 1 => "a" case _ => "b" };` is exactly this shape, with nothing in
+// between to declare a real local first. `normalizeFoldedOperands` (driven
+// by `nativePops`'s own PRINT row) already repairs it before this function
+// runs, so a genuine value is on the stack either way by the time this
+// runs.
+void emitPrint(Emitter& e) {
     e.b.emit("call void [LoxRuntime]Lox.LoxOps::Print(object)", 1, -1);
 }
 
@@ -676,7 +676,7 @@ void emitJumpIfFalse(Emitter& e, std::size_t i, const DecodedInstruction& in) {
 // reference on top of where those values used to sit.
 void spillLooseValues(Emitter& e, int scratchBase, int width) {
     for (int i = width - 1; i >= 0; i--) {
-        e.b.emit("stloc " + std::to_string(scratchBase + i), 1, -1);
+        e.b.emit(e.stloc(scratchBase + i), 1, -1);
     }
 }
 
@@ -692,7 +692,7 @@ void newObjectArrayFromScratch(Emitter& e, int scratchBase, int width) {
     for (int i = 0; i < width; i++) {
         e.b.emit("dup", 1, +1);
         e.b.emit(pushIntInstruction(i), 0, +1);
-        e.b.emit("ldloc " + std::to_string(scratchBase + i), 0, +1);
+        e.b.emit(e.ldloc(scratchBase + i), 0, +1);
         e.b.emit("stelem.ref", 3, -3);
     }
 }
@@ -753,9 +753,9 @@ void emitCall(Emitter& e, const DecodedInstruction& in) {
         return;
     }
     spillLooseValues(e, e.argScratchBase, argCount);
-    e.b.emit("stloc " + std::to_string(e.calleeScratchSlot), 1, -1);
+    e.b.emit(e.stloc(e.calleeScratchSlot), 1, -1);
 
-    e.b.emit("ldloc " + std::to_string(e.calleeScratchSlot), 0, +1);
+    e.b.emit(e.ldloc(e.calleeScratchSlot), 0, +1);
     newObjectArrayFromScratch(e, e.argScratchBase, argCount);
     e.b.emit(callSig, 2, -1);
 }
@@ -879,7 +879,7 @@ void emitGetIter(Emitter& e, std::size_t i, const DecodedInstruction& in) {
     if (e.isCaptured(loxSlot)) {
         emitCapturedStore(e, slot, in.offset, /*peek=*/false);
     } else {
-        e.b.emit("stloc " + std::to_string(slot), 1, -1);
+        e.b.emit(e.stloc(slot), 1, -1);
     }
 }
 
@@ -937,10 +937,10 @@ void emitGetProperty(Emitter& e, const DecodedInstruction& in) {
 // `e.scratchSlot` while the constant name is pushed between them — the same
 // shuffle `emitGlobalsCall`'s own peek path uses for the identical reason.
 void emitSetProperty(Emitter& e, const DecodedInstruction& in) {
-    std::string scratch = std::to_string(e.scratchSlot);
-    e.b.emit("stloc " + scratch, 1, -1);
+    int scratch = e.scratchSlot;
+    e.b.emit(e.stloc(scratch), 1, -1);
     e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
-    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit(e.ldloc(scratch), 0, +1);
     e.b.emit("call object [LoxRuntime]Lox.LoxOps::SetProperty(object, "
              "string, object)",
              3, -2);
@@ -955,12 +955,12 @@ void emitSetProperty(Emitter& e, const DecodedInstruction& in) {
 // real program, so a mismatch can only be an emitter bug, and a raw
 // InvalidCastException is an acceptable way to fail loudly on one.
 void emitDefineMethod(Emitter& e, const DecodedInstruction& in) {
-    std::string scratch = std::to_string(e.scratchSlot);
-    e.b.emit("stloc " + scratch, 1, -1);
+    int scratch = e.scratchSlot;
+    e.b.emit(e.stloc(scratch), 1, -1);
     e.b.emit("dup", 1, +1);
     e.b.emit("castclass [LoxRuntime]Lox.LoxClass", 1, 0);
     e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
-    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit(e.ldloc(scratch), 0, +1);
     e.b.emit("castclass [LoxRuntime]Lox.LoxClosure", 1, 0);
     e.b.emit("call void [LoxRuntime]Lox.LoxOps::DefineMethod(class "
              "[LoxRuntime]Lox.LoxClass, string, class "
@@ -978,13 +978,13 @@ void emitDefineMethod(Emitter& e, const DecodedInstruction& in) {
 // reloaded in `LoxOps.GetSuper`'s own parameter order (superclassVal, name,
 // self).
 void emitGetSuper(Emitter& e, const DecodedInstruction& in) {
-    std::string superScratch = std::to_string(e.scratchSlot);
-    std::string selfScratch = std::to_string(e.calleeScratchSlot);
-    e.b.emit("stloc " + superScratch, 1, -1);
-    e.b.emit("stloc " + selfScratch, 1, -1);
-    e.b.emit("ldloc " + superScratch, 0, +1);
+    int superScratch = e.scratchSlot;
+    int selfScratch = e.calleeScratchSlot;
+    e.b.emit(e.stloc(superScratch), 1, -1);
+    e.b.emit(e.stloc(selfScratch), 1, -1);
+    e.b.emit(e.ldloc(superScratch), 0, +1);
     e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
-    e.b.emit("ldloc " + selfScratch, 0, +1);
+    e.b.emit(e.ldloc(selfScratch), 0, +1);
     e.b.emit("call object [LoxRuntime]Lox.LoxOps::GetSuper(object, string, "
              "object)",
              3, -2);
@@ -1001,7 +1001,7 @@ void emitGetSuper(Emitter& e, const DecodedInstruction& in) {
 // declared CIL type here is not evidence of the invariant; the emitter's
 // own write discipline is.
 void emitInstanceof(Emitter& e, const DecodedInstruction& in) {
-    e.b.emit("ldloc " + std::to_string(e.globalsSlot), 0, +1);
+    e.b.emit(e.ldloc(e.globalsSlot), 0, +1);
     e.b.emit("ldstr " + e.constantStringLiteral(in.constantIndex), 0, +1);
     e.b.emit("call bool [LoxRuntime]Lox.LoxOps::InstanceOf(object, class "
              "[LoxRuntime]Lox.LoxGlobals, string)",
@@ -1032,9 +1032,9 @@ void emitInvoke(Emitter& e, const DecodedInstruction& in) {
         return;
     }
     spillLooseValues(e, e.argScratchBase, argCount);
-    e.b.emit("stloc " + std::to_string(e.calleeScratchSlot), 1, -1);
+    e.b.emit(e.stloc(e.calleeScratchSlot), 1, -1);
 
-    e.b.emit("ldloc " + std::to_string(e.calleeScratchSlot), 0, +1);
+    e.b.emit(e.ldloc(e.calleeScratchSlot), 0, +1);
     e.b.emit("ldstr " + name, 0, +1);
     newObjectArrayFromScratch(e, e.argScratchBase, argCount);
     e.b.emit(invokeSig, 3, -2);
@@ -1053,29 +1053,29 @@ void emitInvoke(Emitter& e, const DecodedInstruction& in) {
 void emitSuperInvoke(Emitter& e, const DecodedInstruction& in) {
     int argCount = in.byteOperand;
     std::string name = e.constantStringLiteral(in.constantIndex);
-    std::string superScratch = std::to_string(e.scratchSlot);
-    std::string selfScratch = std::to_string(e.calleeScratchSlot);
+    int superScratch = e.scratchSlot;
+    int selfScratch = e.calleeScratchSlot;
     const char* superInvokeSig =
         "call object [LoxRuntime]Lox.LoxOps::SuperInvoke(object, string, "
         "object, object[])";
     if (argCount == 0) {
-        e.b.emit("stloc " + superScratch, 1, -1); // superclassVal (top)
-        e.b.emit("stloc " + selfScratch, 1, -1);  // self
-        e.b.emit("ldloc " + superScratch, 0, +1);
+        e.b.emit(e.stloc(superScratch), 1, -1); // superclassVal (top)
+        e.b.emit(e.stloc(selfScratch), 1, -1);  // self
+        e.b.emit(e.ldloc(superScratch), 0, +1);
         e.b.emit("ldstr " + name, 0, +1);
-        e.b.emit("ldloc " + selfScratch, 0, +1);
+        e.b.emit(e.ldloc(selfScratch), 0, +1);
         e.b.emit(pushIntInstruction(0), 0, +1);
         e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
         e.b.emit(superInvokeSig, 4, -3);
         return;
     }
-    e.b.emit("stloc " + superScratch, 1, -1); // superclassVal (top)
+    e.b.emit(e.stloc(superScratch), 1, -1); // superclassVal (top)
     spillLooseValues(e, e.argScratchBase, argCount);
-    e.b.emit("stloc " + selfScratch, 1, -1); // self
+    e.b.emit(e.stloc(selfScratch), 1, -1); // self
 
-    e.b.emit("ldloc " + superScratch, 0, +1);
+    e.b.emit(e.ldloc(superScratch), 0, +1);
     e.b.emit("ldstr " + name, 0, +1);
-    e.b.emit("ldloc " + selfScratch, 0, +1);
+    e.b.emit(e.ldloc(selfScratch), 0, +1);
     newObjectArrayFromScratch(e, e.argScratchBase, argCount);
     e.b.emit(superInvokeSig, 4, -3);
 }
@@ -1091,6 +1091,63 @@ void emitMatchError(Emitter& e) {
              "MatchError()",
              0, +1);
     e.b.emit("throw", 1, -1);
+}
+
+// GET_TAG's own instruction, standalone — the sparse, compare-and-branch
+// match form (compiler.cpp emits GET_LOCAL(subjectSlot); GET_TAG; CONSTANT;
+// EQUAL, once per arm, whenever a guard, an or-pattern, an @-binding, or a
+// non-dense tag set defeats table dispatch). `LoxOps.GetTag` returns the tag
+// as a primitive `float64`, the same shape `LoxOps.Add` and friends already
+// expect from a boxed number operand once boxed — box it exactly the way
+// `emitConstant` boxes a number literal, so the CONSTANT/EQUAL pair right
+// after sees the same `object` shape any other comparison operand does.
+void emitGetTag(Emitter& e) {
+    e.b.emit("call float64 [LoxRuntime]Lox.LoxOps::GetTag(object)", 1, 0);
+    e.b.emit("box [System.Runtime]System.Double", 1, 0);
+}
+
+// GET_TAG fused with an immediately following JUMP_TABLE (P8's own hazard,
+// clr_emitter.h's own top-of-file note): keeps the tag a primitive `float64`
+// the whole way, never boxing it only to unbox it again for the dispatch.
+// CIL's `switch` is base-0 and takes no base argument of its own (unlike
+// jasmin's `tableswitch <low>`), so the base subtraction is explicit here:
+// `conv.i4`, push `min`, `sub`, then `switch`. `min` is the table's own
+// lower tag bound; one label per arm, in ascending tag order —
+// chunk_decoder.cpp already resolved every arm's own absolute target from
+// the raw forward-offset bytes, so this reads that, not the bytes
+// themselves. An index outside the table's own width falls through to the
+// very next instruction: compileMatchBody always places a real MATCH_ERROR
+// there, and the CFG (cfg.h) already gives that offset its own label, the
+// same as any other block leader — this pass does not special-case it.
+void emitFusedGetTagJumpTable(Emitter& e, const DecodedInstruction& table) {
+    e.b.emit("call float64 [LoxRuntime]Lox.LoxOps::GetTag(object)", 1, 0);
+    e.b.emit("conv.i4", 1, 0);
+    e.b.emit(pushIntInstruction(table.minTag), 0, +1);
+    e.b.emit("sub", 2, -1);
+    std::ostringstream sw;
+    sw << "switch (";
+    for (std::size_t k = 0; k < table.jumpTable.size(); k++) {
+        if (k > 0) {
+            sw << ",\n        ";
+        }
+        sw << e.labelFor(table.jumpTable[k].target);
+    }
+    sw << ")";
+    e.b.emit(sw.str(), 1, -1);
+}
+
+// GET_TAG's own dispatch case: fuse with a following JUMP_TABLE when one is
+// there (`fusableJumpTable`'s own note), matching SET_LOCAL/SET_GLOBAL/
+// SET_UPVALUE's own POP-fusion shape — the caller skips the JUMP_TABLE's
+// own array slot instead of dispatching it a second time.
+void emitGetTagOrFused(Emitter& e, std::size_t i,
+                       bool& consumedFollowingJumpTable) {
+    if (e.fusableJumpTable(i)) {
+        emitFusedGetTagJumpTable(e, e.fn.instructions[i + 1]);
+        consumedFollowingJumpTable = true;
+    } else {
+        emitGetTag(e);
+    }
 }
 
 // Wraps `slot` in a fresh `object[1]` ref-cell, seeded with the raw value
@@ -1115,16 +1172,16 @@ void emitMatchError(Emitter& e) {
 void ensureCapturedCell(Emitter& e, int slot, int offset, int subIndex) {
     std::string readyLbl = captureLabel("ok", offset, subIndex);
     int d = e.b.depth;
-    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit(e.ldloc(slot), 0, +1);
     e.b.emit("isinst object[]", 1, 0);
     e.b.emit("brtrue " + readyLbl, 1, -1);
     e.b.emit(pushIntInstruction(1), 0, +1);
     e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
     e.b.emit("dup", 1, +1);
     e.b.emit("ldc.i4.0", 0, +1);
-    e.b.emit("ldloc " + std::to_string(slot), 0, +1);
+    e.b.emit(e.ldloc(slot), 0, +1);
     e.b.emit("stelem.ref", 3, -3);
-    e.b.emit("stloc " + std::to_string(slot), 1, -1);
+    e.b.emit(e.stloc(slot), 1, -1);
     e.b.label(readyLbl);
     e.b.resync(d);
 }
@@ -1196,7 +1253,7 @@ int findSelfCaptureLoxSlot(const Emitter& e, const DecodedInstruction& in) {
 void seedSelfCaptureCell(Emitter& e, int selfSlot) {
     e.b.emit(pushIntInstruction(1), 0, +1);
     e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
-    e.b.emit("stloc " + std::to_string(selfSlot), 1, -1);
+    e.b.emit(e.stloc(selfSlot), 1, -1);
 }
 
 // The declaring store, redirected: write the closure just built into the
@@ -1208,11 +1265,11 @@ void seedSelfCaptureCell(Emitter& e, int selfSlot) {
 // needs the value parked somewhere while the cell reference is fetched.
 void storeClosureIntoSelfCell(Emitter& e, const DecodedInstruction& in,
                               int selfSlot, int selfLoxSlot) {
-    std::string scratch = std::to_string(e.scratchSlot);
-    e.b.emit("stloc " + scratch, 1, -1);
-    e.b.emit("ldloc " + std::to_string(selfSlot), 0, +1);
+    int scratch = e.scratchSlot;
+    e.b.emit(e.stloc(scratch), 1, -1);
+    e.b.emit(e.ldloc(selfSlot), 0, +1);
     e.b.emit("ldc.i4.0", 0, +1);
-    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit(e.ldloc(scratch), 0, +1);
     e.b.emit("stelem.ref", 3, -3);
 
     // finishInstruction must not ALSO store this offset's invisible var: it
@@ -1289,8 +1346,7 @@ void emitClosure(Emitter& e, const DecodedInstruction& in,
             // `selfLoxSlot` already holds a fresh cell (seeded above), so
             // this is the same lowering as any other already-a-cell
             // capture — no special case needed here.
-            e.b.emit("ldloc " + std::to_string(e.slotForLocal(up.index)), 0,
-                     +1);
+            e.b.emit(e.ldloc(e.slotForLocal(up.index)), 0, +1);
             e.b.emit("castclass object[]", 1, 0);
         } else {
             // A grandparent's own upvalue, already a cell — copy the
@@ -1331,17 +1387,17 @@ void emitGetUpvalue(Emitter& e, const DecodedInstruction& in) {
 // `emitCapturedStore`) while `upvals[index]` is fetched, then written back
 // into that cell's slot 0.
 void emitUpvalueStore(Emitter& e, int index, bool peek) {
-    std::string scratch = std::to_string(e.scratchSlot);
-    e.b.emit("stloc " + scratch, 1, -1);
+    int scratch = e.scratchSlot;
+    e.b.emit(e.stloc(scratch), 1, -1);
     e.b.emit("ldarg.0", 0, +1);
     e.b.emit("ldfld object[][] [LoxRuntime]Lox.LoxClosure::Upvalues", 1, 0);
     e.b.emit(pushIntInstruction(index), 0, +1);
     e.b.emit("ldelem.ref", 2, -1);
     e.b.emit("ldc.i4.0", 0, +1);
-    e.b.emit("ldloc " + scratch, 0, +1);
+    e.b.emit(e.ldloc(scratch), 0, +1);
     e.b.emit("stelem.ref", 3, -3);
     if (peek) {
-        e.b.emit("ldloc " + scratch, 0, +1);
+        e.b.emit(e.ldloc(scratch), 0, +1);
     }
 }
 
@@ -1379,14 +1435,15 @@ void emitSetUpvalue(Emitter& e, std::size_t i, const DecodedInstruction& in,
 // "exactly empty" rule. That value is not always a genuine evaluation-stack
 // temporary: `bytecode-translation-problems.md` documents 33 corpus sites
 // where the shared abstract-stack analysis already folded the returned
-// value into a named local before RETURN runs (`before[i].operandDepth()
-// == 0`), with no separate load in the bytecode — the same eager
-// invisible-var materialization SET_LOCAL/SET_GLOBAL/JUMP_IF_FALSE already
-// handle. This node's own checkpoint never reaches that shape (its `return
-// a + b;` is an ordinary temporary), but the check here does not assume
-// the stack case just because it is the only one exercised end to end yet.
-void emitReturn(Emitter& e, std::size_t i, const DecodedInstruction& in,
-                bool isFunction) {
+// value into a named local before RETURN runs, with no separate load in the
+// bytecode — the same eager invisible-var materialization SET_LOCAL/
+// SET_GLOBAL/JUMP_IF_FALSE already handle. `normalizeFoldedOperands`
+// (driven by `nativePops`'s own RETURN row) already repairs that fold
+// before this function runs, the same as it does for every other
+// `nativePops`-covered consumer, so this function no longer inspects depth
+// to decide whether to load anything — only to confirm the repair left the
+// stack in the shape `ret` needs.
+void emitReturn(Emitter& e, bool isFunction) {
     if (!isFunction) {
         e.b.emit("pop", 1, -1);
         if (e.b.depth != 0) {
@@ -1397,9 +1454,6 @@ void emitReturn(Emitter& e, std::size_t i, const DecodedInstruction& in,
         }
         e.b.emit("ret", 0, 0);
         return;
-    }
-    if (isFoldedAtZeroDepth(e, i)) {
-        loadNamedLocalAtZeroDepth(e, i, in.offset);
     }
     if (e.b.depth != 1) {
         throw std::runtime_error(
@@ -1418,22 +1472,125 @@ void emitReturn(Emitter& e, std::size_t i, const DecodedInstruction& in,
 // note), then computing the next walk index and the fall-through carry the
 // *next* iteration's label-resync test (see emitBody) reads.
 std::size_t finishInstruction(Emitter& e, const DecodedInstruction& in,
-                              std::size_t i, bool consumedFollowingPop) {
+                              std::size_t i, bool consumedFollowingPop,
+                              bool consumedFollowingJumpTable) {
     auto varsIt = e.invisibleVarsByOffset.find(in.offset);
     if (varsIt != e.invisibleVarsByOffset.end()) {
         for (int slot : varsIt->second) {
-            e.b.emit("stloc " + std::to_string(e.slotForLocal(slot)), 1, -1);
+            e.b.emit(e.stloc(e.slotForLocal(slot)), 1, -1);
             e.lastInvisibleVarSlot = slot;
         }
     }
 
-    std::size_t nextIndex = i + (consumedFollowingPop ? 2 : 1);
+    std::size_t nextIndex =
+        i + (consumedFollowingPop || consumedFollowingJumpTable ? 2 : 1);
+    // `in.op` reads GET_TAG here whenever this instruction fused away a
+    // following JUMP_TABLE — GET_TAG alone falls through, but the emitted
+    // `switch` never does (every arm, and the out-of-range case, are real
+    // jump targets, same as JUMP/LOOP/MATCH_ERROR): CIL's `switch` does
+    // physically fall through into the next instruction when the index is
+    // out of range, but that next instruction is MATCH_ERROR's own CFG
+    // label, which the label-resync test below re-derives from the shared
+    // abstract-stack analysis regardless of this flag — so treating the
+    // fused pair as "does not fall through" costs nothing and avoids
+    // depending on that physical coincidence.
     e.prevCanFallThrough = in.op != Op::JUMP && in.op != Op::LOOP &&
-                           in.op != Op::RETURN && in.op != Op::MATCH_ERROR;
+                           in.op != Op::RETURN && in.op != Op::MATCH_ERROR &&
+                           !consumedFollowingJumpTable;
     e.prevNaturalSuccessorOffset = (nextIndex < e.fn.instructions.size())
                                        ? e.fn.instructions[nextIndex].offset
                                        : -1;
     return nextIndex;
+}
+
+// The one place every `nativePops`-covered consumer (native_pops.h) gets its
+// folded bottom operand(s) repaired, sharing that one target-independent
+// table with jvm_emitter.cpp's own mechanism of the same name and purpose.
+// `deficit` is how many of this instruction's own `nativePops` cells the
+// shared abstract-stack analysis has already folded into named locals
+// (compileMatchBody's own "fused local/operand-stack model") instead of
+// leaving on the real evaluation stack. A folded operand is always the
+// BOTTOM-most block of an instruction's own operands — `compileMatchBody`
+// folds a `match` expression's result into its own named local (and,
+// starting with the fix that reserves a phantom local per live sibling
+// operand, folds every OTHER live sibling of that same consumer right along
+// with it, once anything inside the match references a slot number above
+// them) before any later sibling operand is even parsed — so this repairs
+// every `nativePops`-covered opcode's own folded-operand shape uniformly,
+// regardless of how many of its operands are folded at once.
+//
+// deficit <= 0: every operand this instruction needs is already, physically,
+// on the stack (any extra depth below belongs to an outer expression and is
+// untouched) — the ordinary case, and what every CUSTOM row gets
+// unconditionally too; this function never computes a deficit for one.
+//
+// deficit >= 1: `genuineCount = *pops - deficit` values are still genuinely
+// on the stack, on top of where the folded ones belong. Zero or one genuine
+// value spills to `e.scratchSlot` (the same single slot SET_PROPERTY/
+// DEFINE_METHOD/GET_SUPER already spill their own second operand into); two
+// or more spill into `e.argScratchBase`, `computeAggregateNeeds`'s own spill
+// area, sized for exactly this by its own scan. Once spilled, the `deficit`
+// folded locals load in ascending slot order — `resolveTopLoxSlot` names
+// the topmost one, cross-checked the same way every other zero-depth
+// consumer's slot is; the rest sit contiguously beneath it, LIFO, per
+// abstract_stack.h's own local/temporary boundary — then the genuine values
+// reload on top, in their original order.
+//
+// This does not stop at a deficit of 1 the way jvm_emitter.cpp's own
+// `normalizeFoldedOperands` still does: that ceiling guarded against a
+// `compileMatchBody` slot-allocation defect that made two-or-more-deep
+// folding collide with a live sibling operand on `build/loxpp` itself, with
+// no correct native answer to reproduce. That defect is fixed in the
+// compiler this pass reads its bytecode from — measured directly, not
+// assumed — so a deeper fold now has a real native answer, and this
+// generalizes to `deficit` of any size to match it, rather than refusing a
+// case the JVM backend still refuses out of a now-stale caution.
+void normalizeFoldedOperands(Emitter& e, std::size_t i,
+                             const DecodedInstruction& in) {
+    std::optional<int> pops = nativePops(in.op, in);
+    if (!pops.has_value()) {
+        return;
+    }
+    int deficit = *pops - e.analysis.before[i].operandDepth();
+    if (deficit <= 0) {
+        return;
+    }
+    // A fold can only ever explain a deficit up to how many locals are
+    // currently bound: `compileMatchBody` folds a value INTO a local, never
+    // out of thin air. A deficit wider than that is not a fold at all — a
+    // genuine evaluation-stack underflow the compiler itself would never
+    // produce — so this leaves it for the instruction's own `Builder::emit`
+    // read-count check to name, against the real CIL instruction being
+    // assembled, rather than resolving a Lox slot that does not exist.
+    if (e.analysis.before[i].localCount < deficit) {
+        return;
+    }
+    int genuineCount = *pops - deficit;
+    if (genuineCount == 1) {
+        e.b.emit(e.stloc(e.scratchSlot), 1, -1);
+    } else if (genuineCount >= 2) {
+        for (int k = 0; k < genuineCount; k++) {
+            e.b.emit(e.stloc(e.argScratchBase + k), 1, -1);
+        }
+    }
+
+    int topLoxSlot = resolveTopLoxSlot(e, i, in.offset);
+    // `k` also serves as the captured-slot label sub-index: this loop can
+    // call loadLoxSlot more than once at this SAME offset, and two of those
+    // calls landing on a captured slot would otherwise both ask
+    // emitCapturedGetLocal for the offset-only label pair ("gr"+offset /
+    // "ge"+offset), which ilasm rejects as a duplicate the second time.
+    for (int k = deficit - 1; k >= 0; k--) {
+        loadLoxSlot(e, topLoxSlot - k, in.offset, k);
+    }
+
+    if (genuineCount == 1) {
+        e.b.emit(e.ldloc(e.scratchSlot), 0, +1);
+    } else if (genuineCount >= 2) {
+        for (int k = genuineCount - 1; k >= 0; k--) {
+            e.b.emit(e.ldloc(e.argScratchBase + k), 0, +1);
+        }
+    }
 }
 
 void emitBody(Emitter& e, bool isFunction,
@@ -1448,6 +1605,7 @@ void emitBody(Emitter& e, bool isFunction,
         }
         const DecodedInstruction& in = ins[i];
         bool consumedFollowingPop = false;
+        bool consumedFollowingJumpTable = false;
 
         auto labelIt = e.labelAtOffset.find(in.offset);
         if (labelIt != e.labelAtOffset.end()) {
@@ -1480,6 +1638,8 @@ void emitBody(Emitter& e, bool isFunction,
                 " at offset " + std::to_string(in.offset));
         }
 
+        normalizeFoldedOperands(e, i, in);
+
         switch (in.op) {
         case Op::CONSTANT:
             emitConstant(e, in);
@@ -1505,7 +1665,7 @@ void emitBody(Emitter& e, bool isFunction,
             emitSetLocal(e, i, in, consumedFollowingPop);
             break;
         case Op::DEFINE_GLOBAL:
-            emitDefineGlobal(e, i, in);
+            emitDefineGlobal(e, in);
             break;
         case Op::GET_GLOBAL:
             emitGetGlobal(e, in);
@@ -1514,7 +1674,7 @@ void emitBody(Emitter& e, bool isFunction,
             emitSetGlobal(e, i, in, consumedFollowingPop);
             break;
         case Op::PRINT:
-            emitPrint(e, i, in);
+            emitPrint(e);
             break;
         case Op::NOT:
             emitNot(e);
@@ -1608,7 +1768,7 @@ void emitBody(Emitter& e, bool isFunction,
             // ensureCapturedCell's own note.
             break;
         case Op::RETURN:
-            emitReturn(e, i, in, isFunction);
+            emitReturn(e, isFunction);
             break;
         case Op::CLASS:
             emitClass(e, in);
@@ -1640,11 +1800,15 @@ void emitBody(Emitter& e, bool isFunction,
         case Op::MATCH_ERROR:
             emitMatchError(e);
             break;
+        case Op::GET_TAG:
+            emitGetTagOrFused(e, i, consumedFollowingJumpTable);
+            break;
         default:
             notImplemented(in.op);
         }
 
-        i = finishInstruction(e, in, i, consumedFollowingPop);
+        i = finishInstruction(e, in, i, consumedFollowingPop,
+                              consumedFollowingJumpTable);
     }
 }
 
@@ -1669,8 +1833,10 @@ int computeMaxLocalCount(const FunctionStackAnalysis& analysis) {
 // What this chunk needs from the shared scratch area: `maxWidth` is the
 // widest aggregate it builds by spilling loose operand-stack values to
 // scratch locals before assembling one aggregate object — CALL's/INVOKE's/
-// SUPER_INVOKE's own argument count, BUILD_LIST's own element count, or
-// BUILD_MAP's own pair count doubled (key, value per pair), whichever is
+// SUPER_INVOKE's own argument count, BUILD_LIST's own element count,
+// BUILD_MAP's own pair count doubled (key, value per pair), or
+// `normalizeFoldedOperands`'s own deficit-vs-genuine spill (two or more
+// genuine operands still live above a folded bottom block), whichever is
 // wider (jvm_emitter.cpp's own computeMaxSpillWidth is the JVM twin of this
 // scan). `needsCalleeSlot` is true whenever some instruction in the chunk
 // needs `e.calleeScratchSlot` itself even at width 0: GET_SUPER and
@@ -1685,8 +1851,10 @@ struct AggregateNeeds {
     bool needsCalleeSlot{false};
 };
 
-AggregateNeeds computeAggregateNeeds(const DecodedFunction& fn) {
+AggregateNeeds computeAggregateNeeds(const DecodedFunction& fn,
+                                     const FunctionStackAnalysis& analysis) {
     AggregateNeeds needs;
+    std::size_t i = 0;
     for (const DecodedInstruction& instr : fn.instructions) {
         switch (instr.op) {
         case Op::CALL:
@@ -1707,8 +1875,33 @@ AggregateNeeds computeAggregateNeeds(const DecodedFunction& fn) {
         default:
             break;
         }
+        std::optional<int> pops = nativePops(instr.op, instr);
+        if (pops.has_value()) {
+            int deficit = *pops - analysis.before[i].operandDepth();
+            if (deficit >= 1) {
+                int genuineCount = *pops - deficit;
+                if (genuineCount >= 2) {
+                    needs.maxWidth = std::max(needs.maxWidth, genuineCount);
+                }
+            }
+        }
+        i++;
     }
     return needs;
+}
+
+// The one authority for how many `.locals init` slots one chunk needs:
+// globals (1) + the Lox frame's own slots + the shuffle scratch (1) + the
+// aggregate spill area, if this chunk needs one. buildEmitter calls this
+// to bound `Emitter::localOp` before a single instruction emits, and
+// emitClassBody calls it again, unchanged, for the `.locals init`
+// directive itself — one computation, not two that could drift apart.
+int computeTotalLocalSlots(int maxLocalCount,
+                           const AggregateNeeds& aggregateNeeds) {
+    bool needsScratchArea =
+        aggregateNeeds.needsCalleeSlot || aggregateNeeds.maxWidth > 0;
+    int extraSpillSlots = needsScratchArea ? aggregateNeeds.maxWidth + 1 : 0;
+    return 1 + maxLocalCount + 1 + extraSpillSlots;
 }
 
 // `captureInfo` is this chunk's own entry from `analyzeCaptures`
@@ -1719,6 +1912,8 @@ Emitter buildEmitter(const DecodedFunction& fn,
                      const FunctionCaptureInfo& captureInfo) {
     Emitter e{fn, analysis, {}};
     e.scratchSlot = e.baseSlot + maxLocalCount;
+    e.declaredLocalCount =
+        computeTotalLocalSlots(maxLocalCount, aggregateNeeds);
     if (aggregateNeeds.needsCalleeSlot || aggregateNeeds.maxWidth > 0) {
         // emitBuildList spills only into argScratchBase, one slot per
         // element, and never touches calleeScratchSlot; reserving it
@@ -1780,21 +1975,21 @@ void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isFunction) {
         e.b.emit("call class [LoxRuntime]Lox.LoxGlobals "
                  "[LoxRuntime]Lox.LoxRuntime::Init()",
                  0, +1);
-        e.b.emit("stloc " + std::to_string(e.globalsSlot), 1, -1);
+        e.b.emit(e.stloc(e.globalsSlot), 1, -1);
         return;
     }
     e.b.emit("call class [LoxRuntime]Lox.LoxGlobals "
              "[LoxRuntime]Lox.LoxRuntime::Current()",
              0, +1);
-    e.b.emit("stloc " + std::to_string(e.globalsSlot), 1, -1);
+    e.b.emit(e.stloc(e.globalsSlot), 1, -1);
     e.b.emit("ldarg.1", 0, +1);
-    e.b.emit("stloc " + std::to_string(e.slotForLocal(0)), 1, -1);
+    e.b.emit(e.stloc(e.slotForLocal(0)), 1, -1);
     int arity = fn.function->arity;
     for (int i = 0; i < arity; i++) {
         e.b.emit("ldarg.2", 0, +1);
         e.b.emit(pushIntInstruction(i), 0, +1);
         e.b.emit("ldelem.ref", 2, -1);
-        e.b.emit("stloc " + std::to_string(e.slotForLocal(i + 1)), 1, -1);
+        e.b.emit(e.stloc(e.slotForLocal(i + 1)), 1, -1);
     }
 }
 
@@ -1894,19 +2089,14 @@ std::string emitChunk(const DecodedFunction& fn,
                       const std::vector<std::string>& childClassNames,
                       const FunctionCaptureInfo& captureInfo) {
     int maxLocalCount = computeMaxLocalCount(analysis);
-    AggregateNeeds aggregateNeeds = computeAggregateNeeds(fn);
-    bool needsScratchArea =
-        aggregateNeeds.needsCalleeSlot || aggregateNeeds.maxWidth > 0;
-    int extraSpillSlots = needsScratchArea ? aggregateNeeds.maxWidth + 1 : 0;
+    AggregateNeeds aggregateNeeds = computeAggregateNeeds(fn, analysis);
 
     Emitter e =
         buildEmitter(fn, analysis, maxLocalCount, aggregateNeeds, captureInfo);
     emitPrologue(e, fn, isFunction);
     emitBody(e, isFunction, childClassNames);
 
-    // globals (1) + the Lox frame's own slots + the shuffle scratch (1) +
-    // the aggregate spill area, if this chunk needs one.
-    int totalLocals = 1 + maxLocalCount + 1 + extraSpillSlots;
+    int totalLocals = computeTotalLocalSlots(maxLocalCount, aggregateNeeds);
     return emitClassBody(e, fn, className, isFunction, totalLocals);
 }
 

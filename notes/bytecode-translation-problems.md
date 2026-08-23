@@ -597,28 +597,44 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     program, and a nested-match-subject program all now match `build/loxpp`
     exactly; one unit test per shape proves it fails when its own
     `nativePops` row is reverted to `std::nullopt`.
-  - **Still open, unowned, not silent — a deficit of two or more.** A
+  - **SUPERSEDED for the native answer — a deficit of two or more.** A
     `match` result sandwiched below TWO OR MORE live sibling operands of its
     own consumer (`CALL`'s own sandwiched-argument shape, `ADD`'s own
     mirror-image and both-sides-folded shapes — `1 + match ...`,
-    `(match ...) + (match ...)`) still gets no answer, and `normalizeFoldedOperands`
-    now throws a named, loud error for it instead of underflowing silently
-    at emit time. This is NOT owed a fix: `compileMatchBody`'s own
-    `resultSlot`/`subjectSlot` allocation (compiler.cpp) uses `m_localCount`
-    alone, blind to a sibling operand already live on the real VM stack, so
-    the two collide at the same slot — a pre-existing defect in
-    `build/loxpp` itself, proven by seven one-line programs across PR #115's
-    three rounds, all raising `Operands must be numbers.` /
-    `Can only call functions, classes and enums.` on `build/loxpp` (exit 70).
-    `1 + match 1 { case 1 => 2 case _ => 3 };` is legal per spec/02-syntax.md
-    (`match` is `primary`). Fixing this is a compiler change, out of any
-    backend node's charter (brief.md section 8); no later emission node owns
-    it either, since N10 is the last one. A second, theoretical residue is
-    unchanged by this round: the case where `loadNamedLocalAtZeroDepth`'s two
-    slot estimates agree and are BOTH wrong is not ruled out by its
-    cross-check — only real, per-edge merge verification closes it, which no
-    node has attempted. No known program reaches either residue; the
-    mission's definition of done is not blocked.
+    `(match ...) + (match ...)`) used to have no correct native answer:
+    `compileMatchBody`'s own `resultSlot`/`subjectSlot` allocation
+    (compiler.cpp) used `m_localCount` alone, blind to a sibling operand
+    already live on the real VM stack, so the two collided at the same slot.
+    A fix to `compileMatchBody` now reserves one phantom local per live
+    sibling operand before allocating the match's own result/subject
+    slots, so the two no longer collide. Measured directly against the
+    current compiler: `1 + match 1 { case 1 => 2 case _ => 3 };` prints `3`,
+    `(match 1 { case 1 => 2 case _ => 3 }) + (match 1 { case 1 => 10 case _
+    => 20 });` prints `12`, and a three-argument `CALL` with the callee
+    folded and a live argument on either side prints the same sum a plain
+    temporary would — `build/loxpp` now answers every one of these
+    correctly, not just the deficit-of-one shape. The JVM backend's own
+    `normalizeFoldedOperands` still refuses a deficit of two or more
+    unconditionally; it was not changed to match this fix, so it remains
+    behind native on this shape. The CLR backend's own fold repair does not
+    carry that ceiling: it loads however many bottom locals a consumer's own
+    deficit names, in ascending slot order, so a deficit of two or more
+    reaches the same repair a deficit of one already used, with two
+    exceptions, both loud. First, when fewer locals are bound than the
+    deficit names, the repair is not a fold at all — a genuine
+    evaluation-stack underflow the compiler would never itself produce — so
+    it returns without touching the stack, leaving the instruction's own
+    `Builder::emit` read-count check to name the underflow against the real
+    CIL instruction being assembled. Second, when two or more of the
+    reloaded slots are also captured-closure slots, each one lowers through
+    the same `isinst object[]` test an ordinary `GET_LOCAL` on that slot
+    uses, and that test needs its own pair of ilasm labels per load — the
+    repair's own load loop passes a distinct sub-index for exactly this. A
+    second, theoretical residue is unchanged:
+    the case where the zero-depth cross-check's two slot estimates agree and
+    are BOTH wrong is not ruled out by that cross-check — only real,
+    per-edge merge verification closes it, which no node has attempted. No
+    known program reaches that second residue.
   - **Still open, unowned, REACHABLE — deferred by referee ruling, PR #115
     (originally R13, PR #115 round 2; disposition ruled at round 3).**
     `and`/`or` (`compiler.cpp`'s `and_`/`or_`) compile `JUMP_IF_FALSE` then

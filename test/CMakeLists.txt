@@ -27,6 +27,7 @@ set(FULL_SRCS
     ${PROJECT_SOURCE_DIR}/src/backend/abstract_stack.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/capture_analysis.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/zero_depth_local.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/native_pops.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/jvm_emitter.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/clr_emitter.cpp
     ${PROJECT_SOURCE_DIR}/src/value.cpp

@@ -85,6 +85,50 @@ void expectEveryBranchTargetIsLabeled(const std::string& il) {
     }
 }
 
+// A CIL `switch` does not fit `kBranchMnemonics`' own "mnemonic, one label,
+// same line" shape: it carries a comma-separated label LIST inside
+// parentheses, one arm per line, with no `default` line of its own (an
+// out-of-range index falls through to whatever physically follows the
+// instruction instead) — so this is a dedicated scan, anchored the same way
+// `expectEveryBranchTargetIsLabeled` is: a string literal payload can never
+// contain a real newline followed by four spaces (ilasmStringLiteral always
+// renders one as a `bytearray` operand, never a raw newline), so
+// "\n    switch (" can only be a real instruction.
+void expectEverySwitchTargetIsLabeled(const std::string& il) {
+    const std::string text = "\n" + il;
+    const std::string anchor = "\n    switch (";
+    std::size_t pos = 0;
+    while ((pos = text.find(anchor, pos)) != std::string::npos) {
+        std::size_t argsStart = pos + anchor.size();
+        std::size_t argsEnd = text.find(')', argsStart);
+        ASSERT_NE(argsEnd, std::string::npos)
+            << "switch's own arm list runs off the end of:\n"
+            << il;
+        std::string args = text.substr(argsStart, argsEnd - argsStart);
+        std::size_t start = 0;
+        while (true) {
+            std::size_t comma = args.find(',', start);
+            std::string raw = (comma == std::string::npos)
+                                  ? args.substr(start)
+                                  : args.substr(start, comma - start);
+            std::size_t first = raw.find_first_not_of(" \t\n");
+            ASSERT_NE(first, std::string::npos)
+                << "blank arm in switch's own list in:\n"
+                << il;
+            std::size_t last = raw.find_last_not_of(" \t\n");
+            std::string target = raw.substr(first, last - first + 1);
+            EXPECT_NE(text.find("\n" + target + ":\n"), std::string::npos)
+                << "switch target to undefined label \"" << target << "\" in:\n"
+                << il;
+            if (comma == std::string::npos) {
+                break;
+            }
+            start = comma + 1;
+        }
+        pos = argsEnd + 1;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ilasmStringLiteral
 // ---------------------------------------------------------------------------
@@ -170,17 +214,15 @@ TEST(IlasmDoubleLiteral, RoundTripsExactly) {
 // emitScript
 // ---------------------------------------------------------------------------
 
-// This node's own opcode set (clr_emitter.h) has no enum tag dispatch and
-// no SLICE/IN/for-in — so JUMP_TABLE is one of the opcodes this pass must
-// still refuse rather than silently mis-lower. A hand-built single-
-// instruction chunk drives the refusal directly, the same way
-// test_jvm_emit.cpp's own `AbortsOnUnsupportedOpcode` does, rather than
-// hunting for a real Lox++ program that reaches an opcode this pass has no
-// case for.
+// JUMP_TABLE is only ever reached fused onto an immediately preceding
+// GET_TAG (`fusableJumpTable`, clr_emitter.cpp) — `compileMatchBody`'s only
+// call site for JUMP_TABLE emits the pair back to back, so a standalone one
+// is not a shape any real Lox++ program compiles to. A hand-built single-
+// instruction chunk drives the dispatch switch's own `notImplemented`
+// fallback directly, the same way test_jvm_emit.cpp's own
+// `AbortsOnUnsupportedOpcode` does, rather than hunting for a real program
+// that reaches an opcode this pass has no case for.
 TEST(EmitScript, AbortsOnUnsupportedOpcode) {
-    // CALL/CLOSURE/RETURN/CLASS/INVOKE/MATCH_ERROR are no longer
-    // unsupported (this node); JUMP_TABLE is the nearest opcode still
-    // outside this pass's scope.
     MemoryManager mm;
     DecodedInstruction table;
     table.offset = 0;
@@ -2055,17 +2097,215 @@ TEST(EmitProgram, GetIterGoesThroughTheCapturedSlotGuardWhenItsSlotIsReused) {
 }
 
 // ---------------------------------------------------------------------------
+// Match/enum dispatch: GET_TAG, JUMP_TABLE, an enum-constructor CONSTANT,
+// and normalizeFoldedOperands's own multi-slot repair.
+// ---------------------------------------------------------------------------
+
+TEST(EmitProgram, DenseEnumMatchFusesGetTagWithSwitch) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("enum Color { Red Green Blue Yellow }\n"
+                                      "fun classify(c) {\n"
+                                      "  return match c {\n"
+                                      "    case Red => 0\n"
+                                      "    case Green => 1\n"
+                                      "    case Blue => 2\n"
+                                      "    case Yellow => 3\n"
+                                      "  };\n"
+                                      "}\n"
+                                      "print classify(Green());\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    ASSERT_NE(il.find("switch ("), std::string::npos)
+        << "no class emits a switch:\n"
+        << il;
+
+    // GetTag()float64; conv.i4; ldc.i4.0 (min tag); sub; switch, back to
+    // back — no boxing in between (each arm's own literal body still boxes
+    // ITS OWN result, 0/1/2/3, further down; that boxing belongs to
+    // CONSTANT, not to this fusion, so this check is anchored to the four
+    // adjacent lines, not to the whole method).
+    EXPECT_NE(il.find("call float64 [LoxRuntime]Lox.LoxOps::GetTag(object)\n"
+                      "    conv.i4\n"
+                      "    ldc.i4.0\n"
+                      "    sub\n"
+                      "    switch ("),
+              std::string::npos)
+        << il;
+    expectEveryBranchTargetIsLabeled(il);
+    expectEverySwitchTargetIsLabeled(il);
+}
+
+TEST(EmitProgram, DenseEnumMatchSwitchFallsThroughToMatchError) {
+    // checkEnumExhaustiveness (compiler.cpp) only checks that the ARMS name
+    // every constructor of THEIR OWN enum; the subject can be a value of a
+    // wholly different enum, whose own tag then falls outside this table's
+    // [min, min+count) range at run time — the literal out-of-range case a
+    // dense, "exhaustive-by-name" match still needs MATCH_ERROR for
+    // (notes/translation-probes/27_jump_table_default_cross_enum.lox).
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("enum A { X Y }\n"
+                     "enum B { P Q R }\n"
+                     "fun classify(subject) {\n"
+                     "  return match subject { case X => 0 case Y => 1 };\n"
+                     "}\n"
+                     "print classify(R());\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    std::size_t switchPos = il.find("\n    switch (");
+    ASSERT_NE(switchPos, std::string::npos) << il;
+    std::size_t argsEnd = il.find(')', switchPos);
+    ASSERT_NE(argsEnd, std::string::npos) << il;
+    // CIL's `switch` has no `default` clause of its own — an index outside
+    // the arm list falls through to whatever physically follows it. The
+    // very next line must be a label, and that label must lead straight
+    // into MATCH_ERROR's own call-then-throw.
+    std::size_t lineStart = argsEnd + 2; // ")\n" then the label line itself.
+    std::size_t lineEnd = il.find('\n', lineStart);
+    ASSERT_NE(lineEnd, std::string::npos) << il;
+    std::string fallThroughLabel = il.substr(lineStart, lineEnd - lineStart);
+    ASSERT_NE(fallThroughLabel.find(':'), std::string::npos)
+        << "expected a label right after the switch's own arm list in:\n"
+        << il;
+    EXPECT_NE(il.find(fallThroughLabel +
+                      "\n    call class [LoxRuntime]Lox.LoxError "
+                      "[LoxRuntime]Lox.LoxOps::MatchError()\n"
+                      "    throw\n"),
+              std::string::npos)
+        << "the switch's own fall-through does not lead straight to "
+           "MATCH_ERROR in:\n"
+        << il;
+    expectEveryBranchTargetIsLabeled(il);
+    expectEverySwitchTargetIsLabeled(il);
+}
+
+// The sparse, compare-and-branch match form (a guard defeats table
+// eligibility — previewEnumArms, compiler.cpp): GET_TAG runs alone, so it
+// must box its own result, the same way CONSTANT boxes a number literal,
+// for the CONSTANT/EQUAL pair right after it to compare against.
+TEST(EmitProgram, SparseGuardedMatchBoxesGetTagForCompareAndBranch) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("enum Color { Red Green Blue Yellow }\n"
+                                      "fun classify(c) {\n"
+                                      "  return match c {\n"
+                                      "    case Red if true => 0\n"
+                                      "    case Green => 1\n"
+                                      "    case Blue => 2\n"
+                                      "    case Yellow => 3\n"
+                                      "  };\n"
+                                      "}\n"
+                                      "print classify(Green());\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    EXPECT_EQ(il.find("switch ("), std::string::npos)
+        << "a guard must defeat table eligibility:\n"
+        << il;
+    EXPECT_NE(il.find("call float64 [LoxRuntime]Lox.LoxOps::GetTag(object)\n"
+                      "    box [System.Runtime]System.Double\n"),
+              std::string::npos)
+        << il;
+    expectEveryBranchTargetIsLabeled(il);
+}
+
+TEST(EmitScript, ConstantOfAnEnumCtorMaterialisesLoxEnumCtor) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("enum Result { Ok(v) Err(e) }\n"
+                                      "print Err;\n",
+                                      mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    // Err is Result's second variant: tag 1, arity 1 (one payload field).
+    EXPECT_NE(j.find("ldc.i4.1\n"
+                     "    ldc.i4.1\n"
+                     "    ldstr " +
+                     clr::ilasmStringLiteral("Err") +
+                     "\n"
+                     "    ldstr " +
+                     clr::ilasmStringLiteral("Result") +
+                     "\n"
+                     "    newobj instance void "
+                     "[LoxRuntime]Lox.LoxEnumCtor::.ctor(int32, int32, "
+                     "string, string)\n"),
+              std::string::npos)
+        << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+// normalizeFoldedOperands's own multi-slot repair (clr_emitter.cpp): "1 +"
+// pushes a genuine temporary, then the match expression folds ITS OWN
+// result into a named local — but reserving that local also reserves a
+// phantom slot for the live "1" already on the stack (compiler.cpp's own
+// per-live-sibling reservation), so by the time ADD runs, BOTH operands are
+// locals and the CIL evaluation stack is empty. ADD's own `nativePops` row
+// is 2, so `deficit` is 2 here — the shape jvm_emitter.cpp's own mechanism
+// still refuses (see this file's own top-of-file note).
+TEST(EmitScript, FoldedOperandBelowALiveSiblingLoadsBothAscending) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("print 1 + match 1 { case 1 => 2 case _ => 3 };", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    // No stloc/ldloc spill at all: deficit (2) equals ADD's own nativePops
+    // (2), so genuineCount is 0 — nothing is genuinely on the stack to
+    // spill, only the ascending pair of loads right before the call.
+    EXPECT_NE(j.find("ldloc 2\n"
+                     "    ldloc 3\n"
+                     "    call object [LoxRuntime]Lox.LoxOps::Add(object, "
+                     "object)\n"),
+              std::string::npos)
+        << j;
+    expectEveryBranchTargetIsLabeled(j);
+}
+
+// The mirror-image shape, with one genuine operand still above the folded
+// pair: `f`'s own callee is folded (a match result), and BOTH of the two
+// arguments already parsed are genuine temporaries pushed after the match
+// closes — CALL's own `nativePops` is argCount + 1 = 3, `deficit` is 1 (the
+// callee alone), so this is the ordinary single-slot repair, included here
+// to pin the callee-specific case since emitCall's own scratch-slot shuffle
+// (calleeScratchSlot) is not simply "one more argScratchBase slot".
+TEST(EmitProgram, FoldedCalleeWithGenuineArgsLoadsCalleeThenSpilledArgs) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun f(x, y) { return x + y; }\n"
+                     "fun g(x, y) { return x - y; }\n"
+                     "print (match 1 { case 1 => f case _ => g })(2, 3);\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    // The two genuine arguments spill to scratch slots 6 (arg "2") and 7
+    // (arg "3") before the folded callee loads from slot 2; the reload
+    // right after that load must put them back in their ORIGINAL
+    // left-to-right order (2, then 3), which needs slot 7 read before
+    // slot 6 — the reverse of the order they were popped off the stack.
+    EXPECT_NE(il.find("ldloc 2\n"
+                      "    ldloc 7\n"
+                      "    ldloc 6\n"),
+              std::string::npos)
+        << il;
+    expectEveryBranchTargetIsLabeled(il);
+}
+
+// ---------------------------------------------------------------------------
 // resolveZeroDepthLocalSlot (zero_depth_local.h): the one, target-
 // independent authority both this file and jvm_emitter.cpp call into for
 // the depth-0 named-local cross-check (clr_emitter.h's own top-of-file
-// note). No program in this node's own opcode set (if/else, and/or, while,
-// for, function bodies) makes the two estimates disagree — the scope-exit
-// rule retires every local a block declared before control reaches
-// outside it, and a function's own body merges through the same if/else/
-// while/for shapes as a script chunk, so a disagreement still needs a
-// `match` arm (out of this node's scope) — so this exercises the
-// cross-check directly rather than asserting it can never be reached
-// indirectly.
+// note). The scope-exit rule retires every local a block declared before
+// control reaches outside it, so a plain if/else/and-or/while/for/function
+// body never makes the two estimates disagree — a disagreement needs a
+// folded `match` result whose own consumer sits at a further CFG merge (a
+// known, unassigned gap: notes/bytecode-translation-problems.md's own GAP
+// entry), so this exercises the cross-check directly rather than asserting
+// it can never be reached indirectly.
 // ---------------------------------------------------------------------------
 
 TEST(ResolveZeroDepthLocalSlot, AwayFromAMergeReadsLocalCountDirectly) {

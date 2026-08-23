@@ -2,20 +2,12 @@
 #
 # tools/loxpp_clr.sh's stdout on each probe must be identical to build/loxpp's
 # own stdout, byte for byte. Compares with diff, not by eye. The CLR twin of
-# tools/check_jvm_probes.sh, scoped today to the straight-line opcode set
-# (CONSTANT, NIL/TRUE/FALSE, arithmetic/comparison, NEGATE, NOT, PRINT, POP,
-# GET_LOCAL, SET_LOCAL, DEFINE_GLOBAL, GET_GLOBAL, SET_GLOBAL), control flow
-# (JUMP, JUMP_IF_FALSE, LOOP), functions and calls (CALL, RETURN's dual
-# role), closures and upvalues (CLOSURE with a captured cell,
-# GET_UPVALUE, SET_UPVALUE, CLOSE_UPVALUE, plus BUILD_LIST, BUILD_MAP,
-# GET_INDEX, and SET_INDEX, pulled forward because the closure probes need
-# a list to hold the closures under test), and classes, methods, and super
-# (CLASS, INHERIT, DEFINE_METHOD, GET_PROPERTY, SET_PROPERTY, INVOKE,
-# GET_SUPER, SUPER_INVOKE, INSTANCEOF, and MATCH_ERROR pulled forward from
-# the match/enum scope — a match whose arms are all class or literal
-# patterns needs no GET_TAG/JUMP_TABLE support to reach it) — later CLR
-# backend work grows this list the same way check_jvm_probes.sh grew as the
-# JVM backend gained opcodes.
+# tools/check_jvm_probes.sh: every entry in the probes array below runs on
+# both backends, and any stdout difference fails the gate naming that probe.
+# The group comments in the probes array name the surface each block adds;
+# neither this header nor any group comment below is itself a completeness
+# claim — the corpus sweep, further down, is the one check that enforces
+# completeness against examples/, and it fails by name when it finds a gap.
 #
 # error_probes hold the opposite shape: both sides must FAIL, with matching
 # stdout. They check that an error stays an error on the CLR backend too, not
@@ -126,6 +118,30 @@ probes=(
     "notes/translation-probes/11_for_in.lox"
     "notes/translation-probes/16_slice_in.lox"
     "notes/translation-probes/25_seq_map_string_coverage.lox"
+    # Match/enum dispatch: a dense match over enum variants (GET_TAG fused
+    # with JUMP_TABLE, a CIL `switch`), an enum-constructor CONSTANT and
+    # CALL, an enum payload read through GET_INDEX, and
+    # normalizeFoldedOperands's own repair for a folded match operand
+    # reaching a genuine sibling operand of the same consumer.
+    "notes/translation-probes/13_enum_match.lox"
+    "notes/translation-probes/14_enum_payload.lox"
+    "notes/translation-probes/28_folded_match_operand_family.lox"
+    # A fold deficit of two or more: every operand the multi-slot repair
+    # reloads is itself folded, with no genuine value between them on the
+    # real CIL evaluation stack, over ADD/CALL/BUILD_LIST/BUILD_MAP, plus
+    # two of the folded slots also being captured-closure slots. No JVM
+    # twin: the JVM side's own repair refuses a deficit above one, so this
+    # file lives in clr-only/ and is named here directly.
+    "notes/translation-probes/clr-only/35_folded_match_deficit_two_plus.lox"
+    # The shared scratch area's own WIDTH, not the multi-slot load order
+    # probe 35 already covers: a SLICE or SET_INDEX consumer whose fold
+    # deficit leaves two or more genuine operands live, in a chunk that
+    # builds no CALL/INVOKE/SUPER_INVOKE/BUILD_LIST/BUILD_MAP of its own to
+    # size the area by coincidence, in both a script chunk and a function
+    # chunk. No JVM twin: the JVM backend reorders with `swap` instead of a
+    # scratch area of a computed width, so this file lives in clr-only/ and
+    # is named here directly.
+    "notes/translation-probes/clr-only/36_folded_operand_spill_sizing.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -144,9 +160,18 @@ error_probes=(
     # own header comment for why).
     "notes/translation-probes/clr-only/31_deep_recursion.lox"
     # A match whose arms are all class patterns raises a real, reachable
-    # MATCH_ERROR when no arm matches (this node's own checkpoint) — both
-    # sides print "before" then fail.
+    # MATCH_ERROR when no arm matches — both sides print "before" then fail.
     "notes/translation-probes/33_class_pattern_match_error.lox"
+    # A dense, table-eligible match over enum A's own tags, given a subject
+    # of an unrelated enum B: the literal JUMP_TABLE default, not the sparse
+    # compare-and-branch form, raises MATCH_ERROR — both sides print
+    # "before" then fail.
+    "notes/translation-probes/27_jump_table_default_cross_enum.lox"
+    # A dense enum match that dispatches correctly, then a second match
+    # whose guard defeats every arm despite naming every constructor once
+    # (exhaustive by name, accepting nothing at run time) — both sides
+    # print the first match's own arm value, then fail on the second.
+    "notes/translation-probes/26_enum_match_dispatch_and_error.lox"
 )
 
 # Whole example programs, not single-opcode probes: each one exercises more
@@ -222,6 +247,16 @@ examples=(
     "examples/sorting.lox"
     "examples/string_list_pattern_demo.lox"
     "examples/huffman.lox"
+    # Match/enum dispatch: each of these needs GET_TAG/JUMP_TABLE, an
+    # enum-constructor CONSTANT and CALL, or an or-pattern/@-binding over an
+    # enum to run.
+    "examples/enum_match.lox"
+    "examples/enum_result.lox"
+    "examples/enum_tree.lox"
+    "examples/at_binding_demo.lox"
+    "examples/bench_jump_table.lox"
+    "examples/or_pattern_demo.lox"
+    "examples/parser.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
