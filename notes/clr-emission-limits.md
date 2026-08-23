@@ -43,12 +43,18 @@ need `goto_w` if a jump ever had to span more than ±32,767 bytes. The CLR
 backend has no equivalent quantity to measure: every `JUMP`/`LOOP`/
 `JUMP_IF_FALSE` lowers to `br`/`brtrue`/`brfalse` followed by a symbolic
 label name (`src/backend/clr_emitter.h`'s own note on `JUMP`/`LOOP`
-lowering), never a hand-computed offset or an explicit choice between the
-short (`br.s`) and long (`br`) opcode forms. `ilasm` resolves every label and
-picks the shortest legal encoding itself. A method whose control flow needs
-the long form is exactly as easy to emit as one that does not — the emitter
-does not know or care which form ilasm chose — so there is no possible
-splitter to build here, independent of any corpus measurement.
+lowering), never a hand-computed offset. The emitter writes only the long
+form of each branch instruction (`br`, `brtrue`, `brfalse`, `switch`), and
+never the short (`.s`) form. `ilasm` keeps whatever form the text names: on
+a method whose `br` target is its own next instruction — the shortest
+branch there is — `ilasm -exe` and `ilasm -exe -optimize` both assembled the
+5-byte long-form encoding, not the 2-byte `br.s` form ECMA-335 allows for
+it. `ilasm` does not widen a short form either: a hand-written `br.s` whose
+target later moves outside its signed 8-bit range fails assembly instead of
+being silently corrected. So there is no branch-range ceiling for the same
+reason there is no splitter to build: the long form's operand is a 32-bit
+signed offset, wide enough for any file this backend can emit, and the
+emitter never chooses between the two forms in the first place.
 
 ## Conclusion
 
