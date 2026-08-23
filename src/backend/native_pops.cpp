@@ -171,7 +171,9 @@ std::optional<int> nativePops(Op op, const DecodedInstruction& in) {
     case Op::INVOKE: // receiver/callee plus argCount arguments
         return in.byteOperand + 1;
     case Op::SUPER_INVOKE: // self, superclass, plus argCount arguments —
-        return in.byteOperand + 2; // self/superclass are never foldable
+        return in.byteOperand + 2; // self and the superclass are counted
+                                   // here because vm.cpp pops both as real
+                                   // cells; either may still be folded
     // CUSTOM: the peek/locals-model family, a pure reclaim, an instruction
     // that already threads its own zero-depth load unconditionally, or pure
     // control transfer. See this function's own header note.
