@@ -30,7 +30,7 @@ should re-check before it trusts this file's numbers.
 4. **No regression.** `ctest` is green on all four presets (`debug`,
    `release`, `debug-variant`, `release-variant` — both `Value`
    representations); `check_examples.py` against the native binary,
-   `check_jvm_probes.sh` (45/45), and `check_clr_probes.sh` (99/99, corpus
+   `check_jvm_probes.sh` (45/45), and `check_clr_probes.sh` (100/100, corpus
    sweep and permutation guard both included) all stay green.
 
 ## The CLR exclusion list
