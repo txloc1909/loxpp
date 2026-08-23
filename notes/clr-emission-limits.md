@@ -1,9 +1,9 @@
 # CLR backend: measured emission limits
 
 Measured against the full `examples/` and `notes/translation-probes/` corpus
-during the CLR backend build (node C-N11). The CLR sibling of
-`notes/jvm-emission-limits.md`, recorded here so a later contributor does not
-re-measure, or build unneeded headroom, from scratch.
+during the CLR backend build (merged to `main` 2026-08-24). The CLR sibling
+of `notes/jvm-emission-limits.md`, recorded here so a later contributor does
+not re-measure, or build unneeded headroom, from scratch.
 
 | Measurement | Value | CLR ceiling |
 |---|---|---|
@@ -22,10 +22,11 @@ operands (`src/backend/clr_emitter.cpp` emits every string constant as a
 UTF-16LE byte array, not a quoted literal — see `ilasmDoubleLiteral`'s own
 note in `src/backend/clr_emitter.h` for the matching ECMA-335 rule for
 doubles). Instruction count is a text-based proxy for the actual assembled
-`CodeSize`; the `dev-managed` image has no IL disassembler to measure the
-true post-assembly byte count directly (see brief.md section 5's ILVerify
-note for the same gap applied to verification instead of disassembly). The
-proxy runs safely high — one line of IL text is at least as costly as, and
+`CodeSize`; the `dev-managed` image has no IL disassembler (`ildasm`,
+`monodis`, `dotnet-ildasm`, and `ikdasm` are all absent) to measure the true
+post-assembly byte count directly, and no IL verifier either — the same gap
+applies to verifying a method's IL as to disassembling it. The proxy runs
+safely high — one line of IL text is at least as costly as, and
 usually costlier than, the one to five bytes its assembled opcode/operand
 pair takes — so a number this far under a 16- or 32-bit field leaves no
 realistic doubt.
