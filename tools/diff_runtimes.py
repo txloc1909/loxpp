@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-Differential runner: native loxpp vs. the JVM backend, stdout only.
+Differential runner: native loxpp vs. another loxpp backend, stdout only.
 
-Runs each Lox++ program on the native binary and on tools/loxpp_jvm.sh, then
-compares stdout. It does not compare stderr and does not compare the exit
+Runs each Lox++ program on the native binary and on a second runner
+(tools/loxpp_jvm.sh, tools/loxpp_clr.sh, or an equivalent), then compares
+stdout. It does not compare stderr and does not compare the exit
 code: differential scope is stdout only.
 
 Three outcomes per program:
   MATCH        stdout is byte-identical on both runtimes.
   PERMUTATION  stdout differs only in line order, and the program is on the
-               exclusion list (tools/jvm_excluded_examples.txt). Map
+               exclusion list (tools/jvm_excluded_examples.txt or
+               tools/clr_excluded_examples.txt, one per backend). Map
                iteration order is unspecified (spec/03-types.md), so a
                reordering alone is not a defect.
   DIVERGE      a real difference: content differs (not only order), or the
@@ -19,6 +21,14 @@ A program on the exclusion list still reports DIVERGE if its stdout stops
 being a permutation of the native stdout — the exclusion list excuses a
 reordering, never a content change.
 
+Two silent runs are not proof that both ran: a runner that crashes before
+writing anything looks identical, on stdout alone, to a program that
+legitimately prints nothing. So when both sides' stdout is empty, this
+script also requires the two exit statuses to agree on success vs. failure
+(zero vs. non-zero) — not on the exact code, since native and another
+runtime are free to use different codes for the same kind of failure. Such
+a match prints as "MATCH (empty)"; a disagreement prints as DIVERGE.
+
 On a DIVERGE, this script prints a short diff excerpt and a best-effort guess
 at which opcode family (P1-P8, see notes/bytecode-translation-problems.md) is
 involved, from a syntax scan of the program. This is a hint, not a proof: a
@@ -27,9 +37,9 @@ build; a syntax scan needs no extra build and runs on every program, so it is
 this script's default. State that trade-off, do not hide it.
 
 Usage:
-    python3 tools/diff_runtimes.py <native-loxpp> <jvm-runner> <path>...
+    python3 tools/diff_runtimes.py <native-loxpp> <other-runner> <path>...
         [--exclude <file>] [--timeout <seconds>]
-    python3 tools/diff_runtimes.py <native-loxpp> <jvm-runner>
+    python3 tools/diff_runtimes.py <native-loxpp> <other-runner>
         --exclude <file> --only-excluded <dir>
 
 <path> is a .lox file, or a directory (every *.lox file inside it, sorted).
@@ -144,7 +154,14 @@ class RunTimeout(Exception):
     """A runtime did not finish inside the allowed time."""
 
 
-def run_stdout(cmd: list[str], input_file: Path, timeout: float) -> str:
+def run_program(cmd: list[str], input_file: Path, timeout: float) -> tuple[str, int]:
+    """Runs one program and returns (stdout, exit code).
+
+    The exit code is not part of the ordinary MATCH/PERMUTATION/DIVERGE
+    comparison (differential scope is stdout only) — it exists only for the
+    empty-stdout tie-break in main(), where stdout alone cannot tell a
+    legitimate silent success from a silent crash.
+    """
     stdin_data = input_file.read_text(encoding="utf-8") if input_file.exists() else None
     try:
         result = subprocess.run(
@@ -152,7 +169,7 @@ def run_stdout(cmd: list[str], input_file: Path, timeout: float) -> str:
         )
     except subprocess.TimeoutExpired as exc:
         raise RunTimeout(f"{cmd[0]} did not finish in {timeout:.0f}s") from exc
-    return result.stdout
+    return result.stdout, result.returncode
 
 
 def collect_programs(paths: list[str]) -> list[Path]:
@@ -193,10 +210,13 @@ def resolve_excluded_programs(excluded: dict[str, str], base_dir: Path) -> list[
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Differential runner: native loxpp vs the JVM backend, stdout only."
+        description="Differential runner: native loxpp vs another loxpp backend, stdout only."
     )
     parser.add_argument("native", help="path to the native loxpp binary")
-    parser.add_argument("jvm_runner", help="path to tools/loxpp_jvm.sh (or an equivalent runner)")
+    parser.add_argument(
+        "other_runner",
+        help="path to tools/loxpp_jvm.sh, tools/loxpp_clr.sh, or an equivalent runner",
+    )
     parser.add_argument(
         "paths", nargs="*", default=[], help="a .lox file, or a directory of .lox files"
     )
@@ -204,7 +224,7 @@ def main() -> None:
         "--exclude",
         type=Path,
         default=None,
-        help="tools/jvm_excluded_examples.txt: permutation-only exclusions",
+        help="tools/jvm_excluded_examples.txt or tools/clr_excluded_examples.txt: permutation-only exclusions",
     )
     parser.add_argument(
         "--only-excluded",
@@ -249,21 +269,35 @@ def main() -> None:
     for lox_file in programs:
         input_file = lox_file.with_suffix(".input")
         try:
-            native_out = run_stdout([args.native, str(lox_file)], input_file, args.timeout)
-            jvm_out = run_stdout([args.jvm_runner, str(lox_file)], input_file, args.timeout)
+            native_out, native_status = run_program(
+                [args.native, str(lox_file)], input_file, args.timeout
+            )
+            other_out, other_status = run_program(
+                [args.other_runner, str(lox_file)], input_file, args.timeout
+            )
         except RunTimeout as exc:
             print(f"DIVERGE     {lox_file}  (timeout: {exc})")
             diverged += 1
             continue
 
-        if native_out == jvm_out:
-            print(f"MATCH       {lox_file}")
+        if native_out == other_out:
+            if native_out == "" and (native_status == 0) != (other_status == 0):
+                print(
+                    f"DIVERGE     {lox_file}  (empty stdout on both sides, but exit status "
+                    f"disagrees: native exited {native_status}, other exited {other_status})"
+                )
+                diverged += 1
+                continue
+            if native_out == "":
+                print(f"MATCH       {lox_file}  (empty, exit status agrees)")
+            else:
+                print(f"MATCH       {lox_file}")
             matched += 1
             continue
 
         native_lines = native_out.splitlines()
-        jvm_lines = jvm_out.splitlines()
-        is_permutation = sorted(native_lines) == sorted(jvm_lines)
+        other_lines = other_out.splitlines()
+        is_permutation = sorted(native_lines) == sorted(other_lines)
 
         if lox_file.name in excluded and is_permutation:
             print(f"PERMUTATION {lox_file}  (excluded: {excluded[lox_file.name]})")
@@ -279,7 +313,9 @@ def main() -> None:
         family_text = ", ".join(families) if families else "none matched (P2 straight-line only)"
         print(f"            likely opcode family (heuristic, not a bytecode decode): {family_text}")
         diff_lines = list(
-            difflib.unified_diff(native_lines, jvm_lines, fromfile="native", tofile="jvm", lineterm="")
+            difflib.unified_diff(
+                native_lines, other_lines, fromfile="native", tofile=Path(args.other_runner).name, lineterm=""
+            )
         )
         for line in diff_lines[:20]:
             print(f"            {line}")

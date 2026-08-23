@@ -106,23 +106,15 @@ public sealed class LoxMap {
         return result;
     }
 
-    // Every LoxMap lazily grows its own per-instance cache the first time a
-    // method is read as a property (not called), so a repeat read gives back
-    // the identical object rather than reallocating. Cross-instance identity
-    // (`m1.has == m2.has`) does not come from this cache being shared - it
-    // isn't - but from LoxMapMethod's name-based equality: see LoxOps.Equal.
-    private readonly Dictionary<string, ILoxCallable> m_methodCache = new();
-
-    public ILoxCallable GetMethod(string name) {
-        if (m_methodCache.TryGetValue(name, out ILoxCallable cached)) {
-            return cached;
-        }
-        ILoxCallable created = CreateMethod(name);
-        if (created != null) {
-            m_methodCache[name] = created;
-        }
-        return created;
-    }
+    /// <summary>
+    /// A fresh method value on every call, matching src/vm.cpp's
+    /// Op::GET_PROPERTY, which wraps a new ObjBoundNative on every read
+    /// (the isMap branch). No two reads are ever the same object, so
+    /// LoxOps.Equal's reference-identity rule gives false for both a
+    /// repeat read of the same map and a read of two different maps -
+    /// the same rule a user-class bound method already follows.
+    /// </summary>
+    public ILoxCallable GetMethod(string name) => CreateMethod(name);
 
     private ILoxCallable CreateMethod(string name) {
         switch (name) {
@@ -172,20 +164,13 @@ public sealed class LoxMap {
 
 /// <summary>
 /// A map's native method, read as a value through GET_PROPERTY (e.g.
-/// <c>m.has</c>) rather than called immediately. The native VM keeps one
-/// ObjNative per method name in a class-wide table shared by every ObjMap
-/// (src/vm.cpp, Op::GET_PROPERTY's <c>isMap</c> branch), so
-/// <c>m1.has == m2.has</c> is true there even though <c>m1</c> and
-/// <c>m2</c> are different maps. LoxMap has no such shared table - each
-/// instance's closure still binds to that one instance - so this class
-/// carries its method name for LoxOps.Equal to compare instead.
+/// <c>m.has</c>) rather than called immediately. Equal only by reference
+/// (LoxOps.Equal's default arm) - see <see cref="LoxMap.GetMethod"/>.
 /// </summary>
 internal sealed class LoxMapMethod : ILoxCallable {
-    public readonly string Name;
     private readonly LoxNative m_native;
 
     public LoxMapMethod(string name, int arity, LoxNative.Fn fn) {
-        Name = name;
         m_native = new LoxNative(name, arity, fn);
     }
 

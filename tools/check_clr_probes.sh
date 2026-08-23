@@ -106,6 +106,19 @@ probes=(
     "notes/translation-probes/09_class.lox"
     "notes/translation-probes/10_super.lox"
     "notes/translation-probes/17_super_value.lox"
+    # INVOKE's field-shadow arm called on a bound built-in method value (a
+    # map or file method read through GET_PROPERTY, then stored in an
+    # instance field and called through the field name), not only a
+    # closure or an unbound native. Lives in clr-only/ (see the probe
+    # file's own header comment for why); named here directly.
+    "notes/translation-probes/clr-only/37_invoke_field_bound_native_method.lox"
+    # Equal on a map method value read through GET_PROPERTY: a fresh
+    # object on every read, so `==` gives false whether the two reads
+    # share a receiver or not. The file method value follows the same
+    # rule through the same Equal arm; runtime/clr/test/FileTest.cs pins
+    # that half at the runtime level. Lives in clr-only/ (see the probe
+    # file's own header comment for why); named here directly.
+    "notes/translation-probes/clr-only/38_bound_native_method_identity.lox"
     # The consumed-match case: a match expression's result reaching PRINT,
     # DEFINE_GLOBAL, or SET_GLOBAL with nothing in between to re-expose it
     # as a genuine evaluation-stack value first.

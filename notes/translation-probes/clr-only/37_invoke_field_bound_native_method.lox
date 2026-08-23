@@ -1,0 +1,15 @@
+// spec/04-semantics.md: reading a map or file method without a call (for
+// example `m.keys`) yields a bound built-in method, and calling that value
+// later is equivalent to calling the method directly. Storing the value in
+// an instance field and invoking it through the field name (`k.g()`) drives
+// the INVOKE opcode's field-shadow arm, not GET_PROPERTY followed by CALL.
+//
+// This file lives under clr-only/ because the JVM gates read
+// notes/translation-probes/ non-recursively and their curated list does
+// not name this file, so a file in clr-only/ runs only against the CLR
+// backend.
+var m = {"a": 1};
+class K {}
+var k = K();
+k.g = m.keys;
+print len(k.g());
