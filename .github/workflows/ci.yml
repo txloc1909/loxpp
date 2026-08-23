@@ -358,3 +358,63 @@ jobs:
             -w /workspace \
             loxpp-dev-managed:latest \
             bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_clr.sh examples/ --exclude tools/clr_excluded_examples.txt"
+
+      # Checkpoint 2 (C-N12): the self-hosted interpreter compiles,
+      # assembles, and runs on the CLR backend, and interprets a Lox++
+      # program correctly. The CLR twin of the matching JVM step above. An
+      # emptiness guard catches the case where both wrappers fail silently
+      # with empty stdout, which a bare `diff <(a) <(b)` would report as a
+      # match.
+      - name: CLR differential suite - self-hosted interpreter on the CLR backend (C-N12)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev-managed:latest \
+            bash -c '
+              native_out=$(bootstrap/lox_wrapper.sh examples/fibonacci.lox)
+              clr_out=$(tools/loxpp_clr_bootstrap.sh examples/fibonacci.lox)
+              if [ -z "$native_out" ] || [ -z "$clr_out" ]; then
+                echo "one or both wrappers gave empty stdout; a silent failure would look like a match"
+                exit 1
+              fi
+              diff <(printf "%s\n" "$native_out") <(printf "%s\n" "$clr_out")
+            '
+
+      # Checkpoint 3 (C-N12): every example, run through the self-hosted
+      # interpreter, with the interpreter itself running on the CLR
+      # backend. Zero failures, same exclusion list as the direct CLR path.
+      - name: CLR differential suite - examples through the self-hosted interpreter on the CLR backend (C-N12)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/check_examples.py tools/loxpp_clr_bootstrap.sh examples/ --exclude tools/clr_excluded_examples.txt"
+
+      # Closes, for the CLR path, a known limit the JVM gate above still
+      # carries: check_examples.py only checks each bootstrapped example's
+      # own CHECK directives, not its full stdout, so an example with none
+      # could print a wrong answer through the interpreter with this gate
+      # green. This step compares full stdout instead, native's own
+      # bootstrap wrapper as the oracle, for every example except
+      # examples/bench_jump_table.lox: a 5,000,000-iteration microbenchmark
+      # with no CHECK directives, and interpreting it twice over (native
+      # once for the oracle, CLR once for the comparison) does not finish
+      # inside this step's own timeout on either side — measured, not a CLR
+      # defect, so it is left out of the file list by name rather than
+      # routed through tools/clr_excluded_examples.txt, which excuses only
+      # a map-order permutation, never a timeout.
+      - name: CLR differential suite - full example corpus through the self-hosted interpreter (C-N12)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev-managed:latest \
+            bash -c '
+              files=$(find examples -maxdepth 1 -name "*.lox" ! -name "bench_jump_table.lox" | sort)
+              python3 tools/diff_runtimes.py bootstrap/lox_wrapper.sh tools/loxpp_clr_bootstrap.sh $files --exclude tools/clr_excluded_examples.txt --timeout 60
+            '
