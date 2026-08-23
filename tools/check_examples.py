@@ -15,10 +15,11 @@ Usage:
     python3 tools/check_examples.py <loxpp-binary> <examples-dir> [--exclude <file>]
 
 --exclude <file> names a file with one excluded example per line: the file
-name, then a reason. tools/jvm_excluded_examples.txt is one such file — the
-map-order-sensitive examples the JVM backend legitimately reorders (spec
-leaves map iteration order unspecified). An excluded file is skipped, not
-run, and reported as SKIP with its reason.
+name, then a reason. tools/jvm_excluded_examples.txt and
+tools/clr_excluded_examples.txt are two such files — the map-order-sensitive
+examples each managed backend legitimately reorders (spec leaves map
+iteration order unspecified). An excluded file is skipped, not run, and
+reported as SKIP with its reason.
 """
 
 import re
