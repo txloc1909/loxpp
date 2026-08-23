@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-Differential runner: native loxpp vs. the JVM backend, stdout only.
+Differential runner: native loxpp vs. another loxpp backend, stdout only.
 
-Runs each Lox++ program on the native binary and on tools/loxpp_jvm.sh, then
-compares stdout. It does not compare stderr and does not compare the exit
+Runs each Lox++ program on the native binary and on a second runner
+(tools/loxpp_jvm.sh, tools/loxpp_clr.sh, or an equivalent), then compares
+stdout. It does not compare stderr and does not compare the exit
 code: differential scope is stdout only.
 
 Three outcomes per program:
   MATCH        stdout is byte-identical on both runtimes.
   PERMUTATION  stdout differs only in line order, and the program is on the
-               exclusion list (tools/jvm_excluded_examples.txt). Map
+               exclusion list (tools/jvm_excluded_examples.txt or
+               tools/clr_excluded_examples.txt, one per backend). Map
                iteration order is unspecified (spec/03-types.md), so a
                reordering alone is not a defect.
   DIVERGE      a real difference: content differs (not only order), or the
@@ -27,9 +29,9 @@ build; a syntax scan needs no extra build and runs on every program, so it is
 this script's default. State that trade-off, do not hide it.
 
 Usage:
-    python3 tools/diff_runtimes.py <native-loxpp> <jvm-runner> <path>...
+    python3 tools/diff_runtimes.py <native-loxpp> <other-runner> <path>...
         [--exclude <file>] [--timeout <seconds>]
-    python3 tools/diff_runtimes.py <native-loxpp> <jvm-runner>
+    python3 tools/diff_runtimes.py <native-loxpp> <other-runner>
         --exclude <file> --only-excluded <dir>
 
 <path> is a .lox file, or a directory (every *.lox file inside it, sorted).
@@ -193,10 +195,13 @@ def resolve_excluded_programs(excluded: dict[str, str], base_dir: Path) -> list[
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Differential runner: native loxpp vs the JVM backend, stdout only."
+        description="Differential runner: native loxpp vs another loxpp backend, stdout only."
     )
     parser.add_argument("native", help="path to the native loxpp binary")
-    parser.add_argument("jvm_runner", help="path to tools/loxpp_jvm.sh (or an equivalent runner)")
+    parser.add_argument(
+        "other_runner",
+        help="path to tools/loxpp_jvm.sh, tools/loxpp_clr.sh, or an equivalent runner",
+    )
     parser.add_argument(
         "paths", nargs="*", default=[], help="a .lox file, or a directory of .lox files"
     )
@@ -204,7 +209,7 @@ def main() -> None:
         "--exclude",
         type=Path,
         default=None,
-        help="tools/jvm_excluded_examples.txt: permutation-only exclusions",
+        help="tools/jvm_excluded_examples.txt or tools/clr_excluded_examples.txt: permutation-only exclusions",
     )
     parser.add_argument(
         "--only-excluded",
@@ -250,20 +255,20 @@ def main() -> None:
         input_file = lox_file.with_suffix(".input")
         try:
             native_out = run_stdout([args.native, str(lox_file)], input_file, args.timeout)
-            jvm_out = run_stdout([args.jvm_runner, str(lox_file)], input_file, args.timeout)
+            other_out = run_stdout([args.other_runner, str(lox_file)], input_file, args.timeout)
         except RunTimeout as exc:
             print(f"DIVERGE     {lox_file}  (timeout: {exc})")
             diverged += 1
             continue
 
-        if native_out == jvm_out:
+        if native_out == other_out:
             print(f"MATCH       {lox_file}")
             matched += 1
             continue
 
         native_lines = native_out.splitlines()
-        jvm_lines = jvm_out.splitlines()
-        is_permutation = sorted(native_lines) == sorted(jvm_lines)
+        other_lines = other_out.splitlines()
+        is_permutation = sorted(native_lines) == sorted(other_lines)
 
         if lox_file.name in excluded and is_permutation:
             print(f"PERMUTATION {lox_file}  (excluded: {excluded[lox_file.name]})")
@@ -279,7 +284,9 @@ def main() -> None:
         family_text = ", ".join(families) if families else "none matched (P2 straight-line only)"
         print(f"            likely opcode family (heuristic, not a bytecode decode): {family_text}")
         diff_lines = list(
-            difflib.unified_diff(native_lines, jvm_lines, fromfile="native", tofile="jvm", lineterm="")
+            difflib.unified_diff(
+                native_lines, other_lines, fromfile="native", tofile=Path(args.other_runner).name, lineterm=""
+            )
         )
         for line in diff_lines[:20]:
             print(f"            {line}")
