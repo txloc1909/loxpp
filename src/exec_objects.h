@@ -76,3 +76,20 @@ inline ObjNative* asObjNative(Obj* obj) { return static_cast<ObjNative*>(obj); }
 inline ObjNative* asObjNative(const Value& v) {
     return static_cast<ObjNative*>(as<Obj*>(v));
 }
+
+struct ObjBoundNative : public Obj {
+    Value receiver;
+    ObjNative* native;
+    ObjBoundNative(Value recv, ObjNative* n)
+        : Obj(ObjType::BOUND_NATIVE), receiver(recv), native(n) {}
+};
+
+inline bool isObjBoundNative(Obj* obj) {
+    return isObjType(obj, ObjType::BOUND_NATIVE);
+}
+inline ObjBoundNative* asObjBoundNative(Obj* obj) {
+    return static_cast<ObjBoundNative*>(obj);
+}
+inline ObjBoundNative* asObjBoundNative(const Value& v) {
+    return static_cast<ObjBoundNative*>(as<Obj*>(v));
+}

@@ -21,6 +21,7 @@ enum class ObjType : uint8_t {
     MAP,
     ENUM_CTOR,
     ENUM,
+    BOUND_NATIVE,
 };
 
 inline uint32_t hashString(std::string_view s) {

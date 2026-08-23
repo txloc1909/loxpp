@@ -265,6 +265,7 @@ Every value has a canonical string form, produced by `print` and by the
 | String | The string content itself (no surrounding quotes) |
 | Function / BoundMethod | `<fn name>` where *name* is the declared function name |
 | Native function | `<native fn>` |
+| Bound built-in method | `<native fn>` |
 | Class | The class name (e.g. `Dog`) |
 | Instance | `ClassName instance` (e.g. `Dog instance`) |
 | List | `[elem0, elem1, ...]` — each element in its canonical string form, comma-space separated, enclosed in `[` and `]`. An empty list is `[]`. |
