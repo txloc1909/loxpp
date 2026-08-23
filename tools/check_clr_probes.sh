@@ -141,6 +141,15 @@ probes=(
     # twin: the JVM side's own repair refuses a deficit above one, so this
     # file lives in clr-only/ and is named here directly.
     "notes/translation-probes/clr-only/35_folded_match_deficit_two_plus.lox"
+    # The shared scratch area's own WIDTH, not the multi-slot load order
+    # probe 35 already covers: a SLICE or SET_INDEX consumer whose fold
+    # deficit leaves two or more genuine operands live, in a chunk that
+    # builds no CALL/INVOKE/SUPER_INVOKE/BUILD_LIST/BUILD_MAP of its own to
+    # size the area by coincidence, in both a script chunk and a function
+    # chunk. No JVM twin: the JVM backend reorders with `swap` instead of a
+    # scratch area of a computed width, so this file lives in clr-only/ and
+    # is named here directly.
+    "notes/translation-probes/clr-only/36_folded_operand_spill_sizing.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
