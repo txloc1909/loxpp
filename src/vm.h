@@ -80,6 +80,7 @@ class VM {
     int m_frameCount{0};
     Value stack[STACK_MAX];
     Value* stackTop;
+    bool m_stackOverflow{false};
     MemoryManager m_mm;
     Table m_globals;
     ObjUpvalue* m_openUpvalues{nullptr};

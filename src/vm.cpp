@@ -152,6 +152,11 @@ InterpretResult VM::run() {
     CallFrame* frame = &m_frames[m_frameCount - 1];
 
     for (;;) {
+        if (m_stackOverflow) {
+            runtimeError("Stack overflow.");
+            return InterpretResult::RUNTIME_ERROR;
+        }
+
 #ifdef LOXPP_DEBUG_TRACE_EXECUTION
         {
             const Chunk& chunk = frame->closure->function->chunk;
@@ -1194,9 +1199,16 @@ void VM::markRoots() {
 void VM::resetStack() {
     stackTop = stack;
     m_frameCount = 0;
+    m_stackOverflow = false;
 }
 
-void VM::push(Value value) { *stackTop++ = value; }
+void VM::push(Value value) {
+    if (stackTop == stack + STACK_MAX) {
+        m_stackOverflow = true;
+        return;
+    }
+    *stackTop++ = value;
+}
 
 Value VM::pop() { return *--stackTop; }
 
