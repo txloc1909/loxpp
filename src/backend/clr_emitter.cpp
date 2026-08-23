@@ -418,14 +418,14 @@ int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset,
     return loadLoxSlot(e, loxSlot, offset);
 }
 
-// The one test every peek-family consumer below (SET_LOCAL, SET_GLOBAL,
-// JUMP_IF_FALSE, RETURN, and any later one that peeks or returns a value
-// the abstract-stack pass may have folded) must run before it decides
-// between `loadNamedLocalAtZeroDepth` and its own ordinary
-// stack-value path. Centralized so a future consumer calls this instead
-// of re-deriving the raw `operandDepth() == 0` expression inline — the
-// resolution it guards (`resolveZeroDepthLocalSlot`) is already the one
-// shared authority; this is the one shared guard in front of it.
+// The one test every consumer whose `nativePops` row is CUSTOM must run
+// before it decides between `loadNamedLocalAtZeroDepth` and its own
+// ordinary stack-value path. Centralized so a future CUSTOM consumer calls
+// this instead of re-deriving the raw `operandDepth() == 0` expression
+// inline — the resolution it guards (`resolveZeroDepthLocalSlot`) is
+// already the one shared authority; this is the one shared guard in front
+// of it. An opcode with an ordinary (non-CUSTOM) row never calls this test
+// directly: `normalizeFoldedOperands` repairs its fold before dispatch.
 bool isFoldedAtZeroDepth(const Emitter& e, std::size_t i) {
     return e.analysis.before[i].operandDepth() == 0;
 }
