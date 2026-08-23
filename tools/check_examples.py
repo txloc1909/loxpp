@@ -95,9 +95,21 @@ def main() -> None:
     loxpp, examples_dir = args[0], Path(args[1])
     excluded = parse_exclude_file(exclude_path) if exclude_path else {}
 
+    lox_files = sorted(examples_dir.glob("*.lox"))
+    if not lox_files:
+        # Path.glob on a directory that does not exist raises nothing and
+        # yields nothing, so a typo'd path would otherwise report "0 passed,
+        # 0 failed, 0 skipped" and exit 0 — a check that ran against
+        # nothing, indistinguishable from a check that passed everything.
+        print(
+            f"error: no .lox files found (not a directory, or empty): {examples_dir}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     passed = failed = skipped = 0
 
-    for lox_file in sorted(examples_dir.glob("*.lox")):
+    for lox_file in lox_files:
         if lox_file.name in excluded:
             print(f"SKIP  {lox_file.name}  (excluded: {excluded[lox_file.name]})")
             skipped += 1
