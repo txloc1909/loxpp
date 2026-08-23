@@ -2,20 +2,12 @@
 #
 # tools/loxpp_clr.sh's stdout on each probe must be identical to build/loxpp's
 # own stdout, byte for byte. Compares with diff, not by eye. The CLR twin of
-# tools/check_jvm_probes.sh, scoped today to the straight-line opcode set
-# (CONSTANT, NIL/TRUE/FALSE, arithmetic/comparison, NEGATE, NOT, PRINT, POP,
-# GET_LOCAL, SET_LOCAL, DEFINE_GLOBAL, GET_GLOBAL, SET_GLOBAL), control flow
-# (JUMP, JUMP_IF_FALSE, LOOP), functions and calls (CALL, RETURN's dual
-# role), closures and upvalues (CLOSURE with a captured cell,
-# GET_UPVALUE, SET_UPVALUE, CLOSE_UPVALUE, plus BUILD_LIST, BUILD_MAP,
-# GET_INDEX, and SET_INDEX, pulled forward because the closure probes need
-# a list to hold the closures under test), and classes, methods, and super
-# (CLASS, INHERIT, DEFINE_METHOD, GET_PROPERTY, SET_PROPERTY, INVOKE,
-# GET_SUPER, SUPER_INVOKE, INSTANCEOF, and MATCH_ERROR), and match/enum
-# dispatch (GET_TAG and JUMP_TABLE, an enum-constructor CONSTANT and CALL,
-# and an enum payload read through GET_INDEX) — later CLR backend work
-# grows this list the same way check_jvm_probes.sh grew as the JVM backend
-# gained opcodes.
+# tools/check_jvm_probes.sh: every entry in the probes array below runs on
+# both backends, and any stdout difference fails the gate naming that probe.
+# The group comments in the probes array name the surface each block adds;
+# neither this header nor any group comment below is itself a completeness
+# claim — the corpus sweep, further down, is the one check that enforces
+# completeness against examples/, and it fails by name when it finds a gap.
 #
 # error_probes hold the opposite shape: both sides must FAIL, with matching
 # stdout. They check that an error stays an error on the CLR backend too, not
