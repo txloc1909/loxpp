@@ -180,11 +180,17 @@ obj.name
 ```
 
 1. Evaluate `obj`.
-2. If `obj` is not an Instance, this is a **runtime error** ("Only instances have properties.").
-3. If the instance's field table contains `name`, return that field value. Fields shadow methods.
-4. Otherwise, look up `name` in the instance's class method table. If found, return a BoundMethod
+2. If `obj` is a Map, look up `name` in the map class method table. If found, return a bound built-in method
+   wrapping the native function and `obj` as receiver. If not found, raise a runtime error
+   ("Undefined property 'name' on map.").
+3. If `obj` is a File, look up `name` in the file class method table. If found, return a bound built-in method
+   wrapping the native function and `obj` as receiver. If not found, raise a runtime error
+   ("Undefined property 'name' on file.").
+4. If `obj` is not an Instance, this is a **runtime error** ("Only instances have properties.").
+5. If the instance's field table contains `name`, return that field value. Fields shadow methods.
+6. Otherwise, look up `name` in the instance's class method table. If found, return a BoundMethod
    wrapping the closure and `obj` as receiver.
-5. If neither step 3 nor 4 found `name`, this is a **runtime error** ("Undefined property 'name'.").
+7. If neither step 5 nor 6 found `name`, this is a **runtime error** ("Undefined property 'name'.").
 
 ### Property Set
 
@@ -886,6 +892,9 @@ list.pop()
 4. The expression evaluates to the removed element.
 
 ### Map Methods
+
+Accessing a map method without a call (for example, `var k = m.keys;`) yields a bound built-in method.
+Calling that method (for example, `k()`) is equivalent to calling the method directly (for example, `m.keys()`).
 
 #### `has`
 

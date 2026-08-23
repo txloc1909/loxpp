@@ -308,3 +308,58 @@ TEST(Map, ForInCollectsAllKeys) {
               InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("r"), "6");
 }
+
+// ---------------------------------------------------------------------------
+// Bound native method calls (regression test for issue #139)
+// ---------------------------------------------------------------------------
+
+TEST(Map, BoundNativeMethodKeys) {
+    VMTestHarness h;
+    // Store a map method value and call it later (GET_PROPERTY binding).
+    ASSERT_EQ(h.run(R"(var m = {"a": 1}; var k = m.keys; var r = k();)"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "[a]");
+}
+
+TEST(Map, BoundNativeMethodValues) {
+    VMTestHarness h;
+    // Store a map method value and call it later (GET_PROPERTY binding).
+    ASSERT_EQ(
+        h.run(R"(var m = {"a": 1, "b": 2}; var v = m.values; var r = v();)"),
+        InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "[1, 2]");
+}
+
+TEST(Map, BoundNativeMethodHas) {
+    VMTestHarness h;
+    // Store a map method value and call it later with arguments.
+    ASSERT_EQ(h.run(R"(var m = {"a": 1}; var h = m.has; var r = h("a");)"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "true");
+}
+
+TEST(Map, BoundNativeMethodInstanceField) {
+    VMTestHarness h;
+    // Store a map method value in an instance field and call it.
+    ASSERT_EQ(h.run(R"(
+        class C { }
+        var c = C();
+        var m = {"x": 99};
+        c.f = m.keys;
+        var r = c.f();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "[x]");
+}
+
+TEST(Map, BoundNativeMethodArgumentPassing) {
+    VMTestHarness h;
+    // Pass a map method value as a function argument and call it.
+    ASSERT_EQ(h.run(R"(
+        fun g(x) { return x(); }
+        var m = {"y": 42};
+        var r = g(m.keys);
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "[y]");
+}
