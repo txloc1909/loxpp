@@ -457,14 +457,22 @@ int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset,
     return loadLoxSlot(e, loxSlot, offset);
 }
 
-// The one test every consumer whose `nativePops` row is CUSTOM must run
-// before it decides between `loadNamedLocalAtZeroDepth` and its own
-// ordinary stack-value path. Centralized so a future CUSTOM consumer calls
-// this instead of re-deriving the raw `operandDepth() == 0` expression
-// inline — the resolution it guards (`resolveZeroDepthLocalSlot`) is
-// already the one shared authority; this is the one shared guard in front
-// of it. An opcode with an ordinary (non-CUSTOM) row never calls this test
-// directly: `normalizeFoldedOperands` repairs its fold before dispatch.
+// The test a CUSTOM `nativePops` consumer runs ONLY when its own operand
+// can genuinely come from either of two sources — a named local already
+// folded at zero depth, or an ordinary stack value — and it must pick
+// which one applies before it dispatches. A CUSTOM consumer whose operand
+// is ALWAYS the zero-depth fold (INHERIT is the one example today) instead
+// calls `loadNamedLocalAtZeroDepth` unconditionally, with no guard needed;
+// a CUSTOM consumer that reads no operand of its own calls neither. Naming
+// every consumer in each of these three groups here would drift out of
+// date the moment a future CUSTOM row changes which group it is in —
+// `native_pops.cpp`'s own CUSTOM rows are the complete, checkable list.
+// Centralized so a future two-source CUSTOM consumer calls this instead of
+// re-deriving the raw `operandDepth() == 0` expression inline — the
+// resolution it guards (`resolveZeroDepthLocalSlot`) is already the one
+// shared authority; this is the one shared guard in front of it. An
+// opcode with an ordinary (non-CUSTOM) row never calls this test directly:
+// `normalizeFoldedOperands` repairs its fold before dispatch.
 bool isFoldedAtZeroDepth(const Emitter& e, std::size_t i) {
     return e.analysis.before[i].operandDepth() == 0;
 }
