@@ -478,15 +478,25 @@ public static class LoxOps {
     public static object Invoke(object receiver, string name, object[] args) {
         if (receiver is LoxInstance instance) {
             if (instance.Fields.TryGetValue(name, out object fieldVal)) {
-                // vm.cpp calls only a closure or a native field this way; a
+                // vm.cpp calls a closure, a native, or a bound native field
+                // this way (src/vm.cpp, Op::INVOKE's field-shadow arm); a
                 // class, an enum constructor, or a bound method is a
-                // runtime error here, even though all four implement
-                // ILoxCallable.
+                // runtime error here, even though all five implement
+                // ILoxCallable. LoxMapMethod and LoxFileMethod are this
+                // runtime's bound-native values (LoxMap.GetMethod,
+                // LoxFile.GetMethod - the values GET_PROPERTY on a map or
+                // file hands back), matching src/vm.cpp's ObjBoundNative.
                 if (fieldVal is LoxClosure closure) {
                     return closure.Call(args);
                 }
                 if (fieldVal is LoxNative native) {
                     return native.Call(args);
+                }
+                if (fieldVal is LoxMapMethod mapMethod) {
+                    return mapMethod.Call(args);
+                }
+                if (fieldVal is LoxFileMethod fileMethod) {
+                    return fileMethod.Call(args);
                 }
                 throw new LoxError("Can only call functions, classes and enums.");
             }
