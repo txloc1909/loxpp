@@ -618,9 +618,19 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     unconditionally; it was not changed to match this fix, so it remains
     behind native on this shape. The CLR backend's own fold repair does not
     carry that ceiling: it loads however many bottom locals a consumer's own
-    deficit names, in ascending slot order, so it matches native on every
-    deficit its `nativePops` table reports, the same way it already matched
-    native on a deficit of one. A second, theoretical residue is unchanged:
+    deficit names, in ascending slot order, so a deficit of two or more
+    reaches the same repair a deficit of one already used, with two
+    exceptions, both loud. First, when fewer locals are bound than the
+    deficit names, the repair is not a fold at all — a genuine
+    evaluation-stack underflow the compiler would never itself produce — so
+    it returns without touching the stack, leaving the instruction's own
+    `Builder::emit` read-count check to name the underflow against the real
+    CIL instruction being assembled. Second, when two or more of the
+    reloaded slots are also captured-closure slots, each one lowers through
+    the same `isinst object[]` test an ordinary `GET_LOCAL` on that slot
+    uses, and that test needs its own pair of ilasm labels per load — the
+    repair's own load loop passes a distinct sub-index for exactly this. A
+    second, theoretical residue is unchanged:
     the case where the zero-depth cross-check's two slot estimates agree and
     are BOTH wrong is not ruled out by that cross-check — only real,
     per-edge merge verification closes it, which no node has attempted. No
