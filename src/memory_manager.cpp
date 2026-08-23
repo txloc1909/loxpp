@@ -42,6 +42,8 @@ static const char* objTypeName(ObjType type) {
         return "enum_ctor";
     case ObjType::ENUM:
         return "enum";
+    case ObjType::BOUND_NATIVE:
+        return "bound_native";
     }
     return "?";
 }
@@ -239,6 +241,12 @@ void MemoryManager::traceObject(Obj* obj) {
         }
         break;
     }
+    case ObjType::BOUND_NATIVE: {
+        auto* bn = static_cast<ObjBoundNative*>(obj);
+        markValue(bn->receiver);
+        markObject(bn->native);
+        break;
+    }
     }
 }
 
@@ -276,6 +284,8 @@ static std::size_t objAllocatedSize(Obj* obj) {
         return sizeof(ObjEnumCtor);
     case ObjType::ENUM:
         return sizeof(ObjEnum);
+    case ObjType::BOUND_NATIVE:
+        return sizeof(ObjBoundNative);
     }
     return 0;
 }

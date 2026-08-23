@@ -402,6 +402,12 @@ InterpretResult VM::run() {
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 frame = &m_frames[m_frameCount - 1];
+            } else if (isBoundNative(callee)) {
+                ObjBoundNative* bn = asObjBoundNative(as<Obj*>(callee));
+                if (!callBoundNative(bn, argCount)) {
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                frame = &m_frames[m_frameCount - 1];
             } else if (isClass(callee)) {
                 ObjClass* klass = asObjClass(as<Obj*>(callee));
                 ObjInstance* instance =
@@ -459,8 +465,10 @@ InterpretResult VM::run() {
                                  name->chars.c_str());
                     return InterpretResult::RUNTIME_ERROR;
                 }
-                pop();        // file
-                push(method); // ObjNative (unbound)
+                ObjBoundNative* bound = m_mm.create<ObjBoundNative>(
+                    peek(0), asObjNative(as<Obj*>(method)));
+                pop(); // file
+                push(Value{static_cast<Obj*>(bound)});
                 break;
             }
             if (isMap(peek(0))) {
@@ -471,8 +479,10 @@ InterpretResult VM::run() {
                                  name->chars.c_str());
                     return InterpretResult::RUNTIME_ERROR;
                 }
-                pop();        // map
-                push(method); // ObjNative (unbound)
+                ObjBoundNative* bound = m_mm.create<ObjBoundNative>(
+                    peek(0), asObjNative(as<Obj*>(method)));
+                pop(); // map
+                push(Value{static_cast<Obj*>(bound)});
                 break;
             }
             if (!isInstance(peek(0))) {
@@ -530,6 +540,12 @@ InterpretResult VM::run() {
                     } else if (isNative(fieldVal)) {
                         if (!callNative(asObjNative(as<Obj*>(fieldVal)),
                                         argCount)) {
+                            return InterpretResult::RUNTIME_ERROR;
+                        }
+                    } else if (isBoundNative(fieldVal)) {
+                        ObjBoundNative* bn =
+                            asObjBoundNative(as<Obj*>(fieldVal));
+                        if (!callBoundNative(bn, argCount)) {
                             return InterpretResult::RUNTIME_ERROR;
                         }
                     } else {
@@ -1124,6 +1140,12 @@ bool VM::callNative(ObjNative* native, int argCount) {
     stackTop -= argCount + 1; // pop args + callee
     push(result);
     return true;
+}
+
+bool VM::callBoundNative(ObjBoundNative* bn, int argCount) {
+    ObjNative* fn = bn->native;             // read before the slot changes
+    stackTop[-argCount - 1] = bn->receiver; // natives read args[-1]
+    return callNative(fn, argCount);
 }
 
 bool VM::bindMethod(ObjClass* klass, ObjString* name) {

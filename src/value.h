@@ -153,6 +153,9 @@ inline bool isFunction(const Value& v) {
 inline bool isNative(const Value& v) {
     return isValueOfType<ObjType::NATIVE>(v);
 }
+inline bool isBoundNative(const Value& v) {
+    return isValueOfType<ObjType::BOUND_NATIVE>(v);
+}
 inline Obj* asObj(const Value& v) { return as<Obj*>(v); }
 inline ObjString* asObjString(const Value& v) {
     return static_cast<ObjString*>(as<Obj*>(v));

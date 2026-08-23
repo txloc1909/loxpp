@@ -114,6 +114,8 @@ std::string stringifyObj(Obj* obj) {
         }
         return s;
     }
+    case ObjType::BOUND_NATIVE:
+        return "<native fn>";
     }
     return "<obj>";
 }
