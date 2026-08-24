@@ -71,6 +71,27 @@ if [ ! -f "$host_dll" ]; then
     exit 1
 fi
 
+# dotnet's own default assembly resolution, given a reflection-loaded
+# assembly with no deps.json of its own, builds its trusted list from the
+# HOST assembly's own directory FIRST — before Assembly.LoadFrom's own
+# directory probe (below) ever runs. So a LoxRuntime.dll already sitting
+# beside $host_dll wins over whatever $rt_dll names, silently, unless the
+# two are the same file. Compare real paths, not names, so the ordinary
+# case — $rt_dll IS that sibling copy, because tools/build_lox_rt_clr.sh
+# writes both dlls into the same runtime/clr/ directory — is not a
+# mismatch; only a genuinely different $rt_dll is refused.
+host_dir="$(dirname "$host_dll")"
+sibling_rt_dll="$host_dir/LoxRuntime.dll"
+if [ -f "$sibling_rt_dll" ] \
+        && [ "$(realpath "$sibling_rt_dll")" != "$(realpath "$rt_dll")" ]; then
+    echo "clr_run.sh: refusing to run: $sibling_rt_dll exists beside $host_dll" >&2
+    echo "clr_run.sh: and dotnet would load THAT copy instead of the one you named:" >&2
+    echo "clr_run.sh:   LOX_RT_CLR_DLL=$rt_dll" >&2
+    echo "clr_run.sh: point LOX_RT_CLR_HOST_DLL at a LoxHost.dll copy with no" >&2
+    echo "clr_run.sh: LoxRuntime.dll beside it, or run against $sibling_rt_dll instead." >&2
+    exit 1
+fi
+
 il_files=("$il_dir"/*.il)
 if [ ! -e "${il_files[0]}" ]; then
     echo "clr_run.sh: no .il files in $il_dir" >&2
@@ -100,10 +121,11 @@ fi
 # LoxHost.dll does, and `dotnet build` already wrote that one
 # (tools/build_lox_rt_clr.sh).
 
-# LoxHost loads $output_dll with Assembly.LoadFrom, which also probes that
-# assembly's own directory for its dependencies — so the runtime dll needs a
-# copy right there too, not only next to LoxHost.dll (tools/build_lox_rt_clr.sh
-# already puts one there) or on ilasm's own assemble-time search path.
+# LoxHost's own directory is where dotnet's default assembly resolution
+# looks first (the guard above this makes sure that copy, if any, is the
+# named one). Assembly.LoadFrom's probe of $output_dll's own directory is
+# only the fallback for a name that lookup does not already resolve — but
+# it still needs satisfying, so the runtime dll needs a copy here too.
 cp "$rt_dll" "$il_dir/"
 
 # exec, not a captured call: it replaces this script with dotnet, so stdin,
