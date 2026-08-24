@@ -23,19 +23,19 @@
 // whose HARD limit is already capped below that floor is the one case
 // neither raise can cover.
 //
-// Lives outside the parent translation-probes directory because the two
-// gates that walk that directory — check_jvm_probes.sh's own curated
-// array, and the CI step that runs tools/diff_runtimes.py over that
-// directory's files, non-recursively, against the JVM backend — would
-// otherwise both pick it up, and the JVM backend already matches native
-// at this same depth (tools/jvm_run.sh's own -Xss64m default clears it
-// with room to spare), so moving this file up a level would add nothing
-// past what those two gates already cover. This is the opposite of why
-// 31_deep_recursion.lox lives here: that probe is moved out because the
-// JVM backend DIVERGES from native (no frame-count ceiling of its own);
-// this one is moved out because the JVM backend already MATCHES native.
-// check_clr_probes.sh names this file directly, so the CLR checkpoint
-// still runs it.
+// Lives outside the parent translation-probes directory because the JVM
+// gates — the curated arrays in tools/check_jvm_probes.sh, and the CI
+// step's non-recursive walk of notes/translation-probes/ against the JVM
+// backend — never name a file one level under clr-only/; only the CI
+// walk would otherwise pick this file up if it lived one level higher,
+// and the JVM backend already matches native at this same depth
+// (tools/jvm_run.sh's own -Xss64m default clears it with room to spare),
+// so moving it up would add nothing past what that one walk already
+// covers. This is the opposite of why 31_deep_recursion.lox lives here:
+// that probe is moved out because the JVM backend DIVERGES from native
+// (no frame-count ceiling of its own); this one is moved out because the
+// JVM backend already MATCHES native. check_clr_probes.sh names this
+// file directly, so the CLR checkpoint still runs it.
 var x = 0;
 var n = 0;
 while (n < 20000) {
