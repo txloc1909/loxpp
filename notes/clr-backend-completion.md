@@ -9,17 +9,27 @@ should re-check before it trusts this file's numbers.
 
 1. **The example program tests pass on the CLR backend.**
    `python3 tools/check_examples.py tools/loxpp_clr.sh examples/ --exclude
-   tools/clr_excluded_examples.txt` — 54 passed, 0 failed, 6 skipped (5 map-
-   order permutations plus one example with no `CHECK` directives). The
+   tools/clr_excluded_examples.txt` — 54 passed, 0 failed, 6 skipped (4 map-
+   order permutations plus two examples with no `CHECK` directives). The
    stronger, full-stdout form (`tools/diff_runtimes.py`, no `CHECK`-directive
    blind spot) also holds over the same corpus: 56 matched, 4 permutation-
-   excused, 0 diverged.
+   excused, 0 diverged. The `--exclude` flag is added here, and the literal
+   command without it fails one `CHECK` on a map-order permutation
+   (`anagram_groups.lox`, 56 passed, 1 failed, 3 skipped) — the same
+   permutation the exclusion list and the guards below already prove is not
+   a defect.
 2. **`bootstrap/loxpp_interpreter.lox` runs on the CLR backend and gives the
    same output as the native VM.** `tools/loxpp_clr_bootstrap.sh` (the CLR
    twin of `tools/loxpp_jvm_bootstrap.sh`) reproduces
    `bootstrap/lox_wrapper.sh`'s output byte for byte on `examples/
    fibonacci.lox`, guarded against a silent empty-vs-empty match on either
-   side.
+   side — the guard checks only for emptiness, not the exit status, so a
+   run that prints part of its output and then fails still reaches the
+   `diff` that follows it. `LANGUAGE` unset (the default arm, selecting
+   `bootstrap/lox_interpreter.lox` instead) also reproduces
+   `bootstrap/lox_wrapper.sh`'s output byte for byte on a small plain-Lox
+   program; no CI step pins this arm, the same gap `tools/
+   loxpp_jvm_bootstrap.sh` already carries.
 3. **The example program tests pass through the CLR-hosted bootstrap
    interpreter.** `python3 tools/check_examples.py
    tools/loxpp_clr_bootstrap.sh examples/ --exclude
@@ -35,10 +45,10 @@ should re-check before it trusts this file's numbers.
 
 ## The CLR exclusion list
 
-`tools/clr_excluded_examples.txt` holds five entries, all proven map-order
+`tools/clr_excluded_examples.txt` holds four entries, all proven map-order
 permutations (native's `ObjMap` iterates by bucket order; `runtime/clr/src/
 LoxMap.cs` iterates by insertion order instead, a deliberate, documented
-choice — see its own header comment): `symbol_table.lox`, `huffman.lox`,
+choice — see its own header comment): `symbol_table.lox`,
 `anagram_groups.lox`, `word_freq.lox`, `phonebook.lox`. Each was proven with
 its own permutation proof when it was added — same lines, different order —
 before the CLR differential gate accepted it.
@@ -54,14 +64,31 @@ method, longest string literal, branch range) against the full corpus,
 program in that file's own table before it was compiled and run here, and
 running it changed none of those numbers.
 
+## Measured run time
+
+The JVM path (`tools/loxpp_jvm_bootstrap.sh`) took about 50 seconds for the
+full bootstrap example run. The CLR path, in the same container, on the
+same corpus, measured fresh at this file's own head:
+
+- `check_examples.py` through `tools/loxpp_clr_bootstrap.sh`, 60 examples:
+  about 9 s.
+- `diff_runtimes.py` through the same wrapper, 59 files (every example
+  except `bench_jump_table.lox`): about 12 s. `.github/workflows/ci.yml`'s
+  `--timeout 60` for this step comes from this figure, not a guess: 60 s
+  is comfortably above the roughly 12 s the full run takes, and short
+  enough that a real hang still fails the job instead of stalling it.
+- `tools/check_clr_probes.sh`, 100 probes plus the permutation guard and
+  the corpus sweep: about 15-17 s, measured across several runs in the
+  same container.
+
 ## The map-order choice, and its consequence
 
 `LoxMap`'s insertion-order iteration (above) is the same choice the JVM
 runtime made with `LinkedHashMap`. The consequence is the same on both
 managed backends: a program that reads a map's `keys()`/`values()`/
 `entries()` in the order they come back, without sorting, prints in
-insertion order on JVM and CLR alike, and in bucket order on native. Five
-programs in this repository do this; all five are excluded, proven
+insertion order on JVM and CLR alike, and in bucket order on native. Four
+programs in this repository do this; all four are excluded, proven
 permutations, not defects. A new example that reads map order directly
 needs the same proof before it can join the exclusion list, or it needs to
 sort its own output instead (the design most of the corpus already uses).
@@ -74,12 +101,15 @@ sort its own output instead (the design most of the corpus already uses).
   Interpreting it twice over — native once as the oracle, the CLR backend
   once as the comparison, each already running a tree-walking interpreter
   written in itself — does not finish inside a CI-sized timeout on either
-  side; this is measured cost, not a CLR-side defect, and it is the same
-  reason `check_examples.py`'s `CHECK`-directive gate never ran this example
-  through the interpreter either. Unlike a map-order permutation, a timeout
-  is not something `tools/clr_excluded_examples.txt` can excuse (`tools/
-  diff_runtimes.py` reports DIVERGE on any timeout, exclusion list or not),
-  so the CI step's own file list leaves this one example out directly. This
+  side; this is measured cost, not a CLR-side defect. `check_examples.py`
+  also never runs this example through the interpreter, but for a different
+  mechanism: it skips any file with no `CHECK` directives before it runs
+  the file at all, so the run time never enters into that gate's own
+  decision. Both gates leave the same hole, each for its own reason. Unlike
+  a map-order permutation, a timeout is not something
+  `tools/clr_excluded_examples.txt` can excuse (`tools/diff_runtimes.py`
+  reports DIVERGE on any timeout, exclusion list or not), so the CI step's
+  own file list leaves this one example out directly. This
   is narrower than the direct-path gate above, which does cover it (`tools/
   check_clr_probes.sh`'s own `examples/bench_jump_table.lox` probe runs it
   directly, with no interpreter in between, and passes).
@@ -94,6 +124,16 @@ sort its own output instead (the design most of the corpus already uses).
   closure.lox`, an existing, passing `check_clr_probes.sh` probe). Every
   differential check in this repository compares stdout only, never stderr
   or the exit code, so this difference is accepted, not hidden.
+- **CI runs `ctest` on two of the four presets the "No regression" condition
+  above names.** `.github/workflows/ci.yml`'s `build-and-test` matrix runs
+  `ctest` on
+  `debug` and `release` only. Its `variant-value` job builds `--target
+  loxpp` under `release-variant` and runs `check_examples.py` against it,
+  with no GTest suite and no `ctest` step; `debug-variant` is not built in
+  CI at all. This is a pre-existing CI design choice (`ci.yml`'s own
+  comment on that job), not something this node changed, so the
+  std::variant `Value` representation's unit-test coverage in CI comes
+  only from the example corpus, not from `ctest`.
 - **`runtime/clr/host/LoxHost.cs`: why every CLR run goes through it, and
   what it does not change.** CoreCLR gives no `-Xss`-equivalent flag; a
   thread's stack size is fixed at creation, and the process's main thread
@@ -125,7 +165,19 @@ sort its own output instead (the design most of the corpus already uses).
   (`tools/check_clr_probes.sh`) pins the fix: native and the CLR backend
   give the same 20,000-deep output on every run, so a later regression back
   to running the emitted assembly directly fails this probe with the
-  `SIGABRT` above, not a silent pass. `LoxHost` does
+  `SIGABRT` above, not a silent pass. This probe's depth also has to stay
+  under native's OWN process-stack ceiling, because `check_clr_probes.sh`
+  runs native first and fails the probe by name if that run alone fails,
+  and `stringifyObj` shares the same unguarded-recursion shape. Measured on
+  the default 8 MiB process stack, native holds through 25,000 levels and
+  segfaults by 27,000 — the probe's 20,000 carries about a 1.3x margin
+  under that ceiling, not a wide one, and the ceiling itself moves with
+  whatever process stack limit the script runs under. `check_clr_probes.sh`
+  now raises its own soft stack limit before running any probe so this no
+  longer depends on the caller's ambient default; a host whose HARD limit
+  is already capped below that floor is the one case the raise cannot
+  cover, and on such a host this probe would fail on its native side for a
+  reason unrelated to the CLR backend. `LoxHost` does
   not change which programs succeed and which raise a Lox-level error — a
   program that overflows `FramesMax` still gets the same `Stack overflow.`
   `LoxError` either way — it only gives CoreCLR room to finish reporting a
