@@ -383,9 +383,8 @@ for probe in "${error_probes[@]}"; do
     # non-zero exit for a host fault it hits before the Lox program itself
     # can raise anything: a bad rt_dll path, or invalid IL that throws
     # InvalidProgramException at JIT time (this image has no IL verifier
-    # to catch that earlier — see brief.md section 5). Only a stderr line
-    # naming Lox.LoxError proves the failure is the Lox-level error this
-    # probe exists to check for.
+    # to catch that earlier). Only a stderr line naming Lox.LoxError proves
+    # the failure is the Lox-level error this probe exists to check for.
     if ! grep -q "Lox.LoxError" "$clr_err"; then
         echo "check_clr_probes.sh: FAIL $probe (CLR run failed, but not with a Lox.LoxError)" >&2
         cat "$clr_err" >&2
