@@ -20,11 +20,14 @@ namespace Lox;
 /// fatal process abort rather than the ordinary unhandled-exception path
 /// below (notes/translation-probes/clr-only/39_deep_nested_stringify.lox;
 /// full measurement in notes/clr-backend-completion.md). Running the same
-/// generated code on a thread with far more headroom does not change
-/// which programs error and which succeed — <see cref="LoxClosure"/>'s own
-/// frame ceiling is unchanged, and matches native's, either way — it only
-/// gives CoreCLR itself room to finish reporting the failure instead of
-/// aborting the whole process while doing so.
+/// generated code on a thread with far more headroom does change whether
+/// an unguarded-recursion case like that one succeeds: it fails on an
+/// 8 MiB thread and prints the correct output on the 256 MiB one this
+/// host provides. What stays the same at any thread size is Lox-level
+/// call recursion: <see cref="LoxClosure"/>'s own frame ceiling is
+/// unchanged, and matches native's, so a program whose call depth alone
+/// overflows it gets the identical <c>Stack overflow.</c> error either
+/// way.
 ///
 /// <c>tools/clr_run.sh</c> runs this assembly in place of an emitted
 /// program's own assembly, for every CLR invocation, not only the

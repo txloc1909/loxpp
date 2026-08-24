@@ -177,11 +177,14 @@ sort its own output instead (the design most of the corpus already uses).
   longer depends on the caller's ambient default; a host whose HARD limit
   is already capped below that floor is the one case the raise cannot
   cover, and on such a host this probe would fail on its native side for a
-  reason unrelated to the CLR backend. `LoxHost` does
-  not change which programs succeed and which raise a Lox-level error — a
-  program that overflows `FramesMax` still gets the same `Stack overflow.`
-  `LoxError` either way — it only gives CoreCLR room to finish reporting a
-  genuine stack exhaustion instead of aborting while trying to. The
+  reason unrelated to the CLR backend. `LoxHost`'s larger stack does
+  change which programs succeed, exactly for this unbounded-recursion
+  case: it fails on an 8 MiB thread and prints the correct 20,000-deep
+  output on the shipped 256 MiB one. What stays the same at any thread
+  size is Lox-level call recursion: a program that overflows `FramesMax`
+  still gets the identical `Stack overflow.` `LoxError` either way,
+  because that ceiling is a fixed count of Lox call frames, not a
+  function of the underlying CLR thread stack. The
   underlying recursion in `Stringify` is unbounded either way; native's own
   `stringifyObj` (`src/object.cpp`) has the identical shape and the
   identical lack of a guard, confirmed to segfault a clean release build on
