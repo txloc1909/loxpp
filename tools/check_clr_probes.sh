@@ -33,8 +33,9 @@
 # gate accepts (spec/03-types.md leaves map iteration order unspecified),
 # the CLR twin of tools/jvm_excluded_examples.txt. Every run of this
 # script re-checks each entry with tools/diff_runtimes.py --only-excluded:
-# an entry whose CLR stdout stops being a permutation of native stdout
-# fails the gate as a real divergence, not a silently-forgiven exclusion.
+# an entry whose CLR stdout became byte-identical to native fails the gate
+# as stale, and an entry whose CLR stdout stops being a permutation of
+# native stdout fails as a real divergence, not a silently-forgiven exclusion.
 #
 
 # Every probe runs even after an earlier one fails: a failing CLR run (an
@@ -398,18 +399,18 @@ done
 
 # --- CLR permutation guard -------------------------------------------------
 # Re-proves, on every run, that each tools/clr_excluded_examples.txt entry's
-# CLR stdout is still a permutation of native stdout, not a content change
-# that the exclusion is silently hiding. tools/diff_runtimes.py already
-# does exactly this for tools/jvm_excluded_examples.txt; --only-excluded
+# CLR stdout is still a permutation of native stdout, not a stale byte-match
+# or a content change that the exclusion is silently hiding. tools/diff_runtimes.py
+# already does exactly this for tools/jvm_excluded_examples.txt; --only-excluded
 # runs it over exactly the excluded programs, resolved under examples/.
 excluded_list="$root/tools/clr_excluded_examples.txt"
 if ! python3 "$root/tools/diff_runtimes.py" "$native_bin" \
         "$root/tools/loxpp_clr.sh" --exclude "$excluded_list" \
         --only-excluded "$root/examples"; then
-    echo "check_clr_probes.sh: FAIL CLR permutation guard (tools/clr_excluded_examples.txt)" >&2
+    echo "check_clr_probes.sh: FAIL CLR exclusion guard (tools/clr_excluded_examples.txt: stale or diverged entries)" >&2
     failed_probes+=("clr_excluded_examples_permutation_guard")
 else
-    echo "check_clr_probes.sh: CLR permutation guard OK, every exclusion is still a map-order permutation"
+    echo "check_clr_probes.sh: CLR exclusion guard OK, every exclusion is still a map-order permutation"
 fi
 
 # --- corpus sweep --------------------------------------------------------
