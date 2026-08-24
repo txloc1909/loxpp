@@ -2,7 +2,6 @@ package lox;
 
 import java.util.AbstractMap;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,12 +38,6 @@ public final class LoxMap {
     }
 
     private final Map<Object, Slot> entries = new LinkedHashMap<>();
-
-    // Every LoxMap lazily grows its own per-instance cache the first time a
-    // method is read as a property (not called): the native VM hands back
-    // the same ObjNative on every GET_PROPERTY, so repeated `m.has == m.has`
-    // must read the identical Java object twice.
-    private final Map<String, LoxCallable> methodCache = new HashMap<>();
 
     // -0.0 and 0.0 must hash and look up identically, matching IEEE 754
     // numeric equality (value.cpp's hashValue canonicalizes the same way).
@@ -88,16 +81,15 @@ public final class LoxMap {
         return result;
     }
 
+    /**
+     * A fresh method value on every call, matching src/vm.cpp's
+     * Op::GET_PROPERTY, which wraps a new ObjBoundNative on every read
+     * (the isMap branch). No two reads give the same object, so
+     * LoxOps.equal's reference-identity rule gives false for a repeat read
+     * of one map and for a read of two different maps.
+     */
     public LoxCallable getMethod(String name) {
-        LoxCallable cached = methodCache.get(name);
-        if (cached != null) {
-            return cached;
-        }
-        LoxCallable created = createMethod(name);
-        if (created != null) {
-            methodCache.put(name, created);
-        }
-        return created;
+        return createMethod(name);
     }
 
     private LoxCallable createMethod(String name) {

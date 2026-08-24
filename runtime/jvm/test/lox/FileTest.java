@@ -14,8 +14,10 @@ public final class FileTest {
         String path = tmp.getAbsolutePath();
 
         LoxFile writer = LoxFile.open(path, "w");
-        check(writer.getMethod("write") == writer.getMethod("write"),
-                "getMethod caches: repeated access returns the same object (PR #97 R3)");
+        check(!LoxOps.equal(writer.getMethod("write"), writer.getMethod("write")),
+                "two reads of the same file's 'write' method are not Lox-equal");
+        check(!LoxOps.equal(writer.getMethod("write"), LoxFile.open(path, "w").getMethod("write")),
+                "two different files' 'write' method values are not Lox-equal");
         writer.writeline("first");
         writer.writeline("second");
         writer.write("third-no-newline");
