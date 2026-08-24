@@ -48,7 +48,11 @@ public static class LoxHost {
             return 2;
         }
 
-        int stackBytes = int.Parse(hostArgs[0]);
+        if (!int.TryParse(hostArgs[0], out int stackBytes)) {
+            Console.Error.WriteLine(
+                $"LoxHost: invalid stack-bytes argument: '{hostArgs[0]}' is not an integer");
+            return 2;
+        }
         string assemblyPath = hostArgs[1];
         string[] programArgs = new string[hostArgs.Length - 2];
         Array.Copy(hostArgs, 2, programArgs, 0, programArgs.Length);
