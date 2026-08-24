@@ -40,7 +40,7 @@ should re-check before it trusts this file's numbers.
 4. **No regression.** `ctest` is green on all four presets (`debug`,
    `release`, `debug-variant`, `release-variant` — both `Value`
    representations); `check_examples.py` against the native binary,
-   `check_jvm_probes.sh` (45/45), and `check_clr_probes.sh` (100/100, corpus
+   `check_jvm_probes.sh` (45/45), and `check_clr_probes.sh` (101/101, corpus
    sweep and permutation guard both included) all stay green.
 
 ## The CLR exclusion list
@@ -77,7 +77,7 @@ same corpus, measured fresh at this file's own head:
   `--timeout 60` for this step comes from this figure, not a guess: 60 s
   is comfortably above the roughly 12 s the full run takes, and short
   enough that a real hang still fails the job instead of stalling it.
-- `tools/check_clr_probes.sh`, 100 probes plus the permutation guard and
+- `tools/check_clr_probes.sh`, 101 probes plus the permutation guard and
   the corpus sweep: about 15-17 s, measured across several runs in the
   same container.
 
