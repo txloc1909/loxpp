@@ -50,6 +50,59 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 native_bin="${LOXPP_BIN:-$root/build/loxpp}"
 rt_dll="${LOX_RT_CLR_DLL:-$root/runtime/clr/LoxRuntime.dll}"
 
+# native_bin's own stringifyObj (src/object.cpp) recurses once per level of
+# list/map nesting with no depth guard, the same shape as this script's
+# 39_deep_nested_stringify.lox probe checks on the CLR side (see that
+# file's own header). This probe's native run needs a process stack big
+# enough for that depth; a host whose default soft limit is already lower
+# than the probe needs would otherwise fail that probe's NATIVE run, which
+# is not a CLR defect.
+#
+# The raise lives in this one function, in a subshell, so it reaches only
+# native_bin's own process — never this script's own shell, and never any
+# CLR child process this script goes on to run. A raise at this script's
+# own top level would leak into every later `dotnet` child too (`clr_run.sh`
+# execs it), silently giving the CLR side a bigger main-thread stack no
+# matter how it sizes its own thread, which would hide a regression that
+# stops routing a CLR run through LoxHost's own larger thread
+# (runtime/clr/host/LoxHost.cs). A host whose HARD limit is already below
+# the floor still gets its soft limit raised, but only up to that hard
+# ceiling, never past it; if the ceiling itself is smaller than the depth
+# this probe needs, the native run still fails, for a reason unrelated to
+# the CLR backend.
+#
+# This is a raise, never a lowering. `ulimit -Ss` prints "unlimited" for an
+# already-unbounded soft limit, and an unconditional `ulimit -Ss 65536`
+# would silently REPLACE "unlimited" with the finite floor — a lowering,
+# not a raise. So this function checks the current soft limit first, caps
+# the target at the current HARD limit when that limit is finite, and only
+# raises the soft limit when the resulting target is above it.
+# tools/diff_runtimes.py's _raise_native_stack_limit is this function's
+# Python twin and follows the identical rule, against the identical
+# 64 MiB floor.
+run_native() {
+    (
+        current_soft="$(ulimit -Ss)"
+        if [ "$current_soft" != "unlimited" ]; then
+            current_hard="$(ulimit -Hs)"
+            if [ "$current_hard" = "unlimited" ]; then
+                ceiling=65536
+            else
+                ceiling="$current_hard"
+            fi
+            if [ "$ceiling" -lt 65536 ]; then
+                target="$ceiling"
+            else
+                target=65536
+            fi
+            if [ "$target" -gt "$current_soft" ]; then
+                ulimit -Ss "$target" 2>/dev/null || true
+            fi
+        fi
+        "$native_bin" "$@"
+    )
+}
+
 probes=(
     "notes/translation-probes/01_assign_local.lox"
     "notes/translation-probes/15_nested_arith.lox"
@@ -119,6 +172,9 @@ probes=(
     # that half at the runtime level. Lives in clr-only/ (see the probe
     # file's own header comment for why); named here directly.
     "notes/translation-probes/clr-only/38_bound_native_method_identity.lox"
+    # notes/translation-probes/clr-only/39_deep_nested_stringify.lox is not
+    # in this array: it needs two runs at two different CLR thread stack
+    # sizes, not one, so it has its own paired check below this loop.
     # The consumed-match case: a match expression's result reaching PRINT,
     # DEFINE_GLOBAL, or SET_GLOBAL with nothing in between to re-expose it
     # as a genuine evaluation-stack value first.
@@ -285,7 +341,7 @@ trap 'rm -f "$native_out" "$native_err" "$clr_out" "$clr_err"' EXIT
 
 failed_probes=()
 for probe in "${probes[@]}"; do
-    if ! "$native_bin" "$root/$probe" >"$native_out" 2>"$native_err"; then
+    if ! run_native "$root/$probe" >"$native_out" 2>"$native_err"; then
         echo "check_clr_probes.sh: FAIL $probe (native run failed)" >&2
         cat "$native_err" >&2
         failed_probes+=("$probe")
@@ -305,8 +361,63 @@ for probe in "${probes[@]}"; do
     fi
 done
 
+# This is the one place that owns the relation between the CLR thread's
+# stack size and notes/translation-probes/clr-only/39_deep_nested_stringify.lox's
+# own ability to fail: two runs of the same probe, at two different sizes,
+# checked together, so neither row can go green for the wrong reason.
+#
+#   MUST-PASS — LOX_CLR_STACK_BYTES explicitly unset for this run, so
+#   ambient state in the calling shell cannot change which size
+#   tools/clr_run.sh picks; the run must match native's stdout byte for
+#   byte, and native's stdout must not be empty. Unsetting rather than
+#   restating tools/clr_run.sh's own default byte count keeps that number
+#   in the one file that already owns it.
+#
+#   MUST-FAIL — LOX_CLR_STACK_BYTES pinned to 8388608, the measured 8 MiB
+#   thread size at which LoxOps.Stringify's own unbounded recursion
+#   overflows this probe's depth (see the probe file's own header). This
+#   run must either exit non-zero or print something other than native's
+#   stdout. If it instead exits zero with output matching native, running
+#   the CLR side on a small thread is no longer what this probe catches,
+#   so this check fails and names the probe disarmed, rather than let the
+#   MUST-PASS row above stand in for a proof it does not give.
+stack_limit_probe="notes/translation-probes/clr-only/39_deep_nested_stringify.lox"
+stack_limit_overflow_bytes=8388608
+stack_limit_checks=2
+
+if ! run_native "$root/$stack_limit_probe" >"$native_out" 2>"$native_err"; then
+    echo "check_clr_probes.sh: FAIL $stack_limit_probe (native run failed)" >&2
+    cat "$native_err" >&2
+    failed_probes+=("$stack_limit_probe (native)")
+elif [ ! -s "$native_out" ]; then
+    echo "check_clr_probes.sh: FAIL $stack_limit_probe (native run gave empty stdout, so a match would prove nothing)" >&2
+    failed_probes+=("$stack_limit_probe (native empty)")
+else
+    must_pass_ok=1
+    env -u LOX_CLR_STACK_BYTES "$root/tools/loxpp_clr.sh" "$root/$stack_limit_probe" \
+        >"$clr_out" 2>"$clr_err" || must_pass_ok=0
+    if [ "$must_pass_ok" -eq 0 ] || ! diff -q "$native_out" "$clr_out" >/dev/null; then
+        echo "check_clr_probes.sh: FAIL $stack_limit_probe (MUST-PASS: default-size CLR thread does not match native)" >&2
+        cat "$clr_err" >&2
+        failed_probes+=("$stack_limit_probe (MUST-PASS)")
+    else
+        echo "check_clr_probes.sh: OK $stack_limit_probe (MUST-PASS: default-size CLR thread matches native)"
+    fi
+
+    must_fail_ok=1
+    LOX_CLR_STACK_BYTES="$stack_limit_overflow_bytes" \
+        "$root/tools/loxpp_clr.sh" "$root/$stack_limit_probe" \
+        >"$clr_out" 2>"$clr_err" || must_fail_ok=0
+    if [ "$must_fail_ok" -eq 1 ] && diff -q "$native_out" "$clr_out" >/dev/null; then
+        echo "check_clr_probes.sh: FAIL $stack_limit_probe (MUST-FAIL: an $stack_limit_overflow_bytes-byte CLR thread matched native — probe disarmed)" >&2
+        failed_probes+=("$stack_limit_probe (MUST-FAIL, disarmed)")
+    else
+        echo "check_clr_probes.sh: OK $stack_limit_probe (MUST-FAIL: an $stack_limit_overflow_bytes-byte CLR thread does not reproduce native's output, so the probe can still catch the regression)"
+    fi
+fi
+
 for probe in "${error_probes[@]}"; do
-    "$native_bin" "$root/$probe" >"$native_out" 2>"$native_err"
+    run_native "$root/$probe" >"$native_out" 2>"$native_err"
     native_status=$?
     if [ "$native_status" -eq 0 ]; then
         echo "check_clr_probes.sh: FAIL $probe (native run did not fail)" >&2
@@ -341,9 +452,8 @@ for probe in "${error_probes[@]}"; do
     # non-zero exit for a host fault it hits before the Lox program itself
     # can raise anything: a bad rt_dll path, or invalid IL that throws
     # InvalidProgramException at JIT time (this image has no IL verifier
-    # to catch that earlier — see brief.md section 5). Only a stderr line
-    # naming Lox.LoxError proves the failure is the Lox-level error this
-    # probe exists to check for.
+    # to catch that earlier). Only a stderr line naming Lox.LoxError proves
+    # the failure is the Lox-level error this probe exists to check for.
     if ! grep -q "Lox.LoxError" "$clr_err"; then
         echo "check_clr_probes.sh: FAIL $probe (CLR run failed, but not with a Lox.LoxError)" >&2
         cat "$clr_err" >&2
@@ -363,10 +473,10 @@ for example in "${examples[@]}"; do
     # exactly as check_examples.py reads it. Most examples have none.
     input_file="$root/${example%.lox}.input"
     if [ -f "$input_file" ]; then
-        native_ok=1; "$native_bin" "$root/$example" <"$input_file" \
+        native_ok=1; run_native "$root/$example" <"$input_file" \
             >"$native_out" 2>"$native_err" || native_ok=0
     else
-        native_ok=1; "$native_bin" "$root/$example" \
+        native_ok=1; run_native "$root/$example" \
             >"$native_out" 2>"$native_err" || native_ok=0
     fi
     if [ "$native_ok" -eq 0 ]; then
@@ -463,10 +573,10 @@ for example_path in "$root"/examples/*.lox; do
 
     input_file="$root/${example%.lox}.input"
     if [ -f "$input_file" ]; then
-        native_ok=1; "$native_bin" "$root/$example" <"$input_file" \
+        native_ok=1; run_native "$root/$example" <"$input_file" \
             >"$native_out" 2>"$native_err" || native_ok=0
     else
-        native_ok=1; "$native_bin" "$root/$example" \
+        native_ok=1; run_native "$root/$example" \
             >"$native_out" 2>"$native_err" || native_ok=0
     fi
     if [ "$native_ok" -eq 0 ]; then
@@ -530,4 +640,4 @@ if [ "${#failed_probes[@]}" -ne 0 ]; then
     exit 1
 fi
 
-echo "check_clr_probes.sh: all $((${#probes[@]} + ${#error_probes[@]} + ${#examples[@]})) probes OK, corpus sweep confirms the examples group is complete"
+echo "check_clr_probes.sh: all $((${#probes[@]} + stack_limit_checks + ${#error_probes[@]} + ${#examples[@]})) probes OK, corpus sweep confirms the examples group is complete"

@@ -60,9 +60,54 @@ reason, rather than hanging the whole run.
 import argparse
 import difflib
 import re
+import resource
 import subprocess
 import sys
 from pathlib import Path
+
+# native's own stringifyObj (src/object.cpp) recurses once per level of
+# list/map nesting with no depth guard, so a host whose ambient soft stack
+# limit is already below this floor can fail native's OWN run on a deeply
+# nested value before either backend is even compared. Applied only to
+# native's own child process (see _raise_native_stack_limit), never to this
+# parent process or to the other runner's child: raising it here, instead of
+# ambient for the whole run, keeps the other runner's own stack-sizing
+# mechanism (if it has one) the only thing standing between it and the same
+# native failure.
+_NATIVE_STACK_FLOOR_BYTES = 64 * 1024 * 1024
+
+
+def _raise_native_stack_limit() -> None:
+    """Runs inside a subprocess's own child, after fork and before exec —
+    never in this parent process. Raises that one child's RLIMIT_STACK soft
+    limit toward _NATIVE_STACK_FLOOR_BYTES, capped at the process's own hard
+    limit, and does nothing if the platform has no RLIMIT_STACK, the
+    current soft limit is already RLIM_INFINITY (unlimited), or the current
+    soft limit already meets the floor.
+
+    This is a raise, never a lowering, and the RLIM_INFINITY case is why
+    that distinction needs its own check: RLIM_INFINITY is -1, which a bare
+    numeric comparison treats as smaller than any finite floor, so an
+    unguarded "raise toward the floor" would replace an unlimited soft
+    limit with the finite floor — a lowering. tools/check_clr_probes.sh's
+    run_native is this function's shell twin and follows the identical
+    rule. A host whose hard limit is already capped below the floor still
+    gets raised, but only up to that hard ceiling, not to the full floor;
+    the child then fails only if the ceiling itself is too small for the
+    depth being probed, not because the raise did nothing. The raise truly
+    does nothing only when the current soft limit already meets or exceeds
+    the hard limit, leaving no room to raise into.
+    """
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_STACK)
+        if soft == resource.RLIM_INFINITY:
+            return
+        ceiling = _NATIVE_STACK_FLOOR_BYTES if hard == resource.RLIM_INFINITY else hard
+        target = min(_NATIVE_STACK_FLOOR_BYTES, ceiling)
+        if target > soft:
+            resource.setrlimit(resource.RLIMIT_STACK, (target, hard))
+    except (AttributeError, ValueError, OSError):
+        pass
 
 FAMILY_RULES: list[tuple[str, re.Pattern[str]]] = [
     (
@@ -154,18 +199,28 @@ class RunTimeout(Exception):
     """A runtime did not finish inside the allowed time."""
 
 
-def run_program(cmd: list[str], input_file: Path, timeout: float) -> tuple[str, int]:
+def run_program(
+    cmd: list[str], input_file: Path, timeout: float, *, raise_native_stack: bool = False
+) -> tuple[str, int]:
     """Runs one program and returns (stdout, exit code).
 
     The exit code is not part of the ordinary MATCH/PERMUTATION/DIVERGE
     comparison (differential scope is stdout only) — it exists only for the
     empty-stdout tie-break in main(), where stdout alone cannot tell a
     legitimate silent success from a silent crash.
+
+    raise_native_stack scopes _raise_native_stack_limit to this one child via
+    preexec_fn — never this parent process, never the other runner's child.
     """
     stdin_data = input_file.read_text(encoding="utf-8") if input_file.exists() else None
     try:
         result = subprocess.run(
-            cmd, input=stdin_data, capture_output=True, text=True, timeout=timeout
+            cmd,
+            input=stdin_data,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            preexec_fn=_raise_native_stack_limit if raise_native_stack else None,
         )
     except subprocess.TimeoutExpired as exc:
         raise RunTimeout(f"{cmd[0]} did not finish in {timeout:.0f}s") from exc
@@ -270,7 +325,7 @@ def main() -> None:
         input_file = lox_file.with_suffix(".input")
         try:
             native_out, native_status = run_program(
-                [args.native, str(lox_file)], input_file, args.timeout
+                [args.native, str(lox_file)], input_file, args.timeout, raise_native_stack=True
             )
             other_out, other_status = run_program(
                 [args.other_runner, str(lox_file)], input_file, args.timeout
