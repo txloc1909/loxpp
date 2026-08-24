@@ -56,11 +56,21 @@ rt_dll="${LOX_RT_CLR_DLL:-$root/runtime/clr/LoxRuntime.dll}"
 # file's own header). This probe's native run needs a process stack big
 # enough for that depth; a host whose default soft limit is already lower
 # than the probe needs would otherwise fail that probe's NATIVE run, which
-# is not a CLR defect. Raise the soft limit here so this script's own
-# result stops depending on the caller's ambient default; a host whose
-# HARD limit is already capped below this value keeps its own ceiling and
-# the probe fails exactly as it did before this line existed.
-ulimit -Ss 65536 2>/dev/null || true
+# is not a CLR defect.
+#
+# The raise lives in this one function, in a subshell, so it reaches only
+# native_bin's own process — never this script's own shell, and never any
+# CLR child process this script goes on to run. A raise at this script's
+# own top level would leak into every later `dotnet` child too (`clr_run.sh`
+# execs it), silently giving the CLR side a bigger main-thread stack no
+# matter how it sizes its own thread, which would hide a regression that
+# stops routing a CLR run through LoxHost's own larger thread
+# (runtime/clr/host/LoxHost.cs). A host whose HARD limit is already capped
+# below this value keeps its own ceiling and the probe fails exactly as it
+# did before this function existed.
+run_native() {
+    ( ulimit -Ss 65536 2>/dev/null || true; "$native_bin" "$@" )
+}
 
 probes=(
     "notes/translation-probes/01_assign_local.lox"
@@ -302,7 +312,7 @@ trap 'rm -f "$native_out" "$native_err" "$clr_out" "$clr_err"' EXIT
 
 failed_probes=()
 for probe in "${probes[@]}"; do
-    if ! "$native_bin" "$root/$probe" >"$native_out" 2>"$native_err"; then
+    if ! run_native "$root/$probe" >"$native_out" 2>"$native_err"; then
         echo "check_clr_probes.sh: FAIL $probe (native run failed)" >&2
         cat "$native_err" >&2
         failed_probes+=("$probe")
@@ -323,7 +333,7 @@ for probe in "${probes[@]}"; do
 done
 
 for probe in "${error_probes[@]}"; do
-    "$native_bin" "$root/$probe" >"$native_out" 2>"$native_err"
+    run_native "$root/$probe" >"$native_out" 2>"$native_err"
     native_status=$?
     if [ "$native_status" -eq 0 ]; then
         echo "check_clr_probes.sh: FAIL $probe (native run did not fail)" >&2
@@ -380,10 +390,10 @@ for example in "${examples[@]}"; do
     # exactly as check_examples.py reads it. Most examples have none.
     input_file="$root/${example%.lox}.input"
     if [ -f "$input_file" ]; then
-        native_ok=1; "$native_bin" "$root/$example" <"$input_file" \
+        native_ok=1; run_native "$root/$example" <"$input_file" \
             >"$native_out" 2>"$native_err" || native_ok=0
     else
-        native_ok=1; "$native_bin" "$root/$example" \
+        native_ok=1; run_native "$root/$example" \
             >"$native_out" 2>"$native_err" || native_ok=0
     fi
     if [ "$native_ok" -eq 0 ]; then
@@ -480,10 +490,10 @@ for example_path in "$root"/examples/*.lox; do
 
     input_file="$root/${example%.lox}.input"
     if [ -f "$input_file" ]; then
-        native_ok=1; "$native_bin" "$root/$example" <"$input_file" \
+        native_ok=1; run_native "$root/$example" <"$input_file" \
             >"$native_out" 2>"$native_err" || native_ok=0
     else
-        native_ok=1; "$native_bin" "$root/$example" \
+        native_ok=1; run_native "$root/$example" \
             >"$native_out" 2>"$native_err" || native_ok=0
     fi
     if [ "$native_ok" -eq 0 ]; then
