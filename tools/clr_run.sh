@@ -87,8 +87,9 @@ if [ -f "$sibling_rt_dll" ] \
     echo "clr_run.sh: refusing to run: $sibling_rt_dll exists beside $host_dll" >&2
     echo "clr_run.sh: and dotnet would load THAT copy instead of the one you named:" >&2
     echo "clr_run.sh:   LOX_RT_CLR_DLL=$rt_dll" >&2
-    echo "clr_run.sh: point LOX_RT_CLR_HOST_DLL at a LoxHost.dll copy with no" >&2
-    echo "clr_run.sh: LoxRuntime.dll beside it, or run against $sibling_rt_dll instead." >&2
+    echo "clr_run.sh: point LOX_RT_CLR_HOST_DLL at a LoxHost.dll copy (with its own" >&2
+    echo "clr_run.sh: LoxHost.runtimeconfig.json alongside it) in a directory that" >&2
+    echo "clr_run.sh: holds no LoxRuntime.dll, or run against $sibling_rt_dll instead." >&2
     exit 1
 fi
 
