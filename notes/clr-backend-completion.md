@@ -162,20 +162,28 @@ sort its own output instead (the design most of the corpus already uses).
   clear this measured failure point with a wide margin; no attempt was made
   to find exactly where the new ceiling falls.
   `notes/translation-probes/clr-only/39_deep_nested_stringify.lox`
-  (`tools/check_clr_probes.sh`) pins the fix: native and the CLR backend
-  give the same 20,000-deep output on every run, so a later regression back
-  to running the emitted assembly directly fails this probe with the
-  `SIGABRT` above, not a silent pass. This probe's depth also has to stay
-  under native's OWN process-stack ceiling, because `check_clr_probes.sh`
-  runs native first and fails the probe by name if that run alone fails,
-  and `stringifyObj` shares the same unguarded-recursion shape. Measured on
-  the default 8 MiB process stack, native holds through 25,000 levels and
-  segfaults by 27,000 — the probe's 20,000 carries about a 1.3x margin
-  under that ceiling, not a wide one, and the ceiling itself moves with
-  whatever process stack limit the script runs under. `check_clr_probes.sh`
-  now raises its own soft stack limit before running any probe so this no
-  longer depends on the caller's ambient default; a host whose HARD limit
-  is already capped below that floor is the one case the raise cannot
+  (`tools/check_clr_probes.sh`, and the CI step that runs the same probe
+  through `tools/diff_runtimes.py`) pins the fix: native and the CLR
+  backend give the same 20,000-deep output on every run, so a later
+  regression back to running the emitted assembly directly — bypassing
+  `LoxHost` — fails this probe with the `SIGABRT` above, not a silent
+  pass. This depends on the CLR side never getting a bigger main-thread
+  stack than the host's own ambient default: `check_clr_probes.sh`'s
+  `run_native` helper and `diff_runtimes.py`'s `_raise_native_stack_limit`
+  each raise the stack floor for native's own child process only, in a
+  subshell or a `preexec_fn`, never for the script's own shell or for any
+  `dotnet` child — an earlier version of both gates raised the floor for
+  the whole script instead, which gave a `LoxHost`-bypassing `dotnet`
+  process the same enlarged stack and let this exact regression pass
+  silently. This probe's depth also has to stay under native's OWN
+  process-stack ceiling, because `check_clr_probes.sh` runs native first
+  and fails the probe by name if that run alone fails, and `stringifyObj`
+  shares the same unguarded-recursion shape. Measured on the default 8 MiB
+  process stack, native holds through 25,000 levels and segfaults by
+  27,000 — the probe's 20,000 carries about a 1.3x margin under that
+  ceiling, not a wide one, and the ceiling itself moves with whatever
+  process stack limit the script runs under; a host whose HARD limit is
+  already capped below the raised floor is the one case the raise cannot
   cover, and on such a host this probe would fail on its native side for a
   reason unrelated to the CLR backend. `LoxHost`'s larger stack does
   change which programs succeed, exactly for this unbounded-recursion

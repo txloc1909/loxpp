@@ -16,12 +16,18 @@
 // default 8 MiB process stack, native holds through 25,000 levels and
 // segfaults by 27,000, so this file's 20,000 carries about a 1.3x margin
 // under native's own ceiling, not a wide one, and that ceiling moves with
-// whatever process stack limit the script runs under.
-// Both gates that run this probe — check_clr_probes.sh, and the CI step
-// that walks notes/translation-probes/ against the CLR backend — raise
-// their own soft stack limit before running it, for this reason; a host
-// whose HARD limit is already capped below that floor is the one case
-// neither raise can cover.
+// whatever process stack limit the script runs under. Both gates that run
+// this probe — check_clr_probes.sh's own run_native, and
+// tools/diff_runtimes.py's _raise_native_stack_limit — raise this floor for
+// NATIVE's own child process only, never for the CLR side. A host whose
+// HARD limit is already capped below that floor is the one case neither
+// raise can cover. The CLR side is left at the caller's ambient default on
+// purpose: this probe's whole point is proving LoxHost's own larger thread
+// (runtime/clr/host/LoxHost.cs), not an ambient limit raised for every
+// child of the gate script, is what clears this depth — a regression that
+// stops routing a CLR run through LoxHost still fails this probe, because
+// nothing here gives the resulting `dotnet` process a bigger stack than
+// whatever the host already had.
 //
 // Lives outside the parent translation-probes directory because the JVM
 // gates — the curated arrays in tools/check_jvm_probes.sh, and the CI
