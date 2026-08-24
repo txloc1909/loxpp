@@ -51,9 +51,10 @@ public static class LoxHost {
             return 2;
         }
 
-        if (!int.TryParse(hostArgs[0], out int stackBytes)) {
+        if (!int.TryParse(hostArgs[0], out int stackBytes) || stackBytes < 0) {
             Console.Error.WriteLine(
-                $"LoxHost: invalid stack-bytes argument: '{hostArgs[0]}' is not an integer");
+                $"LoxHost: invalid stack-bytes argument: '{hostArgs[0]}' is not a " +
+                "non-negative integer");
             return 2;
         }
         string assemblyPath = hostArgs[1];
@@ -86,7 +87,7 @@ public static class LoxHost {
                 throw; // unreachable; satisfies the compiler's definite-assignment check.
             }
             exitCode = result is int i ? i : 0;
-        }, Math.Max(stackBytes, 0));
+        }, stackBytes);
         thread.Start();
         thread.Join();
         return exitCode;
