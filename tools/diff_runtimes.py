@@ -91,9 +91,12 @@ def _raise_native_stack_limit() -> None:
     unguarded "raise toward the floor" would replace an unlimited soft
     limit with the finite floor — a lowering. tools/check_clr_probes.sh's
     run_native is this function's shell twin and follows the identical
-    rule. A host whose hard limit is already capped below the floor keeps
-    its own ceiling; the child then fails exactly as it would have with no
-    raise at all.
+    rule. A host whose hard limit is already capped below the floor still
+    gets raised, but only up to that hard ceiling, not to the full floor;
+    the child then fails only if the ceiling itself is too small for the
+    depth being probed, not because the raise did nothing. The raise truly
+    does nothing only when the current soft limit already meets or exceeds
+    the hard limit, leaving no room to raise into.
     """
     try:
         soft, hard = resource.getrlimit(resource.RLIMIT_STACK)

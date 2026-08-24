@@ -23,7 +23,10 @@
 // past an already-unlimited soft limit: comparing RLIM_INFINITY as a
 // plain number, with no check for that sentinel, makes an unconditional
 // raise a lowering instead on such a host. A host whose HARD limit is
-// already capped below the floor is the one case neither raise can cover.
+// already capped below the floor still gets raised, but only up to that
+// hard ceiling; if the ceiling itself is smaller than the depth this file
+// needs, the native run still fails, for a reason unrelated to the CLR
+// backend.
 //
 // check_clr_probes.sh runs the CLR side of this probe twice, at two
 // explicitly pinned stack sizes, rather than once at whatever size the

@@ -65,23 +65,39 @@ rt_dll="${LOX_RT_CLR_DLL:-$root/runtime/clr/LoxRuntime.dll}"
 # execs it), silently giving the CLR side a bigger main-thread stack no
 # matter how it sizes its own thread, which would hide a regression that
 # stops routing a CLR run through LoxHost's own larger thread
-# (runtime/clr/host/LoxHost.cs). A host whose HARD limit is already capped
-# below this value keeps its own ceiling and the probe fails exactly as it
-# did before this function existed.
+# (runtime/clr/host/LoxHost.cs). A host whose HARD limit is already below
+# the floor still gets its soft limit raised, but only up to that hard
+# ceiling, never past it; if the ceiling itself is smaller than the depth
+# this probe needs, the native run still fails, for a reason unrelated to
+# the CLR backend.
 #
 # This is a raise, never a lowering. `ulimit -Ss` prints "unlimited" for an
 # already-unbounded soft limit, and an unconditional `ulimit -Ss 65536`
 # would silently REPLACE "unlimited" with the finite floor — a lowering,
-# not a raise. So this function checks the current soft limit first and
-# only assigns the floor when that limit is both finite and below it.
+# not a raise. So this function checks the current soft limit first, caps
+# the target at the current HARD limit when that limit is finite, and only
+# raises the soft limit when the resulting target is above it.
 # tools/diff_runtimes.py's _raise_native_stack_limit is this function's
 # Python twin and follows the identical rule, against the identical
 # 64 MiB floor.
 run_native() {
     (
         current_soft="$(ulimit -Ss)"
-        if [ "$current_soft" != "unlimited" ] && [ "$current_soft" -lt 65536 ]; then
-            ulimit -Ss 65536 2>/dev/null || true
+        if [ "$current_soft" != "unlimited" ]; then
+            current_hard="$(ulimit -Hs)"
+            if [ "$current_hard" = "unlimited" ]; then
+                ceiling=65536
+            else
+                ceiling="$current_hard"
+            fi
+            if [ "$ceiling" -lt 65536 ]; then
+                target="$ceiling"
+            else
+                target=65536
+            fi
+            if [ "$target" -gt "$current_soft" ]; then
+                ulimit -Ss "$target" 2>/dev/null || true
+            fi
         fi
         "$native_bin" "$@"
     )

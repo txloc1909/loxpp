@@ -194,9 +194,11 @@ sort its own output instead (the design most of the corpus already uses).
   27,000 — the probe's 20,000 carries about a 1.3x margin under that
   ceiling, not a wide one, and the ceiling itself moves with whatever
   process stack limit the script runs under; a host whose HARD limit is
-  already capped below the raised floor is the one case the raise cannot
-  cover, and on such a host this probe would fail on its native side for a
-  reason unrelated to the CLR backend. `LoxHost`'s larger stack does
+  already capped below the floor still gets its soft limit raised, but only
+  up to that hard ceiling, not to the full floor — such a host's probe
+  fails on its native side only if the ceiling itself is smaller than the
+  depth needed, a reason unrelated to the CLR backend, not because the raise
+  did nothing. `LoxHost`'s larger stack does
   change which programs succeed, exactly for this unbounded-recursion
   case: it fails on an 8 MiB thread and prints the correct 20,000-deep
   output on the shipped 256 MiB one. What stays the same at any thread
