@@ -78,11 +78,13 @@ public static class LoxHost {
                 result = entry.Invoke(null, entryArgs);
             } catch (TargetInvocationException wrapped) when (wrapped.InnerException != null) {
                 // Reflection wraps every exception the invoked method itself
-                // throws. Re-throwing the original, with its own original
-                // stack trace preserved, keeps this indirection invisible to
-                // anything that inspects the uncaught exception's own type or
-                // text (tools/check_clr_probes.sh's error probes grep stderr
-                // for "Lox.LoxError").
+                // throws. Re-throwing the original keeps its own exception
+                // type and its own message line unchanged — what
+                // tools/check_clr_probes.sh's error probes read, by
+                // grepping stderr for "Lox.LoxError" — even though the
+                // printed trace itself gains this reflection call's own
+                // frame and this catch block's rethrow frame, neither of
+                // which any current check reads.
                 ExceptionDispatchInfo.Capture(wrapped.InnerException).Throw();
                 throw; // unreachable; satisfies the compiler's definite-assignment check.
             }
