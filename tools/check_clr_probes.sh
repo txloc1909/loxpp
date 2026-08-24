@@ -68,8 +68,23 @@ rt_dll="${LOX_RT_CLR_DLL:-$root/runtime/clr/LoxRuntime.dll}"
 # (runtime/clr/host/LoxHost.cs). A host whose HARD limit is already capped
 # below this value keeps its own ceiling and the probe fails exactly as it
 # did before this function existed.
+#
+# This is a raise, never a lowering. `ulimit -Ss` prints "unlimited" for an
+# already-unbounded soft limit, and an unconditional `ulimit -Ss 65536`
+# would silently REPLACE "unlimited" with the finite floor — a lowering,
+# not a raise. So this function checks the current soft limit first and
+# only assigns the floor when that limit is both finite and below it.
+# tools/diff_runtimes.py's _raise_native_stack_limit is this function's
+# Python twin and follows the identical rule, against the identical
+# 64 MiB floor.
 run_native() {
-    ( ulimit -Ss 65536 2>/dev/null || true; "$native_bin" "$@" )
+    (
+        current_soft="$(ulimit -Ss)"
+        if [ "$current_soft" != "unlimited" ] && [ "$current_soft" -lt 65536 ]; then
+            ulimit -Ss 65536 2>/dev/null || true
+        fi
+        "$native_bin" "$@"
+    )
 }
 
 probes=(

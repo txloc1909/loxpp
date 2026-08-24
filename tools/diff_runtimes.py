@@ -81,13 +81,24 @@ def _raise_native_stack_limit() -> None:
     """Runs inside a subprocess's own child, after fork and before exec —
     never in this parent process. Raises that one child's RLIMIT_STACK soft
     limit toward _NATIVE_STACK_FLOOR_BYTES, capped at the process's own hard
-    limit, and does nothing if the platform has no RLIMIT_STACK or the
-    current soft limit already meets the floor. A host whose hard limit is
-    already capped below the floor keeps its own ceiling; the child then
-    fails exactly as it would have with no raise at all.
+    limit, and does nothing if the platform has no RLIMIT_STACK, the
+    current soft limit is already RLIM_INFINITY (unlimited), or the current
+    soft limit already meets the floor.
+
+    This is a raise, never a lowering, and the RLIM_INFINITY case is why
+    that distinction needs its own check: RLIM_INFINITY is -1, which a bare
+    numeric comparison treats as smaller than any finite floor, so an
+    unguarded "raise toward the floor" would replace an unlimited soft
+    limit with the finite floor — a lowering. tools/check_clr_probes.sh's
+    run_native is this function's shell twin and follows the identical
+    rule. A host whose hard limit is already capped below the floor keeps
+    its own ceiling; the child then fails exactly as it would have with no
+    raise at all.
     """
     try:
         soft, hard = resource.getrlimit(resource.RLIMIT_STACK)
+        if soft == resource.RLIM_INFINITY:
+            return
         ceiling = _NATIVE_STACK_FLOOR_BYTES if hard == resource.RLIM_INFINITY else hard
         target = min(_NATIVE_STACK_FLOOR_BYTES, ceiling)
         if target > soft:
