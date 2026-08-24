@@ -50,6 +50,18 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 native_bin="${LOXPP_BIN:-$root/build/loxpp}"
 rt_dll="${LOX_RT_CLR_DLL:-$root/runtime/clr/LoxRuntime.dll}"
 
+# native_bin's own stringifyObj (src/object.cpp) recurses once per level of
+# list/map nesting with no depth guard, the same shape as this script's
+# 39_deep_nested_stringify.lox probe checks on the CLR side (see that
+# file's own header). This probe's native run needs a process stack big
+# enough for that depth; a host whose default soft limit is already lower
+# than the probe needs would otherwise fail that probe's NATIVE run, which
+# is not a CLR defect. Raise the soft limit here so this script's own
+# result stops depending on the caller's ambient default; a host whose
+# HARD limit is already capped below this value keeps its own ceiling and
+# the probe fails exactly as it did before this line existed.
+ulimit -Ss 65536 2>/dev/null || true
+
 probes=(
     "notes/translation-probes/01_assign_local.lox"
     "notes/translation-probes/15_nested_arith.lox"
