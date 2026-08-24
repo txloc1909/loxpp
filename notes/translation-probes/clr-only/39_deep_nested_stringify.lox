@@ -17,9 +17,11 @@
 // segfaults by 27,000, so this file's 20,000 carries about a 1.3x margin
 // under native's own ceiling, not a wide one, and that ceiling moves with
 // whatever process stack limit the script runs under.
-// check_clr_probes.sh raises its own soft stack limit before running any
-// probe for this reason; a host whose HARD limit is already capped below
-// that floor is the one case that raise cannot cover.
+// Both gates that run this probe — check_clr_probes.sh, and the CI step
+// that walks notes/translation-probes/ against the CLR backend — raise
+// their own soft stack limit before running it, for this reason; a host
+// whose HARD limit is already capped below that floor is the one case
+// neither raise can cover.
 //
 // Lives outside the parent translation-probes directory because the two
 // gates that walk that directory — check_jvm_probes.sh's own curated
