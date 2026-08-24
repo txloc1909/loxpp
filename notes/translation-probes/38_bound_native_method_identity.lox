@@ -1,0 +1,16 @@
+// A map or file method read through GET_PROPERTY (e.g. `m1.has`) is a
+// fresh, per-read bound value: src/vm.cpp's Op::GET_PROPERTY wraps a new
+// ObjBoundNative on every read (the isMap and isFile branches both call
+// m_mm.create<ObjBoundNative>), and Value operator== compares Obj* by
+// pointer. So no two reads are ever the same object - not a repeat read
+// of the same receiver, and not a read of two different receivers - the
+// same rule spec/03-types.md gives a user-class bound method.
+var m1 = {"a": 1};
+var m2 = {"b": 2};
+print m1.has == m1.has;
+print m1.has == m2.has;
+var k = m1.has;
+print k == m1.has;
+print k == m2.has;
+print m1.keys == m1.has;
+print m1.has in [m1.has];

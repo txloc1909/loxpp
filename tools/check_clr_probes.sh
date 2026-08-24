@@ -169,9 +169,8 @@ probes=(
     # object on every read, so `==` gives false whether the two reads
     # share a receiver or not. The file method value follows the same
     # rule through the same Equal arm; runtime/clr/test/FileTest.cs pins
-    # that half at the runtime level. Lives in clr-only/ (see the probe
-    # file's own header comment for why); named here directly.
-    "notes/translation-probes/clr-only/38_bound_native_method_identity.lox"
+    # that half at the runtime level.
+    "notes/translation-probes/38_bound_native_method_identity.lox"
     # notes/translation-probes/clr-only/39_deep_nested_stringify.lox is not
     # in this array: it needs two runs at two different CLR thread stack
     # sizes, not one, so it has its own paired check below this loop.
