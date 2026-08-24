@@ -475,14 +475,13 @@ public static class LoxOps {
     public static object Invoke(object receiver, string name, object[] args) {
         if (receiver is LoxInstance instance) {
             if (instance.Fields.TryGetValue(name, out object fieldVal)) {
-                // vm.cpp calls a closure, a native, or a bound native field
-                // this way (src/vm.cpp, Op::INVOKE's field-shadow arm); a
-                // class, an enum constructor, or a bound method is a
-                // runtime error here, even though all five implement
-                // ILoxCallable. LoxMapMethod and LoxFileMethod are this
-                // runtime's bound-native values (LoxMap.GetMethod,
-                // LoxFile.GetMethod - the values GET_PROPERTY on a map or
-                // file hands back), matching src/vm.cpp's ObjBoundNative.
+                // Accept the field kinds src/vm.cpp accepts in Op::INVOKE's
+                // field-shadow arm, and refuse every other callable with the
+                // same error the native VM gives. LoxMapMethod and
+                // LoxFileMethod are this runtime's bound-native values
+                // (LoxMap.GetMethod, LoxFile.GetMethod - what GET_PROPERTY on
+                // a map or file hands back); together they are the equivalent
+                // of src/vm.cpp's ObjBoundNative.
                 if (fieldVal is LoxClosure closure) {
                     return closure.Call(args);
                 }
