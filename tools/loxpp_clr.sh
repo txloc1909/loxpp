@@ -21,7 +21,11 @@
 # either way.
 #
 # LOXPP_BIN and LOX_RT_CLR_DLL override the default binary/dll locations,
-# for a caller that built into a non-default location.
+# for a caller that built into a non-default location. tools/clr_run.sh
+# derives the host dll's own path from LOX_RT_CLR_DLL's directory by
+# default, so a LOX_RT_CLR_DLL pointing somewhere other than runtime/clr/
+# needs LOX_RT_CLR_HOST_DLL set alongside it, naming LoxHost.dll's own
+# copy explicitly.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

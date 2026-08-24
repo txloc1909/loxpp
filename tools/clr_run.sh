@@ -65,7 +65,9 @@ fi
 
 if [ ! -f "$host_dll" ]; then
     echo "clr_run.sh: no such host dll: $host_dll" >&2
-    echo "clr_run.sh: run tools/build_lox_rt_clr.sh first." >&2
+    echo "clr_run.sh: run tools/build_lox_rt_clr.sh first (writes both dlls" >&2
+    echo "clr_run.sh: into runtime/clr/), or set LOX_RT_CLR_HOST_DLL if" >&2
+    echo "clr_run.sh: LOX_RT_CLR_DLL points at a copy built elsewhere." >&2
     exit 1
 fi
 
