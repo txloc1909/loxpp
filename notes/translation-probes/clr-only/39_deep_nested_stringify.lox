@@ -9,13 +9,31 @@
 // indirection bypassed, running the emitted assembly directly). LoxHost's
 // larger stack (tools/clr_run.sh) clears this depth with a wide margin.
 //
-// Lives outside the parent translation-probes directory for the same
-// reason 31_deep_recursion.lox does: tools/diff_runtimes.py's own probes
-// step walks that directory's own files, non-recursively, comparing
-// native against the JVM backend too, and the JVM backend already runs
-// every program under -Xss64m (tools/jvm_run.sh's own default), so this
-// depth is not a meaningful JVM checkpoint. check_clr_probes.sh names this
-// file directly, so the CLR checkpoint still runs it.
+// This depth also has to stay under native's OWN process-stack ceiling:
+// check_clr_probes.sh runs native first and fails this probe by name if
+// that run alone fails, and src/object.cpp's stringifyObj has the
+// identical unguarded-recursion shape (issue #152). Measured on the
+// default 8 MiB process stack, native holds through 25,000 levels and
+// segfaults by 27,000, so this file's 20,000 carries about a 1.3x margin
+// under native's own ceiling, not a wide one, and that ceiling moves with
+// whatever process stack limit the script runs under.
+// check_clr_probes.sh raises its own soft stack limit before running any
+// probe for this reason; a host whose HARD limit is already capped below
+// that floor is the one case that raise cannot cover.
+//
+// Lives outside the parent translation-probes directory because the two
+// gates that walk that directory — check_jvm_probes.sh's own curated
+// array, and the CI step that runs tools/diff_runtimes.py over that
+// directory's files, non-recursively, against the JVM backend — would
+// otherwise both pick it up, and the JVM backend already matches native
+// at this same depth (tools/jvm_run.sh's own -Xss64m default clears it
+// with room to spare), so moving this file up a level would add nothing
+// past what those two gates already cover. This is the opposite of why
+// 31_deep_recursion.lox lives here: that probe is moved out because the
+// JVM backend DIVERGES from native (no frame-count ceiling of its own);
+// this one is moved out because the JVM backend already MATCHES native.
+// check_clr_probes.sh names this file directly, so the CLR checkpoint
+// still runs it.
 var x = 0;
 var n = 0;
 while (n < 20000) {
