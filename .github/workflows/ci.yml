@@ -212,7 +212,8 @@ jobs:
             bash -c "tools/check_jvm_probes.sh"
 
       # Needs build/loxpp (LOXPP_CLR_BACKEND, default ON; built above) and
-      # runtime/clr/LoxRuntime.dll (built above by tools/build_lox_rt_clr.sh).
+      # runtime/clr/LoxRuntime.dll and runtime/clr/LoxHost.dll (both built
+      # above by tools/build_lox_rt_clr.sh).
       - name: Check CLR emission probes
         run: |
           docker run --rm \
