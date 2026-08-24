@@ -50,6 +50,8 @@ struct ObjString : public Obj {
 
 std::string stringifyObj(Obj* obj);
 
+inline constexpr int kMaxStringifyDepth = 1000;
+
 inline bool isObjType(Obj* obj, ObjType type) { return obj->type == type; }
 inline ObjString* asObjString(Obj* obj) { return static_cast<ObjString*>(obj); }
 inline const char* asCString(Obj* obj) {

@@ -1,11 +1,24 @@
 #include "object.h"
 #include "objects.h"
 #include "table.h"
+#include "exec_objects.h"
 
 #include <algorithm>
 #include <string>
 
 std::string stringifyObj(Obj* obj) {
+    static thread_local int s_depth = 0;
+
+    struct DepthGuard {
+        DepthGuard() { s_depth++; }
+        ~DepthGuard() { s_depth--; }
+    } guard;
+
+    if (s_depth > kMaxStringifyDepth) {
+        nativeRuntimeError("Value nesting is too deep.");
+        return "...";
+    }
+
     switch (obj->type) {
     case ObjType::STRING: {
         const auto& s = asObjString(obj)->chars;

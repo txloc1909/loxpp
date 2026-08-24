@@ -266,7 +266,13 @@ InterpretResult VM::run() {
             break;
         }
         case Op::PRINT: {
-            printValue(pop());
+            m_stdlibCtx.clearError();
+            std::string s = stringify(pop());
+            if (m_stdlibCtx.nativeError) {
+                runtimeError("%s", m_stdlibCtx.nativeErrorMsg.c_str());
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            std::fwrite(s.data(), 1, s.size(), stdout);
             std::printf("\n");
             break;
         }
