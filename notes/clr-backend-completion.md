@@ -167,17 +167,28 @@ sort its own output instead (the design most of the corpus already uses).
   backend give the same 20,000-deep output on every run, so a later
   regression back to running the emitted assembly directly — bypassing
   `LoxHost` — fails this probe with the `SIGABRT` above, not a silent
-  pass. This depends on the CLR side never getting a bigger main-thread
-  stack than the host's own ambient default: `check_clr_probes.sh`'s
+  pass. `check_clr_probes.sh` proves this directly rather than by
+  argument: it runs this probe twice, once with `LOX_CLR_STACK_BYTES`
+  pinned to the shipped default (must match native) and once pinned to
+  the measured 8 MiB overflow point (must NOT match native — a match
+  there means the probe can no longer catch the regression it exists for,
+  and the gate fails naming it disarmed).
+  This depends on the CLR side never getting a bigger main-thread stack
+  than the host's own ambient default: `check_clr_probes.sh`'s
   `run_native` helper and `diff_runtimes.py`'s `_raise_native_stack_limit`
   each raise the stack floor for native's own child process only, in a
   subshell or a `preexec_fn`, never for the script's own shell or for any
   `dotnet` child — an earlier version of both gates raised the floor for
   the whole script instead, which gave a `LoxHost`-bypassing `dotnet`
   process the same enlarged stack and let this exact regression pass
-  silently. This probe's depth also has to stay under native's OWN
-  process-stack ceiling, because `check_clr_probes.sh` runs native first
-  and fails the probe by name if that run alone fails, and `stringifyObj`
+  silently. Both helpers also raise the floor ONLY when the current soft
+  limit is finite and below it — an earlier version of both compared
+  RLIM_INFINITY (unlimited, -1) as a plain number and unconditionally
+  assigned the floor over it, which lowered an already-unlimited soft
+  limit instead of leaving it alone. This probe's depth also has to stay
+  under native's OWN process-stack ceiling, because `check_clr_probes.sh`
+  runs native first and fails the probe by name if that run alone fails,
+  and `stringifyObj`
   shares the same unguarded-recursion shape. Measured on the default 8 MiB
   process stack, native holds through 25,000 levels and segfaults by
   27,000 — the probe's 20,000 carries about a 1.3x margin under that

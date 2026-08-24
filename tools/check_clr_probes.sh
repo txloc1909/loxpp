@@ -156,11 +156,9 @@ probes=(
     # that half at the runtime level. Lives in clr-only/ (see the probe
     # file's own header comment for why); named here directly.
     "notes/translation-probes/clr-only/38_bound_native_method_identity.lox"
-    # A deeply nested list, printed: LoxOps.Stringify's own unbounded C#
-    # recursion over list nesting, past the default CLR thread stack's own
-    # headroom. Lives in clr-only/ (see the probe file's own header
-    # comment for why); named here directly.
-    "notes/translation-probes/clr-only/39_deep_nested_stringify.lox"
+    # notes/translation-probes/clr-only/39_deep_nested_stringify.lox is not
+    # in this array: it needs two runs at two different CLR thread stack
+    # sizes, not one, so it has its own paired check below this loop.
     # The consumed-match case: a match expression's result reaching PRINT,
     # DEFINE_GLOBAL, or SET_GLOBAL with nothing in between to re-expose it
     # as a genuine evaluation-stack value first.
@@ -346,6 +344,61 @@ for probe in "${probes[@]}"; do
         failed_probes+=("$probe")
     fi
 done
+
+# This is the one place that owns the relation between the CLR thread's
+# stack size and notes/translation-probes/clr-only/39_deep_nested_stringify.lox's
+# own ability to fail: two runs of the same probe, at two different sizes,
+# checked together, so neither row can go green for the wrong reason.
+#
+#   MUST-PASS — LOX_CLR_STACK_BYTES explicitly unset for this run, so
+#   ambient state in the calling shell cannot change which size
+#   tools/clr_run.sh picks; the run must match native's stdout byte for
+#   byte, and native's stdout must not be empty. Unsetting rather than
+#   restating tools/clr_run.sh's own default byte count keeps that number
+#   in the one file that already owns it.
+#
+#   MUST-FAIL — LOX_CLR_STACK_BYTES pinned to 8388608, the measured 8 MiB
+#   thread size at which LoxOps.Stringify's own unbounded recursion
+#   overflows this probe's depth (see the probe file's own header). This
+#   run must either exit non-zero or print something other than native's
+#   stdout. If it instead exits zero with output matching native, running
+#   the CLR side on a small thread is no longer what this probe catches,
+#   so this check fails and names the probe disarmed, rather than let the
+#   MUST-PASS row above stand in for a proof it does not give.
+stack_limit_probe="notes/translation-probes/clr-only/39_deep_nested_stringify.lox"
+stack_limit_overflow_bytes=8388608
+stack_limit_checks=2
+
+if ! run_native "$root/$stack_limit_probe" >"$native_out" 2>"$native_err"; then
+    echo "check_clr_probes.sh: FAIL $stack_limit_probe (native run failed)" >&2
+    cat "$native_err" >&2
+    failed_probes+=("$stack_limit_probe (native)")
+elif [ ! -s "$native_out" ]; then
+    echo "check_clr_probes.sh: FAIL $stack_limit_probe (native run gave empty stdout, so a match would prove nothing)" >&2
+    failed_probes+=("$stack_limit_probe (native empty)")
+else
+    must_pass_ok=1
+    env -u LOX_CLR_STACK_BYTES "$root/tools/loxpp_clr.sh" "$root/$stack_limit_probe" \
+        >"$clr_out" 2>"$clr_err" || must_pass_ok=0
+    if [ "$must_pass_ok" -eq 0 ] || ! diff -q "$native_out" "$clr_out" >/dev/null; then
+        echo "check_clr_probes.sh: FAIL $stack_limit_probe (MUST-PASS: default-size CLR thread does not match native)" >&2
+        cat "$clr_err" >&2
+        failed_probes+=("$stack_limit_probe (MUST-PASS)")
+    else
+        echo "check_clr_probes.sh: OK $stack_limit_probe (MUST-PASS: default-size CLR thread matches native)"
+    fi
+
+    must_fail_ok=1
+    LOX_CLR_STACK_BYTES="$stack_limit_overflow_bytes" \
+        "$root/tools/loxpp_clr.sh" "$root/$stack_limit_probe" \
+        >"$clr_out" 2>"$clr_err" || must_fail_ok=0
+    if [ "$must_fail_ok" -eq 1 ] && diff -q "$native_out" "$clr_out" >/dev/null; then
+        echo "check_clr_probes.sh: FAIL $stack_limit_probe (MUST-FAIL: an $stack_limit_overflow_bytes-byte CLR thread matched native — probe disarmed)" >&2
+        failed_probes+=("$stack_limit_probe (MUST-FAIL, disarmed)")
+    else
+        echo "check_clr_probes.sh: OK $stack_limit_probe (MUST-FAIL: an $stack_limit_overflow_bytes-byte CLR thread does not reproduce native's output, so the probe can still catch the regression)"
+    fi
+fi
 
 for probe in "${error_probes[@]}"; do
     run_native "$root/$probe" >"$native_out" 2>"$native_err"
@@ -571,4 +624,4 @@ if [ "${#failed_probes[@]}" -ne 0 ]; then
     exit 1
 fi
 
-echo "check_clr_probes.sh: all $((${#probes[@]} + ${#error_probes[@]} + ${#examples[@]})) probes OK, corpus sweep confirms the examples group is complete"
+echo "check_clr_probes.sh: all $((${#probes[@]} + stack_limit_checks + ${#error_probes[@]} + ${#examples[@]})) probes OK, corpus sweep confirms the examples group is complete"
