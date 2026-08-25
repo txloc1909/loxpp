@@ -228,6 +228,9 @@ error_probes=(
     # walk against the JVM backend does not see it (see the probe file's
     # own header comment for why).
     "notes/translation-probes/clr-only/31_deep_recursion.lox"
+    # LoxOps.Stringify's depth guard (issue #159): both sides must refuse
+    # nesting depth 201, matching native's 200-depth limit.
+    "notes/translation-probes/clr-only/39_deep_nested_stringify.lox"
     # A match whose arms are all class patterns raises a real, reachable
     # MATCH_ERROR when no arm matches — both sides print "before" then fail.
     "notes/translation-probes/33_class_pattern_match_error.lox"
@@ -361,17 +364,6 @@ for probe in "${probes[@]}"; do
     fi
 done
 
-# The two-tier MUST-PASS/MUST-FAIL stack-limit probe that used to run here
-# (notes/translation-probes/clr-only/39_deep_nested_stringify.lox) depended
-# on native completing an N=20,000-deep stringify to serve as an
-# always-succeeding oracle. Issue #152 gave native's stringifyObj an
-# intentional depth guard well under that N, so native no longer completes
-# it — no depth satisfies both "native succeeds" and "CLR's small thread
-# overflows" once native has any guard below CLR's own crash boundary. The
-# probe file now lives at notes/deferred-probes/39_deep_nested_stringify.lox
-# (out of every directory this script or the CI workflow sweeps) until
-# issue #159's CLR-side depth guard lets it be recalibrated for real.
-stack_limit_checks=0
 
 for probe in "${error_probes[@]}"; do
     run_native "$root/$probe" >"$native_out" 2>"$native_err"
