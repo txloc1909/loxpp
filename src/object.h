@@ -50,6 +50,11 @@ struct ObjString : public Obj {
 
 std::string stringifyObj(Obj* obj);
 
+// Maximum recursion depth for stringifying nested structures. Measured crash
+// boundaries: list ~1500-2000, map ~1200-1500 (tightest), enum ~1500-2000.
+// Set to 200 to maintain 6x safety factor below the tightest boundary (map).
+inline constexpr int kMaxStringifyDepth = 200;
+
 inline bool isObjType(Obj* obj, ObjType type) { return obj->type == type; }
 inline ObjString* asObjString(Obj* obj) { return static_cast<ObjString*>(obj); }
 inline const char* asCString(Obj* obj) {

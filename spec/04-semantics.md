@@ -989,6 +989,7 @@ Common causes:
 | `pop` on empty list | `[].pop()` |
 | NaN used as map key | `m[0/0] = 1` |
 | Object (non-String) used as map key | `m[[1,2]] = 1` |
+| Value nested too deep to print | a list that holds a list, many thousand levels deep |
 | Method called on non-instance/non-list/non-map | `42.foo()` |
 | No arm matches in a `match` expression | `match 99 { case 1 => "one" }` |
 | Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field |

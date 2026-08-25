@@ -270,3 +270,7 @@ Every value has a canonical string form, produced by `print` and by the
 | Instance | `ClassName instance` (e.g. `Dog instance`) |
 | List | `[elem0, elem1, ...]` — each element in its canonical string form, comma-space separated, enclosed in `[` and `]`. An empty list is `[]`. |
 | Map | `{key0: value0, key1: value1, ...}` — each pair as `key: value` in canonical form, comma-space separated, enclosed in `{` and `}`. An empty map is `{}`. |
+
+The nesting depth of a value that a canonical string form can hold is
+implementation-defined. A value more deeply nested than that limit causes a
+**runtime error**.
