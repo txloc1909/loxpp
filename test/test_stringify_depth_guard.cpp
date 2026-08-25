@@ -52,12 +52,12 @@ TEST(StringifyDepthGuard, NestedEnumTripsGuard) {
     // Build a deeply nested enum value chain and verify the guard applies.
     VMTestHarness h;
     std::string source = R"(
-        enum Node { Leaf, Branch with value }
-        var x = Node.Leaf;
+        enum Node { Cons(value) End }
+        var x = Node.End;
         var N = 250;  // Deep enough to trip the guard at 200
         var i = 0;
         while (i < N) {
-            x = Node.Branch(x);
+            x = Node.Cons(x);
             i = i + 1;
         }
         print x;
@@ -110,7 +110,8 @@ TEST(StringifyDepthGuard, ShallowStructureStillPrints) {
 TEST(StringifyDepthGuard, MapShallowStructureStillPrints) {
     // Verify shallow maps are not affected.
     VMTestHarness h;
-    ASSERT_EQ(h.run("var x = {a: {b: {c: 1}}}; print x;"), InterpretResult::OK);
+    ASSERT_EQ(h.run("var x = {\"a\": {\"b\": {\"c\": 1}}}; print x;"),
+              InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("x"), "{a: {b: {c: 1}}}");
 }
 
