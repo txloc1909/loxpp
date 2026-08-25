@@ -16,8 +16,12 @@ public final class FileTest {
         LoxFile writer = LoxFile.open(path, "w");
         check(!LoxOps.equal(writer.getMethod("write"), writer.getMethod("write")),
                 "two reads of the same file's 'write' method are not Lox-equal");
-        check(!LoxOps.equal(writer.getMethod("write"), LoxFile.open(path, "w").getMethod("write")),
+        File otherTmp = File.createTempFile("lox-rt-file-test-other", ".txt");
+        otherTmp.deleteOnExit();
+        LoxFile otherWriter = LoxFile.open(otherTmp.getAbsolutePath(), "w");
+        check(!LoxOps.equal(writer.getMethod("write"), otherWriter.getMethod("write")),
                 "two different files' 'write' method values are not Lox-equal");
+        otherWriter.close();
         writer.writeline("first");
         writer.writeline("second");
         writer.write("third-no-newline");
