@@ -1,3 +1,16 @@
+// DEFERRED — moved out of notes/translation-probes/clr-only/ and out of
+// every CI gate that swept it (tools/check_clr_probes.sh's own named
+// reference, and the "CLR differential suite - probes (N11)" workflow
+// step's directory walk). Issue #152 gave native's stringifyObj an
+// intentional recursion-depth guard (kMaxStringifyDepth = 200,
+// src/object.h) well under this probe's N = 20,000, so native no longer
+// completes this probe and can no longer serve as its always-succeeding
+// oracle — the design below, unchanged from when this file was written,
+// depended on that. See issue #159 for the conflict and the two
+// directions to reinstate this probe for real: give LoxOps.Stringify its
+// own depth guard first, then recalibrate this file (or split it) against
+// both sides' new, intentional limits.
+//
 // LoxOps.Stringify (runtime/clr/src/LoxOps.cs) recurses once per level of
 // list nesting, with no depth guard at all — unbounded by LoxClosure's own
 // FramesMax, because it is plain C# recursion over a value's own shape,
