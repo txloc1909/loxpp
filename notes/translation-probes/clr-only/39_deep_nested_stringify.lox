@@ -1,0 +1,21 @@
+// Both sides must refuse a nesting depth past 200, with matching error
+// messages and exit codes. This probe confirms LoxOps.Stringify's depth
+// guard (issue #159's real fix) keeps native and CLR in sync.
+//
+// Native: list 200 prints OK, list 201 throws LoxError("Value nesting is
+// too deep."), exit 70.
+// CLR: same depth, same result, same message.
+//
+// Without the CLR guard, native would reject and exit 70 while CLR would
+// print the full nested structure on a 256 MiB thread (tools/clr_run.sh's
+// default), a divergence caught by tools/check_clr_probes.sh's error_probes
+// loop: "CLR run did not fail".
+
+print "before";
+var x = 0;
+var n = 0;
+while (n < 201) {
+    x = [x];
+    n = n + 1;
+}
+print x;

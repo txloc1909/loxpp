@@ -660,6 +660,19 @@ public static class LoxOps {
     // print / stringify
     // ------------------------------------------------------------------
 
+    // Matches src/object.h's kMaxStringifyDepth. Each recursion into a
+    // LoxList, LoxMap, or LoxEnum payload increments this counter before
+    // recursing, so deeply nested structures throw LoxError before the
+    // call stack overflows. Native only counts heap values (strings, lists,
+    // maps, enums), not primitives - so the check goes AFTER the null/bool/
+    // double branches to match that exact boundary per shape.
+    private const int MaxStringifyDepth = 200;
+
+    // Starts at 0, not 1: unlike LoxClosure.s_frameCount, there is no
+    // initial stack frame to account for; stringifyObj has no equivalent
+    // to the script's own CallFrame 0.
+    private static int s_stringifyDepth = 0;
+
     public static void Print(object v) {
         LoxRuntime.Out.Write(Stringify(v));
         LoxRuntime.Out.Write('\n');
@@ -675,6 +688,18 @@ public static class LoxOps {
         if (v is double d) {
             return FormatNumber(d);
         }
+        if (s_stringifyDepth == MaxStringifyDepth) {
+            throw new LoxError("Value nesting is too deep.");
+        }
+        s_stringifyDepth++;
+        try {
+            return StringifyObj(v);
+        } finally {
+            s_stringifyDepth--;
+        }
+    }
+
+    private static string StringifyObj(object v) {
         if (v is string s) {
             return s;
         }
