@@ -7,8 +7,11 @@ Runs each Lox++ program on the native binary and on a second runner
 stdout. It does not compare stderr and does not compare the exit
 code: differential scope is stdout only.
 
-Three outcomes per program:
+Four outcomes per program:
   MATCH        stdout is byte-identical on both runtimes.
+  STALE        stdout is byte-identical on both runtimes, but the program is
+               on the exclusion list. The exclusion is no longer needed and
+               must be removed. Exit code 1.
   PERMUTATION  stdout differs only in line order, and the program is on the
                exclusion list (tools/jvm_excluded_examples.txt or
                tools/clr_excluded_examples.txt, one per backend). Map
@@ -319,7 +322,7 @@ def main() -> None:
         )
         sys.exit(2)
 
-    matched = permuted = diverged = 0
+    matched = permuted = diverged = staled = 0
 
     for lox_file in programs:
         input_file = lox_file.with_suffix(".input")
@@ -342,6 +345,10 @@ def main() -> None:
                     f"disagrees: native exited {native_status}, other exited {other_status})"
                 )
                 diverged += 1
+                continue
+            if lox_file.name in excluded:
+                print(f"STALE       {lox_file}  (byte-identical, but marked as excluded: {excluded[lox_file.name]})")
+                staled += 1
                 continue
             if native_out == "":
                 print(f"MATCH       {lox_file}  (empty, exit status agrees)")
@@ -379,8 +386,8 @@ def main() -> None:
         diverged += 1
 
     print()
-    print(f"{matched} matched, {permuted} permutation-excused, {diverged} diverged")
-    sys.exit(1 if diverged else 0)
+    print(f"{matched} matched, {staled} stale, {permuted} permutation-excused, {diverged} diverged")
+    sys.exit(1 if (diverged or staled) else 0)
 
 
 if __name__ == "__main__":

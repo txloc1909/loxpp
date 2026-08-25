@@ -183,6 +183,22 @@ for probe in "${error_probes[@]}"; do
     fi
 done
 
+# --- JVM exclusion guard ---------------------------------------------------
+# Re-proves, on every run, that each tools/jvm_excluded_examples.txt entry's
+# JVM stdout is still a permutation of native stdout, not a stale byte-match
+# or a content change that the exclusion is silently hiding. tools/diff_runtimes.py
+# already does exactly this for tools/clr_excluded_examples.txt; --only-excluded
+# runs it over exactly the excluded programs, resolved under examples/.
+excluded_list="$root/tools/jvm_excluded_examples.txt"
+if ! python3 "$root/tools/diff_runtimes.py" "$native_bin" \
+        "$root/tools/loxpp_jvm.sh" --exclude "$excluded_list" \
+        --only-excluded "$root/examples"; then
+    echo "check_jvm_probes.sh: FAIL JVM exclusion guard (tools/jvm_excluded_examples.txt: stale or diverged entries)" >&2
+    failed_probes+=("jvm_excluded_examples_permutation_guard")
+else
+    echo "check_jvm_probes.sh: JVM exclusion guard OK, every exclusion is still a map-order permutation"
+fi
+
 if [ "${#failed_probes[@]}" -ne 0 ]; then
     echo "check_jvm_probes.sh: ${#failed_probes[@]} probe(s) failed:" >&2
     for probe in "${failed_probes[@]}"; do
