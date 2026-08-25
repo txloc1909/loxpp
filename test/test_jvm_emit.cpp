@@ -1077,7 +1077,7 @@ TEST(EmitProgram, SiblingFunctionsGetSequentialClassNames) {
     std::vector<jvm::EmittedClass> classes =
         jvm::emitProgram(fn, tree, "LoxMain");
 
-    // Deterministic naming (brief.md section 9): one pre-order counter over
+    // Deterministic naming (jvm_emitter.h): one pre-order counter over
     // the whole tree, not per parent — `a` and `b` are siblings, so they
     // draw 0 and 1 in declaration order.
     ASSERT_EQ(classes.size(), 3u);
@@ -1727,7 +1727,7 @@ TEST(EmitProgram, ReturnLoadsTheMatchResultNotTheLastArmBinding) {
 // (isCaptured(2) is true for the reused index); the fix is to load the
 // slot the same raw-or-cell way emitGetLocal already does, never to throw.
 //
-// Prove-it-fails (brief.md): reverting emitReturn's `isCaptured` branch to
+// Prove-it-fails: reverting emitReturn's `isCaptured` branch to
 // the round-1 throw makes this test FAIL with the exact exception the
 // reviewer reproduced, "RETURN's local slot 2 is captured" — confirmed
 // locally before restoring the fix.
@@ -1799,7 +1799,7 @@ TEST(EmitProgram, ReturnDoesNotFalselyRejectAReusedCapturedSlotIndex) {
 // trick), so `localCount - 1` still names it once the subject's one real
 // POP has run.
 //
-// Prove-it-fails (brief.md): reverting emitSetLocal's
+// Prove-it-fails: reverting emitSetLocal's
 // `loadNamedLocalAtZeroDepth` call to `e.loadLastInvisibleVar()` makes this
 // test FAIL — it emits "aload 9" (the inner subject) where "aload 8" (the
 // inner result) belongs, exactly the reviewer's reproduction — confirmed
@@ -1854,7 +1854,7 @@ TEST(EmitProgram, ReturnOfNestedMatchLoadsTheInnerResultNotTheInnerSubject) {
 // `a` (the match RESULT) — confirmed by running both on `main` in a
 // separate worktree, in the dev-managed container, before this fix.
 //
-// Prove-it-fails (brief.md): pointing `emitSetGlobal` back at a bare
+// Prove-it-fails: pointing `emitSetGlobal` back at a bare
 // `e.jvmSlotForLocal(e.lastInvisibleVarSlot)` read (the pre-round-4 shape)
 // makes this test FAIL — it emits "aload 4" (the subject) where "aload 3"
 // (the result) belongs — confirmed locally before restoring the fix.
@@ -1978,7 +1978,7 @@ TEST(EmitProgram, SetUpvalueOfAPlainMatchLoadsTheResultNotAStaleSlot) {
 // int. Fusing them (emitFusedGetTagJumpTable) must never box the tag at
 // all — the tag stays a primitive double, then `int`, the whole way.
 //
-// Prove-it-fails (brief.md): reverting emitFusedGetTagJumpTable to the
+// Prove-it-fails: reverting emitFusedGetTagJumpTable to the
 // context-free box-then-unbox shape P8 warns against (`getTag()D;
 // invokestatic Double/valueOf(D)Ljava/lang/Double; invokevirtual
 // doubleValue()D; d2i; tableswitch`) still assembles and still dispatches
@@ -2155,7 +2155,7 @@ TEST(EmitScript, EnumConstantMaterializesLoxEnumCtor) {
 // (RETURN, SET_LOCAL, SET_GLOBAL, SET_UPVALUE, JUMP_IF_FALSE, GET_ITER); this
 // is the same fix, for the one opcode family none of them share.
 //
-// Prove-it-fails (brief.md): removing emitDefineGlobal's own `if
+// Prove-it-fails: removing emitDefineGlobal's own `if
 // (operandDepth() == 0)` branch makes emitScript throw "operand stack
 // underflow emitting 'aload 1'" instead of returning — confirmed locally
 // before restoring the fix.
