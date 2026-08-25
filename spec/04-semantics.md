@@ -180,11 +180,13 @@ obj.name
 ```
 
 1. Evaluate `obj`.
-2. If `obj` is a Map, look up `name` in the map class method table. If found, return a bound built-in method
-   wrapping the native function and `obj` as receiver. If not found, raise a runtime error
+2. If `obj` is a Map, look up `name` in the map class method table. If found, return a new bound built-in method
+   wrapping the native function and `obj` as receiver. Each evaluation creates a new value, so
+   two property-get reads of the same map's method never yield the same object. If not found, raise a runtime error
    ("Undefined property 'name' on map.").
-3. If `obj` is a File, look up `name` in the file class method table. If found, return a bound built-in method
-   wrapping the native function and `obj` as receiver. If not found, raise a runtime error
+3. If `obj` is a File, look up `name` in the file class method table. If found, return a new bound built-in method
+   wrapping the native function and `obj` as receiver. Each evaluation creates a new value, so
+   two property-get reads of the same file's method never yield the same object. If not found, raise a runtime error
    ("Undefined property 'name' on file.").
 4. If `obj` is not an Instance, this is a **runtime error** ("Only instances have properties.").
 5. If the instance's field table contains `name`, return that field value. Fields shadow methods.

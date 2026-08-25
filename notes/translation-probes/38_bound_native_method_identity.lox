@@ -5,14 +5,6 @@
 // pointer. So no two reads are ever the same object - not a repeat read
 // of the same receiver, and not a read of two different receivers - the
 // same rule spec/03-types.md gives a user-class bound method.
-//
-// This file lives under clr-only/ because the JVM backend returns the
-// identical method object on a repeat property get (a per-instance
-// method cache), so its own output differs here; and the JVM gates (the
-// curated arrays in tools/check_jvm_probes.sh, and the CI probes step's
-// non-recursive walk of notes/translation-probes/) never name a file one
-// level under clr-only/, so a file placed here runs only against the CLR
-// backend.
 var m1 = {"a": 1};
 var m2 = {"b": 2};
 print m1.has == m1.has;

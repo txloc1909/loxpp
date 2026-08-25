@@ -538,7 +538,7 @@ public final class LoxOps {
      * Dispatches by name with no LoxNative allocation — the INVOKE fast path
      * matches vm.cpp's own fast path, which calls the native C function
      * directly and never builds an intermediate ObjNative per call.
-     * {@link LoxMap#getMethod} still allocates (once, cached) for the
+     * {@link LoxMap#getMethod} allocates on every read for the
      * separate GET_PROPERTY case.
      */
     private static Object invokeMapMethod(LoxMap map, String name, Object[] args) {

@@ -47,6 +47,7 @@ probes=(
     "notes/translation-probes/12_list_map_index.lox"
     "notes/translation-probes/16_slice_in.lox"
     "notes/translation-probes/25_seq_map_string_coverage.lox"
+    "notes/translation-probes/38_bound_native_method_identity.lox"
     # Classes, methods, super.
     "notes/translation-probes/09_class.lox"
     "notes/translation-probes/10_super.lox"

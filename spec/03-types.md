@@ -235,7 +235,7 @@ The `==` and `!=` operators compare two values.
   - Strings are equal when they contain the same sequence of characters
   - Functions are equal only when they are the same function object (identity
     equality)
-  - Classes, Instances, BoundMethods, Lists, and Maps use identity equality:
+  - Classes, Instances, BoundMethods, Bound built-in methods, Lists, and Maps use identity equality:
     two values are equal only if they are the exact same object
 
 Equality never produces a runtime error regardless of the types being compared.

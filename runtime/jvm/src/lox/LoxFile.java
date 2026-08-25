@@ -2,8 +2,6 @@ package lox;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Mirrors src/stdlib/file_api.cpp's ObjFile over a RandomAccessFile, which is
@@ -15,11 +13,6 @@ public final class LoxFile {
     private RandomAccessFile raf; // null once closed
     public final boolean readable;
     public final boolean writable;
-
-    // Per-instance cache so repeated GET_PROPERTY reads of the same method
-    // name give back the identical Java object, matching native's ObjNative
-    // identity: `f.read == f.read` must be true.
-    private final Map<String, LoxCallable> methodCache = new HashMap<>();
 
     private LoxFile(RandomAccessFile raf, boolean readable, boolean writable) {
         this.raf = raf;
@@ -153,16 +146,15 @@ public final class LoxFile {
         }
     }
 
+    /**
+     * A fresh method value on every call, matching src/vm.cpp's
+     * Op::GET_PROPERTY, which wraps a new ObjBoundNative on every read
+     * (the isFile branch). No two reads give the same object, so
+     * LoxOps.equal's reference-identity rule gives false for a repeat read
+     * of one file and for a read of two different files.
+     */
     public LoxCallable getMethod(String name) {
-        LoxCallable cached = methodCache.get(name);
-        if (cached != null) {
-            return cached;
-        }
-        LoxCallable created = createMethod(name);
-        if (created != null) {
-            methodCache.put(name, created);
-        }
-        return created;
+        return createMethod(name);
     }
 
     private LoxCallable createMethod(String name) {
