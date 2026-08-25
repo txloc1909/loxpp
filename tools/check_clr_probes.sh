@@ -589,4 +589,4 @@ if [ "${#failed_probes[@]}" -ne 0 ]; then
     exit 1
 fi
 
-echo "check_clr_probes.sh: all $((${#probes[@]} + stack_limit_checks + ${#error_probes[@]} + ${#examples[@]})) probes OK, corpus sweep confirms the examples group is complete"
+echo "check_clr_probes.sh: all $((${#probes[@]} + ${#error_probes[@]} + ${#examples[@]})) probes OK, corpus sweep confirms the examples group is complete"
