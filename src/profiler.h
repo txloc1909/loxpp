@@ -160,6 +160,26 @@ inline const char* opcodeName(Op op) {
         return "SET_INDEX";
     case Op::IN:
         return "IN";
+    case Op::BUILD_MAP:
+        return "BUILD_MAP";
+    case Op::SLICE:
+        return "SLICE";
+    case Op::GET_ITER:
+        return "GET_ITER";
+    case Op::ITER_HAS_NEXT:
+        return "ITER_HAS_NEXT";
+    case Op::ITER_NEXT:
+        return "ITER_NEXT";
+    case Op::MATCH_ERROR:
+        return "MATCH_ERROR";
+    case Op::JUMP_TABLE:
+        return "JUMP_TABLE";
+    case Op::GET_TAG:
+        return "GET_TAG";
+    case Op::INSTANCEOF:
+        return "INSTANCEOF";
+    case Op::IS_SEQ:
+        return "IS_SEQ";
     default:
         return "UNKNOWN";
     }
