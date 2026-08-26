@@ -1,0 +1,14 @@
+// Fib — naive recursive Fibonacci. AWFY benchmark suite.
+// Copyright (c) 2015-2016 Stefan Marr. MIT License.
+
+fun fibonacci(n) {
+  if (n > 1) return fibonacci(n - 1) + fibonacci(n - 2);
+  return n;
+}
+
+class Fib {
+  benchmark() {
+    return fibonacci(35);
+  }
+}
+
