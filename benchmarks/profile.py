@@ -31,6 +31,13 @@ def profile_one(name: str, timeout: int = 600) -> dict:
     prog = str(PROF_PROGRAMS / f"{name}.lox")
     p = subprocess.run([str(PROF_BIN), prog], capture_output=True, text=True,
                        timeout=timeout)
+    if p.returncode != 0:
+        return {
+            "program": name,
+            "ok": False,
+            "error": f"exit {p.returncode}: {p.stderr.strip()[:200]}",
+            "exit": p.returncode,
+        }
     rep = p.stderr
     ops, fns = [], []
     in_ops = in_fns = False
@@ -60,6 +67,7 @@ def profile_one(name: str, timeout: int = 600) -> dict:
     total_ops = sum(c for _, c, _ in ops)
     return {
         "program": name,
+        "ok": True,
         "total_ops": total_ops,
         "opcodes": [{"op": o, "count": c, "pct": p} for o, c, p in ops],
         "functions": sorted(fns, key=lambda f: -f["self_ms"])[:12],
@@ -89,6 +97,9 @@ def main() -> None:
         print(f"  profiling {name} ...", end=" ", flush=True)
         r = profile_one(name)
         out.append(r)
+        if not r["ok"]:
+            print(f"FAIL: {r['error']}")
+            continue
         for o in r["opcodes"]:
             agg[o["op"]] = agg.get(o["op"], 0) + o["count"]
         top = ", ".join(f"{o['op']}={o['pct']:.0f}%" for o in r["opcodes"][:4])
