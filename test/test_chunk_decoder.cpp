@@ -64,64 +64,10 @@ std::vector<fs::path> listLoxFiles(const fs::path& dir) {
     return files;
 }
 
-// Single source of truth for "every Op enumerator", used by both `mnemonic`
-// (below) and `allOps` (R1/R3 fix: the opcode-coverage test needs to name
-// every enumerator, and this list is also the reason `mnemonic`'s switch has
-// no `default:` — a new Op with no entry here is a compile-time -Wswitch
-// warning at that switch, not a silent decoder gap).
-#define LOXPP_FOR_EACH_OP(X)                                                   \
-    X(CONSTANT)                                                                \
-    X(NIL)                                                                     \
-    X(TRUE)                                                                    \
-    X(FALSE)                                                                   \
-    X(EQUAL)                                                                   \
-    X(GREATER)                                                                 \
-    X(LESS)                                                                    \
-    X(NEGATE)                                                                  \
-    X(ADD)                                                                     \
-    X(SUBTRACT)                                                                \
-    X(MULTIPLY)                                                                \
-    X(DIVIDE)                                                                  \
-    X(MODULO)                                                                  \
-    X(NOT)                                                                     \
-    X(PRINT)                                                                   \
-    X(POP)                                                                     \
-    X(GET_LOCAL)                                                               \
-    X(SET_LOCAL)                                                               \
-    X(DEFINE_GLOBAL)                                                           \
-    X(GET_GLOBAL)                                                              \
-    X(SET_GLOBAL)                                                              \
-    X(JUMP)                                                                    \
-    X(JUMP_IF_FALSE)                                                           \
-    X(LOOP)                                                                    \
-    X(CALL)                                                                    \
-    X(RETURN)                                                                  \
-    X(CLOSURE)                                                                 \
-    X(GET_UPVALUE)                                                             \
-    X(SET_UPVALUE)                                                             \
-    X(CLOSE_UPVALUE)                                                           \
-    X(CLASS)                                                                   \
-    X(GET_PROPERTY)                                                            \
-    X(SET_PROPERTY)                                                            \
-    X(DEFINE_METHOD)                                                           \
-    X(INVOKE)                                                                  \
-    X(INHERIT)                                                                 \
-    X(GET_SUPER)                                                               \
-    X(SUPER_INVOKE)                                                            \
-    X(BUILD_LIST)                                                              \
-    X(BUILD_MAP)                                                               \
-    X(GET_INDEX)                                                               \
-    X(SET_INDEX)                                                               \
-    X(SLICE)                                                                   \
-    X(IN)                                                                      \
-    X(GET_ITER)                                                                \
-    X(ITER_HAS_NEXT)                                                           \
-    X(ITER_NEXT)                                                               \
-    X(MATCH_ERROR)                                                             \
-    X(JUMP_TABLE)                                                              \
-    X(GET_TAG)                                                                 \
-    X(INSTANCEOF)                                                              \
-    X(IS_SEQ)
+// LOXPP_FOR_EACH_OP (src/chunk.h) is the single source of truth for "every
+// Op enumerator", used by both `mnemonic` (below) and `allOps` — the
+// opcode-coverage test needs to name every enumerator, and this is also why
+// `mnemonic`'s switch has no `default:` case of its own.
 
 // Re-renders one decoded instruction into the exact text
 // disassembleInstruction (src/debug.cpp) prints for it with color disabled.
