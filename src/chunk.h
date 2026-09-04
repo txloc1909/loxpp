@@ -71,7 +71,70 @@ enum class Op : Byte {
 };
 // clang-format on
 
+// Single source of truth for "every Op enumerator, spelled as itself".
+// test/test_chunk_decoder.cpp's decoder oracle and src/profiler.h's opcode
+// report both name-switch over Op; both are driven by this macro so a new
+// enumerator only needs adding here once, next to the enum it describes,
+// instead of in each hand-typed switch separately.
+#define LOXPP_FOR_EACH_OP(X)                                                   \
+    X(CONSTANT)                                                                \
+    X(NIL)                                                                     \
+    X(TRUE)                                                                    \
+    X(FALSE)                                                                   \
+    X(EQUAL)                                                                   \
+    X(GREATER)                                                                 \
+    X(LESS)                                                                    \
+    X(NEGATE)                                                                  \
+    X(ADD)                                                                     \
+    X(SUBTRACT)                                                                \
+    X(MULTIPLY)                                                                \
+    X(DIVIDE)                                                                  \
+    X(MODULO)                                                                  \
+    X(NOT)                                                                     \
+    X(PRINT)                                                                   \
+    X(POP)                                                                     \
+    X(GET_LOCAL)                                                               \
+    X(SET_LOCAL)                                                               \
+    X(DEFINE_GLOBAL)                                                           \
+    X(GET_GLOBAL)                                                              \
+    X(SET_GLOBAL)                                                              \
+    X(JUMP)                                                                    \
+    X(JUMP_IF_FALSE)                                                           \
+    X(LOOP)                                                                    \
+    X(CALL)                                                                    \
+    X(RETURN)                                                                  \
+    X(CLOSURE)                                                                 \
+    X(GET_UPVALUE)                                                             \
+    X(SET_UPVALUE)                                                             \
+    X(CLOSE_UPVALUE)                                                           \
+    X(CLASS)                                                                   \
+    X(GET_PROPERTY)                                                            \
+    X(SET_PROPERTY)                                                            \
+    X(DEFINE_METHOD)                                                           \
+    X(INVOKE)                                                                  \
+    X(INHERIT)                                                                 \
+    X(GET_SUPER)                                                               \
+    X(SUPER_INVOKE)                                                            \
+    X(BUILD_LIST)                                                              \
+    X(BUILD_MAP)                                                               \
+    X(GET_INDEX)                                                               \
+    X(SET_INDEX)                                                               \
+    X(SLICE)                                                                   \
+    X(IN)                                                                      \
+    X(GET_ITER)                                                                \
+    X(ITER_HAS_NEXT)                                                           \
+    X(ITER_NEXT)                                                               \
+    X(MATCH_ERROR)                                                             \
+    X(JUMP_TABLE)                                                              \
+    X(GET_TAG)                                                                 \
+    X(INSTANCEOF)                                                              \
+    X(IS_SEQ)
+
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }
+
+// Name of an Op enumerator, e.g. opcodeName(Op::ADD) == "ADD". Falls back to
+// "UNKNOWN" for a byte that does not decode to a known Op (corrupt bytecode).
+const char* opcodeName(Op op);
 
 class Chunk : std::vector<Byte> {
   public:
