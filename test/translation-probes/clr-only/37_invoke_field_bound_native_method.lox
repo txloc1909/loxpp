@@ -5,7 +5,7 @@
 // the INVOKE opcode's field-shadow arm, not GET_PROPERTY followed by CALL.
 //
 // This file lives under clr-only/ because the JVM gates read
-// notes/translation-probes/ non-recursively and their curated list does
+// test/translation-probes/ non-recursively and their curated list does
 // not name this file, so a file in clr-only/ runs only against the CLR
 // backend.
 var m = {"a": 1};

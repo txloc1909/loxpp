@@ -1,7 +1,7 @@
 // test_jvm_emit.cpp — JVM straight-line + control-flow emitter (nodes N4/N5).
 //
 // Checkpoint (notes/backend-implementation-dag.md, nodes N4/N5):
-//   tools/loxpp_jvm.sh notes/translation-probes/{01,02,03,04,05,15}_*.lox
+//   tools/loxpp_jvm.sh test/translation-probes/{01,02,03,04,05,15}_*.lox
 // must each print stdout identical to build/loxpp on the same file, and the
 // assembled class must pass `java -Xverify:all`. That full assemble-and-run
 // comparison needs jasmin/java (tools/check_jvm_probes.sh, run inside the
@@ -1363,7 +1363,7 @@ TEST(EmitProgram, DefineMethodDupsClassAndChecksCastsBothOperands) {
 }
 
 TEST(EmitProgram, GetAndSetPropertyPeekCorrectly) {
-    // notes/translation-probes/09_class.lox verbatim.
+    // test/translation-probes/09_class.lox verbatim.
     MemoryManager mm;
     DecodedFunction fn = decodeScript("class C {\n"
                                       "  init(x) { this.x = x; }\n"
@@ -1452,7 +1452,7 @@ TEST(EmitProgram, InvokeWithArgsSpillsToScratchSlotsAndBuildsArray) {
 }
 
 TEST(EmitProgram, InheritLoadsSuperclassFromInvisibleVarNotStack) {
-    // notes/translation-probes/10_super.lox verbatim.
+    // test/translation-probes/10_super.lox verbatim.
     MemoryManager mm;
     DecodedFunction fn =
         decodeScript("class A { greet() { return 1; } }\n"
@@ -1511,7 +1511,7 @@ TEST(EmitProgram, InheritLoadsSuperclassFromInvisibleVarNotStack) {
 }
 
 TEST(EmitProgram, SuperInvokeZeroArgsUsesSwapAndOneScratchSlot) {
-    // notes/translation-probes/10_super.lox verbatim — B's own `greet`.
+    // test/translation-probes/10_super.lox verbatim — B's own `greet`.
     MemoryManager mm;
     DecodedFunction fn =
         decodeScript("class A { greet() { return 1; } }\n"
@@ -1590,7 +1590,7 @@ TEST(EmitProgram, SuperInvokeWithArgsSpillsThreeDistinctScratchSlots) {
 }
 
 TEST(EmitProgram, GetSuperBindsMethodAsValue) {
-    // notes/translation-probes/17_super_value.lox verbatim.
+    // test/translation-probes/17_super_value.lox verbatim.
     MemoryManager mm;
     DecodedFunction fn = decodeScript(
         "class A { greet() { return 1; } }\n"

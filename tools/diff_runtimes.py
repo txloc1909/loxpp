@@ -253,7 +253,7 @@ def resolve_excluded_programs(excluded: dict[str, str], base_dir: Path) -> list[
     """Resolves every name in the exclusion file under base_dir.
 
     Used to run the permutation guard over exactly the excluded programs,
-    without scanning the rest of the corpus (notes/translation-probes, or
+    without scanning the rest of the corpus (test/translation-probes, or
     any example not on this list).
     """
     files: list[Path] = []

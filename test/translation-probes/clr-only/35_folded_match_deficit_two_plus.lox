@@ -10,7 +10,7 @@
 //
 // This file lives under clr-only/ for the same reason
 // clr-only/31_deep_recursion.lox does: tools/diff_runtimes.py's CI probes
-// step walks notes/translation-probes/ non-recursively and diffs native
+// step walks test/translation-probes/ non-recursively and diffs native
 // against the JVM backend, and the JVM backend's own repair for this same
 // mechanism refuses a deficit above one — every shape below would abort at
 // JVM emit time, which is not a JVM regression to report. This file has no

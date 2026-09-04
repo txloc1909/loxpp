@@ -397,7 +397,7 @@ TEST(EmitScript, SetGlobalPeekOfNamedLocalLoadsInsteadOfDup) {
 
 // ---------------------------------------------------------------------------
 // Comparisons, MODULO, NOT, and the TRUE/FALSE/NIL literals — the opcode
-// family notes/translation-probes/30_bool_compare_and_string_literal.lox
+// family test/translation-probes/30_bool_compare_and_string_literal.lox
 // drives end to end through ilasm/dotnet; these tie the same family to the
 // exact instruction text at the C++ level.
 // ---------------------------------------------------------------------------
@@ -629,7 +629,7 @@ TEST(EmitScript, MainForwardsItsOwnArgvToSetProgramArgsBeforeInit) {
 
 // ---------------------------------------------------------------------------
 // Control flow: JUMP, JUMP_IF_FALSE, LOOP (this node). See
-// notes/translation-probes/{02,03,04,05,22,23}_*.lox for the checkpoint
+// test/translation-probes/{02,03,04,05,22,23}_*.lox for the checkpoint
 // this ties to at the assemble-and-run level (tools/check_clr_probes.sh).
 // ---------------------------------------------------------------------------
 
@@ -805,7 +805,7 @@ TEST(EmitScript, LoopBodyAssignsSameSlotEveryIteration) {
 // ---------------------------------------------------------------------------
 // Functions and calls (this node): CALL, zero-upvalue CLOSURE, RETURN's
 // dual role, and emitProgram's multi-class output. See
-// notes/translation-probes/{08,24}_*.lox for the checkpoint this ties to at
+// test/translation-probes/{08,24}_*.lox for the checkpoint this ties to at
 // the assemble-and-run level (tools/check_clr_probes.sh).
 // ---------------------------------------------------------------------------
 
@@ -1013,7 +1013,7 @@ TEST(EmitProgram, DefineMethodDupsClassAndCastsBothOperands) {
 }
 
 TEST(EmitProgram, GetAndSetPropertyPeekCorrectly) {
-    // notes/translation-probes/09_class.lox verbatim.
+    // test/translation-probes/09_class.lox verbatim.
     MemoryManager mm;
     DecodedFunction fn = decodeScript("class C {\n"
                                       "  init(x) { this.x = x; }\n"
@@ -1091,7 +1091,7 @@ TEST(EmitProgram, InvokeWithArgsSpillsToScratchSlotsAndBuildsArray) {
 }
 
 TEST(EmitProgram, InheritLoadsSuperclassFromInvisibleVarNotStack) {
-    // notes/translation-probes/10_super.lox verbatim.
+    // test/translation-probes/10_super.lox verbatim.
     MemoryManager mm;
     DecodedFunction fn =
         decodeScript("class A { greet() { return 1; } }\n"
@@ -1122,7 +1122,7 @@ TEST(EmitProgram, InheritLoadsSuperclassFromInvisibleVarNotStack) {
 }
 
 TEST(EmitProgram, SuperInvokeZeroArgsUsesTwoScratchSlots) {
-    // notes/translation-probes/10_super.lox's own method body: CIL has no
+    // test/translation-probes/10_super.lox's own method body: CIL has no
     // `swap` (unlike the JVM backend's own emitSuperInvoke, which reduces
     // this shape to one `swap` plus a single scratch slot), so both self
     // and the superclass need their own scratch slot here.
@@ -1194,7 +1194,7 @@ TEST(EmitProgram, SuperInvokeWithArgsSpillsThreeDistinctScratchSlots) {
 }
 
 TEST(EmitProgram, GetSuperBindsMethodAsValue) {
-    // notes/translation-probes/17_super_value.lox verbatim.
+    // test/translation-probes/17_super_value.lox verbatim.
     MemoryManager mm;
     DecodedFunction fn = decodeScript(
         "class A { greet() { return 1; } }\n"
@@ -1243,7 +1243,7 @@ TEST(EmitScript, InstanceofChecksGlobalsByName) {
 }
 
 TEST(EmitScript, MatchErrorBuildsThenThrows) {
-    // notes/translation-probes/33_class_pattern_match_error.lox's own
+    // test/translation-probes/33_class_pattern_match_error.lox's own
     // shape: a match whose arms are all class patterns, no unguarded
     // catch-all.
     MemoryManager mm;
@@ -1267,7 +1267,7 @@ TEST(EmitScript, MatchErrorBuildsThenThrows) {
 }
 
 // The consumed-match case (this node's own checkpoint,
-// notes/translation-probes/34_match_consumed_result.lox): a match
+// test/translation-probes/34_match_consumed_result.lox): a match
 // expression's own closing POP retires only the synthetic "subject"
 // local, exposing the arm's own result local as the new top with no
 // separate value ever pushed — so PRINT and DEFINE_GLOBAL need the same
@@ -2143,7 +2143,7 @@ TEST(EmitProgram, DenseEnumMatchSwitchFallsThroughToMatchError) {
     // wholly different enum, whose own tag then falls outside this table's
     // [min, min+count) range at run time — the literal out-of-range case a
     // dense, "exhaustive-by-name" match still needs MATCH_ERROR for
-    // (notes/translation-probes/27_jump_table_default_cross_enum.lox).
+    // (test/translation-probes/27_jump_table_default_cross_enum.lox).
     MemoryManager mm;
     DecodedFunction fn =
         decodeScript("enum A { X Y }\n"

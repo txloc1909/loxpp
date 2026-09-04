@@ -22,7 +22,7 @@ clang++ -std=c++20 -O0 -Wno-c99-designator -Isrc \
 (or `cmake -DLOXPP_DEBUG_PRINT_CODE=ON` for the same effect). Then:
 
 ```bash
-/tmp/loxpp-dis notes/translation-probes/01_assign_local.lox
+/tmp/loxpp-dis test/translation-probes/01_assign_local.lox
 ```
 
 Each probe prints the disassembly of every compiled chunk, followed by the
@@ -32,7 +32,7 @@ first *user* local is slot 1.
 ## Index
 
 The `Problem(s)` column maps each probe to the problem IDs in
-`../bytecode-translation-problems.md`; see the verdict table below for whether
+`../../notes/bytecode-translation-problems.md`; see the verdict table below for whether
 each has an off-the-shelf solution.
 
 | Probe | Isolates | Problem(s) |
@@ -138,4 +138,4 @@ which is exactly why **P1/P3/P4 are `SOLVED-WITH-ADAPTATION`** while
 
 > Verdicts are a literature-mapping pass over P1–P8; the full problem statements,
 > evidence, and the implied backend pipeline are in
-> `../bytecode-translation-problems.md`.
+> `../../notes/bytecode-translation-problems.md`.
