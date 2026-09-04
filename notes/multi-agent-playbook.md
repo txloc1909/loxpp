@@ -9,8 +9,9 @@ rebuilt from scratch.
 The CLR mission reused all four analysis modules the JVM mission built, without
 a change. It therefore paid none of the cost of the JVM mission's two most
 expensive nodes. Read `notes/jvm-emission-contract.md` before you plan a third
-target: the reuse point it names is the reason the second target cost about half
-of the first.
+target: the reuse point it names is why the second target skipped that cost
+entirely, even though it opened more PRs overall (`#125`–`#153`, 29 PRs, versus
+`#96`–`#116`'s 21).
 
 This file describes the workflow. Engineering rules that apply outside a
 multi-agent run live in `AGENTS.md`, not here.
@@ -80,12 +81,12 @@ round — nothing was in dispute. Each round just found one more consumer of
 the same wrong mechanism. A referee trigger that only fires on disagreement
 misses this pattern entirely. Keep both triggers.
 
-**Expect false positives, and keep the trigger anyway.** All nine referee
+**Expect false positives, and keep the trigger anyway.** Seven referee
 decisions in the CLR mission came from the stagnation trigger, and none came
 from a dispute — the implementers accepted almost every finding. Five found a
 real design fault. Two fired because three different defect classes happened to
 share one file name, and the referee correctly ruled that the series had
-converged. That is roughly one false positive in five firings, and each costs a
+converged. That is two false positives in seven firings, and each costs a
 single cheap referee round. Ruling 6 of that mission, which the trigger caught,
 found thirty-six unchecked sites whose failure mode was a module that exits 0,
 assembles, and then dies at run time naming no instruction. One such catch pays
@@ -175,7 +176,9 @@ moved, because a review against an unchanged commit can only repeat its own
 findings. The check learned the tip from the implementer's own reported value.
 An implementer returned without one, the guard never fired, and a full reviewer
 round read a tree whose fixes existed only in a worktree. The rule has no
-exception: read the tip with `git rev-parse origin/<branch>`. An agent's report
+exception: read the tip with `git fetch origin && git rev-parse
+origin/<branch>` — a bare `rev-parse` reads a possibly stale local
+remote-tracking ref, not the true tip. An agent's report
 of its own state is a claim, and a guard built on a claim guards nothing.
 
 ## Run-observation tools
