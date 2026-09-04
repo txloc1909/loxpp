@@ -293,6 +293,57 @@ this).
 
 Effort: XS < ½ day · S ≈ ½–1 day · M ≈ 2–5 days · L ≈ 1–2 weeks.
 
+### Reading the list by which back end you are behind
+
+Items 1–11 are one ranked list, but the two back ends expose different parts
+of the same bottleneck. This groups them by which back end a benchmark loses
+to, ordered by effort within each group.
+
+**Behind CLR — `binary_trees`, `json`, `k_nucleotide`, `list`, `mandelbrot`,
+`reverse_complement`, `sieve` (`clr/nat` 0.33–0.84, §3.1).** Each hot path is
+one large loop over an array, a string, or a number (§3.2). RyuJIT does not
+remove boxing the way HotSpot does — it wins these by compiling a simple loop
+straight to machine code while the native VM still dispatches one opcode at a
+time.
+
+* XS — #2 `-march=native -flto` (+PGO); #12 drop the push-overflow branch
+* S — #1 register-cache `ip`; #4 interned-pointer list dispatch
+* S–M — #8 typed arithmetic / index fast paths
+* M — #6 direct-threaded dispatch; #7 superinstructions/peephole
+* L — #11 generational GC (`binary_trees` only — 57 collections per batch,
+  ~40 % of its runtime, §4.2)
+
+Items 1, 2, 6, 7, and 8 alone should flip most of this group to a native win:
+the gap here is dispatch overhead on a simple loop, not a structural cost.
+
+**Behind JVM — all 17 benchmarks** (`jvm/nat` is below 1.00 everywhere,
+geomean 0.165). §3.2 splits this into two regimes that call for different
+items.
+
+*8×–17× regime* — `mandelbrot`, `reverse_complement`, `sieve`,
+`k_nucleotide`, `storage`, `spectral_norm`, `fib`, `binary_trees`: the same
+loop-bound bottleneck as the CLR group above, only wider, because C2's escape
+analysis and generational nursery go further than RyuJIT's. Same order — #2,
+#12, then #1, #3, then #8, then #6, #7 — plus #11 for `storage` and
+`binary_trees`, where GC is 40–50 % of native runtime (§4.2). A non-JIT
+interpreter has a real ceiling in this regime (see "What not to do", below).
+
+*2×–3× regime* — `nbody`, `bounce`, `richards`, `towers`, `json`, `queens`,
+`permute`, `list`, `fasta`: the **structural floor**. Every engine resolves
+`this.field` / `obj.method()` through a hash probe by name, so the JVM's own
+JIT has little to compile away here either (§4.4) — this is where the native
+VM's own fix has the most relative room:
+
+* XS — #3 cache `"init"`
+* S — #4 interned-pointer dispatch
+* M — #5 monomorphic inline caches (est. 1.3–1.8×); #10 compile-time global
+  slots
+* L — #9 slot-based instance fields / shapes (est. 1.5–2×, compounds with #5)
+
+Items 5 and 9 matter most here — the "Structural OO pass" below — since they
+are the only ones that touch the hash-probe cost the JVM's JIT cannot remove
+either.
+
 ### Suggested sequence
 
 1. **Cheap-wins pass:** items 1, 2, 3, 12, 13 — independent, near-free,
