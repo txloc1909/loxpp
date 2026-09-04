@@ -369,7 +369,7 @@ TEST(CaptureAnalysisTest, SharedUpvalueOneCellNotTwo) {
     // 06_shared_upvalue.lox: get and set both capture outer's slot 1 --
     // "| local 1" on both CLOSURE instructions, with no CLOSE_UPVALUE
     // between them. Checkpoint: one shared cell, not one per closure.
-    Compiled c = compileFile(projectRoot() / "notes" / "translation-probes" /
+    Compiled c = compileFile(projectRoot() / "test" / "translation-probes" /
                              "06_shared_upvalue.lox");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     ASSERT_NE(outer, nullptr);
@@ -391,7 +391,7 @@ TEST(CaptureAnalysisTest, FreshCellPerIterationForBodyLocal) {
     // body, and its CLOSE_UPVALUE (offset 49) sits before the back-edge
     // (LOOP at 50) -- the range is per-iteration, matching runtime output
     // 0, 1, 2.
-    Compiled c = compileFile(projectRoot() / "notes" / "translation-probes" /
+    Compiled c = compileFile(projectRoot() / "test" / "translation-probes" /
                              "V1_fresh_cell.lox");
     const DecodedFunction* make = findByName(c.tree, "make");
     ASSERT_NE(make, nullptr);
@@ -412,7 +412,7 @@ TEST(CaptureAnalysisTest, SharedCellForWholeLoopVar) {
     // V3_loopvar.lox: `i` (slot 2, the loop variable itself) has no
     // CLOSE_UPVALUE inside the body; the only one is after the loop exits,
     // so every iteration shares one cell, matching runtime output 3, 3, 3.
-    Compiled c = compileFile(projectRoot() / "notes" / "translation-probes" /
+    Compiled c = compileFile(projectRoot() / "test" / "translation-probes" /
                              "V3_loopvar.lox");
     const DecodedFunction* make = findByName(c.tree, "make");
     ASSERT_NE(make, nullptr);
@@ -430,7 +430,7 @@ TEST(CaptureAnalysisTest, MutableSharedUpvalueOneCell) {
     // V2_shared.lox: get and inc both capture counter's slot 1; inc mutates
     // it and get observes the mutation (runtime prints 2), which only a
     // single shared cell can produce.
-    Compiled c = compileFile(projectRoot() / "notes" / "translation-probes" /
+    Compiled c = compileFile(projectRoot() / "test" / "translation-probes" /
                              "V2_shared.lox");
     const DecodedFunction* counter = findByName(c.tree, "counter");
     ASSERT_NE(counter, nullptr);
@@ -447,7 +447,7 @@ TEST(CaptureAnalysisTest, SuperIsAnOrdinaryCapture) {
     // class-body scope, and B::greet captures it as an upvalue, closed by
     // an explicit CLOSE_UPVALUE when the class body ends. No special-casing
     // is needed: the analysis must see this exactly like any other capture.
-    Compiled c = compileFile(projectRoot() / "notes" / "translation-probes" /
+    Compiled c = compileFile(projectRoot() / "test" / "translation-probes" /
                              "10_super.lox");
     const FunctionCaptureInfo& script = infoFor(c.captures, c.tree.id);
     ASSERT_EQ(script.liveRangesBySlot.size(), 1U)
@@ -540,7 +540,7 @@ TEST(CaptureAnalysisTest,
 // capture_analysis.h for what this means for N7. This test pins the exact
 // counter-example down as an intentional, tested contract, not a silent gap.
 TEST(CaptureAnalysisTest, LoopVarRangeDoesNotDominateItsOwnClose) {
-    Compiled c = compileFile(projectRoot() / "notes" / "translation-probes" /
+    Compiled c = compileFile(projectRoot() / "test" / "translation-probes" /
                              "V3_loopvar.lox");
     const DecodedFunction* make = findByName(c.tree, "make");
     ASSERT_NE(make, nullptr);
@@ -816,7 +816,7 @@ void checkNoAssertionFailure(const fs::path& path) {
 
 TEST(CaptureAnalysisTest, NoAssertionFailureOnTranslationProbes) {
     std::vector<fs::path> probes =
-        listLoxFiles(projectRoot() / "notes" / "translation-probes");
+        listLoxFiles(projectRoot() / "test" / "translation-probes");
     ASSERT_FALSE(probes.empty()) << "no translation probes found";
     for (const fs::path& probe : probes) {
         checkNoAssertionFailure(probe);

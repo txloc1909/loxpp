@@ -99,9 +99,10 @@ LocalCfg buildCfg(const std::vector<DecodedInstruction>& ins) {
 // a plain POP can (P1). Tracking pop *count* (not just net delta) lets
 // advance() check every removed cell, in order, for that.
 //
-// Every entry here is grounded in a specific vm.cpp handler, not the
-// notes/jvm-backend-plan.md table (that table has known errors — see
-// bytecode-translation-problems.md). Two shapes recur:
+// Every entry here is grounded in a specific vm.cpp handler, not derived
+// from a naive opcode-to-instruction lookup table (see
+// notes/bytecode-translation-problems.md for why that framing is wrong).
+// Two shapes recur:
 //   - "shuffle": pop N, push 1 *new* cell (SET_PROPERTY, SET_INDEX, CALL,
 //     BUILD_LIST/MAP, ...) — assignment-as-expression (P2) or an
 //     aggregate result. The pushed cell is a temporary; nothing here

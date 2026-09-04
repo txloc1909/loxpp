@@ -339,7 +339,7 @@ TEST(BackendCfgTest, MatchErrorEndsBlockWithNoFallThroughSuccessor) {
 
 TEST(BackendCfgTest, HoldsOverTranslationProbes) {
     std::vector<fs::path> probes =
-        listLoxFiles(projectRoot() / "notes" / "translation-probes");
+        listLoxFiles(projectRoot() / "test" / "translation-probes");
     ASSERT_FALSE(probes.empty()) << "no translation probes found";
     for (const fs::path& probe : probes) {
         checkFile(probe);

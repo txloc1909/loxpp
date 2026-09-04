@@ -273,7 +273,7 @@ TEST(AbstractStackTest, DirectlyBuiltGapThrowsWithTheRightMessage) {
 TEST(AbstractStackTest, AssignLocalClassifiesBothPopsByReasonNotJustLabel) {
     MemoryManager mm;
     DecodedFunction script =
-        decodeSource(readFile(projectRoot() / "notes" / "translation-probes" /
+        decodeSource(readFile(projectRoot() / "test" / "translation-probes" /
                               "01_assign_local.lox"),
                      mm);
     FunctionStackAnalysis analysis = analyzeStack(script);
@@ -328,7 +328,7 @@ TEST(AbstractStackTest, AssignLocalClassifiesBothPopsByReasonNotJustLabel) {
 TEST(AbstractStackTest, NestedArithMaxStackMatchesHandCount) {
     MemoryManager mm;
     DecodedFunction script =
-        decodeSource(readFile(projectRoot() / "notes" / "translation-probes" /
+        decodeSource(readFile(projectRoot() / "test" / "translation-probes" /
                               "15_nested_arith.lox"),
                      mm);
     FunctionStackAnalysis analysis = analyzeStack(script);
@@ -362,7 +362,7 @@ TEST(AbstractStackTest, MaxStackWithLocalsIsNotInflatedByLateRecognition) {
 // Checkpoint 3 + 4 + 5 for the probe corpus specifically.
 TEST(AbstractStackTest, RunsOverEveryProbeWithNoInconsistency) {
     std::vector<fs::path> probes =
-        listLoxFiles(projectRoot() / "notes" / "translation-probes");
+        listLoxFiles(projectRoot() / "test" / "translation-probes");
     ASSERT_FALSE(probes.empty()) << "no translation probes found";
     for (const fs::path& probe : probes) {
         checkProbeFile(probe);
@@ -391,7 +391,7 @@ TEST(AbstractStackTest, RunsOverBootstrapInterpreterWithNoInconsistency) {
 TEST(AbstractStackTest, FreshCellProbeHasNoUnexplainedTemporaries) {
     MemoryManager mm;
     DecodedFunction script =
-        decodeSource(readFile(projectRoot() / "notes" / "translation-probes" /
+        decodeSource(readFile(projectRoot() / "test" / "translation-probes" /
                               "V1_fresh_cell.lox"),
                      mm);
     ASSERT_FALSE(script.nested.empty());
@@ -414,7 +414,7 @@ TEST(AbstractStackTest, FreshCellProbeHasNoUnexplainedTemporaries) {
 TEST(AbstractStackTest, ForInInvisibleVarsNameTheirOwnDeclaringPush) {
     MemoryManager mm;
     DecodedFunction script =
-        decodeSource(readFile(projectRoot() / "notes" / "translation-probes" /
+        decodeSource(readFile(projectRoot() / "test" / "translation-probes" /
                               "11_for_in.lox"),
                      mm);
     FunctionStackAnalysis analysis = analyzeStack(script);

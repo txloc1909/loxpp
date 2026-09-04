@@ -231,7 +231,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh notes/translation-probes/"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/"
 
       # Checkpoint 2: the full example corpus on the JVM backend, zero
       # failures. --exclude skips the map-iteration-order-sensitive examples
@@ -308,7 +308,7 @@ jobs:
 
       # CLR twin of checkpoint 1: byte-identical on native and CLR stdout
       # (differential runner, not only the check_clr_probes.sh diff loop
-      # above). Zero exclusions. Reads both notes/translation-probes/ and
+      # above). Zero exclusions. Reads both test/translation-probes/ and
       # its clr-only/ subdirectory — Path.glob("*.lox") does not recurse
       # into subdirectories on its own, and the CLR-specific probes
       # (deep-recursion frame ceiling, multi-slot fold repair) live there
@@ -319,7 +319,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_clr.sh notes/translation-probes/ notes/translation-probes/clr-only/"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_clr.sh test/translation-probes/ test/translation-probes/clr-only/"
 
       # CLR twin of checkpoint 2: the full example corpus on the CLR backend,
       # zero failures. --exclude skips the map-iteration-order-sensitive

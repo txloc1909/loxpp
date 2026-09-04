@@ -10,7 +10,7 @@
 // SUBJECT expression to that same enum. A subject of an unrelated enum type
 // flows into a table-eligible match just as freely, and its tag comes from a
 // different, wider tag space — so the literal default label IS reachable.
-// notes/translation-probes/27_jump_table_default_cross_enum.lox proves it:
+// test/translation-probes/27_jump_table_default_cross_enum.lox proves it:
 // two enums, A (2 variants) and B (3), a match that is table-eligible and
 // exhaustive over A's own 2 tags, given a real B() value at run time. B's
 // tag (2) is outside A's own [0, 2) range, and the literal tableswitch
@@ -33,7 +33,7 @@
 // (bytecode-translation-problems.md, "RETURN can return a named local"),
 // so a `return match ...;` shape belongs under examples/, the way
 // examples/or_pattern_demo.lox already uses it, not under
-// notes/translation-probes/.
+// test/translation-probes/.
 enum Status { A B C D E }
 
 print match C() {

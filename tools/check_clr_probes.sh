@@ -105,32 +105,32 @@ run_native() {
 }
 
 probes=(
-    "notes/translation-probes/01_assign_local.lox"
-    "notes/translation-probes/15_nested_arith.lox"
-    "notes/translation-probes/18_peek_of_named_local.lox"
-    "notes/translation-probes/19_peek_of_named_local_global.lox"
-    "notes/translation-probes/20_float_imprecise_constant.lox"
-    "notes/translation-probes/21_exponent_constant.lox"
-    "notes/translation-probes/30_bool_compare_and_string_literal.lox"
-    "notes/translation-probes/32_string_nul.lox"
+    "test/translation-probes/01_assign_local.lox"
+    "test/translation-probes/15_nested_arith.lox"
+    "test/translation-probes/18_peek_of_named_local.lox"
+    "test/translation-probes/19_peek_of_named_local_global.lox"
+    "test/translation-probes/20_float_imprecise_constant.lox"
+    "test/translation-probes/21_exponent_constant.lox"
+    "test/translation-probes/30_bool_compare_and_string_literal.lox"
+    "test/translation-probes/32_string_nul.lox"
     # Control flow (JUMP, JUMP_IF_FALSE, LOOP): if/else, and/or, while, for,
     # and the two short-circuit merge shapes that broke the JVM emitter
     # after it first looked correct (the merge POP staying real, and the
     # peek-of-a-materialized-condition reload).
-    "notes/translation-probes/02_if_else.lox"
-    "notes/translation-probes/03_and_or.lox"
-    "notes/translation-probes/04_while.lox"
-    "notes/translation-probes/05_for.lox"
-    "notes/translation-probes/22_and_or_assignment_statement.lox"
-    "notes/translation-probes/23_and_or_local_initializer.lox"
+    "test/translation-probes/02_if_else.lox"
+    "test/translation-probes/03_and_or.lox"
+    "test/translation-probes/04_while.lox"
+    "test/translation-probes/05_for.lox"
+    "test/translation-probes/22_and_or_assignment_statement.lox"
+    "test/translation-probes/23_and_or_local_initializer.lox"
     # Functions and calls: CALL's own argument-array reshape, a zero-upvalue
     # CLOSURE building a generated class, and RETURN's function-role value
     # return.
-    "notes/translation-probes/08_call.lox"
+    "test/translation-probes/08_call.lox"
     # CALL of a LoxNative, not only a LoxClosure — LoxOps.Call reaches a
     # native through its own argument-count check, a different path than a
     # closure's, and no earlier probe in this list exercises it.
-    "notes/translation-probes/29_os_access.lox"
+    "test/translation-probes/29_os_access.lox"
     # Closures and upvalues (the bug gate): V1_fresh_cell is the standing
     # counter-example a naive one-cell-per-local-at-function-entry design
     # gets WRONG (2 2 2) while V3_loopvar's shared cell (3 3 3) looks
@@ -145,63 +145,63 @@ probes=(
     # read it back by index, and 12_list_map_index needs a map as well as
     # a list to run at all — none of these probes can even compile without
     # aggregate and index support.
-    "notes/translation-probes/06_shared_upvalue.lox"
-    "notes/translation-probes/V1_fresh_cell.lox"
-    "notes/translation-probes/V2_shared.lox"
-    "notes/translation-probes/V3_loopvar.lox"
-    "notes/translation-probes/V4_mutate_through_upvalue.lox"
-    "notes/translation-probes/V5_self_recursive_closure.lox"
-    "notes/translation-probes/V6_self_recursive_closure_in_loop.lox"
-    "notes/translation-probes/12_list_map_index.lox"
+    "test/translation-probes/06_shared_upvalue.lox"
+    "test/translation-probes/V1_fresh_cell.lox"
+    "test/translation-probes/V2_shared.lox"
+    "test/translation-probes/V3_loopvar.lox"
+    "test/translation-probes/V4_mutate_through_upvalue.lox"
+    "test/translation-probes/V5_self_recursive_closure.lox"
+    "test/translation-probes/V6_self_recursive_closure_in_loop.lox"
+    "test/translation-probes/12_list_map_index.lox"
     # Classes, methods, and super: `this` = slot 0, `init` returns `this`,
     # SET_PROPERTY/DEFINE_METHOD leave a value (P2), and `super` is compiled
     # as an upvalue capture of the superclass (P4) — GET_SUPER reads it as
     # a value, not only through a call.
-    "notes/translation-probes/09_class.lox"
-    "notes/translation-probes/10_super.lox"
-    "notes/translation-probes/17_super_value.lox"
+    "test/translation-probes/09_class.lox"
+    "test/translation-probes/10_super.lox"
+    "test/translation-probes/17_super_value.lox"
     # INVOKE's field-shadow arm called on a bound built-in method value (a
     # map or file method read through GET_PROPERTY, then stored in an
     # instance field and called through the field name), not only a
     # closure or an unbound native. Lives in clr-only/ (see the probe
     # file's own header comment for why); named here directly.
-    "notes/translation-probes/clr-only/37_invoke_field_bound_native_method.lox"
+    "test/translation-probes/clr-only/37_invoke_field_bound_native_method.lox"
     # Equal on a map method value read through GET_PROPERTY: a fresh
     # object on every read, so `==` gives false whether the two reads
     # share a receiver or not. The file method value follows the same
     # rule through the same Equal arm; runtime/clr/test/FileTest.cs pins
     # that half at the runtime level.
-    "notes/translation-probes/38_bound_native_method_identity.lox"
-    # notes/translation-probes/clr-only/39_deep_nested_stringify.lox is not
+    "test/translation-probes/38_bound_native_method_identity.lox"
+    # test/translation-probes/clr-only/39_deep_nested_stringify.lox is not
     # in this array: it needs two runs at two different CLR thread stack
     # sizes, not one, so it has its own paired check below this loop.
     # The consumed-match case: a match expression's result reaching PRINT,
     # DEFINE_GLOBAL, or SET_GLOBAL with nothing in between to re-expose it
     # as a genuine evaluation-stack value first.
-    "notes/translation-probes/34_match_consumed_result.lox"
+    "test/translation-probes/34_match_consumed_result.lox"
     # Aggregates, slices, membership, and iterators: the for-in protocol
     # (GET_ITER/ITER_HAS_NEXT/ITER_NEXT — GET_ITER's own hazard is that it
     # runs on an already-empty evaluation stack, see emitGetIter's own
     # note), SLICE and IN over a List/String/Map, and IS_SEQ (a match
     # sequence pattern's own type check).
-    "notes/translation-probes/11_for_in.lox"
-    "notes/translation-probes/16_slice_in.lox"
-    "notes/translation-probes/25_seq_map_string_coverage.lox"
+    "test/translation-probes/11_for_in.lox"
+    "test/translation-probes/16_slice_in.lox"
+    "test/translation-probes/25_seq_map_string_coverage.lox"
     # Match/enum dispatch: a dense match over enum variants (GET_TAG fused
     # with JUMP_TABLE, a CIL `switch`), an enum-constructor CONSTANT and
     # CALL, an enum payload read through GET_INDEX, and
     # normalizeFoldedOperands's own repair for a folded match operand
     # reaching a genuine sibling operand of the same consumer.
-    "notes/translation-probes/13_enum_match.lox"
-    "notes/translation-probes/14_enum_payload.lox"
-    "notes/translation-probes/28_folded_match_operand_family.lox"
+    "test/translation-probes/13_enum_match.lox"
+    "test/translation-probes/14_enum_payload.lox"
+    "test/translation-probes/28_folded_match_operand_family.lox"
     # A fold deficit of two or more: every operand the multi-slot repair
     # reloads is itself folded, with no genuine value between them on the
     # real CIL evaluation stack, over ADD/CALL/BUILD_LIST/BUILD_MAP, plus
     # two of the folded slots also being captured-closure slots. No JVM
     # twin: the JVM side's own repair refuses a deficit above one, so this
     # file lives in clr-only/ and is named here directly.
-    "notes/translation-probes/clr-only/35_folded_match_deficit_two_plus.lox"
+    "test/translation-probes/clr-only/35_folded_match_deficit_two_plus.lox"
     # The shared scratch area's own WIDTH, not the multi-slot load order
     # probe 35 already covers: a SLICE or SET_INDEX consumer whose fold
     # deficit leaves two or more genuine operands live, in a chunk that
@@ -210,7 +210,7 @@ probes=(
     # chunk. No JVM twin: the JVM backend reorders with `swap` instead of a
     # scratch area of a computed width, so this file lives in clr-only/ and
     # is named here directly.
-    "notes/translation-probes/clr-only/36_folded_operand_spill_sizing.lox"
+    "test/translation-probes/clr-only/36_folded_operand_spill_sizing.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -219,7 +219,7 @@ probes=(
 # tools/loxpp_clr.sh, with matching stdout — empty for 24 and 31, since
 # neither side prints anything before the error.
 error_probes=(
-    "notes/translation-probes/24_call_before_closure.lox"
+    "test/translation-probes/24_call_before_closure.lox"
     # Native's own frame-count ceiling (src/vm.h FRAMES_MAX): a backend
     # whose calling convention recurses its own host call stack has no
     # such ceiling unless it builds one, and a wrong build here is a
@@ -227,23 +227,23 @@ error_probes=(
     # in translation-probes/, so tools/diff_runtimes.py's whole-directory
     # walk against the JVM backend does not see it (see the probe file's
     # own header comment for why).
-    "notes/translation-probes/clr-only/31_deep_recursion.lox"
+    "test/translation-probes/clr-only/31_deep_recursion.lox"
     # LoxOps.Stringify's depth guard (issue #159): both sides must refuse
     # nesting depth 201, matching native's 200-depth limit.
-    "notes/translation-probes/clr-only/39_deep_nested_stringify.lox"
+    "test/translation-probes/clr-only/39_deep_nested_stringify.lox"
     # A match whose arms are all class patterns raises a real, reachable
     # MATCH_ERROR when no arm matches — both sides print "before" then fail.
-    "notes/translation-probes/33_class_pattern_match_error.lox"
+    "test/translation-probes/33_class_pattern_match_error.lox"
     # A dense, table-eligible match over enum A's own tags, given a subject
     # of an unrelated enum B: the literal JUMP_TABLE default, not the sparse
     # compare-and-branch form, raises MATCH_ERROR — both sides print
     # "before" then fail.
-    "notes/translation-probes/27_jump_table_default_cross_enum.lox"
+    "test/translation-probes/27_jump_table_default_cross_enum.lox"
     # A dense enum match that dispatches correctly, then a second match
     # whose guard defeats every arm despite naming every constructor once
     # (exhaustive by name, accepting nothing at run time) — both sides
     # print the first match's own arm value, then fail on the second.
-    "notes/translation-probes/26_enum_match_dispatch_and_error.lox"
+    "test/translation-probes/26_enum_match_dispatch_and_error.lox"
 )
 
 # Whole example programs, not single-opcode probes: each one exercises more

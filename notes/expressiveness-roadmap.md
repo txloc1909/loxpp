@@ -110,9 +110,9 @@ VM reentrancy, profiler rework. Design space already mapped in
   most architecturally invasive item and constrains item 5 (shared suspension
   machinery), item 6 (FFI thread-safety), the GC, and the profiler. Choosing it
   late means redoing them. Build last, choose first.
-- **Reflection is relevant to the backend plans.** Both JVM and CLR
-  (`jvm-backend-plan.md`, `clr-backend-plan.md`) have rich reflection; defining
-  the concept in `spec/` keeps that door open across all three targets.
+- **Reflection is relevant to the JVM and CLR backends.** Both host platforms
+  have rich reflection; defining the concept in `spec/` keeps that door open
+  across all three targets.
 
 ## One-liner
 

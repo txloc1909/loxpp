@@ -8,7 +8,7 @@
 // code, so a decoding bug shows up as a text mismatch against the oracle.
 //
 // Corpora exercised:
-//   1. notes/translation-probes/*.lox — the probes the DAG analysis is
+//   1. test/translation-probes/*.lox — the probes the DAG analysis is
 //      grounded in.
 //   2. examples/*.lox — the wider example corpus.
 //   3. bootstrap/loxpp_interpreter.lox — the self-hosted interpreter, the
@@ -367,7 +367,7 @@ void accumulateOpCounts(const fs::path& path, std::map<Op, int>& counts) {
 
 TEST(ChunkDecoderTest, MatchesOracleOnTranslationProbes) {
     std::vector<fs::path> probes =
-        listLoxFiles(projectRoot() / "notes" / "translation-probes");
+        listLoxFiles(projectRoot() / "test" / "translation-probes");
     ASSERT_FALSE(probes.empty()) << "no translation probes found";
     for (const fs::path& probe : probes) {
         checkFile(probe);
@@ -415,7 +415,7 @@ TEST(ChunkDecoderTest, DecodesEveryOpcodeAtLeastOnce) {
     std::map<Op, int> counts;
 
     for (const fs::path& probe :
-         listLoxFiles(projectRoot() / "notes" / "translation-probes")) {
+         listLoxFiles(projectRoot() / "test" / "translation-probes")) {
         accumulateOpCounts(probe, counts);
     }
     for (const fs::path& example : listLoxFiles(projectRoot() / "examples")) {

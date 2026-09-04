@@ -62,7 +62,7 @@
 // This file also lowers BUILD_LIST/GET_INDEX/SET_INDEX ahead of the rest of
 // the aggregates/for-in scope they conceptually belong to
 // (notes/backend-implementation-dag.md), because the closures/upvalues
-// checkpoint (notes/translation-probes/V1_fresh_cell.lox, V3_loopvar.lox)
+// checkpoint (test/translation-probes/V1_fresh_cell.lox, V3_loopvar.lox)
 // cannot run to completion without them: both build a list of the closures
 // under test and read it back by index. The rest of that scope layers on
 // top: BUILD_MAP, SLICE, IN, IS_SEQ, and the for-in iterator protocol

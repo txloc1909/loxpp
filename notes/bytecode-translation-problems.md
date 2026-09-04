@@ -1,8 +1,8 @@
 # Bytecode translation: the problems a lookup table hides
 
-The JVM and CLR backend plans (`notes/jvm-backend-plan.md`,
-`notes/clr-backend-plan.md`) present translation as an **opcode → instruction
-lookup table**. That framing is misleading. A table implies each Lox++ opcode
+Early JVM and CLR backend plans presented translation as an **opcode →
+instruction lookup table**. That framing is misleading. A table implies each
+Lox++ opcode
 can be lowered independently, in isolation, by textual substitution. It cannot.
 The Lox++ VM and the JVM/CLR share a surface similarity — all three are
 stack machines — but they differ on the one thing that matters for a correct
@@ -10,7 +10,7 @@ lowering: **what "the stack" is**. Getting from one to the other is a small
 compiler, not a table.
 
 This document derives the real problems empirically. Each is grounded in a probe
-program under `notes/translation-probes/` whose *actual* disassembly (and, for
+program under `test/translation-probes/` whose *actual* disassembly (and, for
 the `Vn_*` probes, actual runtime output) is quoted below. Nothing here is
 hypothesised; every claim was produced by a debug-print build of the current
 `main` and can be regenerated (see the probes' README).
