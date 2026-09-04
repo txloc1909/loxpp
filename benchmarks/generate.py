@@ -48,6 +48,26 @@ CONFIG = {
     "reverse_complement": ("ReverseComplement", 25, 12, 30),
 }
 
+# Every name here has the class/benchmark() shape CONFIG expects (checked by
+# check_coverage() below) but is deliberately left out of it. Listed here so
+# the gap in CONFIG is documented, not silent.
+EXCLUDED = {
+    # fannkuch(7) does not terminate on the native VM — see
+    # notes/benchmark_report_2026-06-08.md. Including it would hang run.py.
+    "fannkuch": "does not terminate on the native VM",
+    # AWFY macro benchmarks and Wren-suite ports: not yet tuned into CONFIG
+    # (REPS/warm-up calibration, checksum cross-check against the other two
+    # backends) — kept in core/ for a later pass, per benchmarks/README.md.
+    "cd": "not yet tuned into CONFIG, kept for a later pass",
+    "deltablue": "not yet tuned into CONFIG, kept for a later pass",
+    "earley": "not yet tuned into CONFIG, kept for a later pass",
+    "havlak": "not yet tuned into CONFIG, kept for a later pass",
+    "for_in": "not yet tuned into CONFIG, kept for a later pass",
+    "instantiation": "not yet tuned into CONFIG, kept for a later pass",
+    "string_interning": "not yet tuned into CONFIG, kept for a later pass",
+    "zoo": "not yet tuned into CONFIG, kept for a later pass",
+}
+
 # Regex -> replacement, applied to the core before the footer is appended.
 # Used only to bring one batch into the target time window.
 SIZE_PATCHES = {
@@ -93,16 +113,39 @@ while (_k < _meas) {{
 
 PROF = HERE / "programs" / "prof"
 
+# A core file has the harness shape if it defines a benchmark() method; files
+# without it (Wren-suite ports, unused AWFY macros) are not runnable by the
+# footer regardless of CONFIG/EXCLUDED.
+HARNESS_SHAPE_RE = re.compile(r"\bbenchmark\s*\(\s*\)\s*{")
+
+
+def check_coverage() -> None:
+    known = set(CONFIG) | set(EXCLUDED)
+    unaccounted = []
+    for path in sorted(CORE.glob("*.lox")):
+        if path.stem in known:
+            continue
+        if HARNESS_SHAPE_RE.search(path.read_text()):
+            unaccounted.append(path.stem)
+    if unaccounted:
+        raise SystemExit(
+            f"core/*.lox has the benchmark() shape but is in neither CONFIG "
+            f"nor EXCLUDED: {unaccounted}. Add it to one of them."
+        )
+
 
 def main() -> None:
+    check_coverage()
     OUT.mkdir(exist_ok=True)
     PROF.mkdir(parents=True, exist_ok=True)
     for name, (cls, warm, meas, reps) in CONFIG.items():
         src = (CORE / f"{name}.lox").read_text()
         for pat, repl in SIZE_PATCHES.get(name, []):
             src, n = re.subn(pat, repl, src)
-            if n == 0:
-                raise SystemExit(f"{name}: size patch {pat!r} matched nothing")
+            if n != 1:
+                raise SystemExit(
+                    f"{name}: size patch {pat!r} matched {n} times, want 1"
+                )
         src = src.rstrip()
         footer = FOOTER.format(cls=cls, warm=warm, meas=meas, reps=reps)
         (OUT / f"{name}.lox").write_text(src + "\n" + footer)

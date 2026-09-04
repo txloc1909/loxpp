@@ -18,8 +18,11 @@ moved here unchanged except for stripping each file's ad-hoc timing footer —
 ## Computer Language Benchmarks Game (CLBG)
 
 * Site: https://benchmarksgame-team.pages.debian.net/benchmarksgame/
-* Ported programs: `fasta`, `k_nucleotide`, `reverse_complement`,
-  `spectral_norm`, `binary_trees`, `fannkuch`.
+* In the generated suite: `fasta`, `k_nucleotide`, `reverse_complement`,
+  `spectral_norm`, `binary_trees`.
+* Ported but excluded from the suite: `fannkuch` — `fannkuch(7)` does not
+  terminate on the native VM (`benchmarks/generate.py`'s `EXCLUDED`,
+  `notes/benchmark_report_2026-06-08.md`).
 * These are re-implementations of the published algorithms, not copies of a
   specific licensed entry.
 
@@ -27,8 +30,9 @@ moved here unchanged except for stripping each file's ad-hoc timing footer —
 
 * Repo: https://github.com/wren-lang/wren (`test/benchmark/`)
 * Ported but not currently in the suite: `for_in`, `instantiation`,
-  `string_interning`, `zoo` — they do not use the
-  `class X { benchmark() }` shape the harness expects.
+  `string_interning`, `zoo` — each has the `class X { benchmark() }` shape
+  the harness expects, but none is yet tuned into `generate.py`'s `CONFIG`
+  (see that file's `EXCLUDED`).
 
 ## Not ported
 
