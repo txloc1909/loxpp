@@ -57,19 +57,6 @@ InterpretResult VM::interpret(const std::string& source) {
     return run();
 }
 
-Byte VM::readByte() { return *m_frames[m_frameCount - 1].ip++; }
-
-uint16_t VM::readShort() {
-    uint16_t hi = readByte();
-    uint16_t lo = readByte();
-    return static_cast<uint16_t>((hi << 8) | lo);
-}
-
-Value VM::readConstant() {
-    return m_frames[m_frameCount - 1].closure->function->chunk.getConstant(
-        readShort());
-}
-
 Value VM::lastResult() const { return m_lastResult; }
 
 std::optional<Value> VM::getGlobal(const std::string& name) const {
@@ -139,10 +126,16 @@ void VM::closeUpvalues(Value* last) {
 }
 
 InterpretResult VM::run() {
+#define RAISE_ERROR(...)                                                       \
+    do {                                                                       \
+        frame->ip = ip;                                                        \
+        runtimeError(__VA_ARGS__);                                             \
+    } while (false)
+
 #define BINARY_OP(valueType, op)                                               \
     do {                                                                       \
         if (!is<Number>(peek(0)) || !is<Number>(peek(1))) {                    \
-            runtimeError("Operands must be numbers.");                         \
+            RAISE_ERROR("Operands must be numbers.");                          \
             return InterpretResult::RUNTIME_ERROR;                             \
         }                                                                      \
         Number b = as<Number>(pop());                                          \
@@ -150,20 +143,86 @@ InterpretResult VM::run() {
         push(as<valueType>(a op b));                                           \
     } while (false)
 
-    CallFrame* frame = &m_frames[m_frameCount - 1];
+    // Local to VM::run(). The single place that knows how to derive the
+    // register-cached ip/chunk from the live CallFrame array — used for the
+    // initial load below, for Op::RETURN's reload, and (via the constructor/
+    // destructor pair) to bracket one call()/callNative()/callBoundNative()/
+    // bindMethod() invocation: flush the register-cached ip into frame->ip on
+    // construction (so a runtimeError() raised inside sees an up-to-date
+    // stack trace), then reload frame/ip/chunk from the current top of
+    // m_frames on destruction (a new frame if one was pushed, the same frame
+    // — a no-op reload — otherwise). The guard form is always applied at a
+    // call/bindMethod site, whether or not the call actually changes
+    // frameCount, so no call site has to reason about which case it is.
+    class FrameSync {
+      public:
+        // Unconditional: derive frame/ip/chunk from the top of m_frames.
+        // Requires frameCount > 0 — true for every caller of this overload
+        // (the initial load below, and Op::RETURN, which already checks
+        // m_frameCount == 0 and returns before reaching it).
+        static void loadTop(CallFrame* frames, int frameCount,
+                            CallFrame*& frame, Chunk::const_iterator& ip,
+                            const Chunk*& chunk) {
+            frame = &frames[frameCount - 1];
+            ip = frame->ip;
+            chunk = &frame->closure->function->chunk;
+        }
+
+        FrameSync(CallFrame* frames, int& frameCount, CallFrame*& frame,
+                  Chunk::const_iterator& ip, const Chunk*& chunk)
+            : m_frames(frames), m_frameCount(frameCount), m_frame(frame),
+              m_ip(ip), m_chunk(chunk) {
+            m_frame->ip = m_ip; // flush
+        }
+        ~FrameSync() {
+            // A runtimeError() raised by the guarded call (arity mismatch,
+            // stack overflow, undefined property, ...) resets the frame
+            // stack to empty before returning failure — m_frameCount == 0
+            // here means there is no frame left to resync from. Leave
+            // frame/ip/chunk stale; the caller returns
+            // InterpretResult::RUNTIME_ERROR immediately without reading
+            // them again.
+            if (m_frameCount > 0) {
+                loadTop(m_frames, m_frameCount, m_frame, m_ip, m_chunk);
+            }
+        }
+        FrameSync(const FrameSync&) = delete;
+        FrameSync& operator=(const FrameSync&) = delete;
+
+      private:
+        CallFrame* m_frames;
+        int& m_frameCount;
+        CallFrame*& m_frame;
+        Chunk::const_iterator& m_ip;
+        const Chunk*& m_chunk;
+    };
+
+    CallFrame* frame;
+    Chunk::const_iterator ip;
+    const Chunk* chunk; // constant-pool base
+    FrameSync::loadTop(m_frames, m_frameCount, frame, ip, chunk);
+
+    auto readByte = [&ip]() -> Byte { return *ip++; };
+    auto readShort = [&readByte]() -> uint16_t {
+        uint16_t hi = readByte();
+        uint16_t lo = readByte();
+        return static_cast<uint16_t>((hi << 8) | lo);
+    };
+    auto readConstant = [&chunk, &readShort]() -> Value {
+        return chunk->getConstant(readShort());
+    };
 
     for (;;) {
         if (m_stackOverflow) {
-            runtimeError("Stack overflow.");
+            RAISE_ERROR("Stack overflow.");
             return InterpretResult::RUNTIME_ERROR;
         }
 
 #ifdef LOXPP_DEBUG_TRACE_EXECUTION
         {
-            const Chunk& chunk = frame->closure->function->chunk;
-            int currentOffset = static_cast<int>(frame->ip - chunk.cbegin());
+            int currentOffset = static_cast<int>(ip - chunk->cbegin());
             bool color = isatty(STDOUT_FILENO) != 0;
-            std::printf("[line %d] ", chunk.getLine(currentOffset));
+            std::printf("[line %d] ", chunk->getLine(currentOffset));
             std::printf("          ");
             for (Value* slot = stack; slot < stackTop; slot++) {
                 std::printf("[ ");
@@ -171,7 +230,7 @@ InterpretResult VM::run() {
                 std::printf(" ]");
             }
             std::printf("\n");
-            disassembleInstruction(chunk, m_mm, currentOffset, std::cout,
+            disassembleInstruction(*chunk, m_mm, currentOffset, std::cout,
                                    color);
         }
 #endif
@@ -213,7 +272,7 @@ InterpretResult VM::run() {
         }
         case Op::NEGATE: {
             if (!is<Number>(peek(0))) {
-                runtimeError("Operand must be a number.");
+                RAISE_ERROR("Operand must be a number.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             push(from<Number>(-as<Number>(pop())));
@@ -248,7 +307,7 @@ InterpretResult VM::run() {
         }
         case Op::MODULO: {
             if (!is<Number>(peek(0)) || !is<Number>(peek(1))) {
-                runtimeError("Operands must be numbers.");
+                RAISE_ERROR("Operands must be numbers.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             Number b = as<Number>(pop());
@@ -270,7 +329,7 @@ InterpretResult VM::run() {
             m_stdlibCtx.clearError();
             std::string s = stringify(pop());
             if (m_stdlibCtx.nativeError) {
-                runtimeError("%s", m_stdlibCtx.nativeErrorMsg.c_str());
+                RAISE_ERROR("%s", m_stdlibCtx.nativeErrorMsg.c_str());
                 return InterpretResult::RUNTIME_ERROR;
             }
             std::fwrite(s.data(), 1, s.size(), stdout);
@@ -302,7 +361,7 @@ InterpretResult VM::run() {
             ObjString* name = asObjString(readConstant());
             Value value;
             if (!m_globals.get(name, value)) {
-                runtimeError("Undefined variable '%s'.", name->chars.c_str());
+                RAISE_ERROR("Undefined variable '%s'.", name->chars.c_str());
                 return InterpretResult::RUNTIME_ERROR;
             }
             push(value);
@@ -315,49 +374,49 @@ InterpretResult VM::run() {
             // declared.
             if (m_globals.set(name, peek(0))) {
                 m_globals.del(name); // undo the spurious insertion
-                runtimeError("Undefined variable '%s'.", name->chars.c_str());
+                RAISE_ERROR("Undefined variable '%s'.", name->chars.c_str());
                 return InterpretResult::RUNTIME_ERROR;
             }
             break;
         }
         case Op::JUMP: {
-            frame->ip += readShort();
+            ip += readShort();
             break;
         }
         case Op::JUMP_IF_FALSE: {
             uint16_t offset = readShort();
             if (isFalsy(peek(0))) {
-                frame->ip += offset;
+                ip += offset;
             }
             break;
         }
         case Op::LOOP: {
-            frame->ip -= readShort();
+            ip -= readShort();
             break;
         }
         case Op::MATCH_ERROR: {
-            runtimeError("MatchError: no matching arm.");
+            RAISE_ERROR("MatchError: no matching arm.");
             return InterpretResult::RUNTIME_ERROR;
         }
         case Op::JUMP_TABLE: {
             uint8_t minTag = readByte();
             uint8_t count = readByte();
-            auto tableBase = frame->ip; // iterator to entry[0]
-            frame->ip += static_cast<int>(count) * 2;
+            auto tableBase = ip; // iterator to entry[0]
+            ip += static_cast<int>(count) * 2;
             Value tagVal = pop();
             int tag = static_cast<int>(as<Number>(tagVal));
             int idx = tag - static_cast<int>(minTag);
             if (idx >= 0 && idx < static_cast<int>(count)) {
                 uint16_t fwd = static_cast<uint16_t>((tableBase[idx * 2] << 8) |
                                                      tableBase[(idx * 2) + 1]);
-                frame->ip += fwd;
+                ip += fwd;
             }
             break;
         }
         case Op::GET_TAG: {
             Value val = pop();
             if (!isEnumValue(val)) {
-                runtimeError("GET_TAG: expected an enum value.");
+                RAISE_ERROR("GET_TAG: expected an enum value.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             auto tag = static_cast<double>(asObjEnum(as<Obj*>(val))->ctor->tag);
@@ -392,29 +451,29 @@ InterpretResult VM::run() {
             int argCount = readByte();
             Value callee = peek(argCount);
             if (isNative(callee)) {
+                FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
                 if (!callNative(asObjNative(callee), argCount)) {
                     return InterpretResult::RUNTIME_ERROR;
                 }
-                frame = &m_frames[m_frameCount - 1];
             } else if (isClosure(callee)) {
+                FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
                 if (!call(asObjClosure(callee), argCount)) {
                     return InterpretResult::RUNTIME_ERROR;
                 }
-                frame = &m_frames[m_frameCount - 1];
             } else if (isBoundMethod(callee)) {
                 ObjBoundMethod* bound = asObjBoundMethod(as<Obj*>(callee));
                 // Slot 0 of the new frame = receiver (= this).
                 stackTop[-argCount - 1] = bound->receiver;
+                FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
                 if (!call(bound->method, argCount)) {
                     return InterpretResult::RUNTIME_ERROR;
                 }
-                frame = &m_frames[m_frameCount - 1];
             } else if (isBoundNative(callee)) {
                 ObjBoundNative* bn = asObjBoundNative(as<Obj*>(callee));
+                FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
                 if (!callBoundNative(bn, argCount)) {
                     return InterpretResult::RUNTIME_ERROR;
                 }
-                frame = &m_frames[m_frameCount - 1];
             } else if (isClass(callee)) {
                 ObjClass* klass = asObjClass(as<Obj*>(callee));
                 ObjInstance* instance =
@@ -424,20 +483,20 @@ InterpretResult VM::run() {
                 ObjString* initStr = m_mm.findString("init");
                 Value initMethod;
                 if (initStr && klass->methods.get(initStr, initMethod)) {
+                    FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
                     if (!call(asObjClosure(as<Obj*>(initMethod)), argCount)) {
                         return InterpretResult::RUNTIME_ERROR;
                     }
-                    frame = &m_frames[m_frameCount - 1];
                 } else if (argCount != 0) {
-                    runtimeError("Expected 0 arguments but got %d.", argCount);
+                    RAISE_ERROR("Expected 0 arguments but got %d.", argCount);
                     return InterpretResult::RUNTIME_ERROR;
                 }
             } else if (isEnumCtor(callee)) {
                 ObjEnumCtor* ctor = asObjEnumCtor(as<Obj*>(callee));
                 if (argCount != static_cast<int>(ctor->arity)) {
-                    runtimeError("'%s' expects %d argument(s) but got %d.",
-                                 ctor->ctorName->chars.c_str(),
-                                 static_cast<int>(ctor->arity), argCount);
+                    RAISE_ERROR("'%s' expects %d argument(s) but got %d.",
+                                ctor->ctorName->chars.c_str(),
+                                static_cast<int>(ctor->arity), argCount);
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 ObjEnum* enumVal =
@@ -451,7 +510,7 @@ InterpretResult VM::run() {
                 pop(); // pop the ObjEnumCtor from the callee slot
                 push(Value{static_cast<Obj*>(enumVal)});
             } else {
-                runtimeError("Can only call functions, classes and enums.");
+                RAISE_ERROR("Can only call functions, classes and enums.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             break;
@@ -468,8 +527,8 @@ InterpretResult VM::run() {
                 ObjString* name = asObjString(readConstant());
                 Value method;
                 if (!m_fileClass->methods.get(name, method)) {
-                    runtimeError("Undefined property '%s' on file.",
-                                 name->chars.c_str());
+                    RAISE_ERROR("Undefined property '%s' on file.",
+                                name->chars.c_str());
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 ObjBoundNative* bound = m_mm.create<ObjBoundNative>(
@@ -482,8 +541,8 @@ InterpretResult VM::run() {
                 ObjString* name = asObjString(readConstant());
                 Value method;
                 if (!m_mapClass->methods.get(name, method)) {
-                    runtimeError("Undefined property '%s' on map.",
-                                 name->chars.c_str());
+                    RAISE_ERROR("Undefined property '%s' on map.",
+                                name->chars.c_str());
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 ObjBoundNative* bound = m_mm.create<ObjBoundNative>(
@@ -493,7 +552,7 @@ InterpretResult VM::run() {
                 break;
             }
             if (!isInstance(peek(0))) {
-                runtimeError("Only instances have properties.");
+                RAISE_ERROR("Only instances have properties.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             ObjInstance* instance = asObjInstance(as<Obj*>(peek(0)));
@@ -504,14 +563,17 @@ InterpretResult VM::run() {
                 push(value);
                 break;
             }
-            if (!bindMethod(instance->klass, name)) {
-                return InterpretResult::RUNTIME_ERROR;
+            {
+                FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
+                if (!bindMethod(instance->klass, name)) {
+                    return InterpretResult::RUNTIME_ERROR;
+                }
             }
             break;
         }
         case Op::SET_PROPERTY: {
             if (!isInstance(peek(1))) {
-                runtimeError("Only instances have fields.");
+                RAISE_ERROR("Only instances have fields.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             ObjInstance* instance = asObjInstance(as<Obj*>(peek(1)));
@@ -540,6 +602,7 @@ InterpretResult VM::run() {
                 Value fieldVal;
                 if (instance->fields.get(name, fieldVal)) {
                     stackTop[-argCount - 1] = fieldVal;
+                    FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
                     if (isClosure(fieldVal)) {
                         if (!call(asObjClosure(as<Obj*>(fieldVal)), argCount)) {
                             return InterpretResult::RUNTIME_ERROR;
@@ -556,11 +619,10 @@ InterpretResult VM::run() {
                             return InterpretResult::RUNTIME_ERROR;
                         }
                     } else {
-                        runtimeError(
+                        RAISE_ERROR(
                             "Can only call functions, classes and enums.");
                         return InterpretResult::RUNTIME_ERROR;
                     }
-                    frame = &m_frames[m_frameCount - 1];
                     break;
                 }
                 // Fast path: call the method directly — receiver already sits
@@ -568,11 +630,12 @@ InterpretResult VM::run() {
                 // the new frame.
                 Value method;
                 if (!instance->klass->methods.get(name, method)) {
-                    runtimeError("Undefined property '%s'.",
-                                 name->chars.c_str());
+                    RAISE_ERROR("Undefined property '%s'.",
+                                name->chars.c_str());
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 Obj* methodObj = as<Obj*>(method);
+                FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
                 if (isObjNative(methodObj)) {
                     if (!callNative(asObjNative(methodObj), argCount)) {
                         return InterpretResult::RUNTIME_ERROR;
@@ -581,14 +644,13 @@ InterpretResult VM::run() {
                     if (!call(asObjClosure(methodObj), argCount)) {
                         return InterpretResult::RUNTIME_ERROR;
                     }
-                    frame = &m_frames[m_frameCount - 1];
                 }
             } else if (isList(receiver)) {
                 ObjList* list = asObjList(as<Obj*>(receiver));
                 if (name->chars == "append") {
                     if (argCount != 1) {
-                        runtimeError("'append' expects 1 argument but got %d.",
-                                     argCount);
+                        RAISE_ERROR("'append' expects 1 argument but got %d.",
+                                    argCount);
                         return InterpretResult::RUNTIME_ERROR;
                     }
                     Value val =
@@ -599,12 +661,12 @@ InterpretResult VM::run() {
                     push(from<Nil>(Nil{}));
                 } else if (name->chars == "pop") {
                     if (argCount != 0) {
-                        runtimeError("'pop' expects 0 arguments but got %d.",
-                                     argCount);
+                        RAISE_ERROR("'pop' expects 0 arguments but got %d.",
+                                    argCount);
                         return InterpretResult::RUNTIME_ERROR;
                     }
                     if (list->elements.empty()) {
-                        runtimeError("Cannot pop from an empty list.");
+                        RAISE_ERROR("Cannot pop from an empty list.");
                         return InterpretResult::RUNTIME_ERROR;
                     }
                     Value val = list->elements.back();
@@ -613,8 +675,8 @@ InterpretResult VM::run() {
                     push(val);
                 } else if (name->chars == "remove") {
                     if (argCount != 1) {
-                        runtimeError("'remove' expects 1 argument but got %d.",
-                                     argCount);
+                        RAISE_ERROR("'remove' expects 1 argument but got %d.",
+                                    argCount);
                         return InterpretResult::RUNTIME_ERROR;
                     }
                     Value target = peek(0);
@@ -628,39 +690,41 @@ InterpretResult VM::run() {
                         }
                     }
                     if (!found) {
-                        runtimeError("Value not found in list.");
+                        RAISE_ERROR("Value not found in list.");
                         return InterpretResult::RUNTIME_ERROR;
                     }
                     pop(); // arg
                     pop(); // receiver
                     push(from<Nil>(Nil{}));
                 } else {
-                    runtimeError("Undefined method '%s' on list.",
-                                 name->chars.c_str());
+                    RAISE_ERROR("Undefined method '%s' on list.",
+                                name->chars.c_str());
                     return InterpretResult::RUNTIME_ERROR;
                 }
             } else if (isFile(receiver)) {
                 Value method;
                 if (!m_fileClass->methods.get(name, method)) {
-                    runtimeError("Undefined method '%s' on file.",
-                                 name->chars.c_str());
+                    RAISE_ERROR("Undefined method '%s' on file.",
+                                name->chars.c_str());
                     return InterpretResult::RUNTIME_ERROR;
                 }
+                FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
                 if (!callNative(asObjNative(as<Obj*>(method)), argCount)) {
                     return InterpretResult::RUNTIME_ERROR;
                 }
             } else if (isMap(receiver)) {
                 Value method;
                 if (!m_mapClass->methods.get(name, method)) {
-                    runtimeError("Undefined method '%s' on map.",
-                                 name->chars.c_str());
+                    RAISE_ERROR("Undefined method '%s' on map.",
+                                name->chars.c_str());
                     return InterpretResult::RUNTIME_ERROR;
                 }
+                FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
                 if (!callNative(asObjNative(as<Obj*>(method)), argCount)) {
                     return InterpretResult::RUNTIME_ERROR;
                 }
             } else {
-                runtimeError("Only instances, files, and maps have methods.");
+                RAISE_ERROR("Only instances, files, and maps have methods.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             break;
@@ -668,7 +732,7 @@ InterpretResult VM::run() {
         case Op::INHERIT: {
             Value superVal = peek(1);
             if (!isClass(superVal)) {
-                runtimeError("Superclass must be a class.");
+                RAISE_ERROR("Superclass must be a class.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             ObjClass* superclass = asObjClass(as<Obj*>(superVal));
@@ -681,6 +745,7 @@ InterpretResult VM::run() {
         case Op::GET_SUPER: {
             ObjString* name = asObjString(readConstant());
             ObjClass* superclass = asObjClass(as<Obj*>(pop()));
+            FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
             if (!bindMethod(superclass, name)) {
                 return InterpretResult::RUNTIME_ERROR;
             }
@@ -692,13 +757,13 @@ InterpretResult VM::run() {
             ObjClass* superclass = asObjClass(as<Obj*>(pop()));
             Value method;
             if (!superclass->methods.get(name, method)) {
-                runtimeError("Undefined property '%s'.", name->chars.c_str());
+                RAISE_ERROR("Undefined property '%s'.", name->chars.c_str());
                 return InterpretResult::RUNTIME_ERROR;
             }
+            FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
             if (!call(asObjClosure(as<Obj*>(method)), argCount)) {
                 return InterpretResult::RUNTIME_ERROR;
             }
-            frame = &m_frames[m_frameCount - 1];
             break;
         }
         case Op::CLOSURE: {
@@ -748,7 +813,7 @@ InterpretResult VM::run() {
             // Discard the callee's stack window and push return value.
             stackTop = frame->slots;
             push(result);
-            frame = &m_frames[m_frameCount - 1];
+            FrameSync::loadTop(m_frames, m_frameCount, frame, ip, chunk);
             break;
         }
         case Op::BUILD_LIST: {
@@ -770,7 +835,7 @@ InterpretResult VM::run() {
             for (int i = 0; i < count; i++) {
                 Value key = peek(2 * (count - 1 - i) + 1);
                 if (!isValidMapKey(key)) {
-                    runtimeError(
+                    RAISE_ERROR(
                         "Map keys must be Bool, Number, Nil, or String. "
                         "NaN is not allowed.");
                     return InterpretResult::RUNTIME_ERROR;
@@ -798,35 +863,35 @@ InterpretResult VM::run() {
             Value collectionVal = pop();
             if (isList(collectionVal)) {
                 if (!is<Number>(indexVal)) {
-                    runtimeError("List index must be a number.");
+                    RAISE_ERROR("List index must be a number.");
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 double n = as<Number>(indexVal);
                 if (n != std::floor(n)) {
-                    runtimeError("List index must be an integer.");
+                    RAISE_ERROR("List index must be an integer.");
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 auto* list = asObjList(as<Obj*>(collectionVal));
                 int idx = static_cast<int>(n);
                 if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
-                    runtimeError("List index out of bounds.");
+                    RAISE_ERROR("List index out of bounds.");
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 push(list->elements[idx]);
             } else if (isString(collectionVal)) {
                 if (!is<Number>(indexVal)) {
-                    runtimeError("String index must be a number.");
+                    RAISE_ERROR("String index must be a number.");
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 double n = as<Number>(indexVal);
                 if (n != std::floor(n)) {
-                    runtimeError("String index must be an integer.");
+                    RAISE_ERROR("String index must be an integer.");
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 auto* str = asObjString(as<Obj*>(collectionVal));
                 int idx = static_cast<int>(n);
                 if (idx < 0 || idx >= static_cast<int>(str->chars.size())) {
-                    runtimeError("String index out of bounds.");
+                    RAISE_ERROR("String index out of bounds.");
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 // Copy char before makeString (GC-safe: same pattern as ADD)
@@ -835,7 +900,7 @@ InterpretResult VM::run() {
                     m_mm.makeString(std::string_view{&ch, 1}))});
             } else if (isMap(collectionVal)) {
                 if (!isValidMapKey(indexVal)) {
-                    runtimeError(
+                    RAISE_ERROR(
                         "Map keys must be Bool, Number, Nil, or String. "
                         "NaN is not allowed.");
                     return InterpretResult::RUNTIME_ERROR;
@@ -846,19 +911,19 @@ InterpretResult VM::run() {
                 push(result);
             } else if (isEnumValue(collectionVal)) {
                 if (!is<Number>(indexVal)) {
-                    runtimeError("Enum field index must be a number.");
+                    RAISE_ERROR("Enum field index must be a number.");
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 double n = as<Number>(indexVal);
                 auto* e = asObjEnum(as<Obj*>(collectionVal));
                 int idx = static_cast<int>(n);
                 if (idx < 0 || idx >= static_cast<int>(e->fields.size())) {
-                    runtimeError("Enum field index %d out of range.", idx);
+                    RAISE_ERROR("Enum field index %d out of range.", idx);
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 push(e->fields[static_cast<size_t>(idx)]);
             } else {
-                runtimeError("Only lists, strings, and maps can be indexed.");
+                RAISE_ERROR("Only lists, strings, and maps can be indexed.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             break;
@@ -868,13 +933,13 @@ InterpretResult VM::run() {
             Value indexVal = pop();
             Value listVal = pop();
             if (isString(listVal)) {
-                runtimeError("Strings are immutable and cannot be indexed for "
-                             "assignment.");
+                RAISE_ERROR("Strings are immutable and cannot be indexed for "
+                            "assignment.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             if (isMap(listVal)) {
                 if (!isValidMapKey(indexVal)) {
-                    runtimeError(
+                    RAISE_ERROR(
                         "Map keys must be Bool, Number, Nil, or String. "
                         "NaN is not allowed.");
                     return InterpretResult::RUNTIME_ERROR;
@@ -897,23 +962,23 @@ InterpretResult VM::run() {
                 break;
             }
             if (!isList(listVal)) {
-                runtimeError(
+                RAISE_ERROR(
                     "Only lists and maps can be indexed for assignment.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             if (!is<Number>(indexVal)) {
-                runtimeError("List index must be a number.");
+                RAISE_ERROR("List index must be a number.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             double n = as<Number>(indexVal);
             if (n != std::floor(n)) {
-                runtimeError("List index must be an integer.");
+                RAISE_ERROR("List index must be an integer.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             auto* list = asObjList(as<Obj*>(listVal));
             int idx = static_cast<int>(n);
             if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
-                runtimeError("List index out of bounds.");
+                RAISE_ERROR("List index out of bounds.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             list->elements[idx] = val;
@@ -928,33 +993,33 @@ InterpretResult VM::run() {
             Value seqVal = peek(2);
 
             if (!isList(seqVal) && !isString(seqVal)) {
-                runtimeError("Slice requires a List or String.");
+                RAISE_ERROR("Slice requires a List or String.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             if (!is<Number>(startVal)) {
-                runtimeError("Slice index must be a number.");
+                RAISE_ERROR("Slice index must be a number.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             double startD = as<Number>(startVal);
             if (startD != std::floor(startD)) {
-                runtimeError("Slice index must be an integer.");
+                RAISE_ERROR("Slice index must be an integer.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             if (startD < 0.0) {
-                runtimeError("Slice index must be non-negative.");
+                RAISE_ERROR("Slice index must be non-negative.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             if (!is<Number>(endVal)) {
-                runtimeError("Slice index must be a number.");
+                RAISE_ERROR("Slice index must be a number.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             double endD = as<Number>(endVal);
             if (endD != std::floor(endD)) {
-                runtimeError("Slice index must be an integer.");
+                RAISE_ERROR("Slice index must be an integer.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             if (endD < 0.0) {
-                runtimeError("Slice index must be non-negative.");
+                RAISE_ERROR("Slice index must be non-negative.");
                 return InterpretResult::RUNTIME_ERROR;
             }
 
@@ -1014,7 +1079,7 @@ InterpretResult VM::run() {
                 push(from<bool>(found));
             } else if (isString(seq)) {
                 if (!isString(elem)) {
-                    runtimeError(
+                    RAISE_ERROR(
                         "Left operand of 'in' on a string must be a string.");
                     return InterpretResult::RUNTIME_ERROR;
                 }
@@ -1026,7 +1091,7 @@ InterpretResult VM::run() {
                 push(from<bool>(found));
             } else if (isMap(seq)) {
                 if (!isValidMapKey(elem)) {
-                    runtimeError(
+                    RAISE_ERROR(
                         "Map keys must be Bool, Number, Nil, or String. "
                         "NaN is not allowed.");
                     return InterpretResult::RUNTIME_ERROR;
@@ -1035,7 +1100,7 @@ InterpretResult VM::run() {
                 Value dummy;
                 push(from<bool>(map->mapGet(elem, dummy)));
             } else {
-                runtimeError(
+                RAISE_ERROR(
                     "Right operand of 'in' must be a list, string, or map.");
                 return InterpretResult::RUNTIME_ERROR;
             }
@@ -1046,7 +1111,7 @@ InterpretResult VM::run() {
             // Mirrors the class-instantiation pattern at vm.cpp:556-558.
             Value iterable = peek(0);
             if (!isList(iterable) && !isString(iterable) && !isMap(iterable)) {
-                runtimeError(
+                RAISE_ERROR(
                     "Value is not iterable (expected list, string, or map).");
                 return InterpretResult::RUNTIME_ERROR;
             }
@@ -1058,7 +1123,7 @@ InterpretResult VM::run() {
             Value top = pop();
             // Invariant: value must be an ObjIterator (guaranteed by GET_ITER).
             if (!isIterator(top)) {
-                runtimeError(
+                RAISE_ERROR(
                     "BUG: ITER_HAS_NEXT expects an iterator on the stack.");
                 return InterpretResult::RUNTIME_ERROR;
             }
@@ -1080,7 +1145,7 @@ InterpretResult VM::run() {
                 }
                 has = i < map->map.capacity();
             } else {
-                runtimeError(
+                RAISE_ERROR(
                     "BUG: ObjIterator::collection has unexpected type.");
                 return InterpretResult::RUNTIME_ERROR;
             }
@@ -1091,8 +1156,7 @@ InterpretResult VM::run() {
             Value top = pop();
             // Invariant: value must be an ObjIterator (guaranteed by GET_ITER).
             if (!isIterator(top)) {
-                runtimeError(
-                    "BUG: ITER_NEXT expects an iterator on the stack.");
+                RAISE_ERROR("BUG: ITER_NEXT expects an iterator on the stack.");
                 return InterpretResult::RUNTIME_ERROR;
             }
             ObjIterator* it = asObjIterator(as<Obj*>(top));
@@ -1120,7 +1184,7 @@ InterpretResult VM::run() {
                 push(map->map.entryAt(it->index)->key);
                 ++it->index;
             } else {
-                runtimeError(
+                RAISE_ERROR(
                     "BUG: ObjIterator::collection has unexpected type.");
                 return InterpretResult::RUNTIME_ERROR;
             }
@@ -1130,6 +1194,7 @@ InterpretResult VM::run() {
     }
 
 #undef BINARY_OP
+#undef RAISE_ERROR
 }
 
 bool VM::callNative(ObjNative* native, int argCount) {
