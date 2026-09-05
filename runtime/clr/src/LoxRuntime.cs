@@ -92,6 +92,7 @@ public static class LoxRuntime {
         var globals = new LoxGlobals();
         RegisterGlobals(globals);
         RegisterMath(globals);
+        RegisterReflection(globals);
         s_current = globals;
         return globals;
     }
@@ -213,6 +214,164 @@ public static class LoxRuntime {
             throw new LoxError("Expected a string argument.");
         }
         return s;
+    }
+
+    private static void RegisterReflection(LoxGlobals globals) {
+        globals.Define("type", new LoxNative("type", 1, args => TypeNameOf(args[0])));
+        globals.Define("fields", new LoxNative("fields", 1, args => {
+            LoxInstance inst = RequireInstance(args[0], "Expected an instance.");
+            var list = new LoxList();
+            foreach (string name in inst.Fields.Keys) {
+                list.Elements.Add(name);
+            }
+            return list;
+        }));
+        globals.Define("methods", new LoxNative("methods", 1, args => {
+            if (args[0] is not LoxClass klass) {
+                throw new LoxError("Expected a class.");
+            }
+            var list = new LoxList();
+            foreach (string name in klass.Methods.Keys) {
+                list.Elements.Add(name);
+            }
+            return list;
+        }));
+        globals.Define("getField", new LoxNative("getField", 2, args => {
+            LoxInstance inst = RequireInstance(args[0], "Only instances have properties.");
+            string name = RequireFieldName(args[1]);
+            // Absent field and a field stored as nil both read back as null - use
+            // hasField to tell them apart, matching spec/05-stdlib.md.
+            return inst.Fields.TryGetValue(name, out object value) ? value : null;
+        }));
+        globals.Define("hasField", new LoxNative("hasField", 2, args => {
+            LoxInstance inst = RequireInstance(args[0], "Only instances have properties.");
+            string name = RequireFieldName(args[1]);
+            return inst.Fields.ContainsKey(name);
+        }));
+        globals.Define("setField", new LoxNative("setField", 3, args => {
+            LoxInstance inst = RequireInstance(args[0], "Only instances have fields.");
+            string name = RequireFieldName(args[1]);
+            inst.Fields[name] = args[2];
+            return args[2]; // assignment is an expression, per Property Set semantics
+        }));
+        globals.Define("callMethod", new LoxNative("callMethod", -1, CallMethod));
+    }
+
+    // type(x)'s ladder groups values the same way LoxOps.Stringify does: a
+    // closure and a plain native are both "Function"; a user-defined bound
+    // method and a bound Map/File native are both "BoundMethod". LoxMapMethod
+    // and LoxFileMethod (LoxMap.GetMethod / LoxFile.GetMethod) are this
+    // runtime's dedicated bound-native types - the CLR equivalent of
+    // src/vm.cpp's ObjBoundNative - so no receiver tag on LoxNative itself is
+    // needed to tell a bound native apart from a plain one. This is a
+    // language-level grouping (spec/03-types.md has one Function heading and
+    // one BoundMethod heading), not a one-to-one map from C# type to Lox type.
+    private static string TypeNameOf(object v) {
+        if (v == null) {
+            return "Nil";
+        }
+        if (v is bool) {
+            return "Boolean";
+        }
+        if (v is double) {
+            return "Number";
+        }
+        if (v is string) {
+            return "String";
+        }
+        if (v is LoxClosure) {
+            return "Function";
+        }
+        if (v is LoxNative) {
+            return "Function";
+        }
+        if (v is LoxBoundMethod) {
+            return "BoundMethod";
+        }
+        if (v is LoxMapMethod) {
+            return "BoundMethod";
+        }
+        if (v is LoxFileMethod) {
+            return "BoundMethod";
+        }
+        if (v is LoxClass) {
+            return "Class";
+        }
+        if (v is LoxInstance) {
+            return "Instance";
+        }
+        if (v is LoxList) {
+            return "List";
+        }
+        if (v is LoxMap) {
+            return "Map";
+        }
+        if (v is LoxFile) {
+            return "File";
+        }
+        if (v is LoxIterator) {
+            return "Iterator";
+        }
+        if (v is LoxEnumCtor) {
+            return "EnumConstructor";
+        }
+        if (v is LoxEnum) {
+            return "Enum";
+        }
+        throw new InvalidOperationException($"type(): unrecognized value {v.GetType()}");
+    }
+
+    private static LoxInstance RequireInstance(object v, string message) {
+        if (v is not LoxInstance instance) {
+            throw new LoxError(message);
+        }
+        return instance;
+    }
+
+    private static string RequireFieldName(object v) {
+        if (v is not string s) {
+            throw new LoxError("Field name must be a string.");
+        }
+        return s;
+    }
+
+    // callMethod(inst, name, ...args) resolves exactly like LoxOps.Invoke's
+    // instance branch (fields shadow methods), but only ever calls a native:
+    // a resolved LoxClosure/LoxBoundMethod is a deliberate v1 runtime error,
+    // matching native's restriction (notes/expressiveness-roadmap.md item 1).
+    // A resolved LoxNative/LoxMapMethod/LoxFileMethod already captures
+    // whatever receiver it needs as a C# closure (a plain global native
+    // stored in a field needs none; LoxMap.GetMethod/LoxFile.GetMethod
+    // capture the map/file instance itself), so - unlike native's
+    // ObjBoundNative, which stores its receiver separately and must have it
+    // spliced back in before the call - no receiver substitution is needed
+    // here before forwarding the trailing args.
+    private static object CallMethod(object[] args) {
+        if (args.Length < 2) {
+            throw new LoxError("Expected at least 2 arguments.");
+        }
+        LoxInstance inst = RequireInstance(args[0], "Only instances have methods.");
+        string name = RequireFieldName(args[1]);
+
+        object callee;
+        if (inst.Fields.TryGetValue(name, out object fieldVal)) {
+            callee = fieldVal;
+        } else {
+            LoxClosure method = inst.Klass.FindMethod(name);
+            if (method == null) {
+                throw new LoxError($"Undefined property '{name}'.");
+            }
+            callee = method;
+        }
+
+        object[] forwarded = args[2..];
+        if (callee is LoxNative or LoxMapMethod or LoxFileMethod) {
+            return ((ILoxCallable)callee).Call(forwarded);
+        }
+        if (callee is LoxClosure or LoxBoundMethod) {
+            throw new LoxError("callMethod does not support user-defined methods yet.");
+        }
+        throw new LoxError("Can only call functions, classes and enums.");
     }
 
     // `math` is a plain instance with native-function fields (not

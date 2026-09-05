@@ -1,0 +1,3 @@
+// callMethod() is instance-only; a non-Instance receiver is a runtime
+// error on native, JVM, and CLR alike.
+callMethod(1, "x");
