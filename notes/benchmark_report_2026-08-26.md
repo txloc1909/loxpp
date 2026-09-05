@@ -67,8 +67,12 @@ garbage collector is stop-the-world non-generational. §4 breaks this down;
   the steady-state numbers exclude is in §3.3.
 * `nbody` (12 000 steps), `mandelbrot` (size 120), `fib` (n = 28),
   `binary_trees` (depth 10) use reduced sizes so a batch fits the time window.
-* `fannkuch` is excluded — it does not terminate on the native VM, a
-  pre-existing issue (`timeout 30 build/loxpp` on it: no output, no exit).
+* `fannkuch` is not in this report's data — at the time of this run it did
+  not terminate on the native VM. That turned out to be a carry-propagation
+  bug in the benchmark's Lox++ port, not a VM limitation, and is now fixed
+  (`benchmarks/core/fannkuch.lox`); it is in `generate.py`'s `CONFIG` as of
+  a later commit than the one this report is dated against, so its numbers
+  are not part of §3's tables.
 
 ---
 
