@@ -1,0 +1,61 @@
+// reflection_basics.lox — Introspecting values, fields, and methods at
+// runtime.
+//
+// Demonstrates: type(), fields(), methods(), getField(), setField(),
+// hasField(). fields()/methods() return their results in unspecified order,
+// so this example reports counts and specific known keys instead of
+// printing the raw lists (see notes/expressiveness-roadmap.md item 1 and
+// test/translation-probes/40_reflection.lox for the same convention).
+
+class Counter {
+    tick() {
+        this.count = this.count + 1;
+        return this.count;
+    }
+}
+
+// CHECK: type(1) = Number
+print "type(1) = " + type(1);
+// CHECK: type("hi") = String
+print "type(\"hi\") = " + type("hi");
+// CHECK: type(nil) = Nil
+print "type(nil) = " + type(nil);
+// CHECK: type(true) = Boolean
+print "type(true) = " + type(true);
+// CHECK: type(Counter) = Class
+print "type(Counter) = " + type(Counter);
+
+var c = Counter();
+c.count = 0;
+
+// CHECK: type(c) = Instance
+print "type(c) = " + type(c);
+// CHECK: type(c.tick) = BoundMethod
+print "type(c.tick) = " + type(c.tick);
+// CHECK: type(clock) = Function
+print "type(clock) = " + type(clock);
+
+// CHECK: fields on a fresh counter: 1
+print "fields on a fresh counter: " + str(len(fields(c)));
+// CHECK: methods on Counter: 1
+print "methods on Counter: " + str(len(methods(Counter)));
+
+// CHECK: hasField(c, "count") = true
+print "hasField(c, \"count\") = " + str(hasField(c, "count"));
+// CHECK: hasField(c, "missing") = false
+print "hasField(c, \"missing\") = " + str(hasField(c, "missing"));
+// CHECK: getField(c, "count") = 0
+print "getField(c, \"count\") = " + str(getField(c, "count"));
+// CHECK: getField(c, "missing") = nil
+print "getField(c, \"missing\") = " + str(getField(c, "missing"));
+
+setField(c, "label", "primary");
+// CHECK: getField(c, "label") = primary
+print "getField(c, \"label\") = " + str(getField(c, "label"));
+// CHECK: fields after setField: 2
+print "fields after setField: " + str(len(fields(c)));
+
+c.tick();
+c.tick();
+// CHECK: after two ticks, count = 2
+print "after two ticks, count = " + str(getField(c, "count"));

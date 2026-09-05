@@ -1,0 +1,91 @@
+// generic_tools.lox — Small utilities built directly on the reflection API,
+// each written once and working across any class.
+//
+// Demonstrates: fields(), getField(), setField(), and hasField() used to
+// write class-agnostic code — the pitch from
+// notes/expressiveness-roadmap.md item 1 ("the entire metaprogramming
+// channel" for a language with no macros/templates/generics) — plus
+// callMethod() dispatching to native-backed values by a runtime-computed
+// name. callMethod() only supports native-backed callees for now (see the
+// same roadmap note); a name-to-handler registry built from native
+// functions, like formatters below, is squarely inside that limit.
+
+// Copies every field from src onto dst, without knowing src's class ahead
+// of time.
+fun copyFields(dst, src) {
+    var names = fields(src);
+    var i = 0;
+    while (i < len(names)) {
+        var name = names[i];
+        setField(dst, name, getField(src, name));
+        i = i + 1;
+    }
+}
+
+// Structural equality over two instances' own fields (methods and class
+// identity are not compared).
+fun sameFields(a, b) {
+    var names = fields(a);
+    if (len(names) != len(fields(b))) {
+        return false;
+    }
+    var i = 0;
+    while (i < len(names)) {
+        var name = names[i];
+        if (!hasField(b, name) or getField(a, name) != getField(b, name)) {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+class Point {}
+
+var p1 = Point();
+p1.x = 3;
+p1.y = 4;
+
+var p2 = Point();
+copyFields(p2, p1);
+
+// CHECK: p2.x = 3
+print "p2.x = " + str(p2.x);
+// CHECK: p2.y = 4
+print "p2.y = " + str(p2.y);
+// CHECK: sameFields(p1, p2) = true
+print "sameFields(p1, p2) = " + str(sameFields(p1, p2));
+
+p2.y = 99;
+// CHECK: sameFields(p1, p2) after mutation = false
+print "sameFields(p1, p2) after mutation = " + str(sameFields(p1, p2));
+
+// A name-to-handler registry, resolved at runtime instead of an if/else
+// chain per command. Handlers here are native functions (str, len) and a
+// bound native method (a Map's `has`) — all valid callMethod() targets.
+class Formatters {}
+
+var formatters = Formatters();
+formatters.text = str;
+formatters.count = len;
+
+var seen = {"alice": true};
+formatters.seen = seen.has;
+
+fun format(kind, value) {
+    if (!hasField(formatters, kind)) {
+        return "unknown formatter: " + kind;
+    }
+    return callMethod(formatters, kind, value);
+}
+
+// CHECK: format("text", 42) = 42
+print "format(\"text\", 42) = " + str(format("text", 42));
+// CHECK: format("count", [1, 2, 3]) = 3
+print "format(\"count\", [1, 2, 3]) = " + str(format("count", [1, 2, 3]));
+// CHECK: format("seen", "alice") = true
+print "format(\"seen\", \"alice\") = " + str(format("seen", "alice"));
+// CHECK: format("seen", "bob") = false
+print "format(\"seen\", \"bob\") = " + str(format("seen", "bob"));
+// CHECK: format("bogus", 1) = unknown formatter: bogus
+print "format(\"bogus\", 1) = " + format("bogus", 1);
