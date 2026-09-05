@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
+import java.util.Arrays;
 
 /**
  * Builds a fresh {@link LoxGlobals} populated with the full native stdlib
@@ -93,6 +94,7 @@ public final class LoxRuntime {
         LoxGlobals globals = new LoxGlobals();
         registerGlobals(globals);
         registerMath(globals);
+        registerReflection(globals);
         current = globals;
         return globals;
     }
@@ -264,6 +266,155 @@ public final class LoxRuntime {
         math.fields.put("inf", Double.POSITIVE_INFINITY);
         math.fields.put("nan", Double.NaN);
         globals.define("math", math);
+    }
+
+    // Mirrors src/stdlib/reflect_api.cpp: type/fields/methods/getField/
+    // setField/hasField/callMethod, the introspection surface over
+    // LoxInstance's field table and LoxClass's method table. `callMethod` is
+    // capped to natives-only on every backend, including this one, even
+    // though a JVM closure call needs no re-entrant interpreter loop — see
+    // notes/expressiveness-roadmap.md item 1: lifting this only on JVM would
+    // let JVM print real output where native raises an error, which
+    // tools/diff_runtimes.py would catch as a divergence.
+    private static void registerReflection(LoxGlobals globals) {
+        globals.define("type", new LoxNative("type", 1, args -> typeNameOf(args[0])));
+        globals.define("fields", new LoxNative("fields", 1, args -> {
+            LoxInstance inst = requireInstance(args[0], "Expected an instance.");
+            LoxList list = new LoxList();
+            list.elements.addAll(inst.fields.keySet());
+            return list;
+        }));
+        globals.define("methods", new LoxNative("methods", 1, args -> {
+            if (!(args[0] instanceof LoxClass)) {
+                throw new LoxError("Expected a class.");
+            }
+            LoxList list = new LoxList();
+            list.elements.addAll(((LoxClass) args[0]).methods.keySet());
+            return list;
+        }));
+        globals.define("getField", new LoxNative("getField", 2, args -> {
+            LoxInstance inst = requireInstance(args[0], "Only instances have properties.");
+            String name = requireFieldName(args[1]);
+            return inst.fields.get(name); // absent field and a stored nil both read back as null
+        }));
+        globals.define("hasField", new LoxNative("hasField", 2, args -> {
+            LoxInstance inst = requireInstance(args[0], "Only instances have properties.");
+            String name = requireFieldName(args[1]);
+            return inst.fields.containsKey(name);
+        }));
+        globals.define("setField", new LoxNative("setField", 3, args -> {
+            LoxInstance inst = requireInstance(args[0], "Only instances have fields.");
+            String name = requireFieldName(args[1]);
+            inst.fields.put(name, args[2]);
+            return args[2]; // assignment is an expression, per Property Set semantics
+        }));
+        globals.define("callMethod", new LoxNative("callMethod", -1, LoxRuntime::callMethod));
+    }
+
+    // type(x)'s ladder groups values the same way LoxOps.stringify does:
+    // a closure and a plain native are both "Function"; a user-defined bound
+    // method and a bound Map/File native are both "BoundMethod" (see
+    // LoxNative.receiver for how the two natives are told apart). This is a
+    // language-level grouping (spec/03-types.md has one Function heading and
+    // one BoundMethod heading), not a Java class per Lox type.
+    private static String typeNameOf(Object v) {
+        if (v == null) {
+            return "Nil";
+        }
+        if (v instanceof Boolean) {
+            return "Boolean";
+        }
+        if (v instanceof Double) {
+            return "Number";
+        }
+        if (v instanceof String) {
+            return "String";
+        }
+        if (v instanceof LoxClosure) {
+            return "Function";
+        }
+        if (v instanceof LoxNative) {
+            return (((LoxNative) v).receiver != null) ? "BoundMethod" : "Function";
+        }
+        if (v instanceof LoxBoundMethod) {
+            return "BoundMethod";
+        }
+        if (v instanceof LoxClass) {
+            return "Class";
+        }
+        if (v instanceof LoxInstance) {
+            return "Instance";
+        }
+        if (v instanceof LoxList) {
+            return "List";
+        }
+        if (v instanceof LoxMap) {
+            return "Map";
+        }
+        if (v instanceof LoxFile) {
+            return "File";
+        }
+        if (v instanceof LoxIterator) {
+            return "Iterator";
+        }
+        if (v instanceof LoxEnumCtor) {
+            return "EnumConstructor";
+        }
+        if (v instanceof LoxEnum) {
+            return "Enum";
+        }
+        throw new IllegalStateException("type(): unrecognized value " + v.getClass());
+    }
+
+    private static LoxInstance requireInstance(Object v, String message) {
+        if (!(v instanceof LoxInstance)) {
+            throw new LoxError(message);
+        }
+        return (LoxInstance) v;
+    }
+
+    private static String requireFieldName(Object v) {
+        if (!(v instanceof String)) {
+            throw new LoxError("Field name must be a string.");
+        }
+        return (String) v;
+    }
+
+    // callMethod(inst, name, ...args) resolves exactly like LoxOps.invoke's
+    // instance branch (fields shadow methods), but only ever calls a native:
+    // a resolved LoxClosure/LoxBoundMethod is a deliberate v1 runtime error,
+    // matching native's restriction (see this method's caller for why). A
+    // resolved LoxNative — whether a plain global native stored in a field,
+    // or a bound Map/File native such as `someMap.has` stored in a field —
+    // already captures whatever receiver it needs as a Java closure, so,
+    // unlike native's ObjBoundNative, no receiver substitution is needed
+    // here before forwarding the trailing args.
+    private static Object callMethod(Object[] args) {
+        if (args.length < 2) {
+            throw new LoxError("Expected at least 2 arguments.");
+        }
+        LoxInstance inst = requireInstance(args[0], "Only instances have methods.");
+        String name = requireFieldName(args[1]);
+
+        Object callee;
+        if (inst.fields.containsKey(name)) {
+            callee = inst.fields.get(name);
+        } else {
+            LoxClosure method = inst.klass.findMethod(name);
+            if (method == null) {
+                throw new LoxError("Undefined property '" + name + "'.");
+            }
+            callee = method;
+        }
+
+        Object[] forwarded = Arrays.copyOfRange(args, 2, args.length);
+        if (callee instanceof LoxNative) {
+            return ((LoxNative) callee).call(forwarded);
+        }
+        if (callee instanceof LoxClosure || callee instanceof LoxBoundMethod) {
+            throw new LoxError("callMethod does not support user-defined methods yet.");
+        }
+        throw new LoxError("Can only call functions, classes and enums.");
     }
 
     private interface DoubleFn {
