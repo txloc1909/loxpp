@@ -36,10 +36,14 @@ RUN cd /usr/src/gtest && \
     cmake --build build && \
     cp build/lib/*.a /usr/lib/
 
-ENV CC="ccache clang"
-ENV CXX="ccache clang++"
-
-RUN ccache --max-size=2G
+# ccache is wired in by CMakeLists.txt (CMAKE_*_COMPILER_LAUNCHER). Point the
+# cache at /ccache so a `-v <volume>:/ccache` mount persists it across the
+# ephemeral agent containers; the size is set here rather than with `ccache
+# -M` because a mounted CCACHE_DIR bypasses any baked ccache.conf. 10G covers
+# the object variants across the debug (ASan+UBSan), release, and *-variant
+# (LOXPP_NAN_TAGGING off) presets.
+ENV CCACHE_DIR=/ccache
+ENV CCACHE_MAXSIZE=10G
 
 WORKDIR /workspace
 
