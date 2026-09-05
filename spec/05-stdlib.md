@@ -217,3 +217,165 @@ report whole seconds, milliseconds, or finer.
 
 **Arity:** 1  
 **Returns:** Map on success, Nil if `path` does not exist
+
+---
+
+## `type(value) → String`
+
+Returns the language-level type name of `value` as a String.
+
+| `value` is a... | Returns |
+|---|---|
+| Nil | `"Nil"` |
+| Boolean | `"Boolean"` |
+| Number | `"Number"` |
+| String | `"String"` |
+| Function (see §03-types) | `"Function"` |
+| BoundMethod | `"BoundMethod"` |
+| Class | `"Class"` |
+| Instance | `"Instance"` |
+| List | `"List"` |
+| Map | `"Map"` |
+| File | `"File"` |
+| Iterator | `"Iterator"` |
+| Enum constructor | `"EnumConstructor"` |
+| Enum value | `"Enum"` |
+
+`type()` reports the same names `str()` and the rest of §03-types use for
+these values — it does not distinguish a native function from a user-defined
+one, or a bound method backed by a native from one backed by a user-defined
+method; both count as `Function` and `BoundMethod` respectively.
+
+```lox
+print type(1);          // Number
+print type("hi");       // String
+class Dog {}
+print type(Dog);        // Class
+print type(Dog());      // Instance
+```
+
+**Arity:** 1  
+**Returns:** String
+
+---
+
+## `fields(instance) → List[String]`
+
+Returns the names of every field currently set on `instance`, as a List of
+Strings. Only the instance's own field table is enumerated — inherited or own
+**methods** are not fields and never appear in this list, even though `.`
+property access can reach them (see §04-semantics, Property Get).
+
+The order of the returned names is unspecified. Sort the result if a
+deterministic order is needed.
+
+Runtime error ("Expected an instance.") if `instance` is not an Instance.
+
+**Arity:** 1  
+**Returns:** List of String
+
+---
+
+## `methods(class) → List[String]`
+
+Returns the names of every method `class` responds to, as a List of Strings —
+its own methods plus every method inherited from a superclass.
+
+The order of the returned names is unspecified. Sort the result if a
+deterministic order is needed.
+
+Runtime error ("Expected a class.") if `class` is not a Class.
+
+**Arity:** 1  
+**Returns:** List of String
+
+---
+
+## `getField(instance, name) → Any`
+
+Returns the value of the field named `name` on `instance`.
+
+This is deliberately **fields-only**: unlike `.` property access (§04-
+semantics, Property Get), `getField` never falls back to a bound method when
+`name` is not a field. `getField(instance, name)` reflects exactly what
+`fields(instance)` enumerates — if `name` does not appear in `fields
+(instance)`, `getField` returns `nil`, even if `instance`'s class defines a
+method by that name.
+
+Returns `nil` if `instance` has no field named `name` (use `hasField` to
+distinguish "absent" from "present and nil").
+
+Runtime error ("Only instances have properties.") if `instance` is not an
+Instance.
+
+**Arity:** 2  
+**Returns:** the field's value, or Nil if absent
+
+---
+
+## `hasField(instance, name) → Boolean`
+
+Returns `true` if `instance` has a field named `name` — equivalently, whether
+`name` appears in `fields(instance)`. As with `getField`, this checks the
+field table only; a method named `name` does not make `hasField` return
+`true`.
+
+Runtime error ("Only instances have properties.") if `instance` is not an
+Instance.
+
+**Arity:** 2  
+**Returns:** Boolean
+
+---
+
+## `setField(instance, name, value) → Any`
+
+Sets the field named `name` on `instance` to `value`, creating the field if it
+does not already exist. Behaves exactly like `.` property assignment
+(§04-semantics, Property Set) driven by a runtime-computed name instead of a
+compile-time identifier.
+
+Returns `value` (assignment is an expression, matching `.` assignment).
+
+Runtime error ("Only instances have fields.") if `instance` is not an
+Instance.
+
+**Arity:** 3  
+**Returns:** the assigned value
+
+---
+
+## `callMethod(instance, name, ...args) → Any`
+
+Calls the method or callable field named `name` on `instance` with `args`,
+and returns its result. Resolution matches Method Invocation (§04-semantics):
+if `instance`'s field table contains `name`, that value is called; otherwise
+the method named `name` on `instance`'s class (including inherited methods)
+is called.
+
+**Restriction (v1):** `callMethod` only supports calling a native function —
+a stdlib function, a bound native method (such as a Map or File method), or a
+value stored in a field that holds one of these. Calling a method backed by a
+user-defined function (declared with `fun` inside a `class` body, or a
+closure stored in a field) is a **runtime error**
+("callMethod does not support user-defined methods yet."). This restriction
+applies identically across all execution targets (native, JVM, CLR).
+
+```lox
+class Foo {}
+var f = Foo();
+f.describe = str;      // a native function stored in a field
+print callMethod(f, "describe", 42);   // "42"
+
+class Bar { greet() { return "hi"; } }
+var b = Bar();
+callMethod(b, "greet");   // runtime error: user-defined methods unsupported
+```
+
+Runtime error ("Only instances have methods.") if `instance` is not an
+Instance. Runtime error ("Undefined property 'name'.") if `name` names
+neither a field nor a method. Runtime error if the resolved native is called
+with the wrong number of arguments, matching ordinary call-arity checking.
+
+**Arity:** variadic (at least 2: `instance` and `name`)  
+**Returns:** the called method's result
