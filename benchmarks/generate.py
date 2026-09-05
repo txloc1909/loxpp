@@ -46,16 +46,13 @@ CONFIG = {
     "fasta":              ("Fasta",             25, 12, 40),
     "k_nucleotide":       ("KNucleotide",       25, 12, 30),
     "reverse_complement": ("ReverseComplement", 25, 12, 30),
+    "fannkuch":           ("Fannkuch",          25, 12, 1),
 }
 
 # Every name here has the class/benchmark() shape CONFIG expects (checked by
 # check_coverage() below) but is deliberately left out of it. Listed here so
 # the gap in CONFIG is documented, not silent.
 EXCLUDED = {
-    # fannkuch(7) does not terminate on the native VM (confirmed with
-    # `timeout 30 build/loxpp core/fannkuch.lox` — no output, no exit).
-    # Including it would hang run.py.
-    "fannkuch": "does not terminate on the native VM",
     # AWFY macro benchmarks and Wren-suite ports: not yet tuned into CONFIG
     # (REPS/warm-up calibration, checksum cross-check against the other two
     # backends) — kept in core/ for a later pass, per benchmarks/README.md.

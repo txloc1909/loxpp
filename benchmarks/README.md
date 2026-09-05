@@ -78,11 +78,9 @@ tools/build_lox_rt_clr.sh
 ## Excluded from `core/`
 
 `generate.py`'s `EXCLUDED` dict lists every `core/*.lox` file that has the
-`class X { benchmark() }` shape but is not in `CONFIG`, and why. `fannkuch`
-does not terminate on the native backend (a pre-existing issue). `cd`,
+`class X { benchmark() }` shape but is not in `CONFIG`, and why. `cd`,
 `deltablue`, `earley`, `havlak` (AWFY macro) and `for_in`, `instantiation`,
 `string_interning`, `zoo` (Wren) have the right shape but are not yet tuned
 into `CONFIG` — they are kept in `core/` for a later pass. `generate.py`
-fails loudly if a
-`core/*.lox` file with the harness shape is in neither `CONFIG` nor
-`EXCLUDED`.
+fails loudly if a `core/*.lox` file with the harness shape is in neither
+`CONFIG` nor `EXCLUDED`.
