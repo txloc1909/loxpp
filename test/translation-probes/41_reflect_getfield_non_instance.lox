@@ -1,0 +1,3 @@
+// getField() is instance-only (spec/05-stdlib.md); a non-Instance receiver
+// is a runtime error on native, JVM, and CLR alike.
+getField(1, "x");

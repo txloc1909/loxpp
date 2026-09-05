@@ -211,6 +211,10 @@ probes=(
     # scratch area of a computed width, so this file lives in clr-only/ and
     # is named here directly.
     "test/translation-probes/clr-only/36_folded_operand_spill_sizing.lox"
+    # Reflection introspection: type()/fields()/methods()/getField()/
+    # hasField()/setField()/callMethod(), now supported on native, JVM, and
+    # CLR alike (src/stdlib/reflect_api.cpp, LoxRuntime.registerReflection).
+    "test/translation-probes/40_reflection.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -244,6 +248,17 @@ error_probes=(
     # (exhaustive by name, accepting nothing at run time) — both sides
     # print the first match's own arm value, then fail on the second.
     "test/translation-probes/26_enum_match_dispatch_and_error.lox"
+    # Reflection introspection guards: a non-Instance/non-Class argument to
+    # each accessor is a runtime error on every backend, and callMethod()
+    # v1 refuses a closure-backed method identically everywhere
+    # (notes/expressiveness-roadmap.md item 1).
+    "test/translation-probes/41_reflect_getfield_non_instance.lox"
+    "test/translation-probes/42_reflect_setfield_non_instance.lox"
+    "test/translation-probes/43_reflect_fields_non_instance.lox"
+    "test/translation-probes/44_reflect_hasfield_non_instance.lox"
+    "test/translation-probes/45_reflect_methods_non_instance.lox"
+    "test/translation-probes/46_reflect_callmethod_non_instance.lox"
+    "test/translation-probes/47_reflect_callmethod_closure_method.lox"
 )
 
 # Whole example programs, not single-opcode probes: each one exercises more
