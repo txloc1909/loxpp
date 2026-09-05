@@ -51,7 +51,8 @@ All fully expressible today; none belong on the roadmap:
 | 6 | FFI / native extension ABI | high | highest leverage |
 | 7 | True parallelism (multi-core) | very high | the must-have |
 
-**1. Reflection — introspection only.** `type(x)`, `fields(inst)`,
+**1. Reflection — introspection only. IN PLANNING** (plan drafted covering
+all three backends; not yet implemented). `type(x)`, `fields(inst)`,
 `getField`/`setField`/`hasField`, `methods(cls)`, `callMethod`. Field names
 compile to constant operands of `GET_PROPERTY`; no opcode reads a name computed
 at runtime, so this is a hard wall, not a library. But the fix is just native
@@ -63,6 +64,24 @@ metaprogramming channel — without it every generic facility is hand-written pe
 type. Value is bounded to single-VM inspectability (generic tooling, frameworks,
 local serialization of class instances) — **not** a prerequisite for concurrency
 (see the universal-data-representation point above).
+
+**`callMethod` is capped to natives-only in v1, on all three backends.**
+Calling a resolved method that is closure-backed (an ordinary user-defined
+method) raises a runtime error instead of working. Root cause: the native
+C++ VM's `run()` loop only ever returns at frame count 0 or on error — there
+is no bounded re-entrant call path letting a native function call back into
+the bytecode interpreter and get a return value synchronously, and nothing
+like that exists anywhere in the codebase today. Building it is real,
+separate VM work, best paired with item 5's suspend/resume machinery rather
+than smuggled into this feature. **Non-obvious wrinkle found while planning
+the JVM/CLR ports:** neither managed backend has this limitation — a closure
+call there is just an ordinary synchronous Java/C# method call, so JVM and
+CLR could trivially support full `callMethod` today. They must still be
+capped to match native's restriction anyway, or the three backends would
+observably diverge (JVM/CLR would print real output where native errors),
+which the differential test suite (`tools/diff_runtimes.py`) would catch as
+a failure. Lift the restriction on **all three backends in one PR**, not
+just native's, whenever native's VM gets the re-entrant call path.
 
 **2. OS / world access — basics. PARTIALLY DONE.** `args`, `env`, `exit`,
 `time`/`sleep`, FS metadata (`exists`, `is_dir`, `is_file`, `stat`) all live in
@@ -115,7 +134,14 @@ VM reentrancy, profiler rework. Design space already mapped in
   late means redoing them. Build last, choose first.
 - **Reflection is relevant to the JVM and CLR backends.** Both host platforms
   have rich reflection; defining the concept in `spec/` keeps that door open
-  across all three targets.
+  across all three targets. Confirmed while planning: this costs **zero
+  codegen/emission changes** in either backend — `CALL`/`INVOKE` already
+  dispatch through one shared callable interface (`LoxCallable`/
+  `ILoxCallable`) spanning closures, classes, and natives alike, so a new
+  native is purely a runtime-library addition (`LoxRuntime.java`/`.cs`), the
+  same way `stat` was. The one piece of real per-backend work is `type(x)`'s
+  type-name mapping, which has no shared implementation and must be written
+  once per language, kept in sync by hand.
 
 ## One-liner
 
