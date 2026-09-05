@@ -1,5 +1,16 @@
 #include "chunk.h"
 
+const char* opcodeName(Op op) {
+    switch (op) {
+#define LOXPP_OPCODE_NAME_CASE(name)                                           \
+    case Op::name:                                                             \
+        return #name;
+        LOXPP_FOR_EACH_OP(LOXPP_OPCODE_NAME_CASE)
+#undef LOXPP_OPCODE_NAME_CASE
+    }
+    return "UNKNOWN";
+}
+
 void Chunk::write(Byte byte, int line) {
     push_back(byte);
 
