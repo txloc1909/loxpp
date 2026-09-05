@@ -89,7 +89,15 @@ public final class LoxMap {
      * of one map and for a read of two different maps.
      */
     public LoxCallable getMethod(String name) {
-        return createMethod(name);
+        LoxCallable unbound = createMethod(name);
+        if (unbound == null) {
+            return null;
+        }
+        // Every branch of createMethod returns a LoxNative; re-wrap it with
+        // this map as its receiver so type() can tell a bound Map method
+        // apart from an ordinary, unbound native — see LoxNative.receiver.
+        LoxNative n = (LoxNative) unbound;
+        return new LoxNative(n.name, n.arity, n::call, this);
     }
 
     private LoxCallable createMethod(String name) {
