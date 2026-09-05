@@ -19,9 +19,11 @@ moved here unchanged except for stripping each file's ad-hoc timing footer —
 
 * Site: https://benchmarksgame-team.pages.debian.net/benchmarksgame/
 * In the generated suite: `fasta`, `k_nucleotide`, `reverse_complement`,
-  `spectral_norm`, `binary_trees`.
-* Ported but excluded from the suite: `fannkuch` — `fannkuch(7)` does not
-  terminate on the native VM (`benchmarks/generate.py`'s `EXCLUDED`).
+  `spectral_norm`, `binary_trees`, `fannkuch`.
+* `fannkuch`'s port had a carry-propagation bug (the "advance to the next
+  permutation" step rotated only one level instead of looping through a
+  carry into the next), which made `fannkuch(7)` loop forever instead of
+  reaching `maxFlips=16`. Fixed; see `core/fannkuch.lox`'s comments.
 * These are re-implementations of the published algorithms, not copies of a
   specific licensed entry.
 
