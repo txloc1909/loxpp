@@ -44,7 +44,7 @@ All fully expressible today; none belong on the roadmap:
 | # | Gap | Complexity | Essentialness |
 |---|---|---|---|
 | 1 | Reflection — **introspection only** | low | situational |
-| 2 | OS / world access — basics | low | essential |
+| 2 | OS / world access — basics **(partially done)** | low | essential |
 | 3 | Non-local control flow (`try`/`catch`/`throw` + `defer`/`finally`) | low–medium | essential |
 | 4 | Extensible protocols / operator overloading | medium | essential |
 | 5 | Coroutines / generators (single-core suspension) | medium–high | high-value on-ramp |
@@ -64,10 +64,11 @@ type. Value is bounded to single-VM inspectability (generic tooling, frameworks,
 local serialization of class instances) — **not** a prerequisite for concurrency
 (see the universal-data-representation point above).
 
-**2. OS / world access — basics.** `args`, `env`, `exit`, `time`/`sleep`, FS
-metadata. Thin syscall wrappers; no library reaches a syscall the VM doesn't
-expose. Sockets/subprocess are the medium-cost tail of this bucket. The
-*unbounded* surface here is the standing argument for item 6.
+**2. OS / world access — basics. PARTIALLY DONE.** `args`, `env`, `exit`,
+`time`/`sleep`, FS metadata (`exists`, `is_dir`, `is_file`, `stat`) all live in
+`src/stdlib/os_api.cpp`; `clock` is in `src/stdlib/globals.cpp`. **Still
+missing: sockets and subprocess** — the medium-cost tail of this bucket. The
+*unbounded* surface of that tail is the standing argument for item 6.
 
 **3. Non-local control flow.** `try`/`catch`/`throw` + `defer`/`finally`. Needs
 a handler stack + frame unwinding. Three things are inexpressible because you
@@ -106,7 +107,9 @@ VM reentrancy, profiler rework. Design space already mapped in
   structures, the only metaprogramming channel a dynamic language has); defer
   `eval`. Earlier "concurrency needs reflection for serialization" claim is
   **retracted** — primitives + maps are a universal data representation.
-- **Build order is 1→7, but decide item 7's concurrency model first.** It's the
+- **Build order is 1→7, but decide item 7's concurrency model first.** Item 2
+  is partially done (basics landed; sockets/subprocess still open); next up
+  is item 1 (reflection), then item 3. It's the
   most architecturally invasive item and constrains item 5 (shared suspension
   machinery), item 6 (FFI thread-safety), the GC, and the profiler. Choosing it
   late means redoing them. Build last, choose first.
