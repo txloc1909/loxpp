@@ -1,0 +1,3 @@
+// setField() is instance-only; a non-Instance receiver is a runtime error
+// on native, JVM, and CLR alike.
+setField(1, "x", 2);

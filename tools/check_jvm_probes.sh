@@ -72,6 +72,10 @@ probes=(
     # coverage — the nine R15 shapes, RETURN of a folded match, and a nested
     # match subject.
     "test/translation-probes/28_folded_match_operand_family.lox"
+    # Reflection introspection: type()/fields()/methods()/getField()/
+    # hasField()/setField()/callMethod(), now supported on native, JVM, and
+    # CLR alike (src/stdlib/reflect_api.cpp, LoxRuntime.registerReflection).
+    "test/translation-probes/40_reflection.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -94,6 +98,17 @@ error_probes=(
     # DIFFERENT enum than the arms name — see the probe's own header
     # comment.
     "test/translation-probes/27_jump_table_default_cross_enum.lox"
+    # Reflection introspection guards: a non-Instance/non-Class argument to
+    # each accessor is a runtime error on every backend, and callMethod()
+    # v1 refuses a closure-backed method identically everywhere
+    # (notes/expressiveness-roadmap.md item 1).
+    "test/translation-probes/41_reflect_getfield_non_instance.lox"
+    "test/translation-probes/42_reflect_setfield_non_instance.lox"
+    "test/translation-probes/43_reflect_fields_non_instance.lox"
+    "test/translation-probes/44_reflect_hasfield_non_instance.lox"
+    "test/translation-probes/45_reflect_methods_non_instance.lox"
+    "test/translation-probes/46_reflect_callmethod_non_instance.lox"
+    "test/translation-probes/47_reflect_callmethod_closure_method.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
