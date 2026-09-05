@@ -59,6 +59,7 @@ add_executable(test_vm_runtime test_vm_runtime.cpp test_harness.cpp ${FULL_SRCS}
 add_executable(test_print_nul test_print_nul.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_os_api test_os_api.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_reflect_api test_reflect_api.cpp test_harness.cpp ${FULL_SRCS})
+add_executable(test_reflect_api_gc test_reflect_api.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_closures test_closures.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_stress_gc test_stress_gc.cpp test_harness.cpp ${FULL_SRCS})
 add_executable(test_gc_regression test_gc_regression.cpp test_harness.cpp ${FULL_SRCS})
@@ -153,6 +154,7 @@ target_compile_definitions(test_class_pattern_gc PRIVATE LOXPP_STRESS_GC)
 target_compile_definitions(test_or_pattern_gc PRIVATE LOXPP_STRESS_GC)
 target_compile_definitions(test_list_pattern_gc PRIVATE LOXPP_STRESS_GC)
 target_compile_definitions(test_at_binding_gc PRIVATE LOXPP_STRESS_GC)
+target_compile_definitions(test_reflect_api_gc PRIVATE LOXPP_STRESS_GC)
 target_compile_definitions(test_profiler PRIVATE LOXPP_PROFILE)
 
 target_link_libraries(test_scanner PRIVATE GTest::GTest GTest::Main)
@@ -166,6 +168,7 @@ target_link_libraries(test_vm_runtime PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_print_nul PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_os_api PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_reflect_api PRIVATE GTest::GTest GTest::Main)
+target_link_libraries(test_reflect_api_gc PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_closures PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_stress_gc PRIVATE GTest::GTest GTest::Main)
 target_link_libraries(test_gc_regression PRIVATE GTest::GTest GTest::Main)
@@ -207,7 +210,7 @@ add_test(NAME TestMain COMMAND test_main)
 set(LOXPP_GTEST_TARGETS
     test_scanner test_parser_vm test_parser_bytecode test_table test_allocator
     test_local_variables test_control_flow test_vm_runtime test_print_nul
-    test_os_api test_reflect_api test_closures
+    test_os_api test_reflect_api test_reflect_api_gc test_closures
     test_stress_gc test_gc_regression test_inheritance test_list test_list_gc
     test_map test_map_gc test_var_destructure test_enum test_enum_gc
     test_class_pattern test_class_pattern_gc test_match_expr test_slice

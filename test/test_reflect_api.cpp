@@ -212,6 +212,12 @@ TEST(ReflectApi, GetField_NonInstance_RuntimeError) {
     EXPECT_EQ(h.run(R"(getField(1, "a");)"), InterpretResult::RUNTIME_ERROR);
 }
 
+TEST(ReflectApi, GetField_NonStringName_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("class Foo {} var f = Foo(); getField(f, 1);"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
 TEST(ReflectApi, GetField_DoesNotFallBackToMethod) {
     // Deliberate deviation from `.` property access: a method name is not a
     // field, even though `f.greet` (the `.` operator) would find it.
@@ -241,6 +247,12 @@ TEST(ReflectApi, HasField_NonInstance_RuntimeError) {
     EXPECT_EQ(h.run(R"(hasField(1, "a");)"), InterpretResult::RUNTIME_ERROR);
 }
 
+TEST(ReflectApi, HasField_NonStringName_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("class Foo {} var f = Foo(); hasField(f, 1);"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
 TEST(ReflectApi, SetField_CreatesNewField) {
     VMTestHarness h;
     ASSERT_EQ(h.run("class Foo {} var f = Foo(); setField(f, \"a\", 5); "
@@ -267,6 +279,12 @@ TEST(ReflectApi, SetField_ReturnsAssignedValue) {
 TEST(ReflectApi, SetField_NonInstance_RuntimeError) {
     VMTestHarness h;
     EXPECT_EQ(h.run(R"(setField(1, "a", 2);)"), InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(ReflectApi, SetField_NonStringName_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("class Foo {} var f = Foo(); setField(f, 1, 2);"),
+              InterpretResult::RUNTIME_ERROR);
 }
 
 // ---------------------------------------------------------------------------
@@ -303,6 +321,36 @@ TEST(ReflectApi, CallMethod_ClosureBackedMethod_RuntimeError) {
     VMTestHarness h;
     EXPECT_EQ(h.run("class Foo { greet() { return 1; } } var f = Foo(); "
                     "callMethod(f, \"greet\");"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(ReflectApi, CallMethod_ClassFieldValue_RuntimeError) {
+    // A Class value is callable via `()` but callMethod supports natives
+    // only — it must hit the same restriction as a closure, not the
+    // generic "requires a callable value" fallback for non-callables.
+    VMTestHarness h;
+    EXPECT_EQ(h.run("class Foo {} class Bar {} var f = Foo(); f.c = Bar; "
+                    "callMethod(f, \"c\");"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(ReflectApi, CallMethod_EnumCtorFieldValue_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("enum Opt { Some(x) } class Foo {} var f = Foo(); "
+                    "f.c = Some; callMethod(f, \"c\", 1);"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(ReflectApi, CallMethod_NonCallableFieldValue_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("class Foo {} var f = Foo(); f.n = 5; "
+                    "callMethod(f, \"n\");"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(ReflectApi, CallMethod_NonStringName_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("class Foo {} var f = Foo(); callMethod(f, 1);"),
               InterpretResult::RUNTIME_ERROR);
 }
 
