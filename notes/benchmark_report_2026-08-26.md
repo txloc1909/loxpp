@@ -37,6 +37,10 @@ interpreter: it never stops interpreting, it has no inline caching, and its
 garbage collector is stop-the-world non-generational. §4 breaks this down;
 §5 is the action list.
 
+`richards` was silently dead during this run (§2 caveats) and is now mostly
+fixed; both geomeans above and the `richards` figures wherever they appear
+should be treated as provisional until re-measured under the fix.
+
 ---
 
 ## 2. Method
@@ -73,6 +77,20 @@ garbage collector is stop-the-world non-generational. §4 breaks this down;
   (`benchmarks/core/fannkuch.lox`); it is in `generate.py`'s `CONFIG` as of
   a later commit than the one this report is dated against, so its numbers
   are not part of §3's tables.
+* **`richards`'s row (§3.1, §3.2) is stale.** At the time of this run its
+  scheduler was silently dead — a task-readiness bug made it do almost no
+  work (`queuePacketCount=0` of an intended `23246`) — so its 236.2/81.8/
+  457.1 ms and the 0.35/1.93 ratios measure a near-no-op, not the real
+  richards workload. A later commit fixes most of this (`queuePacketCount`
+  now reaches ~97% of target, deterministic and cross-backend consistent,
+  though the benchmark's own self-check still does not fully pass): richards
+  now runs its actual workload and a single native call takes ~2s, not the
+  236.2 ms per batch this report measured — nearly a 10× change this
+  report's numbers do not reflect. Re-running §3 for richards under the fix is a follow-up; §4's
+  qualitative claim that richards is OO/dispatch-heavy and belongs in the
+  2×–3× regime likely still holds (the bug did not change what richards
+  does, only whether it ran to completion), but the specific ratios and
+  the geomean that includes them should not be trusted until re-measured.
 
 ---
 
