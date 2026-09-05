@@ -1,0 +1,3562 @@
+{
+  "per_program": [
+    {
+      "program": "binary_trees",
+      "total_ops": 4906512,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 1226983,
+          "pct": 25.01
+        },
+        {
+          "op": "POP",
+          "count": 547623,
+          "pct": 11.16
+        },
+        {
+          "op": "CONSTANT",
+          "count": 407648,
+          "pct": 8.31
+        },
+        {
+          "op": "RETURN",
+          "count": 407565,
+          "pct": 8.31
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 273114,
+          "pct": 5.57
+        },
+        {
+          "op": "NIL",
+          "count": 273072,
+          "pct": 5.57
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 271727,
+          "pct": 5.54
+        },
+        {
+          "op": "CALL",
+          "count": 271716,
+          "pct": 5.54
+        },
+        {
+          "op": "EQUAL",
+          "count": 271708,
+          "pct": 5.54
+        },
+        {
+          "op": "SET_PROPERTY",
+          "count": 271708,
+          "pct": 5.54
+        },
+        {
+          "op": "GET_PROPERTY",
+          "count": 270346,
+          "pct": 5.51
+        },
+        {
+          "op": "ADD",
+          "count": 137284,
+          "pct": 2.8
+        },
+        {
+          "op": "INVOKE",
+          "count": 135855,
+          "pct": 2.77
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 134525,
+          "pct": 2.74
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 2782,
+          "pct": 0.06
+        },
+        {
+          "op": "LESS",
+          "count": 1401,
+          "pct": 0.03
+        },
+        {
+          "op": "LOOP",
+          "count": 1394,
+          "pct": 0.03
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 29,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 9,
+          "pct": 0.0
+        },
+        {
+          "op": "NOT",
+          "count": 5,
+          "pct": 0.0
+        },
+        {
+          "op": "CLOSURE",
+          "count": 5,
+          "pct": 0.0
+        },
+        {
+          "op": "GREATER",
+          "count": 5,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 3,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "makeTree",
+          "calls": 135854,
+          "total_ms": 2680.355,
+          "self_ms": 238.839,
+          "self_pct": 8.91
+        },
+        {
+          "fn": "check",
+          "calls": 135854,
+          "total_ms": 1105.611,
+          "self_ms": 163.707,
+          "self_pct": 14.81
+        },
+        {
+          "fn": "init",
+          "calls": 135854,
+          "total_ms": 137.708,
+          "self_ms": 137.708,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "benchmark",
+          "calls": 1,
+          "total_ms": 542.113,
+          "self_ms": 1.859,
+          "self_pct": 0.34
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 542.327,
+          "self_ms": 0.211,
+          "self_pct": 0.04
+        },
+        {
+          "fn": "_batch",
+          "calls": 1,
+          "total_ms": 542.116,
+          "self_ms": 0.003,
+          "self_pct": 0.0
+        }
+      ],
+      "gc": {
+        "collections": 57,
+        "total_ms": 49.828,
+        "max_ms": 2.738
+      },
+      "profiled_cpu_ms": 542.327,
+      "exit": 0
+    },
+    {
+      "program": "bounce",
+      "total_ops": 10576424,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 2652576,
+          "pct": 25.08
+        },
+        {
+          "op": "POP",
+          "count": 1557492,
+          "pct": 14.73
+        },
+        {
+          "op": "GET_PROPERTY",
+          "count": 1266780,
+          "pct": 11.98
+        },
+        {
+          "op": "CONSTANT",
+          "count": 915821,
+          "pct": 8.66
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 906094,
+          "pct": 8.57
+        },
+        {
+          "op": "ADD",
+          "count": 506466,
+          "pct": 4.79
+        },
+        {
+          "op": "LESS",
+          "count": 456094,
+          "pct": 4.31
+        },
+        {
+          "op": "SET_PROPERTY",
+          "count": 409590,
+          "pct": 3.87
+        },
+        {
+          "op": "GREATER",
+          "count": 300000,
+          "pct": 2.84
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 237300,
+          "pct": 2.24
+        },
+        {
+          "op": "INVOKE",
+          "count": 207810,
+          "pct": 1.96
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 197330,
+          "pct": 1.87
+        },
+        {
+          "op": "RETURN",
+          "count": 165062,
+          "pct": 1.56
+        },
+        {
+          "op": "CALL",
+          "count": 154538,
+          "pct": 1.46
+        },
+        {
+          "op": "LOOP",
+          "count": 154531,
+          "pct": 1.46
+        },
+        {
+          "op": "GET_INDEX",
+          "count": 150000,
+          "pct": 1.42
+        },
+        {
+          "op": "FALSE",
+          "count": 150000,
+          "pct": 1.42
+        },
+        {
+          "op": "JUMP",
+          "count": 82710,
+          "pct": 0.78
+        },
+        {
+          "op": "TRUE",
+          "count": 42780,
+          "pct": 0.4
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 27391,
+          "pct": 0.26
+        },
+        {
+          "op": "MODULO",
+          "count": 24000,
+          "pct": 0.23
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 12001,
+          "pct": 0.11
+        },
+        {
+          "op": "BUILD_LIST",
+          "count": 30,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 9,
+          "pct": 0.0
+        },
+        {
+          "op": "CLOSURE",
+          "count": 6,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 5,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 3,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "NIL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "bounce",
+          "calls": 150000,
+          "total_ms": 135.978,
+          "self_ms": 135.978,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "benchmark",
+          "calls": 30,
+          "total_ms": 262.606,
+          "self_ms": 109.111,
+          "self_pct": 41.55
+        },
+        {
+          "fn": "init",
+          "calls": 3000,
+          "total_ms": 17.492,
+          "self_ms": 10.002,
+          "self_pct": 57.18
+        },
+        {
+          "fn": "next",
+          "calls": 12000,
+          "total_ms": 7.489,
+          "self_ms": 7.489,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 262.688,
+          "self_ms": 0.057,
+          "self_pct": 0.02
+        },
+        {
+          "fn": "_batch",
+          "calls": 1,
+          "total_ms": 262.631,
+          "self_ms": 0.025,
+          "self_pct": 0.01
+        },
+        {
+          "fn": "init",
+          "calls": 30,
+          "total_ms": 0.025,
+          "self_ms": 0.025,
+          "self_pct": 100.0
+        }
+      ],
+      "gc": {
+        "collections": 0,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "profiled_cpu_ms": 262.688,
+      "exit": 0
+    },
+    {
+      "program": "fasta",
+      "total_ops": 7804532,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 2105530,
+          "pct": 26.98
+        },
+        {
+          "op": "CONSTANT",
+          "count": 915268,
+          "pct": 11.73
+        },
+        {
+          "op": "POP",
+          "count": 892853,
+          "pct": 11.44
+        },
+        {
+          "op": "GET_INDEX",
+          "count": 595040,
+          "pct": 7.62
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 515164,
+          "pct": 6.6
+        },
+        {
+          "op": "LESS",
+          "count": 297644,
+          "pct": 3.81
+        },
+        {
+          "op": "ADD",
+          "count": 297566,
+          "pct": 3.81
+        },
+        {
+          "op": "GET_PROPERTY",
+          "count": 240000,
+          "pct": 3.08
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 217640,
+          "pct": 2.79
+        },
+        {
+          "op": "LOOP",
+          "count": 217561,
+          "pct": 2.79
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 217538,
+          "pct": 2.79
+        },
+        {
+          "op": "CALL",
+          "count": 217528,
+          "pct": 2.79
+        },
+        {
+          "op": "NOT",
+          "count": 217520,
+          "pct": 2.79
+        },
+        {
+          "op": "GREATER",
+          "count": 217520,
+          "pct": 2.79
+        },
+        {
+          "op": "RETURN",
+          "count": 160043,
+          "pct": 2.05
+        },
+        {
+          "op": "INVOKE",
+          "count": 160040,
+          "pct": 2.05
+        },
+        {
+          "op": "SET_PROPERTY",
+          "count": 80043,
+          "pct": 1.03
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 80001,
+          "pct": 1.03
+        },
+        {
+          "op": "MODULO",
+          "count": 80000,
+          "pct": 1.03
+        },
+        {
+          "op": "DIVIDE",
+          "count": 80000,
+          "pct": 1.03
+        },
+        {
+          "op": "BUILD_LIST",
+          "count": 10,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 7,
+          "pct": 0.0
+        },
+        {
+          "op": "CLOSURE",
+          "count": 5,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 4,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "NIL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "selectRandom",
+          "calls": 80000,
+          "total_ms": 177.012,
+          "self_ms": 125.576,
+          "self_pct": 70.94
+        },
+        {
+          "fn": "benchmark",
+          "calls": 40,
+          "total_ms": 232.725,
+          "self_ms": 55.713,
+          "self_pct": 23.94
+        },
+        {
+          "fn": "nextRandom",
+          "calls": 80000,
+          "total_ms": 51.437,
+          "self_ms": 51.437,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 232.812,
+          "self_ms": 0.05,
+          "self_pct": 0.02
+        },
+        {
+          "fn": "_batch",
+          "calls": 1,
+          "total_ms": 232.758,
+          "self_ms": 0.033,
+          "self_pct": 0.01
+        },
+        {
+          "fn": "init",
+          "calls": 1,
+          "total_ms": 0.004,
+          "self_ms": 0.004,
+          "self_pct": 100.0
+        }
+      ],
+      "gc": {
+        "collections": 0,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "profiled_cpu_ms": 232.811,
+      "exit": 0
+    },
+    {
+      "program": "fib",
+      "total_ops": 12341588,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 2571152,
+          "pct": 20.83
+        },
+        {
+          "op": "CONSTANT",
+          "count": 2056926,
+          "pct": 16.67
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 1028475,
+          "pct": 8.33
+        },
+        {
+          "op": "POP",
+          "count": 1028470,
+          "pct": 8.33
+        },
+        {
+          "op": "CALL",
+          "count": 1028465,
+          "pct": 8.33
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 1028462,
+          "pct": 8.33
+        },
+        {
+          "op": "RETURN",
+          "count": 1028460,
+          "pct": 8.33
+        },
+        {
+          "op": "GREATER",
+          "count": 1028457,
+          "pct": 8.33
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 1028457,
+          "pct": 8.33
+        },
+        {
+          "op": "ADD",
+          "count": 514235,
+          "pct": 4.17
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 8,
+          "pct": 0.0
+        },
+        {
+          "op": "LESS",
+          "count": 5,
+          "pct": 0.0
+        },
+        {
+          "op": "CLOSURE",
+          "count": 3,
+          "pct": 0.0
+        },
+        {
+          "op": "NIL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "LOOP",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "INVOKE",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "fibonacci",
+          "calls": 1028457,
+          "total_ms": 21853.237,
+          "self_ms": 1135.271,
+          "self_pct": 5.19
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 1135.355,
+          "self_ms": 0.078,
+          "self_pct": 0.01
+        },
+        {
+          "fn": "_batch",
+          "calls": 1,
+          "total_ms": 1135.277,
+          "self_ms": 0.003,
+          "self_pct": 0.0
+        },
+        {
+          "fn": "benchmark",
+          "calls": 1,
+          "total_ms": 1135.273,
+          "self_ms": 0.002,
+          "self_pct": 0.0
+        }
+      ],
+      "gc": {
+        "collections": 0,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "profiled_cpu_ms": 1135.354,
+      "exit": 0
+    },
+    {
+      "program": "json",
+      "total_ops": 8112042,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 1805702,
+          "pct": 22.26
+        },
+        {
+          "op": "POP",
+          "count": 1400614,
+          "pct": 17.27
+        },
+        {
+          "op": "CONSTANT",
+          "count": 1199899,
+          "pct": 14.79
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 1095412,
+          "pct": 13.5
+        },
+        {
+          "op": "EQUAL",
+          "count": 969160,
+          "pct": 11.95
+        },
+        {
+          "op": "GET_PROPERTY",
+          "count": 374984,
+          "pct": 4.62
+        },
+        {
+          "op": "INVOKE",
+          "count": 213448,
+          "pct": 2.63
+        },
+        {
+          "op": "RETURN",
+          "count": 177738,
+          "pct": 2.19
+        },
+        {
+          "op": "ADD",
+          "count": 134926,
+          "pct": 1.66
+        },
+        {
+          "op": "LESS",
+          "count": 121284,
+          "pct": 1.5
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 109088,
+          "pct": 1.34
+        },
+        {
+          "op": "NOT",
+          "count": 98584,
+          "pct": 1.22
+        },
+        {
+          "op": "NIL",
+          "count": 81290,
+          "pct": 1.0
+        },
+        {
+          "op": "LOOP",
+          "count": 78065,
+          "pct": 0.96
+        },
+        {
+          "op": "GET_INDEX",
+          "count": 76656,
+          "pct": 0.94
+        },
+        {
+          "op": "SET_PROPERTY",
+          "count": 54248,
+          "pct": 0.67
+        },
+        {
+          "op": "NEGATE",
+          "count": 39688,
+          "pct": 0.49
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 20038,
+          "pct": 0.25
+        },
+        {
+          "op": "CALL",
+          "count": 20024,
+          "pct": 0.25
+        },
+        {
+          "op": "MODULO",
+          "count": 13744,
+          "pct": 0.17
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 10057,
+          "pct": 0.12
+        },
+        {
+          "op": "JUMP",
+          "count": 4936,
+          "pct": 0.06
+        },
+        {
+          "op": "TRUE",
+          "count": 4920,
+          "pct": 0.06
+        },
+        {
+          "op": "BUILD_LIST",
+          "count": 3728,
+          "pct": 0.05
+        },
+        {
+          "op": "SET_INDEX",
+          "count": 3696,
+          "pct": 0.05
+        },
+        {
+          "op": "CLOSURE",
+          "count": 31,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 25,
+          "pct": 0.0
+        },
+        {
+          "op": "FALSE",
+          "count": 24,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 16,
+          "pct": 0.0
+        },
+        {
+          "op": "SLICE",
+          "count": 8,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 5,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "readString",
+          "calls": 7368,
+          "total_ms": 101.474,
+          "self_ms": 55.786,
+          "self_pct": 54.98
+        },
+        {
+          "fn": "current",
+          "calls": 66568,
+          "total_ms": 45.899,
+          "self_ms": 45.899,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "charCode",
+          "calls": 10040,
+          "total_ms": 36.291,
+          "self_ms": 36.291,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "skipWhitespace",
+          "calls": 23416,
+          "total_ms": 47.809,
+          "self_ms": 31.611,
+          "self_pct": 66.12
+        },
+        {
+          "fn": "advance",
+          "calls": 49256,
+          "total_ms": 29.713,
+          "self_ms": 29.713,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "readObject",
+          "calls": 1240,
+          "total_ms": 535.138,
+          "self_ms": 28.747,
+          "self_pct": 5.37
+        },
+        {
+          "fn": "makeJsonInput",
+          "calls": 8,
+          "total_ms": 22.039,
+          "self_ms": 22.039,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "readValue",
+          "calls": 4928,
+          "total_ms": 893.883,
+          "self_ms": 12.693,
+          "self_pct": 1.42
+        },
+        {
+          "fn": "hashOf",
+          "calls": 3704,
+          "total_ms": 47.051,
+          "self_ms": 10.76,
+          "self_pct": 22.87
+        },
+        {
+          "fn": "init",
+          "calls": 1240,
+          "total_ms": 8.206,
+          "self_ms": 8.206,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "add",
+          "calls": 3696,
+          "total_ms": 57.121,
+          "self_ms": 5.852,
+          "self_pct": 10.24
+        },
+        {
+          "fn": "readArray",
+          "calls": 8,
+          "total_ms": 275.307,
+          "self_ms": 4.988,
+          "self_pct": 1.81
+        }
+      ],
+      "gc": {
+        "collections": 47,
+        "total_ms": 2.545,
+        "max_ms": 1.122
+      },
+      "profiled_cpu_ms": 300.312,
+      "exit": 0
+    },
+    {
+      "program": "k_nucleotide",
+      "total_ops": 3838202,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 1439016,
+          "pct": 37.49
+        },
+        {
+          "op": "POP",
+          "count": 539770,
+          "pct": 14.06
+        },
+        {
+          "op": "ADD",
+          "count": 329556,
+          "pct": 8.59
+        },
+        {
+          "op": "CONSTANT",
+          "count": 240341,
+          "pct": 6.26
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 209974,
+          "pct": 5.47
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 149970,
+          "pct": 3.91
+        },
+        {
+          "op": "LOOP",
+          "count": 119941,
+          "pct": 3.12
+        },
+        {
+          "op": "GET_INDEX",
+          "count": 119550,
+          "pct": 3.11
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 90091,
+          "pct": 2.35
+        },
+        {
+          "op": "INVOKE",
+          "count": 90060,
+          "pct": 2.35
+        },
+        {
+          "op": "GREATER",
+          "count": 90000,
+          "pct": 2.34
+        },
+        {
+          "op": "NOT",
+          "count": 90000,
+          "pct": 2.34
+        },
+        {
+          "op": "SLICE",
+          "count": 89910,
+          "pct": 2.34
+        },
+        {
+          "op": "SET_INDEX",
+          "count": 89910,
+          "pct": 2.34
+        },
+        {
+          "op": "JUMP",
+          "count": 89550,
+          "pct": 2.33
+        },
+        {
+          "op": "LESS",
+          "count": 30064,
+          "pct": 0.78
+        },
+        {
+          "op": "MODULO",
+          "count": 30000,
+          "pct": 0.78
+        },
+        {
+          "op": "RETURN",
+          "count": 152,
+          "pct": 0.0
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 108,
+          "pct": 0.0
+        },
+        {
+          "op": "CALL",
+          "count": 98,
+          "pct": 0.0
+        },
+        {
+          "op": "BUILD_MAP",
+          "count": 90,
+          "pct": 0.0
+        },
+        {
+          "op": "BUILD_LIST",
+          "count": 30,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 7,
+          "pct": 0.0
+        },
+        {
+          "op": "CLOSURE",
+          "count": 4,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 3,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "NIL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "makeDNA",
+          "calls": 30,
+          "total_ms": 57.018,
+          "self_ms": 57.018,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "countKmers",
+          "calls": 90,
+          "total_ms": 32.51,
+          "self_ms": 32.51,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "benchmark",
+          "calls": 30,
+          "total_ms": 89.644,
+          "self_ms": 0.117,
+          "self_pct": 0.13
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 89.727,
+          "self_ms": 0.057,
+          "self_pct": 0.06
+        },
+        {
+          "fn": "_batch",
+          "calls": 1,
+          "total_ms": 89.67,
+          "self_ms": 0.026,
+          "self_pct": 0.03
+        }
+      ],
+      "gc": {
+        "collections": 0,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "profiled_cpu_ms": 89.726,
+      "exit": 0
+    },
+    {
+      "program": "list",
+      "total_ops": 10736177,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 2533231,
+          "pct": 23.6
+        },
+        {
+          "op": "POP",
+          "count": 1966511,
+          "pct": 18.32
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 1061629,
+          "pct": 9.89
+        },
+        {
+          "op": "NIL",
+          "count": 991377,
+          "pct": 9.23
+        },
+        {
+          "op": "EQUAL",
+          "count": 991375,
+          "pct": 9.23
+        },
+        {
+          "op": "GET_PROPERTY",
+          "count": 955625,
+          "pct": 8.9
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 902550,
+          "pct": 8.41
+        },
+        {
+          "op": "NOT",
+          "count": 521475,
+          "pct": 4.86
+        },
+        {
+          "op": "LOOP",
+          "count": 451276,
+          "pct": 4.2
+        },
+        {
+          "op": "RETURN",
+          "count": 142352,
+          "pct": 1.33
+        },
+        {
+          "op": "INVOKE",
+          "count": 141575,
+          "pct": 1.32
+        },
+        {
+          "op": "FALSE",
+          "count": 52675,
+          "pct": 0.49
+        },
+        {
+          "op": "TRUE",
+          "count": 17550,
+          "pct": 0.16
+        },
+        {
+          "op": "SET_PROPERTY",
+          "count": 2325,
+          "pct": 0.02
+        },
+        {
+          "op": "CONSTANT",
+          "count": 1986,
+          "pct": 0.02
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 794,
+          "pct": 0.01
+        },
+        {
+          "op": "CALL",
+          "count": 783,
+          "pct": 0.01
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 776,
+          "pct": 0.01
+        },
+        {
+          "op": "ADD",
+          "count": 256,
+          "pct": 0.0
+        },
+        {
+          "op": "LESS",
+          "count": 29,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 8,
+          "pct": 0.0
+        },
+        {
+          "op": "CLOSURE",
+          "count": 7,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 6,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "tail",
+          "calls": 70225,
+          "total_ms": 2307.572,
+          "self_ms": 119.278,
+          "self_pct": 5.17
+        },
+        {
+          "fn": "isShorterThan",
+          "calls": 70225,
+          "total_ms": 110.807,
+          "self_ms": 110.807,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "makeList",
+          "calls": 850,
+          "total_ms": 13.558,
+          "self_ms": 1.552,
+          "self_pct": 11.45
+        },
+        {
+          "fn": "init",
+          "calls": 775,
+          "total_ms": 0.568,
+          "self_ms": 0.568,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "length",
+          "calls": 250,
+          "total_ms": 1.434,
+          "self_ms": 0.272,
+          "self_pct": 18.99
+        },
+        {
+          "fn": "benchmark",
+          "calls": 25,
+          "total_ms": 232.571,
+          "self_ms": 0.094,
+          "self_pct": 0.04
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 232.637,
+          "self_ms": 0.045,
+          "self_pct": 0.02
+        },
+        {
+          "fn": "_batch",
+          "calls": 1,
+          "total_ms": 232.592,
+          "self_ms": 0.021,
+          "self_pct": 0.01
+        }
+      ],
+      "gc": {
+        "collections": 0,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "profiled_cpu_ms": 232.636,
+      "exit": 0
+    },
+    {
+      "program": "mandelbrot",
+      "total_ops": 17850236,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 6098038,
+          "pct": 34.16
+        },
+        {
+          "op": "POP",
+          "count": 2968321,
+          "pct": 16.63
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 2125813,
+          "pct": 11.91
+        },
+        {
+          "op": "CONSTANT",
+          "count": 1514562,
+          "pct": 8.48
+        },
+        {
+          "op": "ADD",
+          "count": 1427794,
+          "pct": 8.0
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 1113492,
+          "pct": 6.24
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 1084568,
+          "pct": 6.08
+        },
+        {
+          "op": "LESS",
+          "count": 380928,
+          "pct": 2.13
+        },
+        {
+          "op": "LOOP",
+          "count": 366404,
+          "pct": 2.05
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 366403,
+          "pct": 2.05
+        },
+        {
+          "op": "GREATER",
+          "count": 351882,
+          "pct": 1.97
+        },
+        {
+          "op": "DIVIDE",
+          "count": 14520,
+          "pct": 0.08
+        },
+        {
+          "op": "TRUE",
+          "count": 14400,
+          "pct": 0.08
+        },
+        {
+          "op": "JUMP",
+          "count": 14400,
+          "pct": 0.08
+        },
+        {
+          "op": "FALSE",
+          "count": 8661,
+          "pct": 0.05
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 18,
+          "pct": 0.0
+        },
+        {
+          "op": "CALL",
+          "count": 8,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 7,
+          "pct": 0.0
+        },
+        {
+          "op": "RETURN",
+          "count": 4,
+          "pct": 0.0
+        },
+        {
+          "op": "CLOSURE",
+          "count": 3,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "INVOKE",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "NIL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "mandelbrot",
+          "calls": 1,
+          "total_ms": 101.253,
+          "self_ms": 101.253,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 101.306,
+          "self_ms": 0.047,
+          "self_pct": 0.05
+        },
+        {
+          "fn": "_batch",
+          "calls": 1,
+          "total_ms": 101.259,
+          "self_ms": 0.003,
+          "self_pct": 0.0
+        },
+        {
+          "fn": "benchmark",
+          "calls": 1,
+          "total_ms": 101.256,
+          "self_ms": 0.003,
+          "self_pct": 0.0
+        }
+      ],
+      "gc": {
+        "collections": 0,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "profiled_cpu_ms": 101.303,
+      "exit": 0
+    },
+    {
+      "program": "nbody",
+      "total_ops": 20041548,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 7728466,
+          "pct": 38.56
+        },
+        {
+          "op": "GET_PROPERTY",
+          "count": 2772173,
+          "pct": 13.83
+        },
+        {
+          "op": "POP",
+          "count": 2532198,
+          "pct": 12.63
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 2100101,
+          "pct": 10.48
+        },
+        {
+          "op": "ADD",
+          "count": 1092082,
+          "pct": 5.45
+        },
+        {
+          "op": "SET_PROPERTY",
+          "count": 900039,
+          "pct": 4.49
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 720044,
+          "pct": 3.59
+        },
+        {
+          "op": "CONSTANT",
+          "count": 348091,
+          "pct": 1.74
+        },
+        {
+          "op": "LESS",
+          "count": 336033,
+          "pct": 1.68
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 336033,
+          "pct": 1.68
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 264052,
+          "pct": 1.32
+        },
+        {
+          "op": "LOOP",
+          "count": 252022,
+          "pct": 1.26
+        },
+        {
+          "op": "GET_INDEX",
+          "count": 240021,
+          "pct": 1.2
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 132071,
+          "pct": 0.66
+        },
+        {
+          "op": "INVOKE",
+          "count": 132013,
+          "pct": 0.66
+        },
+        {
+          "op": "DIVIDE",
+          "count": 120013,
+          "pct": 0.6
+        },
+        {
+          "op": "CALL",
+          "count": 12026,
+          "pct": 0.06
+        },
+        {
+          "op": "RETURN",
+          "count": 12016,
+          "pct": 0.06
+        },
+        {
+          "op": "NIL",
+          "count": 12003,
+          "pct": 0.06
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 16,
+          "pct": 0.0
+        },
+        {
+          "op": "CLOSURE",
+          "count": 12,
+          "pct": 0.0
+        },
+        {
+          "op": "NEGATE",
+          "count": 10,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 6,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 3,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "BUILD_LIST",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "advance",
+          "calls": 12000,
+          "total_ms": 163.755,
+          "self_ms": 163.755,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "benchmark",
+          "calls": 1,
+          "total_ms": 173.097,
+          "self_ms": 9.296,
+          "self_pct": 5.37
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 173.16,
+          "self_ms": 0.06,
+          "self_pct": 0.03
+        },
+        {
+          "fn": "init",
+          "calls": 1,
+          "total_ms": 0.036,
+          "self_ms": 0.017,
+          "self_pct": 47.25
+        },
+        {
+          "fn": "energy",
+          "calls": 1,
+          "total_ms": 0.01,
+          "self_ms": 0.01,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "init",
+          "calls": 5,
+          "total_ms": 0.009,
+          "self_ms": 0.009,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "_batch",
+          "calls": 1,
+          "total_ms": 173.1,
+          "self_ms": 0.002,
+          "self_pct": 0.0
+        },
+        {
+          "fn": "saturn",
+          "calls": 1,
+          "total_ms": 0.005,
+          "self_ms": 0.002,
+          "self_pct": 31.66
+        },
+        {
+          "fn": "sun",
+          "calls": 1,
+          "total_ms": 0.004,
+          "self_ms": 0.002,
+          "self_pct": 47.15
+        },
+        {
+          "fn": "jupiter",
+          "calls": 1,
+          "total_ms": 0.003,
+          "self_ms": 0.002,
+          "self_pct": 60.55
+        },
+        {
+          "fn": "offsetMomentum",
+          "calls": 1,
+          "total_ms": 0.002,
+          "self_ms": 0.002,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "uranus",
+          "calls": 1,
+          "total_ms": 0.002,
+          "self_ms": 0.001,
+          "self_pct": 58.81
+        }
+      ],
+      "gc": {
+        "collections": 0,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "profiled_cpu_ms": 173.16,
+      "exit": 0
+    },
+    {
+      "program": "permute",
+      "total_ops": 13353304,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 4629509,
+          "pct": 34.67
+        },
+        {
+          "op": "POP",
+          "count": 1928937,
+          "pct": 14.45
+        },
+        {
+          "op": "GET_PROPERTY",
+          "count": 1224325,
+          "pct": 9.17
+        },
+        {
+          "op": "CONSTANT",
+          "count": 866187,
+          "pct": 6.49
+        },
+        {
+          "op": "SET_INDEX",
+          "count": 503900,
+          "pct": 3.77
+        },
+        {
+          "op": "GET_INDEX",
+          "count": 503900,
+          "pct": 3.77
+        },
+        {
+          "op": "RETURN",
+          "count": 468478,
+          "pct": 3.51
+        },
+        {
+          "op": "INVOKE",
+          "count": 468475,
+          "pct": 3.51
+        },
+        {
+          "op": "NIL",
+          "count": 468453,
+          "pct": 3.51
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 433004,
+          "pct": 3.24
+        },
+        {
+          "op": "NOT",
+          "count": 432975,
+          "pct": 3.24
+        },
+        {
+          "op": "SET_PROPERTY",
+          "count": 216552,
+          "pct": 1.62
+        },
+        {
+          "op": "ADD",
+          "count": 216531,
+          "pct": 1.62
+        },
+        {
+          "op": "LESS",
+          "count": 216504,
+          "pct": 1.62
+        },
+        {
+          "op": "EQUAL",
+          "count": 216500,
+          "pct": 1.62
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 216476,
+          "pct": 1.62
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 126025,
+          "pct": 0.94
+        },
+        {
+          "op": "LOOP",
+          "count": 126001,
+          "pct": 0.94
+        },
+        {
+          "op": "JUMP",
+          "count": 90500,
+          "pct": 0.68
+        },
+        {
+          "op": "BUILD_LIST",
+          "count": 25,
+          "pct": 0.0
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 18,
+          "pct": 0.0
+        },
+        {
+          "op": "CALL",
+          "count": 8,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 7,
+          "pct": 0.0
+        },
+        {
+          "op": "CLOSURE",
+          "count": 5,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 4,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "permute",
+          "calls": 216500,
+          "total_ms": 3448.896,
+          "self_ms": 448.781,
+          "self_pct": 13.01
+        },
+        {
+          "fn": "swap",
+          "calls": 251950,
+          "total_ms": 170.896,
+          "self_ms": 170.896,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 619.817,
+          "self_ms": 0.071,
+          "self_pct": 0.01
+        },
+        {
+          "fn": "benchmark",
+          "calls": 25,
+          "total_ms": 619.723,
+          "self_ms": 0.046,
+          "self_pct": 0.01
+        },
+        {
+          "fn": "_batch",
+          "calls": 1,
+          "total_ms": 619.744,
+          "self_ms": 0.021,
+          "self_pct": 0.0
+        },
+        {
+          "fn": "init",
+          "calls": 1,
+          "total_ms": 0.001,
+          "self_ms": 0.001,
+          "self_pct": 100.0
+        }
+      ],
+      "gc": {
+        "collections": 0,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "profiled_cpu_ms": 619.816,
+      "exit": 0
+    },
+    {
+      "program": "queens",
+      "total_ops": 14006676,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 4677851,
+          "pct": 33.4
+        },
+        {
+          "op": "POP",
+          "count": 1807774,
+          "pct": 12.91
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 1318484,
+          "pct": 9.41
+        },
+        {
+          "op": "CONSTANT",
+          "count": 1062531,
+          "pct": 7.59
+        },
+        {
+          "op": "GET_PROPERTY",
+          "count": 887600,
+          "pct": 6.34
+        },
+        {
+          "op": "ADD",
+          "count": 797246,
+          "pct": 5.69
+        },
+        {
+          "op": "GET_INDEX",
+          "count": 580800,
+          "pct": 4.15
+        },
+        {
+          "op": "RETURN",
+          "count": 483243,
+          "pct": 3.45
+        },
+        {
+          "op": "INVOKE",
+          "count": 483240,
+          "pct": 3.45
+        },
+        {
+          "op": "LESS",
+          "count": 392884,
+          "pct": 2.8
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 348080,
+          "pct": 2.49
+        },
+        {
+          "op": "LOOP",
+          "count": 347641,
+          "pct": 2.48
+        },
+        {
+          "op": "SET_INDEX",
+          "count": 306800,
+          "pct": 2.19
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 183201,
+          "pct": 1.31
+        },
+        {
+          "op": "NIL",
+          "count": 87206,
+          "pct": 0.62
+        },
+        {
+          "op": "FALSE",
+          "count": 87200,
+          "pct": 0.62
+        },
+        {
+          "op": "TRUE",
+          "count": 61240,
+          "pct": 0.44
+        },
+        {
+          "op": "EQUAL",
+          "count": 45200,
+          "pct": 0.32
+        },
+        {
+          "op": "JUMP",
+          "count": 42000,
+          "pct": 0.3
+        },
+        {
+          "op": "NEGATE",
+          "count": 3200,
+          "pct": 0.02
+        },
+        {
+          "op": "SET_PROPERTY",
+          "count": 1604,
+          "pct": 0.01
+        },
+        {
+          "op": "BUILD_LIST",
+          "count": 1600,
+          "pct": 0.01
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 18,
+          "pct": 0.0
+        },
+        {
+          "op": "CALL",
+          "count": 8,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 7,
+          "pct": 0.0
+        },
+        {
+          "op": "CLOSURE",
+          "count": 7,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 6,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "placeQueen",
+          "calls": 45200,
+          "total_ms": 3547.906,
+          "self_ms": 354.003,
+          "self_pct": 9.98
+        },
+        {
+          "fn": "getRowColumn",
+          "calls": 350400,
+          "total_ms": 209.505,
+          "self_ms": 209.505,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "setRowColumn",
+          "calls": 87200,
+          "total_ms": 59.093,
+          "self_ms": 59.093,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "queens",
+          "calls": 400,
+          "total_ms": 623.953,
+          "self_ms": 1.351,
+          "self_pct": 0.22
+        },
+        {
+          "fn": "benchmark",
+          "calls": 40,
+          "total_ms": 624.262,
+          "self_ms": 0.309,
+          "self_pct": 0.05
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 624.361,
+          "self_ms": 0.065,
+          "self_pct": 0.01
+        },
+        {
+          "fn": "_batch",
+          "calls": 1,
+          "total_ms": 624.295,
+          "self_ms": 0.033,
+          "self_pct": 0.01
+        },
+        {
+          "fn": "init",
+          "calls": 1,
+          "total_ms": 0.001,
+          "self_ms": 0.001,
+          "self_pct": 100.0
+        }
+      ],
+      "gc": {
+        "collections": 0,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "profiled_cpu_ms": 624.361,
+      "exit": 0
+    },
+    {
+      "program": "reverse_complement",
+      "total_ops": 1666714,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 435456,
+          "pct": 26.13
+        },
+        {
+          "op": "POP",
+          "count": 255160,
+          "pct": 15.31
+        },
+        {
+          "op": "CONSTANT",
+          "count": 225341,
+          "pct": 13.52
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 135094,
+          "pct": 8.11
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 120060,
+          "pct": 7.2
+        },
+        {
+          "op": "ADD",
+          "count": 90036,
+          "pct": 5.4
+        },
+        {
+          "op": "EQUAL",
+          "count": 75000,
+          "pct": 4.5
+        },
+        {
+          "op": "LESS",
+          "count": 60094,
+          "pct": 3.61
+        },
+        {
+          "op": "LOOP",
+          "count": 60031,
+          "pct": 3.6
+        },
+        {
+          "op": "GET_INDEX",
+          "count": 60000,
+          "pct": 3.6
+        },
+        {
+          "op": "RETURN",
+          "count": 30092,
+          "pct": 1.81
+        },
+        {
+          "op": "INVOKE",
+          "count": 30090,
+          "pct": 1.81
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 30031,
+          "pct": 1.8
+        },
+        {
+          "op": "NOT",
+          "count": 30030,
+          "pct": 1.8
+        },
+        {
+          "op": "MODULO",
+          "count": 30000,
+          "pct": 1.8
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 78,
+          "pct": 0.0
+        },
+        {
+          "op": "CALL",
+          "count": 68,
+          "pct": 0.0
+        },
+        {
+          "op": "BUILD_LIST",
+          "count": 30,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 7,
+          "pct": 0.0
+        },
+        {
+          "op": "CLOSURE",
+          "count": 5,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 4,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "NIL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "reverseComplement",
+          "calls": 30,
+          "total_ms": 90.536,
+          "self_ms": 71.916,
+          "self_pct": 79.43
+        },
+        {
+          "fn": "makeDNA",
+          "calls": 30,
+          "total_ms": 57.171,
+          "self_ms": 57.171,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "complement",
+          "calls": 30000,
+          "total_ms": 18.62,
+          "self_ms": 18.62,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "benchmark",
+          "calls": 30,
+          "total_ms": 147.773,
+          "self_ms": 0.066,
+          "self_pct": 0.04
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 147.861,
+          "self_ms": 0.06,
+          "self_pct": 0.04
+        },
+        {
+          "fn": "_batch",
+          "calls": 1,
+          "total_ms": 147.8,
+          "self_ms": 0.027,
+          "self_pct": 0.02
+        }
+      ],
+      "gc": {
+        "collections": 0,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "profiled_cpu_ms": 147.86,
+      "exit": 0
+    },
+    {
+      "program": "richards",
+      "total_ops": 25987905,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 6235386,
+          "pct": 23.99
+        },
+        {
+          "op": "POP",
+          "count": 3994067,
+          "pct": 15.37
+        },
+        {
+          "op": "CONSTANT",
+          "count": 2471466,
+          "pct": 9.51
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 1753465,
+          "pct": 6.75
+        },
+        {
+          "op": "GET_PROPERTY",
+          "count": 1514955,
+          "pct": 5.83
+        },
+        {
+          "op": "INVOKE",
+          "count": 1243707,
+          "pct": 4.79
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 1198794,
+          "pct": 4.61
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 1056411,
+          "pct": 4.07
+        },
+        {
+          "op": "DIVIDE",
+          "count": 928557,
+          "pct": 3.57
+        },
+        {
+          "op": "MODULO",
+          "count": 928557,
+          "pct": 3.57
+        },
+        {
+          "op": "NOT",
+          "count": 779244,
+          "pct": 3.0
+        },
+        {
+          "op": "EQUAL",
+          "count": 704265,
+          "pct": 2.71
+        },
+        {
+          "op": "LOOP",
+          "count": 614263,
+          "pct": 2.36
+        },
+        {
+          "op": "ADD",
+          "count": 577119,
+          "pct": 2.22
+        },
+        {
+          "op": "LESS",
+          "count": 464263,
+          "pct": 1.79
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 449281,
+          "pct": 1.73
+        },
+        {
+          "op": "RETURN",
+          "count": 330245,
+          "pct": 1.27
+        },
+        {
+          "op": "SET_PROPERTY",
+          "count": 285477,
+          "pct": 1.1
+        },
+        {
+          "op": "JUMP",
+          "count": 262803,
+          "pct": 1.01
+        },
+        {
+          "op": "NIL",
+          "count": 60160,
+          "pct": 0.23
+        },
+        {
+          "op": "FALSE",
+          "count": 30090,
+          "pct": 0.12
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 30001,
+          "pct": 0.12
+        },
+        {
+          "op": "GET_INDEX",
+          "count": 29997,
+          "pct": 0.12
+        },
+        {
+          "op": "GREATER",
+          "count": 29997,
+          "pct": 0.12
+        },
+        {
+          "op": "CALL",
+          "count": 15107,
+          "pct": 0.06
+        },
+        {
+          "op": "CLOSURE",
+          "count": 52,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 47,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 37,
+          "pct": 0.0
+        },
+        {
+          "op": "BUILD_LIST",
+          "count": 27,
+          "pct": 0.0
+        },
+        {
+          "op": "TRUE",
+          "count": 18,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_INDEX",
+          "count": 18,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 15,
+          "pct": 0.0
+        },
+        {
+          "op": "INHERIT",
+          "count": 8,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 4,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "bitwiseXor",
+          "calls": 14976,
+          "total_ms": 165.47,
+          "self_ms": 165.47,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "schedule",
+          "calls": 3,
+          "total_ms": 582.406,
+          "self_ms": 145.034,
+          "self_pct": 24.9
+        },
+        {
+          "fn": "isTaskHoldingOrWaiting",
+          "calls": 164979,
+          "total_ms": 96.596,
+          "self_ms": 96.596,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "run",
+          "calls": 30000,
+          "total_ms": 273.853,
+          "self_ms": 52.92,
+          "self_pct": 19.32
+        },
+        {
+          "fn": "runTask",
+          "calls": 30000,
+          "total_ms": 340.776,
+          "self_ms": 51.59,
+          "self_pct": 15.14
+        },
+        {
+          "fn": "releaseTask",
+          "calls": 29997,
+          "total_ms": 55.455,
+          "self_ms": 39.933,
+          "self_pct": 72.01
+        },
+        {
+          "fn": "setTaskHolding",
+          "calls": 30018,
+          "total_ms": 15.542,
+          "self_ms": 15.542,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "isWaitingWithPacket",
+          "calls": 30000,
+          "total_ms": 15.333,
+          "self_ms": 15.333,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "init",
+          "calls": 18,
+          "total_ms": 0.164,
+          "self_ms": 0.097,
+          "self_pct": 58.86
+        },
+        {
+          "fn": "benchmark",
+          "calls": 3,
+          "total_ms": 582.93,
+          "self_ms": 0.069,
+          "self_pct": 0.01
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 582.992,
+          "self_ms": 0.056,
+          "self_pct": 0.01
+        },
+        {
+          "fn": "start",
+          "calls": 3,
+          "total_ms": 582.853,
+          "self_ms": 0.045,
+          "self_pct": 0.01
+        }
+      ],
+      "gc": {
+        "collections": 0,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "profiled_cpu_ms": 582.992,
+      "exit": 0
+    },
+    {
+      "program": "sieve",
+      "total_ops": 17105538,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 5737306,
+          "pct": 33.54
+        },
+        {
+          "op": "POP",
+          "count": 3260410,
+          "pct": 19.06
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 1336754,
+          "pct": 7.81
+        },
+        {
+          "op": "ADD",
+          "count": 1120206,
+          "pct": 6.55
+        },
+        {
+          "op": "LESS",
+          "count": 1086854,
+          "pct": 6.35
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 1086850,
+          "pct": 6.35
+        },
+        {
+          "op": "LOOP",
+          "count": 1053301,
+          "pct": 6.16
+        },
+        {
+          "op": "SET_INDEX",
+          "count": 553350,
+          "pct": 3.23
+        },
+        {
+          "op": "FALSE",
+          "count": 553350,
+          "pct": 3.23
+        },
+        {
+          "op": "CONSTANT",
+          "count": 533611,
+          "pct": 3.12
+        },
+        {
+          "op": "INVOKE",
+          "count": 250050,
+          "pct": 1.46
+        },
+        {
+          "op": "TRUE",
+          "count": 250000,
+          "pct": 1.46
+        },
+        {
+          "op": "GET_INDEX",
+          "count": 249900,
+          "pct": 1.46
+        },
+        {
+          "op": "JUMP",
+          "count": 33450,
+          "pct": 0.2
+        },
+        {
+          "op": "RETURN",
+          "count": 52,
+          "pct": 0.0
+        },
+        {
+          "op": "BUILD_LIST",
+          "count": 50,
+          "pct": 0.0
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 18,
+          "pct": 0.0
+        },
+        {
+          "op": "CALL",
+          "count": 8,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 7,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "CLOSURE",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "NIL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "benchmark",
+          "calls": 50,
+          "total_ms": 103.764,
+          "self_ms": 103.764,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 103.867,
+          "self_ms": 0.054,
+          "self_pct": 0.05
+        },
+        {
+          "fn": "_batch",
+          "calls": 1,
+          "total_ms": 103.812,
+          "self_ms": 0.048,
+          "self_pct": 0.05
+        }
+      ],
+      "gc": {
+        "collections": 18,
+        "total_ms": 0.395,
+        "max_ms": 0.074
+      },
+      "profiled_cpu_ms": 103.865,
+      "exit": 0
+    },
+    {
+      "program": "spectral_norm",
+      "total_ops": 17737917,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 6838038,
+          "pct": 38.55
+        },
+        {
+          "op": "ADD",
+          "count": 2408417,
+          "pct": 13.58
+        },
+        {
+          "op": "CONSTANT",
+          "count": 2016419,
+          "pct": 11.37
+        },
+        {
+          "op": "POP",
+          "count": 1228878,
+          "pct": 6.93
+        },
+        {
+          "op": "GET_INDEX",
+          "count": 800400,
+          "pct": 4.51
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 800201,
+          "pct": 4.51
+        },
+        {
+          "op": "DIVIDE",
+          "count": 800001,
+          "pct": 4.51
+        },
+        {
+          "op": "LESS",
+          "count": 412298,
+          "pct": 2.32
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 412298,
+          "pct": 2.32
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 408474,
+          "pct": 2.3
+        },
+        {
+          "op": "LOOP",
+          "count": 408212,
+          "pct": 2.3
+        },
+        {
+          "op": "INVOKE",
+          "count": 404143,
+          "pct": 2.28
+        },
+        {
+          "op": "RETURN",
+          "count": 400044,
+          "pct": 2.26
+        },
+        {
+          "op": "SET_INDEX",
+          "count": 400000,
+          "pct": 2.26
+        },
+        {
+          "op": "BUILD_LIST",
+          "count": 41,
+          "pct": 0.0
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 19,
+          "pct": 0.0
+        },
+        {
+          "op": "CALL",
+          "count": 8,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 7,
+          "pct": 0.0
+        },
+        {
+          "op": "CLOSURE",
+          "count": 6,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 5,
+          "pct": 0.0
+        },
+        {
+          "op": "NIL",
+          "count": 3,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "a",
+          "calls": 400000,
+          "total_ms": 238.167,
+          "self_ms": 238.167,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "mulAtv",
+          "calls": 20,
+          "total_ms": 282.244,
+          "self_ms": 163.062,
+          "self_pct": 57.77
+        },
+        {
+          "fn": "mulAv",
+          "calls": 20,
+          "total_ms": 282.036,
+          "self_ms": 163.051,
+          "self_pct": 57.81
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 564.417,
+          "self_ms": 0.067,
+          "self_pct": 0.01
+        },
+        {
+          "fn": "spectralNorm",
+          "calls": 1,
+          "total_ms": 564.346,
+          "self_ms": 0.066,
+          "self_pct": 0.01
+        },
+        {
+          "fn": "_batch",
+          "calls": 1,
+          "total_ms": 564.351,
+          "self_ms": 0.003,
+          "self_pct": 0.0
+        },
+        {
+          "fn": "benchmark",
+          "calls": 1,
+          "total_ms": 564.348,
+          "self_ms": 0.002,
+          "self_pct": 0.0
+        }
+      ],
+      "gc": {
+        "collections": 0,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "profiled_cpu_ms": 564.417,
+      "exit": 0
+    },
+    {
+      "program": "storage",
+      "total_ops": 5137194,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 1361888,
+          "pct": 26.51
+        },
+        {
+          "op": "POP",
+          "count": 833012,
+          "pct": 16.22
+        },
+        {
+          "op": "CONSTANT",
+          "count": 795628,
+          "pct": 15.49
+        },
+        {
+          "op": "ADD",
+          "count": 332278,
+          "pct": 6.47
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 310428,
+          "pct": 6.04
+        },
+        {
+          "op": "INVOKE",
+          "count": 299504,
+          "pct": 5.83
+        },
+        {
+          "op": "LESS",
+          "count": 266740,
+          "pct": 5.19
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 223056,
+          "pct": 4.34
+        },
+        {
+          "op": "LOOP",
+          "count": 223049,
+          "pct": 4.34
+        },
+        {
+          "op": "GET_PROPERTY",
+          "count": 109232,
+          "pct": 2.13
+        },
+        {
+          "op": "RETURN",
+          "count": 76475,
+          "pct": 1.49
+        },
+        {
+          "op": "SET_PROPERTY",
+          "count": 76473,
+          "pct": 1.49
+        },
+        {
+          "op": "MODULO",
+          "count": 65536,
+          "pct": 1.28
+        },
+        {
+          "op": "EQUAL",
+          "count": 43688,
+          "pct": 0.85
+        },
+        {
+          "op": "BUILD_LIST",
+          "count": 43688,
+          "pct": 0.85
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 43681,
+          "pct": 0.85
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 32769,
+          "pct": 0.64
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 27,
+          "pct": 0.0
+        },
+        {
+          "op": "CALL",
+          "count": 16,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 8,
+          "pct": 0.0
+        },
+        {
+          "op": "CLOSURE",
+          "count": 6,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 5,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "NIL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "buildTreeDepth",
+          "calls": 43688,
+          "total_ms": 1349.353,
+          "self_ms": 180.245,
+          "self_pct": 13.36
+        },
+        {
+          "fn": "next",
+          "calls": 32768,
+          "total_ms": 20.464,
+          "self_ms": 20.464,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 201.19,
+          "self_ms": 0.439,
+          "self_pct": 0.22
+        },
+        {
+          "fn": "benchmark",
+          "calls": 8,
+          "total_ms": 200.738,
+          "self_ms": 0.021,
+          "self_pct": 0.01
+        },
+        {
+          "fn": "_batch",
+          "calls": 1,
+          "total_ms": 200.75,
+          "self_ms": 0.011,
+          "self_pct": 0.01
+        },
+        {
+          "fn": "init",
+          "calls": 8,
+          "total_ms": 0.007,
+          "self_ms": 0.007,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "init",
+          "calls": 1,
+          "total_ms": 0.001,
+          "self_ms": 0.001,
+          "self_pct": 100.0
+        }
+      ],
+      "gc": {
+        "collections": 12,
+        "total_ms": 65.465,
+        "max_ms": 14.238
+      },
+      "profiled_cpu_ms": 201.19,
+      "exit": 0
+    },
+    {
+      "program": "towers",
+      "total_ops": 10755349,
+      "opcodes": [
+        {
+          "op": "GET_LOCAL",
+          "count": 3634269,
+          "pct": 33.79
+        },
+        {
+          "op": "POP",
+          "count": 982825,
+          "pct": 9.14
+        },
+        {
+          "op": "CONSTANT",
+          "count": 834708,
+          "pct": 7.76
+        },
+        {
+          "op": "GET_PROPERTY",
+          "count": 685656,
+          "pct": 6.38
+        },
+        {
+          "op": "INVOKE",
+          "count": 590280,
+          "pct": 5.49
+        },
+        {
+          "op": "RETURN",
+          "count": 491991,
+          "pct": 4.57
+        },
+        {
+          "op": "GET_INDEX",
+          "count": 490428,
+          "pct": 4.56
+        },
+        {
+          "op": "SUBTRACT",
+          "count": 490237,
+          "pct": 4.56
+        },
+        {
+          "op": "NIL",
+          "count": 395057,
+          "pct": 3.67
+        },
+        {
+          "op": "JUMP_IF_FALSE",
+          "count": 393868,
+          "pct": 3.66
+        },
+        {
+          "op": "GET_GLOBAL",
+          "count": 392155,
+          "pct": 3.65
+        },
+        {
+          "op": "CALL",
+          "count": 392144,
+          "pct": 3.65
+        },
+        {
+          "op": "EQUAL",
+          "count": 295212,
+          "pct": 2.74
+        },
+        {
+          "op": "NOT",
+          "count": 195564,
+          "pct": 1.82
+        },
+        {
+          "op": "SET_PROPERTY",
+          "count": 98486,
+          "pct": 0.92
+        },
+        {
+          "op": "ADD",
+          "count": 98310,
+          "pct": 0.91
+        },
+        {
+          "op": "SET_INDEX",
+          "count": 98292,
+          "pct": 0.91
+        },
+        {
+          "op": "SLICE",
+          "count": 98292,
+          "pct": 0.91
+        },
+        {
+          "op": "LESS",
+          "count": 97120,
+          "pct": 0.9
+        },
+        {
+          "op": "SET_LOCAL",
+          "count": 192,
+          "pct": 0.0
+        },
+        {
+          "op": "LOOP",
+          "count": 181,
+          "pct": 0.0
+        },
+        {
+          "op": "BUILD_LIST",
+          "count": 49,
+          "pct": 0.0
+        },
+        {
+          "op": "CLOSURE",
+          "count": 10,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_METHOD",
+          "count": 9,
+          "pct": 0.0
+        },
+        {
+          "op": "DEFINE_GLOBAL",
+          "count": 8,
+          "pct": 0.0
+        },
+        {
+          "op": "CLASS",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "SET_GLOBAL",
+          "count": 2,
+          "pct": 0.0
+        },
+        {
+          "op": "PRINT",
+          "count": 1,
+          "pct": 0.0
+        },
+        {
+          "op": "MULTIPLY",
+          "count": 1,
+          "pct": 0.0
+        }
+      ],
+      "functions": [
+        {
+          "fn": "moveDisks",
+          "calls": 98292,
+          "total_ms": 7960.694,
+          "self_ms": 181.985,
+          "self_pct": 2.29
+        },
+        {
+          "fn": "moveTopDisk",
+          "calls": 98292,
+          "total_ms": 487.265,
+          "self_ms": 175.228,
+          "self_pct": 35.96
+        },
+        {
+          "fn": "pushDisk",
+          "calls": 98460,
+          "total_ms": 202.163,
+          "self_ms": 135.429,
+          "self_pct": 66.99
+        },
+        {
+          "fn": "popDisk",
+          "calls": 98292,
+          "total_ms": 110.226,
+          "self_ms": 110.226,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "topDisk",
+          "calls": 98460,
+          "total_ms": 66.734,
+          "self_ms": 66.734,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "buildTowerAt",
+          "calls": 12,
+          "total_ms": 0.748,
+          "self_ms": 0.262,
+          "self_pct": 35.02
+        },
+        {
+          "fn": "init",
+          "calls": 168,
+          "total_ms": 0.134,
+          "self_ms": 0.134,
+          "self_pct": 100.0
+        },
+        {
+          "fn": "benchmark",
+          "calls": 12,
+          "total_ms": 670.103,
+          "self_ms": 0.105,
+          "self_pct": 0.02
+        },
+        {
+          "fn": "<script>",
+          "calls": 1,
+          "total_ms": 670.207,
+          "self_ms": 0.087,
+          "self_pct": 0.01
+        },
+        {
+          "fn": "_batch",
+          "calls": 1,
+          "total_ms": 670.117,
+          "self_ms": 0.014,
+          "self_pct": 0.0
+        },
+        {
+          "fn": "init",
+          "calls": 1,
+          "total_ms": 0.002,
+          "self_ms": 0.002,
+          "self_pct": 100.0
+        }
+      ],
+      "gc": {
+        "collections": 541,
+        "total_ms": 26.254,
+        "max_ms": 17.802
+      },
+      "profiled_cpu_ms": 670.206,
+      "exit": 0
+    }
+  ],
+  "aggregate": {
+    "GET_LOCAL": 61710397,
+    "POP": 27724915,
+    "CONSTANT": 16406433,
+    "JUMP_IF_FALSE": 12632769,
+    "GET_PROPERTY": 10301676,
+    "ADD": 10080308,
+    "SET_LOCAL": 6337100,
+    "MULTIPLY": 5610261,
+    "INVOKE": 4850293,
+    "LESS": 4620239,
+    "LOOP": 4473875,
+    "RETURN": 4374012,
+    "GET_INDEX": 3896692,
+    "EQUAL": 3612108,
+    "GET_GLOBAL": 3459226,
+    "SUBTRACT": 3361318,
+    "SET_PROPERTY": 2396545,
+    "NIL": 2368637,
+    "NOT": 2365397,
+    "CALL": 2112553,
+    "GREATER": 2017861,
+    "SET_INDEX": 1955966,
+    "DIVIDE": 1943091,
+    "MODULO": 1171837,
+    "FALSE": 882000,
+    "JUMP": 620349,
+    "TRUE": 390908,
+    "SLICE": 188210,
+    "BUILD_LIST": 49309,
+    "NEGATE": 42898,
+    "DEFINE_GLOBAL": 175,
+    "CLOSURE": 169,
+    "DEFINE_METHOD": 136,
+    "BUILD_MAP": 90,
+    "CLASS": 43,
+    "SET_GLOBAL": 34,
+    "PRINT": 20,
+    "INHERIT": 8
+  }
+}
