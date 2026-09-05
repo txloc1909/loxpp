@@ -21,8 +21,7 @@ moved here unchanged except for stripping each file's ad-hoc timing footer —
 * In the generated suite: `fasta`, `k_nucleotide`, `reverse_complement`,
   `spectral_norm`, `binary_trees`.
 * Ported but excluded from the suite: `fannkuch` — `fannkuch(7)` does not
-  terminate on the native VM (`benchmarks/generate.py`'s `EXCLUDED`,
-  `notes/benchmark_report_2026-06-08.md`).
+  terminate on the native VM (`benchmarks/generate.py`'s `EXCLUDED`).
 * These are re-implementations of the published algorithms, not copies of a
   specific licensed entry.
 
@@ -37,6 +36,6 @@ moved here unchanged except for stripping each file's ad-hoc timing footer —
 ## Not ported
 
 The reference C VM (`clox`) and the other-language AWFY entries
-(Python / Lua / Node) that `benchmark_report_2026-06-08.md` used are **not**
+(Python / Lua / Node) an earlier, native-only benchmark pass used are **not**
 part of this suite: its question is native VM vs JVM vs CLR back end, all
 three fed the same Lox++ source.

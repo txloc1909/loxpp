@@ -52,8 +52,9 @@ CONFIG = {
 # check_coverage() below) but is deliberately left out of it. Listed here so
 # the gap in CONFIG is documented, not silent.
 EXCLUDED = {
-    # fannkuch(7) does not terminate on the native VM — see
-    # notes/benchmark_report_2026-06-08.md. Including it would hang run.py.
+    # fannkuch(7) does not terminate on the native VM (confirmed with
+    # `timeout 30 build/loxpp core/fannkuch.lox` — no output, no exit).
+    # Including it would hang run.py.
     "fannkuch": "does not terminate on the native VM",
     # AWFY macro benchmarks and Wren-suite ports: not yet tuned into CONFIG
     # (REPS/warm-up calibration, checksum cross-check against the other two
