@@ -11,10 +11,29 @@ public final class LoxNative implements LoxCallable {
     public final int arity; // -1 = variadic, matching ObjNative::arity
     private final Fn fn;
 
+    /**
+     * Non-null only for a Map/File method value obtained through plain
+     * property access (see {@link LoxMap#getMethod} / {@link
+     * LoxFile#getMethod}) — the object the method is bound to, mirroring
+     * src/exec_objects.h's {@code ObjBoundNative::receiver}. Every other
+     * native, including a math field such as {@code math.abs}, which
+     * src/stdlib/math_module.cpp stores as a plain unbound native, leaves
+     * this null. LoxRuntime's reflection {@code type()} is the only reader:
+     * it is what tells a bound Map/File method (type "BoundMethod") apart
+     * from an ordinary native (type "Function") when both are instances of
+     * this same class.
+     */
+    public final Object receiver;
+
     public LoxNative(String name, int arity, Fn fn) {
+        this(name, arity, fn, null);
+    }
+
+    public LoxNative(String name, int arity, Fn fn, Object receiver) {
         this.name = name;
         this.arity = arity;
         this.fn = fn;
+        this.receiver = receiver;
     }
 
     @Override
