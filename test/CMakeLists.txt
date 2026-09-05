@@ -44,6 +44,7 @@ set(FULL_SRCS
     ${PROJECT_SOURCE_DIR}/src/stdlib/map_api.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/math_module.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/os_api.cpp
+    ${PROJECT_SOURCE_DIR}/src/stdlib/reflect_api.cpp
 )
 
 add_executable(test_main test_main.cpp)
