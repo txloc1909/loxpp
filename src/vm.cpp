@@ -14,6 +14,7 @@
 #include "stdlib/map_api.h"
 #include "stdlib/math_module.h"
 #include "stdlib/os_api.h"
+#include "stdlib/reflect_api.h"
 
 #include <cmath>
 #include <cstddef>
@@ -1174,6 +1175,7 @@ void VM::defineNatives() {
     m_mapClass = registerMapAPI(reg);
     registerMath(reg);
     registerOSAPI(reg, m_mapClass);
+    registerReflectAPI(reg);
 }
 
 void VM::runtimeError(const char* format, ...) {
