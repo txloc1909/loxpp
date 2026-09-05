@@ -8,9 +8,12 @@
 
 #include <string>
 
-// type(x) groups ObjType the same way object.cpp's stringifyObj does: closures
-// and natives are both "Function", bound methods and bound natives are both
-// "BoundMethod" — the NATIVE/CLOSURE/BOUND_NATIVE split is a C++
+// type(x) switches over the same ObjType enum object.cpp's stringifyObj does,
+// but groups differently: stringifyObj distinguishes "<fn name>" (CLOSURE,
+// BOUND_METHOD) from "<native fn>" (NATIVE, BOUND_NATIVE) since that split is
+// visible in printed output. type() collapses across it — closures and
+// natives are both "Function", bound methods and bound natives are both
+// "BoundMethod" — because the NATIVE/CLOSURE/BOUND_NATIVE split is a C++
 // implementation detail, not part of the language's type vocabulary
 // (spec/03-types.md has one Function heading and one BoundMethod heading).
 static const char* typeNameOf(Obj* obj) {
@@ -215,12 +218,16 @@ static Value callMethodNative(int argCount, Value* argv) {
         }
         return native->function(forwardedCount, forwarded);
     }
-    if (isClosure(callee) || isBoundMethod(callee)) {
+    if (isClosure(callee) || isBoundMethod(callee) || isClass(callee) ||
+        isEnumCtor(callee)) {
+        // Class and enum-constructor values are callable via `()`, but
+        // callMethod supports natives only — same restriction as
+        // closures/bound methods, not the "not callable at all" case below.
         nativeRuntimeError(
             "callMethod does not support user-defined methods yet.");
         return from<Nil>(Nil{});
     }
-    nativeRuntimeError("Can only call functions, classes and enums.");
+    nativeRuntimeError("callMethod requires a callable value.");
     return from<Nil>(Nil{});
 }
 

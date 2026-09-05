@@ -246,6 +246,11 @@ these values — it does not distinguish a native function from a user-defined
 one, or a bound method backed by a native from one backed by a user-defined
 method; both count as `Function` and `BoundMethod` respectively.
 
+No Lox++ program can currently obtain an Iterator value directly — `for-in`
+consumes one internally, but never exposes it as a variable's value. The
+`"Iterator"` row exists for completeness of the runtime's type space, not as
+a promise that a program can produce one to pass to `type()` today.
+
 ```lox
 print type(1);          // Number
 print type("hi");       // String
@@ -355,9 +360,10 @@ is called.
 
 **Restriction (v1):** `callMethod` only supports calling a native function —
 a stdlib function, a bound native method (such as a Map or File method), or a
-value stored in a field that holds one of these. Calling a method backed by a
-user-defined function (declared with `fun` inside a `class` body, or a
-closure stored in a field) is a **runtime error**
+value stored in a field that holds one of these. Calling anything else —
+a method backed by a user-defined function (declared with `fun` inside a
+`class` body, or a closure stored in a field), or a Class or Enum constructor
+value stored in a field — is a **runtime error**
 ("callMethod does not support user-defined methods yet."). This restriction
 applies identically across all execution targets (native, JVM, CLR).
 
