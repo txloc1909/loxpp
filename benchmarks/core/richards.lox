@@ -74,7 +74,7 @@ class TaskState < RBObject {
   }
 
   isTaskHoldingOrWaiting() {
-    return this.taskHolding_ or (!this.packetPending_ and this.taskWaiting_);
+    return this.taskHolding_ or (this.input == NO_WORK and this.taskWaiting_);
   }
 
   isWaitingWithPacket() {
@@ -128,19 +128,18 @@ class TaskControlBlock < TaskState {
   }
 
   addInputAndCheckPriority(packet, oldTask) {
-    if (this.input == NO_WORK) {
-      this.input = packet;
+    var wasEmpty = (this.input == NO_WORK);
+    this.input = this.append(packet, this.input);
+    if (wasEmpty) {
       this.setPacketPending(true);
       if (this.priority > oldTask.priority) return this;
-    } else {
-      this.input = this.append(packet, this.input);
     }
     return oldTask;
   }
 
   runTask() {
     var message;
-    if (this.isWaitingWithPacket()) {
+    if (this.input != NO_WORK) {
       message    = this.input;
       this.input = message.link;
       if (this.input == NO_WORK) {
@@ -346,7 +345,7 @@ class Scheduler < RBObject {
     var data = WorkerTaskDataRecord();
     var fn   = WorkerTask();
     fn.scheduler = this;
-    this.addTask(identity, priority, workQueue, createWaiting(), fn, data);
+    this.addTask(identity, priority, workQueue, createWaitingWithPacket(), fn, data);
   }
 
   addHandlerTask(identity, priority, workQueue) {
@@ -358,7 +357,7 @@ class Scheduler < RBObject {
       fn = HandlerBTask();
     }
     fn.scheduler = this;
-    this.addTask(identity, priority, workQueue, createWaiting(), fn, data);
+    this.addTask(identity, priority, workQueue, createWaitingWithPacket(), fn, data);
   }
 
   addDeviceTask(identity, priority, workQueue) {
