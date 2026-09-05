@@ -48,7 +48,9 @@ InterpretResult VM::interpret(const std::string& source) {
     ObjClosure* closure = m_mm.create<ObjClosure>(fn);
     stackTop[-1] = Value{
         static_cast<Obj*>(closure)}; // replace fn with its closure in-place
-    call(closure, 0);
+    if (!call(closure, 0)) {
+        return InterpretResult::RUNTIME_ERROR;
+    }
 #ifdef LOXPP_PROFILE
     // Count the implicit script call so Op::CALL and Op::RETURN stay balanced.
     m_profilerData.opcodeTable[static_cast<uint8_t>(Op::CALL)].count++;
