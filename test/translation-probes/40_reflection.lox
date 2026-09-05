@@ -1,0 +1,39 @@
+// Reflection introspection natives (src/stdlib/reflect_api.cpp /
+// LoxRuntime.{java,cs} registerReflection). A program using them must print
+// byte-identically on native, JVM, and CLR, or the differential suite
+// (tools/diff_runtimes.py) DIVERGEs. fields()/methods() are single-element
+// here so their unspecified iteration order cannot cause a false divergence.
+
+class Animal {
+    speak() { return "..."; }
+}
+var a = Animal();
+a.name = "Rex";
+
+print type(1);
+print type("hi");
+print type(nil);
+print type(true);
+print type(Animal);
+print type(a);
+print type(clock);
+print type(a.speak);
+
+print fields(a);
+print methods(Animal);
+
+print getField(a, "name");
+print getField(a, "missing");
+print hasField(a, "name");
+print hasField(a, "missing");
+
+setField(a, "age", 3);
+print a.age;
+
+a.describe = str;
+print callMethod(a, "describe", 42);
+
+var m = {1: true};
+a.h = m.has;
+print callMethod(a, "h", 1);
+print callMethod(a, "h", 2);

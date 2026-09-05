@@ -1,0 +1,10 @@
+// callMethod() v1 is capped to natives only, on all three backends
+// (notes/expressiveness-roadmap.md item 1). A method backed by a
+// user-defined closure is a runtime error even on JVM/CLR, which have no
+// technical reason of their own to refuse it - parity with native wins.
+class Greeter {
+    greet() { return "hi"; }
+}
+var g = Greeter();
+print "before";
+callMethod(g, "greet");

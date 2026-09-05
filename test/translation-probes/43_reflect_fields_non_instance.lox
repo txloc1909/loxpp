@@ -1,0 +1,3 @@
+// fields() is instance-only; a non-Instance argument is a runtime error
+// on native, JVM, and CLR alike.
+fields(1);
