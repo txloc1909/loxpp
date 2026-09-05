@@ -67,8 +67,8 @@ garbage collector is stop-the-world non-generational. §4 breaks this down;
   the steady-state numbers exclude is in §3.3.
 * `nbody` (12 000 steps), `mandelbrot` (size 120), `fib` (n = 28),
   `binary_trees` (depth 10) use reduced sizes so a batch fits the time window.
-* `fannkuch` is excluded — it does not terminate on the native VM
-  (pre-existing, see `benchmark_report_2026-06-08.md`).
+* `fannkuch` is excluded — it does not terminate on the native VM, a
+  pre-existing issue (`timeout 30 build/loxpp` on it: no output, no exit).
 
 ---
 
