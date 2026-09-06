@@ -55,13 +55,38 @@ jobs:
           cache-from: type=gha,scope=dev
           cache-to: type=gha,mode=max,scope=dev
 
+      # Keyed on the commit SHA so re-runs of the same commit reuse one save;
+      # the prefix restore-key picks up the newest cache from an earlier
+      # commit. CCACHE_MAXSIZE below bounds each scope's footprint in the
+      # 10 GB cache budget shared with the Docker layer caches.
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ matrix.preset }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ matrix.preset }}-
+
       - name: Build
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
+            -e CCACHE_DIR=/workspace/.ccache \
+            -e CCACHE_MAXSIZE=400M \
+            -e CCACHE_COMPRESS=1 \
             loxpp-dev:latest \
             bash -c "cmake --preset ${{ matrix.preset }} && cmake --build build"
+
+      - name: ccache stats
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e CCACHE_DIR=/workspace/.ccache \
+            loxpp-dev:latest \
+            ccache -s
 
       - name: Test
         run: |
@@ -169,6 +194,19 @@ jobs:
           # repo's 10 GB cache budget, which is already ~65% used.
           cache-to: type=gha,mode=min,scope=dev-managed
 
+      # Only the `Build loxpp` step below is routed through this; the JVM/CLR
+      # runtime libraries are Java/C# and ccache does not apply to them.
+      # The release-preset compiles here match build-and-test's release job,
+      # so fall back to that scope's key to seed a cold run.
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-managed-release-${{ github.sha }}
+          restore-keys: |
+            ccache-managed-release-
+            ccache-release-
+
       - name: Check managed toolchains
         run: |
           docker run --rm \
@@ -190,8 +228,21 @@ jobs:
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
+            -e CCACHE_DIR=/workspace/.ccache \
+            -e CCACHE_MAXSIZE=400M \
+            -e CCACHE_COMPRESS=1 \
             loxpp-dev-managed:latest \
             bash -c "cmake --preset release && cmake --build build --target loxpp"
+
+      - name: ccache stats
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e CCACHE_DIR=/workspace/.ccache \
+            loxpp-dev-managed:latest \
+            ccache -s
 
       # Needs build/loxpp (built above, release preset): its own %g parity
       # test is differential against the native binary, not a fixed list.

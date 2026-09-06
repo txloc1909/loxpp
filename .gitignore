@@ -34,6 +34,7 @@
 build/
 build-*/
 .cache/
+.ccache/
 .vscode/
 .claude/worktrees/
 

@@ -15,6 +15,19 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Route compilation through ccache when it is available. The Docker dev
+# images ship it; a bare local build without it still configures fine.
+# A compiler launcher composes with the explicit CMAKE_CXX_COMPILER the
+# presets set, which a bare CC/CXX override would not.
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    message(STATUS "ccache: ${CCACHE_PROGRAM}")
+else()
+    message(STATUS "ccache: not found - compiling without it")
+endif()
+
 # parser rule table uses C99 designator
 add_compile_options(-Wno-c99-designator)
 

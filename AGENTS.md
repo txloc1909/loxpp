@@ -55,15 +55,19 @@ podman build --target dev -t loxpp-dev-env .                    # C++ work
 podman build --target dev-managed -t loxpp-dev-env-managed .    # backend work
 
 # 3. Start ephemeral container (:z needed on SELinux hosts e.g. Fedora),
-#    using whichever image you built above
+#    using whichever image you built above. The loxpp-ccache volume is the
+#    shared compiler cache — create it once, mount it every run. --ignore
+#    makes the create a no-op when the volume is already there.
+podman volume create --ignore loxpp-ccache
 podman run -it --rm \
   -v /path/to/.claude/worktrees/loxpp-<type>-<desc>:/workspace:z \
+  -v loxpp-ccache:/ccache \
   --name loxpp-<type>-<desc> loxpp-dev-env       # or loxpp-dev-env-managed
 
 # 4. Build — also wires the pre-commit hook via cmake
 cmake --preset debug && cmake --build build
 
-# 5. Iterate: write code, test
+# 5. Iterate: write code, test. `ccache -s` shows the cache hit rate.
 ctest --test-dir build --output-on-failure -j$(nproc)
 
 # 6. Format + lint
@@ -88,6 +92,12 @@ gh pr merge <pr-number> --repo txloc1909/loxpp --squash
 git worktree remove .claude/worktrees/loxpp-<type>-<desc>
 git branch -d <type>/<desc>
 ```
+
+> Shared compiler cache: the `loxpp-ccache` volume mounts at `/ccache` in
+> every container (the images set `CCACHE_DIR` to it). ccache locks its own
+> files, so agents running in parallel share it safely. Every worktree mounts
+> at `/workspace`, so compile paths match across agents and cache entries are
+> reused without `CCACHE_BASEDIR`.
 
 > Backend work: run `tools/build_lox_rt.sh && tools/check_managed_toolchains.sh`
 > inside `dev-managed` before touching backend code. The check needs the JVM

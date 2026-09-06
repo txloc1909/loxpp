@@ -1,0 +1,12 @@
+# The dev images install a toolchain only; the working tree is bind-mounted
+# at run time, so nothing here needs to enter the build context.
+.git/
+.claude/
+build/
+.cache/
+.ccache/
+runtime/jvm/classes/
+runtime/jvm/test-classes/
+runtime/clr/**/bin/
+runtime/clr/**/obj/
+__pycache__/
