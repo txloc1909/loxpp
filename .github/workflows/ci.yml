@@ -196,6 +196,8 @@ jobs:
 
       # Only the `Build loxpp` step below is routed through this; the JVM/CLR
       # runtime libraries are Java/C# and ccache does not apply to them.
+      # The release-preset compiles here match build-and-test's release job,
+      # so fall back to that scope's key to seed a cold run.
       - name: Restore ccache
         uses: actions/cache@v4
         with:
@@ -203,6 +205,7 @@ jobs:
           key: ccache-managed-release-${{ github.sha }}
           restore-keys: |
             ccache-managed-release-
+            ccache-release-
 
       - name: Check managed toolchains
         run: |
