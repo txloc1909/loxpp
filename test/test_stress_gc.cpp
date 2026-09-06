@@ -1,9 +1,10 @@
 // test_stress_gc.cpp — GC correctness under maximum allocation pressure.
 //
-// This binary is always compiled with LOXPP_STRESS_GC, which sets m_nextGC=0
-// so every allocation (create<T> and rawAlloc) triggers a full collection.
-// The tests verify that ordinary programs produce correct results even when
-// every single allocation may free unreachable objects.
+// ctest runs this binary with LOXPP_STRESS_GC=1 in the environment (see the
+// test/CMakeLists.txt registration), so MemoryManager triggers a full
+// collection on every allocation (create<T> and rawAlloc). The tests verify
+// that ordinary programs produce correct results even when every single
+// allocation may free unreachable objects.
 
 #include "test_harness.h"
 #include <gtest/gtest.h>

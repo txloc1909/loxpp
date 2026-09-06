@@ -1,10 +1,11 @@
 // test_gc_regression.cpp
 //
 // Regression tests for GC use-after-free bugs #31 and #32.
-// Compiled unconditionally with LOXPP_STRESS_GC so GC fires on every
-// allocation. Run under AddressSanitizer (cmake --preset debug) for reliable
-// detection; without ASAN the UAF is silent UB that may or may not corrupt
-// visible state depending on allocator reuse behaviour.
+// ctest runs this binary with LOXPP_STRESS_GC=1 in the environment (see the
+// test/CMakeLists.txt registration) so GC fires on every allocation. Run
+// under AddressSanitizer (cmake --preset debug) for reliable detection;
+// without ASAN the UAF is silent UB that may or may not corrupt visible
+// state depending on allocator reuse behaviour.
 
 #include "test_harness.h"
 #include <gtest/gtest.h>
@@ -19,7 +20,7 @@
 //   compile() returned).
 //
 //   defineNative("clock", ...)
-//     create<ObjNative>  →  bytesAllocated > m_nextGC(=0)  →  GC fires:
+//     create<ObjNative>  →  m_stressGC  →  GC fires:
 //       m_markRoots == nullptr && m_currentCompiler == nullptr
 //       → nothing marked → entire allObjects heap swept
 //     ObjNative allocated, added to allObjects
