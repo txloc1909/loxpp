@@ -89,7 +89,7 @@ class MemoryManager : public VmAllocBase {
     // constructor. When true, every allocation triggers a full collection.
     // When false, m_nextGC growth and the trigger point are exactly as they
     // are with no stress: this flag adds one branch and nothing else.
-    bool m_stressGC;
+    bool m_stressGC{false};
     std::size_t m_nextGC{1024 * 1024};
     static constexpr int GC_HEAP_GROW_FACTOR = 2;
 };
