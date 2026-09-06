@@ -37,10 +37,13 @@ build-*/
 .vscode/
 .claude/worktrees/
 
-# benchmark programs are generated from benchmarks/core/ by generate.py;
-# benchmarks/results/ holds run.py / profile.py output
+# benchmark programs are generated from benchmarks/core/ by generate.py
 benchmarks/programs/
-benchmarks/results/
+
+# benchmark run outputs — keep only the committed baselines
+benchmarks/results/*
+!benchmarks/results/baseline_*.json
+!benchmarks/results/profile_*.json
 
 # JVM runtime library build output (tools/build_lox_rt.sh)
 runtime/jvm/classes/
