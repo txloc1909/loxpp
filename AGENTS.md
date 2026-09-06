@@ -56,8 +56,9 @@ podman build --target dev-managed -t loxpp-dev-env-managed .    # backend work
 
 # 3. Start ephemeral container (:z needed on SELinux hosts e.g. Fedora),
 #    using whichever image you built above. The loxpp-ccache volume is the
-#    shared compiler cache — create it once (idempotent), mount it every run.
-podman volume create loxpp-ccache
+#    shared compiler cache — create it once, mount it every run. --ignore
+#    makes the create a no-op when the volume is already there.
+podman volume create --ignore loxpp-ccache
 podman run -it --rm \
   -v /path/to/.claude/worktrees/loxpp-<type>-<desc>:/workspace:z \
   -v loxpp-ccache:/ccache \
