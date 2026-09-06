@@ -344,6 +344,10 @@ examples=(
     "examples/bench_jump_table.lox"
     "examples/or_pattern_demo.lox"
     "examples/parser.lox"
+    # Reflection introspection natives (src/stdlib/reflect_api.cpp): type(),
+    # fields(), methods(), getField(), setField(), hasField(), callMethod().
+    "examples/reflection_basics.lox"
+    "examples/generic_tools.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

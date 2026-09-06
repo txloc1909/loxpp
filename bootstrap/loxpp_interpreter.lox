@@ -1477,6 +1477,118 @@ class LoxClass {
     toString() { return this.name; }
 }
 
+// type() support: maps a bootstrap-interpreted value to the same type name
+// the native/JVM/CLR reflection natives report (spec/05-stdlib.md). Uses the
+// existing loxTag() helper, which already guards primitives (no .loxTag
+// field) before falling back to v.loxTag.
+fun reflectTypeName(v) {
+    var tag = loxTag(v);
+    if (tag == "primitive") {
+        if (v == nil) return "Nil";
+        return "Boolean";
+    }
+    if (tag == "number") return "Number";
+    if (tag == "string") return "String";
+    if (tag == "function") {
+        // bind() layers a fresh Environment defining "this" directly on the
+        // original closure. LoxFunction has only one representation for
+        // free functions and bound methods (unlike the real VM's distinct
+        // C++ types), so this is the only way to tell them apart.
+        if (v.closure.values.has("this")) return "BoundMethod";
+        return "Function";
+    }
+    if (tag == "native" or tag == "mathfn") return "Function";
+    if (tag == "mapmethod" or tag == "filemethod" or tag == "listmethod") {
+        return "BoundMethod";
+    }
+    if (tag == "class") return "Class";
+    if (tag == "instance" or tag == "math") return "Instance";
+    if (tag == "list") return "List";
+    if (tag == "map") return "Map";
+    if (tag == "file") return "File";
+    if (tag == "enum_ctor") return "EnumConstructor";
+    if (tag == "enum_val") return "Enum";
+    return "Unknown";
+}
+
+// methods() walks the superclass chain: unlike the real VM's ObjClass,
+// which INHERIT flattens at class-declaration time, LoxClass.methods holds
+// only a class's own methods — findMethod() re-walks the chain on every
+// lookup instead. Collect each name once, subclass-first.
+fun reflectMethodNames(klass) {
+    var seen = {};
+    var k = klass;
+    while (k != nil) {
+        var names = k.methods.keys();
+        var i = 0;
+        while (i < len(names)) {
+            if (!seen.has(names[i])) seen[names[i]] = true;
+            i = i + 1;
+        }
+        k = k.superclass;
+    }
+    return seen.keys();
+}
+
+// callMethod(instance, name, ...forwarded) mirrors
+// src/stdlib/reflect_api.cpp's resolution (fields shadow methods) and its
+// v1 natives-only restriction — reproduced here a fourth time, since this
+// interpreter is its own execution target, independent of the C++ VM that
+// runs it. See notes/expressiveness-roadmap.md item 1 for why the
+// restriction exists and why it applies identically everywhere.
+fun reflectCallMethod(interp, args) {
+    var n = len(args);
+    if (n < 2) {
+        interp.setError("Expected at least 2 arguments.", 0);
+        return nil;
+    }
+    var instance = args[0];
+    if (loxTag(instance) != "instance") {
+        interp.setError("Only instances have methods.", 0);
+        return nil;
+    }
+    var name = args[1];
+    if (!isLoxStr(name)) {
+        interp.setError("Field name must be a string.", 0);
+        return nil;
+    }
+    var callee = nil;
+    var found  = false;
+    if (instance.fields.has(name)) {
+        callee = instance.fields[name];
+        found  = true;
+    } else {
+        callee = instance.klass.findMethod(name);
+        found  = callee != nil;
+    }
+    if (!found) {
+        interp.setError("Undefined property '" + name + "'.", 0);
+        return nil;
+    }
+    var tag = loxTag(callee);
+    if (tag == "function" or tag == "class" or tag == "enum_ctor") {
+        interp.setError("callMethod does not support user-defined methods yet.", 0);
+        return nil;
+    }
+    if (tag != "native" and tag != "mathfn" and tag != "mapmethod" and
+        tag != "filemethod" and tag != "listmethod") {
+        interp.setError("callMethod requires a callable value.", 0);
+        return nil;
+    }
+    var forwarded = [];
+    var i = 2;
+    while (i < n) {
+        forwarded.append(args[i]);
+        i = i + 1;
+    }
+    if (callee.arity() != len(forwarded)) {
+        interp.setError("Expected " + str(callee.arity()) + " arguments but got " +
+                         str(len(forwarded)) + ".", 0);
+        return nil;
+    }
+    return callee.call(interp, forwarded);
+}
+
 class LoxNative {
     init(name) {
         this.name   = name;
@@ -1485,6 +1597,11 @@ class LoxNative {
     arity() {
         if (this.name == "clock" or this.name == "input") return 0;
         if (this.name == "open") return 2;
+        if (this.name == "setField") return 3;
+        if (this.name == "getField" or this.name == "hasField") return 2;
+        if (this.name == "callMethod") return -1;
+        if (this.name == "type" or this.name == "fields" or
+            this.name == "methods") return 1;
         return 1;   // str, len
     }
     call(interp, args) {
@@ -1504,6 +1621,57 @@ class LoxNative {
             var handle = open(args[0], args[1]);
             return InterpFile(handle);
         }
+        if (this.name == "type") return reflectTypeName(args[0]);
+        if (this.name == "fields") {
+            if (loxTag(args[0]) != "instance") {
+                interp.setError("Expected an instance.", 0);
+                return nil;
+            }
+            return InterpList(args[0].fields.keys());
+        }
+        if (this.name == "methods") {
+            if (loxTag(args[0]) != "class") {
+                interp.setError("Expected a class.", 0);
+                return nil;
+            }
+            return InterpList(reflectMethodNames(args[0]));
+        }
+        if (this.name == "getField") {
+            if (loxTag(args[0]) != "instance") {
+                interp.setError("Only instances have properties.", 0);
+                return nil;
+            }
+            if (!isLoxStr(args[1])) {
+                interp.setError("Field name must be a string.", 0);
+                return nil;
+            }
+            if (args[0].fields.has(args[1])) return args[0].fields[args[1]];
+            return nil;
+        }
+        if (this.name == "hasField") {
+            if (loxTag(args[0]) != "instance") {
+                interp.setError("Only instances have properties.", 0);
+                return nil;
+            }
+            if (!isLoxStr(args[1])) {
+                interp.setError("Field name must be a string.", 0);
+                return nil;
+            }
+            return args[0].fields.has(args[1]);
+        }
+        if (this.name == "setField") {
+            if (loxTag(args[0]) != "instance") {
+                interp.setError("Only instances have fields.", 0);
+                return nil;
+            }
+            if (!isLoxStr(args[1])) {
+                interp.setError("Field name must be a string.", 0);
+                return nil;
+            }
+            args[0].fields[args[1]] = args[2];
+            return args[2];
+        }
+        if (this.name == "callMethod") return reflectCallMethod(interp, args);
         return nil;
     }
     toString() { return "<native fn>"; }
@@ -1734,6 +1902,13 @@ class Interpreter {
         this.globals.define("len",   LoxNative("len"));
         this.globals.define("open",  LoxNative("open"));
         this.globals.define("math",  InterpMath());
+        this.globals.define("type",       LoxNative("type"));
+        this.globals.define("fields",     LoxNative("fields"));
+        this.globals.define("methods",    LoxNative("methods"));
+        this.globals.define("getField",   LoxNative("getField"));
+        this.globals.define("setField",   LoxNative("setField"));
+        this.globals.define("hasField",   LoxNative("hasField"));
+        this.globals.define("callMethod", LoxNative("callMethod"));
     }
 
     setError(msg, line) {
@@ -2267,7 +2442,7 @@ class Interpreter {
             this.setError("Can only call functions and classes.", paren_line);
             return nil;
         }
-        if (len(args) != callee.arity()) {
+        if (callee.arity() != -1 and len(args) != callee.arity()) {
             this.setError("Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".", paren_line);
             return nil;
         }
