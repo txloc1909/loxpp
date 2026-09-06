@@ -79,6 +79,7 @@ jobs:
             bash -c "cmake --preset ${{ matrix.preset }} && cmake --build build"
 
       - name: ccache stats
+        continue-on-error: true
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -231,6 +232,7 @@ jobs:
             bash -c "cmake --preset release && cmake --build build --target loxpp"
 
       - name: ccache stats
+        continue-on-error: true
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
