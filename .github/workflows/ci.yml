@@ -67,6 +67,10 @@ jobs:
           restore-keys: |
             ccache-${{ matrix.preset }}-
 
+      # The release leg builds only the interpreter binary. The debug leg
+      # builds the whole GTest suite and the Test step below runs it under
+      # sanitizers; that run is the test gate, so a second unsanitized run
+      # in the release leg adds cost without new coverage.
       - name: Build
         run: |
           docker run --rm \
@@ -76,7 +80,7 @@ jobs:
             -e CCACHE_MAXSIZE=400M \
             -e CCACHE_COMPRESS=1 \
             loxpp-dev:latest \
-            bash -c "cmake --preset ${{ matrix.preset }} && cmake --build build"
+            bash -c "cmake --preset ${{ matrix.preset }} && cmake --build build${{ matrix.preset == 'release' && ' --target loxpp' || '' }}"
 
       - name: ccache stats
         continue-on-error: true
@@ -89,6 +93,7 @@ jobs:
             ccache -s
 
       - name: Test
+        if: matrix.preset == 'debug'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
