@@ -10,6 +10,7 @@
 #endif
 
 #include <cstdio>
+#include <cstdlib>
 
 #ifdef LOXPP_DEBUG_LOG_GC
 static const char* objTypeName(ObjType type) {
@@ -49,19 +50,24 @@ static const char* objTypeName(ObjType type) {
 }
 #endif
 
-MemoryManager::MemoryManager() : m_strings(VmAllocator<Entry>{this}) {}
+// A non-empty LOXPP_STRESS_GC value turns on collect-on-every-allocation for
+// the lifetime of this MemoryManager. Read once here; never on an allocation
+// path.
+static bool readStressGCEnv() {
+    const char* v = std::getenv("LOXPP_STRESS_GC");
+    return v != nullptr && v[0] != '\0';
+}
+
+MemoryManager::MemoryManager()
+    : m_strings(VmAllocator<Entry>{this}), m_stressGC(readStressGCEnv()) {}
 
 MemoryManager::~MemoryManager() { collectAll(); }
 
 void* MemoryManager::rawAlloc(std::size_t bytes) {
     bytesAllocated += bytes;
-#ifdef LOXPP_STRESS_GC
-    collectGarbage(); // fire on every allocation to surface rooting bugs
-#else
-    if (bytesAllocated > m_nextGC) {
+    if (m_stressGC || bytesAllocated > m_nextGC) {
         collectGarbage();
     }
-#endif
     return ::operator new(bytes);
 }
 

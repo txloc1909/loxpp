@@ -101,11 +101,18 @@ jobs:
             loxpp-dev:latest \
             bash -c "ctest --test-dir build --output-on-failure -j$(nproc)"
 
+      # The debug leg runs the example corpus under GC stress
+      # (collect-on-every-allocation). This kept the corpus covered for
+      # rooting bugs back when the debug preset compiled the binary with
+      # -DLOXPP_STRESS_GC on by default. That macro is now a runtime switch,
+      # so the env variable carries the same coverage. The release leg never
+      # had this and keeps its normal GC schedule.
       - name: Run example checks
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
+            ${{ matrix.preset == 'debug' && '-e LOXPP_STRESS_GC=1 ' || '' }}\
             loxpp-dev:latest \
             bash -c "python3 tools/check_examples.py build/loxpp examples/"
 

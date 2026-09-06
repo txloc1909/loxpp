@@ -176,7 +176,14 @@ improvements C and D.
    duplicate GTest build and run from the release job`, 2026-09-07). The
    `build-and-test` release leg now builds the `loxpp` target only and skips
    `ctest`; the debug + ASan leg stays the full GTest gate.
-5. **D** (runtime STRESS_GC) — larger, do last. Not done.
+5. **D** (runtime STRESS_GC) — ✅ **merged as #181** (`refactor: make
+   LOXPP_STRESS_GC a runtime switch, drop the _gc compile variant`,
+   2026-09-07). `MemoryManager` reads the `LOXPP_STRESS_GC` environment
+   variable once in its constructor into a `bool`; `create()` and `rawAlloc()`
+   gate on that flag. The `loxpp_test_core_gc` object library is gone; the ten
+   `_gc` test targets link `loxpp_test_core` and get `LOXPP_STRESS_GC=1`
+   through a per-test ctest `ENVIRONMENT` property. `LOXPP_PROFILE` /
+   `loxpp_test_core_profile` left in place — see section 10.
 
 ## 7. Post-merge measurement (A + B together)
 
@@ -247,3 +254,62 @@ String dump of section '.comment':
 
 The GNU `ld` build has no `Linker:` line in `.comment`. `ctest`:
 1102/1102 pass on both presets with `lld`, same inventory as `main`.
+
+## 10. Post-merge measurement (D — runtime `LOXPP_STRESS_GC`)
+
+Branch `refactor/runtime-stress-gc`, PR #181, rebased on merged C (#180).
+`LOXPP_STRESS_GC` is a runtime `bool` in `MemoryManager`, read once from the
+environment in the constructor. The `loxpp_test_core_gc` object library is
+deleted; the ten `_gc` test targets link `loxpp_test_core` and run under a
+per-test ctest `ENVIRONMENT` property. `LOXPP_PROFILE` and
+`loxpp_test_core_profile` are unchanged and out of scope — the notes' full
+"84 → 28" figure needs that second collapse, which is a bigger change (the
+profiler adds data members to `MemoryManager` and `VM`).
+
+Host: shared 12-core dev container. Clean debug build, **ccache disabled**
+(the apples-to-apples number — with ccache warm the duplicate `_gc`
+compilations are already near-free, because ccache dedups by preprocessed
+content and only `memory_manager.cpp` actually changes with the flag).
+
+| Clean debug build, ccache off | `main` (C merged) | branch D | change |
+|---|---|---|---|
+| ninja build steps (`cmake --build build`) | 209 | **179** | −30 (−14 %) |
+| `ninja -t targets all` | 501 | 468 | −33 |
+| user CPU time | 284.1 s | **265.5 s** | **−18.6 s (−6.5 %)** |
+| real time (this shared host) | 28.1 s | 26.6 s | −1.5 s |
+
+Shared-source compilations drop one of the (then) three variants: the 29
+`src/*` core sources plus `test_harness.cpp` are compiled twice, not three
+times. `ctest`: 1102/1102 pass, identical inventory to `main` (`diff` of
+`ctest -N` is empty).
+
+Proof the `_gc` targets still run collect-on-every-allocation
+(`AGENTS.md`: "prove that a new check can fail"): reintroduce bug #31
+(drop the `pushTempRoot(native)` in `StdlibRegistrar::defineGlobal`).
+
+- Mechanism active: `ctest -R "test_gc_regression|test_stress_gc"` → **9/9
+  fail**, ASan heap-use-after-free.
+- Same binary run directly with no `LOXPP_STRESS_GC` in the environment (the
+  non-`_gc` twin's path) → **3/3 pass**, bug not exercised.
+- Ctor's env read forced to `return false`, `ENVIRONMENT` still set → **9/9
+  pass** vacuously. This is the failure mode the node must not ship.
+
+Then both temporary edits reverted.
+
+Proof the real `loxpp` binary honours the switch without a rebuild
+(debug build, `LOXPP_DEBUG_LOG_GC` on): `build/loxpp examples/huffman.lox`
+runs 0 collections; `LOXPP_STRESS_GC=1 build/loxpp examples/huffman.lox`
+runs 942 collections with identical program output.
+
+### CI coverage note (review round 1)
+
+Before D, the debug preset compiled `loxpp` with `-DLOXPP_STRESS_GC` on by
+default (`option(... ${_debug_default})`, ON for `CMAKE_BUILD_TYPE=Debug`).
+So the `Build & Test (debug)` job's `Run example checks` step ran the whole
+example corpus under collect-on-every-allocation, which covers the corpus
+for rooting bugs that no `_gc` unit test hits. D makes the flag a runtime
+switch, so that step now sets `LOXPP_STRESS_GC=1` explicitly for the debug
+leg only (`.github/workflows/ci.yml`, matrix-preset conditional on the
+`docker run`). The release leg never had GC stress and keeps its normal GC
+schedule. Verified in the container: the debug example corpus passes with
+`LOXPP_STRESS_GC=1` set.
