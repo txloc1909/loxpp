@@ -38,8 +38,7 @@
         "CMAKE_EXE_LINKER_FLAGS": "-fuse-ld=lld",
         "LOXPP_DEBUG_PRINT_CODE": "OFF",
         "LOXPP_DEBUG_TRACE_EXECUTION": "OFF",
-        "LOXPP_DEBUG_LOG_GC": "OFF",
-        "LOXPP_STRESS_GC": "OFF"
+        "LOXPP_DEBUG_LOG_GC": "OFF"
       }
     },
     {

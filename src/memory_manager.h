@@ -29,13 +29,12 @@ class MemoryManager : public VmAllocBase {
     // Creates and takes ownership of a new Obj subclass.
     template <typename T, typename... Args>
     T* create(Args&&... args) {
-#ifdef LOXPP_STRESS_GC
-        collectGarbage(); // fire on every allocation to surface rooting bugs
-#else
-        if (bytesAllocated > m_nextGC) {
+        // m_stressGC fires a collection on every allocation to surface rooting
+        // bugs. It is a runtime flag, not a build flag, so this stays one
+        // member read and one `||` on the hot allocation path.
+        if (m_stressGC || bytesAllocated > m_nextGC) {
             collectGarbage();
         }
-#endif
         bytesAllocated += sizeof(T);
         T* p = new T(std::forward<Args>(args)...);
         allObjects.push_back(p);
@@ -86,10 +85,11 @@ class MemoryManager : public VmAllocBase {
 #ifdef LOXPP_PROFILE
     ProfilerData* m_profilerData{nullptr};
 #endif
-#ifdef LOXPP_STRESS_GC
-    std::size_t m_nextGC{0};
-#else
+    // Set from the LOXPP_STRESS_GC environment variable, read once in the
+    // constructor. When true, every allocation triggers a full collection.
+    // When false, m_nextGC growth and the trigger point are exactly as they
+    // are with no stress: this flag adds one branch and nothing else.
+    bool m_stressGC;
     std::size_t m_nextGC{1024 * 1024};
-#endif
     static constexpr int GC_HEAP_GROW_FACTOR = 2;
 };
