@@ -1,0 +1,43 @@
+// K-Nucleotide — count frequencies of all k-mers in a DNA string.
+// CLBG benchmark: https://benchmarksgame-team.pages.debian.net/benchmarksgame/
+// Uses string slicing (dna[i:i+k]) and a map for counting.
+// Expected result for n=1000, k=2: 999 total k-mers counted.
+
+class KNucleotide {
+  benchmark() {
+    var dna = this.makeDNA(1000);
+    // Count 1-mers, 2-mers, and 3-mers
+    var total = this.countKmers(dna, 1) + this.countKmers(dna, 2) + this.countKmers(dna, 3);
+    return total;
+  }
+
+  makeDNA(n) {
+    // Generate a DNA string by cycling through the four bases
+    var bases = ["a", "c", "g", "t"];
+    var result = "";
+    var i = 0;
+    while (i < n) {
+      result = result + bases[i % 4];
+      i = i + 1;
+    }
+    return result;
+  }
+
+  countKmers(dna, k) {
+    var counts = {};
+    var n = len(dna);
+    var i = 0;
+    while (i <= n - k) {
+      var kmer = dna[i:i + k];
+      if (counts.has(kmer)) {
+        counts[kmer] = counts[kmer] + 1;
+      } else {
+        counts[kmer] = 1;
+      }
+      i = i + 1;
+    }
+    // Return total number of k-mers counted (n - k + 1)
+    return n - k + 1;
+  }
+}
+

@@ -1,0 +1,31 @@
+// Sieve — Sieve of Eratosthenes prime counting. AWFY benchmark suite.
+// Copyright (c) 2015-2016 Stefan Marr. MIT License.
+// n=5000 yields 669 primes.
+
+class Sieve {
+  benchmark() {
+    var sieveSize = 5000;
+    var isPrime = [];
+    var i = 0;
+    while (i < sieveSize) {
+      isPrime.append(true);
+      i = i + 1;
+    }
+
+    var primesCount = 0;
+    i = 2;
+    while (i < sieveSize) {
+      if (isPrime[i]) {
+        primesCount = primesCount + 1;
+        var j = i + i;
+        while (j < sieveSize) {
+          isPrime[j] = false;
+          j = j + i;
+        }
+      }
+      i = i + 1;
+    }
+    return primesCount;
+  }
+}
+

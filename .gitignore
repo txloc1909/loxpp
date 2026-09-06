@@ -32,9 +32,15 @@
 *.app
 
 build/
+build-*/
 .cache/
 .vscode/
 .claude/worktrees/
+
+# benchmark programs are generated from benchmarks/core/ by generate.py;
+# benchmarks/results/ holds run.py / profile.py output
+benchmarks/programs/
+benchmarks/results/
 
 # JVM runtime library build output (tools/build_lox_rt.sh)
 runtime/jvm/classes/
