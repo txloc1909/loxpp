@@ -167,8 +167,12 @@ improvements C and D.
 2. **A** — ✅ **merged as #178** (`refactor: compile shared test sources
    once via object libraries`, 2026-09-06). Adversarially reviewed;
    CI `Build & Test (debug)` dropped from ~10 min to ~2 min.
-3. **C** (`lld`) — one-line preset change, measure after A. Not done.
-4. **E** (CI release-job trim) — CI-only. ✅ **PR open** (`ci: drop the
+3. **C** (`lld`) — ✅ **merged as #180** (`ci: link debug and release builds
+   with lld`, 2026-09-07). `-fuse-ld=lld` added to `CMAKE_EXE_LINKER_FLAGS`
+   of the `debug` and `release` configure presets. Serial link phase (44
+   executables): debug 9.3 s → 3.9 s, release 3.1 s → 2.0 s. 1102/1102 tests
+   pass on both presets, same inventory.
+4. **E** (CI release-job trim) — CI-only. ✅ **merged as #179** (`ci: drop the
    duplicate GTest build and run from the release job`, 2026-09-07). The
    `build-and-test` release leg now builds the `loxpp` target only and skips
    `ctest`; the debug + ASan leg stays the full GTest gate.
@@ -185,7 +189,7 @@ CI `Build & Test (debug)` job, PR #178, run 34049545182:
 | ninja build graph | 1347 steps | 209 steps |
 | `ctest` | 1102/1102 | 1102/1102 (identical inventory) |
 
-C and D remain available if the build needs to get faster still.
+D remains available if the build needs to get faster still.
 
 ## 8. Post-merge measurement (E — CI release-job trim)
 
@@ -211,3 +215,35 @@ test executions on every push. After A (#178) the release job was already
 ~56 s, so the
 absolute runner-time cut is smaller than the plan's original "~10 min"
 estimate, which predated A.
+
+## 9. Post-merge measurement (C — `lld` link phase)
+
+Branch `ci/link-with-lld`, PR #180. `-fuse-ld=lld` added to
+`CMAKE_EXE_LINKER_FLAGS` of the `debug` and `release` configure presets.
+Nothing else changed. Host: shared 12-core dev container, ccache warm so
+only the link edges run.
+
+Link phase = delete all 44 executables (`loxpp` + 43 GTest binaries), then
+`cmake --build build`. Serial (`-j1`) is the apples-to-apples number;
+parallel (`-j 12`) is what a full machine sees. Each value is the mean of 3
+runs; the runs were within 0.05 s of each other.
+
+| Link phase, 44 executables | GNU `ld` (before) | `lld` (after) | change |
+|---|---|---|---|
+| debug (`-fsanitize=address,undefined`), serial `-j1` | 9.34 s | 3.92 s | **−58 %** (2.4x) |
+| debug, parallel `-j12` | 2.76 s | 0.96 s | −65 % |
+| release, serial `-j1` | 3.07 s | 1.97 s | −36 % |
+| release, parallel `-j12` | 1.04 s | 0.36 s | −65 % |
+
+Proof `lld` ran, not just that the flag is present:
+
+```
+$ readelf -p .comment build/test/test_vm_runtime
+String dump of section '.comment':
+  [     1]  GCC: (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+  [    2e]  Ubuntu clang version 18.1.3 (1ubuntu1)
+  [    55]  Linker: Ubuntu LLD 18.1.3
+```
+
+The GNU `ld` build has no `Linker:` line in `.comment`. `ctest`:
+1102/1102 pass on both presets with `lld`, same inventory as `main`.
