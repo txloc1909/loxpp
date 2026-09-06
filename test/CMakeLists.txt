@@ -2,20 +2,25 @@ find_package(GTest REQUIRED)
 include(GoogleTest)
 
 # Propagate the NaN-tagging selection (inherited from the top-level option) to
-# every test target, which compile their own copies of src/*.cpp.
+# every object compiled in this directory.
 if(LOXPP_NAN_TAGGING)
     add_compile_definitions(LOXPP_NAN_TAGGING)
 endif()
 
-set(ALLOC_SRCS
-    ${PROJECT_SOURCE_DIR}/src/memory_manager.cpp
-    ${PROJECT_SOURCE_DIR}/src/object.cpp
-    ${PROJECT_SOURCE_DIR}/src/container_objects.cpp
-    ${PROJECT_SOURCE_DIR}/src/table.cpp
-    ${PROJECT_SOURCE_DIR}/src/value.cpp
-)
-
-set(FULL_SRCS
+# Every GTest binary needs the same 29 interpreter sources plus
+# test_harness.cpp. Listing them in each executable meant the 41 test targets
+# that use them compiled the set ~41 times over; the shared objects below
+# compile it 3 times, once per flag variant.
+#
+# There are three variants because two build flags change the object code and
+# cannot be mixed at link time:
+#   - LOXPP_STRESS_GC   flips an inlined branch in MemoryManager::create and
+#                       the m_nextGC initial value (memory_manager.h).
+#   - LOXPP_PROFILE     adds a member to MemoryManager and VM and pulls in
+#                       profiler.h.
+# Each test executable links exactly one variant, so no translation unit ever
+# sees two definitions of the same symbol.
+set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/vm.cpp
     ${PROJECT_SOURCE_DIR}/src/math.cpp
     ${PROJECT_SOURCE_DIR}/src/compiler.cpp
@@ -47,165 +52,93 @@ set(FULL_SRCS
     ${PROJECT_SOURCE_DIR}/src/stdlib/reflect_api.cpp
 )
 
+add_library(loxpp_test_core OBJECT ${LOXPP_CORE_SRCS} test_harness.cpp)
+target_include_directories(loxpp_test_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
+
+add_library(loxpp_test_core_gc OBJECT ${LOXPP_CORE_SRCS} test_harness.cpp)
+target_include_directories(loxpp_test_core_gc PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_compile_definitions(loxpp_test_core_gc PUBLIC LOXPP_STRESS_GC)
+
+add_library(loxpp_test_core_profile OBJECT ${LOXPP_CORE_SRCS} test_harness.cpp)
+target_include_directories(loxpp_test_core_profile PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_compile_definitions(loxpp_test_core_profile PUBLIC LOXPP_PROFILE)
+
+# loxpp_add_test(<name> <source>... CORE <object-library> [PROBE])
+#
+# CORE names the interpreter object library the executable links.
+# PROBE adds LOXPP_PROJECT_SOURCE_DIR, the repo path a handful of backend
+# probe tests read to locate example programs at run time. Only those test
+# .cpp files use the macro, so it belongs on the executable, not the library.
+function(loxpp_add_test name)
+    cmake_parse_arguments(ARG "PROBE" "CORE" "" ${ARGN})
+    add_executable(${name} ${ARG_UNPARSED_ARGUMENTS})
+    target_link_libraries(${name} PRIVATE GTest::GTest GTest::Main ${ARG_CORE})
+    if(ARG_PROBE)
+        target_compile_definitions(${name} PRIVATE
+            LOXPP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    endif()
+endfunction()
+
+# test_main is a hand-rolled main() (asserts), not a GTest binary, and needs
+# none of the interpreter sources.
 add_executable(test_main test_main.cpp)
-add_executable(test_scanner test_scanner.cpp ${PROJECT_SOURCE_DIR}/src/scanner.cpp ${PROJECT_SOURCE_DIR}/src/token.cpp)
-add_executable(test_parser_vm test_parser_vm.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_parser_bytecode test_parser_bytecode.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_table test_table.cpp ${FULL_SRCS})
-add_executable(test_allocator test_allocator.cpp ${FULL_SRCS})
-add_executable(test_local_variables test_local_variables.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_control_flow test_control_flow.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_vm_runtime test_vm_runtime.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_print_nul test_print_nul.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_os_api test_os_api.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_reflect_api test_reflect_api.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_reflect_api_gc test_reflect_api.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_closures test_closures.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_stress_gc test_stress_gc.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_gc_regression test_gc_regression.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_inheritance test_inheritance.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_list test_list.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_list_gc test_list.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_map test_map.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_map_gc test_map.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_var_destructure test_var_destructure.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_enum test_enum.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_enum_gc test_enum.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_class_pattern test_class_pattern.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_class_pattern_gc test_class_pattern.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_match_expr test_match_expr.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_slice test_slice.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_or_pattern test_or_pattern.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_or_pattern_gc test_or_pattern.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_seq_destructure test_seq_destructure.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_list_pattern test_list_pattern.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_list_pattern_gc test_list_pattern.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_at_binding test_at_binding.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_at_binding_gc test_at_binding.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_profiler profiler_test.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_chunk_decoder test_chunk_decoder.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_backend_cfg test_backend_cfg.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_backend_abstract_stack test_backend_abstract_stack.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_backend_capture test_backend_capture.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_jvm_emit test_jvm_emit.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_clr_emit test_clr_emit.cpp test_harness.cpp ${FULL_SRCS})
-add_executable(test_stringify_depth_guard test_stringify_depth_guard.cpp test_harness.cpp ${FULL_SRCS})
-
 target_include_directories(test_main PRIVATE ${PROJECT_SOURCE_DIR}/src)
+
+# test_scanner needs only the scanner and its tokens, not the whole core.
+add_executable(test_scanner test_scanner.cpp
+    ${PROJECT_SOURCE_DIR}/src/scanner.cpp ${PROJECT_SOURCE_DIR}/src/token.cpp)
 target_include_directories(test_scanner PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_parser_vm PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_parser_bytecode PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_table PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_allocator PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_local_variables PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_control_flow PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_vm_runtime PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_print_nul PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_os_api PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_closures PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_stress_gc PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_gc_regression PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_inheritance PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_list PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_list_gc PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_map PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_map_gc PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_var_destructure PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_enum PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_enum_gc PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_class_pattern PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_class_pattern_gc PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_match_expr PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_slice PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_or_pattern PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_or_pattern_gc PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_seq_destructure PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_list_pattern PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_list_pattern_gc PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_at_binding PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_at_binding_gc PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_profiler PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_chunk_decoder PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(test_backend_capture PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_compile_definitions(test_chunk_decoder PRIVATE
-    LOXPP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-target_include_directories(test_backend_cfg PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_compile_definitions(test_backend_cfg PRIVATE
-    LOXPP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-target_include_directories(test_backend_abstract_stack PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_compile_definitions(test_backend_abstract_stack PRIVATE
-    LOXPP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-target_compile_definitions(test_backend_capture PRIVATE
-    LOXPP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-target_include_directories(test_jvm_emit PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_compile_definitions(test_jvm_emit PRIVATE
-    LOXPP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-target_include_directories(test_clr_emit PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_compile_definitions(test_clr_emit PRIVATE
-    LOXPP_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-target_include_directories(test_stringify_depth_guard PRIVATE ${PROJECT_SOURCE_DIR}/src)
-
-target_compile_definitions(test_stress_gc PRIVATE LOXPP_STRESS_GC)
-target_compile_definitions(test_gc_regression PRIVATE LOXPP_STRESS_GC)
-target_compile_definitions(test_list_gc PRIVATE LOXPP_STRESS_GC)
-target_compile_definitions(test_map_gc PRIVATE LOXPP_STRESS_GC)
-target_compile_definitions(test_enum_gc PRIVATE LOXPP_STRESS_GC)
-target_compile_definitions(test_class_pattern_gc PRIVATE LOXPP_STRESS_GC)
-target_compile_definitions(test_or_pattern_gc PRIVATE LOXPP_STRESS_GC)
-target_compile_definitions(test_list_pattern_gc PRIVATE LOXPP_STRESS_GC)
-target_compile_definitions(test_at_binding_gc PRIVATE LOXPP_STRESS_GC)
-target_compile_definitions(test_reflect_api_gc PRIVATE LOXPP_STRESS_GC)
-target_compile_definitions(test_profiler PRIVATE LOXPP_PROFILE)
-
 target_link_libraries(test_scanner PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_parser_vm PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_parser_bytecode PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_table PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_allocator PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_local_variables PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_control_flow PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_vm_runtime PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_print_nul PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_os_api PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_reflect_api PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_reflect_api_gc PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_closures PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_stress_gc PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_gc_regression PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_inheritance PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_list PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_list_gc PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_map PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_map_gc PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_var_destructure PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_enum PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_enum_gc PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_class_pattern PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_class_pattern_gc PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_match_expr PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_slice PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_or_pattern PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_or_pattern_gc PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_seq_destructure PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_list_pattern PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_list_pattern_gc PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_at_binding PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_at_binding_gc PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_profiler PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_chunk_decoder PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_backend_cfg PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_backend_abstract_stack PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_backend_capture PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_jvm_emit PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_clr_emit PRIVATE GTest::GTest GTest::Main)
-target_link_libraries(test_stringify_depth_guard PRIVATE GTest::GTest GTest::Main)
 
-# test_main is a hand-rolled main() (asserts), not a GTest binary.
+loxpp_add_test(test_parser_vm       test_parser_vm.cpp       CORE loxpp_test_core)
+loxpp_add_test(test_parser_bytecode test_parser_bytecode.cpp CORE loxpp_test_core)
+loxpp_add_test(test_table           test_table.cpp           CORE loxpp_test_core)
+loxpp_add_test(test_allocator       test_allocator.cpp       CORE loxpp_test_core)
+loxpp_add_test(test_local_variables test_local_variables.cpp CORE loxpp_test_core)
+loxpp_add_test(test_control_flow    test_control_flow.cpp    CORE loxpp_test_core)
+loxpp_add_test(test_vm_runtime      test_vm_runtime.cpp      CORE loxpp_test_core)
+loxpp_add_test(test_print_nul       test_print_nul.cpp       CORE loxpp_test_core)
+loxpp_add_test(test_os_api          test_os_api.cpp          CORE loxpp_test_core)
+loxpp_add_test(test_reflect_api     test_reflect_api.cpp     CORE loxpp_test_core)
+loxpp_add_test(test_reflect_api_gc  test_reflect_api.cpp     CORE loxpp_test_core_gc)
+loxpp_add_test(test_closures        test_closures.cpp        CORE loxpp_test_core)
+loxpp_add_test(test_stress_gc       test_stress_gc.cpp       CORE loxpp_test_core_gc)
+loxpp_add_test(test_gc_regression   test_gc_regression.cpp   CORE loxpp_test_core_gc)
+loxpp_add_test(test_inheritance     test_inheritance.cpp     CORE loxpp_test_core)
+loxpp_add_test(test_list            test_list.cpp            CORE loxpp_test_core)
+loxpp_add_test(test_list_gc         test_list.cpp            CORE loxpp_test_core_gc)
+loxpp_add_test(test_map             test_map.cpp             CORE loxpp_test_core)
+loxpp_add_test(test_map_gc          test_map.cpp             CORE loxpp_test_core_gc)
+loxpp_add_test(test_var_destructure test_var_destructure.cpp CORE loxpp_test_core)
+loxpp_add_test(test_enum            test_enum.cpp            CORE loxpp_test_core)
+loxpp_add_test(test_enum_gc         test_enum.cpp            CORE loxpp_test_core_gc)
+loxpp_add_test(test_class_pattern    test_class_pattern.cpp   CORE loxpp_test_core)
+loxpp_add_test(test_class_pattern_gc test_class_pattern.cpp   CORE loxpp_test_core_gc)
+loxpp_add_test(test_match_expr      test_match_expr.cpp      CORE loxpp_test_core)
+loxpp_add_test(test_slice          test_slice.cpp           CORE loxpp_test_core)
+loxpp_add_test(test_or_pattern      test_or_pattern.cpp      CORE loxpp_test_core)
+loxpp_add_test(test_or_pattern_gc   test_or_pattern.cpp      CORE loxpp_test_core_gc)
+loxpp_add_test(test_seq_destructure test_seq_destructure.cpp CORE loxpp_test_core)
+loxpp_add_test(test_list_pattern    test_list_pattern.cpp    CORE loxpp_test_core)
+loxpp_add_test(test_list_pattern_gc test_list_pattern.cpp    CORE loxpp_test_core_gc)
+loxpp_add_test(test_at_binding      test_at_binding.cpp      CORE loxpp_test_core)
+loxpp_add_test(test_at_binding_gc   test_at_binding.cpp      CORE loxpp_test_core_gc)
+loxpp_add_test(test_profiler        profiler_test.cpp        CORE loxpp_test_core_profile)
+loxpp_add_test(test_chunk_decoder   test_chunk_decoder.cpp   CORE loxpp_test_core PROBE)
+loxpp_add_test(test_backend_cfg     test_backend_cfg.cpp     CORE loxpp_test_core PROBE)
+loxpp_add_test(test_backend_abstract_stack test_backend_abstract_stack.cpp
+                                                            CORE loxpp_test_core PROBE)
+loxpp_add_test(test_backend_capture test_backend_capture.cpp CORE loxpp_test_core PROBE)
+loxpp_add_test(test_jvm_emit        test_jvm_emit.cpp        CORE loxpp_test_core PROBE)
+loxpp_add_test(test_clr_emit        test_clr_emit.cpp        CORE loxpp_test_core PROBE)
+loxpp_add_test(test_stringify_depth_guard test_stringify_depth_guard.cpp
+                                                            CORE loxpp_test_core)
+
 add_test(NAME TestMain COMMAND test_main)
 
 # Register each GTest case as its own CTest test so `ctest -j` parallelizes
 # within a binary, not just across binaries. The per-target prefix keeps names
-# unique: the *_gc targets recompile the same sources, so their Suite.Case
+# unique: the *_gc targets reuse the same test sources, so their Suite.Case
 # names would otherwise collide.
 set(LOXPP_GTEST_TARGETS
     test_scanner test_parser_vm test_parser_bytecode test_table test_allocator
