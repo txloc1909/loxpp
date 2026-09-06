@@ -300,3 +300,16 @@ Proof the real `loxpp` binary honours the switch without a rebuild
 (debug build, `LOXPP_DEBUG_LOG_GC` on): `build/loxpp examples/huffman.lox`
 runs 0 collections; `LOXPP_STRESS_GC=1 build/loxpp examples/huffman.lox`
 runs 942 collections with identical program output.
+
+### CI coverage note (review round 1)
+
+Before D, the debug preset compiled `loxpp` with `-DLOXPP_STRESS_GC` on by
+default (`option(... ${_debug_default})`, ON for `CMAKE_BUILD_TYPE=Debug`).
+So the `Build & Test (debug)` job's `Run example checks` step ran the whole
+example corpus under collect-on-every-allocation, which covers the corpus
+for rooting bugs that no `_gc` unit test hits. D makes the flag a runtime
+switch, so that step now sets `LOXPP_STRESS_GC=1` explicitly for the debug
+leg only (`.github/workflows/ci.yml`, matrix-preset conditional on the
+`docker run`). The release leg never had GC stress and keeps its normal GC
+schedule. Verified in the container: the debug example corpus passes with
+`LOXPP_STRESS_GC=1` set.
