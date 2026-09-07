@@ -71,6 +71,13 @@ set(LOXPP_CORE_SOURCES
 add_library(loxpp_core OBJECT ${LOXPP_CORE_SOURCES})
 target_include_directories(loxpp_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
 
+# PUBLIC definitions of loxpp_core: they select a type layout in a header that
+# main.cpp reaches, so every translation unit linked with the library must
+# agree. Collected here and applied once below. The profiling loxpp does not
+# link loxpp_core (see the executable section), so it reuses this same list to
+# stay layout-compatible.
+set(LOXPP_CORE_PUBLIC_DEFINITIONS "")
+
 # The JVM code generator (backend node N4 onward). Default ON so CI builds
 # and checks it; OFF drops --target jvm from the CLI for a build that wants
 # the native VM only.
@@ -80,7 +87,7 @@ if(LOXPP_JVM_BACKEND)
     target_sources(loxpp_core PRIVATE src/backend/jvm_emitter.cpp)
     # PUBLIC: main.cpp reads LOXPP_JVM_BACKEND for the --target dispatch and
     # the LOXPP_TARGET_USAGE_LIST message.
-    target_compile_definitions(loxpp_core PUBLIC LOXPP_JVM_BACKEND)
+    list(APPEND LOXPP_CORE_PUBLIC_DEFINITIONS LOXPP_JVM_BACKEND)
     list(APPEND LOXPP_CORE_SOURCES src/backend/jvm_emitter.cpp)
 endif()
 
@@ -93,7 +100,7 @@ if(LOXPP_CLR_BACKEND)
     target_sources(loxpp_core PRIVATE src/backend/clr_emitter.cpp)
     # PUBLIC: main.cpp reads LOXPP_CLR_BACKEND for the --target dispatch and
     # the LOXPP_TARGET_USAGE_LIST message.
-    target_compile_definitions(loxpp_core PUBLIC LOXPP_CLR_BACKEND)
+    list(APPEND LOXPP_CORE_PUBLIC_DEFINITIONS LOXPP_CLR_BACKEND)
     list(APPEND LOXPP_CORE_SOURCES src/backend/clr_emitter.cpp)
 endif()
 
@@ -153,7 +160,11 @@ if(LOXPP_NAN_TAGGING)
     # PUBLIC: LOXPP_NAN_TAGGING selects the Value layout in src/value.h, a
     # header main.cpp pulls in transitively (vm.h). Every translation unit
     # linked together must agree.
-    target_compile_definitions(loxpp_core PUBLIC LOXPP_NAN_TAGGING)
+    list(APPEND LOXPP_CORE_PUBLIC_DEFINITIONS LOXPP_NAN_TAGGING)
+endif()
+
+if(LOXPP_CORE_PUBLIC_DEFINITIONS)
+    target_compile_definitions(loxpp_core PUBLIC ${LOXPP_CORE_PUBLIC_DEFINITIONS})
 endif()
 
 # The loxpp executable. main.cpp is the only source it owns; everything else
@@ -163,21 +174,14 @@ add_executable(loxpp src/main.cpp)
 if(LOXPP_PROFILE)
     # Profiling build: compile main.cpp and the core sources together with
     # LOXPP_PROFILE so VM and MemoryManager have one layout across the whole
-    # program. loxpp_core (non-profile) is not linked here.
+    # program. loxpp_core (non-profile) is not linked here, so this build
+    # reuses the core definition lists to stay ABI-compatible with the
+    # headers.
     target_sources(loxpp PRIVATE ${LOXPP_CORE_SOURCES})
-    target_compile_definitions(loxpp PRIVATE LOXPP_PROFILE)
-    if(LOXPP_JVM_BACKEND)
-        target_compile_definitions(loxpp PRIVATE LOXPP_JVM_BACKEND)
-    endif()
-    if(LOXPP_CLR_BACKEND)
-        target_compile_definitions(loxpp PRIVATE LOXPP_CLR_BACKEND)
-    endif()
-    if(LOXPP_NAN_TAGGING)
-        target_compile_definitions(loxpp PRIVATE LOXPP_NAN_TAGGING)
-    endif()
-    if(LOXPP_CORE_PRIVATE_DEFINITIONS)
-        target_compile_definitions(loxpp PRIVATE ${LOXPP_CORE_PRIVATE_DEFINITIONS})
-    endif()
+    target_compile_definitions(loxpp PRIVATE
+        LOXPP_PROFILE
+        ${LOXPP_CORE_PUBLIC_DEFINITIONS}
+        ${LOXPP_CORE_PRIVATE_DEFINITIONS})
 else()
     target_link_libraries(loxpp PRIVATE loxpp_core)
 endif()
