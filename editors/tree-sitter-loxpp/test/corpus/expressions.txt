@@ -1,0 +1,242 @@
+================================================================================
+Precedence ladder
+================================================================================
+
+var a = 1 + 2 * 3 - 4 / 2 % 3;
+var b = !x and y or z;
+var c = a == b and c != d;
+var d = a < b or c >= d;
+var e = x in xs;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (binary_expression
+      (binary_expression
+        (number)
+        (binary_expression
+          (number)
+          (number)))
+      (binary_expression
+        (binary_expression
+          (number)
+          (number))
+        (number))))
+  (variable_declaration
+    (identifier)
+    (binary_expression
+      (binary_expression
+        (unary_expression
+          (identifier))
+        (identifier))
+      (identifier)))
+  (variable_declaration
+    (identifier)
+    (binary_expression
+      (binary_expression
+        (identifier)
+        (identifier))
+      (binary_expression
+        (identifier)
+        (identifier))))
+  (variable_declaration
+    (identifier)
+    (binary_expression
+      (binary_expression
+        (identifier)
+        (identifier))
+      (binary_expression
+        (identifier)
+        (identifier))))
+  (variable_declaration
+    (identifier)
+    (binary_expression
+      (identifier)
+      (identifier))))
+
+================================================================================
+Unary and grouping
+================================================================================
+
+var a = -(1 + 2);
+var b = !!flag;
+var c = -x * -y;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (unary_expression
+      (parenthesized_expression
+        (binary_expression
+          (number)
+          (number)))))
+  (variable_declaration
+    (identifier)
+    (unary_expression
+      (unary_expression
+        (identifier))))
+  (variable_declaration
+    (identifier)
+    (binary_expression
+      (unary_expression
+        (identifier))
+      (unary_expression
+        (identifier)))))
+
+================================================================================
+Assignment forms
+================================================================================
+
+a = 1;
+obj.field = 2;
+list[0] = 3;
+a = b = c;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (number)))
+  (expression_statement
+    (assignment_expression
+      (field_expression
+        (identifier)
+        (identifier))
+      (number)))
+  (expression_statement
+    (assignment_expression
+      (subscript_expression
+        (identifier)
+        (number))
+      (number)))
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (assignment_expression
+        (identifier)
+        (identifier)))))
+
+================================================================================
+Call, property, and index chains
+================================================================================
+
+var a = f(1, 2)(3).field[0];
+var b = obj.method(x).other;
+var c = matrix[i][j];
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (subscript_expression
+      (field_expression
+        (call_expression
+          (call_expression
+            (identifier)
+            (arguments
+              (number)
+              (number)))
+          (arguments
+            (number)))
+        (identifier))
+      (number)))
+  (variable_declaration
+    (identifier)
+    (field_expression
+      (call_expression
+        (field_expression
+          (identifier)
+          (identifier))
+        (arguments
+          (identifier)))
+      (identifier)))
+  (variable_declaration
+    (identifier)
+    (subscript_expression
+      (subscript_expression
+        (identifier)
+        (identifier))
+      (identifier))))
+
+================================================================================
+Slices
+================================================================================
+
+var a = xs[1:4];
+var b = s[0:len(s)];
+var c = xs[i:j];
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (slice_expression
+      (identifier)
+      (number)
+      (number)))
+  (variable_declaration
+    (identifier)
+    (slice_expression
+      (identifier)
+      (number)
+      (call_expression
+        (identifier)
+        (arguments
+          (identifier)))))
+  (variable_declaration
+    (identifier)
+    (slice_expression
+      (identifier)
+      (identifier)
+      (identifier))))
+
+================================================================================
+List and map literals
+================================================================================
+
+var a = [1, 2, 3];
+var b = [];
+var c = {"k": 1, "j": 2};
+var d = {};
+var e = {key: value};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (list
+      (number)
+      (number)
+      (number)))
+  (variable_declaration
+    (identifier)
+    (list))
+  (variable_declaration
+    (identifier)
+    (map
+      (pair
+        (string
+          (string_content))
+        (number))
+      (pair
+        (string
+          (string_content))
+        (number))))
+  (variable_declaration
+    (identifier)
+    (map))
+  (variable_declaration
+    (identifier)
+    (map
+      (pair
+        (identifier)
+        (identifier)))))

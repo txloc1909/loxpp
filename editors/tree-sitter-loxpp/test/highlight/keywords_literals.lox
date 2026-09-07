@@ -1,0 +1,30 @@
+var name = "lox";
+// <- keyword
+//         ^ string
+
+var pi = 3.14;
+//       ^ number
+
+var ok = true;
+//       ^ boolean
+
+var nothing = nil;
+//            ^ constant.builtin
+
+// a line comment
+// <- comment
+
+var total = 1 + 2 * 3;
+//          ^ number
+//            ^ operator
+
+print name and pi;
+// <- keyword
+//         ^ keyword.operator
+
+fun greet(who) {
+// <- keyword
+//  ^ function
+//        ^ variable.parameter
+  return who;
+}
