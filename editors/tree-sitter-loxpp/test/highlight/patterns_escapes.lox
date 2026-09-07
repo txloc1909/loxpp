@@ -1,5 +1,15 @@
-var text = "tab:\t end";
-//              ^ string.escape
+var a = "\"";
+//       ^ string.escape
+var b = "\\";
+//       ^ string.escape
+var c = "\n";
+//       ^ string.escape
+var d = "\t";
+//       ^ string.escape
+var e = "\r";
+//       ^ string.escape
+var f = "\0";
+//       ^ string.escape
 
 enum Tree { Leaf(v) Node(l, r) }
 // <- keyword
