@@ -168,6 +168,17 @@ if(LOXPP_CORE_PUBLIC_DEFINITIONS)
     target_compile_definitions(loxpp_core PUBLIC ${LOXPP_CORE_PUBLIC_DEFINITIONS})
 endif()
 
+# Standalone editor-tooling analysers (editor-tooling mission, node N5
+# onward). The tooling parser builds its own AST with source spans; it reuses
+# only the Scanner and Token from the core, so it links loxpp_core rather than
+# recompiling scanner.cpp / token.cpp -- that keeps one copy of those objects
+# in the build graph, which the loxpp-lsp binary (N8) needs when it links
+# loxpp_core and the src/tooling objects together. loxpp_tooling carries only
+# the new tooling sources.
+add_library(loxpp_tooling OBJECT src/tooling/tooling_parser.cpp)
+target_include_directories(loxpp_tooling PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(loxpp_tooling PUBLIC loxpp_core)
+
 # The loxpp executable. main.cpp is the only source it owns; everything else
 # comes from loxpp_core.
 add_executable(loxpp src/main.cpp)
