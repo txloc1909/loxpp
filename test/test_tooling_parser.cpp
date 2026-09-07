@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -43,171 +44,299 @@ std::vector<fs::path> corpusFiles() {
     return out;
 }
 
-// Walk every expression in the tree and hand each to `visit`.
-template <class F>
-void forEachExpr(const Expr* e, const F& visit);
-template <class F>
-void forEachExpr(const Stmt* s, const F& visit);
+// A full span audit: every node of every kind -- Stmt, Expr, Pattern -- plus
+// every bare Name, Param, and sub-name span (`.name`, `super.name`, pattern
+// heads, sequence elements, arm ranges) must lie inside [0, source.size()].
+// N7 walks these same spans, so an out-of-bounds one is a latent crash there.
+struct SpanAudit {
+    std::string_view src;
+    std::string file;
+    std::size_t nodes = 0;
 
-template <class F>
-void forEachExpr(const MatchArm& arm, const F& visit) {
-    forEachExpr(arm.guard.get(), visit);
-    for (const auto& d : arm.body_decls) {
-        forEachExpr(d.get(), visit);
+    void inBounds(std::size_t offset, std::size_t length, const char* what) {
+        ++nodes;
+        EXPECT_LE(offset, src.size()) << what << " offset in " << file;
+        EXPECT_LE(offset + length, src.size()) << what << " end in " << file;
     }
-    forEachExpr(arm.body_expr.get(), visit);
-}
 
-template <class F>
-void forEachExpr(const Expr* e, const F& visit) {
-    if (e == nullptr) {
-        return;
-    }
-    visit(e);
-    switch (e->kind) {
-    case ExprKind::Unary:
-        forEachExpr(static_cast<const UnaryExpr*>(e)->operand.get(), visit);
-        break;
-    case ExprKind::Binary: {
-        const auto* b = static_cast<const BinaryExpr*>(e);
-        forEachExpr(b->left.get(), visit);
-        forEachExpr(b->right.get(), visit);
-        break;
-    }
-    case ExprKind::Logical: {
-        const auto* b = static_cast<const LogicalExpr*>(e);
-        forEachExpr(b->left.get(), visit);
-        forEachExpr(b->right.get(), visit);
-        break;
-    }
-    case ExprKind::Call: {
-        const auto* c = static_cast<const CallExpr*>(e);
-        forEachExpr(c->callee.get(), visit);
-        for (const auto& a : c->arguments) {
-            forEachExpr(a.get(), visit);
+    void name(const Name& n) {
+        inBounds(n.offset, n.length, "Name");
+        if (!n.text.empty()) {
+            EXPECT_GE(n.text.data(), src.data()) << "Name text under " << file;
+            EXPECT_LE(n.text.data() + n.text.size(), src.data() + src.size())
+                << "Name text over " << file;
         }
-        break;
     }
-    case ExprKind::Get:
-        forEachExpr(static_cast<const GetExpr*>(e)->object.get(), visit);
-        break;
-    case ExprKind::Index: {
-        const auto* i = static_cast<const IndexExpr*>(e);
-        forEachExpr(i->object.get(), visit);
-        forEachExpr(i->index.get(), visit);
-        break;
-    }
-    case ExprKind::Slice: {
-        const auto* sl = static_cast<const SliceExpr*>(e);
-        forEachExpr(sl->object.get(), visit);
-        forEachExpr(sl->start.get(), visit);
-        forEachExpr(sl->end.get(), visit);
-        break;
-    }
-    case ExprKind::Assign: {
-        const auto* a = static_cast<const AssignExpr*>(e);
-        forEachExpr(a->target.get(), visit);
-        forEachExpr(a->value.get(), visit);
-        break;
-    }
-    case ExprKind::ListLiteral:
-        for (const auto& el :
-             static_cast<const ListLiteralExpr*>(e)->elements) {
-            forEachExpr(el.get(), visit);
-        }
-        break;
-    case ExprKind::MapLiteral:
-        for (const auto& en : static_cast<const MapLiteralExpr*>(e)->entries) {
-            forEachExpr(en.key.get(), visit);
-            forEachExpr(en.value.get(), visit);
-        }
-        break;
-    case ExprKind::Grouping:
-        forEachExpr(static_cast<const GroupingExpr*>(e)->inner.get(), visit);
-        break;
-    case ExprKind::Match: {
-        const auto* m = static_cast<const MatchExpr*>(e);
-        forEachExpr(m->subject.get(), visit);
-        for (const auto& arm : m->arms) {
-            forEachExpr(arm, visit);
-        }
-        break;
-    }
-    default:
-        break;
-    }
-}
+    void param(const Param& p) { inBounds(p.offset, p.length, "Param"); }
 
-template <class F>
-void forEachExpr(const std::vector<StmtPtr>& body, const F& visit) {
-    for (const auto& s : body) {
-        forEachExpr(s.get(), visit);
-    }
-}
-
-template <class F>
-void forEachExpr(const Stmt* s, const F& visit) {
-    if (s == nullptr) {
-        return;
-    }
-    switch (s->kind) {
-    case StmtKind::VarDecl:
-        forEachExpr(static_cast<const VarDecl*>(s)->initializer.get(), visit);
-        break;
-    case StmtKind::DestructureDecl:
-        forEachExpr(static_cast<const DestructureDecl*>(s)->initializer.get(),
-                    visit);
-        break;
-    case StmtKind::FunDecl:
-        forEachExpr(static_cast<const FunDecl*>(s)->body, visit);
-        break;
-    case StmtKind::ClassDecl:
-        for (const auto& m : static_cast<const ClassDecl*>(s)->methods) {
-            forEachExpr(m.body, visit);
+    void pattern(const Pattern* p) {
+        if (p == nullptr) {
+            return;
         }
-        break;
-    case StmtKind::Block:
-        forEachExpr(static_cast<const Block*>(s)->body, visit);
-        break;
-    case StmtKind::If: {
-        const auto* i = static_cast<const IfStmt*>(s);
-        forEachExpr(i->condition.get(), visit);
-        forEachExpr(i->then_branch.get(), visit);
-        forEachExpr(i->else_branch.get(), visit);
-        break;
+        inBounds(p->offset, p->length, "Pattern");
+        switch (p->kind) {
+        case PatternKind::Binding: {
+            const auto* b = static_cast<const BindingPat*>(p);
+            inBounds(b->name_offset, b->name_length, "BindingPat.name");
+            break;
+        }
+        case PatternKind::Ctor: {
+            const auto* c = static_cast<const CtorPat*>(p);
+            inBounds(c->name_offset, c->name_length, "CtorPat.name");
+            for (const auto& f : c->fields) {
+                name(f);
+            }
+            break;
+        }
+        case PatternKind::Class: {
+            const auto* c = static_cast<const ClassPat*>(p);
+            inBounds(c->name_offset, c->name_length, "ClassPat.name");
+            for (const auto& f : c->fields) {
+                name(f);
+            }
+            break;
+        }
+        case PatternKind::Seq: {
+            const auto* s = static_cast<const SeqPat*>(p);
+            for (const auto& e : s->elements) {
+                inBounds(e.offset, e.length, "SeqPatElem");
+            }
+            break;
+        }
+        case PatternKind::AtBinding: {
+            const auto* a = static_cast<const AtBindingPat*>(p);
+            inBounds(a->name_offset, a->name_length, "AtBindingPat.name");
+            pattern(a->sub.get());
+            break;
+        }
+        case PatternKind::Or:
+            for (const auto& alt : static_cast<const OrPat*>(p)->alternatives) {
+                pattern(alt.get());
+            }
+            break;
+        default:
+            break;
+        }
     }
-    case StmtKind::While: {
-        const auto* w = static_cast<const WhileStmt*>(s);
-        forEachExpr(w->condition.get(), visit);
-        forEachExpr(w->body.get(), visit);
-        break;
+
+    void arm(const MatchArm& a) {
+        inBounds(a.offset, a.length, "MatchArm");
+        for (const auto& pat : a.patterns) {
+            pattern(pat.get());
+        }
+        expr(a.guard.get());
+        for (const auto& d : a.body_decls) {
+            stmt(d.get());
+        }
+        expr(a.body_expr.get());
     }
-    case StmtKind::For: {
-        const auto* f = static_cast<const ForStmt*>(s);
-        forEachExpr(f->initializer.get(), visit);
-        forEachExpr(f->condition.get(), visit);
-        forEachExpr(f->increment.get(), visit);
-        forEachExpr(f->body.get(), visit);
-        break;
+
+    void expr(const Expr* e) {
+        if (e == nullptr) {
+            return;
+        }
+        inBounds(e->offset, e->length, "Expr");
+        switch (e->kind) {
+        case ExprKind::Unary:
+            expr(static_cast<const UnaryExpr*>(e)->operand.get());
+            break;
+        case ExprKind::Binary: {
+            const auto* b = static_cast<const BinaryExpr*>(e);
+            expr(b->left.get());
+            expr(b->right.get());
+            break;
+        }
+        case ExprKind::Logical: {
+            const auto* b = static_cast<const LogicalExpr*>(e);
+            expr(b->left.get());
+            expr(b->right.get());
+            break;
+        }
+        case ExprKind::Call: {
+            const auto* c = static_cast<const CallExpr*>(e);
+            expr(c->callee.get());
+            for (const auto& a : c->arguments) {
+                expr(a.get());
+            }
+            break;
+        }
+        case ExprKind::Get: {
+            const auto* g = static_cast<const GetExpr*>(e);
+            expr(g->object.get());
+            inBounds(g->name_offset, g->name_length, "GetExpr.name");
+            break;
+        }
+        case ExprKind::Index: {
+            const auto* i = static_cast<const IndexExpr*>(e);
+            expr(i->object.get());
+            expr(i->index.get());
+            break;
+        }
+        case ExprKind::Slice: {
+            const auto* sl = static_cast<const SliceExpr*>(e);
+            expr(sl->object.get());
+            expr(sl->start.get());
+            expr(sl->end.get());
+            break;
+        }
+        case ExprKind::Assign: {
+            const auto* a = static_cast<const AssignExpr*>(e);
+            expr(a->target.get());
+            expr(a->value.get());
+            break;
+        }
+        case ExprKind::ListLiteral:
+            for (const auto& el :
+                 static_cast<const ListLiteralExpr*>(e)->elements) {
+                expr(el.get());
+            }
+            break;
+        case ExprKind::MapLiteral:
+            for (const auto& en :
+                 static_cast<const MapLiteralExpr*>(e)->entries) {
+                expr(en.key.get());
+                expr(en.value.get());
+            }
+            break;
+        case ExprKind::Grouping:
+            expr(static_cast<const GroupingExpr*>(e)->inner.get());
+            break;
+        case ExprKind::Super: {
+            const auto* s = static_cast<const SuperExpr*>(e);
+            inBounds(s->name_offset, s->name_length, "SuperExpr.name");
+            break;
+        }
+        case ExprKind::Match: {
+            const auto* m = static_cast<const MatchExpr*>(e);
+            expr(m->subject.get());
+            for (const auto& a : m->arms) {
+                arm(a);
+            }
+            break;
+        }
+        default:
+            break;
+        }
     }
-    case StmtKind::ForIn: {
-        const auto* f = static_cast<const ForInStmt*>(s);
-        forEachExpr(f->iterable.get(), visit);
-        forEachExpr(f->body.get(), visit);
-        break;
+
+    void body(const std::vector<StmtPtr>& stmts) {
+        for (const auto& s : stmts) {
+            stmt(s.get());
+        }
     }
-    case StmtKind::Print:
-        forEachExpr(static_cast<const PrintStmt*>(s)->value.get(), visit);
-        break;
-    case StmtKind::Return:
-        forEachExpr(static_cast<const ReturnStmt*>(s)->value.get(), visit);
-        break;
-    case StmtKind::ExprStmt:
-        forEachExpr(static_cast<const ExprStmt*>(s)->expr.get(), visit);
-        break;
-    default:
-        break;
+
+    void stmt(const Stmt* s) {
+        if (s == nullptr) {
+            return;
+        }
+        inBounds(s->offset, s->length, "Stmt");
+        switch (s->kind) {
+        case StmtKind::VarDecl: {
+            const auto* v = static_cast<const VarDecl*>(s);
+            name(v->name);
+            expr(v->initializer.get());
+            break;
+        }
+        case StmtKind::DestructureDecl: {
+            const auto* d = static_cast<const DestructureDecl*>(s);
+            for (const auto& t : d->targets) {
+                name(t);
+            }
+            expr(d->initializer.get());
+            break;
+        }
+        case StmtKind::FunDecl: {
+            const auto* f = static_cast<const FunDecl*>(s);
+            name(f->name);
+            for (const auto& p : f->params) {
+                param(p);
+            }
+            body(f->body);
+            break;
+        }
+        case StmtKind::ClassDecl: {
+            const auto* c = static_cast<const ClassDecl*>(s);
+            name(c->name);
+            if (c->superclass.has_value()) {
+                name(*c->superclass);
+            }
+            for (const auto& m : c->methods) {
+                inBounds(m.offset, m.length, "MethodDecl");
+                name(m.name);
+                for (const auto& p : m.params) {
+                    param(p);
+                }
+                body(m.body);
+            }
+            break;
+        }
+        case StmtKind::EnumDecl: {
+            const auto* en = static_cast<const EnumDecl*>(s);
+            name(en->name);
+            for (const auto& ctor : en->ctors) {
+                inBounds(ctor.offset, ctor.length, "EnumCtorDecl");
+                name(ctor.name);
+                for (const auto& fld : ctor.fields) {
+                    param(fld);
+                }
+            }
+            break;
+        }
+        case StmtKind::Block:
+            body(static_cast<const Block*>(s)->body);
+            break;
+        case StmtKind::If: {
+            const auto* i = static_cast<const IfStmt*>(s);
+            expr(i->condition.get());
+            stmt(i->then_branch.get());
+            stmt(i->else_branch.get());
+            break;
+        }
+        case StmtKind::While: {
+            const auto* w = static_cast<const WhileStmt*>(s);
+            expr(w->condition.get());
+            stmt(w->body.get());
+            break;
+        }
+        case StmtKind::For: {
+            const auto* f = static_cast<const ForStmt*>(s);
+            stmt(f->initializer.get());
+            expr(f->condition.get());
+            expr(f->increment.get());
+            stmt(f->body.get());
+            break;
+        }
+        case StmtKind::ForIn: {
+            const auto* f = static_cast<const ForInStmt*>(s);
+            name(f->variable);
+            expr(f->iterable.get());
+            stmt(f->body.get());
+            break;
+        }
+        case StmtKind::Print:
+            expr(static_cast<const PrintStmt*>(s)->value.get());
+            break;
+        case StmtKind::Return:
+            expr(static_cast<const ReturnStmt*>(s)->value.get());
+            break;
+        case StmtKind::ExprStmt:
+            expr(static_cast<const ExprStmt*>(s)->expr.get());
+            break;
+        default:
+            break;
+        }
     }
+};
+
+// Audit every span in a parsed Program against its source buffer.
+std::size_t auditSpans(const Program& prog, std::string_view src,
+                       const std::string& file) {
+    SpanAudit audit{src, file, 0};
+    EXPECT_LE(prog.offset, src.size()) << "Program offset in " << file;
+    EXPECT_LE(prog.offset + prog.length, src.size())
+        << "Program end in " << file;
+    audit.body(prog.body);
+    return audit.nodes;
 }
 
 } // namespace
@@ -217,18 +346,18 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // examples/*.lox (62) + bootstrap/*.lox (2) + translation-probes/*.lox (47)
     ASSERT_EQ(files.size(), 111U);
 
+    std::size_t totalNodes = 0;
     for (const auto& file : files) {
         const std::string src = readFile(file);
         const Program prog = parse(src);
         EXPECT_FALSE(prog.body.empty())
             << "empty Program for " << file.string();
 
-        // Every span stays inside the source buffer.
-        forEachExpr(prog.body, [&](const Expr* e) {
-            EXPECT_LE(e->offset, src.size()) << file.string();
-            EXPECT_LE(e->offset + e->length, src.size()) << file.string();
-        });
+        // Every span of every node kind -- Stmt, Expr, Pattern, and every
+        // bare Name / sub-name -- stays inside the source buffer.
+        totalNodes += auditSpans(prog, src, file.string());
     }
+    EXPECT_GT(totalNodes, 0U);
 }
 
 TEST(ToolingParserSpans, IdentifierAndCallSpansAreExact) {
@@ -432,4 +561,110 @@ TEST(ToolingParserEnum, MisplacedEnumStillParses) {
     ASSERT_NE(en, nullptr);
     EXPECT_EQ(en->name.text, "E");
     EXPECT_EQ(en->ctors.size(), 2U);
+}
+
+// R1: a first token that cannot start a declaration or statement, and a
+// lone unterminated string, must not underflow the token cursor. Each one
+// returns a Program (possibly empty) with every span inside the buffer.
+TEST(ToolingParserAdversarial, FirstTokenCannotStartAnythingDoesNotCrash) {
+    const std::vector<std::string> inputs = {".",   ")",    "]",
+                                             "}",   ",",    "*",
+                                             "/",   "%",    ":",
+                                             "?",   "@",    "=>",
+                                             "==",  "!=",   "<=",
+                                             ">=",  "<",    ">",
+                                             "...", "=",    "and",
+                                             "or",  "case", "else",
+                                             "in",  "if)",  "\"unterminated",
+                                             "\"",  "@#$",  ""};
+
+    for (const auto& src : inputs) {
+        const Program prog = parse(src);
+        // No assertion on body size: an empty Program is a valid result here.
+        const std::size_t nodes = auditSpans(prog, src, "input<" + src + ">");
+        EXPECT_LE(prog.offset + prog.length, src.size())
+            << "input<" << src << ">";
+        (void)nodes;
+    }
+}
+
+// R1 companion: the same unexpected leading token followed by real code --
+// the parser must recover and still surface the later declaration.
+TEST(ToolingParserAdversarial, RecoversAfterUnexpectedLeadingToken) {
+    const std::string src = ") fun after() { var x = 1; }";
+    const Program prog = parse(src);
+    bool sawAfter = false;
+    for (const auto& s : prog.body) {
+        if (const auto* f = dynamic_cast<const FunDecl*>(s.get())) {
+            sawAfter = sawAfter || f->name.text == "after";
+        }
+    }
+    EXPECT_TRUE(sawAfter);
+}
+
+// R2: deeply nested constructs must not overflow the C++ call stack. Each
+// case returns a Program with in-bounds spans in bounded time.
+TEST(ToolingParserAdversarial, DeepNestingDoesNotOverflowStack) {
+    constexpr int kDepth = 10000;
+
+    struct Case {
+        const char* name;
+        std::string open;
+        std::string mid;
+        std::string close;
+    };
+    const std::vector<Case> cases = {
+        {"parens", "var x = " + std::string(kDepth, '(') + "1", std::string(),
+         std::string(kDepth, ')') + ";"},
+        {"brackets", "var x = " + std::string(kDepth, '['), "1",
+         std::string(kDepth, ']') + ";"},
+        {"braces", std::string(kDepth, '{'), std::string(),
+         std::string(kDepth, '}')},
+        {"unary", "var x = " + std::string(kDepth, '!'), "y", ";"},
+    };
+
+    for (const auto& c : cases) {
+        std::string src;
+        src.reserve(c.open.size() + c.mid.size() + c.close.size());
+        src += c.open;
+        src += c.mid;
+        src += c.close;
+
+        const auto begin = std::chrono::steady_clock::now();
+        const Program prog = parse(src);
+        const auto elapsed = std::chrono::steady_clock::now() - begin;
+
+        auditSpans(prog, src, std::string("deep-") + c.name);
+        EXPECT_LT(
+            std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(),
+            10)
+            << c.name << " parse did not finish in bounded time";
+    }
+
+    // Nested call chain: f(f(f(...(0)...))).
+    {
+        std::string src = "var x = ";
+        for (int i = 0; i < kDepth; ++i) {
+            src += "f(";
+        }
+        src += "0";
+        src += std::string(kDepth, ')');
+        src += ";";
+        const Program prog = parse(src);
+        auditSpans(prog, src, "deep-calls");
+    }
+
+    // Nested match subjects: match match match ... x {} {} {}.
+    {
+        std::string src = "var x = ";
+        for (int i = 0; i < kDepth; ++i) {
+            src += "match ";
+        }
+        src += "x ";
+        src += std::string(kDepth, '{');
+        src += std::string(kDepth, '}');
+        src += ";";
+        const Program prog = parse(src);
+        auditSpans(prog, src, "deep-match");
+    }
 }

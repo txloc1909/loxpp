@@ -92,6 +92,34 @@ class Parser {
     }
 
   private:
+    // -- recursion-depth guard --------------------------------------------
+
+    // Cap on nested grammar recursion. Every nested expression (a paren
+    // group, list or map element, call argument, subscript, unary prefix,
+    // `=` right side, or `match` subject) and every nested block or control-
+    // flow statement adds C++ stack frames; an editor buffer can hold
+    // thousands of unbalanced `(` or `{`, which would overflow the stack.
+    // Measured overflow under the ASan build is near 2000 levels, so 500
+    // keeps a safety factor of four and is far deeper than any hand-written
+    // nesting. Past the cap the parser stops descending, records an error,
+    // and unwinds to the next recovery point, still returning a Program.
+    static constexpr int kMaxNestingDepth = 500;
+
+    class NestingGuard {
+      public:
+        explicit NestingGuard(Parser& parser) : m_parser(parser) {
+            ++m_parser.m_depth;
+        }
+        ~NestingGuard() { --m_parser.m_depth; }
+        NestingGuard(const NestingGuard&) = delete;
+        NestingGuard& operator=(const NestingGuard&) = delete;
+
+      private:
+        Parser& m_parser;
+    };
+
+    [[nodiscard]] bool tooDeep() const { return m_depth > kMaxNestingDepth; }
+
     // -- token cursor -------------------------------------------------------
 
     [[nodiscard]] const Token& peek() const { return m_tokens[m_pos]; }
@@ -99,7 +127,13 @@ class Parser {
         std::size_t i = m_pos + ahead;
         return i < m_tokens.size() ? m_tokens[i] : m_tokens.back();
     }
-    [[nodiscard]] const Token& previous() const { return m_tokens[m_pos - 1]; }
+    // Before the first advance() the cursor sits at 0 and there is no previous
+    // token; callers that reach here early (a first token that cannot start a
+    // declaration or statement, an unterminated string) get token 0 rather
+    // than a SIZE_MAX index.
+    [[nodiscard]] const Token& previous() const {
+        return m_tokens[m_pos == 0 ? 0 : m_pos - 1];
+    }
     [[nodiscard]] bool isAtEnd() const {
         return peek().type == TokenType::EOF_;
     }
@@ -163,6 +197,11 @@ class Parser {
     }
 
     [[nodiscard]] std::size_t endOfPrevious() const {
+        if (m_pos == 0) {
+            // No token consumed yet: a span that ends here is empty, anchored
+            // at the first token's start.
+            return m_tokens.front().offset;
+        }
         const Token& p = previous();
         return p.offset + p.length;
     }
@@ -195,7 +234,12 @@ class Parser {
     // -- declarations -----------------------------------------------------
 
     StmtPtr declaration() {
+        NestingGuard guard(*this);
         if (m_panic) {
+            return nullptr;
+        }
+        if (tooDeep()) {
+            error();
             return nullptr;
         }
         StmtPtr stmt = declarationInner();
@@ -440,6 +484,11 @@ class Parser {
     // -- statements ------------------------------------------------------
 
     StmtPtr statement() {
+        NestingGuard guard(*this);
+        if (tooDeep()) {
+            error();
+            return nullptr;
+        }
         switch (peek().type) {
         case TokenType::FOR:
             return forStatement();
@@ -692,7 +741,16 @@ class Parser {
         node.length = end > start ? end - start : 0;
     }
 
+    // Every nested expression -- paren group, list or map element, call
+    // argument, subscript, unary prefix, `=` right side, `match` subject --
+    // passes through unary() once per nesting level, so a single guard here
+    // bounds the whole expression grammar.
     ExprPtr unary() {
+        NestingGuard guard(*this);
+        if (tooDeep()) {
+            error();
+            return nullptr;
+        }
         if ((check(TokenType::BANG) || check(TokenType::MINUS)) && !m_panic) {
             Token op = advance();
             auto node = std::make_unique<UnaryExpr>();
@@ -1140,6 +1198,7 @@ class Parser {
     const std::string& m_source;
     std::vector<Token> m_tokens;
     std::size_t m_pos = 0;
+    int m_depth = 0;
     bool m_panic = false;
 };
 
