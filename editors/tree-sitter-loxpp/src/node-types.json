@@ -217,7 +217,15 @@
         "required": true,
         "types": [
           {
-            "type": "_expression",
+            "type": "_primary",
+            "named": true
+          },
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
             "named": true
           }
         ]
@@ -289,7 +297,15 @@
         "required": true,
         "types": [
           {
-            "type": "_expression",
+            "type": "_primary",
+            "named": true
+          },
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
             "named": true
           }
         ]
@@ -1225,7 +1241,15 @@
         "required": true,
         "types": [
           {
-            "type": "_expression",
+            "type": "_primary",
+            "named": true
+          },
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
             "named": true
           }
         ]

@@ -240,3 +240,18 @@ var e = {key: value};
       (pair
         (identifier)
         (identifier)))))
+
+================================================================================
+Assignment is not an operand (spec precedence ladder)
+:error
+================================================================================
+
+a + b = c;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (ERROR
+    (identifier)
+    (identifier)
+    (identifier)))

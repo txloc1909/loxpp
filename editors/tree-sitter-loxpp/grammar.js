@@ -199,6 +199,15 @@ module.exports = grammar({
       field("right", $._expression),
     )),
 
+    // Operand of a binary, unary, or logical operator. The spec precedence
+    // ladder bottoms out at `unary`/`call` and never reaches `assignment`, so
+    // `a + b = c` is a syntax error, not `a + (b = c)`.
+    _operand: $ => choice(
+      $.binary_expression,
+      $.unary_expression,
+      $._primary,
+    ),
+
     binary_expression: $ => {
       const table = [
         ["or", PREC.or],
@@ -217,15 +226,15 @@ module.exports = grammar({
         ["%", PREC.factor],
       ];
       return choice(...table.map(([operator, precedence]) => prec.left(precedence, seq(
-        field("left", $._expression),
+        field("left", $._operand),
         field("operator", operator),
-        field("right", $._expression),
+        field("right", $._operand),
       ))));
     },
 
     unary_expression: $ => prec.right(PREC.unary, seq(
       field("operator", choice("!", "-")),
-      field("operand", $._expression),
+      field("operand", $._operand),
     )),
 
     _primary: $ => choice(
