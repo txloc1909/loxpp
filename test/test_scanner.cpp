@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <cassert>
+#include <cstring>
 #include <iostream>
 #include <vector>
 
@@ -198,8 +199,11 @@ TEST_F(ScannerTest, TokenOffsetFirstToken) {
     const char* source = "foo + bar";
     auto tokens = scanTokens(source);
     EXPECT_EQ(tokens[0].offset, 0);
+    EXPECT_EQ(tokens[0].length, 3);
     EXPECT_EQ(tokens[1].offset, 4); // "+"
+    EXPECT_EQ(tokens[1].length, 1);
     EXPECT_EQ(tokens[2].offset, 6); // "bar"
+    EXPECT_EQ(tokens[2].length, 3);
 }
 
 TEST_F(ScannerTest, TokenOffsetLeadingWhitespace) {
@@ -244,21 +248,44 @@ TEST_F(ScannerTest, TokenOffsetPastTrailingComment) {
 }
 
 TEST_F(ScannerTest, TokenOffsetStringLexeme) {
-    // The STRING lexeme drops the quotes, so its offset points just inside the
-    // opening quote and offset + lexeme.size() stays consistent with it.
+    // The STRING lexeme drops the quotes, but offset/length still describe the
+    // full source span, both quotes included.
     const char* source = "  \"hi\"";
     auto tokens = scanTokens(source);
     EXPECT_EQ(tokens[0].type, TokenType::STRING);
     EXPECT_EQ(tokens[0].lexeme, "hi");
-    EXPECT_EQ(tokens[0].offset, 3);
+    EXPECT_EQ(tokens[0].offset, 2); // the opening quote
+    EXPECT_EQ(tokens[0].length, 4); // "hi" with both quotes
+    // The contract in token.h: source.substr(offset, length) is the token text.
+    EXPECT_EQ(std::string(source).substr(tokens[0].offset, tokens[0].length),
+              "\"hi\"");
 }
 
 TEST_F(ScannerTest, ErrorTokenOffset) {
     const char* source = "abc \x01";
     auto tokens = scanTokens(source);
     EXPECT_EQ(tokens[1].type, TokenType::ERROR);
-    // m_current sits just past the offending character.
-    EXPECT_EQ(tokens[1].offset, 5);
+    // offset points AT the offending character, and length covers it.
+    EXPECT_EQ(tokens[1].offset, 4);
+    EXPECT_EQ(tokens[1].length, 1);
+}
+
+TEST_F(ScannerTest, ErrorTokenOffsetBadEscape) {
+    const char* source = "x = \"a\\qb\";";
+    auto tokens = scanTokens(source);
+    EXPECT_EQ(tokens[2].type, TokenType::ERROR);
+    // offset is the opening quote, the start of the problem token.
+    EXPECT_EQ(tokens[2].offset, 4);
+}
+
+TEST_F(ScannerTest, ErrorTokenOffsetUnterminatedString) {
+    const char* source = "x = \"abc";
+    auto tokens = scanTokens(source);
+    EXPECT_EQ(tokens[2].type, TokenType::ERROR);
+    // offset is the opening quote; the span stays inside the buffer, unlike a
+    // value equal to the source length.
+    EXPECT_EQ(tokens[2].offset, 4);
+    EXPECT_EQ(tokens[2].offset + tokens[2].length, std::strlen(source));
 }
 
 int main(int argc, char** argv) {

@@ -74,15 +74,20 @@ enum class TokenType : std::uint8_t {
 
 struct Token {
     TokenType type;
+    // The semantic value of the token, not always its source text: STRING has
+    // the surrounding quotes removed, ERROR carries a message literal. Use
+    // offset and length for the source span.
     std::string_view lexeme;
     std::size_t line;
-    // Byte offset of the token's first character from the start of the source
-    // buffer. The token's source span is [offset, offset + lexeme.size()) for a
-    // real token. This does NOT hold for an ERROR token: its lexeme is a
-    // message literal, not a slice of the source, so a consumer must not treat
-    // an ERROR token's lexeme.size() as a source span. For an ERROR token
-    // offset marks the scanner position where the error was found.
+    // Source span of the token: its text is source.substr(offset, length),
+    // where offset is the byte index of the first character from the start of
+    // the source buffer. This holds for every token type, including the quotes
+    // of a STRING and the offending run of an ERROR. length can differ from
+    // lexeme.size() (STRING, ERROR). A token that the compiler builds by hand
+    // (see src/compiler.cpp) has no source behind it; both fields stay 0, and
+    // 0 there means "no span", not "position 0".
     std::size_t offset = 0;
+    std::size_t length = 0;
 };
 
 std::ostream& operator<<(std::ostream& os, const TokenType& type);
