@@ -1,6 +1,7 @@
 #include "analyze.h"
 #include "chunk.h"
 #include "diagnostic.h"
+#include "json_escape.h"
 #include "scanner.h"
 #include "vm.h"
 
@@ -134,39 +135,6 @@ static const char* severityWord(Severity severity) {
     }
 }
 
-static void appendJsonString(std::string& out, const std::string& value) {
-    out += '"';
-    for (char c : value) {
-        switch (c) {
-        case '"':
-            out += "\\\"";
-            break;
-        case '\\':
-            out += "\\\\";
-            break;
-        case '\n':
-            out += "\\n";
-            break;
-        case '\r':
-            out += "\\r";
-            break;
-        case '\t':
-            out += "\\t";
-            break;
-        default:
-            if (static_cast<unsigned char>(c) < 0x20) {
-                char buf[8];
-                std::snprintf(buf, sizeof(buf), "\\u%04x",
-                              static_cast<unsigned char>(c));
-                out += buf;
-            } else {
-                out += c;
-            }
-        }
-    }
-    out += '"';
-}
-
 // loxpp --check [--format text|json] <file>: report the compiler's static
 // errors without running the program. Exit 0 when clean, 1 when any error,
 // 74 when the file cannot be read (readFile), 64 on a usage error.
@@ -175,7 +143,13 @@ static int runCheck(int argc, const char* argv[]) {
     std::string path;
     for (int i = 2; i < argc; i++) {
         std::string arg = argv[i];
-        if (arg == "--format" && i + 1 < argc) {
+        if (arg == "--format") {
+            if (i + 1 >= argc) {
+                std::fprintf(
+                    stderr,
+                    "Usage: loxpp --check [--format text|json] <file>\n");
+                return 64;
+            }
             format = argv[++i];
         } else if (path.empty()) {
             path = arg;

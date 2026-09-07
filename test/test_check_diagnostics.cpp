@@ -1,4 +1,5 @@
 #include "analyze.h"
+#include "json_escape.h"
 
 #include <gtest/gtest.h>
 
@@ -71,6 +72,17 @@ TEST(CheckDiagnostics, PanicModeCollapsesToOneDiagnostic) {
     // Two syntax errors in one statement; panic mode keeps it to one.
     std::vector<Diagnostic> diags = analyze("var 1 = = ;");
     EXPECT_EQ(diags.size(), 1U);
+}
+
+TEST(CheckDiagnostics, JsonStringEscapesQuoteBackslashAndControl) {
+    // No compiler message contains these bytes today, so exercise the escaper
+    // that the --format json path uses on the message text directly.
+    std::string in = "a\"b\\c\td";
+    in += '\x01';
+    in += 'e';
+    std::string out;
+    appendJsonString(out, in);
+    EXPECT_EQ(out, "\"a\\\"b\\\\c\\td\\u0001e\"");
 }
 
 } // namespace
