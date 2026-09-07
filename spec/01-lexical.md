@@ -6,6 +6,8 @@ Source files are ASCII text. The lexer operates on bytes; only printable ASCII
 characters and standard whitespace (space, tab, CR, LF) are meaningful. Non-ASCII
 bytes are not permitted in source files.
 
+A byte that cannot begin any token is a static error.
+
 ---
 
 ## Whitespace
@@ -56,6 +58,7 @@ There are no block comments.
 | `/` | SLASH |
 | `*` | STAR |
 | `%` | PERCENT |
+| `@` | AT |
 
 ### One-or-Two-Character Tokens
 
@@ -72,6 +75,19 @@ The scanner always prefers the longer match.
 | `<` | LESS |
 | `<=` | LESS_EQUAL |
 
+### Compound Punctuation
+
+These lexemes are scanned as the longest match, so they never split into
+shorter tokens.
+
+| Lexeme | Name | Notes |
+|---|---|---|
+| `=>` | FAT_ARROW | Two characters. Scanned before `=` and `==`. Introduces a `match` arm body (see §02-syntax). |
+| `...` | ELIPSIS | Exactly three dots. Scanned greedily, so it never splits into `.` plus `..`. Used in sequence patterns (see §02-syntax). |
+
+The `@` token (single character, above) binds a name to a whole value in a
+`match` pattern (see §02-syntax).
+
 ---
 
 ## Keywords
@@ -86,13 +102,15 @@ names:
 | `case` | Match arm label |
 | `class` | Class declaration |
 | `continue` | Loop next-iteration |
-| `default` | Match fallback arm label |
+| `default` | Reserved. Scanned as a keyword, but no grammar rule uses it. A `match` arm uses `case _` for the fallback. |
 | `else` | Alternate branch |
+| `enum` | Enum declaration |
 | `false` | Boolean literal |
 | `for` | For loop |
 | `fun` | Function declaration |
 | `if` | Conditional |
 | `in` | Sequence membership test; for-in loop variable binding |
+| `match` | Match expression (see §02-syntax) |
 | `nil` | Nil literal |
 | `or` | Logical disjunction |
 | `print` | Print statement |
@@ -105,6 +123,10 @@ names:
 
 Keywords are matched case-sensitively. `And` and `AND` are identifiers, not
 keywords.
+
+`case` and `default` are keyword tokens. The `match` wildcard pattern is the
+identifier `_`, which is an ordinary identifier, not a keyword (see §02-syntax
+and §04-semantics).
 
 ---
 
