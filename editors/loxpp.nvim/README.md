@@ -17,8 +17,13 @@ without any plugin manager.
 | `syntax/lox.vim` | Regex syntax highlighting. |
 
 The `.vim` and `.lua` files are two paths to the same result. Classic Vim
-reads only the `.vim` files. Neovim reads both: the `.lua` filetype mapping
-wins first, and the `.vim` files then do nothing, so nothing is set twice.
+reads only the `.vim` files. Neovim reads both, and each pair guards against
+double work:
+
+- `ftdetect/`: the `.lua` mapping sets the filetype first, so the `setf` in
+  `ftdetect/lox.vim` is a no-op.
+- `ftplugin/`: Neovim sources `ftplugin/lox.vim` first, which sets
+  `b:did_ftplugin`, and `ftplugin/lox.lua` then returns early on that flag.
 
 ## Highlighting: which path runs
 

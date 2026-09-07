@@ -41,6 +41,9 @@ syntax keyword loxConstant      nil
 syntax match   loxNumber        /\<\d\+\%(\.\d\+\)\?\>/
 
 " --- Operators ------------------------------------------------------------
+" loxString and loxComment are defined after loxOperator on purpose: at an
+" equal start position the last-defined item wins, so `//` stays a comment and
+" `"` opens a string instead of matching the `/` or bare operator rules.
 syntax match   loxOperator      /[-+*/%!<>=]/
 syntax match   loxOperator      /==\|!=\|>=\|<=\|=>/
 syntax match   loxOperator      /\.\.\./
@@ -60,8 +63,10 @@ syntax region  loxString        start=/"/ skip=/\\./ end=/"/
 syntax keyword loxTodo          TODO FIXME contained
 syntax match   loxComment       "//.*$" contains=loxTodo,@Spell
 
-" Comments and strings must beat the `/` and `"` operator/text matches.
-syntax sync minlines=10
+" Strings are legally multi-line (spec/01-lexical.md), so re-highlight from the
+" start of the file. A window that opens deep inside a long string would
+" otherwise lose the opening quote and mis-colour the visible lines.
+syntax sync fromstart
 
 " --- Highlight links ---------------------------------------------------
 highlight default link loxKeyword          Keyword
