@@ -289,3 +289,33 @@ fun describe(s) {
             (identifier_pattern)
             (string
               (string_content))))))))
+
+================================================================================
+Or-patterns reject sequence alternatives
+:error
+================================================================================
+
+fun f(xs) {
+  return match xs {
+    case [a] or [b] => 1
+  };
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameters
+      (identifier))
+    (block
+      (return_statement
+        (match_expression
+          (identifier)
+          (ERROR
+            (identifier)
+            (identifier))
+          (match_arm
+            (sequence_pattern
+              (identifier_pattern))
+            (number)))))))

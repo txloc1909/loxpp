@@ -336,7 +336,8 @@ module.exports = grammar({
 
     _arm_patterns: $ => choice(
       seq($.literal_pattern, repeat(seq(",", $.literal_pattern))),
-      seq($._arm_pattern, repeat(seq("or", $._arm_pattern))),
+      $.sequence_pattern,
+      seq($._ident_arm_pattern, repeat(seq("or", $._ident_arm_pattern))),
     ),
 
     literal_pattern: $ => choice(
@@ -347,11 +348,13 @@ module.exports = grammar({
       $.nil,
     ),
 
-    _arm_pattern: $ => choice(
+    // An `or` alternative is an identifier-starting pattern only. The compiler
+    // rejects `or` on a sequence pattern (`[a] or [b]`, `Foo(x) or [a, b]`), so
+    // a bare sequence pattern is a standalone arm pattern, never an `or` term.
+    _ident_arm_pattern: $ => choice(
       $.binding_pattern,
       $.constructor_pattern,
       $.record_pattern,
-      $.sequence_pattern,
       $._arm_pattern_ident,
     ),
 
