@@ -5,6 +5,11 @@ every program. They behave like user-defined functions in all respects
 (first-class values, strict arity enforcement) except that their bodies are
 provided by the host environment.
 
+The standard library also provides the global `math` object (numeric functions
+and constants), the `open` function, and the methods on the File value it
+returns. These are described below. The built-in methods on Map values are
+specified in §03-types and §04-semantics.
+
 ---
 
 ## `clock() → Number`
@@ -99,6 +104,63 @@ String so that it can be concatenated with `+`.
 
 **Arity:** 1  
 **Returns:** String
+
+---
+
+## `math` — numeric functions and constants
+
+`math` is a global object bound at the start of every program. Its members are
+numeric functions and constants, reached with `.`:
+
+```lox
+var h = math.hypot(3, 4);   // 5
+print math.floor(2.7);      // 2
+```
+
+`math` behaves like any other global name: a local variable of the same name
+shadows it, and the global can be reassigned.
+
+### Functions of one argument
+
+Each takes one Number and returns a Number. A non-Number argument is a runtime
+error.
+
+`abs`, `ceil`, `floor`, `round`, `sqrt`, `cbrt`, `exp`, `log`, `log2`,
+`log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`
+
+- `round` rounds a halfway value away from zero.
+- `log` is the natural logarithm (base e); `log2` and `log10` use base 2 and
+  base 10.
+- The trigonometric functions use radians.
+- A domain error, such as `math.sqrt(-1)`, returns a NaN value. It is not an
+  error. The sign of that NaN and its identity are not guaranteed: the result
+  can print as `-nan`, and no NaN is equal to `math.nan` or to itself.
+
+**Arity:** 1  
+**Returns:** Number
+
+### Functions of two arguments
+
+Each takes two Numbers and returns a Number. A non-Number argument is a runtime
+error.
+
+`pow`, `atan2`, `hypot`, `min`, `max`
+
+- `min` and `max` take exactly two arguments and return the smaller or larger
+  of the two.
+- If one argument to `min` or `max` is `nan`, the other argument is returned.
+
+**Arity:** 2  
+**Returns:** Number
+
+### Constants
+
+| Member | Value |
+|---|---|
+| `math.pi` | ratio of a circle's circumference to its diameter |
+| `math.e` | base of the natural logarithm |
+| `math.inf` | positive infinity |
+| `math.nan` | IEEE 754 quiet NaN |
 
 ---
 
@@ -217,6 +279,90 @@ report whole seconds, milliseconds, or finer.
 
 **Arity:** 1  
 **Returns:** Map on success, Nil if `path` does not exist
+
+---
+
+## `open(path, mode) → File`
+
+Opens the file at `path` and returns a File value. Both arguments must be
+Strings; any other type is a runtime error.
+
+`mode` selects the access:
+
+| Mode | Access | Notes |
+|---|---|---|
+| `"r"` | read | The file must exist. |
+| `"w"` | write | Truncates the file if it exists; creates it if it does not. |
+| `"a"` | write | Appends to the file; creates it if it does not exist. |
+| `"r+"` | read and write | The file must exist. |
+
+Any other mode string is a runtime error. If the file cannot be opened, for
+example a missing file in mode `"r"`, `open` raises a runtime error.
+
+**Arity:** 2  
+**Returns:** File
+
+---
+
+## File methods
+
+A File value is returned by `open`. `type(f)` on a File returns `"File"`.
+
+A read method on a File that is not open for reading, and a write method on a
+File that is not open for writing, are runtime errors. Every method except
+`close`, called on a closed File, is a runtime error.
+
+### `f.read() → String`
+
+Reads the rest of the file content and returns it as one String.
+
+**Arity:** 0  
+**Returns:** String
+
+### `f.readline() → String | Nil`
+
+Reads the next line and returns it as a String with the trailing newline
+removed. Returns `nil` at end of file.
+
+**Arity:** 0  
+**Returns:** String on success, Nil at end of file
+
+### `f.readlines() → List[String]`
+
+Reads the rest of the file and returns a List of its lines, each with the
+trailing newline removed. A final line with no newline is included.
+
+**Arity:** 0  
+**Returns:** List of String
+
+### `f.write(text) → Nil`
+
+Writes `text` to the file. No newline is added. `text` must be a String.
+
+**Arity:** 1  
+**Returns:** Nil
+
+### `f.writeline(text) → Nil`
+
+Writes `text` followed by one newline character. `text` must be a String.
+
+**Arity:** 1  
+**Returns:** Nil
+
+### `f.close() → Nil`
+
+Closes the file. A second call on a File that is already closed does nothing.
+
+**Arity:** 0  
+**Returns:** Nil
+
+---
+
+## Map methods
+
+Map values respond to the built-in methods `has`, `del`, `keys`, `values`, and
+`entries`. They are specified in §03-types (summary) and §04-semantics
+(evaluation rules), and are not repeated here.
 
 ---
 
