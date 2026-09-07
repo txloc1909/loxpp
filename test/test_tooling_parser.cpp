@@ -667,4 +667,52 @@ TEST(ToolingParserAdversarial, DeepNestingDoesNotOverflowStack) {
         const Program prog = parse(src);
         auditSpans(prog, src, "deep-match");
     }
+
+    // R3: a right-associative `=` chain. `assignment()` recurses into itself
+    // for the `=` right side, a path no other guard covers. Without a guard
+    // in `assignment()` this overflows the stack near 13000 links under the
+    // ASan build.
+    {
+        constexpr int kAssignDepth = 20000;
+        std::string src = "var x = ";
+        for (int i = 0; i < kAssignDepth; ++i) {
+            src += "x = ";
+        }
+        src += "x;";
+        const auto begin = std::chrono::steady_clock::now();
+        const Program prog = parse(src);
+        const auto elapsed = std::chrono::steady_clock::now() - begin;
+        auditSpans(prog, src, "deep-assign-chain");
+        EXPECT_FALSE(prog.body.empty());
+        EXPECT_LT(
+            std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(),
+            10)
+            << "deep assignment chain parse did not finish in bounded time";
+    }
+
+    // R3 companion: a nested mix that alternates rule kinds on every level --
+    // assignment RHS, list element, parenthesised group, map value -- so the
+    // path never repeats the same rule twice in a row. A guard that only
+    // covers one rule kind would miss this.
+    {
+        constexpr int kMixUnits = 6000; // 4 nesting levels per unit
+        std::string src = "var x = ";
+        for (int i = 0; i < kMixUnits; ++i) {
+            src += "y = [ ( { k : ";
+        }
+        src += "0";
+        for (int i = 0; i < kMixUnits; ++i) {
+            src += " } ) ]";
+        }
+        src += ";";
+        const auto begin = std::chrono::steady_clock::now();
+        const Program prog = parse(src);
+        const auto elapsed = std::chrono::steady_clock::now() - begin;
+        auditSpans(prog, src, "deep-mixed-nesting");
+        EXPECT_FALSE(prog.body.empty());
+        EXPECT_LT(
+            std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(),
+            10)
+            << "deep mixed nesting parse did not finish in bounded time";
+    }
 }

@@ -103,6 +103,22 @@ class Parser {
     // keeps a safety factor of four and is far deeper than any hand-written
     // nesting. Past the cap the parser stops descending, records an error,
     // and unwinds to the next recovery point, still returning a Program.
+    //
+    // The guard sits at every rule that can recurse with a depth the input
+    // controls, and only there:
+    //   * assignment() -- the single entry of expression parsing. Every
+    //     parenthesised group, list/map element, call argument, subscript or
+    //     slice bound, `=` right side, logical/binary operand, `match`
+    //     subject or arm body, and every `if`/`while`/`for` condition reaches
+    //     expression parsing through expression() -> assignment(). The `=`
+    //     right side also re-enters assignment() directly.
+    //   * unary() -- a `!`/`-` prefix chain recurses through unary() itself
+    //     and never passes through assignment().
+    //   * declaration() and statement() -- nested blocks and nested control
+    //     flow (`if`/`while`/`for` bodies, nested `fun`/`class`).
+    // Every other recursive call in this file is bounded by the grammar to a
+    // constant depth (the binary-operator ladder, pattern parsing) or is a
+    // sibling loop with forward-progress, so it needs no guard.
     static constexpr int kMaxNestingDepth = 500;
 
     class NestingGuard {
@@ -629,6 +645,11 @@ class Parser {
     ExprPtr expression() { return assignment(); }
 
     ExprPtr assignment() {
+        NestingGuard guard(*this);
+        if (tooDeep()) {
+            error();
+            return nullptr;
+        }
         ExprPtr left = logicOr();
         if (match(TokenType::EQUAL)) {
             Token eq = previous();
@@ -741,10 +762,9 @@ class Parser {
         node.length = end > start ? end - start : 0;
     }
 
-    // Every nested expression -- paren group, list or map element, call
-    // argument, subscript, unary prefix, `=` right side, `match` subject --
-    // passes through unary() once per nesting level, so a single guard here
-    // bounds the whole expression grammar.
+    // A `!`/`-` prefix chain recurses through unary() itself, without passing
+    // through assignment(), so this rule carries its own guard in addition to
+    // the one in assignment().
     ExprPtr unary() {
         NestingGuard guard(*this);
         if (tooDeep()) {
