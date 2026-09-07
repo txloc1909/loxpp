@@ -22,12 +22,11 @@ static bool isAlpha(char c) {
 static bool isAlphaNumeric(char c) { return isDigit(c) || isAlpha(c); }
 
 Scanner::Scanner(const std::string& source)
-    : m_source(&source), m_current(source.data()), m_start(source.data()),
-      m_line(1) {}
+    : m_source_begin(source.data()), m_current(source.data()),
+      m_start(source.data()), m_line(1) {}
 
 Scanner::Scanner(const char* source)
-    : m_source(nullptr), // we don't need m_source for char* constructor
-      m_current(source), m_start(source), m_line(1) {}
+    : m_source_begin(source), m_current(source), m_start(source), m_line(1) {}
 
 Token Scanner::scanOneToken() {
     skipWhitespaceAndComments();
@@ -101,18 +100,28 @@ Token Scanner::scanOneToken() {
 }
 
 Token Scanner::makeToken(TokenType type) {
-    return Token{type,
-                 std::string_view(
-                     m_start, static_cast<std::size_t>(m_current - m_start)),
-                 m_line};
+    return makeToken(type, std::string_view(m_start, static_cast<std::size_t>(
+                                                         m_current - m_start)));
 }
 
 Token Scanner::makeToken(TokenType type, std::string_view lexeme) {
-    return Token{type, lexeme, m_line};
+    // offset and length come from the scanner pointers, not from lexeme: the
+    // string scanner narrows lexeme to drop the quotes, but the source span
+    // still covers m_start .. m_current.
+    return Token{type, lexeme, m_line,
+                 static_cast<std::size_t>(m_start - m_source_begin),
+                 static_cast<std::size_t>(m_current - m_start)};
 }
 
 Token Scanner::createErrorToken(const char* message) {
-    return Token{TokenType::ERROR, message, m_line};
+    // offset points at the start of the problem token: the offending character
+    // for "Unexpected character.", the opening quote for a string error. Every
+    // token then shares one rule -- offset is the token start. length covers
+    // the run the scanner read before it found the error. lexeme is a message,
+    // so a consumer must not read lexeme.size() as the span.
+    return Token{TokenType::ERROR, message, m_line,
+                 static_cast<std::size_t>(m_start - m_source_begin),
+                 static_cast<std::size_t>(m_current - m_start)};
 }
 
 TokenType Scanner::checkKeyword(std::size_t start, std::size_t length,
