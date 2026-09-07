@@ -33,8 +33,12 @@ add_compile_options(-Wno-c99-designator)
 
 include_directories(${PROJECT_SOURCE_DIR}/src)
 
-add_executable(loxpp
-    src/main.cpp
+# The interpreter front-end and runtime, shared by the loxpp executable and,
+# from the editor-tooling mission onward, the loxpp-lsp binary and the
+# src/tooling analysers. main.cpp is the only source that stays on the
+# executable. jvm_emitter.cpp / clr_emitter.cpp are added below, gated on
+# their options.
+set(LOXPP_CORE_SOURCES
     src/chunk.cpp
     src/debug.cpp
     src/backend/chunk_decoder.cpp
@@ -64,14 +68,20 @@ add_executable(loxpp
     src/stdlib/reflect_api.cpp
 )
 
+add_library(loxpp_core OBJECT ${LOXPP_CORE_SOURCES})
+target_include_directories(loxpp_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
+
 # The JVM code generator (backend node N4 onward). Default ON so CI builds
 # and checks it; OFF drops --target jvm from the CLI for a build that wants
 # the native VM only.
 option(LOXPP_JVM_BACKEND
     "Build the JVM backend code generator (--target jvm)" ON)
 if(LOXPP_JVM_BACKEND)
-    target_sources(loxpp PRIVATE src/backend/jvm_emitter.cpp)
-    target_compile_definitions(loxpp PRIVATE LOXPP_JVM_BACKEND)
+    target_sources(loxpp_core PRIVATE src/backend/jvm_emitter.cpp)
+    # PUBLIC: main.cpp reads LOXPP_JVM_BACKEND for the --target dispatch and
+    # the LOXPP_TARGET_USAGE_LIST message.
+    target_compile_definitions(loxpp_core PUBLIC LOXPP_JVM_BACKEND)
+    list(APPEND LOXPP_CORE_SOURCES src/backend/jvm_emitter.cpp)
 endif()
 
 # The CLR code generator. Default ON so CI builds and checks it; OFF drops
@@ -80,8 +90,11 @@ endif()
 option(LOXPP_CLR_BACKEND
     "Build the CLR backend code generator (--target clr)" ON)
 if(LOXPP_CLR_BACKEND)
-    target_sources(loxpp PRIVATE src/backend/clr_emitter.cpp)
-    target_compile_definitions(loxpp PRIVATE LOXPP_CLR_BACKEND)
+    target_sources(loxpp_core PRIVATE src/backend/clr_emitter.cpp)
+    # PUBLIC: main.cpp reads LOXPP_CLR_BACKEND for the --target dispatch and
+    # the LOXPP_TARGET_USAGE_LIST message.
+    target_compile_definitions(loxpp_core PUBLIC LOXPP_CLR_BACKEND)
+    list(APPEND LOXPP_CORE_SOURCES src/backend/clr_emitter.cpp)
 endif()
 
 # Debug output flags: default ON for Debug builds, OFF otherwise.
@@ -97,26 +110,39 @@ option(LOXPP_DEBUG_PRINT_CODE
 option(LOXPP_DEBUG_TRACE_EXECUTION
     "Trace VM execution: print stack + disassemble each instruction" ${_debug_default})
 
+# The debug flags appear only in .cpp translation units (compiler.cpp,
+# vm.cpp, memory_manager.cpp), never in a header main.cpp includes, so they
+# are PRIVATE to loxpp_core.
+set(LOXPP_CORE_PRIVATE_DEFINITIONS "")
 if(LOXPP_DEBUG_PRINT_CODE)
-    target_compile_definitions(loxpp PRIVATE LOXPP_DEBUG_PRINT_CODE)
+    list(APPEND LOXPP_CORE_PRIVATE_DEFINITIONS LOXPP_DEBUG_PRINT_CODE)
 endif()
 if(LOXPP_DEBUG_TRACE_EXECUTION)
-    target_compile_definitions(loxpp PRIVATE LOXPP_DEBUG_TRACE_EXECUTION)
+    list(APPEND LOXPP_CORE_PRIVATE_DEFINITIONS LOXPP_DEBUG_TRACE_EXECUTION)
 endif()
 option(LOXPP_DEBUG_LOG_GC
     "Log GC mark, trace, and sweep events to stderr" ${_debug_default})
 if(LOXPP_DEBUG_LOG_GC)
-    target_compile_definitions(loxpp PRIVATE LOXPP_DEBUG_LOG_GC)
+    list(APPEND LOXPP_CORE_PRIVATE_DEFINITIONS LOXPP_DEBUG_LOG_GC)
 endif()
+if(LOXPP_CORE_PRIVATE_DEFINITIONS)
+    target_compile_definitions(loxpp_core PRIVATE ${LOXPP_CORE_PRIVATE_DEFINITIONS})
+endif()
+
 # GC stress (collect on every allocation) is a runtime switch now, not a build
 # flag: set the LOXPP_STRESS_GC environment variable to any non-empty value
 # when running loxpp or a test binary. MemoryManager reads it once in its
 # constructor.
+
+# Runtime profiler: per-opcode counts, function timing, GC stats. It adds data
+# members to VM and MemoryManager (src/vm.h, src/memory_manager.h), so the
+# whole program must be compiled with it or without it — the layouts cannot be
+# link-mixed. loxpp_core is the non-profile variant and stays that way for the
+# tooling binaries that link it, so a profiling loxpp is built straight from
+# the core sources with the definition instead of linking loxpp_core (see the
+# executable section below). benchmarks/profile.py needs this build.
 option(LOXPP_PROFILE
     "Enable runtime profiler: per-opcode counts, function timing, GC stats" OFF)
-if(LOXPP_PROFILE)
-    target_compile_definitions(loxpp PRIVATE LOXPP_PROFILE)
-endif()
 
 # Value representation: NaN-tagged 8-byte word (default) vs portable
 # std::variant (16 bytes). Turn OFF for platforms where heap pointers may
@@ -124,10 +150,40 @@ endif()
 option(LOXPP_NAN_TAGGING
     "Use NaN-tagged 8-byte Value instead of std::variant" ON)
 if(LOXPP_NAN_TAGGING)
-    target_compile_definitions(loxpp PRIVATE LOXPP_NAN_TAGGING)
+    # PUBLIC: LOXPP_NAN_TAGGING selects the Value layout in src/value.h, a
+    # header main.cpp pulls in transitively (vm.h). Every translation unit
+    # linked together must agree.
+    target_compile_definitions(loxpp_core PUBLIC LOXPP_NAN_TAGGING)
 endif()
 
-# Readline support for the REPL.
+# The loxpp executable. main.cpp is the only source it owns; everything else
+# comes from loxpp_core.
+add_executable(loxpp src/main.cpp)
+
+if(LOXPP_PROFILE)
+    # Profiling build: compile main.cpp and the core sources together with
+    # LOXPP_PROFILE so VM and MemoryManager have one layout across the whole
+    # program. loxpp_core (non-profile) is not linked here.
+    target_sources(loxpp PRIVATE ${LOXPP_CORE_SOURCES})
+    target_compile_definitions(loxpp PRIVATE LOXPP_PROFILE)
+    if(LOXPP_JVM_BACKEND)
+        target_compile_definitions(loxpp PRIVATE LOXPP_JVM_BACKEND)
+    endif()
+    if(LOXPP_CLR_BACKEND)
+        target_compile_definitions(loxpp PRIVATE LOXPP_CLR_BACKEND)
+    endif()
+    if(LOXPP_NAN_TAGGING)
+        target_compile_definitions(loxpp PRIVATE LOXPP_NAN_TAGGING)
+    endif()
+    if(LOXPP_CORE_PRIVATE_DEFINITIONS)
+        target_compile_definitions(loxpp PRIVATE ${LOXPP_CORE_PRIVATE_DEFINITIONS})
+    endif()
+else()
+    target_link_libraries(loxpp PRIVATE loxpp_core)
+endif()
+
+# Readline support for the REPL. main.cpp is the only user, so the library,
+# the include directory, and the definition stay on the executable.
 find_library(READLINE_LIB readline)
 find_path(READLINE_INCLUDE_DIR readline/readline.h)
 if(READLINE_LIB AND READLINE_INCLUDE_DIR)
