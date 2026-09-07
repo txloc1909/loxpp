@@ -43,7 +43,7 @@ All fully expressible today; none belong on the roadmap:
 
 | # | Gap | Complexity | Essentialness |
 |---|---|---|---|
-| 1 | Reflection — **introspection only** | low | situational |
+| 1 | Reflection — **introspection only (done)** | low | situational |
 | 2 | OS / world access — basics **(partially done)** | low | essential |
 | 3 | Non-local control flow (`try`/`catch`/`throw` + `defer`/`finally`) | low–medium | essential |
 | 4 | Extensible protocols / operator overloading | medium | essential |
@@ -51,19 +51,27 @@ All fully expressible today; none belong on the roadmap:
 | 6 | FFI / native extension ABI | high | highest leverage |
 | 7 | True parallelism (multi-core) | very high | the must-have |
 
-**1. Reflection — introspection only. IN PLANNING** (plan drafted covering
-all three backends; not yet implemented). `type(x)`, `fields(inst)`,
-`getField`/`setField`/`hasField`, `methods(cls)`, `callMethod`. Field names
-compile to constant operands of `GET_PROPERTY`; no opcode reads a name computed
-at runtime, so this is a hard wall, not a library. But the fix is just native
-accessors over the `ObjInstance` field table and `ObjClass` method table that
-*already exist* — near-zero new machinery. **`eval` is explicitly deferred** (it
-needs compiler re-entrancy; introspection does not). For a dynamically-typed
+**1. Reflection — introspection only. DONE** (#167, all three back ends;
+`src/stdlib/reflect_api.cpp` + `LoxRuntime.{java,cs}`). `type(x)`,
+`fields(inst)`, `getField`/`setField`/`hasField`, `methods(cls)`, `callMethod`.
+Field names compile to constant operands of `GET_PROPERTY`; no opcode reads a
+name computed at runtime, so this was a hard wall, not a library. The fix was
+just native accessors over the `ObjInstance` field table and `ObjClass` method
+table that *already exist* — near-zero new machinery. **`eval` is explicitly
+deferred** (it needs compiler re-entrancy; introspection does not). For a dynamically-typed
 language with no macros/templates/generics, runtime reflection is the *entire*
 metaprogramming channel — without it every generic facility is hand-written per
 type. Value is bounded to single-VM inspectability (generic tooling, frameworks,
 local serialization of class instances) — **not** a prerequisite for concurrency
 (see the universal-data-representation point above).
+
+**Downstream note:** the native-VM optimisation items 5 (inline caches) and 9
+(slot-based fields / shapes) in `benchmark_report_2026-08-26.md` §5 must now be
+built around this merged API — `getField`/`setField`/`hasField`/`fields`/
+`callMethod` read `ObjInstance::fields` directly, so item 9 rewrites them in
+its own PR, and item 5's property cache key must carry a shape identity
+because `setField` can add a field under a runtime-computed name. See that
+report's "Dependencies on the expressiveness roadmap" table.
 
 **`callMethod` is capped to natives-only in v1, on all three backends.**
 Calling a resolved method that is closure-backed (an ordinary user-defined
@@ -126,21 +134,21 @@ VM reentrancy, profiler rework. Design space already mapped in
   structures, the only metaprogramming channel a dynamic language has); defer
   `eval`. Earlier "concurrency needs reflection for serialization" claim is
   **retracted** — primitives + maps are a universal data representation.
-- **Build order is 1→7, but decide item 7's concurrency model first.** Item 2
-  is partially done (basics landed; sockets/subprocess still open); next up
-  is item 1 (reflection), then item 3. It's the
-  most architecturally invasive item and constrains item 5 (shared suspension
+- **Build order is 1→7, but decide item 7's concurrency model first.** Item 1
+  (reflection) is done (#167); item 2 is partially done (basics landed;
+  sockets/subprocess still open); next up is item 3. Item 7 is the most
+  architecturally invasive item and constrains item 5 (shared suspension
   machinery), item 6 (FFI thread-safety), the GC, and the profiler. Choosing it
   late means redoing them. Build last, choose first.
 - **Reflection is relevant to the JVM and CLR backends.** Both host platforms
   have rich reflection; defining the concept in `spec/` keeps that door open
-  across all three targets. Confirmed while planning: this costs **zero
+  across all three targets. Confirmed in #167: this cost **zero
   codegen/emission changes** in either backend — `CALL`/`INVOKE` already
   dispatch through one shared callable interface (`LoxCallable`/
-  `ILoxCallable`) spanning closures, classes, and natives alike, so a new
-  native is purely a runtime-library addition (`LoxRuntime.java`/`.cs`), the
-  same way `stat` was. The one piece of real per-backend work is `type(x)`'s
-  type-name mapping, which has no shared implementation and must be written
+  `ILoxCallable`) spanning closures, classes, and natives alike, so the new
+  natives were purely a runtime-library addition (`LoxRuntime.java`/`.cs`), the
+  same way `stat` was. The one piece of real per-backend work was `type(x)`'s
+  type-name mapping, which has no shared implementation and is written
   once per language, kept in sync by hand.
 
 ## One-liner

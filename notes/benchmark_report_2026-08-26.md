@@ -378,6 +378,30 @@ either.
    remaining `bounce`/`richards`/`nbody` gap.
 5. **GC:** item 11, last — it only becomes the dominant cost once 1–9 land.
 
+### Dependencies on the expressiveness roadmap
+
+Some items touch the same code that a planned language feature will rewrite.
+The feature list and its order are in `expressiveness-roadmap.md` (roadmap
+items R1–R7) and `concurrency-model-next-steps.md`. Where a §5 item and a
+roadmap item change the same handler, do them in a deliberate order — the
+table says which item waits for, or must leave room for, which.
+
+| §5 item | roadmap item it depends on | why |
+|---|---|---|
+| **1** register-cache `ip` **(DONE, #170)** | **R5** coroutines/generators; **R3** non-local control flow | Item 1 shipped with the seam these features need: `FrameSync` (flush the cached `ip` into `frame->ip` on construct, reload `frame`/`ip`/`chunk` from the top of `m_frames` via `FrameSync::loadTop` on destruct) brackets every nested call, and the `RAISE_ERROR` macro flushes before `runtimeError()`. So every non-executing `CallFrame` already carries a correct `ip` at any depth — R3's unwind pops frames then calls `loadTop`; R5's `yield` flushes, saves the frame/stack slice, and reloads on resume. Both must call that same flush+reload at their new suspend/throw sites; nothing about #170 blocks them, and it removed the "retrofit the cache later" risk. |
+| **4**, **8** list/map dispatch + typed index fast paths | **R4** extensible protocols / operator overloading | R4 makes `[]`, `for-in`, `==`, `len`, `()`, and map-key hashing dispatch to user methods (`__index__`/`__iter__`/`__eq__`/`__hash__`/`__call__`) — the same `INVOKE`/`GET_PROPERTY`/`GET_INDEX`/`SET_INDEX` handlers items 4 and 8 rewrite, including the `n != std::floor(n)` check item 8 drops. Shape the fast path as "built-in type → fast path, else protocol dispatch" so the two compose. R4 also subsumes the map-key hash question in `language-extension.md`. |
+| **5**, **9** inline caches + slot-based fields / shapes | **R1** reflection (**already merged, #167** — `src/stdlib/reflect_api.cpp`, all three back ends) | Reflection shipped first, so items 5 and 9 must accommodate it, not the reverse. `fields`/`getField`/`hasField`/`setField`/`callMethod` all read `ObjInstance::fields` (a `Table`) directly. Item 9 deletes that member for a shape pointer + flat `Value[]`, so all five natives must be rewritten to go through the shape **in the same PR**. `setField(inst, name, v)` sets a field under a runtime-computed name — same layout change as `SET_PROPERTY` on an unknown field — so item 9's shapes must allow transitions on field addition (they already must, for `this.x = v` from any method) and item 5's `GET_PROPERTY`/`SET_PROPERTY` cache key must carry a shape/layout identity, not a bare `ObjClass*`. Item 5's `INVOKE`/method caches are safe: `ObjClass::methods` is immutable after class definition and Lox++ has no runtime method addition. `fields()`/`methods()` order is already spec-unspecified (`spec/05-stdlib.md`: "Sort the result if a deterministic order is needed"; probe `40_reflection.lox` keeps them single-element), so item 9 changing native's enumeration to slot order is legal and does not break the differential suite. `callMethod` is natives-only today (no re-entrant VM call path, roadmap R1 note); when that path lands, user-method `callMethod` should reuse the same shape + cache path as `INVOKE`. |
+| **6** direct-threaded dispatch | **R5** coroutines; **R7** true parallelism | The threaded loop is where suspend/`yield` points and GC safepoints belong (loop back-edges, call sites — see `concurrency_in_bytecode_vms.md` §5). Same state-flush seam as item 1. |
+| **10** compile-time global slots | **R1** reflection (`eval` sub-feature, deferred) | `eval` is deferred, so no conflict now, but item 10 raises the future cost of runtime-defined globals (compile-time slot assignment cannot see them). Separately, the JVM/CLR back ends keep a name→value global map on purpose, to match the native VM's global-lookup cost for benchmark parity (`backend-implementation-dag.md`, "Globals → A2"); item 10 breaks that parity premise — methodology only, the differential suite compares stdout. |
+| **11** generational / incremental GC | **R7** true parallelism + `concurrency-model-next-steps.md` | `concurrency-model-next-steps.md` item 7: do not start the GC redesign before the concurrency-model go/no-go. The model choice sets the GC shape — per-actor heaps (BEAM-style) vs. one shared concurrent collector. An incremental collector with write barriers is groundwork a concurrent GC needs anyway, but the nursery / promotion design must be chosen knowing which. Item 11 must not be built in isolation from that decision. Also flags the profiler coupling in `profiler-concurrency-notes.md` (`m_profilerScopes[]` follows whatever owns `m_frames[]`). |
+| **12** drop per-`push` overflow branch | **R5** coroutines | Minor: growable / segmented coroutine stacks change stack-overflow semantics and the single `CALL`-site depth check. |
+
+**No roadmap dependency:** items 2 (`-march=native -flto`), 3 (cache `"init"`),
+7 (superinstructions / peephole), 13 (profiler opcode-name table). Item 7's
+fused handlers and the nested-pattern match compilation in
+`dynamic-functional-programming.md` evolve match bytecode on separate tracks
+that do not collide.
+
 ### What not to do
 
 Do not write a native-code JIT for the native VM — it is a separate project,
