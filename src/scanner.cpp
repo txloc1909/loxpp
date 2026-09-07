@@ -22,12 +22,12 @@ static bool isAlpha(char c) {
 static bool isAlphaNumeric(char c) { return isDigit(c) || isAlpha(c); }
 
 Scanner::Scanner(const std::string& source)
-    : m_source(&source), m_current(source.data()), m_start(source.data()),
-      m_line(1) {}
+    : m_source(&source), m_source_begin(source.data()),
+      m_current(source.data()), m_start(source.data()), m_line(1) {}
 
 Scanner::Scanner(const char* source)
     : m_source(nullptr), // we don't need m_source for char* constructor
-      m_current(source), m_start(source), m_line(1) {}
+      m_source_begin(source), m_current(source), m_start(source), m_line(1) {}
 
 Token Scanner::scanOneToken() {
     skipWhitespaceAndComments();
@@ -104,15 +104,22 @@ Token Scanner::makeToken(TokenType type) {
     return Token{type,
                  std::string_view(
                      m_start, static_cast<std::size_t>(m_current - m_start)),
-                 m_line};
+                 m_line, static_cast<std::size_t>(m_start - m_source_begin)};
 }
 
 Token Scanner::makeToken(TokenType type, std::string_view lexeme) {
-    return Token{type, lexeme, m_line};
+    // The lexeme may be a narrowed slice that does not start at m_start (the
+    // string scanner drops the surrounding quotes), so derive the offset from
+    // the lexeme's own start, not from m_start.
+    return Token{type, lexeme, m_line,
+                 static_cast<std::size_t>(lexeme.data() - m_source_begin)};
 }
 
 Token Scanner::createErrorToken(const char* message) {
-    return Token{TokenType::ERROR, message, m_line};
+    // For an ERROR token offset is the scanner position where the error was
+    // found (m_current), which is at or just after the offending character.
+    return Token{TokenType::ERROR, message, m_line,
+                 static_cast<std::size_t>(m_current - m_source_begin)};
 }
 
 TokenType Scanner::checkKeyword(std::size_t start, std::size_t length,

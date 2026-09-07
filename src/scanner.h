@@ -32,6 +32,7 @@ class Scanner {
     bool match(char expected);
 
     const std::string* m_source;
+    const char* m_source_begin;
     const char* m_current;
     const char* m_start;
     std::size_t m_line;
