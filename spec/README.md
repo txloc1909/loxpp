@@ -77,8 +77,8 @@ variant) and adds the following:
 | `input()` built-in | Added in Lox++ |
 | `str()` built-in | Added in Lox++ |
 | `len()` built-in | Added in Lox++ |
-| `math` global object (`sqrt`, `floor`, `ceil`, `abs`, `pow`, `pi`, `e`) | Added in Lox++ |
-| `open()` built-in + file I/O methods (`read`, `readline`, `write`, `close`) | Added in Lox++ |
+| `math` global object (unary and binary numeric functions, constants `pi` `e` `inf` `nan`) | Added in Lox++ |
+| `open()` built-in + File methods (`read`, `readline`, `readlines`, `write`, `writeline`, `close`) | Added in Lox++ |
 | List type with `[...]` literal, indexing, and methods (`append`, `pop`, `remove`) | Added in Lox++ |
 | String indexing `s[i]` (read-only, single-character) | Added in Lox++ |
 | `seq[start:end]` slice syntax for List and String | Added in Lox++ |
