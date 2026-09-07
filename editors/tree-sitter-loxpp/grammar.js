@@ -410,6 +410,9 @@ module.exports = grammar({
     // -------------------------------------------------------------------
     // Terminals
     // -------------------------------------------------------------------
+    // `default` is a reserved word in src/token.h but no grammar rule uses it,
+    // and tree-sitter `reserved` needs a real token, so it parses as an
+    // ordinary identifier here. No corpus file uses `default` as a name.
     identifier: _ => /[a-zA-Z_][a-zA-Z0-9_]*/,
 
     number: _ => token(/\d+(\.\d+)?/),
