@@ -12,10 +12,15 @@
 
 class MemoryManager;
 class Compiler;
+class DiagnosticSink;
 
 static constexpr int UINT8_COUNT = 256;
 
-ObjFunction* compile(const std::string& source, MemoryManager* mm);
+// When sink is non-null, every parse error is collected there and nothing is
+// printed; when it is null (the default, used by vm.cpp) errors go to stderr as
+// before. Returns nullptr if any error was reported.
+ObjFunction* compile(const std::string& source, MemoryManager* mm,
+                     DiagnosticSink* sink = nullptr);
 
 enum class FunctionType : std::uint8_t {
     SCRIPT,

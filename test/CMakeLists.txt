@@ -27,6 +27,7 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/math.cpp
     ${PROJECT_SOURCE_DIR}/src/compiler.cpp
     ${PROJECT_SOURCE_DIR}/src/parser.cpp
+    ${PROJECT_SOURCE_DIR}/src/analyze.cpp
     ${PROJECT_SOURCE_DIR}/src/chunk.cpp
     ${PROJECT_SOURCE_DIR}/src/debug.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/chunk_decoder.cpp
@@ -131,6 +132,7 @@ loxpp_add_test(test_jvm_emit        test_jvm_emit.cpp        CORE loxpp_test_cor
 loxpp_add_test(test_clr_emit        test_clr_emit.cpp        CORE loxpp_test_core PROBE)
 loxpp_add_test(test_stringify_depth_guard test_stringify_depth_guard.cpp
                                                             CORE loxpp_test_core)
+loxpp_add_test(test_check_diagnostics test_check_diagnostics.cpp CORE loxpp_test_core)
 
 add_test(NAME TestMain COMMAND test_main)
 
@@ -156,7 +158,8 @@ set(LOXPP_GTEST_TARGETS
     test_or_pattern test_or_pattern_gc test_seq_destructure test_list_pattern
     test_list_pattern_gc test_at_binding test_at_binding_gc test_profiler
     test_chunk_decoder test_backend_cfg test_backend_abstract_stack
-    test_backend_capture test_jvm_emit test_clr_emit test_stringify_depth_guard)
+    test_backend_capture test_jvm_emit test_clr_emit test_stringify_depth_guard
+    test_check_diagnostics)
 foreach(t IN LISTS LOXPP_GTEST_TARGETS)
     if(t IN_LIST LOXPP_GC_STRESS_TARGETS)
         gtest_discover_tests(${t} TEST_PREFIX "${t}."

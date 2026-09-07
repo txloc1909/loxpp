@@ -27,6 +27,7 @@ inline bool operator<=(Precedence a, Precedence b) {
 }
 
 class Compiler;
+class DiagnosticSink;
 using ParseFn = void (Compiler::*)();
 
 struct ParseRule {
@@ -52,6 +53,11 @@ struct Parser {
     // the calling context (whether precedence <= ASSIGNMENT). Adding it to
     // ParseRule would conflate static rule metadata with dynamic call context.
     bool m_canAssign{false};
+
+    // When set, errorAt collects diagnostics here and prints nothing. Null (the
+    // default) keeps the original stderr behaviour byte-for-byte. compile()
+    // wires it; vm.cpp leaves it null.
+    DiagnosticSink* m_sink{nullptr};
 
     Parser(const std::string& source);
 

@@ -1,5 +1,6 @@
 #include "parser.h"
 #include "compiler.h"
+#include "diagnostic.h"
 
 #define T(token) static_cast<int>(TokenType::token)
 #define RULE(token, prefix, infix, prec)                                       \
@@ -104,6 +105,22 @@ void Parser::errorAt(const Token& token, const char* message) {
         return;
     }
     m_panicMode = true;
+    m_hadError = true;
+
+    if (m_sink != nullptr) {
+        Diagnostic diagnostic;
+        diagnostic.offset = token.offset;
+        diagnostic.length = token.length;
+        diagnostic.line = token.line;
+        diagnostic.severity = Severity::Error;
+        diagnostic.message = message;
+        if (token.type == TokenType::EOF_) {
+            diagnostic.length = 0; // end of input has no source span
+        }
+        m_sink->push(std::move(diagnostic));
+        return;
+    }
+
     std::fprintf(stderr, "[line %zu] Error", token.line);
     if (token.type == TokenType::EOF_) {
         std::fprintf(stderr, " at end");
@@ -115,7 +132,6 @@ void Parser::errorAt(const Token& token, const char* message) {
                      token.lexeme.data());
     }
     std::fprintf(stderr, ": %s\n", message);
-    m_hadError = true;
 }
 
 void Parser::errorAtCurrent(const char* message) {

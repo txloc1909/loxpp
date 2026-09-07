@@ -13,9 +13,11 @@
 #include <set>
 #include <unistd.h>
 
-ObjFunction* compile(const std::string& source, MemoryManager* mm) {
+ObjFunction* compile(const std::string& source, MemoryManager* mm,
+                     DiagnosticSink* sink) {
     ObjFunction* fn = mm->create<ObjFunction>();
     auto parser = std::make_unique<Parser>(source);
+    parser->m_sink = sink;
     auto compiler = std::make_unique<Compiler>(fn, parser.get(), mm,
                                                FunctionType::SCRIPT, nullptr);
 
@@ -70,10 +72,14 @@ void Compiler::markRoots(MemoryManager& mm) const {
 void Compiler::endCompiler() {
     emitReturn();
 #ifdef LOXPP_DEBUG_PRINT_CODE
-    bool color = isatty(STDOUT_FILENO) != 0;
-    const char* name =
-        m_function->name ? m_function->name->chars.c_str() : "script";
-    disassembleChunk(*getCurrentChunk(), *m_mm, name, std::cout, color);
+    // A diagnostics-only run (analyze() sets a sink) must emit nothing on
+    // std::cout: its caller collects the sink and prints just the report.
+    if (m_parser->m_sink == nullptr) {
+        bool color = isatty(STDOUT_FILENO) != 0;
+        const char* name =
+            m_function->name ? m_function->name->chars.c_str() : "script";
+        disassembleChunk(*getCurrentChunk(), *m_mm, name, std::cout, color);
+    }
 #endif
 }
 
