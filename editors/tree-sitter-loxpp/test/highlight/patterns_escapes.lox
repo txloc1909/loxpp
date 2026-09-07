@@ -16,6 +16,8 @@ fun size(t) {
 //       ^ variable
 //              ^ constructor
 //                            ^ function.call
+    case Empty => 0
+//       ^ constructor
     case _ => 0
 //       ^ variable.builtin
   };
@@ -27,4 +29,7 @@ class Point < Shape {
   area() { return this.w; }
 //                ^ variable.builtin
 //                     ^ variable.member
+  base() { return super.area; }
+//                ^ variable.builtin
+//                      ^ variable.member
 }

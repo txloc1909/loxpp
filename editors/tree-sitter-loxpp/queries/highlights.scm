@@ -85,6 +85,8 @@
 ; Property access (any `.name`)
 (field_expression
   property: (identifier) @variable.member)
+(super_expression
+  property: (identifier) @variable.member)
 
 ; Declarations
 (parameters (identifier) @variable.parameter)
@@ -113,6 +115,13 @@
 ; this / super
 (this_expression) @variable.builtin
 (super_expression "super" @variable.builtin)
+
+; Bare identifier arm pattern: a value binding, or a zero-field constructor
+; tag check (`case Quit =>`). Syntax alone cannot tell them apart, so fall
+; back on the naming convention: a leading capital reads as a constructor.
+((identifier_pattern) @variable)
+((identifier_pattern) @constructor
+ (#match? @constructor "^[A-Z]"))
 
 ; Wildcard pattern (after everything else so it wins for `_`)
 ((identifier_pattern) @variable.builtin
