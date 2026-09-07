@@ -13,9 +13,11 @@
 #include <set>
 #include <unistd.h>
 
-ObjFunction* compile(const std::string& source, MemoryManager* mm) {
+ObjFunction* compile(const std::string& source, MemoryManager* mm,
+                     DiagnosticSink* sink) {
     ObjFunction* fn = mm->create<ObjFunction>();
     auto parser = std::make_unique<Parser>(source);
+    parser->m_sink = sink;
     auto compiler = std::make_unique<Compiler>(fn, parser.get(), mm,
                                                FunctionType::SCRIPT, nullptr);
 
