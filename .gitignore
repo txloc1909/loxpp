@@ -59,3 +59,12 @@ runtime/clr/LoxHost.dll
 runtime/clr/LoxHost.runtimeconfig.json
 __pycache__/
 *.pyc
+
+# tree-sitter grammar (editors/tree-sitter-loxpp): npm and build output.
+# The generated parser under editors/tree-sitter-loxpp/src/ is committed.
+node_modules/
+editors/tree-sitter-loxpp/package-lock.json
+editors/tree-sitter-loxpp/build/
+editors/tree-sitter-loxpp/target/
+editors/tree-sitter-loxpp/Cargo.lock
+editors/tree-sitter-loxpp/*.wasm

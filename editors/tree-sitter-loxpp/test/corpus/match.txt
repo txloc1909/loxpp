@@ -1,0 +1,291 @@
+================================================================================
+Literal and wildcard arms
+================================================================================
+
+var a = match n {
+  case 0 => "zero"
+  case 1, 2, 3 => "small"
+  case "x" => "ex"
+  case true => "yes"
+  case nil => "none"
+  case _ => "other"
+};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (match_expression
+      (identifier)
+      (match_arm
+        (literal_pattern
+          (number))
+        (string
+          (string_content)))
+      (match_arm
+        (literal_pattern
+          (number))
+        (literal_pattern
+          (number))
+        (literal_pattern
+          (number))
+        (string
+          (string_content)))
+      (match_arm
+        (literal_pattern
+          (string
+            (string_content)))
+        (string
+          (string_content)))
+      (match_arm
+        (literal_pattern
+          (true))
+        (string
+          (string_content)))
+      (match_arm
+        (literal_pattern
+          (nil))
+        (string
+          (string_content)))
+      (match_arm
+        (identifier_pattern)
+        (string
+          (string_content))))))
+
+================================================================================
+Constructor and record patterns
+================================================================================
+
+var a = match t {
+  case Leaf(v) => v
+  case Node(l, r) => l
+  case Point{x, y} => x
+};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (match_expression
+      (identifier)
+      (match_arm
+        (constructor_pattern
+          (identifier)
+          (identifier))
+        (identifier))
+      (match_arm
+        (constructor_pattern
+          (identifier)
+          (identifier)
+          (identifier))
+        (identifier))
+      (match_arm
+        (record_pattern
+          (identifier)
+          (identifier)
+          (identifier))
+        (identifier)))))
+
+================================================================================
+Sequence patterns
+================================================================================
+
+var a = match xs {
+  case [] => 0
+  case [h, ...t] => h
+  case [a, b, ..._] => b
+};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (match_expression
+      (identifier)
+      (match_arm
+        (sequence_pattern)
+        (number))
+      (match_arm
+        (sequence_pattern
+          (identifier_pattern)
+          (rest_element
+            (identifier)))
+        (identifier))
+      (match_arm
+        (sequence_pattern
+          (identifier_pattern)
+          (identifier_pattern)
+          (rest_element
+            (identifier)))
+        (identifier)))))
+
+================================================================================
+At-bindings
+================================================================================
+
+var a = match tree {
+  case leaf @ Leaf(v) => leaf
+  case whole @ [h, ...t] => whole
+  case node @ Node{left, right} => node
+};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (match_expression
+      (identifier)
+      (match_arm
+        (binding_pattern
+          (identifier)
+          (constructor_pattern
+            (identifier)
+            (identifier)))
+        (identifier))
+      (match_arm
+        (binding_pattern
+          (identifier)
+          (sequence_pattern
+            (identifier_pattern)
+            (rest_element
+              (identifier))))
+        (identifier))
+      (match_arm
+        (binding_pattern
+          (identifier)
+          (record_pattern
+            (identifier)
+            (identifier)
+            (identifier)))
+        (identifier)))))
+
+================================================================================
+Or-patterns and guards
+================================================================================
+
+var a = match sig {
+  case Red or Amber => true
+  case Stop(reason) or SlowDown(reason) if "!" in reason => reason
+  case v @ Ok(x) or v @ Err(x) => x
+  case n if n >= 500 => "server"
+};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (match_expression
+      (identifier)
+      (match_arm
+        (identifier_pattern)
+        (identifier_pattern)
+        (true))
+      (match_arm
+        (constructor_pattern
+          (identifier)
+          (identifier))
+        (constructor_pattern
+          (identifier)
+          (identifier))
+        (guard
+          (binary_expression
+            (string
+              (string_content))
+            (identifier)))
+        (identifier))
+      (match_arm
+        (binding_pattern
+          (identifier)
+          (constructor_pattern
+            (identifier)
+            (identifier)))
+        (binding_pattern
+          (identifier)
+          (constructor_pattern
+            (identifier)
+            (identifier)))
+        (identifier))
+      (match_arm
+        (identifier_pattern)
+        (guard
+          (binary_expression
+            (identifier)
+            (number)))
+        (string
+          (string_content))))))
+
+================================================================================
+Block and expression arm bodies
+================================================================================
+
+var a = match node {
+  case A(x) => x + 1
+  case B(y) => {
+    var doubled = y * 2;
+    doubled
+  }
+};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (match_expression
+      (identifier)
+      (match_arm
+        (constructor_pattern
+          (identifier)
+          (identifier))
+        (binary_expression
+          (identifier)
+          (number)))
+      (match_arm
+        (constructor_pattern
+          (identifier)
+          (identifier))
+        (block_arm_body
+          (variable_declaration
+            (identifier)
+            (binary_expression
+              (identifier)
+              (number)))
+          (identifier))))))
+
+================================================================================
+Match as a statement
+================================================================================
+
+fun describe(s) {
+  print match s {
+    case "red" => "stop"
+    case _ => "go"
+  };
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameters
+      (identifier))
+    (block
+      (print_statement
+        (match_expression
+          (identifier)
+          (match_arm
+            (literal_pattern
+              (string
+                (string_content)))
+            (string
+              (string_content)))
+          (match_arm
+            (identifier_pattern)
+            (string
+              (string_content))))))))
