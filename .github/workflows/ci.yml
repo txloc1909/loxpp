@@ -34,6 +34,53 @@ jobs:
             loxpp-dev:latest \
             bash -c "find src test -name '*.cpp' -o -name '*.h' | xargs clang-format --dry-run --Werror"
 
+  tree-sitter:
+    name: tree-sitter grammar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dev-editors image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          target: dev-editors
+          tags: loxpp-dev-editors:latest
+          # Read the dev scope too so the base layers the C++-only jobs
+          # already built are reused instead of rebuilt.
+          cache-from: |
+            type=gha,scope=dev-editors
+            type=gha,scope=dev
+          cache-to: type=gha,mode=min,scope=dev-editors
+
+      - name: Generate, test, and parse the corpus
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace/editors/tree-sitter-loxpp \
+            loxpp-dev-editors:latest \
+            bash -c '
+              set -e
+              tree-sitter generate
+              tree-sitter test
+              files=$(ls ../../examples/*.lox ../../bootstrap/*.lox ../../test/translation-probes/*.lox)
+              n=$(echo $files | wc -w)
+              echo "Parsing $n corpus files ..."
+              set +e
+              out=$(tree-sitter parse --quiet $files 2>&1)
+              rc=$?
+              set -e
+              echo "$out"
+              if [ $rc -ne 0 ] || printf "%s" "$out" | grep -qE "\((ERROR|MISSING)|MISSING \""; then
+                echo "FAIL: corpus parse produced ERROR or MISSING nodes"
+                exit 1
+              fi
+              echo "OK: $n files parsed, zero ERROR and zero MISSING nodes"
+            '
+
   build-and-test:
     name: Build & Test (${{ matrix.preset }})
     runs-on: ubuntu-latest

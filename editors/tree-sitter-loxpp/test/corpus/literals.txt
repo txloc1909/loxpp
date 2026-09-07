@@ -1,0 +1,103 @@
+================================================================================
+Numbers
+================================================================================
+
+var a = 0;
+var b = 42;
+var c = 3.14;
+var d = 1.0;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (number))
+  (variable_declaration
+    (identifier)
+    (number))
+  (variable_declaration
+    (identifier)
+    (number))
+  (variable_declaration
+    (identifier)
+    (number)))
+
+================================================================================
+Strings and escape sequences
+================================================================================
+
+var a = "hello";
+var b = "quote: \" backslash: \\";
+var c = "newline \n tab \t return \r nul \0";
+var d = "spans
+two lines";
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (string
+      (string_content)))
+  (variable_declaration
+    (identifier)
+    (string
+      (string_content)
+      (escape_sequence)
+      (string_content)
+      (escape_sequence)))
+  (variable_declaration
+    (identifier)
+    (string
+      (string_content)
+      (escape_sequence)
+      (string_content)
+      (escape_sequence)
+      (string_content)
+      (escape_sequence)
+      (string_content)
+      (escape_sequence)))
+  (variable_declaration
+    (identifier)
+    (string
+      (string_content))))
+
+================================================================================
+Comments
+================================================================================
+
+// a full-line comment
+var a = 1; // a trailing comment
+// another
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (comment)
+  (variable_declaration
+    (identifier)
+    (number))
+  (comment)
+  (comment))
+
+================================================================================
+Booleans and nil
+================================================================================
+
+var a = true;
+var b = false;
+var c = nil;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (true))
+  (variable_declaration
+    (identifier)
+    (false))
+  (variable_declaration
+    (identifier)
+    (nil)))

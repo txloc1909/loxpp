@@ -1,0 +1,4 @@
+# Generated / scaffolded C and C++ sources — not linted.
+Checks: '-*'
+HeaderFilterRegex: '$^'
+WarningsAsErrors: ''

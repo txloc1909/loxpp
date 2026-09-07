@@ -1,0 +1,159 @@
+================================================================================
+Variable declaration
+================================================================================
+
+var a;
+var b = 1;
+var c = a + b;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier))
+  (variable_declaration
+    (identifier)
+    (number))
+  (variable_declaration
+    (identifier)
+    (binary_expression
+      (identifier)
+      (identifier))))
+
+================================================================================
+Object and list destructuring
+================================================================================
+
+var {x, y} = point;
+var {a, b,} = pair;
+var [h, t] = list;
+var [p, q,] = pair;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (object_pattern
+      (identifier)
+      (identifier))
+    (identifier))
+  (variable_declaration
+    (object_pattern
+      (identifier)
+      (identifier))
+    (identifier))
+  (variable_declaration
+    (list_pattern
+      (identifier)
+      (identifier))
+    (identifier))
+  (variable_declaration
+    (list_pattern
+      (identifier)
+      (identifier))
+    (identifier)))
+
+================================================================================
+Function declaration
+================================================================================
+
+fun add(a, b) {
+  return a + b;
+}
+
+fun noop() {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameters
+      (identifier)
+      (identifier))
+    (block
+      (return_statement
+        (binary_expression
+          (identifier)
+          (identifier)))))
+  (function_declaration
+    (identifier)
+    (parameters)
+    (block)))
+
+================================================================================
+Class declaration with superclass
+================================================================================
+
+class Animal {
+  speak() { print "..."; }
+}
+
+class Dog < Animal {
+  init(name) { this.name = name; }
+  speak() { return super.speak(); }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (class_declaration
+    (identifier)
+    (class_body
+      (method_definition
+        (identifier)
+        (parameters)
+        (block
+          (print_statement
+            (string
+              (string_content)))))))
+  (class_declaration
+    (identifier)
+    (identifier)
+    (class_body
+      (method_definition
+        (identifier)
+        (parameters
+          (identifier))
+        (block
+          (expression_statement
+            (assignment_expression
+              (field_expression
+                (this_expression)
+                (identifier))
+              (identifier)))))
+      (method_definition
+        (identifier)
+        (parameters)
+        (block
+          (return_statement
+            (call_expression
+              (super_expression
+                (identifier))
+              (arguments))))))))
+
+================================================================================
+Enum declaration
+================================================================================
+
+enum Option { Some(v) None }
+enum Result { Ok(value) Err(msg) }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (enum_declaration
+    (identifier)
+    (enum_variant
+      (identifier)
+      (identifier))
+    (enum_variant
+      (identifier)))
+  (enum_declaration
+    (identifier)
+    (enum_variant
+      (identifier)
+      (identifier))
+    (enum_variant
+      (identifier)
+      (identifier))))
