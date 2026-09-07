@@ -58,6 +58,7 @@ set(LOXPP_CORE_SOURCES
     src/token.cpp
     src/compiler.cpp
     src/parser.cpp
+    src/analyze.cpp
     src/stdlib/stdlib_context.cpp
     src/stdlib/stdlib_registrar.cpp
     src/stdlib/globals.cpp

@@ -1,7 +1,11 @@
+#include "analyze.h"
 #include "chunk.h"
+#include "diagnostic.h"
 #include "scanner.h"
 #include "vm.h"
 
+#include <algorithm>
+#include <cstdio>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -116,6 +120,112 @@ static std::string readFile(const std::string& path) {
     std::stringstream buffer;
     buffer << file.rdbuf();
     return buffer.str();
+}
+
+static const char* severityWord(Severity severity) {
+    switch (severity) {
+    case Severity::Warning:
+        return "warning";
+    case Severity::Info:
+        return "info";
+    case Severity::Error:
+    default:
+        return "error";
+    }
+}
+
+static void appendJsonString(std::string& out, const std::string& value) {
+    out += '"';
+    for (char c : value) {
+        switch (c) {
+        case '"':
+            out += "\\\"";
+            break;
+        case '\\':
+            out += "\\\\";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        case '\r':
+            out += "\\r";
+            break;
+        case '\t':
+            out += "\\t";
+            break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20) {
+                char buf[8];
+                std::snprintf(buf, sizeof(buf), "\\u%04x",
+                              static_cast<unsigned char>(c));
+                out += buf;
+            } else {
+                out += c;
+            }
+        }
+    }
+    out += '"';
+}
+
+// loxpp --check [--format text|json] <file>: report the compiler's static
+// errors without running the program. Exit 0 when clean, 1 when any error,
+// 74 when the file cannot be read (readFile), 64 on a usage error.
+static int runCheck(int argc, const char* argv[]) {
+    std::string format = "text";
+    std::string path;
+    for (int i = 2; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "--format" && i + 1 < argc) {
+            format = argv[++i];
+        } else if (path.empty()) {
+            path = arg;
+        } else {
+            std::fprintf(stderr,
+                         "Usage: loxpp --check [--format text|json] <file>\n");
+            return 64;
+        }
+    }
+    if (path.empty() || (format != "text" && format != "json")) {
+        std::fprintf(stderr,
+                     "Usage: loxpp --check [--format text|json] <file>\n");
+        return 64;
+    }
+
+    std::string source = readFile(path);
+    std::vector<Diagnostic> diagnostics = analyze(source);
+    LineIndex index(source);
+
+    if (format == "json") {
+        std::string out = "[";
+        for (std::size_t i = 0; i < diagnostics.size(); i++) {
+            const Diagnostic& d = diagnostics[i];
+            auto [endLine, endColumn] = index.locate(d.offset + d.length);
+            if (i > 0) {
+                out += ',';
+            }
+            out += "{\"line\":" + std::to_string(d.line - 1);
+            out += ",\"character\":" + std::to_string(d.column - 1);
+            out += ",\"endLine\":" + std::to_string(endLine - 1);
+            out += ",\"endCharacter\":" + std::to_string(endColumn - 1);
+            out += ",\"severity\":";
+            appendJsonString(out, severityWord(d.severity));
+            out += ",\"message\":";
+            appendJsonString(out, d.message);
+            out += '}';
+        }
+        out += "]";
+        std::printf("%s\n", out.c_str());
+    } else {
+        for (const Diagnostic& d : diagnostics) {
+            std::printf("%s:%zu:%zu: %s: %s\n", path.c_str(), d.line, d.column,
+                        severityWord(d.severity), d.message.c_str());
+        }
+    }
+
+    bool anyError = std::any_of(
+        diagnostics.begin(), diagnostics.end(),
+        [](const Diagnostic& d) { return d.severity == Severity::Error; });
+    return anyError ? 1 : 0;
 }
 
 static void runFile(VM& vm, const std::string& path) {
@@ -260,6 +370,12 @@ static int runClrTarget(const std::string& outDir, const std::string& path) {
 #endif
 
 int main(int argc, const char* argv[]) {
+    // loxpp --check [--format text|json] <file> — static error check only,
+    // never runs the program. Intercepted before the VM path like --target.
+    if (argc >= 2 && std::string(argv[1]) == "--check") {
+        return runCheck(argc, argv);
+    }
+
 #if defined(LOXPP_JVM_BACKEND) || defined(LOXPP_CLR_BACKEND)
     // loxpp --target {jvm,clr} --out-dir <dir> program.lox — compiles only,
     // never runs the program. Only intercepted when the first argument is
