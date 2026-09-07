@@ -4,9 +4,6 @@
 #include "memory_manager.h"
 
 #include <algorithm>
-#include <iostream>
-#include <sstream>
-#include <streambuf>
 
 LineIndex::LineIndex(const std::string& source) {
     m_lineStarts.push_back(0);
@@ -30,15 +27,10 @@ LineIndex::locate(std::size_t offset) const {
 std::vector<Diagnostic> analyze(const std::string& source) {
     DiagnosticSink sink;
     MemoryManager mm;
-    {
-        // A debug build (LOXPP_DEBUG_PRINT_CODE) disassembles every chunk to
-        // std::cout from inside compile(). The --check output must be the
-        // diagnostics and nothing else, so mute std::cout for the compile.
-        std::ostringstream muted;
-        std::streambuf* saved = std::cout.rdbuf(muted.rdbuf());
-        compile(source, &mm, &sink);
-        std::cout.rdbuf(saved);
-    }
+    // A non-null sink makes compile() a diagnostics-only pass: endCompiler()
+    // skips the debug chunk disassembly, so no std::cout write happens here
+    // and analyze() holds no global mutable state.
+    compile(source, &mm, &sink);
 
     LineIndex index(source);
     std::vector<Diagnostic> result = std::move(sink.diagnostics());
