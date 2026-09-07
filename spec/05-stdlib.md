@@ -132,7 +132,9 @@ error.
 - `log` is the natural logarithm (base e); `log2` and `log10` use base 2 and
   base 10.
 - The trigonometric functions use radians.
-- A domain error, such as `math.sqrt(-1)`, returns `nan`. It is not an error.
+- A domain error, such as `math.sqrt(-1)`, returns a NaN value. It is not an
+  error. The sign of that NaN and its identity are not guaranteed: the result
+  can print as `-nan`, and no NaN is equal to `math.nan` or to itself.
 
 **Arity:** 1  
 **Returns:** Number
