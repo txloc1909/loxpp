@@ -1,0 +1,170 @@
+================================================================================
+If and else
+================================================================================
+
+if (a) print a;
+if (a) { print a; } else { print b; }
+if (a) if (b) c; else d;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (if_statement
+    (identifier)
+    (print_statement
+      (identifier)))
+  (if_statement
+    (identifier)
+    (block
+      (print_statement
+        (identifier)))
+    (block
+      (print_statement
+        (identifier))))
+  (if_statement
+    (identifier)
+    (if_statement
+      (identifier)
+      (expression_statement
+        (identifier))
+      (expression_statement
+        (identifier)))))
+
+================================================================================
+While loop
+================================================================================
+
+while (i < 10) {
+  i = i + 1;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (while_statement
+    (binary_expression
+      (identifier)
+      (number))
+    (block
+      (expression_statement
+        (assignment_expression
+          (identifier)
+          (binary_expression
+            (identifier)
+            (number)))))))
+
+================================================================================
+C-style for loop
+================================================================================
+
+for (var i = 0; i < 10; i = i + 1) print i;
+for (; a; ) b;
+for (i = 0; ; ) break;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (for_statement
+    (variable_declaration
+      (identifier)
+      (number))
+    (binary_expression
+      (identifier)
+      (number))
+    (assignment_expression
+      (identifier)
+      (binary_expression
+        (identifier)
+        (number)))
+    (print_statement
+      (identifier)))
+  (for_statement
+    (identifier)
+    (expression_statement
+      (identifier)))
+  (for_statement
+    (expression_statement
+      (assignment_expression
+        (identifier)
+        (number)))
+    (break_statement)))
+
+================================================================================
+For-in loop
+================================================================================
+
+for (var x in xs) {
+  print x;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (for_statement
+    (identifier)
+    (identifier)
+    (block
+      (print_statement
+        (identifier)))))
+
+================================================================================
+Print, return, break, continue
+================================================================================
+
+fun f() {
+  print 1;
+  while (true) {
+    if (a) break;
+    if (b) continue;
+  }
+  return;
+}
+
+fun g() { return 42; }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameters)
+    (block
+      (print_statement
+        (number))
+      (while_statement
+        (true)
+        (block
+          (if_statement
+            (identifier)
+            (break_statement))
+          (if_statement
+            (identifier)
+            (continue_statement))))
+      (return_statement)))
+  (function_declaration
+    (identifier)
+    (parameters)
+    (block
+      (return_statement
+        (number)))))
+
+================================================================================
+Blocks and expression statements
+================================================================================
+
+{
+  var a = 1;
+  a + 1;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (block
+    (variable_declaration
+      (identifier)
+      (number))
+    (expression_statement
+      (binary_expression
+        (identifier)
+        (number)))))

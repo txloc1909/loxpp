@@ -1,0 +1,47 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "loxpp",
+      "camelcase": "Loxpp",
+      "scope": "source.lox",
+      "path": ".",
+      "file-types": [
+        "lox"
+      ],
+      "highlights": [
+        "queries/highlights.scm"
+      ],
+      "locals": [
+        "queries/locals.scm"
+      ],
+      "folds": [
+        "queries/folds.scm"
+      ],
+      "indents": [
+        "queries/indents.scm"
+      ]
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Lox++ grammar for tree-sitter",
+    "authors": [
+      {
+        "name": "Lox++ contributors"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/txloc1909/loxpp"
+    }
+  },
+  "bindings": {
+    "c": true,
+    "go": false,
+    "node": true,
+    "python": false,
+    "rust": true,
+    "swift": false
+  }
+}

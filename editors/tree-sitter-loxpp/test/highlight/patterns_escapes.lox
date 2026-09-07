@@ -1,0 +1,30 @@
+var text = "tab:\t end";
+//              ^ string.escape
+
+enum Tree { Leaf(v) Node(l, r) }
+// <- keyword
+//   ^ type
+//          ^ constructor
+
+fun size(t) {
+  return match t {
+//       ^ keyword.conditional
+    case Leaf(v) => v
+//  ^ keyword.conditional
+//       ^ constructor
+    case node @ Node(l, r) => size(l) + size(r)
+//       ^ variable
+//              ^ constructor
+//                            ^ function.call
+    case _ => 0
+//       ^ variable.builtin
+  };
+}
+
+class Point < Shape {
+//    ^ type
+//            ^ type
+  area() { return this.w; }
+//                ^ variable.builtin
+//                     ^ variable.member
+}
