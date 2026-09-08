@@ -1,0 +1,5 @@
+# Vendored third-party code is not analysed. json.hpp is copied verbatim from
+# upstream (see README.md) and must never be hand-edited to satisfy a linter.
+Checks: '-*'
+WarningsAsErrors: ''
+HeaderFilterRegex: '$^'
