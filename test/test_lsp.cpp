@@ -173,6 +173,29 @@ TEST(LspDocumentStore, CrlfFileAnalysesLikeItsLfTwin) {
               lf.diags[0].range.start.character);
 }
 
+TEST(LspDocumentStore, LoneCrFileAnalysesLikeItsLfTwin) {
+    PublishSink lfSink;
+    DocumentStore lfStore(lfSink.fn());
+    lfStore.didOpen("file:///lf.lox", 1,
+                    "var a = 1;\nvar b = 2;\nvar c = @;\n");
+    const auto lf = lfSink.waitForCount(1);
+
+    // Classic-Mac line endings: a lone CR terminates each line.
+    PublishSink crSink;
+    DocumentStore crStore(crSink.fn());
+    crStore.didOpen("file:///cr.lox", 1,
+                    "var a = 1;\rvar b = 2;\rvar c = @;\r");
+    const auto cr = crSink.waitForCount(1);
+
+    ASSERT_EQ(lf.diags.size(), 1U);
+    ASSERT_EQ(cr.diags.size(), 1U);
+    EXPECT_EQ(cr.diags[0].range.start.line, lf.diags[0].range.start.line);
+    EXPECT_EQ(cr.diags[0].range.start.character,
+              lf.diags[0].range.start.character);
+    // The error is on the third line; a dropped CR would report it earlier.
+    EXPECT_EQ(cr.diags[0].range.start.line, 2U);
+}
+
 TEST(LspDocumentStore, DebounceCollapsesBurstAndKeepsLastChange) {
     PublishSink sink;
     DocumentStore store(sink.fn());

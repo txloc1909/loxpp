@@ -11,8 +11,16 @@ std::string normalizeNewlines(std::string text) {
     std::string out;
     out.reserve(text.size());
     for (std::size_t i = 0; i < text.size(); ++i) {
-        if (text[i] == '\r' && i + 1 < text.size() && text[i + 1] == '\n') {
-            continue; // drop the CR, keep the following LF
+        // Fold CRLF and a lone CR (classic Mac) alike to one LF. The client
+        // counts either as a single line break, and the tooling parser splits
+        // on '\n' only, so a surviving CR would drift every later position by
+        // one line.
+        if (text[i] == '\r') {
+            out.push_back('\n');
+            if (i + 1 < text.size() && text[i + 1] == '\n') {
+                ++i;
+            }
+            continue;
         }
         out.push_back(text[i]);
     }
