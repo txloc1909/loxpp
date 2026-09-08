@@ -226,5 +226,27 @@ else()
     message(STATUS "Readline support: OFF")
 endif()
 
+# The loxpp-lsp language server (editor-tooling mission, node N8). A second
+# binary in the same build. It links loxpp_core (Scanner + analyze()) and the
+# src/tooling analysers, and vendors nlohmann/json from third_party/. Default
+# ON so CI builds it; OFF drops it for a build that wants the interpreter only.
+option(LOXPP_LSP "Build the loxpp-lsp language server" ON)
+if(LOXPP_LSP)
+    find_package(Threads REQUIRED)
+    add_executable(loxpp-lsp
+        src/lsp/main.cpp
+        src/lsp/json_rpc.cpp
+        src/lsp/document_store.cpp
+        src/lsp/server.cpp
+        src/lsp/stdlib_docs.cpp
+    )
+    # loxpp_tooling is an OBJECT library that PUBLIC-links loxpp_core; CMake
+    # does not carry one OBJECT library's objects through another, so the
+    # executable links loxpp_core directly too (same as test/CMakeLists.txt).
+    target_link_libraries(loxpp-lsp PRIVATE
+        loxpp_tooling loxpp_core Threads::Threads)
+    target_include_directories(loxpp-lsp PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
+endif()
+
 enable_testing()
 add_subdirectory(test)
