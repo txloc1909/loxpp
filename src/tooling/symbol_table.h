@@ -78,7 +78,10 @@ struct Symbol {
     // enum was declared in, listed here for the document outline).
     std::vector<Symbol*> members;
 
-    // Implicit `this` / `super` bindings and `_` are never reported unused.
+    // True for a symbol the user did not write as a plain binding: implicit
+    // `this` / `super`, `_`, and the fallback symbol of a misplaced local enum
+    // (already diagnosed on its own). Such symbols are never reported unused
+    // and never appear in the document outline.
     bool implicit = false;
 };
 

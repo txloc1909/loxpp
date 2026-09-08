@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "diagnostic.h"
@@ -71,8 +72,17 @@ class DocumentModel {
     [[nodiscard]] std::vector<Span>
     referencesAt(std::size_t offset, bool includeDeclaration = true) const;
 
-    // The symbol whose declaration or a use covers offset, or null.
+    // The user-defined symbol whose declaration or a use covers offset, or
+    // null. A null result does NOT mean "nothing here": the offset may sit on
+    // a stdlib global, which has no Symbol. Call knownGlobalAt() to tell the
+    // two cases apart -- N8 hover and completion need that distinction.
     [[nodiscard]] const Symbol* symbolAt(std::size_t offset) const;
+
+    // The stdlib global name at offset (for example "clock" or "len"), or an
+    // empty view when offset is not on a stdlib-global reference. The view
+    // points into text(). A non-empty result always pairs with
+    // symbolAt(offset) == nullptr.
+    [[nodiscard]] std::string_view knownGlobalAt(std::size_t offset) const;
 
     // Hierarchical outline built from the scope tree.
     [[nodiscard]] std::vector<DocumentSymbolNode> documentSymbols() const;

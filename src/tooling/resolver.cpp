@@ -430,11 +430,19 @@ class Resolver {
     void visitEnumDecl(const EnumDecl& e) {
         if (m_current->kind != ScopeKind::Global) {
             warn(nameSpan(e.name), "enum must be declared at global scope");
-            declareIn(m_current, e.name.text, SymbolKind::Class,
-                      nameSpan(e.name), stmtSpan(e));
+            // The misplaced enum is already diagnosed here; mark its symbols
+            // implicit so the unused-local pass does not add a second warning
+            // for the same construct.
+            Symbol* enumSym =
+                declareIn(m_current, e.name.text, SymbolKind::Class,
+                          nameSpan(e.name), stmtSpan(e));
+            enumSym->implicit = true;
             for (const EnumCtorDecl& ctor : e.ctors) {
-                declareIn(m_current, ctor.name.text, SymbolKind::EnumCtor,
-                          nameSpan(ctor.name), {ctor.offset, ctor.length});
+                Symbol* cs =
+                    declareIn(m_current, ctor.name.text, SymbolKind::EnumCtor,
+                              nameSpan(ctor.name), {ctor.offset, ctor.length});
+                cs->implicit = true;
+                enumSym->members.push_back(cs);
             }
             return;
         }
@@ -710,8 +718,124 @@ class Resolver {
             for (const auto& alt : p.alternatives) {
                 bindPattern(alt.get(), armScope);
             }
+            checkOrPatternBindings(p, armScope);
             break;
         }
+        }
+    }
+
+    // The names a single pattern would bind in the arm scope. A bare identifier
+    // that names a constructor is a use, not a binding, so it is left out.
+    void collectBindingNames(const Pattern* pat, Scope* armScope,
+                             std::vector<std::string_view>& names) const {
+        if (pat == nullptr) {
+            return;
+        }
+        auto keep = [&](std::string_view name) {
+            if (name != "_") {
+                names.push_back(name);
+            }
+        };
+        switch (pat->kind) {
+        case PatternKind::Literal:
+        case PatternKind::Wildcard:
+            break;
+        case PatternKind::Binding: {
+            const auto& p = static_cast<const BindingPat&>(*pat);
+            if (!isConstructorSymbol(lookup(p.name, armScope))) {
+                keep(p.name);
+            }
+            break;
+        }
+        case PatternKind::Ctor: {
+            const auto& p = static_cast<const CtorPat&>(*pat);
+            for (const Name& f : p.fields) {
+                keep(f.text);
+            }
+            break;
+        }
+        case PatternKind::Class: {
+            const auto& p = static_cast<const ClassPat&>(*pat);
+            for (const Name& f : p.fields) {
+                keep(f.text);
+            }
+            break;
+        }
+        case PatternKind::Seq: {
+            const auto& p = static_cast<const SeqPat&>(*pat);
+            for (const SeqPatElem& el : p.elements) {
+                keep(el.name);
+            }
+            break;
+        }
+        case PatternKind::AtBinding: {
+            const auto& p = static_cast<const AtBindingPat&>(*pat);
+            keep(p.name);
+            collectBindingNames(p.sub.get(), armScope, names);
+            break;
+        }
+        case PatternKind::Or: {
+            const auto& p = static_cast<const OrPat&>(*pat);
+            for (const auto& alt : p.alternatives) {
+                collectBindingNames(alt.get(), armScope, names);
+            }
+            break;
+        }
+        }
+    }
+
+    static std::vector<std::string_view>
+    sortedUnique(std::vector<std::string_view> names) {
+        std::ranges::sort(names);
+        names.erase(std::ranges::begin(std::ranges::unique(names)),
+                    names.end());
+        return names;
+    }
+
+    // spec/02-syntax.md requires every or-pattern alternative to bind the same
+    // names; N3 owns that as a compile error. Here it is a Warning so the
+    // editor shows that one branch leaves a name unbound at run time.
+    void checkOrPatternBindings(const OrPat& p, Scope* armScope) {
+        if (p.alternatives.size() < 2) {
+            return;
+        }
+        std::vector<std::string_view> first;
+        collectBindingNames(p.alternatives.front().get(), armScope, first);
+        const std::vector<std::string_view> expected = sortedUnique(first);
+        for (const auto& alt : p.alternatives | std::views::drop(1)) {
+            std::vector<std::string_view> cur;
+            collectBindingNames(alt.get(), armScope, cur);
+            const std::vector<std::string_view> got = sortedUnique(cur);
+            if (got == expected) {
+                continue;
+            }
+            std::string_view onlyExpected;
+            for (std::string_view n : expected) {
+                if (std::ranges::find(got, n) == got.end()) {
+                    onlyExpected = n;
+                    break;
+                }
+            }
+            std::string_view onlyGot;
+            for (std::string_view n : got) {
+                if (std::ranges::find(expected, n) == expected.end()) {
+                    onlyGot = n;
+                    break;
+                }
+            }
+            Span span = {p.offset, p.length};
+            if (!onlyExpected.empty() && !onlyGot.empty()) {
+                warn(span, "or-pattern alternatives bind different names: '" +
+                               std::string(onlyExpected) + "' vs '" +
+                               std::string(onlyGot) + "'");
+            } else {
+                const std::string_view missing =
+                    onlyExpected.empty() ? onlyGot : onlyExpected;
+                warn(span, "or-pattern alternatives bind different names: '" +
+                               std::string(missing) +
+                               "' is not bound by every alternative");
+            }
+            return; // one warning per or-pattern
         }
     }
 

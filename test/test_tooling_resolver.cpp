@@ -238,11 +238,71 @@ TEST(ToolingResolver, ReturnAtTopLevelWarns) {
 }
 
 TEST(ToolingResolver, EnumOutsideGlobalScopeWarns) {
+    // Exactly one warning: the scope-placement warning must not also drag in
+    // an "unused local" warning for the same fallback enum symbol.
     const std::string src = "fun f() { enum Local { A B } return 0; }\n";
     DocumentModel model(src);
-    ASSERT_FALSE(warningMessages(model).empty());
+    ASSERT_EQ(warningMessages(model).size(), 1u);
     EXPECT_EQ(model.warnings().front().message,
               "enum must be declared at global scope");
+}
+
+TEST(ToolingResolver, OrPatternMismatchedNamesWarnsOnce) {
+    const std::string src = R"(enum E { A(x) B(y) Quit }
+fun go(e) {
+  return match e {
+    case A(p) or B(q) => p
+    case Quit => 0
+  };
+}
+)";
+    DocumentModel model(src);
+    ASSERT_EQ(warningMessages(model).size(), 1u);
+    EXPECT_EQ(model.warnings().front().message,
+              "or-pattern alternatives bind different names: 'p' vs 'q'");
+
+    // The body still resolves: `p` points at the binding from its alternative.
+    const std::size_t use = offsetOf(src, "=> p") + 3;
+    auto def = model.definitionAt(use);
+    ASSERT_TRUE(def);
+    EXPECT_EQ(def->offset, offsetOf(src, "A(p)") + 2);
+}
+
+TEST(ToolingResolver, OrPatternMatchedNamesDoesNotWarn) {
+    const std::string src = R"(enum E { A(x) B(y) Quit }
+fun go(e) {
+  return match e {
+    case A(v) or B(v) => v
+    case Quit => 0
+  };
+}
+)";
+    DocumentModel model(src);
+    EXPECT_TRUE(warningMessages(model).empty());
+}
+
+TEST(ToolingResolver, SymbolAtDistinguishesNothingUserSymbolAndStdlibGlobal) {
+    const std::string src =
+        "fun f() {\n  var local = 1;\n  return len(local);\n}\n";
+    DocumentModel model(src);
+    EXPECT_TRUE(warningMessages(model).empty());
+
+    // (a) nothing: an offset on the numeric literal.
+    const std::size_t nothing = offsetOf(src, "1;");
+    EXPECT_EQ(model.symbolAt(nothing), nullptr);
+    EXPECT_TRUE(model.knownGlobalAt(nothing).empty());
+
+    // (b) a user symbol: the `local` argument use.
+    const std::size_t userUse = offsetOf(src, "len(local)") + 4;
+    const Symbol* sym = model.symbolAt(userUse);
+    ASSERT_NE(sym, nullptr);
+    EXPECT_EQ(sym->name, "local");
+    EXPECT_TRUE(model.knownGlobalAt(userUse).empty());
+
+    // (c) a stdlib global: the `len` callee.
+    const std::size_t stdUse = offsetOf(src, "len(local)");
+    EXPECT_EQ(model.symbolAt(stdUse), nullptr);
+    EXPECT_EQ(model.knownGlobalAt(stdUse), "len");
 }
 
 TEST(ToolingResolver, RedeclarationInSameScopeWarns) {

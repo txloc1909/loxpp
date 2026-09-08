@@ -94,6 +94,15 @@ const Symbol* DocumentModel::symbolAt(std::size_t offset) const {
     return entry != nullptr ? entry->symbol : nullptr;
 }
 
+std::string_view DocumentModel::knownGlobalAt(std::size_t offset) const {
+    const ReferenceIndex::Entry* entry = m_resolved.references.at(offset);
+    if (entry == nullptr || !entry->knownGlobal) {
+        return {};
+    }
+    return std::string_view(m_text).substr(entry->span.offset,
+                                           entry->span.length);
+}
+
 namespace {
 
 bool includeInOutline(const Symbol& sym, bool topLevel) {
