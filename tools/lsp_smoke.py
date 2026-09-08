@@ -3,7 +3,8 @@
 
 Spawns the server, speaks LSP over stdio, and checks the core features:
 initialize handshake, push diagnostics on a clean and a broken file, hover on
-a stdlib name, document symbols, and go-to-definition on a local use.
+a stdlib name, document symbols, go-to-definition on a local use, and member
+completion (offered for a 'math.' receiver, withheld for any other 'x.').
 
 Usage:
     python3 tools/lsp_smoke.py <path-to-loxpp-lsp> [--bad-file <path>]
@@ -35,8 +36,15 @@ print str(123);
 
 BAD_SOURCE = "print 1 +;\n"
 
+COMPLETION_SOURCE = """\
+var who = "world";
+var a = math.
+var b = who.
+"""
+
 CLEAN_URI = "file:///smoke/clean.lox"
 BAD_URI = "file:///smoke/bad.lox"
+COMPLETION_URI = "file:///smoke/completion.lox"
 
 
 class LspClient:
@@ -257,6 +265,34 @@ def main():
                   and definition["range"]["start"]["character"] == dc)
         check(ok_def, "definition of 'name' points at the parameter (got %s)"
               % (definition["range"] if definition else None))
+
+        # -- completion: member list is gated to the 'math' receiver ----
+        client.notify("textDocument/didOpen", {"textDocument": {
+            "uri": COMPLETION_URI, "languageId": "lox", "version": 1,
+            "text": COMPLETION_SOURCE}})
+        client.pump_until_diagnostics(COMPLETION_URI)
+
+        def labels_after(marker):
+            ml, mc = line_char(COMPLETION_SOURCE, marker)
+            result = client.request("textDocument/completion", {
+                "textDocument": {"uri": COMPLETION_URI},
+                "position": {"line": ml, "character": mc + len(marker)}})
+            items = result.get("items") if isinstance(result, dict) else result
+            return [i.get("label") for i in (items or [])]
+
+        math_labels = labels_after("math.")
+        check("sqrt" in math_labels and "pi" in math_labels,
+              "completion after 'math.' lists math members (got %d items)"
+              % len(math_labels))
+
+        # A non-'math' receiver: the type is unknown, so no member items. The
+        # old behaviour leaked the Map/File method names here.
+        user_labels = labels_after("who.")
+        leaked = sorted(set(user_labels) & {
+            "keys", "values", "read", "close", "write", "readLine"})
+        check(not leaked,
+              "completion after a non-math 'x.' leaks no Map/File methods "
+              "(got %s)" % leaked)
 
     finally:
         code = client.shutdown()

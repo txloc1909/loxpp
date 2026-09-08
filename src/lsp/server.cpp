@@ -301,9 +301,13 @@ tooling::Position toToolingPos(const Position& p) {
 }
 
 void appendMemberCompletions(json& items, const std::string& receiver) {
-    const std::vector<StdlibEntry>& table =
-        receiver == "math" ? allMathMemberDocs() : allMethodDocs();
-    for (const StdlibEntry& e : table) {
+    // `math` is the only receiver the resolver can identify by name. For any
+    // other `x.` the receiver type is unknown, so offer nothing rather than a
+    // guess that lists unrelated Map/File methods.
+    if (receiver != "math") {
+        return;
+    }
+    for (const StdlibEntry& e : allMathMemberDocs()) {
         items.push_back(stdlibItem(e, true));
     }
 }
