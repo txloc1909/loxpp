@@ -180,6 +180,7 @@ add_library(loxpp_tooling OBJECT
     src/tooling/symbol_table.cpp
     src/tooling/stdlib_names.cpp
     src/tooling/resolver.cpp
+    src/tooling/document_model.cpp
 )
 target_include_directories(loxpp_tooling PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(loxpp_tooling PUBLIC loxpp_core)
