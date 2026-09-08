@@ -81,6 +81,64 @@ jobs:
               echo "OK: $n files parsed, zero ERROR and zero MISSING nodes"
             '
 
+  loxpp-lsp:
+    name: loxpp-lsp language server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dev image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          target: dev
+          tags: loxpp-dev:latest
+          cache-from: type=gha,scope=dev
+          cache-to: type=gha,mode=max,scope=dev
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-debug-${{ github.sha }}
+          restore-keys: |
+            ccache-debug-
+
+      # The debug preset builds loxpp-lsp under ASan + UBSan, so the smoke
+      # test also checks for leaks and undefined behaviour in one run.
+      - name: Build loxpp-lsp
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e CCACHE_DIR=/workspace/.ccache \
+            -e CCACHE_MAXSIZE=400M \
+            -e CCACHE_COMPRESS=1 \
+            loxpp-dev:latest \
+            bash -c "cmake --preset debug -DLOXPP_LSP=ON && cmake --build build --target loxpp-lsp"
+
+      - name: Run the LSP smoke test
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c '
+              set -e
+              python3 tools/lsp_smoke.py build/loxpp-lsp
+              # The diagnostics check must be able to fail: point it at a file
+              # with the syntax error removed and expect a non-zero exit.
+              printf "print 1;\n" > /tmp/ok.lox
+              if python3 tools/lsp_smoke.py build/loxpp-lsp --bad-file /tmp/ok.lox; then
+                echo "FAIL: smoke test passed on a file with no diagnostic"
+                exit 1
+              fi
+              echo "OK: the diagnostics assertion fails when the error is removed"
+            '
+
   build-and-test:
     name: Build & Test (${{ matrix.preset }})
     runs-on: ubuntu-latest
