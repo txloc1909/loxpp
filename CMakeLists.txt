@@ -175,7 +175,13 @@ endif()
 # in the build graph, which the loxpp-lsp binary (N8) needs when it links
 # loxpp_core and the src/tooling objects together. loxpp_tooling carries only
 # the new tooling sources.
-add_library(loxpp_tooling OBJECT src/tooling/tooling_parser.cpp)
+add_library(loxpp_tooling OBJECT
+    src/tooling/tooling_parser.cpp
+    src/tooling/symbol_table.cpp
+    src/tooling/stdlib_names.cpp
+    src/tooling/resolver.cpp
+    src/tooling/document_model.cpp
+)
 target_include_directories(loxpp_tooling PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(loxpp_tooling PUBLIC loxpp_core)
 
