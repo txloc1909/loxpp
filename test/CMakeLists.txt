@@ -132,6 +132,11 @@ loxpp_add_test(test_jvm_emit        test_jvm_emit.cpp        CORE loxpp_test_cor
 loxpp_add_test(test_clr_emit        test_clr_emit.cpp        CORE loxpp_test_core PROBE)
 loxpp_add_test(test_stringify_depth_guard test_stringify_depth_guard.cpp
                                                             CORE loxpp_test_core)
+loxpp_add_test(test_tooling_parser  test_tooling_parser.cpp  CORE loxpp_tooling PROBE)
+# loxpp_tooling is an OBJECT library that links loxpp_core for the Scanner;
+# CMake does not propagate one OBJECT library's objects through another, so
+# the executable links loxpp_core directly too.
+target_link_libraries(test_tooling_parser PRIVATE loxpp_core)
 loxpp_add_test(test_check_diagnostics test_check_diagnostics.cpp CORE loxpp_test_core)
 
 add_test(NAME TestMain COMMAND test_main)
@@ -159,7 +164,7 @@ set(LOXPP_GTEST_TARGETS
     test_list_pattern_gc test_at_binding test_at_binding_gc test_profiler
     test_chunk_decoder test_backend_cfg test_backend_abstract_stack
     test_backend_capture test_jvm_emit test_clr_emit test_stringify_depth_guard
-    test_check_diagnostics)
+    test_check_diagnostics test_tooling_parser)
 foreach(t IN LISTS LOXPP_GTEST_TARGETS)
     if(t IN_LIST LOXPP_GC_STRESS_TARGETS)
         gtest_discover_tests(${t} TEST_PREFIX "${t}."
