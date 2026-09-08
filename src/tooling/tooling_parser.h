@@ -1,10 +1,21 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 
 #include "tooling/ast.h"
 
 namespace loxpp::tooling {
+
+// Upper bound on the depth of the returned tree along any root-to-leaf path.
+// The parser counts both recursive-descent nesting and the length of loop-
+// built left-leaning chains (operator ladders, the postfix call chain) on one
+// counter; when the sum reaches this value it stops extending that path,
+// records an error, recovers, and still returns a Program. The bound lets a
+// consumer walk or destroy the tree recursively on a small stack -- an LSP
+// worker thread near 512 KB -- without overflowing. N7's resolver and N8's
+// LSP rely on it; see the comment in tooling_parser.cpp for the rationale.
+inline constexpr std::size_t kMaxTreeDepth = 500;
 
 // Parse Lox++ source into an editor-tooling AST.
 //

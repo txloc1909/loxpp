@@ -339,6 +339,196 @@ std::size_t auditSpans(const Program& prog, std::string_view src,
     return audit.nodes;
 }
 
+// Maximum root-to-leaf depth of a parsed tree. The parser bounds tree depth
+// to kMaxTreeDepth -- the property this measures -- so the walk itself stays
+// shallow on any accepted input.
+std::size_t measureExpr(const Expr* e);
+std::size_t measureStmt(const Stmt* s);
+
+std::size_t maxOf(std::initializer_list<std::size_t> xs) {
+    std::size_t m = 0;
+    for (std::size_t x : xs) {
+        m = std::max(m, x);
+    }
+    return m;
+}
+
+std::size_t measurePat(const Pattern* p) {
+    if (p == nullptr) {
+        return 0;
+    }
+    std::size_t child = 0;
+    if (p->kind == PatternKind::AtBinding) {
+        child = measurePat(static_cast<const AtBindingPat*>(p)->sub.get());
+    } else if (p->kind == PatternKind::Or) {
+        for (const auto& alt : static_cast<const OrPat*>(p)->alternatives) {
+            child = std::max(child, measurePat(alt.get()));
+        }
+    }
+    return 1 + child;
+}
+
+std::size_t measureBody(const std::vector<StmtPtr>& body) {
+    std::size_t m = 0;
+    for (const auto& s : body) {
+        m = std::max(m, measureStmt(s.get()));
+    }
+    return m;
+}
+
+std::size_t measureExpr(const Expr* e) {
+    if (e == nullptr) {
+        return 0;
+    }
+    std::size_t child = 0;
+    switch (e->kind) {
+    case ExprKind::Unary:
+        child = measureExpr(static_cast<const UnaryExpr*>(e)->operand.get());
+        break;
+    case ExprKind::Binary: {
+        const auto* b = static_cast<const BinaryExpr*>(e);
+        child =
+            maxOf({measureExpr(b->left.get()), measureExpr(b->right.get())});
+        break;
+    }
+    case ExprKind::Logical: {
+        const auto* b = static_cast<const LogicalExpr*>(e);
+        child =
+            maxOf({measureExpr(b->left.get()), measureExpr(b->right.get())});
+        break;
+    }
+    case ExprKind::Call: {
+        const auto* c = static_cast<const CallExpr*>(e);
+        child = measureExpr(c->callee.get());
+        for (const auto& a : c->arguments) {
+            child = std::max(child, measureExpr(a.get()));
+        }
+        break;
+    }
+    case ExprKind::Get:
+        child = measureExpr(static_cast<const GetExpr*>(e)->object.get());
+        break;
+    case ExprKind::Index: {
+        const auto* i = static_cast<const IndexExpr*>(e);
+        child =
+            maxOf({measureExpr(i->object.get()), measureExpr(i->index.get())});
+        break;
+    }
+    case ExprKind::Slice: {
+        const auto* s = static_cast<const SliceExpr*>(e);
+        child = maxOf({measureExpr(s->object.get()),
+                       measureExpr(s->start.get()), measureExpr(s->end.get())});
+        break;
+    }
+    case ExprKind::Assign: {
+        const auto* a = static_cast<const AssignExpr*>(e);
+        child =
+            maxOf({measureExpr(a->target.get()), measureExpr(a->value.get())});
+        break;
+    }
+    case ExprKind::ListLiteral:
+        for (const auto& el :
+             static_cast<const ListLiteralExpr*>(e)->elements) {
+            child = std::max(child, measureExpr(el.get()));
+        }
+        break;
+    case ExprKind::MapLiteral:
+        for (const auto& en : static_cast<const MapLiteralExpr*>(e)->entries) {
+            child = maxOf({child, measureExpr(en.key.get()),
+                           measureExpr(en.value.get())});
+        }
+        break;
+    case ExprKind::Grouping:
+        child = measureExpr(static_cast<const GroupingExpr*>(e)->inner.get());
+        break;
+    case ExprKind::Match: {
+        const auto* m = static_cast<const MatchExpr*>(e);
+        child = measureExpr(m->subject.get());
+        for (const auto& a : m->arms) {
+            for (const auto& pat : a.patterns) {
+                child = std::max(child, measurePat(pat.get()));
+            }
+            child = std::max(child, measureExpr(a.guard.get()));
+            child = std::max(child, measureBody(a.body_decls));
+            child = std::max(child, measureExpr(a.body_expr.get()));
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    return 1 + child;
+}
+
+std::size_t measureStmt(const Stmt* s) {
+    if (s == nullptr) {
+        return 0;
+    }
+    std::size_t child = 0;
+    switch (s->kind) {
+    case StmtKind::VarDecl:
+        child = measureExpr(static_cast<const VarDecl*>(s)->initializer.get());
+        break;
+    case StmtKind::DestructureDecl:
+        child = measureExpr(
+            static_cast<const DestructureDecl*>(s)->initializer.get());
+        break;
+    case StmtKind::FunDecl:
+        child = measureBody(static_cast<const FunDecl*>(s)->body);
+        break;
+    case StmtKind::ClassDecl:
+        for (const auto& m : static_cast<const ClassDecl*>(s)->methods) {
+            child = std::max(child, measureBody(m.body));
+        }
+        break;
+    case StmtKind::Block:
+        child = measureBody(static_cast<const Block*>(s)->body);
+        break;
+    case StmtKind::If: {
+        const auto* i = static_cast<const IfStmt*>(s);
+        child = maxOf({measureExpr(i->condition.get()),
+                       measureStmt(i->then_branch.get()),
+                       measureStmt(i->else_branch.get())});
+        break;
+    }
+    case StmtKind::While: {
+        const auto* w = static_cast<const WhileStmt*>(s);
+        child = maxOf(
+            {measureExpr(w->condition.get()), measureStmt(w->body.get())});
+        break;
+    }
+    case StmtKind::For: {
+        const auto* f = static_cast<const ForStmt*>(s);
+        child = maxOf(
+            {measureStmt(f->initializer.get()), measureExpr(f->condition.get()),
+             measureExpr(f->increment.get()), measureStmt(f->body.get())});
+        break;
+    }
+    case StmtKind::ForIn: {
+        const auto* f = static_cast<const ForInStmt*>(s);
+        child =
+            maxOf({measureExpr(f->iterable.get()), measureStmt(f->body.get())});
+        break;
+    }
+    case StmtKind::Print:
+        child = measureExpr(static_cast<const PrintStmt*>(s)->value.get());
+        break;
+    case StmtKind::Return:
+        child = measureExpr(static_cast<const ReturnStmt*>(s)->value.get());
+        break;
+    case StmtKind::ExprStmt:
+        child = measureExpr(static_cast<const ExprStmt*>(s)->expr.get());
+        break;
+    default:
+        break;
+    }
+    return 1 + child;
+}
+
+std::size_t measureProgramDepth(const Program& prog) {
+    return measureBody(prog.body);
+}
+
 } // namespace
 
 TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
@@ -602,117 +792,158 @@ TEST(ToolingParserAdversarial, RecoversAfterUnexpectedLeadingToken) {
     EXPECT_TRUE(sawAfter);
 }
 
-// R2: deeply nested constructs must not overflow the C++ call stack. Each
-// case returns a Program with in-bounds spans in bounded time.
+// R2 / R3 / R4: no input, however deep, overflows the C++ stack -- not while
+// parsing, and not while the returned Program is destroyed. One counter
+// (kMaxTreeDepth) bounds the tree depth along any root-to-leaf path, covering
+// recursive-descent nesting AND loop-built left-leaning chains (the six
+// operator ladders and the postfix call chain). Every case here returns a
+// Program with in-bounds spans, a measured depth at or below the cap, and
+// destroys cleanly in bounded time under the ASan/UBSan `debug` preset.
 TEST(ToolingParserAdversarial, DeepNestingDoesNotOverflowStack) {
-    constexpr int kDepth = 10000;
+    constexpr int kUnits = 200000;
 
     struct Case {
-        const char* name;
-        std::string open;
-        std::string mid;
-        std::string close;
+        std::string name;
+        std::string src;
     };
-    const std::vector<Case> cases = {
-        {"parens", "var x = " + std::string(kDepth, '(') + "1", std::string(),
-         std::string(kDepth, ')') + ";"},
-        {"brackets", "var x = " + std::string(kDepth, '['), "1",
-         std::string(kDepth, ']') + ";"},
-        {"braces", std::string(kDepth, '{'), std::string(),
-         std::string(kDepth, '}')},
-        {"unary", "var x = " + std::string(kDepth, '!'), "y", ";"},
+    std::vector<Case> cases;
+
+    // (a) Loop-built left-leaning chains: one rule activation, kUnits loop
+    // turns, kUnits nodes on the left spine. `~BinaryExpr` / `~LogicalExpr` /
+    // `~GetExpr` / `~CallExpr` / `~IndexExpr` each recurse once per spine
+    // node on teardown -- this is the R4 class. The loop-turn counter caps
+    // the spine.
+    auto chain = [](const std::string& head, const std::string& unit) {
+        std::string s = "var x = ";
+        s.reserve(head.size() + unit.size() * kUnits + 16);
+        s += head;
+        for (int i = 0; i < kUnits; ++i) {
+            s += unit;
+        }
+        s += ";";
+        return s;
     };
+    cases.push_back({"add", chain("1", " + 1")});
+    cases.push_back({"sub", chain("1", " - 1")});
+    cases.push_back({"mul", chain("1", " * 1")});
+    cases.push_back({"div", chain("1", " / 1")});
+    cases.push_back({"mod", chain("1", " % 1")});
+    cases.push_back({"eq", chain("a", " == a")});
+    cases.push_back({"neq", chain("a", " != a")});
+    cases.push_back({"lt", chain("a", " < a")});
+    cases.push_back({"gt", chain("a", " > a")});
+    cases.push_back({"le", chain("a", " <= a")});
+    cases.push_back({"ge", chain("a", " >= a")});
+    cases.push_back({"in", chain("a", " in a")});
+    cases.push_back({"and", chain("a", " and a")});
+    cases.push_back({"or", chain("a", " or a")});
+    cases.push_back({"get", chain("o", ".f")});
+    cases.push_back({"method", chain("o", ".m()")});
+    cases.push_back({"index", chain("o", "[i]")});
+
+    // (b) Right-leaning / nested past the cap: each level recurses through a
+    // guarded rule (assignment(), unary(), declaration(), statement()). These
+    // do not need 200000 units -- 20000 is already 40x the cap -- and past
+    // the cap the parser re-synchronises to the next construct start, so the
+    // count multiplies the recovery work.
+    constexpr int kNest = 20000;
+    cases.push_back({"parens", "var x = " + std::string(kNest, '(') + "1" +
+                                   std::string(kNest, ')') + ";"});
+    cases.push_back({"lists", "var x = " + std::string(kNest, '[') + "1" +
+                                  std::string(kNest, ']') + ";"});
+    cases.push_back({"prefix", "var x = " + [] {
+                         std::string p;
+                         for (int i = 0; i < kNest; ++i) {
+                             p += "-!";
+                         }
+                         return p;
+                     }() + "x;"});
+    cases.push_back(
+        {"blocks", std::string(kNest, '{') + std::string(kNest, '}')});
+    {
+        std::string s = "var x = ";
+        for (int i = 0; i < kNest; ++i) {
+            s += "{a:";
+        }
+        s += "0";
+        for (int i = 0; i < kNest; ++i) {
+            s += "}";
+        }
+        s += ";";
+        cases.push_back({"maps", std::move(s)});
+    }
+    {
+        std::string s = "var x = ";
+        for (int i = 0; i < kNest; ++i) {
+            s += "f(";
+        }
+        s += "0" + std::string(kNest, ')') + ";";
+        cases.push_back({"calls", std::move(s)});
+    }
+    {
+        std::string s = "var x = ";
+        for (int i = 0; i < kUnits; ++i) {
+            s += "x = ";
+        }
+        s += "x;";
+        cases.push_back({"assign-chain", std::move(s)});
+    }
+    {
+        std::string s = "var x = ";
+        for (int i = 0; i < kNest; ++i) {
+            s += "match ";
+        }
+        s += "x " + std::string(kNest, '{') + std::string(kNest, '}') + ";";
+        cases.push_back({"match-subjects", std::move(s)});
+    }
+    {
+        std::string s;
+        for (int i = 0; i < kNest; ++i) {
+            s += "if (x) ";
+        }
+        s += "y;";
+        cases.push_back({"nested-if", std::move(s)});
+    }
+
+    // (c) Mixed: alternate one ladder operator with a run of nesting
+    // constructs on every unit, so no rule repeats twice in a row and the
+    // single counter must sum both kinds of depth along the path. Each unit
+    // adds 4 to the path depth (BinaryExpr, ListLiteral, Grouping,
+    // MapLiteral) -> >= 200000 levels.
+    {
+        constexpr int kMixUnits = 55000;
+        std::string s = "var x = ";
+        for (int i = 0; i < kMixUnits; ++i) {
+            s += "a + [ ( { k : ";
+        }
+        s += "0";
+        for (int i = 0; i < kMixUnits; ++i) {
+            s += " } ) ]";
+        }
+        s += ";";
+        cases.push_back({"mixed-ladder-and-nesting", std::move(s)});
+    }
 
     for (const auto& c : cases) {
-        std::string src;
-        src.reserve(c.open.size() + c.mid.size() + c.close.size());
-        src += c.open;
-        src += c.mid;
-        src += c.close;
-
         const auto begin = std::chrono::steady_clock::now();
-        const Program prog = parse(src);
+        const Program prog = parse(c.src);
         const auto elapsed = std::chrono::steady_clock::now() - begin;
 
-        auditSpans(prog, src, std::string("deep-") + c.name);
-        EXPECT_LT(
-            std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(),
-            10)
-            << c.name << " parse did not finish in bounded time";
-    }
+        auditSpans(prog, c.src, "deep-" + c.name);
 
-    // Nested call chain: f(f(f(...(0)...))).
-    {
-        std::string src = "var x = ";
-        for (int i = 0; i < kDepth; ++i) {
-            src += "f(";
-        }
-        src += "0";
-        src += std::string(kDepth, ')');
-        src += ";";
-        const Program prog = parse(src);
-        auditSpans(prog, src, "deep-calls");
-    }
+        // (d) The produced tree is at or below the documented cap on every
+        // path -- so a recursive walk or destruction of it stays shallow.
+        const std::size_t depth = measureProgramDepth(prog);
+        EXPECT_LE(depth, kMaxTreeDepth) << c.name << ": tree depth " << depth
+                                        << " over the cap " << kMaxTreeDepth;
 
-    // Nested match subjects: match match match ... x {} {} {}.
-    {
-        std::string src = "var x = ";
-        for (int i = 0; i < kDepth; ++i) {
-            src += "match ";
-        }
-        src += "x ";
-        src += std::string(kDepth, '{');
-        src += std::string(kDepth, '}');
-        src += ";";
-        const Program prog = parse(src);
-        auditSpans(prog, src, "deep-match");
-    }
+        const auto ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(elapsed)
+                .count();
+        EXPECT_LT(ms, 5000) << c.name << " parse took " << ms << " ms";
 
-    // R3: a right-associative `=` chain. `assignment()` recurses into itself
-    // for the `=` right side, a path no other guard covers. Without a guard
-    // in `assignment()` this overflows the stack near 13000 links under the
-    // ASan build.
-    {
-        constexpr int kAssignDepth = 20000;
-        std::string src = "var x = ";
-        for (int i = 0; i < kAssignDepth; ++i) {
-            src += "x = ";
-        }
-        src += "x;";
-        const auto begin = std::chrono::steady_clock::now();
-        const Program prog = parse(src);
-        const auto elapsed = std::chrono::steady_clock::now() - begin;
-        auditSpans(prog, src, "deep-assign-chain");
-        EXPECT_FALSE(prog.body.empty());
-        EXPECT_LT(
-            std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(),
-            10)
-            << "deep assignment chain parse did not finish in bounded time";
-    }
-
-    // R3 companion: a nested mix that alternates rule kinds on every level --
-    // assignment RHS, list element, parenthesised group, map value -- so the
-    // path never repeats the same rule twice in a row. A guard that only
-    // covers one rule kind would miss this.
-    {
-        constexpr int kMixUnits = 6000; // 4 nesting levels per unit
-        std::string src = "var x = ";
-        for (int i = 0; i < kMixUnits; ++i) {
-            src += "y = [ ( { k : ";
-        }
-        src += "0";
-        for (int i = 0; i < kMixUnits; ++i) {
-            src += " } ) ]";
-        }
-        src += ";";
-        const auto begin = std::chrono::steady_clock::now();
-        const Program prog = parse(src);
-        const auto elapsed = std::chrono::steady_clock::now() - begin;
-        auditSpans(prog, src, "deep-mixed-nesting");
-        EXPECT_FALSE(prog.body.empty());
-        EXPECT_LT(
-            std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(),
-            10)
-            << "deep mixed nesting parse did not finish in bounded time";
+        // `prog` is destroyed here, at the end of each iteration. Under ASan
+        // a deep left-leaning spine would stack-overflow in this destructor
+        // if the loop-turn counter were removed.
     }
 }

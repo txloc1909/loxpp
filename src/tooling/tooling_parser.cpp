@@ -92,35 +92,48 @@ class Parser {
     }
 
   private:
-    // -- recursion-depth guard --------------------------------------------
+    // -- depth guard -----------------------------------------------------
 
-    // Cap on nested grammar recursion. Every nested expression (a paren
-    // group, list or map element, call argument, subscript, unary prefix,
-    // `=` right side, or `match` subject) and every nested block or control-
-    // flow statement adds C++ stack frames; an editor buffer can hold
-    // thousands of unbalanced `(` or `{`, which would overflow the stack.
-    // Measured overflow under the ASan build is near 2000 levels, so 500
-    // keeps a safety factor of four and is far deeper than any hand-written
-    // nesting. Past the cap the parser stops descending, records an error,
-    // and unwinds to the next recovery point, still returning a Program.
+    // One counter (`m_depth`) and one cap bound the depth of the tree along
+    // any root-to-leaf path. The bound covers BOTH kinds of depth growth:
+    //   * recursive-descent nesting -- a paren group, list/map element, call
+    //     argument, subscript or slice bound, `=` right side, `!`/`-` prefix,
+    //     `match` subject or arm body, nested block, nested `if`/`while`/`for`
+    //     -- each such step recurses through a guarded rule (assignment(),
+    //     unary(), declaration(), statement()) that adds 1 via NestingGuard;
+    //   * loop-built left-leaning chains -- the six operator-ladder rules
+    //     (logicOr, logicAnd, equality, comparison, term, factor) and the
+    //     call() postfix loop (`.name`, `(args)`, `[index]`, `[a:b]`) each
+    //     wrap the running left operand in one more node per turn, growing
+    //     the left spine by one; every turn adds 1 via ChainGuard.
+    // The two share `m_depth`, so nesting depth and chain length add up along
+    // a path. When the sum exceeds the cap the parser stops extending that
+    // path, calls error(), recovers, and still returns a Program: a
+    // left-leaning `1+1+1+...` past the cap yields a bounded-depth tree that
+    // ends in an error where the chain was cut.
     //
-    // The guard sits at every rule that can recurse with a depth the input
-    // controls, and only there:
-    //   * assignment() -- the single entry of expression parsing. Every
-    //     parenthesised group, list/map element, call argument, subscript or
-    //     slice bound, `=` right side, logical/binary operand, `match`
-    //     subject or arm body, and every `if`/`while`/`for` condition reaches
-    //     expression parsing through expression() -> assignment(). The `=`
-    //     right side also re-enters assignment() directly.
-    //   * unary() -- a `!`/`-` prefix chain recurses through unary() itself
-    //     and never passes through assignment().
-    //   * declaration() and statement() -- nested blocks and nested control
-    //     flow (`if`/`while`/`for` bodies, nested `fun`/`class`).
-    // Every other recursive call in this file is bounded by the grammar to a
-    // constant depth (the binary-operator ladder, pattern parsing) or is a
-    // sibling loop with forward-progress, so it needs no guard.
-    static constexpr int kMaxNestingDepth = 500;
+    // Why 500. The deepest expression anywhere in the example / bootstrap /
+    // translation-probe corpus is 16 levels, so 500 is ~30x above real
+    // Lox++ code. The ceiling is set by the smallest stack that later
+    // consumers run on: an LSP request handler (N8) runs on a worker thread
+    // with a stack near 512 KB, against 8 MB for main. Destroying or walking
+    // the tree recurses once per level; a left-leaning chain overflows an
+    // 8 MB stack near 45000 levels (~200 B per frame), so on a 512 KB worker
+    // it overflows near ~2600 levels. A cap of 500 keeps a factor of ~5 for
+    // teardown and a comfortable margin for N7's recursive resolver walk,
+    // which DocumentModel::rebuild() runs on every debounced keystroke.
+    // N7 and N8 rely on this bound instead of adding their own limit.
+    //
+    // Because depth is bounded here, iterative or deferred teardown of the
+    // tree is unnecessary: ~Program recursion stays shallow. A later node
+    // that builds these nodes another way inherits the same bound.
+    //
+    // The value lives in the header as kMaxTreeDepth so consumers and tests
+    // can assert against the same number.
+    static constexpr int kMaxNestingDepth = static_cast<int>(kMaxTreeDepth);
 
+    // Adds 1 to the shared depth for one recursive-descent step; removes it
+    // on unwind.
     class NestingGuard {
       public:
         explicit NestingGuard(Parser& parser) : m_parser(parser) {
@@ -132,6 +145,30 @@ class Parser {
 
       private:
         Parser& m_parser;
+    };
+
+    // Counts loop turns in a left-recursive rule: each turn builds one more
+    // node onto the growing left spine, so each turn adds one to the depth of
+    // the path under construction. The accumulated turns unwind when the rule
+    // returns, so sibling chains -- many call arguments, many list elements,
+    // successive operator ladders on one line -- do not inflate one another.
+    class ChainGuard {
+      public:
+        explicit ChainGuard(Parser& parser) : m_parser(parser) {}
+        ~ChainGuard() { m_parser.m_depth -= m_added; }
+        ChainGuard(const ChainGuard&) = delete;
+        ChainGuard& operator=(const ChainGuard&) = delete;
+
+        // Count one loop turn; true when the path is now too deep.
+        [[nodiscard]] bool step() {
+            ++m_parser.m_depth;
+            ++m_added;
+            return m_parser.tooDeep();
+        }
+
+      private:
+        Parser& m_parser;
+        int m_added = 0;
     };
 
     [[nodiscard]] bool tooDeep() const { return m_depth > kMaxNestingDepth; }
@@ -670,7 +707,12 @@ class Parser {
 
     ExprPtr logicOr() {
         ExprPtr expr = logicAnd();
+        ChainGuard chain(*this);
         while (check(TokenType::OR) && !m_panic) {
+            if (chain.step()) {
+                error();
+                break;
+            }
             Token op = advance();
             ExprPtr right = logicAnd();
             expr = makeLogical(std::move(expr), op, std::move(right));
@@ -680,7 +722,12 @@ class Parser {
 
     ExprPtr logicAnd() {
         ExprPtr expr = equality();
+        ChainGuard chain(*this);
         while (check(TokenType::AND) && !m_panic) {
+            if (chain.step()) {
+                error();
+                break;
+            }
             Token op = advance();
             ExprPtr right = equality();
             expr = makeLogical(std::move(expr), op, std::move(right));
@@ -700,9 +747,14 @@ class Parser {
 
     ExprPtr equality() {
         ExprPtr expr = comparison();
+        ChainGuard chain(*this);
         while (
             (check(TokenType::BANG_EQUAL) || check(TokenType::EQUAL_EQUAL)) &&
             !m_panic) {
+            if (chain.step()) {
+                error();
+                break;
+            }
             Token op = advance();
             ExprPtr right = comparison();
             expr = makeBinary(std::move(expr), op, std::move(right));
@@ -712,10 +764,15 @@ class Parser {
 
     ExprPtr comparison() {
         ExprPtr expr = term();
+        ChainGuard chain(*this);
         while ((check(TokenType::GREATER) || check(TokenType::GREATER_EQUAL) ||
                 check(TokenType::LESS) || check(TokenType::LESS_EQUAL) ||
                 check(TokenType::IN)) &&
                !m_panic) {
+            if (chain.step()) {
+                error();
+                break;
+            }
             Token op = advance();
             ExprPtr right = term();
             expr = makeBinary(std::move(expr), op, std::move(right));
@@ -725,8 +782,13 @@ class Parser {
 
     ExprPtr term() {
         ExprPtr expr = factor();
+        ChainGuard chain(*this);
         while ((check(TokenType::MINUS) || check(TokenType::PLUS)) &&
                !m_panic) {
+            if (chain.step()) {
+                error();
+                break;
+            }
             Token op = advance();
             ExprPtr right = factor();
             expr = makeBinary(std::move(expr), op, std::move(right));
@@ -736,9 +798,14 @@ class Parser {
 
     ExprPtr factor() {
         ExprPtr expr = unary();
+        ChainGuard chain(*this);
         while ((check(TokenType::SLASH) || check(TokenType::STAR) ||
                 check(TokenType::PERCENT)) &&
                !m_panic) {
+            if (chain.step()) {
+                error();
+                break;
+            }
             Token op = advance();
             ExprPtr right = unary();
             expr = makeBinary(std::move(expr), op, std::move(right));
@@ -782,16 +849,29 @@ class Parser {
         return call();
     }
 
+    // The postfix loop wraps the running operand in one more node per turn
+    // (`f()`, `.name`, `[i]`, `[a:b]`), so each turn deepens the left spine by
+    // one and must count against the shared depth, exactly like the operator
+    // ladders.
     ExprPtr call() {
         ExprPtr expr = primary();
         std::size_t start = expr ? expr->offset : peek().offset;
+        ChainGuard chain(*this);
         for (;;) {
             if (m_panic) {
                 break;
             }
             if (match(TokenType::LEFT_PAREN)) {
+                if (chain.step()) {
+                    error();
+                    break;
+                }
                 expr = finishCall(std::move(expr), start);
             } else if (match(TokenType::DOT)) {
+                if (chain.step()) {
+                    error();
+                    break;
+                }
                 if (!check(TokenType::IDENTIFIER)) {
                     error();
                     break;
@@ -805,6 +885,10 @@ class Parser {
                 spanTo(*node, start);
                 expr = std::move(node);
             } else if (match(TokenType::LEFT_BRACKET)) {
+                if (chain.step()) {
+                    error();
+                    break;
+                }
                 expr = finishSubscript(std::move(expr), start);
             } else {
                 break;
