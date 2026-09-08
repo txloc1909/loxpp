@@ -141,6 +141,21 @@ loxpp_add_test(test_tooling_resolver test_tooling_resolver.cpp CORE loxpp_toolin
 target_link_libraries(test_tooling_resolver PRIVATE loxpp_core)
 loxpp_add_test(test_check_diagnostics test_check_diagnostics.cpp CORE loxpp_test_core)
 
+# loxpp-lsp building blocks (node N8): JSON-RPC framing, CRLF handling, the
+# diagnostics debounce, and the stdlib doc table. Links the src/lsp sources
+# (minus main.cpp) plus the tooling analysers and vendored json.hpp.
+if(LOXPP_LSP)
+    find_package(Threads REQUIRED)
+    loxpp_add_test(test_lsp test_lsp.cpp
+        ${PROJECT_SOURCE_DIR}/src/lsp/json_rpc.cpp
+        ${PROJECT_SOURCE_DIR}/src/lsp/document_store.cpp
+        ${PROJECT_SOURCE_DIR}/src/lsp/server.cpp
+        ${PROJECT_SOURCE_DIR}/src/lsp/stdlib_docs.cpp
+        CORE loxpp_tooling)
+    target_link_libraries(test_lsp PRIVATE loxpp_core Threads::Threads)
+    target_include_directories(test_lsp PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
+endif()
+
 add_test(NAME TestMain COMMAND test_main)
 
 # The *_gc targets share their source with a non-_gc twin. They run under GC
@@ -167,6 +182,9 @@ set(LOXPP_GTEST_TARGETS
     test_chunk_decoder test_backend_cfg test_backend_abstract_stack
     test_backend_capture test_jvm_emit test_clr_emit test_stringify_depth_guard
     test_check_diagnostics test_tooling_parser test_tooling_resolver)
+if(LOXPP_LSP)
+    list(APPEND LOXPP_GTEST_TARGETS test_lsp)
+endif()
 foreach(t IN LISTS LOXPP_GTEST_TARGETS)
     if(t IN_LIST LOXPP_GC_STRESS_TARGETS)
         gtest_discover_tests(${t} TEST_PREFIX "${t}."
