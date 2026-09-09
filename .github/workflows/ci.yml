@@ -139,6 +139,87 @@ jobs:
               echo "OK: the diagnostics assertion fails when the error is removed"
             '
 
+  neovim-plugin:
+    name: Neovim plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # dev-editors carries Node + tree-sitter-cli (node N4) plus Neovim and
+      # the two optional plugin deps (node N9). It is FROM dev, so the C++
+      # toolchain is present to build loxpp and loxpp-lsp in the same image.
+      - name: Build dev-editors image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          target: dev-editors
+          tags: loxpp-dev-editors:latest
+          cache-from: |
+            type=gha,scope=dev-editors
+            type=gha,scope=dev
+          cache-to: type=gha,mode=min,scope=dev-editors
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-nvim-plugin-${{ github.sha }}
+          restore-keys: |
+            ccache-nvim-plugin-
+            ccache-debug-
+
+      - name: Build binaries, parser, and run the headless smoke test
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e CCACHE_DIR=/workspace/.ccache \
+            -e CCACHE_MAXSIZE=400M \
+            -e CCACHE_COMPRESS=1 \
+            -e LOXPP_NVIM_PLUGINS=/opt/nvim-plugins \
+            loxpp-dev-editors:latest \
+            bash -c '
+              set -e
+              # The plugin ships its own copy of the N4 queries under
+              # queries/loxpp/; keep them identical to the grammar source.
+              for q in highlights locals folds indents; do
+                diff -u "editors/tree-sitter-loxpp/queries/$q.scm" \
+                        "editors/loxpp.nvim/queries/loxpp/$q.scm" \
+                  || { echo "FAIL: editors/loxpp.nvim/queries/loxpp/$q.scm drifted from the grammar"; exit 1; }
+              done
+              cmake --preset debug -DLOXPP_LSP=ON
+              cmake --build build --target loxpp loxpp-lsp
+              export PATH="/workspace/build:$PATH"
+              ( cd editors/tree-sitter-loxpp && tree-sitter generate )
+              editors/loxpp.nvim/scripts/build-parser.sh
+              nvim --headless \
+                --cmd "set rtp+=editors/loxpp.nvim" \
+                --cmd "set rtp+=$LOXPP_NVIM_PLUGINS/nvim-treesitter" \
+                --cmd "set rtp+=$LOXPP_NVIM_PLUGINS/nvim-lint" \
+                "+checkhealth loxpp" -c "w! /tmp/health.txt" -c "qa!"
+              cat /tmp/health.txt
+              if grep -q "No healthcheck found" /tmp/health.txt; then
+                echo "FAIL: :checkhealth loxpp did not find the health module"
+                exit 1
+              fi
+              grep -q "loxpp-lsp .* on PATH" /tmp/health.txt \
+                || { echo "FAIL: checkhealth did not see loxpp-lsp"; exit 1; }
+              grep -q "parser .loxpp. is compiled" /tmp/health.txt \
+                || { echo "FAIL: checkhealth did not see the compiled parser"; exit 1; }
+              tools/check_nvim_plugin.sh
+              tools/check_nvim_plugin.sh --fallback
+              # Prove the LSP-attach check can fail: a server that exits at once.
+              printf "#!/bin/sh\nexit 1\n" > /tmp/loxpp-lsp && chmod +x /tmp/loxpp-lsp
+              if PATH="/tmp:$PATH" tools/check_nvim_plugin.sh; then
+                echo "FAIL: the headless test passed with a broken loxpp-lsp"
+                exit 1
+              fi
+              echo "OK: the LSP-attach assertion fails when the server is broken"
+            '
+
   build-and-test:
     name: Build & Test (${{ matrix.preset }})
     runs-on: ubuntu-latest

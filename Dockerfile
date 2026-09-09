@@ -65,6 +65,32 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # harness behaviour.
 RUN npm install -g tree-sitter-cli@0.25.10
 
+# Neovim for the editors/loxpp.nvim headless smoke test (node N9). Ubuntu
+# 24.04 ships 0.9.5, which is older than the >= 0.11 the plugin needs for the
+# vim.lsp.config / vim.lsp.enable path, so take the upstream stable tarball at
+# a pinned version. The release asset is nvim-linux-x86_64.tar.gz from 0.10.4
+# onward (it was nvim-linux64.tar.gz before).
+RUN curl -fsSL "https://github.com/neovim/neovim/releases/download/v0.11.3/nvim-linux-x86_64.tar.gz" \
+        -o /tmp/nvim.tar.gz \
+    && echo "02b808a3ee8fc30161e07fe3c3edfb24b28bd0295323ac5dbdd8ec7012cac67d  /tmp/nvim.tar.gz" \
+        | sha256sum -c - \
+    && tar -xzf /tmp/nvim.tar.gz -C /opt \
+    && ln -s /opt/nvim-linux-x86_64/bin/nvim /usr/local/bin/nvim \
+    && rm /tmp/nvim.tar.gz
+
+# Pinned checkouts of the two optional plugin dependencies the headless test
+# and :checkhealth exercise. The plugin does NOT hard-depend on either:
+# tree-sitter highlighting needs only a compiled parser on 'runtimepath'
+# (tools/check_nvim_plugin.sh builds one directly), and the `loxpp --check`
+# fallback needs nvim-lint only in --fallback mode. nvim-treesitter is kept
+# on its `master` branch (classic get_parser_configs API); the plugin also
+# works with the `main` rewrite or with neither.
+RUN git clone --branch master https://github.com/nvim-treesitter/nvim-treesitter /opt/nvim-plugins/nvim-treesitter \
+    && git -C /opt/nvim-plugins/nvim-treesitter checkout cf12346a3414fa1b06af75c79faebe7f76df080a \
+    && git clone https://github.com/mfussenegger/nvim-lint /opt/nvim-plugins/nvim-lint \
+    && git -C /opt/nvim-plugins/nvim-lint checkout 3d55c8f67c6ae5c15e1042571e107c7a3d5c5f4e \
+    && rm -rf /opt/nvim-plugins/*/.git
+
 # --- dev-managed ------------------------------------------------------------
 # Adds the JVM and CLR toolchains needed by the --target jvm / --target clr
 # backends. Kept out of `dev` so the C++-only jobs (lint, build matrix,
