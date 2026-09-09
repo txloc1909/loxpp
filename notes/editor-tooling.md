@@ -184,7 +184,7 @@ caller must know.
 |---|---|
 | `0` | No error diagnostic. The file may still have warnings once the resolver feeds this path. |
 | `1` | At least one diagnostic with severity `error`. Same idea as a linter. |
-| `64` | Usage error — bad flag, missing file argument, or an unknown `--format` value. |
+| `64` | Usage error — no `<file>` argument, a second positional argument, or a `--format` value other than `text` or `json`. An unknown flag such as `--xyz` is taken as the positional path, not rejected here. |
 | `74` | The file cannot be read. |
 
 `--check` does not emit `65` or `70`; those stay on the interpreter path
@@ -244,7 +244,7 @@ Handlers implemented:
 | `textDocument/completion` | Keywords, stdlib globals, in-scope user symbols, and five snippets (`if`, `for`, `fun`, `match`, `class`). After a dot, member completion is offered for the `math` receiver only — any other `x.` offers nothing, because the receiver type is unknown. |
 | `textDocument/definition` | Single file. |
 | `textDocument/references` | Single file. Honours `context.includeDeclaration`. |
-| `textDocument/documentHighlight` | Single file. Same reference set as `references`. |
+| `textDocument/documentHighlight` | Single file. The symbol's declaration and every in-file use — the handler always calls `referencesAt` with `includeDeclaration=true`, so the set can be wider than a `references` request that sets it to `false`. |
 
 Not advertised in v1, so a client must not expect them: `renameProvider`,
 `documentFormattingProvider`, `signatureHelpProvider`,
