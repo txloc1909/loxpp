@@ -119,13 +119,12 @@ struct CaptureLiveRange {
     // never zero (unless the range is closedImplicitly, in which case this
     // is empty: see that field). One captured slot's incarnation can also
     // rack up more than one entry here from CLOSE_UPVALUE instructions that
-    // never dynamically reach this range at all (R22, a static close): the
-    // compiler emits
-    // one close per exit path regardless of which branch a real run takes,
-    // so a close that this pass's own dataflow finds closed on every
-    // reachable path still names this range, by height, as a genuine no-op
-    // instruction — real bytecode, attributed correctly, just never
-    // executed as a live close on that particular path.
+    // never dynamically reach this range at all (a static close): the
+    // compiler emits one close per exit path regardless of which branch a
+    // real run takes, so a close that this pass's own dataflow finds closed
+    // on every reachable path still names this range, by height, as a
+    // genuine no-op instruction — real bytecode, attributed correctly, just
+    // never executed as a live close on that particular path.
     //
     // This field exists so a consumer (or a test — see
     // checkNoOrphanCloseUpvalues in test_backend_capture.cpp) can verify
@@ -203,10 +202,10 @@ struct FunctionCaptureInfo {
     std::vector<int> unreachableCloseOffsets;
 
     // A REACHABLE CLOSE_UPVALUE, closed on every path that reaches it (a
-    // static close, R22), whose most-recent same-slot CLOSURE is itself
-    // unreachable, so it opened no range (R26). Every capture of this
-    // incarnation is dead code, so no cell can exist at this offset on any
-    // real run: the close's only run-time effect is its own pop.
+    // static close), whose most-recent same-slot CLOSURE is itself
+    // unreachable, so it opened no range. Every capture of this incarnation
+    // is dead code, so no cell can exist at this offset on any real run: the
+    // close's only run-time effect is its own pop.
     //
     // The JVM emitter does not read this field either. Its CLOSE_UPVALUE
     // case in jvm_emitter.cpp emits NO bytecode at all, for every close on
@@ -263,14 +262,14 @@ std::unordered_map<int, int> computeFrameHeights(const DecodedFunction& node);
 //   2. dynamic — the dataflow shows the slot open on the path reaching it
 //      (attributed to a real range's allCloseOffsets);
 //   3. static-attributed — the slot is closed on every path reaching it
-//      (R22: a captured local's scope can emit more than one CLOSE_UPVALUE,
+//      (a captured local's scope can emit more than one CLOSE_UPVALUE,
 //      one per exit path, and every one of them is real bytecode that must
 //      resolve to the same instance), and the most recent CLOSURE this pass
 //      has seen for that exact slot, in program order, opened a real range
 //      (also allCloseOffsets);
 //   4. statically dead — the same as 3, except that most recent CLOSURE
-//      opened no range, because it is unreachable too (R26:
-//      FunctionCaptureInfo::staticallyDeadCloseOffsets).
+//      opened no range, because it is unreachable too
+//      (FunctionCaptureInfo::staticallyDeadCloseOffsets).
 //
 // Throws std::runtime_error only for the two outcomes the emission contract
 // (notes/jvm-emission-contract.md) makes impossible for compiler-correct

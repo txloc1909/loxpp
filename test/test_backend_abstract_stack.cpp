@@ -1,7 +1,7 @@
-// test_backend_abstract_stack.cpp — abstract-stack reconstruction checkpoint
-// (notes/backend-implementation-dag.md, node N2).
+// test_backend_abstract_stack.cpp — abstract-stack reconstruction tests
+// (see notes/backend-implementation-dag.md).
 //
-// Checkpoint, verbatim from N2.md:
+// Checkpoint for this pass:
 //   1. 01_assign_local: the POP at offset 8 is TEMP; the POP at offset 12 is
 //      LOCAL-RECLAIM. Assert the reason, not only the label.
 //   2. 15_nested_arith: the computed maximum stack depth equals an
@@ -115,12 +115,12 @@ const StackState& stateBeforeOffset(const DecodedFunction& fn,
                              std::to_string(offset));
 }
 
-// Checkpoint 4/5: analyzeStack runs to completion with no inconsistency
-// anywhere in the tree. The merge-consistency half of checkpoint 5 is
-// enforced *inside* analyzeStack (a disagreement throws), so a corpus walk
-// that completes without throwing has already exercised it on every merge
-// in that program. Recurses into every nested function, mirroring
-// DecodedFunction's own shape.
+// The corpus-consistency check: analyzeStack runs to completion with no
+// inconsistency anywhere in the tree. The merge-consistency half is enforced
+// *inside* analyzeStack (a disagreement throws), so a corpus walk that
+// completes without throwing has already exercised it on every merge in that
+// program. Recurses into every nested function, mirroring DecodedFunction's
+// own shape.
 void checkNoInconsistency(const DecodedFunction& node,
                           const std::string& path) {
     SCOPED_TRACE("function id=" + node.id + " path=" + path);
@@ -130,12 +130,12 @@ void checkNoInconsistency(const DecodedFunction& node,
     }
 }
 
-// Checkpoint 3, scoped exactly as N2.md states it: "every probe". It does
-// not hold program-wide — a `match` expression whose arm is a block of
+// The return-height check, scoped to "every probe". It does not hold
+// program-wide — a `match` expression whose arm is a block of
 // fully-discarded statements (no trailing bare expression) can leave the
 // arm's "value" sitting in a local slot instead of a temporary (observed in
 // bootstrap/loxpp_interpreter.lox's `resolveStmt`); RETURNing that value
-// needs an explicit load, which is an emitter (N4) concern, not a P1 defect.
+// needs an explicit load, which is an emitter concern, not a P1 defect.
 void checkReturnHeightZero(const DecodedFunction& node,
                            const std::string& path) {
     SCOPED_TRACE("function id=" + node.id + " path=" + path);
@@ -173,13 +173,13 @@ void checkProbeFile(const fs::path& path) {
 
 } // namespace
 
-// Checkpoint 5, directly: analyzeStack must throw on a genuine merge
-// disagreement, not just complete without throwing on programs that happen
-// not to have one (R3 — this reviewer finding is why the corpus tests above
-// are worded to say the throw is what they are exercising). Bypasses the
-// compiler to hand-build a chunk no real compiler would ever emit: two
-// paths into one PRINT, one of which pushes an extra CONSTANT the other
-// does not, so the merge disagrees by one cell of height with nothing
+// The merge-consistency check, directly: analyzeStack must throw on a
+// genuine merge disagreement, not just complete without throwing on programs
+// that happen not to have one (a review finding — this is why the corpus
+// tests above are worded to say the throw is what they are exercising).
+// Bypasses the compiler to hand-build a chunk no real compiler would ever
+// emit: two paths into one PRINT, one of which pushes an extra CONSTANT the
+// other does not, so the merge disagrees by one cell of height with nothing
 // recognized as local on either side (not the legitimate differing-arity
 // case runFixpoint's comment discusses — that one keeps operand depth
 // equal; this one deliberately does not).
@@ -211,13 +211,13 @@ TEST(AbstractStackTest, MergeDisagreementThrows) {
 
     fn.instructions = {constant0, jumpIfFalse, constant1, print};
 
-    // R9: assert the message, not only std::runtime_error's type.
+    // Assert the message, not only std::runtime_error's type.
     // analyzeStack throws that type from three places (the unknown-opcode
     // guard, the structural height/localCount guard, and
     // validateMergeConsistency); a plain EXPECT_THROW(..., std::runtime_error)
     // would stay green even if a future change made a *different* guard fire
-    // first on this chunk, silently retiring checkpoint 5's own assertion —
-    // exactly the failure mode R3 reported for this same test.
+    // first on this chunk, silently retiring the merge-consistency assertion —
+    // exactly the failure mode a review finding reported for this same test.
     try {
         analyzeStack(fn);
         ADD_FAILURE() << "analyzeStack did not throw; the jump-taken edge "
@@ -232,13 +232,13 @@ TEST(AbstractStackTest, MergeDisagreementThrows) {
     }
 }
 
-// R15: validateNoInvisibleVarGaps is a safety net for a bug in discovery
+// validateNoInvisibleVarGaps is a safety net for a bug in discovery
 // (findInvisibleVarIndices), not a property any real chunk can trigger —
 // analyzeStack's own discovery never reports a slot that disagrees with the
-// local count at its own recognition point (that is what R8's redesign
-// establishes). So this drives the guard directly, with a `declaredSlotsAt`
-// built by hand to disagree on purpose, instead of hunting for a chunk that
-// cannot exist.
+// local count at its own recognition point (that is what the persistence
+// redesign establishes). So this drives the guard directly, with a
+// `declaredSlotsAt` built by hand to disagree on purpose, instead of hunting
+// for a chunk that cannot exist.
 TEST(AbstractStackTest, DirectlyBuiltGapThrowsWithTheRightMessage) {
     DecodedInstruction constant0;
     constant0.offset = 0;
@@ -268,8 +268,8 @@ TEST(AbstractStackTest, DirectlyBuiltGapThrowsWithTheRightMessage) {
     }
 }
 
-// Checkpoint 1. Quotes the disassembly straight from N2.md, which the
-// orchestrator verified against the real `-DLOXPP_DEBUG_PRINT_CODE` output.
+// The POP-classification check. The disassembly quoted below was verified
+// against the real `-DLOXPP_DEBUG_PRINT_CODE` output.
 TEST(AbstractStackTest, AssignLocalClassifiesBothPopsByReasonNotJustLabel) {
     MemoryManager mm;
     DecodedFunction script =
@@ -306,7 +306,8 @@ TEST(AbstractStackTest, AssignLocalClassifiesBothPopsByReasonNotJustLabel) {
                            << "recognized as slot 1's declaring push";
 }
 
-// Checkpoint 2. `print (1 + 2) * (3 - 4) / 5 - -6;` — hand count below.
+// The max-stack-depth check. `print (1 + 2) * (3 - 4) / 5 - -6;` — hand
+// count below.
 //
 // Starting height is 1 (slot 0 = the script's own closure; VM::interpret
 // calls it via the ordinary zero-arg `call()` path, same as any function).
@@ -335,9 +336,9 @@ TEST(AbstractStackTest, NestedArithMaxStackMatchesHandCount) {
     EXPECT_EQ(analysis.maxOperandDepth, 3);
 }
 
-// Checkpoint 2, a second probe (R2): 15_nested_arith declares no local, so it
-// cannot tell a correct maxOperandDepth from one inflated by counting a
-// not-yet-recognized local as an operand cell. `find_leaf`
+// The max-stack-depth check, a second probe: 15_nested_arith declares no
+// local, so it cannot tell a correct maxOperandDepth from one inflated by
+// counting a not-yet-recognized local as an operand cell. `find_leaf`
 // (examples/at_binding_demo.lox) declares several: a wrong recognition-timing
 // implementation reports 4 here; correct is 3 (hand-verified against a
 // per-offset dump — every local's declaring push is recognized at the push
@@ -359,7 +360,8 @@ TEST(AbstractStackTest, MaxStackWithLocalsIsNotInflatedByLateRecognition) {
     EXPECT_EQ(analysis.maxOperandDepth, 3);
 }
 
-// Checkpoint 3 + 4 + 5 for the probe corpus specifically.
+// The return-height, corpus-consistency, and merge-consistency checks for
+// the probe corpus specifically.
 TEST(AbstractStackTest, RunsOverEveryProbeWithNoInconsistency) {
     std::vector<fs::path> probes =
         listLoxFiles(projectRoot() / "test" / "translation-probes");
@@ -369,8 +371,9 @@ TEST(AbstractStackTest, RunsOverEveryProbeWithNoInconsistency) {
     }
 }
 
-// Checkpoint 4 + 5 over the wider corpus (checkpoint 3 is probe-scoped only
-// — see checkReturnHeightZero's comment).
+// The corpus-consistency and merge-consistency checks over the wider corpus
+// (the return-height check is probe-scoped only — see
+// checkReturnHeightZero's comment).
 TEST(AbstractStackTest, RunsOverEveryExampleWithNoInconsistency) {
     std::vector<fs::path> examples = listLoxFiles(projectRoot() / "examples");
     ASSERT_FALSE(examples.empty()) << "no example programs found";
@@ -401,7 +404,7 @@ TEST(AbstractStackTest, FreshCellProbeHasNoUnexplainedTemporaries) {
     EXPECT_GT(analysis.invisibleVars.size(), 0U);
 }
 
-// R7: findDeclaringPushes must follow a slot's *value*, not its stack
+// findDeclaringPushes must follow a slot's *value*, not its stack
 // position. 11_for_in.lox is the sharpest probe for this: BUILD_LIST pops
 // three cells and pushes the list back at position 1, then GET_ITER
 // replaces it in place — a wrong, position-following implementation walks
@@ -433,7 +436,7 @@ TEST(AbstractStackTest, ForInInvisibleVarsNameTheirOwnDeclaringPush) {
     EXPECT_EQ(sites, expected);
 }
 
-// R8: a local that no instruction ever reads back must still get its own
+// A local that no instruction ever reads back must still get its own
 // invisible-var site. `a` here is never read; only its sibling `b` is. A
 // wrong implementation finds a site for `b` alone, and recognizing `b`'s
 // slot then jumps `localCount` past `a`'s cell with no site to explain it —
@@ -475,8 +478,8 @@ TEST(AbstractStackTest, UnreadSiblingLocalGetsItsOwnDeclaringPushSite) {
     //  11: NIL            before d=0 after d=1   <- implicit return value
     //  12: RETURN         before d=1 after d=0
     // Depth is never inflated to 2: if `a` were still misclassified as a
-    // temporary, offset 3's `after` would read d=1, not d=0 (R8's exact
-    // symptom — see the reviewer's own trace of this bug).
+    // temporary, offset 3's `after` would read d=1, not d=0 — the exact
+    // symptom this test exists to catch.
     const std::vector<std::pair<int, int>> expectedDepths = {
         {0, 0}, {0, 0}, {0, 1}, {1, 0}, {0, 0}, {0, 0}, {0, 1}, {1, 0}};
     ASSERT_EQ(script.instructions.size(), expectedDepths.size());
@@ -487,18 +490,18 @@ TEST(AbstractStackTest, UnreadSiblingLocalGetsItsOwnDeclaringPushSite) {
     }
 }
 
-// Orchestrator round-3 guidance: a local's frame can end with *no* explicit
-// reclaim opcode at all. `never` here is unread (like `a` above) *and* it is
-// never popped anywhere in the chunk — a function's own top-level scope has
-// no enclosing block left to close, so the whole frame is simply discarded
-// at RETURN. Nothing in the reference-driven search, and no sibling POP to
-// backfill from either: only RETURN's own operandDepth()==1 invariant
-// (checkpoint 3) proves every slot below it is local. A wrong implementation
-// leaves `never`'s cell an unrecognized temporary forever, inflating
-// maxOperandDepth and misclassifying any later POP that would have reclaimed
-// it — the same silent failure as R8, in a shape the persistence test at
-// every POP (findPersistentPopLocals) alone cannot reach either: `never` has
-// no POP anywhere in the chunk to run that test at.
+// A local's frame can end with *no* explicit reclaim opcode at all. `never`
+// here is unread (like `a` above) *and* it is never popped anywhere in the
+// chunk — a function's own top-level scope has no enclosing block left to
+// close, so the whole frame is simply discarded at RETURN. Nothing in the
+// reference-driven search, and no sibling POP to backfill from either: only
+// RETURN's own operandDepth()==1 invariant (the return-height check) proves
+// every slot below it is local. A wrong implementation leaves `never`'s cell
+// an unrecognized temporary forever, inflating maxOperandDepth and
+// misclassifying any later POP that would have reclaimed it — the same
+// silent failure the unread-sibling test catches, in a shape the
+// persistence test at every POP (findPersistentPopLocals) alone cannot reach
+// either: `never` has no POP anywhere in the chunk to run that test at.
 TEST(AbstractStackTest, LocalWithNoExplicitReclaimIsStillFoundViaReturn) {
     MemoryManager mm;
     DecodedFunction script = decodeSource(R"(
@@ -544,10 +547,10 @@ f();
     }
 }
 
-// Orchestrator round-3 guidance proposed deriving localCount from "a maximal
-// run of adjacent POP and CLOSE_UPVALUE is one scope-exit group, [whose]
-// size is exactly the number of locals that were live before it." This probe
-// is the counter-example: the expression-statement `a + 2;` discards an
+// An earlier proposal derived localCount from "a maximal run of adjacent POP
+// and CLOSE_UPVALUE is one scope-exit group, [whose] size is exactly the
+// number of locals that were live before it." This probe is the
+// counter-example: the expression-statement `a + 2;` discards an
 // unrelated *temporary* with a plain POP, and that POP sits immediately
 // next to the block's own single-local reclaim POP for `a`, with nothing
 // between them. A byte-adjacency-only "maximal run" reads this as size 2 and
@@ -593,13 +596,13 @@ TEST(AbstractStackTest, AdjacentTempPopAndReclaimPopAreNotConflated) {
     }
 }
 
-// R8 referee ruling, failure case 1 (N2.md section 5): `{ var a = 1; print
-// 2; }` is the sharpest counter-example to the old reference-driven search —
-// `a` is unread, and the only other slot in scope (the temporary `print 2`
-// pushes) never reaches a POP, so nothing near it looks like a sibling to
-// backfill from. The referee's prototype gave site (0,1), POP LOCAL_RECLAIM,
-// maxOperandDepth 1; the old code at 0a9ec4f gave none of the three.
-TEST(AbstractStackTest, ReferereFailureCase1AssignThenUnrelatedPrint) {
+// Failure case 1: `{ var a = 1; print 2; }` is the sharpest counter-example
+// to the old reference-driven search — `a` is unread, and the only other
+// slot in scope (the temporary `print 2` pushes) never reaches a POP, so
+// nothing near it looks like a sibling to backfill from. The expected result
+// is site (0,1), POP LOCAL_RECLAIM, maxOperandDepth 1; the old code at
+// 0a9ec4f gave none of the three.
+TEST(AbstractStackTest, FailureCase1AssignThenUnrelatedPrint) {
     MemoryManager mm;
     DecodedFunction script = decodeSource("{ var a = 1; print 2; }", mm);
     FunctionStackAnalysis analysis = analyzeStack(script);
@@ -625,11 +628,10 @@ TEST(AbstractStackTest, ReferereFailureCase1AssignThenUnrelatedPrint) {
     EXPECT_EQ(analysis.maxOperandDepth, 1);
 }
 
-// R8 referee ruling: the or-pattern `@`-binding case from the ruling's own
-// evidence (N2.md section 5, "unwrap_or"). `v` is never read in either arm —
-// only `x` is — so `v`'s two sites (one per or-pattern alternative, P2's
-// merge) depend entirely on the persistence test finding a cover witness on
-// *each* alternative's own path.
+// The or-pattern `@`-binding case ("unwrap_or"). `v` is never read in either
+// arm — only `x` is — so `v`'s two sites (one per or-pattern alternative,
+// P2's merge) depend entirely on the persistence test finding a cover
+// witness on *each* alternative's own path.
 TEST(AbstractStackTest, OrPatternAtBindingUnreadInBothArmsStillGetsBothSites) {
     MemoryManager mm;
     DecodedFunction script = decodeSource(
@@ -652,15 +654,13 @@ TEST(AbstractStackTest, OrPatternAtBindingUnreadInBothArmsStillGetsBothSites) {
         << "even though `v` itself is never read back";
 }
 
-// R8 referee ruling: a multi-binding match arm where every binding is
-// unread, using bootstrap/loxpp_interpreter.lox's `resolveExpr` — the
-// referee's own third failure case (N2.md section 5). Structural, not
-// hand-counted offsets: the tail theorem (N2.md section 4) guarantees a
-// maximal POP/CLOSE_UPVALUE run reads all-TEMP-then-all-LOCAL_RECLAIM, so a
-// run with two or more leading TEMP labels is exactly the corpus invariant
-// the reviewer's detector checked (32 -> 0 over the real corpus). This
-// asserts that invariant holds for `resolveExpr` specifically, the function
-// the referee measured it on.
+// Failure case 3: a multi-binding match arm where every binding is unread,
+// using bootstrap/loxpp_interpreter.lox's `resolveExpr`. Structural, not
+// hand-counted offsets: the tail theorem guarantees a maximal
+// POP/CLOSE_UPVALUE run reads all-TEMP-then-all-LOCAL_RECLAIM, so a run with
+// two or more leading TEMP labels breaks that corpus invariant (32 -> 0 over
+// the real corpus). This asserts that invariant holds for `resolveExpr`
+// specifically.
 TEST(AbstractStackTest, ResolveExprHasNoRunWithTwoOrMoreLeadingTempLabels) {
     MemoryManager mm;
     DecodedFunction script = decodeSource(
@@ -696,8 +696,7 @@ TEST(AbstractStackTest, ResolveExprHasNoRunWithTwoOrMoreLeadingTempLabels) {
             EXPECT_LT(tempRun, 2U)
                 << "the run ending at/before offset " << reportOffset << " has "
                 << tempRun << " leading TEMP labels — at least "
-                << "one local reclaim was misclassified as a temporary "
-                << "(R8's exact symptom)";
+                << "one local reclaim was misclassified as a temporary";
         }
         tempRun = 0;
         sawReclaimThisRun = false;
@@ -719,7 +718,7 @@ TEST(AbstractStackTest, ResolveExprHasNoRunWithTwoOrMoreLeadingTempLabels) {
             EXPECT_FALSE(sawReclaimThisRun)
                 << "TEMP at offset " << ins.offset << " follows a "
                 << "LOCAL_RECLAIM within the same run — the tail theorem "
-                << "(N2.md section 4) requires TEMP labels to come first";
+                << "requires TEMP labels to come first";
             tempRun++;
         } else {
             sawReclaimThisRun = true;
@@ -728,7 +727,7 @@ TEST(AbstractStackTest, ResolveExprHasNoRunWithTwoOrMoreLeadingTempLabels) {
     endRun(-1);
 }
 
-// R8 referee ruling exception: DEFINE_METHOD's own peek disqualifies a cell
+// A persistence-test exception: DEFINE_METHOD's own peek disqualifies a cell
 // from ever being recognized as a local via a cover witness, even when a
 // CLOSURE pushed on top of it looks exactly like one. `classDeclaration`
 // (compiler.cpp) pushes the class *twice* here: once as the real local `C`
@@ -775,11 +774,10 @@ TEST(AbstractStackTest, ClassValueStaysTempAcrossMultipleMethodDefinitions) {
         << "`C` must be the top local right before its own reclaim";
 }
 
-// R12 referee ruling (N2.md section 7): the depth term
-// `after.operandDepth() + declaredSlotsAt[i].size()`. Checkpoint 3
-// guarantees operand depth 1 immediately before every *reached* RETURN, so
-// any function with a reachable RETURN already masks the undercount this
-// term fixes — the referee's own measurement found the term changes no
+// The depth term `after.operandDepth() + declaredSlotsAt[i].size()`. The
+// return-height check guarantees operand depth 1 immediately before every
+// *reached* RETURN, so any function with a reachable RETURN already masks the
+// undercount this term fixes — a measurement found the term changes no
 // reported number over the real corpus. To exercise it for real, this
 // function's only statement after its two invisible vars is `for (;;) {}`:
 // an omitted condition emits no exit test at all (Compiler::forStatement),
@@ -834,24 +832,24 @@ f();
     ASSERT_GT(correctedMax, naiveMax)
         << "this program was chosen so the compiler's trailing NIL;RETURN "
         << "is unreachable (an omitted for-condition has no exit edge) and "
-        << "cannot mask the undercount the R12 term fixes; if this fails, "
+        << "cannot mask the undercount this depth term fixes; if this fails, "
         << "the chosen program no longer isolates the term";
     EXPECT_EQ(analysis.maxOperandDepth, correctedMax)
         << "analyzeStack must report the corrected bound, not the naive one";
 }
 
-// Found while building the R12 test above, not something the referee ruling
-// anticipated: a plain `var` at a function's own top-level scope, declared
-// *before* a nested `fun`, with the function itself never reaching RETURN
-// (an infinite `for (;;) {}` with no exit edge). The persistence test alone
-// cannot find such a `var` — there is no POP (it is not inside a block) and
-// no reachable RETURN to backfill from (backfillFromFrameTeardown never
-// runs). Only the downward chase from the nested `fun`'s own (unconditional)
-// CLOSURE site — sound because clox's scoping is strictly LIFO, so a
-// confirmed local proves every lower slot is local too — finds it. Without
-// that chase, `analyzeStack` throws `validateNoInvisibleVarGaps`'s gap error
-// instead of silently miscompiling; still a real regression, since the
-// pre-referee-ruling implementation handled this shape correctly.
+// Found while building the depth-term test above: a plain `var` at a
+// function's own top-level scope, declared *before* a nested `fun`, with the
+// function itself never reaching RETURN (an infinite `for (;;) {}` with no
+// exit edge). The persistence test alone cannot find such a `var` — there is
+// no POP (it is not inside a block) and no reachable RETURN to backfill from
+// (backfillFromFrameTeardown never runs). Only the downward chase from the
+// nested `fun`'s own (unconditional) CLOSURE site — sound because clox's
+// scoping is strictly LIFO, so a confirmed local proves every lower slot is
+// local too — finds it. Without that chase, `analyzeStack` throws
+// `validateNoInvisibleVarGaps`'s gap error instead of silently
+// miscompiling; still a real regression, since an earlier implementation
+// handled this shape correctly.
 TEST(AbstractStackTest,
      UnreadLocalBelowANestedFunDeclIsFoundEvenWhenReturnIsUnreachable) {
     MemoryManager mm;
@@ -880,7 +878,7 @@ f();
         << "from `g`'s own declaring push";
 }
 
-// R14: the test above needs only one downward chase step (`g` sits directly
+// The test above needs only one downward chase step (`g` sits directly
 // above `a`), so it cannot tell `chaseSlotsDownward` apart from a version
 // that checks only its own starting slot. This program puts two unread
 // locals (`a`, `b`) below the nested `fun`'s own slot, so finding both

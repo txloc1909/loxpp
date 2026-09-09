@@ -1,4 +1,4 @@
-// This node's own checkpoint: a match whose arms are all class patterns
+// Checkpoint: a match whose arms are all class patterns
 // raises a real, reachable MATCH_ERROR when no arm matches. The compiler
 // never proves a class pattern exhaustive over its own subclasses (unlike
 // an enum's constructor set, checkEnumExhaustiveness does not run for a

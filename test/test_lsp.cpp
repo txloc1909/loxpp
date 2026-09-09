@@ -139,8 +139,9 @@ TEST(LspDocumentStore, OpenPublishesDiagnosticsSynchronously) {
     EXPECT_EQ(sink.count(), 1);
     EXPECT_TRUE(sink.waitForCount(1).diags.empty());
 
-    // '1 +;' is the node N8 fixture. analyze() reports "Expect expression."
-    // anchored at end of input (same as the N3 'print 1 +;' fixture).
+    // '1 +;' is the LSP diagnostics fixture. analyze() reports "Expect
+    // expression." anchored at end of input (same as the compiler's
+    // 'print 1 +;' fixture).
     store.didOpen("file:///bad.lox", 1, "1 +;\n");
     auto ev = sink.waitForCount(2);
     ASSERT_EQ(ev.diags.size(), 1U);

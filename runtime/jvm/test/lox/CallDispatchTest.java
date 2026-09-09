@@ -4,7 +4,7 @@ import static lox.TestSupport.check;
 import static lox.TestSupport.checkEquals;
 import static lox.TestSupport.checkThrows;
 
-/** LoxOps.call (the CALL opcode's runtime dispatch) and LoxRuntime.current() — node N6. */
+/** LoxOps.call (the CALL opcode's runtime dispatch) and LoxRuntime.current(). */
 public final class CallDispatchTest {
     public static void main(String[] args) {
         LoxClosure add = new LoxClosure("add", 2, new Object[0][]) {

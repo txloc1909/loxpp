@@ -1,9 +1,9 @@
-// test_backend_capture.cpp — capture-analysis tests (node N3).
+// test_backend_capture.cpp — capture-analysis tests.
 //
-// The checkpoint (notes/backend-implementation-dag.md, node N3; the N3 node
-// spec P4a section): the five ground-truth probes must each get the exact
-// live-range / sharing verdict their disassembly settles, and the pass must
-// not throw over the whole probe/example/bootstrap corpus.
+// The checkpoint (see notes/backend-implementation-dag.md): the five
+// ground-truth probes must each get the exact live-range / sharing verdict
+// their disassembly settles, and the pass must not throw over the whole
+// probe/example/bootstrap corpus.
 //
 // validateCaptureAnalysis cross-checks every reported range against its own
 // decoded CLOSE_UPVALUE offsets in both directions (not just the analysis's
@@ -11,23 +11,22 @@
 // checkNoOrphanCloseUpvalues. compileAndAnalyze calls it on every result
 // before returning, so it runs over the corpus (probes, examples, bootstrap
 // interpreter) AND over every targeted regression test below, with no way
-// for a test to skip it (round-3 referee decision, item 4): a check that
-// only ever sees programs with zero orphans to find proves nothing about
-// the defect it exists to catch.
+// for a test to skip it: a check that only ever sees programs with zero
+// orphans to find proves nothing about the defect it exists to catch.
 // MatchArmBindingAndLaterBlockLocalDoNotCrossAttribute,
 // LoopVarRangeDoesNotDominateItsOwnEnd, and
-// PerIterationCaptureClosesOnBreakAndContinue pin down three review-round-1
-// findings (R1/R2, R3, R5) as regression tests.
+// PerIterationCaptureClosesOnBreakAndContinue pin down three findings — a
+// match-arm binding misattributed to a later block local, a loop variable's
+// range extended past its own end, and a per-iteration captured local not
+// closed on break/continue — as regression tests.
 // LoopVarNotClosedEarlyByAlternateExit, OuterCaptureNotClosedEarlyByLoopExit,
-// and RecapturedSlotAfterDeadEarlyExitSharesOneCell pin down review-round-2
-// findings R9 and R10: a captured slot with more than one real
-// CLOSE_UPVALUE in the same chunk (break/continue/fall-through each
-// cleaning up their own path) must not let a later, unrelated close, or a
-// later re-capture, resolve to the wrong slot or split one runtime cell into
-// two.
-// PerIterationCaptureInsideIfInsideLoop (R13) and
-// DifferentVariablesReusingOneSlotDoNotShareACell (R14) pin down two
-// review-round-3 findings, resolved by the round-3 referee decision: the
+// and RecapturedSlotAfterDeadEarlyExitSharesOneCell pin down a further
+// class: a captured slot with more than one real CLOSE_UPVALUE in the same
+// chunk (break/continue/fall-through each cleaning up their own path) must
+// not let a later, unrelated close, or a later re-capture, resolve to the
+// wrong slot or split one runtime cell into two.
+// PerIterationCaptureInsideIfInsideLoop and
+// DifferentVariablesReusingOneSlotDoNotShareACell pin down two more: the
 // pass now derives live ranges per CFG execution path (see analyzeOneChunk
 // in capture_analysis.cpp), not a JUMP_IF_FALSE span heuristic over a flat
 // instruction walk, so a capture's verdict depends only on the CFG paths
@@ -109,23 +108,24 @@ void collectById(const DecodedFunction& node,
     }
 }
 
-// R4 / R9 / R15 / round-3 referee decision item 4: cross-checks every
-// reported range against the decoded chunk's own CLOSE_UPVALUE offsets, in
-// both directions -- a misattributed close (R1, R9) must not pass silently.
+// Cross-checks every reported range against the decoded chunk's own
+// CLOSE_UPVALUE offsets, in both directions -- a misattributed close must not
+// pass silently.
 //
-// Round 1's version of this check compared counts (decodedCloses.size() >=
-// nonImplicitRangeCount). That passed on the R9 program: the pass reported
-// one CLOSE_UPVALUE too many for the loop var's range (misattributing a
-// second alternate-exit close meant for a different slot) and, separately,
-// never attributed the loop var's own real close at all -- two errors that
-// canceled out in a size comparison. A count can hide exactly the defect
-// this check exists to catch, so it checks membership in both directions
-// instead: every reported close offset must be a real CLOSE_UPVALUE in the
-// chunk (below), AND every real CLOSE_UPVALUE in the chunk must be one
-// reported (checkNoOrphanCloseUpvalues), or listed as unreachable dead code.
-// Both directions check the FULL allCloseOffsets set, not only end -- R9's
-// and R10's ground-truth programs each have a range with two real alternate
-// closes, and checking end alone would call the earlier one an orphan.
+// An earlier version of this check compared counts (decodedCloses.size() >=
+// nonImplicitRangeCount). That passed on one multi-close program: the pass
+// reported one CLOSE_UPVALUE too many for the loop var's range
+// (misattributing a second alternate-exit close meant for a different slot)
+// and, separately, never attributed the loop var's own real close at all --
+// two errors that canceled out in a size comparison. A count can hide
+// exactly the defect this check exists to catch, so it checks membership in
+// both directions instead: every reported close offset must be a real
+// CLOSE_UPVALUE in the chunk (below), AND every real CLOSE_UPVALUE in the
+// chunk must be one reported (checkNoOrphanCloseUpvalues), or listed as
+// unreachable dead code. Both directions check the FULL allCloseOffsets set,
+// not only end -- some ground-truth programs have a range with two real
+// alternate closes, and checking end alone would call the earlier one an
+// orphan.
 void checkCloseUpvaluesMatchDecodedChunk(const DecodedFunction& node,
                                          const FunctionCaptureInfo& info) {
     std::set<int> decodedCloses;
@@ -146,12 +146,11 @@ void checkCloseUpvaluesMatchDecodedChunk(const DecodedFunction& node,
     }
 }
 
-// R4 / R9 / R15 / referee amendment 1 item 4, extended by amendment 4 item 4
-// (round 10) to a THIRD bucket: the other direction of the cross-check
-// above, strengthened to count occurrences, not just presence. A
+// A later revision added a THIRD bucket: the other direction of the
+// cross-check above, strengthened to count occurrences, not just presence. A
 // CLOSE_UPVALUE the chunk actually contains, but that matches no reported
 // range's close offsets, no unreachableCloseOffsets entry, and no
-// staticallyDeadCloseOffsets entry, is exactly the R9 shape: the close was
+// staticallyDeadCloseOffsets entry, is a misattribution: the close was
 // seen and misattributed elsewhere, with no other check here noticing. A
 // CLOSE_UPVALUE reported more than once (double-attributed across any two
 // of the three buckets) is just as wrong, so every real close must appear
@@ -188,21 +187,20 @@ void checkNoOrphanCloseUpvalues(const DecodedFunction& node,
     }
 }
 
-// R27 (round 10): checkCloseSlotsMatchFrameHeight (deleted) recomputed
-// `computeFrameHeights` and compared it against the very map key that same
-// expression produced -- an equality that holds by construction, for every
-// input, and so can never fail. Referee amendment 3's R23 ruling asked
-// invariant 2 to catch a close attributed to the WRONG slot (R22 case 2);
-// under the height design that class of bug is impossible BY CONSTRUCTION,
-// so the check added no signal. This replacement compares two
+// checkCloseSlotsMatchFrameHeight (deleted) recomputed `computeFrameHeights`
+// and compared it against the very map key that same expression produced --
+// an equality that holds by construction, for every input, and so can never
+// fail. An earlier invariant was meant to catch a close attributed to the
+// WRONG slot; under the height design that class of bug is impossible BY
+// CONSTRUCTION, so the check added no signal. This replacement compares two
 // INDEPENDENTLY written per-opcode tables instead: for every instruction
-// N2's own analyzeStack (src/backend/abstract_stack.cpp, already on `main`)
-// marks reached, this pass's height must equal N2's height. A later edit to
-// either table alone, on any one opcode, fails at that exact instruction --
-// the reviewer proved this class of check has teeth by changing SET_INDEX's
-// effect and watching 14 tests fail, including the three corpus sweeps.
-// Test-only use of N2 is permitted here; the pass itself keeps zero N2
-// dependency (capture_analysis.cpp).
+// analyzeStack (src/backend/abstract_stack.cpp, already on `main`) marks
+// reached, this pass's height must equal the abstract-stack height. A later
+// edit to either table alone, on any one opcode, fails at that exact
+// instruction -- changing SET_INDEX's effect makes 14 tests fail, including
+// the three corpus sweeps. Test-only use of the abstract-stack analysis is
+// permitted here; the pass itself keeps zero dependency on it
+// (capture_analysis.cpp).
 void checkHeightMatchesAbstractStack(const DecodedFunction& node,
                                      const FunctionCaptureInfo& info) {
     std::unordered_map<int, int> heightBefore = computeFrameHeights(node);
@@ -214,26 +212,28 @@ void checkHeightMatchesAbstractStack(const DecodedFunction& node,
     for (size_t i = 0; i < node.instructions.size(); i++) {
         // stack.reached is std::vector<bool>; operator[] gives a proxy, and
         // Value's implicit bool constructor makes `!` on that proxy
-        // ambiguous in the NaN-tagging-off build (R28). Cast first.
+        // ambiguous in the NaN-tagging-off build. Cast first.
         if (!static_cast<bool>(stack.reached[i])) {
             continue;
         }
         int offset = node.instructions[i].offset;
         auto it = heightBefore.find(offset);
         ASSERT_TRUE(it != heightBefore.end())
-            << "id=" << info.id << ": N2 reaches offset " << offset
+            << "id=" << info.id
+            << ": the abstract-stack analysis reaches offset " << offset
             << ", but this pass's own CFG walk never does";
         EXPECT_EQ(it->second, stack.before[i].height)
             << "id=" << info.id << ": this pass's height at offset " << offset
-            << " disagrees with N2's independent table";
+            << " disagrees with the abstract-stack analysis's independent "
+               "table";
     }
 }
 
-// R23 invariant 3 (the reviewer's own LOOP-span check, kept verbatim by
-// referee amendment 3): a range with a close inside some LOOP's back-edge
-// span, whose OWN first capture sits before that span, is a contradiction --
-// a capture that runs once, before the loop, cannot close inside a body that
-// re-executes every iteration. This needs no stack simulation and no N2.
+// Invariant 3 (a LOOP-span check): a range with a close inside some LOOP's
+// back-edge span, whose OWN first capture sits before that span, is a
+// contradiction -- a capture that runs once, before the loop, cannot close
+// inside a body that re-executes every iteration. This needs no stack
+// simulation and no abstract-stack analysis.
 void checkNoEnclosingCaptureClosesInsideLoop(const DecodedFunction& node,
                                              const FunctionCaptureInfo& info) {
     for (const DecodedInstruction& ins : node.instructions) {
@@ -258,14 +258,13 @@ void checkNoEnclosingCaptureClosesInsideLoop(const DecodedFunction& node,
     }
 }
 
-// R4 / round-3 referee decision item 4: checks that every live range is
-// internally consistent (non-negative, backed by at least one capturing
-// closure, non-overlapping with its slot's other ranges) and matches the
-// decoded chunk's own CLOSE_UPVALUE offsets in both directions. Called from
-// the shared compile-and-analyze helper below, so every test that builds a
-// Compiled gets this for free -- no test can skip it, and a check that only
-// ever runs on programs with zero orphans to find proves nothing about the
-// defect it exists to catch.
+// Checks that every live range is internally consistent (non-negative,
+// backed by at least one capturing closure, non-overlapping with its slot's
+// other ranges) and matches the decoded chunk's own CLOSE_UPVALUE offsets in
+// both directions. Called from the shared compile-and-analyze helper below,
+// so every test that builds a Compiled gets this for free -- no test can
+// skip it, and a check that only ever runs on programs with zero orphans to
+// find proves nothing about the defect it exists to catch.
 void validateCaptureAnalysis(const DecodedFunction& tree,
                              const CaptureAnalysis& captures) {
     std::map<std::string, const DecodedFunction*> byId;
@@ -273,11 +272,11 @@ void validateCaptureAnalysis(const DecodedFunction& tree,
 
     for (const auto& [id, info] : captures.functions) {
         const DecodedFunction& node = *byId.at(id);
-        // R18: CaptureLiveRange no longer carries an `end` field (it only
-        // ever duplicated allCloseOffsets.back(), or a chunk-length sentinel
-        // for a closedImplicitly-only range). This is the same bound the
-        // removed field's sentinel case gave, recomputed locally for the
-        // non-overlap check below.
+        // CaptureLiveRange no longer carries an `end` field (it only ever
+        // duplicated allCloseOffsets.back(), or a chunk-length sentinel for a
+        // closedImplicitly-only range). This is the same bound the removed
+        // field's sentinel case gave, recomputed locally for the non-overlap
+        // check below.
         int chunkEnd = static_cast<int>(node.function->chunk.size());
         for (const auto& [slot, ranges] : info.liveRangesBySlot) {
             int previousEnd = -1;
@@ -321,7 +320,7 @@ struct Compiled {
     CaptureAnalysis captures;
 };
 
-// Compiles `source`, decodes it (N0), and runs the capture pass (N3).
+// Compiles `source`, decodes it, and runs the capture pass.
 // Throws on a compile failure, matching test_chunk_decoder.cpp's
 // convention: a corpus file that fails to compile is a corpus problem, not a
 // soft-fail case. Validates the result before returning it (see
@@ -368,7 +367,7 @@ const std::vector<CaptureLiveRange>& rangesFor(const FunctionCaptureInfo& info,
 TEST(CaptureAnalysisTest, SharedUpvalueOneCellNotTwo) {
     // 06_shared_upvalue.lox: get and set both capture outer's slot 1 --
     // "| local 1" on both CLOSURE instructions, with no CLOSE_UPVALUE
-    // between them. Checkpoint: one shared cell, not one per closure.
+    // between them. Expected: one shared cell, not one per closure.
     Compiled c = compileFile(projectRoot() / "test" / "translation-probes" /
                              "06_shared_upvalue.lox");
     const DecodedFunction* outer = findByName(c.tree, "outer");
@@ -476,7 +475,7 @@ TEST(CaptureAnalysisTest, SuperIsAnOrdinaryCapture) {
         << "upvalue";
 }
 
-// R1/R2 regression: a match-arm pattern binding and a later, unrelated block
+// Regression: a match-arm pattern binding and a later, unrelated block
 // local must each close to their OWN slot, never cross-attributed. Before
 // Compiler::emitLoopCleanup was fixed to check isCaptured (see
 // fix/close-captured-locals-on-early-exit), a captured match-arm binding left
@@ -531,14 +530,14 @@ TEST(CaptureAnalysisTest,
         << "not overlap or share an end offset";
 }
 
-// R3 documentation: `firstCaptureOffset` is a bound, not the declaration
-// offset, and it does not dominate a range's own explicit closes.
-// V3_loopvar.lox is the standing counter-example: a zero-trip loop runs the
-// CLOSE_UPVALUE that ends `i`'s range without ever running the CLOSURE that
-// opened it (the declaration, the init clause's `var i = 0`, runs once
-// before the loop and is not reflected in either field). See
-// capture_analysis.h for what this means for N7. This test pins the exact
-// counter-example down as an intentional, tested contract, not a silent gap.
+// Note: `firstCaptureOffset` is a bound, not the declaration offset, and it
+// does not dominate a range's own explicit closes. V3_loopvar.lox is the
+// standing counter-example: a zero-trip loop runs the CLOSE_UPVALUE that
+// ends `i`'s range without ever running the CLOSURE that opened it (the
+// declaration, the init clause's `var i = 0`, runs once before the loop and
+// is not reflected in either field). See capture_analysis.h for what this
+// means for ref-cell allocation. This test pins the exact counter-example
+// down as an intentional, tested contract, not a silent gap.
 TEST(CaptureAnalysisTest, LoopVarRangeDoesNotDominateItsOwnClose) {
     Compiled c = compileFile(projectRoot() / "test" / "translation-probes" /
                              "V3_loopvar.lox");
@@ -569,7 +568,7 @@ TEST(CaptureAnalysisTest, LoopVarRangeDoesNotDominateItsOwnClose) {
         << "update this test and the header doc together";
 }
 
-// R5 regression: a per-iteration captured local must close correctly even
+// Regression: a per-iteration captured local must close correctly even
 // when the loop body has more than one exit path (continue, break, and the
 // normal fall-through). Before the compiler fix, only the fall-through path
 // closed with CLOSE_UPVALUE; break and continue used a plain POP, so the
@@ -648,12 +647,12 @@ TEST(CaptureAnalysisTest, ToleratesUnrelatedCaptureBetweenAlternateExits) {
     EXPECT_FALSE(ranges[0].closedImplicitly);
 }
 
-// R9 regression, failure case 1. Native output is 3, 13, 23 (loxpp on
+// Regression, failure case 1. Native output is 3, 13, 23 (loxpp on
 // 642687e): `i` is one shared cell across all three iterations. Before the
 // fix, the loop body's own two alternate exits for `s` (continue's close,
 // then the fall-through close) left the SECOND close with no open slot of
 // its own to match, so it fell through to `i` — `i` was reported closed
-// inside the loop (perIteration=true), the V3_loopvar defect this whole node
+// inside the loop (perIteration=true), the V3_loopvar defect this whole pass
 // exists to catch.
 TEST(CaptureAnalysisTest, LoopVarNotClosedEarlyByAlternateExit) {
     Compiled c = compileAndAnalyze(R"(
@@ -668,7 +667,7 @@ TEST(CaptureAnalysisTest, LoopVarNotClosedEarlyByAlternateExit) {
             return fns;
         }
     )",
-                                   "r9_loop_var_alternate_exit");
+                                   "loop_var_alternate_exit");
     const DecodedFunction* make = findByName(c.tree, "make");
     const DecodedFunction* f = findByName(c.tree, "f");
     ASSERT_NE(make, nullptr);
@@ -697,7 +696,7 @@ TEST(CaptureAnalysisTest, LoopVarNotClosedEarlyByAlternateExit) {
         << "normal fall-through -- per the multi-end model";
 }
 
-// R9 regression, failure case 2. Native output is 99: `a` is a function-scope
+// Regression, failure case 2. Native output is 99: `a` is a function-scope
 // capture, closed only implicitly when the frame returns. Before the fix,
 // the loop body's own two alternate exits for `s` (break's close, then the
 // fall-through close) left the SECOND close with no open slot of its own,
@@ -720,7 +719,7 @@ TEST(CaptureAnalysisTest, OuterCaptureNotClosedEarlyByLoopExit) {
             return outerCap;
         }
     )",
-                                   "r9_outer_capture_loop_exit");
+                                   "outer_capture_loop_exit");
     const DecodedFunction* make = findByName(c.tree, "make");
     const DecodedFunction* outerCap = findByName(c.tree, "outerCap");
     const DecodedFunction* f = findByName(c.tree, "f");
@@ -751,7 +750,7 @@ TEST(CaptureAnalysisTest, OuterCaptureNotClosedEarlyByLoopExit) {
         << "normal fall-through -- per the multi-end model";
 }
 
-// R10 regression. Native output is 42, 42: f and g share one cell. Before
+// Regression. Native output is 42, 42: f and g share one cell. Before
 // the fix, `s`'s close on the dead `continue` path (never taken — `k` is
 // always 0) was treated as final, so g's later capture of the same slot
 // opened a SECOND, separate range instead of joining f's.
@@ -771,7 +770,7 @@ TEST(CaptureAnalysisTest, RecapturedSlotAfterDeadEarlyExitSharesOneCell) {
             return fns;
         }
     )",
-                                   "r10_recapture_after_dead_exit");
+                                   "recapture_after_dead_exit");
     const DecodedFunction* make = findByName(c.tree, "make");
     const DecodedFunction* f = findByName(c.tree, "f");
     ASSERT_NE(make, nullptr);
@@ -794,7 +793,7 @@ TEST(CaptureAnalysisTest, RecapturedSlotAfterDeadEarlyExitSharesOneCell) {
 // already runs validateCaptureAnalysis on the result (see compileAndAnalyze
 // above), so this only needs to name the file for a failing EXPECT_*.
 //
-// R29: also expect both dead-code buckets empty for every chunk. Measured
+// Also expect both dead-code buckets empty for every chunk. Measured
 // premise -- every chunk of every probe, every example, and the bootstrap
 // interpreter holds zero unreachable and zero statically dead closes today.
 // A future change that moves a real, live close into either bucket must fail
@@ -836,7 +835,7 @@ TEST(CaptureAnalysisTest, NoAssertionFailureOnBootstrapInterpreter) {
                             "loxpp_interpreter.lox");
 }
 
-// R13 regression. Native output is 0, 1, 2: `a` is declared inside an `if`
+// Regression. Native output is 0, 1, 2: `a` is declared inside an `if`
 // that is itself inside the loop body, and its only CLOSE_UPVALUE (the
 // if-block's own endScope) sits before the loop's back-edge, so it needs a
 // fresh cell every iteration -- the exact V1_fresh_cell shape, one `if`
@@ -858,7 +857,7 @@ TEST(CaptureAnalysisTest, PerIterationCaptureInsideIfInsideLoop) {
             return fns;
         }
     )",
-                                   "r13_capture_inside_if_inside_loop");
+                                   "capture_inside_if_inside_loop");
     const DecodedFunction* make = findByName(c.tree, "make");
     const DecodedFunction* f = findByName(c.tree, "f");
     ASSERT_NE(make, nullptr);
@@ -878,7 +877,7 @@ TEST(CaptureAnalysisTest, PerIterationCaptureInsideIfInsideLoop) {
         << "no break/continue here -- a has exactly one real close";
 }
 
-// R14 regression. Native output is 1, then 3: `f` captures `a` (an `if`
+// Regression. Native output is 1, then 3: `f` captures `a` (an `if`
 // block's own local) and `h` captures `d` (a later, unrelated block's own
 // local that happens to reuse a's slot number once a's block truly ends).
 // Before the CFG rewrite, the pass reopened a's slot at the if's own
@@ -904,7 +903,7 @@ TEST(CaptureAnalysisTest, DifferentVariablesReusingOneSlotDoNotShareACell) {
             return fns;
         }
     )",
-                                   "r14_distinct_variables_share_a_slot");
+                                   "distinct_variables_share_a_slot");
     const DecodedFunction* make = findByName(c.tree, "make");
     const DecodedFunction* f = findByName(c.tree, "f");
     const DecodedFunction* h = findByName(c.tree, "h");
@@ -931,7 +930,7 @@ TEST(CaptureAnalysisTest, DifferentVariablesReusingOneSlotDoNotShareACell) {
         << "a must close before d is even captured -- the two ranges must "
         << "not overlap";
 }
-// R16 regression, failure case 1 (a silent wrong attribution, no crash).
+// Regression, failure case 1 (a silent wrong attribution, no crash).
 // Native output is 1, then 5: `g` captures `b` and `h` captures both `c`
 // and `a` -- ONE CLOSURE instruction with two `isLocal=1` upvalues, opening
 // two DIFFERENT ranges at the SAME origin offset. Before the fix,
@@ -948,7 +947,7 @@ TEST(CaptureAnalysisTest,
         }
         outer();
     )",
-                                   "r16_one_closure_two_slots");
+                                   "one_closure_two_slots");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* g = findByName(c.tree, "g");
     const DecodedFunction* h = findByName(c.tree, "h");
@@ -967,7 +966,7 @@ TEST(CaptureAnalysisTest,
     ASSERT_EQ(bSlot, cSlot)
         << "b and c legitimately reuse the same slot number once b's block "
         << "ends -- the test must exercise a REUSED slot, or it does not "
-        << "reach the shape R16 exists to catch";
+        << "reach the shape this test exercises";
     ASSERT_NE(cSlot, aSlot);
 
     const std::vector<CaptureLiveRange>& slot1Ranges = rangesFor(info, bSlot);
@@ -991,14 +990,14 @@ TEST(CaptureAnalysisTest,
     EXPECT_EQ(slot1Ranges[1].firstCaptureOffset,
               slot2Ranges[0].firstCaptureOffset)
         << "c and a are opened by the SAME CLOSURE instruction -- the exact "
-        << "shape R16 exists to catch";
+        << "shape this test exercises";
     EXPECT_NE(slot1Ranges[1].allCloseOffsets.back(),
               slot2Ranges[0].allCloseOffsets.back())
         << "c and a close at DIFFERENT offsets -- one must not silently "
         << "read the other's stale index and report its end instead";
 }
 
-// R16 regression, failure case 2 (a heap-buffer-overflow / SIGSEGV before
+// Regression, failure case 2 (a heap-buffer-overflow / SIGSEGV before
 // the fix, on a fully legal program). A THIRD block whose own CLOSURE also
 // captures two slots makes the stale index -- left over from the SECOND
 // block's own two-slot CLOSURE overwriting the first slot's entry -- larger
@@ -1014,7 +1013,7 @@ TEST(CaptureAnalysisTest,
         }
         outer();
     )",
-                                   "r16_three_blocks_stale_index");
+                                   "three_blocks_stale_index");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* k = findByName(c.tree, "k");
     ASSERT_NE(outer, nullptr);
@@ -1038,13 +1037,13 @@ TEST(CaptureAnalysisTest,
     EXPECT_EQ(eRanges.back().firstCaptureOffset,
               dRanges.back().firstCaptureOffset)
         << "e and d are opened by the SAME CLOSURE instruction -- the exact "
-        << "shape R16 exists to catch";
+        << "shape this test exercises";
     EXPECT_NE(eRanges.back().allCloseOffsets.back(),
               dRanges.back().allCloseOffsets.back())
         << "e and d close at DIFFERENT offsets";
 }
 
-// R17 regression, failure case 1 (a silent wrong answer before the fix).
+// Regression, failure case 1 (a silent wrong answer before the fix).
 // Native output is 2, then 1: `f` captures `a`, a function-scope capture
 // with no close of its own on any path; `g` captures `b`, an if-block local
 // whose ONLY capturing CLOSURE runs on the branch that returns immediately,
@@ -1068,7 +1067,7 @@ TEST(CaptureAnalysisTest,
         print outer(true)();
         print outer(false)();
     )",
-                                   "r17_early_return_sibling_close");
+                                   "early_return_sibling_close");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* f = findByName(c.tree, "f");
     const DecodedFunction* g = findByName(c.tree, "g");
@@ -1082,7 +1081,7 @@ TEST(CaptureAnalysisTest,
     ASSERT_LT(aSlot, bSlot)
         << "a is declared before the if-block and b inside it -- b must get "
         << "the HIGHER slot number, or this test does not reach the shape "
-        << "R17 exists to catch (the wrong pick only ever favours a LOWER "
+        << "it exercises (the wrong pick only ever favours a LOWER "
         << "slot that happens to be dynamically open)";
 
     const std::vector<CaptureLiveRange>& aRanges = rangesFor(info, aSlot);
@@ -1104,7 +1103,7 @@ TEST(CaptureAnalysisTest,
         << "other path";
 }
 
-// R17 regression, failure case 2 (a thrown "no open captured slot to
+// Regression, failure case 2 (a thrown "no open captured slot to
 // close" error before the fix, on a fully legal program). A second,
 // unconditional capture (`a`) before the branch puts TWO CLOSE_UPVALUE
 // instructions in the common scope exit: one for `b` (the branch-only
@@ -1128,7 +1127,7 @@ TEST(CaptureAnalysisTest, CaptureOnEarlyReturnBranchClosesInCommonScopeExit) {
         print outer(true)();
         print outer(false)[0]();
     )",
-                                   "r17_early_return_common_scope_exit");
+                                   "early_return_common_scope_exit");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* f = findByName(c.tree, "f");
     const DecodedFunction* g = findByName(c.tree, "g");
@@ -1141,7 +1140,7 @@ TEST(CaptureAnalysisTest, CaptureOnEarlyReturnBranchClosesInCommonScopeExit) {
     ASSERT_NE(aSlot, bSlot);
     ASSERT_LT(aSlot, bSlot)
         << "a is declared before b -- b must get the HIGHER slot number, "
-        << "or this test does not reach the shape R17 exists to catch";
+        << "or this test does not reach the shape it exercises";
 
     const std::vector<CaptureLiveRange>& aRanges = rangesFor(info, aSlot);
     const std::vector<CaptureLiveRange>& bRanges = rangesFor(info, bSlot);
@@ -1163,18 +1162,18 @@ TEST(CaptureAnalysisTest, CaptureOnEarlyReturnBranchClosesInCommonScopeExit) {
         << "common scope exit";
 }
 
-// Amendment 1's own adversarial shape ("a static close above a live outer
-// capture", referee amendment 1 section 7): two SEPARATE if-with-early-
-// return blocks, each needing the amended (static-overlay) resolution on its
-// own, one after the other, and BOTH reusing the same slot number once the
-// first if-block's own scope truly ends (the R14 shape, layered onto R17).
-// `keep` is a genuine, live, unconditional outer capture opened BEFORE
-// either if-block and never explicitly closed anywhere; its slot number is
-// necessarily lower than both if-block locals' (declared later). Before the
-// amendment, "highest open slot in the per-path state" would have picked
-// `keep` at BOTH if-blocks' own static-only closes -- it is the only slot
-// dynamically open on either sibling (false) path -- ending `keep` far too
-// early and leaving neither if-block local's own close recorded at all.
+// An adversarial shape: a static close above a live outer capture. Two
+// SEPARATE if-with-early-return blocks, each needing the static-overlay
+// resolution on its own, one after the other, and BOTH reusing the same slot
+// number once the first if-block's own scope truly ends (a reused-slot shape
+// layered onto an early-return-branch close). `keep` is a genuine, live,
+// unconditional outer capture opened BEFORE either if-block and never
+// explicitly closed anywhere; its slot number is necessarily lower than both
+// if-block locals' (declared later). With an earlier design, "highest open
+// slot in the per-path state" would have picked `keep` at BOTH if-blocks'
+// own static-only closes -- it is the only slot dynamically open on either
+// sibling (false) path -- ending `keep` far too early and leaving neither
+// if-block local's own close recorded at all.
 TEST(CaptureAnalysisTest, TwoSiblingStaticClosesDoNotStealAnOuterCapturesSlot) {
     Compiled c = compileAndAnalyze(R"(
         fun outer(cond1, cond2) {
@@ -1213,7 +1212,8 @@ TEST(CaptureAnalysisTest, TwoSiblingStaticClosesDoNotStealAnOuterCapturesSlot) {
         << "be caught here";
     ASSERT_EQ(xSlot, ySlot)
         << "x's block fully ends before y's begins -- the test must "
-        << "exercise a REUSED slot, layering R14 onto R17, or it does not "
+        << "exercise a REUSED slot, layering a reused-slot shape onto an "
+        << "early-return-branch close, or it does not "
         << "reach the shape this test exists to catch";
 
     const std::vector<CaptureLiveRange>& keepRanges = rangesFor(info, keepSlot);
@@ -1242,10 +1242,10 @@ TEST(CaptureAnalysisTest, TwoSiblingStaticClosesDoNotStealAnOuterCapturesSlot) {
         << "incarnations must not overlap";
 }
 
-// R19 regression, failure case 1. Native output is 99: `a` is a
-// function-scope capture (closed only implicitly at the frame's own
-// RETURN); `b` is captured only inside a nested if-with-early-return, and
-// its own scope's endScope close is a STATIC, overlay-only one (R17's
+// Regression, failure case 1. Native output is 99: `a` is a function-scope
+// capture (closed only implicitly at the frame's own RETURN); `b` is
+// captured only inside a nested if-with-early-return, and its own scope's
+// endScope close is a STATIC, overlay-only one (an early-return-branch
 // shape) on the sibling path. Before the fix, advanceProbe blindly popped
 // `state`'s own highest slot at every CLOSE_UPVALUE, including that static
 // close -- and on the sibling ("cond=false") path, `a` (an unrelated,
@@ -1270,7 +1270,7 @@ TEST(CaptureAnalysisTest,
         }
         print outer(false)();
     )",
-                                   "r19_static_close_across_block_boundary");
+                                   "static_close_across_block_boundary");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* g = findByName(c.tree, "g");
     const DecodedFunction* h = findByName(c.tree, "h");
@@ -1285,7 +1285,7 @@ TEST(CaptureAnalysisTest,
     int aSlotAgain = infoFor(c.captures, s->id).ownUpvalues.at(0).index;
     ASSERT_EQ(aSlot, aSlotAgain)
         << "s and g must capture the SAME variable, or this test does not "
-        << "reach the shape R19 exists to catch";
+        << "reach the shape it exercises";
     ASSERT_NE(aSlot, bSlot);
 
     const std::vector<CaptureLiveRange>& aRanges = rangesFor(info, aSlot);
@@ -1304,7 +1304,7 @@ TEST(CaptureAnalysisTest,
         << "b's own static, overlay-only endScope close";
 }
 
-// R19 regression, failure case 2. Native output is 0, then 1: `snap` gets a
+// Regression, failure case 2. Native output is 0, then 1: `snap` gets a
 // fresh cell each iteration, and its live range ends on whichever of the
 // loop body's own two alternate exits (continue, or the normal
 // fall-through) runs. Before the fix, advanceProbe's blind pop wrongly
@@ -1334,7 +1334,7 @@ TEST(CaptureAnalysisTest,
         print r[0]();
         print r[2]();
     )",
-                                   "r19_static_close_inside_loop_alternates");
+                                   "static_close_inside_loop_alternates");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* mk = findByName(c.tree, "mk");
     const DecodedFunction* h = findByName(c.tree, "h");
@@ -1365,7 +1365,7 @@ TEST(CaptureAnalysisTest,
         << "nothing left to find";
 }
 
-// R20 regression. Native output is 1, then 2: an ordinary if/else where
+// Regression. Native output is 1, then 2: an ordinary if/else where
 // BOTH arms capture the same outer, never-redeclared local must share one
 // cell, not be treated as two conflicting incarnations. Before the fix,
 // joinInto threw where the two arms' exit states rejoined, because it saw
@@ -1383,7 +1383,7 @@ TEST(CaptureAnalysisTest, IfElseArmsCapturingOneOuterVariableShareOneCell) {
         print outer(true)();
         print outer(false)();
     )",
-                                   "r20_if_else_arms_share_one_outer_capture");
+                                   "if_else_arms_share_one_outer_capture");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* a = findByName(c.tree, "a");
     const DecodedFunction* b = findByName(c.tree, "b");
@@ -1395,7 +1395,7 @@ TEST(CaptureAnalysisTest, IfElseArmsCapturingOneOuterVariableShareOneCell) {
     int bSlot = infoFor(c.captures, b->id).ownUpvalues.at(0).index;
     ASSERT_EQ(aSlot, bSlot)
         << "a and b must capture the SAME slot, or this test does not "
-        << "reach the shape R20 exists to catch";
+        << "reach the shape it exercises";
 
     const std::vector<CaptureLiveRange>& ranges = rangesFor(info, aSlot);
     ASSERT_EQ(ranges.size(), 1U)
@@ -1407,7 +1407,7 @@ TEST(CaptureAnalysisTest, IfElseArmsCapturingOneOuterVariableShareOneCell) {
         << "x is function scope -- only the frame's RETURN ends it";
 }
 
-// R20 regression, layered onto a loop: the loop variable itself is
+// Regression, layered onto a loop: the loop variable itself is
 // captured by both if/else arms, on every iteration. Native output is 2,
 // then 2 (both closures see the loop var's final value, one shared cell for
 // the whole loop).
@@ -1426,7 +1426,7 @@ TEST(CaptureAnalysisTest,
         print r[0]();
         print r[1]();
     )",
-                                   "r20_if_else_arms_in_loop_share_loop_var");
+                                   "if_else_arms_in_loop_share_loop_var");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* a = findByName(c.tree, "a");
     const DecodedFunction* b = findByName(c.tree, "b");
@@ -1448,7 +1448,7 @@ TEST(CaptureAnalysisTest,
         << "its back-edge span";
 }
 
-// R20 regression, layered onto a loop a second way: a fresh, per-iteration
+// Regression, layered onto a loop a second way: a fresh, per-iteration
 // body local, captured by both if/else arms on each iteration. Native
 // output is 0, then 1 (each iteration's own fresh cell).
 TEST(CaptureAnalysisTest,
@@ -1467,7 +1467,7 @@ TEST(CaptureAnalysisTest,
         print r[0]();
         print r[1]();
     )",
-                                   "r20_if_else_arms_in_loop_share_body_local");
+                                   "if_else_arms_in_loop_share_body_local");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* a = findByName(c.tree, "a");
     const DecodedFunction* b = findByName(c.tree, "b");
@@ -1487,7 +1487,7 @@ TEST(CaptureAnalysisTest,
     EXPECT_TRUE(ranges[0].perIteration);
 }
 
-// R21 (nit): none of the shapes above capture a slot AGAIN after a static,
+// None of the shapes above capture a slot AGAIN after a static,
 // overlay-only close AND a block boundary -- the one shape that reads the
 // per-block entry state advanceProbe could have damaged. Native output is
 // 1, 3, then 2, 3: whichever if/else arm ran, x is still open afterward,
@@ -1510,7 +1510,7 @@ TEST(CaptureAnalysisTest, RecaptureAfterIfElseMergeJoinsTheMergedRange) {
         print r2[0]();
         print r2[1]();
     )",
-                                   "r21_recapture_after_if_else_merge");
+                                   "recapture_after_if_else_merge");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* a = findByName(c.tree, "a");
     const DecodedFunction* b = findByName(c.tree, "b");
@@ -1535,16 +1535,16 @@ TEST(CaptureAnalysisTest, RecaptureAfterIfElseMergeJoinsTheMergedRange) {
     EXPECT_TRUE(ranges[0].closedImplicitly);
 }
 
-// R22 regression, failure case 1 (referee amendment 3). Native output is
-// [10, 11]: `x` is captured only on the `c` branch, which returns
-// immediately, so the loop body's own two alternate exits for its scope --
-// `continue`'s cleanup and the normal fall-through -- both emit a REAL
-// CLOSE_UPVALUE for x's slot, on every iteration, even though neither path
-// ever dynamically ran the CLOSURE that captured it. Before amendment 3,
-// the static overlay held one entry per slot; the first close (continue's)
-// erased it, and the second (the fall-through's) found nothing left in
-// either layer -- exactly this program made the pass throw.
-TEST(CaptureAnalysisTest, R22StaticSiblingClosesBothAttributeToTheOneInstance) {
+// Regression, failure case 1. Native output is [10, 11]: `x` is captured
+// only on the `c` branch, which returns immediately, so the loop body's own
+// two alternate exits for its scope -- `continue`'s cleanup and the normal
+// fall-through -- both emit a REAL CLOSE_UPVALUE for x's slot, on every
+// iteration, even though neither path ever dynamically ran the CLOSURE that
+// captured it. With an earlier static-overlay design that held one entry per
+// slot, the first close (continue's) erased it, and the second (the
+// fall-through's) found nothing left in either layer -- exactly this program
+// made the pass throw.
+TEST(CaptureAnalysisTest, StaticSiblingClosesBothAttributeToTheOneInstance) {
     Compiled c = compileAndAnalyze(R"(
         fun outer(c, d) {
           var acc = [];
@@ -1558,7 +1558,7 @@ TEST(CaptureAnalysisTest, R22StaticSiblingClosesBothAttributeToTheOneInstance) {
         }
         print outer(false, false);
     )",
-                                   "r22_case1_static_sibling_closes");
+                                   "static_sibling_closes_one_instance");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* gx = findByName(c.tree, "gx");
     ASSERT_NE(outer, nullptr);
@@ -1575,7 +1575,7 @@ TEST(CaptureAnalysisTest, R22StaticSiblingClosesBothAttributeToTheOneInstance) {
     EXPECT_EQ(ranges[0].allCloseOffsets.size(), 2U)
         << "the continue path and the normal fall-through each emit their "
         << "own real CLOSE_UPVALUE for x's slot -- both must attribute to "
-        << "this one instance, or R22's defect is back";
+        << "this one instance, or the static-close defect is back";
     EXPECT_TRUE(ranges[0].closedImplicitly)
         << "the c=true path returns before either alternate exit runs, "
         << "leaving that iteration's cell open at that RETURN";
@@ -1584,16 +1584,16 @@ TEST(CaptureAnalysisTest, R22StaticSiblingClosesBothAttributeToTheOneInstance) {
         << "iteration";
 }
 
-// R22 regression, failure case 2 (referee amendment 3). Native output is 5,
-// then 5: `keep` is a function-scope capture with no close of its own
-// anywhere; `x`, like case 1 above, is captured only on a branch that
-// returns, so both of the loop's alternate-exit closes are static, real
-// CLOSE_UPVALUE instructions for x's slot. Before amendment 3, the overlay
-// lost x's slot at the first (continue's) close, so the SECOND close (the
-// fall-through's) fell through to `keep` -- the only thing left open in
-// `state` -- and reported `keep`'s cell as dead inside the loop body, which
-// would make a backend read a stale value (1) where native reads 5.
-TEST(CaptureAnalysisTest, R22StaticCloseDoesNotStealAnOuterFunctionScopeSlot) {
+// Regression, failure case 2. Native output is 5, then 5: `keep` is a
+// function-scope capture with no close of its own anywhere; `x`, like case 1
+// above, is captured only on a branch that returns, so both of the loop's
+// alternate-exit closes are static, real CLOSE_UPVALUE instructions for x's
+// slot. With an earlier overlay design, the pass lost x's slot at the first
+// (continue's) close, so the SECOND close (the fall-through's) fell through
+// to `keep` -- the only thing left open in `state` -- and reported `keep`'s
+// cell as dead inside the loop body, which would make a backend read a stale
+// value (1) where native reads 5.
+TEST(CaptureAnalysisTest, StaticCloseDoesNotStealAnOuterFunctionScopeSlot) {
     Compiled c = compileAndAnalyze(R"(
         fun outer(c, d) {
           var keep = 1;
@@ -1611,7 +1611,7 @@ TEST(CaptureAnalysisTest, R22StaticCloseDoesNotStealAnOuterFunctionScopeSlot) {
         print outer(false, false)();
         print outer(false, true)();
     )",
-                                   "r22_case2_static_close_does_not_steal");
+                                   "static_close_does_not_steal_outer_slot");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* kf = findByName(c.tree, "kf");
     const DecodedFunction* gx = findByName(c.tree, "gx");
@@ -1641,13 +1641,13 @@ TEST(CaptureAnalysisTest, R22StaticCloseDoesNotStealAnOuterFunctionScopeSlot) {
     EXPECT_TRUE(xRanges[0].perIteration);
 }
 
-// R25 regression 1 (referee amendment 4, round 10). Native output is 1:
-// `Compiler::endScope` emits the block's own CLOSE_UPVALUE AFTER the
-// `return f;`, so that close sits in a block block 0 never reaches.
-// Before amendment 4, `advanceCommit` looked the offset up in
-// `heightBefore` before checking reachability, and `heightBefore` (built by
-// `computeFrameHeightsForCfg`) holds no entry for an unreached block, so
-// the lookup threw `std::out_of_range` -- this program crashed the pass.
+// Regression 1. Native output is 1: `Compiler::endScope` emits the block's
+// own CLOSE_UPVALUE AFTER the `return f;`, so that close sits in a block that
+// block 0 never reaches. With an earlier design, `advanceCommit` looked the
+// offset up in `heightBefore` before checking reachability, and
+// `heightBefore` (built by `computeFrameHeightsForCfg`) holds no entry for
+// an unreached block, so the lookup threw `std::out_of_range` -- this
+// program crashed the pass.
 TEST(CaptureAnalysisTest, DeadCloseAfterReturnFromBlockIsUnreachableNotAThrow) {
     Compiled c = compileAndAnalyze(R"(
         fun outer() {
@@ -1659,7 +1659,7 @@ TEST(CaptureAnalysisTest, DeadCloseAfterReturnFromBlockIsUnreachableNotAThrow) {
         }
         print outer()();
     )",
-                                   "r25_1_dead_close_after_return_from_block");
+                                   "dead_close_after_return_from_block");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* f = findByName(c.tree, "f");
     ASSERT_NE(outer, nullptr);
@@ -1681,9 +1681,8 @@ TEST(CaptureAnalysisTest, DeadCloseAfterReturnFromBlockIsUnreachableNotAThrow) {
     EXPECT_TRUE(info.staticallyDeadCloseOffsets.empty());
 }
 
-// R25 regression 2 (referee amendment 4, round 10). Native output is 7: the
-// same shape as the previous test, one level deeper -- a method body's own
-// block, not a plain function's.
+// Regression 2. Native output is 7: the same shape as the previous test, one
+// level deeper -- a method body's own block, not a plain function's.
 TEST(CaptureAnalysisTest, DeadCloseAfterReturnFromMethodBlockIsUnreachable) {
     Compiled c = compileAndAnalyze(R"(
         class Box {
@@ -1698,7 +1697,7 @@ TEST(CaptureAnalysisTest, DeadCloseAfterReturnFromMethodBlockIsUnreachable) {
         }
         print Box(7).getter()();
     )",
-                                   "r25_2_dead_close_after_return_from_method");
+                                   "dead_close_after_return_from_method");
     const DecodedFunction* getter = findByName(c.tree, "getter");
     const DecodedFunction* g = findByName(c.tree, "g");
     ASSERT_NE(getter, nullptr);
@@ -1715,11 +1714,10 @@ TEST(CaptureAnalysisTest, DeadCloseAfterReturnFromMethodBlockIsUnreachable) {
     EXPECT_TRUE(info.staticallyDeadCloseOffsets.empty());
 }
 
-// R25 regression 3 (referee amendment 4, round 10). Native output is 0: an
-// unconditional `return f;` inside a WHILE loop's body, so the loop's own
-// back-edge (LOOP) and the loop-body scope's own CLOSE_UPVALUE both become
-// dead code below the return. Pins that R25's fix generalizes past an `if`
-// block to an ordinary loop body.
+// Regression 3. Native output is 0: an unconditional `return f;` inside a
+// WHILE loop's body, so the loop's own back-edge (LOOP) and the loop-body
+// scope's own CLOSE_UPVALUE both become dead code below the return. Pins
+// that the fix generalizes past an `if` block to an ordinary loop body.
 TEST(CaptureAnalysisTest, DeadCloseAfterReturnFromLoopBodyIsUnreachable) {
     Compiled c = compileAndAnalyze(R"(
         fun outer() {
@@ -1733,7 +1731,7 @@ TEST(CaptureAnalysisTest, DeadCloseAfterReturnFromLoopBodyIsUnreachable) {
         }
         print outer()();
     )",
-                                   "r25_3_dead_close_after_return_from_loop");
+                                   "dead_close_after_return_from_loop");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* f = findByName(c.tree, "f");
     ASSERT_NE(outer, nullptr);
@@ -1750,14 +1748,13 @@ TEST(CaptureAnalysisTest, DeadCloseAfterReturnFromLoopBodyIsUnreachable) {
     EXPECT_TRUE(info.staticallyDeadCloseOffsets.empty());
 }
 
-// R26 regression (referee amendment 4, round 10). Native output is nil:
-// `fun g` sits after `return r;`, so its CLOSURE is unreachable, but
-// program order still puts it before the enclosing block's own
-// CLOSE_UPVALUE for x -- a REACHABLE, STATIC close (the only path that
-// captures x, through `if (c)`, itself returns). Before amendment 4, this
-// close's static lookup named g's (range-less) origin and threw "resolved
-// to slot ... which has no recorded range". Now it is a statically dead
-// close.
+// Regression. Native output is nil: `fun g` sits after `return r;`, so its
+// CLOSURE is unreachable, but program order still puts it before the
+// enclosing block's own CLOSE_UPVALUE for x -- a REACHABLE, STATIC close (the
+// only path that captures x, through `if (c)`, itself returns). With an
+// earlier design, this close's static lookup named g's (range-less) origin
+// and threw "resolved to slot ... which has no recorded range". Now it is a
+// statically dead close.
 TEST(CaptureAnalysisTest, StaticCloseOfSlotWithOnlyUnreachableCaptureIsDead) {
     Compiled c = compileAndAnalyze(R"(
         fun outer(c, d) {
@@ -1777,7 +1774,7 @@ TEST(CaptureAnalysisTest, StaticCloseOfSlotWithOnlyUnreachableCaptureIsDead) {
         }
         print outer(false, false);
     )",
-                                   "r26_static_close_only_unreachable_capture");
+                                   "static_close_only_unreachable_capture");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* f = findByName(c.tree, "f");
     ASSERT_NE(outer, nullptr);
@@ -1801,7 +1798,7 @@ TEST(CaptureAnalysisTest, StaticCloseOfSlotWithOnlyUnreachableCaptureIsDead) {
         << "this close is reachable -- only its ORIGIN is dead code";
 }
 
-// deadcap.lox (referee amendment 4, round 10). Native output is 1: x is
+// Regression: all captures unreachable. Native output is 1: x is
 // captured ONLY by a CLOSURE that sits after an unconditional `return nil;`
 // inside the `if`, so f's CLOSURE never opens a range at all. The block's
 // own CLOSE_UPVALUE for x, after the `if`, is reachable (the `if (c)`
@@ -1835,13 +1832,13 @@ TEST(CaptureAnalysisTest, DeadCapAllCapturesUnreachableLeavesNoRangeAtAll) {
         << "the close itself IS reached, from the if (c) false branch";
 }
 
-// steal.lox (referee amendment 4, round 10). Native output is 2: `a` and
+// Regression: sibling scope reusing a slot. Native output is 2: `a` and
 // `b` are two DIFFERENT variables that reuse the same slot in two sibling
 // scopes. `a` is really captured (by `f`, reachable) and really closes at
-// the end of its own scope. `b` is captured only by `g`, whose CLOSURE
-// sits after an unconditional `return nil;` (unreachable). The rejected
-// fix from R26 ("gate latestInstanceBySlot on reachable") makes b's own
-// scope-exit close silently resolve to a's ALREADY-CLOSED range instead
+// the end of its own scope. `b` is captured only by `g`, whose CLOSURE sits
+// after an unconditional `return nil;` (unreachable). A rejected fix ("gate
+// latestInstanceBySlot on reachable") makes b's own scope-exit close
+// silently resolve to a's ALREADY-CLOSED range instead
 // (because gating stops g's unreachable CLOSURE from ever overwriting the
 // map entry a's CLOSURE left behind) -- this test pins that a's range ends
 // at exactly {9}, never touching b's close at 31.
@@ -1885,9 +1882,9 @@ TEST(CaptureAnalysisTest, SiblingScopeReusingSlotDoesNotStealClosedRange) {
         << "origin -- statically dead, not a's stolen range";
 }
 
-// corner.lox (referee amendment 4, round 10). Native output is 2 2 2: a
-// C-style `for` with an OMITTED condition and a captured loop var, whose
-// only exit is a `break` inside the body. `Compiler::emitLoopCleanup`
+// Regression: break-only for loop. Native output is 2 2 2: a C-style `for`
+// with an OMITTED condition and a captured loop var, whose only exit is a
+// `break` inside the body. `Compiler::emitLoopCleanup`
 // routes `break` THROUGH the loop's shared after-loop CLOSE_UPVALUE (the
 // break jump TARGETS the close itself, rather than emitting its own copy),
 // so that close stays reachable and dynamic whenever any break is -- this

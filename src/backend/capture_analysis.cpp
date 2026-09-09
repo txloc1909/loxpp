@@ -173,17 +173,17 @@ computeFrameHeightsForCfg(const Cfg& cfg, int entryHeight,
 // ---------------------------------------------------------------------------
 // Pass 1 — which instance of a captured slot is open at each point.
 //
-// Unchanged from referee amendment 2: a slot is open at a block's entry
-// exactly when some predecessor that reaches it still has it open
-// (mirroring the VM's own open-upvalue list), and a merge where two
-// predecessors bring the same slot open under different origins unites them
-// into one instance (mirroring captureUpvalue's reuse of an already-open
-// upvalue at one stack location). What amendment 3 removes is the static
-// overlay this fixpoint used to need to resolve a CLOSE_UPVALUE's target:
-// with the height rule, that target is now a compile-time constant
-// (closeSlotFor below), so a close is either found open on this path (erase
-// it) or not (a genuine no-op here, left for Pass 2's program-order
-// attribution) — no second layer, no iteration to a fixed point.
+// A slot is open at a block's entry exactly when some predecessor that
+// reaches it still has it open (mirroring the VM's own open-upvalue list),
+// and a merge where two predecessors bring the same slot open under
+// different origins unites them into one instance (mirroring
+// captureUpvalue's reuse of an already-open upvalue at one stack location).
+// A later revision removed the static overlay this fixpoint used to need to
+// resolve a CLOSE_UPVALUE's target: with the height rule, that target is now
+// a compile-time constant (closeSlotFor below), so a close is either found
+// open on this path (erase it) or not (a genuine no-op here, left for Pass
+// 2's program-order attribution) — no second layer, no iteration to a fixed
+// point.
 // ---------------------------------------------------------------------------
 
 // Slot -> the offset of the CLOSURE that opened the slot's currently-live
@@ -192,17 +192,17 @@ using OpenOrigins = std::map<int, int>;
 
 // (slot, opening CLOSURE offset) -> that range's index in
 // FunctionCaptureInfo::liveRangesBySlot[slot]. Keyed by the PAIR, not the
-// offset alone (R16): one CLOSURE can capture more than one parent local in
+// offset alone: one CLOSURE can capture more than one parent local in
 // a single instruction (one `isLocal=1` upvalue per captured slot), so two
 // DIFFERENT slots can share the same origin offset.
 using RangeIndex = std::map<std::pair<int, int>, int>;
 
 // Canonicalizes (slot, CLOSURE offset) origins that two mutually exclusive
-// CFG paths prove are one live instance (referee amendment 2, rule 4). A
-// classic union-find keyed by the pair, so a chain of merges (an if/else
-// nested inside another if/else, all capturing one outer local) still
-// resolves to one root. Slot is part of the key only so two different
-// slots' origins never compare equal by coincidence.
+// CFG paths prove are one live instance. A classic union-find keyed by the
+// pair, so a chain of merges (an if/else nested inside another if/else, all
+// capturing one outer local) still resolves to one root. Slot is part of
+// the key only so two different slots' origins never compare equal by
+// coincidence.
 class OriginUnionFind {
   public:
     int find(int slot, int origin) {
@@ -241,9 +241,8 @@ class OriginUnionFind {
 // pre-loop predecessor shows `i` closed, the back-edge predecessor shows it
 // open, and open wins).
 //
-// Referee amendment 2, rule 4: two predecessors CAN both have the slot open
-// with different origins, and that is not drift. Unite the two origins
-// instead of throwing.
+// Two predecessors CAN both have the slot open with different origins, and
+// that is not drift. Unite the two origins instead of throwing.
 void joinInto(OpenOrigins& acc, const OpenOrigins& incoming,
               OriginUnionFind& aliases) {
     for (const auto& [slot, origin] : incoming) {
@@ -260,11 +259,11 @@ void joinInto(OpenOrigins& acc, const OpenOrigins& incoming,
 // (analyzeOneChunk). It never builds a CaptureLiveRange.
 //
 // CLOSE_UPVALUE's target slot is now a compile-time constant
-// (`heightBefore.at(offset) - 1`, referee amendment 3), so resolving it here
-// needs no history, no fallback, and no later reconciliation: erase that
-// exact slot if `state` has it open, otherwise leave `state` untouched — a
-// dynamic no-op on this path, exactly matching what `vm.cpp`'s
-// `closeUpvalues` does when nothing is open at that stack location.
+// (`heightBefore.at(offset) - 1`), so resolving it here needs no history, no
+// fallback, and no later reconciliation: erase that exact slot if `state`
+// has it open, otherwise leave `state` untouched — a dynamic no-op on this
+// path, exactly matching what `vm.cpp`'s `closeUpvalues` does when nothing
+// is open at that stack location.
 void advanceDataflow(const BasicBlock& block, OpenOrigins& state,
                      const std::unordered_map<int, int>& heightBefore) {
     for (const DecodedInstruction& in : block.instructions) {
@@ -372,24 +371,22 @@ DataflowResult runDataflow(const Cfg& cfg,
 // Pass 2 — program-order attribution.
 // ---------------------------------------------------------------------------
 
-// Folds one CLOSURE instruction's local captures into `state` together
-// (this walk's own path-local view) and, if `reachable`, into `info`. Also
-// updates `latestInstanceBySlot` unconditionally — see advanceCommit's own
-// header comment, below, for why that is correct even for an unreachable
-// CLOSURE (R26).
+// Folds one CLOSURE instruction's local captures into `state` together (this
+// walk's own path-local view) and, if `reachable`, into `info`. Also updates
+// `latestInstanceBySlot` unconditionally — see advanceCommit's own header
+// comment, below, for why that is correct even for an unreachable CLOSURE.
 //
-// Referee amendment 2 corrects range identity: a capture token (slot,
-// CLOSURE offset) is only a range's INITIAL NAME, not its identity. Three
-// cases, matching `vm.cpp`'s own `captureUpvalue` (reuse an open upvalue, or
+// Range identity is not the capture token: a capture token (slot, CLOSURE
+// offset) is only a range's INITIAL NAME, not its identity. Three cases,
+// matching `vm.cpp`'s own `captureUpvalue` (reuse an open upvalue, or
 // create one):
-//   - joinsExistingRange (rule 2): this exact PATH already has the slot
-//     open -- add to that instance.
-//   - joinsSiblingRange (rule 4): this path does not, but a MUTUALLY
-//     EXCLUSIVE sibling path does, under a different token that the
-//     dataflow's own union-find already proved is the SAME instance -- add
-//     to it too.
-//   - neither (rule 3): every path reaching here has the slot closed --
-//     start a genuinely new instance.
+//   - joinsExistingRange: this exact PATH already has the slot open -- add
+//     to that instance.
+//   - joinsSiblingRange: this path does not, but a MUTUALLY EXCLUSIVE
+//     sibling path does, under a different token that the dataflow's own
+//     union-find already proved is the SAME instance -- add to it too.
+//   - neither: every path reaching here has the slot closed -- start a
+//     genuinely new instance.
 void handleClosureCommit(const DecodedInstruction& in, OpenOrigins& state,
                          bool reachable, FunctionCaptureInfo& info,
                          RangeIndex& rangeIndexByOrigin,
@@ -448,10 +445,9 @@ void handleClosureCommit(const DecodedInstruction& in, OpenOrigins& state,
 
 // Resolves one REACHABLE CLOSE_UPVALUE and records the outcome into `info`.
 // `slot` is `heightBefore.at(in.offset) - 1` — a compile-time constant, not
-// inferred (referee amendment 3). The caller (advanceCommit) handles the
-// unreachable case itself, before it ever computes `slot`, because
-// `heightBefore` holds no entry for an unreachable offset (R25) — so this
-// function never receives one.
+// inferred. The caller (advanceCommit) handles the unreachable case itself,
+// before it ever computes `slot`, because `heightBefore` holds no entry for
+// an unreachable offset — so this function never receives one.
 //
 // A close whose slot `state` shows open on this exact path is a DYNAMIC
 // close: attribute it to that instance and erase it from `state`. The
@@ -460,7 +456,7 @@ void handleClosureCommit(const DecodedInstruction& in, OpenOrigins& state,
 // by a CLOSURE on a path this pass proved reachable; a violation throws,
 // as decoder or compiler drift.
 //
-// A close whose slot `state` does NOT show open is a STATIC one (R22): the
+// A close whose slot `state` does NOT show open is a STATIC one: the
 // compiler emits one CLOSE_UPVALUE per exit path that crosses a captured
 // local's scope (break, continue, the fall-through), and every path but the
 // one that dynamically captured it reaches its own copy of that instruction
@@ -469,14 +465,14 @@ void handleClosureCommit(const DecodedInstruction& in, OpenOrigins& state,
 // instance to record against: `latestInstanceBySlot` names the most recent
 // CLOSURE this whole program-order walk has seen for this EXACT slot,
 // updated by every CLOSURE (handleClosureCommit) and never cleared by a
-// close — an earlier design (amendments 1 and 2's static overlay) erased
-// this on the FIRST close and broke on a slot's second, sibling close
-// (R22). Exact-slot matching (via height) makes stealing impossible: a
-// close for slot 7 can never consult, or touch, slot 3's entry.
+// close — an earlier static-overlay design erased this on the FIRST close
+// and broke on a slot's second, sibling close. Exact-slot matching (via
+// height) makes stealing impossible: a close for slot 7 can never consult,
+// or touch, slot 3's entry.
 //
-// A static close's origin can itself have opened no range (R26): the
-// CLOSURE `latestInstanceBySlot` names is unreachable too, so every capture
-// of this incarnation is dead code and no cell can exist here at run time.
+// A static close's origin can itself have opened no range: the CLOSURE
+// `latestInstanceBySlot` names is unreachable too, so every capture of this
+// incarnation is dead code and no cell can exist here at run time.
 // That is a STATICALLY DEAD close, not drift: record it in
 // `staticallyDeadCloseOffsets` and return with no throw.
 //
@@ -513,9 +509,9 @@ void handleCloseUpvalueCommit(
     if (idxIt == rangeIndexByOrigin.end()) {
         if (!dynamicClose) {
             // Static, and the origin it resolved to opened no range: every
-            // capture of this incarnation is unreachable too (R26). No cell
-            // can exist here at run time; the close's only real effect is
-            // its own pop.
+            // capture of this incarnation is unreachable too. No cell can
+            // exist here at run time; the close's only real effect is its
+            // own pop.
             info.staticallyDeadCloseOffsets.push_back(in.offset);
             return;
         }
@@ -536,25 +532,24 @@ void handleCloseUpvalueCommit(
 // block of the chunk — reachable or not.
 //
 // An unreachable CLOSE_UPVALUE is recorded and skipped BEFORE any per-offset
-// map access (R25): `heightBefore` (computeFrameHeightsForCfg) holds no
-// entry for a block block 0 never reaches, so looking one up here first
-// would throw `std::out_of_range` before the unreachable case is even
-// distinguished. `handleCloseUpvalueCommit` below therefore only ever sees a
-// REACHABLE close.
+// map access: `heightBefore` (computeFrameHeightsForCfg) holds no entry for
+// a block that block 0 never reaches, so looking one up here first would
+// throw `std::out_of_range` before the unreachable case is even
+// distinguished. `handleCloseUpvalueCommit` below therefore only ever sees
+// a REACHABLE close.
 //
 // `latestInstanceBySlot` still advances for an unreachable CLOSURE too
-// (handleClosureCommit), and that is correct, not merely tolerated (R26):
-// the emission contract (notes/jvm-emission-contract.md) guarantees that
+// (handleClosureCommit), and that is correct, not merely tolerated: the
+// emission contract (notes/jvm-emission-contract.md) guarantees that
 // cleanup emitted before a local's first capture uses POP, never
-// CLOSE_UPVALUE, so
-// every CLOSE_UPVALUE — reachable or not — has at least one
-// program-order-earlier CLOSURE of its own incarnation, in the same chunk.
-// The latest entry this map holds for a slot, at any close, therefore
-// always names that close's own incarnation, whether or not the CLOSURE
-// that wrote the entry itself ever runs. Gating the update on `reachable`
-// looks safer but is wrong: it makes the entry name a PREVIOUS incarnation
-// of the slot instead, which a later static close of a different
-// incarnation then silently steals (the referee's `steal.lox`).
+// CLOSE_UPVALUE, so every CLOSE_UPVALUE — reachable or not — has at least
+// one program-order-earlier CLOSURE of its own incarnation, in the same
+// chunk. The latest entry this map holds for a slot, at any close,
+// therefore always names that close's own incarnation, whether or not the
+// CLOSURE that wrote the entry itself ever runs. Gating the update on
+// `reachable` looks safer but is wrong: it makes the entry name a PREVIOUS
+// incarnation of the slot instead, which a later static close of a
+// different incarnation then silently steals.
 void advanceCommit(const BasicBlock& block, OpenOrigins& state, bool reachable,
                    const std::string& functionId, FunctionCaptureInfo& info,
                    RangeIndex& rangeIndexByOrigin, OriginUnionFind& aliases,

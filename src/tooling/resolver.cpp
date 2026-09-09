@@ -556,8 +556,8 @@ class Resolver {
         }
         case ExprKind::Get:
             // `obj.name` -- `name` is a member and is resolved dynamically at
-            // run time; the tooling does not link it to a class member (see
-            // nodes/N7.md). Only the object sub-expression is resolved.
+            // run time; the tooling does not link it to a class member. Only
+            // the object sub-expression is resolved.
             visitExpr(static_cast<const GetExpr&>(*expr).object.get());
             break;
         case ExprKind::Index: {
@@ -793,8 +793,8 @@ class Resolver {
     }
 
     // spec/02-syntax.md requires every or-pattern alternative to bind the same
-    // names; N3 owns that as a compile error. Here it is a Warning so the
-    // editor shows that one branch leaves a name unbound at run time.
+    // names; the compiler owns that as a compile error. Here it is a Warning
+    // so the editor shows that one branch leaves a name unbound at run time.
     void checkOrPatternBindings(const OrPat& p, Scope* armScope) {
         if (p.alternatives.size() < 2) {
             return;

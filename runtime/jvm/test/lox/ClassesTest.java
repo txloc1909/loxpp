@@ -91,7 +91,7 @@ public final class ClassesTest {
         checkEquals(null, globals.get("nilGlobal"), "a nil-valued global reads back as nil, not undefined");
         globals.set("nilGlobal", 5.0);
         checkEquals(5.0, globals.get("nilGlobal"), "set updates an existing global");
-        globals.set("nilGlobal", null); // R6: sentinel round-trip must survive a defined -> nil write
+        globals.set("nilGlobal", null); // sentinel round-trip must survive a defined -> nil write
         checkEquals(null, globals.get("nilGlobal"), "set can write nil back onto a defined global");
         check(globals.isDefined("nilGlobal"), "isDefined stays true after set writes nil");
 
@@ -117,7 +117,7 @@ public final class ClassesTest {
         check(LoxOps.inherit(animal) == animal, "inherit() returns the validated superclass");
         checkThrows(() -> LoxOps.getTag(1.0), LoxError.class, "getTag() rejects a non-enum value");
         checkEquals(1.0, LoxOps.getTag(a), "getTag() reads the constructor's tag as a Lox number");
-        LoxOps.checkMapKey("k"); // public for N6's BUILD_MAP — must not throw for a valid key
+        LoxOps.checkMapKey("k"); // public for BUILD_MAP — must not throw for a valid key
         checkThrows(() -> LoxOps.checkMapKey(Double.NaN), LoxError.class, "checkMapKey() rejects NaN");
 
         System.exit(TestSupport.finish("ClassesTest"));

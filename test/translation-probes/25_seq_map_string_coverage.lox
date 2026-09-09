@@ -1,4 +1,4 @@
-// N9 R2: end-to-end run of the parts of P7/P8 that 11/12/16 leave untouched:
+// End-to-end run of the parts of P7/P8 that 11/12/16 leave untouched:
 // IS_SEQ (via a match sequence pattern), SLICE on a List, `in` on a String
 // and a Map, iteration over a String and a Map, and BUILD_MAP with three
 // pairs. Map keys are summed, never printed, so map bucket order cannot
@@ -10,8 +10,8 @@
 // (Compiler::compileListPattern, compiler.cpp:2125, is the only emitter, and
 // only a match arm reaches it). Each match below stays a discarded
 // statement: a *consumed* match (assigned, printed, returned) does not yet
-// emit at all, on any target, and that gap belongs to N10
-// (notes/backend-implementation-dag.md, N10 row).
+// emit at all, on any target, and that gap belongs to the match/enum dispatch
+// work (see notes/backend-implementation-dag.md).
 
 var xs = [1, 2, 3];
 var a = xs[0];
@@ -31,7 +31,7 @@ match "hi" {
 };
 print r;
 
-// R2 fix (PR #115 round 1): a 2-element pattern here can never prove IS_SEQ
+// Fix (PR #115 round 1): a 2-element pattern here can never prove IS_SEQ
 // runs at all — compileListPattern's own length check (compiler.cpp:2129-
 // 2148) rejects a 1-pair map on width alone, so IS_SEQ's own answer never
 // reaches stdout either way (proof: mutating LoxOps.isSeq to `return true`

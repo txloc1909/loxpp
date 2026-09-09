@@ -13,8 +13,9 @@ namespace loxpp::tooling {
 // counter; when the sum reaches this value it stops extending that path,
 // records an error, recovers, and still returns a Program. The bound lets a
 // consumer walk or destroy the tree recursively on a small stack -- an LSP
-// worker thread near 512 KB -- without overflowing. N7's resolver and N8's
-// LSP rely on it; see the comment in tooling_parser.cpp for the rationale.
+// worker thread near 512 KB -- without overflowing. The resolver and the
+// LSP server rely on it; see the comment in tooling_parser.cpp for the
+// rationale.
 inline constexpr std::size_t kMaxTreeDepth = 500;
 
 // Parse Lox++ source into an editor-tooling AST.

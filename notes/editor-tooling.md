@@ -1,12 +1,11 @@
 # Lox++ editor tooling — design note
 
-This note records the editor-tooling stack that the 2026-09 mission built:
+This note records the editor-tooling stack that recent work built:
 the `loxpp --check` diagnostics CLI, the `loxpp-lsp` language server, the
 `tree-sitter-loxpp` grammar, and the `loxpp.nvim` plugin.
 
-It is the durable record. The approved plan
-(`~/.claude/plans/velvety-sniffing-snowglobe.md`) holds the first design; this
-note describes what shipped and, where the two differ, this note is correct.
+It is the durable record. An earlier design draft preceded this note; where
+they differ, this note is correct.
 
 Language semantics stay in `spec/`. This note does not repeat them.
 
@@ -42,8 +41,8 @@ Language semantics stay in `spec/`. This note does not repeat them.
                              | loxpp_core   (OBJECT library)        |
                              |   the interpreter sources, minus     |
                              |   main.cpp                           |
-                             |   + Token.offset (N2)                |
-                             |   + Parser DiagnosticSink (N3)       |
+                             |   + Token.offset                     |
+                             |   + Parser DiagnosticSink            |
                              |   + analyze()  ->  `loxpp --check`   |
                              +-------------------------------------+
 ```
@@ -67,11 +66,11 @@ Build targets:
 
 `src/compiler.cpp` is a single-pass Pratt parser and bytecode compiler. It
 keeps no persistent syntax tree (`src/compiler.h`). Each `Token` carries a
-line number and, since node N2, a source byte offset (`src/token.h`), but the
-compiler frees all structure as it emits code.
+line number and a source byte offset (`src/token.h`), but the compiler frees
+all structure as it emits code.
 
 The compiler is the authority for **diagnostics**. It does a full parse, name
-resolution, and the limit checks. Node N3 added a `DiagnosticSink` to
+resolution, and the limit checks. The tooling work added a `DiagnosticSink` to
 `Parser` (`src/diagnostic.h`): when a sink is set, `Parser::errorAt` pushes a
 `Diagnostic { offset, length, line, severity, message }` instead of printing
 to `stderr`. `analyze()` (`src/analyze.h`, `src/analyze.cpp`) drives
@@ -413,8 +412,8 @@ Each item is small on this base.
 
 ## Follow-up bug candidates
 
-Found during the mission, not fixed (each is out of scope for a docs or
-tooling node). None changes the tooling's behaviour on valid source.
+Found during this work, not fixed (each is out of scope for a docs or
+tooling change). None changes the tooling's behaviour on valid source.
 
 - **`lox_keywords()` in `src/scanner.cpp` is missing `in`.** The array is
   called "the single source of truth" for the keyword list

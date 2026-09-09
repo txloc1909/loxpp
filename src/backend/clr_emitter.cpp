@@ -763,7 +763,7 @@ void emitCall(Emitter& e, const DecodedInstruction& in) {
 // BUILD_LIST (pulled forward from the aggregates scope this opcode
 // conceptually belongs to: V1_fresh_cell.lox and V3_loopvar.lox, the two
 // probes that prove or disprove the fresh-cell-per-declaration model this
-// node exists to get right, each build a list of the closures under test
+// pass exists to get right, each build a list of the closures under test
 // and read it back by index, so an emitter that still throws "not
 // implemented" on BUILD_LIST/GET_INDEX/SET_INDEX cannot even reach the
 // closure bug being tested for). The same P7 shuffle CALL's own argument
@@ -783,9 +783,9 @@ void emitBuildList(Emitter& e, const DecodedInstruction& in) {
 // BUILD_MAP n: n key/value pairs already loose on the stack, pushed in
 // source order (key0, val0, key1, val1, ..., matching compiler.cpp's map
 // literal) — the same P7 reshape as BUILD_LIST, over 2n cells instead of n.
-// `12_list_map_index` — this node's own checkpoint — indexes a map literal
-// as well as a list, so this opcode is pulled forward here for the same
-// reason BUILD_LIST/GET_INDEX/SET_INDEX are: the probe cannot compile
+// `12_list_map_index` — this pass's own checkpoint probe — indexes a map
+// literal as well as a list, so this opcode is pulled forward here for the
+// same reason BUILD_LIST/GET_INDEX/SET_INDEX are: the probe cannot compile
 // without it. LoxOps.BuildMap (runtime/clr) validates every key before
 // writing any pair, matching vm.cpp's own two-pass shape.
 void emitBuildMap(Emitter& e, const DecodedInstruction& in) {

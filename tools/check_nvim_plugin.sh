@@ -3,8 +3,8 @@
 #
 # Proves the three layers wire up in a real Neovim:
 #   1. filetype detection            -> &filetype == "lox"
-#   2. tree-sitter grammar (node N4) -> vim.treesitter.get_parser(0, "loxpp") works
-#   3. loxpp-lsp server   (node N8)  -> a client attaches to a .lox buffer
+#   2. tree-sitter grammar           -> vim.treesitter.get_parser(0, "loxpp") works
+#   3. loxpp-lsp server              -> a client attaches to a .lox buffer
 #   4. live diagnostics              -> editing in "1 +;" raises a vim.diagnostic
 #
 # Requirements on PATH: nvim (>= 0.11), loxpp, loxpp-lsp, and a C compiler

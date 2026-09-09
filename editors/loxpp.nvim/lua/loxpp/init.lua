@@ -1,11 +1,11 @@
 -- loxpp.nvim: wires the three editor layers for Lox++.
 --
---   1. tree-sitter grammar  (editors/tree-sitter-loxpp, node N4)
---   2. loxpp-lsp server      (node N8)
---   3. `loxpp --check`        diagnostics fallback (node N3), used only when
+--   1. tree-sitter grammar  (editors/tree-sitter-loxpp)
+--   2. the loxpp-lsp language server
+--   3. `loxpp --check`        diagnostics fallback, used only when
 --      the LSP is not running
 --
--- The Vim regex syntax, ftdetect, and ftplugin files (node N6) sit beside
+-- The Vim regex syntax, ftdetect, and ftplugin files sit beside
 -- this tree and load on their own from 'runtimepath'; they need no setup.
 
 local M = {}

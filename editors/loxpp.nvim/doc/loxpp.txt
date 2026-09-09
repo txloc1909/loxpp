@@ -114,7 +114,7 @@ Diagnostics~
   Without the server, `loxpp --check --format json` runs on save through
   |nvim-lint| and reports the compiler's static errors only.
 
-Filetype and options (node N6, no setup needed)~
+Filetype and options (no setup needed)~
   `ftdetect/lox.{vim,lua}` map `*.lox` to filetype `lox`.
   `ftplugin/lox.{vim,lua}` set `commentstring`, `comments`, `iskeyword`,
   `suffixesadd` and `formatoptions`.

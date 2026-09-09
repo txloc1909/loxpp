@@ -1,6 +1,6 @@
 // test_backend_cfg.cpp — leaders-algorithm CFG recovery tests.
 //
-// The checkpoint (notes/backend-implementation-dag.md, node N1):
+// The checkpoint (see notes/backend-implementation-dag.md):
 //   1. 05_for.lox's top-level chunk has exactly 2 back edges and 1
 //      unconditional forward skip, and its leaders are exactly {0, 3, 12, 16,
 //      28, 34}.
@@ -77,8 +77,8 @@ bool hasSuccessor(const BasicBlock& from, const Cfg& cfg, int targetOffset,
 }
 
 // Every invariant a CFG must hold for *any* well-formed chunk, independent of
-// what that chunk actually computes. Used to sweep the whole corpus (R4 of
-// the checkpoint).
+// what that chunk actually computes. Used to sweep the whole corpus (the
+// corpus-wide half of the checkpoint).
 void checkInvariants(const Cfg& cfg,
                      const std::vector<DecodedInstruction>& instructions,
                      const std::string& trace) {
