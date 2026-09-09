@@ -78,7 +78,7 @@ bool hasSuccessor(const BasicBlock& from, const Cfg& cfg, int targetOffset,
 
 // Every invariant a CFG must hold for *any* well-formed chunk, independent of
 // what that chunk actually computes. Used to sweep the whole corpus (the
-// corpus-wide check).
+// corpus-wide half of the checkpoint).
 void checkInvariants(const Cfg& cfg,
                      const std::vector<DecodedInstruction>& instructions,
                      const std::string& trace) {

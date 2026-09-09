@@ -66,8 +66,8 @@ Build targets:
 
 `src/compiler.cpp` is a single-pass Pratt parser and bytecode compiler. It
 keeps no persistent syntax tree (`src/compiler.h`). Each `Token` carries a
-line number and a source byte offset (`src/token.h`), but the
-compiler frees all structure as it emits code.
+line number and a source byte offset (`src/token.h`), but the compiler frees
+all structure as it emits code.
 
 The compiler is the authority for **diagnostics**. It does a full parse, name
 resolution, and the limit checks. The tooling work added a `DiagnosticSink` to

@@ -1,7 +1,7 @@
 -- loxpp.nvim: wires the three editor layers for Lox++.
 --
 --   1. tree-sitter grammar  (editors/tree-sitter-loxpp)
---   2. loxpp-lsp server      (loxpp-lsp)
+--   2. the loxpp-lsp language server
 --   3. `loxpp --check`        diagnostics fallback, used only when
 --      the LSP is not running
 --

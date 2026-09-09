@@ -116,11 +116,11 @@ const StackState& stateBeforeOffset(const DecodedFunction& fn,
 }
 
 // The corpus-consistency check: analyzeStack runs to completion with no
-// inconsistency anywhere in the tree. The merge-consistency half is
-// enforced *inside* analyzeStack (a disagreement throws), so a corpus walk
-// that completes without throwing has already exercised it on every merge
-// in that program. Recurses into every nested function, mirroring
-// DecodedFunction's own shape.
+// inconsistency anywhere in the tree. The merge-consistency half is enforced
+// *inside* analyzeStack (a disagreement throws), so a corpus walk that
+// completes without throwing has already exercised it on every merge in that
+// program. Recurses into every nested function, mirroring DecodedFunction's
+// own shape.
 void checkNoInconsistency(const DecodedFunction& node,
                           const std::string& path) {
     SCOPED_TRACE("function id=" + node.id + " path=" + path);
@@ -130,8 +130,8 @@ void checkNoInconsistency(const DecodedFunction& node,
     }
 }
 
-// The return-height check, scoped to "every probe". It does
-// not hold program-wide — a `match` expression whose arm is a block of
+// The return-height check, scoped to "every probe". It does not hold
+// program-wide — a `match` expression whose arm is a block of
 // fully-discarded statements (no trailing bare expression) can leave the
 // arm's "value" sitting in a local slot instead of a temporary (observed in
 // bootstrap/loxpp_interpreter.lox's `resolveStmt`); RETURNing that value
@@ -177,10 +177,9 @@ void checkProbeFile(const fs::path& path) {
 // genuine merge disagreement, not just complete without throwing on programs
 // that happen not to have one (a review finding — this is why the corpus
 // tests above are worded to say the throw is what they are exercising).
-// Bypasses the
-// compiler to hand-build a chunk no real compiler would ever emit: two
-// paths into one PRINT, one of which pushes an extra CONSTANT the other
-// does not, so the merge disagrees by one cell of height with nothing
+// Bypasses the compiler to hand-build a chunk no real compiler would ever
+// emit: two paths into one PRINT, one of which pushes an extra CONSTANT the
+// other does not, so the merge disagrees by one cell of height with nothing
 // recognized as local on either side (not the legitimate differing-arity
 // case runFixpoint's comment discusses — that one keeps operand depth
 // equal; this one deliberately does not).
@@ -238,9 +237,8 @@ TEST(AbstractStackTest, MergeDisagreementThrows) {
 // analyzeStack's own discovery never reports a slot that disagrees with the
 // local count at its own recognition point (that is what the persistence
 // redesign establishes). So this drives the guard directly, with a
-// `declaredSlotsAt`
-// built by hand to disagree on purpose, instead of hunting for a chunk that
-// cannot exist.
+// `declaredSlotsAt` built by hand to disagree on purpose, instead of hunting
+// for a chunk that cannot exist.
 TEST(AbstractStackTest, DirectlyBuiltGapThrowsWithTheRightMessage) {
     DecodedInstruction constant0;
     constant0.offset = 0;
@@ -308,8 +306,8 @@ TEST(AbstractStackTest, AssignLocalClassifiesBothPopsByReasonNotJustLabel) {
                            << "recognized as slot 1's declaring push";
 }
 
-// The max-stack-depth check. `print (1 + 2) * (3 - 4) / 5 - -6;` — hand count
-// below.
+// The max-stack-depth check. `print (1 + 2) * (3 - 4) / 5 - -6;` — hand
+// count below.
 //
 // Starting height is 1 (slot 0 = the script's own closure; VM::interpret
 // calls it via the ordinary zero-arg `call()` path, same as any function).
@@ -339,9 +337,8 @@ TEST(AbstractStackTest, NestedArithMaxStackMatchesHandCount) {
 }
 
 // The max-stack-depth check, a second probe: 15_nested_arith declares no
-// local, so it
-// cannot tell a correct maxOperandDepth from one inflated by counting a
-// not-yet-recognized local as an operand cell. `find_leaf`
+// local, so it cannot tell a correct maxOperandDepth from one inflated by
+// counting a not-yet-recognized local as an operand cell. `find_leaf`
 // (examples/at_binding_demo.lox) declares several: a wrong recognition-timing
 // implementation reports 4 here; correct is 3 (hand-verified against a
 // per-offset dump — every local's declaring push is recognized at the push
@@ -375,8 +372,8 @@ TEST(AbstractStackTest, RunsOverEveryProbeWithNoInconsistency) {
 }
 
 // The corpus-consistency and merge-consistency checks over the wider corpus
-// (the return-height check is probe-scoped only — see checkReturnHeightZero's
-// comment).
+// (the return-height check is probe-scoped only — see
+// checkReturnHeightZero's comment).
 TEST(AbstractStackTest, RunsOverEveryExampleWithNoInconsistency) {
     std::vector<fs::path> examples = listLoxFiles(projectRoot() / "examples");
     ASSERT_FALSE(examples.empty()) << "no example programs found";
@@ -493,19 +490,18 @@ TEST(AbstractStackTest, UnreadSiblingLocalGetsItsOwnDeclaringPushSite) {
     }
 }
 
-// A local's frame can end with *no* explicit
-// reclaim opcode at all. `never` here is unread (like `a` above) *and* it is
-// never popped anywhere in the chunk — a function's own top-level scope has
-// no enclosing block left to close, so the whole frame is simply discarded
-// at RETURN. Nothing in the reference-driven search, and no sibling POP to
-// backfill from either: only RETURN's own operandDepth()==1 invariant
-// (the return-height check) proves every slot below it is local. A wrong
-// implementation leaves `never`'s cell an unrecognized temporary forever,
-// inflating maxOperandDepth and misclassifying any later POP that would have
-// reclaimed it — the same silent failure the unread-sibling test catches, in
-// a shape the persistence test at
-// every POP (findPersistentPopLocals) alone cannot reach either: `never` has
-// no POP anywhere in the chunk to run that test at.
+// A local's frame can end with *no* explicit reclaim opcode at all. `never`
+// here is unread (like `a` above) *and* it is never popped anywhere in the
+// chunk — a function's own top-level scope has no enclosing block left to
+// close, so the whole frame is simply discarded at RETURN. Nothing in the
+// reference-driven search, and no sibling POP to backfill from either: only
+// RETURN's own operandDepth()==1 invariant (the return-height check) proves
+// every slot below it is local. A wrong implementation leaves `never`'s cell
+// an unrecognized temporary forever, inflating maxOperandDepth and
+// misclassifying any later POP that would have reclaimed it — the same
+// silent failure the unread-sibling test catches, in a shape the
+// persistence test at every POP (findPersistentPopLocals) alone cannot reach
+// either: `never` has no POP anywhere in the chunk to run that test at.
 TEST(AbstractStackTest, LocalWithNoExplicitReclaimIsStillFoundViaReturn) {
     MemoryManager mm;
     DecodedFunction script = decodeSource(R"(
@@ -551,10 +547,10 @@ f();
     }
 }
 
-// An earlier proposal derived localCount from "a maximal
-// run of adjacent POP and CLOSE_UPVALUE is one scope-exit group, [whose]
-// size is exactly the number of locals that were live before it." This probe
-// is the counter-example: the expression-statement `a + 2;` discards an
+// An earlier proposal derived localCount from "a maximal run of adjacent POP
+// and CLOSE_UPVALUE is one scope-exit group, [whose] size is exactly the
+// number of locals that were live before it." This probe is the
+// counter-example: the expression-statement `a + 2;` discards an
 // unrelated *temporary* with a plain POP, and that POP sits immediately
 // next to the block's own single-local reclaim POP for `a`, with nothing
 // between them. A byte-adjacency-only "maximal run" reads this as size 2 and
@@ -600,12 +596,12 @@ TEST(AbstractStackTest, AdjacentTempPopAndReclaimPopAreNotConflated) {
     }
 }
 
-// Failure case 1: `{ var a = 1; print
-// 2; }` is the sharpest counter-example to the old reference-driven search —
-// `a` is unread, and the only other slot in scope (the temporary `print 2`
-// pushes) never reaches a POP, so nothing near it looks like a sibling to
-// backfill from. The expected result is site (0,1), POP LOCAL_RECLAIM,
-// maxOperandDepth 1; the old code at 0a9ec4f gave none of the three.
+// Failure case 1: `{ var a = 1; print 2; }` is the sharpest counter-example
+// to the old reference-driven search — `a` is unread, and the only other
+// slot in scope (the temporary `print 2` pushes) never reaches a POP, so
+// nothing near it looks like a sibling to backfill from. The expected result
+// is site (0,1), POP LOCAL_RECLAIM, maxOperandDepth 1; the old code at
+// 0a9ec4f gave none of the three.
 TEST(AbstractStackTest, FailureCase1AssignThenUnrelatedPrint) {
     MemoryManager mm;
     DecodedFunction script = decodeSource("{ var a = 1; print 2; }", mm);
@@ -633,10 +629,9 @@ TEST(AbstractStackTest, FailureCase1AssignThenUnrelatedPrint) {
 }
 
 // The or-pattern `@`-binding case ("unwrap_or"). `v` is never read in either
-// arm —
-// only `x` is — so `v`'s two sites (one per or-pattern alternative, P2's
-// merge) depend entirely on the persistence test finding a cover witness on
-// *each* alternative's own path.
+// arm — only `x` is — so `v`'s two sites (one per or-pattern alternative,
+// P2's merge) depend entirely on the persistence test finding a cover
+// witness on *each* alternative's own path.
 TEST(AbstractStackTest, OrPatternAtBindingUnreadInBothArmsStillGetsBothSites) {
     MemoryManager mm;
     DecodedFunction script = decodeSource(
@@ -659,13 +654,13 @@ TEST(AbstractStackTest, OrPatternAtBindingUnreadInBothArmsStillGetsBothSites) {
         << "even though `v` itself is never read back";
 }
 
-// Failure case 3: a multi-binding match arm where every binding is
-// unread, using bootstrap/loxpp_interpreter.lox's `resolveExpr`. Structural,
-// not hand-counted offsets: the tail theorem guarantees a
-// maximal POP/CLOSE_UPVALUE run reads all-TEMP-then-all-LOCAL_RECLAIM, so a
-// run with two or more leading TEMP labels breaks that corpus invariant
-// (32 -> 0 over the real corpus). This
-// asserts that invariant holds for `resolveExpr` specifically.
+// Failure case 3: a multi-binding match arm where every binding is unread,
+// using bootstrap/loxpp_interpreter.lox's `resolveExpr`. Structural, not
+// hand-counted offsets: the tail theorem guarantees a maximal
+// POP/CLOSE_UPVALUE run reads all-TEMP-then-all-LOCAL_RECLAIM, so a run with
+// two or more leading TEMP labels breaks that corpus invariant (32 -> 0 over
+// the real corpus). This asserts that invariant holds for `resolveExpr`
+// specifically.
 TEST(AbstractStackTest, ResolveExprHasNoRunWithTwoOrMoreLeadingTempLabels) {
     MemoryManager mm;
     DecodedFunction script = decodeSource(
@@ -779,11 +774,10 @@ TEST(AbstractStackTest, ClassValueStaysTempAcrossMultipleMethodDefinitions) {
         << "`C` must be the top local right before its own reclaim";
 }
 
-// The depth term
-// `after.operandDepth() + declaredSlotsAt[i].size()`. The return-height check
-// guarantees operand depth 1 immediately before every *reached* RETURN, so
-// any function with a reachable RETURN already masks the undercount this
-// term fixes — a measurement found the term changes no
+// The depth term `after.operandDepth() + declaredSlotsAt[i].size()`. The
+// return-height check guarantees operand depth 1 immediately before every
+// *reached* RETURN, so any function with a reachable RETURN already masks the
+// undercount this term fixes — a measurement found the term changes no
 // reported number over the real corpus. To exercise it for real, this
 // function's only statement after its two invisible vars is `for (;;) {}`:
 // an omitted condition emits no exit test at all (Compiler::forStatement),
@@ -845,17 +839,17 @@ f();
 }
 
 // Found while building the depth-term test above: a plain `var` at a
-// function's own top-level scope, declared
-// *before* a nested `fun`, with the function itself never reaching RETURN
-// (an infinite `for (;;) {}` with no exit edge). The persistence test alone
-// cannot find such a `var` — there is no POP (it is not inside a block) and
-// no reachable RETURN to backfill from (backfillFromFrameTeardown never
-// runs). Only the downward chase from the nested `fun`'s own (unconditional)
-// CLOSURE site — sound because clox's scoping is strictly LIFO, so a
-// confirmed local proves every lower slot is local too — finds it. Without
-// that chase, `analyzeStack` throws `validateNoInvisibleVarGaps`'s gap error
-// instead of silently miscompiling; still a real regression, since an
-// earlier implementation handled this shape correctly.
+// function's own top-level scope, declared *before* a nested `fun`, with the
+// function itself never reaching RETURN (an infinite `for (;;) {}` with no
+// exit edge). The persistence test alone cannot find such a `var` — there is
+// no POP (it is not inside a block) and no reachable RETURN to backfill from
+// (backfillFromFrameTeardown never runs). Only the downward chase from the
+// nested `fun`'s own (unconditional) CLOSURE site — sound because clox's
+// scoping is strictly LIFO, so a confirmed local proves every lower slot is
+// local too — finds it. Without that chase, `analyzeStack` throws
+// `validateNoInvisibleVarGaps`'s gap error instead of silently
+// miscompiling; still a real regression, since an earlier implementation
+// handled this shape correctly.
 TEST(AbstractStackTest,
      UnreadLocalBelowANestedFunDeclIsFoundEvenWhenReturnIsUnreachable) {
     MemoryManager mm;

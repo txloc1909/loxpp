@@ -147,9 +147,9 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      # dev-editors carries Node + tree-sitter-cli plus Neovim and
-      # the two optional plugin deps. It is FROM dev, so the C++
-      # toolchain is present to build loxpp and loxpp-lsp in the same image.
+      # dev-editors carries Node + tree-sitter-cli plus Neovim and the two
+      # optional plugin deps. It is FROM dev, so the C++ toolchain is present
+      # to build loxpp and loxpp-lsp in the same image.
       - name: Build dev-editors image
         uses: docker/build-push-action@v5
         with:
@@ -471,9 +471,9 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "tools/check_clr_probes.sh"
 
-      # The parity gate. Every probe must be
-      # byte-identical on native and JVM stdout (differential runner, not
-      # only the check_jvm_probes.sh diff loop above).
+      # The parity gate. Every probe must be byte-identical on native and JVM
+      # stdout (differential runner, not only the check_jvm_probes.sh diff
+      # loop above).
       - name: JVM differential suite - probes
         run: |
           docker run --rm \
@@ -482,8 +482,8 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/"
 
-      # The full example corpus on the JVM backend, zero
-      # failures. --exclude skips the map-iteration-order-sensitive examples
+      # The full example corpus on the JVM backend, zero failures. --exclude
+      # skips the map-iteration-order-sensitive examples
       # (tools/jvm_excluded_examples.txt); the native path below still runs
       # every example, unchanged.
       - name: JVM differential suite - examples
@@ -521,11 +521,10 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh examples/ --exclude tools/jvm_excluded_examples.txt"
 
-      # The self-hosted interpreter compiles, assembles, and
-      # runs on the JVM backend, and interprets a Lox++ program correctly.
-      # An emptiness guard catches the case where both wrappers fail silently
-      # with empty stdout, which a bare `diff <(a) <(b)` would report as a
-      # match.
+      # The self-hosted interpreter compiles, assembles, and runs on the JVM
+      # backend, and interprets a Lox++ program correctly. An emptiness guard
+      # catches the case where both wrappers fail silently with empty stdout,
+      # which a bare `diff <(a) <(b)` would report as a match.
       - name: JVM differential suite - self-hosted interpreter on the JVM backend
         run: |
           docker run --rm \
@@ -543,9 +542,9 @@ jobs:
               diff <(printf "%s\n" "$native_out") <(printf "%s\n" "$jvm_out")
             '
 
-      # Every example, run through the self-hosted
-      # interpreter, with the interpreter itself running on the JVM backend.
-      # Zero failures, same exclusion list as the examples step above.
+      # Every example, run through the self-hosted interpreter, with the
+      # interpreter itself running on the JVM backend. Zero failures, same
+      # exclusion list as the examples step above.
       - name: JVM differential suite - examples through the self-hosted interpreter on the JVM backend
         run: |
           docker run --rm \
@@ -570,10 +569,11 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_clr.sh test/translation-probes/ test/translation-probes/clr-only/"
 
-      # CLR twin of the examples check: the full example corpus on the CLR backend,
-      # zero failures. --exclude skips the map-iteration-order-sensitive
-      # examples (tools/clr_excluded_examples.txt); the native path below
-      # still runs every example, unchanged.
+      # CLR twin of the examples check: the full example corpus on the CLR
+      # backend, zero failures. --exclude skips the
+      # map-iteration-order-sensitive examples
+      # (tools/clr_excluded_examples.txt); the native path below still runs
+      # every example, unchanged.
       - name: CLR differential suite - examples
         run: |
           docker run --rm \
@@ -609,12 +609,11 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_clr.sh examples/ --exclude tools/clr_excluded_examples.txt"
 
-      # The self-hosted interpreter compiles,
-      # assembles, and runs on the CLR backend, and interprets a Lox++
-      # program correctly. The CLR twin of the matching JVM step above. An
-      # emptiness guard catches the case where both wrappers fail silently
-      # with empty stdout, which a bare `diff <(a) <(b)` would report as a
-      # match.
+      # The self-hosted interpreter compiles, assembles, and runs on the CLR
+      # backend, and interprets a Lox++ program correctly. The CLR twin of the
+      # matching JVM step above. An emptiness guard catches the case where
+      # both wrappers fail silently with empty stdout, which a bare
+      # `diff <(a) <(b)` would report as a match.
       - name: CLR differential suite - self-hosted interpreter on the CLR backend
         run: |
           docker run --rm \
@@ -632,9 +631,9 @@ jobs:
               diff <(printf "%s\n" "$native_out") <(printf "%s\n" "$clr_out")
             '
 
-      # Every example, run through the self-hosted
-      # interpreter, with the interpreter itself running on the CLR
-      # backend. Zero failures, same exclusion list as the direct CLR path.
+      # Every example, run through the self-hosted interpreter, with the
+      # interpreter itself running on the CLR backend. Zero failures, same
+      # exclusion list as the direct CLR path.
       - name: CLR differential suite - examples through the self-hosted interpreter on the CLR backend
         run: |
           docker run --rm \

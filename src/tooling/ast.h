@@ -22,9 +22,9 @@
 // by construction. Every IdentifierExpr is a reference (its `role` field says
 // so explicitly). `ClassDecl::superclass` is the one `Name` that is a
 // reference, not a definition. Pattern head identifiers (BindingPat, CtorPat,
-// ClassPat) are genuinely ambiguous between a fresh binding and a constructor
-// reference; the parser records name + span only and leaves the role to the
-// resolver.
+// ClassPat) are genuinely ambiguous between a fresh binding and a
+// constructor reference; the parser records name + span only and leaves the
+// role to the resolver.
 
 #include <cstddef>
 #include <cstdint>

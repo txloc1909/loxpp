@@ -120,12 +120,11 @@ struct CaptureLiveRange {
     // is empty: see that field). One captured slot's incarnation can also
     // rack up more than one entry here from CLOSE_UPVALUE instructions that
     // never dynamically reach this range at all (a static close): the
-    // compiler emits
-    // one close per exit path regardless of which branch a real run takes,
-    // so a close that this pass's own dataflow finds closed on every
-    // reachable path still names this range, by height, as a genuine no-op
-    // instruction — real bytecode, attributed correctly, just never
-    // executed as a live close on that particular path.
+    // compiler emits one close per exit path regardless of which branch a
+    // real run takes, so a close that this pass's own dataflow finds closed
+    // on every reachable path still names this range, by height, as a
+    // genuine no-op instruction — real bytecode, attributed correctly, just
+    // never executed as a live close on that particular path.
     //
     // This field exists so a consumer (or a test — see
     // checkNoOrphanCloseUpvalues in test_backend_capture.cpp) can verify
@@ -204,9 +203,9 @@ struct FunctionCaptureInfo {
 
     // A REACHABLE CLOSE_UPVALUE, closed on every path that reaches it (a
     // static close), whose most-recent same-slot CLOSURE is itself
-    // unreachable, so it opened no range. Every capture of this
-    // incarnation is dead code, so no cell can exist at this offset on any
-    // real run: the close's only run-time effect is its own pop.
+    // unreachable, so it opened no range. Every capture of this incarnation
+    // is dead code, so no cell can exist at this offset on any real run: the
+    // close's only run-time effect is its own pop.
     //
     // The JVM emitter does not read this field either. Its CLOSE_UPVALUE
     // case in jvm_emitter.cpp emits NO bytecode at all, for every close on

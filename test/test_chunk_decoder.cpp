@@ -210,11 +210,11 @@ std::string oracleDisassembly(const DecodedFunction& node,
     return out.str();
 }
 
-// The number of function-typed constants in `chunk`'s own pool must
-// equal `nested.size()`, at every level of the walk — not only at the root.
-// A walker that silently drops functions below some depth fails this at the
-// first dropped level, even though every
-// node it does produce still renders correct text.
+// The number of function-typed constants in `chunk`'s own pool must equal
+// `nested.size()`, at every level of the walk — not only at the root. A
+// walker that silently drops functions below some depth fails this at the
+// first dropped level, even though every node it does produce still renders
+// correct text.
 int countFunctionConstants(const Chunk& chunk) {
     int count = 0;
     const ValueArray& constants = chunk.constants();

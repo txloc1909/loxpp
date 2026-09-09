@@ -813,8 +813,7 @@ TEST(ToolingParserAdversarial, DeepNestingDoesNotOverflowStack) {
     // turns, kUnits nodes on the left spine. `~BinaryExpr` / `~LogicalExpr` /
     // `~GetExpr` / `~CallExpr` / `~IndexExpr` each recurse once per spine
     // node on teardown -- this is the deep-chain-teardown class. The
-    // loop-turn counter caps
-    // the spine.
+    // loop-turn counter caps the spine.
     auto chain = [](const std::string& head, const std::string& unit) {
         std::string s = "var x = ";
         s.reserve(head.size() + unit.size() * kUnits + 16);

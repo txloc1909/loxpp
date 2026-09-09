@@ -1,6 +1,6 @@
-// Checkpoint: a match expression's result, once its own
-// closing POP retires the synthetic "subject" local, is exposed as a named
-// local's own value — the fused local/stack model has no separate cell to
+// Checkpoint: a match expression's result, once its own closing POP retires
+// the synthetic "subject" local, is exposed as a named local's own value —
+// the fused local/stack model has no separate cell to
 // push for a genuine consumer to read (bytecode-translation-problems.md,
 // "RETURN can return a named local"). RETURN and SET_GLOBAL already share
 // this fold check with the rest of the peek family; PRINT and DEFINE_GLOBAL

@@ -1,6 +1,7 @@
-// test_jvm_emit.cpp — JVM straight-line + control-flow emitter (nodes N4/N5).
+// test_jvm_emit.cpp — JVM straight-line + control-flow emitter
+// (see notes/backend-implementation-dag.md).
 //
-// Checkpoint (notes/backend-implementation-dag.md, nodes N4/N5):
+// Checkpoint (see notes/backend-implementation-dag.md):
 //   tools/loxpp_jvm.sh test/translation-probes/{01,02,03,04,05,15}_*.lox
 // must each print stdout identical to build/loxpp on the same file, and the
 // assembled class must pass `java -Xverify:all`. That full assemble-and-run
@@ -47,23 +48,21 @@ int countOccurrences(const std::string& haystack, const std::string& needle) {
     return count;
 }
 
-// The mnemonics this emitter writes as a jump, each
-// carrying exactly one label operand. Later work adds `ifeq` (the
-// captured-slot
-// raw/cell runtime check — emitCapturedGetLocal, emitCapturedStore,
-// ensureCapturedCell). `tableswitch` does not fit this shape — it
-// carries one label per arm plus a `default :` label, none of them prefixed
-// by a mnemonic-and-space the way `goto <label>` is — so it gets its own
-// scan, below. Whichever pass adds a new single-operand jump form must add
-// its mnemonic here too, or that jump gets no label-integrity coverage from
-// this helper.
+// The mnemonics this emitter writes as a jump, each carrying exactly one
+// label operand. Later work adds `ifeq` (the captured-slot raw/cell runtime
+// check — emitCapturedGetLocal, emitCapturedStore, ensureCapturedCell).
+// `tableswitch` does not fit this shape — it carries one label per arm plus
+// a `default :` label, none of them prefixed by a mnemonic-and-space the way
+// `goto <label>` is — so it gets its own scan, below. Whichever pass adds a
+// new single-operand jump form must add its mnemonic here too, or that jump
+// gets no label-integrity coverage from this helper.
 const std::vector<std::string> kJumpMnemonics = {"goto ", "ifne ", "ifeq "};
 
-// Assigned nit, PR #109 R9: a `goto`/`ifne` to a jasmin label the
-// emitter never wrote assembles fine as far as ctest can see — only
+// Assigned nit, PR #109 R9: a `goto`/`ifne` to a jasmin label the emitter
+// never wrote assembles fine as far as ctest can see — only
 // tools/check_jvm_probes.sh (jasmin + java, container-only) would ever
-// reject it. The control-flow pass had exactly this class of bug, on probe
-// 22.
+// reject it. The control-flow pass had exactly this class of bug, on
+// probe 22.
 // Collects every operand of `goto ` and `ifne `, then asserts a "<name>:"
 // line exists for each one, so a plain unit test in this file catches the
 // same defect at zero runtime cost. Call at the end of every emitScript
@@ -145,8 +144,7 @@ void expectEveryJumpTargetIsLabeled(const std::string& j) {
                 << mnemonic << "operand runs off the end of:\n"
                 << j;
             // The operand is the first field: a defensive split, not a
-            // reaction to any real trailing content this emitter writes
-            // today.
+            // reaction to any real trailing content this emitter writes today.
             std::string rest = text.substr(nameStart, nameEnd - nameStart);
             std::size_t sep = rest.find_first_of(" \t");
             std::string target =
@@ -240,10 +238,10 @@ TEST(FormatDoubleBitsLiteral, IsABareDecimalIntegerNeverADecimalOrExponent) {
 //
 // Every real Op the compiler emits now has a handler (this is the last
 // backend-emission pass, per notes/backend-implementation-dag.md), so no
-// source program compiles down to an opcode this pass still
-// refuses. The one shape that still refuses is JUMP_TABLE reached without an
-// immediately preceding GET_TAG: compiler.cpp's compileMatchBody has exactly
-// one call site for JUMP_TABLE, and it always emits GET_TAG right before it,
+// source program compiles down to an opcode this pass still refuses. The one
+// shape that still refuses is JUMP_TABLE reached without an immediately
+// preceding GET_TAG: compiler.cpp's compileMatchBody has exactly one call
+// site for JUMP_TABLE, and it always emits GET_TAG right before it,
 // so `emitGetTagOrFused`'s own fusion check (`Emitter::fusableJumpTable`)
 // never leaves JUMP_TABLE's own array slot for the main dispatch switch to
 // see — a hand-built instruction list drives this directly instead, the
@@ -373,11 +371,11 @@ TEST(EmitScript, GlobalsRoundTripThroughDefineSetGet) {
 // ---------------------------------------------------------------------------
 // Regression (PR #107 round 1): a SET_LOCAL/SET_GLOBAL peek whose source
 // value the abstract-stack analysis already folded into a named local (the
-// eager invisible-var
-// materialization, abstract_stack.h) must load that local, not assume a JVM
-// stack temp that was never pushed. The bug produced a structurally invalid
-// method that still returned normally from emitScript, so these tests assert
-// the emitted text, not only the absence of a throw.
+// eager invisible-var materialization, abstract_stack.h) must load that
+// local, not assume a JVM stack temp that was never pushed. The bug
+// produced a structurally invalid method that still returned normally from
+// emitScript, so these tests assert the emitted text, not only the absence
+// of a throw.
 // ---------------------------------------------------------------------------
 
 TEST(EmitScript, SetLocalPeekOfNamedLocalLoadsInsteadOfDup) {
@@ -484,8 +482,8 @@ TEST(EmitScript, AndOrKeepsTheValue) {
 // ---------------------------------------------------------------------------
 
 TEST(EmitScript, AndOrAssignmentStatementKeepsTheMergeLabelReal) {
-    // Blocking: probe 22. The short-circuit merge's own POP can also be
-    // a CFG block leader when the right side is an assignment — every edge
+    // Blocking: probe 22. The short-circuit merge's own POP can also be a
+    // CFG block leader when the right side is an assignment — every edge
     // into it needs a real jasmin label there. `fusablePop` must not fuse
     // that POP away, or the label disappears with it and jasmin fails to
     // assemble ("Label ... has not been added to the code").
@@ -511,11 +509,11 @@ TEST(EmitScript, AndOrAssignmentStatementKeepsTheMergeLabelReal) {
 TEST(EmitScript, JumpIfFalseOnAMaterializedConditionLoadsInsteadOfDup) {
     // Blocking: probe 23. When a local's initializer is a short-circuit
     // expression, the abstract-stack analysis's eager invisible-var
-    // materialization (P2/P3) moves the
-    // condition off the JVM operand stack before JUMP_IF_FALSE runs —
-    // before[i].operandDepth() == 0. `dup` on that empty stack is a
-    // VerifyError ("Unable to pop operand off an empty stack"), not a wrong
-    // slot; the fix loads a fresh copy from lastInvisibleVarSlot instead.
+    // materialization (P2/P3) moves the condition off the JVM operand stack
+    // before JUMP_IF_FALSE runs — before[i].operandDepth() == 0. `dup` on
+    // that empty stack is a VerifyError ("Unable to pop operand off an empty
+    // stack"), not a wrong slot; the fix loads a fresh copy from
+    // lastInvisibleVarSlot instead.
     MemoryManager mm;
     DecodedFunction fn =
         decodeScript("{ var c = true; var b = c and 2; print b; }", mm);
@@ -529,9 +527,9 @@ TEST(EmitScript, JumpIfFalseOnAMaterializedConditionLoadsInsteadOfDup) {
 }
 
 TEST(EmitScript, WhileLoopEmitsBackEdgeAndLabel) {
-    // 04_while: LOOP lowers to `goto`, at a label N1 placed at the
-    // condition. The back edge's own target must be a real, defined label
-    // in this same method — not merely present as `goto` text.
+    // 04_while: LOOP lowers to `goto`, at a label the CFG pass placed at
+    // the condition. The back edge's own target must be a real, defined
+    // label in this same method — not merely present as `goto` text.
     MemoryManager mm;
     DecodedFunction fn = decodeScript(
         "{ var i = 0; while (i < 3) { print i; i = i + 1; } }", mm);
@@ -595,13 +593,12 @@ TEST(EmitScript, IfWithoutElseStillEmitsTheUnconditionalSkip) {
 }
 
 // ---------------------------------------------------------------------------
-// Regression: a SET_LOCAL/SET_GLOBAL whose
-// merge-exact operandDepth() is 0 must resolve its source slot from
-// lastInvisibleVarSlot (this pass's own forward walk), never from
-// `before[i].localCount` — a mere upper bound once a CFG merge exists
-// upstream. These assert the store lands in the *same* slot on every path
-// and that the depth-consistency safety net does not trip, which is
-// exactly the check a wrong-slot store would fail.
+// Regression: a SET_LOCAL/SET_GLOBAL whose merge-exact operandDepth() is 0
+// must resolve its source slot from lastInvisibleVarSlot (this pass's own
+// forward walk), never from `before[i].localCount` — a mere upper bound once
+// a CFG merge exists upstream. These assert the store lands in the *same*
+// slot on every path and that the depth-consistency safety net does not
+// trip, which is exactly the check a wrong-slot store would fail.
 // ---------------------------------------------------------------------------
 
 TEST(EmitScript, IfElseAssignsSameSlotOnBothBranches) {
@@ -633,9 +630,9 @@ TEST(EmitScript, LoopBodyAssignsSameSlotEveryIteration) {
 
 TEST(EmitScript, PeekOfNamedLocalAfterAMergeStillLoadsTheRightSlot) {
     // The var-assign-in-initializer idiom (var b = (a = 2)) placed after an
-    // if-without-else
-    // merge: proves lastInvisibleVarSlot survives a preceding CFG join,
-    // where `before[i].localCount` would only be an upper bound.
+    // if-without-else merge: proves lastInvisibleVarSlot survives a
+    // preceding CFG join, where `before[i].localCount` would only be an
+    // upper bound.
     MemoryManager mm;
     DecodedFunction fn = decodeScript("{\n"
                                       "  var a = 1;\n"
@@ -873,19 +870,19 @@ TEST(EmitScript, SliceAndInAreOneInvokestaticEach) {
 TEST(EmitScript, GetIterReloadsAndRestoresItsOwnDeclaringSlot) {
     // GET_ITER carries no operand byte and replaces its own operand in
     // place (vm.cpp: `stackTop[-1] = ...`) — the abstract-stack and capture
-    // analyses attribute the invisible-
-    // var store for that position to the iterable expression's OWN
-    // declaring push (here BUILD_LIST), one instruction earlier, so the JVM
-    // operand stack is already empty by the time GET_ITER runs. A plain
-    // one-`invokestatic` lowering (no reload, no store-back) calls
-    // LoxOps.getIter on an empty stack: jasmin's own net-word bookkeeping
-    // cannot catch this, because GET_ITER's declared effect is a true net
-    // zero (one popped, one pushed) — only `java -Xverify:all` does
-    // (`VerifyError: Unable to pop operand off an empty stack`,
-    // check_jvm_probes.sh on 11_for_in.lox). This test fails without the
-    // `aload <slot>` / `astore <slot>` wrap: reverting emitGetIter to a bare
-    // `invokestatic getIter` call, with no surrounding load/store, makes it
-    // fail (verified locally against this PR's own diff).
+    // analyses attribute the invisible-var store for that position to the
+    // iterable expression's OWN declaring push (here BUILD_LIST), one
+    // instruction earlier, so the JVM operand stack is already empty by the
+    // time GET_ITER runs. A plain one-`invokestatic` lowering (no reload, no
+    // store-back) calls LoxOps.getIter on an empty stack: jasmin's own
+    // net-word bookkeeping cannot catch this, because GET_ITER's declared
+    // effect is a true net zero (one popped, one pushed) — only
+    // `java -Xverify:all` does (`VerifyError: Unable to pop operand off an
+    // empty stack`, check_jvm_probes.sh on 11_for_in.lox). This test fails
+    // without the `aload <slot>` / `astore <slot>` wrap: reverting
+    // emitGetIter to a bare `invokestatic getIter` call, with no surrounding
+    // load/store, makes it fail (verified locally against this PR's own
+    // diff).
     MemoryManager mm;
     DecodedFunction fn = decodeScript("for (var x in [1, 2, 3]) print x;", mm);
     FunctionStackAnalysis analysis = analyzeStack(fn);
@@ -973,10 +970,9 @@ TEST(EmitScript, GetIterAfterAMergeStillLoadsTheRightSlot) {
 TEST(EmitScript, IsSeqEmitsOneInvokestatic) {
     // IS_SEQ is a match sequence-pattern's own type check (compiler.cpp).
     // An unguarded catch-all arm keeps this snippet inside the earlier
-    // passes' opcode
-    // set: no JUMP_TABLE/GET_TAG (those need an enum arm, previewEnumArms
-    // rejects a sequence pattern on sight) and no MATCH_ERROR (only emitted
-    // when no arm is an unguarded catch-all).
+    // passes' opcode set: no JUMP_TABLE/GET_TAG (those need an enum arm,
+    // previewEnumArms rejects a sequence pattern on sight) and no MATCH_ERROR
+    // (only emitted when no arm is an unguarded catch-all).
     //
     // The match is a bare statement, its result discarded, not assigned to a
     // variable: assigning it (`var n = match ...;`, also `13_enum_match.lox`'s
@@ -1024,8 +1020,7 @@ TEST(EmitProgram, ZeroUpvalueClosureConstructsGeneratedClass) {
 
     const std::string& main = classes[0].source;
     // Zero upvalues (a captured one is the closure pass's wiring): new + an
-    // empty
-    // Object[][] + the one constructor every generated class shares.
+    // empty Object[][] + the one constructor every generated class shares.
     EXPECT_NE(main.find("new LoxFn$0\n"
                         "    dup\n"
                         "    iconst_0\n"
@@ -1261,15 +1256,14 @@ TEST(EmitProgram, NestedClosureCopiesGrandparentUpvalue) {
     expectEveryJumpTargetIsLabeled(classes[3].source);
 }
 
-// A harness invariant: a local
-// `fun` that captures itself made the JVM verifier reject the class
-// ("Accessing value from uninitialized register") until the closure pass's
-// fix
-// (seedSelfCaptureCell) seeded the cell before anything read it. This pass
-// extends the very same emitClosure path — `super` is captured the same
-// way (SuperInvokeZeroArgsUsesOneScratchSlot below) — so it is the pass
-// most likely to break that fix and least likely to notice, since only
-// tools/check_jvm_probes.sh (container-only) would catch a regression.
+// A harness invariant: a local `fun` that captures itself made the JVM
+// verifier reject the class ("Accessing value from uninitialized register")
+// until the closure pass's fix (seedSelfCaptureCell) seeded the cell before
+// anything read it. This pass extends the very same emitClosure path —
+// `super` is captured the same way (SuperInvokeZeroArgsUsesOneScratchSlot
+// below) — so it is the pass most likely to break that fix and least likely
+// to notice, since only tools/check_jvm_probes.sh (container-only) would
+// catch a regression.
 // Reverting seedSelfCaptureCell's seed locally and rerunning this test
 // confirms it FAILS first: without the seed, the very first "astore 5"
 // this test looks for does not exist before the closure's own array-build
@@ -1484,12 +1478,11 @@ TEST(EmitProgram, InheritLoadsSuperclassFromInvisibleVarNotStack) {
     // PR #113 round 4: `super` (slot 3) is also captured by B's own
     // `greet` CLOSURE later in this same script (for `super.greet()`), so
     // `loadNamedLocalAtZeroDepth` — the one mechanism INHERIT now shares
-    // with every other zero-depth consumer — wraps this
-    // load in the ordinary raw-or-cell dance. That is correct: INHERIT
-    // always runs before any method's own CLOSURE, so the slot is still
-    // raw here, and the runtime `instanceof` test confirms it. Assert the
-    // dance's shape, not a bare `aload 3`, which the old, INHERIT-only
-    // lowering assumed instead.
+    // with every other zero-depth consumer — wraps this load in the ordinary
+    // raw-or-cell dance. That is correct: INHERIT always runs before any
+    // method's own CLOSURE, so the slot is still raw here, and the runtime
+    // `instanceof` test confirms it. Assert the dance's shape, not a bare
+    // `aload 3`, which the old, INHERIT-only lowering assumed instead.
     EXPECT_NE(main.find("ldc \"A\"\n"
                         "    invokevirtual lox/LoxGlobals/get(Ljava/lang/"
                         "String;)Ljava/lang/Object;\n"
@@ -1672,9 +1665,9 @@ TEST(EmitProgram, MatchErrorCallsLoxOpsMatchError) {
     ASSERT_EQ(classes.size(), 2u);
     const std::string& f = classes[1].source;
     // MATCH_ERROR: no operand, no successor this pass needs to reach. Fix
-    // (PR #113 round 1): the call now leaves a real LoxError on the
-    // stack, and athrow — a genuine terminal instruction — follows it, so
-    // the verifier (not only this pass's own analysis) sees no fall-through.
+    // (PR #113 round 1): the call now leaves a real LoxError on the stack,
+    // and athrow — a genuine terminal instruction — follows it, so the
+    // verifier (not only this pass's own analysis) sees no fall-through.
     EXPECT_NE(f.find("pop\n"
                      "    invokestatic lox/LoxOps/matchError()Llox/LoxError;\n"
                      "    athrow\n"),
@@ -1756,7 +1749,7 @@ TEST(EmitProgram, ReturnDoesNotFalselyRejectAReusedCapturedSlotIndex) {
 
     // f is declared after LoxMain and after g's own LoxFn$n class; find it
     // by its RETURN, not by a fixed index — this test does not need to
-    // know N7's own closure-lowering class count.
+    // know the closure-lowering class count.
     const jvm::EmittedClass* fClass = nullptr;
     for (const jvm::EmittedClass& cls : classes) {
         if (cls.source.find("areturn\n") != std::string::npos &&
@@ -1803,11 +1796,10 @@ TEST(EmitProgram, ReturnDoesNotFalselyRejectAReusedCapturedSlotIndex) {
 // by then names the inner match's SUBJECT (declared after its own result,
 // compiler.cpp's compileMatchBody) — not its result. `localCount - 1`
 // (loadNamedLocalAtZeroDepth, shared with RETURN) is immune: the
-// abstract-stack analysis only
-// retires a slot on a bytecode POP classified LOCAL-RECLAIM, and the inner
-// match's own result retires with no POP at all (P1's invisible-var
-// trick), so `localCount - 1` still names it once the subject's one real
-// POP has run.
+// abstract-stack analysis only retires a slot on a bytecode POP classified
+// LOCAL-RECLAIM, and the inner match's own result retires with no POP at all
+// (P1's invisible-var trick), so `localCount - 1` still names it once the
+// subject's one real POP has run.
 //
 // Prove-it-fails: reverting emitSetLocal's
 // `loadNamedLocalAtZeroDepth` call to `e.loadLastInvisibleVar()` makes this
@@ -1861,8 +1853,7 @@ TEST(EmitProgram, ReturnOfNestedMatchLoadsTheInnerResultNotTheInnerSubject) {
 // reaching SET_GLOBAL, JUMP_IF_FALSE, or SET_UPVALUE gave silently wrong
 // output on `main` (commit 32991ff), not only on a nested match. `main`
 // prints `1` for the first below (the match SUBJECT), where build/loxpp
-// prints
-// `a` (the match RESULT) — confirmed by running both on `main` in a
+// prints `a` (the match RESULT) — confirmed by running both on `main` in a
 // separate worktree, in the dev-managed container, before this fix.
 //
 // Prove-it-fails: pointing `emitSetGlobal` back at a bare
@@ -1980,9 +1971,9 @@ TEST(EmitProgram, SetUpvalueOfAPlainMatchLoadsTheResultNotAStaleSlot) {
 }
 
 // ---------------------------------------------------------------------------
-// Match/enum dispatch — GET_TAG, JUMP_TABLE, enum-ctor CONSTANT, and
-// the two residue consumers (PRINT, DEFINE_GLOBAL) this pass's own checkpoint
-// needs a real fix for.
+// Match/enum dispatch — GET_TAG, JUMP_TABLE, enum-ctor CONSTANT, and the two
+// residue consumers (PRINT, DEFINE_GLOBAL) this pass's own checkpoint needs
+// a real fix for.
 // ---------------------------------------------------------------------------
 
 // P8's own hazard: GET_TAG pushes a boxed double and JUMP_TABLE wants an
@@ -2222,10 +2213,9 @@ TEST(EmitScript, PrintOfAPlainMatchLoadsTheResultNotTheSubject) {
 }
 
 // Fix (PR #115 round 2): the three earlier one-operand fixes (NOT,
-// one-element
-// BUILD_LIST, folded-collection GET_INDEX) had no test at all. Proved this
-// by reverting each guard to a value it can
-// never take (`operandDepth() == -1`), rebuilt, and watched `ctest` and
+// one-element BUILD_LIST, folded-collection GET_INDEX) had no test at all.
+// Proved this by reverting each guard to a value it can never take
+// (`operandDepth() == -1`), rebuilt, and watched `ctest` and
 // `check_jvm_probes.sh` stay green while these three tests below failed —
 // then restored the guards. These three tests are that missing net.
 TEST(EmitScript, NotOfAPlainMatchLoadsTheResultNotTheSubject) {
@@ -2238,8 +2228,7 @@ TEST(EmitScript, NotOfAPlainMatchLoadsTheResultNotTheSubject) {
 
     // Nothing left on the real JVM operand stack for NOT to consume
     // directly (the abstract-stack analysis folded the match's result into a
-    // named local, slot 3):
-    // it must reload before calling LoxOps.not.
+    // named local, slot 3): it must reload before calling LoxOps.not.
     EXPECT_NE(
         j.find("aload 3\n"
                "    invokestatic lox/LoxOps/not(Ljava/lang/Object;)Ljava/lang/"
@@ -2375,17 +2364,15 @@ TEST(EmitScript, EqualOfAFoldedMatchLeftOperandReordersTheGenuineRightOperand) {
     expectEveryJumpTargetIsLabeled(j);
 }
 
-// PR #115 round 3 found nine more consumer opcodes with the same
-// defect class the earlier fixes found: the folded operand is the BOTTOM
-// one, and a
-// genuine sibling operand sits above it. That round
-// replaced every per-consumer branch (this file's own earlier per-opcode
-// fixes
-// above) with one generic mechanism, `normalizeFoldedOperands`
-// (jvm_emitter.cpp, above emitBody), driven by one table, `nativePops`. The
-// eleven tests below are the required coverage: one per folded-operand
-// shape (nine), one for RETURN of a folded match, and one for a nested
-// match subject (a nested match's own result feeding an enclosing GET_TAG).
+// PR #115 round 3 found nine more consumer opcodes with the same defect
+// class the earlier fixes found: the folded operand is the BOTTOM one, and a
+// genuine sibling operand sits above it. That round replaced every
+// per-consumer branch (this file's own earlier per-opcode fixes above) with
+// one generic mechanism, `normalizeFoldedOperands` (jvm_emitter.cpp, above
+// emitBody), driven by one table, `nativePops`. The eleven tests below are
+// the required coverage: one per folded-operand shape (nine), one for
+// RETURN of a folded match, and one for a nested match subject (a nested
+// match's own result feeding an enclosing GET_TAG).
 //
 // Proved-it-fails the same way every earlier round did: reverted
 // `nativePops`'s own row for the opcode under test to `std::nullopt`
@@ -2394,10 +2381,9 @@ TEST(EmitScript, EqualOfAFoldedMatchLeftOperandReordersTheGenuineRightOperand) {
 // then restored the row. Confirmed locally in loxpp-dev-env-managed.
 
 // Folded-operand shape 1: BUILD_LIST, width above 1, FIRST element folded —
-// the exact
-// mirror of the earlier one-element fix (round 1): `emitBuildList`'s old guard
-// tested `in.byteOperand == 1` only, so a wider list's own first-folded
-// shape (`[match ..., 5]`) never reached it.
+// the exact mirror of the earlier one-element fix (round 1):
+// `emitBuildList`'s old guard tested `in.byteOperand == 1` only, so a wider
+// list's own first-folded shape (`[match ..., 5]`) never reached it.
 TEST(EmitScript,
      BuildListOfTwoElementsWithFirstFoldedLoadsTheResultNotTheSubject) {
     MemoryManager mm;
@@ -2469,10 +2455,9 @@ TEST(EmitScript, BuildMapOfAFoldedKeyLoadsTheResultNotTheSubject) {
 }
 
 // Folded-operand shape 3: CALL, folded CALLEE — the earlier one-element
-// rebuttal (round 1) covered only
-// a folded ARGUMENT (sandwiched between a genuine callee and CALL itself,
-// still broken on build/loxpp itself); a folded callee is a different shape,
-// and build/loxpp answers it correctly.
+// rebuttal (round 1) covered only a folded ARGUMENT (sandwiched between a
+// genuine callee and CALL itself, still broken on build/loxpp itself); a
+// folded callee is a different shape, and build/loxpp answers it correctly.
 TEST(EmitProgram, CallOfAFoldedMatchCalleeLoadsTheResultNotTheSubject) {
     MemoryManager mm;
     DecodedFunction fn =
@@ -2537,8 +2522,8 @@ TEST(EmitProgram,
 }
 
 // Folded-operand shape 5: INVOKE, folded RECEIVER, argCount == 0 — the same
-// bare-load shape as GET_PROPERTY above, on the fused "get property then call"
-// path.
+// bare-load shape as GET_PROPERTY above, on the fused "get property then
+// call" path.
 TEST(EmitProgram, InvokeOfAFoldedMatchReceiverLoadsTheResultNotTheSubject) {
     MemoryManager mm;
     DecodedFunction fn =
@@ -2602,9 +2587,9 @@ TEST(EmitProgram,
 }
 
 // Folded-operand shape 7: SET_INDEX, folded COLLECTION — the first consumer
-// whose deficit-1 shape needs TWO genuine operands (index and value) spilled at
-// once, so this is the first test that exercises argScratchBase rather than
-// e.scratchSlot for normalizeFoldedOperands's own reorder.
+// whose deficit-1 shape needs TWO genuine operands (index and value)
+// spilled at once, so this is the first test that exercises argScratchBase
+// rather than e.scratchSlot for normalizeFoldedOperands's own reorder.
 TEST(EmitScript, SetIndexOfAFoldedMatchCollectionLoadsTheResultNotTheSubject) {
     MemoryManager mm;
     DecodedFunction fn =
@@ -2707,11 +2692,11 @@ TEST(EmitProgram, ReturnOfAFoldedMatchResultLoadsItOnce) {
     expectEveryJumpTargetIsLabeled(fn0);
 }
 
-// A nested match subject: the OUTER match's own GET_TAG operand is the
-// INNER match's own folded result — the shape PR #115 round 3
-// named as required coverage alongside those nine. GET_TAG had no
-// private branch before this round (no checkpoint reached a folded subject
-// at all); `nativePops(GET_TAG) == 1` is new coverage, not a redundant-branch
+// A nested match subject: the OUTER match's own GET_TAG operand is the INNER
+// match's own folded result — the shape PR #115 round 3 named as required
+// coverage alongside those nine. GET_TAG had no private branch before this
+// round (no checkpoint reached a folded subject at all);
+// `nativePops(GET_TAG) == 1` is new coverage, not a redundant-branch
 // deletion.
 TEST(EmitScript,
      MatchOverAFoldedNestedMatchSubjectLoadsTheResultNotTheSubject) {

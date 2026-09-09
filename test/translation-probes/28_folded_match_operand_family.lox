@@ -1,7 +1,7 @@
-// Run-parity coverage (PR #115 round 4) for
-// `normalizeFoldedOperands` (jvm_emitter.cpp, redesigned in PR #115
-// round 3), the one mechanism that repairs a folded `match` result sitting
-// below a genuine sibling operand of its own consumer.
+// Run-parity coverage (PR #115 round 4) for `normalizeFoldedOperands`
+// (jvm_emitter.cpp, redesigned in PR #115 round 3), the one mechanism that
+// repairs a folded `match` result sitting below a genuine sibling operand of
+// its own consumer.
 //
 // The eleven unit tests in test/test_jvm_emit.cpp (added the same round)
 // already prove each shape below emits the right jasmin text, and fails
@@ -12,9 +12,9 @@
 // own stdout against `build/loxpp`, byte for byte, the same gate every
 // other numbered probe uses.
 //
-// Nine folded-operand shapes plus one nested match
-// subject — ten print statements below, one per shape, in the same order
-// the unit tests list them.
+// Nine folded-operand shapes plus one nested match subject — ten print
+// statements below, one per shape, in the same order the unit tests list
+// them.
 //
 // The `RETURN`-of-a-folded-match shape is NOT repeated here on purpose.
 // `AbstractStackTest.RunsOverEveryProbeWithNoInconsistency`

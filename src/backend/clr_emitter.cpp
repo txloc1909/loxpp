@@ -784,9 +784,8 @@ void emitBuildList(Emitter& e, const DecodedInstruction& in) {
 // source order (key0, val0, key1, val1, ..., matching compiler.cpp's map
 // literal) — the same P7 reshape as BUILD_LIST, over 2n cells instead of n.
 // `12_list_map_index` — this pass's own checkpoint probe — indexes a map
-// literal
-// as well as a list, so this opcode is pulled forward here for the same
-// reason BUILD_LIST/GET_INDEX/SET_INDEX are: the probe cannot compile
+// literal as well as a list, so this opcode is pulled forward here for the
+// same reason BUILD_LIST/GET_INDEX/SET_INDEX are: the probe cannot compile
 // without it. LoxOps.BuildMap (runtime/clr) validates every key before
 // writing any pair, matching vm.cpp's own two-pass shape.
 void emitBuildMap(Emitter& e, const DecodedInstruction& in) {

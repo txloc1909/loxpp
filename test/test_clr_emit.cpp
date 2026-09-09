@@ -1,11 +1,11 @@
 // test_clr_emit.cpp — CLR emitter: straight-line code, control flow,
 // functions and calls, and closures and upvalues (the bug gate).
 //
-// Checkpoint for this pass: `tools/loxpp_clr.sh` on
-// every probe in `tools/check_clr_probes.sh`'s accumulated list must print
-// stdout identical to build/loxpp, `V1_fresh_cell` must print `0 1 2` (never
-// `2 2 2`), and the error probes must FAIL identically on both sides. That
-// full assemble-and-run comparison needs ilasm/dotnet
+// Checkpoint for this pass: `tools/loxpp_clr.sh` on every probe in
+// `tools/check_clr_probes.sh`'s accumulated list must print stdout identical
+// to build/loxpp, `V1_fresh_cell` must print `0 1 2` (never `2 2 2`), and the
+// error probes must FAIL identically on both sides. That full
+// assemble-and-run comparison needs ilasm/dotnet
 // (tools/check_clr_probes.sh, run inside the dev-managed container); this
 // file covers what a plain C++ unit test can check without them: the
 // bytearray/bit-pattern literal helpers, and the generated ilasm's
@@ -629,8 +629,8 @@ TEST(EmitScript, MainForwardsItsOwnArgvToSetProgramArgsBeforeInit) {
 
 // ---------------------------------------------------------------------------
 // Control flow: JUMP, JUMP_IF_FALSE, LOOP. See
-// test/translation-probes/{02,03,04,05,22,23}_*.lox for the checkpoint
-// this ties to at the assemble-and-run level (tools/check_clr_probes.sh).
+// test/translation-probes/{02,03,04,05,22,23}_*.lox for the checkpoint this
+// ties to at the assemble-and-run level (tools/check_clr_probes.sh).
 // ---------------------------------------------------------------------------
 
 TEST(EmitScript, IfElseDupsThePeekAndBothPopsAreReal) {
@@ -803,8 +803,8 @@ TEST(EmitScript, LoopBodyAssignsSameSlotEveryIteration) {
 }
 
 // ---------------------------------------------------------------------------
-// Functions and calls: CALL, zero-upvalue CLOSURE, RETURN's
-// dual role, and emitProgram's multi-class output. See
+// Functions and calls: CALL, zero-upvalue CLOSURE, RETURN's dual role, and
+// emitProgram's multi-class output. See
 // test/translation-probes/{08,24}_*.lox for the checkpoint this ties to at
 // the assemble-and-run level (tools/check_clr_probes.sh).
 // ---------------------------------------------------------------------------
@@ -1401,8 +1401,8 @@ TEST(EmitProgram, SiblingFunctionsGetSequentialClassNames) {
     expectEveryBranchTargetIsLabeled(il);
 }
 
-// Closures and upvalues (the bug gate). The real, end-to-end
-// proof that a captured local behaves correctly (V1_fresh_cell, V2_shared,
+// Closures and upvalues (the bug gate). The real, end-to-end proof that a
+// captured local behaves correctly (V1_fresh_cell, V2_shared,
 // V3_loopvar, V4_mutate_through_upvalue, V5/V6_self_recursive_closure,
 // 06_shared_upvalue) is tools/check_clr_probes.sh, run inside the
 // dev-managed container — a plain unit test cannot assemble+run ilasm/
@@ -1670,15 +1670,15 @@ TEST(EmitProgram, SelfRecursiveClosureSeedsCellBeforeFirstRead) {
     expectEveryBranchTargetIsLabeled(outer);
 }
 
-// RETURN's function-role hazard: the shared
-// abstract-stack analysis can fold the returned value into a named local
-// rather than leave it as a genuine evaluation-stack temporary — 33 sites
-// in the corpus (bytecode-translation-problems.md), none reachable from
-// this pass's own opcode set alone (it needs a `match` expression), so
-// this hand-builds the shape directly rather than waiting for a later
-// pass's program to reach it. Mirrors this file's own
-// `SetLocalPeekOfNamedLocalLoadsInsteadOfDup` technique, one level deeper
-// (a function's own RETURN instead of a script's SET_LOCAL).
+// RETURN's function-role hazard: the shared abstract-stack analysis can fold
+// the returned value into a named local rather than leave it as a genuine
+// evaluation-stack temporary — 33 sites in the corpus
+// (bytecode-translation-problems.md), none reachable from this pass's own
+// opcode set alone (it needs a `match` expression), so this hand-builds the
+// shape directly rather than waiting for a later pass's program to reach it.
+// Mirrors this file's own `SetLocalPeekOfNamedLocalLoadsInsteadOfDup`
+// technique, one level deeper (a function's own RETURN instead of a script's
+// SET_LOCAL).
 TEST(EmitProgram, ReturnOfAFoldedLocalLoadsInsteadOfAssumingATemp) {
     MemoryManager mm;
 

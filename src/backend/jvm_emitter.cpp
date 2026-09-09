@@ -307,9 +307,8 @@ struct Emitter {
 // (compiler.cpp, compileMatchBody) — so the two DO disagree, on a plain,
 // unnested match, with no CFG merge involved at all (three plain match
 // programs in test_jvm_emit.cpp). `loadNamedLocalAtZeroDepth` (below
-// emitCapturedStore)
-// is the current mechanism: `localCount - 1` off a CFG label, cross-checked
-// against `lastInvisibleVarSlot` on one.
+// emitCapturedStore) is the current mechanism: `localCount - 1` off a CFG
+// label, cross-checked against `lastInvisibleVarSlot` on one.
 void emitConstant(Emitter& e, const DecodedInstruction& in) {
     Value v = e.fn.function->chunk.getConstant(
         static_cast<uint16_t>(in.constantIndex));
@@ -544,17 +543,17 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
 // wrong output on a `match`, because the tracker names the most RECENTLY
 // DECLARED slot, while `compileMatchBody` declares a match's own subject
 // AFTER its own result — the result, not the subject, is what an enclosing
-// consumer wants. test_jvm_emit.cpp proves the same defect for a
-// PLAIN, unnested match, on `main`, so this was never only a nesting defect.
+// consumer wants. test_jvm_emit.cpp proves the same defect for a PLAIN,
+// unnested match, on `main`, so this was never only a nesting defect.
 //
 // `localCount - 1` is exact away from a CFG merge (abstract_stack.h). At a
 // merge it is only an upper bound, so the tracker now serves as a second,
 // independent estimate that must confirm it. Agreement emits exactly what
 // the tracker path used to emit alone, so no green shape regresses.
 // Disagreement means the old, unconditional tracker read gave silently
-// wrong output — so this throws at emit time instead, loud rather
-// than silent. See the GAP entry in bytecode-translation-problems.md for
-// the residual cases this still does not cover.
+// wrong output — so this throws at emit time instead, loud rather than
+// silent. See the GAP entry in bytecode-translation-problems.md for the
+// residual cases this still does not cover.
 //
 // The cross-check itself (resolveZeroDepthLocalSlot, zero_depth_local.h) is
 // target-independent: any backend that lowers this opcode family once CFG
@@ -639,9 +638,9 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
     // That slot is `loadNamedLocalAtZeroDepth`'s `localCount - 1`, not
     // `lastInvisibleVarSlot` — a nested match's own result defeats the
     // tracker (see that function's own note) with no error, only a wrong
-    // value. This site is exactly where a `match` arm
-    // whose value is itself a nested `match` surfaced the defect: the
-    // OUTER arm's own `SET_LOCAL` into its result slot is this instruction.
+    // value. This site is exactly where a `match` arm whose value is itself
+    // a nested `match` surfaced the defect: the OUTER arm's own `SET_LOCAL`
+    // into its result slot is this instruction.
     if (e.analysis.before[i].operandDepth() == 0) {
         loadNamedLocalAtZeroDepth(e, i, in.offset);
         if (captured) {
@@ -955,13 +954,13 @@ void emitSpillToArray(Emitter& e, int width, const char* buildSig) {
 // the same order.
 //
 // Redesign: a one-element list whose sole element is a `match`, and a wider
-// list whose FIRST element is a folded `match`, both used to need — or lack —
-// a private branch here. `normalizeFoldedOperands`
-// (above emitBody) now spills every genuine element this instruction's own
-// `nativePops` row expects, loads the folded bottom element, and reloads the
-// genuine ones on top in order, for any width — so by the time this
-// function runs, `in.byteOperand` genuine values are always already on the
-// real stack, and this is a plain, unconditional spill-to-array.
+// list whose FIRST element is a folded `match`, both used to need — or lack
+// — a private branch here. `normalizeFoldedOperands` (above emitBody) now
+// spills every genuine element this instruction's own `nativePops` row
+// expects, loads the folded bottom element, and reloads the genuine ones on
+// top in order, for any width — so by the time this function runs,
+// `in.byteOperand` genuine values are always already on the real stack, and
+// this is a plain, unconditional spill-to-array.
 void emitBuildList(Emitter& e, const DecodedInstruction& in) {
     emitSpillToArray(e, in.byteOperand,
                      "invokestatic lox/LoxOps/buildList([Ljava/lang/"
@@ -1772,9 +1771,9 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
 
 // The one place every `nativePops`-covered consumer gets its folded bottom
 // operand repaired, replacing what used to be one private
-// `if (operandDepth() == ...)` branch per consumer — nine more folded-operand
-// shapes were the last straw: a per-consumer enumeration of this branch kept
-// finding one more missing site every round.
+// `if (operandDepth() == ...)` branch per consumer — nine more
+// folded-operand shapes were the last straw: a per-consumer enumeration of
+// this branch kept finding one more missing site each time.
 //
 // `deficit` is how many of this instruction's own `nativePops` cells are
 // genuinely missing from the real JVM operand stack, because
@@ -2189,9 +2188,9 @@ std::string escapeJasminString(const std::string& raw) {
 
 std::string formatDoubleBitsLiteral(double value) {
     // A bare decimal integer: jasmin 2.4 reads an `ldc2_w` operand shaped
-    // like this as a `long`, at full precision, never at float precision
-    // and never rejected as "badly formatted" — both defects are
-    // specific to the decimal-point/exponent literal forms.
+    // like this as a `long`, at full precision, never at float precision and
+    // never rejected as "badly formatted" — both defects are specific to the
+    // decimal-point/exponent literal forms.
     return std::to_string(std::bit_cast<int64_t>(value));
 }
 

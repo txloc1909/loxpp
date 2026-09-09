@@ -306,11 +306,10 @@ StackState advance(const std::vector<DecodedInstruction>& ins, size_t idx,
 //
 // Returns whether it found at least one declaring push, independent of
 // whether `sites` already held it — findInvisibleVarIndices's persistence
-// backfill (below) needs that to tell "this slot has no push instruction at all
-// here
-// (an initial parameter — stop descending)" apart from "this slot's push was
-// already known from elsewhere", which look identical if judged only by
-// whether `sites` grew.
+// backfill (below) needs that to tell "this slot has no push instruction at
+// all here (an initial parameter — stop descending)" apart from "this slot's
+// push was already known from elsewhere", which look identical if judged
+// only by whether `sites` grew.
 bool findDeclaringPushIndices(int fromIndex, int slot,
                               const std::vector<DecodedInstruction>& ins,
                               const LocalCfg& cfg,
@@ -603,11 +602,10 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
     backfillFromFrameTeardown(ins, cfg, before, after, reached, sites);
 
     // The persistence test at every POP — see findPersistentPopLocals's
-    // own comment. Independent of the
-    // reference-driven loop above; it can add a site the loop above never
-    // could reach (no GET_LOCAL/SET_LOCAL/capture at all) and it can
-    // re-derive one the loop above already found (deduplicated by `sites`
-    // being a set).
+    // own comment. Independent of the reference-driven loop above; it can
+    // add a site the loop above never could reach (no
+    // GET_LOCAL/SET_LOCAL/capture at all) and it can re-derive one the loop
+    // above already found (deduplicated by `sites` being a set).
     findPersistentPopLocals(ins, cfg, before, after, reached, sites);
     return sites;
 }
@@ -636,13 +634,13 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
 // dimension independently is sound here because, in every such case, the
 // same edge supplies both maxima (the longer arm has strictly more of
 // everything, never a trade-off between the two) — the join only becomes
-// unsound when recognition timing itself, not genuine structure,
-// causes two edges to split one edge's cells between "local" and "temp"
+// unsound when recognition timing itself, not genuine structure, causes
+// two edges to split one edge's cells between "local" and "temp"
 // differently at the *same* height. That split can't happen once
 // recognition is declaring-push-timed, and analyzeStack checks it isn't:
 // see validateMergeConsistency, which is the real merge-consistency
-// assertion — a post-convergence check, not this join, because a join that
-// throws on every *transient* mid-fixpoint disagreement (before a
+// assertion — a post-convergence check, not this join, because a join
+// that throws on every *transient* mid-fixpoint disagreement (before a
 // loop's back-edge has propagated) would reject legitimate programs.
 std::vector<std::optional<StackState>>
 runFixpoint(const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
@@ -686,15 +684,16 @@ runFixpoint(const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
     return state;
 }
 
-// The merge-consistency check, asserted for real: every reached instruction
-// with two or more reached predecessors must see the *same* operand depth on
-// every incoming edge — the invariant the JVM/CLR verifier enforces at
-// every control-flow merge. Runs once, after pass 2 has fully converged,
-// using each predecessor's own final `after` state directly: recognition
-// is declaring-push-timed now and reclaim/return-anchored (see
-// findInvisibleVarIndices), not reference-timed, so a predecessor's `after`
-// state already reflects every declaration on its own path with no further
-// reconciliation needed at the point of use.
+// The merge-consistency check, asserted for real: every reached
+// instruction with two or more reached predecessors must see the *same*
+// operand depth on every incoming edge — the invariant the JVM/CLR
+// verifier enforces at every control-flow merge. Runs once, after pass 2
+// has fully converged, using each predecessor's own final `after` state
+// directly: recognition is declaring-push-timed now and
+// reclaim/return-anchored (see findInvisibleVarIndices), not
+// reference-timed, so a predecessor's `after` state already reflects every
+// declaration on its own path with no further reconciliation needed at the
+// point of use.
 //
 // An alternative design compares raw (height, localCount) at a merge, not
 // only operand depth, turning "the join becomes an assertion, not a
@@ -755,19 +754,18 @@ void validateMergeConsistency(const std::vector<DecodedInstruction>& ins,
 
 } // namespace
 
-// This is a safety net for a *false* site, not a detector for a
-// *missing* one. It iterates only over the sites discovery already found
+// This is a safety net for a *false* site, not a detector for a *missing*
+// one. It iterates only over the sites discovery already found
 // (`declaredSlotsAt[i].empty()` skips silently), so a slot the persistence
-// test fails to recognize at all is invisible to this loop by construction —
-// it is not what catches such a miss. What it does catch: if some future
-// change
-// makes findInvisibleVarIndices report a slot that does not match the true
-// local count at its own recognition point, this throws immediately instead
-// of letting a wrong number reach the JVM emitter. With the persistence test
-// in place (findPersistentPopLocals), every POP receives a direct, decidable
-// classification at the reclaim site itself, so no silent gap class remains
-// for a bogus site to hide behind either — this guard is now a real net,
-// not a false promise.
+// test fails to recognize at all is invisible to this loop by
+// construction — it is not what catches such a miss. What it does catch:
+// if some future change makes findInvisibleVarIndices report a slot that
+// does not match the true local count at its own recognition point, this
+// throws immediately instead of letting a wrong number reach the JVM
+// emitter. With the persistence test in place (findPersistentPopLocals),
+// every POP receives a direct, decidable classification at the reclaim
+// site itself, so no silent gap class remains for a bogus site to hide
+// behind either — this guard is now a real net, not a false promise.
 //
 // Runs once post-convergence for the same reason validateMergeConsistency
 // does: a recognition point can be advance()-ed several times while the
@@ -781,14 +779,14 @@ void validateMergeConsistency(const std::vector<DecodedInstruction>& ins,
 // popping the instruction's own operands, in the order declaredSlotsAt[i]
 // lists them (ascending, since it is built from a std::set<pair<int,int>>).
 //
-// Given external linkage (not left in the anonymous namespace above),
-// so test_backend_abstract_stack.cpp can drive it directly with a
-// hand-built `declaredSlotsAt` and assert the throw — see
+// Has external linkage (not left in the anonymous namespace above) so
+// test_backend_abstract_stack.cpp can drive it directly with a hand-built
+// `declaredSlotsAt` and assert the throw — see
 // DirectlyBuiltGapThrowsWithTheRightMessage. A gap needs a genuinely
 // inconsistent `declaredSlotsAt` to fire (analyzeStack's own discovery
 // never produces one; that is the property the persistence redesign
-// establishes), so
-// no real chunk can drive this guard through analyzeStack alone.
+// establishes), so no real chunk can drive this guard through analyzeStack
+// alone.
 void validateNoInvisibleVarGaps(
     const std::vector<DecodedInstruction>& ins,
     const std::vector<StackState>& before, const std::vector<bool>& reached,
@@ -875,9 +873,8 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
 
     // Structural sanity check on the converged values: a position can never
     // be local without existing, and height can never go negative. Guards
-    // against a stack-effect table or CFG-building bug; not itself
-    // the merge-consistency check (see validateMergeConsistency below for
-    // that).
+    // against a stack-effect table or CFG-building bug; not itself the
+    // merge-consistency check (see validateMergeConsistency below for that).
     for (size_t i = 0; i < n; i++) {
         if (!static_cast<bool>(reached[i])) {
             continue;
@@ -906,15 +903,15 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
         result.before[i] = before;
         result.after[i] = after;
 
-        // When this instruction's own push
-        // is an invisible var's declaring push (declaredSlotsAt[i] non-
-        // empty), the emitter's store has not run yet at this exact point —
-        // the value still needs real operand-stack room here, even though
-        // `after` already counts it as local and reports operandDepth 0 for
-        // it. after.operandDepth() alone can therefore undercount by exactly
-        // the number of slots just recognized; add it back so the bound
-        // stays safe by construction. An undercount is a JVM VerifyError,
-        // and the CLR backend has no jasmin fallback to hide behind.
+        // When this instruction's own push is an invisible var's declaring
+        // push (declaredSlotsAt[i] non-empty), the emitter's store has not
+        // run yet at this exact point — the value still needs real
+        // operand-stack room here, even though `after` already counts it as
+        // local and reports operandDepth 0 for it. after.operandDepth()
+        // alone can therefore undercount by exactly the number of slots just
+        // recognized; add it back so the bound stays safe by construction.
+        // An undercount is a JVM VerifyError, and the CLR backend has no
+        // jasmin fallback to hide behind.
         int depth = std::max(before.operandDepth(),
                              after.operandDepth() +
                                  static_cast<int>(declaredSlotsAt[i].size()));
