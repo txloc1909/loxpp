@@ -1,0 +1,149 @@
+*loxpp.txt*  Editor support for the Lox++ scripting language
+
+==============================================================================
+CONTENTS                                                        *loxpp-contents*
+
+  1. Introduction ............................ |loxpp-introduction|
+  2. Requirements ............................ |loxpp-requirements|
+  3. Install ................................. |loxpp-install|
+  4. Setup ................................... |loxpp-setup|
+  5. The three layers ........................ |loxpp-layers|
+  6. Health check ............................ |loxpp-health|
+  7. Troubleshooting ......................... |loxpp-troubleshooting|
+
+==============================================================================
+1. INTRODUCTION                                            *loxpp-introduction*
+
+`loxpp.nvim` wires three editor layers for Lox++ (`*.lox` files):
+
+  1. a tree-sitter grammar for scope-aware highlighting, folds and indents;
+  2. the `loxpp-lsp` language server for diagnostics, hover, completion,
+     go-to-definition and find-references;
+  3. a `loxpp --check` fallback through |nvim-lint| for users who build the
+     `loxpp` interpreter but not the server.
+
+A Vim regex syntax, filetype detection and buffer options (see
+|loxpp-layers|) load on their own and need no setup. They also work in plain
+Vim.
+
+==============================================================================
+2. REQUIREMENTS                                            *loxpp-requirements*
+
+  - Neovim 0.11 or later for the built-in `vim.lsp.config` / `vim.lsp.enable`
+    path. Neovim 0.10 works with |nvim-lspconfig| installed. Plain Vim gets
+    the regex syntax and filetype layer only.
+  - `loxpp` on `$PATH` for the `--check` fallback.
+  - `loxpp-lsp` on `$PATH` for the language server.
+  - A C compiler (`cc` / `clang` / `gcc`) to build the tree-sitter parser.
+  - Optional: |nvim-treesitter| ("master" branch) to install the parser with
+    `:TSInstall loxpp`. The plugin also works with the "main" rewrite or with
+    no nvim-treesitter at all, as long as a compiled parser is on
+    'runtimepath'.
+
+Build the binaries and the parser from the Lox++ checkout: >
+
+    cmake --preset debug -DLOXPP_LSP=ON
+    cmake --build build --target loxpp loxpp-lsp
+    # put build/loxpp and build/loxpp-lsp on your PATH
+
+    cd editors/tree-sitter-loxpp && tree-sitter generate && cd -
+    editors/loxpp.nvim/scripts/build-parser.sh   # writes parser/loxpp.so
+<
+==============================================================================
+3. INSTALL                                                      *loxpp-install*
+
+lazy.nvim: >
+
+    {
+      dir = "/path/to/loxpp/editors/loxpp.nvim",   -- or a git url
+      ft = "lox",
+      build = "./scripts/build-parser.sh",
+      opts = {},
+    }
+<
+packer.nvim: >
+
+    use {
+      "/path/to/loxpp/editors/loxpp.nvim",
+      run = "./scripts/build-parser.sh",
+      config = function() require("loxpp").setup() end,
+    }
+<
+Manual: put `editors/loxpp.nvim` on 'runtimepath', run
+`scripts/build-parser.sh`, then `:lua require("loxpp").setup()`.
+
+==============================================================================
+4. SETUP                                                          *loxpp-setup*
+
+                                                              *loxpp.setup()*
+>
+    require("loxpp").setup({
+      treesitter = {
+        enable = true,
+        parser_dir = nil,   -- grammar source dir; nil = sibling checkout
+        highlight = true,   -- vim.treesitter.start on a lox buffer
+        fold = true,        -- tree-sitter 'foldexpr'
+      },
+      lsp = {
+        enable = true,
+        cmd = { "loxpp-lsp" },
+        root_markers = { "spec", ".git" },
+      },
+      lint = {
+        enable = true,      -- loxpp --check via nvim-lint, only with no LSP
+        cmd = "loxpp",
+      },
+    })
+<
+Every layer can be turned off with its `enable = false`. `setup()` is called
+automatically the first time a `lox` buffer opens if you have not called it.
+
+==============================================================================
+5. THE THREE LAYERS                                              *loxpp-layers*
+
+Highlighting~
+  `queries/loxpp/*.scm` drive tree-sitter highlighting, folds and indents once
+  `parser/loxpp.so` is on 'runtimepath'. Until then `syntax/lox.vim` (a
+  shallow regex highlighter) stays active. tree-sitter takes over a buffer
+  when it starts.
+
+Diagnostics~
+  With `loxpp-lsp` running, the server owns diagnostics (errors from the
+  compiler plus lint warnings: unused local, undefined name, and more), and
+  also hover, completion, definition, references and document symbols.
+  Without the server, `loxpp --check --format json` runs on save through
+  |nvim-lint| and reports the compiler's static errors only.
+
+Filetype and options (node N6, no setup needed)~
+  `ftdetect/lox.{vim,lua}` map `*.lox` to filetype `lox`.
+  `ftplugin/lox.{vim,lua}` set `commentstring`, `comments`, `iskeyword`,
+  `suffixesadd` and `formatoptions`.
+  `compiler/lox.vim` gives `:compiler lox` then `:make` for a zero-Lua
+  quickfix workflow.
+
+==============================================================================
+6. HEALTH CHECK                                                  *loxpp-health*
+
+`:checkhealth loxpp` reports the Neovim version, whether `loxpp` and
+`loxpp-lsp` are on `$PATH`, whether the tree-sitter parser is compiled, and
+whether |nvim-treesitter| and |nvim-lint| are installed.
+
+==============================================================================
+7. TROUBLESHOOTING                                      *loxpp-troubleshooting*
+
+No tree-sitter highlighting~
+  Run `:checkhealth loxpp`. If the parser is missing, run
+  `scripts/build-parser.sh` or `:TSInstall loxpp`. Confirm a C compiler is on
+  `$PATH`.
+
+The language server does not attach~
+  Confirm `loxpp-lsp` is on `$PATH` (`:checkhealth loxpp`). Check
+  `:LspLog` / `~/.local/state/nvim/lsp.log`. The server needs a project
+  root; it uses the first parent directory that holds `spec` or `.git`.
+
+Diagnostics appear twice~
+  The `--check` fallback stands down whenever a `loxpp_lsp` client is
+  attached to the buffer. If you see duplicates, one is from a second LSP
+  client or a second linter you configured elsewhere.
+
+ vim:tw=78:ts=8:noet:ft=help:norl:
