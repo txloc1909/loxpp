@@ -6,6 +6,12 @@ configuration.
 
 [TESTING.md](TESTING.md) covers how to write new GTest cases and use the VM test helpers.
 
+[notes/editor-tooling.md](notes/editor-tooling.md) covers the editor stack (`loxpp --check`,
+`loxpp-lsp`, the tree-sitter grammar, the Neovim plugin). Build and test it in the
+`dev-editors` image: `cmake --build build --target loxpp loxpp-lsp`, then
+`cd editors/tree-sitter-loxpp && tree-sitter generate && tree-sitter test`, then
+`tools/lsp_smoke.py build/loxpp-lsp` and `tools/check_nvim_plugin.sh`.
+
 **Dev environment:** the `Dockerfile` packages the full toolchain in two stages —
 `dev` for C++ work, `dev-managed` when touching the JVM or CLR backends. Build the one
 you need:

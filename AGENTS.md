@@ -53,6 +53,7 @@ git worktree add .claude/worktrees/loxpp-<type>-<desc> -b <type>/<desc>
 # 2. Build the image — pick the stage for the work
 podman build --target dev -t loxpp-dev-env .                    # C++ work
 podman build --target dev-managed -t loxpp-dev-env-managed .    # backend work
+podman build --target dev-editors -t loxpp-dev-editors .        # editors/ work (tree-sitter, Neovim)
 
 # 3. Start ephemeral container (:z needed on SELinux hosts e.g. Fedora),
 #    using whichever image you built above. The loxpp-ccache volume is the
