@@ -261,7 +261,7 @@ bool closureIsConsumedImmediately(const std::vector<DecodedInstruction>& ins,
 // recognition happens here, on this instruction's own outgoing state, not
 // retroactively on some later referencing instruction's incoming state. A
 // local becomes visible to the analysis at the exact offset the emitter
-// must insert its store, closing the gap R1 found between `invisibleVars`
+// must insert its store, closing the gap between `invisibleVars`
 // and the reported per-offset stack states. Null during the first,
 // height-only pass (see runFixpoint's two call sites in analyzeStack):
 // nothing is recognized as local yet, because the declaring-push sites
@@ -288,7 +288,7 @@ StackState advance(const std::vector<DecodedInstruction>& ins, size_t idx,
 // Finds the declaring push(es) for `slot`'s *current value*, walking
 // backward from `fromIndex` over the CFG's predecessor edges.
 //
-// This follows the value, not the stack position (R7): an instruction whose
+// This follows the value, not the stack position: an instruction whose
 // own pop reaches down to (or past) `slot` destroys whatever was there
 // before it ran. If its own push then lands back at `slot`, that is a brand
 // new value occupying the same numeric position — the declaring push — and
@@ -305,8 +305,9 @@ StackState advance(const std::vector<DecodedInstruction>& ins, size_t idx,
 // this explores every predecessor, not just one.
 //
 // Returns whether it found at least one declaring push, independent of
-// whether `sites` already held it — findInvisibleVarIndices's R8 backfill
-// (below) needs that to tell "this slot has no push instruction at all here
+// whether `sites` already held it — findInvisibleVarIndices's persistence
+// backfill (below) needs that to tell "this slot has no push instruction at all
+// here
 // (an initial parameter — stop descending)" apart from "this slot's push was
 // already known from elsewhere", which look identical if judged only by
 // whether `sites` grew.
@@ -368,9 +369,9 @@ bool findDeclaringPushIndices(int fromIndex, int slot,
 // CLOSURE's own push declares it, or RETURN's operandDepth()==1 invariant
 // proves it (backfillFromFrameTeardown) — every lower slot must be local
 // too, whether or not anything ever names *those*. This is not the "run
-// length implies local count" rule the referee rejected: that rule had no
-// independently-confirmed anchor at all, only POP adjacency; every call
-// here starts from one.
+// length implies local count" rule an earlier design tried and a
+// counter-example defeated: that rule had no independently-confirmed anchor
+// at all, only POP adjacency; every call here starts from one.
 void chaseSlotsDownward(int originIdx, int topSlot,
                         const std::vector<DecodedInstruction>& ins,
                         const LocalCfg& cfg,
@@ -386,7 +387,7 @@ void chaseSlotsDownward(int originIdx, int topSlot,
     }
 }
 
-// R8, the binding design rule (replaces an earlier reference-driven backfill
+// The binding design rule (replaces an earlier reference-driven backfill
 // a counter-example defeated): whether a POP discards a named local or a
 // compiler temporary cannot be read off the POP itself. `{ var a = 1; }`
 // and `1;` compile to byte-identical chunks with opposite source truth
@@ -419,7 +420,7 @@ struct PersistenceResult {
 };
 
 // Same backward walk as findDeclaringPushIndices (follows the *value* at
-// `slot`, not its stack position — R7), instrumented to also decide
+// `slot`, not its stack position), instrumented to also decide
 // persistence. `result.births` collects every declaring push found, exactly
 // like findDeclaringPushIndices's `sites`; the caller only keeps them when
 // the verdict is LOCAL.
@@ -470,8 +471,8 @@ void walkForPersistence(int fromIndex, int slot,
 
 // Runs the persistence test at every reached POP and folds every LOCAL
 // verdict's births into `sites`. Discovery here depends on no reference
-// elsewhere in the function — the property that closes R8 as a class,
-// per the referee ruling: every POP is examined directly.
+// elsewhere in the function — the property that closes this defect as a
+// class: every POP is examined directly.
 void findPersistentPopLocals(const std::vector<DecodedInstruction>& ins,
                              const LocalCfg& cfg,
                              const std::vector<StackState>& before,
@@ -501,7 +502,7 @@ void findPersistentPopLocals(const std::vector<DecodedInstruction>& ins,
 // (function `f(){ var a=1; var never=99; print a; }` — `never` has no POP in
 // the whole chunk for findPersistentPopLocals's test to run at).
 //
-// Checkpoint 3's own invariant gives the fix for free: operandDepth() is
+// The return-height invariant gives the fix for free: operandDepth() is
 // exactly 1 immediately before every RETURN (the return value, and nothing
 // else, is ever a temporary there — vm.cpp tears down the rest of the frame
 // wholesale). So every slot below that one temporary is local, with no
@@ -601,7 +602,7 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
     // loop above at all — see backfillFromFrameTeardown's own comment.
     backfillFromFrameTeardown(ins, cfg, before, after, reached, sites);
 
-    // R8: the persistence test at every POP — see findPersistentPopLocals's
+    // The persistence test at every POP — see findPersistentPopLocals's
     // own comment. Independent of the
     // reference-driven loop above; it can add a site the loop above never
     // could reach (no GET_LOCAL/SET_LOCAL/capture at all) and it can
@@ -618,7 +619,7 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
 //   height is meaningful; its purpose is solely to give
 //   findInvisibleVarIndices the before/after heights it needs to locate
 //   every declaring push. No recognition happens yet, so there is nothing
-//   for a recognition-timing bug to lag (R1's failure mode does not exist
+//   for a recognition-timing bug to lag (that failure mode does not exist
 //   in this pass).
 //
 //   Pass 2 — `declaredSlotsAt` is pass 1's result. `advance()` now
@@ -635,12 +636,12 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
 // dimension independently is sound here because, in every such case, the
 // same edge supplies both maxima (the longer arm has strictly more of
 // everything, never a trade-off between the two) — the join only becomes
-// unsound (R4) when recognition timing itself, not genuine structure,
+// unsound when recognition timing itself, not genuine structure,
 // causes two edges to split one edge's cells between "local" and "temp"
 // differently at the *same* height. That split can't happen once
 // recognition is declaring-push-timed, and analyzeStack checks it isn't:
-// see validateMergeConsistency, which is the real assertion for checkpoint
-// 5 (R3) — a post-convergence check, not this join, because a join that
+// see validateMergeConsistency, which is the real merge-consistency
+// assertion — a post-convergence check, not this join, because a join that
 // throws on every *transient* mid-fixpoint disagreement (before a
 // loop's back-edge has propagated) would reject legitimate programs.
 std::vector<std::optional<StackState>>
@@ -685,12 +686,12 @@ runFixpoint(const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
     return state;
 }
 
-// Checkpoint 5, asserted for real (R3/R4): every reached instruction with
-// two or more reached predecessors must see the *same* operand depth on
+// The merge-consistency check, asserted for real: every reached instruction
+// with two or more reached predecessors must see the *same* operand depth on
 // every incoming edge — the invariant the JVM/CLR verifier enforces at
 // every control-flow merge. Runs once, after pass 2 has fully converged,
 // using each predecessor's own final `after` state directly: recognition
-// is declaring-push-timed now (R1) and reclaim/return-anchored (R8 — see
+// is declaring-push-timed now and reclaim/return-anchored (see
 // findInvisibleVarIndices), not reference-timed, so a predecessor's `after`
 // state already reflects every declaration on its own path with no further
 // reconciliation needed at the point of use.
@@ -754,11 +755,12 @@ void validateMergeConsistency(const std::vector<DecodedInstruction>& ins,
 
 } // namespace
 
-// R11: this is a safety net for a *false* site, not a detector for a
+// This is a safety net for a *false* site, not a detector for a
 // *missing* one. It iterates only over the sites discovery already found
-// (`declaredSlotsAt[i].empty()` skips silently), so a slot R8 fails to
-// recognize at all is invisible to this loop by construction — it is not
-// what catches a slot R8 misses. What it does catch: if some future change
+// (`declaredSlotsAt[i].empty()` skips silently), so a slot the persistence
+// test fails to recognize at all is invisible to this loop by construction —
+// it is not what catches such a miss. What it does catch: if some future
+// change
 // makes findInvisibleVarIndices report a slot that does not match the true
 // local count at its own recognition point, this throws immediately instead
 // of letting a wrong number reach the JVM emitter. With the persistence test
@@ -779,12 +781,13 @@ void validateMergeConsistency(const std::vector<DecodedInstruction>& ins,
 // popping the instruction's own operands, in the order declaredSlotsAt[i]
 // lists them (ascending, since it is built from a std::set<pair<int,int>>).
 //
-// R15: given external linkage (not left in the anonymous namespace above),
+// Given external linkage (not left in the anonymous namespace above),
 // so test_backend_abstract_stack.cpp can drive it directly with a
 // hand-built `declaredSlotsAt` and assert the throw — see
 // DirectlyBuiltGapThrowsWithTheRightMessage. A gap needs a genuinely
 // inconsistent `declaredSlotsAt` to fire (analyzeStack's own discovery
-// never produces one; that is the property R8's redesign establishes), so
+// never produces one; that is the property the persistence redesign
+// establishes), so
 // no real chunk can drive this guard through analyzeStack alone.
 void validateNoInvisibleVarGaps(
     const std::vector<DecodedInstruction>& ins,
@@ -855,9 +858,9 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
         heightAfter[i] = advance(ins, i, heightBefore[i], nullptr);
     }
 
-    // Locate every declaring push using pass 1's heights (R7-fixed search),
-    // then index them by instruction so pass 2 can recognize each local
-    // exactly there instead of at its first reference (R1).
+    // Locate every declaring push using pass 1's heights (a value-following
+    // search), then index them by instruction so pass 2 can recognize each
+    // local exactly there instead of at its first reference.
     std::set<std::pair<int, int>> siteIndices =
         findInvisibleVarIndices(ins, cfg, heightBefore, heightAfter, reached);
     std::vector<std::vector<int>> declaredSlotsAt(n);
@@ -873,7 +876,8 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
     // Structural sanity check on the converged values: a position can never
     // be local without existing, and height can never go negative. Guards
     // against a stack-effect table or CFG-building bug; not itself
-    // checkpoint 5 (see validateMergeConsistency below for that).
+    // the merge-consistency check (see validateMergeConsistency below for
+    // that).
     for (size_t i = 0; i < n; i++) {
         if (!static_cast<bool>(reached[i])) {
             continue;
@@ -902,7 +906,7 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
         result.before[i] = before;
         result.after[i] = after;
 
-        // R12: when this instruction's own push
+        // When this instruction's own push
         // is an invisible var's declaring push (declaredSlotsAt[i] non-
         // empty), the emitter's store has not run yet at this exact point —
         // the value still needs real operand-stack room here, even though

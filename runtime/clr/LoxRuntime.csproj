@@ -8,7 +8,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <!-- Generated CIL never uses these; keep the deps.json this project
-         emits small so a later emission node's ilasm/dotnet link step has
+         emits small so a later emission stage's ilasm/dotnet link step has
          one obvious extern to reference. -->
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>

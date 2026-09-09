@@ -110,7 +110,7 @@ struct Builder {
 // threshold of 25. Each opcode family
 // below is its own function taking this by reference, so emitChunk's own
 // body shrinks to a dispatch table plus the parts genuinely specific to
-// walking the instruction array (labels, the R1 depth safety net,
+// walking the instruction array (labels, the depth safety net,
 // invisible-var stores).
 struct Emitter {
     const DecodedFunction& fn;
@@ -305,8 +305,9 @@ struct Emitter {
 // names the most RECENTLY DECLARED invisible var, not the topmost LIVE one,
 // and a `match` expression declares its own subject AFTER its own result
 // (compiler.cpp, compileMatchBody) — so the two DO disagree, on a plain,
-// unnested match, with no CFG merge involved at all (T1/T2/T3,
-// test_jvm_emit.cpp). `loadNamedLocalAtZeroDepth` (below emitCapturedStore)
+// unnested match, with no CFG merge involved at all (three plain match
+// programs in test_jvm_emit.cpp). `loadNamedLocalAtZeroDepth` (below
+// emitCapturedStore)
 // is the current mechanism: `localCount - 1` off a CFG label, cross-checked
 // against `lastInvisibleVarSlot` on one.
 void emitConstant(Emitter& e, const DecodedInstruction& in) {
@@ -543,7 +544,7 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
 // wrong output on a `match`, because the tracker names the most RECENTLY
 // DECLARED slot, while `compileMatchBody` declares a match's own subject
 // AFTER its own result — the result, not the subject, is what an enclosing
-// consumer wants. T1/T2/T3 (test_jvm_emit.cpp) prove the same defect for a
+// consumer wants. test_jvm_emit.cpp proves the same defect for a
 // PLAIN, unnested match, on `main`, so this was never only a nesting defect.
 //
 // `localCount - 1` is exact away from a CFG merge (abstract_stack.h). At a
@@ -551,7 +552,7 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
 // independent estimate that must confirm it. Agreement emits exactly what
 // the tracker path used to emit alone, so no green shape regresses.
 // Disagreement means the old, unconditional tracker read gave silently
-// wrong output (T1-T3) — so this throws at emit time instead, loud rather
+// wrong output — so this throws at emit time instead, loud rather
 // than silent. See the GAP entry in bytecode-translation-problems.md for
 // the residual cases this still does not cover.
 //
@@ -562,7 +563,7 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
 // the slot is known — `aload`/captured-cell test here, the CLR backend's
 // own load elsewhere.
 //
-// The captured-slot check (R5) applies to either estimate:
+// The captured-slot check applies to either estimate:
 // `capturedSlots` holds slot INDEXES, not live ranges (isCaptured's own
 // note) — a slot this chunk captured earlier, in a scope already closed,
 // stays in the set once the compiler reuses the index for an unrelated
@@ -635,11 +636,11 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
     // invisible-var materialization, abstract_stack.h) — nothing sits on the
     // JVM operand stack to `dup`. Load it back from its slot instead.
     //
-    // R6: that slot is `loadNamedLocalAtZeroDepth`'s `localCount - 1`, not
+    // That slot is `loadNamedLocalAtZeroDepth`'s `localCount - 1`, not
     // `lastInvisibleVarSlot` — a nested match's own result defeats the
     // tracker (see that function's own note) with no error, only a wrong
-    // value. This site is exactly where R6's reproduction (a `match` arm
-    // whose value is itself a nested `match`) surfaced the defect: the
+    // value. This site is exactly where a `match` arm
+    // whose value is itself a nested `match` surfaced the defect: the
     // OUTER arm's own `SET_LOCAL` into its result slot is this instruction.
     if (e.analysis.before[i].operandDepth() == 0) {
         loadNamedLocalAtZeroDepth(e, i, in.offset);
@@ -659,7 +660,7 @@ void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
     consumedFollowingPop = fuse;
 }
 
-// R7: a `var` at script scope compiles to CONSTANT/expr then DEFINE_GLOBAL
+// A `var` at script scope compiles to CONSTANT/expr then DEFINE_GLOBAL
 // (compiler.cpp's varDeclaration, m_scopeDepth == 0), so `var n = match
 // c {...};` at the top level — 13_enum_match.lox's own shape — reaches this
 // opcode with a match's result still sitting only in its own JVM local slot,
@@ -705,7 +706,7 @@ void emitNegate(Emitter& e) {
              0);
 }
 
-// R11/R12 once added `reorderFoldedLeftOperand` here, one private
+// An earlier design added `reorderFoldedLeftOperand` here, one private
 // spill-reload per two-operand op, to fold a LEFT-folded operand back in.
 // The redesign deletes it: normalizeFoldedOperands now does the same
 // reorder, generically, for any op's own nativePops row — see that
@@ -908,7 +909,7 @@ void emitCall(Emitter& e, const DecodedInstruction& in) {
     e.b.emit(callSig, -1);
 }
 
-// Shared P7 reshape for BUILD_LIST/BUILD_MAP (R4 fix): spill `width` values,
+// Shared P7 reshape for BUILD_LIST/BUILD_MAP: spill `width` values,
 // already on the stack BELOW where a fresh array reference would land, into
 // `argScratchBase` (same reasoning as emitCall), build a fresh
 // Object[width], refill it ascending, then hand it to `buildSig`. `width ==
@@ -954,7 +955,7 @@ void emitSpillToArray(Emitter& e, int width, const char* buildSig) {
 // the same order.
 //
 // Redesign: a one-element list whose sole element is a `match`, and a wider
-// list whose FIRST element is (R15 shape 1), both used to need — or lack —
+// list whose FIRST element is a folded `match`, both used to need — or lack —
 // a private branch here. `normalizeFoldedOperands`
 // (above emitBody) now spills every genuine element this instruction's own
 // `nativePops` row expects, loads the folded bottom element, and reloads the
@@ -986,8 +987,8 @@ void emitBuildMap(Emitter& e, const DecodedInstruction& in) {
 // every other `nativePops` row, so this is a plain, unconditional call.
 // SET_INDEX/SLICE/IN never needed an instruction index of their own (no
 // private branch ever lived in emitSimpleOp for them), so the same
-// normalization reaches their own folded-bottom-operand shapes (R15 shapes
-// 6-9) without pulling them out of emitSimpleOp at all.
+// normalization reaches their own folded-bottom-operand shapes without
+// pulling them out of emitSimpleOp at all.
 void emitGetIndex(Emitter& e) {
     e.b.emit("invokestatic "
              "lox/LoxOps/getIndex(Ljava/lang/Object;Ljava/lang/"
@@ -1067,7 +1068,7 @@ void ensureCapturedCell(Emitter& e, int slot, int offset, int subIndex) {
 // Object[]-typed upvals array (the seed's OWN aastore, above, does not need
 // one: `anewarray` already gives it the exact array type).
 //
-// R2: `up.isLocal` and `e.capturedSlots` come from two different sources
+// `up.isLocal` and `e.capturedSlots` come from two different sources
 // that agree today by construction, not by any check — the former is the
 // CLOSURE instruction's own decoded operand bytes, the latter is the
 // capture analysis's `liveRangesBySlot`. Nothing makes a future drift
@@ -1136,7 +1137,7 @@ void seedSelfCaptureCell(Emitter& e, int selfJvmSlot) {
 // cell's own `[0]`, never into the JVM slot itself (which already holds
 // that cell, from seedSelfCaptureCell) — finishInstruction's ordinary plain
 // `astore` would undo the seed and hand every capturing sibling closure a
-// stale cell (R1's second, separate defect). Spilled to `scratchSlot` first
+// stale cell (a second, separate defect). Spilled to `scratchSlot` first
 // for the same reason emitCapturedStore does: building [cellRef, 0, value]
 // for `aastore` needs the value parked somewhere while the cell reference
 // is fetched.
@@ -1498,7 +1499,7 @@ void emitGetTagOrFused(Emitter& e, std::size_t i,
 // is entered by fall-through (finishInstruction already excludes both
 // alike).
 //
-// R4 fix: that claim must be true of the EMITTED bytecode, not only of this
+// That claim must be true of the EMITTED bytecode, not only of this
 // pass's own analysis. An earlier version called a plain void
 // `matchError()V`; the JVM verifier does not know a void call always
 // throws, so it still treats the next instruction as reachable from it,
@@ -1527,7 +1528,7 @@ void emitMatchError(Emitter& e) {
 // the RETURN checkpoint is the first to exercise it end-to-end.
 //
 // Redesign: the fold-repair used to be a private `if (operandDepth() == 0)`
-// branch here (R2/R5). It is now `normalizeFoldedOperands`'s own RETURN row,
+// branch here. It is now `normalizeFoldedOperands`'s own RETURN row,
 // the same
 // mechanism every other consumer shares — a private branch here would now
 // load the named local a SECOND time, on top of normalizeFoldedOperands's
@@ -1771,8 +1772,8 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
 
 // The one place every `nativePops`-covered consumer gets its folded bottom
 // operand repaired, replacing what used to be one private
-// `if (operandDepth() == ...)` branch per consumer — R15's own nine shapes
-// were the last straw: a per-consumer enumeration of this branch kept
+// `if (operandDepth() == ...)` branch per consumer — nine more folded-operand
+// shapes were the last straw: a per-consumer enumeration of this branch kept
 // finding one more missing site every round.
 //
 // `deficit` is how many of this instruction's own `nativePops` cells are
@@ -1852,7 +1853,7 @@ void normalizeFoldedOperands(Emitter& e, std::size_t i,
 
 // Walks every instruction once, in offset order, dispatching each to its
 // opcode-family function. The parts that are not one opcode's own concern —
-// labels, the R1 depth safety net, `normalizeFoldedOperands`, and the
+// labels, the depth safety net, `normalizeFoldedOperands`, and the
 // invisible-var/fall-through bookkeeping finishInstruction does — stay here
 // rather than in any one case.
 void emitBody(Emitter& e, bool isScript,
@@ -1887,7 +1888,7 @@ void emitBody(Emitter& e, bool isScript,
             }
         }
 
-        // R1 safety net: every correctly-lowered opcode in this pass keeps
+        // Depth safety net: every correctly-lowered opcode in this pass keeps
         // the JVM operand stack's physical depth equal to the full
         // abstract-stack analysis's own operandDepth() at the same offset
         // — a temp this emitter pushed is the only thing it counts as "on
@@ -2189,8 +2190,8 @@ std::string escapeJasminString(const std::string& raw) {
 std::string formatDoubleBitsLiteral(double value) {
     // A bare decimal integer: jasmin 2.4 reads an `ldc2_w` operand shaped
     // like this as a `long`, at full precision, never at float precision
-    // (R6) and never rejected as "badly formatted" (R7) — both
-    // defects are specific to the decimal-point/exponent literal forms.
+    // and never rejected as "badly formatted" — both defects are
+    // specific to the decimal-point/exponent literal forms.
     return std::to_string(std::bit_cast<int64_t>(value));
 }
 

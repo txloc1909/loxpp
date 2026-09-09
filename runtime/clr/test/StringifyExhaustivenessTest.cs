@@ -17,7 +17,7 @@ namespace LoxRuntimeTests;
 /// registered below fails this test immediately, before Stringify can
 /// throw on it in a generated program. LoxClosure is abstract and is
 /// handled in Stringify by an `is LoxClosure` check, which already covers
-/// every subclass a later emission node defines, so this test does not
+/// every subclass a later emission pass defines, so this test does not
 /// need a probe for it.
 /// </summary>
 public static class StringifyExhaustivenessTest {

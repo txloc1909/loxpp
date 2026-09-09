@@ -91,7 +91,7 @@ public static class StringifyDifferentialTest {
     private static List<double> GenerateValues() {
         var values = new List<double>();
 
-        // The named cases from the node checkpoint, explicitly.
+        // The named cases from the stringify contract, explicitly.
         double[] named = {
             0.0, 1.0, -1.0, 2.0, 3.0, -3.0, 10.0, -10.0, 42.0, 100.0, -100.0,
             0.1 + 0.2,     // the canonical floating-point-imprecision case
