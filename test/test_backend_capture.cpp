@@ -667,7 +667,7 @@ TEST(CaptureAnalysisTest, LoopVarNotClosedEarlyByAlternateExit) {
             return fns;
         }
     )",
-                                   "r9_loop_var_alternate_exit");
+                                   "loop_var_alternate_exit");
     const DecodedFunction* make = findByName(c.tree, "make");
     const DecodedFunction* f = findByName(c.tree, "f");
     ASSERT_NE(make, nullptr);
@@ -719,7 +719,7 @@ TEST(CaptureAnalysisTest, OuterCaptureNotClosedEarlyByLoopExit) {
             return outerCap;
         }
     )",
-                                   "r9_outer_capture_loop_exit");
+                                   "outer_capture_loop_exit");
     const DecodedFunction* make = findByName(c.tree, "make");
     const DecodedFunction* outerCap = findByName(c.tree, "outerCap");
     const DecodedFunction* f = findByName(c.tree, "f");
@@ -770,7 +770,7 @@ TEST(CaptureAnalysisTest, RecapturedSlotAfterDeadEarlyExitSharesOneCell) {
             return fns;
         }
     )",
-                                   "r10_recapture_after_dead_exit");
+                                   "recapture_after_dead_exit");
     const DecodedFunction* make = findByName(c.tree, "make");
     const DecodedFunction* f = findByName(c.tree, "f");
     ASSERT_NE(make, nullptr);
@@ -857,7 +857,7 @@ TEST(CaptureAnalysisTest, PerIterationCaptureInsideIfInsideLoop) {
             return fns;
         }
     )",
-                                   "r13_capture_inside_if_inside_loop");
+                                   "capture_inside_if_inside_loop");
     const DecodedFunction* make = findByName(c.tree, "make");
     const DecodedFunction* f = findByName(c.tree, "f");
     ASSERT_NE(make, nullptr);
@@ -903,7 +903,7 @@ TEST(CaptureAnalysisTest, DifferentVariablesReusingOneSlotDoNotShareACell) {
             return fns;
         }
     )",
-                                   "r14_distinct_variables_share_a_slot");
+                                   "distinct_variables_share_a_slot");
     const DecodedFunction* make = findByName(c.tree, "make");
     const DecodedFunction* f = findByName(c.tree, "f");
     const DecodedFunction* h = findByName(c.tree, "h");
@@ -947,7 +947,7 @@ TEST(CaptureAnalysisTest,
         }
         outer();
     )",
-                                   "r16_one_closure_two_slots");
+                                   "one_closure_two_slots");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* g = findByName(c.tree, "g");
     const DecodedFunction* h = findByName(c.tree, "h");
@@ -1013,7 +1013,7 @@ TEST(CaptureAnalysisTest,
         }
         outer();
     )",
-                                   "r16_three_blocks_stale_index");
+                                   "three_blocks_stale_index");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* k = findByName(c.tree, "k");
     ASSERT_NE(outer, nullptr);
@@ -1067,7 +1067,7 @@ TEST(CaptureAnalysisTest,
         print outer(true)();
         print outer(false)();
     )",
-                                   "r17_early_return_sibling_close");
+                                   "early_return_sibling_close");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* f = findByName(c.tree, "f");
     const DecodedFunction* g = findByName(c.tree, "g");
@@ -1127,7 +1127,7 @@ TEST(CaptureAnalysisTest, CaptureOnEarlyReturnBranchClosesInCommonScopeExit) {
         print outer(true)();
         print outer(false)[0]();
     )",
-                                   "r17_early_return_common_scope_exit");
+                                   "early_return_common_scope_exit");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* f = findByName(c.tree, "f");
     const DecodedFunction* g = findByName(c.tree, "g");
@@ -1270,7 +1270,7 @@ TEST(CaptureAnalysisTest,
         }
         print outer(false)();
     )",
-                                   "r19_static_close_across_block_boundary");
+                                   "static_close_across_block_boundary");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* g = findByName(c.tree, "g");
     const DecodedFunction* h = findByName(c.tree, "h");
@@ -1334,7 +1334,7 @@ TEST(CaptureAnalysisTest,
         print r[0]();
         print r[2]();
     )",
-                                   "r19_static_close_inside_loop_alternates");
+                                   "static_close_inside_loop_alternates");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* mk = findByName(c.tree, "mk");
     const DecodedFunction* h = findByName(c.tree, "h");
@@ -1383,7 +1383,7 @@ TEST(CaptureAnalysisTest, IfElseArmsCapturingOneOuterVariableShareOneCell) {
         print outer(true)();
         print outer(false)();
     )",
-                                   "r20_if_else_arms_share_one_outer_capture");
+                                   "if_else_arms_share_one_outer_capture");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* a = findByName(c.tree, "a");
     const DecodedFunction* b = findByName(c.tree, "b");
@@ -1426,7 +1426,7 @@ TEST(CaptureAnalysisTest,
         print r[0]();
         print r[1]();
     )",
-                                   "r20_if_else_arms_in_loop_share_loop_var");
+                                   "if_else_arms_in_loop_share_loop_var");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* a = findByName(c.tree, "a");
     const DecodedFunction* b = findByName(c.tree, "b");
@@ -1467,7 +1467,7 @@ TEST(CaptureAnalysisTest,
         print r[0]();
         print r[1]();
     )",
-                                   "r20_if_else_arms_in_loop_share_body_local");
+                                   "if_else_arms_in_loop_share_body_local");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* a = findByName(c.tree, "a");
     const DecodedFunction* b = findByName(c.tree, "b");
@@ -1510,7 +1510,7 @@ TEST(CaptureAnalysisTest, RecaptureAfterIfElseMergeJoinsTheMergedRange) {
         print r2[0]();
         print r2[1]();
     )",
-                                   "r21_recapture_after_if_else_merge");
+                                   "recapture_after_if_else_merge");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* a = findByName(c.tree, "a");
     const DecodedFunction* b = findByName(c.tree, "b");
@@ -1558,7 +1558,7 @@ TEST(CaptureAnalysisTest, StaticSiblingClosesBothAttributeToTheOneInstance) {
         }
         print outer(false, false);
     )",
-                                   "r22_case1_static_sibling_closes");
+                                   "static_sibling_closes_one_instance");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* gx = findByName(c.tree, "gx");
     ASSERT_NE(outer, nullptr);
@@ -1611,7 +1611,7 @@ TEST(CaptureAnalysisTest, StaticCloseDoesNotStealAnOuterFunctionScopeSlot) {
         print outer(false, false)();
         print outer(false, true)();
     )",
-                                   "r22_case2_static_close_does_not_steal");
+                                   "static_close_does_not_steal_outer_slot");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* kf = findByName(c.tree, "kf");
     const DecodedFunction* gx = findByName(c.tree, "gx");
@@ -1659,7 +1659,7 @@ TEST(CaptureAnalysisTest, DeadCloseAfterReturnFromBlockIsUnreachableNotAThrow) {
         }
         print outer()();
     )",
-                                   "r25_1_dead_close_after_return_from_block");
+                                   "dead_close_after_return_from_block");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* f = findByName(c.tree, "f");
     ASSERT_NE(outer, nullptr);
@@ -1697,7 +1697,7 @@ TEST(CaptureAnalysisTest, DeadCloseAfterReturnFromMethodBlockIsUnreachable) {
         }
         print Box(7).getter()();
     )",
-                                   "r25_2_dead_close_after_return_from_method");
+                                   "dead_close_after_return_from_method");
     const DecodedFunction* getter = findByName(c.tree, "getter");
     const DecodedFunction* g = findByName(c.tree, "g");
     ASSERT_NE(getter, nullptr);
@@ -1731,7 +1731,7 @@ TEST(CaptureAnalysisTest, DeadCloseAfterReturnFromLoopBodyIsUnreachable) {
         }
         print outer()();
     )",
-                                   "r25_3_dead_close_after_return_from_loop");
+                                   "dead_close_after_return_from_loop");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* f = findByName(c.tree, "f");
     ASSERT_NE(outer, nullptr);
@@ -1774,7 +1774,7 @@ TEST(CaptureAnalysisTest, StaticCloseOfSlotWithOnlyUnreachableCaptureIsDead) {
         }
         print outer(false, false);
     )",
-                                   "r26_static_close_only_unreachable_capture");
+                                   "static_close_only_unreachable_capture");
     const DecodedFunction* outer = findByName(c.tree, "outer");
     const DecodedFunction* f = findByName(c.tree, "f");
     ASSERT_NE(outer, nullptr);
