@@ -1,18 +1,18 @@
-// N10 checkpoint (R21, PR #115 round 4): run-parity coverage for
-// `normalizeFoldedOperands` (jvm_emitter.cpp, referee redesign, PR #115
+// Run-parity coverage (PR #115 round 4) for
+// `normalizeFoldedOperands` (jvm_emitter.cpp, redesigned in PR #115
 // round 3), the one mechanism that repairs a folded `match` result sitting
 // below a genuine sibling operand of its own consumer.
 //
 // The eleven unit tests in test/test_jvm_emit.cpp (added the same round)
 // already prove each shape below emits the right jasmin text, and fails
 // under its own `nativePops` row reverted to CUSTOM. Those tests read
-// emitted text only; they do not assemble a class file and run it (R21).
+// emitted text only; they do not assemble a class file and run it.
 // This probe is the missing automated proof that the RUN result, not only
 // the text, stays correct: `tools/check_jvm_probes.sh` diffs this file's
 // own stdout against `build/loxpp`, byte for byte, the same gate every
 // other numbered probe uses.
 //
-// Nine shapes (the referee's own "R15 shapes") plus one nested match
+// Nine folded-operand shapes plus one nested match
 // subject — ten print statements below, one per shape, in the same order
 // the unit tests list them.
 //

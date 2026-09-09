@@ -1,7 +1,7 @@
 // test_clr_emit.cpp — CLR emitter: straight-line code, control flow,
 // functions and calls, and closures and upvalues (the bug gate).
 //
-// Checkpoint (see the node's own specification): `tools/loxpp_clr.sh` on
+// Checkpoint for this pass: `tools/loxpp_clr.sh` on
 // every probe in `tools/check_clr_probes.sh`'s accumulated list must print
 // stdout identical to build/loxpp, `V1_fresh_cell` must print `0 1 2` (never
 // `2 2 2`), and the error probes must FAIL identically on both sides. That
@@ -472,7 +472,7 @@ TEST(EmitScript, TrueFalseAndNilLoadTheirOwnLiteralAndBoxWhereNeeded) {
 // reveal (NOT/NEGATE net 0 but read 1; a binary/comparison op nets -1 but
 // reads 2), the same shape AbortsOnUnsupportedOpcode uses to drive a refusal
 // with no real Lox++ program that reaches the case. A single-instruction
-// analysis, matching this node's own opcode set (no CALL, no control flow),
+// analysis, matching this pass's own opcode set (no CALL, no control flow),
 // stands in for the earlier, narrower `dup`-only guard.
 // ---------------------------------------------------------------------------
 
@@ -602,7 +602,7 @@ TEST(EmitScript, ScriptReturnPopsTheTrailingNilBeforeRet) {
 }
 
 TEST(EmitScript, MainForwardsItsOwnArgvToSetProgramArgsBeforeInit) {
-    // Before this node's own fix, a program could never reach the native
+    // Before this pass's own fix, a program could never reach the native
     // `args()` global at all (no CALL); once CALL made it reachable,
     // `Main` still declared no parameter and forwarded nothing, so
     // `args()` always answered empty regardless of the real command line.
@@ -628,7 +628,7 @@ TEST(EmitScript, MainForwardsItsOwnArgvToSetProgramArgsBeforeInit) {
 }
 
 // ---------------------------------------------------------------------------
-// Control flow: JUMP, JUMP_IF_FALSE, LOOP (this node). See
+// Control flow: JUMP, JUMP_IF_FALSE, LOOP. See
 // test/translation-probes/{02,03,04,05,22,23}_*.lox for the checkpoint
 // this ties to at the assemble-and-run level (tools/check_clr_probes.sh).
 // ---------------------------------------------------------------------------
@@ -803,7 +803,7 @@ TEST(EmitScript, LoopBodyAssignsSameSlotEveryIteration) {
 }
 
 // ---------------------------------------------------------------------------
-// Functions and calls (this node): CALL, zero-upvalue CLOSURE, RETURN's
+// Functions and calls: CALL, zero-upvalue CLOSURE, RETURN's
 // dual role, and emitProgram's multi-class output. See
 // test/translation-probes/{08,24}_*.lox for the checkpoint this ties to at
 // the assemble-and-run level (tools/check_clr_probes.sh).
@@ -870,11 +870,11 @@ TEST(EmitScript, CallWithArgsSpillsToScratchSlotsAndBuildsArray) {
         << j;
 }
 
-// BUILD_LIST/GET_INDEX/SET_INDEX (this node pulls these three opcodes
+// BUILD_LIST/GET_INDEX/SET_INDEX (this pass pulls these three opcodes
 // forward from the aggregates scope they conceptually belong to — see
 // emitBuildList's own note): V1_fresh_cell and V3_loopvar each build a
 // list of the closures under test and read it back by index, so this
-// node's own checkpoint needs list and index support to run at all.
+// pass's own checkpoint needs list and index support to run at all.
 
 TEST(EmitScript, BuildListOfZeroElementsBuildsDirectly) {
     MemoryManager mm;
@@ -950,7 +950,7 @@ TEST(EmitScript, GetIndexAndSetIndexAreOneCallEach) {
 }
 
 // ---------------------------------------------------------------------------
-// Classes, methods, and super (this node)
+// Classes, methods, and super
 // ---------------------------------------------------------------------------
 
 TEST(EmitScript, ClassOpcodeConstructsWithNullSuperclass) {
@@ -1266,7 +1266,7 @@ TEST(EmitScript, MatchErrorBuildsThenThrows) {
     expectEveryBranchTargetIsLabeled(j);
 }
 
-// The consumed-match case (this node's own checkpoint,
+// The consumed-match case (this pass's own checkpoint,
 // test/translation-probes/34_match_consumed_result.lox): a match
 // expression's own closing POP retires only the synthetic "subject"
 // local, exposing the arm's own result local as the new top with no
@@ -1331,8 +1331,8 @@ TEST(EmitProgram, ZeroUpvalueClosureConstructsGeneratedClass) {
     EXPECT_NE(il.find(".class public auto ansi LoxFn$0"), std::string::npos)
         << il;
 
-    // Zero upvalues (this node's own top-of-file note; a captured one is a
-    // later node's wiring): an empty object[][], then one `newobj` builds
+    // Zero upvalues (this file's own top-of-file note; a captured one is a
+    // later pass's wiring): an empty object[][], then one `newobj` builds
     // and constructs the generated class in a single instruction.
     EXPECT_NE(il.find("ldc.i4.0\n"
                       "    newarr object[]\n"
@@ -1401,7 +1401,7 @@ TEST(EmitProgram, SiblingFunctionsGetSequentialClassNames) {
     expectEveryBranchTargetIsLabeled(il);
 }
 
-// Closures and upvalues (this node, the bug gate). The real, end-to-end
+// Closures and upvalues (the bug gate). The real, end-to-end
 // proof that a captured local behaves correctly (V1_fresh_cell, V2_shared,
 // V3_loopvar, V4_mutate_through_upvalue, V5/V6_self_recursive_closure,
 // 06_shared_upvalue) is tools/check_clr_probes.sh, run inside the
@@ -1476,7 +1476,7 @@ TEST(EmitProgram, TwoClosuresShareOneCaptureCell) {
     // 06_shared_upvalue: get and set both capture x. Each CLOSURE gets its
     // OWN idempotent check (distinct labels, tied to its own offset —
     // captureLabel), because ensureCapturedCell cannot assume the other one
-    // ran first on every path (this node's own hazard: two closures
+    // ran first on every path (a hazard here: two closures
     // sharing a cell is not always sequential — an if/else can capture the
     // same outer on mutually exclusive arms). Here both run on the SAME
     // straight-line path, so the second one's check is a real no-op at
@@ -1670,13 +1670,13 @@ TEST(EmitProgram, SelfRecursiveClosureSeedsCellBeforeFirstRead) {
     expectEveryBranchTargetIsLabeled(outer);
 }
 
-// RETURN's function-role hazard (node specification): the shared
+// RETURN's function-role hazard: the shared
 // abstract-stack analysis can fold the returned value into a named local
 // rather than leave it as a genuine evaluation-stack temporary — 33 sites
 // in the corpus (bytecode-translation-problems.md), none reachable from
-// this node's own opcode set alone (it needs a `match` expression), so
+// this pass's own opcode set alone (it needs a `match` expression), so
 // this hand-builds the shape directly rather than waiting for a later
-// node's program to reach it. Mirrors this file's own
+// pass's program to reach it. Mirrors this file's own
 // `SetLocalPeekOfNamedLocalLoadsInsteadOfDup` technique, one level deeper
 // (a function's own RETURN instead of a script's SET_LOCAL).
 TEST(EmitProgram, ReturnOfAFoldedLocalLoadsInsteadOfAssumingATemp) {
@@ -1863,7 +1863,7 @@ TEST(EmitProgram, MismatchedNestedChildCountThrowsInsteadOfReadingOutOfRange) {
 }
 
 // ---------------------------------------------------------------------------
-// Aggregates, slices, membership, and iterators (this node)
+// Aggregates, slices, membership, and iterators
 // ---------------------------------------------------------------------------
 
 TEST(EmitScript, SliceAndInAreOneCallEach) {
@@ -1889,13 +1889,13 @@ TEST(EmitScript, SliceAndInAreOneCallEach) {
 
 TEST(EmitScript, IsSeqEmitsOneCallAndBoxes) {
     // IS_SEQ is a match sequence-pattern's own type check (compiler.cpp).
-    // An unguarded catch-all arm keeps this snippet inside this node's own
+    // An unguarded catch-all arm keeps this snippet inside this pass's own
     // opcode set: no JUMP_TABLE/GET_TAG (an enum arm needs those, out of
-    // scope until a later node) and no MATCH_ERROR (only emitted when no
+    // scope until a later pass) and no MATCH_ERROR (only emitted when no
     // arm is an unguarded catch-all). The match is a bare, fully-discarded
     // statement — a match expression whose result is actually consumed
     // (assigned, printed, returned) is a separate, pre-existing gap this
-    // node does not own (P8, match/enum dispatch, a later node's scope).
+    // pass does not own (P8, match/enum dispatch, a later pass's scope).
     MemoryManager mm;
     DecodedFunction fn =
         decodeScript("match [1, 2] { case [a, b] => a + b case _ => 0 };", mm);

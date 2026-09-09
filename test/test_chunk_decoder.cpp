@@ -1,6 +1,6 @@
 // test_chunk_decoder.cpp — decoder/chunk-walker round-trip tests.
 //
-// The checkpoint (notes/backend-implementation-dag.md, node N0): re-disassemble
+// The checkpoint (see notes/backend-implementation-dag.md): re-disassemble
 // every chunk in the compiled ObjFunction tree with the new decoder, and
 // compare the result against disassembleChunk (src/debug.cpp) — the oracle —
 // string for string. `renderInstruction` below turns a DecodedInstruction
@@ -86,7 +86,7 @@ const char* mnemonic(Op op) {
 }
 
 // Every Op enumerator, in declaration order. Used by the opcode-coverage
-// test (R1) to fail when the corpus never exercises one of them.
+// test to fail when the corpus never exercises one of them.
 std::vector<Op> allOps() {
     return {
 #define LOXPP_OP_VALUE(name) Op::name,
@@ -210,10 +210,10 @@ std::string oracleDisassembly(const DecodedFunction& node,
     return out.str();
 }
 
-// R2 fix: the number of function-typed constants in `chunk`'s own pool must
+// The number of function-typed constants in `chunk`'s own pool must
 // equal `nested.size()`, at every level of the walk — not only at the root.
-// A walker that silently drops functions below some depth (proven possible
-// by the reviewer) fails this at the first dropped level, even though every
+// A walker that silently drops functions below some depth fails this at the
+// first dropped level, even though every
 // node it does produce still renders correct text.
 int countFunctionConstants(const Chunk& chunk) {
     int count = 0;
@@ -249,7 +249,7 @@ void checkNode(const DecodedFunction& node, const MemoryManager& mm,
         << "walker found a different number of nested functions than the "
         << "chunk's own constant pool holds";
 
-    // R4 fix: a CLOSURE's nestedIndex must name its own target function, not
+    // A CLOSURE's nestedIndex must name its own target function, not
     // some other same-shaped node.
     for (const DecodedInstruction& ins : node.instructions) {
         if (ins.op != Op::CLOSURE) {
@@ -352,7 +352,7 @@ TEST(ChunkDecoderTest, AssignsStableDeterministicIdentity) {
     EXPECT_NE(tree.nested[0].function, tree.nested[1].function);
 }
 
-// R1 fix: a decoder bug in one opcode's width shifts every later instruction
+// A decoder bug in one opcode's width shifts every later instruction
 // in the chunk to a wrong offset, but the three tests above cannot see that
 // for an opcode the corpus never emits. This test closes that gap for good:
 // it fails on any Op enumerator with a corpus-wide count of zero, for this

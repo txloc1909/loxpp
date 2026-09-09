@@ -52,17 +52,17 @@ each has an off-the-shelf solution.
 | `15_nested_arith` | operand-stack high-water mark (CIL `.maxstack`) | P1 |
 | `16_slice_in` | `SLICE`/`IN` arg order and arity | P8 |
 | `17_super_value` | `GET_SUPER` reads a super method as a value, not a call | P4 |
-| `18_peek_of_named_local` | a `SET_LOCAL` peek reads a value N2 already folded into a named local, not a stack temp | P1, P2 |
+| `18_peek_of_named_local` | a `SET_LOCAL` peek reads a value the abstract-stack analysis already folded into a named local, not a stack temp | P1, P2 |
 | `19_peek_of_named_local_global` | same fact through `SET_GLOBAL`, inside a block scope | P1, P2 |
 | `20_float_imprecise_constant` | a number constant a 32-bit float cannot hold exactly | P2 |
 | `21_exponent_constant` | a number constant whose exponent text has no decimal point (jasmin rejects it) | P2 |
 | `22_and_or_assignment_statement` | an `and`/`or` right side ends in an assignment; the merge `POP` is also a CFG block leader | P2, P3 |
-| `23_and_or_local_initializer` | `JUMP_IF_FALSE` on a condition N2 already folded into a named local, not a stack temp | P2, P3 |
+| `23_and_or_local_initializer` | `JUMP_IF_FALSE` on a condition the abstract-stack analysis already folded into a named local, not a stack temp | P2, P3 |
 | `24_call_before_closure` | a global function called before its own `fun` declaration has run: late-bound globals must fail, not silently succeed | P5 |
 | `25_seq_map_string_coverage` | `IS_SEQ` via a discarded `match` sequence pattern (list, string, map subject), `SLICE` on a List, `in` on a String and a Map, iteration over a String and a Map, `BUILD_MAP` with 3 pairs | P7, P8 |
 | `26_enum_match_dispatch_and_error` | dense enum `match` dispatches to the correct arm; every arm's guard false raises a real, reachable `MATCH_ERROR` through the sparse compare-and-branch form | P8 |
 | `27_jump_table_default_cross_enum` | the literal `JUMP_TABLE` "out of range" default, reached with a table-eligible match's subject from a DIFFERENT enum than its arms | P8 |
-| `28_folded_match_operand_family` | `normalizeFoldedOperands`'s own required coverage: the nine R15 shapes (`BUILD_LIST`, `BUILD_MAP`, `CALL`, `GET_PROPERTY`, `INVOKE`, `SET_PROPERTY`, `SET_INDEX`, `SLICE`, `IN`, each with a folded operand) plus one nested match subject; `RETURN` of a folded match is deliberately not repeated here (`checkReturnHeightZero` excludes probes by design) — `examples/or_pattern_demo.lox` already covers it | P8 |
+| `28_folded_match_operand_family` | `normalizeFoldedOperands`'s own required coverage: the nine folded-operand shapes (`BUILD_LIST`, `BUILD_MAP`, `CALL`, `GET_PROPERTY`, `INVOKE`, `SET_PROPERTY`, `SET_INDEX`, `SLICE`, `IN`, each with a folded operand) plus one nested match subject; `RETURN` of a folded match is deliberately not repeated here (`checkReturnHeightZero` excludes probes by design) — `examples/or_pattern_demo.lox` already covers it | P8 |
 | `29_os_access` | the OS/world access natives (`args`, `env`, `exists`, `is_dir`, `is_file`, `stat`, `sleep`) must run byte-identically on both runtimes — the JVM runtime registers them too (`LoxRuntime`), and this probe guards against a future drift | none (parity gate, N11) |
 | `30_bool_compare_and_string_literal` | every comparison spelling (`==`, `!=`, `>`, `>=`, `<`, `<=`, each lowering to EQUAL/GREATER/LESS optionally paired with NOT), a standalone `!`, `%`, the `true`/`false`/`nil` literals printed as values in their own right, and a string constant with a quote, a backslash, and a tab | P2 |
 | `clr-only/31_deep_recursion` | native's own frame-count ceiling (`src/vm.h` `FRAMES_MAX`), reached through ordinary self-recursive `CALL`s, must fail identically on a backend whose calling convention has no ceiling of its own — CLR-only, see the note below the table | P5, P6 |
