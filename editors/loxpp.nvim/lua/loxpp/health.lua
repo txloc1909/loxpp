@@ -20,15 +20,17 @@ function M.check()
   start("loxpp.nvim")
 
   -- Neovim version
-  if vim.fn.has("nvim-0.10") == 1 then
-    ok("Neovim " .. tostring(vim.version()))
-  else
-    error_("Neovim 0.10 or later is required")
-  end
+  local v = vim.version()
+  local vstr = ("%d.%d.%d"):format(v.major, v.minor, v.patch)
   if vim.fn.has("nvim-0.11") == 1 then
-    ok("LSP client API: vim.lsp.config / vim.lsp.enable (Neovim >= 0.11)")
+    ok("Neovim " .. vstr .. " (>= 0.11: vim.lsp.config / vim.lsp.enable)")
+  elseif vim.fn.has("nvim-0.10") == 1 then
+    warn(
+      "Neovim " .. vstr .. ": the LSP layer needs nvim-lspconfig, and "
+        .. "tree-sitter parser detection may misreport. 0.11+ recommended."
+    )
   else
-    warn("Neovim < 0.11: the LSP layer needs nvim-lspconfig")
+    error_("Neovim 0.10 or later is required (0.11+ recommended)")
   end
 
   -- Binaries
@@ -52,11 +54,12 @@ function M.check()
     warn("nvim-treesitter not found: the tree-sitter layer is off")
   end
 
-  -- The compiled parser. `vim.treesitter.language.add` returns `true` on
-  -- success and `nil, <message>` on a missing parser (it does not raise), so
-  -- pcall alone always looks like success.
+  -- The compiled parser. On Neovim >= 0.11 `vim.treesitter.language.add`
+  -- returns `true` on success and `nil, <message>` on a missing parser (it
+  -- does not raise), so pcall alone always looks like success.
   local add_ok, added = pcall(vim.treesitter.language.add, "loxpp")
-  if add_ok and added == true then
+  local have = add_ok and (vim.fn.has("nvim-0.11") == 0 or added == true)
+  if have then
     ok("tree-sitter parser `loxpp` is compiled and on runtimepath")
   else
     warn(

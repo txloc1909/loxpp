@@ -97,12 +97,19 @@ local function setup_treesitter(cfg)
 end
 
 -- True when a compiled parser for `loxpp` is reachable on 'runtimepath'.
--- `vim.treesitter.language.add` does not raise for a missing parser: it
--- returns `true` on success and `nil, <message>` otherwise, so pcall alone
--- is not enough.
+-- On Neovim >= 0.11 `vim.treesitter.language.add` returns `true` on success
+-- and `nil, <message>` for a missing parser (no raise), so pcall alone is not
+-- enough. On 0.10 it raises on failure and returns nil on success, which the
+-- `added ~= nil or ok` shape below also covers.
 local function parser_available()
   local ok, added = pcall(vim.treesitter.language.add, LANG)
-  return ok and added == true
+  if not ok then
+    return false
+  end
+  if vim.fn.has("nvim-0.11") == 1 then
+    return added == true
+  end
+  return true -- 0.10: pcall succeeded, so the parser loaded
 end
 
 local warned_no_parser = false

@@ -166,8 +166,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: ccache-debug-${{ github.sha }}
+          key: ccache-nvim-plugin-${{ github.sha }}
           restore-keys: |
+            ccache-nvim-plugin-
             ccache-debug-
 
       - name: Build binaries, parser, and run the headless smoke test
@@ -194,8 +195,20 @@ jobs:
               export PATH="/workspace/build:$PATH"
               ( cd editors/tree-sitter-loxpp && tree-sitter generate )
               editors/loxpp.nvim/scripts/build-parser.sh
-              nvim --headless "+checkhealth loxpp" -c "w! /tmp/health.txt" -c "qa!"
+              nvim --headless \
+                --cmd "set rtp+=editors/loxpp.nvim" \
+                --cmd "set rtp+=$LOXPP_NVIM_PLUGINS/nvim-treesitter" \
+                --cmd "set rtp+=$LOXPP_NVIM_PLUGINS/nvim-lint" \
+                "+checkhealth loxpp" -c "w! /tmp/health.txt" -c "qa!"
               cat /tmp/health.txt
+              if grep -q "No healthcheck found" /tmp/health.txt; then
+                echo "FAIL: :checkhealth loxpp did not find the health module"
+                exit 1
+              fi
+              grep -q "loxpp-lsp .* on PATH" /tmp/health.txt \
+                || { echo "FAIL: checkhealth did not see loxpp-lsp"; exit 1; }
+              grep -q "parser .loxpp. is compiled" /tmp/health.txt \
+                || { echo "FAIL: checkhealth did not see the compiled parser"; exit 1; }
               tools/check_nvim_plugin.sh
               tools/check_nvim_plugin.sh --fallback
               # Prove the LSP-attach check can fail: a server that exits at once.
