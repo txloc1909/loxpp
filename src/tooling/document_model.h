@@ -1,10 +1,10 @@
 #pragma once
 
 // One open source file, parsed and resolved, with the queries the LSP
-// navigation handlers (N8) need.
+// navigation handlers need.
 //
 // rebuild() replaces the text and re-runs the whole pipeline (parse +
-// resolve). It is called on every debounced keystroke in N8, so it allocates
+// resolve). It is called on every debounced keystroke, so it allocates
 // only what a fresh parse and resolve need -- no incremental state is kept
 // between edits.
 
@@ -75,7 +75,7 @@ class DocumentModel {
     // The user-defined symbol whose declaration or a use covers offset, or
     // null. A null result does NOT mean "nothing here": the offset may sit on
     // a stdlib global, which has no Symbol. Call knownGlobalAt() to tell the
-    // two cases apart -- N8 hover and completion need that distinction.
+    // two cases apart -- hover and completion need that distinction.
     [[nodiscard]] const Symbol* symbolAt(std::size_t offset) const;
 
     // The stdlib global name at offset (for example "clock" or "len"), or an

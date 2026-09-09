@@ -5,7 +5,7 @@
 // resolve() walks a parsed Program, builds the scope tree and symbol table,
 // links every identifier reference to the Symbol it names (or to a stdlib
 // global, or to nothing), and reports lint-level problems as Warning / Info
-// diagnostics. The authoritative compile errors stay with src/analyze.h (N3);
+// diagnostics. The authoritative compile errors stay with src/analyze.h;
 // this pass never produces an Error.
 //
 // Globals in Lox++ are late-bound: a function body may name a global declared

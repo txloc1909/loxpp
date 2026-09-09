@@ -49,8 +49,8 @@ WORKDIR /workspace
 
 # --- dev-editors -----------------------------------------------------------
 # Adds Node.js and the tree-sitter CLI for the editors/tree-sitter-loxpp
-# grammar (node N4). Kept out of `dev` so the C++-only jobs do not load a
-# JavaScript runtime they never use. Node N9 extends this same stage with
+# grammar. Kept out of `dev` so the C++-only jobs do not load a
+# JavaScript runtime they never use. This stage also adds
 # Neovim for the plugin smoke test.
 FROM dev AS dev-editors
 
@@ -65,7 +65,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # harness behaviour.
 RUN npm install -g tree-sitter-cli@0.25.10
 
-# Neovim for the editors/loxpp.nvim headless smoke test (node N9). Ubuntu
+# Neovim for the editors/loxpp.nvim headless smoke test. Ubuntu
 # 24.04 ships 0.9.5, which is older than the >= 0.11 the plugin needs for the
 # vim.lsp.config / vim.lsp.enable path, so take the upstream stable tarball at
 # a pinned version. The release asset is nvim-linux-x86_64.tar.gz from 0.10.4

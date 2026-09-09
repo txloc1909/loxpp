@@ -11,7 +11,7 @@ Three layers, each optional:
 | `loxpp --check` fallback | compiler static errors on save | `loxpp` on `$PATH`, [`nvim-lint`](https://github.com/mfussenegger/nvim-lint) |
 
 Filetype detection, buffer options, a regex syntax fallback, and a
-`:compiler lox` quickfix workflow (node N6) load on their own — no setup, and
+`:compiler lox` quickfix workflow load on their own — no setup, and
 they work in plain Vim too.
 
 ## Build the pieces
@@ -93,11 +93,11 @@ optional plugin dependencies.
 ## Files
 
 ```
-ftdetect/    *.lox -> filetype lox            (N6)
-ftplugin/    commentstring, comments, ...      (N6)
-syntax/      regex highlighter, the fallback   (N6)
-compiler/    :compiler lox -> loxpp --check    (N6)
-queries/     tree-sitter highlights/locals/folds/indents  (from N4)
+ftdetect/    *.lox -> filetype lox
+ftplugin/    commentstring, comments, ...
+syntax/      regex highlighter, the fallback
+compiler/    :compiler lox -> loxpp --check
+queries/     tree-sitter highlights/locals/folds/indents
 lua/loxpp/   init (setup), lint (nvim-lint spec), health
 plugin/      load guard + lazy bootstrap
 scripts/     build-parser.sh

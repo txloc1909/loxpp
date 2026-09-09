@@ -115,17 +115,18 @@ class Parser {
     // Why 500. The deepest expression anywhere in the example / bootstrap /
     // translation-probe corpus is 16 levels, so 500 is ~30x above real
     // Lox++ code. The ceiling is set by the smallest stack that later
-    // consumers run on: an LSP request handler (N8) runs on a worker thread
+    // consumers run on: an LSP request handler runs on a worker thread
     // with a stack near 512 KB, against 8 MB for main. Destroying or walking
     // the tree recurses once per level; a left-leaning chain overflows an
     // 8 MB stack near 45000 levels (~200 B per frame), so on a 512 KB worker
     // it overflows near ~2600 levels. A cap of 500 keeps a factor of ~5 for
-    // teardown and a comfortable margin for N7's recursive resolver walk,
+    // teardown and a comfortable margin for the recursive resolver walk,
     // which DocumentModel::rebuild() runs on every debounced keystroke.
-    // N7 and N8 rely on this bound instead of adding their own limit.
+    // The resolver and the LSP server rely on this bound instead of adding
+    // their own limit.
     //
     // Because depth is bounded here, iterative or deferred teardown of the
-    // tree is unnecessary: ~Program recursion stays shallow. A later node
+    // tree is unnecessary: ~Program recursion stays shallow. A later stage
     // that builds these nodes another way inherits the same bound.
     //
     // The value lives in the header as kMaxTreeDepth so consumers and tests
@@ -313,7 +314,7 @@ class Parser {
             return varDecl();
         }
         // `enum` is global-scope-only in the real compiler; the tooling parser
-        // still parses a misplaced one so N7 can note it.
+        // still parses a misplaced one so the resolver can note it.
         if (check(TokenType::ENUM)) {
             return enumDecl();
         }
@@ -1183,7 +1184,7 @@ class Parser {
             return ctorPattern(nameTok);
         }
         // A bare identifier here is a zero-field constructor or a class type
-        // check; recorded as a BindingPat for N7 to classify.
+        // check; recorded as a BindingPat for the resolver to classify.
         auto node = std::make_unique<BindingPat>();
         node->name = tokenText(nameTok);
         node->name_offset = nameTok.offset;

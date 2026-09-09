@@ -2,10 +2,10 @@
 
 // The stdlib global name set, and the members of the `math` object.
 //
-// Single source of truth for both the resolver (N7 -- decides whether an
+// Single source of truth for both the resolver (decides whether an
 // unresolved reference is a known global or a genuine unknown) and the LSP
-// server (N8 -- hover and completion). Cross-checked against src/stdlib/*.cpp
-// and src/math.cpp; see the PR body for the grep.
+// server (hover and completion). Cross-checked against the defineGlobal
+// calls in src/stdlib/*.cpp and the tables in src/math.cpp.
 
 #include <span>
 #include <string_view>

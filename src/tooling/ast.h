@@ -23,7 +23,8 @@
 // so explicitly). `ClassDecl::superclass` is the one `Name` that is a
 // reference, not a definition. Pattern head identifiers (BindingPat, CtorPat,
 // ClassPat) are genuinely ambiguous between a fresh binding and a constructor
-// reference; the parser records name + span only and leaves the role to N7.
+// reference; the parser records name + span only and leaves the role to the
+// resolver.
 
 #include <cstddef>
 #include <cstdint>
@@ -150,7 +151,7 @@ struct SliceExpr : Expr {
 
 // target is an IdentifierExpr, GetExpr, IndexExpr, or -- for `a[x:y] = v`,
 // which the real compiler rejects -- a SliceExpr. The tooling parser records
-// the shape and leaves rejection to N3/N7.
+// the shape and leaves rejection to the compiler and the resolver.
 struct AssignExpr : Expr {
     AssignExpr() : Expr(ExprKind::Assign) {}
     ExprPtr target;
@@ -341,7 +342,7 @@ struct VarDecl : Stmt {
 // `var {a, b} = e;` (record form, is_sequence == false) or
 // `var [a, b] = e;` (sequence form, is_sequence == true). Targets are
 // definitions; `_` in the sequence form is a discard, kept as a target named
-// "_" for N7 to skip.
+// "_" for the resolver to skip.
 struct DestructureDecl : Stmt {
     DestructureDecl() : Stmt(StmtKind::DestructureDecl) {}
     bool is_sequence = false;

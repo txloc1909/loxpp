@@ -33,8 +33,8 @@ add_compile_options(-Wno-c99-designator)
 
 include_directories(${PROJECT_SOURCE_DIR}/src)
 
-# The interpreter front-end and runtime, shared by the loxpp executable and,
-# from the editor-tooling mission onward, the loxpp-lsp binary and the
+# The interpreter front-end and runtime, shared by the loxpp executable, the
+# loxpp-lsp binary, and the
 # src/tooling analysers. main.cpp is the only source that stays on the
 # executable. jvm_emitter.cpp / clr_emitter.cpp are added below, gated on
 # their options.
@@ -79,7 +79,7 @@ target_include_directories(loxpp_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
 # stay layout-compatible.
 set(LOXPP_CORE_PUBLIC_DEFINITIONS "")
 
-# The JVM code generator (backend node N4 onward). Default ON so CI builds
+# The JVM code generator. Default ON so CI builds
 # and checks it; OFF drops --target jvm from the CLI for a build that wants
 # the native VM only.
 option(LOXPP_JVM_BACKEND
@@ -168,11 +168,11 @@ if(LOXPP_CORE_PUBLIC_DEFINITIONS)
     target_compile_definitions(loxpp_core PUBLIC ${LOXPP_CORE_PUBLIC_DEFINITIONS})
 endif()
 
-# Standalone editor-tooling analysers (editor-tooling mission, node N5
-# onward). The tooling parser builds its own AST with source spans; it reuses
+# Standalone editor-tooling analysers. The tooling parser builds its own AST
+# with source spans; it reuses
 # only the Scanner and Token from the core, so it links loxpp_core rather than
 # recompiling scanner.cpp / token.cpp -- that keeps one copy of those objects
-# in the build graph, which the loxpp-lsp binary (N8) needs when it links
+# in the build graph, which the loxpp-lsp binary needs when it links
 # loxpp_core and the src/tooling objects together. loxpp_tooling carries only
 # the new tooling sources.
 add_library(loxpp_tooling OBJECT
@@ -226,7 +226,7 @@ else()
     message(STATUS "Readline support: OFF")
 endif()
 
-# The loxpp-lsp language server (editor-tooling mission, node N8). A second
+# The loxpp-lsp language server. A second
 # binary in the same build. It links loxpp_core (Scanner + analyze()) and the
 # src/tooling analysers, and vendors nlohmann/json from third_party/. Default
 # ON so CI builds it; OFF drops it for a build that wants the interpreter only.

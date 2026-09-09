@@ -1,6 +1,6 @@
 -- nvim-lint linter spec: `loxpp --check --format json <file>`.
 --
--- N3's JSON is an array of LSP-shaped, 0-based objects:
+-- `loxpp --check --format json` emits an array of LSP-shaped, 0-based objects:
 --   { line, character, endLine, endCharacter, severity, message }
 -- which maps straight onto `vim.diagnostic` items (also 0-based).
 --

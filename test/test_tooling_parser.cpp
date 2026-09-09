@@ -47,7 +47,8 @@ std::vector<fs::path> corpusFiles() {
 // A full span audit: every node of every kind -- Stmt, Expr, Pattern -- plus
 // every bare Name, Param, and sub-name span (`.name`, `super.name`, pattern
 // heads, sequence elements, arm ranges) must lie inside [0, source.size()].
-// N7 walks these same spans, so an out-of-bounds one is a latent crash there.
+// The resolver walks these same spans, so an out-of-bounds one is a latent
+// crash there.
 struct SpanAudit {
     std::string_view src;
     std::string file;
@@ -753,7 +754,7 @@ TEST(ToolingParserEnum, MisplacedEnumStillParses) {
     EXPECT_EQ(en->ctors.size(), 2U);
 }
 
-// R1: a first token that cannot start a declaration or statement, and a
+// A first token that cannot start a declaration or statement, and a
 // lone unterminated string, must not underflow the token cursor. Each one
 // returns a Program (possibly empty) with every span inside the buffer.
 TEST(ToolingParserAdversarial, FirstTokenCannotStartAnythingDoesNotCrash) {
@@ -778,7 +779,7 @@ TEST(ToolingParserAdversarial, FirstTokenCannotStartAnythingDoesNotCrash) {
     }
 }
 
-// R1 companion: the same unexpected leading token followed by real code --
+// Companion: the same unexpected leading token followed by real code --
 // the parser must recover and still surface the later declaration.
 TEST(ToolingParserAdversarial, RecoversAfterUnexpectedLeadingToken) {
     const std::string src = ") fun after() { var x = 1; }";
@@ -792,7 +793,7 @@ TEST(ToolingParserAdversarial, RecoversAfterUnexpectedLeadingToken) {
     EXPECT_TRUE(sawAfter);
 }
 
-// R2 / R3 / R4: no input, however deep, overflows the C++ stack -- not while
+// No input, however deep, overflows the C++ stack -- not while
 // parsing, and not while the returned Program is destroyed. One counter
 // (kMaxTreeDepth) bounds the tree depth along any root-to-leaf path, covering
 // recursive-descent nesting AND loop-built left-leaning chains (the six
@@ -811,7 +812,8 @@ TEST(ToolingParserAdversarial, DeepNestingDoesNotOverflowStack) {
     // (a) Loop-built left-leaning chains: one rule activation, kUnits loop
     // turns, kUnits nodes on the left spine. `~BinaryExpr` / `~LogicalExpr` /
     // `~GetExpr` / `~CallExpr` / `~IndexExpr` each recurse once per spine
-    // node on teardown -- this is the R4 class. The loop-turn counter caps
+    // node on teardown -- this is the deep-chain-teardown class. The
+    // loop-turn counter caps
     // the spine.
     auto chain = [](const std::string& head, const std::string& unit) {
         std::string s = "var x = ";

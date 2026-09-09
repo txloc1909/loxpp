@@ -2,8 +2,8 @@
 
 // The Lox++ language server: capability advertisement and request handlers.
 //
-// Diagnostics come from analyze() (src/analyze.h, N3) plus the resolver
-// warnings on the N7 DocumentModel. Navigation, hover, and completion come
+// Diagnostics come from analyze() (src/analyze.h) plus the resolver
+// warnings on the DocumentModel. Navigation, hover, and completion come
 // from that same DocumentModel. The server holds no language knowledge of its
 // own beyond the keyword and stdlib doc tables.
 

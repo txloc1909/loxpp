@@ -141,7 +141,7 @@ loxpp_add_test(test_tooling_resolver test_tooling_resolver.cpp CORE loxpp_toolin
 target_link_libraries(test_tooling_resolver PRIVATE loxpp_core)
 loxpp_add_test(test_check_diagnostics test_check_diagnostics.cpp CORE loxpp_test_core)
 
-# loxpp-lsp building blocks (node N8): JSON-RPC framing, CRLF handling, the
+# loxpp-lsp building blocks: JSON-RPC framing, CRLF handling, the
 # diagnostics debounce, and the stdlib doc table. Links the src/lsp sources
 # (minus main.cpp) plus the tooling analysers and vendored json.hpp.
 if(LOXPP_LSP)

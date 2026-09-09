@@ -2,9 +2,10 @@
 
 // Scope tree and symbol table for the editor-tooling resolver.
 //
-// The resolver (resolver.h) walks the N5 AST and fills this structure: one
-// Scope per lexical region, one Symbol per declared name, and a use-span list
-// on each Symbol. The LSP navigation handlers (N8) read it back through
+// The resolver (resolver.h) walks the tooling AST and fills this structure:
+// one Scope per lexical region, one Symbol per declared name, and a use-span
+// list
+// on each Symbol. The LSP navigation handlers read it back through
 // DocumentModel.
 //
 // Names are stored as owned std::string, not string_view into the source, so
