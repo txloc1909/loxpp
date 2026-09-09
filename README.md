@@ -82,6 +82,38 @@ coding to a [self-hosted interpreter](bootstrap/loxpp_interpreter.lox).
 
 ---
 
+## Editor support
+
+Lox++ ships a first editor-tooling stack in [`editors/`](editors/):
+
+| Piece | Gives you | Needs |
+|---|---|---|
+| [`tree-sitter-loxpp`](editors/tree-sitter-loxpp/) | scope-aware highlighting, folds, indents | a compiled parser (or a Vim regex fallback) |
+| `loxpp-lsp` | diagnostics, hover, completion, document symbols, go-to-definition, references (all within one file) | the `loxpp-lsp` binary |
+| `loxpp --check` | the compiler's static errors, as text or JSON | the `loxpp` binary; a fallback for editors without the server |
+| [`loxpp.nvim`](editors/loxpp.nvim/) | all of the above wired for Neovim, plus filetype detection and buffer options for plain Vim | Neovim (a Vim regex + quickfix path works without the binaries) |
+
+Build the two binaries:
+
+```sh
+cmake --preset debug -DLOXPP_LSP=ON
+cmake --build build --target loxpp loxpp-lsp
+```
+
+Build the tree-sitter parser:
+
+```sh
+cd editors/tree-sitter-loxpp && tree-sitter generate && cd -
+editors/loxpp.nvim/scripts/build-parser.sh
+```
+
+Install the Neovim plugin: see [`editors/loxpp.nvim/README.md`](editors/loxpp.nvim/README.md).
+
+Design, the `loxpp --check` contract, the LSP capability set, and the
+feature-parity table: [`notes/editor-tooling.md`](notes/editor-tooling.md).
+
+---
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, workflow, and conventions.
