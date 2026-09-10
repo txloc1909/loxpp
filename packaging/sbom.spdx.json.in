@@ -1,0 +1,58 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "loxpp-@VERSION@",
+  "documentNamespace": "https://github.com/txloc1909/loxpp/spdx/loxpp-@VERSION@",
+  "creationInfo": {
+    "created": "@CREATED@",
+    "creators": [
+      "Tool: loxpp-release-workflow",
+      "Organization: txloc1909"
+    ]
+  },
+  "packages": [
+    {
+      "name": "loxpp",
+      "SPDXID": "SPDXRef-Package-loxpp",
+      "versionInfo": "@VERSION@",
+      "downloadLocation": "https://github.com/txloc1909/loxpp/releases/download/v@VERSION@/loxpp-@VERSION@-x86_64-linux.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "supplier": "Organization: txloc1909",
+      "primaryPackagePurpose": "APPLICATION"
+    },
+    {
+      "name": "isocline",
+      "SPDXID": "SPDXRef-Package-isocline",
+      "versionInfo": "@ISOCLINE_VERSION@",
+      "downloadLocation": "https://github.com/daanx/isocline/archive/refs/tags/v@ISOCLINE_VERSION@.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright (c) 2021 Daan Leijen",
+      "supplier": "Person: Daan Leijen",
+      "primaryPackagePurpose": "LIBRARY",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "@ISOCLINE_SHA256@"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-loxpp"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-loxpp",
+      "relationshipType": "STATIC_LINK",
+      "relatedSpdxElement": "SPDXRef-Package-isocline"
+    }
+  ]
+}
