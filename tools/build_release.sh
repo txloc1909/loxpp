@@ -55,7 +55,7 @@ parse_manifest() {
     fi
 
     # Parse targets = ["target1", "target2", ...]
-    if [[ "$line" =~ ^targets[[:space:]]*=\[(.+)\] ]]; then
+    if [[ "$line" =~ ^targets[[:space:]]*=[[:space:]]*\[(.+)\] ]]; then
       local targets_str="${BASH_REMATCH[1]}"
       # Strip quotes and commas, split by whitespace
       targets=$(echo "$targets_str" | sed 's/"//g; s/,/ /g' | tr -s ' ')
