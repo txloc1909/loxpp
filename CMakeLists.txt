@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(Lox++ VERSION 1.0 LANGUAGES CXX)
+project(Lox++ VERSION 1.0 LANGUAGES CXX C)
 
 # Install git hooks on every configure so agents get them automatically.
 execute_process(
@@ -201,27 +201,14 @@ else()
     target_link_libraries(loxpp PRIVATE loxpp_core)
 endif()
 
-# Readline support for the REPL. main.cpp is the only user, so the library,
-# the include directory, and the definition stay on the executable.
-find_library(READLINE_LIB readline)
-find_path(READLINE_INCLUDE_DIR readline/readline.h)
-if(READLINE_LIB AND READLINE_INCLUDE_DIR)
-    set(_readline_found_default ON)
-else()
-    set(_readline_found_default OFF)
-endif()
-option(LOXPP_USE_READLINE "Enable GNU Readline for the REPL" ${_readline_found_default})
-if(LOXPP_USE_READLINE)
-    if(NOT READLINE_LIB OR NOT READLINE_INCLUDE_DIR)
-        message(FATAL_ERROR "LOXPP_USE_READLINE=ON but readline library or headers not found.")
-    endif()
-    target_include_directories(loxpp PRIVATE ${READLINE_INCLUDE_DIR})
-    target_link_libraries(loxpp PRIVATE ${READLINE_LIB})
-    target_compile_definitions(loxpp PRIVATE LOXPP_USE_READLINE)
-    message(STATUS "Readline support: ON (${READLINE_LIB})")
-else()
-    message(STATUS "Readline support: OFF")
-endif()
+# isocline line editor for the REPL. Single translation unit build from
+# third_party/isocline/src/isocline.c. See third_party/isocline/README.md.
+add_library(loxpp_isocline STATIC
+    third_party/isocline/src/isocline.c
+)
+target_include_directories(loxpp_isocline PRIVATE third_party/isocline/include)
+target_include_directories(loxpp PRIVATE third_party/isocline/include)
+target_link_libraries(loxpp PRIVATE loxpp_isocline)
 
 # The loxpp-lsp language server. A second binary in the same build. It links
 # loxpp_core (Scanner + analyze()) and the src/tooling analysers, and vendors
@@ -245,5 +232,9 @@ if(LOXPP_LSP)
     target_include_directories(loxpp-lsp PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
 endif()
 
-enable_testing()
-add_subdirectory(test)
+option(LOXPP_BUILD_TESTS "Build the GTest suite" ON)
+
+if(LOXPP_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(test)
+endif()
