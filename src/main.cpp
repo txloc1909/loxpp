@@ -4,6 +4,7 @@
 #include "json_escape.h"
 #include "scanner.h"
 #include "vm.h"
+#include "loxpp_version.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -304,6 +305,29 @@ static int runClrTarget(const std::string& outDir, const std::string& path) {
 #endif
 
 int main(int argc, const char* argv[]) {
+    // loxpp --version — print the version and bundled library info.
+    if (argc >= 2 && std::string(argv[1]) == "--version") {
+        std::printf("loxpp %s\n", LOXPP_VERSION);
+        std::printf("Bundled: isocline %s (© Daan Leijen, MIT)\n",
+                    LOXPP_ISOCLINE_VERSION);
+        return 0;
+    }
+
+    // loxpp --help — print usage information.
+    if (argc >= 2 && std::string(argv[1]) == "--help") {
+        std::printf("Usage:\n");
+        std::printf("  loxpp [path]                           Run a script or "
+                    "enter REPL\n");
+        std::printf("  loxpp --version                        Print version "
+                    "and dependencies\n");
+        std::printf("  loxpp --help                           Print this help "
+                    "message\n");
+        std::printf("  loxpp --check [--format text|json] <file>\n");
+        std::printf("                                         Check syntax "
+                    "without running\n");
+        return 0;
+    }
+
     // loxpp --check [--format text|json] <file> — static error check only,
     // never runs the program. Intercepted before the VM path like --target.
     if (argc >= 2 && std::string(argv[1]) == "--check") {
