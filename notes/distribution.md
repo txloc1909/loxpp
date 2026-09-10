@@ -42,9 +42,11 @@ replaced it with isocline (MIT, by Daan Leijen):
 - **MIT licensed:** vendoring it keeps the binary MIT.
 - **Full history and completion:** same REPL experience, one library.
 
-Isocline is vendored in `third_party/isocline/`, copied **verbatim** from
-upstream. No edits, no reformatting. The single upstream change is a symlink
-in the header comment for relative include paths, kept as-is.
+Isocline is vendored in `third_party/isocline/`, copied **verbatim** from the
+pinned upstream release (`v1.1.0`). No edits, no reformatting. Every per-file
+copyright header is kept. The provenance record — upstream URL, tag, archive
+SHA-256, fetch date, files vendored, directories dropped — is in
+`third_party/isocline/README.md`.
 
 ## Why cosign keyless, not a long-lived GPG key
 

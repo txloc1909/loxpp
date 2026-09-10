@@ -78,27 +78,32 @@ Extract the tarball and test the binary:
 
 ```bash
 tar -xzf loxpp-X.Y.Z-x86_64-linux.tar.gz
-./loxpp-X.Y.Z-x86_64-linux/loxpp --version
-./loxpp-X.Y.Z-x86_64-linux/loxpp examples/hello.lox
+cd loxpp-X.Y.Z-x86_64-linux
+./loxpp --version
+./loxpp examples/fibonacci.lox
 ```
 
 Also test the installer in a clean environment:
 
 ```bash
-docker run -it --rm ubuntu:24.04 bash -c '
-  apt-get update && apt-get install -y curl
-  curl -fsSL https://github.com/txloc1909/loxpp/releases/download/vX.Y.Z/install.sh | sh
+docker run --rm ubuntu:24.04 bash -c '
+  apt-get update && apt-get install -y curl ca-certificates
+  curl -fsSL https://github.com/txloc1909/loxpp/releases/download/vX.Y.Z/install.sh | sh -s -- --version X.Y.Z
+  export PATH="$HOME/.local/bin:$PATH"
   loxpp --version
-  loxpp examples/hello.lox  # if examples are installed
 '
 ```
 
 ## Dry run
 
-To test the release pipeline without publishing:
+To test the release pipeline without publishing a stable release:
 
-1. Push a pre-release tag (e.g. `git tag v0.0.0-rc1 && git push origin v0.0.0-rc1`).
-2. Or use `workflow_dispatch`: `gh workflow run release.yml --repo txloc1909/loxpp -f ref=main -f dry_run=true`.
+1. `workflow_dispatch` — a true dry run, no tag, no public release:
+   `gh workflow run release.yml --repo txloc1909/loxpp -f ref=main -f dry_run=true`.
+2. Or push a pre-release tag (e.g. `git tag v0.1.0-rc1 && git push origin v0.1.0-rc1`).
+   This creates a real GitHub pre-release (and a real Rekor signature entry),
+   but never becomes "latest". Delete it after with
+   `gh release delete v0.1.0-rc1 --repo txloc1909/loxpp --yes --cleanup-tag`.
 
 A dry run builds and uploads to a uniquely named draft release, leaving
 `releases/latest` untouched.

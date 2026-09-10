@@ -124,8 +124,8 @@ curl -fsSL https://github.com/txloc1909/loxpp/releases/latest/download/SHA256SUM
 curl -fsSL https://github.com/txloc1909/loxpp/releases/latest/download/SHA256SUMS.cosign-bundle -O
 curl -fsSL https://github.com/txloc1909/loxpp/releases/latest/download/loxpp-0.1.0-x86_64-linux.tar.gz -O
 
-# Verify the checksum
-sha256sum -c SHA256SUMS
+# Verify the checksum (--ignore-missing: only the files you downloaded are checked)
+sha256sum --ignore-missing -c SHA256SUMS
 
 # Verify the cosign signature (requires cosign installed)
 cosign verify-blob \
@@ -140,14 +140,15 @@ gh attestation verify loxpp-0.1.0-x86_64-linux.tar.gz --repo txloc1909/loxpp
 
 ### Uninstall
 
-Remove these paths:
+Remove these paths (the `install.sh` defaults; `$XDG_DATA_HOME` replaces
+`~/.local/share` and `$XDG_CACHE_HOME` replaces `~/.cache` when set):
 
 - `~/.local/bin/loxpp` — the binary
 - `~/.local/share/man/man1/loxpp.1` — the manual page
-- `~/.config/bash/completion.d/loxpp` — bash completions (if present)
-- `~/.config/zsh/completion.d/_loxpp` — zsh completions (if present)
-- `~/.config/fish/completions/loxpp.fish` — fish completions (if present)
-- `~/.cache/loxpp/` — the REPL history cache
+- `~/.local/share/bash-completion/completions/loxpp` — bash completion (if present)
+- `~/.local/share/zsh/site-functions/_loxpp` — zsh completion (if present)
+- `~/.local/share/fish/vendor_completions.d/loxpp.fish` — fish completion (if present)
+- `~/.cache/loxpp/` — the REPL history
 
 ---
 
