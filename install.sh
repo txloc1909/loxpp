@@ -215,6 +215,10 @@ resolve_version() {
 # Follow a symlink at $BIN_DIR/loxpp to its real target, so an upgrade
 # writes the file the symlink points at, not the link. The atomic rename
 # then happens inside the real directory (one filesystem).
+#
+# TODO(editor-tooling distribution): this resolves one path for "loxpp"
+# only. A second shipped component (loxpp-lsp) needs a resolved path per
+# component - a small map or a per-component call, not one global.
 resolve_paths() {
     _dest="${BIN_DIR}/loxpp"
     if [ -L "$_dest" ] && command -v readlink >/dev/null 2>&1; then
@@ -227,6 +231,9 @@ resolve_paths() {
 
 # --- currently installed version ---------------------------------
 
+# TODO(editor-tooling distribution): reports the version of "loxpp" only.
+# A second shipped component needs its own version probe, and the
+# idempotency check in the main flow must compare each component, not one.
 installed_version() {
     _bin=""
     if [ -x "${BIN_DIR}/loxpp" ]; then
@@ -321,6 +328,9 @@ place_aux() {
 
 # --- one component: download, verify, place -----------------
 
+# TODO(editor-tooling distribution): places every component at the single
+# global INSTALL_PATH / INSTALL_DIR that resolve_paths set for "loxpp". A
+# second shipped component needs a target path of its own here.
 fetch_verify_install() {
     _comp="$1"
     _tarball="${_comp}-${VERSION}-${TARGET}.tar.gz"
@@ -350,7 +360,9 @@ fetch_verify_install() {
     say "Checking the SHA256..."
     (
         cd "$WORK" || exit 1
-        grep " ${_tarball}$" SHA256SUMS > SHA256SUMS.one \
+        # Fixed-string match on the two-space "sha256sum" field separator.
+        # A plain regex would read the "." in the asset name as "any char".
+        grep -F "  ${_tarball}" SHA256SUMS > SHA256SUMS.one \
             || { echo "no ${_tarball} line in SHA256SUMS" >&2; exit 1; }
         sha256sum -c SHA256SUMS.one
     ) >/dev/null 2>&1 || die \
@@ -360,7 +372,8 @@ fetch_verify_install() {
     verify_signature
 
     say "Installing ${_comp}..."
-    ( cd "$WORK" && tar -xzf "$_tarball" )
+    ( cd "$WORK" && tar -xzf "$_tarball" ) || die \
+        "cannot unpack ${_tarball}. The archive is corrupt. Nothing was installed."
     _extracted="${WORK}/${_comp}-${VERSION}-${TARGET}"
     [ -f "${_extracted}/${_comp}" ] || die \
         "the tarball has no ${_comp} binary."
@@ -373,7 +386,8 @@ fetch_verify_install() {
     cp "${_extracted}/${_comp}" "$TMP_BIN" || die \
         "cannot write to ${INSTALL_DIR}."
     chmod 0755 "$TMP_BIN"
-    mv -f "$TMP_BIN" "$INSTALL_PATH"
+    mv -f "$TMP_BIN" "$INSTALL_PATH" || die \
+        "cannot move the new binary over ${INSTALL_PATH}. Nothing was changed."
     TMP_BIN=""
     say "Installed ${INSTALL_PATH}"
 
