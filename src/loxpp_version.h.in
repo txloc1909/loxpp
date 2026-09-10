@@ -1,0 +1,22 @@
+// GENERATED FILE: loxpp_version.h
+//
+// This file is generated at configure time by cmake via configure_file().
+// The version string comes from `git describe --tags --always --dirty`,
+// run once at configure time only (not on every build). When the source is
+// not a git checkout, it falls back to the CMake project version.
+//
+// Do not edit this .in file by hand; hand-edit CMakeLists.txt to change
+// the version strategy.
+
+#pragma once
+
+// The current loxpp version: either the result of `git describe` or the
+// CMake project version fallback. This value is stamped into the binary
+// at configure time, so a release tag cuts a clean version with no
+// "-dirty" suffix.
+#define LOXPP_VERSION "@LOXPP_VERSION@"
+
+// The isocline version, read from third_party/isocline/README.md at
+// configure time. This constant is baked into `loxpp --version` so a
+// binary-only user sees which line-editing library is bundled.
+#define LOXPP_ISOCLINE_VERSION "@LOXPP_ISOCLINE_VERSION@"
