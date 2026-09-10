@@ -2,6 +2,10 @@ FROM ubuntu:24.04 AS dev
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# This stage carries clang 18 (glibc). The release-static stage carries
+# clang 20 (musl Alpine 3.22). These majors are recorded here so a future
+# version bump moves both stages together. No released Alpine matches clang 18;
+# alignment requires a newer Ubuntu base or an Alpine downgrade.
 # Install toolchain
 RUN apt-get update && apt-get install -y \
     clang \
@@ -138,3 +142,27 @@ RUN curl -fsSL "https://api.nuget.org/v3-flatcontainer/runtime.linux-x64.microso
     && install -Dm755 /tmp/ilasm/runtimes/linux-x64/native/ilasm \
         /usr/local/bin/ilasm \
     && rm -rf /tmp/ilasm.nupkg /tmp/ilasm
+
+# --- release-static --------------------------------------------------------
+# Alpine 3.22 with musl libc for a fully static build. Separate stage, same
+# Dockerfile, independent of the glibc dev stages above. This stage carries
+# clang 20 (musl); the dev stage carries clang 18 (glibc). Record both majors
+# in each stage so a compiler bump moves both together.
+FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS release-static
+
+# Alpine 3.22 carries clang 20.1.8 (musl). The dev stage on Ubuntu 24.04
+# carries clang 18.1.3 (glibc). The majors do not match. A future alignment
+# requires a newer Ubuntu with clang 20 or a downgrade to Alpine 3.21
+# (clang 19, ~4 weeks support left as of 2026-09). The durable fix is a
+# newer Ubuntu base when released. Record both majors so a bump is deliberate.
+RUN apk add --no-cache \
+    bash ccache clang lld cmake ninja make g++ musl-dev libstdc++-dev \
+    linux-headers binutils python3 git
+
+# ccache is shared across all stages (see dev stage comment). Raise
+# CCACHE_MAXSIZE to 20G to provide enough cache for both glibc and musl
+# object files across all stages.
+ENV CCACHE_DIR=/ccache
+ENV CCACHE_MAXSIZE=20G
+
+WORKDIR /workspace

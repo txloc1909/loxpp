@@ -1,0 +1,9 @@
+[[component]]
+name    = "loxpp"
+targets = ["loxpp"]
+shipped = true
+
+[[component]]
+name    = "loxpp-lsp"
+targets = ["loxpp-lsp"]
+shipped = false
