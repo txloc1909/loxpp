@@ -7,6 +7,7 @@
 #include "loxpp_version.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <iostream>
 #include <fstream>
@@ -36,7 +37,10 @@
 
 #include <isocline.h>
 #include <cstdlib>
+#include <regex>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 static std::string xdg_history_path() {
     const char* xdg = std::getenv("XDG_CACHE_HOME");
@@ -305,6 +309,339 @@ static int runClrTarget(const std::string& outDir, const std::string& path) {
 #define LOXPP_TARGET_USAGE_LIST "{clr}"
 #endif
 
+// --- loxpp upgrade -------------------------------------------------------
+//
+// `loxpp upgrade` is a thin front-end over install.sh. It never downloads
+// or verifies the binary itself: it fetches the canonical install.sh and
+// runs it with `sh`. All TLS, checksum, and signature logic stays in the
+// script, so the binary carries no CA bundle and there is one copy of the
+// verify path.
+
+namespace {
+
+// The installer that `loxpp upgrade` runs. `raw ... /main/install.sh` is
+// always the current script, so a fix to the verify logic reaches every
+// installed binary on its next upgrade. The URL is fixed with no override:
+// `loxpp upgrade` runs code from this path with the user's rights, so a
+// changed environment must not be able to redirect it to another script.
+constexpr const char* kInstallShUrl =
+    "https://raw.githubusercontent.com/txloc1909/loxpp/main/install.sh";
+
+// The SHA256SUMS of the newest non-pre-release. github.com, not the API, so
+// there is no rate limit. install.sh reads the same file the same way.
+constexpr const char* kLatestSumsUrl =
+    "https://github.com/txloc1909/loxpp/releases/latest/download/SHA256SUMS";
+
+bool hasCommand(const char* name) {
+    std::string probe = "command -v ";
+    probe += name;
+    probe += " >/dev/null 2>&1";
+    return std::system(probe.c_str()) == 0;
+}
+
+std::string singleQuote(const std::string& s) {
+    std::string out = "'";
+    for (char c : s) {
+        if (c == '\'') {
+            out += "'\\''";
+        } else {
+            out += c;
+        }
+    }
+    out += "'";
+    return out;
+}
+
+// Run `curl`/`wget` through the shell and return the response body, or
+// nullopt when neither tool is present or the transfer fails.
+std::optional<std::string> httpGet(const std::string& url) {
+    std::string cmd;
+    if (hasCommand("curl")) {
+        cmd = "curl -fsSL " + singleQuote(url);
+    } else if (hasCommand("wget")) {
+        cmd = "wget -q -O - " + singleQuote(url);
+    } else {
+        return std::nullopt;
+    }
+    // The caller prints its own message on failure; keep the transport
+    // tool's own stderr out of the way.
+    cmd += " 2>/dev/null";
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (pipe == nullptr) {
+        return std::nullopt;
+    }
+    std::string body;
+    std::string chunk(4096, '\0');
+    size_t got = 0;
+    while ((got = std::fread(chunk.data(), 1, chunk.size(), pipe)) > 0) {
+        body.append(chunk.data(), got);
+    }
+    int status = pclose(pipe);
+    if (status != 0) {
+        return std::nullopt;
+    }
+    return body;
+}
+
+// Pull the version out of an asset name, e.g.
+// "loxpp-0.1.0-x86_64-linux.tar.gz" -> "0.1.0". Non-greedy so the capture
+// stops at the first "-x86_64-linux".
+std::optional<std::string> versionFromSums(const std::string& sums) {
+    static const std::regex asset(R"(loxpp-(.+?)-x86_64-linux\.tar\.gz)");
+    std::smatch match;
+    if (std::regex_search(sums, match, asset)) {
+        return match[1].str();
+    }
+    return std::nullopt;
+}
+
+struct SemVer {
+    long major = 0;
+    long minor = 0;
+    long patch = 0;
+    std::string pre;
+    bool parsed = false;
+};
+
+SemVer parseSemVer(const std::string& text) {
+    static const std::regex form(R"(^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$)");
+    std::smatch match;
+    SemVer out;
+    if (std::regex_match(text, match, form)) {
+        out.major = std::stol(match[1].str());
+        out.minor = std::stol(match[2].str());
+        out.patch = std::stol(match[3].str());
+        out.pre = match[4].matched ? match[4].str() : "";
+        out.parsed = true;
+    }
+    return out;
+}
+
+// Returns <0 when `a` is older, 0 when equal, >0 when `a` is newer. A
+// pre-release suffix (0.1.0-rc1) sorts before the same version with none
+// (0.1.0), per semver. Unparseable input falls back to a string compare.
+int compareVersions(const std::string& a, const std::string& b) {
+    SemVer va = parseSemVer(a);
+    SemVer vb = parseSemVer(b);
+    if (!va.parsed || !vb.parsed) {
+        return a.compare(b);
+    }
+    if (va.major != vb.major) {
+        return va.major < vb.major ? -1 : 1;
+    }
+    if (va.minor != vb.minor) {
+        return va.minor < vb.minor ? -1 : 1;
+    }
+    if (va.patch != vb.patch) {
+        return va.patch < vb.patch ? -1 : 1;
+    }
+    if (va.pre == vb.pre) {
+        return 0;
+    }
+    if (va.pre.empty()) {
+        return 1;
+    }
+    if (vb.pre.empty()) {
+        return -1;
+    }
+    return va.pre < vb.pre ? -1 : 1;
+}
+
+// Resolve the real path of this executable through /proc/self/exe (which
+// dereferences a ~/.local/bin/loxpp symlink) and return its directory.
+std::optional<std::string> exeDir() {
+    std::string buffer(4096, '\0');
+    ssize_t len = ::readlink("/proc/self/exe", buffer.data(), buffer.size());
+    if (len <= 0 || static_cast<size_t>(len) >= buffer.size()) {
+        return std::nullopt;
+    }
+    buffer.resize(static_cast<size_t>(len));
+    size_t slash = buffer.find_last_of('/');
+    if (slash == std::string::npos) {
+        return std::string(".");
+    }
+    if (slash == 0) {
+        return std::string("/");
+    }
+    return buffer.substr(0, slash);
+}
+
+std::optional<std::string> latestReleaseVersion() {
+    std::optional<std::string> sums = httpGet(kLatestSumsUrl);
+    if (!sums) {
+        return std::nullopt;
+    }
+    return versionFromSums(*sums);
+}
+
+// `loxpp upgrade --check`: compare the running version to the newest
+// release. Changes nothing.
+int runUpgradeCheck() {
+    std::optional<std::string> latest = latestReleaseVersion();
+    if (!latest) {
+        std::fprintf(stderr,
+                     "loxpp upgrade --check: cannot read the latest release. "
+                     "Need curl or wget and a network connection.\n");
+        return 74;
+    }
+    const std::string current = LOXPP_VERSION;
+    if (compareVersions(current, *latest) >= 0) {
+        std::printf("loxpp is up to date (%s)\n", current.c_str());
+    } else {
+        std::printf("loxpp %s is available (you have %s); run: loxpp upgrade\n",
+                    latest->c_str(), current.c_str());
+    }
+    return 0;
+}
+
+bool isSafeVersion(const std::string& v) {
+    if (v.empty()) {
+        return false;
+    }
+    return std::all_of(v.begin(), v.end(), [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '.' ||
+               c == '-' || c == '+';
+    });
+}
+
+// `loxpp upgrade [--version X.Y.Z]`: hand off to install.sh.
+int runUpgradeApply(const std::string& version) {
+    std::optional<std::string> dir = exeDir();
+    if (!dir) {
+        std::fprintf(stderr, "loxpp upgrade: cannot resolve /proc/self/exe.\n");
+        return 74;
+    }
+
+    // The installer writes a temp file in this directory and renames it
+    // over the running binary. Fail here, before any download, when the
+    // directory is not writable.
+    if (::access(dir->c_str(), W_OK) != 0) {
+        std::fprintf(stderr,
+                     "loxpp upgrade: %s is not writable.\n"
+                     "Set LOXPP_INSTALL_DIR to a writable directory, or run "
+                     "with sudo:\n"
+                     "  sudo loxpp upgrade\n",
+                     dir->c_str());
+        return 74;
+    }
+
+    if (!version.empty() && !isSafeVersion(version)) {
+        std::fprintf(stderr, "loxpp upgrade: invalid --version value.\n");
+        return 64;
+    }
+
+    // Without an explicit --version, skip the work when already current.
+    if (version.empty()) {
+        std::optional<std::string> latest = latestReleaseVersion();
+        if (latest &&
+            compareVersions(std::string(LOXPP_VERSION), *latest) >= 0) {
+            std::printf("loxpp is up to date (%s)\n", LOXPP_VERSION);
+            return 0;
+        }
+    }
+
+    const bool haveCurl = hasCommand("curl");
+    const bool haveWget = hasCommand("wget");
+    if ((!haveCurl && !haveWget) || !hasCommand("sh")) {
+        std::fprintf(
+            stderr,
+            "loxpp upgrade: need (curl or wget) and sh. Install manually:\n"
+            "  curl -fsSL %s | sh\n",
+            kInstallShUrl);
+        return 74;
+    }
+
+    // Download the installer to a file and check the transfer first, then
+    // run it. A piped `curl ... | sh` hides a failed fetch: the pipeline
+    // exit status is `sh`'s, and `sh` on empty input exits 0, so a 404 or a
+    // dropped network would look like a clean upgrade that changed nothing.
+    std::optional<std::string> script = httpGet(kInstallShUrl);
+    if (!script || script->empty()) {
+        std::fprintf(stderr,
+                     "loxpp upgrade: could not download the installer from\n"
+                     "  %s\n"
+                     "Check your network connection, then try again.\n",
+                     kInstallShUrl);
+        return 74;
+    }
+
+    const char* tmpDir = std::getenv("TMPDIR");
+    std::string scriptPath =
+        (tmpDir != nullptr && tmpDir[0] != '\0' ? std::string(tmpDir)
+                                                : std::string("/tmp")) +
+        "/loxpp-upgrade.XXXXXX";
+    std::vector<char> pathBuf(scriptPath.begin(), scriptPath.end());
+    pathBuf.push_back('\0');
+    int fd = ::mkstemp(pathBuf.data());
+    if (fd < 0) {
+        std::fprintf(
+            stderr,
+            "loxpp upgrade: cannot create a temp file for the installer.\n");
+        return 74;
+    }
+    scriptPath = pathBuf.data();
+
+    bool writeOk = true;
+    size_t written = 0;
+    while (written < script->size()) {
+        ssize_t n =
+            ::write(fd, script->data() + written, script->size() - written);
+        if (n <= 0) {
+            writeOk = false;
+            break;
+        }
+        written += static_cast<size_t>(n);
+    }
+    ::close(fd);
+    if (!writeOk) {
+        ::unlink(scriptPath.c_str());
+        std::fprintf(stderr,
+                     "loxpp upgrade: cannot write the installer to disk.\n");
+        return 74;
+    }
+
+    std::string cmd = "sh " + singleQuote(scriptPath) + " --";
+    cmd += " --bin-dir " + singleQuote(*dir);
+    if (!version.empty()) {
+        cmd += " --version " + singleQuote(version);
+    }
+
+    int status = std::system(cmd.c_str());
+    ::unlink(scriptPath.c_str());
+    if (status == -1) {
+        std::fprintf(stderr, "loxpp upgrade: could not start the installer.\n");
+        return 74;
+    }
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+    return 70;
+}
+
+int runUpgrade(int argc, const char* const* argv) {
+    std::string version;
+    bool check = false;
+    for (int i = 2; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "--check") {
+            check = true;
+        } else if (arg == "--version" && i + 1 < argc) {
+            version = argv[++i];
+        } else {
+            std::fprintf(stderr,
+                         "Usage: loxpp upgrade [--check] [--version X.Y.Z]\n");
+            return 64;
+        }
+    }
+    if (check) {
+        return runUpgradeCheck();
+    }
+    return runUpgradeApply(version);
+}
+
+} // namespace
+
 // Print version and bundled library info, then exit.
 static void printVersion() {
     std::printf("loxpp %s\n", LOXPP_VERSION);
@@ -324,6 +661,9 @@ static void printHelp() {
     std::printf("  loxpp --check [--format text|json] <file>\n");
     std::printf("                                         Check syntax "
                 "without running\n");
+    std::printf("  loxpp upgrade [--check] [--version X.Y.Z]\n");
+    std::printf("                                         Update loxpp to "
+                "the latest release\n");
     std::printf("\n");
     std::printf("Exit codes:\n");
     std::printf("  0   Success\n");
@@ -358,6 +698,10 @@ static std::optional<int> dispatchEarlyFlags(int argc, const char* argv[]) {
 
     if (flag == "--check") {
         return runCheck(argc, argv);
+    }
+
+    if (flag == "upgrade") {
+        return runUpgrade(argc, argv);
     }
 
 #if defined(LOXPP_JVM_BACKEND) || defined(LOXPP_CLR_BACKEND)
