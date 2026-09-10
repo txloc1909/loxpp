@@ -71,10 +71,8 @@ parse_manifest() {
 
 # Build a list of all targets (build-set).
 BUILD_SET=""
-declare -A SHIP_MAP  # Maps component name to "shipped" status
 
 while IFS='|' read -r name shipped target_list; do
-  SHIP_MAP["$name"]="$shipped"
   for target in $target_list; do
     BUILD_SET="$BUILD_SET $target"
   done
