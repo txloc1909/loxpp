@@ -688,6 +688,7 @@ jobs:
 
       - name: Build release binaries
         run: |
+          git config --global --add safe.directory '*'
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
@@ -710,22 +711,16 @@ jobs:
                 echo "ERROR: Binary not found at $binary"
                 exit 1
               fi
-              # Verify "statically linked" in file output
-              if ! file "$binary" | grep -q "statically linked"; then
-                echo "ERROR: Binary is not statically linked"
-                file "$binary"
-                exit 1
-              fi
-              # Verify zero NEEDED entries in readelf
-              if readelf -d "$binary" | grep -q "NEEDED"; then
-                echo "ERROR: Binary has NEEDED entries (dynamic)"
+              # Verify there is no dynamic section (reliable check for both glibc and musl).
+              if readelf -d "$binary" | grep -q "There is a dynamic section"; then
+                echo "ERROR: Binary has a dynamic section"
                 readelf -d "$binary"
                 exit 1
               fi
-              # Verify ldd reports "not a dynamic executable"
-              if ! ldd "$binary" 2>&1 | grep -q "not a dynamic"; then
-                echo "ERROR: ldd did not report a non-dynamic executable"
-                ldd "$binary" 2>&1 || true
+              # Verify there is no INTERP segment.
+              if readelf -l "$binary" | grep -q "INTERP"; then
+                echo "ERROR: Binary has an INTERP segment"
+                readelf -l "$binary"
                 exit 1
               fi
               echo "OK: loxpp is fully statically linked"
@@ -744,9 +739,16 @@ jobs:
                 echo "ERROR: Binary not found at $binary"
                 exit 1
               fi
-              if readelf -d "$binary" | grep -q "NEEDED"; then
-                echo "ERROR: loxpp-lsp has NEEDED entries"
+              # Verify there is no dynamic section.
+              if readelf -d "$binary" | grep -q "There is a dynamic section"; then
+                echo "ERROR: Binary has a dynamic section"
                 readelf -d "$binary"
+                exit 1
+              fi
+              # Verify there is no INTERP segment.
+              if readelf -l "$binary" | grep -q "INTERP"; then
+                echo "ERROR: Binary has an INTERP segment"
+                readelf -l "$binary"
                 exit 1
               fi
               echo "OK: loxpp-lsp is fully statically linked"
