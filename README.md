@@ -72,6 +72,85 @@ coding to a [self-hosted interpreter](bootstrap/loxpp_interpreter.lox).
 
 ---
 
+## Install
+
+The Lox++ binary is a single statically linked file for x86_64 Linux. No
+system dependencies, no shared libraries.
+
+### Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/txloc1909/loxpp/main/install.sh | sh
+```
+
+You can also pin a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/txloc1909/loxpp/main/install.sh | sh -s -- --version 0.1.0
+```
+
+The script downloads to `~/.local/bin/` by default. If you have `~/.local/bin`
+on your `PATH`, you can now run `loxpp`. The script verifies the SHA256 checksum
+always, and the cosign signature if `cosign` is on your `PATH`.
+
+### Upgrade
+
+Re-run the install command (it is idempotent — re-running does not reinstall if
+you are already current):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/txloc1909/loxpp/main/install.sh | sh
+```
+
+Or use the `loxpp upgrade` subcommand to fetch and run the script:
+
+```bash
+loxpp upgrade
+```
+
+Check if an update is available without installing:
+
+```bash
+loxpp upgrade --check
+```
+
+### Verify (optional, for the cautious)
+
+Verify the SHA256 checksum and cosign signature of the latest release:
+
+```bash
+# Download the assets
+curl -fsSL https://github.com/txloc1909/loxpp/releases/latest/download/SHA256SUMS -O
+curl -fsSL https://github.com/txloc1909/loxpp/releases/latest/download/SHA256SUMS.cosign-bundle -O
+curl -fsSL https://github.com/txloc1909/loxpp/releases/latest/download/loxpp-0.1.0-x86_64-linux.tar.gz -O
+
+# Verify the checksum
+sha256sum -c SHA256SUMS
+
+# Verify the cosign signature (requires cosign installed)
+cosign verify-blob \
+  --bundle SHA256SUMS.cosign-bundle \
+  --certificate-identity-regexp '^https://github\.com/txloc1909/loxpp/\.github/workflows/release\.yml@refs/tags/v.*$' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  SHA256SUMS
+
+# Verify build provenance (requires gh installed)
+gh attestation verify loxpp-0.1.0-x86_64-linux.tar.gz --repo txloc1909/loxpp
+```
+
+### Uninstall
+
+Remove these paths:
+
+- `~/.local/bin/loxpp` — the binary
+- `~/.local/share/man/man1/loxpp.1` — the manual page
+- `~/.config/bash/completion.d/loxpp` — bash completions (if present)
+- `~/.config/zsh/completion.d/_loxpp` — zsh completions (if present)
+- `~/.config/fish/completions/loxpp.fish` — fish completions (if present)
+- `~/.cache/loxpp/` — the REPL history cache
+
+---
+
 ## Language tour
 
 | Resource | Contents |

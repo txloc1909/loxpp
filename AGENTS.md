@@ -147,6 +147,11 @@ to make sense, it is in the wrong place:
   referee decision — goes in the commit message body and the PR reply, not in
   the source.
 
+**Releases:** to cut a release, tag `vX.Y.Z` on `main` and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+The `release.yml` workflow builds the static binary, signs and attests it, and publishes to GitHub
+Releases. See [RELEASING.md](RELEASING.md) for the full process and [notes/distribution.md](notes/distribution.md)
+for the architecture.
+
 ---
 
 ## Engineering rules

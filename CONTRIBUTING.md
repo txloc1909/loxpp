@@ -4,6 +4,9 @@
 presets, test and lint commands, branch/commit conventions, the full task loop, and cloud agent
 configuration.
 
+To cut a release, see [RELEASING.md](RELEASING.md). For the distribution design (why static, why
+isocline, the component manifest, the tag namespace), see [notes/distribution.md](notes/distribution.md).
+
 [TESTING.md](TESTING.md) covers how to write new GTest cases and use the VM test helpers.
 
 [notes/editor-tooling.md](notes/editor-tooling.md) covers the editor stack (`loxpp --check`,
