@@ -1,0 +1,328 @@
+name: Release
+
+# Build, sign, attest, and publish a static x86_64 Linux loxpp release.
+#
+# Trigger: a version tag push (v*), or a manual run. A manual run is a dry
+# run unless its ref is itself a v* tag and dry_run is false; a dry run
+# uploads to a uniquely named draft and never creates or moves a public
+# release, so "releases/latest" is untouched.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag or branch to build (default: this workflow ref)'
+        type: string
+        required: false
+        default: ''
+      dry_run:
+        description: 'Build and upload to a draft release only'
+        type: boolean
+        required: false
+        default: false
+      _corrupt_checksum_test:
+        description: 'TEST ONLY: corrupt an asset after SHA256SUMS to prove the verify gate fails'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  # Serialise two runs of the same tag or ref.
+  group: release-${{ github.event.inputs.ref || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_BUILDKIT: '1'
+    steps:
+      - name: Check out the requested ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve release mode, tag, and reproducibility inputs
+        id: vars
+        run: |
+          set -euo pipefail
+          EVENT='${{ github.event_name }}'
+          DRY_INPUT='${{ github.event.inputs.dry_run }}'
+
+          # SOURCE_DATE_EPOCH is the committer date of the built commit, so a
+          # local rebuild of the same tag is byte-for-byte comparable.
+          SDE="$(git log -1 --format=%ct HEAD)"
+
+          ON_TAG=""
+          TAG=""
+          if git describe --exact-match --match 'v*' --tags HEAD >/dev/null 2>&1; then
+            ON_TAG=1
+            TAG="$(git describe --exact-match --match 'v*' --tags HEAD)"
+          fi
+
+          MODE="dry"
+          if [ "$EVENT" = "push" ]; then
+            MODE="release"
+            TAG="${GITHUB_REF_NAME}"
+          elif [ "$DRY_INPUT" != "true" ] && [ -n "$ON_TAG" ]; then
+            MODE="release"
+          fi
+
+          {
+            echo "mode=$MODE"
+            echo "tag=$TAG"
+            echo "source_date_epoch=$SDE"
+          } >> "$GITHUB_OUTPUT"
+          echo "SOURCE_DATE_EPOCH=$SDE" >> "$GITHUB_ENV"
+          echo "event=$EVENT mode=$MODE tag=${TAG:-<none>} SOURCE_DATE_EPOCH=$SDE"
+
+      - name: Build the release-static image
+        run: docker build --target release-static -t loxpp-release-static .
+
+      # This job runs only on a release tag, a few times a year, so it skips
+      # actions/cache (used by the per-PR legs in ci.yml). Every compile is
+      # cold on purpose; the restore/save cost is not worth it here.
+      - name: Build the static binaries, smoke test, and lay out dist/
+        run: |
+          set -euo pipefail
+          TAG='${{ steps.vars.outputs.tag }}'
+          docker run --rm \
+            -v "$PWD":/workspace -w /workspace \
+            -e SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" \
+            loxpp-release-static \
+            bash -c "
+              set -euo pipefail
+              # Ensure the tag is available to git describe. Make safe.directory
+              # unconditional so in-container git calls never hit dubious ownership.
+              git config --global --add safe.directory /workspace
+              bash tools/build_release.sh
+            "
+          # Docker container ran as root; take ownership back for host steps.
+          sudo chown -R "$(id -u):$(id -g)" build dist
+
+      - name: Derive VERSION from the stamped binary
+        id: version
+        run: |
+          set -euo pipefail
+          RAW="$(dist/loxpp/loxpp --version | head -1)"
+          # Line 1 of --version is: loxpp <version>
+          VERSION="${RAW#loxpp }"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$RAW" ]; then
+            echo "could not parse a version from: $RAW" >&2
+            exit 1
+          fi
+          TAG='${{ steps.vars.outputs.tag }}'
+          if [ '${{ steps.vars.outputs.mode }}' = 'release' ] && [ -n "$TAG" ]; then
+            if [ "${TAG#v}" != "$VERSION" ]; then
+              echo "tag $TAG and stamped version $VERSION disagree" >&2
+              exit 1
+            fi
+          fi
+          case "$VERSION" in
+            *-rc*|*-alpha*|*-beta*) PRERELEASE=1 ;;
+            *)                      PRERELEASE=0 ;;
+          esac
+          {
+            echo "version=$VERSION"
+            echo "prerelease=$PRERELEASE"
+          } >> "$GITHUB_OUTPUT"
+          echo "VERSION=$VERSION prerelease=$PRERELEASE"
+
+      - name: Package the shipped components
+        run: |
+          set -euo pipefail
+          VERSION='${{ steps.version.outputs.version }}'
+          TARGET="x86_64-linux"
+          SDE="${SOURCE_DATE_EPOCH}"
+          mkdir -p out stage
+
+          # build_release.sh created dist/<name>/ only for components the
+          # manifest marks shipped = true. Iterating those directories keeps
+          # this step manifest-driven with no second TOML parser.
+          for cdir in dist/*/; do
+            [ -d "$cdir" ] || continue
+            comp="$(basename "$cdir")"
+            top="${comp}-${VERSION}-${TARGET}"
+            dest="stage/${top}"
+            mkdir -p "$dest"
+
+            # Everything build_release.sh laid out, minus the debug sidecar.
+            cp -a "${cdir}." "$dest/"
+            find "$dest" -name '*.debug' -delete
+
+            # The portable tarball also carries the generated man page, the
+            # three shell completions, and the example corpus. build_release.sh
+            # lays out the binary and licences only, so add these here to meet
+            # the D4 asset contract.
+            if [ "$comp" = "loxpp" ]; then
+              cp build/loxpp.1 "$dest/"
+              cp completions/loxpp.bash completions/loxpp.zsh completions/loxpp.fish "$dest/"
+              cp -r examples "$dest/examples"
+            fi
+
+            tar --sort=name --mtime="@${SDE}" --owner=0 --group=0 --numeric-owner \
+              -C stage -cf - "$top" | gzip -n > "out/${top}.tar.gz"
+            echo "packed out/${top}.tar.gz"
+
+            for dbg in "${cdir}"*.debug; do
+              [ -e "$dbg" ] || continue
+              base="$(basename "$dbg")"
+              tar --sort=name --mtime="@${SDE}" --owner=0 --group=0 --numeric-owner \
+                -C "$cdir" -cf - "$base" | gzip -n \
+                > "out/${comp}-${VERSION}-${TARGET}.debug.tar.gz"
+              echo "packed out/${comp}-${VERSION}-${TARGET}.debug.tar.gz"
+            done
+          done
+
+      - name: Generate the SPDX SBOM
+        run: |
+          set -euo pipefail
+          VERSION='${{ steps.version.outputs.version }}'
+          README="third_party/isocline/README.md"
+          ISO_VERSION="$(sed -n 's/.*Release tag.*`v\([0-9.]*\)`.*/\1/p' "$README" | head -1)"
+          ISO_SHA="$(sed -n 's/.*Archive SHA-256.*`\([0-9a-f]*\)`.*/\1/p' "$README" | head -1)"
+          CREATED="$(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)"
+          test -n "$ISO_VERSION"
+          test -n "$ISO_SHA"
+          sed -e "s/@VERSION@/${VERSION}/g" \
+              -e "s/@CREATED@/${CREATED}/g" \
+              -e "s/@ISOCLINE_VERSION@/${ISO_VERSION}/g" \
+              -e "s/@ISOCLINE_SHA256@/${ISO_SHA}/g" \
+              packaging/sbom.spdx.json.in > "out/loxpp-${VERSION}.spdx.json"
+          python3 -c "import json,sys; json.load(open(sys.argv[1]))" "out/loxpp-${VERSION}.spdx.json"
+          grep -q '"name": "isocline"' "out/loxpp-${VERSION}.spdx.json"
+          grep -q '"versionInfo": "'"${ISO_VERSION}"'"' "out/loxpp-${VERSION}.spdx.json"
+
+      - name: Write SHA256SUMS over the content assets
+        run: |
+          set -euo pipefail
+          cd out
+          # Bare file names, no ./ prefix, so `sha256sum -c` works from a
+          # user's download directory. Covers the tarballs and the SBOM; the
+          # cosign bundle and install.sh are added afterwards and are not
+          # self-listed.
+          sha256sum ./*.tar.gz ./*.spdx.json | sed 's# \./# #' > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: 'TEST ONLY: corrupt an asset after SHA256SUMS was written'
+        if: ${{ inputs._corrupt_checksum_test }}
+        run: |
+          set -euo pipefail
+          set -- out/*.spdx.json
+          f=$1
+          echo "appending one byte to $f to prove the verify gate catches it"
+          printf 'x' >> "$f"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
+
+      - name: Sign SHA256SUMS (keyless, Sigstore OIDC)
+        run: |
+          set -euo pipefail
+          cd out
+          cosign sign-blob --yes \
+            --bundle SHA256SUMS.cosign-bundle \
+            SHA256SUMS
+
+      - name: Add the installer asset
+        run: cp install.sh out/install.sh
+
+      - name: Verify SHA256SUMS before publishing
+        run: |
+          set -euo pipefail
+          cd out
+          sha256sum -c SHA256SUMS
+
+      - name: Attest build provenance for every asset
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: 'out/*'
+
+      - name: Compose the release notes
+        run: |
+          set -euo pipefail
+          VERSION='${{ steps.version.outputs.version }}'
+          {
+            echo "## loxpp ${VERSION}"
+            echo
+            echo "Statically linked \`x86_64\` Linux build. No shared library dependency."
+            echo
+            echo "### Assets"
+            echo
+            echo "| File | Purpose |"
+            echo "|---|---|"
+            echo "| \`loxpp-${VERSION}-x86_64-linux.tar.gz\` | interpreter, licences, man page, completions, examples |"
+            echo "| \`loxpp-${VERSION}-x86_64-linux.debug.tar.gz\` | detached debug symbols |"
+            echo "| \`loxpp-${VERSION}.spdx.json\` | SPDX SBOM |"
+            echo "| \`SHA256SUMS\` | checksums for the files above |"
+            echo "| \`SHA256SUMS.cosign-bundle\` | cosign keyless signature of \`SHA256SUMS\` |"
+            echo "| \`install.sh\` | installer |"
+            echo
+            echo "### Verify"
+            echo
+            echo '```sh'
+            echo "sha256sum -c SHA256SUMS"
+            echo
+            echo "cosign verify-blob \\"
+            echo "  --bundle SHA256SUMS.cosign-bundle \\"
+            echo "  --certificate-identity-regexp '^https://github\\.com/txloc1909/loxpp/\\.github/workflows/release\\.yml@refs/tags/v.*\$' \\"
+            echo "  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \\"
+            echo "  SHA256SUMS"
+            echo
+            echo "gh attestation verify loxpp-${VERSION}-x86_64-linux.tar.gz --repo txloc1909/loxpp"
+            echo '```'
+            echo
+            echo "Every asset also carries a build-provenance attestation from GitHub."
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          MODE='${{ steps.vars.outputs.mode }}'
+          VERSION='${{ steps.version.outputs.version }}'
+          PRERELEASE='${{ steps.version.outputs.prerelease }}'
+          REPO='${{ github.repository }}'
+
+          FLAGS=()
+          if [ "$MODE" = "release" ]; then
+            TAG='${{ steps.vars.outputs.tag }}'
+            TITLE="loxpp ${VERSION}"
+            # A pre-release suffix keeps the release out of "latest".
+            [ "$PRERELEASE" = "1" ] && FLAGS+=(--prerelease)
+          else
+            # A dry run uploads to a uniquely named draft. GitHub never treats
+            # a draft as "latest" and creates no tag until it is published.
+            TAG="dry-run-${{ github.run_id }}"
+            TITLE="DRY RUN loxpp ${VERSION} (run ${{ github.run_id }})"
+            FLAGS+=(--draft --target "${{ github.sha }}")
+          fi
+
+          # create-or-edit: a retry of the same tag must not fail on
+          # "release already exists".
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$REPO" \
+              --title "$TITLE" --notes-file release-notes.md ${FLAGS[@]+"${FLAGS[@]}"}
+            gh release upload "$TAG" --repo "$REPO" --clobber out/*
+          else
+            gh release create "$TAG" --repo "$REPO" \
+              --title "$TITLE" --notes-file release-notes.md ${FLAGS[@]+"${FLAGS[@]}"} \
+              out/*
+          fi
+
+          echo "published: mode=$MODE tag=$TAG"
+          gh release view "$TAG" --repo "$REPO" \
+            --json isDraft,isPrerelease,tagName,assets \
+            --jq '{tagName,isDraft,isPrerelease,assets:[.assets[].name]}'
