@@ -667,3 +667,95 @@ jobs:
               files=$(find examples -maxdepth 1 -name "*.lox" ! -name "bench_jump_table.lox" | sort)
               python3 tools/diff_runtimes.py bootstrap/lox_wrapper.sh tools/loxpp_clr_bootstrap.sh $files --exclude tools/clr_excluded_examples.txt --timeout 60
             '
+
+  release-static:
+    name: Static musl release build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build release-static image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          target: release-static
+          tags: loxpp-release-static:latest
+          cache-from: type=gha,scope=release-static
+          cache-to: type=gha,mode=max,scope=release-static
+
+      - name: Build release binaries
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e CCACHE_DIR=/workspace/.ccache \
+            -e CCACHE_MAXSIZE=1G \
+            -e CCACHE_COMPRESS=1 \
+            loxpp-release-static:latest \
+            bash tools/build_release.sh
+
+      - name: Assert loxpp is statically linked
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-release-static:latest \
+            bash -c '
+              set -e
+              binary="dist/loxpp/loxpp"
+              if [ ! -f "$binary" ]; then
+                echo "ERROR: Binary not found at $binary"
+                exit 1
+              fi
+              # Verify "statically linked" in file output
+              if ! file "$binary" | grep -q "statically linked"; then
+                echo "ERROR: Binary is not statically linked"
+                file "$binary"
+                exit 1
+              fi
+              # Verify zero NEEDED entries in readelf
+              if readelf -d "$binary" | grep -q "NEEDED"; then
+                echo "ERROR: Binary has NEEDED entries (dynamic)"
+                readelf -d "$binary"
+                exit 1
+              fi
+              # Verify ldd reports "not a dynamic executable"
+              if ! ldd "$binary" 2>&1 | grep -q "not a dynamic"; then
+                echo "ERROR: ldd did not report a non-dynamic executable"
+                ldd "$binary" 2>&1 || true
+                exit 1
+              fi
+              echo "OK: loxpp is fully statically linked"
+            '
+
+      - name: Assert loxpp-lsp is statically linked
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-release-static:latest \
+            bash -c '
+              set -e
+              binary="build/loxpp-lsp"
+              if [ ! -f "$binary" ]; then
+                echo "ERROR: Binary not found at $binary"
+                exit 1
+              fi
+              if readelf -d "$binary" | grep -q "NEEDED"; then
+                echo "ERROR: loxpp-lsp has NEEDED entries"
+                readelf -d "$binary"
+                exit 1
+              fi
+              echo "OK: loxpp-lsp is fully statically linked"
+            '
+
+      - name: Verify examples pass
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-release-static:latest \
+            python3 tools/check_examples.py dist/loxpp/loxpp examples/
