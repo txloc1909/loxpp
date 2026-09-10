@@ -58,19 +58,9 @@ message(STATUS "loxpp_version.h configured at ${CMAKE_BINARY_DIR}/loxpp_version.
 # (which matches loxpp --version line 1) and a date. Use the current date or
 # SOURCE_DATE_EPOCH if set (for reproducible builds). The date is unquoted
 # here; quotes are added in the template for proper groff formatting.
-if(DEFINED ENV{SOURCE_DATE_EPOCH})
-    execute_process(
-        COMMAND bash -c "date -u -d @$ENV{SOURCE_DATE_EPOCH} '+%B %d, %Y'"
-        OUTPUT_VARIABLE LOXPP_MAN_DATE
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-else()
-    execute_process(
-        COMMAND bash -c "date '+%B %d, %Y'"
-        OUTPUT_VARIABLE LOXPP_MAN_DATE
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-endif()
+# CMake's string(TIMESTAMP) honors SOURCE_DATE_EPOCH automatically for
+# reproducible builds and removes the bash dependency.
+string(TIMESTAMP LOXPP_MAN_DATE "%B %d, %Y" UTC)
 message(STATUS "man page date: ${LOXPP_MAN_DATE}")
 
 configure_file(
