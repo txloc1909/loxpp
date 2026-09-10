@@ -95,11 +95,21 @@ jobs:
       - name: Build the static binaries and lay out dist/
         run: |
           set -euo pipefail
+          TAG='${{ steps.vars.outputs.tag }}'
           docker run --rm \
             -v "$PWD":/workspace -w /workspace \
             -e SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" \
             loxpp-release-static \
-            bash tools/build_release.sh
+            bash -c "
+              set -euo pipefail
+              # Ensure the tag is available to git describe. If a tag is passed,
+              # create it locally in the container so git describe finds it.
+              if [ -n '$TAG' ]; then
+                git config --global --add safe.directory /workspace
+                git -C /workspace fetch --no-tags origin \"$TAG:refs/tags/$TAG\" 2>/dev/null || true
+              fi
+              bash tools/build_release.sh
+            "
           # build_release.sh runs in the container as root; take ownership back
           # so later non-root steps can package and clean the tree.
           sudo chown -R "$(id -u):$(id -g)" build dist
