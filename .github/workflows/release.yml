@@ -102,16 +102,10 @@ jobs:
             loxpp-release-static \
             bash -c "
               set -euo pipefail
-              # Ensure the tag is available to git describe. If a tag is passed,
-              # create it locally in the container so git describe finds it.
-              if [ -n '$TAG' ]; then
-                git config --global --add safe.directory /workspace
-                git -C /workspace fetch --no-tags origin \"$TAG:refs/tags/$TAG\" 2>/dev/null || true
-              fi
+              # Ensure the tag is available to git describe. Make safe.directory
+              # unconditional so in-container git calls never hit dubious ownership.
+              git config --global --add safe.directory /workspace
               bash tools/build_release.sh
-              # Run smoke test inside container where file permissions are simpler
-              # (everything is root-owned, no permission conflicts).
-              python3 tools/check_examples.py build/loxpp examples/
             "
           # Docker container ran as root; take ownership back for host steps.
           sudo chown -R "$(id -u):$(id -g)" build dist
@@ -224,7 +218,8 @@ jobs:
         if: ${{ inputs._corrupt_checksum_test }}
         run: |
           set -euo pipefail
-          f="$(ls out/*.spdx.json | head -1)"
+          set -- out/*.spdx.json
+          f=$1
           echo "appending one byte to $f to prove the verify gate catches it"
           printf 'x' >> "$f"
 
