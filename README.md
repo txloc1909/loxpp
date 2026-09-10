@@ -121,6 +121,15 @@ AI agents: see [AGENTS.md](AGENTS.md) for the complete task loop.
 
 ---
 
+## Third-party code
+
+Lox++ vendors a small set of third-party libraries. Each is copied **verbatim**
+from the upstream source and listed in [`THIRD_PARTY.md`](THIRD_PARTY.md) with
+its copyright holder, license, and the location of the license text. See that
+file for details.
+
+---
+
 ## License
 
 [MIT](LICENSE) — Copyright 2025 Tran Xuan Loc

@@ -32,36 +32,10 @@
 #include "backend/clr_emitter.h"
 #endif
 
-#ifdef LOXPP_USE_READLINE
-#include <readline/readline.h>
-#include <readline/history.h>
+#include <isocline.h>
 #include <cstdlib>
 #include <cstring>
 #include <sys/stat.h>
-
-static char* keyword_generator(const char* text, int state) {
-    static int list_index;
-    static std::size_t text_len;
-
-    if (!state) {
-        list_index = 0;
-        text_len = std::strlen(text);
-    }
-
-    const char* const* keywords = lox_keywords();
-    while (keywords[list_index]) {
-        const char* kw = keywords[list_index++];
-        if (std::strncmp(kw, text, text_len) == 0) {
-            return strdup(kw);
-        }
-    }
-    return nullptr;
-}
-
-static char** lox_completion(const char* text, int /*start*/, int /*end*/) {
-    rl_attempted_completion_over = 1;
-    return rl_completion_matches(text, keyword_generator);
-}
 
 static std::string xdg_history_path() {
     const char* xdg = std::getenv("XDG_CACHE_HOME");
@@ -73,43 +47,30 @@ static std::string xdg_history_path() {
     mkdir(dir.c_str(), 0755);
     return dir + "/history";
 }
-#endif
+
+static void lox_word_completer(ic_completion_env_t* cenv, const char* word) {
+    ic_add_completions(cenv, word, (const char**)lox_keywords());
+}
+
+static void lox_completer(ic_completion_env_t* cenv, const char* prefix) {
+    ic_complete_word(cenv, prefix, lox_word_completer, nullptr);
+}
 
 static void repl(VM& vm) {
-#ifdef LOXPP_USE_READLINE
     std::string history_path = xdg_history_path();
-    using_history();
-    stifle_history(1000);
-    read_history(history_path.c_str());
-
-    rl_attempted_completion_function = lox_completion;
+    ic_set_history(history_path.c_str(), 1000);
+    ic_set_default_completer(lox_completer, nullptr);
 
     for (;;) {
-        char* raw = readline("> ");
+        char* raw = ic_readline("> ");
         if (!raw) {
             std::cout << std::endl;
             break;
         }
         std::string line(raw);
         free(raw);
-        if (!line.empty()) {
-            add_history(line.c_str());
-        }
         vm.interpret(line);
     }
-
-    write_history(history_path.c_str());
-#else
-    std::string line;
-    for (;;) {
-        std::cout << "> ";
-        if (!std::getline(std::cin, line)) {
-            std::cout << std::endl;
-            break;
-        }
-        vm.interpret(line);
-    }
-#endif
 }
 
 static std::string readFile(const std::string& path) {
