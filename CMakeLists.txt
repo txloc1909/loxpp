@@ -206,7 +206,6 @@ endif()
 add_library(loxpp_isocline STATIC
     third_party/isocline/src/isocline.c
 )
-set_target_properties(loxpp_isocline PROPERTIES LANGUAGE C)
 target_include_directories(loxpp_isocline PRIVATE third_party/isocline/include)
 target_include_directories(loxpp PRIVATE third_party/isocline/include)
 target_link_libraries(loxpp PRIVATE loxpp_isocline)

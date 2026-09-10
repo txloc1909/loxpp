@@ -34,7 +34,6 @@
 
 #include <isocline.h>
 #include <cstdlib>
-#include <cstring>
 #include <sys/stat.h>
 
 static std::string xdg_history_path() {

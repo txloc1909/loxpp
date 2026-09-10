@@ -16,7 +16,6 @@ RUN apt-get update && apt-get install -y \
     clang-format \
     clang-tidy \
     pkg-config \
-    libreadline-dev \
     python3 \
     curl \
     unzip \

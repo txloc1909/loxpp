@@ -8,6 +8,7 @@ license file in this repository.
 
 | Component | Copyright | License | License file |
 |---|---|---|---|
+| nlohmann/json | Niels Lohmann | MIT | `third_party/nlohmann/LICENSE.MIT` |
 | isocline | Daan Leijen | MIT | `third_party/isocline/LICENSE` |
 | isocline `wcwidth.c` | Markus Kuhn | Public domain / MIT-compatible | `third_party/isocline/src/wcwidth.c` (see header) |
 
