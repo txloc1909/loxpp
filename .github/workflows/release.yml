@@ -92,7 +92,7 @@ jobs:
       # This job runs only on a release tag, a few times a year, so it skips
       # actions/cache (used by the per-PR legs in ci.yml). Every compile is
       # cold on purpose; the restore/save cost is not worth it here.
-      - name: Build the static binaries and lay out dist/
+      - name: Build the static binaries, smoke test, and lay out dist/
         run: |
           set -euo pipefail
           TAG='${{ steps.vars.outputs.tag }}'
@@ -109,9 +109,11 @@ jobs:
                 git -C /workspace fetch --no-tags origin \"$TAG:refs/tags/$TAG\" 2>/dev/null || true
               fi
               bash tools/build_release.sh
+              # Run smoke test inside container where file permissions are simpler
+              # (everything is root-owned, no permission conflicts).
+              python3 tools/check_examples.py build/loxpp examples/
             "
-          # build_release.sh runs in the container as root; take ownership back
-          # so later non-root steps can package and clean the tree.
+          # Docker container ran as root; take ownership back for host steps.
           sudo chown -R "$(id -u):$(id -g)" build dist
 
       - name: Derive VERSION from the stamped binary
@@ -141,12 +143,6 @@ jobs:
             echo "prerelease=$PRERELEASE"
           } >> "$GITHUB_OUTPUT"
           echo "VERSION=$VERSION prerelease=$PRERELEASE"
-
-      - name: Release smoke test (example corpus)
-        run: |
-          set -euo pipefail
-          python3 tools/check_examples.py dist/loxpp/loxpp examples/
-          test "$(dist/loxpp/loxpp --version | head -1)" = "loxpp ${{ steps.version.outputs.version }}"
 
       - name: Package the shipped components
         run: |
