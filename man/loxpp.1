@@ -1,0 +1,83 @@
+.TH LOXPP 1 "September 10, 2026" "loxpp 0.1.0" "Lox++ Interpreter"
+.SH NAME
+loxpp \- a fast, simple programming language interpreter
+.SH SYNOPSIS
+.B loxpp
+[\fIpath\fR]
+.br
+.B loxpp
+.B \-\-check
+[\fB\-\-format\fR {text|json}] \fIpath\fR
+.br
+.B loxpp
+.B \-\-version
+.br
+.B loxpp
+.B \-\-help
+.SH DESCRIPTION
+The
+.B loxpp
+interpreter runs Lox++ programs. Lox++ is a dynamically typed, single-threaded
+language with classes, methods, closures, and a garbage collector.
+.TP
+.B loxpp \fIpath\fR
+Runs the Lox++ script at \fIpath\fR.
+.TP
+.B loxpp
+(no arguments) enters the interactive Read\-Eval\-Print Loop (REPL). The REPL
+supports history (stored in
+.IR $XDG_CACHE_HOME/loxpp/history " or " $HOME/.cache/loxpp/history ),
+keyword completion, and line editing via the bundled isocline library.
+.TP
+.B loxpp \-\-check [\-\-format {text|json}] \fIpath\fR
+Performs static syntax and semantic analysis on \fIpath\fR without running it.
+Reports all compile\-time errors and warnings.
+.RS
+.TP
+.B \-\-format text
+Human\-readable error output (default).
+.TP
+.B \-\-format json
+Structured JSON output suitable for editor integration.
+.RE
+.TP
+.B loxpp \-\-version
+Prints the loxpp version and bundled library information.
+.TP
+.B loxpp \-\-help
+Prints this usage summary.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Compile error when running or checking a script.
+.TP
+.B 64
+Usage error (bad arguments or flag combination).
+.TP
+.B 65
+Compile error (loxpp \-\-check only, exit 1 when running).
+.TP
+.B 70
+Runtime error when running a script.
+.TP
+.B 74
+File system error (file not found, cannot write output, etc.).
+.SH FILES
+.TP
+.I $XDG_CACHE_HOME/loxpp/history
+REPL command history (created on first use).
+.SH ENVIRONMENT
+.TP
+.B XDG_CACHE_HOME
+Directory for cache files. Defaults to
+.IR $HOME/.cache .
+.TP
+.B HOME
+User home directory (used to find the cache directory if XDG_CACHE_HOME is unset).
+.SH SEE ALSO
+.BR man (1)
+.SH AUTHOR
+The Lox++ project: https://github.com/txloc1909/loxpp
