@@ -321,8 +321,9 @@ namespace {
 
 // The installer that `loxpp upgrade` runs. `raw ... /main/install.sh` is
 // always the current script, so a fix to the verify logic reaches every
-// installed binary on its next upgrade. LOXPP_INSTALL_SH_URL overrides it
-// for testing and forks; it must be an https URL.
+// installed binary on its next upgrade. The URL is fixed with no override:
+// `loxpp upgrade` runs code from this path with the user's rights, so a
+// changed environment must not be able to redirect it to another script.
 constexpr const char* kInstallShUrl =
     "https://raw.githubusercontent.com/txloc1909/loxpp/main/install.sh";
 
@@ -551,25 +552,63 @@ int runUpgradeApply(const std::string& version) {
         return 74;
     }
 
-    const char* override = std::getenv("LOXPP_INSTALL_SH_URL");
-    std::string url = (override != nullptr && override[0] != '\0')
-                          ? std::string(override)
-                          : std::string(kInstallShUrl);
-    if (!url.starts_with("https://")) {
+    // Download the installer to a file and check the transfer first, then
+    // run it. A piped `curl ... | sh` hides a failed fetch: the pipeline
+    // exit status is `sh`'s, and `sh` on empty input exits 0, so a 404 or a
+    // dropped network would look like a clean upgrade that changed nothing.
+    std::optional<std::string> script = httpGet(kInstallShUrl);
+    if (!script || script->empty()) {
         std::fprintf(stderr,
-                     "loxpp upgrade: LOXPP_INSTALL_SH_URL must be https.\n");
-        return 64;
+                     "loxpp upgrade: could not download the installer from\n"
+                     "  %s\n"
+                     "Check your network connection, then try again.\n",
+                     kInstallShUrl);
+        return 74;
     }
 
-    std::string cmd = haveCurl ? "curl -fsSL " : "wget -q -O - ";
-    cmd += singleQuote(url);
-    cmd += " | sh -s --";
+    const char* tmpDir = std::getenv("TMPDIR");
+    std::string scriptPath =
+        (tmpDir != nullptr && tmpDir[0] != '\0' ? std::string(tmpDir)
+                                                : std::string("/tmp")) +
+        "/loxpp-upgrade.XXXXXX";
+    std::vector<char> pathBuf(scriptPath.begin(), scriptPath.end());
+    pathBuf.push_back('\0');
+    int fd = ::mkstemp(pathBuf.data());
+    if (fd < 0) {
+        std::fprintf(
+            stderr,
+            "loxpp upgrade: cannot create a temp file for the installer.\n");
+        return 74;
+    }
+    scriptPath = pathBuf.data();
+
+    bool writeOk = true;
+    size_t written = 0;
+    while (written < script->size()) {
+        ssize_t n =
+            ::write(fd, script->data() + written, script->size() - written);
+        if (n <= 0) {
+            writeOk = false;
+            break;
+        }
+        written += static_cast<size_t>(n);
+    }
+    ::close(fd);
+    if (!writeOk) {
+        ::unlink(scriptPath.c_str());
+        std::fprintf(stderr,
+                     "loxpp upgrade: cannot write the installer to disk.\n");
+        return 74;
+    }
+
+    std::string cmd = "sh " + singleQuote(scriptPath) + " --";
     cmd += " --bin-dir " + singleQuote(*dir);
     if (!version.empty()) {
         cmd += " --version " + singleQuote(version);
     }
 
     int status = std::system(cmd.c_str());
+    ::unlink(scriptPath.c_str());
     if (status == -1) {
         std::fprintf(stderr, "loxpp upgrade: could not start the installer.\n");
         return 74;
