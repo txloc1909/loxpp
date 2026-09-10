@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <iostream>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -334,32 +335,33 @@ static void printHelp() {
                 "etc.)\n");
 }
 
-int main(int argc, const char* argv[]) {
-    // loxpp --version — print the version and bundled library info.
-    if (argc >= 2 && std::string(argv[1]) == "--version") {
+// Dispatch early info flags (--version, --help, --check, --target) that
+// exit before VM initialization. Returns std::nullopt if the caller should
+// proceed to normal execution; returns an exit code if a flag was handled.
+// Reduces cognitive complexity of main() by extracting the nested conditions.
+static std::optional<int> dispatchEarlyFlags(int argc, const char* argv[]) {
+    if (argc < 2) {
+        return std::nullopt;
+    }
+
+    std::string flag = argv[1];
+
+    if (flag == "--version") {
         printVersion();
         return 0;
     }
 
-    // loxpp --help — print usage information.
-    if (argc >= 2 && std::string(argv[1]) == "--help") {
+    if (flag == "--help") {
         printHelp();
         return 0;
     }
 
-    // loxpp --check [--format text|json] <file> — static error check only,
-    // never runs the program. Intercepted before the VM path like --target.
-    if (argc >= 2 && std::string(argv[1]) == "--check") {
+    if (flag == "--check") {
         return runCheck(argc, argv);
     }
 
 #if defined(LOXPP_JVM_BACKEND) || defined(LOXPP_CLR_BACKEND)
-    // loxpp --target {jvm,clr} --out-dir <dir> program.lox — compiles only,
-    // never runs the program. Only intercepted when the first argument is
-    // exactly "--target", so plain `loxpp [path]` keeps its existing
-    // behaviour. Which `target` values are recognized here depends on which
-    // backends this build was configured with.
-    if (argc >= 2 && std::string(argv[1]) == "--target") {
+    if (flag == "--target") {
         std::string target;
         std::string outDir;
         std::string scriptPath;
@@ -394,6 +396,16 @@ int main(int argc, const char* argv[]) {
         return 64;
     }
 #endif
+
+    return std::nullopt;
+}
+
+int main(int argc, const char* argv[]) {
+    // Handle early exit flags: --version, --help, --check, --target.
+    auto exitCode = dispatchEarlyFlags(argc, argv);
+    if (exitCode.has_value()) {
+        return exitCode.value();
+    }
 
     VM vm;
 
