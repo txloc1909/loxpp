@@ -304,27 +304,46 @@ static int runClrTarget(const std::string& outDir, const std::string& path) {
 #define LOXPP_TARGET_USAGE_LIST "{clr}"
 #endif
 
+// Print version and bundled library info, then exit.
+static void printVersion() {
+    std::printf("loxpp %s\n", LOXPP_VERSION);
+    std::printf("Bundled: isocline %s (© Daan Leijen, MIT)\n",
+                LOXPP_ISOCLINE_VERSION);
+}
+
+// Print usage help with exit codes, then exit.
+static void printHelp() {
+    std::printf("Usage:\n");
+    std::printf("  loxpp [path]                           Run a script or "
+                "enter REPL\n");
+    std::printf("  loxpp --version                        Print version "
+                "and dependencies\n");
+    std::printf("  loxpp --help                           Print this help "
+                "message\n");
+    std::printf("  loxpp --check [--format text|json] <file>\n");
+    std::printf("                                         Check syntax "
+                "without running\n");
+    std::printf("\n");
+    std::printf("Exit codes:\n");
+    std::printf("  0   Success\n");
+    std::printf("  1   Compile error when checking (--check only)\n");
+    std::printf("  64  Usage error (bad arguments or flags)\n");
+    std::printf("  65  Compile error when running a script\n");
+    std::printf("  70  Runtime error when running a script\n");
+    std::printf("  74  File system error (file not found, cannot read, "
+                "etc.)\n");
+}
+
 int main(int argc, const char* argv[]) {
     // loxpp --version — print the version and bundled library info.
     if (argc >= 2 && std::string(argv[1]) == "--version") {
-        std::printf("loxpp %s\n", LOXPP_VERSION);
-        std::printf("Bundled: isocline %s (© Daan Leijen, MIT)\n",
-                    LOXPP_ISOCLINE_VERSION);
+        printVersion();
         return 0;
     }
 
     // loxpp --help — print usage information.
     if (argc >= 2 && std::string(argv[1]) == "--help") {
-        std::printf("Usage:\n");
-        std::printf("  loxpp [path]                           Run a script or "
-                    "enter REPL\n");
-        std::printf("  loxpp --version                        Print version "
-                    "and dependencies\n");
-        std::printf("  loxpp --help                           Print this help "
-                    "message\n");
-        std::printf("  loxpp --check [--format text|json] <file>\n");
-        std::printf("                                         Check syntax "
-                    "without running\n");
+        printHelp();
         return 0;
     }
 

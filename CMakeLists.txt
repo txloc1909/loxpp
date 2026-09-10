@@ -12,19 +12,27 @@ if(NOT _git_config_result EQUAL 0)
 endif()
 
 # Generate the version header at configure time. The version string comes
-# from `git describe --tags --always --dirty`, run once at configure time
-# only (not on every build). When the source is not a git checkout, fall
-# back to the CMake project version.
+# from `git describe --match "v*" --tags --always --dirty`, run once at
+# configure time only (not on every build). The --match "v*" filter ensures
+# only release tags (v0.1.0, v0.1.0-rc1, etc.) count. When the source is not
+# a git checkout or no v* tag is reachable, fall back to the CMake project
+# version. This gives a clean semver string that install.sh can compare.
 execute_process(
-    COMMAND git describe --tags --always --dirty
+    COMMAND git describe --match "v*" --tags --always --dirty
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    OUTPUT_VARIABLE LOXPP_VERSION
+    OUTPUT_VARIABLE LOXPP_VERSION_RAW
     OUTPUT_STRIP_TRAILING_WHITESPACE
     RESULT_VARIABLE _git_describe_result
 )
-if(NOT _git_describe_result EQUAL 0)
-    # Not a git checkout; use the project version fallback.
+if(NOT _git_describe_result EQUAL 0 OR NOT LOXPP_VERSION_RAW MATCHES "^v")
+    # Not a git checkout, or no v* tag is reachable (git describe fell back
+    # to a commit hash). Use the project version fallback for a clean semver
+    # string that install.sh can compare reliably.
     set(LOXPP_VERSION "${PROJECT_VERSION}")
+else()
+    # Found a v* tag. Strip the leading 'v' from git describe output
+    # (v0.1.0 -> 0.1.0, v0.1.0-rc1-5-gABC123 -> 0.1.0-rc1-5-gABC123).
+    string(SUBSTRING "${LOXPP_VERSION_RAW}" 1 -1 LOXPP_VERSION)
 endif()
 message(STATUS "loxpp version: ${LOXPP_VERSION}")
 
@@ -45,6 +53,32 @@ configure_file(
     @ONLY
 )
 message(STATUS "loxpp_version.h configured at ${CMAKE_BINARY_DIR}/loxpp_version.h")
+
+# Generate the man page from the template. The .TH line includes the version
+# (which matches loxpp --version line 1) and a date. Use the current date or
+# SOURCE_DATE_EPOCH if set (for reproducible builds). The date is unquoted
+# here; quotes are added in the template for proper groff formatting.
+if(DEFINED ENV{SOURCE_DATE_EPOCH})
+    execute_process(
+        COMMAND bash -c "date -u -d @$ENV{SOURCE_DATE_EPOCH} '+%B %d, %Y'"
+        OUTPUT_VARIABLE LOXPP_MAN_DATE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+else()
+    execute_process(
+        COMMAND bash -c "date '+%B %d, %Y'"
+        OUTPUT_VARIABLE LOXPP_MAN_DATE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+endif()
+message(STATUS "man page date: ${LOXPP_MAN_DATE}")
+
+configure_file(
+    "${CMAKE_SOURCE_DIR}/man/loxpp.1.in"
+    "${CMAKE_BINARY_DIR}/loxpp.1"
+    @ONLY
+)
+message(STATUS "loxpp.1 configured at ${CMAKE_BINARY_DIR}/loxpp.1")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -284,11 +318,16 @@ endif()
 # Install rules for the release channel. Use GNUInstallDirs for all paths.
 include(GNUInstallDirs)
 
+# Override CMAKE_INSTALL_DOCDIR to use "loxpp" instead of the project name
+# "Lox++". GNUInstallDirs defaults to share/doc/<project-name>; we want
+# share/doc/loxpp for consistency across the install tree.
+set(CMAKE_INSTALL_DOCDIR "${CMAKE_INSTALL_DATADIR}/doc/loxpp")
+
 # Install the loxpp binary.
 install(TARGETS loxpp RUNTIME COMPONENT runtime)
 
-# Install the man page.
-install(FILES man/loxpp.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1 COMPONENT runtime)
+# Install the configured man page from the build directory.
+install(FILES ${CMAKE_BINARY_DIR}/loxpp.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1 COMPONENT runtime)
 
 # Install shell completions to the conventional locations.
 install(FILES completions/loxpp.bash
@@ -308,16 +347,23 @@ install(DIRECTORY examples/ DESTINATION ${CMAKE_INSTALL_DOCDIR}/examples COMPONE
 install(FILES LICENSE THIRD_PARTY.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT runtime)
 
 # CPack configuration for source and binary packages.
-include(CPack)
+# NOTE: include(CPack) MUST come after all set(CPACK_*) statements so the
+# generated CPackConfig.cmake picks up our settings, not CMake defaults.
 set(CPACK_PACKAGE_NAME "loxpp")
 set(CPACK_PACKAGE_VERSION "${LOXPP_VERSION}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Lox++ interpreter")
 set(CPACK_PACKAGE_VENDOR "txloc1909")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/txloc1909/loxpp")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
+
+# Binary package generator: TXZ (tar + xz compression).
 set(CPACK_GENERATOR "TXZ")
-# Add source generator (default is ZIP on Windows, TGZ elsewhere).
+# Source package generator: TGZ (tar + gzip).
 list(APPEND CPACK_GENERATOR "TGZ")
-# Component-aware packaging.
+
+# Component-aware packaging: only components in CPACK_COMPONENTS_ALL are packed.
 set(CPACK_COMPONENTS_ALL runtime)
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+
+# Include CPack AFTER all CPACK_* settings.
+include(CPack)
