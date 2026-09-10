@@ -711,9 +711,9 @@ jobs:
                 echo "ERROR: Binary not found at $binary"
                 exit 1
               fi
-              # Verify there is no dynamic section (reliable check for both glibc and musl).
-              if readelf -d "$binary" | grep -q "There is a dynamic section"; then
-                echo "ERROR: Binary has a dynamic section"
+              # Verify there are no NEEDED entries (a static binary has none).
+              if readelf -d "$binary" | grep -q "NEEDED"; then
+                echo "ERROR: Binary has dynamic dependencies (NEEDED entries)"
                 readelf -d "$binary"
                 exit 1
               fi
@@ -739,9 +739,9 @@ jobs:
                 echo "ERROR: Binary not found at $binary"
                 exit 1
               fi
-              # Verify there is no dynamic section.
-              if readelf -d "$binary" | grep -q "There is a dynamic section"; then
-                echo "ERROR: Binary has a dynamic section"
+              # Verify there are no NEEDED entries (a static binary has none).
+              if readelf -d "$binary" | grep -q "NEEDED"; then
+                echo "ERROR: Binary has dynamic dependencies (NEEDED entries)"
                 readelf -d "$binary"
                 exit 1
               fi
