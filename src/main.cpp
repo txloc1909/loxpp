@@ -4,11 +4,13 @@
 #include "json_escape.h"
 #include "scanner.h"
 #include "vm.h"
+#include "loxpp_version.h"
 
 #include <algorithm>
 #include <cstdio>
 #include <iostream>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -303,20 +305,63 @@ static int runClrTarget(const std::string& outDir, const std::string& path) {
 #define LOXPP_TARGET_USAGE_LIST "{clr}"
 #endif
 
-int main(int argc, const char* argv[]) {
-    // loxpp --check [--format text|json] <file> — static error check only,
-    // never runs the program. Intercepted before the VM path like --target.
-    if (argc >= 2 && std::string(argv[1]) == "--check") {
+// Print version and bundled library info, then exit.
+static void printVersion() {
+    std::printf("loxpp %s\n", LOXPP_VERSION);
+    std::printf("Bundled: isocline %s (© Daan Leijen, MIT)\n",
+                LOXPP_ISOCLINE_VERSION);
+}
+
+// Print usage help with exit codes, then exit.
+static void printHelp() {
+    std::printf("Usage:\n");
+    std::printf("  loxpp [path]                           Run a script or "
+                "enter REPL\n");
+    std::printf("  loxpp --version                        Print version "
+                "and dependencies\n");
+    std::printf("  loxpp --help                           Print this help "
+                "message\n");
+    std::printf("  loxpp --check [--format text|json] <file>\n");
+    std::printf("                                         Check syntax "
+                "without running\n");
+    std::printf("\n");
+    std::printf("Exit codes:\n");
+    std::printf("  0   Success\n");
+    std::printf("  1   Compile error when checking (--check only)\n");
+    std::printf("  64  Usage error (bad arguments or flags)\n");
+    std::printf("  65  Compile error when running a script\n");
+    std::printf("  70  Runtime error when running a script\n");
+    std::printf("  74  File system error (file not found, cannot read, "
+                "etc.)\n");
+}
+
+// Dispatch early info flags (--version, --help, --check, --target) that
+// exit before VM initialization. Returns std::nullopt if the caller should
+// proceed to normal execution; returns an exit code if a flag was handled.
+// Reduces cognitive complexity of main() by extracting the nested conditions.
+static std::optional<int> dispatchEarlyFlags(int argc, const char* argv[]) {
+    if (argc < 2) {
+        return std::nullopt;
+    }
+
+    std::string flag = argv[1];
+
+    if (flag == "--version") {
+        printVersion();
+        return 0;
+    }
+
+    if (flag == "--help") {
+        printHelp();
+        return 0;
+    }
+
+    if (flag == "--check") {
         return runCheck(argc, argv);
     }
 
 #if defined(LOXPP_JVM_BACKEND) || defined(LOXPP_CLR_BACKEND)
-    // loxpp --target {jvm,clr} --out-dir <dir> program.lox — compiles only,
-    // never runs the program. Only intercepted when the first argument is
-    // exactly "--target", so plain `loxpp [path]` keeps its existing
-    // behaviour. Which `target` values are recognized here depends on which
-    // backends this build was configured with.
-    if (argc >= 2 && std::string(argv[1]) == "--target") {
+    if (flag == "--target") {
         std::string target;
         std::string outDir;
         std::string scriptPath;
@@ -351,6 +396,16 @@ int main(int argc, const char* argv[]) {
         return 64;
     }
 #endif
+
+    return std::nullopt;
+}
+
+int main(int argc, const char* argv[]) {
+    // Handle early exit flags: --version, --help, --check, --target.
+    auto exitCode = dispatchEarlyFlags(argc, argv);
+    if (exitCode.has_value()) {
+        return exitCode.value();
+    }
 
     VM vm;
 

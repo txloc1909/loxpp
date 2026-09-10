@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(Lox++ VERSION 1.0 LANGUAGES CXX C)
+project(Lox++ VERSION 0.1.0 LANGUAGES CXX C)
 
 # Install git hooks on every configure so agents get them automatically.
 execute_process(
@@ -10,6 +10,65 @@ execute_process(
 if(NOT _git_config_result EQUAL 0)
     message(WARNING "Failed to set core.hooksPath — git hooks will not run automatically.")
 endif()
+
+# Generate the version header at configure time. The version string comes
+# from `git describe --match "v*" --tags --always --dirty`, run once at
+# configure time only (not on every build). The --match "v*" filter ensures
+# only release tags (v0.1.0, v0.1.0-rc1, etc.) count. When the source is not
+# a git checkout or no v* tag is reachable, fall back to the CMake project
+# version. This gives a clean semver string that install.sh can compare.
+execute_process(
+    COMMAND git describe --match "v*" --tags --always --dirty
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE LOXPP_VERSION_RAW
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _git_describe_result
+)
+if(NOT _git_describe_result EQUAL 0 OR NOT LOXPP_VERSION_RAW MATCHES "^v")
+    # Not a git checkout, or no v* tag is reachable (git describe fell back
+    # to a commit hash). Use the project version fallback for a clean semver
+    # string that install.sh can compare reliably.
+    set(LOXPP_VERSION "${PROJECT_VERSION}")
+else()
+    # Found a v* tag. Strip the leading 'v' from git describe output
+    # (v0.1.0 -> 0.1.0, v0.1.0-rc1-5-gABC123 -> 0.1.0-rc1-5-gABC123).
+    string(SUBSTRING "${LOXPP_VERSION_RAW}" 1 -1 LOXPP_VERSION)
+endif()
+message(STATUS "loxpp version: ${LOXPP_VERSION}")
+
+# Read the isocline version from third_party/isocline/README.md. The
+# version is on the line "| Release tag | `v<version>` |".
+file(READ "${CMAKE_SOURCE_DIR}/third_party/isocline/README.md" _isocline_readme)
+if(_isocline_readme MATCHES "Release tag.*`v([0-9.]+)`")
+    set(LOXPP_ISOCLINE_VERSION "${CMAKE_MATCH_1}")
+else()
+    message(FATAL_ERROR "Could not extract isocline version from third_party/isocline/README.md")
+endif()
+message(STATUS "bundled isocline version: ${LOXPP_ISOCLINE_VERSION}")
+
+# Configure the version header template into the build directory.
+configure_file(
+    "${CMAKE_SOURCE_DIR}/src/loxpp_version.h.in"
+    "${CMAKE_BINARY_DIR}/loxpp_version.h"
+    @ONLY
+)
+message(STATUS "loxpp_version.h configured at ${CMAKE_BINARY_DIR}/loxpp_version.h")
+
+# Generate the man page from the template. The .TH line includes the version
+# (which matches loxpp --version line 1) and a date. Use the current date or
+# SOURCE_DATE_EPOCH if set (for reproducible builds). The date is unquoted
+# here; quotes are added in the template for proper groff formatting.
+# CMake's string(TIMESTAMP) honors SOURCE_DATE_EPOCH automatically for
+# reproducible builds and removes the bash dependency.
+string(TIMESTAMP LOXPP_MAN_DATE "%B %d, %Y" UTC)
+message(STATUS "man page date: ${LOXPP_MAN_DATE}")
+
+configure_file(
+    "${CMAKE_SOURCE_DIR}/man/loxpp.1.in"
+    "${CMAKE_BINARY_DIR}/loxpp.1"
+    @ONLY
+)
+message(STATUS "loxpp.1 configured at ${CMAKE_BINARY_DIR}/loxpp.1")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -70,6 +129,12 @@ set(LOXPP_CORE_SOURCES
 
 add_library(loxpp_core OBJECT ${LOXPP_CORE_SOURCES})
 target_include_directories(loxpp_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
+
+# Wire the generated version header as an explicit dependency of loxpp_core.
+# loxpp_core is an OBJECT library; its TUs #include the header, so it must
+# be an explicit dependency to avoid race conditions in clean parallel builds.
+target_sources(loxpp_core PRIVATE "${CMAKE_BINARY_DIR}/loxpp_version.h")
+target_include_directories(loxpp_core PUBLIC "${CMAKE_BINARY_DIR}")
 
 # PUBLIC definitions of loxpp_core: they select a type layout in a header that
 # main.cpp reaches, so every translation unit linked with the library must
@@ -191,8 +256,9 @@ if(LOXPP_PROFILE)
     # LOXPP_PROFILE so VM and MemoryManager have one layout across the whole
     # program. loxpp_core (non-profile) is not linked here, so this build
     # reuses the core definition lists to stay ABI-compatible with the
-    # headers.
+    # headers. The generated version header is needed on the include path.
     target_sources(loxpp PRIVATE ${LOXPP_CORE_SOURCES})
+    target_include_directories(loxpp PRIVATE "${CMAKE_BINARY_DIR}")
     target_compile_definitions(loxpp PRIVATE
         LOXPP_PROFILE
         ${LOXPP_CORE_PUBLIC_DEFINITIONS}
@@ -238,3 +304,56 @@ if(LOXPP_BUILD_TESTS)
     enable_testing()
     add_subdirectory(test)
 endif()
+
+# Install rules for the release channel. Use GNUInstallDirs for all paths.
+include(GNUInstallDirs)
+
+# Override CMAKE_INSTALL_DOCDIR to use "loxpp" instead of the project name
+# "Lox++". GNUInstallDirs defaults to share/doc/<project-name>; we want
+# share/doc/loxpp for consistency across the install tree.
+set(CMAKE_INSTALL_DOCDIR "${CMAKE_INSTALL_DATADIR}/doc/loxpp")
+
+# Install the loxpp binary.
+install(TARGETS loxpp RUNTIME COMPONENT runtime)
+
+# Install the configured man page from the build directory.
+install(FILES ${CMAKE_BINARY_DIR}/loxpp.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1 COMPONENT runtime)
+
+# Install shell completions to the conventional locations.
+install(FILES completions/loxpp.bash
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/bash-completion/completions
+        RENAME loxpp
+        COMPONENT runtime)
+install(FILES completions/loxpp.zsh
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/zsh/site-functions
+        RENAME _loxpp
+        COMPONENT runtime)
+install(FILES completions/loxpp.fish
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/fish/vendor_completions.d
+        COMPONENT runtime)
+
+# Install documentation.
+install(DIRECTORY examples/ DESTINATION ${CMAKE_INSTALL_DOCDIR}/examples COMPONENT runtime)
+install(FILES LICENSE THIRD_PARTY.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT runtime)
+
+# CPack configuration for source and binary packages.
+# NOTE: include(CPack) MUST come after all set(CPACK_*) statements so the
+# generated CPackConfig.cmake picks up our settings, not CMake defaults.
+set(CPACK_PACKAGE_NAME "loxpp")
+set(CPACK_PACKAGE_VERSION "${LOXPP_VERSION}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Lox++ interpreter")
+set(CPACK_PACKAGE_VENDOR "txloc1909")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/txloc1909/loxpp")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
+
+# Binary package generator: TXZ (tar + xz compression).
+set(CPACK_GENERATOR "TXZ")
+# Source package generator: TGZ (tar + gzip).
+list(APPEND CPACK_GENERATOR "TGZ")
+
+# Component-aware packaging: only components in CPACK_COMPONENTS_ALL are packed.
+set(CPACK_COMPONENTS_ALL runtime)
+set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+
+# Include CPack AFTER all CPACK_* settings.
+include(CPack)
