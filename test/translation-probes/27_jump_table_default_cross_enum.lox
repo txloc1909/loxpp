@@ -1,4 +1,4 @@
-// Fix (PR #115 round 1): proves the literal JUMP_TABLE "out of [minTag,
+// Fix (PR #115): proves the literal JUMP_TABLE "out of [minTag,
 // minTag+count) range" fallthrough is reachable.
 //
 // 26_enum_match_dispatch_and_error.lox's own header once claimed this path

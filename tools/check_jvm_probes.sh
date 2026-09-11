@@ -68,9 +68,9 @@ probes=(
     "examples/or_pattern_demo.lox"
     "examples/at_binding_demo.lox"
     "examples/string_list_pattern_demo.lox"
-    # R21: run-parity proof for normalizeFoldedOperands's own required
-    # coverage — the nine R15 shapes, RETURN of a folded match, and a nested
-    # match subject.
+    # Run-parity proof for normalizeFoldedOperands's own required
+    # coverage — the nine folded-operand shapes, RETURN of a folded match,
+    # and a nested match subject.
     "test/translation-probes/28_folded_match_operand_family.lox"
     # Reflection introspection: type()/fields()/methods()/getField()/
     # hasField()/setField()/callMethod(), now supported on native, JVM, and
@@ -93,7 +93,7 @@ error_probes=(
     # match carries a guard, so it is not table-eligible — see 27, below, for
     # the literal JUMP_TABLE default's own reachable case instead).
     "test/translation-probes/26_enum_match_dispatch_and_error.lox"
-    # R1 fix: the literal JUMP_TABLE "out of range" fallthrough itself,
+    # The literal JUMP_TABLE "out of range" fallthrough itself,
     # reached through a table-eligible match whose subject is a value of a
     # DIFFERENT enum than the arms name — see the probe's own header
     # comment.

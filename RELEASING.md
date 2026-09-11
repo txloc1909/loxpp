@@ -123,7 +123,7 @@ curl -fsSL https://raw.githubusercontent.com/txloc1909/loxpp/main/install.sh | s
 
 ## Tag namespace
 
-This mission ships only the `loxpp` interpreter. The tag namespace is reserved
+Today only the `loxpp` interpreter is released. The tag namespace is reserved
 for future components with their own release cadence:
 
 | Tag prefix | Component | Notes |

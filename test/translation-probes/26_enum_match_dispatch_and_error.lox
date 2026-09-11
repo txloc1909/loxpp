@@ -2,7 +2,7 @@
 // correct arm, and a match with no accepting arm raises MATCH_ERROR at run
 // time.
 //
-// Fix (PR #115 round 1): an earlier version of this comment said the
+// Fix (PR #115): an earlier version of this comment said the
 // literal JUMP_TABLE "out of [minTag, minTag+count) range" fallthrough is NOT
 // reachable from any program that compiles. That is false.
 // checkEnumExhaustiveness only checks that the ARMS name every constructor

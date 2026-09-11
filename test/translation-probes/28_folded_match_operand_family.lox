@@ -1,5 +1,5 @@
-// Run-parity coverage (PR #115 round 4) for `normalizeFoldedOperands`
-// (jvm_emitter.cpp, redesigned in PR #115 round 3), the one mechanism that
+// Run-parity coverage (PR #115) for `normalizeFoldedOperands`
+// (jvm_emitter.cpp, redesigned in PR #115), the one mechanism that
 // repairs a folded `match` result sitting below a genuine sibling operand of
 // its own consumer.
 //

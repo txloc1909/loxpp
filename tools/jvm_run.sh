@@ -36,8 +36,7 @@ rt_jar="$2"
 main_class="$3"
 stack_size="${4:-64m}"
 # Accept either a bare value ("64m") or a full flag ("-Xss64m"): a caller
-# that passes the whole flag must not get "-Xss-Xss64m" (reported:
-# jvm_run.sh, R4).
+# that passes the whole flag must not get "-Xss-Xss64m".
 stack_size="${stack_size#-Xss}"
 program_args=("${@:5}")
 
@@ -66,9 +65,9 @@ fi
 # ".class" directive, rather than trusting jasmin's exit code or its message
 # text afterward. Text- or count-based proof can say "assembly succeeded"
 # when it had not, three different ways: a directory name that matched the
-# error scan (R1), a packaged class that a shallow scan missed (R5), and two
+# error scan, a packaged class that a shallow scan missed, and two
 # files naming one class, which still print one "Generated:" line each even
-# though the second overwrites the first on disk (R8). Checking the exact
+# though the second overwrites the first on disk. Checking the exact
 # expected path is immune to all three, by construction, because it does
 # not read jasmin's output at all.
 #
@@ -101,10 +100,9 @@ fi
 # Clear class files left by an earlier run against this same directory, so
 # a leftover file cannot stand in for one jasmin was supposed to write this
 # time. A packaged class assembles into a subdirectory of $j_dir, so the
-# scan must walk the whole tree, not only its top level (reported:
-# jvm_run.sh, R5). A trailing slash makes find enter $j_dir even when the
-# caller passes it as a symbolic link, which find would not otherwise
-# follow as a path argument (reported: jvm_run.sh, R9).
+# scan must walk the whole tree, not only its top level. A trailing slash
+# makes find enter $j_dir even when the caller passes it as a symbolic
+# link, which find would not otherwise follow as a path argument.
 mapfile -d '' stale_classes < <(find "$j_dir"/ -name '*.class' -print0)
 if [ "${#stale_classes[@]}" -gt 0 ]; then
     rm -f -- "${stale_classes[@]}"

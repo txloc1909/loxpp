@@ -7,7 +7,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 
 /**
- * PR #97 review finding R1: every string that crosses stdout or stdin must
+ * PR #97: every string that crosses stdout or stdin must
  * be treated as raw bytes (LoxRuntime.CHARSET), not decoded/encoded as UTF-8
  * text. These checks drive the same logic LoxRuntime.out and input() use,
  * through a ByteArrayOutputStream/ByteArrayInputStream instead of the real
@@ -16,7 +16,7 @@ import java.io.PrintStream;
 public final class RuntimeIOTest {
     public static void main(String[] args) throws Exception {
         // Read the production object itself, not a copy built to the same
-        // recipe (PR #97 review finding R10: a check that rebuilds its own
+        // recipe (PR #97: a check that rebuilds its own
         // PrintStream cannot catch a bug in LoxRuntime.out's own charset).
         checkEquals(LoxRuntime.CHARSET, LoxRuntime.out.charset(),
                 "LoxRuntime.out writes raw bytes, not the JVM default charset");

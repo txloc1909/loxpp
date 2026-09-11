@@ -162,8 +162,8 @@ jobs:
 
             # The portable tarball also carries the generated man page, the
             # three shell completions, and the example corpus. build_release.sh
-            # lays out the binary and licences only, so add these here to meet
-            # the D4 asset contract.
+            # lays out the binary and licences only, so add these here to match
+            # the release asset contract (see notes/distribution.md).
             if [ "$comp" = "loxpp" ]; then
               cp build/loxpp.1 "$dest/"
               cp completions/loxpp.bash completions/loxpp.zsh completions/loxpp.fish "$dest/"
