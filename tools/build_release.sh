@@ -18,9 +18,13 @@ SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "$REPO_ROOT" log -1 --format=%c
 export SOURCE_DATE_EPOCH
 echo "Using SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
 
-# NOTE: SOURCE_DATE_EPOCH has no observable effect today (no timestamp is
-# baked into the binary). Once D2 adds a version header, D4 must re-verify
-# reproducibility with a stamped build.
+# NOTE: this script does not itself consume SOURCE_DATE_EPOCH beyond
+# exporting it for any downstream tool that reads it (objcopy, the linker).
+# No wall-clock timestamp is baked into the binary; `--version` comes from
+# `git describe` on the tagged commit, which is itself deterministic.
+# Confirmed reproducible with the version stamp in place: two builds of the
+# same tagged commit, same SOURCE_DATE_EPOCH, produce a byte-identical
+# `loxpp` binary.
 
 # Parse components.toml without a TOML library. Return a list of records:
 # "name|shipped|target1 target2 ..."
