@@ -239,6 +239,36 @@ never established. Record it as an unexplained failure, not as a proven one.
 The rule stands on the correctness hazard alone: one agent system per
 repository, and give a second one its own clone.
 
+## A mission's backlog and follow-up work leaves as GitHub issues
+
+`notes/` is for brainstorming and design records only (see `AGENTS.md`'s
+"Backlog and task tracking"); a mission's own backlog lives in GitHub
+Issues, never in a bullet list inside a mission brief or design note.
+
+When an implementer or the orchestrator identifies work that is explicitly
+out of scope for the current DAG — a node descoped from the plan, a
+follow-up target the brief names but does not build — file one GitHub issue
+per discrete item before closing the mission out:
+
+- **One issue per item**, scoped the way a node spec is: what it is, why it
+  was deferred, and what already exists for it to build on (a shared
+  harness, a manifest slot, a reused analysis module).
+- **Label it** with the repo's existing labels (`enhancement`, plus any area
+  label the deferred work needs) so it is discoverable outside the mission's
+  own history.
+- **Link it from the design note**, if the note's reasoning for deferring the
+  work still matters — the note keeps the *why*, the issue tracks the *when*
+  and *by whom*.
+- **A follow-up mission with several deferred nodes gets a GitHub Project**,
+  not a new `notes/` DAG-plan-shaped list, so the items can be sequenced and
+  tracked the same way an active mission tracks its own nodes through PR and
+  review state (see "State comes from persistent storage" above).
+
+This mirrors the mission's own rule for live state: GitHub, not a
+hand-maintained file, is authoritative. A `notes/` design doc may still say
+*why* something was deferred; it must never be the place where "is this done
+yet" gets answered.
+
 ## Orchestrator text is not an authority against the source
 
 A node specification states constraints, not mechanisms — say what must hold

@@ -238,48 +238,33 @@ Cargo), fold version selection into **that** tool. Do not ship a standalone
 The first bug report of the form "my program ran on `loxpp` 0.N and breaks on
 0.M" that coincides with a second project needing 0.N.
 
-## "Maybe later" list
+## Deferred work
 
-These features stay in a deferred list. They are not complex, but not urgent:
+Not complex, but not urgent, or waiting on a decision. Each is a standalone
+GitHub issue, not a list here:
 
-- **`ghcr` runtime image:** `FROM scratch` + the static binary = a minimal
-  container image. Near-trivial now the binary is static. Defer until there is
-  demand for container distribution.
-- **Nix flake:** for Nix users. Worth doing once the release machinery is solid
-  and has users to validate against.
-- **Background "new version available" nudge:** a daemon or cron job that
-  checks weekly and notifies if an update exists. `loxpp upgrade --check` does
-  the check; a nudge UX is secondary.
-- **Side-by-side slotted installs:** `install.sh --version X --slot X` to
-  install multiple versions as `loxpp-X` and keep PATH pointing at one default.
-  The 10-line extension to `install.sh`, implement on request.
+- `ghcr` runtime image (`FROM scratch` + the static binary): near-trivial
+  now the binary is static; deferred until there is demand for container
+  distribution — https://github.com/txloc1909/loxpp/issues/202
+- Nix flake, worth doing once the release machinery has users to validate
+  against — https://github.com/txloc1909/loxpp/issues/203
+- Background "new version available" nudge, on top of the
+  `loxpp upgrade --check` that already exists —
+  https://github.com/txloc1909/loxpp/issues/204
+- Side-by-side slotted installs (`install.sh --version X --slot X`) —
+  https://github.com/txloc1909/loxpp/issues/205
 
-## v2 backlog: editor-tooling distribution
+## Follow-up mission: editor-tooling distribution
 
-A follow-up mission will ship the editor tooling components:
-
-- `loxpp-lsp` — the language server
-- `tree-sitter-loxpp` — the tree-sitter parser grammar
-- `loxpp.nvim` — the Neovim plugin
-
-This mission's release machinery is built to support them: the component
+A follow-up mission ships `loxpp-lsp`, `tree-sitter-loxpp`, and
+`loxpp.nvim` through this mission's release machinery — the component
 manifest, the build-set / ship-set split, the tag namespace (`lsp-v*`,
 `grammar-v*`, `nvim-v*`), and CPack components all slot them in with no
 workflow rework.
 
-### Credential prerequisites for editor-tooling shipping
-
-- **npm publishing (`tree-sitter-loxpp`):** requires `NPM_TOKEN` secret in
-  GitHub (granular npm automation token or classic token).
-- **crates.io publishing (`tree-sitter-loxpp` crate):** requires
-  `CARGO_REGISTRY_TOKEN` secret in GitHub (crates.io API token via GitHub
-  login).
-- **Plugin registries:** `loxpp.nvim` plugin registries (nvim-treesitter,
-  neovim/nvim-treesitter, vim-plug-compatible repos) accept pull requests. No
-  token needed, but each registry has its own PR/merge workflow.
-- **Plugin repository:** decision pending — whether `loxpp.nvim` lives in this
-  repo or a separate `txloc1909/loxpp.nvim`. A separate repo simplifies
-  per-plugin versioning and gives plugin developers a focused issue tracker.
+Tracked as https://github.com/txloc1909/loxpp/issues/201, with its
+credential and repository-location prerequisites tracked as their own
+linked issues.
 
 ---
 

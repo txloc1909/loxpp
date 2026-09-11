@@ -9,8 +9,35 @@ same PR as any language change.
 Decision priority: **spec** (`spec/`) > **implementation** (`src/`) > **design
 notes** (`notes/`)
 
-Consult `notes/` when planning — it captures future direction and helps avoid
-conflicting designs.
+Consult `notes/` when planning — it captures the *why* behind past decisions
+and sketches future direction, and helps avoid conflicting designs. `notes/`
+is for brainstorming and design records only, never for tracking backlog or
+task status — see "Backlog and task tracking" below.
+
+---
+
+## Backlog and task tracking
+
+GitHub Issues are the backlog, and GitHub Projects the board for anything
+bigger than a handful of issues. A follow-up, a known gap, a "do this later"
+item — file it as an issue. Never park it as a bullet list in `notes/`: an
+issue can be assigned, labeled, closed, and linked from a PR; a markdown
+bullet cannot, and nothing then answers "is this done yet."
+
+- **File it, don't list it.** When a PR, a design note, or a mission's
+  closing doc identifies future work, open one GitHub issue per discrete
+  item instead of adding or growing a bullet list in a note.
+- **`notes/` stays for ideas and design records.** Brainstorm there, and
+  record the reasoning behind a decision — including *why* something was
+  deferred. Once an idea becomes an actionable, schedulable item, it belongs
+  in an issue; link the issue back from the note if the note's reasoning
+  still matters.
+- **GitHub Projects for multi-issue efforts.** When a body of work spans more
+  than a few issues (a mission, a multi-stage feature), track it on a GitHub
+  Project board rather than a hand-maintained checklist in a note.
+- **Labels carry status**, not `notes/` prose. Use the repo's existing labels
+  (`bug`, `enhancement`, `documentation`, ...), plus any area-specific label
+  the work needs.
 
 ---
 
@@ -19,7 +46,8 @@ conflicting designs.
 **Always plan before implementing.**
 
 1. Post a plan (approach, files affected, open questions) as an issue comment
-   or PR description.
+   or PR description. Open the issue first if the work doesn't already have
+   one.
 2. Wait for explicit approval before writing any code or opening a PR.
 3. If the plan changes, acknowledge the revision before proceeding.
 

@@ -379,60 +379,49 @@ Corrections against the plan's table:
 
 ---
 
-## v2 backlog
+## Future work
 
-Each item is small on this base.
+Each item below is small on this base, and each is a standalone GitHub
+issue, not a list here:
 
-- **Signature help.** `signatureHelpProvider` plus a handler. Arity and the
-  parameter list are already in `src/lsp/stdlib_docs.*`.
-- **In-file rename.** `renameProvider` plus a handler. The reference sets
-  from `references` already give the edit list.
-- **Code actions from compiler errors.** `codeActionProvider`. Add the
-  missing `match` arm that the exhaustiveness check names; wrap a `+` operand
-  in `str()`.
-- **Formatting.** Build a `loxpp fmt` formatter first, then
-  `documentFormattingProvider` and `textDocument/formatting`.
-- **Incremental document sync.** Move from `Full` to `Incremental`, so
-  `analyze()` (a full recompile) does not run on the whole file for every
-  keystroke.
-- **Semantic tokens.** Only if the tree-sitter highlighting proves not
-  enough for some client.
-- **Cross-file navigation and workspace symbols.** Waits on a module system
-  (`notes/expressiveness-roadmap.md`, not scheduled).
-- **A TextMate grammar** (`editors/loxpp.tmbundle`) for VS Code and GitHub
-  Linguist reach.
-- **A VS Code extension.**
-- **Split `editors/tree-sitter-loxpp` and `editors/loxpp.nvim` into their own
-  repositories**, so `:TSInstall loxpp` and the plugin managers can fetch
-  them directly. The Node and Rust bindings under
-  `editors/tree-sitter-loxpp/bindings/` are the `tree-sitter init` scaffold
-  and are not built in CI; a split would make them real.
+- Signature help (`signatureHelpProvider`); arity and the parameter list
+  already exist in `src/lsp/stdlib_docs.*` —
+  https://github.com/txloc1909/loxpp/issues/210
+- In-file rename (`renameProvider`), using the edit list that `references`
+  already computes — https://github.com/txloc1909/loxpp/issues/211
+- Code actions from compiler errors (`codeActionProvider`) —
+  https://github.com/txloc1909/loxpp/issues/212
+- Formatting: a `loxpp fmt` formatter, then `documentFormattingProvider` —
+  https://github.com/txloc1909/loxpp/issues/213
+- Incremental document sync (`Full` to `Incremental`), so `analyze()` does
+  not recompile the whole file on every keystroke —
+  https://github.com/txloc1909/loxpp/issues/214
+- Semantic tokens, only if tree-sitter highlighting proves insufficient —
+  https://github.com/txloc1909/loxpp/issues/215
+- Cross-file navigation and workspace symbols; waits on a module system
+  (`notes/expressiveness-roadmap.md`, not scheduled) —
+  https://github.com/txloc1909/loxpp/issues/216
+- A TextMate grammar (`editors/loxpp.tmbundle`) for VS Code and GitHub
+  Linguist reach — https://github.com/txloc1909/loxpp/issues/217
+- A VS Code extension — https://github.com/txloc1909/loxpp/issues/218
+- Split `editors/tree-sitter-loxpp` and `editors/loxpp.nvim` into their own
+  repositories, so `:TSInstall loxpp` and plugin managers can fetch them
+  directly — https://github.com/txloc1909/loxpp/issues/219
 
 ---
 
 ## Follow-up bug candidates
 
 Found during this work, not fixed (each is out of scope for a docs or
-tooling change). None changes the tooling's behaviour on valid source.
+tooling change). None changes the tooling's behaviour on valid source. Each
+is a standalone GitHub issue, not a list here:
 
-- **`lox_keywords()` in `src/scanner.cpp` is missing `in`.** The array is
-  called "the single source of truth" for the keyword list
-  (`src/scanner.h`), but it lists 22 of the 23 keyword tokens. Effect: the
-  REPL does not tab-complete `in`. Scanning is not affected —
-  `Scanner::identifierType()` is a separate hand-written trie that
-  recognises `in`.
-- **A two-dot run `..` scans as one `DOT` token with a two-character
-  lexeme.** `Scanner::match` advances on every match that succeeds and does
-  not step back when the next one fails, so `case '.'` consumes both dots and
-  then builds a `DOT` token. Effect: `o..x` runs the same as `o.x` instead
-  of being a lexical error. `spec/01-lexical.md` now claims a meaning for
-  three dots (`...` = `ELIPSIS`) only, and gives none to a two-dot run.
-- **The tree-sitter grammar treats `default` as an ordinary identifier.**
-  `default` is a reserved word in the scanner (`src/token.h`) but no grammar
-  rule uses it, and tree-sitter prunes a `reserved` word that only a pruned
-  rule references. A program that uses `default` as a name is a compile
-  error in real Lox++; the grammar does not flag it. No corpus file is
-  affected. `match`, `enum`, and `case` are reserved correctly.
+- `lox_keywords()` in `src/scanner.cpp` is missing `in` —
+  https://github.com/txloc1909/loxpp/issues/220
+- A two-dot run `..` scans as one `DOT` token instead of a lexical error —
+  https://github.com/txloc1909/loxpp/issues/221
+- The tree-sitter grammar treats `default` as an ordinary identifier —
+  https://github.com/txloc1909/loxpp/issues/222
 
 The tooling parser also accepts a few constructs the real compiler rejects —
 a slice on an assignment left side (`a[x:y] = v`), a misplaced `enum`. That
