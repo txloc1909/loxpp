@@ -20,7 +20,7 @@ public final class MapTest {
         map.put(-0.0, "neg-zero");
         checkEquals(2, map.size(), "storing -0.0 after 0.0 overwrites, not inserts");
         checkEquals("neg-zero", map.get(0.0), "the later write under -0.0 is what 0.0 now reads");
-        // PR #97 review finding R11: the stored value is normalized for
+        // PR #97: the stored value is normalized for
         // lookup, but the key printed back must be the sign the caller last
         // wrote, matching CoreHashMap::set (native `m[0]=1; m[-z]=2;
         // print m.keys();` prints `[-0]`, not `[0]`).
@@ -36,7 +36,7 @@ public final class MapTest {
         checkEquals(1, map.size(), "removing an absent key is a no-op");
 
         // LinkedHashMap gives insertion order, not the native table's bucket
-        // order (binding supervisor ruling on PR #97 finding R2: the gap is
+        // order (PR #97: the gap is
         // legal because spec/03-types.md leaves map order unspecified).
         LoxMap ordered = new LoxMap();
         ordered.put("b", 2.0);

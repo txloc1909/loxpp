@@ -31,7 +31,7 @@ match "hi" {
 };
 print r;
 
-// Fix (PR #115 round 1): a 2-element pattern here can never prove IS_SEQ
+// Fix (PR #115): a 2-element pattern here can never prove IS_SEQ
 // runs at all — compileListPattern's own length check (compiler.cpp:2129-
 // 2148) rejects a 1-pair map on width alone, so IS_SEQ's own answer never
 // reaches stdout either way (proof: mutating LoxOps.isSeq to `return true`

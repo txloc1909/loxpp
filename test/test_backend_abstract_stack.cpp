@@ -175,8 +175,8 @@ void checkProbeFile(const fs::path& path) {
 
 // The merge-consistency check, directly: analyzeStack must throw on a
 // genuine merge disagreement, not just complete without throwing on programs
-// that happen not to have one (a review finding — this is why the corpus
-// tests above are worded to say the throw is what they are exercising).
+// that happen not to have one — this is why the corpus tests above are
+// worded to say the throw is what they are exercising.
 // Bypasses the compiler to hand-build a chunk no real compiler would ever
 // emit: two paths into one PRINT, one of which pushes an extra CONSTANT the
 // other does not, so the merge disagrees by one cell of height with nothing
@@ -217,7 +217,7 @@ TEST(AbstractStackTest, MergeDisagreementThrows) {
     // validateMergeConsistency); a plain EXPECT_THROW(..., std::runtime_error)
     // would stay green even if a future change made a *different* guard fire
     // first on this chunk, silently retiring the merge-consistency assertion —
-    // exactly the failure mode a review finding reported for this same test.
+    // exactly the failure mode this test exists to catch.
     try {
         analyzeStack(fn);
         ADD_FAILURE() << "analyzeStack did not throw; the jump-taken edge "

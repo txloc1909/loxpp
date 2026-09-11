@@ -1,6 +1,6 @@
 // V5: a local `fun` that captures itself as an upvalue (direct recursion).
 // The CLOSURE instruction that declares `fact` also names `fact`'s own slot
-// in its own upvalue list. PR #111 R1: this made the JVM verifier reject
+// in its own upvalue list. PR #111: this made the JVM verifier reject
 // the class, because the naive lowering read that slot before any
 // instruction wrote it, and even once fixed, a plain declaring store
 // clobbered the cell with the raw closure. Native loxpp prints 120.
