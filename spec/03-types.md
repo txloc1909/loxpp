@@ -208,7 +208,7 @@ read-only:
 | Field | Meaning |
 |---|---|
 | `message` | Human-readable description of the fault — the same text the implementation reports when that fault is left uncaught. |
-| `kind` | A fixed name identifying the category of fault, one of the values listed in the [Runtime Errors](04-semantics.md#runtime-errors) table. |
+| `kind` | A string identifying the category of fault; see the [Runtime Errors](04-semantics.md#runtime-errors) table for the kind used by each fault defined in this specification. |
 
 ```lox
 try {

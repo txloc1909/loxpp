@@ -66,6 +66,10 @@ tryStmt        ::= "try" block "catch" "(" IDENTIFIER ")" block ;
 throwStmt      ::= "throw" expression ";" ;
 
 deferStmt      ::= "defer" call "(" arguments? ")" ";" ;
+                   (* `call` permits method calls and subscript access; the grammar
+                      requires one more `()` pair, so `defer` requires the full
+                      syntactic form of a function or method call, not a bare
+                      identifier or property access. *)
 
 block          ::= "{" declaration* "}" ;
 

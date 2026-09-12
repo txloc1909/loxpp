@@ -697,6 +697,7 @@ Nothing in the rest of this section applies to a global.
 - a function parameter;
 - the name of a local `fun` or `class` declaration;
 - `this`, inside a method;
+- the identifier in a `catch (identifier)` clause;
 - a pattern binding in a `match` arm.
 
 A `match` pattern binding is a local binding, but no closure can capture it. A
@@ -1111,11 +1112,13 @@ len(seq)
 
 A runtime error halts execution immediately and reports an error message —
 **unless** it happens during the execution of a `try` statement's
-`tryBlock` (directly, or inside a function called from within it), in
+`tryBlock` (directly, or inside any function called from within it), in
 which case it does not halt the program; instead it is delivered to that
 `try` statement's `catchBlock` as an `Error` value, exactly as the
 [`throw` Statement](#throw-statement) describes for any other thrown
-value. Every cause below is catchable this way.
+value. An error that occurs during the execution of the `catchBlock`
+itself is not caught by that same `try` statement. Every cause below is
+catchable this way.
 
 The table lists each cause, an example, and the `kind` field
 ([§03-types](03-types.md#error)) of the `Error` value delivered to
@@ -1142,6 +1145,7 @@ same text the implementation reports when the fault is left uncaught.
 | Method called on non-instance/non-list/non-map | `42.foo()` | `"InvalidReceiverError"` |
 | No arm matches in a `match` expression | `match 99 { case 1 => "one" }` | `"MatchError"` |
 | Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field | `"ConstructorArityError"` |
+| Undefined property on an `Error` value | `try { throw 1; } catch (e) { e.foo; }` | `"UndefinedPropertyError"` |
 
 ---
 
