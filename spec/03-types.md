@@ -8,7 +8,7 @@ types over its lifetime.
 
 ## Runtime Types
 
-There are ten runtime types:
+There are eleven runtime types:
 
 ### Nil
 
@@ -193,6 +193,48 @@ integer index.
 
 The maximum number of key-value pairs in a map literal is 255.
 
+### Error
+
+Produced by the runtime when a fault caught by a `try` statement is
+delivered to its `catchBlock` (see [§04-semantics, Runtime
+Errors](04-semantics.md#runtime-errors) and [`try`
+Statement](04-semantics.md#try-statement)). No built-in global name or
+literal syntax constructs an `Error` value directly — the only way a Lox++
+program obtains one is by catching a runtime fault with `try`/`catch`.
+
+Every `Error` value has exactly two fields, both Strings and both
+read-only:
+
+| Field | Meaning |
+|---|---|
+| `message` | Human-readable description of the fault — the same text the implementation reports when that fault is left uncaught. |
+| `kind` | A fixed name identifying the category of fault, one of the values listed in the [Runtime Errors](04-semantics.md#runtime-errors) table. |
+
+```lox
+try {
+    var xs = [];
+    print xs[0];
+} catch (e) {
+    print e.kind;     // IndexOutOfBoundsError
+    print e.message;  // List index out of bounds.
+}
+```
+
+`e.message` and `e.kind` are read with the same `.` syntax used for
+Instance fields. Reading any other property name on an `Error` value, or
+assigning to `message`, `kind`, or any other name, is a **runtime error**.
+
+Two `Error` values are equal only if they are the exact same object
+(identity equality — see [Equality](#equality)).
+
+`Error` is not a sequence type: it does not support `len()`, `[]`, `in`, or
+`for-in`.
+
+Because `throw` accepts any value, an `Error` is not the only thing a
+`catch` clause can ever bind — it is specifically what the language itself
+delivers for a runtime fault. A `throw` written by a program can throw a
+String, a Number, an Instance of a user-defined class, or any other value.
+
 ---
 
 ## Sequence Protocol
@@ -235,8 +277,8 @@ The `==` and `!=` operators compare two values.
   - Strings are equal when they contain the same sequence of characters
   - Functions are equal only when they are the same function object (identity
     equality)
-  - Classes, Instances, BoundMethods, Bound built-in methods, Lists, and Maps use identity equality:
-    two values are equal only if they are the exact same object
+  - Classes, Instances, BoundMethods, Bound built-in methods, Lists, Maps, and Errors use identity
+    equality: two values are equal only if they are the exact same object
 
 Equality never produces a runtime error regardless of the types being compared.
 
@@ -270,6 +312,7 @@ Every value has a canonical string form, produced by `print` and by the
 | Instance | `ClassName instance` (e.g. `Dog instance`) |
 | List | `[elem0, elem1, ...]` — each element in its canonical string form, comma-space separated, enclosed in `[` and `]`. An empty list is `[]`. |
 | Map | `{key0: value0, key1: value1, ...}` — each pair as `key: value` in canonical form, comma-space separated, enclosed in `{` and `}`. An empty map is `{}`. |
+| Error | `kind: message` — the value of the `kind` field, then `": "`, then the value of the `message` field. Note that an *uncaught* `throw` of an Error reports only `message`, not this form — see [§04-semantics, `throw` Statement](04-semantics.md#throw-statement). |
 
 The nesting depth of a value that a canonical string form can hold is
 implementation-defined. A value more deeply nested than that limit causes a

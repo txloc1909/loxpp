@@ -383,6 +383,7 @@ Returns the language-level type name of `value` as a String.
 | List | `"List"` |
 | Map | `"Map"` |
 | File | `"File"` |
+| Error (see §03-types) | `"Error"` |
 | Iterator | `"Iterator"` |
 | Enum constructor | `"EnumConstructor"` |
 | Enum value | `"Enum"` |

@@ -52,11 +52,18 @@ Grammar throughout this specification is written in **EBNF**:
 variable resolution). A conforming implementation must report a static error
 and must not execute the program that contains one.
 
-Examples: `break` outside a loop, `return` at the top level, self-referential
-variable initializer, duplicate name in the same scope.
+Examples: `break` outside a loop, `return` at the top level, `defer` at the
+top level, self-referential variable initializer, duplicate name in the same
+scope.
 
 **Runtime error** — detected during execution. A conforming implementation
-must halt execution and report the error.
+must halt execution and report the error, **unless** the error occurs during
+the execution of a `try` statement's protected block (directly, or inside a
+function called from within it) — in that case execution transfers to that
+`try` statement's `catch` clause instead of halting, with the fault
+delivered as an `Error` value. See [§04-semantics, `try`
+Statement](04-semantics.md#try-statement) and [§04-semantics, Runtime
+Errors](04-semantics.md#runtime-errors).
 
 Examples: arithmetic on a non-Number, calling a non-function, wrong number of
 arguments, reading an undeclared global variable.
@@ -88,6 +95,7 @@ variant) and adds the following:
 | `var {x, y} = expr` destructuring | Added in Lox++ |
 | `enum` declaration with constructor variants | Added in Lox++ |
 | Constructor patterns and class (instanceof) patterns in `match` | Added in Lox++ |
+| `try`/`catch`, `throw`, `defer` non-local control flow + built-in `Error` type | Added in Lox++ |
 
 ---
 

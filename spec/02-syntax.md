@@ -34,6 +34,9 @@ statement      ::= exprStmt
                  | whileStmt
                  | breakStmt
                  | continueStmt
+                 | tryStmt
+                 | throwStmt
+                 | deferStmt
                  | block ;
 
 exprStmt       ::= expression ";" ;
@@ -57,6 +60,12 @@ whileStmt      ::= "while" "(" expression ")" statement ;
 breakStmt      ::= "break" ";" ;
 
 continueStmt   ::= "continue" ";" ;
+
+tryStmt        ::= "try" block "catch" "(" IDENTIFIER ")" block ;
+
+throwStmt      ::= "throw" expression ";" ;
+
+deferStmt      ::= "defer" call "(" arguments? ")" ";" ;
 
 block          ::= "{" declaration* "}" ;
 
@@ -268,3 +277,23 @@ listing the absent names.
 
 A call may pass up to 255 arguments. The maximum number of parameters a
 function may declare is also 255.
+
+### `try`/`catch`, `throw`, `defer`
+
+See `tryStmt` / `throwStmt` / `deferStmt` in the main EBNF.
+
+- `try` and `catch` each require an explicit `{ }` block — an unbraced
+  single statement is a parse error, unlike `if`/`while`/`for`.
+- `catch` binds exactly one identifier. There is no typed catch-clause
+  syntax; a program that needs to discriminate the shape of a thrown value
+  does so with `match` inside `catchBlock`.
+- `throw`'s operand is a plain `expression` — any expression form is
+  allowed, and the thrown value is not restricted to any particular type.
+- `defer`'s operand must have the syntactic form of a function or method
+  call, `callee(arguments)`. Any expression that is not shaped like a call
+  — a bare identifier, a property access with no trailing `(...)`, a
+  literal, and so on — is a parse error.
+
+See [§04-semantics](04-semantics.md#try-statement) for the full evaluation
+rules of all three statements, and [§03-types](03-types.md#error) for the
+built-in `Error` type a caught runtime fault is delivered as.
