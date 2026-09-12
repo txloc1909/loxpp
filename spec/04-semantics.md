@@ -1145,7 +1145,7 @@ same text the implementation reports when the fault is left uncaught.
 | Method called on non-instance/non-list/non-map | `42.foo()` | `"InvalidReceiverError"` |
 | No arm matches in a `match` expression | `match 99 { case 1 => "one" }` | `"MatchError"` |
 | Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field | `"ConstructorArityError"` |
-| Undefined property on an `Error` value | `try { throw 1; } catch (e) { e.foo; }` | `"UndefinedPropertyError"` |
+| Undefined property on an `Error` value | `try { try { [][0]; } catch (e) { e.foo; } } catch (_) { }` | `"UndefinedPropertyError"` |
 
 ---
 
