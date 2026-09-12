@@ -434,8 +434,7 @@ TEST(NonlocalCfgTest, ThrowTerminalPreventsASpuriousMergeDisagreement) {
 // the first place (a real chunk can't currently trigger the guard directly,
 // since LocalCfg is private to abstract_stack.cpp) while documenting the
 // exact condition that would.
-TEST(NonlocalCfgTest,
-     CorpusProbeNeverProducesTwoHandlerEntriesAtTheSameOffset) {
+TEST(NonlocalCfgTest, MultipleIndependentHandlersEachGetTheirOwnDeclaredDepth) {
     // A degenerate but legal shape: two independent PUSH_HANDLERs whose
     // catch code happens to sit back-to-back, each with its own distinct
     // catch entry. Exercises handlerEntrySeeds/runFixpoint with more than
@@ -472,4 +471,52 @@ TEST(NonlocalCfgTest,
     for (const HandlerEntryContract& c : analysis.handlerEntries) {
         EXPECT_EQ(c.declaredOperandDepth, 1);
     }
+}
+
+// Regression test for R1/R2: empty protected region where PUSH_HANDLER's
+// catch offset equals its own immediate fallthrough (i.e. try {} catch (e)
+// { ... }). This must NOT cause the catch block to gain a generic
+// predecessor edge from PUSH_HANDLER.
+TEST(NonlocalCfgTest, EmptyProtectedRegionPushHandlerCatchOffsetEqualsNext) {
+    // Build: 0: PUSH_HANDLER -> 3   (catch target == own fallthrough)
+    //        3: POP                 (catch entry)
+    //        4: NIL
+    //        5: RETURN
+    Chunk chunk;
+    writePushHandler(chunk, 3, 1); // 0: PUSH_HANDLER with catch offset = 3
+    chunk.write(Op::POP, 1);       // 3
+    chunk.write(Op::NIL, 1);       // 4
+    chunk.write(Op::RETURN, 1);    // 5
+
+    std::vector<DecodedInstruction> ins = decodeChunk(chunk);
+    Cfg cfg = buildCfg(ins);
+
+    // The catch block (at offset 3, which is POP) must be tagged as handler
+    // entry and must NOT have any generic predecessors.
+    const BasicBlock& catchBlock = blockAt(cfg, 3);
+    EXPECT_TRUE(catchBlock.isHandlerEntry)
+        << "catch-target block must be tagged isHandlerEntry";
+    EXPECT_TRUE(catchBlock.predecessors.empty())
+        << "catch-target block must have no generic predecessors, even when "
+        << "the PUSH_HANDLER's catch offset equals its own immediate "
+        << "fallthrough (empty protected region)";
+
+    // Verify abstract_stack.cpp's analyzeStack also handles this correctly.
+    ObjFunction fakeFn;
+    fakeFn.chunk = chunk;
+
+    DecodedFunction fn;
+    fn.function = &fakeFn;
+    fn.id = "0";
+    fn.displayName = "emptyProtectedRegion";
+    fn.instructions = decodeChunk(fakeFn.chunk);
+
+    FunctionStackAnalysis analysis; // NOLINT(misc-const-correctness)
+    // This should NOT throw with "unexpectedly has a generic predecessor
+    // edge".
+    ASSERT_NO_THROW(analysis = analyzeStack(fn));
+    ASSERT_EQ(analysis.handlerEntries.size(), 1U);
+    EXPECT_EQ(analysis.handlerEntries[0].declaredOperandDepth, 1)
+        << "catch entry at an empty protected region must still declare "
+        << "its entry depth as PUSH_HANDLER's own depth + 1";
 }

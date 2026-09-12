@@ -80,7 +80,11 @@ LocalCfg buildCfg(const std::vector<DecodedInstruction>& ins) {
             // with no operand at all.
             int catchIdx = offsetToIndex.at(ins[i].jumpTarget);
             cfg.handlerLinks.emplace_back(idx, catchIdx);
-            if (fallthrough >= 0) {
+            // When the catch offset equals the immediate next instruction
+            // (empty protected region, e.g. try {} catch (e) { ... }), do
+            // NOT wire the fallthrough edge — the catch block must never gain
+            // a generic predecessor from PUSH_HANDLER itself.
+            if (fallthrough >= 0 && fallthrough != catchIdx) {
                 addEdge(idx, fallthrough);
             }
             break;
@@ -683,7 +687,10 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
 // seeded this way is "reached" from a *declared* state, never from
 // LocalCfg::predecessors — there are none for it (LocalCfg::handlerLinks'
 // own comment) — so this is the only way such an instruction ever becomes
-// reachable at all.
+// reachable at all. Note: This function's body is rewritten to support
+// multiple seeds (the loop-of-one `seeds = {{0, initial}}` path remains
+// mathematically identical to the original single-seed version, but the
+// code implementation is changed-but-provably-equivalent, not untouched).
 std::vector<std::optional<StackState>>
 runFixpoint(const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
             const std::vector<std::pair<int, StackState>>& seeds,

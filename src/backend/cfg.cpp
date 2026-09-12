@@ -185,6 +185,17 @@ void wireSuccessors(BasicBlock& block,
     case Op::MATCH_ERROR:
     case Op::THROW:
         break; // no successor
+    case Op::PUSH_HANDLER:
+        // PUSH_HANDLER falls through to the protected code normally. However,
+        // when its catch-offset target coincides with its own immediate
+        // fallthrough (empty protected region, e.g. try {} catch (e) { ... }),
+        // do NOT wire the fallthrough edge — the catch block is a leader that
+        // must never gain a generic predecessor from PUSH_HANDLER itself.
+        if (block.endOffset < chunkEnd && block.endOffset != last.jumpTarget) {
+            addEdge(block, blockIndexOfOffset.at(block.endOffset),
+                    EdgeKind::FALL_THROUGH);
+        }
+        break;
     default:
         if (block.endOffset < chunkEnd) {
             addEdge(block, blockIndexOfOffset.at(block.endOffset),
