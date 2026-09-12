@@ -10,10 +10,17 @@ namespace {
 
 // A branch either transfers control elsewhere (JUMP, JUMP_IF_FALSE, LOOP,
 // JUMP_TABLE) or ends the chunk's control flow outright (RETURN,
-// MATCH_ERROR — vm.cpp: the latter never returns). Either way, the block it
-// sits in ends there, and whatever instruction follows — if any — starts a
-// new one, even when nothing else ever jumps to it (rule 3 of the leaders
-// algorithm does not care about reachability).
+// MATCH_ERROR — vm.cpp: the latter never returns; THROW — unwinds past this
+// function entirely, the same "no successor" shape as RETURN). Either way,
+// the block it sits in ends there, and whatever instruction follows — if
+// any — starts a new one, even when nothing else ever jumps to it (rule 3 of
+// the leaders algorithm does not care about reachability).
+//
+// PUSH_HANDLER is deliberately absent here even though it carries a
+// jump-shaped operand (chunk.h): control always falls through past it into
+// the protected code that follows, so it must not end its own block the way
+// a real branch does. Its catch-offset operand still needs a leader at its
+// target (see collectLeaderOffsets) — just not via this function.
 bool isBranch(Op op) {
     switch (op) {
     case Op::JUMP:
@@ -22,6 +29,7 @@ bool isBranch(Op op) {
     case Op::JUMP_TABLE:
     case Op::RETURN:
     case Op::MATCH_ERROR:
+    case Op::THROW:
         return true;
     default:
         return false;
@@ -107,6 +115,18 @@ collectLeaderOffsets(const std::vector<DecodedInstruction>& instructions,
                 leaders.insert(arm.target); // rule 2
             }
             break;
+        case Op::PUSH_HANDLER:
+            // The catch entry is a leader like any other jump target (rule
+            // 2), but — unlike JUMP/JUMP_TABLE above — this instruction is
+            // not in isBranch's set, so wireSuccessors never turns this into
+            // a generic successor/predecessor edge (see buildCfg's
+            // post-pass, below, for how the link is recorded instead).
+            requireInstructionBoundary(byOffset, ins.jumpTarget, ins.offset,
+                                       "PUSH_HANDLER catch target");
+            requireDirection(ins.jumpTarget, ins.offset, /*wantForward=*/true,
+                             "PUSH_HANDLER catch target");
+            leaders.insert(ins.jumpTarget); // rule 2
+            break;
         default:
             break;
         }
@@ -163,6 +183,7 @@ void wireSuccessors(BasicBlock& block,
         break;
     case Op::RETURN:
     case Op::MATCH_ERROR:
+    case Op::THROW:
         break; // no successor
     default:
         if (block.endOffset < chunkEnd) {
@@ -230,6 +251,22 @@ Cfg buildCfg(const std::vector<DecodedInstruction>& instructions) {
             cfg.blocks[static_cast<size_t>(edge.targetBlock)]
                 .predecessors.push_back(static_cast<int>(b));
         }
+    }
+
+    // PUSH_HANDLER's catch-target links, recorded separately from the
+    // successor/predecessor edges above — see HandlerEntry and
+    // BasicBlock::isHandlerEntry. No edge was added for these above (they
+    // are absent from isBranch's set and wireSuccessors' switch), so every
+    // catch-target block's `predecessors` is empty by construction; this
+    // loop only tags it and records the declaring PUSH_HANDLER, it does not
+    // add to `predecessors`.
+    for (const DecodedInstruction& ins : instructions) {
+        if (ins.op != Op::PUSH_HANDLER) {
+            continue;
+        }
+        int catchBlock = blockIndexOfOffset.at(ins.jumpTarget);
+        cfg.blocks[static_cast<size_t>(catchBlock)].isHandlerEntry = true;
+        cfg.handlerEntries.push_back({ins.offset, catchBlock});
     }
 
     return cfg;

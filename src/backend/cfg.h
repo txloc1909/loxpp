@@ -53,11 +53,33 @@ struct BasicBlock {
     std::vector<CfgEdge> successors;
     // Indices into Cfg::blocks of every block with an edge into this one.
     std::vector<int> predecessors;
+
+    // True for a PUSH_HANDLER's catch-target block (see HandlerEntry below).
+    // Never set alongside a non-empty `predecessors`: this pass deliberately
+    // never wires a generic edge into a catch-target block, because a catch
+    // handler's real predecessors are every THROW reachable in the
+    // protected region — including ones in a callee this function's own
+    // bytecode cannot see. A consumer that needs this block's entry state
+    // (abstract_stack.cpp) must derive it from the declaring PUSH_HANDLER
+    // (see Cfg::handlerEntries), never from `predecessors`.
+    bool isHandlerEntry{false};
+};
+
+// A PUSH_HANDLER's catch-handler entry, recorded separately from the
+// generic successor/predecessor edges above — see BasicBlock::isHandlerEntry
+// and chunk.h's own comment on PUSH_HANDLER.
+struct HandlerEntry {
+    int pushHandlerOffset{0};
+    int catchBlock{-1}; // index into Cfg::blocks
 };
 
 // The basic blocks of one chunk, in byte order.
 struct Cfg {
     std::vector<BasicBlock> blocks;
+
+    // One entry per PUSH_HANDLER in the chunk. None of these blocks appear
+    // as a target in any BasicBlock::predecessors entry — see HandlerEntry.
+    std::vector<HandlerEntry> handlerEntries;
 };
 
 // Recovers the CFG of one chunk from its already-decoded instructions (see
