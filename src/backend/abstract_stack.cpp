@@ -52,7 +52,27 @@ LocalCfg buildCfg(const std::vector<DecodedInstruction>& ins) {
     LocalCfg cfg;
     cfg.successors.resize(ins.size());
     cfg.predecessors.resize(ins.size());
+
+    // Collect every PUSH_HANDLER's catch-target instruction index before
+    // adding any edges. addEdge will check this set to refuse edges to
+    // handler-entry instructions (referee's binding decision on PR #231).
+    std::vector<bool> isHandlerEntryInstr(ins.size(), false);
+    for (size_t i = 0; i < ins.size(); i++) {
+        if (ins[i].op == Op::PUSH_HANDLER) {
+            int catchIdx = offsetToIndex.at(ins[i].jumpTarget);
+            isHandlerEntryInstr[static_cast<size_t>(catchIdx)] = true;
+            cfg.handlerLinks.emplace_back(static_cast<int>(i), catchIdx);
+        }
+    }
+
     auto addEdge = [&](int from, int to) {
+        // Refuse to add an edge to a handler-entry instruction: catch targets
+        // must never gain a generic predecessor edge. This single check,
+        // applied to every edge addition in the file, structurally enforces
+        // the invariant without per-opcode special cases.
+        if (isHandlerEntryInstr[static_cast<size_t>(to)]) {
+            return;
+        }
         cfg.successors[from].push_back(to);
         cfg.predecessors[to].push_back(from);
     };
@@ -74,17 +94,11 @@ LocalCfg buildCfg(const std::vector<DecodedInstruction>& ins) {
             addEdge(idx, offsetToIndex.at(ins[i].jumpTarget));
             break;
         case Op::PUSH_HANDLER: {
-            // Deliberately no addEdge to the catch target: see LocalCfg's
-            // own comment on handlerLinks. Falls through normally into the
-            // protected code that follows, exactly like an instruction
-            // with no operand at all.
-            int catchIdx = offsetToIndex.at(ins[i].jumpTarget);
-            cfg.handlerLinks.emplace_back(idx, catchIdx);
-            // When the catch offset equals the immediate next instruction
-            // (empty protected region, e.g. try {} catch (e) { ... }), do
-            // NOT wire the fallthrough edge — the catch block must never gain
-            // a generic predecessor from PUSH_HANDLER itself.
-            if (fallthrough >= 0 && fallthrough != catchIdx) {
+            // Falls through normally into the protected code that follows.
+            // The catch-block exclusion (via addEdge's handler-entry check)
+            // handles all edge cases automatically, so no special guard is
+            // needed here (see buildCfg's own comment on isHandlerEntryInstr).
+            if (fallthrough >= 0) {
                 addEdge(idx, fallthrough);
             }
             break;

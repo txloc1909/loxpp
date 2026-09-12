@@ -142,7 +142,15 @@ collectLeaderOffsets(const std::vector<DecodedInstruction>& instructions,
     return leaders;
 }
 
-void addEdge(BasicBlock& block, int targetBlock, EdgeKind kind) {
+void addEdge(BasicBlock& block, int targetBlock, EdgeKind kind,
+             const std::vector<bool>& isHandlerEntryBlock) {
+    // Refuse to add an edge to a handler-entry block: catch targets must never
+    // gain a generic predecessor edge. This single check, applied to every edge
+    // addition in the file, structurally enforces the invariant without
+    // per-opcode special cases (see the referee's binding decision on PR #231).
+    if (isHandlerEntryBlock[static_cast<size_t>(targetBlock)]) {
+        return;
+    }
     block.successors.push_back(CfgEdge{targetBlock, kind});
 }
 
@@ -152,33 +160,34 @@ void addEdge(BasicBlock& block, int targetBlock, EdgeKind kind) {
 // below cannot miss.
 void wireSuccessors(BasicBlock& block,
                     const std::unordered_map<int, int>& blockIndexOfOffset,
-                    int chunkEnd) {
+                    int chunkEnd,
+                    const std::vector<bool>& isHandlerEntryBlock) {
     const DecodedInstruction& last = block.instructions.back();
     switch (last.op) {
     case Op::JUMP:
         addEdge(block, blockIndexOfOffset.at(last.jumpTarget),
-                EdgeKind::FORWARD_BRANCH);
+                EdgeKind::FORWARD_BRANCH, isHandlerEntryBlock);
         break;
     case Op::LOOP:
         addEdge(block, blockIndexOfOffset.at(last.jumpTarget),
-                EdgeKind::BACK_EDGE);
+                EdgeKind::BACK_EDGE, isHandlerEntryBlock);
         break;
     case Op::JUMP_IF_FALSE:
         addEdge(block, blockIndexOfOffset.at(last.jumpTarget),
-                EdgeKind::FORWARD_BRANCH);
+                EdgeKind::FORWARD_BRANCH, isHandlerEntryBlock);
         if (block.endOffset < chunkEnd) {
             addEdge(block, blockIndexOfOffset.at(block.endOffset),
-                    EdgeKind::FALL_THROUGH);
+                    EdgeKind::FALL_THROUGH, isHandlerEntryBlock);
         }
         break;
     case Op::JUMP_TABLE:
         for (const JumpTableArm& arm : last.jumpTable) {
             addEdge(block, blockIndexOfOffset.at(arm.target),
-                    EdgeKind::FORWARD_BRANCH);
+                    EdgeKind::FORWARD_BRANCH, isHandlerEntryBlock);
         }
         if (block.endOffset < chunkEnd) {
             addEdge(block, blockIndexOfOffset.at(block.endOffset),
-                    EdgeKind::FALL_THROUGH);
+                    EdgeKind::FALL_THROUGH, isHandlerEntryBlock);
         }
         break;
     case Op::RETURN:
@@ -186,20 +195,19 @@ void wireSuccessors(BasicBlock& block,
     case Op::THROW:
         break; // no successor
     case Op::PUSH_HANDLER:
-        // PUSH_HANDLER falls through to the protected code normally. However,
-        // when its catch-offset target coincides with its own immediate
-        // fallthrough (empty protected region, e.g. try {} catch (e) { ... }),
-        // do NOT wire the fallthrough edge — the catch block is a leader that
-        // must never gain a generic predecessor from PUSH_HANDLER itself.
-        if (block.endOffset < chunkEnd && block.endOffset != last.jumpTarget) {
+        // PUSH_HANDLER falls through to the protected code normally. The
+        // catch-block exclusion (via addEdge's handler-entry check) handles
+        // the empty protected region case automatically, so no special guard
+        // is needed here.
+        if (block.endOffset < chunkEnd) {
             addEdge(block, blockIndexOfOffset.at(block.endOffset),
-                    EdgeKind::FALL_THROUGH);
+                    EdgeKind::FALL_THROUGH, isHandlerEntryBlock);
         }
         break;
     default:
         if (block.endOffset < chunkEnd) {
             addEdge(block, blockIndexOfOffset.at(block.endOffset),
-                    EdgeKind::FALL_THROUGH);
+                    EdgeKind::FALL_THROUGH, isHandlerEntryBlock);
         }
         break;
     }
@@ -252,8 +260,23 @@ Cfg buildCfg(const std::vector<DecodedInstruction>& instructions) {
         blockIndexOfOffset[cfg.blocks[b].leaderOffset] = static_cast<int>(b);
     }
 
+    // Tag handler-entry blocks BEFORE wiring successors: addEdge needs to
+    // check this set to refuse edges to handler-entry blocks (referee's
+    // binding decision on PR #231).
+    std::vector<bool> isHandlerEntryBlock(cfg.blocks.size(), false);
+    for (const DecodedInstruction& ins : instructions) {
+        if (ins.op != Op::PUSH_HANDLER) {
+            continue;
+        }
+        int catchBlock = blockIndexOfOffset.at(ins.jumpTarget);
+        cfg.blocks[static_cast<size_t>(catchBlock)].isHandlerEntry = true;
+        isHandlerEntryBlock[static_cast<size_t>(catchBlock)] = true;
+        cfg.handlerEntries.push_back({ins.offset, catchBlock});
+    }
+
     for (BasicBlock& block : cfg.blocks) {
-        wireSuccessors(block, blockIndexOfOffset, chunkEnd);
+        wireSuccessors(block, blockIndexOfOffset, chunkEnd,
+                       isHandlerEntryBlock);
     }
 
     // Predecessors are the transpose of the successor edges just built.
@@ -264,20 +287,22 @@ Cfg buildCfg(const std::vector<DecodedInstruction>& instructions) {
         }
     }
 
-    // PUSH_HANDLER's catch-target links, recorded separately from the
-    // successor/predecessor edges above — see HandlerEntry and
-    // BasicBlock::isHandlerEntry. No edge was added for these above (they
-    // are absent from isBranch's set and wireSuccessors' switch), so every
-    // catch-target block's `predecessors` is empty by construction; this
-    // loop only tags it and records the declaring PUSH_HANDLER, it does not
-    // add to `predecessors`.
-    for (const DecodedInstruction& ins : instructions) {
-        if (ins.op != Op::PUSH_HANDLER) {
-            continue;
+    // Assertion-symmetry requirement: cfg.cpp must check the invariant that
+    // handler-entry blocks have no generic predecessors (mirroring
+    // abstract_stack.cpp's own validateMergeConsistency). This should never
+    // fire given addEdge's structural refusal above, but it is the proof that
+    // the refusal is not merely accidental (a future change that bypasses
+    // addEdge would fail loudly here instead of silently violating
+    // BasicBlock::isHandlerEntry's doc comment).
+    for (size_t b = 0; b < cfg.blocks.size(); b++) {
+        if (cfg.blocks[b].isHandlerEntry &&
+            !cfg.blocks[b].predecessors.empty()) {
+            throw std::runtime_error(
+                "cfg: handler-entry block at offset " +
+                std::to_string(cfg.blocks[b].leaderOffset) +
+                " unexpectedly has a generic predecessor edge — "
+                "addEdge must refuse all edges to handler-entry blocks");
         }
-        int catchBlock = blockIndexOfOffset.at(ins.jumpTarget);
-        cfg.blocks[static_cast<size_t>(catchBlock)].isHandlerEntry = true;
-        cfg.handlerEntries.push_back({ins.offset, catchBlock});
     }
 
     return cfg;
