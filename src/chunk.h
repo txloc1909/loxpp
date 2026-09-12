@@ -68,6 +68,30 @@ enum class Op : Byte {
     INSTANCEOF,  // 2-byte constant (class name ObjString*); pop value, push
                  // bool
     IS_SEQ, // no operands — pop value, push true if it is a sequence type
+
+    // catchOffset (2-byte forward-relative offset, encoded exactly like
+    // JUMP's — see chunk_decoder.cpp). Pushes a handler record (checkpoint
+    // stack depth, catchOffset) onto the VM's separate handler stack; no
+    // operand-stack effect of its own.
+    //
+    // Despite the JUMP-shaped operand, PUSH_HANDLER is not a branch: control
+    // always falls through to the protected code that follows it, and the
+    // catch-handler entry named by catchOffset is reached only through a
+    // THROW unwind, never by falling or jumping there directly. A catch
+    // handler's real predecessors are every THROW reachable in the
+    // protected region — including ones in a callee this function's own
+    // bytecode cannot see — so cfg.cpp/abstract_stack.cpp must never treat
+    // catchOffset as an ordinary jump target: the catch entry's operand
+    // depth is a *declared* contract (checkpoint depth + 1, for the thrown
+    // value), not something discovered via predecessor agreement. See
+    // notes/non-local-control-flow.md and notes/bytecode-translation-
+    // problems.md.
+    PUSH_HANDLER,
+    POP_HANDLER, // no operands — pops the current handler record
+    // no operands — pops the value to raise, unwinds to the nearest
+    // PUSH_HANDLER checkpoint. Terminal: like RETURN, control never falls
+    // through past THROW into the next instruction in this function.
+    THROW,
 };
 // clang-format on
 
@@ -128,7 +152,10 @@ enum class Op : Byte {
     X(JUMP_TABLE)                                                              \
     X(GET_TAG)                                                                 \
     X(INSTANCEOF)                                                              \
-    X(IS_SEQ)
+    X(IS_SEQ)                                                                  \
+    X(PUSH_HANDLER)                                                            \
+    X(POP_HANDLER)                                                             \
+    X(THROW)
 
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }
 
