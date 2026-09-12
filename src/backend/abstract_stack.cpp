@@ -30,6 +30,16 @@ namespace {
 struct LocalCfg {
     std::vector<std::vector<int>> successors;
     std::vector<std::vector<int>> predecessors;
+
+    // {pushHandlerIdx, catchIdx} for every PUSH_HANDLER, by instruction
+    // index. No edge is ever added between the two in successors/
+    // predecessors above (see buildCfg's PUSH_HANDLER case) — a catch
+    // handler's real predecessors are every THROW reachable in the
+    // protected region, including ones in a callee this function's own
+    // chunk cannot see, so it must never be discovered via `predecessors`.
+    // analyzeStack uses this list to seed each catch entry's state directly
+    // instead (handlerEntrySeeds).
+    std::vector<std::pair<int, int>> handlerLinks;
 };
 
 LocalCfg buildCfg(const std::vector<DecodedInstruction>& ins) {
@@ -42,7 +52,27 @@ LocalCfg buildCfg(const std::vector<DecodedInstruction>& ins) {
     LocalCfg cfg;
     cfg.successors.resize(ins.size());
     cfg.predecessors.resize(ins.size());
+
+    // Collect every PUSH_HANDLER's catch-target instruction index before
+    // adding any edges. addEdge will check this set to refuse edges to
+    // handler-entry instructions (referee's binding decision on PR #231).
+    std::vector<bool> isHandlerEntryInstr(ins.size(), false);
+    for (size_t i = 0; i < ins.size(); i++) {
+        if (ins[i].op == Op::PUSH_HANDLER) {
+            int catchIdx = offsetToIndex.at(ins[i].jumpTarget);
+            isHandlerEntryInstr[static_cast<size_t>(catchIdx)] = true;
+            cfg.handlerLinks.emplace_back(static_cast<int>(i), catchIdx);
+        }
+    }
+
     auto addEdge = [&](int from, int to) {
+        // Refuse to add an edge to a handler-entry instruction: catch targets
+        // must never gain a generic predecessor edge. This single check,
+        // applied to every edge addition in the file, structurally enforces
+        // the invariant without per-opcode special cases.
+        if (isHandlerEntryInstr[static_cast<size_t>(to)]) {
+            return;
+        }
         cfg.successors[from].push_back(to);
         cfg.predecessors[to].push_back(from);
     };
@@ -51,15 +81,28 @@ LocalCfg buildCfg(const std::vector<DecodedInstruction>& ins) {
         int idx = static_cast<int>(i);
         int fallthrough = (i + 1 < ins.size()) ? idx + 1 : -1;
         switch (ins[i].op) {
-        // Terminators: the frame ends (RETURN) or the VM always raises
-        // (MATCH_ERROR) — control never falls through to the next offset.
+        // Terminators: the frame ends (RETURN), the VM always raises
+        // (MATCH_ERROR), or the thrown value unwinds past this function
+        // entirely (THROW) — control never falls through to the next
+        // offset.
         case Op::RETURN:
         case Op::MATCH_ERROR:
+        case Op::THROW:
             break;
         case Op::JUMP:
         case Op::LOOP:
             addEdge(idx, offsetToIndex.at(ins[i].jumpTarget));
             break;
+        case Op::PUSH_HANDLER: {
+            // Falls through normally into the protected code that follows.
+            // The catch-block exclusion (via addEdge's handler-entry check)
+            // handles all edge cases automatically, so no special guard is
+            // needed here (see buildCfg's own comment on isHandlerEntryInstr).
+            if (fallthrough >= 0) {
+                addEdge(idx, fallthrough);
+            }
+            break;
+        }
         case Op::JUMP_IF_FALSE:
             // Peeks (vm.cpp); both edges carry the same abstract stack.
             addEdge(idx, offsetToIndex.at(ins[i].jumpTarget));
@@ -175,7 +218,15 @@ StackEffect stackEffect(const DecodedInstruction& ins) {
     case Op::DEFINE_GLOBAL: // peek then pop (vm.cpp)
     case Op::CLOSE_UPVALUE:
     case Op::RETURN:
+    case Op::THROW: // pops the value to raise, mirroring RETURN's own
+                    // accounting of its return value
         return {1, 0};
+
+    // PUSH_HANDLER/POP_HANDLER touch a separate VM handler stack, not the
+    // operand stack this pass tracks — no effect here.
+    case Op::PUSH_HANDLER:
+    case Op::POP_HANDLER:
+        return {0, 0};
 
     // Pop the tag, no push (JUMP_TABLE's arms are jumps, not values).
     case Op::JUMP_TABLE:
@@ -642,16 +693,31 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
 // assertion — a post-convergence check, not this join, because a join
 // that throws on every *transient* mid-fixpoint disagreement (before a
 // loop's back-edge has propagated) would reject legitimate programs.
+//
+// `seeds` names every instruction the worklist starts from, each with its
+// own initial state — ordinarily just {0, initial} (function entry), plus
+// one more per PUSH_HANDLER's catch-target instruction when the caller
+// supplies handlerEntrySeeds' result (see analyzeStack). A catch entry
+// seeded this way is "reached" from a *declared* state, never from
+// LocalCfg::predecessors — there are none for it (LocalCfg::handlerLinks'
+// own comment) — so this is the only way such an instruction ever becomes
+// reachable at all. Note: This function's body is rewritten to support
+// multiple seeds (the loop-of-one `seeds = {{0, initial}}` path remains
+// mathematically identical to the original single-seed version, but the
+// code implementation is changed-but-provably-equivalent, not untouched).
 std::vector<std::optional<StackState>>
 runFixpoint(const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
-            StackState initial,
+            const std::vector<std::pair<int, StackState>>& seeds,
             const std::vector<std::vector<int>>* declaredSlotsAt) {
     size_t n = ins.size();
     std::vector<std::optional<StackState>> state(n);
-    state[0] = initial;
-    std::deque<int> worklist{0};
+    std::deque<int> worklist;
     std::vector<bool> queued(n, false);
-    queued[0] = true;
+    for (const auto& [idx, seed] : seeds) {
+        state[idx] = seed;
+        worklist.push_back(idx);
+        queued[idx] = true;
+    }
 
     while (!worklist.empty()) {
         int i = worklist.front();
@@ -682,6 +748,43 @@ runFixpoint(const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
         }
     }
     return state;
+}
+
+// The declared contract for every PUSH_HANDLER's catch entry: checkpoint
+// operand depth (PUSH_HANDLER's own `before` state, which `pushHandlerState`
+// supplies — PUSH_HANDLER has no stack effect of its own, so before and
+// after are identical for it) plus 1, for the thrown value. This is what
+// runFixpoint's `seeds` gets reseeded with — never something
+// validateMergeConsistency discovers, because a catch handler's real
+// predecessors (every THROW in the protected region, including ones in an
+// unseen callee) are not visible to this pass at all.
+//
+// `trackLocals` selects which of the two fixpoint conventions to match:
+// false reproduces pass 1's "nothing is local yet" convention (localCount
+// 0, matching instruction 0's own pass-1 seed); true reproduces pass 2's
+// recognition-aware convention, carrying the checkpoint's own (already
+// recognized) localCount forward unchanged — entering a handler declares no
+// new local by itself, only the thrown value arrives as a temporary. A
+// PUSH_HANDLER absent from `pushHandlerState` (unreached — a dead try
+// block) contributes no seed; its catch block then stays unreached too,
+// exactly like the compiler's own unreachable trailing NIL;RETURN.
+std::vector<std::pair<int, StackState>> handlerEntrySeeds(
+    const LocalCfg& cfg,
+    const std::vector<std::optional<StackState>>& pushHandlerState,
+    bool trackLocals) {
+    std::vector<std::pair<int, StackState>> seeds;
+    for (const auto& [pushIdx, catchIdx] : cfg.handlerLinks) {
+        if (!pushHandlerState[pushIdx]) {
+            continue;
+        }
+        const StackState& checkpoint = *pushHandlerState[pushIdx];
+        int declaredOperandDepth = checkpoint.operandDepth() + 1;
+        int localCount = trackLocals ? checkpoint.localCount : 0;
+        seeds.emplace_back(
+            catchIdx,
+            StackState{localCount + declaredOperandDepth, localCount});
+    }
+    return seeds;
 }
 
 // The merge-consistency check, asserted for real: every reached
@@ -720,14 +823,39 @@ runFixpoint(const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
 // contribution all the way around, and throwing on that transient state
 // would reject legitimate programs. A disagreement that survives to
 // convergence is a real one.
+//
+// `isHandlerEntry`, built from LocalCfg::handlerLinks (not from any
+// incidental property of the offset itself), names every PUSH_HANDLER
+// catch-target instruction: its entry depth is a *declared* contract
+// (handlerEntrySeeds), not a merge outcome, so this loop must never judge
+// it by predecessor agreement. The check is explicit here, not merely
+// implied by `cfg.predecessors[i]` already being empty for such an
+// instruction (which it always is — buildCfg never adds one) — the
+// assertion below turns "empty by omission" into "empty by construction,
+// verified," so a future change that accidentally starts wiring a generic
+// edge there fails loudly instead of silently reintroducing the exact bug
+// this mechanism exists to prevent.
 void validateMergeConsistency(const std::vector<DecodedInstruction>& ins,
                               const LocalCfg& cfg,
                               const std::vector<StackState>& after,
                               const std::vector<bool>& reached,
+                              const std::vector<bool>& isHandlerEntry,
                               const std::string& functionId) {
     for (size_t i = 0; i < ins.size(); i++) {
         if (!static_cast<bool>(reached[i])) {
             continue;
+        }
+        if (isHandlerEntry[i]) {
+            if (!cfg.predecessors[i].empty()) {
+                throw std::runtime_error(
+                    "abstract_stack: catch-target instruction in function '" +
+                    functionId + "' at offset " +
+                    std::to_string(ins[i].offset) +
+                    " unexpectedly has a generic predecessor edge — "
+                    "PUSH_HANDLER's catch target must never gain one (see "
+                    "buildCfg)");
+            }
+            continue; // declared contract from PUSH_HANDLER, not discovered
         }
         std::optional<int> depth;
         for (int pred : cfg.predecessors[i]) {
@@ -814,6 +942,37 @@ void validateNoInvisibleVarGaps(
     }
 }
 
+// Runs the fixpoint from function entry, transparently reseeded at every
+// PUSH_HANDLER's catch entry with its declared contract (handlerEntrySeeds).
+// A chunk with no PUSH_HANDLER (cfg.handlerLinks empty — true for every
+// chunk before this analysis gained handler support, and every chunk today,
+// since src/compiler.cpp does not emit PUSH_HANDLER yet) takes exactly the
+// single-seed path this always took, with no extra work. A chunk with
+// PUSH_HANDLER needs an unseeded pre-run first (`prelim`): handlerEntrySeeds
+// needs each PUSH_HANDLER's own checkpoint state under `declaredSlotsAt`'s
+// current recognition, and nothing has been computed yet on the first call.
+// The reseeded run that follows is what actually makes a catch entry
+// `reached` — from its declared contract, never from LocalCfg::predecessors
+// (buildCfg never adds one there). Shared between analyzeStack's pass 1
+// (declaredSlotsAt null, trackLocals false — see runFixpoint's own comment
+// on the two passes) and pass 2 (declaredSlotsAt set, trackLocals true).
+std::vector<std::optional<StackState>> runFixpointWithHandlerSeeds(
+    const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
+    const StackState& entryState,
+    const std::vector<std::vector<int>>* declaredSlotsAt, bool trackLocals) {
+    std::vector<std::pair<int, StackState>> entrySeed{{0, entryState}};
+    if (cfg.handlerLinks.empty()) {
+        return runFixpoint(ins, cfg, entrySeed, declaredSlotsAt);
+    }
+    std::vector<std::optional<StackState>> prelim =
+        runFixpoint(ins, cfg, entrySeed, declaredSlotsAt);
+    std::vector<std::pair<int, StackState>> seeds = entrySeed;
+    std::vector<std::pair<int, StackState>> handlerSeeds =
+        handlerEntrySeeds(cfg, prelim, trackLocals);
+    seeds.insert(seeds.end(), handlerSeeds.begin(), handlerSeeds.end());
+    return runFixpoint(ins, cfg, seeds, declaredSlotsAt);
+}
+
 FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
     const auto& ins = fn.instructions;
     FunctionStackAnalysis result;
@@ -834,7 +993,8 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
 
     // Pass 1: height-and-reachability only (see runFixpoint's comment).
     std::vector<std::optional<StackState>> heightState =
-        runFixpoint(ins, cfg, StackState{initialHeight, 0}, nullptr);
+        runFixpointWithHandlerSeeds(ins, cfg, StackState{initialHeight, 0},
+                                    nullptr, /*trackLocals=*/false);
 
     // `endCompiler()` (compiler.cpp) unconditionally appends a trailing
     // NIL;RETURN, even when every path already returned explicitly — that
@@ -867,9 +1027,9 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
     }
 
     // Pass 2: full recognition-aware fixpoint.
-    StackState initial{initialHeight, initialHeight};
-    std::vector<std::optional<StackState>> state =
-        runFixpoint(ins, cfg, initial, &declaredSlotsAt);
+    std::vector<std::optional<StackState>> state = runFixpointWithHandlerSeeds(
+        ins, cfg, StackState{initialHeight, initialHeight}, &declaredSlotsAt,
+        /*trackLocals=*/true);
 
     // Structural sanity check on the converged values: a position can never
     // be local without existing, and height can never go negative. Guards
@@ -924,13 +1084,33 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
         }
     }
 
-    validateMergeConsistency(ins, cfg, result.after, reached, fn.id);
+    // Built from LocalCfg::handlerLinks — the authoritative record of which
+    // instructions are catch-target entries — not from any incidental
+    // property of the offset (see validateMergeConsistency's own comment on
+    // why this must be explicit).
+    std::vector<bool> isHandlerEntry(n, false);
+    for (const auto& [pushIdx, catchIdx] : cfg.handlerLinks) {
+        isHandlerEntry[static_cast<size_t>(catchIdx)] = true;
+    }
+    validateMergeConsistency(ins, cfg, result.after, reached, isHandlerEntry,
+                             fn.id);
     validateNoInvisibleVarGaps(ins, result.before, reached, declaredSlotsAt,
                                fn.id);
 
     result.invisibleVars.reserve(siteIndices.size());
     for (const auto& [idx, slot] : siteIndices) {
         result.invisibleVars.push_back({ins[idx].offset, slot});
+    }
+
+    result.handlerEntries.reserve(cfg.handlerLinks.size());
+    for (const auto& [pushIdx, catchIdx] : cfg.handlerLinks) {
+        if (!static_cast<bool>(reached[static_cast<size_t>(pushIdx)])) {
+            continue; // dead try block — see handlerEntrySeeds
+        }
+        result.handlerEntries.push_back(
+            {ins[static_cast<size_t>(pushIdx)].offset,
+             ins[static_cast<size_t>(catchIdx)].offset,
+             result.before[static_cast<size_t>(catchIdx)].operandDepth()});
     }
 
     return result;

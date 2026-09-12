@@ -226,6 +226,12 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return constantInstruction("INSTANCEOF", chunk, mm, offset, out, color);
     case Op::IS_SEQ:
         return simpleInstruction("IS_SEQ", offset, out, color);
+    case Op::PUSH_HANDLER:
+        return jumpInstruction("PUSH_HANDLER", 1, chunk, offset, out, color);
+    case Op::POP_HANDLER:
+        return simpleInstruction("POP_HANDLER", offset, out, color);
+    case Op::THROW:
+        return simpleInstruction("THROW", offset, out, color);
     default:
         out << cc(color, kRed) << cc(color, kBold) << "UNKNOWN("
             << static_cast<unsigned>(chunk.at(offset)) << ")"

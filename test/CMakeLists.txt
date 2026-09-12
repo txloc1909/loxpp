@@ -128,6 +128,7 @@ loxpp_add_test(test_backend_cfg     test_backend_cfg.cpp     CORE loxpp_test_cor
 loxpp_add_test(test_backend_abstract_stack test_backend_abstract_stack.cpp
                                                             CORE loxpp_test_core PROBE)
 loxpp_add_test(test_backend_capture test_backend_capture.cpp CORE loxpp_test_core PROBE)
+loxpp_add_test(test_nonlocal_cfg    test_nonlocal_cfg.cpp    CORE loxpp_test_core PROBE)
 loxpp_add_test(test_jvm_emit        test_jvm_emit.cpp        CORE loxpp_test_core PROBE)
 loxpp_add_test(test_clr_emit        test_clr_emit.cpp        CORE loxpp_test_core PROBE)
 loxpp_add_test(test_stringify_depth_guard test_stringify_depth_guard.cpp
@@ -180,7 +181,8 @@ set(LOXPP_GTEST_TARGETS
     test_or_pattern test_or_pattern_gc test_seq_destructure test_list_pattern
     test_list_pattern_gc test_at_binding test_at_binding_gc test_profiler
     test_chunk_decoder test_backend_cfg test_backend_abstract_stack
-    test_backend_capture test_jvm_emit test_clr_emit test_stringify_depth_guard
+    test_backend_capture test_nonlocal_cfg test_jvm_emit test_clr_emit
+    test_stringify_depth_guard
     test_check_diagnostics test_tooling_parser test_tooling_resolver)
 if(LOXPP_LSP)
     list(APPEND LOXPP_GTEST_TARGETS test_lsp)
