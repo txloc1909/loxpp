@@ -188,11 +188,13 @@ obj.name
    wrapping the native function and `obj` as receiver. Each evaluation creates a new value, so
    two property-get reads of the same file's method never yield the same object. If not found, raise a runtime error
    ("Undefined property 'name' on file.").
-4. If `obj` is not an Instance, this is a **runtime error** ("Only instances have properties.").
-5. If the instance's field table contains `name`, return that field value. Fields shadow methods.
-6. Otherwise, look up `name` in the instance's class method table. If found, return a BoundMethod
+4. If `obj` is an `Error` ([§03-types](03-types.md#error)): if `name` is `message` or `kind`, return that
+   field's value (a String). Otherwise, this is a **runtime error** ("Undefined property 'name' on error.").
+5. If `obj` is not an Instance, this is a **runtime error** ("Only instances have properties.").
+6. If the instance's field table contains `name`, return that field value. Fields shadow methods.
+7. Otherwise, look up `name` in the instance's class method table. If found, return a BoundMethod
    wrapping the closure and `obj` as receiver.
-7. If neither step 5 nor 6 found `name`, this is a **runtime error** ("Undefined property 'name'.").
+8. If neither step 6 nor 7 found `name`, this is a **runtime error** ("Undefined property 'name'.").
 
 ### Property Set
 
@@ -497,6 +499,139 @@ return expr ;     // returns the value of expr
 Exits the current function immediately, yielding the given value (or `nil`).
 A `return` at the top level (outside any function body) is a **static error**.
 
+A function call may also exit early because of an in-flight `throw`,
+skipping any remaining statements in the body — see [`throw`
+Statement](#throw-statement) below.
+
+### `try` Statement
+
+```
+try tryBlock catch ( name ) catchBlock
+```
+
+1. Execute `tryBlock`.
+2. If `tryBlock` runs to completion without an in-flight `throw` reaching
+   this `try` statement — whether it falls off the end, or exits via
+   `break`, `continue`, or `return` — the `try` statement completes the
+   same way; `catchBlock` does not execute.
+3. If a `throw` statement executes anywhere during step 1 — inside
+   `tryBlock` itself, or inside any function called (directly or
+   indirectly) from within `tryBlock` — and no `try` statement nested more
+   tightly around the point of that `throw` has already caught it, this
+   `try` statement catches the thrown value:
+   a. A new local variable named `name` is declared, scoped to
+      `catchBlock` only, and bound to the thrown value.
+   b. `catchBlock` executes with `name` in scope.
+   c. Every local binding created since `tryBlock` began — including ones
+      created inside functions that were exited while unwinding to reach
+      this `catch` — has already ended by the time `catchBlock` starts
+      (see [Binding Identity](#binding-identity)).
+4. How the `try` statement as a whole exits is decided by `catchBlock`: if
+   `catchBlock` runs to completion, the `try` statement completes normally
+   after it; if `catchBlock` executes `return`, `break`, or `continue`,
+   the `try` statement exits that way; if `catchBlock` executes `throw` —
+   whether throwing a new value or re-throwing `name` — that follows the
+   ordinary [`throw` Statement](#throw-statement) rules below and is
+   **not** caught by this same `try` statement's own `catchBlock`.
+5. There is no `finally` clause. Code that must run on every exit from a
+   function — including an exit caused by an in-flight `throw` — is
+   written with [`defer`](#defer-statement) instead.
+
+### `throw` Statement
+
+```
+throw expr ;
+```
+
+1. Evaluate `expr`.
+2. Control does not return to the statement after this `throw`. Instead,
+   Lox++ searches for the nearest `try` statement able to catch it:
+   starting at the point of the `throw` and continuing outward through the
+   chain of function calls currently in progress (the function containing
+   the `throw`, the function that called it, and so on, up to the
+   top-level script), Lox++ finds the innermost `try` statement whose
+   `tryBlock` is still executing at that point and that has not already
+   caught an in-flight throw.
+3. Every function call that this search exits — every call between the
+   point of the `throw` and the function that contains the catching `try`
+   statement, exclusive — is exited immediately:
+   a. That call's pending deferred calls run first, in the order described
+      under [`defer` Statement](#defer-statement), before the call is
+      considered exited.
+   b. The call's local bindings end (see [Binding Identity](#binding-identity)).
+   c. No return value is produced by that call.
+4. Once the catching `try` statement is found, its `catchBlock` runs as
+   described under [`try` Statement](#try-statement), with the value from
+   step 1 bound to its identifier.
+5. If no `try` statement catches it — the search in step 2 reaches the top
+   of the program with no match — the `throw` is **uncaught**. Every
+   function call on the way to the top still runs its pending deferred
+   calls (step 3a). Execution then halts and the error is reported exactly
+   as an uncaught runtime error is reported (see [Runtime
+   Errors](#runtime-errors)):
+   - If the thrown value is an `Error` value ([§03-types](03-types.md#error)),
+     the reported message is that value's `message` field, unchanged.
+   - For any other value, the reported message is that value's canonical
+     string representation ([§03-types, Canonical String
+     Representation](03-types.md#canonical-string-representation)) — the
+     same text `str()` would produce.
+6. A `throw` statement never completes normally: no statement written
+   after it in the same block ever executes.
+7. `throw` may appear anywhere a statement may appear, including inside a
+   function called from the top level, or directly at the top level of the
+   script — it is not restricted to appearing inside a function body. A
+   `throw` at the top level that nothing catches behaves exactly as step 5
+   describes; a `throw` at the top level caught by a `try` statement also
+   at the top level behaves exactly as steps 1-4 describe.
+8. A `throw` written inside a `catchBlock` — including one that re-throws
+   the value just bound by that `catch` clause (`throw name;`) — is not a
+   distinct construct. It follows exactly the rules above: it is caught by
+   an enclosing `try` statement the same way a fresh `throw` would be, and
+   it is never caught by the `catchBlock` it was written inside.
+
+### `defer` Statement
+
+```
+defer callee ( arguments ) ;
+```
+
+1. Evaluate `callee` and each argument expression, left-to-right — exactly
+   as steps 1-2 of [Function Call](#function-call) — at the point where
+   this `defer` statement executes. The call itself is **not** performed
+   yet.
+2. The evaluated callee and argument values are recorded as one pending
+   deferred call, belonging to the function call whose body is currently
+   executing. Recording happens independently on each execution of a
+   `defer` statement: executing the same `defer` statement more than once
+   (for example, on each iteration of a loop) records one pending deferred
+   call per execution.
+3. Execution continues with the statement after `defer`. The recorded call
+   has not run yet.
+4. When the enclosing function call exits — by falling off the end of the
+   function body, by `return`, or by a `throw` unwinding past this
+   function call (see [`throw` Statement](#throw-statement) above) — every
+   pending deferred call recorded during this function call runs,
+   most-recently-recorded first (LIFO order), before the call is
+   considered fully exited. Each deferred call's own return value is
+   discarded.
+5. If running a deferred call itself executes a `throw`, that new throw
+   replaces whatever was already causing this function call to exit: a
+   `return` value in progress is discarded, and an in-flight throw already
+   unwinding through this function call is replaced by the new one. Any
+   deferred calls recorded before the one that threw still run, in the
+   same LIFO order, before the new throw continues propagating — searching
+   for an enclosing `try` statement starting from this function call's own
+   caller, exactly as step 2 of [`throw` Statement](#throw-statement)
+   describes.
+6. `defer` is scoped to the **function**, not to the block it textually
+   appears in: a deferred call recorded inside a nested block, loop, or
+   `try`/`catch` still runs when the whole enclosing function call exits,
+   not when that inner construct exits.
+7. `defer` is permitted only inside a function body. Using `defer` at the
+   top level of a script (outside any function) is a **static error**
+   ("Can't defer at the top level."), matching how `return` at the top
+   level is a static error.
+
 ---
 
 ## Closures
@@ -562,6 +697,7 @@ Nothing in the rest of this section applies to a global.
 - a function parameter;
 - the name of a local `fun` or `class` declaration;
 - `this`, inside a method;
+- the identifier in a `catch (identifier)` clause;
 - a pattern binding in a `match` arm.
 
 A `match` pattern binding is a local binding, but no closure can capture it. A
@@ -698,8 +834,12 @@ again. Ending a binding does not destroy its storage: a closure that captured it
 keeps it alive and can still read and write it. Ending it means only that the
 next execution of the same declaration makes a **different** binding.
 
-Falling off the end of a block, `break`, `continue`, `return`, and leaving a
-`match` arm all end the bindings of the scopes they leave.
+Falling off the end of a block, `break`, `continue`, `return`, leaving a
+`match` arm, and an in-flight `throw` unwinding past a scope all end the
+bindings of the scopes they leave. A `throw` ends every binding of every
+scope between the point of the `throw` and whichever `try` statement's
+`catchBlock` stops it — or, if nothing catches it, every scope up to the
+top of the program. See the [`throw` Statement](#throw-statement).
 
 ```lox
 var fns = [nil, nil, nil];
@@ -970,29 +1110,42 @@ len(seq)
 
 ## Runtime Errors
 
-A runtime error halts execution immediately and reports an error message.
-Common causes:
+A runtime error halts execution immediately and reports an error message —
+**unless** it happens during the execution of a `try` statement's
+`tryBlock` (directly, or inside any function called from within it), in
+which case it does not halt the program; instead it is delivered to that
+`try` statement's `catchBlock` as an `Error` value, exactly as the
+[`throw` Statement](#throw-statement) describes for any other thrown
+value. An error that occurs during the execution of the `catchBlock`
+itself is not caught by that same `try` statement. Every cause below is
+catchable this way.
 
-| Cause | Example |
-|---|---|
-| Arithmetic on non-Numbers | `"a" - 1` |
-| Comparison on non-Numbers | `"a" < 1` |
-| `+` on incompatible types | `1 + "a"` |
-| Call of a non-callable value | `42()` |
-| Wrong argument count | `fun f(a) {} f(1, 2)` |
-| Undefined global variable | `print undeclared;` |
-| Call stack overflow | Unbounded recursion |
-| Index of non-List/non-Map | `42[0]` |
-| Non-Number list index | `list["a"]` |
-| Fractional list index | `list[1.5]` |
-| List index out of bounds | `[][0]` |
-| `pop` on empty list | `[].pop()` |
-| NaN used as map key | `m[0/0] = 1` |
-| Object (non-String) used as map key | `m[[1,2]] = 1` |
-| Value nested too deep to print | a list that holds a list, many thousand levels deep |
-| Method called on non-instance/non-list/non-map | `42.foo()` |
-| No arm matches in a `match` expression | `match 99 { case 1 => "one" }` |
-| Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field |
+The table lists each cause, an example, and the `kind` field
+([§03-types](03-types.md#error)) of the `Error` value delivered to
+`catchBlock` when it is caught. The `Error`'s `message` field holds the
+same text the implementation reports when the fault is left uncaught.
+
+| Cause | Example | `Error.kind` |
+|---|---|---|
+| Arithmetic on non-Numbers | `"a" - 1` | `"ArithmeticTypeError"` |
+| Comparison on non-Numbers | `"a" < 1` | `"ComparisonTypeError"` |
+| `+` on incompatible types | `1 + "a"` | `"ConcatenationTypeError"` |
+| Call of a non-callable value | `42()` | `"NotCallableError"` |
+| Wrong argument count | `fun f(a) {} f(1, 2)` | `"ArityError"` |
+| Undefined global variable | `print undeclared;` | `"UndefinedVariableError"` |
+| Call stack overflow | Unbounded recursion | `"StackOverflowError"` |
+| Index of non-List/non-Map | `42[0]` | `"NotIndexableError"` |
+| Non-Number list index | `list["a"]` | `"IndexTypeError"` |
+| Fractional list index | `list[1.5]` | `"IndexNotIntegerError"` |
+| List index out of bounds | `[][0]` | `"IndexOutOfBoundsError"` |
+| `pop` on empty list | `[].pop()` | `"EmptyListError"` |
+| NaN used as map key | `m[0/0] = 1` | `"NaNKeyError"` |
+| Object (non-String) used as map key | `m[[1,2]] = 1` | `"InvalidMapKeyError"` |
+| Value nested too deep to print | a list that holds a list, many thousand levels deep | `"MaxDepthExceededError"` |
+| Method called on non-instance/non-list/non-map | `42.foo()` | `"InvalidReceiverError"` |
+| No arm matches in a `match` expression | `match 99 { case 1 => "one" }` | `"MatchError"` |
+| Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field | `"ConstructorArityError"` |
+| Undefined property on an `Error` value | `try { try { [][0]; } catch (e) { e.foo; } } catch (_) { }` | `"UndefinedPropertyError"` |
 
 ---
 
