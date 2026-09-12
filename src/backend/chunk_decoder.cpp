@@ -54,6 +54,8 @@ DecodedInstruction decodeOne(const Chunk& chunk, int offset) {
     case Op::MATCH_ERROR:
     case Op::GET_TAG:
     case Op::IS_SEQ:
+    case Op::POP_HANDLER:
+    case Op::THROW:
         ins.length = 1;
         break;
 
@@ -95,6 +97,14 @@ DecodedInstruction decodeOne(const Chunk& chunk, int offset) {
         uint16_t jump = readU16(chunk, offset + 1);
         ins.length = 3;
         ins.jumpTarget = offset + ins.length - static_cast<int>(jump);
+        break;
+    }
+
+    // catchOffset: same 2-byte forward-relative encoding as JUMP (chunk.h).
+    case Op::PUSH_HANDLER: {
+        uint16_t jump = readU16(chunk, offset + 1);
+        ins.length = 3;
+        ins.jumpTarget = offset + ins.length + static_cast<int>(jump);
         break;
     }
 

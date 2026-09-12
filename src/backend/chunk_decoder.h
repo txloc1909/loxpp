@@ -51,7 +51,11 @@ struct DecodedInstruction {
     // INVOKE / SUPER_INVOKE.
     int byteOperand{-1};
 
-    // Absolute target offset. Set by JUMP, JUMP_IF_FALSE, LOOP.
+    // Absolute target offset. Set by JUMP, JUMP_IF_FALSE, LOOP, and
+    // PUSH_HANDLER (the catch-handler entry offset). PUSH_HANDLER's target
+    // is never a generic branch target, despite reusing this field — see
+    // chunk.h's own comment on PUSH_HANDLER, and cfg.cpp/abstract_stack.cpp
+    // for how it is excluded from ordinary successor/predecessor edges.
     int jumpTarget{-1};
 
     // Set by CLOSURE: one entry per upvalue the target function captures,
