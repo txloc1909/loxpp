@@ -253,6 +253,21 @@ void MemoryManager::traceObject(Obj* obj) {
         markObject(bn->native);
         break;
     }
+    case ObjType::ERROR: {
+        auto* err = static_cast<ObjError*>(obj);
+        markObject(err->klass);
+        markObject(err->message);
+        markObject(err->kind);
+        break;
+    }
+    case ObjType::DEFERRED_CALL: {
+        auto* deferred = static_cast<ObjDeferredCall*>(obj);
+        markValue(deferred->callable);
+        for (auto& v : deferred->args) {
+            markValue(v);
+        }
+        break;
+    }
     }
 }
 
