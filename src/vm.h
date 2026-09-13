@@ -77,19 +77,63 @@ class VM {
     Value pop();
     Value peek(int distance);
 
+    // Outcome of a throw/catch dispatch (handleThrow/raiseThrowableError).
+    // stopAtFrameCount always names the boundary of whichever run()
+    // invocation is currently, actually dispatching — the run() parameter
+    // itself for Op::THROW and the tryCatchableError lambda, and the same
+    // value threaded down through runPendingDefers/call() for a reentrant
+    // fault inside a running defer. Uncaught: no handler found, runtimeError()
+    // already called — caller returns InterpretResult::RUNTIME_ERROR.
+    // HandledContinue: a handler was found (here, or by a reentrant call
+    // several levels down) and the resulting m_frameCount is still above the
+    // caller's own stopAtFrameCount — the caller's own frame context is still
+    // live; it must FrameSync::loadTop (or let its own ambient FrameSync
+    // guard do so) and continue dispatch normally. HandledStop: handled, but
+    // the resulting m_frameCount is at or below the caller's own
+    // stopAtFrameCount — control now belongs to a different, less-nested
+    // run() invocation. The caller must NOT read frame/ip/chunk (m_frameCount
+    // may even be 0, making that read out of bounds) and must return
+    // InterpretResult::OK immediately.
+    enum class ThrowOutcome : std::uint8_t {
+        Uncaught,
+        HandledContinue,
+        HandledStop
+    };
+
+    // Outcome of VM::call(). Pushed: a new frame is on top of m_frames;
+    // proceed normally. CaughtContinue/CaughtStop: no new frame was pushed —
+    // an arity mismatch was itself caught (see ThrowOutcome above for what
+    // the two names mean) — the caller must react exactly as it would to the
+    // matching ThrowOutcome. Uncaught: hard, already-reported error — caller
+    // returns InterpretResult::RUNTIME_ERROR.
+    enum class CallOutcome : std::uint8_t {
+        Pushed,
+        CaughtContinue,
+        CaughtStop,
+        Uncaught,
+    };
+
     // Runs pending defers for m_frames[frameIndex] LIFO, each to completion
     // (via a nested run() call) before the next one starts, so ordering and
     // side effects land exactly as multiple sequential calls would. Used by
-    // Op::RUN_DEFERS and by THROW's unwind loop for each discarded frame.
-    // RUNTIME_ERROR propagates a hard error at the call site itself (arity
-    // mismatch, stack overflow); on OK, the caller must still check whether
-    // m_frameCount is still frameIndex + 1 — a lower value means a deferred
-    // call's own throw escaped past this frame (e.g. was caught by an outer
-    // handler), and the caller must stop unwinding/dispatching at its own
-    // level too rather than assume frame `frameIndex` is still live.
-    InterpretResult runPendingDefers(int frameIndex);
+    // Op::RUN_DEFERS and by handleThrow's unwind loop for each discarded
+    // frame. stopAtFrameCount is passed straight through to this frame's own
+    // deferred call() (see ThrowOutcome above) — it is NOT frameIndex: a
+    // handler reachable while draining frameIndex's own defers was always
+    // pushed before frameIndex's function was even called (any handler
+    // scoped inside that function's own body is already popped by the time
+    // RUN_DEFERS runs), so catching one always means frameIndex itself no
+    // longer exists, regardless of stopAtFrameCount. RUNTIME_ERROR propagates
+    // a hard error at the call site itself (arity mismatch, stack overflow);
+    // on OK, the caller must still check whether m_frameCount is still
+    // frameIndex + 1 — a lower value means a deferred call's own throw (or
+    // arity mismatch) escaped past this frame, and the caller must stop
+    // unwinding/dispatching at its own level too rather than assume frame
+    // `frameIndex` is still live.
+    InterpretResult runPendingDefers(int frameIndex, int stopAtFrameCount);
 
-    bool call(ObjClosure* closure, int argCount);
+    CallOutcome call(ObjClosure* closure, int argCount,
+                     int stopAtFrameCount = 0);
     bool callNative(ObjNative* native, int argCount);
     bool callBoundNative(ObjBoundNative* bn, int argCount);
     bool bindMethod(ObjClass* klass, ObjString* name);
@@ -100,17 +144,17 @@ class VM {
     void markRoots();
 
     // Helper for handling a thrown error: searches handler stack LIFO, unwinds
-    // frames if found, and updates m_frames/m_frameCount. Returns true if
-    // handled, false if no handler found. When true, caller must call
-    // FrameSync::loadTop to sync the local frame/ip/chunk and then break.
-    bool handleThrow(Value thrownValue, int stopAtFrameCount = 0);
+    // frames if found, and updates m_frames/m_frameCount. See ThrowOutcome
+    // above for the three possible results and what each obligates the
+    // caller to do.
+    ThrowOutcome handleThrow(Value thrownValue, int stopAtFrameCount = 0);
 
     // Helper for raising a catchable runtime error (used by both run()'s
     // tryCatchableError and call()'s arity check). Constructs an Error object
-    // with the given kind and message, then calls handleThrow. Returns true if
-    // the error was caught by a handler, false otherwise. When true, caller
-    // must call FrameSync::loadTop to resync the local frame/ip/chunk.
-    bool raiseThrowableError(const char* kind_str, const char* msg);
+    // with the given kind and message, then calls handleThrow. See
+    // ThrowOutcome above.
+    ThrowOutcome raiseThrowableError(const char* kind_str, const char* msg,
+                                     int stopAtFrameCount = 0);
 
     CallFrame m_frames[FRAMES_MAX];
     int m_frameCount{0};

@@ -49,7 +49,9 @@ InterpretResult VM::interpret(const std::string& source) {
     ObjClosure* closure = m_mm.create<ObjClosure>(fn);
     stackTop[-1] = Value{
         static_cast<Obj*>(closure)}; // replace fn with its closure in-place
-    if (!call(closure, 0)) {
+    // No handler can be active yet (nothing has executed), so the only
+    // reachable outcome here is Pushed or Uncaught.
+    if (call(closure, 0) == CallOutcome::Uncaught) {
         return InterpretResult::RUNTIME_ERROR;
     }
 #ifdef LOXPP_PROFILE
@@ -74,7 +76,8 @@ std::optional<Value> VM::getGlobal(const std::string& name) const {
     return out;
 }
 
-bool VM::call(ObjClosure* closure, int argCount) {
+VM::CallOutcome VM::call(ObjClosure* closure, int argCount,
+                         int stopAtFrameCount) {
     ObjFunction* fn = closure->function;
     if (argCount != fn->arity) {
         // Arity mismatch is now catchable as ArityError, but only if a handler
@@ -84,18 +87,29 @@ bool VM::call(ObjClosure* closure, int argCount) {
         char msg[256];
         snprintf(msg, sizeof(msg), "Expected %d arguments but got %d.",
                  fn->arity, argCount);
-        if (!m_handlerStack.empty() && raiseThrowableError("ArityError", msg)) {
-            // Error was caught; the handler is set up and ready to run.
-            // No new frame was pushed, so the frame count is unchanged.
-            return true;
+        if (!m_handlerStack.empty()) {
+            // stopAtFrameCount must be the boundary of whichever run()
+            // invocation is actually calling us (threaded down from there,
+            // not always 0) — see ThrowOutcome's doc comment in vm.h. Using
+            // the wrong boundary here is exactly the class of bug that let a
+            // caught fault corrupt an unrelated, more-nested run()
+            // invocation's own frame bookkeeping.
+            ThrowOutcome outcome =
+                raiseThrowableError("ArityError", msg, stopAtFrameCount);
+            if (outcome == ThrowOutcome::HandledContinue) {
+                return CallOutcome::CaughtContinue;
+            }
+            if (outcome == ThrowOutcome::HandledStop) {
+                return CallOutcome::CaughtStop;
+            }
         }
         // No handler found, or error class not ready; uncaught error.
         runtimeError("Expected %d arguments but got %d.", fn->arity, argCount);
-        return false;
+        return CallOutcome::Uncaught;
     }
     if (m_frameCount == FRAMES_MAX) {
         runtimeError("Stack overflow.");
-        return false;
+        return CallOutcome::Uncaught;
     }
     CallFrame* frame = &m_frames[m_frameCount++];
     frame->closure = closure;
@@ -109,7 +123,7 @@ bool VM::call(ObjClosure* closure, int argCount) {
         m_profilerScopes[depth].emplace(m_profilerData, closure, depth, parent);
     }
 #endif
-    return true;
+    return CallOutcome::Pushed;
 }
 
 ObjUpvalue* VM::captureUpvalue(Value* local) {
@@ -141,7 +155,7 @@ void VM::closeUpvalues(Value* last) {
     }
 }
 
-InterpretResult VM::runPendingDefers(int frameIndex) {
+InterpretResult VM::runPendingDefers(int frameIndex, int stopAtFrameCount) {
     // Run every deferred call for m_frames[frameIndex], LIFO (most recently
     // recorded first). Each one runs to completion — via a nested run() that
     // stops once m_frameCount returns to frameIndex + 1 — before the next
@@ -170,28 +184,41 @@ InterpretResult VM::runPendingDefers(int frameIndex) {
         // Handle various callable types (similar to Op::CALL dispatch).
         // For BoundMethod, replace the method on the stack with the receiver,
         // then call the underlying method closure.
-        bool callSucceeded = false;
+        CallOutcome outcome;
         if (isBoundMethod(calleeVal)) {
             ObjBoundMethod* bound = asObjBoundMethod(as<Obj*>(calleeVal));
             stackTop[-argCount - 1] = bound->receiver;
-            callSucceeded = call(bound->method, argCount);
+            outcome = call(bound->method, argCount, stopAtFrameCount);
         } else if (isClosure(calleeVal)) {
             ObjClosure* closure = asObjClosure(as<Obj*>(calleeVal));
-            callSucceeded = call(closure, argCount);
+            outcome = call(closure, argCount, stopAtFrameCount);
         } else if (isNative(calleeVal)) {
             ObjNative* native = asObjNative(as<Obj*>(calleeVal));
-            callSucceeded = callNative(native, argCount);
+            outcome = callNative(native, argCount) ? CallOutcome::Pushed
+                                                   : CallOutcome::Uncaught;
         } else if (isBoundNative(calleeVal)) {
             ObjBoundNative* bound = asObjBoundNative(as<Obj*>(calleeVal));
-            callSucceeded = callBoundNative(bound, argCount);
+            outcome = callBoundNative(bound, argCount) ? CallOutcome::Pushed
+                                                       : CallOutcome::Uncaught;
         } else {
             // Unexpected callable type in deferred call
             runtimeError("Deferred callable has unexpected type.");
             return InterpretResult::RUNTIME_ERROR;
         }
 
-        if (!callSucceeded) {
+        if (outcome == CallOutcome::Uncaught) {
             return InterpretResult::RUNTIME_ERROR;
+        }
+        if (outcome != CallOutcome::Pushed) {
+            // The deferred call's own arity mismatch was caught instead of
+            // pushing a new frame. Any handler reachable here was pushed
+            // before frameIndex's own function was even called (a handler
+            // scoped inside that function's body is already popped by the
+            // time RUN_DEFERS runs), so frameIndex no longer exists — there
+            // is no new frame to run to completion. Per defer step 5's
+            // documented limitation, abandon any remaining sibling defers
+            // rather than still running them.
+            return InterpretResult::OK;
         }
         InterpretResult result = run(frameIndex + 1);
         if (result != InterpretResult::OK) {
@@ -208,13 +235,12 @@ InterpretResult VM::runPendingDefers(int frameIndex) {
     return InterpretResult::OK;
 }
 
-bool VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
+VM::ThrowOutcome VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
     // Search LIFO for a handler in an active try block. This is the ONE
     // unwind implementation for both explicit throw (Op::THROW) and runtime
-    // faults (IndexOutOfBoundsError, etc.). Returns true if handled (handler
-    // set up in m_frames), false otherwise. On return true, caller must sync
-    // frame/ip/chunk via FrameSync::loadTop. On return false, runtimeError
-    // has been called; caller should return RUNTIME_ERROR.
+    // faults (IndexOutOfBoundsError, etc.). See ThrowOutcome's doc comment in
+    // vm.h for what each of the three results means and obligates the
+    // caller to do.
     bool handled = false;
     while (!m_handlerStack.empty()) {
         HandlerRecord handler = m_handlerStack.back();
@@ -223,17 +249,28 @@ bool VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
             while (m_frameCount > handler.frameCount) {
                 int unwoundFrameIndex = m_frameCount - 1;
                 closeUpvalues(m_frames[unwoundFrameIndex].slots);
-                InterpretResult result = runPendingDefers(unwoundFrameIndex);
+                // stopAtFrameCount is OUR OWN parameter, not
+                // unwoundFrameIndex: it is the boundary of whichever run()
+                // invocation is unwinding right now (see vm.h), and a
+                // reentrant fault inside this defer must be judged against
+                // that same boundary, not a fresh default.
+                InterpretResult result =
+                    runPendingDefers(unwoundFrameIndex, stopAtFrameCount);
                 if (result != InterpretResult::OK) {
-                    return false; // Hard error during defer, already reported
+                    // Hard error during defer, already reported.
+                    return ThrowOutcome::Uncaught;
                 }
                 if (m_frameCount != unwoundFrameIndex + 1) {
-                    // Deferred call threw; its throw handler took over and set
-                    // up control flow (possibly to a different handler). The
-                    // unwind is complete from our perspective. Return true so
-                    // the caller does not call runtimeError: the inner throw
-                    // is already being handled elsewhere.
-                    return true;
+                    // Deferred call threw (or its own arity mismatch was
+                    // caught); that inner dispatch already fully resolved
+                    // things — possibly by running the rest of the program
+                    // to completion, which can leave m_frameCount at 0. Our
+                    // own unwind has nothing left to finish: whether OUR
+                    // caller must also stop depends on where m_frameCount
+                    // landed relative to OUR OWN stopAtFrameCount.
+                    return (m_frameCount <= stopAtFrameCount)
+                               ? ThrowOutcome::HandledStop
+                               : ThrowOutcome::HandledContinue;
                 }
 #ifdef LOXPP_PROFILE
                 m_profilerScopes[m_frameCount - 1].reset();
@@ -248,10 +285,6 @@ bool VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
             // Pop this handler since we're handling the throw.
             m_handlerStack.pop_back();
             handled = true;
-            if (m_frameCount <= stopAtFrameCount) {
-                // Nested run() caught at or above stopping depth.
-                return true; // Handler found, caller will sync and continue
-            }
             break;
         } else {
             // Handler frame has exited — pop and search next.
@@ -259,7 +292,9 @@ bool VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
         }
     }
     if (handled) {
-        return true; // Handler set up, caller syncs and continues
+        return (m_frameCount <= stopAtFrameCount)
+                   ? ThrowOutcome::HandledStop
+                   : ThrowOutcome::HandledContinue;
     }
     // No handler found — report uncaught error.
     if (isError(thrownValue)) {
@@ -269,24 +304,20 @@ bool VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
         std::string thrownStr = stringify(thrownValue);
         runtimeError("Uncaught throw: %s", thrownStr.c_str());
     }
-    return false; // Not handled, error reported
+    return ThrowOutcome::Uncaught;
 }
 
-bool VM::raiseThrowableError(const char* kind_str, const char* msg) {
+VM::ThrowOutcome VM::raiseThrowableError(const char* kind_str, const char* msg,
+                                         int stopAtFrameCount) {
     // Shared implementation for raising a catchable runtime error. Used by both
     // run()'s tryCatchableError lambda and by call()'s arity check. Constructs
     // an Error instance with the given kind and message, then calls handleThrow
-    // to search for a handler. Returns true if the error was caught by an
-    // active handler, false otherwise.
-    //
-    // When this returns true, the caller must sync the local frame/ip/chunk via
-    // FrameSync::loadTop(m_frames, m_frameCount, frame, ip, chunk) before
-    // continuing, because handleThrow may have unwound frames.
+    // to search for a handler. See ThrowOutcome's doc comment in vm.h.
 
     if (m_errorClass == nullptr) {
         // Error class not ready; fallback to uncaught error
         runtimeError("%s", msg);
-        return false;
+        return ThrowOutcome::Uncaught;
     }
 
     // GC safety: root intermediate strings while constructing the error.
@@ -306,9 +337,7 @@ bool VM::raiseThrowableError(const char* kind_str, const char* msg) {
 
     // handleThrow will push err_obj and potentially truncate the stack.
     // So we pass err_obj but don't manage its stack presence ourselves.
-    bool handled = handleThrow(Value{static_cast<Obj*>(err_obj)});
-
-    return handled;
+    return handleThrow(Value{static_cast<Obj*>(err_obj)}, stopAtFrameCount);
 }
 
 InterpretResult VM::run(int stopAtFrameCount) {
@@ -318,13 +347,33 @@ InterpretResult VM::run(int stopAtFrameCount) {
         runtimeError(__VA_ARGS__);                                             \
     } while (false)
 
+    // tryCatchableError(kind, msg) returns ThrowOutcome (see vm.h). This
+    // macro reacts to it exactly the way every catchable-fault call site
+    // must: return RUNTIME_ERROR if uncaught, return OK immediately (without
+    // touching frame/ip/chunk — they may not even be safe to read, see
+    // ThrowOutcome's doc comment) if the catch resolved outside this run()
+    // invocation's own frame range, and otherwise do nothing, so the call
+    // site's own trailing `break;` resumes dispatch normally. Only `return`
+    // appears in this macro's body — never `break`/`continue` — so it is
+    // safe to expand inside another do/while (BINARY_OP) or directly inside
+    // a switch case without an enclosing loop/switch swallowing a break that
+    // was meant for the opcode dispatch switch.
+#define CATCHABLE_OR_RETURN(outcome_expr)                                      \
+    do {                                                                       \
+        ThrowOutcome _catchableOutcome = (outcome_expr);                       \
+        if (_catchableOutcome == ThrowOutcome::Uncaught) {                     \
+            return InterpretResult::RUNTIME_ERROR;                             \
+        }                                                                      \
+        if (_catchableOutcome == ThrowOutcome::HandledStop) {                  \
+            return InterpretResult::OK;                                        \
+        }                                                                      \
+    } while (false)
+
 #define BINARY_OP(valueType, op, kind_str, msg)                                \
     do {                                                                       \
         if (!is<Number>(peek(0)) || !is<Number>(peek(1))) {                    \
-            if (tryCatchableError(kind_str, msg)) {                            \
-                break;                                                         \
-            }                                                                  \
-            return InterpretResult::RUNTIME_ERROR;                             \
+            CATCHABLE_OR_RETURN(tryCatchableError(kind_str, msg));             \
+            break;                                                             \
         }                                                                      \
         Number b = as<Number>(pop());                                          \
         Number a = as<Number>(pop());                                          \
@@ -398,21 +447,28 @@ InterpretResult VM::run(int stopAtFrameCount) {
     };
 
     // Helper lambda to construct and potentially catch a runtime error.
-    // Syncs frame->ip before any operation. If m_errorClass is available and
-    // handleThrow succeeds, updates frame/ip/chunk and returns true (the caller
-    // should NOT return RUNTIME_ERROR). Otherwise returns false (caller must
-    // return RUNTIME_ERROR or handle the error itself).
-    // Wrap the shared raiseThrowableError to sync frame/ip/chunk on success.
-    auto tryCatchableError = [this, &frame, &ip, &chunk](const char* kind_str,
-                                                         const char* msg) {
+    // Syncs frame->ip before any operation, then forwards to the shared
+    // raiseThrowableError with THIS run() invocation's own stopAtFrameCount
+    // — the boundary a reentrant fault must be judged against, not always 0
+    // (see ThrowOutcome's doc comment in vm.h; using the wrong boundary here
+    // is exactly what let a caught fault corrupt an unrelated, more-nested
+    // run() invocation's frame bookkeeping). On HandledContinue, reloads
+    // frame/ip/chunk from the new top — safe, since m_frameCount is still
+    // above stopAtFrameCount. On HandledStop or Uncaught, frame/ip/chunk are
+    // deliberately left untouched: CATCHABLE_OR_RETURN returns from run()
+    // before either is read again, and reading them here could be out of
+    // bounds (m_frameCount may be 0).
+    auto tryCatchableError = [this, &frame, &ip, &chunk, stopAtFrameCount](
+                                 const char* kind_str,
+                                 const char* msg) -> ThrowOutcome {
         frame->ip = ip; // Sync frame->ip before allocations (fixes line number)
 
-        bool handled = raiseThrowableError(kind_str, msg);
-        if (handled) {
+        ThrowOutcome outcome =
+            raiseThrowableError(kind_str, msg, stopAtFrameCount);
+        if (outcome == ThrowOutcome::HandledContinue) {
             FrameSync::loadTop(m_frames, m_frameCount, frame, ip, chunk);
-            return true;
         }
-        return false;
+        return outcome;
     };
 
     auto readConstant = [&chunk, &readShort]() -> Value {
@@ -481,11 +537,9 @@ InterpretResult VM::run(int stopAtFrameCount) {
         }
         case Op::NEGATE: {
             if (!is<Number>(peek(0))) {
-                if (tryCatchableError("ArithmeticTypeError",
-                                      "Operand must be a number.")) {
-                    break;
-                }
-                return InterpretResult::RUNTIME_ERROR;
+                CATCHABLE_OR_RETURN(tryCatchableError(
+                    "ArithmeticTypeError", "Operand must be a number."));
+                break;
             }
             push(from<Number>(-as<Number>(pop())));
             break;
@@ -524,11 +578,9 @@ InterpretResult VM::run(int stopAtFrameCount) {
         }
         case Op::MODULO: {
             if (!is<Number>(peek(0)) || !is<Number>(peek(1))) {
-                if (tryCatchableError("ArithmeticTypeError",
-                                      "Operands must be numbers.")) {
-                    break;
-                }
-                return InterpretResult::RUNTIME_ERROR;
+                CATCHABLE_OR_RETURN(tryCatchableError(
+                    "ArithmeticTypeError", "Operands must be numbers."));
+                break;
             }
             Number b = as<Number>(pop());
             Number a = as<Number>(pop());
@@ -581,11 +633,9 @@ InterpretResult VM::run(int stopAtFrameCount) {
             ObjString* name = asObjString(readConstant());
             Value value;
             if (!m_globals.get(name, value)) {
-                if (tryCatchableError("UndefinedVariableError",
-                                      "Undefined variable.")) {
-                    break;
-                }
-                return InterpretResult::RUNTIME_ERROR;
+                CATCHABLE_OR_RETURN(tryCatchableError("UndefinedVariableError",
+                                                      "Undefined variable."));
+                break;
             }
             push(value);
             break;
@@ -597,11 +647,9 @@ InterpretResult VM::run(int stopAtFrameCount) {
             // declared.
             if (m_globals.set(name, peek(0))) {
                 m_globals.del(name); // undo the spurious insertion
-                if (tryCatchableError("UndefinedVariableError",
-                                      "Undefined variable.")) {
-                    break;
-                }
-                return InterpretResult::RUNTIME_ERROR;
+                CATCHABLE_OR_RETURN(tryCatchableError("UndefinedVariableError",
+                                                      "Undefined variable."));
+                break;
             }
             break;
         }
@@ -621,11 +669,9 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::MATCH_ERROR: {
-            if (tryCatchableError("MatchError",
-                                  "No matching arm in match expression.")) {
-                break;
-            }
-            return InterpretResult::RUNTIME_ERROR;
+            CATCHABLE_OR_RETURN(tryCatchableError(
+                "MatchError", "No matching arm in match expression."));
+            break;
         }
         case Op::JUMP_TABLE: {
             uint8_t minTag = readByte();
@@ -686,16 +732,26 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 }
             } else if (isClosure(callee)) {
                 FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
-                if (!call(asObjClosure(callee), argCount)) {
+                CallOutcome outcome =
+                    call(asObjClosure(callee), argCount, stopAtFrameCount);
+                if (outcome == CallOutcome::Uncaught) {
                     return InterpretResult::RUNTIME_ERROR;
+                }
+                if (outcome == CallOutcome::CaughtStop) {
+                    return InterpretResult::OK;
                 }
             } else if (isBoundMethod(callee)) {
                 ObjBoundMethod* bound = asObjBoundMethod(as<Obj*>(callee));
                 // Slot 0 of the new frame = receiver (= this).
                 stackTop[-argCount - 1] = bound->receiver;
                 FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
-                if (!call(bound->method, argCount)) {
+                CallOutcome outcome =
+                    call(bound->method, argCount, stopAtFrameCount);
+                if (outcome == CallOutcome::Uncaught) {
                     return InterpretResult::RUNTIME_ERROR;
+                }
+                if (outcome == CallOutcome::CaughtStop) {
+                    return InterpretResult::OK;
                 }
             } else if (isBoundNative(callee)) {
                 ObjBoundNative* bn = asObjBoundNative(as<Obj*>(callee));
@@ -713,26 +769,28 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 Value initMethod;
                 if (initStr && klass->methods.get(initStr, initMethod)) {
                     FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
-                    if (!call(asObjClosure(as<Obj*>(initMethod)), argCount)) {
+                    CallOutcome outcome =
+                        call(asObjClosure(as<Obj*>(initMethod)), argCount,
+                             stopAtFrameCount);
+                    if (outcome == CallOutcome::Uncaught) {
                         return InterpretResult::RUNTIME_ERROR;
                     }
-                } else if (argCount != 0) {
-                    if (tryCatchableError(
-                            "ConstructorArityError",
-                            "Expected 0 arguments but got some.")) {
-                        break;
+                    if (outcome == CallOutcome::CaughtStop) {
+                        return InterpretResult::OK;
                     }
-                    return InterpretResult::RUNTIME_ERROR;
+                } else if (argCount != 0) {
+                    CATCHABLE_OR_RETURN(tryCatchableError(
+                        "ConstructorArityError",
+                        "Expected 0 arguments but got some."));
+                    break;
                 }
             } else if (isEnumCtor(callee)) {
                 ObjEnumCtor* ctor = asObjEnumCtor(as<Obj*>(callee));
                 if (argCount != static_cast<int>(ctor->arity)) {
-                    if (tryCatchableError(
-                            "ConstructorArityError",
-                            "Constructor called with wrong arity.")) {
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    CATCHABLE_OR_RETURN(tryCatchableError(
+                        "ConstructorArityError",
+                        "Constructor called with wrong arity."));
+                    break;
                 }
                 ObjEnum* enumVal =
                     m_mm.create<ObjEnum>(ctor, VmAllocator<Value>{&m_mm});
@@ -745,12 +803,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 pop(); // pop the ObjEnumCtor from the callee slot
                 push(Value{static_cast<Obj*>(enumVal)});
             } else {
-                if (tryCatchableError(
-                        "NotCallableError",
-                        "Can only call functions, classes and enums.")) {
-                    break;
-                }
-                return InterpretResult::RUNTIME_ERROR;
+                CATCHABLE_OR_RETURN(tryCatchableError(
+                    "NotCallableError",
+                    "Can only call functions, classes and enums."));
+                break;
             }
             break;
         }
@@ -771,11 +827,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 } else if (name->chars == "kind") {
                     push(Value{static_cast<Obj*>(err->kind)});
                 } else {
-                    if (tryCatchableError("UndefinedPropertyError",
-                                          "Undefined property on error.")) {
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    CATCHABLE_OR_RETURN(
+                        tryCatchableError("UndefinedPropertyError",
+                                          "Undefined property on error."));
+                    break;
                 }
                 break;
             }
@@ -860,8 +915,14 @@ InterpretResult VM::run(int stopAtFrameCount) {
                     stackTop[-argCount - 1] = fieldVal;
                     FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
                     if (isClosure(fieldVal)) {
-                        if (!call(asObjClosure(as<Obj*>(fieldVal)), argCount)) {
+                        CallOutcome outcome =
+                            call(asObjClosure(as<Obj*>(fieldVal)), argCount,
+                                 stopAtFrameCount);
+                        if (outcome == CallOutcome::Uncaught) {
                             return InterpretResult::RUNTIME_ERROR;
+                        }
+                        if (outcome == CallOutcome::CaughtStop) {
+                            return InterpretResult::OK;
                         }
                     } else if (isNative(fieldVal)) {
                         if (!callNative(asObjNative(as<Obj*>(fieldVal)),
@@ -897,8 +958,13 @@ InterpretResult VM::run(int stopAtFrameCount) {
                         return InterpretResult::RUNTIME_ERROR;
                     }
                 } else {
-                    if (!call(asObjClosure(methodObj), argCount)) {
+                    CallOutcome outcome = call(asObjClosure(methodObj),
+                                               argCount, stopAtFrameCount);
+                    if (outcome == CallOutcome::Uncaught) {
                         return InterpretResult::RUNTIME_ERROR;
+                    }
+                    if (outcome == CallOutcome::CaughtStop) {
+                        return InterpretResult::OK;
                     }
                 }
             } else if (isList(receiver)) {
@@ -922,12 +988,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
                         return InterpretResult::RUNTIME_ERROR;
                     }
                     if (list->elements.empty()) {
-                        if (tryCatchableError(
-                                "EmptyListError",
-                                "Cannot pop from an empty list.")) {
-                            break;
-                        }
-                        return InterpretResult::RUNTIME_ERROR;
+                        CATCHABLE_OR_RETURN(tryCatchableError(
+                            "EmptyListError",
+                            "Cannot pop from an empty list."));
+                        break;
                     }
                     Value val = list->elements.back();
                     list->elements.pop_back();
@@ -984,11 +1048,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
                     return InterpretResult::RUNTIME_ERROR;
                 }
             } else {
-                if (tryCatchableError("InvalidReceiverError",
-                                      "Method called on invalid receiver.")) {
-                    break;
-                }
-                return InterpretResult::RUNTIME_ERROR;
+                CATCHABLE_OR_RETURN(
+                    tryCatchableError("InvalidReceiverError",
+                                      "Method called on invalid receiver."));
+                break;
             }
             break;
         }
@@ -1024,8 +1087,15 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 return InterpretResult::RUNTIME_ERROR;
             }
             FrameSync sync(m_frames, m_frameCount, frame, ip, chunk);
-            if (!call(asObjClosure(as<Obj*>(method)), argCount)) {
-                return InterpretResult::RUNTIME_ERROR;
+            {
+                CallOutcome outcome = call(asObjClosure(as<Obj*>(method)),
+                                           argCount, stopAtFrameCount);
+                if (outcome == CallOutcome::Uncaught) {
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                if (outcome == CallOutcome::CaughtStop) {
+                    return InterpretResult::OK;
+                }
             }
             break;
         }
@@ -1106,22 +1176,22 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 Value key = peek(2 * (count - 1 - i) + 1);
                 // Check for NaN first
                 if (is<Number>(key) && std::isnan(as<Number>(key))) {
-                    if (tryCatchableError("NaNKeyError",
-                                          "NaN cannot be used as a map key.")) {
-                        errorCaught = true;
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    // The macro's own early returns cover Uncaught/HandledStop;
+                    // reaching here means HandledContinue, so break out of this
+                    // validation loop (not the outer switch — errorCaught does
+                    // that below) same as before.
+                    CATCHABLE_OR_RETURN(tryCatchableError(
+                        "NaNKeyError", "NaN cannot be used as a map key."));
+                    errorCaught = true;
+                    break;
                 }
                 // Then check for invalid object types (non-String)
                 if (is<Obj*>(key) && as<Obj*>(key)->type != ObjType::STRING) {
-                    if (tryCatchableError(
-                            "InvalidMapKeyError",
-                            "Map keys must be Bool, Number, Nil, or String.")) {
-                        errorCaught = true;
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    CATCHABLE_OR_RETURN(tryCatchableError(
+                        "InvalidMapKeyError",
+                        "Map keys must be Bool, Number, Nil, or String."));
+                    errorCaught = true;
+                    break;
                 }
             }
             if (errorCaught) {
@@ -1149,54 +1219,45 @@ InterpretResult VM::run(int stopAtFrameCount) {
             Value collectionVal = pop();
             if (isList(collectionVal)) {
                 if (!is<Number>(indexVal)) {
-                    if (tryCatchableError("IndexTypeError",
-                                          "List index must be a number.")) {
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    CATCHABLE_OR_RETURN(tryCatchableError(
+                        "IndexTypeError", "List index must be a number."));
+                    break;
                 }
                 double n = as<Number>(indexVal);
                 if (n != std::floor(n)) {
-                    if (tryCatchableError("IndexNotIntegerError",
-                                          "List index must be an integer.")) {
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    CATCHABLE_OR_RETURN(
+                        tryCatchableError("IndexNotIntegerError",
+                                          "List index must be an integer."));
+                    break;
                 }
                 auto* list = asObjList(as<Obj*>(collectionVal));
                 int idx = static_cast<int>(n);
                 if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
-                    if (tryCatchableError("IndexOutOfBoundsError",
-                                          "List index out of bounds.")) {
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    CATCHABLE_OR_RETURN(tryCatchableError(
+                        "IndexOutOfBoundsError", "List index out of bounds."));
+                    break;
                 }
                 push(list->elements[idx]);
             } else if (isString(collectionVal)) {
                 if (!is<Number>(indexVal)) {
-                    if (tryCatchableError("IndexTypeError",
-                                          "String index must be a number.")) {
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    CATCHABLE_OR_RETURN(tryCatchableError(
+                        "IndexTypeError", "String index must be a number."));
+                    break;
                 }
                 double n = as<Number>(indexVal);
                 if (n != std::floor(n)) {
-                    if (tryCatchableError("IndexNotIntegerError",
-                                          "String index must be an integer.")) {
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    CATCHABLE_OR_RETURN(
+                        tryCatchableError("IndexNotIntegerError",
+                                          "String index must be an integer."));
+                    break;
                 }
                 auto* str = asObjString(as<Obj*>(collectionVal));
                 int idx = static_cast<int>(n);
                 if (idx < 0 || idx >= static_cast<int>(str->chars.size())) {
-                    if (tryCatchableError("IndexOutOfBoundsError",
-                                          "String index out of bounds.")) {
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    CATCHABLE_OR_RETURN(
+                        tryCatchableError("IndexOutOfBoundsError",
+                                          "String index out of bounds."));
+                    break;
                 }
                 // Copy char before makeString (GC-safe: same pattern as ADD)
                 char ch = str->chars[idx];
@@ -1204,20 +1265,16 @@ InterpretResult VM::run(int stopAtFrameCount) {
                     m_mm.makeString(std::string_view{&ch, 1}))});
             } else if (isMap(collectionVal)) {
                 if (is<Number>(indexVal) && std::isnan(as<Number>(indexVal))) {
-                    if (tryCatchableError("NaNKeyError",
-                                          "NaN cannot be used as a map key.")) {
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    CATCHABLE_OR_RETURN(tryCatchableError(
+                        "NaNKeyError", "NaN cannot be used as a map key."));
+                    break;
                 }
                 if (is<Obj*>(indexVal) &&
                     as<Obj*>(indexVal)->type != ObjType::STRING) {
-                    if (tryCatchableError(
-                            "InvalidMapKeyError",
-                            "Map keys must be Bool, Number, Nil, or String.")) {
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    CATCHABLE_OR_RETURN(tryCatchableError(
+                        "InvalidMapKeyError",
+                        "Map keys must be Bool, Number, Nil, or String."));
+                    break;
                 }
                 auto* map = asObjMap(as<Obj*>(collectionVal));
                 Value result{Nil{}}; // default nil — returned when key absent
@@ -1237,12 +1294,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 }
                 push(e->fields[static_cast<size_t>(idx)]);
             } else {
-                if (tryCatchableError(
-                        "NotIndexableError",
-                        "Only lists, strings, and maps can be indexed.")) {
-                    break;
-                }
-                return InterpretResult::RUNTIME_ERROR;
+                CATCHABLE_OR_RETURN(tryCatchableError(
+                    "NotIndexableError",
+                    "Only lists, strings, and maps can be indexed."));
+                break;
             }
             break;
         }
@@ -1257,20 +1312,16 @@ InterpretResult VM::run(int stopAtFrameCount) {
             }
             if (isMap(listVal)) {
                 if (is<Number>(indexVal) && std::isnan(as<Number>(indexVal))) {
-                    if (tryCatchableError("NaNKeyError",
-                                          "NaN cannot be used as a map key.")) {
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    CATCHABLE_OR_RETURN(tryCatchableError(
+                        "NaNKeyError", "NaN cannot be used as a map key."));
+                    break;
                 }
                 if (is<Obj*>(indexVal) &&
                     as<Obj*>(indexVal)->type != ObjType::STRING) {
-                    if (tryCatchableError(
-                            "InvalidMapKeyError",
-                            "Map keys must be Bool, Number, Nil, or String.")) {
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    CATCHABLE_OR_RETURN(tryCatchableError(
+                        "InvalidMapKeyError",
+                        "Map keys must be Bool, Number, Nil, or String."));
+                    break;
                 }
                 auto* map = asObjMap(as<Obj*>(listVal));
                 // Root the map: it was popped and may be a temporary; mapSet
@@ -1290,36 +1341,28 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 break;
             }
             if (!isList(listVal)) {
-                if (tryCatchableError(
-                        "NotIndexableError",
-                        "Only lists and maps can be indexed for assignment.")) {
-                    break;
-                }
-                return InterpretResult::RUNTIME_ERROR;
+                CATCHABLE_OR_RETURN(tryCatchableError(
+                    "NotIndexableError",
+                    "Only lists and maps can be indexed for assignment."));
+                break;
             }
             if (!is<Number>(indexVal)) {
-                if (tryCatchableError("IndexTypeError",
-                                      "List index must be a number.")) {
-                    break;
-                }
-                return InterpretResult::RUNTIME_ERROR;
+                CATCHABLE_OR_RETURN(tryCatchableError(
+                    "IndexTypeError", "List index must be a number."));
+                break;
             }
             double n = as<Number>(indexVal);
             if (n != std::floor(n)) {
-                if (tryCatchableError("IndexNotIntegerError",
-                                      "List index must be an integer.")) {
-                    break;
-                }
-                return InterpretResult::RUNTIME_ERROR;
+                CATCHABLE_OR_RETURN(tryCatchableError(
+                    "IndexNotIntegerError", "List index must be an integer."));
+                break;
             }
             auto* list = asObjList(as<Obj*>(listVal));
             int idx = static_cast<int>(n);
             if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
-                if (tryCatchableError("IndexOutOfBoundsError",
-                                      "List index out of bounds.")) {
-                    break;
-                }
-                return InterpretResult::RUNTIME_ERROR;
+                CATCHABLE_OR_RETURN(tryCatchableError(
+                    "IndexOutOfBoundsError", "List index out of bounds."));
+                break;
             }
             list->elements[idx] = val;
             push(val); // assignment is an expression; its value is the assigned
@@ -1431,19 +1474,15 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 push(from<bool>(found));
             } else if (isMap(seq)) {
                 if (is<Number>(elem) && std::isnan(as<Number>(elem))) {
-                    if (tryCatchableError("NaNKeyError",
-                                          "NaN cannot be used as a map key.")) {
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    CATCHABLE_OR_RETURN(tryCatchableError(
+                        "NaNKeyError", "NaN cannot be used as a map key."));
+                    break;
                 }
                 if (is<Obj*>(elem) && as<Obj*>(elem)->type != ObjType::STRING) {
-                    if (tryCatchableError(
-                            "InvalidMapKeyError",
-                            "Map keys must be Bool, Number, Nil, or String.")) {
-                        break;
-                    }
-                    return InterpretResult::RUNTIME_ERROR;
+                    CATCHABLE_OR_RETURN(tryCatchableError(
+                        "InvalidMapKeyError",
+                        "Map keys must be Bool, Number, Nil, or String."));
+                    break;
                 }
                 auto* map = asObjMap(as<Obj*>(seq));
                 Value dummy;
@@ -1583,14 +1622,28 @@ InterpretResult VM::run(int stopAtFrameCount) {
             // current position, not a stale one (see FrameSync's own
             // comment above for why this matters).
             frame->ip = ip;
-            InterpretResult result = runPendingDefers(frameIndex);
+            InterpretResult result =
+                runPendingDefers(frameIndex, stopAtFrameCount);
             if (result != InterpretResult::OK) {
                 return result;
             }
-            if (m_frameCount <= frameIndex) {
-                // A deferred call's own throw propagated past this frame —
-                // it no longer exists, and whatever caught that throw (or
-                // program exit) already took over dispatch.
+            // Checking against frameIndex here (instead of stopAtFrameCount)
+            // was a second instance of R15's bug class: a deferred call's own
+            // fault can be caught by a handler ABOVE stopAtFrameCount but AT
+            // OR BELOW frameIndex (e.g. an outer try wrapping this frame's
+            // own call site) — that catch's frame is a real, still-live
+            // frame belonging to THIS SAME run() invocation, and its ip now
+            // correctly points at the catch block. Checking frameIndex
+            // treated that live catch context as "gone" and returned OK
+            // without ever dispatching it (reproduced: defer_throw_outer_
+            // catch.lox printed only "middle body" and silently exited 0,
+            // never reaching its catch block or "program end"). Only
+            // stopAtFrameCount — this run() invocation's own boundary — is
+            // the right test: below it, control belongs to a different,
+            // less-nested run() invocation (m_frameCount may even be 0);
+            // at or above it, any surviving frame is this invocation's own
+            // and must be dispatched, whether or not it is still frameIndex.
+            if (m_frameCount <= stopAtFrameCount) {
                 return InterpretResult::OK;
             }
             FrameSync::loadTop(m_frames, m_frameCount, frame, ip, chunk);
@@ -1601,30 +1654,34 @@ InterpretResult VM::run(int stopAtFrameCount) {
             // Use the shared unwind implementation (same as runtime faults).
             // Sync frame->ip before calling handleThrow for error reporting.
             frame->ip = ip;
-            if (handleThrow(thrownValue, stopAtFrameCount)) {
-                // Handler found and set up. Reload frame/ip/chunk from the
-                // new top and continue dispatch (break from the switch, enter
-                // the next iteration of the main loop). For non-zero
-                // stopAtFrameCount (nested run()), handleThrow returns true
-                // for both "handler found in nested call" and "inner throw
-                // already handled": both mean "control is now at a handler,
-                // return to the calling run()" —via InterpretResult::OK below.
-                FrameSync::loadTop(m_frames, m_frameCount, frame, ip, chunk);
-                if (m_frameCount <= stopAtFrameCount) {
-                    // Nested run() caught this throw at or above its own
-                    // stopping depth — hand control back.
-                    return InterpretResult::OK;
-                }
-                break; // Continue main dispatch loop from the new frame
+            ThrowOutcome outcome = handleThrow(thrownValue, stopAtFrameCount);
+            if (outcome == ThrowOutcome::Uncaught) {
+                // No handler found, runtimeError was called, and the stack
+                // was reset.
+                return InterpretResult::RUNTIME_ERROR;
             }
-            // handleThrow returned false: no handler found, runtimeError
-            // was called, and the stack was reset. Return RUNTIME_ERROR.
-            return InterpretResult::RUNTIME_ERROR;
+            if (outcome == ThrowOutcome::HandledStop) {
+                // Handled, but by a handler outside THIS run() invocation's
+                // own frame range (possibly several reentrant handleThrow
+                // calls down — see ThrowOutcome's doc comment in vm.h).
+                // m_frameCount may even be 0 here (the resolution ran the
+                // rest of the program to completion) — do NOT touch
+                // frame/ip/chunk; FrameSync::loadTop would read out of
+                // bounds. Hand control back to whichever context started
+                // this run() invocation.
+                return InterpretResult::OK;
+            }
+            // HandledContinue: a handler was found and set up, and this
+            // run() invocation's own frame context is still live. Reload
+            // frame/ip/chunk from the new top and continue dispatch.
+            FrameSync::loadTop(m_frames, m_frameCount, frame, ip, chunk);
+            break;
         }
         }
     }
 
 #undef BINARY_OP
+#undef CATCHABLE_OR_RETURN
 #undef RAISE_ERROR
 }
 
