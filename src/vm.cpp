@@ -239,11 +239,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
         runtimeError(__VA_ARGS__);                                             \
     } while (false)
 
-#define BINARY_OP(valueType, op)                                               \
+#define BINARY_OP(valueType, op, kind_str, msg)                                \
     do {                                                                       \
         if (!is<Number>(peek(0)) || !is<Number>(peek(1))) {                    \
-            if (tryCatchableError("ArithmeticTypeError",                       \
-                                  "Operands must be numbers.")) {              \
+            if (tryCatchableError(kind_str, msg)) {                            \
                 break;                                                         \
             }                                                                  \
             return InterpretResult::RUNTIME_ERROR;                             \
@@ -418,11 +417,13 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::GREATER: {
-            BINARY_OP(bool, >);
+            BINARY_OP(bool, >, "ComparisonTypeError",
+                      "Operands must be numbers.");
             break;
         }
         case Op::LESS: {
-            BINARY_OP(bool, <);
+            BINARY_OP(bool, <, "ComparisonTypeError",
+                      "Operands must be numbers.");
             break;
         }
         case Op::NEGATE: {
@@ -444,20 +445,25 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 push(Value{
                     static_cast<Obj*>(m_mm.makeString(std::move(result)))});
             } else {
-                BINARY_OP(Number, +);
+                BINARY_OP(Number, +, "ConcatenationTypeError",
+                          "Operands must be two numbers, two strings, or a "
+                          "string and a number.");
             }
             break;
         }
         case Op::SUBTRACT: {
-            BINARY_OP(Number, -);
+            BINARY_OP(Number, -, "ArithmeticTypeError",
+                      "Operands must be numbers.");
             break;
         }
         case Op::MULTIPLY: {
-            BINARY_OP(Number, *);
+            BINARY_OP(Number, *, "ArithmeticTypeError",
+                      "Operands must be numbers.");
             break;
         }
         case Op::DIVIDE: {
-            BINARY_OP(Number, /);
+            BINARY_OP(Number, /, "ArithmeticTypeError",
+                      "Operands must be numbers.");
             break;
         }
         case Op::MODULO: {
