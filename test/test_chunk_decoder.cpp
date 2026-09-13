@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -127,6 +128,8 @@ void renderInstruction(const Chunk& chunk, const DecodedInstruction& ins,
     case Op::MATCH_ERROR:
     case Op::GET_TAG:
     case Op::IS_SEQ:
+    case Op::POP_HANDLER:
+    case Op::THROW:
         out << mnemonic(ins.op) << '\n';
         return;
 
@@ -159,6 +162,7 @@ void renderInstruction(const Chunk& chunk, const DecodedInstruction& ins,
     case Op::JUMP:
     case Op::JUMP_IF_FALSE:
     case Op::LOOP:
+    case Op::PUSH_HANDLER:
         out << mnemonic(ins.op) << ' ' << ins.offset << " -> " << ins.jumpTarget
             << '\n';
         return;
@@ -370,7 +374,19 @@ TEST(ChunkDecoderTest, DecodesEveryOpcodeAtLeastOnce) {
     accumulateOpCounts(projectRoot() / "bootstrap" / "loxpp_interpreter.lox",
                        counts);
 
+    // PUSH_HANDLER/POP_HANDLER/THROW are proven directly against
+    // cfg.cpp/abstract_stack.cpp by test_nonlocal_cfg.cpp, with hand-built
+    // chunks — src/compiler.cpp does not parse try/catch/throw yet, so no
+    // corpus program can emit them (notes/missions/2026-09-non-local-
+    // control-flow/nodes/X1.md). Remove this carve-out once a later node
+    // (X3) adds compiler support and a real corpus program exercises them.
+    const std::set<Op> notYetEmittedByCompiler = {Op::PUSH_HANDLER,
+                                                  Op::POP_HANDLER, Op::THROW};
+
     for (Op op : allOps()) {
+        if (notYetEmittedByCompiler.count(op) != 0) {
+            continue;
+        }
         EXPECT_GT(counts[op], 0)
             << mnemonic(op) << " is never decoded anywhere in the corpus";
     }

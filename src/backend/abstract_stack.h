@@ -56,6 +56,21 @@ struct PopClassification {
     PopKind kind{};
 };
 
+// One PUSH_HANDLER's catch-handler entry contract: the operand depth this
+// analysis *declared* for the catch block's entry — checkpoint depth
+// (PUSH_HANDLER's own operand depth) plus 1, for the thrown value — never
+// something validateMergeConsistency discovers via predecessor agreement. A
+// catch handler's real predecessors are every THROW reachable in the
+// protected region, including ones in a callee this function's own chunk
+// cannot see, so this is a declared fact stated by PUSH_HANDLER itself, not
+// a computed one. Mirrors cfg.h's HandlerEntry, independently, the same way
+// this file's own private LocalCfg mirrors cfg.cpp's public Cfg.
+struct HandlerEntryContract {
+    int pushHandlerOffset{0};
+    int catchOffset{0};
+    int declaredOperandDepth{0};
+};
+
 // The full per-instruction analysis of one function's own chunk.
 struct FunctionStackAnalysis {
     std::string functionId;
@@ -78,6 +93,12 @@ struct FunctionStackAnalysis {
     // from more than one predecessor (e.g. a captured local initialised by
     // a short-circuit `and`/`or` expression lands via either branch).
     std::vector<InvisibleVarSite> invisibleVars;
+
+    // One entry per PUSH_HANDLER in this chunk. See HandlerEntryContract:
+    // each catch-target instruction's `before`/`after` state above is
+    // seeded from this declared contract, not discovered through
+    // `reached`'s ordinary predecessor-driven propagation.
+    std::vector<HandlerEntryContract> handlerEntries;
 
     // High-water mark of operandDepth() over the whole chunk — what a JVM
     // `.limit stack` / CIL `.maxstack` must be at least as large as. Excludes
