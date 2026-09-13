@@ -1072,14 +1072,31 @@ InterpretResult VM::run(int stopAtFrameCount) {
             uint8_t count = readByte();
             // Validate all keys before any allocation. Stack (top to bottom):
             //   val_{n-1}, key_{n-1}, ..., val_0, key_0
+            bool errorCaught = false;
             for (int i = 0; i < count; i++) {
                 Value key = peek(2 * (count - 1 - i) + 1);
-                if (!isValidMapKey(key)) {
-                    RAISE_ERROR(
-                        "Map keys must be Bool, Number, Nil, or String. "
-                        "NaN is not allowed.");
+                // Check for NaN first
+                if (is<Number>(key) && std::isnan(as<Number>(key))) {
+                    if (tryCatchableError("NaNKeyError",
+                                          "NaN cannot be used as a map key.")) {
+                        errorCaught = true;
+                        break;
+                    }
                     return InterpretResult::RUNTIME_ERROR;
                 }
+                // Then check for invalid object types (non-String)
+                if (is<Obj*>(key) && as<Obj*>(key)->type != ObjType::STRING) {
+                    if (tryCatchableError(
+                            "InvalidMapKeyError",
+                            "Map keys must be Bool, Number, Nil, or String.")) {
+                        errorCaught = true;
+                        break;
+                    }
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+            }
+            if (errorCaught) {
+                break;
             }
             ObjMap* map =
                 m_mm.create<ObjMap>(m_mapClass, VmAllocator<MapEntry>{&m_mm});
@@ -1157,10 +1174,20 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 push(Value{static_cast<Obj*>(
                     m_mm.makeString(std::string_view{&ch, 1}))});
             } else if (isMap(collectionVal)) {
-                if (!isValidMapKey(indexVal)) {
-                    RAISE_ERROR(
-                        "Map keys must be Bool, Number, Nil, or String. "
-                        "NaN is not allowed.");
+                if (is<Number>(indexVal) && std::isnan(as<Number>(indexVal))) {
+                    if (tryCatchableError("NaNKeyError",
+                                          "NaN cannot be used as a map key.")) {
+                        break;
+                    }
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                if (is<Obj*>(indexVal) &&
+                    as<Obj*>(indexVal)->type != ObjType::STRING) {
+                    if (tryCatchableError(
+                            "InvalidMapKeyError",
+                            "Map keys must be Bool, Number, Nil, or String.")) {
+                        break;
+                    }
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 auto* map = asObjMap(as<Obj*>(collectionVal));
@@ -1200,10 +1227,20 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 return InterpretResult::RUNTIME_ERROR;
             }
             if (isMap(listVal)) {
-                if (!isValidMapKey(indexVal)) {
-                    RAISE_ERROR(
-                        "Map keys must be Bool, Number, Nil, or String. "
-                        "NaN is not allowed.");
+                if (is<Number>(indexVal) && std::isnan(as<Number>(indexVal))) {
+                    if (tryCatchableError("NaNKeyError",
+                                          "NaN cannot be used as a map key.")) {
+                        break;
+                    }
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                if (is<Obj*>(indexVal) &&
+                    as<Obj*>(indexVal)->type != ObjType::STRING) {
+                    if (tryCatchableError(
+                            "InvalidMapKeyError",
+                            "Map keys must be Bool, Number, Nil, or String.")) {
+                        break;
+                    }
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 auto* map = asObjMap(as<Obj*>(listVal));
@@ -1224,23 +1261,35 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 break;
             }
             if (!isList(listVal)) {
-                RAISE_ERROR(
-                    "Only lists and maps can be indexed for assignment.");
+                if (tryCatchableError(
+                        "NotIndexableError",
+                        "Only lists and maps can be indexed for assignment.")) {
+                    break;
+                }
                 return InterpretResult::RUNTIME_ERROR;
             }
             if (!is<Number>(indexVal)) {
-                RAISE_ERROR("List index must be a number.");
+                if (tryCatchableError("IndexTypeError",
+                                      "List index must be a number.")) {
+                    break;
+                }
                 return InterpretResult::RUNTIME_ERROR;
             }
             double n = as<Number>(indexVal);
             if (n != std::floor(n)) {
-                RAISE_ERROR("List index must be an integer.");
+                if (tryCatchableError("IndexNotIntegerError",
+                                      "List index must be an integer.")) {
+                    break;
+                }
                 return InterpretResult::RUNTIME_ERROR;
             }
             auto* list = asObjList(as<Obj*>(listVal));
             int idx = static_cast<int>(n);
             if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
-                RAISE_ERROR("List index out of bounds.");
+                if (tryCatchableError("IndexOutOfBoundsError",
+                                      "List index out of bounds.")) {
+                    break;
+                }
                 return InterpretResult::RUNTIME_ERROR;
             }
             list->elements[idx] = val;
@@ -1352,10 +1401,19 @@ InterpretResult VM::run(int stopAtFrameCount) {
                              LoxString::npos;
                 push(from<bool>(found));
             } else if (isMap(seq)) {
-                if (!isValidMapKey(elem)) {
-                    RAISE_ERROR(
-                        "Map keys must be Bool, Number, Nil, or String. "
-                        "NaN is not allowed.");
+                if (is<Number>(elem) && std::isnan(as<Number>(elem))) {
+                    if (tryCatchableError("NaNKeyError",
+                                          "NaN cannot be used as a map key.")) {
+                        break;
+                    }
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                if (is<Obj*>(elem) && as<Obj*>(elem)->type != ObjType::STRING) {
+                    if (tryCatchableError(
+                            "InvalidMapKeyError",
+                            "Map keys must be Bool, Number, Nil, or String.")) {
+                        break;
+                    }
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 auto* map = asObjMap(as<Obj*>(seq));

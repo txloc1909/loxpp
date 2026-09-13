@@ -46,6 +46,11 @@ static const char* typeNameOf(Obj* obj) {
         return "EnumConstructor";
     case ObjType::ENUM:
         return "Enum";
+    case ObjType::ERROR:
+        return "Error";
+    case ObjType::DEFERRED_CALL:
+        // Internal implementation detail, never directly observable from Lox++
+        return "DeferredCall";
     }
     return "Unknown";
 }

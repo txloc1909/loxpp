@@ -45,6 +45,10 @@ static const char* objTypeName(ObjType type) {
         return "enum";
     case ObjType::BOUND_NATIVE:
         return "bound_native";
+    case ObjType::ERROR:
+        return "error";
+    case ObjType::DEFERRED_CALL:
+        return "deferred_call";
     }
     return "?";
 }
@@ -307,6 +311,10 @@ static std::size_t objAllocatedSize(Obj* obj) {
         return sizeof(ObjEnum);
     case ObjType::BOUND_NATIVE:
         return sizeof(ObjBoundNative);
+    case ObjType::ERROR:
+        return sizeof(ObjError);
+    case ObjType::DEFERRED_CALL:
+        return sizeof(ObjDeferredCall);
     }
     return 0;
 }
