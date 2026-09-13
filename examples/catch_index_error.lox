@@ -11,3 +11,6 @@ try {
 }
 
 print "Program continues after catching error";
+// CHECK: IndexOutOfBoundsError
+// CHECK: List index out of bounds.
+// CHECK: Program continues after catching error
