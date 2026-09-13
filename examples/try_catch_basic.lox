@@ -1,0 +1,18 @@
+// Basic try/catch with a thrown value
+fun throws() {
+    throw "test error";
+}
+
+fun main() {
+    try {
+        print "In try block";
+        throws();
+        print "After throws() call";
+    } catch (e) {
+        print "In catch block";
+        print "Caught: " + e;
+    }
+    print "After try/catch";
+}
+
+main();

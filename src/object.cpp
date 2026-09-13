@@ -129,6 +129,19 @@ std::string stringifyObj(Obj* obj) {
     }
     case ObjType::BOUND_NATIVE:
         return "<native fn>";
+    case ObjType::ERROR: {
+        auto* err = asObjError(obj);
+        // Format: kind: message (per spec/03-types.md)
+        std::string result(err->kind->chars.data(), err->kind->chars.size());
+        result += ": ";
+        result +=
+            std::string(err->message->chars.data(), err->message->chars.size());
+        return result;
+    }
+    case ObjType::DEFERRED_CALL:
+        // Deferred calls are internal VM details and should never be
+        // user-visible. This is a defensive stringification only.
+        return "<deferred-call>";
     }
     return "<obj>";
 }

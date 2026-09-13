@@ -2001,12 +2001,11 @@ void Compiler::tryStatement() {
     beginScope();
     block();
     endScope();
-    // No explicit POP_HANDLER before catch — the exception handler is still
-    // active if we reach here (successful try completion). POP_HANDLER is
-    // emitted after the entire try/catch is done.
+
+    // On normal completion of try block, skip the catch block.
+    int skipCatchJump = emitJump(Op::JUMP);
 
     // Patch the handler offset now that we know where the catch block is
-    int catchOffset = static_cast<int>(getCurrentChunk()->size());
     patchJump(handlerOffset);
 
     m_parser->consume(TokenType::CATCH, "Expect 'catch' after try block.");
@@ -2030,6 +2029,9 @@ void Compiler::tryStatement() {
 
     block();
     endScope();
+
+    // Patch the skip jump to jump past the catch block.
+    patchJump(skipCatchJump);
 
     // Pop the exception handler after the try/catch completes.
     emitByte(Op::POP_HANDLER);
@@ -2115,8 +2117,12 @@ void Compiler::or_() {
 }
 
 void Compiler::emitReturn() {
-    // Run deferred calls before returning.
-    emitByte(Op::RUN_DEFERS);
+    if (m_type != FunctionType::SCRIPT) {
+        // Run deferred calls before returning from functions.
+        // (Scripts cannot have defer statements, so this is only for user
+        // functions and initializers.)
+        emitByte(Op::RUN_DEFERS);
+    }
     if (m_type == FunctionType::INITIALIZER) {
         emitBytes(Op::GET_LOCAL, 0); // implicit return of 'this'
     } else {
@@ -2197,6 +2203,19 @@ void Compiler::trackOperandStack(Op op) {
     case Op::BUILD_MAP:
         // Operand count is not known here; the caller adjusts m_stackHeight.
         break;
+    case Op::PUSH_HANDLER:
+    case Op::POP_HANDLER:
+    case Op::RUN_DEFERS:
+        // These operate on separate stacks (handler stack, defer list),
+        // not the value stack.
+        break;
+    case Op::THROW:
+        // THROW is terminal (like RETURN). Stack height is irrelevant.
+        break;
+    case Op::DEFER_RECORD:
+        // DEFER_RECORD pops callee and args, with argc as operand.
+        // The caller adjusts m_stackHeight in emitBytes().
+        break;
     }
 }
 
@@ -2211,6 +2230,9 @@ void Compiler::emitBytes(Op op, Byte byte) {
     switch (op) {
     case Op::CALL:
         m_stackHeight -= byte; // pop callee+args, push result
+        break;
+    case Op::DEFER_RECORD:
+        m_stackHeight -= byte + 1; // pop callee+args, nothing pushed
         break;
     case Op::BUILD_LIST:
         m_stackHeight -= static_cast<int>(byte) - 1;

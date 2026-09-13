@@ -1236,7 +1236,9 @@ InterpretResult VM::run() {
         }
         case Op::PUSH_HANDLER: {
             uint16_t catchOffset = readShort();
-            Chunk::const_iterator catchIp = chunk->cbegin() + catchOffset;
+            // catchOffset is relative to the current IP, just like JUMP.
+            // ip points to the first byte after the PUSH_HANDLER instruction.
+            Chunk::const_iterator catchIp = ip + catchOffset;
             m_handlerStack.push_back(
                 HandlerRecord{m_frameCount, stackTop, catchIp});
             break;
