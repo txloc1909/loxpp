@@ -6,10 +6,10 @@
 
 const char* const* lox_keywords() {
     static const char* keywords[] = {
-        "and",   "break", "case",  "class", "continue", "default",
-        "else",  "enum",  "false", "for",   "fun",      "if",
-        "match", "nil",   "or",    "print", "return",   "super",
-        "this",  "true",  "var",   "while", nullptr};
+        "and",   "break", "case", "catch", "class",  "continue", "default",
+        "defer", "else",  "enum", "false", "for",    "fun",      "if",
+        "match", "nil",   "or",   "print", "return", "super",    "this",
+        "throw", "true",  "try",  "var",   "while",  nullptr};
     return keywords;
 }
 
@@ -143,8 +143,17 @@ TokenType Scanner::identifierType() {
     case 'c': {
         if (m_current - m_start > 1) {
             switch (m_start[1]) {
-            case 'a':
-                return checkKeyword(2, 2, "se", TokenType::CASE);
+            case 'a': {
+                if (m_current - m_start > 2) {
+                    if (m_start[2] == 's') {
+                        return checkKeyword(3, 1, "e", TokenType::CASE);
+                    }
+                    if (m_start[2] == 't') {
+                        return checkKeyword(3, 2, "ch", TokenType::CATCH);
+                    }
+                }
+                break;
+            }
             case 'l':
                 return checkKeyword(2, 3, "ass", TokenType::CLASS);
             case 'o':
@@ -153,8 +162,25 @@ TokenType Scanner::identifierType() {
         }
         break;
     }
-    case 'd':
-        return checkKeyword(1, 6, "efault", TokenType::DEFAULT);
+    case 'd': {
+        if (m_current - m_start > 1) {
+            switch (m_start[1]) {
+            case 'e': {
+                if (m_current - m_start > 2) {
+                    if (m_start[2] == 'f') {
+                        return checkKeyword(3, 2, "er", TokenType::DEFER);
+                    }
+                    if (m_start[2] == 'f' && m_current - m_start > 3 &&
+                        m_start[3] == 'a') {
+                        return checkKeyword(4, 3, "ult", TokenType::DEFAULT);
+                    }
+                }
+                break;
+            }
+            }
+        }
+        break;
+    }
     case 'e': {
         if (m_current - m_start > 1) {
             switch (m_start[1]) {
@@ -205,10 +231,28 @@ TokenType Scanner::identifierType() {
     case 't': {
         if (m_current - m_start > 1) {
             switch (m_start[1]) {
-            case 'h':
-                return checkKeyword(2, 2, "is", TokenType::THIS);
-            case 'r':
-                return checkKeyword(2, 2, "ue", TokenType::TRUE);
+            case 'h': {
+                if (m_current - m_start > 2) {
+                    if (m_start[2] == 'i') {
+                        return checkKeyword(3, 1, "s", TokenType::THIS);
+                    }
+                    if (m_start[2] == 'r') {
+                        return checkKeyword(3, 2, "ow", TokenType::THROW);
+                    }
+                }
+                break;
+            }
+            case 'r': {
+                if (m_current - m_start > 2) {
+                    if (m_start[2] == 'u') {
+                        return checkKeyword(3, 1, "e", TokenType::TRUE);
+                    }
+                    if (m_start[2] == 'y') {
+                        return checkKeyword(3, 0, "", TokenType::TRY);
+                    }
+                }
+                break;
+            }
             }
         }
         break;

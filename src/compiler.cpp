@@ -550,6 +550,12 @@ void Compiler::statement() {
         breakStatement();
     } else if (m_parser->match(TokenType::CONTINUE)) {
         continueStatement();
+    } else if (m_parser->match(TokenType::TRY)) {
+        tryStatement();
+    } else if (m_parser->match(TokenType::THROW)) {
+        throwStatement();
+    } else if (m_parser->match(TokenType::DEFER)) {
+        deferStatement();
     } else if (m_parser->match(TokenType::PRINT)) {
         printStatement();
     } else if (m_parser->match(TokenType::RETURN)) {
@@ -1983,6 +1989,61 @@ void Compiler::returnStatement() {
                           "Expect ';' after return value.");
         emitByte(Op::RETURN);
     }
+}
+
+void Compiler::tryStatement() {
+    // try block catch (name) block
+    m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' after 'try'.");
+    int handlerOffset = emitJump(Op::PUSH_HANDLER);
+
+    beginScope();
+    block();
+    endScope();
+
+    // Patch the handler offset now that we know where the catch block is
+    int catchOffset = static_cast<int>(getCurrentChunk()->size());
+    patchJump(handlerOffset);
+
+    m_parser->consume(TokenType::CATCH, "Expect 'catch' after try block.");
+    m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after 'catch'.");
+    m_parser->consume(TokenType::IDENTIFIER,
+                      "Expect identifier in catch clause.");
+    Token catchName = m_parser->m_previous;
+    m_parser->consume(TokenType::RIGHT_PAREN,
+                      "Expect ')' after catch identifier.");
+
+    m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' for catch block.");
+
+    // Add the caught value binding to scope
+    beginScope();
+    addLocal(catchName);
+    markInitialized();
+
+    block();
+    endScope();
+
+    emitByte(Op::POP_HANDLER);
+}
+
+void Compiler::throwStatement() {
+    expression();
+    m_parser->consume(TokenType::SEMICOLON,
+                      "Expect ';' after throw expression.");
+    emitByte(Op::THROW);
+}
+
+void Compiler::deferStatement() {
+    if (m_type == FunctionType::SCRIPT) {
+        m_parser->error("Can't defer at the top level.");
+        return;
+    }
+
+    // defer call ( arguments ) ;
+    // For now, just parse as an expression and emit a placeholder
+    expression();
+    m_parser->consume(TokenType::SEMICOLON,
+                      "Expect ';' after defer expression.");
+    // TODO: Emit defer opcode/logic
 }
 
 void Compiler::parseFunction(FunctionType /*type*/) {

@@ -90,6 +90,9 @@ class Compiler {
     void forInStatement(const Token& itemName);
     void breakStatement();
     void continueStatement();
+    void tryStatement();
+    void throwStatement();
+    void deferStatement();
     void matchExpression();
     void enumDeclaration();
 
