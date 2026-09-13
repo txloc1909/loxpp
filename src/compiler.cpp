@@ -1978,6 +1978,8 @@ void Compiler::returnStatement() {
         m_parser->error("Can't return from top-level code.");
         return;
     }
+    // Run deferred calls before returning.
+    emitByte(Op::RUN_DEFERS);
     if (m_parser->match(TokenType::SEMICOLON)) {
         emitReturn();
     } else {
@@ -1999,6 +2001,9 @@ void Compiler::tryStatement() {
     beginScope();
     block();
     endScope();
+    // No explicit POP_HANDLER before catch — the exception handler is still
+    // active if we reach here (successful try completion). POP_HANDLER is
+    // emitted after the entire try/catch is done.
 
     // Patch the handler offset now that we know where the catch block is
     int catchOffset = static_cast<int>(getCurrentChunk()->size());
@@ -2014,14 +2019,19 @@ void Compiler::tryStatement() {
 
     m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' for catch block.");
 
-    // Add the caught value binding to scope
+    // The catch block starts with the thrown value on the stack (pushed by
+    // THROW). Bind it to the catch variable.
     beginScope();
     addLocal(catchName);
+    // The thrown value is already on the stack at stackTop[-1]. Store it into
+    // the local variable slot.
+    emitBytes(Op::SET_LOCAL, static_cast<uint8_t>(m_localCount - 1));
     markInitialized();
 
     block();
     endScope();
 
+    // Pop the exception handler after the try/catch completes.
     emitByte(Op::POP_HANDLER);
 }
 
@@ -2039,11 +2049,30 @@ void Compiler::deferStatement() {
     }
 
     // defer call ( arguments ) ;
-    // For now, just parse as an expression and emit a placeholder
+    // Parse the call expression. The call expression will emit all the
+    // bytecode to evaluate the callee and arguments, then emit CALL.
+    // We want to emit DEFER_RECORD instead of CALL.
+    //
+    // Workaround: parse as a normal call expression, then replace the CALL
+    // opcode with DEFER_RECORD using the patch() method.
+
+    // Get the byte position before parsing the call.
+    int callPos = static_cast<int>(getCurrentChunk()->size());
+
+    // Parse as a normal expression (which will include the call).
     expression();
+
+    // Now find and replace the CALL opcode with DEFER_RECORD.
+    // The CALL should be at position callPos (1 byte: OP::CALL).
+    // The argc follows immediately.
+    if (getCurrentChunk()->size() >= callPos + 1) {
+        // Use patch() to replace the CALL byte with DEFER_RECORD.
+        // The argc byte stays the same.
+        getCurrentChunk()->patch(callPos, static_cast<Byte>(Op::DEFER_RECORD));
+    }
+
     m_parser->consume(TokenType::SEMICOLON,
-                      "Expect ';' after defer expression.");
-    // TODO: Emit defer opcode/logic
+                      "Expect ';' after defer statement.");
 }
 
 void Compiler::parseFunction(FunctionType /*type*/) {
@@ -2086,6 +2115,8 @@ void Compiler::or_() {
 }
 
 void Compiler::emitReturn() {
+    // Run deferred calls before returning.
+    emitByte(Op::RUN_DEFERS);
     if (m_type == FunctionType::INITIALIZER) {
         emitBytes(Op::GET_LOCAL, 0); // implicit return of 'this'
     } else {

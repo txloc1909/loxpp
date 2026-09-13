@@ -23,6 +23,12 @@ enum class InterpretResult : std::uint8_t {
     RUNTIME_ERROR,
 };
 
+struct HandlerRecord {
+    int frameCount;                // number of frames at push time
+    Value* stackTop;               // stack pointer at push time
+    Chunk::const_iterator catchIp; // jump target for catch block
+};
+
 struct CallFrame {
     ObjClosure* closure;
     Chunk::const_iterator ip;
@@ -64,6 +70,10 @@ class VM {
     Value pop();
     Value peek(int distance);
 
+    // Run pending defers for the current frame LIFO. Returns false if a defer
+    // execution fails. Used during RETURN and THROW unwinding.
+    bool runPendingDefers(int frameIndex);
+
     bool call(ObjClosure* closure, int argCount);
     bool callNative(ObjNative* native, int argCount);
     bool callBoundNative(ObjBoundNative* bn, int argCount);
@@ -87,6 +97,16 @@ class VM {
     StdlibContext m_stdlibCtx;
     ObjClass* m_fileClass{nullptr};
     ObjClass* m_mapClass{nullptr};
+    ObjClass* m_errorClass{nullptr};
+
+    // Handler stack for try/catch — parallel to m_frames[].
+    // m_handlerStack[i] records {frameCount, stackTop, catchIp} for the
+    // i-th PUSH_HANDLER. THROW searches LIFO for a matching handler.
+    std::vector<HandlerRecord> m_handlerStack;
+
+    // Per-frame defer lists — parallel to m_frames[]. Each entry is a
+    // vector of ObjClosure* (thunks) pending invocation LIFO.
+    std::array<std::vector<Value>, FRAMES_MAX> m_deferLists;
 
 #ifdef LOXPP_PROFILE
     ProfilerData m_profilerData;

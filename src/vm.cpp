@@ -12,6 +12,7 @@
 #include "stdlib/globals.h"
 #include "stdlib/file_api.h"
 #include "stdlib/map_api.h"
+#include "stdlib/error_api.h"
 #include "stdlib/math_module.h"
 #include "stdlib/os_api.h"
 #include "stdlib/reflect_api.h"
@@ -125,6 +126,32 @@ void VM::closeUpvalues(Value* last) {
         uv->location = &uv->closed;
         m_openUpvalues = uv->next;
     }
+}
+
+bool VM::runPendingDefers(int frameIndex) {
+    // Run all deferred calls for the given frame in LIFO order.
+    // This is called during RETURN and THROW unwinding.
+    auto& deferList = m_deferLists[frameIndex];
+    for (auto it = deferList.rbegin(); it != deferList.rend(); ++it) {
+        Value deferValue = *it;
+        if (isDeferredCall(deferValue)) {
+            ObjDeferredCall* deferred = asObjDeferredCall(as<Obj*>(deferValue));
+            // Push arguments and callee, then call.
+            for (const Value& arg : deferred->args) {
+                push(arg);
+            }
+            push(deferred->callable);
+            ObjClosure* callee = asObjClosure(as<Obj*>(deferred->callable));
+            int argCount = static_cast<int>(deferred->args.size());
+            if (!call(callee, argCount)) {
+                return false; // Defer invocation failed
+            }
+            // call() pushed a frame, which will be executed by the main loop.
+            // We return true to indicate success, and the main loop continues.
+        }
+    }
+    deferList.clear();
+    return true;
 }
 
 InterpretResult VM::run() {
@@ -525,6 +552,21 @@ InterpretResult VM::run() {
             break;
         }
         case Op::GET_PROPERTY: {
+            if (isError(peek(0))) {
+                ObjError* err = asObjError(as<Obj*>(peek(0)));
+                ObjString* name = asObjString(readConstant());
+                pop(); // error
+                if (name->chars == "message") {
+                    push(Value{static_cast<Obj*>(err->message)});
+                } else if (name->chars == "kind") {
+                    push(Value{static_cast<Obj*>(err->kind)});
+                } else {
+                    RAISE_ERROR("Undefined property '%s' on error.",
+                                name->chars.c_str());
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                break;
+            }
             if (isFile(peek(0))) {
                 ObjString* name = asObjString(readConstant());
                 Value method;
@@ -1192,6 +1234,96 @@ InterpretResult VM::run() {
             }
             break;
         }
+        case Op::PUSH_HANDLER: {
+            uint16_t catchOffset = readShort();
+            Chunk::const_iterator catchIp = chunk->cbegin() + catchOffset;
+            m_handlerStack.push_back(
+                HandlerRecord{m_frameCount, stackTop, catchIp});
+            break;
+        }
+        case Op::POP_HANDLER: {
+            if (m_handlerStack.empty()) {
+                RAISE_ERROR("BUG: POP_HANDLER with empty handler stack.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            m_handlerStack.pop_back();
+            break;
+        }
+        case Op::DEFER_RECORD: {
+            uint8_t argc = readByte();
+            // Pop callee and arguments from stack. Create an ObjDeferredCall
+            // object that captures them, and store it on the defer list.
+            Value callee = stackTop[-(argc + 1)];
+            ObjDeferredCall* deferred =
+                m_mm.create<ObjDeferredCall>(callee, VmAllocator<Value>{&m_mm});
+            m_mm.pushTempRoot(deferred);
+            for (int i = argc - 1; i >= 0; i--) {
+                deferred->args.push_back(stackTop[-(i + 1)]);
+            }
+            m_mm.popTempRoot();
+            // Pop arguments and callee from stack.
+            stackTop -= argc + 1;
+            // Add to defer list for the current frame.
+            m_deferLists[m_frameCount - 1].push_back(
+                Value{static_cast<Obj*>(deferred)});
+            break;
+        }
+        case Op::RUN_DEFERS: {
+            // Run all deferred calls for the current frame in LIFO order.
+            // This executes immediately, pushing frames as needed.
+            // The main loop will execute those frames on subsequent iterations.
+            if (!runPendingDefers(m_frameCount - 1)) {
+                return InterpretResult::RUNTIME_ERROR;
+            }
+            break;
+        }
+        case Op::THROW: {
+            Value thrownValue = pop();
+            // Search LIFO for a handler in an active try block.
+            while (!m_handlerStack.empty()) {
+                HandlerRecord handler = m_handlerStack.back();
+                // Check if this handler frame is still active.
+                if (handler.frameCount <= m_frameCount) {
+                    // Handler's frame is active — unwind to it.
+                    while (m_frameCount > handler.frameCount) {
+                        // Close upvalues and run defers for each unwound frame.
+                        closeUpvalues(frame->slots);
+                        // Run pending defers LIFO before discarding the frame.
+                        if (!runPendingDefers(m_frameCount - 1)) {
+                            // Defer invocation failed during unwind.
+                            return InterpretResult::RUNTIME_ERROR;
+                        }
+#ifdef LOXPP_PROFILE
+                        m_profilerScopes[m_frameCount - 1].reset();
+#endif
+                        m_frameCount--;
+                    }
+                    // Truncate stack to checkpoint.
+                    stackTop = handler.stackTop;
+                    push(thrownValue);
+                    // Jump to catch block.
+                    frame->ip = handler.catchIp;
+                    FrameSync::loadTop(m_frames, m_frameCount, frame, ip,
+                                       chunk);
+                    // Pop this handler since we're handling the throw.
+                    m_handlerStack.pop_back();
+                    break;
+                } else {
+                    // Handler frame has exited — pop it and continue searching.
+                    m_handlerStack.pop_back();
+                }
+            }
+            // No handler found — uncaught throw. Report and exit.
+            frame->ip = ip;
+            if (isError(thrownValue)) {
+                ObjError* err = asObjError(as<Obj*>(thrownValue));
+                runtimeError("%s", err->message->chars.c_str());
+            } else {
+                std::string thrownStr = stringify(thrownValue);
+                runtimeError("Uncaught throw: %s", thrownStr.c_str());
+            }
+            return InterpretResult::RUNTIME_ERROR;
+        }
         }
     }
 
@@ -1240,6 +1372,7 @@ void VM::defineNatives() {
     registerGlobals(reg);
     m_fileClass = registerFileAPI(reg);
     m_mapClass = registerMapAPI(reg);
+    m_errorClass = registerErrorAPI(reg);
     registerMath(reg);
     registerOSAPI(reg, m_mapClass);
     registerReflectAPI(reg);
@@ -1277,6 +1410,10 @@ void VM::markRoots() {
     }
     for (int i = 0; i < m_frameCount; ++i) {
         m_mm.markObject(m_frames[i].closure);
+        // Mark pending deferred calls in this frame.
+        for (const Value& defer : m_deferLists[i]) {
+            m_mm.markValue(defer);
+        }
     }
     for (ObjUpvalue* uv = m_openUpvalues; uv != nullptr; uv = uv->next) {
         m_mm.markObject(uv);
@@ -1291,12 +1428,19 @@ void VM::markRoots() {
     if (m_mapClass) {
         m_mm.markObject(m_mapClass);
     }
+    if (m_errorClass) {
+        m_mm.markObject(m_errorClass);
+    }
 }
 
 void VM::resetStack() {
     stackTop = stack;
     m_frameCount = 0;
     m_stackOverflow = false;
+    m_handlerStack.clear();
+    for (auto& deferList : m_deferLists) {
+        deferList.clear();
+    }
 }
 
 void VM::push(Value value) {
