@@ -431,6 +431,8 @@ TEST(ToolingResolverCorpus, NoCrashAndFewWarnings) {
     // resolver does not parse try/catch/throw/defer yet, so it reports a
     // false "unknown name" for `catch (e)`'s own binding wherever a catch
     // body uses it — tracked in issue #233 (src/tooling/, not the compiler
-    // or VM). Lower this back to 5 once that resolver support lands.
-    EXPECT_LE(totalWarnings, 10u);
+    // or VM). Raised again, 10 -> 11, for defer_throw_outer_catch.lox (also
+    // PR #232), one more example with a `catch (e)` body hitting the same
+    // tracked gap. Lower this back to 5 once that resolver support lands.
+    EXPECT_LE(totalWarnings, 11u);
 }
