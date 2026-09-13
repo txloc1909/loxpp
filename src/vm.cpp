@@ -128,33 +128,50 @@ void VM::closeUpvalues(Value* last) {
     }
 }
 
-bool VM::runPendingDefers(int frameIndex) {
-    // Run all deferred calls for the given frame in LIFO order.
-    // This is called during RETURN and THROW unwinding.
+InterpretResult VM::runPendingDefers(int frameIndex) {
+    // Run every deferred call for m_frames[frameIndex], LIFO (most recently
+    // recorded first). Each one runs to completion — via a nested run() that
+    // stops once m_frameCount returns to frameIndex + 1 — before the next
+    // one starts: popping every frame up front and letting the ordinary
+    // dispatch loop replay them would run them in declaration order instead
+    // of LIFO, and would leave call()'s later pushes silently discarding the
+    // stack effects of earlier ones.
     auto& deferList = m_deferLists[frameIndex];
-    for (auto it = deferList.rbegin(); it != deferList.rend(); ++it) {
-        Value deferValue = *it;
-        if (isDeferredCall(deferValue)) {
-            ObjDeferredCall* deferred = asObjDeferredCall(as<Obj*>(deferValue));
-            // Push arguments and callee, then call.
-            for (const Value& arg : deferred->args) {
-                push(arg);
-            }
-            push(deferred->callable);
-            ObjClosure* callee = asObjClosure(as<Obj*>(deferred->callable));
-            int argCount = static_cast<int>(deferred->args.size());
-            if (!call(callee, argCount)) {
-                return false; // Defer invocation failed
-            }
-            // call() pushed a frame, which will be executed by the main loop.
-            // We return true to indicate success, and the main loop continues.
+    while (!deferList.empty()) {
+        Value deferValue = deferList.back();
+        deferList.pop_back();
+        if (!isDeferredCall(deferValue)) {
+            continue;
+        }
+        ObjDeferredCall* deferred = asObjDeferredCall(as<Obj*>(deferValue));
+        // call()'s own convention (and DEFER_RECORD's documented "stack
+        // before" shape, chunk.h) is [callee, arg0, ..., argN-1] — the
+        // callee goes first, underneath its arguments, not last.
+        push(deferred->callable);
+        for (const Value& arg : deferred->args) {
+            push(arg);
+        }
+        ObjClosure* callee = asObjClosure(as<Obj*>(deferred->callable));
+        int argCount = static_cast<int>(deferred->args.size());
+        if (!call(callee, argCount)) {
+            return InterpretResult::RUNTIME_ERROR;
+        }
+        InterpretResult result = run(frameIndex + 1);
+        if (result != InterpretResult::OK) {
+            return result;
+        }
+        if (m_frameCount != frameIndex + 1) {
+            // The deferred call's own throw propagated past this frame (it
+            // no longer exists — an outer handler or program exit already
+            // took over dispatch). Abandon the rest of this list; the
+            // caller must notice m_frameCount changed and stop too.
+            return InterpretResult::OK;
         }
     }
-    deferList.clear();
-    return true;
+    return InterpretResult::OK;
 }
 
-InterpretResult VM::run() {
+InterpretResult VM::run(int stopAtFrameCount) {
 #define RAISE_ERROR(...)                                                       \
     do {                                                                       \
         frame->ip = ip;                                                        \
@@ -858,6 +875,12 @@ InterpretResult VM::run() {
             stackTop = frame->slots;
             push(result);
             FrameSync::loadTop(m_frames, m_frameCount, frame, ip, chunk);
+            if (m_frameCount <= stopAtFrameCount) {
+                // A nested run() (draining a deferred call — see
+                // runPendingDefers) reached the depth it was asked to stop
+                // at; hand control back to whichever C++ frame started it.
+                return InterpretResult::OK;
+            }
             break;
         }
         case Op::BUILD_LIST: {
@@ -1271,16 +1294,29 @@ InterpretResult VM::run() {
             break;
         }
         case Op::RUN_DEFERS: {
-            // Run all deferred calls for the current frame in LIFO order.
-            // This executes immediately, pushing frames as needed.
-            // The main loop will execute those frames on subsequent iterations.
-            if (!runPendingDefers(m_frameCount - 1)) {
-                return InterpretResult::RUNTIME_ERROR;
+            int frameIndex = m_frameCount - 1;
+            // Flush ip into frame->ip first: runPendingDefers may run
+            // arbitrary Lox++ code (each deferred call, to completion), and
+            // a runtimeError() raised inside it must see this frame's
+            // current position, not a stale one (see FrameSync's own
+            // comment above for why this matters).
+            frame->ip = ip;
+            InterpretResult result = runPendingDefers(frameIndex);
+            if (result != InterpretResult::OK) {
+                return result;
             }
+            if (m_frameCount <= frameIndex) {
+                // A deferred call's own throw propagated past this frame —
+                // it no longer exists, and whatever caught that throw (or
+                // program exit) already took over dispatch.
+                return InterpretResult::OK;
+            }
+            FrameSync::loadTop(m_frames, m_frameCount, frame, ip, chunk);
             break;
         }
         case Op::THROW: {
             Value thrownValue = pop();
+            bool handled = false;
             // Search LIFO for a handler in an active try block.
             while (!m_handlerStack.empty()) {
                 HandlerRecord handler = m_handlerStack.back();
@@ -1288,12 +1324,22 @@ InterpretResult VM::run() {
                 if (handler.frameCount <= m_frameCount) {
                     // Handler's frame is active — unwind to it.
                     while (m_frameCount > handler.frameCount) {
+                        int unwoundFrameIndex = m_frameCount - 1;
                         // Close upvalues and run defers for each unwound frame.
-                        closeUpvalues(frame->slots);
+                        closeUpvalues(m_frames[unwoundFrameIndex].slots);
                         // Run pending defers LIFO before discarding the frame.
-                        if (!runPendingDefers(m_frameCount - 1)) {
-                            // Defer invocation failed during unwind.
-                            return InterpretResult::RUNTIME_ERROR;
+                        InterpretResult result =
+                            runPendingDefers(unwoundFrameIndex);
+                        if (result != InterpretResult::OK) {
+                            return result;
+                        }
+                        if (m_frameCount != unwoundFrameIndex + 1) {
+                            // One of those deferred calls threw in turn, and
+                            // that throw's own search already caught it (or
+                            // reached program exit) elsewhere, taking over
+                            // dispatch. This THROW's own unwind has nothing
+                            // left to finish.
+                            return InterpretResult::OK;
                         }
 #ifdef LOXPP_PROFILE
                         m_profilerScopes[m_frameCount - 1].reset();
@@ -1303,17 +1349,31 @@ InterpretResult VM::run() {
                     // Truncate stack to checkpoint.
                     stackTop = handler.stackTop;
                     push(thrownValue);
-                    // Jump to catch block.
-                    frame->ip = handler.catchIp;
+                    // Jump to catch block, in the target frame's own record —
+                    // `frame` may still point at a frame this unwind just
+                    // discarded, so write through m_frames directly rather
+                    // than through the (possibly stale) `frame` pointer.
+                    m_frames[m_frameCount - 1].ip = handler.catchIp;
                     FrameSync::loadTop(m_frames, m_frameCount, frame, ip,
                                        chunk);
                     // Pop this handler since we're handling the throw.
                     m_handlerStack.pop_back();
+                    handled = true;
+                    if (m_frameCount <= stopAtFrameCount) {
+                        // A nested run() (draining a deferred call) caught
+                        // this throw at or above its own stopping depth —
+                        // hand control back rather than dispatch the catch
+                        // block from here (see Op::RETURN's own check).
+                        return InterpretResult::OK;
+                    }
                     break;
                 } else {
                     // Handler frame has exited — pop it and continue searching.
                     m_handlerStack.pop_back();
                 }
+            }
+            if (handled) {
+                break;
             }
             // No handler found — uncaught throw. Report and exit.
             frame->ip = ip;

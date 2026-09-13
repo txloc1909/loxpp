@@ -49,7 +49,14 @@ class VM {
     }
 
     InterpretResult interpret(const std::string& source);
-    InterpretResult run();
+    // stopAtFrameCount: returns InterpretResult::OK as soon as m_frameCount
+    // drops to or below this value, instead of only at program exit
+    // (frameCount == 0). Lets a deferred call run to completion via a
+    // nested run() invocation — see runPendingDefers() — before its
+    // recorder resumes. The top-level call (stopAtFrameCount == 0, the
+    // default) is unaffected: m_frameCount never reaches 0 except at
+    // program exit, which the frameCount == 0 branch already handles.
+    InterpretResult run(int stopAtFrameCount = 0);
     [[nodiscard]] Value lastResult() const;
 
     // Runtime state inspection (for testing and debugging).
@@ -70,9 +77,17 @@ class VM {
     Value pop();
     Value peek(int distance);
 
-    // Run pending defers for the current frame LIFO. Returns false if a defer
-    // execution fails. Used during RETURN and THROW unwinding.
-    bool runPendingDefers(int frameIndex);
+    // Runs pending defers for m_frames[frameIndex] LIFO, each to completion
+    // (via a nested run() call) before the next one starts, so ordering and
+    // side effects land exactly as multiple sequential calls would. Used by
+    // Op::RUN_DEFERS and by THROW's unwind loop for each discarded frame.
+    // RUNTIME_ERROR propagates a hard error at the call site itself (arity
+    // mismatch, stack overflow); on OK, the caller must still check whether
+    // m_frameCount is still frameIndex + 1 — a lower value means a deferred
+    // call's own throw escaped past this frame (e.g. was caught by an outer
+    // handler), and the caller must stop unwinding/dispatching at its own
+    // level too rather than assume frame `frameIndex` is still live.
+    InterpretResult runPendingDefers(int frameIndex);
 
     bool call(ObjClosure* closure, int argCount);
     bool callNative(ObjNative* native, int argCount);
