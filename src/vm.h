@@ -99,6 +99,12 @@ class VM {
     void runtimeError(const char* format, ...);
     void markRoots();
 
+    // Helper for handling a thrown error: searches handler stack LIFO, unwinds
+    // frames if found, and updates m_frames/m_frameCount. Returns true if
+    // handled, false if no handler found. When true, caller must call
+    // FrameSync::loadTop to sync the local frame/ip/chunk and then break.
+    bool handleThrow(Value thrownValue, int stopAtFrameCount = 0);
+
     CallFrame m_frames[FRAMES_MAX];
     int m_frameCount{0};
     Value stack[STACK_MAX];

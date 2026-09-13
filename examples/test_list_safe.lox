@@ -1,0 +1,5 @@
+// Test accessing a valid list index
+var list = [1, 2, 3];
+print list[0];
+print list[1];
+print list[2];

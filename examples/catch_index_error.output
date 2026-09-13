@@ -1,0 +1,3 @@
+IndexOutOfBoundsError
+List index out of bounds.
+Program continues after catching error

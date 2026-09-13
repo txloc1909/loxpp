@@ -171,6 +171,67 @@ InterpretResult VM::runPendingDefers(int frameIndex) {
     return InterpretResult::OK;
 }
 
+bool VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
+    // Search LIFO for a handler in an active try block. Same logic as
+    // Op::THROW, but extracted as a reusable function for runtime-fault
+    // sites that construct an Error and throw if a handler is active.
+    // Returns true if handled (handler set up in m_frames), false otherwise.
+    // On return true, caller must sync frame/ip/chunk via FrameSync::loadTop.
+    // On return false, runtimeError has been called; caller should return
+    // RUNTIME_ERROR.
+    bool handled = false;
+    while (!m_handlerStack.empty()) {
+        HandlerRecord handler = m_handlerStack.back();
+        if (handler.frameCount <= m_frameCount) {
+            // Handler's frame is active — unwind to it.
+            while (m_frameCount > handler.frameCount) {
+                int unwoundFrameIndex = m_frameCount - 1;
+                closeUpvalues(m_frames[unwoundFrameIndex].slots);
+                InterpretResult result = runPendingDefers(unwoundFrameIndex);
+                if (result != InterpretResult::OK) {
+                    return false; // Hard error during defer, already reported
+                }
+                if (m_frameCount != unwoundFrameIndex + 1) {
+                    // Deferred call threw; its throw handler took over.
+                    return false;
+                }
+#ifdef LOXPP_PROFILE
+                m_profilerScopes[m_frameCount - 1].reset();
+#endif
+                m_frameCount--;
+            }
+            // Truncate stack to checkpoint and push thrown value.
+            stackTop = handler.stackTop;
+            push(thrownValue);
+            // Set IP to catch block in the frame record directly.
+            m_frames[m_frameCount - 1].ip = handler.catchIp;
+            // Pop this handler since we're handling the throw.
+            m_handlerStack.pop_back();
+            handled = true;
+            if (m_frameCount <= stopAtFrameCount) {
+                // Nested run() caught at or above stopping depth.
+                return true; // Handler found, caller will sync and continue
+            }
+            break;
+        } else {
+            // Handler frame has exited — pop and search next.
+            m_handlerStack.pop_back();
+        }
+    }
+    if (handled) {
+        return true; // Handler set up, caller syncs and continues
+    }
+    // No handler found — report uncaught error.
+    if (isError(thrownValue)) {
+        ObjError* err = asObjError(as<Obj*>(thrownValue));
+        runtimeError("%s", err->message->chars.c_str());
+    } else {
+        std::string thrownStr = stringify(thrownValue);
+        runtimeError("Uncaught throw: %s", thrownStr.c_str());
+    }
+    return false; // Not handled, error reported
+}
+
 InterpretResult VM::run(int stopAtFrameCount) {
 #define RAISE_ERROR(...)                                                       \
     do {                                                                       \
@@ -178,10 +239,33 @@ InterpretResult VM::run(int stopAtFrameCount) {
         runtimeError(__VA_ARGS__);                                             \
     } while (false)
 
+#define RAISE_CATCHABLE(kind_str, ...)                                         \
+    do {                                                                       \
+        char msg_buf[512];                                                     \
+        snprintf(msg_buf, sizeof(msg_buf), __VA_ARGS__);                       \
+        if (m_errorClass != nullptr) {                                         \
+            ObjString* msg_obj = m_mm.makeString(msg_buf);                     \
+            ObjString* kind_obj = m_mm.makeString(kind_str);                   \
+            ObjError* err_obj =                                                \
+                m_mm.create<ObjError>(m_errorClass, msg_obj, kind_obj);        \
+            if (handleThrow(Value{static_cast<Obj*>(err_obj)})) {              \
+                /* Error was caught by a handler, sync locals and continue */  \
+                FrameSync::loadTop(m_frames, m_frameCount, frame, ip, chunk);  \
+                break;                                                         \
+            }                                                                  \
+            /* Error not caught; handleThrow already called runtimeError */    \
+        } else {                                                               \
+            /* Fallback if error class not ready */                            \
+            frame->ip = ip;                                                    \
+            runtimeError("%s", msg_buf);                                       \
+        }                                                                      \
+    } while (false)
+
 #define BINARY_OP(valueType, op)                                               \
     do {                                                                       \
         if (!is<Number>(peek(0)) || !is<Number>(peek(1))) {                    \
-            RAISE_ERROR("Operands must be numbers.");                          \
+            RAISE_CATCHABLE("ArithmeticTypeError",                             \
+                            "Operands must be numbers.");                      \
             return InterpretResult::RUNTIME_ERROR;                             \
         }                                                                      \
         Number b = as<Number>(pop());                                          \
@@ -930,29 +1014,34 @@ InterpretResult VM::run(int stopAtFrameCount) {
             Value collectionVal = pop();
             if (isList(collectionVal)) {
                 if (!is<Number>(indexVal)) {
-                    RAISE_ERROR("List index must be a number.");
+                    RAISE_CATCHABLE("IndexTypeError",
+                                    "List index must be a number.");
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 double n = as<Number>(indexVal);
                 if (n != std::floor(n)) {
-                    RAISE_ERROR("List index must be an integer.");
+                    RAISE_CATCHABLE("IndexNotIntegerError",
+                                    "List index must be an integer.");
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 auto* list = asObjList(as<Obj*>(collectionVal));
                 int idx = static_cast<int>(n);
                 if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
-                    RAISE_ERROR("List index out of bounds.");
+                    RAISE_CATCHABLE("IndexOutOfBoundsError",
+                                    "List index out of bounds.");
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 push(list->elements[idx]);
             } else if (isString(collectionVal)) {
                 if (!is<Number>(indexVal)) {
-                    RAISE_ERROR("String index must be a number.");
+                    RAISE_CATCHABLE("IndexTypeError",
+                                    "String index must be a number.");
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 double n = as<Number>(indexVal);
                 if (n != std::floor(n)) {
-                    RAISE_ERROR("String index must be an integer.");
+                    RAISE_CATCHABLE("IndexNotIntegerError",
+                                    "String index must be an integer.");
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 auto* str = asObjString(as<Obj*>(collectionVal));
