@@ -150,6 +150,18 @@ Remove these paths (the `install.sh` defaults; `$XDG_DATA_HOME` replaces
 - `~/.local/share/fish/vendor_completions.d/loxpp.fish` — fish completion (if present)
 - `~/.cache/loxpp/` — the REPL history
 
+### Run in a container
+
+A minimal OCI image (`FROM scratch` plus the static binary) ships with each
+release on GitHub Container Registry:
+
+```bash
+docker run --rm -v "$PWD:/work" -w /work ghcr.io/txloc1909/loxpp script.lox
+```
+
+`ghcr.io/txloc1909/loxpp:latest` tracks the newest stable release; pin a
+specific version with `ghcr.io/txloc1909/loxpp:vX.Y.Z`.
+
 ---
 
 ## Language tour

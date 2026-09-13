@@ -25,7 +25,8 @@ No long-lived credentials needed. Publishing uses GitHub's automatic
 
 The workflow builds the static binary, smoke-tests it, packages it with the
 man page and completions, signs the checksums, attests the build provenance,
-and publishes a GitHub Release with all assets attached.
+pushes the ghcr runtime image, and publishes a GitHub Release with all assets
+attached.
 
 ## What the workflow produces
 
@@ -39,6 +40,7 @@ For each release, the workflow creates these assets:
 | `SHA256SUMS.cosign-bundle` | Keyless cosign signature of the checksums file |
 | `loxpp-X.Y.Z.spdx.json` | Software bill of materials (SPDX format) |
 | `install.sh` | The installer script, also available as an asset |
+| `ghcr.io/txloc1909/loxpp:vX.Y.Z` | Minimal OCI image (`FROM scratch` + the static binary), pushed to GitHub Container Registry; `:latest` points at the newest stable release |
 
 All assets are attached to the GitHub Release and also available at stable URLs:
 
@@ -94,6 +96,13 @@ docker run --rm ubuntu:24.04 bash -c '
 '
 ```
 
+Also run the container image:
+
+```bash
+docker run --rm ghcr.io/txloc1909/loxpp:vX.Y.Z --version
+docker run --rm -v "$PWD:/work" -w /work ghcr.io/txloc1909/loxpp examples/fibonacci.lox
+```
+
 ## Dry run
 
 To test the release pipeline without publishing a stable release:
@@ -106,7 +115,8 @@ To test the release pipeline without publishing a stable release:
    `gh release delete v0.1.0-rc1 --repo txloc1909/loxpp --yes --cleanup-tag`.
 
 A dry run builds and uploads to a uniquely named draft release, leaving
-`releases/latest` untouched.
+`releases/latest` untouched. It also builds and smoke-tests the ghcr image but
+never pushes it.
 
 ## Rollback
 
