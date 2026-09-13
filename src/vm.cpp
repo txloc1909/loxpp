@@ -236,67 +236,77 @@ InterpretResult VM::runPendingDefers(int frameIndex, int stopAtFrameCount) {
 }
 
 VM::ThrowOutcome VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
-    // Search LIFO for a handler in an active try block. This is the ONE
-    // unwind implementation for both explicit throw (Op::THROW) and runtime
-    // faults (IndexOutOfBoundsError, etc.). See ThrowOutcome's doc comment in
-    // vm.h for what each of the three results means and obligates the
-    // caller to do.
-    bool handled = false;
-    while (!m_handlerStack.empty()) {
-        HandlerRecord handler = m_handlerStack.back();
+    // Unwind frame-by-frame, running each frame's pending defers, regardless
+    // of whether a handler will ultimately be found. This unifies the search
+    // and the defer-draining (spec/04-semantics.md throw Statement step 5,
+    // defer Statement step 4). This is the ONE unwind implementation for both
+    // explicit throw (Op::THROW) and runtime faults (IndexOutOfBoundsError,
+    // etc.). See ThrowOutcome's doc comment in vm.h for what each of the
+    // three results means and obligates the caller to do.
+
+    // Step 1: Find if any live handler exists (without popping it yet).
+    bool foundHandler = false;
+    HandlerRecord handlerToUse;
+    int handlerIndex = -1;
+    for (int i = (int)m_handlerStack.size() - 1; i >= 0; i--) {
+        HandlerRecord handler = m_handlerStack[i];
         if (handler.frameCount <= m_frameCount) {
-            // Handler's frame is active — unwind to it.
-            while (m_frameCount > handler.frameCount) {
-                int unwoundFrameIndex = m_frameCount - 1;
-                closeUpvalues(m_frames[unwoundFrameIndex].slots);
-                // stopAtFrameCount is OUR OWN parameter, not
-                // unwoundFrameIndex: it is the boundary of whichever run()
-                // invocation is unwinding right now (see vm.h), and a
-                // reentrant fault inside this defer must be judged against
-                // that same boundary, not a fresh default.
-                InterpretResult result =
-                    runPendingDefers(unwoundFrameIndex, stopAtFrameCount);
-                if (result != InterpretResult::OK) {
-                    // Hard error during defer, already reported.
-                    return ThrowOutcome::Uncaught;
-                }
-                if (m_frameCount != unwoundFrameIndex + 1) {
-                    // Deferred call threw (or its own arity mismatch was
-                    // caught); that inner dispatch already fully resolved
-                    // things — possibly by running the rest of the program
-                    // to completion, which can leave m_frameCount at 0. Our
-                    // own unwind has nothing left to finish: whether OUR
-                    // caller must also stop depends on where m_frameCount
-                    // landed relative to OUR OWN stopAtFrameCount.
-                    return (m_frameCount <= stopAtFrameCount)
-                               ? ThrowOutcome::HandledStop
-                               : ThrowOutcome::HandledContinue;
-                }
-#ifdef LOXPP_PROFILE
-                m_profilerScopes[m_frameCount - 1].reset();
-#endif
-                m_frameCount--;
-            }
-            // Truncate stack to checkpoint and push thrown value.
-            stackTop = handler.stackTop;
-            push(thrownValue);
-            // Set IP to catch block in the frame record directly.
-            m_frames[m_frameCount - 1].ip = handler.catchIp;
-            // Pop this handler since we're handling the throw.
-            m_handlerStack.pop_back();
-            handled = true;
+            // Found a live handler (innermost one, since we iterate LIFO).
+            foundHandler = true;
+            handlerToUse = handler;
+            handlerIndex = i;
             break;
-        } else {
-            // Handler frame has exited — pop and search next.
-            m_handlerStack.pop_back();
         }
     }
-    if (handled) {
+
+    // Step 2: Unwind frame-by-frame, draining defers, to either the
+    // handler's frame (if found) or frame 0 (if not found).
+    int targetFrameCount = foundHandler ? handlerToUse.frameCount : 0;
+    while (m_frameCount > targetFrameCount) {
+        int unwoundFrameIndex = m_frameCount - 1;
+        closeUpvalues(m_frames[unwoundFrameIndex].slots);
+        // stopAtFrameCount is OUR OWN parameter, not unwoundFrameIndex: it
+        // is the boundary of whichever run() invocation is unwinding right
+        // now (see vm.h), and a reentrant fault inside this defer must be
+        // judged against that same boundary, not a fresh default.
+        InterpretResult result =
+            runPendingDefers(unwoundFrameIndex, stopAtFrameCount);
+        if (result != InterpretResult::OK) {
+            // Hard error during defer, already reported.
+            return ThrowOutcome::Uncaught;
+        }
+        if (m_frameCount != unwoundFrameIndex + 1) {
+            // Deferred call threw (or its own arity mismatch was caught);
+            // that inner dispatch already fully resolved things — possibly by
+            // running the rest of the program to completion, which can leave
+            // m_frameCount at 0. Our own unwind has nothing left to finish:
+            // whether OUR caller must also stop depends on where m_frameCount
+            // landed relative to OUR OWN stopAtFrameCount.
+            return (m_frameCount <= stopAtFrameCount)
+                       ? ThrowOutcome::HandledStop
+                       : ThrowOutcome::HandledContinue;
+        }
+#ifdef LOXPP_PROFILE
+        m_profilerScopes[m_frameCount - 1].reset();
+#endif
+        m_frameCount--;
+    }
+
+    // Step 3: After unwinding is complete, decide what to do.
+    if (foundHandler) {
+        // Truncate stack to checkpoint and push thrown value.
+        stackTop = handlerToUse.stackTop;
+        push(thrownValue);
+        // Set IP to catch block in the frame record directly.
+        m_frames[m_frameCount - 1].ip = handlerToUse.catchIp;
+        // Pop this handler since we're handling the throw.
+        m_handlerStack.erase(m_handlerStack.begin() + handlerIndex);
         return (m_frameCount <= stopAtFrameCount)
                    ? ThrowOutcome::HandledStop
                    : ThrowOutcome::HandledContinue;
     }
-    // No handler found — report uncaught error.
+
+    // No handler found — report uncaught error (after defers have run).
     if (isError(thrownValue)) {
         ObjError* err = asObjError(as<Obj*>(thrownValue));
         runtimeError("%s", err->message->chars.c_str());
