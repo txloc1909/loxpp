@@ -199,6 +199,18 @@ class Compiler {
     FunctionType m_type;
     Compiler* m_enclosing;
     ClassCompiler* m_currentClass{nullptr};
+    // Whether this function's body contains a `defer` statement anywhere —
+    // decided by a one-token look-ahead scan in parseFunction() before the
+    // body compiles for real (see bodyHasDefer() in compiler.cpp). A single
+    // forward pass cannot know this at the point an early `return` compiles:
+    // a `defer` written later in the same function still needs every
+    // earlier return (even one reached again on a later loop iteration, at
+    // runtime, after that `defer` already ran) to emit RUN_DEFERS.
+    // returnStatement()/emitReturn() gate RUN_DEFERS on this flag so a
+    // defer-free function's chunk carries no RUN_DEFERS at all — needed so
+    // --target jvm/clr keeps working for ordinary functions, since neither
+    // emitter translates RUN_DEFERS yet (see notes/non-local-control-flow.md).
+    bool m_hasDefer{false};
 
     Local m_locals[UINT8_COUNT];
     int m_localCount{0};
