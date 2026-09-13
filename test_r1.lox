@@ -1,0 +1,1 @@
+try { [][0]; } catch (e) { print e.message; print e.kind; }

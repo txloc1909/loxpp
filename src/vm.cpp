@@ -239,33 +239,13 @@ InterpretResult VM::run(int stopAtFrameCount) {
         runtimeError(__VA_ARGS__);                                             \
     } while (false)
 
-#define RAISE_CATCHABLE(kind_str, ...)                                         \
-    do {                                                                       \
-        char msg_buf[512];                                                     \
-        snprintf(msg_buf, sizeof(msg_buf), __VA_ARGS__);                       \
-        if (m_errorClass != nullptr) {                                         \
-            ObjString* msg_obj = m_mm.makeString(msg_buf);                     \
-            ObjString* kind_obj = m_mm.makeString(kind_str);                   \
-            ObjError* err_obj =                                                \
-                m_mm.create<ObjError>(m_errorClass, msg_obj, kind_obj);        \
-            if (handleThrow(Value{static_cast<Obj*>(err_obj)})) {              \
-                /* Error was caught by a handler, sync locals and continue */  \
-                FrameSync::loadTop(m_frames, m_frameCount, frame, ip, chunk);  \
-                break;                                                         \
-            }                                                                  \
-            /* Error not caught; handleThrow already called runtimeError */    \
-        } else {                                                               \
-            /* Fallback if error class not ready */                            \
-            frame->ip = ip;                                                    \
-            runtimeError("%s", msg_buf);                                       \
-        }                                                                      \
-    } while (false)
-
 #define BINARY_OP(valueType, op)                                               \
     do {                                                                       \
         if (!is<Number>(peek(0)) || !is<Number>(peek(1))) {                    \
-            RAISE_CATCHABLE("ArithmeticTypeError",                             \
-                            "Operands must be numbers.");                      \
+            if (tryCatchableError("ArithmeticTypeError",                       \
+                                  "Operands must be numbers.")) {              \
+                break;                                                         \
+            }                                                                  \
             return InterpretResult::RUNTIME_ERROR;                             \
         }                                                                      \
         Number b = as<Number>(pop());                                          \
@@ -338,6 +318,51 @@ InterpretResult VM::run(int stopAtFrameCount) {
         uint16_t lo = readByte();
         return static_cast<uint16_t>((hi << 8) | lo);
     };
+
+    // Helper lambda to construct and potentially catch a runtime error.
+    // Syncs frame->ip before any operation. If m_errorClass is available and
+    // handleThrow succeeds, updates frame/ip/chunk and returns true (the caller
+    // should NOT return RUNTIME_ERROR). Otherwise returns false (caller must
+    // return RUNTIME_ERROR or handle the error itself).
+    // GC: roots intermediate string allocations before construct, then lets
+    // handleThrow manage the final error object's lifecycle on the stack.
+    auto tryCatchableError = [this, &frame, &ip, &chunk](const char* kind_str,
+                                                         const char* msg) {
+        frame->ip = ip; // Sync frame->ip before allocations (fixes line number)
+
+        if (m_errorClass == nullptr) {
+            // Error class not ready; fallback to uncaught error
+            runtimeError("%s", msg);
+            return false;
+        }
+
+        // GC safety: root intermediate strings while constructing the error.
+        // These are temporary and removed by handleThrow's stack truncation,
+        // so we only root them during the construction phase, not during
+        // handleThrow (which resets the stack).
+        ObjString* msg_obj = m_mm.makeString(msg);
+        m_mm.pushTempRoot(msg_obj);
+
+        ObjString* kind_obj = m_mm.makeString(kind_str);
+        m_mm.pushTempRoot(kind_obj);
+
+        ObjError* err_obj =
+            m_mm.create<ObjError>(m_errorClass, msg_obj, kind_obj);
+
+        m_mm.popTempRoot(); // Unroot kind_obj
+        m_mm.popTempRoot(); // Unroot msg_obj
+
+        // handleThrow will push err_obj and potentially truncate the stack.
+        // So we pass err_obj but don't manage its stack presence ourselves.
+        bool handled = handleThrow(Value{static_cast<Obj*>(err_obj)});
+
+        if (handled) {
+            FrameSync::loadTop(m_frames, m_frameCount, frame, ip, chunk);
+            return true;
+        }
+        return false;
+    };
+
     auto readConstant = [&chunk, &readShort]() -> Value {
         return chunk->getConstant(readShort());
     };
@@ -1014,34 +1039,44 @@ InterpretResult VM::run(int stopAtFrameCount) {
             Value collectionVal = pop();
             if (isList(collectionVal)) {
                 if (!is<Number>(indexVal)) {
-                    RAISE_CATCHABLE("IndexTypeError",
-                                    "List index must be a number.");
+                    if (tryCatchableError("IndexTypeError",
+                                          "List index must be a number.")) {
+                        break;
+                    }
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 double n = as<Number>(indexVal);
                 if (n != std::floor(n)) {
-                    RAISE_CATCHABLE("IndexNotIntegerError",
-                                    "List index must be an integer.");
+                    if (tryCatchableError("IndexNotIntegerError",
+                                          "List index must be an integer.")) {
+                        break;
+                    }
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 auto* list = asObjList(as<Obj*>(collectionVal));
                 int idx = static_cast<int>(n);
                 if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
-                    RAISE_CATCHABLE("IndexOutOfBoundsError",
-                                    "List index out of bounds.");
+                    if (tryCatchableError("IndexOutOfBoundsError",
+                                          "List index out of bounds.")) {
+                        break;
+                    }
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 push(list->elements[idx]);
             } else if (isString(collectionVal)) {
                 if (!is<Number>(indexVal)) {
-                    RAISE_CATCHABLE("IndexTypeError",
-                                    "String index must be a number.");
+                    if (tryCatchableError("IndexTypeError",
+                                          "String index must be a number.")) {
+                        break;
+                    }
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 double n = as<Number>(indexVal);
                 if (n != std::floor(n)) {
-                    RAISE_CATCHABLE("IndexNotIntegerError",
-                                    "String index must be an integer.");
+                    if (tryCatchableError("IndexNotIntegerError",
+                                          "String index must be an integer.")) {
+                        break;
+                    }
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 auto* str = asObjString(as<Obj*>(collectionVal));
