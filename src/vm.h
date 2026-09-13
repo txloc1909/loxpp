@@ -105,6 +105,13 @@ class VM {
     // FrameSync::loadTop to sync the local frame/ip/chunk and then break.
     bool handleThrow(Value thrownValue, int stopAtFrameCount = 0);
 
+    // Helper for raising a catchable runtime error (used by both run()'s
+    // tryCatchableError and call()'s arity check). Constructs an Error object
+    // with the given kind and message, then calls handleThrow. Returns true if
+    // the error was caught by a handler, false otherwise. When true, caller
+    // must call FrameSync::loadTop to resync the local frame/ip/chunk.
+    bool raiseThrowableError(const char* kind_str, const char* msg);
+
     CallFrame m_frames[FRAMES_MAX];
     int m_frameCount{0};
     Value stack[STACK_MAX];

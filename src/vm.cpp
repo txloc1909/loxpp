@@ -77,6 +77,19 @@ std::optional<Value> VM::getGlobal(const std::string& name) const {
 bool VM::call(ObjClosure* closure, int argCount) {
     ObjFunction* fn = closure->function;
     if (argCount != fn->arity) {
+        // Arity mismatch is now catchable as ArityError, but only if a handler
+        // is active. If no handler is active, fall back to uncaught error.
+        // The arity check happens before any new frame is pushed, so this does
+        // not carry the reentrancy hazard that excludes StackOverflowError.
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Expected %d arguments but got %d.",
+                 fn->arity, argCount);
+        if (!m_handlerStack.empty() && raiseThrowableError("ArityError", msg)) {
+            // Error was caught; the handler is set up and ready to run.
+            // No new frame was pushed, so the frame count is unchanged.
+            return true;
+        }
+        // No handler found, or error class not ready; uncaught error.
         runtimeError("Expected %d arguments but got %d.", fn->arity, argCount);
         return false;
     }
@@ -256,6 +269,45 @@ bool VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
     return false; // Not handled, error reported
 }
 
+bool VM::raiseThrowableError(const char* kind_str, const char* msg) {
+    // Shared implementation for raising a catchable runtime error. Used by both
+    // run()'s tryCatchableError lambda and by call()'s arity check. Constructs
+    // an Error instance with the given kind and message, then calls handleThrow
+    // to search for a handler. Returns true if the error was caught by an
+    // active handler, false otherwise.
+    //
+    // When this returns true, the caller must sync the local frame/ip/chunk via
+    // FrameSync::loadTop(m_frames, m_frameCount, frame, ip, chunk) before
+    // continuing, because handleThrow may have unwound frames.
+
+    if (m_errorClass == nullptr) {
+        // Error class not ready; fallback to uncaught error
+        runtimeError("%s", msg);
+        return false;
+    }
+
+    // GC safety: root intermediate strings while constructing the error.
+    // These are temporary and removed by handleThrow's stack truncation,
+    // so we only root them during the construction phase, not during
+    // handleThrow (which resets the stack).
+    ObjString* msg_obj = m_mm.makeString(msg);
+    m_mm.pushTempRoot(msg_obj);
+
+    ObjString* kind_obj = m_mm.makeString(kind_str);
+    m_mm.pushTempRoot(kind_obj);
+
+    ObjError* err_obj = m_mm.create<ObjError>(m_errorClass, msg_obj, kind_obj);
+
+    m_mm.popTempRoot(); // Unroot kind_obj
+    m_mm.popTempRoot(); // Unroot msg_obj
+
+    // handleThrow will push err_obj and potentially truncate the stack.
+    // So we pass err_obj but don't manage its stack presence ourselves.
+    bool handled = handleThrow(Value{static_cast<Obj*>(err_obj)});
+
+    return handled;
+}
+
 InterpretResult VM::run(int stopAtFrameCount) {
 #define RAISE_ERROR(...)                                                       \
     do {                                                                       \
@@ -347,38 +399,12 @@ InterpretResult VM::run(int stopAtFrameCount) {
     // handleThrow succeeds, updates frame/ip/chunk and returns true (the caller
     // should NOT return RUNTIME_ERROR). Otherwise returns false (caller must
     // return RUNTIME_ERROR or handle the error itself).
-    // GC: roots intermediate string allocations before construct, then lets
-    // handleThrow manage the final error object's lifecycle on the stack.
+    // Wrap the shared raiseThrowableError to sync frame/ip/chunk on success.
     auto tryCatchableError = [this, &frame, &ip, &chunk](const char* kind_str,
                                                          const char* msg) {
         frame->ip = ip; // Sync frame->ip before allocations (fixes line number)
 
-        if (m_errorClass == nullptr) {
-            // Error class not ready; fallback to uncaught error
-            runtimeError("%s", msg);
-            return false;
-        }
-
-        // GC safety: root intermediate strings while constructing the error.
-        // These are temporary and removed by handleThrow's stack truncation,
-        // so we only root them during the construction phase, not during
-        // handleThrow (which resets the stack).
-        ObjString* msg_obj = m_mm.makeString(msg);
-        m_mm.pushTempRoot(msg_obj);
-
-        ObjString* kind_obj = m_mm.makeString(kind_str);
-        m_mm.pushTempRoot(kind_obj);
-
-        ObjError* err_obj =
-            m_mm.create<ObjError>(m_errorClass, msg_obj, kind_obj);
-
-        m_mm.popTempRoot(); // Unroot kind_obj
-        m_mm.popTempRoot(); // Unroot msg_obj
-
-        // handleThrow will push err_obj and potentially truncate the stack.
-        // So we pass err_obj but don't manage its stack presence ourselves.
-        bool handled = handleThrow(Value{static_cast<Obj*>(err_obj)});
-
+        bool handled = raiseThrowableError(kind_str, msg);
         if (handled) {
             FrameSync::loadTop(m_frames, m_frameCount, frame, ip, chunk);
             return true;
