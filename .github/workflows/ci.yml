@@ -761,3 +761,23 @@ jobs:
             -w /workspace \
             loxpp-release-static:latest \
             python3 tools/check_examples.py dist/loxpp/loxpp examples/
+
+      - name: Build the ghcr runtime image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./dist/loxpp
+          file: ./packaging/runtime.Dockerfile
+          load: true
+          provenance: false
+          tags: loxpp-runtime:test
+
+      - name: Smoke-test the ghcr runtime image
+        run: |
+          set -euo pipefail
+          BIN_VERSION="$(dist/loxpp/loxpp --version | head -1)"
+          IMAGE_VERSION="$(docker run --rm loxpp-runtime:test --version | head -1)"
+          if [ "$BIN_VERSION" != "$IMAGE_VERSION" ]; then
+            echo "binary says '$BIN_VERSION', image says '$IMAGE_VERSION'" >&2
+            exit 1
+          fi
+          echo "OK: runtime image reports $IMAGE_VERSION"

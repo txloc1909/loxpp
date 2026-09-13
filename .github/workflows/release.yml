@@ -33,6 +33,7 @@ permissions:
   contents: write
   id-token: write
   attestations: write
+  packages: write
 
 concurrency:
   # Serialise two runs of the same tag or ref.
@@ -137,6 +138,58 @@ jobs:
             echo "prerelease=$PRERELEASE"
           } >> "$GITHUB_OUTPUT"
           echo "VERSION=$VERSION prerelease=$PRERELEASE"
+
+      - name: Compute the ghcr image tags
+        id: imagetags
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository }}"
+          MODE='${{ steps.vars.outputs.mode }}'
+          VERSION='${{ steps.version.outputs.version }}'
+          if [ "$MODE" = "release" ]; then
+            TAGS="$IMAGE:v${VERSION}"
+            if [ '${{ steps.version.outputs.prerelease }}' = '0' ]; then
+              TAGS="$TAGS,$IMAGE:latest"
+            fi
+          else
+            # A dry run never pushes; the local tag carries the version so the
+            # smoke test cannot pick up a stale image from a previous run.
+            TAGS="loxpp-runtime:v${VERSION}"
+          fi
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+          echo "ghcr image tags: $TAGS"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build the ghcr runtime image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./dist/loxpp
+          file: ./packaging/runtime.Dockerfile
+          load: true
+          provenance: false
+          tags: ${{ steps.imagetags.outputs.tags }}
+
+      - name: Smoke-test the ghcr runtime image
+        run: |
+          set -euo pipefail
+          VERSION='${{ steps.version.outputs.version }}'
+          IMAGE_TAGS='${{ steps.imagetags.outputs.tags }}'
+          IMAGE="${IMAGE_TAGS%%,*}"
+          OUTPUT="$(docker run --rm "$IMAGE" --version | head -1)"
+          if [ "$OUTPUT" != "loxpp $VERSION" ]; then
+            echo "expected 'loxpp $VERSION', got '$OUTPUT'" >&2
+            exit 1
+          fi
+          echo "OK: $IMAGE runs loxpp $VERSION"
 
       - name: Package the shipped components
         run: |
@@ -268,6 +321,12 @@ jobs:
             echo "| \`SHA256SUMS.cosign-bundle\` | cosign keyless signature of \`SHA256SUMS\` |"
             echo "| \`install.sh\` | installer |"
             echo
+            echo "### Container image"
+            echo
+            echo "\`ghcr.io/txloc1909/loxpp:v${VERSION}\` — minimal OCI image"
+            echo "(\`FROM scratch\` + the static binary). \`:latest\` points at the"
+            echo "newest stable release."
+            echo
             echo "### Verify"
             echo
             echo '```sh'
@@ -326,3 +385,14 @@ jobs:
           gh release view "$TAG" --repo "$REPO" \
             --json isDraft,isPrerelease,tagName,assets \
             --jq '{tagName,isDraft,isPrerelease,assets:[.assets[].name]}'
+
+      # Push only after the release published: a failed release must not leave a
+      # live image behind. The tag is idempotent, so a rerun just overwrites.
+      - name: Push the ghcr runtime image
+        if: ${{ steps.vars.outputs.mode == 'release' }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra TAGS <<< "${{ steps.imagetags.outputs.tags }}"
+          for tag in "${TAGS[@]}"; do
+            docker push "$tag"
+          done

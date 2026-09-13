@@ -195,6 +195,36 @@ The `loxpp upgrade` subcommand is a thin wrapper: it fetches `install.sh` and
 runs it with the same logic. No TLS stack in the binary — all download and
 verify code lives in the script.
 
+## Container image (ghcr)
+
+A minimal OCI image ships alongside every release:
+
+- `ghcr.io/txloc1909/loxpp:vX.Y.Z` — every release, pre-releases included
+- `ghcr.io/txloc1909/loxpp:latest` — newest stable (non-pre-release) release
+
+The image is `FROM scratch`: it carries only the statically linked `loxpp`
+binary at `/loxpp`, set as the entrypoint. The musl build has no dynamic
+dependencies and the binary performs no network access on its own, so the
+scratch image needs no libc, no shell, and no CA certificates:
+
+```bash
+docker run --rm -v "$PWD:/work" -w /work ghcr.io/txloc1909/loxpp script.lox
+```
+
+The image is built from the same `dist/loxpp/` layout that makes the release
+tarball, so the binary inside is byte-identical to the downloadable one. The
+release workflow builds and smoke-tests the image (running `/loxpp --version`
+inside the container) before pushing; the `release-static` CI job does the
+same on every PR. A dry run builds and tests but never pushes.
+
+Two things deliberately do not exist in the image:
+
+- **No `loxpp upgrade`.** The subcommand shells out to `curl` and `sh`, which
+  a scratch image does not carry. A container is replaced, not upgraded: pull
+  the next `vX.Y.Z` tag instead.
+- **No TLS stack, no CA bundle.** Any HTTPS work belongs outside the
+  container, on the host or in a higher image layer.
+
 ## "When would loxpp need a version manager?"
 
 A runtime version manager (nvm, pyenv, rbenv, rustup toolchains, uv's Python
@@ -243,9 +273,6 @@ The first bug report of the form "my program ran on `loxpp` 0.N and breaks on
 Not complex, but not urgent, or waiting on a decision. Each is a standalone
 GitHub issue, not a list here:
 
-- `ghcr` runtime image (`FROM scratch` + the static binary): near-trivial
-  now the binary is static; deferred until there is demand for container
-  distribution — https://github.com/txloc1909/loxpp/issues/202
 - Nix flake, worth doing once the release machinery has users to validate
   against — https://github.com/txloc1909/loxpp/issues/203
 - Background "new version available" nudge, on top of the
