@@ -225,12 +225,6 @@ Two things deliberately do not exist in the image:
 - **No TLS stack, no CA bundle.** Any HTTPS work belongs outside the
   container, on the host or in a higher image layer.
 
-Why ship it now: the deferred list parked this as "wait for demand", and the
-image is near-trivial to build and verify with the existing release machinery.
-A container channel is the default way many CI systems consume a CLI, so the
-channel earns its place alongside the tarball before a large user base asks
-for it.
-
 ## "When would loxpp need a version manager?"
 
 A runtime version manager (nvm, pyenv, rbenv, rustup toolchains, uv's Python
