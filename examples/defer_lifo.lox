@@ -1,0 +1,35 @@
+// defer on normal return, multiple defers in one function running in LIFO
+// order (most recently recorded runs first), and defer draining when a
+// throw unwinds past its frame.
+fun announce(name) {
+    print "cleanup: " + name;
+}
+
+fun withThreeDefers() {
+    defer announce("first");
+    defer announce("second");
+    defer announce("third");
+    print "body";
+}
+
+fun boom() {
+    defer announce("boom-cleanup");
+    throw "boom";
+}
+
+withThreeDefers();
+
+try {
+    boom();
+} catch (e) {
+    print "caught: " + e;
+}
+
+print "done";
+// CHECK: body
+// CHECK: cleanup: third
+// CHECK: cleanup: second
+// CHECK: cleanup: first
+// CHECK: cleanup: boom-cleanup
+// CHECK: caught: boom
+// CHECK: done

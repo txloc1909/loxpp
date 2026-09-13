@@ -1,3 +1,5 @@
+// A thrown value caught by a matching try/catch.
+// CHECK: caught: oops
 try {
     throw "oops";
 } catch (e) {
