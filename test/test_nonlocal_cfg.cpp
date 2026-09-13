@@ -598,6 +598,74 @@ TEST(NonlocalCfgTest, JumpTargetsCatchOffsetIsRefusedByAddEdge) {
         << "analyzeStack must not throw when JUMP targets a catch offset";
 }
 
+// R5 shape (b): JUMP_TABLE arm targets a PUSH_HANDLER's catch offset. Before
+// the structural fix, cfg.cpp would wire a real predecessor edge to the catch
+// block; after the fix, addEdge refuses it.
+TEST(NonlocalCfgTest, JumpTableArmTargetsCatchOffsetIsRefusedByAddEdge) {
+    // Build:
+    //   0: PUSH_HANDLER -> 10
+    //   3: JUMP_TABLE with one arm {tag:0, target:10}
+    //   9: POP                  (filler; JUMP_TABLE at offset 3 + size 6)
+    //   10: POP                 (catch entry — must NOT gain an edge from
+    //   the table arm)
+    //   11: NIL
+    //   12: RETURN
+    DecodedInstruction pushHandler;
+    pushHandler.offset = 0;
+    pushHandler.op = Op::PUSH_HANDLER;
+    pushHandler.length = 3;
+    pushHandler.jumpTarget = 10;
+
+    DecodedInstruction jumpTable;
+    jumpTable.offset = 3;
+    jumpTable.op = Op::JUMP_TABLE;
+    jumpTable.length = 6;
+    jumpTable.jumpTable.push_back({0, 10}); // one arm targets the catch offset
+
+    DecodedInstruction pop0;
+    pop0.offset = 9;
+    pop0.op = Op::POP;
+    pop0.length = 1;
+
+    DecodedInstruction catchPop;
+    catchPop.offset = 10;
+    catchPop.op = Op::POP;
+    catchPop.length = 1;
+
+    DecodedInstruction nil;
+    nil.offset = 11;
+    nil.op = Op::NIL;
+    nil.length = 1;
+
+    DecodedInstruction ret;
+    ret.offset = 12;
+    ret.op = Op::RETURN;
+    ret.length = 1;
+
+    std::vector<DecodedInstruction> ins{pushHandler, jumpTable, pop0,
+                                        catchPop,    nil,       ret};
+    Cfg cfg = buildCfg(ins);
+
+    const BasicBlock& catchBlock = blockAt(cfg, 10);
+    EXPECT_TRUE(catchBlock.isHandlerEntry)
+        << "catch-target block must be tagged isHandlerEntry";
+    EXPECT_TRUE(catchBlock.predecessors.empty())
+        << "catch-target block must have no predecessors, even when a "
+        << "JUMP_TABLE arm targets the same offset";
+
+    // Verify abstract_stack also respects this.
+    ObjFunction fakeFn;
+    DecodedFunction fn;
+    fn.function = &fakeFn;
+    fn.id = "0";
+    fn.displayName = "jumpTableArmTargetsCatchOffset";
+    fn.instructions = ins;
+
+    EXPECT_NO_THROW(analyzeStack(fn))
+        << "analyzeStack must not throw when JUMP_TABLE arm targets a catch "
+        << "offset";
+}
+
 // R5 shape (c): ordinary, non-branching protected-region code whose block
 // ends immediately before a catch offset, with no explicit jump-around.
 // The block's fallthrough edge (via wireSuccessors' default case) must be
@@ -665,43 +733,39 @@ TEST(NonlocalCfgTest, GenericFallthroughIntoCatchOffsetIsRefused) {
     EXPECT_NO_THROW(analyzeStack(fn));
 }
 
-// Proves the NEW cfg.cpp assertion can fire: reverting addEdge's refusal
-// should cause the post-construction assertion to throw. This test confirms
-// the assertion itself is functional (AGENTS.md's engineering rule: prove
-// a new check can fail).
-//
-// To avoid requiring a friend declaration or a test-only code path in the
-// production code, this test builds a cfg and manually violates the
-// invariant, then confirms a hand-written check that mirrors the assertion
-// throws. The real assertion is in cfg.cpp's buildCfg, and would fire in
-// the same scenario if addEdge's refusal were removed.
-TEST(NonlocalCfgTest,
-     HandlerEntryAssertionWouldFireIfAddEdgeRefusalWasRemoved) {
-    // To prove the assertion can fire, we'd need to manually push a
-    // predecessor onto a handler-entry block. Since cfg.cpp's blocks are
-    // private and addEdge is our only way to modify successors/predecessors,
-    // we instead build a normal cfg and verify the invariant holds, then
-    // document that if addEdge's refusal were removed, the post-construction
-    // assertion (lines ~307-312 in cfg.cpp) would catch it.
-    //
-    // A direct proof: if we could bypass addEdge (e.g. by hand-pushing a
-    // CfgEdge and a predecessor), the assertion in buildCfg would throw
-    // with "unexpectedly has a generic predecessor edge".
-    //
-    // We verify the invariant holds in the normally-built cfg instead:
-    Chunk chunk = buildTryCatchProbe();
-    std::vector<DecodedInstruction> ins = decodeChunk(chunk);
-    Cfg cfg = buildCfg(ins);
+// Proves the NEW cfg.cpp assertion can fire: directly validates that a Cfg
+// with a handler-entry block that has a predecessor is rejected. This test
+// confirms the assertion itself is functional (AGENTS.md's engineering rule:
+// prove a new check can fail).
+TEST(NonlocalCfgTest, ValidateHandlerEntryInvariantThrowsOnViolation) {
+    // Manually construct a Cfg that violates the invariant: a handler-entry
+    // block with a non-empty predecessors list. This simulates what would
+    // happen if addEdge's refusal were removed.
+    Cfg badCfg;
 
-    // Verify that NO handler-entry block has a predecessor.
-    for (const BasicBlock& block : cfg.blocks) {
-        if (block.isHandlerEntry) {
-            EXPECT_TRUE(block.predecessors.empty())
-                << "the post-construction assertion in cfg.cpp's buildCfg "
-                << "enforces that handler-entry blocks have empty "
-                   "predecessors; "
-                << "if addEdge's refusal were removed, the assertion would "
-                << "catch the violation";
-        }
-    }
+    BasicBlock block0;
+    block0.leaderOffset = 0;
+    block0.endOffset = 3;
+    block0.label = "L_0000";
+    badCfg.blocks.push_back(block0);
+
+    BasicBlock block1;
+    block1.leaderOffset = 3;
+    block1.endOffset = 5;
+    block1.label = "L_0003";
+    block1.isHandlerEntry = true;
+    // Deliberately add a predecessor to violate the invariant
+    block1.predecessors.push_back(0);
+    badCfg.blocks.push_back(block1);
+
+    HandlerEntry handler;
+    handler.pushHandlerOffset = 0;
+    handler.catchBlock = 1;
+    badCfg.handlerEntries.push_back(handler);
+
+    // The validator should throw when it finds a handler-entry block with
+    // a non-empty predecessors list.
+    EXPECT_THROW(validateHandlerEntryInvariant(badCfg), std::runtime_error)
+        << "validateHandlerEntryInvariant must reject a Cfg where a "
+        << "handler-entry block has a generic predecessor edge";
 }

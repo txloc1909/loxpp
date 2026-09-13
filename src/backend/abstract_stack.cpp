@@ -42,6 +42,25 @@ struct LocalCfg {
     std::vector<std::pair<int, int>> handlerLinks;
 };
 
+// Collects every PUSH_HANDLER's catch-target instruction index and populates
+// the isHandlerEntryInstr set and handlerLinks list. Called before adding any
+// edges so addEdge can refuse edges to handler-entry instructions (referee's
+// binding decision on PR #231).
+std::vector<bool>
+collectHandlerEntries(const std::vector<DecodedInstruction>& ins,
+                      const std::unordered_map<int, int>& offsetToIndex,
+                      std::vector<std::pair<int, int>>& handlerLinks) {
+    std::vector<bool> isHandlerEntryInstr(ins.size(), false);
+    for (size_t i = 0; i < ins.size(); i++) {
+        if (ins[i].op == Op::PUSH_HANDLER) {
+            int catchIdx = offsetToIndex.at(ins[i].jumpTarget);
+            isHandlerEntryInstr[static_cast<size_t>(catchIdx)] = true;
+            handlerLinks.emplace_back(static_cast<int>(i), catchIdx);
+        }
+    }
+    return isHandlerEntryInstr;
+}
+
 LocalCfg buildCfg(const std::vector<DecodedInstruction>& ins) {
     std::unordered_map<int, int> offsetToIndex;
     offsetToIndex.reserve(ins.size());
@@ -56,14 +75,8 @@ LocalCfg buildCfg(const std::vector<DecodedInstruction>& ins) {
     // Collect every PUSH_HANDLER's catch-target instruction index before
     // adding any edges. addEdge will check this set to refuse edges to
     // handler-entry instructions (referee's binding decision on PR #231).
-    std::vector<bool> isHandlerEntryInstr(ins.size(), false);
-    for (size_t i = 0; i < ins.size(); i++) {
-        if (ins[i].op == Op::PUSH_HANDLER) {
-            int catchIdx = offsetToIndex.at(ins[i].jumpTarget);
-            isHandlerEntryInstr[static_cast<size_t>(catchIdx)] = true;
-            cfg.handlerLinks.emplace_back(static_cast<int>(i), catchIdx);
-        }
-    }
+    std::vector<bool> isHandlerEntryInstr =
+        collectHandlerEntries(ins, offsetToIndex, cfg.handlerLinks);
 
     auto addEdge = [&](int from, int to) {
         // Refuse to add an edge to a handler-entry instruction: catch targets

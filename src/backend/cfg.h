@@ -93,3 +93,9 @@ struct Cfg {
 // means the decoder and this pass have drifted apart, or the compiler emitted
 // something this pass does not yet model.
 Cfg buildCfg(const std::vector<DecodedInstruction>& instructions);
+
+// Validates the invariant that all handler-entry blocks have empty
+// predecessors lists. Throws std::runtime_error if any handler-entry block
+// has a generic predecessor edge (which would mean addEdge's refusal is not
+// working correctly). Exposed for testing purposes.
+void validateHandlerEntryInvariant(const Cfg& cfg);

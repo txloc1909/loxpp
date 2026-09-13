@@ -194,16 +194,6 @@ void wireSuccessors(BasicBlock& block,
     case Op::MATCH_ERROR:
     case Op::THROW:
         break; // no successor
-    case Op::PUSH_HANDLER:
-        // PUSH_HANDLER falls through to the protected code normally. The
-        // catch-block exclusion (via addEdge's handler-entry check) handles
-        // the empty protected region case automatically, so no special guard
-        // is needed here.
-        if (block.endOffset < chunkEnd) {
-            addEdge(block, blockIndexOfOffset.at(block.endOffset),
-                    EdgeKind::FALL_THROUGH, isHandlerEntryBlock);
-        }
-        break;
     default:
         if (block.endOffset < chunkEnd) {
             addEdge(block, blockIndexOfOffset.at(block.endOffset),
@@ -294,16 +284,19 @@ Cfg buildCfg(const std::vector<DecodedInstruction>& instructions) {
     // the refusal is not merely accidental (a future change that bypasses
     // addEdge would fail loudly here instead of silently violating
     // BasicBlock::isHandlerEntry's doc comment).
-    for (size_t b = 0; b < cfg.blocks.size(); b++) {
-        if (cfg.blocks[b].isHandlerEntry &&
-            !cfg.blocks[b].predecessors.empty()) {
+    validateHandlerEntryInvariant(cfg);
+
+    return cfg;
+}
+
+void validateHandlerEntryInvariant(const Cfg& cfg) {
+    for (const BasicBlock& block : cfg.blocks) {
+        if (block.isHandlerEntry && !block.predecessors.empty()) {
             throw std::runtime_error(
                 "cfg: handler-entry block at offset " +
-                std::to_string(cfg.blocks[b].leaderOffset) +
+                std::to_string(block.leaderOffset) +
                 " unexpectedly has a generic predecessor edge — "
                 "addEdge must refuse all edges to handler-entry blocks");
         }
     }
-
-    return cfg;
 }
