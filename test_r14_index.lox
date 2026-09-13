@@ -1,0 +1,19 @@
+// R14 reproduction 1: IndexOutOfBoundsError in a defer inside a try/catch
+// Expected: catch block runs, prints "caught: IndexOutOfBoundsError"
+// Current (broken): no output, exit 70
+
+fun makeError() {
+  var list = [1, 2, 3];
+  list[10];  // throws IndexOutOfBoundsError
+}
+
+fun outer() {
+  defer makeError();
+  print "body";
+}
+
+try {
+  outer();
+} catch (e) {
+  print "caught: " + e.kind;
+}

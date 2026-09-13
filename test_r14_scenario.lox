@@ -1,0 +1,28 @@
+// More specific R14 scenario: 
+// Outer try/catch, inner function with defer that itself throws,
+// the throw happens in the defer's body during RUN_DEFERS
+
+fun errorFunc() {
+  var list = [1, 2, 3];
+  list[10];  // will throw IndexOutOfBoundsError
+}
+
+fun inner() {
+  defer errorFunc();  // record a defer that will throw
+  print "inner body";
+  // return from inner - triggers RUN_DEFERS
+}
+
+fun middle() {
+  inner();  // call inner, which will execute defer
+  print "middle body";
+}
+
+try {
+  middle();
+  print "try body succeeded";
+} catch (e) {
+  print "caught error: " + e.kind;
+}
+
+print "program end";

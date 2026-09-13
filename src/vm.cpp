@@ -209,13 +209,12 @@ InterpretResult VM::runPendingDefers(int frameIndex) {
 }
 
 bool VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
-    // Search LIFO for a handler in an active try block. Same logic as
-    // Op::THROW, but extracted as a reusable function for runtime-fault
-    // sites that construct an Error and throw if a handler is active.
-    // Returns true if handled (handler set up in m_frames), false otherwise.
-    // On return true, caller must sync frame/ip/chunk via FrameSync::loadTop.
-    // On return false, runtimeError has been called; caller should return
-    // RUNTIME_ERROR.
+    // Search LIFO for a handler in an active try block. This is the ONE
+    // unwind implementation for both explicit throw (Op::THROW) and runtime
+    // faults (IndexOutOfBoundsError, etc.). Returns true if handled (handler
+    // set up in m_frames), false otherwise. On return true, caller must sync
+    // frame/ip/chunk via FrameSync::loadTop. On return false, runtimeError
+    // has been called; caller should return RUNTIME_ERROR.
     bool handled = false;
     while (!m_handlerStack.empty()) {
         HandlerRecord handler = m_handlerStack.back();
@@ -229,8 +228,12 @@ bool VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
                     return false; // Hard error during defer, already reported
                 }
                 if (m_frameCount != unwoundFrameIndex + 1) {
-                    // Deferred call threw; its throw handler took over.
-                    return false;
+                    // Deferred call threw; its throw handler took over and set
+                    // up control flow (possibly to a different handler). The
+                    // unwind is complete from our perspective. Return true so
+                    // the caller does not call runtimeError: the inner throw
+                    // is already being handled elsewhere.
+                    return true;
                 }
 #ifdef LOXPP_PROFILE
                 m_profilerScopes[m_frameCount - 1].reset();
@@ -1595,74 +1598,27 @@ InterpretResult VM::run(int stopAtFrameCount) {
         }
         case Op::THROW: {
             Value thrownValue = pop();
-            bool handled = false;
-            // Search LIFO for a handler in an active try block.
-            while (!m_handlerStack.empty()) {
-                HandlerRecord handler = m_handlerStack.back();
-                // Check if this handler frame is still active.
-                if (handler.frameCount <= m_frameCount) {
-                    // Handler's frame is active — unwind to it.
-                    while (m_frameCount > handler.frameCount) {
-                        int unwoundFrameIndex = m_frameCount - 1;
-                        // Close upvalues and run defers for each unwound frame.
-                        closeUpvalues(m_frames[unwoundFrameIndex].slots);
-                        // Run pending defers LIFO before discarding the frame.
-                        InterpretResult result =
-                            runPendingDefers(unwoundFrameIndex);
-                        if (result != InterpretResult::OK) {
-                            return result;
-                        }
-                        if (m_frameCount != unwoundFrameIndex + 1) {
-                            // One of those deferred calls threw in turn, and
-                            // that throw's own search already caught it (or
-                            // reached program exit) elsewhere, taking over
-                            // dispatch. This THROW's own unwind has nothing
-                            // left to finish.
-                            return InterpretResult::OK;
-                        }
-#ifdef LOXPP_PROFILE
-                        m_profilerScopes[m_frameCount - 1].reset();
-#endif
-                        m_frameCount--;
-                    }
-                    // Truncate stack to checkpoint.
-                    stackTop = handler.stackTop;
-                    push(thrownValue);
-                    // Jump to catch block, in the target frame's own record —
-                    // `frame` may still point at a frame this unwind just
-                    // discarded, so write through m_frames directly rather
-                    // than through the (possibly stale) `frame` pointer.
-                    m_frames[m_frameCount - 1].ip = handler.catchIp;
-                    FrameSync::loadTop(m_frames, m_frameCount, frame, ip,
-                                       chunk);
-                    // Pop this handler since we're handling the throw.
-                    m_handlerStack.pop_back();
-                    handled = true;
-                    if (m_frameCount <= stopAtFrameCount) {
-                        // A nested run() (draining a deferred call) caught
-                        // this throw at or above its own stopping depth —
-                        // hand control back rather than dispatch the catch
-                        // block from here (see Op::RETURN's own check).
-                        return InterpretResult::OK;
-                    }
-                    break;
-                } else {
-                    // Handler frame has exited — pop it and continue searching.
-                    m_handlerStack.pop_back();
-                }
-            }
-            if (handled) {
-                break;
-            }
-            // No handler found — uncaught throw. Report and exit.
+            // Use the shared unwind implementation (same as runtime faults).
+            // Sync frame->ip before calling handleThrow for error reporting.
             frame->ip = ip;
-            if (isError(thrownValue)) {
-                ObjError* err = asObjError(as<Obj*>(thrownValue));
-                runtimeError("%s", err->message->chars.c_str());
-            } else {
-                std::string thrownStr = stringify(thrownValue);
-                runtimeError("Uncaught throw: %s", thrownStr.c_str());
+            if (handleThrow(thrownValue, stopAtFrameCount)) {
+                // Handler found and set up. Reload frame/ip/chunk from the
+                // new top and continue dispatch (break from the switch, enter
+                // the next iteration of the main loop). For non-zero
+                // stopAtFrameCount (nested run()), handleThrow returns true
+                // for both "handler found in nested call" and "inner throw
+                // already handled": both mean "control is now at a handler,
+                // return to the calling run()" —via InterpretResult::OK below.
+                FrameSync::loadTop(m_frames, m_frameCount, frame, ip, chunk);
+                if (m_frameCount <= stopAtFrameCount) {
+                    // Nested run() caught this throw at or above its own
+                    // stopping depth — hand control back.
+                    return InterpretResult::OK;
+                }
+                break; // Continue main dispatch loop from the new frame
             }
+            // handleThrow returned false: no handler found, runtimeError
+            // was called, and the stack was reset. Return RUNTIME_ERROR.
             return InterpretResult::RUNTIME_ERROR;
         }
         }

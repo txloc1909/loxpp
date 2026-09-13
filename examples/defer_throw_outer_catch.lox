@@ -1,0 +1,27 @@
+// Test: defer statement whose call throws, caught by outer handler
+// This was the edge case (R14) that had duplication/drift between Op::THROW
+// and handleThrow(). The defer runs during function exit, and if it throws,
+// that throw should propagate to the nearest enclosing try/catch.
+
+fun error() {
+  var list = [1, 2, 3];
+  return list[10];  // IndexOutOfBoundsError
+}
+
+fun middle() {
+  defer error();  // will throw during RUN_DEFERS
+  print "middle body";
+}
+
+try {
+  middle();
+  print "try body (should not reach here)";
+} catch (e) {
+  print "caught outer: " + e.kind;
+}
+
+print "program end";
+
+// CHECK: middle body
+// CHECK: caught outer: IndexOutOfBoundsError
+// CHECK: program end
