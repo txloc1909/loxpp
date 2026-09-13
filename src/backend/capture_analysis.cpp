@@ -59,6 +59,12 @@ int frameHeightEffect(const DecodedInstruction& ins) {
     case Op::GET_TAG:
     case Op::INSTANCEOF:
     case Op::IS_SEQ:
+    // PUSH_HANDLER/POP_HANDLER touch the VM's separate handler stack, not
+    // the operand stack this pass tracks (chunk.h). RUN_DEFERS leaves the
+    // operand stack unchanged (chunk.h).
+    case Op::PUSH_HANDLER:
+    case Op::POP_HANDLER:
+    case Op::RUN_DEFERS:
         return 0;
 
     // Pop 2 (or 1), push 1: net -1. JUMP_TABLE pops only the tag integer,
@@ -102,10 +108,16 @@ int frameHeightEffect(const DecodedInstruction& ins) {
     case Op::BUILD_MAP:
         return 1 - (2 * ins.byteOperand);
 
+    // Pop argc+1 (callee + args), push nothing — the call is deferred, not
+    // performed now (chunk.h).
+    case Op::DEFER_RECORD:
+        return -(ins.byteOperand + 1);
+
     // Terminal: no successor edge ever reads a height past these, so their
     // own net effect is never propagated anywhere.
     case Op::RETURN:
     case Op::MATCH_ERROR:
+    case Op::THROW:
         return 0;
     }
     throw std::runtime_error(
@@ -139,6 +151,49 @@ computeFrameHeightsForCfg(const Cfg& cfg, int entryHeight,
         worklist.push_back(0);
     }
 
+    // A catch-target block (BasicBlock::isHandlerEntry) has no ordinary
+    // predecessor edge — cfg.cpp deliberately never wires one, because a
+    // catch handler's real predecessors are every THROW reachable in the
+    // protected region, including ones this pass cannot see. Its entry
+    // height is instead a *declared* contract, exactly as
+    // abstract_stack.cpp's handlerEntrySeeds already treats it: the
+    // checkpoint height at the declaring PUSH_HANDLER (its own `before`
+    // state — PUSH_HANDLER has no height effect of its own) plus 1, for the
+    // thrown value THROW pushes before jumping there. Seeded lazily, once
+    // each PUSH_HANDLER's own height becomes known, so nested try/catch
+    // (a catch block containing another PUSH_HANDLER) resolves correctly.
+    std::vector<bool> handlerSeeded(cfg.handlerEntries.size(), false);
+    auto trySeedHandlerEntries = [&]() {
+        for (size_t hi = 0; hi < cfg.handlerEntries.size(); hi++) {
+            if (handlerSeeded[hi]) {
+                continue;
+            }
+            const HandlerEntry& he = cfg.handlerEntries[hi];
+            auto it = heightBefore.find(he.pushHandlerOffset);
+            if (it == heightBefore.end()) {
+                continue; // this PUSH_HANDLER not reached yet
+            }
+            handlerSeeded[hi] = true;
+            int catchBlock = he.catchBlock;
+            int seedHeight = it->second + 1;
+            if (known[static_cast<size_t>(catchBlock)] == 0) {
+                known[static_cast<size_t>(catchBlock)] = 1;
+                blockEntryHeight[static_cast<size_t>(catchBlock)] = seedHeight;
+                worklist.push_back(catchBlock);
+            } else if (blockEntryHeight[static_cast<size_t>(catchBlock)] !=
+                       seedHeight) {
+                throw std::runtime_error(
+                    "capture_analysis: frame height mismatch entering catch "
+                    "block " +
+                    std::to_string(catchBlock) +
+                    " in function id=" + functionId + " (" +
+                    std::to_string(
+                        blockEntryHeight[static_cast<size_t>(catchBlock)]) +
+                    " vs " + std::to_string(seedHeight) + ")");
+            }
+        }
+    };
+
     while (!worklist.empty()) {
         int b = worklist.front();
         worklist.pop_front();
@@ -165,6 +220,8 @@ computeFrameHeightsForCfg(const Cfg& cfg, int entryHeight,
                     " vs " + std::to_string(h) + ")");
             }
         }
+
+        trySeedHandlerEntries();
     }
 
     return heightBefore;

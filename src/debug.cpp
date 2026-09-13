@@ -232,6 +232,10 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return simpleInstruction("POP_HANDLER", offset, out, color);
     case Op::THROW:
         return simpleInstruction("THROW", offset, out, color);
+    case Op::DEFER_RECORD:
+        return byteInstruction("DEFER_RECORD", chunk, offset, out, color);
+    case Op::RUN_DEFERS:
+        return simpleInstruction("RUN_DEFERS", offset, out, color);
     default:
         out << cc(color, kRed) << cc(color, kBold) << "UNKNOWN("
             << static_cast<unsigned>(chunk.at(offset)) << ")"

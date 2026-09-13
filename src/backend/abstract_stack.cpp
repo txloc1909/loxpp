@@ -207,7 +207,9 @@ StackEffect stackEffect(const DecodedInstruction& ins) {
     case Op::JUMP:
     case Op::LOOP:
     case Op::MATCH_ERROR:
-    case Op::GET_ITER: // in-place replace (vm.cpp: stackTop[-1] = ...)
+    case Op::GET_ITER:   // in-place replace (vm.cpp: stackTop[-1] = ...)
+    case Op::RUN_DEFERS: // runs pending deferred calls; operand stack
+                         // untouched (chunk.h)
         return {0, 0};
 
     // Pop 2, push 1.
@@ -269,6 +271,11 @@ StackEffect stackEffect(const DecodedInstruction& ins) {
         return {ins.byteOperand, 1};
     case Op::BUILD_MAP:
         return {2 * ins.byteOperand, 1};
+
+    // Pops argc+1 (callee + args), pushes nothing — the call itself is
+    // deferred, not performed now (chunk.h).
+    case Op::DEFER_RECORD:
+        return {ins.byteOperand + 1, 0};
     }
     throw std::runtime_error("abstract_stack: no stack effect for opcode " +
                              std::to_string(static_cast<int>(ins.op)) +
