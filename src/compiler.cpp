@@ -1894,8 +1894,11 @@ void Compiler::dot() {
     if (m_parser->m_canAssign && m_parser->match(TokenType::EQUAL)) {
         expression();
         emitConstantOp(Op::SET_PROPERTY, nameConst);
-    } else if (m_parser->match(TokenType::LEFT_PAREN)) {
-        // Fuse GET_PROPERTY + CALL into a single INVOKE superinstruction.
+    } else if (!m_disableInvokeFusion &&
+               m_parser->match(TokenType::LEFT_PAREN)) {
+        // Fuse GET_PROPERTY + CALL into a single INVOKE superinstruction
+        // (unless we're in a defer context, where we need separate GET_PROPERTY
+        // and CALL so that CALL can be patched to DEFER_RECORD).
         uint8_t argCount = 0;
         if (!m_parser->check(TokenType::RIGHT_PAREN)) {
             do {
@@ -1911,6 +1914,25 @@ void Compiler::dot() {
         emitConstantOp(Op::INVOKE, nameConst);
         emitByte(argCount);
         m_stackHeight -= argCount; // pop receiver+args, push result
+    } else if (m_parser->match(TokenType::LEFT_PAREN)) {
+        // Defer context: emit GET_PROPERTY + CALL instead of fused INVOKE.
+        // This produces a BoundMethod that CALL can invoke, and allows the
+        // subsequent CALL to be patched to DEFER_RECORD.
+        emitConstantOp(Op::GET_PROPERTY, nameConst);
+        uint8_t argCount = 0;
+        if (!m_parser->check(TokenType::RIGHT_PAREN)) {
+            do {
+                if (argCount == 255) {
+                    m_parser->error("Can't have more than 255 arguments.");
+                }
+                expression();
+                argCount++;
+            } while (m_parser->match(TokenType::COMMA));
+        }
+        m_parser->consume(TokenType::RIGHT_PAREN,
+                          "Expect ')' after arguments.");
+        emitBytes(Op::CALL, argCount);
+        m_stackHeight -= argCount; // pop BoundMethod+args, push result
     } else {
         emitConstantOp(Op::GET_PROPERTY, nameConst);
     }
@@ -2078,7 +2100,14 @@ void Compiler::deferStatement() {
     // final 2 bytes emitted for a call expression (opcode, argc) — never at
     // the position captured before expression() runs, which is instead the
     // start of the callee-loading instruction (GET_GLOBAL/GET_LOCAL/...).
+    //
+    // For method calls (obj.method(...)), we disable INVOKE fusion so the
+    // compiler emits GET_PROPERTY + CALL instead of the fused INVOKE
+    // superinstruction. This allows CALL to be patched to DEFER_RECORD
+    // without special INVOKE handling.
+    m_disableInvokeFusion = true;
     expression();
+    m_disableInvokeFusion = false;
 
     Chunk* chunk = getCurrentChunk();
     int callPos = static_cast<int>(chunk->size()) - 2;

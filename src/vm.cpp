@@ -147,13 +147,37 @@ InterpretResult VM::runPendingDefers(int frameIndex) {
         // call()'s own convention (and DEFER_RECORD's documented "stack
         // before" shape, chunk.h) is [callee, arg0, ..., argN-1] — the
         // callee goes first, underneath its arguments, not last.
-        push(deferred->callable);
+        Value calleeVal = deferred->callable;
+        push(calleeVal);
         for (const Value& arg : deferred->args) {
             push(arg);
         }
-        ObjClosure* callee = asObjClosure(as<Obj*>(deferred->callable));
         int argCount = static_cast<int>(deferred->args.size());
-        if (!call(callee, argCount)) {
+
+        // Handle various callable types (similar to Op::CALL dispatch).
+        // For BoundMethod, replace the method on the stack with the receiver,
+        // then call the underlying method closure.
+        bool callSucceeded = false;
+        if (isBoundMethod(calleeVal)) {
+            ObjBoundMethod* bound = asObjBoundMethod(as<Obj*>(calleeVal));
+            stackTop[-argCount - 1] = bound->receiver;
+            callSucceeded = call(bound->method, argCount);
+        } else if (isClosure(calleeVal)) {
+            ObjClosure* closure = asObjClosure(as<Obj*>(calleeVal));
+            callSucceeded = call(closure, argCount);
+        } else if (isNative(calleeVal)) {
+            ObjNative* native = asObjNative(as<Obj*>(calleeVal));
+            callSucceeded = callNative(native, argCount);
+        } else if (isBoundNative(calleeVal)) {
+            ObjBoundNative* bound = asObjBoundNative(as<Obj*>(calleeVal));
+            callSucceeded = callBoundNative(bound, argCount);
+        } else {
+            // Unexpected callable type in deferred call
+            runtimeError("Deferred callable has unexpected type.");
+            return InterpretResult::RUNTIME_ERROR;
+        }
+
+        if (!callSucceeded) {
             return InterpretResult::RUNTIME_ERROR;
         }
         InterpretResult result = run(frameIndex + 1);
@@ -428,7 +452,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
         }
         case Op::NEGATE: {
             if (!is<Number>(peek(0))) {
-                RAISE_ERROR("Operand must be a number.");
+                if (tryCatchableError("ArithmeticTypeError",
+                                      "Operand must be a number.")) {
+                    break;
+                }
                 return InterpretResult::RUNTIME_ERROR;
             }
             push(from<Number>(-as<Number>(pop())));
@@ -468,7 +495,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
         }
         case Op::MODULO: {
             if (!is<Number>(peek(0)) || !is<Number>(peek(1))) {
-                RAISE_ERROR("Operands must be numbers.");
+                if (tryCatchableError("ArithmeticTypeError",
+                                      "Operands must be numbers.")) {
+                    break;
+                }
                 return InterpretResult::RUNTIME_ERROR;
             }
             Number b = as<Number>(pop());
@@ -522,7 +552,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
             ObjString* name = asObjString(readConstant());
             Value value;
             if (!m_globals.get(name, value)) {
-                RAISE_ERROR("Undefined variable '%s'.", name->chars.c_str());
+                if (tryCatchableError("UndefinedVariableError",
+                                      "Undefined variable.")) {
+                    break;
+                }
                 return InterpretResult::RUNTIME_ERROR;
             }
             push(value);
@@ -535,7 +568,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
             // declared.
             if (m_globals.set(name, peek(0))) {
                 m_globals.del(name); // undo the spurious insertion
-                RAISE_ERROR("Undefined variable '%s'.", name->chars.c_str());
+                if (tryCatchableError("UndefinedVariableError",
+                                      "Undefined variable.")) {
+                    break;
+                }
                 return InterpretResult::RUNTIME_ERROR;
             }
             break;
@@ -556,7 +592,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::MATCH_ERROR: {
-            RAISE_ERROR("MatchError: no matching arm.");
+            if (tryCatchableError("MatchError",
+                                  "No matching arm in match expression.")) {
+                break;
+            }
             return InterpretResult::RUNTIME_ERROR;
         }
         case Op::JUMP_TABLE: {
@@ -649,15 +688,21 @@ InterpretResult VM::run(int stopAtFrameCount) {
                         return InterpretResult::RUNTIME_ERROR;
                     }
                 } else if (argCount != 0) {
-                    RAISE_ERROR("Expected 0 arguments but got %d.", argCount);
+                    if (tryCatchableError(
+                            "ConstructorArityError",
+                            "Expected 0 arguments but got some.")) {
+                        break;
+                    }
                     return InterpretResult::RUNTIME_ERROR;
                 }
             } else if (isEnumCtor(callee)) {
                 ObjEnumCtor* ctor = asObjEnumCtor(as<Obj*>(callee));
                 if (argCount != static_cast<int>(ctor->arity)) {
-                    RAISE_ERROR("'%s' expects %d argument(s) but got %d.",
-                                ctor->ctorName->chars.c_str(),
-                                static_cast<int>(ctor->arity), argCount);
+                    if (tryCatchableError(
+                            "ConstructorArityError",
+                            "Constructor called with wrong arity.")) {
+                        break;
+                    }
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 ObjEnum* enumVal =
@@ -671,7 +716,11 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 pop(); // pop the ObjEnumCtor from the callee slot
                 push(Value{static_cast<Obj*>(enumVal)});
             } else {
-                RAISE_ERROR("Can only call functions, classes and enums.");
+                if (tryCatchableError(
+                        "NotCallableError",
+                        "Can only call functions, classes and enums.")) {
+                    break;
+                }
                 return InterpretResult::RUNTIME_ERROR;
             }
             break;
@@ -693,8 +742,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 } else if (name->chars == "kind") {
                     push(Value{static_cast<Obj*>(err->kind)});
                 } else {
-                    RAISE_ERROR("Undefined property '%s' on error.",
-                                name->chars.c_str());
+                    if (tryCatchableError("UndefinedPropertyError",
+                                          "Undefined property on error.")) {
+                        break;
+                    }
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 break;
@@ -842,7 +893,11 @@ InterpretResult VM::run(int stopAtFrameCount) {
                         return InterpretResult::RUNTIME_ERROR;
                     }
                     if (list->elements.empty()) {
-                        RAISE_ERROR("Cannot pop from an empty list.");
+                        if (tryCatchableError(
+                                "EmptyListError",
+                                "Cannot pop from an empty list.")) {
+                            break;
+                        }
                         return InterpretResult::RUNTIME_ERROR;
                     }
                     Value val = list->elements.back();
@@ -900,7 +955,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
                     return InterpretResult::RUNTIME_ERROR;
                 }
             } else {
-                RAISE_ERROR("Only instances, files, and maps have methods.");
+                if (tryCatchableError("InvalidReceiverError",
+                                      "Method called on invalid receiver.")) {
+                    break;
+                }
                 return InterpretResult::RUNTIME_ERROR;
             }
             break;
@@ -1088,7 +1146,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 auto* str = asObjString(as<Obj*>(collectionVal));
                 int idx = static_cast<int>(n);
                 if (idx < 0 || idx >= static_cast<int>(str->chars.size())) {
-                    RAISE_ERROR("String index out of bounds.");
+                    if (tryCatchableError("IndexOutOfBoundsError",
+                                          "String index out of bounds.")) {
+                        break;
+                    }
                     return InterpretResult::RUNTIME_ERROR;
                 }
                 // Copy char before makeString (GC-safe: same pattern as ADD)
@@ -1120,7 +1181,11 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 }
                 push(e->fields[static_cast<size_t>(idx)]);
             } else {
-                RAISE_ERROR("Only lists, strings, and maps can be indexed.");
+                if (tryCatchableError(
+                        "NotIndexableError",
+                        "Only lists, strings, and maps can be indexed.")) {
+                    break;
+                }
                 return InterpretResult::RUNTIME_ERROR;
             }
             break;

@@ -211,6 +211,10 @@ class Compiler {
     // --target jvm/clr keeps working for ordinary functions, since neither
     // emitter translates RUN_DEFERS yet (see notes/non-local-control-flow.md).
     bool m_hasDefer{false};
+    // When true (only inside deferStatement()), prevent emitting INVOKE fusion
+    // for method calls so they compile as GET_PROPERTY + CALL instead, allowing
+    // CALL to be patched to DEFER_RECORD without special INVOKE handling.
+    bool m_disableInvokeFusion{false};
 
     Local m_locals[UINT8_COUNT];
     int m_localCount{0};
