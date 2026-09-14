@@ -802,4 +802,45 @@ public final class LoxOps {
         }
         return s.substring(0, end);
     }
+
+    // ------------------------------------------------------------------
+    // Deferred calls
+    // ------------------------------------------------------------------
+
+    /**
+     * Run all deferred calls in LIFO order (most recently recorded first).
+     * This is called at function exit points (before return, on fall-through,
+     * and in exception handlers).
+     *
+     * The list is emptied as it runs, so this can be called multiple times
+     * safely (e.g., in different exit paths from the same function).
+     *
+     * @param deferList a java.util.List of DeferredCall objects
+     * @throws LoxError if a deferred call throws
+     */
+    @SuppressWarnings("unchecked")
+    public static void runDefers(Object deferList) {
+        if (!(deferList instanceof java.util.List)) {
+            return; // Not a list, nothing to do
+        }
+        java.util.List<Object> list = (java.util.List<Object>) deferList;
+
+        // Run in LIFO order by repeatedly popping from the end
+        while (!list.isEmpty()) {
+            Object lastItem = list.remove(list.size() - 1);
+            if (!(lastItem instanceof DeferredCall)) {
+                continue; // Skip non-DeferredCall items
+            }
+            DeferredCall deferred = (DeferredCall) lastItem;
+
+            // Invoke the deferred call
+            if (deferred.callable == null) {
+                throw new LoxError("Deferred call has null callable.");
+            }
+            if (deferred.args == null) {
+                throw new LoxError("Deferred call has null args array.");
+            }
+            call(deferred.callable, deferred.args);
+        }
+    }
 }

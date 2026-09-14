@@ -138,6 +138,7 @@ struct Emitter {
     // one set of opcode-family functions.
     int baseSlot{2};
     int globalsSlot{0};
+    int deferListSlot{-1}; // allocated only if defer is used, -1 otherwise
     int scratchSlot{0};
 
     // Set (to scratchSlot+1 / scratchSlot+2) only when this chunk contains a
@@ -1648,6 +1649,86 @@ void emitThrow(Emitter& e) {
     e.b.emit("athrow", -1);
 }
 
+// DEFER_RECORD: Record a deferred call. Pops callee and argc arguments,
+// creates a DeferredCall object with them, and adds it to the defer list.
+// Stack order: [callee, arg0, arg1, ..., argN-1] where argN-1 is on top.
+void emitDeferRecord(Emitter& e, const DecodedInstruction& in) {
+    if (e.deferListSlot < 0) {
+        throw std::runtime_error(
+            "jvm_emitter: DEFER_RECORD but no defer list allocated");
+    }
+
+    int argc = in.byteOperand;
+    // Stack before: [callee, arg0, arg1, ..., argN-1]  (argN-1 is on top)
+
+    int calleeSlot = e.scratchSlot;
+    int argsSlot = e.scratchSlot + 1;
+    int arraySlot = e.scratchSlot + 2;
+
+    // Spill argc arguments into scratch slots (in reverse order since they're
+    // on top) Pop from top to bottom: argN-1, argN-2, ..., arg0
+    for (int i = argc - 1; i >= 0; i--) {
+        e.b.emit("astore " + std::to_string(argsSlot + i), -1);
+    }
+    // Stack: [callee]
+
+    // Now pop the callee
+    e.b.emit("astore " + std::to_string(calleeSlot), -1);
+    // Stack: []
+
+    // Create Object[argc] array for arguments
+    e.b.emit(pushIntInstruction(argc), +1);
+    e.b.emit("anewarray java/lang/Object", 0);
+    // Stack: [Object[argc]]
+
+    // Refill array with spilled arguments (in order: arg0, arg1, ..., argN-1)
+    for (int i = 0; i < argc; i++) {
+        e.b.emit("dup", +1);
+        e.b.emit(pushIntInstruction(i), +1);
+        e.b.emit("aload " + std::to_string(argsSlot + i), +1);
+        e.b.emit("aastore", -3);
+    }
+    // Stack: [Object[argc]]
+
+    // Store array in arraySlot
+    e.b.emit("astore " + std::to_string(arraySlot), -1);
+    // Stack: []
+
+    // Create DeferredCall(callee, array)
+    e.b.emit("new lox/DeferredCall", +1);
+    e.b.emit("dup", +1);
+    e.b.emit("aload " + std::to_string(calleeSlot), +1);
+    e.b.emit("aload " + std::to_string(arraySlot), +1);
+    e.b.emit("invokespecial "
+             "lox/DeferredCall/<init>(Ljava/lang/Object;[Ljava/lang/Object;)V",
+             -3);
+    // Stack: [DeferredCall]
+
+    // Add to defer list
+    e.b.emit("aload " + std::to_string(e.deferListSlot), +1);
+    // Stack: [DeferredCall, List]
+    e.b.emit("swap", 0);
+    // Stack: [List, DeferredCall]
+    e.b.emit("invokevirtual java/util/ArrayList/add(Ljava/lang/Object;)Z", -1);
+    // Stack: [boolean (true if added)]
+    e.b.emit("pop", -1);
+    // Stack: []
+}
+
+// RUN_DEFERS: Run all deferred calls in LIFO order.
+void emitRunDefers(Emitter& e) {
+    if (e.deferListSlot < 0) {
+        // No defer list allocated, so no defers to run
+        return;
+    }
+
+    // Stack before: []
+    // Load the defer list and call runDefers
+    e.b.emit("aload " + std::to_string(e.deferListSlot), +1);
+    e.b.emit("invokestatic lox/LoxOps/runDefers(Ljava/lang/Object;)V", -1);
+    // Stack after: []
+}
+
 // The `<init>` every generated LoxFn$<n> needs (jvm_emitter.h hazard note):
 // calls straight through to LoxClosure's own constructor with this
 // function's compile-time name/arity as literals, so only the upvalues
@@ -1690,6 +1771,16 @@ int computeMaxLocalCount(const FunctionStackAnalysis& analysis) {
     }
     // slot 0: the callee/receiver, never named by itself, but always live.
     return std::max(maxLocalCount, 1);
+}
+
+// Check if the function uses defer (DEFER_RECORD or RUN_DEFERS opcodes).
+bool usesDefer(const DecodedFunction& fn) {
+    for (const auto& instr : fn.instructions) {
+        if (instr.op == Op::DEFER_RECORD || instr.op == Op::RUN_DEFERS) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // The widest N-element spill this chunk needs — CALL's/INVOKE's/
@@ -1827,20 +1918,28 @@ void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isScript) {
                  -1);
         e.b.emit("invokestatic lox/LoxRuntime/init()Llox/LoxGlobals;", +1);
         e.b.emit("astore " + std::to_string(e.globalsSlot), -1);
-        return;
+    } else {
+        // A generated class has no field of its own for the shared globals
+        // instance (jvm_emitter.h) — read the one instance init() built.
+        e.b.emit("invokestatic lox/LoxRuntime/current()Llox/LoxGlobals;", +1);
+        e.b.emit("astore " + std::to_string(e.globalsSlot), -1);
+        e.b.emit("aload 1", +1);
+        e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(0)), -1);
+        int arity = fn.function->arity;
+        for (int i = 0; i < arity; i++) {
+            e.b.emit("aload 2", +1);
+            e.b.emit(pushIntInstruction(i), +1);
+            e.b.emit("aaload", -1);
+            e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(i + 1)), -1);
+        }
     }
-    // A generated class has no field of its own for the shared globals
-    // instance (jvm_emitter.h) — read the one instance init() built.
-    e.b.emit("invokestatic lox/LoxRuntime/current()Llox/LoxGlobals;", +1);
-    e.b.emit("astore " + std::to_string(e.globalsSlot), -1);
-    e.b.emit("aload 1", +1);
-    e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(0)), -1);
-    int arity = fn.function->arity;
-    for (int i = 0; i < arity; i++) {
-        e.b.emit("aload 2", +1);
-        e.b.emit(pushIntInstruction(i), +1);
-        e.b.emit("aaload", -1);
-        e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(i + 1)), -1);
+
+    // Initialize defer list if this function uses defer
+    if (e.deferListSlot >= 0) {
+        e.b.emit("new java/util/ArrayList", +1);
+        e.b.emit("dup", +1);
+        e.b.emit("invokespecial java/util/ArrayList/<init>()V", -1);
+        e.b.emit("astore " + std::to_string(e.deferListSlot), -1);
     }
 }
 
@@ -2190,8 +2289,10 @@ void emitBody(Emitter& e, bool isScript,
             emitThrow(e);
             break;
         case Op::DEFER_RECORD:
+            emitDeferRecord(e, in);
+            break;
         case Op::RUN_DEFERS:
-            notImplemented(in.op);
+            emitRunDefers(e);
             break;
         default:
             if (!emitSimpleOp(e, in.op)) {
@@ -2260,10 +2361,42 @@ std::string emitChunk(const DecodedFunction& fn,
     int maxSpillWidth = computeMaxSpillWidth(fn, analysis);
     int extraSpillSlots = maxSpillWidth > 0 ? maxSpillWidth + 1 : 0;
 
+    // If function uses defer, compute extra slots needed
+    // (1 for defer list + argc for temp argument storage in DEFER_RECORD)
+    int deferListExtraSlots = 0;
+    if (usesDefer(fn)) {
+        deferListExtraSlots = 1;
+        // Check max argc in DEFER_RECORD opcodes to know how many temps we need
+        int maxDeferArgc = 0;
+        for (const auto& instr : fn.instructions) {
+            if (instr.op == Op::DEFER_RECORD) {
+                maxDeferArgc =
+                    std::max(maxDeferArgc, static_cast<int>(instr.byteOperand));
+            }
+        }
+        deferListExtraSlots += maxDeferArgc;
+    }
+
     Emitter e = buildEmitter(fn, analysis, isScript, maxLocalCount,
                              maxSpillWidth, captureInfo);
+
+    // If defer is used, shift slot assignments to make room for defer list
+    // and temp argument storage
+    if (usesDefer(fn)) {
+        e.deferListSlot =
+            e.scratchSlot; // scratchSlot was at baseSlot + maxLocalCount
+        e.scratchSlot = e.deferListSlot + deferListExtraSlots;
+        if (maxSpillWidth > 0) {
+            e.calleeScratchSlot = e.scratchSlot + 1;
+            e.argScratchBase = e.scratchSlot + 2;
+        }
+    }
     emitPrologue(e, fn, isScript);
     emitBody(e, isScript, childClassNames);
+
+    // assembleClass calculates: scratchSlot + 1 + extraSpillSlots
+    // If defer is used, the defer-related slots are already included in
+    // scratchSlot, so we don't need to add them to extraSpillSlots again
     return assembleClass(e, fn, className, isScript, extraSpillSlots);
 }
 
