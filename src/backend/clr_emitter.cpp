@@ -2235,8 +2235,8 @@ std::string injectTryCatchDirectives(const std::string& bodyText,
         // get_Value() method in IL. This mirrors the JVM backend's behavior
         // (see jvm_emitter.cpp). The bytecode-derived code expects the caught
         // value on the stack.
-        result << "    callvirt instance object [LoxRuntime]Lox.LoxError"
-                  "::`get_Value'()\n";
+        result << "    call instance object [LoxRuntime]Lox.LoxError"
+                  "::get_Value()\n";
 
         // Catch handler: from after catchStart to the next label.
         // The first instruction in the handler uses the extracted value.
