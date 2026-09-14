@@ -139,6 +139,8 @@ struct Emitter {
     int baseSlot{2};
     int globalsSlot{0};
     int deferListSlot{-1}; // allocated only if defer is used, -1 otherwise
+    int deferTempSlotBase{
+        -1}; // base slot for DEFER_RECORD temp storage, -1 if not used
     int scratchSlot{0};
 
     // Set (to scratchSlot+1 / scratchSlot+2) only when this chunk contains a
@@ -324,6 +326,12 @@ struct Emitter {
 
     // All exception table entries collected during emission.
     std::vector<ExceptionEntry> exceptionTable;
+
+    // Defer catch-all handler: label at the start of the function body
+    // (after prologue) and the handler code label for catching exceptions
+    // and running defers before re-throwing.
+    std::string deferCatchAllBodyStartLabel;
+    std::string deferCatchAllHandlerLabel;
 };
 
 // `analysis.before[i].localCount` is only an upper bound at a CFG merge
@@ -1661,9 +1669,11 @@ void emitDeferRecord(Emitter& e, const DecodedInstruction& in) {
     int argc = in.byteOperand;
     // Stack before: [callee, arg0, arg1, ..., argN-1]  (argN-1 is on top)
 
-    int calleeSlot = e.scratchSlot;
-    int argsSlot = e.scratchSlot + 1;
-    int arraySlot = e.scratchSlot + 2;
+    // Use the dedicated temp slots for DEFER_RECORD, not the general
+    // scratchSlot
+    int calleeSlot = e.deferTempSlotBase;
+    int argsSlot = e.deferTempSlotBase + 1;
+    int arraySlot = e.deferTempSlotBase + 2;
 
     // Spill argc arguments into scratch slots (in reverse order since they're
     // on top) Pop from top to bottom: argN-1, argN-2, ..., arg0
@@ -2078,6 +2088,13 @@ void emitBody(Emitter& e, bool isScript,
     const std::vector<DecodedInstruction>& ins = e.fn.instructions;
     std::size_t n = ins.size();
 
+    // Emit start label for defer catch-all handler (if function uses defer).
+    // This label marks where the protected region begins.
+    if (usesDefer(e.fn)) {
+        e.deferCatchAllBodyStartLabel = "L_defer_body_start";
+        e.b.label(e.deferCatchAllBodyStartLabel);
+    }
+
     for (std::size_t i = 0; i < n;) {
         if (!e.reached(i)) {
             i++;
@@ -2362,10 +2379,11 @@ std::string emitChunk(const DecodedFunction& fn,
     int extraSpillSlots = maxSpillWidth > 0 ? maxSpillWidth + 1 : 0;
 
     // If function uses defer, compute extra slots needed
-    // (1 for defer list + argc for temp argument storage in DEFER_RECORD)
+    // (1 for defer list + 2 for calleeSlot and arraySlot + argc for temp
+    // argument storage in DEFER_RECORD, per emitDeferRecord)
     int deferListExtraSlots = 0;
     if (usesDefer(fn)) {
-        deferListExtraSlots = 1;
+        deferListExtraSlots = 1; // for the defer list itself
         // Check max argc in DEFER_RECORD opcodes to know how many temps we need
         int maxDeferArgc = 0;
         for (const auto& instr : fn.instructions) {
@@ -2374,18 +2392,23 @@ std::string emitChunk(const DecodedFunction& fn,
                     std::max(maxDeferArgc, static_cast<int>(instr.byteOperand));
             }
         }
-        deferListExtraSlots += maxDeferArgc;
+        // emitDeferRecord uses: calleeSlot, argsSlot (..+argc-1), arraySlot
+        // That's: scratchSlot, scratchSlot+1 (..<+argc), scratchSlot+2
+        // Total: 2 + argc extra slots (beyond the defer list itself)
+        deferListExtraSlots += 2 + maxDeferArgc;
     }
 
     Emitter e = buildEmitter(fn, analysis, isScript, maxLocalCount,
                              maxSpillWidth, captureInfo);
 
     // If defer is used, shift slot assignments to make room for defer list
-    // and temp argument storage
+    // and temp argument storage for DEFER_RECORD
     if (usesDefer(fn)) {
-        e.deferListSlot =
-            e.scratchSlot; // scratchSlot was at baseSlot + maxLocalCount
-        e.scratchSlot = e.deferListSlot + deferListExtraSlots;
+        e.deferListSlot = e.scratchSlot; // slot for the defer list itself
+        e.deferTempSlotBase =
+            e.deferListSlot + 1; // slots for DEFER_RECORD temps
+        e.scratchSlot =
+            e.deferListSlot + deferListExtraSlots; // next available scratch
         if (maxSpillWidth > 0) {
             e.calleeScratchSlot = e.scratchSlot + 1;
             e.argScratchBase = e.scratchSlot + 2;
@@ -2393,6 +2416,47 @@ std::string emitChunk(const DecodedFunction& fn,
     }
     emitPrologue(e, fn, isScript);
     emitBody(e, isScript, childClassNames);
+
+    // If the function uses defer, emit a catch-all exception handler that
+    // runs defers before re-throwing. This ensures defers run on the
+    // exceptional exit path, not just the normal return path.
+    if (usesDefer(fn)) {
+        // Emit the end label for the protected region
+        std::string deferCatchAllEndLabel = "L_defer_body_end";
+        e.b.label(deferCatchAllEndLabel);
+
+        // Emit the catch-all handler code
+        e.deferCatchAllHandlerLabel = "L_defer_catch_all";
+        e.b.label(e.deferCatchAllHandlerLabel);
+        // When the handler is invoked, the JVM has the exception on the stack.
+        // Resync the depth to account for it.
+        e.b.resync(1);
+        // Stack: [LoxError exception]
+        // Use the defer list slot to temporarily store the exception after
+        // calling runDefers (the defer list is no longer needed at this point).
+        // But first, we need to swap so the defer list is on top for the call.
+        e.b.emit("aload " + std::to_string(e.deferListSlot), +1);
+        // Stack: [LoxError exception, ArrayList deferList]
+        e.b.emit("swap", 0);
+        // Stack: [ArrayList deferList, LoxError exception]
+        e.b.emit("astore " + std::to_string(e.deferListSlot), -1);
+        // Stack: [ArrayList deferList]
+        // Call LoxOps.runDefers() with the defer list
+        e.b.emit("invokestatic lox/LoxOps/runDefers(Ljava/lang/Object;)V", -1);
+        // Stack: []
+        // Restore and re-throw the caught exception
+        e.b.emit("aload " + std::to_string(e.deferListSlot), +1);
+        e.b.emit("athrow", -1);
+
+        // Create an exception table entry for the defer catch-all handler.
+        // This covers the entire function body and catches any exception that
+        // is not caught by inner try/catch handlers.
+        ExceptionEntry deferEntry;
+        deferEntry.regionStartLabel = e.deferCatchAllBodyStartLabel;
+        deferEntry.regionEndLabel = deferCatchAllEndLabel;
+        deferEntry.handlerLabel = e.deferCatchAllHandlerLabel;
+        e.exceptionTable.push_back(deferEntry);
+    }
 
     // assembleClass calculates: scratchSlot + 1 + extraSpillSlots
     // If defer is used, the defer-related slots are already included in
