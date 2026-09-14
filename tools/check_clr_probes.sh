@@ -369,8 +369,13 @@ examples=(
     # RUN_DEFERS — including the cross-function-unwind case, where that new
     # throw propagates past the deferring function's own frame to an
     # outer caller's try/catch (defer_throw_outer_catch.lox).
+    # defer_explicit_return.lox additionally covers an explicit `return`
+    # inside a defer-using function (not only fall-through), where the
+    # `leave` that runs the .finally block would otherwise discard the
+    # return value already on the evaluation stack.
     "examples/defer_lifo.lox"
     "examples/defer_throw_outer_catch.lox"
+    "examples/defer_explicit_return.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

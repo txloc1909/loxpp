@@ -1,0 +1,28 @@
+// Test: defer draining on an explicit `return`, not only fall-through.
+// Each defer statement records its call at the point it executes, so the
+// two calls below record a different number of pending deferred calls
+// depending on which branch returns.
+fun cleanup(tag) {
+    print "cleanup: " + tag;
+}
+
+fun withReturn(x) {
+    defer cleanup("A");
+    if (x > 0) {
+        defer cleanup("B");
+        return "positive";
+    }
+    defer cleanup("C");
+    return "non-positive";
+}
+
+print withReturn(5);
+print withReturn(-1);
+print "done";
+// CHECK: cleanup: B
+// CHECK: cleanup: A
+// CHECK: positive
+// CHECK: cleanup: C
+// CHECK: cleanup: A
+// CHECK: non-positive
+// CHECK: done
