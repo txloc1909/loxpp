@@ -101,6 +101,15 @@ LocalCfg buildCfg(const std::vector<DecodedInstruction>& ins) {
         case Op::RETURN:
         case Op::MATCH_ERROR:
         case Op::THROW:
+            // PUSH_HANDLER is a structural boundary: the protected region and
+            // its handler must exist regardless of whether a preceding try body
+            // is terminal. If the next instruction is PUSH_HANDLER, connect it
+            // to this terminal even though no normal control flow falls
+            // through.
+            if (fallthrough >= 0 &&
+                ins[static_cast<size_t>(fallthrough)].op == Op::PUSH_HANDLER) {
+                addEdge(idx, fallthrough);
+            }
             break;
         case Op::JUMP:
         case Op::LOOP:

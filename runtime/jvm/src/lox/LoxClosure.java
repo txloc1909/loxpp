@@ -31,7 +31,7 @@ public abstract class LoxClosure implements LoxCallable {
 
     public final Object callAsSelf(Object self, Object[] args) {
         if (args.length != arity) {
-            throw new LoxError(
+            throw LoxOps.makeError("ArityError",
                     "Expected " + arity + " arguments but got " + args.length + ".");
         }
         return invoke(self, args);

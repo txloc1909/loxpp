@@ -25,7 +25,7 @@ public final class LoxOps {
      * and message. This allows caught exceptions to access .kind and .message
      * fields via the Error class.
      */
-    private static LoxError makeThrowable(String kind, String message) {
+    public static LoxError makeError(String kind, String message) {
         Object error = LoxRuntime.makeError(kind, message);
         return new LoxError(message, error);
     }
@@ -49,7 +49,7 @@ public final class LoxOps {
 
     public static double checkNumber(Object v) {
         if (!(v instanceof Double)) {
-            throw makeThrowable("ArithmeticTypeError",
+            throw makeError("ArithmeticTypeError",
                                 "Operand must be a number.");
         }
         return (Double)v;
@@ -57,7 +57,7 @@ public final class LoxOps {
 
     private static void checkNumbers(Object a, Object b) {
         if (!(a instanceof Double) || !(b instanceof Double)) {
-            throw makeThrowable("ArithmeticTypeError",
+            throw makeError("ArithmeticTypeError",
                                 "Operands must be numbers.");
         }
     }
@@ -67,7 +67,7 @@ public final class LoxOps {
             return (String)a + (String)b;
         }
         if (a instanceof String || b instanceof String) {
-            throw makeThrowable(
+            throw makeError(
                 "ConcatenationTypeError",
                 "Operands must be both strings or both numbers.");
         }
@@ -137,7 +137,7 @@ public final class LoxOps {
 
     private static void checkNumbersForComparison(Object a, Object b) {
         if (!(a instanceof Double) || !(b instanceof Double)) {
-            throw makeThrowable("ComparisonTypeError",
+            throw makeError("ComparisonTypeError",
                                 "Operands must be numbers.");
         }
     }
@@ -164,11 +164,13 @@ public final class LoxOps {
         if (key == null || key instanceof Boolean || key instanceof String) {
             return;
         }
-        if (key instanceof Double && !Double.isNaN((Double)key)) {
+        if (key instanceof Double) {
+            if (Double.isNaN((Double)key)) {
+                throw makeError("NaNKeyError", "NaN cannot be used as a map key.");
+            }
             return;
         }
-        throw new LoxError("Map keys must be Bool, Number, Nil, or String. " +
-                           "NaN is not allowed.");
+        throw makeError("InvalidMapKeyError", "Map keys must be Bool, Number, Nil, or String.");
     }
 
     /**
@@ -243,17 +245,17 @@ public final class LoxOps {
 
     private static int boundedIndex(Object indexVal, int size, String kind) {
         if (!(indexVal instanceof Double)) {
-            throw makeThrowable("IndexTypeError",
+            throw makeError("IndexTypeError",
                                 kind + " index must be a number.");
         }
         double d = (Double)indexVal;
         if (d != Math.floor(d)) {
-            throw makeThrowable("IndexNotIntegerError",
+            throw makeError("IndexNotIntegerError",
                                 kind + " index must be an integer.");
         }
         int idx = (int)d;
         if (idx < 0 || idx >= size) {
-            throw makeThrowable("IndexOutOfBoundsError",
+            throw makeError("IndexOutOfBoundsError",
                                 kind + " index out of bounds.");
         }
         return idx;
@@ -329,26 +331,26 @@ public final class LoxOps {
         }
         if (collection instanceof LoxEnum) {
             if (!(index instanceof Double)) {
-                throw makeThrowable("IndexTypeError",
+                throw makeError("IndexTypeError",
                                     "Enum field index must be a number.");
             }
             Object[] payload = ((LoxEnum)collection).payload;
             int idx = (int)(double)(Double)index;
             if (idx < 0 || idx >= payload.length) {
-                throw makeThrowable("IndexOutOfBoundsError",
+                throw makeError("IndexOutOfBoundsError",
                                     "Enum field index " + idx +
                                         " out of range.");
             }
             return payload[idx];
         }
-        throw makeThrowable("NotIndexableError",
+        throw makeError("NotIndexableError",
                             "Only lists, strings, and maps can be indexed.");
     }
 
     public static Object setIndex(Object collection, Object index,
                                   Object value) {
         if (collection instanceof String) {
-            throw makeThrowable(
+            throw makeError(
                 "NotIndexableError",
                 "Strings are immutable and cannot be indexed for assignment.");
         }
@@ -358,7 +360,7 @@ public final class LoxOps {
             return value;
         }
         if (!(collection instanceof LoxList)) {
-            throw makeThrowable(
+            throw makeError(
                 "NotIndexableError",
                 "Only lists and maps can be indexed for assignment.");
         }
@@ -406,7 +408,7 @@ public final class LoxOps {
      * and follows it with an athrow itself.
      */
     public static LoxError matchError() {
-        return new LoxError("MatchError: no matching arm.");
+        return makeError("MatchError", "MatchError: no matching arm.");
     }
 
     /**
@@ -453,7 +455,7 @@ public final class LoxOps {
         if (obj instanceof LoxFile) {
             LoxCallable m = ((LoxFile)obj).getMethod(name);
             if (m == null) {
-                throw makeThrowable("UndefinedPropertyError",
+                throw makeError("UndefinedPropertyError",
                                     "Undefined property '" + name +
                                         "' on file.");
             }
@@ -462,14 +464,14 @@ public final class LoxOps {
         if (obj instanceof LoxMap) {
             LoxCallable m = ((LoxMap)obj).getMethod(name);
             if (m == null) {
-                throw makeThrowable("UndefinedPropertyError",
+                throw makeError("UndefinedPropertyError",
                                     "Undefined property '" + name +
                                         "' on map.");
             }
             return m;
         }
         if (!(obj instanceof LoxInstance)) {
-            throw makeThrowable("InvalidReceiverError",
+            throw makeError("InvalidReceiverError",
                                 "Only instances have properties.");
         }
         LoxInstance instance = (LoxInstance)obj;
@@ -478,7 +480,7 @@ public final class LoxOps {
         }
         LoxClosure method = instance.klass.findMethod(name);
         if (method == null) {
-            throw makeThrowable("UndefinedPropertyError",
+            throw makeError("UndefinedPropertyError",
                                 "Undefined property '" + name + "'.");
         }
         return new LoxBoundMethod(instance, method);
@@ -486,7 +488,7 @@ public final class LoxOps {
 
     public static Object setProperty(Object obj, String name, Object value) {
         if (!(obj instanceof LoxInstance)) {
-            throw makeThrowable("InvalidReceiverError",
+            throw makeError("InvalidReceiverError",
                                 "Only instances have fields.");
         }
         ((LoxInstance)obj).fields.put(name, value);
@@ -547,7 +549,7 @@ public final class LoxOps {
         if (callee instanceof LoxCallable) {
             return ((LoxCallable)callee).call(args);
         }
-        throw makeThrowable("NotCallableError",
+        throw makeError("NotCallableError",
                             "Can only call functions, classes and enums.");
     }
 
@@ -570,13 +572,13 @@ public final class LoxOps {
                 if (fieldVal instanceof LoxNative) {
                     return ((LoxNative)fieldVal).call(args);
                 }
-                throw makeThrowable(
+                throw makeError(
                     "NotCallableError",
                     "Can only call functions, classes and enums.");
             }
             LoxClosure method = instance.klass.findMethod(name);
             if (method == null) {
-                throw makeThrowable("UndefinedPropertyError",
+                throw makeError("UndefinedPropertyError",
                                     "Undefined property '" + name + "'.");
             }
             return method.callAsSelf(instance, args);
@@ -609,7 +611,7 @@ public final class LoxOps {
                                    args.length + ".");
             }
             if (list.elements.isEmpty()) {
-                throw new LoxError("Cannot pop from an empty list.");
+                throw makeError("EmptyListError", "Cannot pop from an empty list.");
             }
             return list.elements.remove(list.elements.size() - 1);
         case "remove":
