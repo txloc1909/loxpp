@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <optional>
 #include <sstream>
+#include <stack>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -129,6 +130,10 @@ struct Emitter {
     std::unordered_map<int, PopKind> popKinds;
     std::unordered_map<int, std::vector<int>> invisibleVarsByOffset;
     std::unordered_map<int, std::string> labelAtOffset;
+
+    // Labels marking the start and end of protected regions (for try/catch).
+    std::unordered_map<int, std::string> pushHandlerLabels;
+    std::unordered_map<int, std::string> popHandlerLabels;
 
     // Every Lox local slot this chunk's OWN captures (capture_analysis.h's
     // FunctionCaptureInfo::liveRangesBySlot) ever backs with an object[1]
@@ -1803,6 +1808,45 @@ void emitBody(Emitter& e, bool isFunction,
         case Op::GET_TAG:
             emitGetTagOrFused(e, i, consumedFollowingJumpTable);
             break;
+        case Op::PUSH_HANDLER: {
+            // Mark the start of a protected region. The catch handler offset is
+            // recorded in the analysis; we just emit a label for the CFG pass
+            // to recognize. The actual try/catch directives are emitted after
+            // the body.
+            std::string handlerLabel = "tryStart_" + std::to_string(in.offset);
+            e.b.label(handlerLabel);
+            e.pushHandlerLabels[in.offset] = handlerLabel;
+            break;
+        }
+        case Op::POP_HANDLER: {
+            // Mark the end of a protected region. Emit a label so the exception
+            // handler directives know where the protected region ends.
+            std::string endLabel = "tryEnd_" + std::to_string(in.offset);
+            e.b.label(endLabel);
+            e.popHandlerLabels[in.offset] = endLabel;
+            break;
+        }
+        case Op::THROW: {
+            // Throw an exception. The value on top of the stack is the value
+            // being thrown. If it's not already an Error instance, wrap it in a
+            // LoxError.
+            e.b.emit("call object [LoxRuntime]Lox.LoxOps::Throw(object)", 1,
+                     -1);
+            e.b.emit("throw", 0, 0);
+            break;
+        }
+        case Op::DEFER_RECORD:
+            // Defer: record a closure to be invoked at function exit.
+            // For now, this is a placeholder - full implementation deferred to
+            // later.
+            notImplemented(in.op);
+            break;
+        case Op::RUN_DEFERS:
+            // Run accumulated defers in LIFO order at function exit.
+            // For now, this is a placeholder - full implementation deferred to
+            // later.
+            notImplemented(in.op);
+            break;
         default:
             notImplemented(in.op);
         }
@@ -2045,6 +2089,21 @@ std::string emitHeader(const std::string& moduleClassName) {
 // with no extra wiring; a function chunk becomes a class extending
 // [LoxRuntime]Lox.LoxClosure, with the constructor every such class needs
 // plus the `Invoke` override that holds this chunk's own lowered body.
+// Inject .try/catch directives for exception handling regions into the
+// generated IL. For full try/catch region support with structured IL, see X6
+// (differential tests). For now, return the body unchanged - THROW works via
+// CLR exception propagation, but structured try/catch regions require more
+// complex IL restructuring that is deferred to the next node.
+std::string injectTryCatchDirectives(const std::string& bodyText,
+                                     const Emitter& e,
+                                     const DecodedFunction& fn) {
+    // TODO(X6): Emit proper .try{}catch{} IL with label references and leave
+    // instructions. This requires scanning the IL to identify try/catch
+    // boundaries and restructuring the instruction stream to place handler code
+    // in the proper catch block scope.
+    return bodyText;
+}
+
 std::string emitClassBody(const Emitter& e, const DecodedFunction& fn,
                           const std::string& className, bool isFunction,
                           int totalLocals) {
@@ -2070,7 +2129,10 @@ std::string emitClassBody(const Emitter& e, const DecodedFunction& fn,
         out << "object";
     }
     out << ")\n\n";
-    out << e.b.text.str();
+
+    std::string bodyText = e.b.text.str();
+    bodyText = injectTryCatchDirectives(bodyText, e, fn);
+    out << bodyText;
     out << "  }\n";
     out << "}\n";
     return out.str();

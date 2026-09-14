@@ -918,4 +918,13 @@ public static class LoxOps {
         }
         return s.Substring(0, end);
     }
+
+    /// <summary>
+    /// Handle a throw: wrap the value in a LoxError and throw it.
+    /// This is called by the THROW opcode in generated code.
+    /// The value can be anything; it becomes the Value field of the LoxError.
+    /// </summary>
+    public static object Throw(object value) {
+        throw new LoxError(value);
+    }
 }
