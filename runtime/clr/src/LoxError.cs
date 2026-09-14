@@ -9,16 +9,17 @@ namespace Lox;
 /// </summary>
 public sealed class LoxError : Exception {
     /// <summary>The Error instance being thrown (if this is a caught/catchable error).</summary>
-    public object Value { get; }
+    private object _value;
+    public object Value { get { return _value; } }
 
     /// <summary>Construct from a message only (for uncatchable internal errors).</summary>
     public LoxError(string message) : base(message) {
-        Value = null;
+        _value = null;
     }
 
     /// <summary>Construct from an Error value (for catchable runtime faults).</summary>
     public LoxError(object value) : base(ExtractMessage(value)) {
-        Value = value;
+        _value = value;
     }
 
     private static string ExtractMessage(object value) {

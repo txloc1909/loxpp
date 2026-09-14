@@ -228,14 +228,14 @@ public static class LoxOps {
 
     private static int BoundedIndex(object indexVal, int size, string kind) {
         if (indexVal is not double d) {
-            throw new LoxError($"{kind} index must be a number.");
+            throw new LoxError(LoxRuntime.MakeError($"{kind} index must be a number.", "IndexTypeError"));
         }
         if (d != Math.Floor(d)) {
-            throw new LoxError($"{kind} index must be an integer.");
+            throw new LoxError(LoxRuntime.MakeError($"{kind} index must be an integer.", "IndexNotIntegerError"));
         }
         int idx = (int)d;
         if (idx < 0 || idx >= size) {
-            throw new LoxError($"{kind} index out of bounds.");
+            throw new LoxError(LoxRuntime.MakeError($"{kind} index out of bounds.", "IndexOutOfBoundsError"));
         }
         return idx;
     }
