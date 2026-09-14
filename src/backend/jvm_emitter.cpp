@@ -307,6 +307,11 @@ struct Emitter {
     // catch-block label (from the CFG analysis).
     std::unordered_map<int, std::string> handlerLabelsByOffset;
 
+    // Handler entry block offsets (from CFG analysis). When entering a block
+    // at one of these offsets via exception dispatch, a LoxError is on the
+    // stack and needs to be unwrapped to get the Lox value.
+    std::unordered_set<int> handlerEntryOffsets;
+
     // Tracks the currently active protected region (between PUSH_HANDLER and
     // POP_HANDLER). startBytecodeOffset is the byte offset in the emitted
     // bytecode where the protected region starts.
@@ -1794,6 +1799,10 @@ Emitter buildEmitter(const DecodedFunction& fn,
             entry.catchBlock < static_cast<int>(cfg.blocks.size())) {
             e.handlerLabelsByOffset[entry.pushHandlerOffset] =
                 cfg.blocks[entry.catchBlock].label;
+            // Record that this block is a handler entry, so we can emit
+            // extraction code when entering it.
+            e.handlerEntryOffsets.insert(
+                cfg.blocks[entry.catchBlock].leaderOffset);
         }
     }
 
@@ -1982,6 +1991,21 @@ void emitBody(Emitter& e, bool isScript,
         auto labelIt = e.labelAtOffset.find(in.offset);
         if (labelIt != e.labelAtOffset.end()) {
             e.b.label(labelIt->second);
+
+            // If this is a handler entry block, extract the Lox value from the
+            // caught LoxError (which is on the stack via JVM exception
+            // dispatch). The catch code expects the Lox value, not the
+            // exception wrapper.
+            if (e.handlerEntryOffsets.find(in.offset) !=
+                e.handlerEntryOffsets.end()) {
+                // Stack before: [LoxError]
+                // Extract the value field and leave it on the stack
+                e.b.emit("invokevirtual lox/LoxError/getValue()"
+                         "Ljava/lang/Object;",
+                         0);
+                // Stack after: [value]
+            }
+
             bool trustCarryForward = e.prevCanFallThrough &&
                                      e.prevNaturalSuccessorOffset == in.offset;
             if (!trustCarryForward) {
