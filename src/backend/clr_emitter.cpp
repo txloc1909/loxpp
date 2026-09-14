@@ -135,6 +135,10 @@ struct Emitter {
     std::unordered_map<int, std::string> pushHandlerLabels;
     std::unordered_map<int, std::string> popHandlerLabels;
 
+    // Map from catchOffset to a label marking the start of the catch handler
+    // block.
+    std::unordered_map<int, std::string> catchBlockLabels;
+
     // Every Lox local slot this chunk's OWN captures (capture_analysis.h's
     // FunctionCaptureInfo::liveRangesBySlot) ever backs with an object[1]
     // ref-cell. Membership only, not the live range: GET_LOCAL, SET_LOCAL,
@@ -1629,6 +1633,21 @@ void emitBody(Emitter& e, bool isFunction,
             }
         }
 
+        // Check if this instruction starts a catch handler block (for try/catch
+        // IL).
+        for (const auto& handler : e.analysis.handlerEntries) {
+            if (handler.catchOffset == in.offset) {
+                std::string catchLabel =
+                    "catchStart_" + std::to_string(in.offset);
+                e.b.label(catchLabel);
+                e.catchBlockLabels[in.offset] = catchLabel;
+                // Resync depth to the declared contract depth for the catch
+                // entry.
+                e.b.resync(handler.declaredOperandDepth);
+                break;
+            }
+        }
+
         // Safety net: every correctly-lowered opcode in this pass keeps the
         // CIL evaluation stack's physical depth equal to the shared
         // abstract-stack analysis's own operandDepth() at the same offset.
@@ -2090,18 +2109,138 @@ std::string emitHeader(const std::string& moduleClassName) {
 // [LoxRuntime]Lox.LoxClosure, with the constructor every such class needs
 // plus the `Invoke` override that holds this chunk's own lowered body.
 // Inject .try/catch directives for exception handling regions into the
-// generated IL. For full try/catch region support with structured IL, see X6
-// (differential tests). For now, return the body unchanged - THROW works via
-// CLR exception propagation, but structured try/catch regions require more
-// complex IL restructuring that is deferred to the next node.
+// generated IL. This restructures the IL to emit properly-nested .try{}/catch{}
+// blocks that satisfy ilasm's structured exception handling requirements.
 std::string injectTryCatchDirectives(const std::string& bodyText,
                                      const Emitter& e,
                                      const DecodedFunction& fn) {
-    // TODO(X6): Emit proper .try{}catch{} IL with label references and leave
-    // instructions. This requires scanning the IL to identify try/catch
-    // boundaries and restructuring the instruction stream to place handler code
-    // in the proper catch block scope.
-    return bodyText;
+    // If there are no handler entries, return the body unchanged.
+    if (e.analysis.handlerEntries.empty()) {
+        return bodyText;
+    }
+
+    std::istringstream iss(bodyText);
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(iss, line)) {
+        lines.push_back(line);
+    }
+
+    // Build maps for label locations.
+    std::unordered_map<std::string, std::size_t> labelToLine;
+    for (std::size_t i = 0; i < lines.size(); i++) {
+        const std::string& l = lines[i];
+        std::size_t colonPos = l.rfind(':');
+        if (colonPos != std::string::npos &&
+            l.find_first_not_of(" \t", colonPos + 1) == std::string::npos) {
+            std::size_t labelStart = l.find_first_not_of(" \t");
+            if (labelStart != std::string::npos && labelStart < colonPos) {
+                std::string labelName =
+                    l.substr(labelStart, colonPos - labelStart);
+                labelToLine[labelName] = i;
+            }
+        }
+    }
+
+    // Restructure the IL to emit .try/.catch blocks.
+    std::ostringstream result;
+    std::vector<bool> processed(lines.size(), false);
+
+    for (const auto& handler : e.analysis.handlerEntries) {
+        std::string tryStartLabel =
+            "tryStart_" + std::to_string(handler.pushHandlerOffset);
+        std::string catchStartLabel =
+            "catchStart_" + std::to_string(handler.catchOffset);
+
+        auto tryStartIt = labelToLine.find(tryStartLabel);
+        auto catchStartIt = labelToLine.find(catchStartLabel);
+
+        if (tryStartIt == labelToLine.end() ||
+            catchStartIt == labelToLine.end()) {
+            continue;
+        }
+
+        std::size_t tryStartLine = tryStartIt->second;
+        std::size_t catchStartLine = catchStartIt->second;
+
+        // Protected region ends just before the catch handler label.
+        // Skip back over any intermediate labels (like L_0010:) that are
+        // between tryStart and catchStart - these are CFG labels, not
+        // user-visible, and should not be included in the try block.
+        std::size_t tryEndLine = catchStartLine;
+        while (tryEndLine > tryStartLine && tryEndLine > 0) {
+            const std::string& l = lines[tryEndLine - 1];
+            std::size_t colonPos = l.rfind(':');
+            if (colonPos != std::string::npos &&
+                l.find_first_not_of(" \t", colonPos + 1) == std::string::npos) {
+                // This is a label, skip it.
+                tryEndLine--;
+            } else {
+                // Found an actual instruction - this is where the try block
+                // ends.
+                break;
+            }
+        }
+
+        // Find where the catch block ends: the next label after catchStart.
+        std::size_t catchEndLine = catchStartLine + 1;
+        for (std::size_t i = catchStartLine + 1; i < lines.size(); i++) {
+            const std::string& l = lines[i];
+            std::size_t colonPos = l.rfind(':');
+            if (colonPos != std::string::npos &&
+                l.find_first_not_of(" \t", colonPos + 1) == std::string::npos) {
+                // Found a label - catch block ends here.
+                catchEndLine = i;
+                break;
+            }
+        }
+
+        // Output all unprocessed lines before the try block.
+        for (std::size_t i = 0; i < tryStartLine; i++) {
+            if (!processed[i]) {
+                result << lines[i] << "\n";
+                processed[i] = true;
+            }
+        }
+
+        // Emit the .try/.catch structure.
+        result << "    .try\n    {\n";
+
+        // Protected region: from after tryStart to just before catchStart
+        // label.
+        for (std::size_t i = tryStartLine + 1; i < tryEndLine; i++) {
+            if (!lines[i].empty()) {
+                result << lines[i] << "\n";
+            }
+            processed[i] = true;
+        }
+
+        result << "    }\n";
+        result << "    catch [LoxRuntime]Lox.LoxError\n    {\n";
+
+        // Catch handler: from after catchStart to the next label.
+        for (std::size_t i = catchStartLine + 1; i < catchEndLine; i++) {
+            if (!lines[i].empty()) {
+                result << lines[i] << "\n";
+            }
+            processed[i] = true;
+        }
+
+        result << "    }\n";
+
+        // Mark the labels themselves as processed.
+        processed[tryStartLine] = true;
+        processed[catchStartLine] = true;
+    }
+
+    // Emit remaining unprocessed lines.
+    for (std::size_t i = 0; i < lines.size(); i++) {
+        if (!processed[i]) {
+            result << lines[i] << "\n";
+        }
+    }
+
+    return result.str();
 }
 
 std::string emitClassBody(const Emitter& e, const DecodedFunction& fn,
