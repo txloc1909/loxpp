@@ -30,6 +30,16 @@ namespace {
     throw std::runtime_error("not implemented: " + opName(op));
 }
 
+// One entry in the JVM exception table: a try region and its handler.
+struct ExceptionEntry {
+    std::string
+        regionStartLabel;       // synthetic label for start of protected region
+    std::string regionEndLabel; // synthetic label for end of protected region
+    std::string handlerLabel;   // jasmin label of handler block (from CFG)
+    int startInstrOffset{0};    // unused (kept for compatibility)
+    int endInstrOffset{0};      // unused (kept for compatibility)
+};
+
 // A short, offset-anchored jasmin label for a micro-branch this emitter
 // inserts on top of what the CFG pass (cfg.h) already labeled — see
 // ensureCapturedCell and the captured GET_LOCAL/SET_LOCAL lowering below.
@@ -292,6 +302,22 @@ struct Emitter {
         b.emit(call, -3);
         b.emit("aload " + scratch, +1);
     }
+
+    // Exception handling: maps from PUSH_HANDLER offset to the handler's
+    // catch-block label (from the CFG analysis).
+    std::unordered_map<int, std::string> handlerLabelsByOffset;
+
+    // Tracks the currently active protected region (between PUSH_HANDLER and
+    // POP_HANDLER). startBytecodeOffset is the byte offset in the emitted
+    // bytecode where the protected region starts.
+    struct ActiveRegion {
+        int startBytecodeOffset{0};
+        int pushHandlerInstrOffset{0};
+    };
+    std::vector<ActiveRegion> activeRegions;
+
+    // All exception table entries collected during emission.
+    std::vector<ExceptionEntry> exceptionTable;
 };
 
 // `analysis.before[i].localCount` is only an upper bound at a CFG merge
@@ -1545,6 +1571,78 @@ void emitReturn(Emitter& e, bool isScript) {
     e.b.emit("areturn", -1);
 }
 
+// PUSH_HANDLER: Start a try/catch protected region. Emit a label for the
+// region start and record the handler information for later emission of
+// the .catch directive.
+void emitPushHandler(Emitter& e, const DecodedInstruction& in) {
+    // Find the handler label for this PUSH_HANDLER.
+    auto it = e.handlerLabelsByOffset.find(in.offset);
+    if (it == e.handlerLabelsByOffset.end()) {
+        throw std::runtime_error(
+            "jvm_emitter: PUSH_HANDLER at offset " + std::to_string(in.offset) +
+            " has no handler label in CFG (internal error)");
+    }
+
+    // Generate a synthetic label for the protected region start.
+    std::string regionStartLabel =
+        "try_" + std::to_string(in.offset) + "_start";
+    e.b.label(regionStartLabel);
+
+    // Record the region information for emission of .catch directive later.
+    Emitter::ActiveRegion region;
+    region.pushHandlerInstrOffset = in.offset;
+    e.activeRegions.push_back(region);
+}
+
+// POP_HANDLER: End a try/catch protected region. Emit a label for the
+// region end and create an exception table entry.
+void emitPopHandler(Emitter& e, const DecodedInstruction& in) {
+    if (e.activeRegions.empty()) {
+        throw std::runtime_error(
+            "jvm_emitter: POP_HANDLER without matching PUSH_HANDLER");
+    }
+
+    Emitter::ActiveRegion region = e.activeRegions.back();
+    e.activeRegions.pop_back();
+
+    // Generate a synthetic label for the protected region end.
+    std::string regionEndLabel =
+        "try_" + std::to_string(region.pushHandlerInstrOffset) + "_end";
+    e.b.label(regionEndLabel);
+
+    // Look up the handler label.
+    auto it = e.handlerLabelsByOffset.find(region.pushHandlerInstrOffset);
+    if (it == e.handlerLabelsByOffset.end()) {
+        throw std::runtime_error("jvm_emitter: handler label not found");
+    }
+
+    // Create an exception table entry using the synthetic labels.
+    ExceptionEntry entry;
+    entry.startInstrOffset = 0; // Unused when using labels
+    entry.endInstrOffset = 0;   // Unused when using labels
+    entry.handlerLabel = it->second;
+
+    // Store the region labels for later .catch emission
+    std::string startLabel =
+        "try_" + std::to_string(region.pushHandlerInstrOffset) + "_start";
+    entry.regionStartLabel = startLabel;
+    entry.regionEndLabel = regionEndLabel;
+
+    e.exceptionTable.push_back(entry);
+}
+
+// THROW: Raise an exception. The value on the stack is wrapped in a LoxError
+// and thrown via athrow.
+void emitThrow(Emitter& e) {
+    // Stack before: [value]
+    // makeThrowable(Object) returns LoxError: net stack effect 0
+    e.b.emit("invokestatic lox/LoxOps/makeThrowable(Ljava/lang/Object;)"
+             "Llox/LoxError;",
+             0);
+    // athrow consumes the LoxError and throws: stack effect -1
+    e.b.emit("athrow", -1);
+}
+
 // The `<init>` every generated LoxFn$<n> needs (jvm_emitter.h hazard note):
 // calls straight through to LoxClosure's own constructor with this
 // function's compile-time name/arity as literals, so only the upvalues
@@ -1687,6 +1785,18 @@ Emitter buildEmitter(const DecodedFunction& fn,
     for (const BasicBlock& block : cfg.blocks) {
         e.labelAtOffset.emplace(block.leaderOffset, block.label);
     }
+
+    // Map PUSH_HANDLER offsets to their catch handler labels. Exception regions
+    // will be emitted using this map when PUSH_HANDLER/POP_HANDLER are
+    // processed.
+    for (const HandlerEntry& entry : cfg.handlerEntries) {
+        if (entry.catchBlock >= 0 &&
+            entry.catchBlock < static_cast<int>(cfg.blocks.size())) {
+            e.handlerLabelsByOffset[entry.pushHandlerOffset] =
+                cfg.blocks[entry.catchBlock].label;
+        }
+    }
+
     return e;
 }
 
@@ -2046,6 +2156,19 @@ void emitBody(Emitter& e, bool isScript,
         case Op::GET_TAG:
             emitGetTagOrFused(e, i, consumedFollowingJumpTable);
             break;
+        case Op::PUSH_HANDLER:
+            emitPushHandler(e, in);
+            break;
+        case Op::POP_HANDLER:
+            emitPopHandler(e, in);
+            break;
+        case Op::THROW:
+            emitThrow(e);
+            break;
+        case Op::DEFER_RECORD:
+        case Op::RUN_DEFERS:
+            notImplemented(in.op);
+            break;
         default:
             if (!emitSimpleOp(e, in.op)) {
                 notImplemented(in.op);
@@ -2055,6 +2178,18 @@ void emitBody(Emitter& e, bool isScript,
         i = finishInstruction(e, i, in, consumedFollowingPop,
                               consumedFollowingJumpTable);
     }
+}
+
+// Generate the .catch directives for exception table entries.
+std::string generateExceptionTable(const Emitter& e) {
+    std::ostringstream out;
+    for (const ExceptionEntry& entry : e.exceptionTable) {
+        // .catch <exception-type> from <label> to <label> using <label>
+        out << "    .catch lox/LoxError from " << entry.regionStartLabel
+            << " to " << entry.regionEndLabel << " using " << entry.handlerLabel
+            << "\n";
+    }
+    return out.str();
 }
 
 // The class header, the method this chunk becomes (`main` or `invoke`, plus
@@ -2076,7 +2211,10 @@ std::string assembleClass(const Emitter& e, const DecodedFunction& fn,
     }
     out << "    .limit stack " << std::max(1, e.b.maxDepth) << "\n";
     out << "    .limit locals " << (e.scratchSlot + 1 + extraSpillSlots)
-        << "\n\n";
+        << "\n";
+    // Emit exception table entries before the method body
+    out << generateExceptionTable(e);
+    out << "\n";
     out << e.b.text.str();
     out << ".end method\n";
     return out.str();

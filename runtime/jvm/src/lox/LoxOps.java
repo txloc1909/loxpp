@@ -352,6 +352,16 @@ public final class LoxOps {
         return new LoxError("MatchError: no matching arm.");
     }
 
+    /**
+     * Wrap a user-thrown Lox++ value in a LoxError for throw statement execution.
+     * The value is carried as a field in the LoxError for later catch binding.
+     */
+    public static LoxError makeThrowable(Object value) {
+        // If the value is a string, use it as the message; otherwise use toString()
+        String message = stringify(value);
+        return new LoxError(message, value);
+    }
+
     // ------------------------------------------------------------------
     // instanceof / properties / methods
     // ------------------------------------------------------------------
