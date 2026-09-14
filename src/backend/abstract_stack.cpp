@@ -101,15 +101,6 @@ LocalCfg buildCfg(const std::vector<DecodedInstruction>& ins) {
         case Op::RETURN:
         case Op::MATCH_ERROR:
         case Op::THROW:
-            // PUSH_HANDLER is a structural boundary: the protected region and
-            // its handler must exist regardless of whether a preceding try body
-            // is terminal. If the next instruction is PUSH_HANDLER, connect it
-            // to this terminal even though no normal control flow falls
-            // through.
-            if (fallthrough >= 0 &&
-                ins[static_cast<size_t>(fallthrough)].op == Op::PUSH_HANDLER) {
-                addEdge(idx, fallthrough);
-            }
             break;
         case Op::JUMP:
         case Op::LOOP:
@@ -995,6 +986,38 @@ std::vector<std::optional<StackState>> runFixpointWithHandlerSeeds(
     }
     std::vector<std::optional<StackState>> prelim =
         runFixpoint(ins, cfg, entrySeed, declaredSlotsAt);
+
+    // PUSH_HANDLER is a structural boundary: every try region must be
+    // reachable if any code in the function is reachable, regardless of
+    // control flow. If a PUSH_HANDLER has no normal CFG predecessors
+    // (unreached in prelim), but there is reachable code before it in the
+    // instruction stream, synthesize a state for it by carrying forward from
+    // the most recent reachable instruction. This ensures handler-entry blocks
+    // are seeded and reachable, even for sibling try/catch statements where
+    // an earlier one ends in a terminal instruction (THROW/RETURN).
+    for (const auto& [pushIdx, catchIdx] : cfg.handlerLinks) {
+        if (!prelim[pushIdx]) {
+            // PUSH_HANDLER is unreached — check if there is any reachable
+            // instruction before it in the stream
+            bool hasReachablePredecessor = false;
+            int lastReachedIdx = -1;
+            for (int i = 0; i < static_cast<int>(pushIdx); i++) {
+                if (prelim[i]) {
+                    hasReachablePredecessor = true;
+                    lastReachedIdx = i;
+                }
+            }
+            if (hasReachablePredecessor && lastReachedIdx >= 0) {
+                // Synthesize state for unreached PUSH_HANDLER by advancing
+                // from the most recent reached instruction. PUSH_HANDLER has
+                // no stack effect, so its before-state equals its after-state.
+                prelim[pushIdx] =
+                    advance(ins, lastReachedIdx, *prelim[lastReachedIdx],
+                            declaredSlotsAt);
+            }
+        }
+    }
+
     std::vector<std::pair<int, StackState>> seeds = entrySeed;
     std::vector<std::pair<int, StackState>> handlerSeeds =
         handlerEntrySeeds(cfg, prelim, trackLocals);
