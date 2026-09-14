@@ -22,7 +22,10 @@ public sealed class LoxGlobals {
 
     public object Get(string name) {
         if (!m_values.TryGetValue(name, out object v)) {
-            throw new LoxError($"Undefined variable '{name}'.");
+            // Kind/message match vm.cpp's GET_GLOBAL/SET_GLOBAL exactly (no name
+            // interpolation there) - catchable as UndefinedVariableError per
+            // spec/04-semantics.md's Runtime Errors table.
+            throw new LoxError(LoxRuntime.MakeError("Undefined variable.", "UndefinedVariableError"));
         }
         return Unbox(v);
     }
@@ -33,7 +36,10 @@ public sealed class LoxGlobals {
         m_values[name] = Box(value);
         if (isNewKey) {
             m_values.Remove(name);
-            throw new LoxError($"Undefined variable '{name}'.");
+            // Kind/message match vm.cpp's GET_GLOBAL/SET_GLOBAL exactly (no name
+            // interpolation there) - catchable as UndefinedVariableError per
+            // spec/04-semantics.md's Runtime Errors table.
+            throw new LoxError(LoxRuntime.MakeError("Undefined variable.", "UndefinedVariableError"));
         }
     }
 

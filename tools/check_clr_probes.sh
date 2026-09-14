@@ -353,17 +353,19 @@ examples=(
     # (try_catch_basic.lox) and a try/catch nested inside another try's
     # protected body and its catch body (nested_try_catch.lox, rethrown
     # from the inner catch to the outer one). A runtime fault whose caught
-    # Error exposes `kind`/`message` (list index out of bounds, a
-    # defer-triggered fault) is not in this group yet: LoxRuntime.cs's
-    # fault sites do not build a catchable Error instance
-    # (LoxRuntime.MakeError exists but nothing calls it), so e.kind/
-    # e.message on a caught runtime fault stays unimplemented pending a
-    # follow-up node.
+    # Error exposes `kind`/`message` (catch_index_error.lox: list index out
+    # of bounds) now matches: LoxOps.cs's catchable fault sites build a
+    # proper Error instance via LoxRuntime.MakeError. A *defer*-triggered
+    # fault (defer_throw_outer_catch.lox) is still not in this group: the
+    # CLR emitter does not lower DEFER_RECORD/RUN_DEFERS at all yet (a
+    # separate, much larger gap than fault-site wiring — see clr_emitter.cpp)
+    # so that example cannot even emit valid IL, let alone match native.
     "examples/simple_throw.lox"
     "examples/test_throw_simple.lox"
     "examples/try_catch_basic.lox"
     "examples/test_catch_simple.lox"
     "examples/nested_try_catch.lox"
+    "examples/catch_index_error.lox"
     "examples/test_arithmetic.lox"
     "examples/test_list_safe.lox"
 )

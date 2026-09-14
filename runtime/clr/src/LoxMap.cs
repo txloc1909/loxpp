@@ -120,12 +120,12 @@ public sealed class LoxMap {
         switch (name) {
         case "has":
             return new LoxMapMethod("has", 1, a => {
-                LoxOps.CheckMapKey(a[0]);
+                LoxOps.CheckMapKeyForNativeMethod(a[0]);
                 return Has(a[0]);
             });
         case "del":
             return new LoxMapMethod("del", 1, a => {
-                LoxOps.CheckMapKey(a[0]);
+                LoxOps.CheckMapKeyForNativeMethod(a[0]);
                 Remove(a[0]);
                 return null;
             });
