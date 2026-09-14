@@ -348,6 +348,24 @@ examples=(
     # fields(), methods(), getField(), setField(), hasField(), callMethod().
     "examples/reflection_basics.lox"
     "examples/generic_tools.lox"
+    # Non-local control flow: a thrown value caught by a matching handler,
+    # including a throw that crosses a function-call boundary
+    # (try_catch_basic.lox) and a try/catch nested inside another try's
+    # protected body and its catch body (nested_try_catch.lox, rethrown
+    # from the inner catch to the outer one). A runtime fault whose caught
+    # Error exposes `kind`/`message` (list index out of bounds, a
+    # defer-triggered fault) is not in this group yet: LoxRuntime.cs's
+    # fault sites do not build a catchable Error instance
+    # (LoxRuntime.MakeError exists but nothing calls it), so e.kind/
+    # e.message on a caught runtime fault stays unimplemented pending a
+    # follow-up node.
+    "examples/simple_throw.lox"
+    "examples/test_throw_simple.lox"
+    "examples/try_catch_basic.lox"
+    "examples/test_catch_simple.lox"
+    "examples/nested_try_catch.lox"
+    "examples/test_arithmetic.lox"
+    "examples/test_list_safe.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
