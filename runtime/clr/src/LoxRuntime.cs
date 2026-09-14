@@ -492,4 +492,16 @@ public static class LoxRuntime {
         }
         return a > b ? a : b;
     }
+
+    /// <summary>
+    /// Create a builtin Error instance per spec/03-types.md.
+    /// Every Error has `message` and `kind` fields, both read-only strings.
+    /// </summary>
+    public static object MakeError(string message, string kind) {
+        var errorClass = new LoxClass("Error", null);
+        var errorInst = new LoxInstance(errorClass);
+        errorInst.Fields["message"] = message;
+        errorInst.Fields["kind"] = kind;
+        return errorInst;
+    }
 }
