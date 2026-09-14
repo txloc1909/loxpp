@@ -327,6 +327,12 @@ struct Emitter {
     // All exception table entries collected during emission.
     std::vector<ExceptionEntry> exceptionTable;
 
+    // Maps from handler entry offset to the PUSH_HANDLER's offset that
+    // declares it. Used to emit the region end label at the handler entry
+    // before the handler's own label. A handler entry offset can appear at
+    // most once (each PUSH_HANDLER declares one target).
+    std::unordered_map<int, int> regionEndLabelsByHandlerOffset;
+
     // Defer catch-all handler: label at the start of the function body
     // (after prologue) and the handler code label for catching exceptions
     // and running defers before re-throwing.
@@ -1606,10 +1612,18 @@ void emitPushHandler(Emitter& e, const DecodedInstruction& in) {
     Emitter::ActiveRegion region;
     region.pushHandlerInstrOffset = in.offset;
     e.activeRegions.push_back(region);
+
+    // Record that the region end label needs to be emitted at the handler
+    // entry offset (the target of this PUSH_HANDLER). This ensures the
+    // exception table's protected-region end is placed right before the
+    // handler code starts, not after the handler executes.
+    e.regionEndLabelsByHandlerOffset[in.jumpTarget] = in.offset;
 }
 
-// POP_HANDLER: End a try/catch protected region. Emit a label for the
-// region end and create an exception table entry.
+// POP_HANDLER: End a try/catch protected region and create an exception
+// table entry. The region end label is emitted when the handler entry is
+// encountered (in emitBody), not here, to ensure it is placed before the
+// handler code starts, not after.
 void emitPopHandler(Emitter& e, const DecodedInstruction& in) {
     if (e.activeRegions.empty()) {
         throw std::runtime_error(
@@ -1619,26 +1633,24 @@ void emitPopHandler(Emitter& e, const DecodedInstruction& in) {
     Emitter::ActiveRegion region = e.activeRegions.back();
     e.activeRegions.pop_back();
 
-    // Generate a synthetic label for the protected region end.
-    std::string regionEndLabel =
-        "try_" + std::to_string(region.pushHandlerInstrOffset) + "_end";
-    e.b.label(regionEndLabel);
-
     // Look up the handler label.
     auto it = e.handlerLabelsByOffset.find(region.pushHandlerInstrOffset);
     if (it == e.handlerLabelsByOffset.end()) {
         throw std::runtime_error("jvm_emitter: handler label not found");
     }
 
-    // Create an exception table entry using the synthetic labels.
+    // Create an exception table entry using the synthetic labels. The region
+    // end label is generated from the same PUSH_HANDLER offset as the start
+    // label, which ensures they are consistent.
     ExceptionEntry entry;
     entry.startInstrOffset = 0; // Unused when using labels
     entry.endInstrOffset = 0;   // Unused when using labels
     entry.handlerLabel = it->second;
 
-    // Store the region labels for later .catch emission
     std::string startLabel =
         "try_" + std::to_string(region.pushHandlerInstrOffset) + "_start";
+    std::string regionEndLabel =
+        "try_" + std::to_string(region.pushHandlerInstrOffset) + "_end";
     entry.regionStartLabel = startLabel;
     entry.regionEndLabel = regionEndLabel;
 
@@ -2096,16 +2108,35 @@ void emitBody(Emitter& e, bool isScript,
     }
 
     for (std::size_t i = 0; i < n;) {
-        if (!e.reached(i)) {
-            i++;
-            continue; // endCompiler()'s trailing NIL;RETURN can be dead code.
-        }
         const DecodedInstruction& in = ins[i];
+        // POP_HANDLER marks the end of a try region and must always be
+        // processed, even if the preceding instruction is terminal (THROW or
+        // RETURN), which would mark this offset as unreachable. The region
+        // boundary is a structural constraint, not a control-flow reachability
+        // constraint. Skip other unreachable instructions normally (e.g.,
+        // endCompiler()'s trailing NIL;RETURN).
+        bool isPopHandler = in.op == Op::POP_HANDLER;
+        if (!e.reached(i) && !isPopHandler) {
+            i++;
+            continue;
+        }
         bool consumedFollowingPop = false;
         bool consumedFollowingJumpTable = false;
 
         auto labelIt = e.labelAtOffset.find(in.offset);
         if (labelIt != e.labelAtOffset.end()) {
+            // Before emitting the handler entry label, emit any region end
+            // labels that need to be placed at this offset. This ensures the
+            // exception table's protected-region boundary is correctly placed
+            // right before the handler code starts.
+            auto regionEndIt = e.regionEndLabelsByHandlerOffset.find(in.offset);
+            if (regionEndIt != e.regionEndLabelsByHandlerOffset.end()) {
+                int pushHandlerOffset = regionEndIt->second;
+                std::string regionEndLabel =
+                    "try_" + std::to_string(pushHandlerOffset) + "_end";
+                e.b.label(regionEndLabel);
+            }
+
             e.b.label(labelIt->second);
 
             // If this is a handler entry block, extract the Lox value from the

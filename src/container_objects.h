@@ -47,7 +47,7 @@ struct ObjFile : public Obj {
     // program exit (or never, if the heap is not exhausted). Always call
     // f.close() explicitly.
     ~ObjFile() override {
-        if (handle) {
+        if (handle != nullptr) {
             std::fclose(handle);
             handle = nullptr;
         }

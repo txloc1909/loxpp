@@ -17,19 +17,31 @@ public final class LoxOps {
     private LoxOps() {}
 
     // ------------------------------------------------------------------
+    // Error construction helpers
+    // ------------------------------------------------------------------
+
+    /**
+     * Constructs a LoxError wrapping an Error instance with the given kind
+     * and message. This allows caught exceptions to access .kind and .message
+     * fields via the Error class.
+     */
+    private static LoxError makeThrowable(String kind, String message) {
+        Object error = LoxRuntime.makeError(kind, message);
+        return new LoxError(message, error);
+    }
+
+    // ------------------------------------------------------------------
     // Truthiness (operator! in value.h: numbers and objects are truthy)
     // ------------------------------------------------------------------
 
     public static boolean isFalsy(Object v) {
         if (v instanceof Boolean) {
-            return !(Boolean) v;
+            return !(Boolean)v;
         }
         return v == null;
     }
 
-    public static Object not(Object v) {
-        return isFalsy(v);
-    }
+    public static Object not(Object v) { return isFalsy(v); }
 
     // ------------------------------------------------------------------
     // Arithmetic
@@ -37,54 +49,63 @@ public final class LoxOps {
 
     public static double checkNumber(Object v) {
         if (!(v instanceof Double)) {
-            throw new LoxError("Operand must be a number.");
+            throw makeThrowable("ArithmeticTypeError",
+                                "Operand must be a number.");
         }
-        return (Double) v;
+        return (Double)v;
     }
 
     private static void checkNumbers(Object a, Object b) {
         if (!(a instanceof Double) || !(b instanceof Double)) {
-            throw new LoxError("Operands must be numbers.");
+            throw makeThrowable("ArithmeticTypeError",
+                                "Operands must be numbers.");
         }
     }
 
     public static Object add(Object a, Object b) {
         if (a instanceof String && b instanceof String) {
-            return (String) a + (String) b;
+            return (String)a + (String)b;
+        }
+        if (a instanceof String || b instanceof String) {
+            throw makeThrowable(
+                "ConcatenationTypeError",
+                "Operands must be both strings or both numbers.");
         }
         checkNumbers(a, b);
-        return (Double) a + (Double) b;
+        return (Double)a + (Double)b;
     }
 
     public static Object subtract(Object a, Object b) {
         checkNumbers(a, b);
-        return (Double) a - (Double) b;
+        return (Double)a - (Double)b;
     }
 
     public static Object multiply(Object a, Object b) {
         checkNumbers(a, b);
-        return (Double) a * (Double) b;
+        return (Double)a * (Double)b;
     }
 
     public static Object divide(Object a, Object b) {
         checkNumbers(a, b);
-        return (Double) a / (Double) b;
+        return (Double)a / (Double)b;
     }
 
-    /** Floor-division sign: the result takes the sign of `b` (Python/Lua rule), matching vm.cpp exactly. */
+    /**
+     * Floor-division sign: the result takes the sign of `b` (Python/Lua rule),
+     * matching vm.cpp exactly.
+     */
     public static Object modulo(Object a, Object b) {
         checkNumbers(a, b);
-        double bd = (Double) b;
-        double result = (Double) a % bd; // Java's `%` on doubles is fmod, per JLS 15.17.3
+        double bd = (Double)b;
+        double result =
+            (Double)a % bd; // Java's `%` on doubles is fmod, per JLS 15.17.3
         if (result != 0 && (result < 0) != (bd < 0)) {
             result += bd;
         }
         return result;
     }
 
-    public static Object negate(Object a) {
-        return -checkNumber(a);
-    }
+    public static Object negate(Object a) { return -checkNumber(a); }
 
     // ------------------------------------------------------------------
     // Comparisons
@@ -99,7 +120,7 @@ public final class LoxOps {
      */
     public static boolean equal(Object a, Object b) {
         if (a instanceof Double && b instanceof Double) {
-            return ((Double) a).doubleValue() == ((Double) b).doubleValue();
+            return ((Double)a).doubleValue() == ((Double)b).doubleValue();
         }
         if (a instanceof Double || b instanceof Double) {
             return false;
@@ -110,39 +131,53 @@ public final class LoxOps {
         if (a instanceof String && b instanceof String) {
             return a.equals(b);
         }
-        return a == b; // nil (null == null) and every identity-equality object type
+        return a ==
+            b; // nil (null == null) and every identity-equality object type
+    }
+
+    private static void checkNumbersForComparison(Object a, Object b) {
+        if (!(a instanceof Double) || !(b instanceof Double)) {
+            throw makeThrowable("ComparisonTypeError",
+                                "Operands must be numbers.");
+        }
     }
 
     public static boolean greater(Object a, Object b) {
-        checkNumbers(a, b);
-        return (Double) a > (Double) b;
+        checkNumbersForComparison(a, b);
+        return (Double)a > (Double)b;
     }
 
     public static boolean less(Object a, Object b) {
-        checkNumbers(a, b);
-        return (Double) a < (Double) b;
+        checkNumbersForComparison(a, b);
+        return (Double)a < (Double)b;
     }
 
     // ------------------------------------------------------------------
     // Sequences: in / slice / index
     // ------------------------------------------------------------------
 
-    /** Public for codegen's BUILD_MAP: every key must pass this before the map is built, per vm.cpp. */
+    /**
+     * Public for codegen's BUILD_MAP: every key must pass this before the map
+     * is built, per vm.cpp.
+     */
     public static void checkMapKey(Object key) {
         if (key == null || key instanceof Boolean || key instanceof String) {
             return;
         }
-        if (key instanceof Double && !Double.isNaN((Double) key)) {
+        if (key instanceof Double && !Double.isNaN((Double)key)) {
             return;
         }
-        throw new LoxError(
-                "Map keys must be Bool, Number, Nil, or String. NaN is not allowed.");
+        throw new LoxError("Map keys must be Bool, Number, Nil, or String. " +
+                           "NaN is not allowed.");
     }
 
-    /** Operand order matches the on-stack order (elem below seq) — chunk.h's IN pops [elem, seq]. */
+    /**
+     * Operand order matches the on-stack order (elem below seq) — chunk.h's IN
+     * pops [elem, seq].
+     */
     public static boolean in(Object elem, Object seq) {
         if (seq instanceof LoxList) {
-            for (Object v : ((LoxList) seq).elements) {
+            for (Object v : ((LoxList)seq).elements) {
                 if (equal(v, elem)) {
                     return true;
                 }
@@ -151,32 +186,37 @@ public final class LoxOps {
         }
         if (seq instanceof String) {
             if (!(elem instanceof String)) {
-                throw new LoxError("Left operand of 'in' on a string must be a string.");
+                throw new LoxError(
+                    "Left operand of 'in' on a string must be a string.");
             }
-            return ((String) seq).contains((String) elem);
+            return ((String)seq).contains((String)elem);
         }
         if (seq instanceof LoxMap) {
             checkMapKey(elem);
-            return ((LoxMap) seq).has(elem);
+            return ((LoxMap)seq).has(elem);
         }
-        throw new LoxError("Right operand of 'in' must be a list, string, or map.");
+        throw new LoxError(
+            "Right operand of 'in' must be a list, string, or map.");
     }
 
     private static int sliceIndex(Object v) {
         if (!(v instanceof Double)) {
             throw new LoxError("Slice index must be a number.");
         }
-        double d = (Double) v;
+        double d = (Double)v;
         if (d != Math.floor(d)) {
             throw new LoxError("Slice index must be an integer.");
         }
         if (d < 0.0) {
             throw new LoxError("Slice index must be non-negative.");
         }
-        return (int) d;
+        return (int)d;
     }
 
-    /** [seq, start, end] — the same parameter order the operand stack holds bottom-up. */
+    /**
+     * [seq, start, end] — the same parameter order the operand stack holds
+     * bottom-up.
+     */
     public static Object slice(Object seq, Object startVal, Object endVal) {
         if (!(seq instanceof LoxList) && !(seq instanceof String)) {
             throw new LoxError("Slice requires a List or String.");
@@ -184,7 +224,7 @@ public final class LoxOps {
         int start = sliceIndex(startVal);
         int end = sliceIndex(endVal);
         if (seq instanceof LoxList) {
-            List<Object> src = ((LoxList) seq).elements;
+            List<Object> src = ((LoxList)seq).elements;
             int n = src.size();
             int s = Math.min(start, n);
             int e = Math.min(end, n);
@@ -194,7 +234,7 @@ public final class LoxOps {
             }
             return result;
         }
-        String str = (String) seq;
+        String str = (String)seq;
         int n = str.length();
         int s = Math.min(start, n);
         int e = Math.min(end, n);
@@ -203,15 +243,18 @@ public final class LoxOps {
 
     private static int boundedIndex(Object indexVal, int size, String kind) {
         if (!(indexVal instanceof Double)) {
-            throw new LoxError(kind + " index must be a number.");
+            throw makeThrowable("IndexTypeError",
+                                kind + " index must be a number.");
         }
-        double d = (Double) indexVal;
+        double d = (Double)indexVal;
         if (d != Math.floor(d)) {
-            throw new LoxError(kind + " index must be an integer.");
+            throw makeThrowable("IndexNotIntegerError",
+                                kind + " index must be an integer.");
         }
-        int idx = (int) d;
+        int idx = (int)d;
         if (idx < 0 || idx >= size) {
-            throw new LoxError(kind + " index out of bounds.");
+            throw makeThrowable("IndexOutOfBoundsError",
+                                kind + " index out of bounds.");
         }
         return idx;
     }
@@ -270,54 +313,65 @@ public final class LoxOps {
     // JvmObjectArrayInvariantTest for the enforcement.
     public static Object getIndex(Object collection, Object index) {
         if (collection instanceof LoxList) {
-            List<Object> elements = ((LoxList) collection).elements;
+            List<Object> elements = ((LoxList)collection).elements;
             return elements.get(boundedIndex(index, elements.size(), "List"));
         }
         if (collection instanceof String) {
-            String s = (String) collection;
-            return String.valueOf(s.charAt(boundedIndex(index, s.length(), "String")));
+            String s = (String)collection;
+            return String.valueOf(
+                s.charAt(boundedIndex(index, s.length(), "String")));
         }
         if (collection instanceof LoxMap) {
             checkMapKey(index);
-            return ((LoxMap) collection).get(index); // absent key and a stored nil both read back as null
+            return ((LoxMap)collection)
+                .get(index); // absent key and a stored nil both read back as
+                             // null
         }
         if (collection instanceof LoxEnum) {
             if (!(index instanceof Double)) {
-                throw new LoxError("Enum field index must be a number.");
+                throw makeThrowable("IndexTypeError",
+                                    "Enum field index must be a number.");
             }
-            Object[] payload = ((LoxEnum) collection).payload;
-            int idx = (int) (double) (Double) index;
+            Object[] payload = ((LoxEnum)collection).payload;
+            int idx = (int)(double)(Double)index;
             if (idx < 0 || idx >= payload.length) {
-                throw new LoxError("Enum field index " + idx + " out of range.");
+                throw makeThrowable("IndexOutOfBoundsError",
+                                    "Enum field index " + idx +
+                                        " out of range.");
             }
             return payload[idx];
         }
-        throw new LoxError("Only lists, strings, and maps can be indexed.");
+        throw makeThrowable("NotIndexableError",
+                            "Only lists, strings, and maps can be indexed.");
     }
 
-    public static Object setIndex(Object collection, Object index, Object value) {
+    public static Object setIndex(Object collection, Object index,
+                                  Object value) {
         if (collection instanceof String) {
-            throw new LoxError(
-                    "Strings are immutable and cannot be indexed for assignment.");
+            throw makeThrowable(
+                "NotIndexableError",
+                "Strings are immutable and cannot be indexed for assignment.");
         }
         if (collection instanceof LoxMap) {
             checkMapKey(index);
-            ((LoxMap) collection).put(index, value);
+            ((LoxMap)collection).put(index, value);
             return value;
         }
         if (!(collection instanceof LoxList)) {
-            throw new LoxError("Only lists and maps can be indexed for assignment.");
+            throw makeThrowable(
+                "NotIndexableError",
+                "Only lists and maps can be indexed for assignment.");
         }
-        List<Object> elements = ((LoxList) collection).elements;
+        List<Object> elements = ((LoxList)collection).elements;
         elements.set(boundedIndex(index, elements.size(), "List"), value);
         return value; // assignment is an expression
     }
 
     public static LoxIterator getIter(Object iterable) {
-        if (!(iterable instanceof LoxList) && !(iterable instanceof String)
-                && !(iterable instanceof LoxMap)) {
+        if (!(iterable instanceof LoxList) && !(iterable instanceof String) &&
+            !(iterable instanceof LoxMap)) {
             throw new LoxError(
-                    "Value is not iterable (expected list, string, or map).");
+                "Value is not iterable (expected list, string, or map).");
         }
         return new LoxIterator(iterable);
     }
@@ -330,14 +384,17 @@ public final class LoxOps {
      * see anything else.
      */
     public static boolean iterHasNext(Object it) {
-        return ((LoxIterator) it).hasNext();
+        return ((LoxIterator)it).hasNext();
     }
 
     public static Object iterNext(Object it) {
-        return ((LoxIterator) it).next();
+        return ((LoxIterator)it).next();
     }
 
-    /** Matches Op::IS_SEQ exactly: List and String only — Map is not included (vm.cpp). */
+    /**
+     * Matches Op::IS_SEQ exactly: List and String only — Map is not included
+     * (vm.cpp).
+     */
     public static boolean isSeq(Object v) {
         return v instanceof LoxList || v instanceof String;
     }
@@ -353,11 +410,13 @@ public final class LoxOps {
     }
 
     /**
-     * Wrap a user-thrown Lox++ value in a LoxError for throw statement execution.
-     * The value is carried as a field in the LoxError for later catch binding.
+     * Wrap a user-thrown Lox++ value in a LoxError for throw statement
+     * execution. The value is carried as a field in the LoxError for later
+     * catch binding.
      */
     public static LoxError makeThrowable(Object value) {
-        // If the value is a string, use it as the message; otherwise use toString()
+        // If the value is a string, use it as the message; otherwise use
+        // toString()
         String message = stringify(value);
         return new LoxError(message, value);
     }
@@ -366,8 +425,12 @@ public final class LoxOps {
     // instanceof / properties / methods
     // ------------------------------------------------------------------
 
-    /** Never throws: an undefined or non-class name simply fails to match, as in vm.cpp's INSTANCEOF. */
-    public static boolean instanceOf(Object val, LoxGlobals globals, String className) {
+    /**
+     * Never throws: an undefined or non-class name simply fails to match, as
+     * in vm.cpp's INSTANCEOF.
+     */
+    public static boolean instanceOf(Object val, LoxGlobals globals,
+                                     String className) {
         if (!(val instanceof LoxInstance) || !globals.isDefined(className)) {
             return false;
         }
@@ -375,8 +438,8 @@ public final class LoxOps {
         if (!(classVal instanceof LoxClass)) {
             return false;
         }
-        LoxClass target = (LoxClass) classVal;
-        LoxClass k = ((LoxInstance) val).klass;
+        LoxClass target = (LoxClass)classVal;
+        LoxClass k = ((LoxInstance)val).klass;
         while (k != null) {
             if (k == target) {
                 return true;
@@ -388,42 +451,50 @@ public final class LoxOps {
 
     public static Object getProperty(Object obj, String name) {
         if (obj instanceof LoxFile) {
-            LoxCallable m = ((LoxFile) obj).getMethod(name);
+            LoxCallable m = ((LoxFile)obj).getMethod(name);
             if (m == null) {
-                throw new LoxError("Undefined property '" + name + "' on file.");
+                throw makeThrowable("UndefinedPropertyError",
+                                    "Undefined property '" + name +
+                                        "' on file.");
             }
             return m;
         }
         if (obj instanceof LoxMap) {
-            LoxCallable m = ((LoxMap) obj).getMethod(name);
+            LoxCallable m = ((LoxMap)obj).getMethod(name);
             if (m == null) {
-                throw new LoxError("Undefined property '" + name + "' on map.");
+                throw makeThrowable("UndefinedPropertyError",
+                                    "Undefined property '" + name +
+                                        "' on map.");
             }
             return m;
         }
         if (!(obj instanceof LoxInstance)) {
-            throw new LoxError("Only instances have properties.");
+            throw makeThrowable("InvalidReceiverError",
+                                "Only instances have properties.");
         }
-        LoxInstance instance = (LoxInstance) obj;
+        LoxInstance instance = (LoxInstance)obj;
         if (instance.fields.containsKey(name)) {
             return instance.fields.get(name);
         }
         LoxClosure method = instance.klass.findMethod(name);
         if (method == null) {
-            throw new LoxError("Undefined property '" + name + "'.");
+            throw makeThrowable("UndefinedPropertyError",
+                                "Undefined property '" + name + "'.");
         }
         return new LoxBoundMethod(instance, method);
     }
 
     public static Object setProperty(Object obj, String name, Object value) {
         if (!(obj instanceof LoxInstance)) {
-            throw new LoxError("Only instances have fields.");
+            throw makeThrowable("InvalidReceiverError",
+                                "Only instances have fields.");
         }
-        ((LoxInstance) obj).fields.put(name, value);
+        ((LoxInstance)obj).fields.put(name, value);
         return value; // assignment is an expression
     }
 
-    public static void defineMethod(LoxClass klass, String name, LoxClosure method) {
+    public static void defineMethod(LoxClass klass, String name,
+                                    LoxClosure method) {
         klass.methods.put(name, method);
     }
 
@@ -437,7 +508,7 @@ public final class LoxOps {
         if (!(superclassVal instanceof LoxClass)) {
             throw new LoxError("Superclass must be a class.");
         }
-        return (LoxClass) superclassVal;
+        return (LoxClass)superclassVal;
     }
 
     /**
@@ -450,15 +521,18 @@ public final class LoxOps {
      */
     public static void inheritInto(Object subclassVal, Object superclassVal) {
         LoxClass superclass = inherit(superclassVal);
-        ((LoxClass) subclassVal).inheritFrom(superclass);
+        ((LoxClass)subclassVal).inheritFrom(superclass);
     }
 
-    /** The GET_TAG opcode's guard — same ClassCastException problem as {@link #inherit}. */
+    /**
+     * The GET_TAG opcode's guard — same ClassCastException problem as {@link
+     * #inherit}.
+     */
     public static double getTag(Object v) {
         if (!(v instanceof LoxEnum)) {
             throw new LoxError("GET_TAG: expected an enum value.");
         }
-        return ((LoxEnum) v).ctor.tag;
+        return ((LoxEnum)v).ctor.tag;
     }
 
     /**
@@ -471,15 +545,19 @@ public final class LoxOps {
      */
     public static Object call(Object callee, Object[] args) {
         if (callee instanceof LoxCallable) {
-            return ((LoxCallable) callee).call(args);
+            return ((LoxCallable)callee).call(args);
         }
-        throw new LoxError("Can only call functions, classes and enums.");
+        throw makeThrowable("NotCallableError",
+                            "Can only call functions, classes and enums.");
     }
 
-    /** The INVOKE fast path: dispatches on the receiver's runtime kind (P6), not on one static type. */
+    /**
+     * The INVOKE fast path: dispatches on the receiver's runtime kind (P6),
+     * not on one static type.
+     */
     public static Object invoke(Object receiver, String name, Object[] args) {
         if (receiver instanceof LoxInstance) {
-            LoxInstance instance = (LoxInstance) receiver;
+            LoxInstance instance = (LoxInstance)receiver;
             if (instance.fields.containsKey(name)) {
                 Object fieldVal = instance.fields.get(name);
                 // vm.cpp lines 518-533 call only a closure or a native field
@@ -487,42 +565,48 @@ public final class LoxOps {
                 // is a runtime error here, even though all four implement
                 // LoxCallable.
                 if (fieldVal instanceof LoxClosure) {
-                    return ((LoxClosure) fieldVal).call(args);
+                    return ((LoxClosure)fieldVal).call(args);
                 }
                 if (fieldVal instanceof LoxNative) {
-                    return ((LoxNative) fieldVal).call(args);
+                    return ((LoxNative)fieldVal).call(args);
                 }
-                throw new LoxError("Can only call functions, classes and enums.");
+                throw makeThrowable(
+                    "NotCallableError",
+                    "Can only call functions, classes and enums.");
             }
             LoxClosure method = instance.klass.findMethod(name);
             if (method == null) {
-                throw new LoxError("Undefined property '" + name + "'.");
+                throw makeThrowable("UndefinedPropertyError",
+                                    "Undefined property '" + name + "'.");
             }
             return method.callAsSelf(instance, args);
         }
         if (receiver instanceof LoxList) {
-            return invokeListMethod((LoxList) receiver, name, args);
+            return invokeListMethod((LoxList)receiver, name, args);
         }
         if (receiver instanceof LoxFile) {
-            return invokeFileMethod((LoxFile) receiver, name, args);
+            return invokeFileMethod((LoxFile)receiver, name, args);
         }
         if (receiver instanceof LoxMap) {
-            return invokeMapMethod((LoxMap) receiver, name, args);
+            return invokeMapMethod((LoxMap)receiver, name, args);
         }
         throw new LoxError("Only instances, files, and maps have methods.");
     }
 
-    private static Object invokeListMethod(LoxList list, String name, Object[] args) {
+    private static Object invokeListMethod(LoxList list, String name,
+                                           Object[] args) {
         switch (name) {
         case "append":
             if (args.length != 1) {
-                throw new LoxError("'append' expects 1 argument but got " + args.length + ".");
+                throw new LoxError("'append' expects 1 argument but got " +
+                                   args.length + ".");
             }
             list.elements.add(args[0]);
             return null;
         case "pop":
             if (args.length != 0) {
-                throw new LoxError("'pop' expects 0 arguments but got " + args.length + ".");
+                throw new LoxError("'pop' expects 0 arguments but got " +
+                                   args.length + ".");
             }
             if (list.elements.isEmpty()) {
                 throw new LoxError("Cannot pop from an empty list.");
@@ -530,7 +614,8 @@ public final class LoxOps {
             return list.elements.remove(list.elements.size() - 1);
         case "remove":
             if (args.length != 1) {
-                throw new LoxError("'remove' expects 1 argument but got " + args.length + ".");
+                throw new LoxError("'remove' expects 1 argument but got " +
+                                   args.length + ".");
             }
             for (int i = 0; i < list.elements.size(); i++) {
                 if (equal(list.elements.get(i), args[0])) {
@@ -551,7 +636,8 @@ public final class LoxOps {
      * {@link LoxMap#getMethod} allocates on every read for the
      * separate GET_PROPERTY case.
      */
-    private static Object invokeMapMethod(LoxMap map, String name, Object[] args) {
+    private static Object invokeMapMethod(LoxMap map, String name,
+                                          Object[] args) {
         switch (name) {
         case "has":
             requireArity(args, 1, "has");
@@ -594,8 +680,12 @@ public final class LoxOps {
         }
     }
 
-    /** Same no-allocation dispatch as {@link #invokeMapMethod}, for the file API. */
-    private static Object invokeFileMethod(LoxFile file, String name, Object[] args) {
+    /**
+     * Same no-allocation dispatch as {@link #invokeMapMethod}, for the file
+     * API.
+     */
+    private static Object invokeFileMethod(LoxFile file, String name,
+                                           Object[] args) {
         switch (name) {
         case "read":
             requireArity(args, 0, "read");
@@ -625,8 +715,8 @@ public final class LoxOps {
 
     private static void requireArity(Object[] args, int arity, String method) {
         if (args.length != arity) {
-            throw new LoxError(
-                    "'" + method + "' expects " + arity + " argument(s) but got " + args.length + ".");
+            throw new LoxError("'" + method + "' expects " + arity +
+                               " argument(s) but got " + args.length + ".");
         }
     }
 
@@ -634,19 +724,21 @@ public final class LoxOps {
         if (!(v instanceof String)) {
             throw new LoxError("'" + method + "' argument must be a string.");
         }
-        return (String) v;
+        return (String)v;
     }
 
-    public static Object getSuper(Object superclassVal, String name, Object self) {
-        LoxClosure method = ((LoxClass) superclassVal).findMethod(name);
+    public static Object getSuper(Object superclassVal, String name,
+                                  Object self) {
+        LoxClosure method = ((LoxClass)superclassVal).findMethod(name);
         if (method == null) {
             throw new LoxError("Undefined property '" + name + "'.");
         }
         return new LoxBoundMethod(self, method);
     }
 
-    public static Object superInvoke(Object superclassVal, String name, Object self, Object[] args) {
-        LoxClosure method = ((LoxClass) superclassVal).findMethod(name);
+    public static Object superInvoke(Object superclassVal, String name,
+                                     Object self, Object[] args) {
+        LoxClosure method = ((LoxClass)superclassVal).findMethod(name);
         if (method == null) {
             throw new LoxError("Undefined property '" + name + "'.");
         }
@@ -667,29 +759,29 @@ public final class LoxOps {
             return "nil";
         }
         if (v instanceof Boolean) {
-            return ((Boolean) v) ? "true" : "false";
+            return ((Boolean)v) ? "true" : "false";
         }
         if (v instanceof Double) {
-            return formatNumber((Double) v);
+            return formatNumber((Double)v);
         }
         if (v instanceof String) {
-            return (String) v;
+            return (String)v;
         }
         if (v instanceof LoxClosure) {
-            String name = ((LoxClosure) v).name;
+            String name = ((LoxClosure)v).name;
             return (name == null) ? "<script>" : "<fn " + name + ">";
         }
         if (v instanceof LoxNative) {
             return "<native fn>";
         }
         if (v instanceof LoxBoundMethod) {
-            return "<fn " + ((LoxBoundMethod) v).method.name + ">";
+            return "<fn " + ((LoxBoundMethod)v).method.name + ">";
         }
         if (v instanceof LoxClass) {
-            return ((LoxClass) v).name;
+            return ((LoxClass)v).name;
         }
         if (v instanceof LoxInstance) {
-            return ((LoxInstance) v).klass.name + " instance";
+            return ((LoxInstance)v).klass.name + " instance";
         }
         if (v instanceof LoxFile) {
             return "<file>";
@@ -699,7 +791,7 @@ public final class LoxOps {
         }
         if (v instanceof LoxList) {
             StringBuilder sb = new StringBuilder("[");
-            List<Object> elements = ((LoxList) v).elements;
+            List<Object> elements = ((LoxList)v).elements;
             for (int i = 0; i < elements.size(); i++) {
                 if (i > 0) {
                     sb.append(", ");
@@ -711,22 +803,26 @@ public final class LoxOps {
         if (v instanceof LoxMap) {
             StringBuilder sb = new StringBuilder("{");
             boolean first = true;
-            for (Map.Entry<Object, Object> e : ((LoxMap) v).entrySet()) {
+            for (Map.Entry<Object, Object> e : ((LoxMap)v).entrySet()) {
                 if (!first) {
                     sb.append(", ");
                 }
                 first = false;
-                sb.append(stringify(e.getKey())).append(": ").append(stringify(e.getValue()));
+                sb.append(stringify(e.getKey()))
+                    .append(": ")
+                    .append(stringify(e.getValue()));
             }
             return sb.append('}').toString();
         }
         if (v instanceof LoxEnumCtor) {
-            LoxEnumCtor c = (LoxEnumCtor) v;
+            LoxEnumCtor c = (LoxEnumCtor)v;
             return "<ctor " + c.enumName + "::" + c.ctorName + ">";
         }
         if (v instanceof LoxEnum) {
-            LoxEnum e = (LoxEnum) v;
-            StringBuilder sb = new StringBuilder(e.ctor.enumName).append("::").append(e.ctor.ctorName);
+            LoxEnum e = (LoxEnum)v;
+            StringBuilder sb = new StringBuilder(e.ctor.enumName)
+                                   .append("::")
+                                   .append(e.ctor.ctorName);
             if (e.payload.length > 0) {
                 sb.append('(');
                 for (int i = 0; i < e.payload.length; i++) {
@@ -739,7 +835,8 @@ public final class LoxOps {
             }
             return sb.toString();
         }
-        throw new IllegalStateException("stringify: unrecognized value type " + v.getClass());
+        throw new IllegalStateException("stringify: unrecognized value type " +
+                                        v.getClass());
     }
 
     /**
@@ -770,7 +867,8 @@ public final class LoxOps {
         // Round to 6 significant digits from the double's exact binary value —
         // the same correctly-rounded conversion snprintf performs, not a
         // round-trip through the shortest decimal string.
-        BigDecimal rounded = new BigDecimal(mag).round(new MathContext(6, RoundingMode.HALF_EVEN));
+        BigDecimal rounded = new BigDecimal(mag).round(
+            new MathContext(6, RoundingMode.HALF_EVEN));
         int exponent = rounded.precision() - rounded.scale() - 1; // %g's X
         String digits = rounded.unscaledValue().toString();
 
@@ -781,8 +879,8 @@ public final class LoxOps {
             if (digits.length() > 1) {
                 mantissa.append('.').append(digits, 1, digits.length());
             }
-            body = stripTrailingZeros(mantissa.toString())
-                    + "e" + String.format(Locale.ROOT, "%+03d", exponent);
+            body = stripTrailingZeros(mantissa.toString()) + "e" +
+                   String.format(Locale.ROOT, "%+03d", exponent);
         } else {
             body = stripTrailingZeros(rounded.toPlainString());
         }
@@ -823,7 +921,7 @@ public final class LoxOps {
         if (!(deferList instanceof java.util.List)) {
             return; // Not a list, nothing to do
         }
-        java.util.List<Object> list = (java.util.List<Object>) deferList;
+        java.util.List<Object> list = (java.util.List<Object>)deferList;
 
         // Run in LIFO order by repeatedly popping from the end
         while (!list.isEmpty()) {
@@ -831,7 +929,7 @@ public final class LoxOps {
             if (!(lastItem instanceof DeferredCall)) {
                 continue; // Skip non-DeferredCall items
             }
-            DeferredCall deferred = (DeferredCall) lastItem;
+            DeferredCall deferred = (DeferredCall)lastItem;
 
             // Invoke the deferred call
             if (deferred.callable == null) {

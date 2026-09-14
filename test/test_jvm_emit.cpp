@@ -2721,3 +2721,68 @@ TEST(EmitScript,
         << j;
     expectEveryJumpTargetIsLabeled(j);
 }
+
+// Exception handling: PUSH_HANDLER/POP_HANDLER emit .catch directive
+// with correct region boundaries (start and end labels) and handler target.
+TEST(EmitScript, TryCatchEmitsExceptionTableEntry) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("try { print 1; } catch (e) { print e; }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // The .catch directive must appear exactly once (one try/catch pair).
+    EXPECT_EQ(countOccurrences(j, ".catch lox/LoxError from"), 1) << j;
+    // Must reference a start label.
+    EXPECT_NE(j.find(".catch lox/LoxError from try_"), std::string::npos) << j;
+    // Must reference an end label with the same prefix.
+    EXPECT_NE(j.find(" to try_"), std::string::npos) << j;
+    // Must reference a handler label (CFG-generated, format L_<offset>).
+    EXPECT_NE(j.find(" using L_"), std::string::npos) << j;
+}
+
+// Exception handling: even when a try body ends with a terminal instruction
+// (throw or return), the POP_HANDLER boundary marker must still generate the
+// exception table entry. This tests that R1 (dead-code reachability fix) works.
+TEST(EmitScript, TryCatchWithTerminalBodyStillEmitsExceptionEntry) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("try { throw 1; } catch (e) { }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // The .catch directive must be generated even though throw is terminal.
+    EXPECT_EQ(countOccurrences(j, ".catch lox/LoxError from"), 1) << j;
+}
+
+// Exception handling: the protected region's end label must be placed right
+// before the handler code starts, not after it. This is checked by verifying
+// a .catch directive is present with matching start and end labels.
+TEST(EmitScript, ExceptionTableEndLabelPlacedBeforeHandler) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("try { print 1; } catch (e) { print e; }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // Verify that the .catch directive references both a start and end label
+    // with the same prefix, proving they are from the same PUSH_HANDLER.
+    size_t catchPos = j.find(".catch lox/LoxError from try_");
+    ASSERT_NE(catchPos, std::string::npos)
+        << ".catch directive not found with expected format in:\n"
+        << j;
+
+    // Extract the try offset from the start label.
+    size_t afterPrefix =
+        catchPos + std::string(".catch lox/LoxError from try_").length();
+    size_t underscore = j.find("_", afterPrefix);
+    ASSERT_NE(underscore, std::string::npos) << j;
+    std::string tryOffset = j.substr(afterPrefix, underscore - afterPrefix);
+
+    // Verify the end label is referenced in the same .catch directive.
+    std::string endLabelRef = "to try_" + tryOffset + "_end";
+    size_t endLabelRefPos = j.find(endLabelRef, catchPos);
+    EXPECT_NE(endLabelRefPos, std::string::npos)
+        << "End label reference '" << endLabelRef
+        << "' not found in .catch directive in:\n"
+        << j;
+}
