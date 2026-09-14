@@ -55,6 +55,12 @@ TEST(CheckDiagnostics, MissingExpressionAtEnd) {
     expectOne("print 1 +;", 1, 11, "Expect expression");
 }
 
+TEST(CheckDiagnostics, TwoDotRunNotPropertyAccess) {
+    // `..` lexes as DOT DOT; the parser rejects the second DOT where it
+    // expects a property name.
+    expectOne("o..x;", 1, 3, "Expect property name after '.'.");
+}
+
 TEST(CheckDiagnostics, CleanSourceHasNoDiagnostics) {
     EXPECT_TRUE(analyze("var x = 1;\nprint x + 2;\n").empty());
 }

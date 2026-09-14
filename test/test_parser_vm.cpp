@@ -504,3 +504,19 @@ TEST_F(SequenceVMTest, CStyleFor_Regression) {
               InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("r"), "3"); // 0 + 1 + 2
 }
+
+// ---------------------------------------------------------------------------
+// A two-dot run must not parse as a property access
+// ---------------------------------------------------------------------------
+
+TEST_F(ParserVMTest, TwoDotRun_NotAPropertyAccess) {
+    // `..` lexes as DOT DOT; the grammar never puts a DOT after a DOT, so
+    // `o..x` is a compile error, not `o.x`.
+    EXPECT_EQ(run_program("o..x;"), InterpretResult::COMPILE_ERROR);
+}
+
+TEST_F(ParserVMTest, TwoDotRun_AfterSuper_CompileError) {
+    EXPECT_EQ(run_program("class A {}\n"
+                          "class B < A { m() { super..x; } }"),
+              InterpretResult::COMPILE_ERROR);
+}
