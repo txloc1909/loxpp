@@ -2118,9 +2118,230 @@ std::string emitHeader(const std::string& moduleClassName) {
 // with no extra wiring; a function chunk becomes a class extending
 // [LoxRuntime]Lox.LoxClosure, with the constructor every such class needs
 // plus the `Invoke` override that holds this chunk's own lowered body.
+// True when `l` is a label-only line ("SomeLabel:", no instruction after
+// the colon) — as opposed to an instruction line that merely carries a
+// trailing label prefix.
+bool isLabelOnlyLine(const std::string& l) {
+    std::size_t colonPos = l.rfind(':');
+    return colonPos != std::string::npos &&
+           l.find_first_not_of(" \t", colonPos + 1) == std::string::npos;
+}
+
+// One PUSH_HANDLER/catch pair's line-range boundaries inside the flat
+// instruction-line array, plus the other handlers nested textually inside
+// its try body or its catch body (a try/catch inside a try, or inside a
+// catch, per nested_try_catch.lox). Indices are into the same `regions`
+// vector this struct's own entry lives in, so a region's children may
+// themselves have children.
+struct TryRegion {
+    std::size_t tryStartLine{};
+    std::size_t tryEndLine{}; // exclusive
+    std::size_t catchStartLine{};
+    std::size_t catchEndLine{}; // exclusive
+    std::vector<std::size_t> tryChildren;
+    std::vector<std::size_t> catchChildren;
+};
+
+// Resolves every handler entry to a TryRegion, still flat (no parent/child
+// links yet — buildRegionForest does that next). A handler whose labels
+// were never emitted (unreachable code the decoder still walked) is
+// dropped, mirroring the old function's `continue`.
+std::vector<TryRegion>
+resolveRegions(const std::vector<std::string>& lines,
+               const std::unordered_map<std::string, std::size_t>& labelToLine,
+               const Emitter& e) {
+    std::vector<TryRegion> regions;
+    for (const auto& handler : e.analysis.handlerEntries) {
+        auto tryStartIt = labelToLine.find(
+            "tryStart_" + std::to_string(handler.pushHandlerOffset));
+        auto catchStartIt = labelToLine.find(
+            "catchStart_" + std::to_string(handler.catchOffset));
+        if (tryStartIt == labelToLine.end() ||
+            catchStartIt == labelToLine.end()) {
+            continue;
+        }
+
+        TryRegion r;
+        r.tryStartLine = tryStartIt->second;
+        r.catchStartLine = catchStartIt->second;
+
+        // Protected region ends just before the catch handler label. Skip
+        // back over any intermediate labels (like L_0010:) between
+        // tryStart and catchStart — these are CFG labels, not
+        // user-visible, and should not be included in the try block.
+        r.tryEndLine = r.catchStartLine;
+        while (r.tryEndLine > r.tryStartLine &&
+               isLabelOnlyLine(lines[r.tryEndLine - 1])) {
+            r.tryEndLine--;
+        }
+
+        // Catch block ends at the next label after catchStart.
+        r.catchEndLine = r.catchStartLine + 1;
+        for (std::size_t i = r.catchStartLine + 1; i < lines.size(); i++) {
+            if (isLabelOnlyLine(lines[i])) {
+                r.catchEndLine = i;
+                break;
+            }
+        }
+
+        regions.push_back(r);
+    }
+    return regions;
+}
+
+// Links each region to its immediate parent's tryChildren or catchChildren
+// list, by line-range containment — the flat pass above finds every
+// PUSH_HANDLER independently, so a try/catch nested inside another one's
+// try body or catch body (nested_try_catch.lox nests one inside a try
+// body; a handler nested inside a catch body, from a throw during error
+// recovery, is the same shape) shows up here only as two regions whose
+// line ranges nest, never as a single combined region. The immediate
+// parent is whichever candidate encloses `child` most tightly — the one
+// with the largest tryStartLine, since a proper (non-overlapping) nesting
+// orders enclosing regions' start lines strictly outside-in.
+void buildRegionForest(std::vector<TryRegion>& regions,
+                       std::vector<std::size_t>& roots) {
+    for (std::size_t i = 0; i < regions.size(); i++) {
+        std::optional<std::size_t> parent;
+        for (std::size_t j = 0; j < regions.size(); j++) {
+            if (i == j) {
+                continue;
+            }
+            bool contained =
+                regions[i].tryStartLine > regions[j].tryStartLine &&
+                regions[i].tryStartLine < regions[j].catchEndLine;
+            if (contained && (!parent || regions[j].tryStartLine >
+                                             regions[*parent].tryStartLine)) {
+                parent = j;
+            }
+        }
+        if (!parent) {
+            roots.push_back(i);
+        } else if (regions[i].tryStartLine < regions[*parent].catchStartLine) {
+            regions[*parent].tryChildren.push_back(i);
+        } else {
+            regions[*parent].catchChildren.push_back(i);
+        }
+    }
+    auto byStart = [&regions](std::size_t a, std::size_t b) {
+        return regions[a].tryStartLine < regions[b].tryStartLine;
+    };
+    std::sort(roots.begin(), roots.end(), byStart);
+    for (auto& r : regions) {
+        std::sort(r.tryChildren.begin(), r.tryChildren.end(), byStart);
+        std::sort(r.catchChildren.begin(), r.catchChildren.end(), byStart);
+    }
+}
+
+// A plain `br <label>` (the only unconditional-jump form this emitter
+// produces — see emitJump/emitLoop/emitControlFlowFold) that targets
+// outside [begin, end) is leaving a .try{} or catch{} region. ECMA-335
+// III.1.7.5 forbids using `br` for that: only `leave`/`leave.s` may
+// transfer control out of a protected region (and it needs no separate
+// stack-clearing instruction — `leave` empties the evaluation stack
+// itself). ilasm accepts the illegal `br` form with no complaint; CoreCLR
+// only rejects it later, at JIT time, as InvalidProgramException. One
+// `leave` unwinds through as many enclosing regions as the target needs,
+// running any `finally` blocks in between, so a single rewrite at the
+// innermost region containing the branch is enough even when it exits
+// more than one level of nesting at once.
+std::optional<std::string> asLeaveIfExiting(
+    const std::string& l, std::size_t begin, std::size_t end,
+    const std::unordered_map<std::string, std::size_t>& labelToLine) {
+    std::size_t start = l.find_first_not_of(" \t");
+    if (start == std::string::npos || l.compare(start, 3, "br ") != 0) {
+        return std::nullopt;
+    }
+    std::string target = l.substr(start + 3);
+    auto it = labelToLine.find(target);
+    if (it == labelToLine.end() || (it->second >= begin && it->second < end)) {
+        return std::nullopt;
+    }
+    return l.substr(0, start) + "leave " + target;
+}
+
+// label -> line index, for every "Label:" line with nothing after the
+// colon (a jump target, as opposed to an instruction line that merely
+// starts with one).
+std::unordered_map<std::string, std::size_t>
+buildLabelIndex(const std::vector<std::string>& lines) {
+    std::unordered_map<std::string, std::size_t> labelToLine;
+    for (std::size_t i = 0; i < lines.size(); i++) {
+        const std::string& l = lines[i];
+        if (!isLabelOnlyLine(l)) {
+            continue;
+        }
+        std::size_t colonPos = l.rfind(':');
+        std::size_t labelStart = l.find_first_not_of(" \t");
+        if (labelStart != std::string::npos && labelStart < colonPos) {
+            labelToLine[l.substr(labelStart, colonPos - labelStart)] = i;
+        }
+    }
+    return labelToLine;
+}
+
+// Emits lines[begin, end), splicing in a nested .try{}/catch{} for every
+// region in `children` whose tryStartLine falls in that range, and
+// recursing into each such region's own body with its own nested
+// children. `protectedRegion` is true while emitting directly inside a
+// try or catch body (never at the function's own top level, where a `br`
+// is ordinary control flow, not a region exit) — it gates the
+// br-to-leave rewrite (asLeaveIfExiting), scoped to exactly [begin, end)
+// so a branch that stays inside this region (an `if` fully inside the
+// `try`, say) is left as a plain `br`.
+void emitRegionRange(
+    const std::vector<std::string>& lines,
+    const std::vector<TryRegion>& regions,
+    const std::unordered_map<std::string, std::size_t>& labelToLine,
+    std::size_t begin, std::size_t end,
+    const std::vector<std::size_t>& children, bool protectedRegion,
+    std::ostringstream& result) {
+    std::size_t childIdx = 0;
+    for (std::size_t i = begin; i < end;) {
+        if (childIdx < children.size() &&
+            i == regions[children[childIdx]].tryStartLine) {
+            const TryRegion& r = regions[children[childIdx]];
+            childIdx++;
+
+            result << "    .try\n    {\n";
+            emitRegionRange(lines, regions, labelToLine, r.tryStartLine + 1,
+                            r.tryEndLine, r.tryChildren, true, result);
+            result << "    }\n";
+            result << "    catch [LoxRuntime]Lox.LoxError\n    {\n";
+            // At catch entry, the CLR has pushed the LoxError exception
+            // reference onto the stack. Extract the wrapped Lox++ value
+            // via the Value property getter before any bytecode-derived
+            // handler code runs — the C# auto-property compiles to
+            // get_Value() in IL, the same pattern jvm_emitter.cpp uses
+            // for getValue() on the JVM side.
+            result << "    call instance object [LoxRuntime]Lox.LoxError"
+                      "::get_Value()\n";
+            emitRegionRange(lines, regions, labelToLine, r.catchStartLine + 1,
+                            r.catchEndLine, r.catchChildren, true, result);
+            result << "    }\n";
+
+            i = r.catchEndLine;
+            continue;
+        }
+
+        const std::string& l = lines[i];
+        if (!l.empty()) {
+            auto leave = protectedRegion
+                             ? asLeaveIfExiting(l, begin, end, labelToLine)
+                             : std::nullopt;
+            result << (leave ? *leave : l) << "\n";
+        }
+        i++;
+    }
+}
+
 // Inject .try/catch directives for exception handling regions into the
 // generated IL. This restructures the IL to emit properly-nested .try{}/catch{}
-// blocks that satisfy ilasm's structured exception handling requirements.
+// blocks that satisfy ilasm's structured exception handling requirements,
+// including a try/catch nested inside another one's try or catch body, and
+// rewrites the bytecode-derived `br` that skips each catch handler (and the
+// one that skips the rest of a handler once it has run) into the `leave`
+// ECMA-335 requires for leaving a protected region.
 std::string injectTryCatchDirectives(const std::string& bodyText,
                                      const Emitter& e,
                                      const DecodedFunction& fn) {
@@ -2136,132 +2357,15 @@ std::string injectTryCatchDirectives(const std::string& bodyText,
         lines.push_back(line);
     }
 
-    // Build maps for label locations.
-    std::unordered_map<std::string, std::size_t> labelToLine;
-    for (std::size_t i = 0; i < lines.size(); i++) {
-        const std::string& l = lines[i];
-        std::size_t colonPos = l.rfind(':');
-        if (colonPos != std::string::npos &&
-            l.find_first_not_of(" \t", colonPos + 1) == std::string::npos) {
-            std::size_t labelStart = l.find_first_not_of(" \t");
-            if (labelStart != std::string::npos && labelStart < colonPos) {
-                std::string labelName =
-                    l.substr(labelStart, colonPos - labelStart);
-                labelToLine[labelName] = i;
-            }
-        }
-    }
+    std::unordered_map<std::string, std::size_t> labelToLine =
+        buildLabelIndex(lines);
+    std::vector<TryRegion> regions = resolveRegions(lines, labelToLine, e);
+    std::vector<std::size_t> roots;
+    buildRegionForest(regions, roots);
 
-    // Restructure the IL to emit .try/.catch blocks.
     std::ostringstream result;
-    std::vector<bool> processed(lines.size(), false);
-
-    for (const auto& handler : e.analysis.handlerEntries) {
-        std::string tryStartLabel =
-            "tryStart_" + std::to_string(handler.pushHandlerOffset);
-        std::string catchStartLabel =
-            "catchStart_" + std::to_string(handler.catchOffset);
-
-        auto tryStartIt = labelToLine.find(tryStartLabel);
-        auto catchStartIt = labelToLine.find(catchStartLabel);
-
-        if (tryStartIt == labelToLine.end() ||
-            catchStartIt == labelToLine.end()) {
-            continue;
-        }
-
-        std::size_t tryStartLine = tryStartIt->second;
-        std::size_t catchStartLine = catchStartIt->second;
-
-        // Protected region ends just before the catch handler label.
-        // Skip back over any intermediate labels (like L_0010:) that are
-        // between tryStart and catchStart - these are CFG labels, not
-        // user-visible, and should not be included in the try block.
-        std::size_t tryEndLine = catchStartLine;
-        while (tryEndLine > tryStartLine && tryEndLine > 0) {
-            const std::string& l = lines[tryEndLine - 1];
-            std::size_t colonPos = l.rfind(':');
-            if (colonPos != std::string::npos &&
-                l.find_first_not_of(" \t", colonPos + 1) == std::string::npos) {
-                // This is a label, skip it.
-                tryEndLine--;
-            } else {
-                // Found an actual instruction - this is where the try block
-                // ends.
-                break;
-            }
-        }
-
-        // Find where the catch block ends: the next label after catchStart.
-        std::size_t catchEndLine = catchStartLine + 1;
-        for (std::size_t i = catchStartLine + 1; i < lines.size(); i++) {
-            const std::string& l = lines[i];
-            std::size_t colonPos = l.rfind(':');
-            if (colonPos != std::string::npos &&
-                l.find_first_not_of(" \t", colonPos + 1) == std::string::npos) {
-                // Found a label - catch block ends here.
-                catchEndLine = i;
-                break;
-            }
-        }
-
-        // Output all unprocessed lines before the try block.
-        for (std::size_t i = 0; i < tryStartLine; i++) {
-            if (!processed[i]) {
-                result << lines[i] << "\n";
-                processed[i] = true;
-            }
-        }
-
-        // Emit the .try/.catch structure.
-        result << "    .try\n    {\n";
-
-        // Protected region: from after tryStart to just before catchStart
-        // label.
-        for (std::size_t i = tryStartLine + 1; i < tryEndLine; i++) {
-            if (!lines[i].empty()) {
-                result << lines[i] << "\n";
-            }
-            processed[i] = true;
-        }
-
-        result << "    }\n";
-        result << "    catch [LoxRuntime]Lox.LoxError\n    {\n";
-
-        // At catch entry, the CLR has pushed the LoxError exception reference
-        // onto the stack. We must immediately extract the wrapped Lox++ value
-        // using the Value property getter, then proceed with the
-        // bytecode-derived handler code. The C# property Value compiles to a
-        // get_Value() method in IL. This mirrors the JVM backend's behavior
-        // (see jvm_emitter.cpp). The bytecode-derived code expects the caught
-        // value on the stack.
-        result << "    call instance object [LoxRuntime]Lox.LoxError"
-                  "::get_Value()\n";
-
-        // Catch handler: from after catchStart to the next label.
-        // The first instruction in the handler uses the extracted value.
-        for (std::size_t i = catchStartLine + 1; i < catchEndLine; i++) {
-            const std::string& l = lines[i];
-            if (!l.empty()) {
-                result << l << "\n";
-            }
-            processed[i] = true;
-        }
-
-        result << "    }\n";
-
-        // Mark the labels themselves as processed.
-        processed[tryStartLine] = true;
-        processed[catchStartLine] = true;
-    }
-
-    // Emit remaining unprocessed lines.
-    for (std::size_t i = 0; i < lines.size(); i++) {
-        if (!processed[i]) {
-            result << lines[i] << "\n";
-        }
-    }
-
+    emitRegionRange(lines, regions, labelToLine, 0, lines.size(), roots,
+                    /*protectedRegion=*/false, result);
     return result.str();
 }
 
