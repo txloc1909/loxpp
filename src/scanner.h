@@ -12,6 +12,14 @@ class Scanner {
     Scanner(const char* source);
     Token scanOneToken();
 
+    // The start of the buffer this scanner was constructed over. Combined
+    // with a Token's own `offset` (always the true source span, even for
+    // STRING/ERROR whose `lexeme` is not verbatim source text — see
+    // token.h), this recovers a `const char*` into the original source at
+    // that token's position, for a caller that wants to start a second,
+    // independent Scanner from there (compiler.cpp's defer look-ahead).
+    [[nodiscard]] const char* sourceBegin() const { return m_source_begin; }
+
   private:
     Token makeToken(TokenType type);
     Token makeToken(TokenType type, std::string_view lexeme);

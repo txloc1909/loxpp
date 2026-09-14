@@ -1,0 +1,5 @@
+// Simple test of index out of bounds error
+var list = [1, 2, 3];
+print "About to index";
+print list[10];
+print "After index";

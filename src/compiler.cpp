@@ -550,6 +550,12 @@ void Compiler::statement() {
         breakStatement();
     } else if (m_parser->match(TokenType::CONTINUE)) {
         continueStatement();
+    } else if (m_parser->match(TokenType::TRY)) {
+        tryStatement();
+    } else if (m_parser->match(TokenType::THROW)) {
+        throwStatement();
+    } else if (m_parser->match(TokenType::DEFER)) {
+        deferStatement();
     } else if (m_parser->match(TokenType::PRINT)) {
         printStatement();
     } else if (m_parser->match(TokenType::RETURN)) {
@@ -1888,8 +1894,11 @@ void Compiler::dot() {
     if (m_parser->m_canAssign && m_parser->match(TokenType::EQUAL)) {
         expression();
         emitConstantOp(Op::SET_PROPERTY, nameConst);
-    } else if (m_parser->match(TokenType::LEFT_PAREN)) {
-        // Fuse GET_PROPERTY + CALL into a single INVOKE superinstruction.
+    } else if (!m_disableInvokeFusion &&
+               m_parser->match(TokenType::LEFT_PAREN)) {
+        // Fuse GET_PROPERTY + CALL into a single INVOKE superinstruction
+        // (unless we're in a defer context, where we need separate GET_PROPERTY
+        // and CALL so that CALL can be patched to DEFER_RECORD).
         uint8_t argCount = 0;
         if (!m_parser->check(TokenType::RIGHT_PAREN)) {
             do {
@@ -1905,6 +1914,25 @@ void Compiler::dot() {
         emitConstantOp(Op::INVOKE, nameConst);
         emitByte(argCount);
         m_stackHeight -= argCount; // pop receiver+args, push result
+    } else if (m_parser->match(TokenType::LEFT_PAREN)) {
+        // Defer context: emit GET_PROPERTY + CALL instead of fused INVOKE.
+        // This produces a BoundMethod that CALL can invoke, and allows the
+        // subsequent CALL to be patched to DEFER_RECORD.
+        emitConstantOp(Op::GET_PROPERTY, nameConst);
+        uint8_t argCount = 0;
+        if (!m_parser->check(TokenType::RIGHT_PAREN)) {
+            do {
+                if (argCount == 255) {
+                    m_parser->error("Can't have more than 255 arguments.");
+                }
+                expression();
+                argCount++;
+            } while (m_parser->match(TokenType::COMMA));
+        }
+        m_parser->consume(TokenType::RIGHT_PAREN,
+                          "Expect ')' after arguments.");
+        emitBytes(Op::CALL, argCount);
+        m_stackHeight -= argCount; // pop BoundMethod+args, push result
     } else {
         emitConstantOp(Op::GET_PROPERTY, nameConst);
     }
@@ -1973,10 +2001,21 @@ void Compiler::returnStatement() {
         return;
     }
     if (m_parser->match(TokenType::SEMICOLON)) {
+        // emitReturn() itself emits RUN_DEFERS (when needed) ahead of the
+        // implicit nil/this and RETURN — do not also emit one here, or a
+        // bare `return;` would drain the defer list twice.
         emitReturn();
     } else {
         if (m_type == FunctionType::INITIALIZER) {
             m_parser->error("Can't return a value from an initializer.");
+        }
+        // Run deferred calls before returning a value. Gated on m_hasDefer
+        // (set by parseFunction()'s look-ahead): a defer-free function's
+        // chunk must carry no RUN_DEFERS at all, since neither the JVM nor
+        // the CLR emitter translates it yet, and it must not become the
+        // reason an otherwise-ordinary function can no longer target them.
+        if (m_hasDefer) {
+            emitByte(Op::RUN_DEFERS);
         }
         expression();
         m_parser->consume(TokenType::SEMICOLON,
@@ -1984,6 +2023,142 @@ void Compiler::returnStatement() {
         emitByte(Op::RETURN);
     }
 }
+
+void Compiler::tryStatement() {
+    // try block catch (name) block
+    m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' after 'try'.");
+    int handlerOffset = emitJump(Op::PUSH_HANDLER);
+
+    beginScope();
+    block();
+    endScope();
+
+    // On normal completion of try block, skip the catch block.
+    int skipCatchJump = emitJump(Op::JUMP);
+
+    // Patch the handler offset now that we know where the catch block is
+    patchJump(handlerOffset);
+
+    m_parser->consume(TokenType::CATCH, "Expect 'catch' after try block.");
+    m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after 'catch'.");
+    m_parser->consume(TokenType::IDENTIFIER,
+                      "Expect identifier in catch clause.");
+    Token catchName = m_parser->m_previous;
+    m_parser->consume(TokenType::RIGHT_PAREN,
+                      "Expect ')' after catch identifier.");
+
+    m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' for catch block.");
+
+    // The catch block starts with the thrown value on the stack (pushed by
+    // THROW). Bind it to the catch variable.
+    beginScope();
+    addLocal(catchName);
+    // The thrown value is already on the stack at stackTop[-1]. Store it into
+    // the local variable slot.
+    emitBytes(Op::SET_LOCAL, static_cast<uint8_t>(m_localCount - 1));
+    markInitialized();
+
+    block();
+    endScope();
+
+    // THROW pops the handler record itself before jumping to catchIp (a
+    // throw inside catchBlock must escape to an outer handler, not this
+    // one — see spec/04-semantics.md's throw-statement rules). So the
+    // POP_HANDLER below belongs only to the normal-completion path; the
+    // catch path must skip it.
+    int skipPopJump = emitJump(Op::JUMP);
+
+    // Patch the skip jump to jump past the catch block.
+    patchJump(skipCatchJump);
+
+    // Pop the exception handler after the try block completes normally.
+    emitByte(Op::POP_HANDLER);
+
+    patchJump(skipPopJump);
+}
+
+void Compiler::throwStatement() {
+    expression();
+    m_parser->consume(TokenType::SEMICOLON,
+                      "Expect ';' after throw expression.");
+    emitByte(Op::THROW);
+}
+
+void Compiler::deferStatement() {
+    if (m_type == FunctionType::SCRIPT) {
+        m_parser->error("Can't defer at the top level.");
+        return;
+    }
+
+    // defer call ( arguments ) ;
+    // Parse the call expression. The call expression emits bytecode to
+    // evaluate the callee and arguments, then a trailing CALL. We want
+    // DEFER_RECORD instead of CALL.
+    //
+    // Workaround: parse as a normal call expression, then replace the CALL
+    // opcode with DEFER_RECORD using the patch() method. CALL is always the
+    // final 2 bytes emitted for a call expression (opcode, argc) — never at
+    // the position captured before expression() runs, which is instead the
+    // start of the callee-loading instruction (GET_GLOBAL/GET_LOCAL/...).
+    //
+    // For method calls (obj.method(...)), we disable INVOKE fusion so the
+    // compiler emits GET_PROPERTY + CALL instead of the fused INVOKE
+    // superinstruction. This allows CALL to be patched to DEFER_RECORD
+    // without special INVOKE handling.
+    m_disableInvokeFusion = true;
+    expression();
+    m_disableInvokeFusion = false;
+
+    Chunk* chunk = getCurrentChunk();
+    int callPos = static_cast<int>(chunk->size()) - 2;
+    if (callPos < 0 || toOpcode(chunk->at(callPos)) != Op::CALL) {
+        m_parser->error("Expect a call expression after 'defer'.");
+        return;
+    }
+    // The argc byte (chunk->at(callPos + 1)) stays the same.
+    chunk->patch(callPos, static_cast<Byte>(Op::DEFER_RECORD));
+
+    m_parser->consume(TokenType::SEMICOLON,
+                      "Expect ';' after defer statement.");
+}
+
+namespace {
+// Scans forward from `bodyStart` (the source position of the first token
+// after a function's opening '{', which the caller has already consumed) to
+// that function's matching closing '}', to decide whether the function
+// needs RUN_DEFERS anywhere. A single forward-pass compile cannot answer
+// this at the point it compiles an early `return`: a `defer` written later
+// in the same function still needs every earlier return — even one reached
+// again on a later loop iteration, at runtime, after that `defer` already
+// ran — to drain the defer list. So this runs once, via a throwaway Scanner
+// over the same source buffer, before the body compiles for real.
+//
+// This does not try to exclude a nested function's own `defer`: an
+// enclosing function emitting one harmless extra RUN_DEFERS changes nothing
+// once the nested function's own (real) RUN_DEFERS already makes the whole
+// program un-translatable to JVM/CLR — that limitation is shared, not
+// specific to whichever function's chunk RUN_DEFERS appears in.
+bool bodyHasDefer(const char* bodyStart) {
+    Scanner lookahead(bodyStart);
+    int depth = 1;
+    for (;;) {
+        Token t = lookahead.scanOneToken();
+        if (t.type == TokenType::DEFER) {
+            return true;
+        }
+        if (t.type == TokenType::LEFT_BRACE) {
+            depth++;
+        } else if (t.type == TokenType::RIGHT_BRACE) {
+            depth--;
+            if (depth == 0) {
+                return false;
+            }
+        } else if (t.type == TokenType::EOF_) {
+            return false; // malformed input; the real parse reports it
+        }
+    }
+}
+} // namespace
 
 void Compiler::parseFunction(FunctionType /*type*/) {
     beginScope();
@@ -2004,6 +2179,9 @@ void Compiler::parseFunction(FunctionType /*type*/) {
     m_stackHeight = m_localCount;
     m_parser->consume(TokenType::LEFT_BRACE,
                       "Expect '{' before function body.");
+    const char* bodyStart =
+        m_parser->m_scanner.sourceBegin() + m_parser->m_current.offset;
+    m_hasDefer = bodyHasDefer(bodyStart);
     block();
     endCompiler();
 }
@@ -2025,6 +2203,14 @@ void Compiler::or_() {
 }
 
 void Compiler::emitReturn() {
+    // Run deferred calls before returning from functions (scripts cannot
+    // have defer statements — deferStatement() rejects them — so this is
+    // only for user functions and initializers). Gated on m_hasDefer: see
+    // returnStatement()'s own comment on why a defer-free function must
+    // emit no RUN_DEFERS at all.
+    if (m_type != FunctionType::SCRIPT && m_hasDefer) {
+        emitByte(Op::RUN_DEFERS);
+    }
     if (m_type == FunctionType::INITIALIZER) {
         emitBytes(Op::GET_LOCAL, 0); // implicit return of 'this'
     } else {
@@ -2105,6 +2291,19 @@ void Compiler::trackOperandStack(Op op) {
     case Op::BUILD_MAP:
         // Operand count is not known here; the caller adjusts m_stackHeight.
         break;
+    case Op::PUSH_HANDLER:
+    case Op::POP_HANDLER:
+    case Op::RUN_DEFERS:
+        // These operate on separate stacks (handler stack, defer list),
+        // not the value stack.
+        break;
+    case Op::THROW:
+        // THROW is terminal (like RETURN). Stack height is irrelevant.
+        break;
+    case Op::DEFER_RECORD:
+        // DEFER_RECORD pops callee and args, with argc as operand.
+        // The caller adjusts m_stackHeight in emitBytes().
+        break;
     }
 }
 
@@ -2119,6 +2318,9 @@ void Compiler::emitBytes(Op op, Byte byte) {
     switch (op) {
     case Op::CALL:
         m_stackHeight -= byte; // pop callee+args, push result
+        break;
+    case Op::DEFER_RECORD:
+        m_stackHeight -= byte + 1; // pop callee+args, nothing pushed
         break;
     case Op::BUILD_LIST:
         m_stackHeight -= static_cast<int>(byte) - 1;

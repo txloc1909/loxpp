@@ -1,0 +1,7 @@
+// Test that basic throw/catch still works
+try {
+    throw "test error";
+} catch (e) {
+    print "Caught: " + e;
+}
+print "Done";

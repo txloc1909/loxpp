@@ -92,6 +92,15 @@ enum class Op : Byte {
     // PUSH_HANDLER checkpoint. Terminal: like RETURN, control never falls
     // through past THROW into the next instruction in this function.
     THROW,
+    // Records a deferred call. Operand: argc (argument count).
+    // Stack before: [callee, arg0, arg1, ..., arg_argc-1] (top)
+    // Stack after: [] (defer list updated)
+    // Pops argc+1 values from stack, stores them as a deferred call
+    // pending invocation at function exit.
+    DEFER_RECORD,
+    // Runs all pending deferred calls for the current frame in LIFO order.
+    // No operands. Stack: unchanged.
+    RUN_DEFERS,
 };
 // clang-format on
 
@@ -155,7 +164,9 @@ enum class Op : Byte {
     X(IS_SEQ)                                                                  \
     X(PUSH_HANDLER)                                                            \
     X(POP_HANDLER)                                                             \
-    X(THROW)
+    X(THROW)                                                                   \
+    X(DEFER_RECORD)                                                            \
+    X(RUN_DEFERS)
 
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }
 

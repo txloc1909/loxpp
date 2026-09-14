@@ -56,6 +56,7 @@ DecodedInstruction decodeOne(const Chunk& chunk, int offset) {
     case Op::IS_SEQ:
     case Op::POP_HANDLER:
     case Op::THROW:
+    case Op::RUN_DEFERS:
         ins.length = 1;
         break;
 
@@ -82,6 +83,7 @@ DecodedInstruction decodeOne(const Chunk& chunk, int offset) {
     case Op::BUILD_MAP:
     case Op::GET_UPVALUE:
     case Op::SET_UPVALUE:
+    case Op::DEFER_RECORD:
         ins.byteOperand = chunk.at(offset + 1);
         ins.length = 2;
         break;

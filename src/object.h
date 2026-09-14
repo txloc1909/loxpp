@@ -22,6 +22,8 @@ enum class ObjType : uint8_t {
     ENUM_CTOR,
     ENUM,
     BOUND_NATIVE,
+    ERROR,
+    DEFERRED_CALL,
 };
 
 inline uint32_t hashString(std::string_view s) {

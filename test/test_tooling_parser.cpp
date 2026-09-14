@@ -534,8 +534,8 @@ std::size_t measureProgramDepth(const Program& prog) {
 
 TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     const std::vector<fs::path> files = corpusFiles();
-    // examples/*.lox (62) + bootstrap/*.lox (2) + translation-probes/*.lox (47)
-    ASSERT_EQ(files.size(), 111U);
+    // examples/*.lox (73) + bootstrap/*.lox (2) + translation-probes/*.lox (47)
+    ASSERT_EQ(files.size(), 122U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {

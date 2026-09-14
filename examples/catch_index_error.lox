@@ -1,0 +1,16 @@
+// Catch a runtime fault: index out of bounds
+// This demonstrates that a catchable runtime error can be caught by try/catch
+
+var list = [1, 2, 3];
+
+try {
+    print list[10];  // Out of bounds
+} catch (e) {
+    print e.kind;        // Should print: IndexOutOfBoundsError
+    print e.message;     // Should print: List index out of bounds.
+}
+
+print "Program continues after catching error";
+// CHECK: IndexOutOfBoundsError
+// CHECK: List index out of bounds.
+// CHECK: Program continues after catching error

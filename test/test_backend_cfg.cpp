@@ -138,11 +138,14 @@ void checkInvariants(const Cfg& cfg,
         }
     }
 
-    // RETURN/MATCH_ERROR end a block with no successor; everything else that
-    // ends a block has at least one.
+    // RETURN/MATCH_ERROR/THROW end a block with no successor (cfg.cpp's own
+    // isBranch(): THROW unwinds past this function entirely, the same
+    // "no successor" shape as RETURN); everything else that ends a block
+    // has at least one.
     for (const BasicBlock& block : cfg.blocks) {
         Op lastOp = block.instructions.back().op;
-        if (lastOp == Op::RETURN || lastOp == Op::MATCH_ERROR) {
+        if (lastOp == Op::RETURN || lastOp == Op::MATCH_ERROR ||
+            lastOp == Op::THROW) {
             EXPECT_TRUE(block.successors.empty())
                 << block.label << " ends in " << static_cast<int>(lastOp)
                 << " but has a successor";

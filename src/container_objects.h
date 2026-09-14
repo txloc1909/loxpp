@@ -59,6 +59,22 @@ inline ObjFile* asObjFile(Obj* o) { return static_cast<ObjFile*>(o); }
 inline bool isFile(const Value& v) { return isValueOfType<ObjType::FILE>(v); }
 
 // ---------------------------------------------------------------------------
+// ObjError — error value caught by try/catch
+// ---------------------------------------------------------------------------
+struct ObjError : public Obj {
+    ObjClass* klass;    // shared s_errorClass; GC-tracked
+    ObjString* message; // human-readable error message
+    ObjString* kind;    // error category string (e.g. "ArithmeticTypeError")
+
+    ObjError(ObjClass* k, ObjString* msg, ObjString* k_str)
+        : Obj(ObjType::ERROR), klass(k), message(msg), kind(k_str) {}
+};
+
+inline bool isObjError(Obj* o) { return isObjType(o, ObjType::ERROR); }
+inline ObjError* asObjError(Obj* o) { return static_cast<ObjError*>(o); }
+inline bool isError(const Value& v) { return isValueOfType<ObjType::ERROR>(v); }
+
+// ---------------------------------------------------------------------------
 // ObjMap — open-addressing hash map with Value keys and values.
 // Keys must be Bool, Number, Nil, or String (interned).
 // ---------------------------------------------------------------------------
@@ -142,3 +158,24 @@ inline bool isEnumValue(const Value& v) {
     return isValueOfType<ObjType::ENUM>(v);
 }
 inline ObjEnum* asObjEnum(Obj* o) { return static_cast<ObjEnum*>(o); }
+
+// ---------------------------------------------------------------------------
+// ObjDeferredCall — captured callable and its arguments, pending invocation
+// ---------------------------------------------------------------------------
+struct ObjDeferredCall : public Obj {
+    Value callable;       // ObjClosure* - the function to call
+    VmVector<Value> args; // arguments to pass
+
+    ObjDeferredCall(Value fn, VmAllocator<Value> alloc)
+        : Obj(ObjType::DEFERRED_CALL), callable(fn), args(alloc) {}
+};
+
+inline bool isObjDeferredCall(Obj* o) {
+    return isObjType(o, ObjType::DEFERRED_CALL);
+}
+inline ObjDeferredCall* asObjDeferredCall(Obj* o) {
+    return static_cast<ObjDeferredCall*>(o);
+}
+inline bool isDeferredCall(const Value& v) {
+    return isValueOfType<ObjType::DEFERRED_CALL>(v);
+}

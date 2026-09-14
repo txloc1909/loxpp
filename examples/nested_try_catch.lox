@@ -1,0 +1,16 @@
+// A throw inside a catch block is not caught by that same catch block: it
+// escapes to the next enclosing try/catch.
+try {
+    try {
+        throw "inner";
+    } catch (e) {
+        print "inner-catch: " + e;
+        throw "rethrown-" + e;
+    }
+} catch (e2) {
+    print "outer-catch: " + e2;
+}
+print "done";
+// CHECK: inner-catch: inner
+// CHECK: outer-catch: rethrown-inner
+// CHECK: done

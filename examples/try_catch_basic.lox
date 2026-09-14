@@ -1,0 +1,23 @@
+// A throw crossing a function boundary: throws() raises, and main()'s try
+// catches it. The line after the failing call never runs.
+fun throws() {
+    throw "test error";
+}
+
+fun main() {
+    try {
+        print "In try block";
+        throws();
+        print "After throws() call";
+    } catch (e) {
+        print "In catch block";
+        print "Caught: " + e;
+    }
+    print "After try/catch";
+}
+
+main();
+// CHECK: In try block
+// CHECK: In catch block
+// CHECK: Caught: test error
+// CHECK: After try/catch

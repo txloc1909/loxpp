@@ -1,0 +1,9 @@
+print "Before try";
+try {
+    var list = [1, 2, 3];
+    print list[10];
+    print "After access";
+} catch (e) {
+    print "Caught error";
+}
+print "After catch";

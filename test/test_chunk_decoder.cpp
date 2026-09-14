@@ -130,6 +130,7 @@ void renderInstruction(const Chunk& chunk, const DecodedInstruction& ins,
     case Op::IS_SEQ:
     case Op::POP_HANDLER:
     case Op::THROW:
+    case Op::RUN_DEFERS:
         out << mnemonic(ins.op) << '\n';
         return;
 
@@ -156,6 +157,7 @@ void renderInstruction(const Chunk& chunk, const DecodedInstruction& ins,
     case Op::BUILD_MAP:
     case Op::GET_UPVALUE:
     case Op::SET_UPVALUE:
+    case Op::DEFER_RECORD:
         out << mnemonic(ins.op) << ' ' << ins.byteOperand << '\n';
         return;
 

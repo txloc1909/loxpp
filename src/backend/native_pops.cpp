@@ -109,6 +109,16 @@ std::string opName(Op op) {
         return "INSTANCEOF";
     case Op::IS_SEQ:
         return "IS_SEQ";
+    case Op::PUSH_HANDLER:
+        return "PUSH_HANDLER";
+    case Op::POP_HANDLER:
+        return "POP_HANDLER";
+    case Op::THROW:
+        return "THROW";
+    case Op::DEFER_RECORD:
+        return "DEFER_RECORD";
+    case Op::RUN_DEFERS:
+        return "RUN_DEFERS";
     }
     return "UNKNOWN_OP";
 }
@@ -126,6 +136,12 @@ std::optional<int> nativePops(Op op, const DecodedInstruction& in) {
     case Op::CLASS:
     case Op::CLOSURE:
     case Op::MATCH_ERROR:
+    // PUSH_HANDLER/POP_HANDLER touch the VM's separate handler stack, not
+    // the operand stack (chunk.h). RUN_DEFERS reads nothing of its own
+    // (chunk.h).
+    case Op::PUSH_HANDLER:
+    case Op::POP_HANDLER:
+    case Op::RUN_DEFERS:
         return 0;
     // One operand read.
     case Op::NEGATE:
@@ -139,6 +155,7 @@ std::optional<int> nativePops(Op op, const DecodedInstruction& in) {
     case Op::RETURN:
     case Op::ITER_HAS_NEXT:
     case Op::ITER_NEXT:
+    case Op::THROW: // reads the value to raise (chunk.h)
         return 1;
     // Two operands read.
     case Op::EQUAL:
@@ -168,7 +185,8 @@ std::optional<int> nativePops(Op op, const DecodedInstruction& in) {
     case Op::BUILD_MAP:
         return 2 * in.byteOperand;
     case Op::CALL:
-    case Op::INVOKE: // receiver/callee plus argCount arguments
+    case Op::INVOKE:       // receiver/callee plus argCount arguments
+    case Op::DEFER_RECORD: // callee plus argc arguments (chunk.h)
         return in.byteOperand + 1;
     case Op::SUPER_INVOKE: // self, superclass, plus argCount arguments —
         return in.byteOperand + 2; // self and the superclass are counted
