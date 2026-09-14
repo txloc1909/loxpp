@@ -355,11 +355,7 @@ examples=(
     # from the inner catch to the outer one). A runtime fault whose caught
     # Error exposes `kind`/`message` (catch_index_error.lox: list index out
     # of bounds) now matches: LoxOps.cs's catchable fault sites build a
-    # proper Error instance via LoxRuntime.MakeError. A *defer*-triggered
-    # fault (defer_throw_outer_catch.lox) is still not in this group: the
-    # CLR emitter does not lower DEFER_RECORD/RUN_DEFERS at all yet (a
-    # separate, much larger gap than fault-site wiring — see clr_emitter.cpp)
-    # so that example cannot even emit valid IL, let alone match native.
+    # proper Error instance via LoxRuntime.MakeError.
     "examples/simple_throw.lox"
     "examples/test_throw_simple.lox"
     "examples/try_catch_basic.lox"
@@ -368,6 +364,13 @@ examples=(
     "examples/catch_index_error.lox"
     "examples/test_arithmetic.lox"
     "examples/test_list_safe.lox"
+    # defer: normal-return and fall-through exit, multiple defers in one
+    # function running LIFO, and a defer's own call throwing during
+    # RUN_DEFERS — including the cross-function-unwind case, where that new
+    # throw propagates past the deferring function's own frame to an
+    # outer caller's try/catch (defer_throw_outer_catch.lox).
+    "examples/defer_lifo.lox"
+    "examples/defer_throw_outer_catch.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

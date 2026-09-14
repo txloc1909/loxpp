@@ -196,6 +196,14 @@ struct Emitter {
     int deferListSlot{-1};
     int deferTempSlotBase{-1};
 
+    // Holds a defer-using function's return value across `leave` — `leave`
+    // empties the evaluation stack (ECMA-335 III.3.64), so a value already
+    // pushed for `ret` does not survive being redirected to `leave
+    // defer_exit` to run the .finally block; injectTryCatchDirectives
+    // stashes it here first and reloads it after the .finally block, right
+    // before the real `ret`. -1 if defer is not used.
+    int deferReturnSlot{-1};
+
     // The exact slot count `.locals init` declares for this chunk (set by
     // buildEmitter, from the same computation emitClassBody uses for the
     // directive itself) — the upper bound `localOp` checks every slot
@@ -1902,26 +1910,30 @@ void emitBody(Emitter& e, bool isFunction,
             e.b.emit(e.stloc(arraySlot), 1, -1);
             // Stack: []
 
-            // Create DeferredCall(callee, array)
-            // Load callee and array for the constructor
+            // Add(DeferredCall(callee, array)) to the defer list. `this`
+            // (the List) has to be under the argument on the stack for an
+            // instance call, so it is pushed first, with the DeferredCall
+            // built as the argument on top of it — not the other way
+            // around, which would hand List<T>.Add the List as its `T
+            // item` argument and the DeferredCall as `this`.
+            e.b.emit(e.ldloc(e.deferListSlot), 0, +1);
+            // Stack: [List]
             e.b.emit(e.ldloc(calleeSlot), 0, +1);
-            // Stack: [callee]
+            // Stack: [List, callee]
             e.b.emit(e.ldloc(arraySlot), 0, +1);
-            // Stack: [callee, array]
+            // Stack: [List, callee, array]
             e.b.emit("newobj instance void [LoxRuntime]Lox.DeferredCall::.ctor"
                      "(object, object[])",
                      2, -1);
-            // Stack: [DeferredCall]
-
-            // Add to defer list
-            e.b.emit(e.ldloc(e.deferListSlot), 1, +1);
-            // Stack: [DeferredCall, List]
-            e.b.emit("call instance bool "
-                     "class [System.Runtime]System.Collections.Generic."
+            // Stack: [List, DeferredCall]
+            // List<T>.Add returns void, unlike ISet<T>.Add (e.g.
+            // HashSet<T>.Add) — using `bool` here resolves to no method at
+            // all (MissingMethodException at runtime; ilasm does not check
+            // the referenced method actually exists).
+            e.b.emit("call instance void "
+                     "class [System.Collections]System.Collections.Generic."
                      "List`1<object>::Add(!0)",
-                     2, -1);
-            // Stack: [bool (true if added)]
-            e.b.emit("pop", 1, -1);
+                     2, -2);
             // Stack: []
             break;
         }
@@ -2054,6 +2066,30 @@ AggregateNeeds computeAggregateNeeds(const DecodedFunction& fn,
     return needs;
 }
 
+// The one authority for how many extra `.locals init` slots defer support
+// needs in one chunk: 0 if the chunk does not use defer; otherwise 1 (the
+// defer list) + 2 + the widest DEFER_RECORD argc seen (DEFER_RECORD's own
+// calleeSlot/argsSlot/arraySlot temps) + 1 (deferReturnSlot, holding the
+// function's return value across the `leave` that exits the .try region —
+// see Emitter::deferReturnSlot). buildEmitter and emitChunk both call this,
+// instead of each recomputing it, so the slot count buildEmitter assigns
+// from can never drift from the one emitChunk later declares.
+int computeDeferExtraSlots(const DecodedFunction& fn) {
+    if (!usesDefer(fn)) {
+        return 0;
+    }
+    int maxDeferArgc = 0;
+    for (const auto& instr : fn.instructions) {
+        if (instr.op == Op::DEFER_RECORD) {
+            maxDeferArgc =
+                std::max(maxDeferArgc, static_cast<int>(instr.byteOperand));
+        }
+    }
+    // 1 (defer list) + 2 + maxDeferArgc (DEFER_RECORD's own temps) + 1
+    // (deferReturnSlot).
+    return 1 + (2 + maxDeferArgc) + 1;
+}
+
 // The one authority for how many `.locals init` slots one chunk needs:
 // globals (1) + the Lox frame's own slots + the shuffle scratch (1) + the
 // aggregate spill area, if this chunk needs one, + defer list and temp storage
@@ -2078,37 +2114,22 @@ Emitter buildEmitter(const DecodedFunction& fn,
                      const FunctionCaptureInfo& captureInfo) {
     Emitter e{fn, analysis, {}};
 
-    // Compute defer-related extra slots if this function uses defer
-    int deferExtraSlots = 0;
-    if (usesDefer(fn)) {
-        deferExtraSlots = 1; // for the defer list itself
-        // Check max argc in DEFER_RECORD opcodes to know how many temps we need
-        int maxDeferArgc = 0;
-        for (const auto& instr : fn.instructions) {
-            if (instr.op == Op::DEFER_RECORD) {
-                maxDeferArgc =
-                    std::max(maxDeferArgc, static_cast<int>(instr.byteOperand));
-            }
-        }
-        // DEFER_RECORD uses: calleeSlot, argsSlot (..+argc), arraySlot
-        // That's: deferTempSlotBase, deferTempSlotBase+1 (..<+argc),
-        // deferTempSlotBase+2 Total: 2 + argc extra slots (beyond the defer
-        // list itself)
-        deferExtraSlots += 2 + maxDeferArgc;
-    }
+    int deferExtraSlots = computeDeferExtraSlots(fn);
 
     e.scratchSlot = e.baseSlot + maxLocalCount;
     e.declaredLocalCount =
         computeTotalLocalSlots(maxLocalCount, aggregateNeeds, deferExtraSlots);
 
-    // If defer is used, shift slot assignments to make room for defer list
-    // and temp argument storage for DEFER_RECORD
+    // If defer is used, shift slot assignments to make room for defer list,
+    // temp argument storage for DEFER_RECORD, and the return-value slot
+    // `leave` needs (Emitter::deferReturnSlot).
     if (usesDefer(fn)) {
         e.deferListSlot = e.scratchSlot; // slot for the defer list itself
         e.deferTempSlotBase =
             e.deferListSlot + 1; // slots for DEFER_RECORD temps
         e.scratchSlot =
             e.deferListSlot + deferExtraSlots; // next available scratch
+        e.deferReturnSlot = e.scratchSlot - 1; // last slot in the defer block
     }
 
     if (aggregateNeeds.needsCalleeSlot || aggregateNeeds.maxWidth > 0) {
@@ -2192,7 +2213,7 @@ void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isFunction) {
     // Initialize defer list if this function uses defer
     if (e.deferListSlot >= 0) {
         e.b.emit("newobj instance void "
-                 "class [System.Runtime]System.Collections.Generic."
+                 "class [System.Collections]System.Collections.Generic."
                  "List`1<object>::.ctor()",
                  0, +1);
         e.b.emit(e.stloc(e.deferListSlot), 1, -1);
@@ -2237,6 +2258,12 @@ std::string emitConstructorMethod(const DecodedFunction& fn) {
 std::string emitHeader(const std::string& moduleClassName) {
     std::ostringstream out;
     out << ".assembly extern System.Runtime { .ver 8:0:0:0 }\n";
+    // System.Collections.Generic.List`1, used by defer's pending-call list,
+    // is not in System.Runtime's own type-forward table at runtime (unlike
+    // System.Object/System.Double, which are) — CoreCLR raises
+    // TypeLoadException loading it from there, confirmed against this
+    // image's Microsoft.NETCore.App 8.0.31. It lives in System.Collections.
+    out << ".assembly extern System.Collections { .ver 8:0:0:0 }\n";
     out << ".assembly extern LoxRuntime {}\n";
     out << ".assembly " << moduleClassName << " {}\n";
     out << ".module " << moduleClassName << ".dll\n\n";
@@ -2515,6 +2542,26 @@ std::string injectTryCatchDirectives(const std::string& bodyText,
         std::string deferExitLabel = "defer_exit";
         result += "    .try\n    {\n";
 
+        // `leave` empties the evaluation stack (ECMA-335 III.3.64), so a
+        // bare `ret`'s already-pushed return value does not survive being
+        // redirected to `leave defer_exit` to run the .finally block first.
+        // Stash it in deferReturnSlot before leaving; the code after the
+        // .finally block reloads it just before the real `ret` (below).
+        auto rewriteRetForDeferExit = [&](const std::string& line) {
+            std::size_t retPos = line.rfind("ret");
+            bool isRealRet =
+                retPos != std::string::npos &&
+                (retPos + 3 >= line.length() ||
+                 std::isalnum(static_cast<unsigned char>(line[retPos + 3])) ==
+                     0);
+            if (!isRealRet) {
+                return line;
+            }
+            std::string indent = line.substr(0, retPos);
+            return indent + e.stloc(e.deferReturnSlot) + "\n" + indent +
+                   "leave " + deferExitLabel;
+        };
+
         if (!e.analysis.handlerEntries.empty()) {
             // Process try/catch regions for the body (from firstLabelIdx
             // onward)
@@ -2531,55 +2578,37 @@ std::string injectTryCatchDirectives(const std::string& bodyText,
                             /*protectedRegion=*/false, regionsResult);
 
             // The regionResult is indented one level for inside the try block
-            // Also replace any `ret` with `leave defer_exit` to allow finally
-            // to run
             std::string regionsText = regionsResult.str();
             std::istringstream regionsStream(regionsText);
             std::string regionsLine;
             while (std::getline(regionsStream, regionsLine)) {
-                // Replace `ret` with `leave defer_exit` to exit the try block
-                if (regionsLine.find("ret") != std::string::npos) {
-                    size_t retPos = regionsLine.rfind("ret");
-                    // Make sure it's a real ret instruction, not part of a word
-                    if (retPos != std::string::npos &&
-                        (retPos + 3 >= regionsLine.length() ||
-                         !std::isalnum(regionsLine[retPos + 3]))) {
-                        regionsLine = regionsLine.substr(0, retPos) + "leave " +
-                                      deferExitLabel;
-                    }
-                }
-                result += "    " + regionsLine + "\n";
+                result += "    " + rewriteRetForDeferExit(regionsLine) + "\n";
             }
         } else {
             // No try/catch regions, just copy the body with indentation
-            // Also replace any `ret` with `leave defer_exit`
             for (std::size_t i = firstLabelIdx; i < lines.size(); i++) {
-                std::string line = lines[i];
-                // Replace `ret` with `leave defer_exit` to exit the try block
-                if (line.find("ret") != std::string::npos) {
-                    size_t retPos = line.rfind("ret");
-                    // Make sure it's a real ret instruction, not part of a word
-                    if (retPos != std::string::npos &&
-                        (retPos + 3 >= line.length() ||
-                         !std::isalnum(line[retPos + 3]))) {
-                        line =
-                            line.substr(0, retPos) + "leave " + deferExitLabel;
-                    }
-                }
-                result += "    " + line + "\n";
+                result += "    " + rewriteRetForDeferExit(lines[i]) + "\n";
             }
         }
 
-        // Emit the defer .finally block
+        // Emit the defer .finally block. ECMA-335 III.1.7.5 requires a
+        // .finally handler to end with `endfinally` — the CLR verifier
+        // rejects (InvalidProgramException, at JIT time, same as the
+        // .try/.catch `br`-vs-`leave` defect this emitter already works
+        // around) a finally body that merely falls through to whatever
+        // follows the block.
         result += "    }\n";
         result += "    finally\n";
         result += "    {\n";
         result += "      " + e.ldloc(e.deferListSlot) + "\n";
         result += "      call void [LoxRuntime]Lox.LoxOps::RunDefers(object)\n";
+        result += "      endfinally\n";
         result += "    }\n";
 
-        // Emit the exit label and final ret
+        // Emit the exit label, reload the return value `leave` discarded
+        // from the stack, and the final ret.
         result += deferExitLabel + ":\n";
+        result += "    " + e.ldloc(e.deferReturnSlot) + "\n";
         result += "    ret\n";
     } else {
         // No defer, just process try/catch regions if any
@@ -2646,23 +2675,7 @@ std::string emitChunk(const DecodedFunction& fn,
                       const FunctionCaptureInfo& captureInfo) {
     int maxLocalCount = computeMaxLocalCount(analysis);
     AggregateNeeds aggregateNeeds = computeAggregateNeeds(fn, analysis);
-
-    // Compute defer-related extra slots if this function uses defer
-    int deferExtraSlots = 0;
-    if (usesDefer(fn)) {
-        deferExtraSlots = 1; // for the defer list itself
-        // Check max argc in DEFER_RECORD opcodes to know how many temps we need
-        int maxDeferArgc = 0;
-        for (const auto& instr : fn.instructions) {
-            if (instr.op == Op::DEFER_RECORD) {
-                maxDeferArgc =
-                    std::max(maxDeferArgc, static_cast<int>(instr.byteOperand));
-            }
-        }
-        // DEFER_RECORD uses: calleeSlot, argsSlot (..+argc), arraySlot
-        // That's: 2 + argc extra slots (beyond the defer list itself)
-        deferExtraSlots += 2 + maxDeferArgc;
-    }
+    int deferExtraSlots = computeDeferExtraSlots(fn);
 
     Emitter e =
         buildEmitter(fn, analysis, maxLocalCount, aggregateNeeds, captureInfo);
