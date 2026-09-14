@@ -139,6 +139,16 @@ struct Emitter {
     // block.
     std::unordered_map<int, std::string> catchBlockLabels;
 
+    // Check if a given offset is the start of a catch handler block.
+    bool isCatchHandlerEntry(int offset) const {
+        for (const auto& handler : analysis.handlerEntries) {
+            if (handler.catchOffset == offset) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // Every Lox local slot this chunk's OWN captures (capture_analysis.h's
     // FunctionCaptureInfo::liveRangesBySlot) ever backs with an object[1]
     // ref-cell. Membership only, not the live range: GET_LOCAL, SET_LOCAL,
@@ -2218,10 +2228,22 @@ std::string injectTryCatchDirectives(const std::string& bodyText,
         result << "    }\n";
         result << "    catch [LoxRuntime]Lox.LoxError\n    {\n";
 
+        // At catch entry, the CLR has pushed the LoxError exception reference
+        // onto the stack. We must immediately extract the wrapped Lox++ value
+        // using the Value property getter, then proceed with the
+        // bytecode-derived handler code. The C# property Value compiles to a
+        // get_Value() method in IL. This mirrors the JVM backend's behavior
+        // (see jvm_emitter.cpp). The bytecode-derived code expects the caught
+        // value on the stack.
+        result << "    callvirt instance object [LoxRuntime]Lox.LoxError"
+                  "::`get_Value'()\n";
+
         // Catch handler: from after catchStart to the next label.
+        // The first instruction in the handler uses the extracted value.
         for (std::size_t i = catchStartLine + 1; i < catchEndLine; i++) {
-            if (!lines[i].empty()) {
-                result << lines[i] << "\n";
+            const std::string& l = lines[i];
+            if (!l.empty()) {
+                result << l << "\n";
             }
             processed[i] = true;
         }
