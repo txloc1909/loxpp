@@ -974,4 +974,37 @@ public static class LoxOps {
     public static object Throw(object value) {
         throw new LoxError(value);
     }
+
+    /// <summary>
+    /// Run all deferred calls in LIFO order. Called at function exit (both normal
+    /// return and exceptional paths) when defer is used. The deferList can be
+    /// a List[object] or null; if null or empty, this is a no-op.
+    /// </summary>
+    public static void RunDefers(object? deferList) {
+        if (deferList is not List<object?> list) {
+            return; // Not a list, nothing to do
+        }
+
+        // Run in LIFO order by repeatedly popping from the end
+        while (list.Count > 0) {
+            object? lastItem = list[list.Count - 1];
+            list.RemoveAt(list.Count - 1);
+            if (lastItem is not DeferredCall deferred) {
+                continue; // Skip non-DeferredCall items
+            }
+
+            // Invoke the deferred call
+            if (deferred.Callable == null) {
+                throw new LoxError(LoxRuntime.MakeError(
+                    "Deferred call has null callable.",
+                    "RuntimeError"));
+            }
+            if (deferred.Args == null) {
+                throw new LoxError(LoxRuntime.MakeError(
+                    "Deferred call has null args array.",
+                    "RuntimeError"));
+            }
+            Call(deferred.Callable, deferred.Args);
+        }
+    }
 }

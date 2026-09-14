@@ -33,6 +33,16 @@ namespace {
                              opName(op) + " yet");
 }
 
+// Check if the function uses defer (DEFER_RECORD or RUN_DEFERS opcodes).
+bool usesDefer(const DecodedFunction& fn) {
+    for (const auto& instr : fn.instructions) {
+        if (instr.op == Op::DEFER_RECORD || instr.op == Op::RUN_DEFERS) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Accumulates ilasm instruction text for one method body while tracking the
 // CIL evaluation stack's depth in slots. Unlike the JVM operand stack, CIL's
 // `.maxstack` counts one slot per value regardless of its underlying width —
@@ -179,6 +189,12 @@ struct Emitter {
     // instead of silently aliasing scratchSlot.
     int calleeScratchSlot{-1};
     int argScratchBase{-1};
+
+    // Defer support: slot for the defer list (allocated only if defer is used)
+    // and base slot for temporary storage during DEFER_RECORD (callee, args).
+    // Both are -1 if defer is not used.
+    int deferListSlot{-1};
+    int deferTempSlotBase{-1};
 
     // The exact slot count `.locals init` declares for this chunk (set by
     // buildEmitter, from the same computation emitClassBody uses for the
@@ -1837,6 +1853,93 @@ void emitBody(Emitter& e, bool isFunction,
         case Op::GET_TAG:
             emitGetTagOrFused(e, i, consumedFollowingJumpTable);
             break;
+        case Op::DEFER_RECORD: {
+            // Record a deferred call for execution at function exit.
+            // Stack before: [callee, arg0, arg1, ..., argN-1]
+            // Stack after: []
+            // The arguments are stored in the order they appear on the stack.
+
+            if (e.deferListSlot < 0) {
+                throw std::runtime_error(
+                    "clr_emitter: DEFER_RECORD but no defer list allocated");
+            }
+
+            int argc = in.byteOperand;
+
+            // Use dedicated temp slots for DEFER_RECORD
+            int calleeSlot = e.deferTempSlotBase;
+            int argsSlot = e.deferTempSlotBase + 1;
+            int arraySlot = e.deferTempSlotBase + 2;
+
+            // Spill argc arguments into scratch slots (in reverse order since
+            // they're on top). Pop from top to bottom: argN-1, argN-2, ...,
+            // arg0
+            for (int i = argc - 1; i >= 0; i--) {
+                e.b.emit(e.stloc(argsSlot + i), 1, -1);
+            }
+            // Stack: [callee]
+
+            // Pop the callee
+            e.b.emit(e.stloc(calleeSlot), 1, -1);
+            // Stack: []
+
+            // Create object[] array for arguments
+            e.b.emit(pushIntInstruction(argc), 0, +1);
+            e.b.emit("newarr [System.Runtime]System.Object", 1, 0);
+            // Stack: [object[]]
+
+            // Refill array with spilled arguments (in order: arg0, arg1, ...,
+            // argN-1)
+            for (int i = 0; i < argc; i++) {
+                e.b.emit("dup", 1, +1);
+                e.b.emit(pushIntInstruction(i), 0, +1);
+                e.b.emit(e.ldloc(argsSlot + i), 0, +1);
+                e.b.emit("stelem.ref", 3, -3);
+            }
+            // Stack: [object[]]
+
+            // Store array in arraySlot
+            e.b.emit(e.stloc(arraySlot), 1, -1);
+            // Stack: []
+
+            // Create DeferredCall(callee, array)
+            // Load callee and array for the constructor
+            e.b.emit(e.ldloc(calleeSlot), 0, +1);
+            // Stack: [callee]
+            e.b.emit(e.ldloc(arraySlot), 0, +1);
+            // Stack: [callee, array]
+            e.b.emit("newobj instance void [LoxRuntime]Lox.DeferredCall::.ctor"
+                     "(object, object[])",
+                     2, -1);
+            // Stack: [DeferredCall]
+
+            // Add to defer list
+            e.b.emit(e.ldloc(e.deferListSlot), 1, +1);
+            // Stack: [DeferredCall, List]
+            e.b.emit("call instance bool "
+                     "class [System.Runtime]System.Collections.Generic."
+                     "List`1<object>::Add(!0)",
+                     2, -1);
+            // Stack: [bool (true if added)]
+            e.b.emit("pop", 1, -1);
+            // Stack: []
+            break;
+        }
+        case Op::RUN_DEFERS: {
+            // Run all deferred calls in LIFO order.
+            // NOTE: When defer is used on CLR, the actual cleanup is done by
+            // the .finally block injected by injectTryCatchDirectives, not by
+            // this opcode. We skip the call here to avoid running defers twice.
+            if (e.deferListSlot < 0) {
+                // No defer list allocated, so no defers to run
+                break;
+            }
+
+            // With defer, the finally block handles cleanup, so we skip this
+            // call. The bytecode still has RUN_DEFERS for compatibility with
+            // other backends, but we don't emit it on CLR.
+            break;
+        }
         case Op::PUSH_HANDLER: {
             // Mark the start of a protected region. The catch handler offset is
             // recorded in the analysis; we just emit a label for the CFG pass
@@ -1864,18 +1967,6 @@ void emitBody(Emitter& e, bool isFunction,
             e.b.emit("throw", 0, 0);
             break;
         }
-        case Op::DEFER_RECORD:
-            // Defer: record a closure to be invoked at function exit.
-            // For now, this is a placeholder - full implementation deferred to
-            // later.
-            notImplemented(in.op);
-            break;
-        case Op::RUN_DEFERS:
-            // Run accumulated defers in LIFO order at function exit.
-            // For now, this is a placeholder - full implementation deferred to
-            // later.
-            notImplemented(in.op);
-            break;
         default:
             notImplemented(in.op);
         }
@@ -1965,16 +2056,18 @@ AggregateNeeds computeAggregateNeeds(const DecodedFunction& fn,
 
 // The one authority for how many `.locals init` slots one chunk needs:
 // globals (1) + the Lox frame's own slots + the shuffle scratch (1) + the
-// aggregate spill area, if this chunk needs one. buildEmitter calls this
-// to bound `Emitter::localOp` before a single instruction emits, and
-// emitClassBody calls it again, unchanged, for the `.locals init`
-// directive itself — one computation, not two that could drift apart.
+// aggregate spill area, if this chunk needs one, + defer list and temp storage
+// if defer is used. buildEmitter calls this to bound `Emitter::localOp`
+// before a single instruction emits, and emitClassBody calls it again,
+// unchanged, for the `.locals init` directive itself — one computation, not
+// two that could drift apart.
 int computeTotalLocalSlots(int maxLocalCount,
-                           const AggregateNeeds& aggregateNeeds) {
+                           const AggregateNeeds& aggregateNeeds,
+                           int deferExtraSlots) {
     bool needsScratchArea =
         aggregateNeeds.needsCalleeSlot || aggregateNeeds.maxWidth > 0;
     int extraSpillSlots = needsScratchArea ? aggregateNeeds.maxWidth + 1 : 0;
-    return 1 + maxLocalCount + 1 + extraSpillSlots;
+    return 1 + maxLocalCount + 1 + extraSpillSlots + deferExtraSlots;
 }
 
 // `captureInfo` is this chunk's own entry from `analyzeCaptures`
@@ -1984,9 +2077,40 @@ Emitter buildEmitter(const DecodedFunction& fn,
                      const AggregateNeeds& aggregateNeeds,
                      const FunctionCaptureInfo& captureInfo) {
     Emitter e{fn, analysis, {}};
+
+    // Compute defer-related extra slots if this function uses defer
+    int deferExtraSlots = 0;
+    if (usesDefer(fn)) {
+        deferExtraSlots = 1; // for the defer list itself
+        // Check max argc in DEFER_RECORD opcodes to know how many temps we need
+        int maxDeferArgc = 0;
+        for (const auto& instr : fn.instructions) {
+            if (instr.op == Op::DEFER_RECORD) {
+                maxDeferArgc =
+                    std::max(maxDeferArgc, static_cast<int>(instr.byteOperand));
+            }
+        }
+        // DEFER_RECORD uses: calleeSlot, argsSlot (..+argc), arraySlot
+        // That's: deferTempSlotBase, deferTempSlotBase+1 (..<+argc),
+        // deferTempSlotBase+2 Total: 2 + argc extra slots (beyond the defer
+        // list itself)
+        deferExtraSlots += 2 + maxDeferArgc;
+    }
+
     e.scratchSlot = e.baseSlot + maxLocalCount;
     e.declaredLocalCount =
-        computeTotalLocalSlots(maxLocalCount, aggregateNeeds);
+        computeTotalLocalSlots(maxLocalCount, aggregateNeeds, deferExtraSlots);
+
+    // If defer is used, shift slot assignments to make room for defer list
+    // and temp argument storage for DEFER_RECORD
+    if (usesDefer(fn)) {
+        e.deferListSlot = e.scratchSlot; // slot for the defer list itself
+        e.deferTempSlotBase =
+            e.deferListSlot + 1; // slots for DEFER_RECORD temps
+        e.scratchSlot =
+            e.deferListSlot + deferExtraSlots; // next available scratch
+    }
+
     if (aggregateNeeds.needsCalleeSlot || aggregateNeeds.maxWidth > 0) {
         // emitBuildList spills only into argScratchBase, one slot per
         // element, and never touches calleeScratchSlot; reserving it
@@ -2049,20 +2173,29 @@ void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isFunction) {
                  "[LoxRuntime]Lox.LoxRuntime::Init()",
                  0, +1);
         e.b.emit(e.stloc(e.globalsSlot), 1, -1);
-        return;
+    } else {
+        e.b.emit("call class [LoxRuntime]Lox.LoxGlobals "
+                 "[LoxRuntime]Lox.LoxRuntime::Current()",
+                 0, +1);
+        e.b.emit(e.stloc(e.globalsSlot), 1, -1);
+        e.b.emit("ldarg.1", 0, +1);
+        e.b.emit(e.stloc(e.slotForLocal(0)), 1, -1);
+        int arity = fn.function->arity;
+        for (int i = 0; i < arity; i++) {
+            e.b.emit("ldarg.2", 0, +1);
+            e.b.emit(pushIntInstruction(i), 0, +1);
+            e.b.emit("ldelem.ref", 2, -1);
+            e.b.emit(e.stloc(e.slotForLocal(i + 1)), 1, -1);
+        }
     }
-    e.b.emit("call class [LoxRuntime]Lox.LoxGlobals "
-             "[LoxRuntime]Lox.LoxRuntime::Current()",
-             0, +1);
-    e.b.emit(e.stloc(e.globalsSlot), 1, -1);
-    e.b.emit("ldarg.1", 0, +1);
-    e.b.emit(e.stloc(e.slotForLocal(0)), 1, -1);
-    int arity = fn.function->arity;
-    for (int i = 0; i < arity; i++) {
-        e.b.emit("ldarg.2", 0, +1);
-        e.b.emit(pushIntInstruction(i), 0, +1);
-        e.b.emit("ldelem.ref", 2, -1);
-        e.b.emit(e.stloc(e.slotForLocal(i + 1)), 1, -1);
+
+    // Initialize defer list if this function uses defer
+    if (e.deferListSlot >= 0) {
+        e.b.emit("newobj instance void "
+                 "class [System.Runtime]System.Collections.Generic."
+                 "List`1<object>::.ctor()",
+                 0, +1);
+        e.b.emit(e.stloc(e.deferListSlot), 1, -1);
     }
 }
 
@@ -2345,8 +2478,11 @@ void emitRegionRange(
 std::string injectTryCatchDirectives(const std::string& bodyText,
                                      const Emitter& e,
                                      const DecodedFunction& fn) {
-    // If there are no handler entries, return the body unchanged.
-    if (e.analysis.handlerEntries.empty()) {
+    // Check if this function uses defer
+    bool functionUsesDefer = e.deferListSlot >= 0;
+
+    // If there are no handler entries and no defer, return the body unchanged.
+    if (e.analysis.handlerEntries.empty() && !functionUsesDefer) {
         return bodyText;
     }
 
@@ -2357,16 +2493,109 @@ std::string injectTryCatchDirectives(const std::string& bodyText,
         lines.push_back(line);
     }
 
-    std::unordered_map<std::string, std::size_t> labelToLine =
-        buildLabelIndex(lines);
-    std::vector<TryRegion> regions = resolveRegions(lines, labelToLine, e);
-    std::vector<std::size_t> roots;
-    buildRegionForest(regions, roots);
+    std::string result;
 
-    std::ostringstream result;
-    emitRegionRange(lines, regions, labelToLine, 0, lines.size(), roots,
-                    /*protectedRegion=*/false, result);
-    return result.str();
+    // Find the first label (start of actual code, after prologue)
+    std::size_t firstLabelIdx = 0;
+    for (std::size_t i = 0; i < lines.size(); i++) {
+        const auto& l = lines[i];
+        if (l.find(':') != std::string::npos && isLabelOnlyLine(l)) {
+            firstLabelIdx = i;
+            break;
+        }
+    }
+
+    // If defer is used, wrap from the first label onward in .try/.finally
+    if (functionUsesDefer) {
+        // Emit prologue (before first label) outside the try block
+        for (std::size_t i = 0; i < firstLabelIdx; i++) {
+            result += lines[i] + "\n";
+        }
+
+        std::string deferExitLabel = "defer_exit";
+        result += "    .try\n    {\n";
+
+        if (!e.analysis.handlerEntries.empty()) {
+            // Process try/catch regions for the body (from firstLabelIdx
+            // onward)
+            std::unordered_map<std::string, std::size_t> labelToLine =
+                buildLabelIndex(lines);
+            std::vector<TryRegion> regions =
+                resolveRegions(lines, labelToLine, e);
+            std::vector<std::size_t> roots;
+            buildRegionForest(regions, roots);
+
+            std::ostringstream regionsResult;
+            emitRegionRange(lines, regions, labelToLine, firstLabelIdx,
+                            lines.size(), roots,
+                            /*protectedRegion=*/false, regionsResult);
+
+            // The regionResult is indented one level for inside the try block
+            // Also replace any `ret` with `leave defer_exit` to allow finally
+            // to run
+            std::string regionsText = regionsResult.str();
+            std::istringstream regionsStream(regionsText);
+            std::string regionsLine;
+            while (std::getline(regionsStream, regionsLine)) {
+                // Replace `ret` with `leave defer_exit` to exit the try block
+                if (regionsLine.find("ret") != std::string::npos) {
+                    size_t retPos = regionsLine.rfind("ret");
+                    // Make sure it's a real ret instruction, not part of a word
+                    if (retPos != std::string::npos &&
+                        (retPos + 3 >= regionsLine.length() ||
+                         !std::isalnum(regionsLine[retPos + 3]))) {
+                        regionsLine = regionsLine.substr(0, retPos) + "leave " +
+                                      deferExitLabel;
+                    }
+                }
+                result += "    " + regionsLine + "\n";
+            }
+        } else {
+            // No try/catch regions, just copy the body with indentation
+            // Also replace any `ret` with `leave defer_exit`
+            for (std::size_t i = firstLabelIdx; i < lines.size(); i++) {
+                std::string line = lines[i];
+                // Replace `ret` with `leave defer_exit` to exit the try block
+                if (line.find("ret") != std::string::npos) {
+                    size_t retPos = line.rfind("ret");
+                    // Make sure it's a real ret instruction, not part of a word
+                    if (retPos != std::string::npos &&
+                        (retPos + 3 >= line.length() ||
+                         !std::isalnum(line[retPos + 3]))) {
+                        line =
+                            line.substr(0, retPos) + "leave " + deferExitLabel;
+                    }
+                }
+                result += "    " + line + "\n";
+            }
+        }
+
+        // Emit the defer .finally block
+        result += "    }\n";
+        result += "    finally\n";
+        result += "    {\n";
+        result += "      " + e.ldloc(e.deferListSlot) + "\n";
+        result += "      call void [LoxRuntime]Lox.LoxOps::RunDefers(object)\n";
+        result += "    }\n";
+
+        // Emit the exit label and final ret
+        result += deferExitLabel + ":\n";
+        result += "    ret\n";
+    } else {
+        // No defer, just process try/catch regions if any
+        std::unordered_map<std::string, std::size_t> labelToLine =
+            buildLabelIndex(lines);
+        std::vector<TryRegion> regions = resolveRegions(lines, labelToLine, e);
+        std::vector<std::size_t> roots;
+        buildRegionForest(regions, roots);
+
+        std::ostringstream regionsResult;
+        emitRegionRange(lines, regions, labelToLine, 0, lines.size(), roots,
+                        /*protectedRegion=*/false, regionsResult);
+        result = regionsResult.str();
+    }
+
+    return result;
 }
 
 std::string emitClassBody(const Emitter& e, const DecodedFunction& fn,
@@ -2418,12 +2647,30 @@ std::string emitChunk(const DecodedFunction& fn,
     int maxLocalCount = computeMaxLocalCount(analysis);
     AggregateNeeds aggregateNeeds = computeAggregateNeeds(fn, analysis);
 
+    // Compute defer-related extra slots if this function uses defer
+    int deferExtraSlots = 0;
+    if (usesDefer(fn)) {
+        deferExtraSlots = 1; // for the defer list itself
+        // Check max argc in DEFER_RECORD opcodes to know how many temps we need
+        int maxDeferArgc = 0;
+        for (const auto& instr : fn.instructions) {
+            if (instr.op == Op::DEFER_RECORD) {
+                maxDeferArgc =
+                    std::max(maxDeferArgc, static_cast<int>(instr.byteOperand));
+            }
+        }
+        // DEFER_RECORD uses: calleeSlot, argsSlot (..+argc), arraySlot
+        // That's: 2 + argc extra slots (beyond the defer list itself)
+        deferExtraSlots += 2 + maxDeferArgc;
+    }
+
     Emitter e =
         buildEmitter(fn, analysis, maxLocalCount, aggregateNeeds, captureInfo);
     emitPrologue(e, fn, isFunction);
     emitBody(e, isFunction, childClassNames);
 
-    int totalLocals = computeTotalLocalSlots(maxLocalCount, aggregateNeeds);
+    int totalLocals =
+        computeTotalLocalSlots(maxLocalCount, aggregateNeeds, deferExtraSlots);
     return emitClassBody(e, fn, className, isFunction, totalLocals);
 }
 
