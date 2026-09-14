@@ -2764,25 +2764,86 @@ TEST(EmitScript, ExceptionTableEndLabelPlacedBeforeHandler) {
     FunctionStackAnalysis analysis = analyzeStack(fn);
     std::string j = jvm::emitScript(fn, analysis, "LoxMain");
 
-    // Verify that the .catch directive references both a start and end label
-    // with the same prefix, proving they are from the same PUSH_HANDLER.
+    // Verify that the end label (try_X_end:) is defined in the output
+    // and comes BEFORE the handler's own label (L_XXXX:) in the text.
+    // This ensures the exception table region correctly covers only the
+    // try body, not the handler code itself.
+
     size_t catchPos = j.find(".catch lox/LoxError from try_");
     ASSERT_NE(catchPos, std::string::npos)
         << ".catch directive not found with expected format in:\n"
         << j;
 
-    // Extract the try offset from the start label.
+    // Extract the try offset from the start label
     size_t afterPrefix =
         catchPos + std::string(".catch lox/LoxError from try_").length();
     size_t underscore = j.find("_", afterPrefix);
     ASSERT_NE(underscore, std::string::npos) << j;
     std::string tryOffset = j.substr(afterPrefix, underscore - afterPrefix);
 
-    // Verify the end label is referenced in the same .catch directive.
-    std::string endLabelRef = "to try_" + tryOffset + "_end";
-    size_t endLabelRefPos = j.find(endLabelRef, catchPos);
-    EXPECT_NE(endLabelRefPos, std::string::npos)
-        << "End label reference '" << endLabelRef
-        << "' not found in .catch directive in:\n"
+    // Extract the handler label from the .catch directive
+    std::string usingStr = " using L_";
+    size_t usingPos = j.find(usingStr, catchPos);
+    ASSERT_NE(usingPos, std::string::npos)
+        << "Handler label 'using L_' not found in:\n"
+        << j;
+    size_t handlerLabelStart = usingPos + usingStr.length();
+    size_t handlerLabelEnd = j.find("\n", handlerLabelStart);
+    std::string handlerLabel =
+        j.substr(handlerLabelStart, handlerLabelEnd - handlerLabelStart);
+
+    // Find the actual label definitions in the code
+    std::string endLabelDef = "try_" + tryOffset + "_end:";
+    std::string handlerLabelDef = "L_" + handlerLabel + ":";
+
+    size_t endLabelPos = j.find(endLabelDef);
+    size_t handlerLabelPos = j.find(handlerLabelDef);
+
+    ASSERT_NE(endLabelPos, std::string::npos)
+        << "End label definition '" << endLabelDef << "' not found in:\n"
+        << j;
+    ASSERT_NE(handlerLabelPos, std::string::npos)
+        << "Handler label definition '" << handlerLabelDef
+        << "' not found in:\n"
+        << j;
+
+    // The critical assertion: end label must appear BEFORE handler label
+    EXPECT_LT(endLabelPos, handlerLabelPos)
+        << "End label " << endLabelDef << " at position " << endLabelPos
+        << " must come before handler label " << handlerLabelDef
+        << " at position " << handlerLabelPos << " to ensure the exception"
+        << " table region does not include handler code";
+}
+
+TEST(EmitScript, SiblingTryCatchAfterTerminalBody) {
+    MemoryManager mm;
+    // Regression test for R6: two try/catch statements where the first
+    // body is terminal (ends in throw or return). This used to cause
+    // Jasmin assembly failure "Label ... has not been added to the code"
+    // because the second PUSH_HANDLER and its handler were unreachable
+    // in the CFG reachability analysis and thus skipped entirely.
+    DecodedFunction fn = decodeScript(
+        "try { throw \"a\"; } catch (e) { print \"caught-a: \" + e; } "
+        "try { print \"b-body\"; } catch (e) { print \"caught-b\"; } "
+        "print \"done\";",
+        mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // Both try regions must have .catch entries
+    EXPECT_EQ(countOccurrences(j, ".catch lox/LoxError from try_"), 2)
+        << "Expected 2 .catch directives (one per try/catch) in:\n"
+        << j;
+
+    // Both exception table entries must have their end labels defined
+    // in the emitted code (not silently dropped)
+    EXPECT_GE(countOccurrences(j, "_end:"), 2)
+        << "Expected at least 2 end labels (try_X_end:) in:\n"
+        << j;
+
+    // Handler code for second try must be present (not silently dropped)
+    // This is indicated by the presence of handler labels
+    EXPECT_GE(countOccurrences(j, "L_"), 2)
+        << "Expected at least 2 handler labels (L_XXXX:) in:\n"
         << j;
 }
