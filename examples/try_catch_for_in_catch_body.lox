@@ -1,0 +1,22 @@
+// Same defect class as try_catch_if_else_in_catch_body.lox, with a `for`
+// loop's own back-edge label inside the catch body instead of an
+// if/else's skip target.
+
+fun f() {
+    try {
+        throw "boom";
+    } catch (e) {
+        for (var i = 0; i < 3; i = i + 1) {
+            print "loop " + str(i);
+        }
+        print "after-for-in-catch";
+    }
+    print "after-try";
+}
+f();
+
+// CHECK: loop 0
+// CHECK: loop 1
+// CHECK: loop 2
+// CHECK: after-for-in-catch
+// CHECK: after-try

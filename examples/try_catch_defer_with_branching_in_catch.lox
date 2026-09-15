@@ -1,0 +1,23 @@
+fun cleanup(tag) {
+    print "cleanup: " + tag;
+}
+fun f(x) {
+    defer cleanup("f");
+    try {
+        throw "boom";
+    } catch (e) {
+        if (x) {
+            print "caught: " + e + " (x path)";
+        } else {
+            var i = 0;
+            while (i < 2) {
+                print "caught-loop " + str(i);
+                i = i + 1;
+            }
+        }
+        print "after-branch-in-catch";
+    }
+    print "after-try";
+}
+f(true);
+f(false);

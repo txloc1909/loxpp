@@ -32,20 +32,33 @@ public static class LoxOps {
 
     public static double CheckNumber(object v) {
         if (v is not double d) {
-            throw new LoxError("Operand must be a number.");
+            throw new LoxError(LoxRuntime.MakeError("Operand must be a number.", "ArithmeticTypeError"));
         }
         return d;
     }
 
     private static void CheckNumbers(object a, object b) {
         if (a is not double || b is not double) {
-            throw new LoxError("Operands must be numbers.");
+            throw new LoxError(LoxRuntime.MakeError("Operands must be numbers.", "ArithmeticTypeError"));
+        }
+    }
+
+    /// <summary>Same check as <see cref="CheckNumbers"/>, but a distinct kind - vm.cpp's GREATER/LESS
+    /// raise "ComparisonTypeError", not "ArithmeticTypeError", for the identical operand shape.</summary>
+    private static void CheckNumbersForComparison(object a, object b) {
+        if (a is not double || b is not double) {
+            throw new LoxError(LoxRuntime.MakeError("Operands must be numbers.", "ComparisonTypeError"));
         }
     }
 
     public static object Add(object a, object b) {
         if (a is string sa && b is string sb) {
             return sa + sb;
+        }
+        if (a is string || b is string) {
+            throw new LoxError(LoxRuntime.MakeError(
+                "Operands must be two numbers, two strings, or a string and a number.",
+                "ConcatenationTypeError"));
         }
         CheckNumbers(a, b);
         return (double)a + (double)b;
@@ -129,12 +142,12 @@ public static class LoxOps {
     }
 
     public static bool Greater(object a, object b) {
-        CheckNumbers(a, b);
+        CheckNumbersForComparison(a, b);
         return (double)a > (double)b;
     }
 
     public static bool Less(object a, object b) {
-        CheckNumbers(a, b);
+        CheckNumbersForComparison(a, b);
         return (double)a < (double)b;
     }
 
@@ -142,8 +155,34 @@ public static class LoxOps {
     // Sequences: in / slice / index
     // ------------------------------------------------------------------
 
-    /// <summary>Public for codegen's BUILD_MAP: every key must pass this before the map is built, per vm.cpp.</summary>
+    /// <summary>
+    /// Public for codegen's BUILD_MAP: every key must pass this before the map is built, per vm.cpp.
+    /// Catchable and kind-split (NaNKeyError vs InvalidMapKeyError), matching vm.cpp's BUILD_MAP,
+    /// SET_INDEX, GET_INDEX, and the map branch of IN — every one of those opcodes uses
+    /// tryCatchableError with a distinct kind per cause, not a single uncatchable message.
+    /// </summary>
     public static void CheckMapKey(object key) {
+        if (key == null || key is bool || key is string) {
+            return;
+        }
+        if (key is double d) {
+            if (double.IsNaN(d)) {
+                throw new LoxError(LoxRuntime.MakeError("NaN cannot be used as a map key.", "NaNKeyError"));
+            }
+            return;
+        }
+        throw new LoxError(LoxRuntime.MakeError(
+            "Map keys must be Bool, Number, Nil, or String.", "InvalidMapKeyError"));
+    }
+
+    /// <summary>
+    /// The `has`/`del` map-method key check. Unlike <see cref="CheckMapKey"/>, this mirrors
+    /// map_api.cpp's mapHasNative/mapDelNative exactly: a single uncatchable fault with one
+    /// combined message, not a catchable, kind-split one. vm.cpp's opcodes (BUILD_MAP, IN,
+    /// GET_INDEX, SET_INDEX) and its native map methods (has/del) are not symmetric here — this
+    /// is a pre-existing native-VM inconsistency, not a CLR-specific choice.
+    /// </summary>
+    internal static void CheckMapKeyForNativeMethod(object key) {
         if (key == null || key is bool || key is string) {
             return;
         }
@@ -228,14 +267,14 @@ public static class LoxOps {
 
     private static int BoundedIndex(object indexVal, int size, string kind) {
         if (indexVal is not double d) {
-            throw new LoxError($"{kind} index must be a number.");
+            throw new LoxError(LoxRuntime.MakeError($"{kind} index must be a number.", "IndexTypeError"));
         }
         if (d != Math.Floor(d)) {
-            throw new LoxError($"{kind} index must be an integer.");
+            throw new LoxError(LoxRuntime.MakeError($"{kind} index must be an integer.", "IndexNotIntegerError"));
         }
         int idx = (int)d;
         if (idx < 0 || idx >= size) {
-            throw new LoxError($"{kind} index out of bounds.");
+            throw new LoxError(LoxRuntime.MakeError($"{kind} index out of bounds.", "IndexOutOfBoundsError"));
         }
         return idx;
     }
@@ -311,7 +350,8 @@ public static class LoxOps {
             }
             return payload[idx];
         }
-        throw new LoxError("Only lists, strings, and maps can be indexed.");
+        throw new LoxError(LoxRuntime.MakeError(
+            "Only lists, strings, and maps can be indexed.", "NotIndexableError"));
     }
 
     public static object SetIndex(object collection, object index, object value) {
@@ -324,7 +364,8 @@ public static class LoxOps {
             return value;
         }
         if (collection is not LoxList list) {
-            throw new LoxError("Only lists and maps can be indexed for assignment.");
+            throw new LoxError(LoxRuntime.MakeError(
+                "Only lists and maps can be indexed for assignment.", "NotIndexableError"));
         }
         list.Elements[BoundedIndex(index, list.Elements.Count, "List")] = value;
         return value; // assignment is an expression
@@ -468,7 +509,8 @@ public static class LoxOps {
         if (callee is ILoxCallable callable) {
             return callable.Call(args);
         }
-        throw new LoxError("Can only call functions, classes and enums.");
+        throw new LoxError(LoxRuntime.MakeError(
+            "Can only call functions, classes and enums.", "NotCallableError"));
     }
 
     /// <summary>The INVOKE fast path: dispatches on the receiver's runtime kind (P6), not on one static type.</summary>
@@ -511,7 +553,12 @@ public static class LoxOps {
         if (receiver is LoxMap map) {
             return InvokeMapMethod(map, name, args);
         }
-        throw new LoxError("Only instances, files, and maps have methods.");
+        // Kind/message deliberately match vm.cpp's INVOKE final-else branch
+        // ("Method called on invalid receiver."), not this file's prior wording -
+        // check_clr_probes.sh diffs stdout against native, so a caught e.message
+        // must match verbatim.
+        throw new LoxError(LoxRuntime.MakeError(
+            "Method called on invalid receiver.", "InvalidReceiverError"));
     }
 
     private static object InvokeListMethod(LoxList list, string name, object[] args) {
@@ -527,7 +574,7 @@ public static class LoxOps {
                 throw new LoxError($"'pop' expects 0 arguments but got {args.Length}.");
             }
             if (list.Elements.Count == 0) {
-                throw new LoxError("Cannot pop from an empty list.");
+                throw new LoxError(LoxRuntime.MakeError("Cannot pop from an empty list.", "EmptyListError"));
             }
             object last = list.Elements[^1];
             list.Elements.RemoveAt(list.Elements.Count - 1);
@@ -559,11 +606,11 @@ public static class LoxOps {
         switch (name) {
         case "has":
             RequireArity(args, 1, "has");
-            CheckMapKey(args[0]);
+            CheckMapKeyForNativeMethod(args[0]);
             return map.Has(args[0]);
         case "del":
             RequireArity(args, 1, "del");
-            CheckMapKey(args[0]);
+            CheckMapKeyForNativeMethod(args[0]);
             map.Remove(args[0]);
             return null;
         case "keys": {
@@ -917,5 +964,47 @@ public static class LoxOps {
             end--;
         }
         return s.Substring(0, end);
+    }
+
+    /// <summary>
+    /// Handle a throw: wrap the value in a LoxError and throw it.
+    /// This is called by the THROW opcode in generated code.
+    /// The value can be anything; it becomes the Value field of the LoxError.
+    /// </summary>
+    public static object Throw(object value) {
+        throw new LoxError(value);
+    }
+
+    /// <summary>
+    /// Run all deferred calls in LIFO order. Called at function exit (both normal
+    /// return and exceptional paths) when defer is used. The deferList can be
+    /// a List[object] or null; if null or empty, this is a no-op.
+    /// </summary>
+    public static void RunDefers(object? deferList) {
+        if (deferList is not List<object?> list) {
+            return; // Not a list, nothing to do
+        }
+
+        // Run in LIFO order by repeatedly popping from the end
+        while (list.Count > 0) {
+            object? lastItem = list[list.Count - 1];
+            list.RemoveAt(list.Count - 1);
+            if (lastItem is not DeferredCall deferred) {
+                continue; // Skip non-DeferredCall items
+            }
+
+            // Invoke the deferred call
+            if (deferred.Callable == null) {
+                throw new LoxError(LoxRuntime.MakeError(
+                    "Deferred call has null callable.",
+                    "RuntimeError"));
+            }
+            if (deferred.Args == null) {
+                throw new LoxError(LoxRuntime.MakeError(
+                    "Deferred call has null args array.",
+                    "RuntimeError"));
+            }
+            Call(deferred.Callable, deferred.Args);
+        }
     }
 }

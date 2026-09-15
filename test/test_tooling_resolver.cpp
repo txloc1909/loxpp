@@ -440,7 +440,15 @@ TEST(ToolingResolverCorpus, NoCrashAndFewWarnings) {
     // none of them a new warning class. Raised again, 19 -> 23, for 2 more
     // adversarial regressions (nested try/catch with a terminal outer catch;
     // a local declared in a catch body immediately followed by a sibling
-    // try/catch) — 4 more bindings, same tracked gap. Lower this back to 5
-    // once that resolver support lands.
-    EXPECT_LE(totalWarnings, 23u);
+    // try/catch) — 4 more bindings, same tracked gap. Raised again, 23 ->
+    // 25, for 2 CLR-only regressions added in this PR (a terminal catch
+    // body with no sibling try/catch; a live `return` inside a try body)
+    // — 2 more `catch (e)` bindings, same tracked gap. Raised again, 25 ->
+    // 39, for 10 more CLR catch-region-boundary adversarial examples added
+    // in this PR (branching shapes inside a catch body: if/else, while,
+    // for, and/or, match, nested/sibling combinations, defer with
+    // branching) — 14 more `catch (e)`/`catch (e2)`/`catch (e3)` bindings,
+    // same tracked gap, no new warning class. Lower this back to 5 once
+    // that resolver support lands.
+    EXPECT_LE(totalWarnings, 39u);
 }

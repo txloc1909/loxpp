@@ -129,6 +129,48 @@ void expectEverySwitchTargetIsLabeled(const std::string& il) {
     }
 }
 
+// Returns the text strictly between the first `catch [LoxRuntime]Lox.
+// LoxError` block's own opening and closing braces — the region
+// injectTryCatchDirectives() actually wraps in a CIL `catch { }` handler.
+// Braces are matched by depth (a catch body can itself contain a nested
+// `.try{}`/`catch{}`), scanning only the exact "    {\n"/"    }\n" lines
+// emitRegionRange() ever produces for a region boundary — no ordinary CIL
+// instruction line is ever exactly one of those two literal lines. Used to
+// check that a catch body's own internal control-flow branches (an
+// if/else's skip target, a match arm's dispatch label, ...) land INSIDE
+// this substring, not spliced out into the enclosing scope by a region
+// boundary computed from the wrong label.
+std::string extractFirstCatchBody(const std::string& il) {
+    const std::string marker = "catch [LoxRuntime]Lox.LoxError\n    {\n";
+    std::size_t start = il.find(marker);
+    if (start == std::string::npos) {
+        ADD_FAILURE() << "no catch block found in:\n" << il;
+        return "";
+    }
+    std::size_t bodyStart = start + marker.size();
+    int depth = 1;
+    std::size_t pos = bodyStart;
+    while (depth > 0) {
+        std::size_t openPos = il.find("    {\n", pos);
+        std::size_t closePos = il.find("    }\n", pos);
+        if (closePos == std::string::npos) {
+            ADD_FAILURE() << "unbalanced catch block in:\n" << il;
+            return "";
+        }
+        if (openPos != std::string::npos && openPos < closePos) {
+            depth++;
+            pos = openPos + 6;
+        } else {
+            depth--;
+            if (depth == 0) {
+                return il.substr(bodyStart, closePos - bodyStart);
+            }
+            pos = closePos + 6;
+        }
+    }
+    return "";
+}
+
 // ---------------------------------------------------------------------------
 // ilasmStringLiteral
 // ---------------------------------------------------------------------------
@@ -2325,6 +2367,125 @@ TEST(ResolveZeroDepthLocalSlot, AtAMergeAgreementIsSilent) {
                                         /*lastInvisibleVarSlot=*/2,
                                         /*offset=*/9, "clr_emitter"),
               2);
+}
+
+// ---------------------------------------------------------------------------
+// Catch-region boundaries: resolveRegions()/emitRegionRange() must derive a
+// catch handler's own extent from the compiler's declared PUSH_HANDLER/
+// POP_HANDLER boundaries, not by scanning forward for whichever label
+// happens to appear first after the catch body starts. A catch body's own
+// internal control flow (an if/else's skip target, a match arm's dispatch
+// label, ...) places exactly that kind of label, and a scan that cannot
+// tell it apart from the true end-of-handler label truncates the region
+// mid-handler — splicing the rest of the catch body outside the `catch{}`
+// block it is still lexically inside. ilasm accepts the result; CoreCLR
+// rejects it at JIT time as InvalidProgramException.
+// ---------------------------------------------------------------------------
+
+TEST(EmitScript, CatchBodyWithIfElseKeepsBothBranchTargetsInsideCatchRegion) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "try { throw \"boom\"; } "
+        "catch (e) { "
+        "  if (e == \"boom\") { print \"yes\"; } else { print \"no\"; } "
+        "  print \"after-if-in-catch\"; "
+        "} "
+        "print \"after-try\";",
+        mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    std::string catchBody = extractFirstCatchBody(j);
+    ASSERT_FALSE(catchBody.empty()) << j;
+    // The if/else's own brtrue/br targets, and "print after-if-in-catch",
+    // must all be part of the extracted catch body — reusing
+    // expectEveryBranchTargetIsLabeled scoped to just this substring: a
+    // branch whose target label is only defined outside catchBody (the
+    // truncation bug) fails this the same way an undefined label would.
+    expectEveryBranchTargetIsLabeled(catchBody);
+    // String literals compile to a `bytearray` operand (ilasmStringLiteral),
+    // not readable source text — match the same way the emitter does.
+    EXPECT_NE(catchBody.find(clr::ilasmStringLiteral("after-if-in-catch")),
+              std::string::npos)
+        << "catch body's own trailing statement was spliced outside the "
+           "catch{} block:\n"
+        << j;
+    // "after-try" is NOT part of the catch handler — it must fall outside
+    // the extracted catch body, or the region grew too large the other way.
+    EXPECT_EQ(catchBody.find(clr::ilasmStringLiteral("after-try")),
+              std::string::npos)
+        << j;
+}
+
+TEST(EmitScript, CatchBodyWithMatchKeepsDispatchLabelsInsideCatchRegion) {
+    // spec/02-syntax.md's own recommended catch-discrimination idiom:
+    // `match` inside `catchBlock`, immediately followed by a sibling
+    // try/catch (the exact shape the round-1 [Reviewer] round on PR #236
+    // cited as broken).
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("enum Shape { Circle(r) Square(side) } "
+                     "try { throw Circle(3); } "
+                     "catch (e) { "
+                     "  var described = match e { "
+                     "    case Circle(r) => \"circle\" "
+                     "    case Square(side) => \"square\" "
+                     "    case _ => \"other\" "
+                     "  }; "
+                     "  print described; "
+                     "} "
+                     "try { throw \"sibling\"; } catch (e2) { print e2; }",
+                     mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    std::string catchBody = extractFirstCatchBody(j);
+    ASSERT_FALSE(catchBody.empty()) << j;
+    expectEveryBranchTargetIsLabeled(catchBody);
+    expectEverySwitchTargetIsLabeled(catchBody);
+    // The match's own dispatch (GET_TAG/switch or the sparse
+    // compare-and-branch form) and the `print` of its result must both be
+    // part of the extracted catch body, not spliced outside it — the
+    // `print` call is the last real instruction the catch body's own
+    // scope contains before it falls out to the sibling try/catch.
+    EXPECT_NE(catchBody.find("call void [LoxRuntime]Lox.LoxOps::Print"),
+              std::string::npos)
+        << "match's own result was spliced outside the catch{} block:\n"
+        << j;
+    // "sibling" (the second try/catch's own throw) is NOT part of the
+    // first catch handler — it must fall outside the extracted catch body.
+    EXPECT_EQ(catchBody.find(clr::ilasmStringLiteral("sibling")),
+              std::string::npos)
+        << j;
+}
+
+TEST(EmitProgram, TerminalCatchBodyWithBranchingInFunctionStaysBalanced) {
+    // Combines two previously-fixed shapes: a catch body that is the
+    // function's own last code (its own POP_HANDLER never runs — round-3's
+    // fix) AND internal branching inside that same catch body (round-4's
+    // finding). Every emitted branch target must resolve inside the
+    // extracted catch body.
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun f(x) {"
+                     "  try { throw \"boom\"; }"
+                     "  catch (e) {"
+                     "    if (x) { print \"x: \" + e; return \"early-x\"; }"
+                     "    else { print \"notx: \" + e; return \"early-notx\"; }"
+                     "  }"
+                     "}"
+                     "print f(true);",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    std::string catchBody = extractFirstCatchBody(il);
+    ASSERT_FALSE(catchBody.empty()) << il;
+    expectEveryBranchTargetIsLabeled(catchBody);
+    // Both `return`s inside the catch body must have been rewritten to
+    // `leave` (ECMA-335 III.1.7.5) — a bare `ret` here is as illegal as an
+    // unrewritten `br` leaving the region.
+    EXPECT_EQ(countOccurrences(catchBody, "\n    ret\n"), 0) << catchBody;
 }
 
 TEST(ResolveZeroDepthLocalSlot, AtAMergeDisagreementThrows) {

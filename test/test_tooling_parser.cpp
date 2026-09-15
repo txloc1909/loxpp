@@ -534,8 +534,12 @@ std::size_t measureProgramDepth(const Program& prog) {
 
 TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     const std::vector<fs::path> files = corpusFiles();
-    // examples/*.lox (81) + bootstrap/*.lox (2) + translation-probes/*.lox (47)
-    ASSERT_EQ(files.size(), 130U);
+    // examples/*.lox (94) + bootstrap/*.lox (2) + translation-probes/*.lox
+    // (47). Raised from 133 for the 10 CLR catch-region-boundary adversarial
+    // examples added alongside this PR's fix (branching shapes inside a
+    // catch body: if/else, while, for, and/or, match, nested/sibling
+    // combinations, defer with branching).
+    ASSERT_EQ(files.size(), 143U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {

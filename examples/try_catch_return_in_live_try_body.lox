@@ -1,0 +1,28 @@
+// Regression for a second CLR-only bug found in this PR: `return` inside a
+// try body that IS actually reached at runtime (not dead code left over
+// from an earlier terminal catch). A plain `ret` sitting inside a
+// .try{}/catch{} block is illegal (ECMA-335 III.1.7.5), the same rule that
+// already required rewriting a bytecode-derived `br` into `leave`
+// (asLeaveIfExiting) -- but nothing rewrote a `ret` the same way for a
+// non-defer function. A defer-using function already gets this for free
+// from its own outer .try/.finally wrapping (Emitter::deferReturnSlot);
+// this checks the analogous fix for a function with no defer at all
+// (Emitter::handlerReturnSlot).
+
+fun withReturnInTry(shouldThrow) {
+    try {
+        if (shouldThrow) {
+            throw "boom";
+        }
+        return "no-throw-path";
+    } catch (e) {
+        print "caught: " + e;
+    }
+    print "after try/catch";
+}
+print withReturnInTry(false);
+print withReturnInTry(true);
+
+// CHECK: no-throw-path
+// CHECK: caught: boom
+// CHECK: after try/catch

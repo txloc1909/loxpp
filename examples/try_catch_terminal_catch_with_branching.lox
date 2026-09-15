@@ -1,0 +1,15 @@
+fun f(x) {
+    try {
+        throw "boom";
+    } catch (e) {
+        if (x) {
+            print "caught: " + e + " (x path)";
+            return "early-x";
+        } else {
+            print "caught: " + e + " (not-x path)";
+            return "early-not-x";
+        }
+    }
+}
+print f(true);
+print f(false);

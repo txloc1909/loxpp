@@ -348,6 +348,95 @@ examples=(
     # fields(), methods(), getField(), setField(), hasField(), callMethod().
     "examples/reflection_basics.lox"
     "examples/generic_tools.lox"
+    # Non-local control flow: a thrown value caught by a matching handler,
+    # including a throw that crosses a function-call boundary
+    # (try_catch_basic.lox) and a try/catch nested inside another try's
+    # protected body and its catch body (nested_try_catch.lox, rethrown
+    # from the inner catch to the outer one). A runtime fault whose caught
+    # Error exposes `kind`/`message` (catch_index_error.lox: list index out
+    # of bounds) now matches: LoxOps.cs's catchable fault sites build a
+    # proper Error instance via LoxRuntime.MakeError.
+    "examples/simple_throw.lox"
+    "examples/test_throw_simple.lox"
+    "examples/try_catch_basic.lox"
+    "examples/test_catch_simple.lox"
+    "examples/nested_try_catch.lox"
+    "examples/catch_index_error.lox"
+    "examples/test_arithmetic.lox"
+    "examples/test_list_safe.lox"
+    # defer: normal-return and fall-through exit, multiple defers in one
+    # function running LIFO, and a defer's own call throwing during
+    # RUN_DEFERS — including the cross-function-unwind case, where that new
+    # throw propagates past the deferring function's own frame to an
+    # outer caller's try/catch (defer_throw_outer_catch.lox).
+    # defer_explicit_return.lox additionally covers an explicit `return`
+    # inside a defer-using function (not only fall-through), where the
+    # `leave` that runs the .finally block would otherwise discard the
+    # return value already on the evaluation stack.
+    "examples/defer_lifo.lox"
+    "examples/defer_throw_outer_catch.lox"
+    "examples/defer_explicit_return.lox"
+    # The JVM-side referee's own PR #237 regression examples (issue #240's
+    # repro, plus shapes (A)/(B) from that PR's rounds 2-3), inherited by
+    # this branch's rebase onto main for the shared local-recognition and
+    # handler-seeding fix, and now passing on CLR too:
+    # try_catch_defer_local_slot.lox (#240 itself) via the inherited fix;
+    # try_catch_local_in_catch_body.lox,
+    # try_catch_local_before_and_in_catch.lox, and
+    # try_catch_local_in_catch_then_sibling.lox via the same inherited fix
+    # to catch-bound-local recognition; try_catch_invalid_receiver.lox
+    # needed no CLR-side change (LoxOps.cs already wired
+    # InvalidReceiverError). try_catch_sibling_after_terminal_catch.lox,
+    # try_catch_three_terminal_siblings.lox, and
+    # try_catch_nested_terminal_outer_catch.lox additionally needed two
+    # CLR-only fixes this PR adds: resolveRegions's catchEndLine no longer
+    # defaults to zero instruction lines when a catch body is the last
+    # code emitted, and a bare `ret` inside a .try{}/catch{} (not only a
+    # `br`) now rewrites to `leave` via Emitter::handlerReturnSlot.
+    "examples/try_catch_defer_local_slot.lox"
+    "examples/try_catch_invalid_receiver.lox"
+    "examples/try_catch_local_before_and_in_catch.lox"
+    "examples/try_catch_local_in_catch_body.lox"
+    "examples/try_catch_local_in_catch_then_sibling.lox"
+    "examples/try_catch_nested_terminal_outer_catch.lox"
+    "examples/try_catch_sibling_after_terminal_catch.lox"
+    "examples/try_catch_three_terminal_siblings.lox"
+    # Two CLR-only regressions this PR's own fix closes (see
+    # resolveRegions's catchEndLine comment and Emitter::handlerReturnSlot
+    # in src/backend/clr_emitter.cpp): a terminal catch body with no
+    # sibling try/catch at all, and a live (actually-reached, not dead)
+    # `return` inside a try body.
+    "examples/try_catch_return_in_catch_no_sibling.lox"
+    "examples/try_catch_return_in_live_try_body.lox"
+    # A [Reviewer] round found resolveRegions()'s catchEndLine computed by
+    # scanning forward from catchStartLine for the FIRST CFG label — which
+    # cannot tell "the label marking this handler's own true end" apart
+    # from a label the catch body's own internal control flow placed for
+    # an unrelated reason (an if/else's skip target, a loop back-edge, a
+    # match arm's dispatch label). Fixed by deriving catchEndLine from the
+    # compiler's own declared PUSH_HANDLER/POP_HANDLER boundary
+    # (HandlerEntryContract::popHandlerOffset) instead of scanning; each
+    # example below adds one more branching shape inside a catch body that
+    # the old scan-based heuristic truncated mid-handler.
+    "examples/try_catch_if_else_in_catch_body.lox"
+    "examples/try_catch_while_in_catch_body.lox"
+    "examples/try_catch_for_in_catch_body.lox"
+    "examples/try_catch_andor_in_catch_body.lox"
+    # spec/02-syntax.md's own recommended catch-discrimination idiom:
+    # `match` inside `catchBlock`, immediately followed by a sibling
+    # try/catch.
+    "examples/try_catch_match_in_catch_body.lox"
+    "examples/try_catch_match_terminal_last.lox"
+    # Combines this fix with two earlier ones: internal branching inside a
+    # catch body that is ALSO the function's own last code (round-3's
+    # terminal-catch-body fix), a catch body's own internal branching
+    # nested inside another try/catch's catch body, and three sibling
+    # try/catch statements, each with a terminal, branching catch body.
+    "examples/try_catch_terminal_catch_with_branching.lox"
+    "examples/try_catch_nested_catch_with_branching.lox"
+    "examples/try_catch_three_terminal_siblings_with_branching.lox"
+    # defer combined with a catch body containing internal branching.
+    "examples/try_catch_defer_with_branching_in_catch.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

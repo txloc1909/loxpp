@@ -1,0 +1,26 @@
+// Regression for a CLR-only bug found in this PR: a single try/catch, no
+// sibling try/catch at all, whose catch body is the LAST code the function
+// ever runs and ends in `return`. clr_emitter.cpp's resolveRegions() used
+// to default the catch region's end line to "one line past the catch
+// entry" whenever it found no CFG label after the catch body (true here,
+// since nothing follows it) -- truncating the catch region to zero of its
+// own instruction lines and silently spilling the whole handler body
+// (everything after the injected get_Value() call) outside the .try{}/
+// catch{} block. ilasm accepted the malformed IL; CoreCLR rejected it at
+// JIT time as InvalidProgramException. No sibling try/catch or dead-code
+// shape is needed to trigger this -- unlike this PR's other
+// try_catch_*_terminal_* regressions, all inherited from PR #237's JVM
+// side, this one is CLR-specific.
+
+fun f() {
+    try {
+        throw "x";
+    } catch (e) {
+        print "caught: " + e;
+        return "early";
+    }
+}
+print f();
+
+// CHECK: caught: x
+// CHECK: early
