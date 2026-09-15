@@ -4,29 +4,35 @@
 
 var LOG = "examples/log_writer.output";
 
-// Start with a clean log file.
-var f = open(LOG, "w");
-f.close();
+fun main() {
+    // Start with a clean log file.
+    var f = open(LOG, "w");
+    defer f.close();
 
-// Simulate three independent sessions, each appending to the same log.
-var session = 1;
-while (session <= 3) {
-    f = open(LOG, "a");
-    f.writeline("[session " + str(session) + "] event: start");
-    f.writeline("[session " + str(session) + "] event: done");
-    f.close();
-    session = session + 1;
+    // Simulate three independent sessions, each appending to the same log.
+    var session = 1;
+    while (session <= 3) {
+        {
+            f = open(LOG, "a");
+            defer f.close();
+            f.writeline("[session " + str(session) + "] event: start");
+            f.writeline("[session " + str(session) + "] event: done");
+        }
+        session = session + 1;
+    }
+
+    // Read back the accumulated log.
+    print "=== Log Writer ===";
+    f = open(LOG, "r");
+    defer f.close();
+    var line = f.readline();
+    while (line != nil) {
+        print line;
+        line = f.readline();
+    }
 }
 
-// Read back the accumulated log.
-print "=== Log Writer ===";
-f = open(LOG, "r");
-var line = f.readline();
-while (line != nil) {
-    print line;
-    line = f.readline();
-}
-f.close();
+main();
 // CHECK: === Log Writer ===
 // CHECK: [session 1] event: start
 // CHECK: [session 1] event: done

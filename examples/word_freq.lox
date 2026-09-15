@@ -23,42 +23,46 @@ fun splitWords(s) {
     return words;
 }
 
-var counts = {};
+fun main() {
+    var counts = {};
 
-var f = open("examples/word_freq.input", "r");
-var line = f.readline();
-while (line != nil) {
-    var words = splitWords(line);
-    for (var w in words) {
-        if (counts.has(w)) {
-            counts[w] = counts[w] + 1;
-        } else {
-            counts[w] = 1;
+    var f = open("examples/word_freq.input", "r");
+    defer f.close();
+    var line = f.readline();
+    while (line != nil) {
+        var words = splitWords(line);
+        for (var w in words) {
+            if (counts.has(w)) {
+                counts[w] = counts[w] + 1;
+            } else {
+                counts[w] = 1;
+            }
         }
+        line = f.readline();
     }
-    line = f.readline();
-}
-f.close();
 
-// Sort keys by frequency descending (insertion sort on keys list)
-var keys = counts.keys();
-var n = len(keys);
-var i = 1;
-while (i < n) {
-    var key = keys[i];
-    var j = i - 1;
-    while (j >= 0 and counts[keys[j]] < counts[key]) {
-        keys[j + 1] = keys[j];
-        j = j - 1;
+    // Sort keys by frequency descending (insertion sort on keys list)
+    var keys = counts.keys();
+    var n = len(keys);
+    var i = 1;
+    while (i < n) {
+        var key = keys[i];
+        var j = i - 1;
+        while (j >= 0 and counts[keys[j]] < counts[key]) {
+            keys[j + 1] = keys[j];
+            j = j - 1;
+        }
+        keys[j + 1] = key;
+        i = i + 1;
     }
-    keys[j + 1] = key;
-    i = i + 1;
+
+    // CHECK: === Word Frequencies ===
+    print "=== Word Frequencies ===";
+    for (var w in keys) {
+        print w + ": " + str(counts[w]);
+    }
 }
 
-// CHECK: === Word Frequencies ===
-print "=== Word Frequencies ===";
-for (var w in keys) {
-    print w + ": " + str(counts[w]);
-}
+main();
 // CHECK: the: 4
 // (ties in frequency are printed in unspecified Map-key order)

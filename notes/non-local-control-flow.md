@@ -248,3 +248,7 @@ Runtime Errors table (mark each fault "catchable via `try`"); a new builtin
 
 See the tracking issue (linked from this file once opened) for the node
 breakdown.
+
+## Shipped
+
+**Mission #223: non-local control flow (`try`/`catch`/`throw`/`defer`) — COMPLETE** (X1–X6, all nodes merged). All three backends (native, JVM, CLR) implemented and differential-tested. Expressiveness roadmap item 3 closed. See `notes/missions/2026-09-non-local-control-flow/` for the implementation record.

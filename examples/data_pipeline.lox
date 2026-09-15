@@ -5,28 +5,32 @@
 var INPUT  = "examples/data_pipeline.input";
 var OUTPUT = "examples/data_pipeline.output";
 
-// --- Transform: read input, write numbered output ---
-var fin  = open(INPUT,  "r");
-var fout = open(OUTPUT, "w");
-var n = 1;
-var line = fin.readline();
-while (line != nil) {
-    fout.writeline(str(n) + ". " + line);
-    n = n + 1;
-    line = fin.readline();
-}
-fin.close();
-fout.close();
+fun main() {
+    // --- Transform: read input, write numbered output ---
+    var fin  = open(INPUT,  "r");
+    defer fin.close();
+    var fout = open(OUTPUT, "w");
+    defer fout.close();
+    var n = 1;
+    var line = fin.readline();
+    while (line != nil) {
+        fout.writeline(str(n) + ". " + line);
+        n = n + 1;
+        line = fin.readline();
+    }
 
-// --- Verify: read and print the output file ---
-print "=== Data Pipeline ===";
-var f = open(OUTPUT, "r");
-line = f.readline();
-while (line != nil) {
-    print line;
+    // --- Verify: read and print the output file ---
+    print "=== Data Pipeline ===";
+    var f = open(OUTPUT, "r");
+    defer f.close();
     line = f.readline();
+    while (line != nil) {
+        print line;
+        line = f.readline();
+    }
 }
-f.close();
+
+main();
 // CHECK: === Data Pipeline ===
 // CHECK: 1. Alice
 // CHECK: 2. Bob
