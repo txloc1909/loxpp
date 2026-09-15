@@ -333,6 +333,19 @@ struct Emitter {
     // most once (each PUSH_HANDLER declares one target).
     std::unordered_map<int, int> regionEndLabelsByHandlerOffset;
 
+    // POP_HANDLER offsets whose own PUSH_HANDLER was reached (from
+    // analysis.handlerEntries — see HandlerEntryContract::popHandlerOffset).
+    // emitBody's reachability gate reads this instead of a blanket
+    // "always run POP_HANDLER" bypass: a POP_HANDLER's own raw reached bit
+    // is unreliable (the CFG walk marks it unreached whenever the try body's
+    // last statement is terminal — see PUSH_HANDLER's own emitter note),
+    // but whether its *paired* PUSH_HANDLER ran is exactly what decides
+    // whether this region needs closing. A POP_HANDLER absent from this set
+    // belongs to a genuinely dead try/catch (its PUSH_HANDLER never ran
+    // either) and must be skipped, not forced — forcing it would pop
+    // e.activeRegions against a region that was never pushed.
+    std::unordered_set<int> popHandlerOffsetsWithReachedPush;
+
     // Defer catch-all handler: label at the start of the function body
     // (after prologue) and the handler code label for catching exceptions
     // and running defers before re-throwing.
@@ -1885,6 +1898,12 @@ Emitter buildEmitter(const DecodedFunction& fn,
     for (const InvisibleVarSite& site : analysis.invisibleVars) {
         e.invisibleVarsByOffset[site.offset].push_back(site.slot);
     }
+    // analysis.handlerEntries only contains regions whose PUSH_HANDLER was
+    // reached (analyzeStack skips dead try blocks there) — see
+    // popHandlerOffsetsWithReachedPush's own comment.
+    for (const HandlerEntryContract& entry : analysis.handlerEntries) {
+        e.popHandlerOffsetsWithReachedPush.insert(entry.popHandlerOffset);
+    }
     // Which of this chunk's OWN local slots ever back an Object[1] cell —
     // every slot some reachable CLOSURE in this chunk captures
     // (capture_analysis.h). Membership only; see ensureCapturedCell's own
@@ -2109,14 +2128,22 @@ void emitBody(Emitter& e, bool isScript,
 
     for (std::size_t i = 0; i < n;) {
         const DecodedInstruction& in = ins[i];
-        // POP_HANDLER marks the end of a try region and must always be
-        // processed, even if the preceding instruction is terminal (THROW or
-        // RETURN), which would mark this offset as unreachable. The region
-        // boundary is a structural constraint, not a control-flow reachability
-        // constraint. Skip other unreachable instructions normally (e.g.,
-        // endCompiler()'s trailing NIL;RETURN).
-        bool isPopHandler = in.op == Op::POP_HANDLER;
-        if (!e.reached(i) && !isPopHandler) {
+        // POP_HANDLER marks the end of a try region and must be processed
+        // whenever its own PUSH_HANDLER ran, even if POP_HANDLER's own raw
+        // offset is unreachable (the try body's last statement was terminal
+        // — THROW or RETURN — so nothing falls through into it). The region
+        // boundary is a structural constraint tied to its PUSH_HANDLER, not
+        // to this offset's own control-flow reachability: forcing every
+        // POP_HANDLER unconditionally would also run one whose PUSH_HANDLER
+        // never ran (a genuinely dead try/catch, e.g. one physically placed
+        // after another handler's own terminal body), popping
+        // e.activeRegions against a region that was never pushed. Skip other
+        // unreachable instructions normally (e.g. endCompiler()'s trailing
+        // NIL;RETURN).
+        bool isReachablePopHandler =
+            in.op == Op::POP_HANDLER &&
+            e.popHandlerOffsetsWithReachedPush.contains(in.offset);
+        if (!e.reached(i) && !isReachablePopHandler) {
             i++;
             continue;
         }
