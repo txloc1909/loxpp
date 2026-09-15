@@ -134,6 +134,18 @@ git branch -d <type>/<desc>
 > and CLR toolchains are healthy, so any later failure points at generated
 > bytecode rather than the image. Neither agent tag is `loxpp-dev` — that name
 > belongs to the human's off-limits distrobox container.
+>
+> CLR work needs one more build before running any example or probe:
+> `tools/build_lox_rt_clr.sh` compiles `runtime/clr/LoxRuntime.dll` and
+> `LoxHost.dll`, the project's own CLR runtime library. `check_managed_toolchains.sh`
+> does not build this file — it only proves ilasm and dotnet work, using
+> throwaway assemblies of its own — so a fresh worktree with no CLR runtime
+> library yet still passes that check. Running `tools/loxpp_clr.sh` or
+> `tools/diff_runtimes.py` against a missing `LoxRuntime.dll` fails fast with
+> a clear message on stderr and a non-zero exit, but prints nothing at all to
+> stdout: a check that reads only stdout, not stderr or the exit code, sees
+> this as "no output" and can mistake a missed build step for a backend
+> defect.
 
 ---
 
