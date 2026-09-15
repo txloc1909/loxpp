@@ -22,7 +22,9 @@ public sealed class LoxEnumCtor : ILoxCallable {
 
     public object Call(object[] args) {
         if (args.Length != Arity) {
-            throw new LoxError($"'{CtorName}' expects {Arity} argument(s) but got {args.Length}.");
+            throw new LoxError(LoxRuntime.MakeError(
+                $"'{CtorName}' expects {Arity} argument(s) but got {args.Length}.",
+                "ConstructorArityError"));
         }
         return new LoxEnum(this, (object[])args.Clone());
     }
