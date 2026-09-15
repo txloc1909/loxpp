@@ -146,6 +146,15 @@ git branch -d <type>/<desc>
 > stdout: a check that reads only stdout, not stderr or the exit code, sees
 > this as "no output" and can mistake a missed build step for a backend
 > defect.
+>
+> Build with the `release` preset, not the generic task loop's `debug` one,
+> before comparing output across backends (`tools/diff_runtimes.py`, or
+> hand-diffing `build/loxpp` against `tools/loxpp_jvm.sh`/`loxpp_clr.sh`).
+> The `debug` preset leaves `LOXPP_DEBUG_TRACE_EXECUTION`/
+> `LOXPP_DEBUG_PRINT_CODE` on by default, so native's stdout carries a full
+> per-instruction bytecode+stack trace the managed backends never produce —
+> every comparison "diverges" even when nothing is actually wrong. CI's own
+> `managed-toolchains` job builds `release` for exactly this reason.
 
 ---
 
