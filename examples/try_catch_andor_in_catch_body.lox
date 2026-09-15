@@ -1,0 +1,28 @@
+// Same defect class as try_catch_if_else_in_catch_body.lox, with an
+// `and`/`or` short-circuit merge label inside the catch body's own `if`
+// condition instead of a plain if/else skip target.
+
+fun f(a, b) {
+    try {
+        throw "boom";
+    } catch (e) {
+        if (a and b) {
+            print "both true";
+        } else if (a or b) {
+            print "one true";
+        } else {
+            print "neither";
+        }
+    }
+    print "after-try";
+}
+f(true, true);
+f(true, false);
+f(false, false);
+
+// CHECK: both true
+// CHECK: after-try
+// CHECK: one true
+// CHECK: after-try
+// CHECK: neither
+// CHECK: after-try

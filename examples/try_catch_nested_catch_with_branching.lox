@@ -1,0 +1,20 @@
+fun f(x) {
+    try {
+        try {
+            throw "inner";
+        } catch (e1) {
+            if (x) {
+                print "inner-catch: rethrow path";
+                throw "rethrown-" + e1;
+            } else {
+                print "inner-catch: swallow path";
+            }
+        }
+        print "after-inner-try";
+    } catch (e2) {
+        print "outer-catch: " + e2;
+    }
+    print "done";
+}
+f(true);
+f(false);

@@ -408,6 +408,35 @@ examples=(
     # `return` inside a try body.
     "examples/try_catch_return_in_catch_no_sibling.lox"
     "examples/try_catch_return_in_live_try_body.lox"
+    # A [Reviewer] round found resolveRegions()'s catchEndLine computed by
+    # scanning forward from catchStartLine for the FIRST CFG label — which
+    # cannot tell "the label marking this handler's own true end" apart
+    # from a label the catch body's own internal control flow placed for
+    # an unrelated reason (an if/else's skip target, a loop back-edge, a
+    # match arm's dispatch label). Fixed by deriving catchEndLine from the
+    # compiler's own declared PUSH_HANDLER/POP_HANDLER boundary
+    # (HandlerEntryContract::popHandlerOffset) instead of scanning; each
+    # example below adds one more branching shape inside a catch body that
+    # the old scan-based heuristic truncated mid-handler.
+    "examples/try_catch_if_else_in_catch_body.lox"
+    "examples/try_catch_while_in_catch_body.lox"
+    "examples/try_catch_for_in_catch_body.lox"
+    "examples/try_catch_andor_in_catch_body.lox"
+    # spec/02-syntax.md's own recommended catch-discrimination idiom:
+    # `match` inside `catchBlock`, immediately followed by a sibling
+    # try/catch.
+    "examples/try_catch_match_in_catch_body.lox"
+    "examples/try_catch_match_terminal_last.lox"
+    # Combines this fix with two earlier ones: internal branching inside a
+    # catch body that is ALSO the function's own last code (round-3's
+    # terminal-catch-body fix), a catch body's own internal branching
+    # nested inside another try/catch's catch body, and three sibling
+    # try/catch statements, each with a terminal, branching catch body.
+    "examples/try_catch_terminal_catch_with_branching.lox"
+    "examples/try_catch_nested_catch_with_branching.lox"
+    "examples/try_catch_three_terminal_siblings_with_branching.lox"
+    # defer combined with a catch body containing internal branching.
+    "examples/try_catch_defer_with_branching_in_catch.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

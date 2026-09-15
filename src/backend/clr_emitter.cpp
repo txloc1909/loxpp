@@ -1645,6 +1645,20 @@ void normalizeFoldedOperands(Emitter& e, std::size_t i,
     }
 }
 
+// A POP_HANDLER's own offset is resolveRegions()'s declared boundary for
+// where its catch handler's extent ends (HandlerEntryContract::
+// popHandlerOffset) — needed even when this POP_HANDLER never executes
+// (e.g. a try body that always throws, so the "normal completion" path
+// that would jump here is itself dead). Anchor it with no other side
+// effect: unlike a reached POP_HANDLER (emitted by its own switch case
+// below), this never runs at runtime, so it gets no resync and no stack
+// accounting.
+void anchorUnreachedPopHandler(Emitter& e, const DecodedInstruction& in) {
+    if (in.op == Op::POP_HANDLER) {
+        e.b.label("tryEnd_" + std::to_string(in.offset));
+    }
+}
+
 void emitBody(Emitter& e, bool isFunction,
               const std::vector<std::string>& childClassNames) {
     const std::vector<DecodedInstruction>& ins = e.fn.instructions;
@@ -1652,6 +1666,7 @@ void emitBody(Emitter& e, bool isFunction,
 
     for (std::size_t i = 0; i < n;) {
         if (!e.reached(i)) {
+            anchorUnreachedPopHandler(e, ins[i]);
             i++;
             continue; // endCompiler()'s trailing NIL;RETURN can be dead code.
         }
@@ -2373,26 +2388,29 @@ resolveRegions(const std::vector<std::string>& lines,
             r.tryEndLine--;
         }
 
-        // Catch block ends at the next label after catchStart, or at the
-        // end of the emitted body if the catch handler's own code is the
-        // last thing the function ever runs (a terminal catch body with
-        // nothing reachable after it — no CFG label is ever placed past
-        // the handler's own `ret`/`leave`). Defaulting this to
-        // `catchStartLine + 1` instead of `lines.size()` used to truncate
-        // the catch region to zero of its own instruction lines, silently
-        // spilling the whole handler body (everything after the injected
-        // `get_Value()` call) outside the `catch{}` block — code ilasm
-        // accepts but CoreCLR rejects at JIT time as
-        // InvalidProgramException, the same failure class as the
-        // `br`-vs-`leave` and `.finally`/`endfinally` defects this emitter
-        // already works around.
-        r.catchEndLine = lines.size();
-        for (std::size_t i = r.catchStartLine + 1; i < lines.size(); i++) {
-            if (isLabelOnlyLine(lines[i])) {
-                r.catchEndLine = i;
-                break;
-            }
-        }
+        // Catch block ends exactly where the compiler's own POP_HANDLER for
+        // this same protected region sits (HandlerEntryContract's declared
+        // `popHandlerOffset` — see abstract_stack.h) — never wherever
+        // scanning forward happens to find the next label. A forward scan
+        // cannot tell "the label marking this handler's own true end" apart
+        // from a label the catch body's own internal control flow placed
+        // for unrelated reasons (an if/else skip target, a loop back-edge,
+        // a match arm's dispatch label): it would stop at whichever comes
+        // first, truncating the region mid-handler and splicing the rest of
+        // the catch body outside the `catch{}` block it is still inside —
+        // code ilasm accepts but CoreCLR rejects at JIT time as
+        // InvalidProgramException. emitBody() anchors a "tryEnd_" label at
+        // this exact offset unconditionally, even when POP_HANDLER itself
+        // never runs (a try body that always throws leaves its own
+        // POP_HANDLER dead code), so the lookup below always succeeds for
+        // any chunk a real try/catch compiles to. `lines.size()` remains
+        // only as the fallback for a hand-built test chunk with no matching
+        // POP_HANDLER at all (`popHandlerOffset == -1`, per
+        // HandlerEntryContract's own doc comment).
+        auto tryEndIt = labelToLine.find(
+            "tryEnd_" + std::to_string(handler.popHandlerOffset));
+        r.catchEndLine =
+            tryEndIt != labelToLine.end() ? tryEndIt->second : lines.size();
 
         regions.push_back(r);
     }

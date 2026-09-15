@@ -1,0 +1,14 @@
+enum Shape { Circle(r) Square(side) }
+fun f(v) {
+    try {
+        throw v;
+    } catch (e) {
+        return match e {
+            case Circle(r)    => "circle r=" + str(r)
+            case Square(side) => "square side=" + str(side)
+            case _            => "other"
+        };
+    }
+}
+print f(Circle(3));
+print f(Square(4));

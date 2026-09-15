@@ -1,0 +1,35 @@
+// Regression test for a [Reviewer] round on PR #236: resolveRegions()
+// computed a catch region's own end by scanning forward for the FIRST CFG
+// label after the catch body starts. An if/else inside the catch body
+// places exactly that kind of label (its own skip target), so the scan
+// stopped there instead of at the true end of the handler -- truncating
+// the region mid-handler and splicing the rest of the catch body (plus
+// the if/else's own conditional branch) outside the `catch{}` block it
+// was still lexically inside. ilasm assembled the result; CoreCLR's JIT
+// rejected it as InvalidProgramException.
+//
+// Fixed by deriving the region's end from the compiler's own declared
+// PUSH_HANDLER/POP_HANDLER boundary instead of scanning for a label.
+
+fun f(x) {
+    try {
+        throw "boom";
+    } catch (e) {
+        if (x) {
+            print "yes";
+        } else {
+            print "no";
+        }
+        print "after-if-in-catch";
+    }
+    print "after-try";
+}
+f(true);
+f(false);
+
+// CHECK: yes
+// CHECK: after-if-in-catch
+// CHECK: after-try
+// CHECK: no
+// CHECK: after-if-in-catch
+// CHECK: after-try

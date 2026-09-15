@@ -1,0 +1,24 @@
+// Same defect class as try_catch_if_else_in_catch_body.lox, with a
+// `while` loop's own back-edge label inside the catch body instead of an
+// if/else's skip target.
+
+fun f() {
+    try {
+        throw "boom";
+    } catch (e) {
+        var i = 0;
+        while (i < 3) {
+            print "loop " + str(i);
+            i = i + 1;
+        }
+        print "after-while-in-catch";
+    }
+    print "after-try";
+}
+f();
+
+// CHECK: loop 0
+// CHECK: loop 1
+// CHECK: loop 2
+// CHECK: after-while-in-catch
+// CHECK: after-try

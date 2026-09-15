@@ -1,0 +1,14 @@
+fun f(x) {
+    try { throw "a"; } catch (e1) {
+        if (x) { print "a-x: " + e1; } else { print "a-notx: " + e1; }
+    }
+    try { throw "b"; } catch (e2) {
+        if (x) { print "b-x: " + e2; } else { print "b-notx: " + e2; }
+    }
+    try { throw "c"; } catch (e3) {
+        if (x) { print "c-x: " + e3; } else { print "c-notx: " + e3; }
+    }
+    print "done";
+}
+f(true);
+f(false);
