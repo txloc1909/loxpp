@@ -69,6 +69,17 @@ struct HandlerEntryContract {
     int pushHandlerOffset{0};
     int catchOffset{0};
     int declaredOperandDepth{0};
+
+    // The POP_HANDLER that closes this same protected region, found by a
+    // LIFO scan over program order (POP_HANDLER carries no operand naming
+    // its own PUSH_HANDLER — chunk.h). A region only appears here at all
+    // when its PUSH_HANDLER is reached (see analyzeStack), so an emitter
+    // gating a POP_HANDLER's own emission on "did my PUSH_HANDLER run" can
+    // read this offset directly instead of re-deriving the pairing itself.
+    // -1 when the chunk has no matching POP_HANDLER at all — only possible
+    // in a hand-built test chunk (a real compiled try statement always
+    // emits one).
+    int popHandlerOffset{-1};
 };
 
 // The full per-instruction analysis of one function's own chunk.
