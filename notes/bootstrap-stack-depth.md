@@ -69,3 +69,4 @@ to matter in practice (e.g. a bootstrap-interpreted program that legitimately
 recurses deeply crashes instead of hitting Lox++-level `StackOverflowError`
 handling), it should be filed as its own issue against the bootstrap
 interpreter generally, not folded into a future `stringify()`-specific fix.
+Filed as [issue #248](https://github.com/txloc1909/loxpp/issues/248).
