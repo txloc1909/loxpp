@@ -1,0 +1,37 @@
+// Regression test for issue #240: a function using both `defer` and its own
+// `try`/`catch` with a bound identifier (`catch (e) {...}`) used to have its
+// defer list's local slot silently overwritten by the caught value, because
+// the caught value's own local slot was not recognized as one (the same
+// root cause as PR #237 round 3's shape (B)). No crash, just missing defer
+// output -- so this checks the FULL output sequence, not just "did not
+// throw".
+
+fun cleanup(tag) { print "cleanup: " + tag; }
+
+fun ownTryCatch(shouldThrow) {
+    defer cleanup("outer-defer");
+    try {
+        defer cleanup("inner-defer");
+        if (shouldThrow) {
+            throw "inner-error";
+        }
+        print "no throw";
+    } catch (e) {
+        print "caught: " + e;
+    }
+    print "after try/catch";
+}
+
+ownTryCatch(true);
+ownTryCatch(false);
+print "done";
+
+// CHECK: caught: inner-error
+// CHECK: after try/catch
+// CHECK: cleanup: inner-defer
+// CHECK: cleanup: outer-defer
+// CHECK: no throw
+// CHECK: after try/catch
+// CHECK: cleanup: inner-defer
+// CHECK: cleanup: outer-defer
+// CHECK: done

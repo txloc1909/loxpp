@@ -1,0 +1,17 @@
+// Regression test for PR #237 round 3's InvalidReceiverError gap: calling a
+// method on a non-object receiver (Number, String, Bool, Nil) inside a try
+// must deliver a catchable InvalidReceiverError, not crash uncaught.
+// LoxOps.invoke()'s own fallback branch (runtime/jvm/src/lox/LoxOps.java)
+// was the one call path R3's earlier fix (getProperty's two call sites)
+// missed.
+
+fun f() { return 42.foo(); }
+try {
+    f();
+} catch (e) {
+    print "kind: " + e.kind;
+}
+print "done";
+
+// CHECK: kind: InvalidReceiverError
+// CHECK: done

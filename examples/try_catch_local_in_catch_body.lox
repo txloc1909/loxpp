@@ -1,0 +1,20 @@
+// Regression test for PR #237 round 3, shape (B): a single try/catch, no
+// siblings, no terminal control flow at all -- just a local variable
+// declared inside the catch body. The caught value `e` and `local1` both
+// need a real JVM local slot; recognizing them used to require a backward
+// search that dead-ends at the catch entry's own (structurally empty, by
+// design) predecessor list, throwing "invisible-var recognition gap".
+
+fun m() {
+    try {
+        print "risky";
+    } catch (e) {
+        var local1 = "x";
+        print "caught: " + e + " " + local1;
+    }
+    print "done";
+}
+m();
+
+// CHECK: risky
+// CHECK: done

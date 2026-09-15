@@ -1,0 +1,27 @@
+// Adversarial regression for PR #237's referee fix: NESTED (not sibling)
+// try/catch, where the OUTER catch body is itself terminal (returns), and
+// the nested try/catch lives inside the outer TRY body, not the catch body.
+// Exercises handler-entry reachability/seeding for a PUSH_HANDLER whose own
+// containing scope is a try body (not straight-line function scope), with
+// an enclosing handler that only completes via its own terminal catch.
+
+fun f() {
+    try {
+        try {
+            throw "inner";
+        } catch (inner) {
+            print "caught inner: " + inner;
+        }
+        print "after inner try/catch";
+        throw "outer";
+    } catch (outer) {
+        print "caught outer: " + outer;
+        return "done";
+    }
+}
+print f();
+
+// CHECK: caught inner: inner
+// CHECK: after inner try/catch
+// CHECK: caught outer: outer
+// CHECK: done

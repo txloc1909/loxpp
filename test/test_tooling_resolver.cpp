@@ -433,6 +433,14 @@ TEST(ToolingResolverCorpus, NoCrashAndFewWarnings) {
     // body uses it — tracked in issue #233 (src/tooling/, not the compiler
     // or VM). Raised again, 10 -> 11, for defer_throw_outer_catch.lox (also
     // PR #232), one more example with a `catch (e)` body hitting the same
-    // tracked gap. Lower this back to 5 once that resolver support lands.
-    EXPECT_LE(totalWarnings, 11u);
+    // tracked gap. Raised again, 11 -> 19, for 6 JVM-backend regression
+    // examples added in PR #237 (round-3 review shapes (A)/(B), issue #240,
+    // and adversarial generalizations of both) — 8 more `catch (e)`/
+    // `catch (e2)`/`catch (e3)` bindings hitting the exact same tracked gap,
+    // none of them a new warning class. Raised again, 19 -> 23, for 2 more
+    // adversarial regressions (nested try/catch with a terminal outer catch;
+    // a local declared in a catch body immediately followed by a sibling
+    // try/catch) — 4 more bindings, same tracked gap. Lower this back to 5
+    // once that resolver support lands.
+    EXPECT_LE(totalWarnings, 23u);
 }
