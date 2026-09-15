@@ -1823,7 +1823,7 @@ class InterpListMethod {
         }
         if (this.name == "pop") {
             if (len(this.list.elements) == 0) {
-                interp.setError("Cannot pop from an empty list.", 0);
+                interp.setError("EmptyListError", "Cannot pop from an empty list.", 0);
                 return nil;
             }
             return this.list.elements.pop();
@@ -1871,14 +1871,18 @@ class InterpMapMethod {
     call(interp, args) {
         if (this.name == "has") {
             if (!interp.isValidMapKey(args[0])) {
-                interp.setError("Map key must be a scalar (Nil, Bool, Number, or String).", 0);
+                var errorKind = "InvalidMapKeyError";
+                if (interp.isNaNKey(args[0])) errorKind = "NaNKeyError";
+                interp.setError(errorKind, "Map key must be a scalar (Nil, Bool, Number, or String).", 0);
                 return nil;
             }
             return this.map.data.has(args[0]);
         }
         if (this.name == "del") {
             if (!interp.isValidMapKey(args[0])) {
-                interp.setError("Map key must be a scalar (Nil, Bool, Number, or String).", 0);
+                var errorKind = "InvalidMapKeyError";
+                if (interp.isNaNKey(args[0])) errorKind = "NaNKeyError";
+                interp.setError(errorKind, "Map key must be a scalar (Nil, Bool, Number, or String).", 0);
                 return nil;
             }
             if (this.map.data.has(args[0])) this.map.data.del(args[0]);
@@ -1989,15 +1993,16 @@ class LoxError {
 
 class Interpreter {
     init(locals) {
-        this.locals       = locals;
-        this.globals      = Environment(nil);
-        this.returnFlag   = false;
-        this.returnValue  = nil;
-        this.breakFlag    = false;
-        this.continueFlag = false;
-        this.throwFlag    = false;
-        this.thrownValue  = nil;
+        this.locals        = locals;
+        this.globals       = Environment(nil);
+        this.returnFlag    = false;
+        this.returnValue   = nil;
+        this.breakFlag     = false;
+        this.continueFlag  = false;
+        this.throwFlag     = false;
+        this.thrownValue   = nil;
         this.pendingDefers = [];
+        this.stringifyDepth = 0;
         this.globals.define("clock", LoxNative("clock"));
         this.globals.define("input", LoxNative("input"));
         this.globals.define("str",   LoxNative("str"));
@@ -2025,6 +2030,11 @@ class Interpreter {
         if (v == nil or v == true or v == false) return true;
         if (isLoxStr(v)) return true;
         if (isLoxNum(v)) return v == v;
+        return false;
+    }
+
+    isNaNKey(v) {
+        if (isLoxNum(v)) return v != v;
         return false;
     }
 
@@ -2092,7 +2102,12 @@ class Interpreter {
             if (this.throwFlag) return nil;
             var v = this.evalExpr(vals[i], env);
             if (this.throwFlag) return nil;
-            if (!this.isValidMapKey(k)) { this.setError("Map key must be a scalar (Nil, Bool, Number, or String).", 0); return nil; }
+            if (!this.isValidMapKey(k)) {
+                var errorKind = "InvalidMapKeyError";
+                if (this.isNaNKey(k)) errorKind = "NaNKeyError";
+                this.setError(errorKind, "Map key must be a scalar (Nil, Bool, Number, or String).", 0);
+                return nil;
+            }
             result.data[k] = v;
             i = i + 1;
         }
@@ -2106,7 +2121,12 @@ class Interpreter {
         if (this.throwFlag) return nil;
         var tag = loxTag(object);
         if (tag == "map") {
-            if (!this.isValidMapKey(index)) { this.setError("InvalidMapKeyError", "Map key must be a scalar (Nil, Bool, Number, or String).", line); return nil; }
+            if (!this.isValidMapKey(index)) {
+                var errorKind = "InvalidMapKeyError";
+                if (this.isNaNKey(index)) errorKind = "NaNKeyError";
+                this.setError(errorKind, "Map key must be a scalar (Nil, Bool, Number, or String).", line);
+                return nil;
+            }
             if (object.data.has(index)) return object.data[index];
             return nil;
         }
@@ -2135,7 +2155,12 @@ class Interpreter {
         if (this.throwFlag) return nil;
         var tag = loxTag(object);
         if (tag == "map") {
-            if (!this.isValidMapKey(index)) { this.setError("InvalidMapKeyError", "Map key must be a scalar (Nil, Bool, Number, or String).", line); return nil; }
+            if (!this.isValidMapKey(index)) {
+                var errorKind = "InvalidMapKeyError";
+                if (this.isNaNKey(index)) errorKind = "NaNKeyError";
+                this.setError(errorKind, "Map key must be a scalar (Nil, Bool, Number, or String).", line);
+                return nil;
+            }
             var val = this.evalExpr(valueExpr, env);
             if (this.throwFlag) return nil;
             object.data[index] = val;
@@ -2576,7 +2601,12 @@ class Interpreter {
                 return left in right;
             }
             if (rtag == "map") {
-                if (!this.isValidMapKey(left)) { this.setError("InvalidMapKeyError", "Map key must be a scalar (Nil, Bool, Number, or String).", opLine); return nil; }
+                if (!this.isValidMapKey(left)) {
+                    var errorKind = "InvalidMapKeyError";
+                    if (this.isNaNKey(left)) errorKind = "NaNKeyError";
+                    this.setError(errorKind, "Map key must be a scalar (Nil, Bool, Number, or String).", opLine);
+                    return nil;
+                }
                 return right.data.has(left);
             }
             this.setError("NotIndexableError", "Right operand of 'in' must be a List, String, or Map.", opLine);
@@ -2621,7 +2651,9 @@ class Interpreter {
             return nil;
         }
         if (callee.arity() != -1 and len(args) != callee.arity()) {
-            this.setError("ArityError", "Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".", paren_line);
+            var errorKind = "ArityError";
+            if (tag == "enum_ctor") errorKind = "ConstructorArityError";
+            this.setError(errorKind, "Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".", paren_line);
             return nil;
         }
         return callee.call(this, args);
@@ -2705,12 +2737,27 @@ class Interpreter {
         if (val == false) return "false";
         if (isLoxStr(val)) return val;
         if (isLoxNum(val)) return str(val);
+        this.stringifyDepth = this.stringifyDepth + 1;
+        if (this.stringifyDepth > 200) {
+            this.stringifyDepth = this.stringifyDepth - 1;
+            this.setError("MaxDepthExceededError", "Value nesting is too deep.", 0);
+            return "...";
+        }
         var vtag = loxTag(val);
-        if (vtag == "list")     return this.stringifyList(val);
-        if (vtag == "map")      return this.stringifyMap(val);
-        if (vtag == "enum_val") return this.stringifyEnumVal(val);
-        if (vtag == "error")    return val.message;
-        return val.toString();
+        var result;
+        if (vtag == "list") {
+            result = this.stringifyList(val);
+        } else if (vtag == "map") {
+            result = this.stringifyMap(val);
+        } else if (vtag == "enum_val") {
+            result = this.stringifyEnumVal(val);
+        } else if (vtag == "error") {
+            result = val.message;
+        } else {
+            result = val.toString();
+        }
+        this.stringifyDepth = this.stringifyDepth - 1;
+        return result;
     }
 
     stringifyEnumVal(val) {
