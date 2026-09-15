@@ -97,12 +97,7 @@ just native's, whenever native's VM gets the re-entrant call path.
 missing: sockets and subprocess** — the medium-cost tail of this bucket. The
 *unbounded* surface of that tail is the standing argument for item 6.
 
-**3. Non-local control flow.** `try`/`catch`/`throw` + `defer`/`finally`. Needs
-a handler stack + frame unwinding. Three things are inexpressible because you
-can't unwind from Lox++: intercepting **runtime faults** (index OOB, calling
-`nil`), **non-local escape** without threading `Result` through every return,
-and **cleanup-on-unwind** (also fixes the `container_objects.h` file-handle leak
-TODO).
+**3. Non-local control flow (`try`/`catch`/`throw`/`defer`). DONE** (#223, all three backends; `src/vm.cpp`, `src/backend/jvm_emitter.cpp`, `runtime/clr/src/LoxRuntime.cs`, `spec/04-semantics.md`). Handler stack + frame unwinding. Closes expressiveness roadmap item 3: runtime faults are now catchable via `try`/`catch`, non-local escape works without threading `Result` through every return, and `defer` provides cleanup-on-unwind (also fixes the `container_objects.h` file-handle leak TODO). See `notes/non-local-control-flow.md` for the design record and `notes/missions/2026-09-non-local-control-flow/` for the implementation breakdown.
 
 **4. Extensible protocols / operator overloading.** Today `for-in`, `[]`, `==`,
 `len`, `()`, and map-key hashing are hardwired to built-in List/String/Map, so

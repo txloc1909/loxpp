@@ -19,45 +19,49 @@ fun split(s, delim) {
     return result;
 }
 
-var f = open("examples/csv_reader.input", "r");
+fun main() {
+    var f = open("examples/csv_reader.input", "r");
+    defer f.close();
 
-// First line is the header.
-var header = split(f.readline(), ",");
-var rows = [];
+    // First line is the header.
+    var header = split(f.readline(), ",");
+    var rows = [];
 
-var line = f.readline();
-while (line != nil) {
-    rows.append(split(line, ","));
-    line = f.readline();
-}
-f.close();
-
-print "=== CSV Reader ===";
-
-// Print column names space-separated.
-var cols = "";
-var i = 0;
-while (i < len(header)) {
-    if (i > 0) cols = cols + " ";
-    cols = cols + header[i];
-    i = i + 1;
-}
-print "columns: " + cols;
-
-// Print each row space-separated.
-i = 0;
-while (i < len(rows)) {
-    var row = rows[i];
-    var out = "";
-    var j = 0;
-    while (j < len(row)) {
-        if (j > 0) out = out + " ";
-        out = out + row[j];
-        j = j + 1;
+    var line = f.readline();
+    while (line != nil) {
+        rows.append(split(line, ","));
+        line = f.readline();
     }
-    print out;
-    i = i + 1;
+
+    print "=== CSV Reader ===";
+
+    // Print column names space-separated.
+    var cols = "";
+    var i = 0;
+    while (i < len(header)) {
+        if (i > 0) cols = cols + " ";
+        cols = cols + header[i];
+        i = i + 1;
+    }
+    print "columns: " + cols;
+
+    // Print each row space-separated.
+    i = 0;
+    while (i < len(rows)) {
+        var row = rows[i];
+        var out = "";
+        var j = 0;
+        while (j < len(row)) {
+            if (j > 0) out = out + " ";
+            out = out + row[j];
+            j = j + 1;
+        }
+        print out;
+        i = i + 1;
+    }
 }
+
+main();
 // CHECK: === CSV Reader ===
 // CHECK: columns: name age city
 // CHECK: Alice 30 London

@@ -248,3 +248,7 @@ Runtime Errors table (mark each fault "catchable via `try`"); a new builtin
 
 See the tracking issue (linked from this file once opened) for the node
 breakdown.
+
+## Shipped
+
+**Mission #223: non-local control flow (`try`/`catch`/`throw`/`defer`) — IN PROGRESS** (X1–X5 and X7 merged; X6, the mission's closing/gate node, pending review). All three execution backends (native, JVM, CLR) and the bootstrap interpreter now implement `try`/`catch`/`throw`/`defer`. X6 formalizes cross-backend differential-test coverage and closes the `ObjFile` leak using `defer`; once it merges, the mission is complete. Expressiveness roadmap item 3 targeted. See `notes/missions/2026-09-non-local-control-flow/` for the implementation record.

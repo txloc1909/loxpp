@@ -19,18 +19,22 @@ fun split(s, delim) {
     return result;
 }
 
-print "=== Config Parser ===";
-var f = open("examples/config_parser.input", "r");
-var line = f.readline();
-while (line != nil) {
-    // Skip blank lines and comments (lines starting with #).
-    if (len(line) > 0 and !("#" in line)) {
-        var parts = split(line, "=");
-        print parts[0] + ": " + parts[1];
+fun main() {
+    print "=== Config Parser ===";
+    var f = open("examples/config_parser.input", "r");
+    defer f.close();
+    var line = f.readline();
+    while (line != nil) {
+        // Skip blank lines and comments (lines starting with #).
+        if (len(line) > 0 and !("#" in line)) {
+            var parts = split(line, "=");
+            print parts[0] + ": " + parts[1];
+        }
+        line = f.readline();
     }
-    line = f.readline();
 }
-f.close();
+
+main();
 // CHECK: === Config Parser ===
 // CHECK: host: localhost
 // CHECK: port: 8080
