@@ -56,7 +56,8 @@ public abstract class LoxClosure : ILoxCallable {
 
     public object CallAsSelf(object self, object[] args) {
         if (args.Length != Arity) {
-            throw new LoxError($"Expected {Arity} arguments but got {args.Length}.");
+            throw new LoxError(LoxRuntime.MakeError(
+                $"Expected {Arity} arguments but got {args.Length}.", "ArityError"));
         }
         if (s_frameCount == FramesMax) {
             throw new LoxError("Stack overflow.");
