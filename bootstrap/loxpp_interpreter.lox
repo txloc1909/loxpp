@@ -1479,6 +1479,14 @@ class LoxFunction {
         interp.execBlock(this.body, callEnv);
         var funcDefers = interp.pendingDefers;
         interp.pendingDefers = savedDefers;
+        // Capture the return value from this function's own execution, before defers run.
+        // This prevents nested defer calls from consuming the outer function's return state.
+        var returnVal = nil;
+        if (interp.returnFlag) {
+            returnVal = interp.returnValue;
+            interp.returnFlag  = false;
+            interp.returnValue = nil;
+        }
         var j = len(funcDefers) - 1;
         while (j >= 0) {
             var defer_item = funcDefers[j];
@@ -1499,12 +1507,6 @@ class LoxFunction {
                 }
             }
             j = j - 1;
-        }
-        var returnVal = nil;
-        if (interp.returnFlag) {
-            returnVal = interp.returnValue;
-            interp.returnFlag  = false;
-            interp.returnValue = nil;
         }
         if (this.isInitializer) return this.closure.getAt(0, "this");
         return returnVal;
