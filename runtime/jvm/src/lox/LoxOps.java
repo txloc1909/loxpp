@@ -592,7 +592,8 @@ public final class LoxOps {
         if (receiver instanceof LoxMap) {
             return invokeMapMethod((LoxMap)receiver, name, args);
         }
-        throw new LoxError("Only instances, files, and maps have methods.");
+        throw makeError("InvalidReceiverError",
+                        "Only instances, files, and maps have methods.");
     }
 
     private static Object invokeListMethod(LoxList list, String name,
