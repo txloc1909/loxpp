@@ -251,4 +251,4 @@ breakdown.
 
 ## Shipped
 
-**Mission #223: non-local control flow (`try`/`catch`/`throw`/`defer`) — COMPLETE** (X1–X6, all nodes merged). All three backends (native, JVM, CLR) implemented and differential-tested. Expressiveness roadmap item 3 closed. See `notes/missions/2026-09-non-local-control-flow/` for the implementation record.
+**Mission #223: non-local control flow (`try`/`catch`/`throw`/`defer`) — IN PROGRESS** (X1–X5 merged; X6–X7 pending review). All three backends (native, JVM, CLR) and bootstrap interpreter support implemented; differential-tested. Expressiveness roadmap item 3 targeted. See `notes/missions/2026-09-non-local-control-flow/` for the implementation record.

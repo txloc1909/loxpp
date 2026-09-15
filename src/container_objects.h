@@ -42,10 +42,10 @@ struct ObjFile : public Obj {
     bool writable{false};
 
     explicit ObjFile(ObjClass* k) : Obj(ObjType::FILE), klass(k) {}
-    // TODO(loctx): Do NOT rely on this destructor to close file handles.
-    // GC timing is non-deterministic; an open file may not be collected until
-    // program exit (or never, if the heap is not exhausted). Always call
-    // f.close() explicitly.
+    // Do NOT rely on this destructor to close file handles. GC timing is
+    // non-deterministic; an open file may not be collected until program exit
+    // (or never, if the heap is not exhausted). Use `defer f.close()` to
+    // guarantee cleanup on function exit, or call f.close() explicitly.
     ~ObjFile() override {
         if (handle != nullptr) {
             std::fclose(handle);

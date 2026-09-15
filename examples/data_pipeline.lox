@@ -5,8 +5,10 @@
 var INPUT  = "examples/data_pipeline.input";
 var OUTPUT = "examples/data_pipeline.output";
 
-fun main() {
-    // --- Transform: read input, write numbered output ---
+// Transform: read input, write numbered output. Defers are function-scoped,
+// so they fire when this function returns, ensuring the output file is fully
+// flushed before main() reopens it for reading.
+fun transform() {
     var fin  = open(INPUT,  "r");
     defer fin.close();
     var fout = open(OUTPUT, "w");
@@ -18,16 +20,23 @@ fun main() {
         n = n + 1;
         line = fin.readline();
     }
+}
 
-    // --- Verify: read and print the output file ---
+// Verify: read and print the output file.
+fun verify() {
     print "=== Data Pipeline ===";
     var f = open(OUTPUT, "r");
     defer f.close();
-    line = f.readline();
+    var line = f.readline();
     while (line != nil) {
         print line;
         line = f.readline();
     }
+}
+
+fun main() {
+    transform();
+    verify();
 }
 
 main();

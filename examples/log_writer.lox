@@ -4,32 +4,43 @@
 
 var LOG = "examples/log_writer.output";
 
-fun main() {
+// Write log entries. Defers are function-scoped, so they fire when this
+// function returns, ensuring the file is fully flushed before main()
+// reopens it for reading. Keep a single append handle open across all
+// sessions to avoid buffering issues with multiple handles.
+fun writeLog() {
     // Start with a clean log file.
     var f = open(LOG, "w");
+    f.close();
+
+    // Open once for append, keep it open for all sessions.
+    f = open(LOG, "a");
     defer f.close();
 
     // Simulate three independent sessions, each appending to the same log.
     var session = 1;
     while (session <= 3) {
-        {
-            f = open(LOG, "a");
-            defer f.close();
-            f.writeline("[session " + str(session) + "] event: start");
-            f.writeline("[session " + str(session) + "] event: done");
-        }
+        f.writeline("[session " + str(session) + "] event: start");
+        f.writeline("[session " + str(session) + "] event: done");
         session = session + 1;
     }
+}
 
-    // Read back the accumulated log.
+// Read back the accumulated log.
+fun readLog() {
     print "=== Log Writer ===";
-    f = open(LOG, "r");
+    var f = open(LOG, "r");
     defer f.close();
     var line = f.readline();
     while (line != nil) {
         print line;
         line = f.readline();
     }
+}
+
+fun main() {
+    writeLog();
+    readLog();
 }
 
 main();
