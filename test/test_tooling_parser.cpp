@@ -654,6 +654,34 @@ TEST(ToolingParserSpans, GetExprAndSuperNameSpans) {
     EXPECT_EQ(thisGet->object->kind, ExprKind::This);
 }
 
+TEST(ToolingParserSpans, TwoDotRunDoesNotParseAsGet) {
+    // `o..x` lexes as o DOT DOT x; the parser must not recover it into a
+    // GetExpr the way `o.x` would. Only the bare identifier survives.
+    const std::string src = "o..x;";
+    const Program prog = parse(src);
+    ASSERT_EQ(prog.body.size(), 1U);
+    const auto* stmt = dynamic_cast<const ExprStmt*>(prog.body[0].get());
+    ASSERT_NE(stmt, nullptr);
+    ASSERT_NE(stmt->expr, nullptr);
+    EXPECT_EQ(stmt->expr->kind, ExprKind::Identifier);
+    const auto* id = static_cast<const IdentifierExpr*>(stmt->expr.get());
+    EXPECT_EQ(id->name, "o");
+}
+
+TEST(ToolingParserSpans, TwoDotRunAfterSuperDoesNotParseAsGet) {
+    // `super..x` must not survive as `super.x`: the parser errors on the
+    // second DOT instead of building a GetExpr over a nameless SuperExpr.
+    const std::string src = "super..x;";
+    const Program prog = parse(src);
+    ASSERT_EQ(prog.body.size(), 1U);
+    const auto* stmt = dynamic_cast<const ExprStmt*>(prog.body[0].get());
+    ASSERT_NE(stmt, nullptr);
+    ASSERT_NE(stmt->expr, nullptr);
+    EXPECT_EQ(stmt->expr->kind, ExprKind::Super);
+    const auto* sup = static_cast<const SuperExpr*>(stmt->expr.get());
+    EXPECT_EQ(sup->name_length, 0U);
+}
+
 TEST(ToolingParserRecovery, GarbageBetweenDeclarationsStillYieldsLater) {
     // Removing the synchronize() call in declaration() makes this fail:
     // the parser never reaches `b`.

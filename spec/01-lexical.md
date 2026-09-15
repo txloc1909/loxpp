@@ -78,12 +78,13 @@ The scanner always prefers the longer match.
 ### Compound Punctuation
 
 The scanner checks for the longer lexeme before it falls back to the shorter
-operator. It does not look back once it has started a token.
+operator. When the longer lexeme cannot complete, it splits the run instead of
+silently extending the shorter token's span (see ELIPSIS below).
 
 | Lexeme | Name | Notes |
 |---|---|---|
 | `=>` | FAT_ARROW | Two characters. The scanner tests for `>` right after `=` before it treats `=` as EQUAL or EQUAL_EQUAL. Introduces a `match` arm body (see §02-syntax). |
-| `...` | ELIPSIS | Three dots. The scanner makes an ELIPSIS only when it sees three dots in a row; it gives no special meaning to a run of two dots. Used in sequence patterns (see §02-syntax). |
+| `...` | ELIPSIS | Three dots. The scanner makes an ELIPSIS only when it sees three dots in a row. Any other dot run carries no special meaning: each dot not consumed by an ELIPSIS is its own DOT token (so `..` is two DOT tokens, `....` is an ELIPSIS followed by a DOT). The grammar never places a DOT directly after a DOT, so a two-dot run is rejected at parse time. Used in sequence patterns (see §02-syntax). |
 
 The `@` token (single character, above) binds a name to a whole value in a
 `match` pattern (see §02-syntax).

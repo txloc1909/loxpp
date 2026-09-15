@@ -61,8 +61,13 @@ Token Scanner::scanOneToken() {
     case ':':
         return makeToken(TokenType::COLON);
     case '.':
-        if (match('.') && match('.')) {
-            return makeToken(TokenType::ELIPSIS);
+        if (match('.')) {
+            if (match('.')) {
+                return makeToken(TokenType::ELIPSIS);
+            }
+            // Two-dot run: the second dot cannot complete an ELIPSIS, so it
+            // starts its own DOT token. Step back over it.
+            m_current--;
         }
         return makeToken(TokenType::DOT);
     case '-':

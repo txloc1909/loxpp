@@ -969,11 +969,18 @@ class Parser {
             advance();
             auto node = std::make_unique<SuperExpr>();
             node->offset = t.offset;
-            if (consume(TokenType::DOT) && check(TokenType::IDENTIFIER)) {
-                Token nameTok = advance();
-                node->name = tokenText(nameTok);
-                node->name_offset = nameTok.offset;
-                node->name_length = nameTok.length;
+            if (consume(TokenType::DOT)) {
+                if (!check(TokenType::IDENTIFIER)) {
+                    // A second DOT (or anything but a name) after 'super.'
+                    // is malformed; do not fall through and let the postfix
+                    // loop turn it into a GetExpr on the nameless super.
+                    error();
+                } else {
+                    Token nameTok = advance();
+                    node->name = tokenText(nameTok);
+                    node->name_offset = nameTok.offset;
+                    node->name_length = nameTok.length;
+                }
             }
             spanTo(*node, t.offset);
             return node;

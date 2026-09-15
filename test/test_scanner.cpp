@@ -154,6 +154,60 @@ TEST_F(ScannerTest, ElipsisToken) {
     EXPECT_EQ(tokens[1].lexeme, ".");
 }
 
+TEST_F(ScannerTest, TwoDotRunIsTwoDotTokens) {
+    // A two-dot run has no special meaning: it lexes as two DOT tokens, not
+    // a single DOT token whose span swallows both dots.
+    const char* source = "..";
+    auto tokens = scanTokens(source);
+    ASSERT_EQ(tokens.size(), 3); // DOT, DOT, EOF
+    EXPECT_EQ(tokens[0].type, TokenType::DOT);
+    EXPECT_EQ(tokens[0].lexeme, ".");
+    EXPECT_EQ(tokens[0].offset, 0);
+    EXPECT_EQ(tokens[0].length, 1);
+    EXPECT_EQ(tokens[1].type, TokenType::DOT);
+    EXPECT_EQ(tokens[1].lexeme, ".");
+    EXPECT_EQ(tokens[1].offset, 1);
+    EXPECT_EQ(tokens[1].length, 1);
+}
+
+TEST_F(ScannerTest, TwoDotRunAfterProperty) {
+    // o..x must lex as o, DOT, DOT, x -- not o, DOT(span 2), x.
+    const char* source = "o..x";
+    auto tokens = scanTokens(source);
+    ASSERT_EQ(tokens.size(), 5); // o, DOT, DOT, x, EOF
+    EXPECT_EQ(tokens[0].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[0].lexeme, "o");
+    EXPECT_EQ(tokens[1].type, TokenType::DOT);
+    EXPECT_EQ(tokens[1].offset, 1);
+    EXPECT_EQ(tokens[1].length, 1);
+    EXPECT_EQ(tokens[2].type, TokenType::DOT);
+    EXPECT_EQ(tokens[2].offset, 2);
+    EXPECT_EQ(tokens[2].length, 1);
+    EXPECT_EQ(tokens[3].type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tokens[3].lexeme, "x");
+}
+
+TEST_F(ScannerTest, FourDotRunIsElipsisThenDot) {
+    // Four dots: the first three form an ELIPSIS, the leftover is a DOT.
+    const char* source = "....";
+    auto tokens = scanTokens(source);
+    ASSERT_EQ(tokens.size(), 3); // ELIPSIS, DOT, EOF
+    EXPECT_EQ(tokens[0].type, TokenType::ELIPSIS);
+    EXPECT_EQ(tokens[0].lexeme, "...");
+    EXPECT_EQ(tokens[1].type, TokenType::DOT);
+    EXPECT_EQ(tokens[1].lexeme, ".");
+}
+
+TEST_F(ScannerTest, FiveDotRunIsElipsisThenTwoDots) {
+    // Five dots: ELIPSIS, then a leftover two-dot run as DOT DOT.
+    const char* source = ".....";
+    auto tokens = scanTokens(source);
+    ASSERT_EQ(tokens.size(), 4); // ELIPSIS, DOT, DOT, EOF
+    EXPECT_EQ(tokens[0].type, TokenType::ELIPSIS);
+    EXPECT_EQ(tokens[1].type, TokenType::DOT);
+    EXPECT_EQ(tokens[2].type, TokenType::DOT);
+}
+
 TEST_F(ScannerTest, ElipsisInListPattern) {
     // ...rest inside a match arm bracket
     const char* source = "[head, ...tail]";
