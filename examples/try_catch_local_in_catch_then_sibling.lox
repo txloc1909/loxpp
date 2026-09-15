@@ -1,0 +1,26 @@
+// Adversarial regression combining PR #237 round 3's shapes (A) and (B): a
+// local variable declared inside a catch body (shape B's own local-count
+// recognition gap), where that same try/catch is ALSO immediately followed
+// by a sibling try/catch (shape A's own reachability gap). Neither
+// mechanism alone predicts what happens when both interact in the same
+// function.
+
+fun f() {
+    try {
+        print "risky-a";
+    } catch (e) {
+        var local1 = "x";
+        print "caught-a: " + e + " " + local1;
+    }
+    try {
+        print "risky-b";
+    } catch (e2) {
+        print "caught-b: " + e2;
+    }
+    print "done";
+}
+f();
+
+// CHECK: risky-a
+// CHECK: risky-b
+// CHECK: done

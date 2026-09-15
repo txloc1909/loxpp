@@ -1,0 +1,22 @@
+// Adversarial regression for PR #237 round 3's shape (B): a local declared
+// BEFORE the try (its own declaring push lives on the path into
+// PUSH_HANDLER, not reachable from inside the catch body via the catch
+// entry's own -- structurally empty -- predecessor list) combined with a
+// second local declared INSIDE the catch body. Both must be recognized as
+// real JVM local slots, and the pre-existing one must still be readable
+// after the try/catch statement ends.
+
+fun f() {
+    var pre = "pre-existing";
+    try {
+        print "risky";
+    } catch (e) {
+        var local1 = "x";
+        print pre + " / caught: " + e + " / " + local1;
+    }
+    print "done: " + pre;
+}
+f();
+
+// CHECK: risky
+// CHECK: done: pre-existing

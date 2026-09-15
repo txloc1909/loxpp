@@ -24,7 +24,7 @@ public final class LoxGlobals {
     public Object get(String name) {
         Object v = values.get(name);
         if (v == null) {
-            throw new LoxError("Undefined variable '" + name + "'.");
+            throw LoxOps.makeError("UndefinedVariableError", "Undefined variable '" + name + "'.");
         }
         return unbox(v);
     }
@@ -34,7 +34,7 @@ public final class LoxGlobals {
         Object prev = values.put(name, box(value));
         if (prev == null) {
             values.remove(name);
-            throw new LoxError("Undefined variable '" + name + "'.");
+            throw LoxOps.makeError("UndefinedVariableError", "Undefined variable '" + name + "'.");
         }
     }
 

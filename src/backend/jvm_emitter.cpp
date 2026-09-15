@@ -30,6 +30,16 @@ namespace {
     throw std::runtime_error("not implemented: " + opName(op));
 }
 
+// One entry in the JVM exception table: a try region and its handler.
+struct ExceptionEntry {
+    std::string
+        regionStartLabel;       // synthetic label for start of protected region
+    std::string regionEndLabel; // synthetic label for end of protected region
+    std::string handlerLabel;   // jasmin label of handler block (from CFG)
+    int startInstrOffset{0};    // unused (kept for compatibility)
+    int endInstrOffset{0};      // unused (kept for compatibility)
+};
+
 // A short, offset-anchored jasmin label for a micro-branch this emitter
 // inserts on top of what the CFG pass (cfg.h) already labeled — see
 // ensureCapturedCell and the captured GET_LOCAL/SET_LOCAL lowering below.
@@ -128,6 +138,9 @@ struct Emitter {
     // one set of opcode-family functions.
     int baseSlot{2};
     int globalsSlot{0};
+    int deferListSlot{-1}; // allocated only if defer is used, -1 otherwise
+    int deferTempSlotBase{
+        -1}; // base slot for DEFER_RECORD temp storage, -1 if not used
     int scratchSlot{0};
 
     // Set (to scratchSlot+1 / scratchSlot+2) only when this chunk contains a
@@ -292,6 +305,52 @@ struct Emitter {
         b.emit(call, -3);
         b.emit("aload " + scratch, +1);
     }
+
+    // Exception handling: maps from PUSH_HANDLER offset to the handler's
+    // catch-block label (from the CFG analysis).
+    std::unordered_map<int, std::string> handlerLabelsByOffset;
+
+    // Handler entry block offsets (from CFG analysis). When entering a block
+    // at one of these offsets via exception dispatch, a LoxError is on the
+    // stack and needs to be unwrapped to get the Lox value.
+    std::unordered_set<int> handlerEntryOffsets;
+
+    // Tracks the currently active protected region (between PUSH_HANDLER and
+    // POP_HANDLER). startBytecodeOffset is the byte offset in the emitted
+    // bytecode where the protected region starts.
+    struct ActiveRegion {
+        int startBytecodeOffset{0};
+        int pushHandlerInstrOffset{0};
+    };
+    std::vector<ActiveRegion> activeRegions;
+
+    // All exception table entries collected during emission.
+    std::vector<ExceptionEntry> exceptionTable;
+
+    // Maps from handler entry offset to the PUSH_HANDLER's offset that
+    // declares it. Used to emit the region end label at the handler entry
+    // before the handler's own label. A handler entry offset can appear at
+    // most once (each PUSH_HANDLER declares one target).
+    std::unordered_map<int, int> regionEndLabelsByHandlerOffset;
+
+    // POP_HANDLER offsets whose own PUSH_HANDLER was reached (from
+    // analysis.handlerEntries — see HandlerEntryContract::popHandlerOffset).
+    // emitBody's reachability gate reads this instead of a blanket
+    // "always run POP_HANDLER" bypass: a POP_HANDLER's own raw reached bit
+    // is unreliable (the CFG walk marks it unreached whenever the try body's
+    // last statement is terminal — see PUSH_HANDLER's own emitter note),
+    // but whether its *paired* PUSH_HANDLER ran is exactly what decides
+    // whether this region needs closing. A POP_HANDLER absent from this set
+    // belongs to a genuinely dead try/catch (its PUSH_HANDLER never ran
+    // either) and must be skipped, not forced — forcing it would pop
+    // e.activeRegions against a region that was never pushed.
+    std::unordered_set<int> popHandlerOffsetsWithReachedPush;
+
+    // Defer catch-all handler: label at the start of the function body
+    // (after prologue) and the handler code label for catching exceptions
+    // and running defers before re-throwing.
+    std::string deferCatchAllBodyStartLabel;
+    std::string deferCatchAllHandlerLabel;
 };
 
 // `analysis.before[i].localCount` is only an upper bound at a CFG merge
@@ -1545,6 +1604,166 @@ void emitReturn(Emitter& e, bool isScript) {
     e.b.emit("areturn", -1);
 }
 
+// PUSH_HANDLER: Start a try/catch protected region. Emit a label for the
+// region start and record the handler information for later emission of
+// the .catch directive.
+void emitPushHandler(Emitter& e, const DecodedInstruction& in) {
+    // Find the handler label for this PUSH_HANDLER.
+    auto it = e.handlerLabelsByOffset.find(in.offset);
+    if (it == e.handlerLabelsByOffset.end()) {
+        throw std::runtime_error(
+            "jvm_emitter: PUSH_HANDLER at offset " + std::to_string(in.offset) +
+            " has no handler label in CFG (internal error)");
+    }
+
+    // Generate a synthetic label for the protected region start.
+    std::string regionStartLabel =
+        "try_" + std::to_string(in.offset) + "_start";
+    e.b.label(regionStartLabel);
+
+    // Record the region information for emission of .catch directive later.
+    Emitter::ActiveRegion region;
+    region.pushHandlerInstrOffset = in.offset;
+    e.activeRegions.push_back(region);
+
+    // Record that the region end label needs to be emitted at the handler
+    // entry offset (the target of this PUSH_HANDLER). This ensures the
+    // exception table's protected-region end is placed right before the
+    // handler code starts, not after the handler executes.
+    e.regionEndLabelsByHandlerOffset[in.jumpTarget] = in.offset;
+}
+
+// POP_HANDLER: End a try/catch protected region and create an exception
+// table entry. The region end label is emitted when the handler entry is
+// encountered (in emitBody), not here, to ensure it is placed before the
+// handler code starts, not after.
+void emitPopHandler(Emitter& e, const DecodedInstruction& in) {
+    if (e.activeRegions.empty()) {
+        throw std::runtime_error(
+            "jvm_emitter: POP_HANDLER without matching PUSH_HANDLER");
+    }
+
+    Emitter::ActiveRegion region = e.activeRegions.back();
+    e.activeRegions.pop_back();
+
+    // Look up the handler label.
+    auto it = e.handlerLabelsByOffset.find(region.pushHandlerInstrOffset);
+    if (it == e.handlerLabelsByOffset.end()) {
+        throw std::runtime_error("jvm_emitter: handler label not found");
+    }
+
+    // Create an exception table entry using the synthetic labels. The region
+    // end label is generated from the same PUSH_HANDLER offset as the start
+    // label, which ensures they are consistent.
+    ExceptionEntry entry;
+    entry.startInstrOffset = 0; // Unused when using labels
+    entry.endInstrOffset = 0;   // Unused when using labels
+    entry.handlerLabel = it->second;
+
+    std::string startLabel =
+        "try_" + std::to_string(region.pushHandlerInstrOffset) + "_start";
+    std::string regionEndLabel =
+        "try_" + std::to_string(region.pushHandlerInstrOffset) + "_end";
+    entry.regionStartLabel = startLabel;
+    entry.regionEndLabel = regionEndLabel;
+
+    e.exceptionTable.push_back(entry);
+}
+
+// THROW: Raise an exception. The value on the stack is wrapped in a LoxError
+// and thrown via athrow.
+void emitThrow(Emitter& e) {
+    // Stack before: [value]
+    // makeThrowable(Object) returns LoxError: net stack effect 0
+    e.b.emit("invokestatic lox/LoxOps/makeThrowable(Ljava/lang/Object;)"
+             "Llox/LoxError;",
+             0);
+    // athrow consumes the LoxError and throws: stack effect -1
+    e.b.emit("athrow", -1);
+}
+
+// DEFER_RECORD: Record a deferred call. Pops callee and argc arguments,
+// creates a DeferredCall object with them, and adds it to the defer list.
+// Stack order: [callee, arg0, arg1, ..., argN-1] where argN-1 is on top.
+void emitDeferRecord(Emitter& e, const DecodedInstruction& in) {
+    if (e.deferListSlot < 0) {
+        throw std::runtime_error(
+            "jvm_emitter: DEFER_RECORD but no defer list allocated");
+    }
+
+    int argc = in.byteOperand;
+    // Stack before: [callee, arg0, arg1, ..., argN-1]  (argN-1 is on top)
+
+    // Use the dedicated temp slots for DEFER_RECORD, not the general
+    // scratchSlot
+    int calleeSlot = e.deferTempSlotBase;
+    int argsSlot = e.deferTempSlotBase + 1;
+    int arraySlot = e.deferTempSlotBase + 2;
+
+    // Spill argc arguments into scratch slots (in reverse order since they're
+    // on top) Pop from top to bottom: argN-1, argN-2, ..., arg0
+    for (int i = argc - 1; i >= 0; i--) {
+        e.b.emit("astore " + std::to_string(argsSlot + i), -1);
+    }
+    // Stack: [callee]
+
+    // Now pop the callee
+    e.b.emit("astore " + std::to_string(calleeSlot), -1);
+    // Stack: []
+
+    // Create Object[argc] array for arguments
+    e.b.emit(pushIntInstruction(argc), +1);
+    e.b.emit("anewarray java/lang/Object", 0);
+    // Stack: [Object[argc]]
+
+    // Refill array with spilled arguments (in order: arg0, arg1, ..., argN-1)
+    for (int i = 0; i < argc; i++) {
+        e.b.emit("dup", +1);
+        e.b.emit(pushIntInstruction(i), +1);
+        e.b.emit("aload " + std::to_string(argsSlot + i), +1);
+        e.b.emit("aastore", -3);
+    }
+    // Stack: [Object[argc]]
+
+    // Store array in arraySlot
+    e.b.emit("astore " + std::to_string(arraySlot), -1);
+    // Stack: []
+
+    // Create DeferredCall(callee, array)
+    e.b.emit("new lox/DeferredCall", +1);
+    e.b.emit("dup", +1);
+    e.b.emit("aload " + std::to_string(calleeSlot), +1);
+    e.b.emit("aload " + std::to_string(arraySlot), +1);
+    e.b.emit("invokespecial "
+             "lox/DeferredCall/<init>(Ljava/lang/Object;[Ljava/lang/Object;)V",
+             -3);
+    // Stack: [DeferredCall]
+
+    // Add to defer list
+    e.b.emit("aload " + std::to_string(e.deferListSlot), +1);
+    // Stack: [DeferredCall, List]
+    e.b.emit("swap", 0);
+    // Stack: [List, DeferredCall]
+    e.b.emit("invokevirtual java/util/ArrayList/add(Ljava/lang/Object;)Z", -1);
+    // Stack: [boolean (true if added)]
+    e.b.emit("pop", -1);
+    // Stack: []
+}
+
+// RUN_DEFERS: Run all deferred calls in LIFO order.
+void emitRunDefers(Emitter& e) {
+    if (e.deferListSlot < 0) {
+        // No defer list allocated, so no defers to run
+        return;
+    }
+
+    // Stack before: []
+    // Load the defer list and call runDefers
+    e.b.emit("aload " + std::to_string(e.deferListSlot), +1);
+    e.b.emit("invokestatic lox/LoxOps/runDefers(Ljava/lang/Object;)V", -1);
+    // Stack after: []
+}
+
 // The `<init>` every generated LoxFn$<n> needs (jvm_emitter.h hazard note):
 // calls straight through to LoxClosure's own constructor with this
 // function's compile-time name/arity as literals, so only the upvalues
@@ -1587,6 +1806,16 @@ int computeMaxLocalCount(const FunctionStackAnalysis& analysis) {
     }
     // slot 0: the callee/receiver, never named by itself, but always live.
     return std::max(maxLocalCount, 1);
+}
+
+// Check if the function uses defer (DEFER_RECORD or RUN_DEFERS opcodes).
+bool usesDefer(const DecodedFunction& fn) {
+    for (const auto& instr : fn.instructions) {
+        if (instr.op == Op::DEFER_RECORD || instr.op == Op::RUN_DEFERS) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // The widest N-element spill this chunk needs — CALL's/INVOKE's/
@@ -1669,6 +1898,12 @@ Emitter buildEmitter(const DecodedFunction& fn,
     for (const InvisibleVarSite& site : analysis.invisibleVars) {
         e.invisibleVarsByOffset[site.offset].push_back(site.slot);
     }
+    // analysis.handlerEntries only contains regions whose PUSH_HANDLER was
+    // reached (analyzeStack skips dead try blocks there) — see
+    // popHandlerOffsetsWithReachedPush's own comment.
+    for (const HandlerEntryContract& entry : analysis.handlerEntries) {
+        e.popHandlerOffsetsWithReachedPush.insert(entry.popHandlerOffset);
+    }
     // Which of this chunk's OWN local slots ever back an Object[1] cell —
     // every slot some reachable CLOSURE in this chunk captures
     // (capture_analysis.h). Membership only; see ensureCapturedCell's own
@@ -1687,6 +1922,22 @@ Emitter buildEmitter(const DecodedFunction& fn,
     for (const BasicBlock& block : cfg.blocks) {
         e.labelAtOffset.emplace(block.leaderOffset, block.label);
     }
+
+    // Map PUSH_HANDLER offsets to their catch handler labels. Exception regions
+    // will be emitted using this map when PUSH_HANDLER/POP_HANDLER are
+    // processed.
+    for (const HandlerEntry& entry : cfg.handlerEntries) {
+        if (entry.catchBlock >= 0 &&
+            entry.catchBlock < static_cast<int>(cfg.blocks.size())) {
+            e.handlerLabelsByOffset[entry.pushHandlerOffset] =
+                cfg.blocks[entry.catchBlock].label;
+            // Record that this block is a handler entry, so we can emit
+            // extraction code when entering it.
+            e.handlerEntryOffsets.insert(
+                cfg.blocks[entry.catchBlock].leaderOffset);
+        }
+    }
+
     return e;
 }
 
@@ -1708,20 +1959,28 @@ void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isScript) {
                  -1);
         e.b.emit("invokestatic lox/LoxRuntime/init()Llox/LoxGlobals;", +1);
         e.b.emit("astore " + std::to_string(e.globalsSlot), -1);
-        return;
+    } else {
+        // A generated class has no field of its own for the shared globals
+        // instance (jvm_emitter.h) — read the one instance init() built.
+        e.b.emit("invokestatic lox/LoxRuntime/current()Llox/LoxGlobals;", +1);
+        e.b.emit("astore " + std::to_string(e.globalsSlot), -1);
+        e.b.emit("aload 1", +1);
+        e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(0)), -1);
+        int arity = fn.function->arity;
+        for (int i = 0; i < arity; i++) {
+            e.b.emit("aload 2", +1);
+            e.b.emit(pushIntInstruction(i), +1);
+            e.b.emit("aaload", -1);
+            e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(i + 1)), -1);
+        }
     }
-    // A generated class has no field of its own for the shared globals
-    // instance (jvm_emitter.h) — read the one instance init() built.
-    e.b.emit("invokestatic lox/LoxRuntime/current()Llox/LoxGlobals;", +1);
-    e.b.emit("astore " + std::to_string(e.globalsSlot), -1);
-    e.b.emit("aload 1", +1);
-    e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(0)), -1);
-    int arity = fn.function->arity;
-    for (int i = 0; i < arity; i++) {
-        e.b.emit("aload 2", +1);
-        e.b.emit(pushIntInstruction(i), +1);
-        e.b.emit("aaload", -1);
-        e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(i + 1)), -1);
+
+    // Initialize defer list if this function uses defer
+    if (e.deferListSlot >= 0) {
+        e.b.emit("new java/util/ArrayList", +1);
+        e.b.emit("dup", +1);
+        e.b.emit("invokespecial java/util/ArrayList/<init>()V", -1);
+        e.b.emit("astore " + std::to_string(e.deferListSlot), -1);
     }
 }
 
@@ -1860,18 +2119,67 @@ void emitBody(Emitter& e, bool isScript,
     const std::vector<DecodedInstruction>& ins = e.fn.instructions;
     std::size_t n = ins.size();
 
+    // Emit start label for defer catch-all handler (if function uses defer).
+    // This label marks where the protected region begins.
+    if (usesDefer(e.fn)) {
+        e.deferCatchAllBodyStartLabel = "L_defer_body_start";
+        e.b.label(e.deferCatchAllBodyStartLabel);
+    }
+
     for (std::size_t i = 0; i < n;) {
-        if (!e.reached(i)) {
-            i++;
-            continue; // endCompiler()'s trailing NIL;RETURN can be dead code.
-        }
         const DecodedInstruction& in = ins[i];
+        // POP_HANDLER marks the end of a try region and must be processed
+        // whenever its own PUSH_HANDLER ran, even if POP_HANDLER's own raw
+        // offset is unreachable (the try body's last statement was terminal
+        // — THROW or RETURN — so nothing falls through into it). The region
+        // boundary is a structural constraint tied to its PUSH_HANDLER, not
+        // to this offset's own control-flow reachability: forcing every
+        // POP_HANDLER unconditionally would also run one whose PUSH_HANDLER
+        // never ran (a genuinely dead try/catch, e.g. one physically placed
+        // after another handler's own terminal body), popping
+        // e.activeRegions against a region that was never pushed. Skip other
+        // unreachable instructions normally (e.g. endCompiler()'s trailing
+        // NIL;RETURN).
+        bool isReachablePopHandler =
+            in.op == Op::POP_HANDLER &&
+            e.popHandlerOffsetsWithReachedPush.contains(in.offset);
+        if (!e.reached(i) && !isReachablePopHandler) {
+            i++;
+            continue;
+        }
         bool consumedFollowingPop = false;
         bool consumedFollowingJumpTable = false;
 
         auto labelIt = e.labelAtOffset.find(in.offset);
         if (labelIt != e.labelAtOffset.end()) {
+            // Before emitting the handler entry label, emit any region end
+            // labels that need to be placed at this offset. This ensures the
+            // exception table's protected-region boundary is correctly placed
+            // right before the handler code starts.
+            auto regionEndIt = e.regionEndLabelsByHandlerOffset.find(in.offset);
+            if (regionEndIt != e.regionEndLabelsByHandlerOffset.end()) {
+                int pushHandlerOffset = regionEndIt->second;
+                std::string regionEndLabel =
+                    "try_" + std::to_string(pushHandlerOffset) + "_end";
+                e.b.label(regionEndLabel);
+            }
+
             e.b.label(labelIt->second);
+
+            // If this is a handler entry block, extract the Lox value from the
+            // caught LoxError (which is on the stack via JVM exception
+            // dispatch). The catch code expects the Lox value, not the
+            // exception wrapper.
+            if (e.handlerEntryOffsets.find(in.offset) !=
+                e.handlerEntryOffsets.end()) {
+                // Stack before: [LoxError]
+                // Extract the value field and leave it on the stack
+                e.b.emit("invokevirtual lox/LoxError/getValue()"
+                         "Ljava/lang/Object;",
+                         0);
+                // Stack after: [value]
+            }
+
             bool trustCarryForward = e.prevCanFallThrough &&
                                      e.prevNaturalSuccessorOffset == in.offset;
             if (!trustCarryForward) {
@@ -2046,6 +2354,21 @@ void emitBody(Emitter& e, bool isScript,
         case Op::GET_TAG:
             emitGetTagOrFused(e, i, consumedFollowingJumpTable);
             break;
+        case Op::PUSH_HANDLER:
+            emitPushHandler(e, in);
+            break;
+        case Op::POP_HANDLER:
+            emitPopHandler(e, in);
+            break;
+        case Op::THROW:
+            emitThrow(e);
+            break;
+        case Op::DEFER_RECORD:
+            emitDeferRecord(e, in);
+            break;
+        case Op::RUN_DEFERS:
+            emitRunDefers(e);
+            break;
         default:
             if (!emitSimpleOp(e, in.op)) {
                 notImplemented(in.op);
@@ -2055,6 +2378,18 @@ void emitBody(Emitter& e, bool isScript,
         i = finishInstruction(e, i, in, consumedFollowingPop,
                               consumedFollowingJumpTable);
     }
+}
+
+// Generate the .catch directives for exception table entries.
+std::string generateExceptionTable(const Emitter& e) {
+    std::ostringstream out;
+    for (const ExceptionEntry& entry : e.exceptionTable) {
+        // .catch <exception-type> from <label> to <label> using <label>
+        out << "    .catch lox/LoxError from " << entry.regionStartLabel
+            << " to " << entry.regionEndLabel << " using " << entry.handlerLabel
+            << "\n";
+    }
+    return out.str();
 }
 
 // The class header, the method this chunk becomes (`main` or `invoke`, plus
@@ -2076,7 +2411,10 @@ std::string assembleClass(const Emitter& e, const DecodedFunction& fn,
     }
     out << "    .limit stack " << std::max(1, e.b.maxDepth) << "\n";
     out << "    .limit locals " << (e.scratchSlot + 1 + extraSpillSlots)
-        << "\n\n";
+        << "\n";
+    // Emit exception table entries before the method body
+    out << generateExceptionTable(e);
+    out << "\n";
     out << e.b.text.str();
     out << ".end method\n";
     return out.str();
@@ -2098,10 +2436,89 @@ std::string emitChunk(const DecodedFunction& fn,
     int maxSpillWidth = computeMaxSpillWidth(fn, analysis);
     int extraSpillSlots = maxSpillWidth > 0 ? maxSpillWidth + 1 : 0;
 
+    // If function uses defer, compute extra slots needed
+    // (1 for defer list + 2 for calleeSlot and arraySlot + argc for temp
+    // argument storage in DEFER_RECORD, per emitDeferRecord)
+    int deferListExtraSlots = 0;
+    if (usesDefer(fn)) {
+        deferListExtraSlots = 1; // for the defer list itself
+        // Check max argc in DEFER_RECORD opcodes to know how many temps we need
+        int maxDeferArgc = 0;
+        for (const auto& instr : fn.instructions) {
+            if (instr.op == Op::DEFER_RECORD) {
+                maxDeferArgc =
+                    std::max(maxDeferArgc, static_cast<int>(instr.byteOperand));
+            }
+        }
+        // emitDeferRecord uses: calleeSlot, argsSlot (..+argc-1), arraySlot
+        // That's: scratchSlot, scratchSlot+1 (..<+argc), scratchSlot+2
+        // Total: 2 + argc extra slots (beyond the defer list itself)
+        deferListExtraSlots += 2 + maxDeferArgc;
+    }
+
     Emitter e = buildEmitter(fn, analysis, isScript, maxLocalCount,
                              maxSpillWidth, captureInfo);
+
+    // If defer is used, shift slot assignments to make room for defer list
+    // and temp argument storage for DEFER_RECORD
+    if (usesDefer(fn)) {
+        e.deferListSlot = e.scratchSlot; // slot for the defer list itself
+        e.deferTempSlotBase =
+            e.deferListSlot + 1; // slots for DEFER_RECORD temps
+        e.scratchSlot =
+            e.deferListSlot + deferListExtraSlots; // next available scratch
+        if (maxSpillWidth > 0) {
+            e.calleeScratchSlot = e.scratchSlot + 1;
+            e.argScratchBase = e.scratchSlot + 2;
+        }
+    }
     emitPrologue(e, fn, isScript);
     emitBody(e, isScript, childClassNames);
+
+    // If the function uses defer, emit a catch-all exception handler that
+    // runs defers before re-throwing. This ensures defers run on the
+    // exceptional exit path, not just the normal return path.
+    if (usesDefer(fn)) {
+        // Emit the end label for the protected region
+        std::string deferCatchAllEndLabel = "L_defer_body_end";
+        e.b.label(deferCatchAllEndLabel);
+
+        // Emit the catch-all handler code
+        e.deferCatchAllHandlerLabel = "L_defer_catch_all";
+        e.b.label(e.deferCatchAllHandlerLabel);
+        // When the handler is invoked, the JVM has the exception on the stack.
+        // Resync the depth to account for it.
+        e.b.resync(1);
+        // Stack: [LoxError exception]
+        // Use the defer list slot to temporarily store the exception after
+        // calling runDefers (the defer list is no longer needed at this point).
+        // But first, we need to swap so the defer list is on top for the call.
+        e.b.emit("aload " + std::to_string(e.deferListSlot), +1);
+        // Stack: [LoxError exception, ArrayList deferList]
+        e.b.emit("swap", 0);
+        // Stack: [ArrayList deferList, LoxError exception]
+        e.b.emit("astore " + std::to_string(e.deferListSlot), -1);
+        // Stack: [ArrayList deferList]
+        // Call LoxOps.runDefers() with the defer list
+        e.b.emit("invokestatic lox/LoxOps/runDefers(Ljava/lang/Object;)V", -1);
+        // Stack: []
+        // Restore and re-throw the caught exception
+        e.b.emit("aload " + std::to_string(e.deferListSlot), +1);
+        e.b.emit("athrow", -1);
+
+        // Create an exception table entry for the defer catch-all handler.
+        // This covers the entire function body and catches any exception that
+        // is not caught by inner try/catch handlers.
+        ExceptionEntry deferEntry;
+        deferEntry.regionStartLabel = e.deferCatchAllBodyStartLabel;
+        deferEntry.regionEndLabel = deferCatchAllEndLabel;
+        deferEntry.handlerLabel = e.deferCatchAllHandlerLabel;
+        e.exceptionTable.push_back(deferEntry);
+    }
+
+    // assembleClass calculates: scratchSlot + 1 + extraSpillSlots
+    // If defer is used, the defer-related slots are already included in
+    // scratchSlot, so we don't need to add them to extraSpillSlots again
     return assembleClass(e, fn, className, isScript, extraSpillSlots);
 }
 

@@ -2721,3 +2721,271 @@ TEST(EmitScript,
         << j;
     expectEveryJumpTargetIsLabeled(j);
 }
+
+// Exception handling: PUSH_HANDLER/POP_HANDLER emit .catch directive
+// with correct region boundaries (start and end labels) and handler target.
+TEST(EmitScript, TryCatchEmitsExceptionTableEntry) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("try { print 1; } catch (e) { print e; }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // The .catch directive must appear exactly once (one try/catch pair).
+    EXPECT_EQ(countOccurrences(j, ".catch lox/LoxError from"), 1) << j;
+    // Must reference a start label.
+    EXPECT_NE(j.find(".catch lox/LoxError from try_"), std::string::npos) << j;
+    // Must reference an end label with the same prefix.
+    EXPECT_NE(j.find(" to try_"), std::string::npos) << j;
+    // Must reference a handler label (CFG-generated, format L_<offset>).
+    EXPECT_NE(j.find(" using L_"), std::string::npos) << j;
+}
+
+// Exception handling: even when a try body ends with a terminal instruction
+// (throw or return), the POP_HANDLER boundary marker must still generate the
+// exception table entry. This tests that R1 (dead-code reachability fix) works.
+TEST(EmitScript, TryCatchWithTerminalBodyStillEmitsExceptionEntry) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("try { throw 1; } catch (e) { }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // The .catch directive must be generated even though throw is terminal.
+    EXPECT_EQ(countOccurrences(j, ".catch lox/LoxError from"), 1) << j;
+}
+
+// Exception handling: the protected region's end label must be placed right
+// before the handler code starts, not after it. This is checked by verifying
+// a .catch directive is present with matching start and end labels.
+TEST(EmitScript, ExceptionTableEndLabelPlacedBeforeHandler) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("try { print 1; } catch (e) { print e; }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // Verify that the end label (try_X_end:) is defined in the output
+    // and comes BEFORE the handler's own label (L_XXXX:) in the text.
+    // This ensures the exception table region correctly covers only the
+    // try body, not the handler code itself.
+
+    size_t catchPos = j.find(".catch lox/LoxError from try_");
+    ASSERT_NE(catchPos, std::string::npos)
+        << ".catch directive not found with expected format in:\n"
+        << j;
+
+    // Extract the try offset from the start label
+    size_t afterPrefix =
+        catchPos + std::string(".catch lox/LoxError from try_").length();
+    size_t underscore = j.find("_", afterPrefix);
+    ASSERT_NE(underscore, std::string::npos) << j;
+    std::string tryOffset = j.substr(afterPrefix, underscore - afterPrefix);
+
+    // Extract the handler label from the .catch directive
+    std::string usingStr = " using L_";
+    size_t usingPos = j.find(usingStr, catchPos);
+    ASSERT_NE(usingPos, std::string::npos)
+        << "Handler label 'using L_' not found in:\n"
+        << j;
+    size_t handlerLabelStart = usingPos + usingStr.length();
+    size_t handlerLabelEnd = j.find("\n", handlerLabelStart);
+    std::string handlerLabel =
+        j.substr(handlerLabelStart, handlerLabelEnd - handlerLabelStart);
+
+    // Find the actual label definitions in the code
+    std::string endLabelDef = "try_" + tryOffset + "_end:";
+    std::string handlerLabelDef = "L_" + handlerLabel + ":";
+
+    size_t endLabelPos = j.find(endLabelDef);
+    size_t handlerLabelPos = j.find(handlerLabelDef);
+
+    ASSERT_NE(endLabelPos, std::string::npos)
+        << "End label definition '" << endLabelDef << "' not found in:\n"
+        << j;
+    ASSERT_NE(handlerLabelPos, std::string::npos)
+        << "Handler label definition '" << handlerLabelDef
+        << "' not found in:\n"
+        << j;
+
+    // The critical assertion: end label must appear BEFORE handler label
+    EXPECT_LT(endLabelPos, handlerLabelPos)
+        << "End label " << endLabelDef << " at position " << endLabelPos
+        << " must come before handler label " << handlerLabelDef
+        << " at position " << handlerLabelPos << " to ensure the exception"
+        << " table region does not include handler code";
+}
+
+TEST(EmitScript, SiblingTryCatchAfterTerminalBody) {
+    MemoryManager mm;
+    // Regression test for R6: two try/catch statements where the first
+    // body is terminal (ends in throw or return). This used to cause
+    // Jasmin assembly failure "Label ... has not been added to the code"
+    // because the second PUSH_HANDLER and its handler were unreachable
+    // in the CFG reachability analysis and thus skipped entirely.
+    DecodedFunction fn = decodeScript(
+        "try { throw \"a\"; } catch (e) { print \"caught-a: \" + e; } "
+        "try { print \"b-body\"; } catch (e) { print \"caught-b\"; } "
+        "print \"done\";",
+        mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    // Both try regions must have .catch entries
+    EXPECT_EQ(countOccurrences(j, ".catch lox/LoxError from try_"), 2)
+        << "Expected 2 .catch directives (one per try/catch) in:\n"
+        << j;
+
+    // Both exception table entries must have their end labels defined
+    // in the emitted code (not silently dropped)
+    EXPECT_GE(countOccurrences(j, "_end:"), 2)
+        << "Expected at least 2 end labels (try_X_end:) in:\n"
+        << j;
+
+    // Handler code for second try must be present (not silently dropped)
+    // This is indicated by the presence of handler labels
+    EXPECT_GE(countOccurrences(j, "L_"), 2)
+        << "Expected at least 2 handler labels (L_XXXX:) in:\n"
+        << j;
+}
+
+// PR #237 round 3's shape (A): the FIRST try/catch's own CATCH body is
+// itself terminal (`return`), immediately followed by a second, sibling
+// try/catch. The whole second try/catch is genuinely dead code — the first
+// catch body always returns — but the compiler still emits it linearly, so
+// its PUSH_HANDLER/POP_HANDLER pair must stay a balanced, unemitted region
+// rather than crashing the emitter with "POP_HANDLER without matching
+// PUSH_HANDLER" (round 2's fix only made a *terminal try body* reachable
+// again; a terminal *catch* body is one layer further along the same
+// protected region and was still broken).
+TEST(EmitProgram, SiblingTryCatchAfterTerminalCatchBodyStaysBalanced) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "fun f() {"
+        "    try { throw \"x\"; } catch (e) { print \"caught: \" + e; return "
+        "\"early\"; }"
+        "    try { print \"b\"; } catch (e2) { print \"caught2\"; }"
+        "    print \"after\";"
+        "}"
+        "print f();",
+        mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+
+    std::vector<jvm::EmittedClass> classes;
+    ASSERT_NO_THROW(classes = jvm::emitProgram(fn, tree, "LoxMain"))
+        << "a genuinely dead sibling try/catch, after a terminal catch "
+        << "body, must not unbalance PUSH_HANDLER/POP_HANDLER emission";
+
+    ASSERT_EQ(classes.size(), 2u);
+    const std::string& fnSource = classes[1].source;
+    // Only the FIRST try/catch is reachable — the second is dead code, so
+    // exactly one .catch entry must exist, not two and not a crash.
+    EXPECT_EQ(countOccurrences(fnSource, ".catch lox/LoxError from"), 1)
+        << fnSource;
+}
+
+// PR #237 round 3's shape (B): a single try/catch, no siblings, no terminal
+// control flow at all — just a local variable declared inside the catch
+// body. The caught value `e` and `local1` both need a real, sequential
+// local slot; recognizing `e`'s own slot used to require a backward search
+// that dead-ends at the catch entry's own (structurally empty, by design)
+// predecessor list, so it was never recognized at all and `local1`'s own
+// recognition disagreed with the local count computed at its own offset
+// ("invisible-var recognition gap").
+TEST(EmitScript, CatchBoundValueAndLocalDeclaredInCatchBodyAreBothRecognized) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "fun m() {"
+        "    try { print \"risky\"; } catch (e) { var local1 = \"x\"; print "
+        "\"caught: \" + e + \" \" + local1; }"
+        "    print \"done\";"
+        "}"
+        "m();",
+        mm);
+
+    // Locate `m`'s own DecodedFunction/analysis pair (same index in both
+    // trees — analyzeStackTree mirrors DecodedFunction::nested 1:1).
+    const DecodedFunction* target = nullptr;
+    const FunctionStackAnalysis* targetAnalysis = nullptr;
+    StackAnalysisTree tree; // NOLINT(misc-const-correctness)
+    ASSERT_NO_THROW(tree = analyzeStackTree(fn))
+        << "a catch-bound value followed by a local declared in the same "
+        << "catch body must not trip validateNoInvisibleVarGaps";
+    for (std::size_t i = 0; i < fn.nested.size(); i++) {
+        if (!tree.nested[i].self.handlerEntries.empty()) {
+            target = &fn.nested[i];
+            targetAnalysis = &tree.nested[i].self;
+            break;
+        }
+    }
+    ASSERT_NE(target, nullptr) << "no nested function has a handler entry";
+    ASSERT_EQ(targetAnalysis->handlerEntries.size(), 1U);
+    int catchOffset = targetAnalysis->handlerEntries[0].catchOffset;
+
+    bool foundCaughtValueSite = false;
+    int caughtValueSlot = -1;
+    bool foundLocal1Site = false;
+    int local1Slot = -1;
+    for (const InvisibleVarSite& site : targetAnalysis->invisibleVars) {
+        if (site.offset == catchOffset) {
+            foundCaughtValueSite = true;
+            caughtValueSlot = site.slot;
+        } else if (site.offset > catchOffset) {
+            foundLocal1Site = true;
+            local1Slot = site.slot;
+        }
+    }
+    EXPECT_TRUE(foundCaughtValueSite)
+        << "the catch entry's own bound value must be a recognized local "
+        << "invisible-var site, or a later local can silently collide with "
+        << "its slot (issue #240)";
+    EXPECT_TRUE(foundLocal1Site);
+    EXPECT_EQ(local1Slot, caughtValueSlot + 1)
+        << "local1 must be recognized exactly one slot above the caught "
+        << "value, with no gap and no overlap";
+
+    std::string j;
+    EXPECT_NO_THROW(j = jvm::emitScript(*target, *targetAnalysis, "LoxFn"));
+}
+
+// Issue #240: a function using both `defer` and its own bound `catch (e)`
+// had its defer list's local slot silently overwritten by the caught value,
+// because the caught value's own slot was never counted by
+// computeMaxLocalCount (jvm_emitter.cpp) — the same root cause as shape (B)
+// above, reached through a different call path (no explicit local
+// declared in the catch body needed; the miscount is in the caught value's
+// own recognition, not in what comes after it).
+TEST(EmitProgram, CaughtValueIsRecognizedWhenFunctionAlsoUsesDefer) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun cleanup(tag) { print tag; }"
+                     "fun f() {"
+                     "    defer cleanup(\"outer\");"
+                     "    try { throw \"x\"; } catch (e) { print e; }"
+                     "}"
+                     "f();",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+
+    const StackAnalysisTree* target = nullptr;
+    for (const StackAnalysisTree& child : tree.nested) {
+        if (!child.self.handlerEntries.empty()) {
+            target = &child;
+            break;
+        }
+    }
+    ASSERT_NE(target, nullptr);
+    ASSERT_EQ(target->self.handlerEntries.size(), 1U);
+    int catchOffset = target->self.handlerEntries[0].catchOffset;
+
+    bool caughtValueRecognized = false;
+    for (const InvisibleVarSite& site : target->self.invisibleVars) {
+        if (site.offset == catchOffset) {
+            caughtValueRecognized = true;
+        }
+    }
+    EXPECT_TRUE(caughtValueRecognized)
+        << "the caught value must occupy a counted local slot even when the "
+        << "function also uses defer, or the defer list's own slot "
+        << "(computeMaxLocalCount + 1, jvm_emitter.cpp) can land on top of "
+        << "it and silently drop the deferred call (issue #240)";
+}

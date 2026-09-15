@@ -1,0 +1,21 @@
+// Regression test for PR #237 round 3, shape (A): a try/catch whose catch
+// body is itself terminal (ends in `return`), immediately followed by a
+// sibling try/catch. The whole second try/catch (and everything after it)
+// is genuinely dead code -- the first catch body always returns -- but the
+// compiler still emits it linearly, and its PUSH_HANDLER/POP_HANDLER pair
+// must stay balanced (both unreached) rather than crashing the JVM emitter
+// with "POP_HANDLER without matching PUSH_HANDLER".
+//
+// Round 2's own fix (0958c34) only handled a terminal TRY body; this one
+// has a terminal CATCH body instead, one layer further along the same
+// protected region.
+
+fun f() {
+    try { throw "x"; } catch (e) { print "caught: " + e; return "early"; }
+    try { print "b"; } catch (e2) { print "caught2"; }
+    print "after";
+}
+print f();
+
+// CHECK: caught: x
+// CHECK: early

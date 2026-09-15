@@ -22,7 +22,8 @@ public final class LoxEnumCtor implements LoxCallable {
     @Override
     public Object call(Object[] args) {
         if (args.length != arity) {
-            throw new LoxError("'" + ctorName + "' expects " + arity
+            throw LoxOps.makeError("ConstructorArityError",
+                    "'" + ctorName + "' expects " + arity
                     + " argument(s) but got " + args.length + ".");
         }
         return new LoxEnum(this, args.clone());

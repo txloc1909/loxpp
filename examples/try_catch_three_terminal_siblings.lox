@@ -1,0 +1,17 @@
+// Adversarial regression for PR #237 round 3's shape (A), generalized past
+// exactly two: three sibling try/catch statements in the same function,
+// each one's catch body itself terminal (returns immediately). Every
+// PUSH_HANDLER/POP_HANDLER pair after the first is genuinely dead code
+// (each catch body always returns), and must stay balanced rather than
+// crashing the JVM emitter or the compiler's own invisible-var analysis.
+
+fun h() {
+    try { throw "1"; } catch (e) { print "c1: " + e; return "r1"; }
+    try { throw "2"; } catch (e2) { print "c2: " + e2; return "r2"; }
+    try { throw "3"; } catch (e3) { print "c3: " + e3; return "r3"; }
+    print "never";
+}
+print h();
+
+// CHECK: c1: 1
+// CHECK: r1

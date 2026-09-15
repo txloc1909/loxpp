@@ -76,6 +76,25 @@ probes=(
     # hasField()/setField()/callMethod(), now supported on native, JVM, and
     # CLR alike (src/stdlib/reflect_api.cpp, LoxRuntime.registerReflection).
     "test/translation-probes/40_reflection.lox"
+    # try/catch/throw/defer (PUSH_HANDLER/POP_HANDLER/THROW/DEFER_RECORD/
+    # RUN_DEFERS). PR #237 rounds 1-3's own repros, plus round 3's shapes
+    # (A)/(B) and their generalizations, plus issue #240 — none of these
+    # were wired into an executed corpus before, which is why every one of
+    # them survived to a live review instead of failing a build.
+    "examples/simple_throw.lox"
+    "examples/nested_try_catch.lox"
+    "examples/test_throw_simple.lox"
+    "examples/catch_index_error.lox"
+    "examples/defer_throw_outer_catch.lox"
+    "examples/defer_lifo.lox"
+    "examples/try_catch_sibling_after_terminal_catch.lox"
+    "examples/try_catch_local_in_catch_body.lox"
+    "examples/try_catch_local_before_and_in_catch.lox"
+    "examples/try_catch_three_terminal_siblings.lox"
+    "examples/try_catch_defer_local_slot.lox"
+    "examples/try_catch_invalid_receiver.lox"
+    "examples/try_catch_nested_terminal_outer_catch.lox"
+    "examples/try_catch_local_in_catch_then_sibling.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its

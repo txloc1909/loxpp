@@ -42,6 +42,32 @@ struct LocalCfg {
     std::vector<std::pair<int, int>> handlerLinks;
 };
 
+// Pairs each PUSH_HANDLER with the POP_HANDLER that closes its own protected
+// region, by a LIFO scan over program order. This is a purely structural
+// property of well-nested try/catch codegen — independent of reachability —
+// because POP_HANDLER carries no operand naming its own PUSH_HANDLER
+// (chunk.h); nothing else in the chunk records this pairing.
+std::unordered_map<int, int>
+matchPushHandlersToPopHandlers(const std::vector<DecodedInstruction>& ins) {
+    std::unordered_map<int, int> pushIdxToPopIdx;
+    std::vector<int> openPushIdx;
+    for (size_t i = 0; i < ins.size(); i++) {
+        if (ins[i].op == Op::PUSH_HANDLER) {
+            openPushIdx.push_back(static_cast<int>(i));
+        } else if (ins[i].op == Op::POP_HANDLER) {
+            if (openPushIdx.empty()) {
+                throw std::runtime_error(
+                    "abstract_stack: POP_HANDLER at offset " +
+                    std::to_string(ins[i].offset) +
+                    " has no matching PUSH_HANDLER");
+            }
+            pushIdxToPopIdx[openPushIdx.back()] = static_cast<int>(i);
+            openPushIdx.pop_back();
+        }
+    }
+    return pushIdxToPopIdx;
+}
+
 // Collects every PUSH_HANDLER's catch-target instruction index and populates
 // the isHandlerEntryInstr set and handlerLinks list. Called before adding any
 // edges so addEdge can refuse edges to handler-entry instructions (referee's
@@ -381,17 +407,39 @@ StackState advance(const std::vector<DecodedInstruction>& ins, size_t idx,
 // all here (an initial parameter — stop descending)" apart from "this slot's
 // push was already known from elsewhere", which look identical if judged
 // only by whether `sites` grew.
-bool findDeclaringPushIndices(int fromIndex, int slot,
-                              const std::vector<DecodedInstruction>& ins,
-                              const LocalCfg& cfg,
-                              const std::vector<StackState>& before,
-                              const std::vector<StackState>& after,
-                              const std::vector<bool>& reached,
-                              std::set<std::pair<int, int>>& sites) {
+//
+// `catchEntryToPushIdx` names every catch-target instruction (LocalCfg::
+// handlerLinks, inverted). A catch entry has no generic predecessors by
+// design (buildCfg never wires one), so a plain walk dead-ends there — but
+// its own top-of-stack position (the caught value) is not undiscoverable, it
+// is *declared*, the same way its operand depth is (handlerEntrySeeds): the
+// exception mechanism places the value there, not any instruction in this
+// chunk. When the walk reaches a catch entry looking for exactly that
+// position, the catch entry itself is the answer, with no predecessor to
+// consult. Looking for anything *below* it (a local that already existed
+// before the try) is answered by continuing from PUSH_HANDLER's own real
+// predecessors instead — the position passed through the try statement
+// unchanged, exactly like it would through any other instruction that
+// doesn't reach that deep, and PUSH_HANDLER's own declared checkpoint height
+// equals the caught value's slot (handlerEntrySeeds' "+1"), so treating it as
+// a pass-through predecessor of the catch entry falls out of the same
+// popReach/after.height test every other instruction gets below, once
+// seeded with PUSH_HANDLER as the "predecessor" to continue from.
+bool findDeclaringPushIndices(
+    int fromIndex, int slot, const std::vector<DecodedInstruction>& ins,
+    const LocalCfg& cfg, const std::vector<StackState>& before,
+    const std::vector<StackState>& after, const std::vector<bool>& reached,
+    const std::unordered_map<int, int>& catchEntryToPushIdx,
+    std::set<std::pair<int, int>>& sites) {
     bool found = false;
     std::vector<bool> visited(ins.size(), false);
-    std::deque<int> frontier(cfg.predecessors[fromIndex].begin(),
-                             cfg.predecessors[fromIndex].end());
+    std::deque<int> frontier;
+    if (catchEntryToPushIdx.contains(fromIndex)) {
+        frontier.push_back(fromIndex);
+    } else {
+        frontier.assign(cfg.predecessors[fromIndex].begin(),
+                        cfg.predecessors[fromIndex].end());
+    }
     while (!frontier.empty()) {
         int cur = frontier.front();
         frontier.pop_front();
@@ -399,6 +447,18 @@ bool findDeclaringPushIndices(int fromIndex, int slot,
             continue;
         }
         visited[cur] = true;
+
+        auto catchIt = catchEntryToPushIdx.find(cur);
+        if (catchIt != catchEntryToPushIdx.end()) {
+            int caughtSlot = before[cur].height - 1;
+            if (slot == caughtSlot) {
+                sites.insert({cur, slot});
+                found = true;
+            } else if (slot < caughtSlot) {
+                frontier.push_back(catchIt->second); // PUSH_HANDLER
+            }
+            continue;
+        }
 
         StackEffect effect = stackEffect(ins[cur]);
         // Height right after `cur`'s pops, before its own push — equally
@@ -448,10 +508,11 @@ void chaseSlotsDownward(int originIdx, int topSlot,
                         const std::vector<StackState>& before,
                         const std::vector<StackState>& after,
                         const std::vector<bool>& reached,
+                        const std::unordered_map<int, int>& catchEntryToPushIdx,
                         std::set<std::pair<int, int>>& sites) {
     for (int k = topSlot; k >= 0; k--) {
         if (!findDeclaringPushIndices(originIdx, k, ins, cfg, before, after,
-                                      reached, sites)) {
+                                      reached, catchEntryToPushIdx, sites)) {
             return;
         }
     }
@@ -494,12 +555,21 @@ struct PersistenceResult {
 // persistence. `result.births` collects every declaring push found, exactly
 // like findDeclaringPushIndices's `sites`; the caller only keeps them when
 // the verdict is LOCAL.
+//
+// A catch entry reached mid-walk is handled differently from
+// findDeclaringPushIndices: asking about a position *below* the caught value
+// still redirects to PUSH_HANDLER (a pre-existing local's cover witness can
+// legitimately live before the try). But asking about the caught value's
+// *own* slot must not redirect — nothing before PUSH_HANDLER can be its
+// cover witness, because the value did not exist there; it is born exactly
+// at the catch entry, so the search simply has nothing further to find.
 void walkForPersistence(int fromIndex, int slot,
                         const std::vector<DecodedInstruction>& ins,
                         const LocalCfg& cfg,
                         const std::vector<StackState>& before,
                         const std::vector<StackState>& after,
                         const std::vector<bool>& reached,
+                        const std::unordered_map<int, int>& catchEntryToPushIdx,
                         PersistenceResult& result) {
     std::vector<bool> visited(ins.size(), false);
     std::deque<int> frontier(cfg.predecessors[fromIndex].begin(),
@@ -511,6 +581,15 @@ void walkForPersistence(int fromIndex, int slot,
             continue;
         }
         visited[cur] = true;
+
+        auto catchIt = catchEntryToPushIdx.find(cur);
+        if (catchIt != catchEntryToPushIdx.end()) {
+            int caughtSlot = before[cur].height - 1;
+            if (slot < caughtSlot) {
+                frontier.push_back(catchIt->second); // PUSH_HANDLER
+            }
+            continue;
+        }
 
         StackEffect effect = stackEffect(ins[cur]);
         int popReach = before[cur].height - effect.popCount;
@@ -539,16 +618,51 @@ void walkForPersistence(int fromIndex, int slot,
     }
 }
 
+// Builds one HandlerEntryContract per reached PUSH_HANDLER (a dead try
+// block, per handlerEntrySeeds, contributes none). Split out of
+// analyzeStack to keep that function's own cognitive complexity down —
+// this is a self-contained lookup/assembly step, not part of the fixpoint
+// itself.
+std::vector<HandlerEntryContract> buildHandlerEntryContracts(
+    const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
+    const std::vector<bool>& reached, const std::vector<StackState>& before) {
+    std::unordered_map<int, int> pushIdxToPopIdx =
+        matchPushHandlersToPopHandlers(ins);
+    std::vector<HandlerEntryContract> entries;
+    entries.reserve(cfg.handlerLinks.size());
+    for (const auto& [pushIdx, catchIdx] : cfg.handlerLinks) {
+        if (!static_cast<bool>(reached[static_cast<size_t>(pushIdx)])) {
+            continue; // dead try block — see handlerEntrySeeds
+        }
+        // A real compiled try statement always emits a matching POP_HANDLER
+        // (it is how the region gets closed at all) — the lookup only
+        // misses on a hand-built test chunk that omits one deliberately
+        // (e.g. an empty-protected-region probe with no need to exercise
+        // emission). -1 signals "no POP_HANDLER in this chunk" rather than
+        // asserting one must exist, so those pipeline-level probes keep
+        // working unchanged.
+        auto popIt = pushIdxToPopIdx.find(pushIdx);
+        int popOffset = popIt != pushIdxToPopIdx.end()
+                            ? ins[static_cast<size_t>(popIt->second)].offset
+                            : -1;
+        entries.push_back({ins[static_cast<size_t>(pushIdx)].offset,
+                           ins[static_cast<size_t>(catchIdx)].offset,
+                           before[static_cast<size_t>(catchIdx)].operandDepth(),
+                           popOffset});
+    }
+    return entries;
+}
+
 // Runs the persistence test at every reached POP and folds every LOCAL
 // verdict's births into `sites`. Discovery here depends on no reference
 // elsewhere in the function — the property that closes this defect as a
 // class: every POP is examined directly.
-void findPersistentPopLocals(const std::vector<DecodedInstruction>& ins,
-                             const LocalCfg& cfg,
-                             const std::vector<StackState>& before,
-                             const std::vector<StackState>& after,
-                             const std::vector<bool>& reached,
-                             std::set<std::pair<int, int>>& sites) {
+void findPersistentPopLocals(
+    const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
+    const std::vector<StackState>& before, const std::vector<StackState>& after,
+    const std::vector<bool>& reached,
+    const std::unordered_map<int, int>& catchEntryToPushIdx,
+    std::set<std::pair<int, int>>& sites) {
     for (size_t i = 0; i < ins.size(); i++) {
         if (!static_cast<bool>(reached[i]) || ins[i].op != Op::POP) {
             continue;
@@ -556,7 +670,8 @@ void findPersistentPopLocals(const std::vector<DecodedInstruction>& ins,
         int idx = static_cast<int>(i);
         int slot = before[i].height - 1;
         PersistenceResult result;
-        walkForPersistence(idx, slot, ins, cfg, before, after, reached, result);
+        walkForPersistence(idx, slot, ins, cfg, before, after, reached,
+                           catchEntryToPushIdx, result);
         if (result.coverWitness && !result.disqualified) {
             sites.insert(result.births.begin(), result.births.end());
         }
@@ -578,19 +693,19 @@ void findPersistentPopLocals(const std::vector<DecodedInstruction>& ins,
 // wholesale). So every slot below that one temporary is local, with no
 // reference needed to prove it; chase each one's declaring push from the
 // RETURN itself.
-void backfillFromFrameTeardown(const std::vector<DecodedInstruction>& ins,
-                               const LocalCfg& cfg,
-                               const std::vector<StackState>& before,
-                               const std::vector<StackState>& after,
-                               const std::vector<bool>& reached,
-                               std::set<std::pair<int, int>>& sites) {
+void backfillFromFrameTeardown(
+    const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
+    const std::vector<StackState>& before, const std::vector<StackState>& after,
+    const std::vector<bool>& reached,
+    const std::unordered_map<int, int>& catchEntryToPushIdx,
+    std::set<std::pair<int, int>>& sites) {
     for (size_t i = 0; i < ins.size(); i++) {
         if (!static_cast<bool>(reached[i]) || ins[i].op != Op::RETURN) {
             continue;
         }
         int idx = static_cast<int>(i);
         chaseSlotsDownward(idx, before[i].height - 2, ins, cfg, before, after,
-                           reached, sites);
+                           reached, catchEntryToPushIdx, sites);
     }
 }
 
@@ -606,6 +721,17 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
     const std::vector<StackState>& before, const std::vector<StackState>& after,
     const std::vector<bool>& reached) {
     std::set<std::pair<int, int>> sites;
+
+    // Every catch-target instruction, by index — see findDeclaringPushIndices'
+    // own comment on why a backward search needs this: a catch entry's
+    // caught value is a real local (P1, like an unread `var`) with no
+    // instruction that "pushes" it, and no generic predecessor to search
+    // through either (LocalCfg::handlerLinks — buildCfg never wires one).
+    std::unordered_map<int, int> catchEntryToPushIdx;
+    for (const auto& [pushIdx, catchIdx] : cfg.handlerLinks) {
+        catchEntryToPushIdx[catchIdx] = pushIdx;
+    }
+
     for (size_t i = 0; i < ins.size(); i++) {
         if (!static_cast<bool>(reached[i])) {
             continue;
@@ -626,7 +752,7 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
             // because the function diverges, e.g. a trailing `for (;;) {}`)
             // is ever found at all.
             chaseSlotsDownward(idx, ins[i].byteOperand, ins, cfg, before, after,
-                               reached, sites);
+                               reached, catchEntryToPushIdx, sites);
             break;
         case Op::CLOSURE:
             // isLocal upvalue entries name slots in *this* function
@@ -636,7 +762,7 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
             for (const auto& uv : ins[i].upvalues) {
                 if (uv.isLocal) {
                     chaseSlotsDownward(idx, uv.index, ins, cfg, before, after,
-                                       reached, sites);
+                                       reached, catchEntryToPushIdx, sites);
                 }
             }
             // The CLOSURE's *own* pushed value can itself become a local
@@ -652,7 +778,7 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
             if (!closureIsConsumedImmediately(ins, i)) {
                 sites.insert({idx, after[i].height - 1});
                 chaseSlotsDownward(idx, after[i].height - 2, ins, cfg, before,
-                                   after, reached, sites);
+                                   after, reached, catchEntryToPushIdx, sites);
             }
             break;
         case Op::CLOSE_UPVALUE:
@@ -660,7 +786,7 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
             // captured local is ever closed. Chases downward for the same
             // reason as the GET_LOCAL/SET_LOCAL case above.
             chaseSlotsDownward(idx, before[i].height - 1, ins, cfg, before,
-                               after, reached, sites);
+                               after, reached, catchEntryToPushIdx, sites);
             break;
         default:
             break;
@@ -670,14 +796,16 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
     // A local reachable at RETURN with no explicit reclaim anywhere (a
     // function's own top-level scope) gets no site from the reference-driven
     // loop above at all — see backfillFromFrameTeardown's own comment.
-    backfillFromFrameTeardown(ins, cfg, before, after, reached, sites);
+    backfillFromFrameTeardown(ins, cfg, before, after, reached,
+                              catchEntryToPushIdx, sites);
 
     // The persistence test at every POP — see findPersistentPopLocals's
     // own comment. Independent of the reference-driven loop above; it can
     // add a site the loop above never could reach (no
     // GET_LOCAL/SET_LOCAL/capture at all) and it can re-derive one the loop
     // above already found (deduplicated by `sites` being a set).
-    findPersistentPopLocals(ins, cfg, before, after, reached, sites);
+    findPersistentPopLocals(ins, cfg, before, after, reached,
+                            catchEntryToPushIdx, sites);
     return sites;
 }
 
@@ -967,30 +1095,74 @@ void validateNoInvisibleVarGaps(
 // A chunk with no PUSH_HANDLER (cfg.handlerLinks empty — true for every
 // chunk before this analysis gained handler support, and every chunk today,
 // since src/compiler.cpp does not emit PUSH_HANDLER yet) takes exactly the
-// single-seed path this always took, with no extra work. A chunk with
-// PUSH_HANDLER needs an unseeded pre-run first (`prelim`): handlerEntrySeeds
-// needs each PUSH_HANDLER's own checkpoint state under `declaredSlotsAt`'s
-// current recognition, and nothing has been computed yet on the first call.
-// The reseeded run that follows is what actually makes a catch entry
-// `reached` — from its declared contract, never from LocalCfg::predecessors
-// (buildCfg never adds one there). Shared between analyzeStack's pass 1
-// (declaredSlotsAt null, trackLocals false — see runFixpoint's own comment
-// on the two passes) and pass 2 (declaredSlotsAt set, trackLocals true).
+// single-seed path this always took, with no extra work.
+//
+// A chunk with PUSH_HANDLER needs more than one round: a catch entry's own
+// checkpoint can only be computed once its PUSH_HANDLER is known reachable,
+// but a *second* try/catch physically placed after the first one's handler
+// body only becomes reachable once that first handler's own seed has been
+// added and propagated through its body (its tail falls through into the
+// second try statement's own PUSH_HANDLER — an entirely ordinary edge,
+// nothing to do with handler-entry exclusion). So handler seeding is itself
+// a fixpoint: reseed with every catch entry whose PUSH_HANDLER has newly
+// become reachable, rerun, and repeat until a round adds nothing. Bounded by
+// the handler count, since each productive round seeds at least one
+// previously-unseeded catch entry.
+//
+// This must not be short-circuited by carrying forward some other, earlier
+// reached instruction's state when a PUSH_HANDLER isn't reached yet — that
+// state is not this PUSH_HANDLER's real predecessor, and using it anyway
+// (an approach tried and reverted; see PR #237's own history) only happens
+// to produce a plausible answer for the shapes it was tested against. A
+// PUSH_HANDLER whose own predecessor chain never becomes reachable in any
+// round is not seeded at all, which is correct: the whole try/catch it opens
+// is genuinely dead code (e.g. every path into it already returned or
+// threw), and the emitter must skip its region entirely rather than
+// fabricate one — see jvm_emitter.cpp's emitBody, which gates a POP_HANDLER
+// on whether *its own* PUSH_HANDLER was reached (HandlerEntryContract::
+// popHandlerOffset), not on a blanket "always run".
+//
+// Shared between analyzeStack's pass 1 (declaredSlotsAt null, trackLocals
+// false — see runFixpoint's own comment on the two passes) and pass 2
+// (declaredSlotsAt set, trackLocals true).
 std::vector<std::optional<StackState>> runFixpointWithHandlerSeeds(
     const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
     const StackState& entryState,
     const std::vector<std::vector<int>>* declaredSlotsAt, bool trackLocals) {
-    std::vector<std::pair<int, StackState>> entrySeed{{0, entryState}};
+    std::vector<std::pair<int, StackState>> seeds{{0, entryState}};
     if (cfg.handlerLinks.empty()) {
-        return runFixpoint(ins, cfg, entrySeed, declaredSlotsAt);
+        return runFixpoint(ins, cfg, seeds, declaredSlotsAt);
     }
-    std::vector<std::optional<StackState>> prelim =
-        runFixpoint(ins, cfg, entrySeed, declaredSlotsAt);
-    std::vector<std::pair<int, StackState>> seeds = entrySeed;
-    std::vector<std::pair<int, StackState>> handlerSeeds =
-        handlerEntrySeeds(cfg, prelim, trackLocals);
-    seeds.insert(seeds.end(), handlerSeeds.begin(), handlerSeeds.end());
-    return runFixpoint(ins, cfg, seeds, declaredSlotsAt);
+
+    std::vector<bool> seeded(cfg.handlerLinks.size(), false);
+    std::vector<std::optional<StackState>> state =
+        runFixpoint(ins, cfg, seeds, declaredSlotsAt);
+    for (size_t round = 0; round < cfg.handlerLinks.size(); round++) {
+        std::vector<std::pair<int, StackState>> newlyReachable =
+            handlerEntrySeeds(cfg, state, trackLocals);
+        bool addedSeed = false;
+        for (size_t h = 0; h < cfg.handlerLinks.size(); h++) {
+            if (seeded[h]) {
+                continue;
+            }
+            int catchIdx = cfg.handlerLinks[h].second;
+            auto it = std::find_if(newlyReachable.begin(), newlyReachable.end(),
+                                   [catchIdx](const auto& seed) {
+                                       return seed.first == catchIdx;
+                                   });
+            if (it == newlyReachable.end()) {
+                continue; // this handler's PUSH_HANDLER still isn't reached
+            }
+            seeded[h] = true;
+            seeds.push_back(*it);
+            addedSeed = true;
+        }
+        if (!addedSeed) {
+            break;
+        }
+        state = runFixpoint(ins, cfg, seeds, declaredSlotsAt);
+    }
+    return state;
 }
 
 FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
@@ -1122,16 +1294,8 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
         result.invisibleVars.push_back({ins[idx].offset, slot});
     }
 
-    result.handlerEntries.reserve(cfg.handlerLinks.size());
-    for (const auto& [pushIdx, catchIdx] : cfg.handlerLinks) {
-        if (!static_cast<bool>(reached[static_cast<size_t>(pushIdx)])) {
-            continue; // dead try block — see handlerEntrySeeds
-        }
-        result.handlerEntries.push_back(
-            {ins[static_cast<size_t>(pushIdx)].offset,
-             ins[static_cast<size_t>(catchIdx)].offset,
-             result.before[static_cast<size_t>(catchIdx)].operandDepth()});
-    }
+    result.handlerEntries =
+        buildHandlerEntryContracts(ins, cfg, reached, result.before);
 
     return result;
 }
