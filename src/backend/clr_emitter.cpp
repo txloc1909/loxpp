@@ -204,6 +204,15 @@ struct Emitter {
     // before the real `ret`. -1 if defer is not used.
     int deferReturnSlot{-1};
 
+    // Same role as deferReturnSlot, but for a function that has its own
+    // try/catch and does NOT use defer: a plain `ret` sitting inside a
+    // .try{} or catch{} body is illegal for the same ECMA-335 reason (a
+    // defer-using function already gets this from deferReturnSlot/
+    // defer_exit, which wraps the whole body and so also covers a `ret`
+    // nested inside its own try/catch — this slot is only needed when
+    // defer is absent). -1 when no rewrite is needed for this chunk.
+    int handlerReturnSlot{-1};
+
     // The exact slot count `.locals init` declares for this chunk (set by
     // buildEmitter, from the same computation emitClassBody uses for the
     // directive itself) — the upper bound `localOp` checks every slot
@@ -2090,20 +2099,39 @@ int computeDeferExtraSlots(const DecodedFunction& fn) {
     return 1 + (2 + maxDeferArgc) + 1;
 }
 
+// The one authority for how many extra `.locals init` slots the
+// non-defer `ret`-inside-try/catch rewrite needs (Emitter::handlerReturnSlot)
+// — 1 if this chunk is a function with its own try/catch and does not use
+// defer, 0 otherwise. A script chunk never needs this: compiler.cpp rejects
+// a top-level `return` outright, so a script's own implicit trailing `ret`
+// never sits inside a try/catch region (see emitRegionRange's own note).
+// buildEmitter and emitChunk both call this, instead of each recomputing
+// it, for the same reason computeDeferExtraSlots is shared between them.
+int computeHandlerReturnExtraSlots(const DecodedFunction& fn,
+                                   const FunctionStackAnalysis& analysis,
+                                   bool isFunction) {
+    if (!isFunction || usesDefer(fn) || analysis.handlerEntries.empty()) {
+        return 0;
+    }
+    return 1;
+}
+
 // The one authority for how many `.locals init` slots one chunk needs:
 // globals (1) + the Lox frame's own slots + the shuffle scratch (1) + the
 // aggregate spill area, if this chunk needs one, + defer list and temp storage
-// if defer is used. buildEmitter calls this to bound `Emitter::localOp`
-// before a single instruction emits, and emitClassBody calls it again,
-// unchanged, for the `.locals init` directive itself — one computation, not
-// two that could drift apart.
+// if defer is used, + the non-defer handler-return-rewrite slot if that is
+// used instead. buildEmitter calls this to bound `Emitter::localOp` before a
+// single instruction emits, and emitClassBody calls it again, unchanged,
+// for the `.locals init` directive itself — one computation, not two that
+// could drift apart.
 int computeTotalLocalSlots(int maxLocalCount,
                            const AggregateNeeds& aggregateNeeds,
-                           int deferExtraSlots) {
+                           int deferExtraSlots, int handlerReturnExtraSlots) {
     bool needsScratchArea =
         aggregateNeeds.needsCalleeSlot || aggregateNeeds.maxWidth > 0;
     int extraSpillSlots = needsScratchArea ? aggregateNeeds.maxWidth + 1 : 0;
-    return 1 + maxLocalCount + 1 + extraSpillSlots + deferExtraSlots;
+    return 1 + maxLocalCount + 1 + extraSpillSlots + deferExtraSlots +
+           handlerReturnExtraSlots;
 }
 
 // `captureInfo` is this chunk's own entry from `analyzeCaptures`
@@ -2111,18 +2139,25 @@ int computeTotalLocalSlots(int maxLocalCount,
 Emitter buildEmitter(const DecodedFunction& fn,
                      const FunctionStackAnalysis& analysis, int maxLocalCount,
                      const AggregateNeeds& aggregateNeeds,
-                     const FunctionCaptureInfo& captureInfo) {
+                     const FunctionCaptureInfo& captureInfo, bool isFunction) {
     Emitter e{fn, analysis, {}};
 
     int deferExtraSlots = computeDeferExtraSlots(fn);
+    int handlerReturnExtraSlots =
+        computeHandlerReturnExtraSlots(fn, analysis, isFunction);
 
     e.scratchSlot = e.baseSlot + maxLocalCount;
     e.declaredLocalCount =
-        computeTotalLocalSlots(maxLocalCount, aggregateNeeds, deferExtraSlots);
+        computeTotalLocalSlots(maxLocalCount, aggregateNeeds, deferExtraSlots,
+                               handlerReturnExtraSlots);
 
     // If defer is used, shift slot assignments to make room for defer list,
     // temp argument storage for DEFER_RECORD, and the return-value slot
-    // `leave` needs (Emitter::deferReturnSlot).
+    // `leave` needs (Emitter::deferReturnSlot). Otherwise, a function with
+    // its own try/catch gets the analogous single slot for the same `ret`
+    // rewrite (Emitter::handlerReturnSlot) — the two never coexist, since a
+    // defer-using function's own outer .try/.finally already reaches every
+    // `ret` in its body, nested or not.
     if (usesDefer(fn)) {
         e.deferListSlot = e.scratchSlot; // slot for the defer list itself
         e.deferTempSlotBase =
@@ -2130,6 +2165,9 @@ Emitter buildEmitter(const DecodedFunction& fn,
         e.scratchSlot =
             e.deferListSlot + deferExtraSlots; // next available scratch
         e.deferReturnSlot = e.scratchSlot - 1; // last slot in the defer block
+    } else if (handlerReturnExtraSlots > 0) {
+        e.handlerReturnSlot = e.scratchSlot;
+        e.scratchSlot += handlerReturnExtraSlots;
     }
 
     if (aggregateNeeds.needsCalleeSlot || aggregateNeeds.maxWidth > 0) {
@@ -2335,8 +2373,20 @@ resolveRegions(const std::vector<std::string>& lines,
             r.tryEndLine--;
         }
 
-        // Catch block ends at the next label after catchStart.
-        r.catchEndLine = r.catchStartLine + 1;
+        // Catch block ends at the next label after catchStart, or at the
+        // end of the emitted body if the catch handler's own code is the
+        // last thing the function ever runs (a terminal catch body with
+        // nothing reachable after it — no CFG label is ever placed past
+        // the handler's own `ret`/`leave`). Defaulting this to
+        // `catchStartLine + 1` instead of `lines.size()` used to truncate
+        // the catch region to zero of its own instruction lines, silently
+        // spilling the whole handler body (everything after the injected
+        // `get_Value()` call) outside the `catch{}` block — code ilasm
+        // accepts but CoreCLR rejects at JIT time as
+        // InvalidProgramException, the same failure class as the
+        // `br`-vs-`leave` and `.finally`/`endfinally` defects this emitter
+        // already works around.
+        r.catchEndLine = lines.size();
         for (std::size_t i = r.catchStartLine + 1; i < lines.size(); i++) {
             if (isLabelOnlyLine(lines[i])) {
                 r.catchEndLine = i;
@@ -2393,6 +2443,20 @@ void buildRegionForest(std::vector<TryRegion>& regions,
     }
 }
 
+// Label a non-defer-using function's own `ret`-inside-try/catch rewrite
+// (see Emitter::handlerReturnSlot) leaves to, and reloads the stashed
+// return value from, once every top-level try/catch region has closed.
+const char* const kHandlerReturnExitLabel = "handler_return_exit";
+
+// True when `l` is exactly a bare `ret` instruction — CIL's `ret` takes no
+// operand, so this is a stricter check than `asLeaveIfExiting`'s `br `
+// prefix match (which still needs the target label text that follows).
+bool isBareRet(const std::string& l) {
+    std::size_t start = l.find_first_not_of(" \t");
+    return start != std::string::npos && l.compare(start, 3, "ret") == 0 &&
+           l.find_first_not_of(" \t", start + 3) == std::string::npos;
+}
+
 // A plain `br <label>` (the only unconditional-jump form this emitter
 // produces — see emitJump/emitLoop/emitControlFlowFold) that targets
 // outside [begin, end) is leaving a .try{} or catch{} region. ECMA-335
@@ -2445,17 +2509,20 @@ buildLabelIndex(const std::vector<std::string>& lines) {
 // recursing into each such region's own body with its own nested
 // children. `protectedRegion` is true while emitting directly inside a
 // try or catch body (never at the function's own top level, where a `br`
-// is ordinary control flow, not a region exit) — it gates the
+// is ordinary control flow, not a region exit) — it gates both the
 // br-to-leave rewrite (asLeaveIfExiting), scoped to exactly [begin, end)
 // so a branch that stays inside this region (an `if` fully inside the
-// `try`, say) is left as a plain `br`.
+// `try`, say) is left as a plain `br`, and the ret-to-leave rewrite below
+// (`e.handlerReturnSlot`), which is unscoped — a `leave` from any nesting
+// depth reaches kHandlerReturnExitLabel directly (see asLeaveIfExiting's
+// own note).
 void emitRegionRange(
     const std::vector<std::string>& lines,
     const std::vector<TryRegion>& regions,
     const std::unordered_map<std::string, std::size_t>& labelToLine,
     std::size_t begin, std::size_t end,
     const std::vector<std::size_t>& children, bool protectedRegion,
-    std::ostringstream& result) {
+    std::ostringstream& result, const Emitter& e) {
     std::size_t childIdx = 0;
     for (std::size_t i = begin; i < end;) {
         if (childIdx < children.size() &&
@@ -2465,7 +2532,7 @@ void emitRegionRange(
 
             result << "    .try\n    {\n";
             emitRegionRange(lines, regions, labelToLine, r.tryStartLine + 1,
-                            r.tryEndLine, r.tryChildren, true, result);
+                            r.tryEndLine, r.tryChildren, true, result, e);
             result << "    }\n";
             result << "    catch [LoxRuntime]Lox.LoxError\n    {\n";
             // At catch entry, the CLR has pushed the LoxError exception
@@ -2477,7 +2544,7 @@ void emitRegionRange(
             result << "    call instance object [LoxRuntime]Lox.LoxError"
                       "::get_Value()\n";
             emitRegionRange(lines, regions, labelToLine, r.catchStartLine + 1,
-                            r.catchEndLine, r.catchChildren, true, result);
+                            r.catchEndLine, r.catchChildren, true, result, e);
             result << "    }\n";
 
             i = r.catchEndLine;
@@ -2489,10 +2556,63 @@ void emitRegionRange(
             auto leave = protectedRegion
                              ? asLeaveIfExiting(l, begin, end, labelToLine)
                              : std::nullopt;
-            result << (leave ? *leave : l) << "\n";
+            if (leave) {
+                result << *leave << "\n";
+            } else if (protectedRegion && e.handlerReturnSlot >= 0 &&
+                       isBareRet(l)) {
+                // A plain `ret` inside a .try{}/catch{} is as illegal as
+                // the `br` above — ECMA-335 III.1.7.5 — and, unlike a
+                // defer-using function (whose single outer .try/.finally
+                // already reaches every `ret` in the body), nothing else
+                // rewrites this one. `e.handlerReturnSlot` is only ever
+                // allocated for a function chunk (compiler.cpp rejects a
+                // top-level `return` outright, so a script chunk's own
+                // implicit trailing `ret` always sits after — never
+                // inside — every top-level try/catch region), so the
+                // value `ret` was about to consume is always present here.
+                std::string indent = l.substr(0, l.find_first_not_of(" \t"));
+                result << indent << e.stloc(e.handlerReturnSlot) << "\n";
+                result << indent << "leave " << kHandlerReturnExitLabel << "\n";
+            } else {
+                result << l << "\n";
+            }
         }
         i++;
     }
+}
+
+// The non-defer half of injectTryCatchDirectives: splice every top-level
+// try/catch region into `lines` (already resolved into a region forest by
+// the caller's own machinery), then append the `kHandlerReturnExitLabel`
+// epilogue only if some `ret` inside a region actually needed rewriting
+// (emitRegionRange leaves that trace in the text itself — see its own
+// `leave kHandlerReturnExitLabel` emission). Split out of
+// injectTryCatchDirectives to keep that function's own cognitive
+// complexity down, the same reasoning computeAggregateNeeds and friends
+// already follow elsewhere in this file.
+std::string emitNonDeferTryCatch(const std::vector<std::string>& lines,
+                                 const Emitter& e) {
+    std::unordered_map<std::string, std::size_t> labelToLine =
+        buildLabelIndex(lines);
+    std::vector<TryRegion> regions = resolveRegions(lines, labelToLine, e);
+    std::vector<std::size_t> roots;
+    buildRegionForest(regions, roots);
+
+    std::ostringstream regionsResult;
+    emitRegionRange(lines, regions, labelToLine, 0, lines.size(), roots,
+                    /*protectedRegion=*/false, regionsResult, e);
+    std::string result = regionsResult.str();
+
+    // Only a function whose try/catch actually contains a `return` gets a
+    // `leave kHandlerReturnExitLabel` above — append the label and its
+    // reload+ret epilogue only when that rewrite actually fired, so a
+    // try/catch with no `return` inside gets no dead code.
+    if (result.find(kHandlerReturnExitLabel) != std::string::npos) {
+        result += std::string(kHandlerReturnExitLabel) + ":\n";
+        result += "    " + e.ldloc(e.handlerReturnSlot) + "\n";
+        result += "    ret\n";
+    }
+    return result;
 }
 
 // Inject .try/catch directives for exception handling regions into the
@@ -2575,7 +2695,7 @@ std::string injectTryCatchDirectives(const std::string& bodyText,
             std::ostringstream regionsResult;
             emitRegionRange(lines, regions, labelToLine, firstLabelIdx,
                             lines.size(), roots,
-                            /*protectedRegion=*/false, regionsResult);
+                            /*protectedRegion=*/false, regionsResult, e);
 
             // The regionResult is indented one level for inside the try block
             std::string regionsText = regionsResult.str();
@@ -2612,16 +2732,7 @@ std::string injectTryCatchDirectives(const std::string& bodyText,
         result += "    ret\n";
     } else {
         // No defer, just process try/catch regions if any
-        std::unordered_map<std::string, std::size_t> labelToLine =
-            buildLabelIndex(lines);
-        std::vector<TryRegion> regions = resolveRegions(lines, labelToLine, e);
-        std::vector<std::size_t> roots;
-        buildRegionForest(regions, roots);
-
-        std::ostringstream regionsResult;
-        emitRegionRange(lines, regions, labelToLine, 0, lines.size(), roots,
-                        /*protectedRegion=*/false, regionsResult);
-        result = regionsResult.str();
+        result = emitNonDeferTryCatch(lines, e);
     }
 
     return result;
@@ -2676,14 +2787,17 @@ std::string emitChunk(const DecodedFunction& fn,
     int maxLocalCount = computeMaxLocalCount(analysis);
     AggregateNeeds aggregateNeeds = computeAggregateNeeds(fn, analysis);
     int deferExtraSlots = computeDeferExtraSlots(fn);
+    int handlerReturnExtraSlots =
+        computeHandlerReturnExtraSlots(fn, analysis, isFunction);
 
-    Emitter e =
-        buildEmitter(fn, analysis, maxLocalCount, aggregateNeeds, captureInfo);
+    Emitter e = buildEmitter(fn, analysis, maxLocalCount, aggregateNeeds,
+                             captureInfo, isFunction);
     emitPrologue(e, fn, isFunction);
     emitBody(e, isFunction, childClassNames);
 
     int totalLocals =
-        computeTotalLocalSlots(maxLocalCount, aggregateNeeds, deferExtraSlots);
+        computeTotalLocalSlots(maxLocalCount, aggregateNeeds, deferExtraSlots,
+                               handlerReturnExtraSlots);
     return emitClassBody(e, fn, className, isFunction, totalLocals);
 }
 

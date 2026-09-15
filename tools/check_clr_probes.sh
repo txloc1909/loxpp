@@ -376,6 +376,38 @@ examples=(
     "examples/defer_lifo.lox"
     "examples/defer_throw_outer_catch.lox"
     "examples/defer_explicit_return.lox"
+    # The JVM-side referee's own PR #237 regression examples (issue #240's
+    # repro, plus shapes (A)/(B) from that PR's rounds 2-3), inherited by
+    # this branch's rebase onto main for the shared local-recognition and
+    # handler-seeding fix, and now passing on CLR too:
+    # try_catch_defer_local_slot.lox (#240 itself) via the inherited fix;
+    # try_catch_local_in_catch_body.lox,
+    # try_catch_local_before_and_in_catch.lox, and
+    # try_catch_local_in_catch_then_sibling.lox via the same inherited fix
+    # to catch-bound-local recognition; try_catch_invalid_receiver.lox
+    # needed no CLR-side change (LoxOps.cs already wired
+    # InvalidReceiverError). try_catch_sibling_after_terminal_catch.lox,
+    # try_catch_three_terminal_siblings.lox, and
+    # try_catch_nested_terminal_outer_catch.lox additionally needed two
+    # CLR-only fixes this PR adds: resolveRegions's catchEndLine no longer
+    # defaults to zero instruction lines when a catch body is the last
+    # code emitted, and a bare `ret` inside a .try{}/catch{} (not only a
+    # `br`) now rewrites to `leave` via Emitter::handlerReturnSlot.
+    "examples/try_catch_defer_local_slot.lox"
+    "examples/try_catch_invalid_receiver.lox"
+    "examples/try_catch_local_before_and_in_catch.lox"
+    "examples/try_catch_local_in_catch_body.lox"
+    "examples/try_catch_local_in_catch_then_sibling.lox"
+    "examples/try_catch_nested_terminal_outer_catch.lox"
+    "examples/try_catch_sibling_after_terminal_catch.lox"
+    "examples/try_catch_three_terminal_siblings.lox"
+    # Two CLR-only regressions this PR's own fix closes (see
+    # resolveRegions's catchEndLine comment and Emitter::handlerReturnSlot
+    # in src/backend/clr_emitter.cpp): a terminal catch body with no
+    # sibling try/catch at all, and a live (actually-reached, not dead)
+    # `return` inside a try body.
+    "examples/try_catch_return_in_catch_no_sibling.lox"
+    "examples/try_catch_return_in_live_try_body.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
