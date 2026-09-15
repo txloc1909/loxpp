@@ -494,12 +494,22 @@ public static class LoxRuntime {
     }
 
     /// <summary>
+    /// The one class every <see cref="MakeError"/>-built instance shares.
+    /// spec/03-types.md's Error section: "No built-in global name or literal
+    /// syntax constructs an Error value directly" - a Lox++ program can never
+    /// reach this object to build a lookalike, so reference equality against
+    /// it (see LoxOps.GetProperty) reliably tells a genuine caught-fault
+    /// value apart from any user-defined instance, including one a user
+    /// names "Error" themselves.
+    /// </summary>
+    public static readonly LoxClass ErrorClass = new("Error", null);
+
+    /// <summary>
     /// Create a builtin Error instance per spec/03-types.md.
     /// Every Error has `message` and `kind` fields, both read-only strings.
     /// </summary>
     public static object MakeError(string message, string kind) {
-        var errorClass = new LoxClass("Error", null);
-        var errorInst = new LoxInstance(errorClass);
+        var errorInst = new LoxInstance(ErrorClass);
         errorInst.Fields["message"] = message;
         errorInst.Fields["kind"] = kind;
         return errorInst;

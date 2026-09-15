@@ -437,6 +437,21 @@ examples=(
     "examples/try_catch_three_terminal_siblings_with_branching.lox"
     # defer combined with a catch body containing internal branching.
     "examples/try_catch_defer_with_branching_in_catch.lox"
+    # Five of these six already matched byte for byte before this fix and
+    # were only ever missing from this array (a pre-existing completeness
+    # gap this pass closes alongside its own fix): test_empty_list_pop_try,
+    # test_error_kind_message, test_invalid_map_key_try, test_nan_key_try,
+    # test_stringify_depth_guard. test_enum_arity_try.lox is this fix's own
+    # regression probe - LoxEnumCtor.Call raised a bare, uncatchable
+    # LoxError instead of a MakeError-wired ConstructorArityError, so the
+    # CLR backend crashed past any try/catch instead of delivering the
+    # fault to it.
+    "examples/test_empty_list_pop_try.lox"
+    "examples/test_enum_arity_try.lox"
+    "examples/test_error_kind_message.lox"
+    "examples/test_invalid_map_key_try.lox"
+    "examples/test_nan_key_try.lox"
+    "examples/test_stringify_depth_guard.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

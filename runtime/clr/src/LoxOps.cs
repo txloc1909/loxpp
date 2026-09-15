@@ -398,7 +398,8 @@ public static class LoxOps {
     /// cannot prove always throws; it takes the returned object and follows
     /// it with a `throw` itself.
     /// </summary>
-    public static LoxError MatchError() => new("MatchError: no matching arm.");
+    public static LoxError MatchError() => new(LoxRuntime.MakeError(
+        "MatchError: no matching arm.", "MatchError"));
 
     // ------------------------------------------------------------------
     // instanceof / properties / methods
@@ -445,6 +446,17 @@ public static class LoxOps {
         }
         LoxClosure method = instance.Klass.FindMethod(name);
         if (method == null) {
+            // vm.cpp's GET_PROPERTY special-cases its distinct ObjError type
+            // before it ever reaches the generic "no such field/method"
+            // path: any property other than message/kind on a caught fault
+            // is catchable (UndefinedPropertyError), unlike the same miss on
+            // an ordinary instance. This runtime has no distinct Error type -
+            // MakeError instances are plain LoxInstance - so ErrorClass
+            // reference identity is what stands in for vm.cpp's isError check.
+            if (ReferenceEquals(instance.Klass, LoxRuntime.ErrorClass)) {
+                throw new LoxError(LoxRuntime.MakeError(
+                    "Undefined property on error.", "UndefinedPropertyError"));
+            }
             throw new LoxError($"Undefined property '{name}'.");
         }
         return new LoxBoundMethod(instance, method);

@@ -62,7 +62,8 @@ public sealed class LoxClass : ILoxCallable {
         if (init != null) {
             init.CallAsSelf(instance, args);
         } else if (args.Length != 0) {
-            throw new LoxError($"Expected 0 arguments but got {args.Length}.");
+            throw new LoxError(LoxRuntime.MakeError(
+                $"Expected 0 arguments but got {args.Length}.", "ConstructorArityError"));
         }
         return instance;
     }
