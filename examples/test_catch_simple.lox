@@ -7,3 +7,6 @@ try {
     print "Caught error";
 }
 print "After catch";
+// CHECK: Before try
+// CHECK: Caught error
+// CHECK: After catch

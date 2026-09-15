@@ -1,0 +1,12 @@
+// Test catching ConstructorArityError when calling enum variant with wrong arity
+// CHECK: caught: ConstructorArityError
+// CHECK: after
+
+enum Result { Ok(value) Err(msg) }
+
+try {
+    var r = Ok(1, 2);
+} catch (e) {
+    print "caught: " + e.kind;
+}
+print "after";

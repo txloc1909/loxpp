@@ -1,0 +1,11 @@
+// Test catching NaNKeyError when using NaN as a map key
+// CHECK: caught: NaNKeyError
+// CHECK: after
+
+try {
+    var m = {};
+    m[0/0] = 1;
+} catch (e) {
+    print "caught: " + e.kind;
+}
+print "after";

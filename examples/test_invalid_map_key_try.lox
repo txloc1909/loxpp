@@ -1,0 +1,11 @@
+// Test catching InvalidMapKeyError when using a non-scalar key in map literal
+// CHECK: caught: InvalidMapKeyError
+// CHECK: after
+
+try {
+    var invalidKey = [1, 2];
+    var m = {invalidKey: 5};
+} catch (e) {
+    print "caught: " + e.kind;
+}
+print "after";

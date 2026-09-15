@@ -1,0 +1,11 @@
+// Test catching EmptyListError when popping from an empty list
+// CHECK: caught: EmptyListError
+// CHECK: after
+
+try {
+    var list = [];
+    list.pop();
+} catch (e) {
+    print "caught: " + e.kind;
+}
+print "after";

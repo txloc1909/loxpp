@@ -1,0 +1,28 @@
+// Test: Error .kind and .message fields on internally-raised faults
+try {
+    var list = [];
+    print list[10];
+} catch (e) {
+    print "kind: " + e.kind;
+    print "message: " + e.message;
+}
+
+// Test multiple error kinds
+try {
+    42();
+} catch (e) {
+    print "kind: " + e.kind;
+}
+
+try {
+    var x = undefined_var;
+} catch (e) {
+    print "kind: " + e.kind;
+}
+
+print "done";
+// CHECK: kind: IndexOutOfBoundsError
+// CHECK: message: List index out of bounds.
+// CHECK: kind: NotCallableError
+// CHECK: kind: UndefinedVariableError
+// CHECK: done

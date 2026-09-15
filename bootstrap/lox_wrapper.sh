@@ -20,6 +20,17 @@ case "${LANGUAGE:-LOX}" in
 esac
 
 exitcode=0
+# The bootstrap interpreter reports its own controlled halts (compile error,
+# uncaught throw, ...) via a LOXERR65/LOXERR70-prefixed stdout line, parsed
+# below. But a fault one layer below that protocol -- the native VM crashing
+# on its own interpretation of the bootstrap script, e.g. an arity mismatch
+# inside loxpp_interpreter.lox -- never prints such a line; it only shows up
+# as $LOXPP's own nonzero exit status. Capture that status via a status file
+# written inside the process substitution (its subshell exit status isn't
+# visible to the parent shell any other way) so a native-level crash still
+# fails the wrapper instead of silently reporting exit 0.
+status_file="$(mktemp)"
+trap 'rm -f "$status_file"' EXIT
 while IFS= read -r line; do
     case "$line" in
         LOXERR65\ *)
@@ -34,5 +45,9 @@ while IFS= read -r line; do
             printf '%s\n' "$line"
             ;;
     esac
-done < <(eval "$FEED_CMD" | "$LOXPP" "$INTERPRETER")
+done < <(eval "$FEED_CMD" | "$LOXPP" "$INTERPRETER"; echo "$?" > "$status_file")
+loxpp_status="$(cat "$status_file" 2>/dev/null)"
+if [ "$exitcode" -eq 0 ] && [ -n "$loxpp_status" ] && [ "$loxpp_status" -ne 0 ]; then
+    exitcode="$loxpp_status"
+fi
 exit $exitcode

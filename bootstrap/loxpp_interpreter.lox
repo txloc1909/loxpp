@@ -18,7 +18,8 @@ var LOX_KEYWORDS = {
     "print": "PRINT",   "return": "RETURN",   "super": "SUPER",
     "this": "THIS",     "true": "TRUE",       "var": "VAR",
     "while": "WHILE",   "break": "BREAK",     "continue": "CONTINUE",
-    "in": "IN",         "enum": "ENUM",       "match": "MATCH",       "case": "CASE"
+    "in": "IN",         "enum": "ENUM",       "match": "MATCH",       "case": "CASE",
+    "try": "TRY",       "catch": "CATCH",     "throw": "THROW",       "defer": "DEFER"
 };
 
 var DIGIT_MAP = {
@@ -123,6 +124,9 @@ enum Stmt {
     EnumDecl(name, ctor_names, ctor_fields_list)
     SeqDestructure(names, line, initializer)
     ObjDestructure(names, line, initializer)
+    TryStmt(try_block, catch_var, catch_block)
+    ThrowStmt(line, value)
+    DeferStmt(line, callee, args)
 }
 
 enum Pattern {
@@ -483,9 +487,13 @@ class Parser {
         return VarDecl(nameTok.lexeme, nameTok.line, init);
     }
 
+
     statement() {
         if (this.matchT("BREAK"))    return this.breakStatement();
         if (this.matchT("CONTINUE")) return this.continueStatement();
+        if (this.matchT("TRY"))      return this.tryStatement();
+        if (this.matchT("THROW"))    return this.throwStatement();
+        if (this.matchT("DEFER"))    return this.deferStatement();
         if (this.matchT("FOR"))    return this.forStatement();
         if (this.matchT("IF"))     return this.ifStatement();
         if (this.matchT("PRINT"))  return this.printStatement();
@@ -505,6 +513,36 @@ class Parser {
         var line = this.previous().line;
         this.expect("SEMICOLON", "Expect ';' after 'continue'.");
         return ContinueStmt(line);
+    }
+
+
+    tryStatement() {
+        this.expect("LEFT_BRACE", "Expect '{' after 'try'.");
+        var tryBlock = Block(this.blockContents());
+        this.expect("CATCH", "Expect 'catch' after try block.");
+        this.expect("LEFT_PAREN", "Expect '(' after 'catch'.");
+        var catchVar = this.expect("IDENTIFIER", "Expect variable name in catch clause.");
+        this.expect("RIGHT_PAREN", "Expect ')' after catch variable.");
+        this.expect("LEFT_BRACE", "Expect '{' for catch block.");
+        var catchBlock = Block(this.blockContents());
+        return TryStmt(tryBlock, catchVar.lexeme, catchBlock);
+    }
+
+    throwStatement() {
+        var line = this.previous().line;
+        var val = this.expression();
+        this.expect("SEMICOLON", "Expect ';' after throw value.");
+        return ThrowStmt(line, val);
+    }
+
+    deferStatement() {
+        var line = this.previous().line;
+        var expr = this.unary();
+        this.expect("SEMICOLON", "Expect ';' after defer statement.");
+        return match expr {
+            case Call{callee, paren_line, args} => DeferStmt(line, callee, args)
+            case _ => { this.softError(this.peek(), "defer requires a function call."); nil }
+        };
     }
 
     blockContents() {
@@ -1058,6 +1096,9 @@ class Resolver {
             case EnumDecl{name, ctor_names, ctor_fields_list} => this.resolveEnumDecl(name, ctor_names)
             case SeqDestructure{names, line, initializer}     => this.resolveDestructure(names, line, initializer)
             case ObjDestructure{names, line, initializer}     => this.resolveDestructure(names, line, initializer)
+            case TryStmt{try_block, catch_var, catch_block}   => this.resolveTry(try_block, catch_var, catch_block)
+            case ThrowStmt{line, value}                       => this.resolveThrow(value)
+            case DeferStmt{line, callee, args}                => this.resolveDefer(callee, args)
         };
     }
 
@@ -1143,6 +1184,29 @@ class Resolver {
         this.resolveStmt(thenB);
         if (elseB != nil) this.resolveStmt(elseB);
     }
+
+    resolveTry(tryBlock, catchVar, catchBlock) {
+        this.resolveStmt(tryBlock);
+        this.beginScope();
+        this.declare(catchVar, 0);
+        this.define(catchVar);
+        this.resolveStmt(catchBlock);
+        this.endScope();
+    }
+
+    resolveThrow(value) {
+        this.resolveExpr(value);
+    }
+
+    resolveDefer(callee, args) {
+        this.resolveExpr(callee);
+        var i = 0;
+        while (i < len(args)) {
+            this.resolveExpr(args[i]);
+            i = i + 1;
+        }
+    }
+
 
     resolveBreak(line) {
         if (this.loopDepth == 0)
@@ -1410,12 +1474,39 @@ class LoxFunction {
             callEnv.define(this.params[i].lexeme, args[i]);
             i = i + 1;
         }
+        var savedDefers = interp.pendingDefers;
+        interp.pendingDefers = [];
         interp.execBlock(this.body, callEnv);
+        var funcDefers = interp.pendingDefers;
+        interp.pendingDefers = savedDefers;
+        // Capture the return value from this function's own execution, before defers run.
+        // This prevents nested defer calls from consuming the outer function's return state.
         var returnVal = nil;
         if (interp.returnFlag) {
             returnVal = interp.returnValue;
             interp.returnFlag  = false;
             interp.returnValue = nil;
+        }
+        var j = len(funcDefers) - 1;
+        while (j >= 0) {
+            var defer_item = funcDefers[j];
+            var callee = defer_item[0];
+            var defer_args = defer_item[1];
+            var tag = loxTag(callee);
+            if (tag == "function" or tag == "class" or tag == "native" or tag == "mathfn" or tag == "listmethod" or tag == "mapmethod" or tag == "filemethod" or tag == "enum_ctor") {
+                if (callee.arity() == -1 or len(defer_args) == callee.arity()) {
+                    var savedThrow = interp.throwFlag;
+                    var savedValue = interp.thrownValue;
+                    interp.throwFlag = false;
+                    interp.thrownValue = nil;
+                    callee.call(interp, defer_args);
+                    if (!interp.throwFlag) {
+                        interp.throwFlag = savedThrow;
+                        interp.thrownValue = savedValue;
+                    }
+                }
+            }
+            j = j - 1;
         }
         if (this.isInitializer) return this.closure.getAt(0, "this");
         return returnVal;
@@ -1539,17 +1630,17 @@ fun reflectMethodNames(klass) {
 fun reflectCallMethod(interp, args) {
     var n = len(args);
     if (n < 2) {
-        interp.setError("Expected at least 2 arguments.", 0);
+        interp.setError("ArityError", "Expected at least 2 arguments.", 0);
         return nil;
     }
     var instance = args[0];
     if (loxTag(instance) != "instance") {
-        interp.setError("Only instances have methods.", 0);
+        interp.setError("InvalidReceiverError", "Only instances have methods.", 0);
         return nil;
     }
     var name = args[1];
     if (!isLoxStr(name)) {
-        interp.setError("Field name must be a string.", 0);
+        interp.setError("InvalidMapKeyError", "Field name must be a string.", 0);
         return nil;
     }
     var callee = nil;
@@ -1562,17 +1653,17 @@ fun reflectCallMethod(interp, args) {
         found  = callee != nil;
     }
     if (!found) {
-        interp.setError("Undefined property '" + name + "'.", 0);
+        interp.setError("UndefinedPropertyError", "Undefined property '" + name + "'.", 0);
         return nil;
     }
     var tag = loxTag(callee);
     if (tag == "function" or tag == "class" or tag == "enum_ctor") {
-        interp.setError("callMethod does not support user-defined methods yet.", 0);
+        interp.setError("NotCallableError", "callMethod does not support user-defined methods yet.", 0);
         return nil;
     }
     if (tag != "native" and tag != "mathfn" and tag != "mapmethod" and
         tag != "filemethod" and tag != "listmethod") {
-        interp.setError("callMethod requires a callable value.", 0);
+        interp.setError("NotCallableError", "callMethod requires a callable value.", 0);
         return nil;
     }
     var forwarded = [];
@@ -1582,7 +1673,7 @@ fun reflectCallMethod(interp, args) {
         i = i + 1;
     }
     if (callee.arity() != len(forwarded)) {
-        interp.setError("Expected " + str(callee.arity()) + " arguments but got " +
+        interp.setError("ArityError", "Expected " + str(callee.arity()) + " arguments but got " +
                          str(len(forwarded)) + ".", 0);
         return nil;
     }
@@ -1614,7 +1705,7 @@ class LoxNative {
             var vtag = loxTag(v);
             if (vtag == "list") return len(v.elements);
             if (vtag == "map")  return len(v.data);
-            interp.setError("len() argument must be a String, List, or Map.", 0);
+            interp.setError("NotIndexableError", "len() argument must be a String, List, or Map.", 0);
             return nil;
         }
         if (this.name == "open") {
@@ -1624,25 +1715,25 @@ class LoxNative {
         if (this.name == "type") return reflectTypeName(args[0]);
         if (this.name == "fields") {
             if (loxTag(args[0]) != "instance") {
-                interp.setError("Expected an instance.", 0);
+                interp.setError("InvalidReceiverError", "Expected an instance.", 0);
                 return nil;
             }
             return InterpList(args[0].fields.keys());
         }
         if (this.name == "methods") {
             if (loxTag(args[0]) != "class") {
-                interp.setError("Expected a class.", 0);
+                interp.setError("InvalidReceiverError", "Expected a class.", 0);
                 return nil;
             }
             return InterpList(reflectMethodNames(args[0]));
         }
         if (this.name == "getField") {
             if (loxTag(args[0]) != "instance") {
-                interp.setError("Only instances have properties.", 0);
+                interp.setError("InvalidReceiverError", "Only instances have properties.", 0);
                 return nil;
             }
             if (!isLoxStr(args[1])) {
-                interp.setError("Field name must be a string.", 0);
+                interp.setError("InvalidMapKeyError", "Field name must be a string.", 0);
                 return nil;
             }
             if (args[0].fields.has(args[1])) return args[0].fields[args[1]];
@@ -1650,22 +1741,22 @@ class LoxNative {
         }
         if (this.name == "hasField") {
             if (loxTag(args[0]) != "instance") {
-                interp.setError("Only instances have properties.", 0);
+                interp.setError("InvalidReceiverError", "Only instances have properties.", 0);
                 return nil;
             }
             if (!isLoxStr(args[1])) {
-                interp.setError("Field name must be a string.", 0);
+                interp.setError("InvalidMapKeyError", "Field name must be a string.", 0);
                 return nil;
             }
             return args[0].fields.has(args[1]);
         }
         if (this.name == "setField") {
             if (loxTag(args[0]) != "instance") {
-                interp.setError("Only instances have fields.", 0);
+                interp.setError("InvalidReceiverError", "Only instances have fields.", 0);
                 return nil;
             }
             if (!isLoxStr(args[1])) {
-                interp.setError("Field name must be a string.", 0);
+                interp.setError("InvalidMapKeyError", "Field name must be a string.", 0);
                 return nil;
             }
             args[0].fields[args[1]] = args[2];
@@ -1734,7 +1825,7 @@ class InterpListMethod {
         }
         if (this.name == "pop") {
             if (len(this.list.elements) == 0) {
-                interp.setError("Cannot pop from an empty list.", 0);
+                interp.setError("EmptyListError", "Cannot pop from an empty list.", 0);
                 return nil;
             }
             return this.list.elements.pop();
@@ -1753,7 +1844,7 @@ class InterpListMethod {
                 }
                 i = i + 1;
             }
-            interp.setError("Value not found in list.", 0);
+            interp.setError("IndexOutOfBoundsError", "Value not found in list.", 0);
             return nil;
         }
         return nil;
@@ -1782,14 +1873,18 @@ class InterpMapMethod {
     call(interp, args) {
         if (this.name == "has") {
             if (!interp.isValidMapKey(args[0])) {
-                interp.setError("Map key must be a scalar (Nil, Bool, Number, or String).", 0);
+                var errorKind = "InvalidMapKeyError";
+                if (interp.isNaNKey(args[0])) errorKind = "NaNKeyError";
+                interp.setError(errorKind, "Map key must be a scalar (Nil, Bool, Number, or String).", 0);
                 return nil;
             }
             return this.map.data.has(args[0]);
         }
         if (this.name == "del") {
             if (!interp.isValidMapKey(args[0])) {
-                interp.setError("Map key must be a scalar (Nil, Bool, Number, or String).", 0);
+                var errorKind = "InvalidMapKeyError";
+                if (interp.isNaNKey(args[0])) errorKind = "NaNKeyError";
+                interp.setError(errorKind, "Map key must be a scalar (Nil, Bool, Number, or String).", 0);
                 return nil;
             }
             if (this.map.data.has(args[0])) this.map.data.del(args[0]);
@@ -1887,15 +1982,29 @@ class LoxEnumValue {
 // INTERPRETER
 // ===========================================================================
 
+class LoxError {
+    init(kind, message) {
+        this.kind    = kind;
+        this.message = message;
+        this.loxTag  = "error";
+    }
+    toString() {
+        return this.kind + ": " + this.message;
+    }
+}
+
 class Interpreter {
     init(locals) {
-        this.locals       = locals;
-        this.globals      = Environment(nil);
-        this.returnFlag   = false;
-        this.returnValue  = nil;
-        this.errorFlag    = false;
-        this.breakFlag    = false;
-        this.continueFlag = false;
+        this.locals        = locals;
+        this.globals       = Environment(nil);
+        this.returnFlag    = false;
+        this.returnValue   = nil;
+        this.breakFlag     = false;
+        this.continueFlag  = false;
+        this.throwFlag     = false;
+        this.thrownValue   = nil;
+        this.pendingDefers = [];
+        this.stringifyDepth = 0;
         this.globals.define("clock", LoxNative("clock"));
         this.globals.define("input", LoxNative("input"));
         this.globals.define("str",   LoxNative("str"));
@@ -1911,13 +2020,11 @@ class Interpreter {
         this.globals.define("callMethod", LoxNative("callMethod"));
     }
 
-    setError(msg, line) {
-        if (!this.errorFlag) {
-            print "LOXERR70 " + msg;
-            if (line > 0) {
-                print "LOXERR70 [line " + str(line) + "]";
-            }
-            this.errorFlag = true;
+    setError(kind, msg, line) {
+        if (!this.throwFlag) {
+            var error = LoxError(kind, msg);
+            this.throwFlag = true;
+            this.thrownValue = error;
         }
     }
 
@@ -1925,6 +2032,11 @@ class Interpreter {
         if (v == nil or v == true or v == false) return true;
         if (isLoxStr(v)) return true;
         if (isLoxNum(v)) return v == v;
+        return false;
+    }
+
+    isNaNKey(v) {
+        if (isLoxNum(v)) return v != v;
         return false;
     }
 
@@ -1955,7 +2067,19 @@ class Interpreter {
         var i = 0;
         while (i < len(stmts)) {
             this.execStmt(stmts[i], this.globals);
-            if (this.errorFlag or this.returnFlag) return;
+            if (this.returnFlag or this.throwFlag) {
+                if (this.throwFlag) {
+                    this.runPendingDefers();
+                    if (loxTag(this.thrownValue) == "error") {
+                        print "LOXERR70 " + this.thrownValue.message;
+                    } else {
+                        print "LOXERR70 " + this.stringify(this.thrownValue);
+                    }
+                    this.throwFlag = false;
+                    this.thrownValue = nil;
+                }
+                return;
+            }
             i = i + 1;
         }
     }
@@ -1965,7 +2089,7 @@ class Interpreter {
         var i = 0;
         while (i < len(elements)) {
             var v = this.evalExpr(elements[i], env);
-            if (this.errorFlag) return nil;
+            if (this.throwFlag) return nil;
             result.elements.append(v);
             i = i + 1;
         }
@@ -1977,10 +2101,15 @@ class Interpreter {
         var i = 0;
         while (i < len(keys)) {
             var k = this.evalExpr(keys[i], env);
-            if (this.errorFlag) return nil;
+            if (this.throwFlag) return nil;
             var v = this.evalExpr(vals[i], env);
-            if (this.errorFlag) return nil;
-            if (!this.isValidMapKey(k)) { this.setError("Map key must be a scalar (Nil, Bool, Number, or String).", 0); return nil; }
+            if (this.throwFlag) return nil;
+            if (!this.isValidMapKey(k)) {
+                var errorKind = "InvalidMapKeyError";
+                if (this.isNaNKey(k)) errorKind = "NaNKeyError";
+                this.setError(errorKind, "Map key must be a scalar (Nil, Bool, Number, or String).", 0);
+                return nil;
+            }
             result.data[k] = v;
             i = i + 1;
         }
@@ -1989,76 +2118,86 @@ class Interpreter {
 
     evalIndex(objectExpr, indexExpr, line, env) {
         var object = this.evalExpr(objectExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         var index = this.evalExpr(indexExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         var tag = loxTag(object);
         if (tag == "map") {
-            if (!this.isValidMapKey(index)) { this.setError("Map key must be a scalar (Nil, Bool, Number, or String).", line); return nil; }
+            if (!this.isValidMapKey(index)) {
+                var errorKind = "InvalidMapKeyError";
+                if (this.isNaNKey(index)) errorKind = "NaNKeyError";
+                this.setError(errorKind, "Map key must be a scalar (Nil, Bool, Number, or String).", line);
+                return nil;
+            }
             if (object.data.has(index)) return object.data[index];
             return nil;
         }
         if (tag == "list") {
-            if (!isLoxNum(index)) { this.setError("Index must be a number.", line); return nil; }
+            if (!isLoxNum(index)) { this.setError("IndexTypeError", "Index must be a number.", line); return nil; }
             var fl = math.floor(index);
-            if (fl != index) { this.setError("Index must be an integer.", line); return nil; }
-            if (fl < 0 or fl >= len(object.elements)) { this.setError("List index out of bounds.", line); return nil; }
+            if (fl != index) { this.setError("IndexNotIntegerError", "Index must be an integer.", line); return nil; }
+            if (fl < 0 or fl >= len(object.elements)) { this.setError("IndexOutOfBoundsError", "List index out of bounds.", line); return nil; }
             return object.elements[fl];
         }
         if (isLoxStr(object)) {
-            if (!isLoxNum(index)) { this.setError("Index must be a number.", line); return nil; }
+            if (!isLoxNum(index)) { this.setError("IndexTypeError", "Index must be a number.", line); return nil; }
             var fl = math.floor(index);
-            if (fl != index) { this.setError("Index must be an integer.", line); return nil; }
-            if (fl < 0 or fl >= len(object)) { this.setError("List index out of bounds.", line); return nil; }
+            if (fl != index) { this.setError("IndexNotIntegerError", "Index must be an integer.", line); return nil; }
+            if (fl < 0 or fl >= len(object)) { this.setError("IndexOutOfBoundsError", "List index out of bounds.", line); return nil; }
             return object[fl];
         }
-        this.setError("Only lists, maps, and strings can be indexed.", line);
+        this.setError("NotIndexableError", "Only lists, maps, and strings can be indexed.", line);
         return nil;
     }
 
     evalIndexSet(objectExpr, indexExpr, line, valueExpr, env) {
         var object = this.evalExpr(objectExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         var index = this.evalExpr(indexExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         var tag = loxTag(object);
         if (tag == "map") {
-            if (!this.isValidMapKey(index)) { this.setError("Map key must be a scalar (Nil, Bool, Number, or String).", line); return nil; }
+            if (!this.isValidMapKey(index)) {
+                var errorKind = "InvalidMapKeyError";
+                if (this.isNaNKey(index)) errorKind = "NaNKeyError";
+                this.setError(errorKind, "Map key must be a scalar (Nil, Bool, Number, or String).", line);
+                return nil;
+            }
             var val = this.evalExpr(valueExpr, env);
-            if (this.errorFlag) return nil;
+            if (this.throwFlag) return nil;
             object.data[index] = val;
             return val;
         }
         if (tag == "list") {
-            if (!isLoxNum(index)) { this.setError("Index must be a number.", line); return nil; }
+            if (!isLoxNum(index)) { this.setError("IndexTypeError", "Index must be a number.", line); return nil; }
             var fl = math.floor(index);
-            if (fl != index) { this.setError("Index must be an integer.", line); return nil; }
-            if (fl < 0 or fl >= len(object.elements)) { this.setError("List index out of bounds.", line); return nil; }
+            if (fl != index) { this.setError("IndexNotIntegerError", "Index must be an integer.", line); return nil; }
+            if (fl < 0 or fl >= len(object.elements)) { this.setError("IndexOutOfBoundsError", "List index out of bounds.", line); return nil; }
             var val = this.evalExpr(valueExpr, env);
-            if (this.errorFlag) return nil;
+            if (this.throwFlag) return nil;
             object.elements[fl] = val;
             return val;
         }
-        if (isLoxStr(object)) { this.setError("Strings are immutable.", line); return nil; }
-        this.setError("Only lists and maps support index assignment.", line);
+        if (isLoxStr(object)) { this.setError("NotIndexableError", "Strings are immutable.", line); return nil; }
+        this.setError("NotIndexableError", "Only lists and maps support index assignment.", line);
         return nil;
     }
 
     evalSlice(objectExpr, startExpr, endExpr, line, env) {
         var object = this.evalExpr(objectExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         var startV = this.evalExpr(startExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         var endV = this.evalExpr(endExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         var tag = loxTag(object);
-        if (tag != "list" and !isLoxStr(object)) { this.setError("Slice requires a List or String.", line); return nil; }
-        if (!isLoxNum(startV)) { this.setError("Slice index must be a number.", line); return nil; }
-        if (math.floor(startV) != startV) { this.setError("Slice index must be an integer.", line); return nil; }
-        if (startV < 0) { this.setError("Slice index must be non-negative.", line); return nil; }
-        if (!isLoxNum(endV)) { this.setError("Slice index must be a number.", line); return nil; }
-        if (math.floor(endV) != endV) { this.setError("Slice index must be an integer.", line); return nil; }
-        if (endV < 0) { this.setError("Slice index must be non-negative.", line); return nil; }
+        if (tag != "list" and !isLoxStr(object)) { this.setError("NotIndexableError", "Slice requires a List or String.", line); return nil; }
+        if (!isLoxNum(startV)) { this.setError("IndexTypeError", "Slice index must be a number.", line); return nil; }
+        if (math.floor(startV) != startV) { this.setError("IndexNotIntegerError", "Slice index must be an integer.", line); return nil; }
+        if (startV < 0) { this.setError("IndexOutOfBoundsError", "Slice index must be non-negative.", line); return nil; }
+        if (!isLoxNum(endV)) { this.setError("IndexTypeError", "Slice index must be a number.", line); return nil; }
+        if (math.floor(endV) != endV) { this.setError("IndexNotIntegerError", "Slice index must be an integer.", line); return nil; }
+        if (endV < 0) { this.setError("IndexOutOfBoundsError", "Slice index must be non-negative.", line); return nil; }
         var s = startV;
         var e = endV;
         if (tag == "list") {
@@ -2079,10 +2218,10 @@ class Interpreter {
 
     execForIn(varName, varLine, iterableExpr, body, env) {
         var iterable = this.evalExpr(iterableExpr, env);
-        if (this.errorFlag) return;
+        if (this.throwFlag) return;
         var tag = loxTag(iterable);
         if (tag != "list" and !isLoxStr(iterable) and tag != "map") {
-            this.setError("Value is not iterable.", varLine);
+            this.setError("NotIndexableError", "Value is not iterable.", varLine);
             return;
         }
         var loopEnv = Environment(env);
@@ -2093,7 +2232,7 @@ class Interpreter {
             while (i < len(ks)) {
                 loopEnv.define(varName, ks[i]);
                 this.execStmt(body, loopEnv);
-                if (this.errorFlag or this.returnFlag) return;
+                if (this.returnFlag or this.throwFlag) return;
                 if (this.breakFlag) { this.breakFlag = false; return; }
                 if (this.continueFlag) { this.continueFlag = false; }
                 i = i + 1;
@@ -2106,7 +2245,7 @@ class Interpreter {
             while (i < slen) {
                 loopEnv.define(varName, iterable[i]);
                 this.execStmt(body, loopEnv);
-                if (this.errorFlag or this.returnFlag) return;
+                if (this.returnFlag or this.throwFlag) return;
                 if (this.breakFlag) { this.breakFlag = false; return; }
                 if (this.continueFlag) { this.continueFlag = false; }
                 i = i + 1;
@@ -2117,7 +2256,7 @@ class Interpreter {
         while (i < len(iterable.elements)) {
             loopEnv.define(varName, iterable.elements[i]);
             this.execStmt(body, loopEnv);
-            if (this.errorFlag or this.returnFlag) return;
+            if (this.returnFlag or this.throwFlag) return;
             if (this.breakFlag) { this.breakFlag = false; return; }
             if (this.continueFlag) { this.continueFlag = false; }
             i = i + 1;
@@ -2142,25 +2281,28 @@ class Interpreter {
             case EnumDecl{name, ctor_names, ctor_fields_list}    => this.execEnumDecl(name, ctor_names, ctor_fields_list, env)
             case SeqDestructure{names, line, initializer}        => this.execSeqDestructure(names, line, initializer, env)
             case ObjDestructure{names, line, initializer}        => this.execObjDestructure(names, line, initializer, env)
+            case TryStmt{try_block, catch_var, catch_block}      => this.execTry(try_block, catch_var, catch_block, env)
+            case ThrowStmt{line, value}                          => this.execThrow(line, value, env)
+            case DeferStmt{line, callee, args}                   => this.execDefer(line, callee, args, env)
         };
     }
 
     execFor(init, cond, inc, body, env) {
         var forEnv = Environment(env);
-        if (init != nil) { this.execStmt(init, forEnv); if (this.errorFlag) return; }
+        if (init != nil) { this.execStmt(init, forEnv); if (this.throwFlag) return; }
         var condVal = nil;
-        if (cond != nil) { condVal = this.evalExpr(cond, forEnv); if (this.errorFlag) return; }
+        if (cond != nil) { condVal = this.evalExpr(cond, forEnv); if (this.throwFlag) return; }
         var keep = cond == nil or this.isTruthy(condVal);
         while (keep) {
             this.execStmt(body, forEnv);
-            if (this.errorFlag or this.returnFlag) return;
+            if (this.returnFlag or this.throwFlag) return;
             if (this.breakFlag) { this.breakFlag = false; return; }
             if (this.continueFlag) { this.continueFlag = false; }
             // Increment always runs — even after continue.
-            if (inc != nil) { this.evalExpr(inc, forEnv); if (this.errorFlag) return; }
+            if (inc != nil) { this.evalExpr(inc, forEnv); if (this.throwFlag) return; }
             if (cond != nil) {
                 condVal = this.evalExpr(cond, forEnv);
-                if (this.errorFlag) return;
+                if (this.throwFlag) return;
                 keep = this.isTruthy(condVal);
             }
         }
@@ -2170,7 +2312,7 @@ class Interpreter {
         var i = 0;
         while (i < len(stmts)) {
             this.execStmt(stmts[i], env);
-            if (this.errorFlag or this.returnFlag or this.breakFlag or this.continueFlag) return;
+            if (this.returnFlag or this.breakFlag or this.continueFlag or this.throwFlag) return;
             i = i + 1;
         }
     }
@@ -2196,9 +2338,9 @@ class Interpreter {
         var superclass = nil;
         if (super_id != nil) {
             superclass = this.lookupVariable(super_id, super_name, super_line, env);
-            if (this.errorFlag) return;
+            if (this.throwFlag) return;
             if (loxTag(superclass) != "class") {
-                this.setError("Superclass must be a class.", super_line);
+                this.setError("NotCallableError", "Superclass must be a class.", super_line);
                 return;
             }
         }
@@ -2220,7 +2362,7 @@ class Interpreter {
 
     execIf(cond, thenB, elseB, env) {
         var condVal = this.evalExpr(cond, env);
-        if (this.errorFlag) return;
+        if (this.throwFlag) return;
         if (this.isTruthy(condVal)) {
             this.execStmt(thenB, env);
         } else if (elseB != nil) {
@@ -2230,15 +2372,23 @@ class Interpreter {
 
     execPrint(expr, env) {
         var val = this.evalExpr(expr, env);
-        if (this.errorFlag) return;
-        print this.stringify(val);
+        if (this.throwFlag) return;
+        // stringify() can itself raise (e.g. MaxDepthExceededError, via the
+        // depth guard) partway through building the string. Check before
+        // printing -- native suppresses the fwrite entirely in this case
+        // (src/vm.cpp's Op::PRINT), so printing the partial/truncated
+        // string here would be a garbage-output divergence, not merely a
+        // late error.
+        var s = this.stringify(val);
+        if (this.throwFlag) return;
+        print s;
     }
 
     execReturn(line, valueExpr, env) {
         var val = nil;
         if (valueExpr != nil) {
             val = this.evalExpr(valueExpr, env);
-            if (this.errorFlag) return;
+            if (this.throwFlag) return;
         }
         this.returnFlag  = true;
         this.returnValue = val;
@@ -2248,22 +2398,85 @@ class Interpreter {
         var val = nil;
         if (initializer != nil) {
             val = this.evalExpr(initializer, env);
-            if (this.errorFlag) return;
+            if (this.throwFlag) return;
         }
         env.define(name, val);
     }
 
     execWhile(cond, body, env) {
         var condVal = this.evalExpr(cond, env);
-        if (this.errorFlag) return;
+        if (this.throwFlag) return;
         while (this.isTruthy(condVal)) {
             this.execStmt(body, env);
-            if (this.errorFlag or this.returnFlag) return;
+            if (this.returnFlag or this.throwFlag) return;
             if (this.breakFlag)    { this.breakFlag = false; return; }
             if (this.continueFlag) { this.continueFlag = false; }
             condVal = this.evalExpr(cond, env);
-            if (this.errorFlag) return;
+            if (this.throwFlag) return;
         }
+    }
+
+    execTry(tryBlock, catchVar, catchBlock, env) {
+        this.execStmt(tryBlock, env);
+        if (this.throwFlag) {
+            this.throwFlag = false;
+            var caughtVal = this.thrownValue;
+            this.thrownValue = nil;
+            var catchEnv = Environment(env);
+            catchEnv.define(catchVar, caughtVal);
+            this.execStmt(catchBlock, catchEnv);
+        }
+    }
+
+    execThrow(line, valueExpr, env) {
+        var val = this.evalExpr(valueExpr, env);
+        if (this.throwFlag) return;
+        this.throwFlag = true;
+        this.thrownValue = val;
+    }
+
+    execDefer(line, calleeExpr, argsExprs, env) {
+        var callee = this.evalExpr(calleeExpr, env);
+        if (this.throwFlag) return;
+        var args = [];
+        var i = 0;
+        while (i < len(argsExprs)) {
+            var arg = this.evalExpr(argsExprs[i], env);
+            if (this.throwFlag) return;
+            args.append(arg);
+            i = i + 1;
+        }
+        if (this.pendingDefers == nil) this.pendingDefers = [];
+        this.pendingDefers.append([callee, args]);
+    }
+
+    runPendingDefers() {
+        var i = len(this.pendingDefers) - 1;
+        while (i >= 0) {
+            var defer_item = this.pendingDefers[i];
+            var callee = defer_item[0];
+            var args = defer_item[1];
+            var tag = loxTag(callee);
+            if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "enum_ctor") {
+                i = i - 1;
+                continue;
+            }
+            if (callee.arity() != -1 and len(args) != callee.arity()) {
+                i = i - 1;
+                continue;
+            }
+            var savedThrow = this.throwFlag;
+            var savedValue = this.thrownValue;
+            this.throwFlag = false;
+            this.thrownValue = nil;
+            callee.call(this, args);
+            if (!this.throwFlag) {
+                this.throwFlag = savedThrow;
+                this.thrownValue = savedValue;
+            }
+            i = i - 1;
+        }
+        this.pendingDefers = [];
     }
 
     evalExpr(expr, env) {
@@ -2294,7 +2507,7 @@ class Interpreter {
             return env.getAt(this.locals[id], name);
         }
         if (!this.globals.envHas(name)) {
-            this.setError("Undefined variable '" + name + "'.", line);
+            this.setError("UndefinedVariableError", "Undefined variable '" + name + "'.", line);
             return nil;
         }
         return this.globals.envGet(name, 0);
@@ -2306,12 +2519,12 @@ class Interpreter {
 
     evalAssign(id, name, line, valueExpr, env) {
         var val = this.evalExpr(valueExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         if (this.locals.has(id)) {
             env.assignAt(this.locals[id], name, val);
         } else {
             if (!this.globals.envAssign(name, val)) {
-                this.setError("Undefined variable '" + name + "'.", line);
+                this.setError("UndefinedVariableError", "Undefined variable '" + name + "'.", line);
                 return nil;
             }
         }
@@ -2320,11 +2533,11 @@ class Interpreter {
 
     evalUnary(op, rightExpr, env) {
         var right = this.evalExpr(rightExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         if (op.lexeme == "!") return !this.isTruthy(right);
         if (op.lexeme == "-") {
             if (!isLoxNum(right)) {
-                this.setError("Operand must be a number.", op.line);
+                this.setError("ArithmeticTypeError", "Operand must be a number.", op.line);
                 return nil;
             }
             return -right;
@@ -2334,50 +2547,50 @@ class Interpreter {
 
     evalBinary(op, leftExpr, rightExpr, env) {
         var left = this.evalExpr(leftExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         var right = this.evalExpr(rightExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         var opL = op.lexeme;
         var opLine = op.line;
         if (opL == "+") {
             if (isLoxNum(left) and isLoxNum(right)) return left + right;
             if (isLoxStr(left) and isLoxStr(right)) return left + right;
-            this.setError("Operands must be two numbers or two strings.", opLine);
+            this.setError("ConcatenationTypeError", "Operands must be two numbers or two strings.", opLine);
             return nil;
         }
         if (opL == "-") {
-            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("Operands must be numbers.", opLine); return nil; }
+            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("ArithmeticTypeError", "Operands must be numbers.", opLine); return nil; }
             return left - right;
         }
         if (opL == "*") {
-            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("Operands must be numbers.", opLine); return nil; }
+            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("ArithmeticTypeError", "Operands must be numbers.", opLine); return nil; }
             return left * right;
         }
         if (opL == "/") {
-            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("Operands must be numbers.", opLine); return nil; }
+            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("ArithmeticTypeError", "Operands must be numbers.", opLine); return nil; }
             return left / right;
         }
         if (opL == "<")  {
-            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("Operands must be numbers.", opLine); return nil; }
+            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("ComparisonTypeError", "Operands must be numbers.", opLine); return nil; }
             return left < right;
         }
         if (opL == "<=") {
-            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("Operands must be numbers.", opLine); return nil; }
+            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("ComparisonTypeError", "Operands must be numbers.", opLine); return nil; }
             return left <= right;
         }
         if (opL == ">")  {
-            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("Operands must be numbers.", opLine); return nil; }
+            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("ComparisonTypeError", "Operands must be numbers.", opLine); return nil; }
             return left > right;
         }
         if (opL == ">=") {
-            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("Operands must be numbers.", opLine); return nil; }
+            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("ComparisonTypeError", "Operands must be numbers.", opLine); return nil; }
             return left >= right;
         }
         if (opL == "==") return left == right;
         if (opL == "!=") return left != right;
         if (opL == "%") {
             if (!isLoxNum(left) or !isLoxNum(right)) {
-                this.setError("Operands must be numbers.", opLine);
+                this.setError("ArithmeticTypeError", "Operands must be numbers.", opLine);
                 return nil;
             }
             // Floor-mod: result sign matches divisor.
@@ -2394,14 +2607,19 @@ class Interpreter {
                 return false;
             }
             if (isLoxStr(right)) {
-                if (!isLoxStr(left)) { this.setError("Left operand of 'in' on a String must be a String.", opLine); return nil; }
+                if (!isLoxStr(left)) { this.setError("IndexTypeError", "Left operand of 'in' on a String must be a String.", opLine); return nil; }
                 return left in right;
             }
             if (rtag == "map") {
-                if (!this.isValidMapKey(left)) { this.setError("Map key must be a scalar (Nil, Bool, Number, or String).", opLine); return nil; }
+                if (!this.isValidMapKey(left)) {
+                    var errorKind = "InvalidMapKeyError";
+                    if (this.isNaNKey(left)) errorKind = "NaNKeyError";
+                    this.setError(errorKind, "Map key must be a scalar (Nil, Bool, Number, or String).", opLine);
+                    return nil;
+                }
                 return right.data.has(left);
             }
-            this.setError("Right operand of 'in' must be a List, String, or Map.", opLine);
+            this.setError("NotIndexableError", "Right operand of 'in' must be a List, String, or Map.", opLine);
             return nil;
         }
         return nil;
@@ -2409,7 +2627,7 @@ class Interpreter {
 
     evalLogical(op, leftExpr, rightExpr, env) {
         var left = this.evalExpr(leftExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         if (op == "or") {
             if (this.isTruthy(left)) return left;
         } else {
@@ -2420,30 +2638,32 @@ class Interpreter {
 
     evalCall(calleeExpr, paren_line, argsExprs, env) {
         var callee = this.evalExpr(calleeExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         if (callee == nil or callee == true or callee == false) {
-            this.setError("Can only call functions and classes.", paren_line);
+            this.setError("NotCallableError", "Can only call functions and classes.", paren_line);
             return nil;
         }
         if (isLoxStr(callee) or isLoxNum(callee)) {
-            this.setError("Can only call functions and classes.", paren_line);
+            this.setError("NotCallableError", "Can only call functions and classes.", paren_line);
             return nil;
         }
         var args = [];
         var i = 0;
         while (i < len(argsExprs)) {
             var arg = this.evalExpr(argsExprs[i], env);
-            if (this.errorFlag) return nil;
+            if (this.throwFlag) return nil;
             args.append(arg);
             i = i + 1;
         }
         var tag = callee.loxTag;
         if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "enum_ctor") {
-            this.setError("Can only call functions and classes.", paren_line);
+            this.setError("NotCallableError", "Can only call functions and classes.", paren_line);
             return nil;
         }
         if (callee.arity() != -1 and len(args) != callee.arity()) {
-            this.setError("Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".", paren_line);
+            var errorKind = "ArityError";
+            if (tag == "enum_ctor") errorKind = "ConstructorArityError";
+            this.setError(errorKind, "Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".", paren_line);
             return nil;
         }
         return callee.call(this, args);
@@ -2451,7 +2671,7 @@ class Interpreter {
 
     evalGet(objectExpr, name, line, env) {
         var object = this.evalExpr(objectExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         if (loxTag(object) == "math") {
             if (name == "pi") return math.pi;
             if (name == "e")  return math.e;
@@ -2459,26 +2679,32 @@ class Interpreter {
         }
         if (loxTag(object) == "list") {
             if (name == "append" or name == "pop" or name == "remove") return InterpListMethod(name, object);
-            this.setError("Undefined property '" + name + "'.", line);
+            this.setError("UndefinedPropertyError", "Undefined property '" + name + "'.", line);
             return nil;
         }
         if (loxTag(object) == "map") {
             if (name == "has" or name == "del" or name == "keys" or name == "values" or name == "entries") return InterpMapMethod(name, object);
-            this.setError("Undefined property '" + name + "'.", line);
+            this.setError("UndefinedPropertyError", "Undefined property '" + name + "'.", line);
             return nil;
         }
         if (loxTag(object) == "file") {
             if (name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close") return InterpFileMethod(name, object);
-            this.setError("Undefined property '" + name + "'.", line);
+            this.setError("UndefinedPropertyError", "Undefined property '" + name + "'.", line);
+            return nil;
+        }
+        if (loxTag(object) == "error") {
+            if (name == "kind") return object.kind;
+            if (name == "message") return object.message;
+            this.setError("UndefinedPropertyError", "Undefined property '" + name + "' on error.", line);
             return nil;
         }
         if (loxTag(object) != "instance") {
-            this.setError("Only instances have properties.", line);
+            this.setError("InvalidReceiverError", "Only instances have properties.", line);
             return nil;
         }
         var val = object.instGet(name, 0);
         if (val == nil and !object.fields.has(name) and object.klass.findMethod(name) == nil) {
-            this.setError("Undefined property '" + name + "'.", line);
+            this.setError("UndefinedPropertyError", "Undefined property '" + name + "'.", line);
             return nil;
         }
         return val;
@@ -2486,13 +2712,13 @@ class Interpreter {
 
     evalSet(objectExpr, name, line, valueExpr, env) {
         var object = this.evalExpr(objectExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         if (loxTag(object) != "instance") {
-            this.setError("Only instances have fields.", line);
+            this.setError("InvalidReceiverError", "Only instances have fields.", line);
             return nil;
         }
         var val = this.evalExpr(valueExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         object.instSet(name, val);
         return val;
     }
@@ -2503,7 +2729,7 @@ class Interpreter {
         var object     = env.getAt(dist - 1, "this");
         var fn         = superclass.findMethod(method);
         if (fn == nil) {
-            this.setError("Undefined property '" + method + "'.", line);
+            this.setError("UndefinedPropertyError", "Undefined property '" + method + "'.", line);
             return nil;
         }
         return fn.bind(object);
@@ -2521,11 +2747,38 @@ class Interpreter {
         if (val == false) return "false";
         if (isLoxStr(val)) return val;
         if (isLoxNum(val)) return str(val);
+        this.stringifyDepth = this.stringifyDepth + 1;
+        // Best-effort only, not an architectural guarantee: each nesting
+        // level here costs 2 native-VM call frames (this method plus
+        // stringifyList/stringifyMap), and that budget is shared with
+        // however deep the target program's own call stack already is at
+        // the print call site (FRAMES_MAX = 256, src/vm.h). At zero ambient
+        // call depth this fires safely as low as ~120; by the time the
+        // caller is ~40 frames deep -- ordinary for ordinary recursive
+        // Lox++ code -- native's own "Stack overflow." can win the race
+        // before this counter ever reaches 100. 100 catches the common,
+        // shallow-call-site case; it cannot catch every case. See
+        // notes/bootstrap-stack-depth.md.
+        if (this.stringifyDepth > 100) {
+            this.stringifyDepth = this.stringifyDepth - 1;
+            this.setError("MaxDepthExceededError", "Value nesting is too deep.", 0);
+            return "...";
+        }
         var vtag = loxTag(val);
-        if (vtag == "list")     return this.stringifyList(val);
-        if (vtag == "map")      return this.stringifyMap(val);
-        if (vtag == "enum_val") return this.stringifyEnumVal(val);
-        return val.toString();
+        var result;
+        if (vtag == "list") {
+            result = this.stringifyList(val);
+        } else if (vtag == "map") {
+            result = this.stringifyMap(val);
+        } else if (vtag == "enum_val") {
+            result = this.stringifyEnumVal(val);
+        } else if (vtag == "error") {
+            result = val.message;
+        } else {
+            result = val.toString();
+        }
+        this.stringifyDepth = this.stringifyDepth - 1;
+        return result;
     }
 
     stringifyEnumVal(val) {
@@ -2552,15 +2805,15 @@ class Interpreter {
 
     execSeqDestructure(names, line, initializer, env) {
         var val = this.evalExpr(initializer, env);
-        if (this.errorFlag) return;
+        if (this.throwFlag) return;
         if (loxTag(val) != "list") {
-            this.setError("Sequence destructuring requires a List.", line);
+            this.setError("NotIndexableError", "Sequence destructuring requires a List.", line);
             return;
         }
         var i = 0;
         while (i < len(names)) {
             if (i >= len(val.elements)) {
-                this.setError("Not enough elements for sequence destructuring.", line);
+                this.setError("IndexOutOfBoundsError", "Not enough elements for sequence destructuring.", line);
                 return;
             }
             env.define(names[i], val.elements[i]);
@@ -2570,9 +2823,9 @@ class Interpreter {
 
     execObjDestructure(names, line, initializer, env) {
         var val = this.evalExpr(initializer, env);
-        if (this.errorFlag) return;
+        if (this.throwFlag) return;
         if (loxTag(val) != "instance") {
-            this.setError("Object destructuring requires an instance.", line);
+            this.setError("InvalidReceiverError", "Object destructuring requires an instance.", line);
             return;
         }
         var i = 0;
@@ -2585,7 +2838,7 @@ class Interpreter {
 
     evalMatchExpr(subjectExpr, arms, env) {
         var subject = this.evalExpr(subjectExpr, env);
-        if (this.errorFlag) return nil;
+        if (this.throwFlag) return nil;
         var i = 0;
         while (i < len(arms)) {
             var arm = arms[i];
@@ -2611,14 +2864,14 @@ class Interpreter {
                 var doBody = true;
                 if (arm.guard != nil) {
                     var guardVal = this.evalExpr(arm.guard, armEnv);
-                    if (this.errorFlag) return nil;
+                    if (this.throwFlag) return nil;
                     if (!this.isTruthy(guardVal)) doBody = false;
                 }
                 if (doBody) return this.evalExpr(arm.body, armEnv);
             }
             i = i + 1;
         }
-        this.setError("Match expression was not exhaustive.", 0);
+        this.setError("MatchError", "Match expression was not exhaustive.", 0);
         return nil;
     }
 
