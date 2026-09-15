@@ -1,14 +1,24 @@
-// Test that stringify has a depth guard to prevent stack overflow
-// This builds a moderately nested structure and verifies it can be stringified
-// Note: Due to bootstrap interpreter overhead, we can't reach the 200-level limit
-// before hitting native stack overflow, but the guard is in place for the native VM
+// Test the stringify() depth guard (MaxDepthExceededError).
+//
+// The guard is best-effort, not an architectural guarantee: bootstrap is
+// itself a Lox++ program run by the native VM, so stringify()'s own
+// recursion shares the VM's call-frame budget (VM::FRAMES_MAX) with
+// whatever call depth the caller already has. At a shallow call site (as
+// here, top-level) the guard reliably fires well before that budget is
+// exhausted; deep inside an already-deep call chain it can lose the race
+// to a native "Stack overflow." instead. See notes/bootstrap-stack-depth.md.
+// CHECK: caught: MaxDepthExceededError
+// CHECK: after
 
-var x = [1, 2];
+var v = [];
 var i = 0;
-while (i < 10) {
-    x = [x, x];
+while (i < 150) {
+    v = [v];
     i = i + 1;
 }
-print "deep structure created";
-print len(str(x));
-print "stringify successful";
+try {
+    print v;
+} catch (e) {
+    print "caught: " + e.kind;
+}
+print "after";

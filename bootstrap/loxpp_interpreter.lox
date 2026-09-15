@@ -1628,17 +1628,17 @@ fun reflectMethodNames(klass) {
 fun reflectCallMethod(interp, args) {
     var n = len(args);
     if (n < 2) {
-        interp.setError("Expected at least 2 arguments.", 0);
+        interp.setError("ArityError", "Expected at least 2 arguments.", 0);
         return nil;
     }
     var instance = args[0];
     if (loxTag(instance) != "instance") {
-        interp.setError("Only instances have methods.", 0);
+        interp.setError("InvalidReceiverError", "Only instances have methods.", 0);
         return nil;
     }
     var name = args[1];
     if (!isLoxStr(name)) {
-        interp.setError("Field name must be a string.", 0);
+        interp.setError("InvalidMapKeyError", "Field name must be a string.", 0);
         return nil;
     }
     var callee = nil;
@@ -1651,17 +1651,17 @@ fun reflectCallMethod(interp, args) {
         found  = callee != nil;
     }
     if (!found) {
-        interp.setError("Undefined property '" + name + "'.", 0);
+        interp.setError("UndefinedPropertyError", "Undefined property '" + name + "'.", 0);
         return nil;
     }
     var tag = loxTag(callee);
     if (tag == "function" or tag == "class" or tag == "enum_ctor") {
-        interp.setError("callMethod does not support user-defined methods yet.", 0);
+        interp.setError("NotCallableError", "callMethod does not support user-defined methods yet.", 0);
         return nil;
     }
     if (tag != "native" and tag != "mathfn" and tag != "mapmethod" and
         tag != "filemethod" and tag != "listmethod") {
-        interp.setError("callMethod requires a callable value.", 0);
+        interp.setError("NotCallableError", "callMethod requires a callable value.", 0);
         return nil;
     }
     var forwarded = [];
@@ -1671,7 +1671,7 @@ fun reflectCallMethod(interp, args) {
         i = i + 1;
     }
     if (callee.arity() != len(forwarded)) {
-        interp.setError("Expected " + str(callee.arity()) + " arguments but got " +
+        interp.setError("ArityError", "Expected " + str(callee.arity()) + " arguments but got " +
                          str(len(forwarded)) + ".", 0);
         return nil;
     }
@@ -1703,7 +1703,7 @@ class LoxNative {
             var vtag = loxTag(v);
             if (vtag == "list") return len(v.elements);
             if (vtag == "map")  return len(v.data);
-            interp.setError("len() argument must be a String, List, or Map.", 0);
+            interp.setError("NotIndexableError", "len() argument must be a String, List, or Map.", 0);
             return nil;
         }
         if (this.name == "open") {
@@ -1713,25 +1713,25 @@ class LoxNative {
         if (this.name == "type") return reflectTypeName(args[0]);
         if (this.name == "fields") {
             if (loxTag(args[0]) != "instance") {
-                interp.setError("Expected an instance.", 0);
+                interp.setError("InvalidReceiverError", "Expected an instance.", 0);
                 return nil;
             }
             return InterpList(args[0].fields.keys());
         }
         if (this.name == "methods") {
             if (loxTag(args[0]) != "class") {
-                interp.setError("Expected a class.", 0);
+                interp.setError("InvalidReceiverError", "Expected a class.", 0);
                 return nil;
             }
             return InterpList(reflectMethodNames(args[0]));
         }
         if (this.name == "getField") {
             if (loxTag(args[0]) != "instance") {
-                interp.setError("Only instances have properties.", 0);
+                interp.setError("InvalidReceiverError", "Only instances have properties.", 0);
                 return nil;
             }
             if (!isLoxStr(args[1])) {
-                interp.setError("Field name must be a string.", 0);
+                interp.setError("InvalidMapKeyError", "Field name must be a string.", 0);
                 return nil;
             }
             if (args[0].fields.has(args[1])) return args[0].fields[args[1]];
@@ -1739,22 +1739,22 @@ class LoxNative {
         }
         if (this.name == "hasField") {
             if (loxTag(args[0]) != "instance") {
-                interp.setError("Only instances have properties.", 0);
+                interp.setError("InvalidReceiverError", "Only instances have properties.", 0);
                 return nil;
             }
             if (!isLoxStr(args[1])) {
-                interp.setError("Field name must be a string.", 0);
+                interp.setError("InvalidMapKeyError", "Field name must be a string.", 0);
                 return nil;
             }
             return args[0].fields.has(args[1]);
         }
         if (this.name == "setField") {
             if (loxTag(args[0]) != "instance") {
-                interp.setError("Only instances have fields.", 0);
+                interp.setError("InvalidReceiverError", "Only instances have fields.", 0);
                 return nil;
             }
             if (!isLoxStr(args[1])) {
-                interp.setError("Field name must be a string.", 0);
+                interp.setError("InvalidMapKeyError", "Field name must be a string.", 0);
                 return nil;
             }
             args[0].fields[args[1]] = args[2];
@@ -1842,7 +1842,7 @@ class InterpListMethod {
                 }
                 i = i + 1;
             }
-            interp.setError("Value not found in list.", 0);
+            interp.setError("IndexOutOfBoundsError", "Value not found in list.", 0);
             return nil;
         }
         return nil;
@@ -2371,7 +2371,15 @@ class Interpreter {
     execPrint(expr, env) {
         var val = this.evalExpr(expr, env);
         if (this.throwFlag) return;
-        print this.stringify(val);
+        // stringify() can itself raise (e.g. MaxDepthExceededError, via the
+        // depth guard) partway through building the string. Check before
+        // printing -- native suppresses the fwrite entirely in this case
+        // (src/vm.cpp's Op::PRINT), so printing the partial/truncated
+        // string here would be a garbage-output divergence, not merely a
+        // late error.
+        var s = this.stringify(val);
+        if (this.throwFlag) return;
+        print s;
     }
 
     execReturn(line, valueExpr, env) {
@@ -2738,7 +2746,18 @@ class Interpreter {
         if (isLoxStr(val)) return val;
         if (isLoxNum(val)) return str(val);
         this.stringifyDepth = this.stringifyDepth + 1;
-        if (this.stringifyDepth > 200) {
+        // Best-effort only, not an architectural guarantee: each nesting
+        // level here costs 2 native-VM call frames (this method plus
+        // stringifyList/stringifyMap), and that budget is shared with
+        // however deep the target program's own call stack already is at
+        // the print call site (FRAMES_MAX = 256, src/vm.h). At zero ambient
+        // call depth this fires safely as low as ~120; by the time the
+        // caller is ~40 frames deep -- ordinary for ordinary recursive
+        // Lox++ code -- native's own "Stack overflow." can win the race
+        // before this counter ever reaches 100. 100 catches the common,
+        // shallow-call-site case; it cannot catch every case. See
+        // notes/bootstrap-stack-depth.md.
+        if (this.stringifyDepth > 100) {
             this.stringifyDepth = this.stringifyDepth - 1;
             this.setError("MaxDepthExceededError", "Value nesting is too deep.", 0);
             return "...";
