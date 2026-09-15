@@ -618,6 +618,41 @@ void walkForPersistence(int fromIndex, int slot,
     }
 }
 
+// Builds one HandlerEntryContract per reached PUSH_HANDLER (a dead try
+// block, per handlerEntrySeeds, contributes none). Split out of
+// analyzeStack to keep that function's own cognitive complexity down —
+// this is a self-contained lookup/assembly step, not part of the fixpoint
+// itself.
+std::vector<HandlerEntryContract> buildHandlerEntryContracts(
+    const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
+    const std::vector<bool>& reached, const std::vector<StackState>& before) {
+    std::unordered_map<int, int> pushIdxToPopIdx =
+        matchPushHandlersToPopHandlers(ins);
+    std::vector<HandlerEntryContract> entries;
+    entries.reserve(cfg.handlerLinks.size());
+    for (const auto& [pushIdx, catchIdx] : cfg.handlerLinks) {
+        if (!static_cast<bool>(reached[static_cast<size_t>(pushIdx)])) {
+            continue; // dead try block — see handlerEntrySeeds
+        }
+        // A real compiled try statement always emits a matching POP_HANDLER
+        // (it is how the region gets closed at all) — the lookup only
+        // misses on a hand-built test chunk that omits one deliberately
+        // (e.g. an empty-protected-region probe with no need to exercise
+        // emission). -1 signals "no POP_HANDLER in this chunk" rather than
+        // asserting one must exist, so those pipeline-level probes keep
+        // working unchanged.
+        auto popIt = pushIdxToPopIdx.find(pushIdx);
+        int popOffset = popIt != pushIdxToPopIdx.end()
+                            ? ins[static_cast<size_t>(popIt->second)].offset
+                            : -1;
+        entries.push_back({ins[static_cast<size_t>(pushIdx)].offset,
+                           ins[static_cast<size_t>(catchIdx)].offset,
+                           before[static_cast<size_t>(catchIdx)].operandDepth(),
+                           popOffset});
+    }
+    return entries;
+}
+
 // Runs the persistence test at every reached POP and folds every LOCAL
 // verdict's births into `sites`. Discovery here depends on no reference
 // elsewhere in the function — the property that closes this defect as a
@@ -1259,30 +1294,8 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
         result.invisibleVars.push_back({ins[idx].offset, slot});
     }
 
-    std::unordered_map<int, int> pushIdxToPopIdx =
-        matchPushHandlersToPopHandlers(ins);
-    result.handlerEntries.reserve(cfg.handlerLinks.size());
-    for (const auto& [pushIdx, catchIdx] : cfg.handlerLinks) {
-        if (!static_cast<bool>(reached[static_cast<size_t>(pushIdx)])) {
-            continue; // dead try block — see handlerEntrySeeds
-        }
-        // A real compiled try statement always emits a matching POP_HANDLER
-        // (it is how the region gets closed at all) — the lookup only
-        // misses on a hand-built test chunk that omits one deliberately
-        // (e.g. an empty-protected-region probe with no need to exercise
-        // emission). -1 signals "no POP_HANDLER in this chunk" rather than
-        // asserting one must exist, so those pipeline-level probes keep
-        // working unchanged.
-        auto popIt = pushIdxToPopIdx.find(pushIdx);
-        int popOffset = popIt != pushIdxToPopIdx.end()
-                            ? ins[static_cast<size_t>(popIt->second)].offset
-                            : -1;
-        result.handlerEntries.push_back(
-            {ins[static_cast<size_t>(pushIdx)].offset,
-             ins[static_cast<size_t>(catchIdx)].offset,
-             result.before[static_cast<size_t>(catchIdx)].operandDepth(),
-             popOffset});
-    }
+    result.handlerEntries =
+        buildHandlerEntryContracts(ins, cfg, reached, result.before);
 
     return result;
 }

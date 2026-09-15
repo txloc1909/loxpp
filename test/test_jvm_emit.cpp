@@ -2847,3 +2847,145 @@ TEST(EmitScript, SiblingTryCatchAfterTerminalBody) {
         << "Expected at least 2 handler labels (L_XXXX:) in:\n"
         << j;
 }
+
+// PR #237 round 3's shape (A): the FIRST try/catch's own CATCH body is
+// itself terminal (`return`), immediately followed by a second, sibling
+// try/catch. The whole second try/catch is genuinely dead code — the first
+// catch body always returns — but the compiler still emits it linearly, so
+// its PUSH_HANDLER/POP_HANDLER pair must stay a balanced, unemitted region
+// rather than crashing the emitter with "POP_HANDLER without matching
+// PUSH_HANDLER" (round 2's fix only made a *terminal try body* reachable
+// again; a terminal *catch* body is one layer further along the same
+// protected region and was still broken).
+TEST(EmitProgram, SiblingTryCatchAfterTerminalCatchBodyStaysBalanced) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "fun f() {"
+        "    try { throw \"x\"; } catch (e) { print \"caught: \" + e; return "
+        "\"early\"; }"
+        "    try { print \"b\"; } catch (e2) { print \"caught2\"; }"
+        "    print \"after\";"
+        "}"
+        "print f();",
+        mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+
+    std::vector<jvm::EmittedClass> classes;
+    ASSERT_NO_THROW(classes = jvm::emitProgram(fn, tree, "LoxMain"))
+        << "a genuinely dead sibling try/catch, after a terminal catch "
+        << "body, must not unbalance PUSH_HANDLER/POP_HANDLER emission";
+
+    ASSERT_EQ(classes.size(), 2u);
+    const std::string& fnSource = classes[1].source;
+    // Only the FIRST try/catch is reachable — the second is dead code, so
+    // exactly one .catch entry must exist, not two and not a crash.
+    EXPECT_EQ(countOccurrences(fnSource, ".catch lox/LoxError from"), 1)
+        << fnSource;
+}
+
+// PR #237 round 3's shape (B): a single try/catch, no siblings, no terminal
+// control flow at all — just a local variable declared inside the catch
+// body. The caught value `e` and `local1` both need a real, sequential
+// local slot; recognizing `e`'s own slot used to require a backward search
+// that dead-ends at the catch entry's own (structurally empty, by design)
+// predecessor list, so it was never recognized at all and `local1`'s own
+// recognition disagreed with the local count computed at its own offset
+// ("invisible-var recognition gap").
+TEST(EmitScript, CatchBoundValueAndLocalDeclaredInCatchBodyAreBothRecognized) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "fun m() {"
+        "    try { print \"risky\"; } catch (e) { var local1 = \"x\"; print "
+        "\"caught: \" + e + \" \" + local1; }"
+        "    print \"done\";"
+        "}"
+        "m();",
+        mm);
+
+    // Locate `m`'s own DecodedFunction/analysis pair (same index in both
+    // trees — analyzeStackTree mirrors DecodedFunction::nested 1:1).
+    const DecodedFunction* target = nullptr;
+    const FunctionStackAnalysis* targetAnalysis = nullptr;
+    StackAnalysisTree tree; // NOLINT(misc-const-correctness)
+    ASSERT_NO_THROW(tree = analyzeStackTree(fn))
+        << "a catch-bound value followed by a local declared in the same "
+        << "catch body must not trip validateNoInvisibleVarGaps";
+    for (std::size_t i = 0; i < fn.nested.size(); i++) {
+        if (!tree.nested[i].self.handlerEntries.empty()) {
+            target = &fn.nested[i];
+            targetAnalysis = &tree.nested[i].self;
+            break;
+        }
+    }
+    ASSERT_NE(target, nullptr) << "no nested function has a handler entry";
+    ASSERT_EQ(targetAnalysis->handlerEntries.size(), 1U);
+    int catchOffset = targetAnalysis->handlerEntries[0].catchOffset;
+
+    bool foundCaughtValueSite = false;
+    int caughtValueSlot = -1;
+    bool foundLocal1Site = false;
+    int local1Slot = -1;
+    for (const InvisibleVarSite& site : targetAnalysis->invisibleVars) {
+        if (site.offset == catchOffset) {
+            foundCaughtValueSite = true;
+            caughtValueSlot = site.slot;
+        } else if (site.offset > catchOffset) {
+            foundLocal1Site = true;
+            local1Slot = site.slot;
+        }
+    }
+    EXPECT_TRUE(foundCaughtValueSite)
+        << "the catch entry's own bound value must be a recognized local "
+        << "invisible-var site, or a later local can silently collide with "
+        << "its slot (issue #240)";
+    EXPECT_TRUE(foundLocal1Site);
+    EXPECT_EQ(local1Slot, caughtValueSlot + 1)
+        << "local1 must be recognized exactly one slot above the caught "
+        << "value, with no gap and no overlap";
+
+    std::string j;
+    EXPECT_NO_THROW(j = jvm::emitScript(*target, *targetAnalysis, "LoxFn"));
+}
+
+// Issue #240: a function using both `defer` and its own bound `catch (e)`
+// had its defer list's local slot silently overwritten by the caught value,
+// because the caught value's own slot was never counted by
+// computeMaxLocalCount (jvm_emitter.cpp) — the same root cause as shape (B)
+// above, reached through a different call path (no explicit local
+// declared in the catch body needed; the miscount is in the caught value's
+// own recognition, not in what comes after it).
+TEST(EmitProgram, CaughtValueIsRecognizedWhenFunctionAlsoUsesDefer) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun cleanup(tag) { print tag; }"
+                     "fun f() {"
+                     "    defer cleanup(\"outer\");"
+                     "    try { throw \"x\"; } catch (e) { print e; }"
+                     "}"
+                     "f();",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+
+    const StackAnalysisTree* target = nullptr;
+    for (const StackAnalysisTree& child : tree.nested) {
+        if (!child.self.handlerEntries.empty()) {
+            target = &child;
+            break;
+        }
+    }
+    ASSERT_NE(target, nullptr);
+    ASSERT_EQ(target->self.handlerEntries.size(), 1U);
+    int catchOffset = target->self.handlerEntries[0].catchOffset;
+
+    bool caughtValueRecognized = false;
+    for (const InvisibleVarSite& site : target->self.invisibleVars) {
+        if (site.offset == catchOffset) {
+            caughtValueRecognized = true;
+        }
+    }
+    EXPECT_TRUE(caughtValueRecognized)
+        << "the caught value must occupy a counted local slot even when the "
+        << "function also uses defer, or the defer list's own slot "
+        << "(computeMaxLocalCount + 1, jvm_emitter.cpp) can land on top of "
+        << "it and silently drop the deferred call (issue #240)";
+}
