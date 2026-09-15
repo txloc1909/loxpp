@@ -18,7 +18,8 @@ var LOX_KEYWORDS = {
     "print": "PRINT",   "return": "RETURN",   "super": "SUPER",
     "this": "THIS",     "true": "TRUE",       "var": "VAR",
     "while": "WHILE",   "break": "BREAK",     "continue": "CONTINUE",
-    "in": "IN",         "enum": "ENUM",       "match": "MATCH",       "case": "CASE"
+    "in": "IN",         "enum": "ENUM",       "match": "MATCH",       "case": "CASE",
+    "try": "TRY",       "catch": "CATCH",     "throw": "THROW",       "defer": "DEFER"
 };
 
 var DIGIT_MAP = {
@@ -123,6 +124,9 @@ enum Stmt {
     EnumDecl(name, ctor_names, ctor_fields_list)
     SeqDestructure(names, line, initializer)
     ObjDestructure(names, line, initializer)
+    TryStmt(try_block, catch_var, catch_block)
+    ThrowStmt(line, value)
+    DeferStmt(line, callee, args)
 }
 
 enum Pattern {
@@ -483,9 +487,13 @@ class Parser {
         return VarDecl(nameTok.lexeme, nameTok.line, init);
     }
 
+
     statement() {
         if (this.matchT("BREAK"))    return this.breakStatement();
         if (this.matchT("CONTINUE")) return this.continueStatement();
+        if (this.matchT("TRY"))      return this.tryStatement();
+        if (this.matchT("THROW"))    return this.throwStatement();
+        if (this.matchT("DEFER"))    return this.deferStatement();
         if (this.matchT("FOR"))    return this.forStatement();
         if (this.matchT("IF"))     return this.ifStatement();
         if (this.matchT("PRINT"))  return this.printStatement();
@@ -505,6 +513,36 @@ class Parser {
         var line = this.previous().line;
         this.expect("SEMICOLON", "Expect ';' after 'continue'.");
         return ContinueStmt(line);
+    }
+
+
+    tryStatement() {
+        this.expect("LEFT_BRACE", "Expect '{' after 'try'.");
+        var tryBlock = Block(this.blockContents());
+        this.expect("CATCH", "Expect 'catch' after try block.");
+        this.expect("LEFT_PAREN", "Expect '(' after 'catch'.");
+        var catchVar = this.expect("IDENTIFIER", "Expect variable name in catch clause.");
+        this.expect("RIGHT_PAREN", "Expect ')' after catch variable.");
+        this.expect("LEFT_BRACE", "Expect '{' for catch block.");
+        var catchBlock = Block(this.blockContents());
+        return TryStmt(tryBlock, catchVar.lexeme, catchBlock);
+    }
+
+    throwStatement() {
+        var line = this.previous().line;
+        var val = this.expression();
+        this.expect("SEMICOLON", "Expect ';' after throw value.");
+        return ThrowStmt(line, val);
+    }
+
+    deferStatement() {
+        var line = this.previous().line;
+        var expr = this.unary();
+        this.expect("SEMICOLON", "Expect ';' after defer statement.");
+        return match expr {
+            case Call{callee, paren_line, args} => DeferStmt(line, callee, args)
+            case _ => { this.softError(this.peek(), "defer requires a function call."); nil }
+        };
     }
 
     blockContents() {
@@ -1058,6 +1096,9 @@ class Resolver {
             case EnumDecl{name, ctor_names, ctor_fields_list} => this.resolveEnumDecl(name, ctor_names)
             case SeqDestructure{names, line, initializer}     => this.resolveDestructure(names, line, initializer)
             case ObjDestructure{names, line, initializer}     => this.resolveDestructure(names, line, initializer)
+            case TryStmt{try_block, catch_var, catch_block}   => this.resolveTry(try_block, catch_var, catch_block)
+            case ThrowStmt{line, value}                       => this.resolveThrow(value)
+            case DeferStmt{line, callee, args}                => this.resolveDefer(callee, args)
         };
     }
 
@@ -1143,6 +1184,29 @@ class Resolver {
         this.resolveStmt(thenB);
         if (elseB != nil) this.resolveStmt(elseB);
     }
+
+    resolveTry(tryBlock, catchVar, catchBlock) {
+        this.resolveStmt(tryBlock);
+        this.beginScope();
+        this.declare(catchVar, 0);
+        this.define(catchVar);
+        this.resolveStmt(catchBlock);
+        this.endScope();
+    }
+
+    resolveThrow(value) {
+        this.resolveExpr(value);
+    }
+
+    resolveDefer(callee, args) {
+        this.resolveExpr(callee);
+        var i = 0;
+        while (i < len(args)) {
+            this.resolveExpr(args[i]);
+            i = i + 1;
+        }
+    }
+
 
     resolveBreak(line) {
         if (this.loopDepth == 0)
@@ -1410,7 +1474,22 @@ class LoxFunction {
             callEnv.define(this.params[i].lexeme, args[i]);
             i = i + 1;
         }
+        var savedDefers = interp.pendingDefers;
+        interp.pendingDefers = [];
         interp.execBlock(this.body, callEnv);
+        var funcDefers = interp.pendingDefers;
+        interp.pendingDefers = savedDefers;
+        var j = len(funcDefers) - 1;
+        while (j >= 0) {
+            var defer_item = funcDefers[j];
+            var callee = defer_item[0];
+            var defer_args = defer_item[1];
+            var tag = loxTag(callee);
+            if (tag == "function" or tag == "class" or tag == "native" or tag == "mathfn" or tag == "listmethod" or tag == "mapmethod" or tag == "filemethod" or tag == "enum_ctor") {
+                if (callee.arity() == -1 or len(defer_args) == callee.arity()) callee.call(interp, defer_args);
+            }
+            j = j - 1;
+        }
         var returnVal = nil;
         if (interp.returnFlag) {
             returnVal = interp.returnValue;
@@ -1887,6 +1966,17 @@ class LoxEnumValue {
 // INTERPRETER
 // ===========================================================================
 
+class LoxError {
+    init(kind, message) {
+        this.kind    = kind;
+        this.message = message;
+        this.loxTag  = "error";
+    }
+    toString() {
+        return this.kind + ": " + this.message;
+    }
+}
+
 class Interpreter {
     init(locals) {
         this.locals       = locals;
@@ -1896,6 +1986,9 @@ class Interpreter {
         this.errorFlag    = false;
         this.breakFlag    = false;
         this.continueFlag = false;
+        this.throwFlag    = false;
+        this.thrownValue  = nil;
+        this.pendingDefers = [];
         this.globals.define("clock", LoxNative("clock"));
         this.globals.define("input", LoxNative("input"));
         this.globals.define("str",   LoxNative("str"));
@@ -1955,7 +2048,15 @@ class Interpreter {
         var i = 0;
         while (i < len(stmts)) {
             this.execStmt(stmts[i], this.globals);
-            if (this.errorFlag or this.returnFlag) return;
+            if (this.errorFlag or this.returnFlag or this.throwFlag) {
+                if (this.throwFlag) {
+                    this.runPendingDefers();
+                    print "LOXERR70 " + this.stringify(this.thrownValue);
+                    this.throwFlag = false;
+                    this.thrownValue = nil;
+                }
+                return;
+            }
             i = i + 1;
         }
     }
@@ -2093,7 +2194,7 @@ class Interpreter {
             while (i < len(ks)) {
                 loopEnv.define(varName, ks[i]);
                 this.execStmt(body, loopEnv);
-                if (this.errorFlag or this.returnFlag) return;
+                if (this.errorFlag or this.returnFlag or this.throwFlag) return;
                 if (this.breakFlag) { this.breakFlag = false; return; }
                 if (this.continueFlag) { this.continueFlag = false; }
                 i = i + 1;
@@ -2106,7 +2207,7 @@ class Interpreter {
             while (i < slen) {
                 loopEnv.define(varName, iterable[i]);
                 this.execStmt(body, loopEnv);
-                if (this.errorFlag or this.returnFlag) return;
+                if (this.errorFlag or this.returnFlag or this.throwFlag) return;
                 if (this.breakFlag) { this.breakFlag = false; return; }
                 if (this.continueFlag) { this.continueFlag = false; }
                 i = i + 1;
@@ -2117,7 +2218,7 @@ class Interpreter {
         while (i < len(iterable.elements)) {
             loopEnv.define(varName, iterable.elements[i]);
             this.execStmt(body, loopEnv);
-            if (this.errorFlag or this.returnFlag) return;
+            if (this.errorFlag or this.returnFlag or this.throwFlag) return;
             if (this.breakFlag) { this.breakFlag = false; return; }
             if (this.continueFlag) { this.continueFlag = false; }
             i = i + 1;
@@ -2142,6 +2243,9 @@ class Interpreter {
             case EnumDecl{name, ctor_names, ctor_fields_list}    => this.execEnumDecl(name, ctor_names, ctor_fields_list, env)
             case SeqDestructure{names, line, initializer}        => this.execSeqDestructure(names, line, initializer, env)
             case ObjDestructure{names, line, initializer}        => this.execObjDestructure(names, line, initializer, env)
+            case TryStmt{try_block, catch_var, catch_block}      => this.execTry(try_block, catch_var, catch_block, env)
+            case ThrowStmt{line, value}                          => this.execThrow(line, value, env)
+            case DeferStmt{line, callee, args}                   => this.execDefer(line, callee, args, env)
         };
     }
 
@@ -2153,7 +2257,7 @@ class Interpreter {
         var keep = cond == nil or this.isTruthy(condVal);
         while (keep) {
             this.execStmt(body, forEnv);
-            if (this.errorFlag or this.returnFlag) return;
+            if (this.errorFlag or this.returnFlag or this.throwFlag) return;
             if (this.breakFlag) { this.breakFlag = false; return; }
             if (this.continueFlag) { this.continueFlag = false; }
             // Increment always runs — even after continue.
@@ -2170,7 +2274,7 @@ class Interpreter {
         var i = 0;
         while (i < len(stmts)) {
             this.execStmt(stmts[i], env);
-            if (this.errorFlag or this.returnFlag or this.breakFlag or this.continueFlag) return;
+            if (this.errorFlag or this.returnFlag or this.breakFlag or this.continueFlag or this.throwFlag) return;
             i = i + 1;
         }
     }
@@ -2258,12 +2362,67 @@ class Interpreter {
         if (this.errorFlag) return;
         while (this.isTruthy(condVal)) {
             this.execStmt(body, env);
-            if (this.errorFlag or this.returnFlag) return;
+            if (this.errorFlag or this.returnFlag or this.throwFlag) return;
             if (this.breakFlag)    { this.breakFlag = false; return; }
             if (this.continueFlag) { this.continueFlag = false; }
             condVal = this.evalExpr(cond, env);
             if (this.errorFlag) return;
         }
+    }
+
+    execTry(tryBlock, catchVar, catchBlock, env) {
+        this.execStmt(tryBlock, env);
+        if (this.throwFlag) {
+            this.throwFlag = false;
+            var caughtVal = this.thrownValue;
+            this.thrownValue = nil;
+            var catchEnv = Environment(env);
+            catchEnv.define(catchVar, caughtVal);
+            this.execStmt(catchBlock, catchEnv);
+        }
+    }
+
+    execThrow(line, valueExpr, env) {
+        var val = this.evalExpr(valueExpr, env);
+        if (this.errorFlag) return;
+        this.throwFlag = true;
+        this.thrownValue = val;
+    }
+
+    execDefer(line, calleeExpr, argsExprs, env) {
+        var callee = this.evalExpr(calleeExpr, env);
+        if (this.errorFlag) return;
+        var args = [];
+        var i = 0;
+        while (i < len(argsExprs)) {
+            var arg = this.evalExpr(argsExprs[i], env);
+            if (this.errorFlag) return;
+            args.append(arg);
+            i = i + 1;
+        }
+        if (this.pendingDefers == nil) this.pendingDefers = [];
+        this.pendingDefers.append([callee, args]);
+    }
+
+    runPendingDefers() {
+        var i = len(this.pendingDefers) - 1;
+        while (i >= 0) {
+            var defer_item = this.pendingDefers[i];
+            var callee = defer_item[0];
+            var args = defer_item[1];
+            var tag = loxTag(callee);
+            if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "enum_ctor") {
+                i = i - 1;
+                continue;
+            }
+            if (callee.arity() != -1 and len(args) != callee.arity()) {
+                i = i - 1;
+                continue;
+            }
+            callee.call(this, args);
+            i = i - 1;
+        }
+        this.pendingDefers = [];
     }
 
     evalExpr(expr, env) {
@@ -2472,6 +2631,12 @@ class Interpreter {
             this.setError("Undefined property '" + name + "'.", line);
             return nil;
         }
+        if (loxTag(object) == "error") {
+            if (name == "kind") return object.kind;
+            if (name == "message") return object.message;
+            this.setError("Undefined property '" + name + "' on error.", line);
+            return nil;
+        }
         if (loxTag(object) != "instance") {
             this.setError("Only instances have properties.", line);
             return nil;
@@ -2525,6 +2690,7 @@ class Interpreter {
         if (vtag == "list")     return this.stringifyList(val);
         if (vtag == "map")      return this.stringifyMap(val);
         if (vtag == "enum_val") return this.stringifyEnumVal(val);
+        if (vtag == "error")    return val.message;
         return val.toString();
     }
 
