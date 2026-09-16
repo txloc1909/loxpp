@@ -660,15 +660,15 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     which expressions N2 folds into an invisible local, or relaxing
     `validateMergeConsistency`'s own equivalence rule, in
     `abstract_stack.cpp`, an already-reviewed, target-independent file no
-    diff in this PR touches; that is a change to N2's own design, which
-    is a research-referee decision, not an in-PR edit smuggled through
-    N10 (`notes/multi-agent-playbook.md`'s "Roles": the researcher, not
-    the implementer of another node, hands down that ruling as referee).
+    diff in this PR touches; that is a change to N2's own design. The
+    round-3 referee (below) reserved that specific change for a referee
+    ruling, not an in-PR edit smuggled through N10.
     **Disposition (round-3 referee ruling).** The round-2 implementer named
-    N11 the owner; the referee ruled that call out of procedure
-    (`notes/multi-agent-playbook.md`'s "Roles": an unanticipated problem is
-    ruled on by the researcher, not by the implementer that hit it) and
-    resolved it on substance instead: this
+    N11 the owner; the referee ruled that call out of procedure — deciding
+    which node owns a gap is a referee's call, not an implementer's, per
+    `notes/multi-agent-playbook.md`'s "Roles" (the researcher "either
+    unblocks the implementer or, as referee, hands down a binding ruling")
+    — and resolved it on substance instead: this
     gap is **not assigned an owning node**. It does not block N10 — the
     implementer, the reviewer, and the referee each independently verified no
     required gate reaches it: a pattern search over all of `examples/*.lox`,
@@ -678,9 +678,8 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     places a `match` expression directly on either side of `and`/`or`. N11
     does not fix this gap and does not own the fix; N11's own differential
     runs against the growing corpus will detect it loudly if any program ever
-    reaches it, and that event is itself a researcher-unblock condition
-    (`notes/multi-agent-playbook.md`'s "Roles"), not something N11 resolves
-    alone. This gap stays
+    reaches it, and a program that reaches this gap starts the researcher,
+    who rules on it — not something N11 resolves alone. This gap stays
     unassigned until a program actually reaches it or a researcher rules
     on N2's fold model if the corpus ever reaches this shape.
   - **Still open, unowned, REACHABLE, not silent — a folded operand plus a
