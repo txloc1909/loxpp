@@ -612,7 +612,7 @@ void Compiler::whileStatement() {
     int savedOperandDepth = m_stackHeight - m_localCount;
 
     int loopStart = static_cast<int>(getCurrentChunk()->size());
-    m_loopStack.push_back({loopStart, m_localCount, {}});
+    m_loopStack.push_back({loopStart, m_localCount, m_openHandlerCount, {}});
 
     m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after 'while'.");
     expression();
@@ -671,7 +671,7 @@ void Compiler::forStatement() {
     }
 
     int loopStart = static_cast<int>(getCurrentChunk()->size());
-    m_loopStack.push_back({loopStart, m_localCount, {}});
+    m_loopStack.push_back({loopStart, m_localCount, m_openHandlerCount, {}});
 
     int exitJump = -1;
     if (!m_parser->match(TokenType::SEMICOLON)) {
@@ -736,7 +736,7 @@ void Compiler::forInStatement(const Token& itemName) {
 
     // 3. Loop header (re-entry point for LOOP and continue).
     int loopStart = static_cast<int>(getCurrentChunk()->size());
-    m_loopStack.push_back({loopStart, m_localCount, {}});
+    m_loopStack.push_back({loopStart, m_localCount, m_openHandlerCount, {}});
 
     // 4. Check: push iterator copy, ITER_HAS_NEXT → bool on stack.
     emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(iterSlot));
@@ -771,7 +771,8 @@ void Compiler::breakStatement() {
         return;
     }
     m_parser->consume(TokenType::SEMICOLON, "Expect ';' after 'break'.");
-    emitLoopCleanup(m_loopStack.back().localCount);
+    emitLoopCleanup(m_loopStack.back().localCount,
+                    m_loopStack.back().handlerCount);
     int jump = emitJump(Op::JUMP);
     m_loopStack.back().breakJumps.push_back(jump);
 }
@@ -783,7 +784,8 @@ void Compiler::continueStatement() {
         if (m_loopStack[i].start != -1) {
             m_parser->consume(TokenType::SEMICOLON,
                               "Expect ';' after 'continue'.");
-            emitLoopCleanup(m_loopStack[i].localCount);
+            emitLoopCleanup(m_loopStack[i].localCount,
+                            m_loopStack[i].handlerCount);
             emitLoop(m_loopStack[i].start);
             return;
         }
@@ -850,7 +852,7 @@ void Compiler::compileMatchBody() {
     // start = -1 flags this context as a match (not a loop).
     // localCount = armLocalBase so break cleanup stops before result and
     // subject.
-    m_loopStack.push_back({-1, m_localCount, {}});
+    m_loopStack.push_back({-1, m_localCount, m_openHandlerCount, {}});
 
     bool hasUnguardedCatchAll = false;
     std::set<std::string> seenCtors;
@@ -901,8 +903,9 @@ void Compiler::compileMatchBody() {
                 static_cast<int>(getCurrentChunk()->size());
         }
 
-        auto arm = compileMatchArm(subjectSlot, armLocalBase_iter, resultSlot,
-                                   jtc.eligible);
+        auto arm =
+            compileMatchArm(subjectSlot, armLocalBase_iter, m_openHandlerCount,
+                            resultSlot, jtc.eligible);
         if (arm.isUnguardedCatchAll) {
             hasUnguardedCatchAll = true;
         }
@@ -997,10 +1000,9 @@ void Compiler::compileMatchBody() {
     m_localCount += numPending;
 }
 
-Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
-                                                   int armLocalBase,
-                                                   int resultSlot,
-                                                   bool skipPatternCheck) {
+Compiler::MatchArmResult
+Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
+                          int resultSlot, bool skipPatternCheck) {
     // Result of compiling one pattern alternative (before 'or' or guard/arrow).
     struct OnePatResult {
         int missJump; // JUMP_IF_FALSE offset; -1 = always matches
@@ -1340,7 +1342,7 @@ Compiler::MatchArmResult Compiler::compileMatchArm(int subjectSlot,
     endScope();
 
     // Normal arm exit: clean up binding locals, jump to match end.
-    emitLoopCleanup(armLocalBase);
+    emitLoopCleanup(armLocalBase, armHandlerBase);
     m_localCount = armLocalBase;
     int endJump = emitJump(Op::JUMP);
     m_loopStack.back().breakJumps.push_back(endJump);
@@ -2028,6 +2030,7 @@ void Compiler::tryStatement() {
     // try block catch (name) block
     m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' after 'try'.");
     int handlerOffset = emitJump(Op::PUSH_HANDLER);
+    m_openHandlerCount++;
 
     beginScope();
     block();
@@ -2080,6 +2083,7 @@ void Compiler::tryStatement() {
 
     // Pop the exception handler after the try block completes normally.
     emitByte(Op::POP_HANDLER);
+    m_openHandlerCount--;
 
     patchJump(skipPopJump);
 }
@@ -2367,7 +2371,7 @@ void Compiler::emitLoop(int loopStart) {
     emitByte(static_cast<uint8_t>(offset & 0xff));
 }
 
-void Compiler::emitLoopCleanup(int targetLocalCount) {
+void Compiler::emitLoopCleanup(int targetLocalCount, int targetHandlerCount) {
     // Mirrors endScope(): a captured local must close with CLOSE_UPVALUE, not
     // a plain POP, or its cell stays open past this early exit and the next
     // loop iteration (or the next match arm) reuses the same stale cell.
@@ -2377,6 +2381,12 @@ void Compiler::emitLoopCleanup(int targetLocalCount) {
         } else {
             emitByte(Op::POP);
         }
+    }
+    // Emit POP_HANDLER for each try/catch region opened since the loop started,
+    // mirroring the behavior for locals above. A break/continue that exits a
+    // protected region must not leave a stale HandlerRecord on the stack.
+    for (int i = m_openHandlerCount - 1; i >= targetHandlerCount; i--) {
+        emitByte(Op::POP_HANDLER);
     }
 }
 

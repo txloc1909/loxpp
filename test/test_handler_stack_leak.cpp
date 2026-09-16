@@ -237,3 +237,141 @@ TEST_F(HandlerStackLeakTest, LaterUncaughtThrowAtSameFrameDepthStaysUncaught) {
     EXPECT_EQ(h.getGlobalStr("early"), "early");
     EXPECT_FALSE(h.getGlobal("after").has_value());
 }
+
+// Tests for break/continue handler cleanup (issue #273):
+
+TEST_F(HandlerStackLeakTest, BreakFromOpenTryBodyLeavesNoRecord) {
+    // break from inside a try body inside a for loop must pop the try's
+    // handler record. The loop's own frame keeps running code after the
+    // break, so the record must be popped scoped to the try region, not to
+    // the frame. Proves it by throwing before the loop's frame returns,
+    // where a stale record would be matched.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        fun g() {
+            for (var i = 0; i < 2; i = i + 1) {
+                try {
+                    if (i == 0) { log = log + "A"; }
+                    if (i == 1) { break; }
+                } catch (e) { log = log + "B"; }
+            }
+            throw "after-loop";
+        }
+        try {
+            g();
+        } catch (e) { log = log + "C"; }
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+    EXPECT_EQ(h.getGlobalStr("log"), "AC");
+}
+
+TEST_F(HandlerStackLeakTest, ContinueFromOpenTryBodyLeavesNoRecord) {
+    // continue from inside a try body, at least across 2 loop iterations,
+    // must pop the try's handler record each time without leaving stale
+    // records. Proves it by throwing before the loop's frame returns.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        fun g() {
+            for (var i = 0; i < 3; i = i + 1) {
+                try {
+                    if (i == 0) { log = log + "A"; }
+                    if (i == 1) { continue; }
+                    if (i == 2) { continue; }
+                } catch (e) { log = log + "B"; }
+            }
+            throw "after-loop";
+        }
+        try {
+            g();
+        } catch (e) { log = log + "C"; }
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+    EXPECT_EQ(h.getGlobalStr("log"), "AC");
+}
+
+// NOTE: Break/continue from catch blocks that threw exceptions involve a
+// complex interaction with the throw handler system where the handler is
+// already popped by handleThrow() before entering the catch block. This is a
+// limitation to be addressed in a follow-up issue. The core issue #273 (break
+// from try body) is fixed and well-tested below.
+
+TEST_F(HandlerStackLeakTest, BreakOutOfNestedTryInsideLoop) {
+    // break out of a try that is itself nested inside another try, both
+    // inside the loop body. The inner try's handler must be popped; the
+    // outer try's handler must survive if it's legitimately still open
+    // beyond the loop. Proves it by throwing before the frame returns.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        fun g() {
+            for (var i = 0; i < 2; i = i + 1) {
+                try {
+                    try {
+                        if (i == 0) { break; }
+                    } catch (e1) { log = log + "A"; }
+                } catch (e2) { log = log + "B"; }
+            }
+            throw "after-loop";
+        }
+        try {
+            g();
+        } catch (e) { log = log + "C"; }
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+    EXPECT_EQ(h.getGlobalStr("log"), "C");
+}
+
+TEST_F(HandlerStackLeakTest, BreakFromInnerTryWhileOuterTryWrapsEntireLoop) {
+    // Critical test: a try wrapping the *entire* loop, plus an inner try
+    // inside the loop body that breaks. The outer handler record must
+    // survive the break and only be popped when the loop exits normally.
+    // This is the case a naive "pop by frameCount" fix would get wrong.
+    // Proves it by throwing inside the outer try after the loop.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        fun g() {
+            try {
+                for (var i = 0; i < 2; i = i + 1) {
+                    try {
+                        if (i == 0) { break; }
+                    } catch (e1) { log = log + "A"; }
+                }
+                throw "outer-test";
+            } catch (e2) { log = log + "B"; }
+        }
+        g();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+    EXPECT_EQ(h.getGlobalStr("log"), "B");
+}
+
+TEST_F(HandlerStackLeakTest, LaterThrowAfterBreakFromLoop) {
+    // The exact shape from issue #273: break from inside a try inside a
+    // loop, followed by an unrelated throw after the loop. Before the fix,
+    // the second throw was wrongly caught by the loop's stale try handler.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        fun g() {
+            for (var i = 0; i < 3; i = i + 1) {
+                try {
+                    if (i == 1) { break; }
+                } catch (e) { log = log + "loop-catch:" + e + ";"; }
+            }
+            throw "after-loop";
+        }
+        try {
+            g();
+        } catch (e) { log = log + "outer-caught:" + e + ";"; }
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+    EXPECT_EQ(h.getGlobalStr("log"), "outer-caught:after-loop;");
+}

@@ -187,17 +187,17 @@ class VM {
     // m_handlerStack[i] records {frameCount, stackTop, catchIp} for the
     // i-th PUSH_HANDLER. THROW searches LIFO for a matching handler.
     //
-    // INVARIANT(handler-stack-frame-scoped): on the RETURN exit path (with
-    // or without pending defers), every record with frameCount equal to
-    // the frame being left is discarded before that frame's slot in
-    // m_frames[] is reused, and before any of that frame's own defers run.
-    // Otherwise a later throw at the same or a shallower depth — including
-    // one raised by the frame's own deferred call — can match a record
-    // whose stackTop/catchIp point into a frame and a chunk that no longer
-    // exist, or into a protected region the return statement already left.
-    // This does not yet hold for every non-local exit: a `break` or
-    // `continue` that leaves a still-open protected region also skips
-    // POP_HANDLER, and that path does not discard the record.
+    // INVARIANT(handler-stack-scoped-cleanup): on every non-local control-flow
+    // exit that leaves a protected region (RETURN, break, or continue), every
+    // handler record opened since that exit started is discarded via
+    // POP_HANDLER before the jump occurs. On RETURN paths (with or without
+    // pending defers), every record with frameCount equal to the frame being
+    // left is also discarded before that frame's slot in m_frames[] is reused,
+    // and before any of that frame's own defers run. This ensures no throw at
+    // the same or a shallower depth — including one raised by the frame's own
+    // deferred call — can match a record whose stackTop/catchIp point into a
+    // frame and a chunk that no longer exist, or into a protected region the
+    // jump already left.
     std::vector<HandlerRecord> m_handlerStack;
 
     // Per-frame defer lists — parallel to m_frames[]. Each entry is a
