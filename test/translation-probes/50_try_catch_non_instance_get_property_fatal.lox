@@ -1,0 +1,6 @@
+// Test for issue #253: GET_PROPERTY on non-instance should be fatal
+// Both native and JVM should crash with exit code 1
+
+// CHECK: Exit code 1
+print 42.foo;
+print "ERROR: should not reach here";

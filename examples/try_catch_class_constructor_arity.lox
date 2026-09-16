@@ -1,0 +1,16 @@
+// Test for issue #254: ConstructorArityError should be catchable
+// Currently JVM crashes uncaught; native handles it correctly
+
+class Point {
+  describe() {
+    return "a point";
+  }
+}
+
+try {
+  var p = Point(1, 2);
+  print "ERROR: should not reach here";
+} catch (e) {
+  print "caught: " + e.kind;
+}
+print "after";

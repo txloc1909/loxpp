@@ -25,7 +25,16 @@ public final class LoxError extends RuntimeException {
 
     /**
      * Get the Lox++ value being thrown. Returns the original value if this
-     * error wraps a user throw; null if this is an internally-raised fault.
+     * error wraps a user throw. If this is an internally-raised fault
+     * (value == null), rethrow the exception instead of returning it,
+     * making internally-raised faults uncatchable by Lox try/catch blocks.
+     * This is the mechanism that distinguishes catchable errors (from user
+     * throw or makeError() with an Error instance) from fatal system faults.
      */
-    public Object getValue() { return value; }
+    public Object getValue() {
+        if (value == null) {
+            throw this;
+        }
+        return value;
+    }
 }

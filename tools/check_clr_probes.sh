@@ -475,6 +475,13 @@ examples=(
     "examples/try_catch_match_three_sibling_catches.lox"
     "examples/try_catch_match_wildcard_guard_only.lox"
     "examples/try_catch_match_after_bare_rethrow.lox"
+    # Issue #253/#254 fault-classification fixes: ConstructorArityError made
+    # catchable on JVM backend (matching native/CLR), and Error instance
+    # property access made conditional (catchable for Error values, fatal for
+    # ordinary instances).
+    "examples/try_catch_class_constructor_arity.lox"
+    "examples/try_catch_error_instance_properties_catchable.lox"
+    "examples/try_catch_error_vs_ordinary_instance_catchability.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
