@@ -44,20 +44,43 @@ account:
 (JVM, CLR, ...) is hardcoded into its control flow. A mission run supplies,
 via `args`:
 
-- `missionDir` — absolute path to the mission directory holding `brief.md`
-  and `nodes/*.md`. **Never point this at `/tmp`** — on some hosts it is a
-  memory filesystem a service cleans, and an agent that loses its brief this
-  way may not notice. Treat a missing or unreadable brief as a hard failure,
+- `missionIssue` — the tracking issue number that sequences this mission's
+  nodes (see "Node specification structure" below). The stage order and the
+  full node-to-issue list live there, in git-hosted, reviewable, permanent
+  GitHub state — never in a local directory a host can lose.
+- `briefPath` — absolute path, inside this repository, to the mission brief
+  (`notes/missions/<name>.md`). The brief holds binding mission-wide rules:
+  role assignments, the DAG diagram, execution notes. It does **not** hold
+  per-node specifications — those are GitHub issue bodies now, one issue per
+  node (see below). Treat a missing or unreadable brief as a hard failure,
   not as optional.
-- `nodes` — a map of node id → `{ branch, title }`.
+- `nodes` — a map of node id → `{ branch, title, issue }`. `issue` is the
+  node's own GitHub issue number; `id` is any mnemonic the mission wants for
+  logging (it does not have to match the issue number, though matching it is
+  the simplest choice for a new mission). This map is still authored by
+  whoever launches the run — `tools/agent-workflow/plan_resume.py
+  <mission-issue>` derives the dynamic `stages`/`resume` args from GitHub,
+  but `nodes` itself (branch names, titles) is not tracked anywhere in git or
+  GitHub, so merge it in by hand each time.
 - `stages` — an array of node-id groups; each group runs in parallel, groups
-  run in sequence.
+  run in sequence. `plan_resume.py` derives this from the tracking issue.
 - `repo`, `githubRepo`, and the doc paths a node implementer/reviewer must
   read (the DAG plan doc, the target's opcode/semantics reference, ...).
 
 Before a new mission's first run, edit `meta.phases` in the script to name
 that mission's real nodes — it drives the progress-tree preview and must stay
 a literal, so it cannot be derived from `args.nodes` automatically.
+
+Every agent reads its node specification with
+`gh issue view <issue> --repo <githubRepo> --comments` — **never** the plain
+`gh issue view <issue>`. The plain form prints the body only; it gives no
+sign that comments exist, and a cross-node hazard left by an earlier node
+lives only in a comment (see "Node specification structure"). An agent that
+uses the plain form gets a spec with a silently missing hazard, the same
+failure mode a lost mission directory used to cause. The harness prompt
+always gives the full command, and an agent whose `gh issue view --comments`
+call fails stops with `blocked_surprise` rather than continuing on a partial
+read.
 
 ## Escalation limits
 
@@ -130,20 +153,19 @@ cannot simply repeat with the same ambiguity.
 
 ## Node specification structure
 
-Each node gets one file: deliverable, checkpoint, hazards, and anything it
-inherits from a node it depends on. This is the live channel between nodes —
-a running workflow holds its script in memory, but each agent reads its node
-spec from disk when it starts, so a merged node can leave a hazard for a
-later one there. Worked example, generalized from the JVM mission's N4 (a
-mid-complexity node — a first straight-line code generator):
+Each node gets one GitHub issue: deliverable, scope, checkpoint, and hazards
+live in the issue body. This is the live channel between nodes — a merged
+node that finds a hazard for a node it blocks posts a **comment** on that
+later node's issue, never a body edit. A comment records who found the
+hazard and when; a body edit hides both. This is why every agent reads its
+node with `gh issue view <n> --repo <githubRepo> --comments` and never with
+the plain form (see "The harness" above) — a hazard that arrived after the
+issue was filed is invisible to the plain form.
+
+Worked shape, generalized from the JVM mission's N4 (a mid-complexity node —
+a first straight-line code generator), as an issue body:
 
 ```markdown
-# Node <ID> — <one-line summary>
-
-**Branch:** `<type>/<short-description>`
-**Depends on:** <ids, or "none">, all merged.
-**Blocks:** <ids that cannot start until this merges>.
-
 ## Deliverable
 
 <What this node builds, in one paragraph. List the files it touches.>
@@ -172,6 +194,28 @@ that the runtime/host enforces silently, a naming or determinism concern —
 whatever a later reader would otherwise have to rediscover the hard way.>
 ```
 
+The implementer's PR body must contain the line `Closes #<node-issue>`. A
+node issue closes at PR **merge**, not at reviewer approval — GitHub does
+this automatically from that line, so no agent has to remember a separate
+close step, and no agent can close a node whose PR never merged. Approval is
+unrelated and unchanged: it is still the PR comment whose first line is
+exactly `[Reviewer] APPROVED` (`plan_resume.py` reads that, not GitHub's own
+review-approval feature, because the reviewer shares the implementer's
+GitHub account and cannot use `gh pr review --approve`).
+
+### The tracking issue
+
+The DAG structure — which nodes exist, which GitHub issue backs each one,
+and the stage/wave order — lives in one tracking issue per mission, in the
+shape issue #261 already uses: a `### Wave N` heading per stage, followed by
+`- [ ] #<node-issue> — <description>` lines, one per node in that stage.
+`tools/agent-workflow/plan_resume.py <mission-issue>` parses exactly this
+shape. The checkbox itself is never read as truth — only a convenience for a
+human skimming the issue — a node's real state always comes from a live
+search of PR bodies for `Closes #<node-issue>`, the same string the
+implementer prompt requires. A tracking issue is scope-only: "do not scope
+code work directly against this issue number," the way #261 itself says.
+
 ## One node, one branch, one PR, one merge
 
 Keeps every review small enough for the reviewer to actually finish reading
@@ -182,12 +226,23 @@ open PR first and pushes to it.
 ## State comes from persistent storage (commonly GitHub and git), never from a written progress file
 
 `tools/agent-workflow/plan_resume.py` reconstructs each node's status by
-querying GitHub (PR state, review state) and git (branch existence, ahead/
-behind main) — it does not read or trust a hand-maintained status file. This
-was correct across 4 workflow launches, one interruption, and one incorrect
-manual stop, and it is the reason resume never desynced from reality. A
-written `STATE.md`-style file is fine as a human-readable snapshot, but never
-as the resume source of truth.
+querying GitHub alone — the tracking issue for stage order, and every PR's
+body for the `Closes #<node-issue>` line that names its node — it does not
+read or trust a hand-maintained status file, and as of the GitHub-issue
+migration (#264) it needs no local git checkout either. This was correct
+across 4 workflow launches, one interruption, and one incorrect manual stop,
+and it is the reason resume never desynced from reality. A written
+`STATE.md`-style file is fine as a human-readable snapshot, but never as the
+resume source of truth.
+
+**Match PR bodies literally, never by relevance search.** `plan_resume.py`
+fetches every PR's body and regex-matches `Closes #<n>` itself; it does not
+call `gh search prs`. That command was measured returning a PR for the query
+`"Closes #240"` whose body did not contain the string `"240"` anywhere —
+`gh search` ranks by relevance, not by literal substring, so it reported a
+node as `merged` while its issue was still open. A literal match against
+fetched text is the only form of this check that cannot manufacture a false
+positive out of ranking.
 
 **This applies to a guard the harness itself runs, not only to resume.** The
 CLR mission added a check that skips a review round when the branch tip has not
@@ -218,6 +273,16 @@ affected PR pointing the next agent at exactly what it should pick back up —
 this recovered two otherwise-lost fix rounds in the JVM mission, both times
 an implementer hit its step limit mid-fix, after compiling but before it
 could commit, push, or reply.
+
+`snapshot.sh` takes its output directory and its branch-name filter as
+explicit flags — `--out <dir> --filter <substr>`, plus an optional
+`--issue <mission-issue>` to also write a derived `state.json` via
+`plan_resume.py`. It no longer infers either one from a mission directory's
+basename: there is no mission directory left to infer them from, and an
+inferred value that happens to be wrong fails exactly as silently as a
+missing one. Snapshots themselves stay on disk — they are a backup for a
+reboot or an interruption, never a source of truth, and nothing in the
+harness reads them back.
 
 ## Diagnose a stall from three signals together
 
