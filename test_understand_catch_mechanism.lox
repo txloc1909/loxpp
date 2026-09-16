@@ -1,0 +1,15 @@
+// Understand how catch mechanism works with null values
+
+// Test 1: Catch an error where value is an Error instance
+print "Test 1: Error instance";
+try {
+  print undefinedVar;
+} catch (e) {
+  print "caught, e = " + e;
+  if (e != nil) {
+    print "e.kind = " + e.kind;
+  }
+}
+
+// Test 2: Try to catch a bare LoxError (should not be catchable in theory)
+print "Test 2: Bare LoxError (should crash, not print this)";

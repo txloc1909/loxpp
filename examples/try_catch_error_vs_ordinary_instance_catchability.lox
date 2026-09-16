@@ -1,0 +1,44 @@
+// This test demonstrates why the conditional at site 4 (undefined property on instance)
+// is necessary, not just a blanket "always fatal" or "always catchable" fix.
+//
+// It shows:
+// 1. Accessing an undefined property on an ordinary class instance MUST be fatal
+// 2. Accessing an undefined property on an Error instance MUST be catchable
+//
+// A blanket fatal fix would break case 2.
+// A blanket catchable fix (current bug) wrongly allows case 1.
+
+class Point {
+  init(x, y) {
+    this.x = x;
+    this.y = y;
+  }
+}
+
+// Case 1: Accessing undefined property on ordinary instance should be FATAL
+print "Case 1: trying to access undefined property on ordinary instance...";
+try {
+  var p = Point(1, 2);
+  print p.bogus;
+  print "ERROR: should not reach here";
+} catch (e) {
+  print "ERROR: should not catch this - ordinary instance property access must be fatal";
+}
+
+// Case 2: Accessing undefined property on Error instance should be CATCHABLE
+print "Case 2: trying to access undefined property on Error instance...";
+try {
+  // Trigger an error to get an Error instance
+  print undefinedVar;
+} catch (e) {
+  // e is an Error instance
+  try {
+    print e.bogus;
+    print "ERROR: should not reach here";
+  } catch (e2) {
+    // This should succeed - undefined property on Error instance is catchable
+    print "caught undefined property on error: " + e2.kind;
+  }
+}
+
+print "after";

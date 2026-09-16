@@ -57,7 +57,8 @@ public final class LoxClass implements LoxCallable {
         if (init != null) {
             init.callAsSelf(instance, args);
         } else if (args.length != 0) {
-            throw new LoxError("Expected 0 arguments but got " + args.length + ".");
+            throw LoxOps.makeError("ConstructorArityError",
+                                   "Expected 0 arguments but got " + args.length + ".");
         }
         return instance;
     }

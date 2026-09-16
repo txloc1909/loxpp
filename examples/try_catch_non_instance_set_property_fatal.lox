@@ -1,0 +1,7 @@
+// Test for issue #253: SET_PROPERTY on non-instance should be fatal
+// Both native and JVM should crash with exit code 1
+
+// CHECK: Exit code 1
+var x = 42;
+x.foo = 10;
+print "ERROR: should not reach here";
