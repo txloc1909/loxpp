@@ -457,5 +457,9 @@ TEST(ToolingResolverCorpus, NoCrashAndFewWarnings) {
     // Raised again, 52 -> 67, for 6 more match-in-catch regression examples
     // (15 more catch-bound identifiers hitting the same tracked gap) for a
     // total of 155 corpus files.
-    EXPECT_LE(totalWarnings, 67u);
+    // Raised again, 67 -> 71, for 1 more regression example covering a
+    // catch body whose own last statement is a bare rethrow (4 more
+    // catch-bound identifiers hitting the same tracked gap) for a total of
+    // 156 corpus files.
+    EXPECT_LE(totalWarnings, 71u);
 }
