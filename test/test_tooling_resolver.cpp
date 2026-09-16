@@ -464,5 +464,8 @@ TEST(ToolingResolverCorpus, NoCrashAndFewWarnings) {
     // Raised again, 71 -> 73, after rebasing onto the return-handler-stack-
     // leak fix (which added 1 more example with two `catch (e)` bindings
     // hitting the same tracked gap), for a total of 157 corpus files.
+    // Unchanged at 73 after rebasing onto the File after-close visibility
+    // probe (issue #251): it binds no `catch`, so it adds no warning, for a
+    // total of 158 corpus files.
     EXPECT_LE(totalWarnings, 73u);
 }

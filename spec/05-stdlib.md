@@ -356,6 +356,18 @@ Closes the file. A second call on a File that is already closed does nothing.
 **Arity:** 0  
 **Returns:** Nil
 
+### Visibility and durability
+
+Writes may buffer. `close()` makes everything written through that File
+visible to every later `open()` and to other processes. What another handle
+sees before `close()` is implementation-defined and may be none, part, or all
+of the data. A program that needs a second handle to see the data closes the
+File first, or uses `defer f.close()`.
+
+When the program ends — by the end of the script, by `exit()`, or by an
+uncaught `throw` — every File that is still open is flushed as if `close()`
+was called.
+
 ---
 
 ## Map methods

@@ -76,6 +76,11 @@ probes=(
     # hasField()/setField()/callMethod(), now supported on native, JVM, and
     # CLR alike (src/stdlib/reflect_api.cpp, LoxRuntime.registerReflection).
     "test/translation-probes/40_reflection.lox"
+    # Visibility after close() (spec/05-stdlib.md, File section): the
+    # differential corpus sweep alone reports a false MATCH when a probe
+    # cannot even run (both sides give empty stdout and a matching non-zero
+    # exit), so this probe also needs the exit-code-checked loop below.
+    "test/translation-probes/48_file_visible_after_close.lox"
     # try/catch/throw/defer (PUSH_HANDLER/POP_HANDLER/THROW/DEFER_RECORD/
     # RUN_DEFERS). PR #237 rounds 1-3's own repros, plus round 3's shapes
     # (A)/(B) and their generalizations, plus issue #240 — none of these
