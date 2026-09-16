@@ -62,6 +62,10 @@ class VMTestHarness {
     // Stack depth at the moment of the call.
     int stackDepth() const { return m_vm.stackDepth(); }
 
+    // Number of still-open try/catch protected regions at the moment of the
+    // call. Zero after a well-formed program's last statement completes.
+    int handlerStackDepth() const { return m_vm.handlerStackDepth(); }
+
     // Look up a global variable by name. Returns std::nullopt if the variable
     // was never defined (absent != nil).
     std::optional<Value> getGlobal(const std::string& name) const {
