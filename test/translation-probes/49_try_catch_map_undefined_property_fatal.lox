@@ -1,0 +1,7 @@
+// Test for issue #253: undefined property on Map should be fatal
+// Both native and JVM should crash with exit code 1
+
+// CHECK: Exit code 1
+var m = {"key": "value"};
+print m.bogusMethod;
+print "ERROR: should not reach here";

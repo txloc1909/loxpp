@@ -1,0 +1,24 @@
+// Test for issue #253: Error instance properties should be catchable
+// Error instances can access .kind, .message, and even undefined properties
+// which should themselves throw catchable UndefinedPropertyError
+
+// First, let's construct an error via an operation that creates one
+try {
+  // Trigger a catchable error: e.g., undefined variable
+  print undefinedVar;
+} catch (e) {
+  // e is now an Error instance with .kind and .message fields
+  print "caught error kind: " + e.kind;
+  // Note: message text may vary between native/JVM, just check we catch it
+  // print "caught error message: " + e.message;
+
+  // Try accessing an undefined property on this caught error
+  try {
+    print e.bogusField;
+    print "ERROR: should not reach here";
+  } catch (e2) {
+    // Accessing an undefined property on an Error instance is catchable
+    print "undefined property on error caught: " + e2.kind;
+  }
+}
+print "after";

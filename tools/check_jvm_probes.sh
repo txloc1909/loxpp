@@ -100,6 +100,11 @@ probes=(
     "examples/try_catch_invalid_receiver.lox"
     "examples/try_catch_nested_terminal_outer_catch.lox"
     "examples/try_catch_local_in_catch_then_sibling.lox"
+    # Issue #253/#254: fault-classification fixes for JVM backend (catchable
+    # error construction and Error instance property access).
+    "examples/try_catch_class_constructor_arity.lox"
+    "examples/try_catch_error_instance_properties_catchable.lox"
+    "examples/try_catch_error_vs_ordinary_instance_catchability.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its

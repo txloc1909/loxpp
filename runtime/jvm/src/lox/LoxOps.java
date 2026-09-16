@@ -455,8 +455,7 @@ public final class LoxOps {
         if (obj instanceof LoxFile) {
             LoxCallable m = ((LoxFile)obj).getMethod(name);
             if (m == null) {
-                throw makeError("UndefinedPropertyError",
-                                    "Undefined property '" + name +
+                throw new LoxError("Undefined property '" + name +
                                         "' on file.");
             }
             return m;
@@ -464,15 +463,13 @@ public final class LoxOps {
         if (obj instanceof LoxMap) {
             LoxCallable m = ((LoxMap)obj).getMethod(name);
             if (m == null) {
-                throw makeError("UndefinedPropertyError",
-                                    "Undefined property '" + name +
+                throw new LoxError("Undefined property '" + name +
                                         "' on map.");
             }
             return m;
         }
         if (!(obj instanceof LoxInstance)) {
-            throw makeError("InvalidReceiverError",
-                                "Only instances have properties.");
+            throw new LoxError("Only instances have properties.");
         }
         LoxInstance instance = (LoxInstance)obj;
         if (instance.fields.containsKey(name)) {
@@ -480,16 +477,23 @@ public final class LoxOps {
         }
         LoxClosure method = instance.klass.findMethod(name);
         if (method == null) {
-            throw makeError("UndefinedPropertyError",
-                                "Undefined property '" + name + "'.");
+            // Undefined property is only catchable for Error values.
+            // Error instances can access their fields (.kind, .message, or
+            // undefined ones via catch binding). Ordinary instances get a
+            // fatal fault.
+            LoxClass errorClass = (LoxClass)LoxRuntime.current().get("Error");
+            if (instance.klass == errorClass) {
+                throw makeError("UndefinedPropertyError",
+                                    "Undefined property '" + name + "'.");
+            }
+            throw new LoxError("Undefined property '" + name + "'.");
         }
         return new LoxBoundMethod(instance, method);
     }
 
     public static Object setProperty(Object obj, String name, Object value) {
         if (!(obj instanceof LoxInstance)) {
-            throw makeError("InvalidReceiverError",
-                                "Only instances have fields.");
+            throw new LoxError("Only instances have fields.");
         }
         ((LoxInstance)obj).fields.put(name, value);
         return value; // assignment is an expression

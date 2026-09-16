@@ -1,0 +1,14 @@
+// Test for issue #253: undefined property on ordinary instance should be fatal
+// Both native and JVM should crash with exit code 1
+
+// CHECK: Exit code 1
+class Point {
+  init(x, y) {
+    this.x = x;
+    this.y = y;
+  }
+}
+
+var p = Point(1, 2);
+print p.bogusField;
+print "ERROR: should not reach here";

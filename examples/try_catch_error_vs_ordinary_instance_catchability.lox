@@ -1,0 +1,28 @@
+// Accessing undefined properties on different receiver types should have
+// different catchability: fatal for ordinary instances, catchable for Error
+// instances (which are caught values bound in catch blocks).
+
+// Case 1: Accessing undefined property on Error instance is catchable
+print "Case 1: Error instance undefined property";
+try {
+  // Trigger an error to get an Error instance
+  print undefinedVar;
+} catch (e) {
+  // e is an Error instance with .kind and .message fields
+  // Try accessing an undefined property - should be catchable
+  try {
+    print e.bogus;
+    print "ERROR: should not reach here";
+  } catch (e2) {
+    // This should succeed - undefined property on Error instance is catchable
+    print "caught: " + e2.kind;
+  }
+}
+
+print "Case 1 done";
+
+// Case 2: Note - ordinary instances with undefined properties would crash
+// and cannot be tested in a single exit-0 test file. See the fatal-by-design
+// probes test/translation-probes/48_try_catch_instance_undefined_property_fatal.lox
+
+print "after";
