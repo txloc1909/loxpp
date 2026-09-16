@@ -580,38 +580,93 @@ TEST_F(ModuloTest, ZeroDividend) {
 class StackOverflowTest : public ::testing::Test {};
 
 // Deep recursion that exceeds STACK_MAX should produce RUNTIME_ERROR, not
-// crash. The down(n) function declares 10 local variables per frame, causing
-// stack usage to grow faster than a simple counter. n=200 exceeds the 2048-slot
-// limit and must trigger VM::push's STACK_MAX guard.
+// crash. down(n) declares 20 local variables per frame (plus the callee slot
+// and the argument slot, 22 slots/frame), so its stack usage overtakes
+// FRAMES_MAX * 22 well before its frame count reaches FRAMES_MAX -- the
+// margin a many-locals recursion needs so this test still isolates
+// VM::push's STACK_MAX guard from the frame-count guard below, rather than
+// hitting whichever guard is reached first by coincidence. n=900 exceeds
+// the 16384-slot limit (900 * 22 = 19800) while its frame count (902) stays
+// well under FRAMES_MAX (1024).
 TEST_F(StackOverflowTest, DeepRecursionExceedsStackMax_RuntimeError) {
     VMTestHarness h;
     std::string src =
         "fun down(n) {"
         "  var a = 1; var b = 2; var c = 3; var d = 4; var e = 5;"
         "  var g = 6; var h = 7; var i = 8; var j = 9; var k = 10;"
-        "  if (n == 0) return a + b + c + d + e + g + h + i + j + k;"
+        "  var l = 11; var m = 12; var o = 13; var p = 14; var q = 15;"
+        "  var r = 16; var s = 17; var t = 18; var u = 19; var v = 20;"
+        "  if (n == 0) return a+b+c+d+e+g+h+i+j+k+l+m+o+p+q+r+s+t+u+v;"
         "  return down(n - 1);"
         "}"
-        "down(200);";
+        "down(900);";
     EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR);
     // Stack must be clean after a runtime error.
     EXPECT_EQ(h.stackDepth(), 0);
 }
 
-// Recursion at a safe depth (down(50)) must still succeed with correct result.
-// The guard must not reject a legitimate deep call chain. down(50) returns
-// the sum of its 10 local variables: 1+2+3+4+5+6+7+8+9+10 = 55.
+// Recursion at a safe depth (down(50)) must still succeed with correct
+// result. The guard must not reject a legitimate deep call chain. down(50)
+// returns the sum of its 20 local variables: 1+2+...+20 = 210.
 TEST_F(StackOverflowTest, SafeDepthRecursion_Succeeds) {
     VMTestHarness h;
     std::string src =
         "fun down(n) {"
         "  var a = 1; var b = 2; var c = 3; var d = 4; var e = 5;"
         "  var g = 6; var h = 7; var i = 8; var j = 9; var k = 10;"
-        "  if (n == 0) return a + b + c + d + e + g + h + i + j + k;"
+        "  var l = 11; var m = 12; var o = 13; var p = 14; var q = 15;"
+        "  var r = 16; var s = 17; var t = 18; var u = 19; var v = 20;"
+        "  if (n == 0) return a+b+c+d+e+g+h+i+j+k+l+m+o+p+q+r+s+t+u+v;"
         "  return down(n - 1);"
         "}"
         "down(50);";
     ASSERT_EQ(h.run(src), InterpretResult::OK);
-    EXPECT_EQ(h.lastResult(), from<Number>(55.0));
+    EXPECT_EQ(h.lastResult(), from<Number>(210.0));
+    EXPECT_EQ(h.stackDepth(), 0);
+}
+
+// down(n) here declares no locals, so its per-frame stack usage (2 slots:
+// the callee and the argument) never comes close to STACK_MAX; only
+// FRAMES_MAX bounds how deep it can go. 500 nested calls overflowed the old
+// 256-frame ceiling; this proves the new ceiling actually moved, not just
+// that some guard still fires eventually.
+TEST_F(StackOverflowTest, RecursionPastOldFramesMaxCeiling_Succeeds) {
+    VMTestHarness h;
+    std::string src = "fun down(n) {"
+                      "  if (n == 0) return 0;"
+                      "  return down(n - 1);"
+                      "}"
+                      "down(500);";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.lastResult(), from<Number>(0.0));
+    EXPECT_EQ(h.stackDepth(), 0);
+}
+
+// The script's own top-level call already occupies one of FRAMES_MAX's
+// CallFrame slots before down() is ever called (VM::interpret() pushes it
+// as frame 0), so a chain of N nested down() calls uses N+2 total frames.
+// N=1022 is the deepest chain that still fits under FRAMES_MAX=1024;
+// N=1023 must overflow it cleanly.
+TEST_F(StackOverflowTest, DeepestFramesMaxRecursion_Succeeds) {
+    VMTestHarness h;
+    std::string src = "fun down(n) {"
+                      "  if (n == 0) return 0;"
+                      "  return down(n - 1);"
+                      "}"
+                      "down(1022);";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.lastResult(), from<Number>(0.0));
+    EXPECT_EQ(h.stackDepth(), 0);
+}
+
+TEST_F(StackOverflowTest, DeepRecursionExceedsFramesMax_RuntimeError) {
+    VMTestHarness h;
+    std::string src = "fun down(n) {"
+                      "  if (n == 0) return 0;"
+                      "  return down(n - 1);"
+                      "}"
+                      "down(1023);";
+    EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR);
+    // Stack must be clean after a runtime error, same as the STACK_MAX path.
     EXPECT_EQ(h.stackDepth(), 0);
 }
