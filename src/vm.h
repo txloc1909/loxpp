@@ -64,6 +64,9 @@ class VM {
         return static_cast<int>(stackTop - stack);
     }
     [[nodiscard]] int frameCount() const { return m_frameCount; }
+    [[nodiscard]] int handlerStackDepth() const {
+        return static_cast<int>(m_handlerStack.size());
+    }
     [[nodiscard]] std::optional<Value> getGlobal(const std::string& name) const;
 
     // Sets the command-line arguments exposed to the program via args().
@@ -174,6 +177,15 @@ class VM {
     // Handler stack for try/catch — parallel to m_frames[].
     // m_handlerStack[i] records {frameCount, stackTop, catchIp} for the
     // i-th PUSH_HANDLER. THROW searches LIFO for a matching handler.
+    //
+    // INVARIANT(handler-stack-frame-scoped): every record's frameCount is
+    // the depth (m_frameCount) of the call frame whose still-open protected
+    // region pushed it. Any path that leaves that frame — not only THROW's
+    // own unwind, but also a plain RETURN taken before the region's
+    // POP_HANDLER runs — must discard every record with that frameCount
+    // before the frame's slot in m_frames[] can be reused. Otherwise a
+    // later throw at the same or a shallower depth can match a record whose
+    // stackTop/catchIp point into a frame and a chunk that no longer exist.
     std::vector<HandlerRecord> m_handlerStack;
 
     // Per-frame defer lists — parallel to m_frames[]. Each entry is a

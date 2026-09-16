@@ -1142,6 +1142,18 @@ InterpretResult VM::run(int stopAtFrameCount) {
         case Op::RETURN: {
             Value result = pop();
             closeUpvalues(frame->slots);
+            // See INVARIANT(handler-stack-frame-scoped) on m_handlerStack's
+            // declaration (vm.h): a still-open try/catch in this frame has
+            // no POP_HANDLER on the return path, so its record would
+            // otherwise survive the frame that pushed it. m_frameCount is
+            // still this frame's own depth here (it drops below), and
+            // nested protected regions opened by this same frame all share
+            // that depth, so the loop clears every one of them and stops at
+            // the first record belonging to an ancestor frame.
+            while (!m_handlerStack.empty() &&
+                   m_handlerStack.back().frameCount == m_frameCount) {
+                m_handlerStack.pop_back();
+            }
 #ifdef LOXPP_PROFILE
             // Destroy the function scope before decrementing frameCount so the
             // depth index still points to this frame's slot.
