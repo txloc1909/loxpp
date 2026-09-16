@@ -68,3 +68,7 @@ editors/tree-sitter-loxpp/build/
 editors/tree-sitter-loxpp/target/
 editors/tree-sitter-loxpp/Cargo.lock
 editors/tree-sitter-loxpp/*.wasm
+
+# Scratch files a translation-probes/*.lox program writes and reads back
+# during its own run — not a committed baseline like examples/*.output.
+test/translation-probes/*.tmp

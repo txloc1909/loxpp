@@ -1,7 +1,7 @@
 // Once close() returns, everything written through a File is visible to a
 // later open() on the same path (spec/05-stdlib.md, File section). Write two
 // lines, close, then open a fresh handle and read them back.
-var path = "/tmp/loxpp_probe_file_visible_after_close.tmp";
+var path = "test/translation-probes/48_file_visible_after_close.tmp";
 var w = open(path, "w");
 w.writeline("first");
 w.writeline("second");
