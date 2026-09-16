@@ -1,0 +1,30 @@
+// A catch-bound value discriminated by `match`, where an if/else picks
+// which variant gets thrown, followed by a sibling try/catch. The match's
+// own subject/result temporaries and the catch-bound identifier share the
+// same local-slot numbering the compiler hands out for every named local in
+// a function; a miscount in that numbering only becomes visible once a
+// later scope (here, the sibling try/catch) reuses a slot the miscount
+// left in a bad state. Parameterized so both if/else arms run.
+
+enum Shape { Circle(r) Square(side) }
+fun f(pickCircle) {
+    try {
+        if (pickCircle) { throw Circle(3); } else { throw Square(4); }
+    } catch (e) {
+        var described = match e {
+            case Circle(r)    => "caught a circle r=" + str(r)
+            case Square(side) => "caught a square side=" + str(side)
+            case _            => "caught something else"
+        };
+        print described;
+    }
+    try { throw "sibling-fault"; }
+    catch (e2) { print "sibling caught: " + e2; }
+}
+f(true);
+f(false);
+
+// CHECK: caught a circle r=3
+// CHECK: sibling caught: sibling-fault
+// CHECK: caught a square side=4
+// CHECK: sibling caught: sibling-fault

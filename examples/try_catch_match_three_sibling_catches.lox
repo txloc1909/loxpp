@@ -1,0 +1,36 @@
+// A match on a caught value, followed by three sibling try/catch blocks
+// (not just one). Each sibling's own catch-bound identifier gets a fresh
+// local slot; if the match inside the first catch leaves the compiler's
+// slot count wrong, every sibling after it reads or writes the wrong
+// stack cell, not only the first one.
+//
+// The try body throws through an if/else rather than a bare `throw`: an
+// if/else re-anchors the compiler's own operand-height counter on exit, so
+// this shape does not rely on an unrelated, unbalanced counter elsewhere
+// happening to cancel out the defect under test.
+
+enum Shape { Circle(r) Square(side) }
+fun f() {
+    try {
+        if (true) { throw Circle(3); } else { throw Square(4); }
+    } catch (e) {
+        var described = match e {
+            case Circle(r)    => "caught a circle r=" + str(r)
+            case Square(side) => "caught a square side=" + str(side)
+            case _            => "caught something else"
+        };
+        print described;
+    }
+    try { throw "first-fault"; }
+    catch (e1) { print "first caught: " + e1; }
+    try { throw "second-fault"; }
+    catch (e2) { print "second caught: " + e2; }
+    try { throw "third-fault"; }
+    catch (e3) { print "third caught: " + e3; }
+}
+f();
+
+// CHECK: caught a circle r=3
+// CHECK: first caught: first-fault
+// CHECK: second caught: second-fault
+// CHECK: third caught: third-fault

@@ -454,5 +454,8 @@ TEST(ToolingResolverCorpus, NoCrashAndFewWarnings) {
     // caught value around. Raised again, 36 -> 52, after rebasing onto
     // PR #246 (which added 13 more examples with 16 more catch-binding
     // warnings) for a total of 149 corpus files.
-    EXPECT_LE(totalWarnings, 52u);
+    // Raised again, 52 -> 67, for 6 more match-in-catch regression examples
+    // (15 more catch-bound identifiers hitting the same tracked gap) for a
+    // total of 155 corpus files.
+    EXPECT_LE(totalWarnings, 67u);
 }
