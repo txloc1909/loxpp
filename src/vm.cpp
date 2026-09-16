@@ -155,6 +155,18 @@ void VM::closeUpvalues(Value* last) {
     }
 }
 
+void VM::popHandlersOwnedByCurrentFrame() {
+    // m_frameCount is still the depth of the frame being left here — see
+    // INVARIANT(handler-stack-frame-scoped) on m_handlerStack's declaration
+    // (vm.h). Nested protected regions opened by this same frame all share
+    // that depth, so the loop clears every one of them and stops at the
+    // first record belonging to an ancestor frame.
+    while (!m_handlerStack.empty() &&
+           m_handlerStack.back().frameCount == m_frameCount) {
+        m_handlerStack.pop_back();
+    }
+}
+
 InterpretResult VM::runPendingDefers(int frameIndex, int stopAtFrameCount) {
     // Run every deferred call for m_frames[frameIndex], LIFO (most recently
     // recorded first). Each one runs to completion — via a nested run() that
@@ -1142,18 +1154,11 @@ InterpretResult VM::run(int stopAtFrameCount) {
         case Op::RETURN: {
             Value result = pop();
             closeUpvalues(frame->slots);
-            // See INVARIANT(handler-stack-frame-scoped) on m_handlerStack's
-            // declaration (vm.h): a still-open try/catch in this frame has
-            // no POP_HANDLER on the return path, so its record would
-            // otherwise survive the frame that pushed it. m_frameCount is
-            // still this frame's own depth here (it drops below), and
-            // nested protected regions opened by this same frame all share
-            // that depth, so the loop clears every one of them and stops at
-            // the first record belonging to an ancestor frame.
-            while (!m_handlerStack.empty() &&
-                   m_handlerStack.back().frameCount == m_frameCount) {
-                m_handlerStack.pop_back();
-            }
+            // A defer-free function has no RUN_DEFERS, so this is the only
+            // place its own stale records get discarded. A function with
+            // defers already had this done by RUN_DEFERS below, before its
+            // defers ran; this is then a no-op.
+            popHandlersOwnedByCurrentFrame();
 #ifdef LOXPP_PROFILE
             // Destroy the function scope before decrementing frameCount so the
             // depth index still points to this frame's slot.
@@ -1638,6 +1643,15 @@ InterpretResult VM::run(int stopAtFrameCount) {
         }
         case Op::RUN_DEFERS: {
             int frameIndex = m_frameCount - 1;
+            // The compiler emits RUN_DEFERS only immediately before RETURN,
+            // in the same frame, so this is a return leaving this frame —
+            // see INVARIANT(handler-stack-frame-scoped) on m_handlerStack's
+            // declaration (vm.h). This frame's own stale records must be
+            // gone BEFORE its defers run, not only at the RETURN below:
+            // otherwise a defer that throws here would still match this
+            // frame's own (already-exited) protected region instead of
+            // unwinding to the real caller.
+            popHandlersOwnedByCurrentFrame();
             // Flush ip into frame->ip first: runPendingDefers may run
             // arbitrary Lox++ code (each deferred call, to completion), and
             // a runtimeError() raised inside it must see this frame's

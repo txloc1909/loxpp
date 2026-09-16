@@ -14,6 +14,11 @@
 //   3. `defer` registered before a `return` taken from inside an open try
 //      still runs, in LIFO order, and does not itself leave a stale
 //      handler record.
+//   4. A defer that itself throws, when run because of a `return` out of
+//      an open try, is not caught by that same try — the record it would
+//      otherwise wrongly match is already gone by the time the defer
+//      runs — and any earlier-registered defer still runs during the
+//      resulting unwind.
 
 #include "test_harness.h"
 #include <gtest/gtest.h>
@@ -148,6 +153,65 @@ TEST_F(HandlerStackLeakTest, LaterThrowAtSameFrameDepthUsesItsOwnHandler) {
               InterpretResult::OK);
     EXPECT_EQ(h.handlerStackDepth(), 0);
     EXPECT_EQ(h.getGlobalStr("log"), "h-catch:h-fault;");
+}
+
+TEST_F(HandlerStackLeakTest, DeferThrowDuringReturnFromOpenTryEscapesToCaller) {
+    // The frame's own catch belongs to a try that a `return` already left.
+    // A defer registered before that return, if it throws, must not be
+    // caught by that same try — see INVARIANT(handler-stack-frame-scoped)
+    // on m_handlerStack's declaration.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        fun boom() { throw "from-defer"; }
+        fun g() {
+            defer boom();
+            try {
+                return "early";
+            } catch (e) { log = log + "g-wrongly-caught:" + e + ";"; }
+        }
+        try {
+            var r = g();
+            log = log + "g-returned:" + r + ";";
+        } catch (e) {
+            log = log + "outer-caught:" + e + ";";
+        }
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+    EXPECT_EQ(h.getGlobalStr("log"), "outer-caught:from-defer;");
+}
+
+TEST_F(HandlerStackLeakTest,
+       DeferThrowMidListDuringReturnFromOpenTryStillDrainsEarlierDefers) {
+    // Same shape as DeferThrowDuringReturnFromOpenTryEscapesToCaller, but
+    // with a defer registered before the one that throws. LIFO order runs
+    // the throwing defer first; the earlier-registered one must still run
+    // during the resulting unwind (defer's own "always runs" rule), and the
+    // throw must still reach the caller's handler, not the frame's own.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var trace = "";
+        fun mark(msg) { trace = trace + msg; }
+        fun boom() { throw "from-defer"; }
+        fun g() {
+            defer mark("first;");
+            defer boom();
+            try {
+                return "early";
+            } catch (e) { trace = trace + "g-wrongly-caught:" + e + ";"; }
+        }
+        var caught = "";
+        try {
+            g();
+        } catch (e) {
+            caught = e;
+        }
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+    EXPECT_EQ(h.getGlobalStr("caught"), "from-defer");
+    EXPECT_EQ(h.getGlobalStr("trace"), "first;");
 }
 
 TEST_F(HandlerStackLeakTest, LaterUncaughtThrowAtSameFrameDepthStaysUncaught) {

@@ -143,6 +143,15 @@ class VM {
     void defineNatives();
     ObjUpvalue* captureUpvalue(Value* local);
     void closeUpvalues(Value* last);
+    // Discards every m_handlerStack record whose frameCount equals the
+    // frame at depth m_frameCount (the frame about to be left) — see
+    // INVARIANT(handler-stack-frame-scoped) on m_handlerStack's
+    // declaration. Called from both Op::RETURN (the only exit for a
+    // defer-free function) and Op::RUN_DEFERS (which always runs before
+    // Op::RETURN in the same frame, so its own defers must not observe a
+    // record this frame no longer owns). A frame with no open region does
+    // nothing here; POP_HANDLER already removed its records.
+    void popHandlersOwnedByCurrentFrame();
     void runtimeError(const char* format, ...);
     void markRoots();
 
