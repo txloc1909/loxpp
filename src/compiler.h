@@ -46,8 +46,10 @@ struct Upvalue {
 };
 
 struct LoopContext {
-    int start;      // LOOP target: condition (while) or increment (for)
-    int localCount; // m_localCount at loop entry, for cleanup POPs
+    int start;        // LOOP target: condition (while) or increment (for)
+    int localCount;   // m_localCount at loop entry, for cleanup POPs
+    int handlerCount; // m_openHandlerCount at loop entry, for cleanup
+                      // POP_HANDLERs
     std::vector<int>
         breakJumps; // JUMP placeholder offsets to patch on loop exit
 };
@@ -102,9 +104,10 @@ class Compiler {
         int bindingCount; // locals pushed by the pattern
         bool isUnguardedCatchAll;           // true → suppress MATCH_ERROR
         std::vector<std::string> ctorNames; // constructors matched by this arm
+        int armHandlerBase;                 // m_openHandlerCount at arm start
     };
     MatchArmResult compileMatchArm(int subjectSlot, int armLocalBase,
-                                   int resultSlot,
+                                   int armHandlerBase, int resultSlot,
                                    bool skipPatternCheck = false);
     void varDeclaration();
     void block();
@@ -152,7 +155,7 @@ class Compiler {
     int emitJump(Op op);
     void patchJump(int offset);
     void emitLoop(int loopStart);
-    void emitLoopCleanup(int targetLocalCount);
+    void emitLoopCleanup(int targetLocalCount, int targetHandlerCount);
 
     uint16_t makeConstant(Value value);
     uint16_t identifierConstant(const Token& name);
@@ -215,6 +218,10 @@ class Compiler {
     // for method calls so they compile as GET_PROPERTY + CALL instead, allowing
     // CALL to be patched to DEFER_RECORD without special INVOKE handling.
     bool m_disableInvokeFusion{false};
+    // Count of currently-open handler records in the bytecode; incremented by
+    // tryStatement() after PUSH_HANDLER, decremented after POP_HANDLER. Used
+    // by break/continue to emit the correct number of cleanup POP_HANDLER ops.
+    int m_openHandlerCount{0};
 
     Local m_locals[UINT8_COUNT];
     int m_localCount{0};
