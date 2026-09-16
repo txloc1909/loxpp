@@ -453,6 +453,8 @@ TEST(ToolingResolverCorpus, NoCrashAndFewWarnings) {
     // unused-local warnings for `r`/`m` in the examples that keep the
     // caught value around. Raised again, 36 -> 52, after rebasing onto
     // PR #246 (which added 13 more examples with 16 more catch-binding
-    // warnings) for a total of 149 corpus files.
-    EXPECT_LE(totalWarnings, 52u);
+    // warnings) for a total of 149 corpus files. Raised again, 52 -> 54,
+    // for one more example with two `catch (e)` bindings hitting the same
+    // tracked gap, for a total of 150 corpus files.
+    EXPECT_LE(totalWarnings, 54u);
 }
