@@ -408,6 +408,10 @@ examples=(
     # `return` inside a try body.
     "examples/try_catch_return_in_catch_no_sibling.lox"
     "examples/try_catch_return_in_live_try_body.lox"
+    # A return taken from inside a still-open try must not leave a stale
+    # handler that a later, unrelated throw at the same call-frame depth
+    # could match instead of its own handler.
+    "examples/try_catch_return_then_sibling_throw.lox"
     # A [Reviewer] round found resolveRegions()'s catchEndLine computed by
     # scanning forward from catchStartLine for the FIRST CFG label — which
     # cannot tell "the label marking this handler's own true end" apart

@@ -461,5 +461,8 @@ TEST(ToolingResolverCorpus, NoCrashAndFewWarnings) {
     // catch body whose own last statement is a bare rethrow (4 more
     // catch-bound identifiers hitting the same tracked gap) for a total of
     // 156 corpus files.
-    EXPECT_LE(totalWarnings, 71u);
+    // Raised again, 71 -> 73, after rebasing onto the return-handler-stack-
+    // leak fix (which added 1 more example with two `catch (e)` bindings
+    // hitting the same tracked gap), for a total of 157 corpus files.
+    EXPECT_LE(totalWarnings, 73u);
 }

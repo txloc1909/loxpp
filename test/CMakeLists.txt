@@ -130,6 +130,8 @@ loxpp_add_test(test_backend_abstract_stack test_backend_abstract_stack.cpp
                                                             CORE loxpp_test_core PROBE)
 loxpp_add_test(test_backend_capture test_backend_capture.cpp CORE loxpp_test_core PROBE)
 loxpp_add_test(test_nonlocal_cfg    test_nonlocal_cfg.cpp    CORE loxpp_test_core PROBE)
+loxpp_add_test(test_handler_stack_leak    test_handler_stack_leak.cpp CORE loxpp_test_core)
+loxpp_add_test(test_handler_stack_leak_gc test_handler_stack_leak.cpp CORE loxpp_test_core)
 loxpp_add_test(test_jvm_emit        test_jvm_emit.cpp        CORE loxpp_test_core PROBE)
 loxpp_add_test(test_clr_emit        test_clr_emit.cpp        CORE loxpp_test_core PROBE)
 loxpp_add_test(test_stringify_depth_guard test_stringify_depth_guard.cpp
@@ -166,7 +168,7 @@ add_test(NAME TestMain COMMAND test_main)
 set(LOXPP_GC_STRESS_TARGETS
     test_reflect_api_gc test_stress_gc test_gc_regression test_list_gc
     test_map_gc test_enum_gc test_class_pattern_gc test_or_pattern_gc
-    test_list_pattern_gc test_at_binding_gc)
+    test_list_pattern_gc test_at_binding_gc test_handler_stack_leak_gc)
 
 # Register each GTest case as its own CTest test so `ctest -j` parallelizes
 # within a binary, not just across binaries. The per-target prefix keeps names
@@ -182,7 +184,8 @@ set(LOXPP_GTEST_TARGETS
     test_or_pattern test_or_pattern_gc test_seq_destructure test_list_pattern
     test_list_pattern_gc test_at_binding test_at_binding_gc test_profiler
     test_chunk_decoder test_backend_cfg test_backend_abstract_stack
-    test_backend_capture test_nonlocal_cfg test_jvm_emit test_clr_emit
+    test_backend_capture test_nonlocal_cfg test_handler_stack_leak
+    test_handler_stack_leak_gc test_jvm_emit test_clr_emit
     test_stringify_depth_guard
     test_check_diagnostics test_tooling_parser test_tooling_resolver)
 if(LOXPP_LSP)
