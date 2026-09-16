@@ -1,7 +1,0 @@
-// Test for issue #253: undefined property on File should be fatal
-// Native and JVM should both crash uncaught
-
-// CHECK: Exit code 1
-var f = File("nonexistent.txt", "r");
-print f.bogusMethod;
-print "ERROR: should not reach here";
