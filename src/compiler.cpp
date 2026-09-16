@@ -2057,6 +2057,13 @@ void Compiler::tryStatement() {
     // the local variable slot.
     emitBytes(Op::SET_LOCAL, static_cast<uint8_t>(m_localCount - 1));
     markInitialized();
+    // The catch variable's cell was placed on the runtime stack by the VM's
+    // throw-unwind (handleThrow in vm.cpp), not by a compiler-emitted push,
+    // so trackOperandStack() never counted it. Sync the height the same way
+    // parseFunction() does for caller-pushed arguments, or every operand-
+    // depth computation taken from inside this scope (e.g. compileMatchBody's
+    // sibling-operand count) undercounts by one.
+    m_stackHeight = m_localCount;
 
     block();
     endScope();
