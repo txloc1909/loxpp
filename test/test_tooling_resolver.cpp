@@ -465,7 +465,10 @@ TEST(ToolingResolverCorpus, NoCrashAndFewWarnings) {
     // leak fix (which added 1 more example with two `catch (e)` bindings
     // hitting the same tracked gap), for a total of 157 corpus files.
     // Unchanged at 73 after rebasing onto the File after-close visibility
-    // probe (issue #251): it binds no `catch`, so it adds no warning, for a
-    // total of 158 corpus files.
-    EXPECT_LE(totalWarnings, 73u);
+    // probe (issue #251): it binds no `catch`, so it adds no warning; new
+    // #253/#254 probes (try_catch_class_constructor_arity,
+    // try_catch_error_instance_properties_catchable,
+    // try_catch_error_vs_ordinary_instance_catchability) add 9 warnings total,
+    // for a new budget of 82 warnings across 165 corpus files.
+    EXPECT_LE(totalWarnings, 82u);
 }
