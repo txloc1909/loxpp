@@ -442,16 +442,17 @@ TEST(ToolingResolverCorpus, NoCrashAndFewWarnings) {
     // a local declared in a catch body immediately followed by a sibling
     // try/catch) — 4 more bindings, same tracked gap. Raised to 29 for the
     // test_error_kind_message.lox corpus example (6 undefined variable
-    // warnings). Raised again, 29 -> 36, for 5 X7 round-3 regression
-    // examples (test_empty_list_pop_try.lox, test_enum_arity_try.lox,
-    // test_invalid_map_key_try.lox, test_nan_key_try.lox,
-    // test_stringify_depth_guard.lox): 5 more `catch (e)` bindings hitting
-    // the same tracked #233 gap (test_stringify_depth_guard.lox's own
-    // `catch (e)` was added by the X7 referee pass to actually exercise the
-    // depth guard, replacing a version of the example that never triggered
-    // it and had no catch block), plus 2 unused-local warnings for `r`/`m`
-    // in the examples that keep the caught value around. Raised again, 36 ->
-    // 52, after rebasing onto X6 (which added 13 more examples with 16 more
-    // catch-binding warnings) for a total of 149 corpus files.
+    // warnings). Raised again, 29 -> 36, for 5 bootstrap-interpreter
+    // regression examples added in PR #245 (test_empty_list_pop_try.lox,
+    // test_enum_arity_try.lox, test_invalid_map_key_try.lox,
+    // test_nan_key_try.lox, test_stringify_depth_guard.lox): 5 more
+    // `catch (e)` bindings hitting the same tracked #233 gap
+    // (test_stringify_depth_guard.lox's own `catch (e)` was rewritten in
+    // PR #245 to actually exercise the depth guard, replacing a version of
+    // the example that never triggered it and had no catch block), plus 2
+    // unused-local warnings for `r`/`m` in the examples that keep the
+    // caught value around. Raised again, 36 -> 52, after rebasing onto
+    // PR #246 (which added 13 more examples with 16 more catch-binding
+    // warnings) for a total of 149 corpus files.
     EXPECT_LE(totalWarnings, 52u);
 }
