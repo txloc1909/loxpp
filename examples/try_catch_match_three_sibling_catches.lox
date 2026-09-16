@@ -4,10 +4,7 @@
 // slot count wrong, every sibling after it reads or writes the wrong
 // stack cell, not only the first one.
 //
-// The try body throws through an if/else rather than a bare `throw`: an
-// if/else re-anchors the compiler's own operand-height counter on exit, so
-// this shape does not rely on an unrelated, unbalanced counter elsewhere
-// happening to cancel out the defect under test.
+// The try body throws through an if/else so both arms are exercised.
 
 enum Shape { Circle(r) Square(side) }
 fun f() {

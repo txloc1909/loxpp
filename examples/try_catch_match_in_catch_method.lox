@@ -4,10 +4,7 @@
 // function's — any local-slot miscount that only shows up at a specific
 // slot number could hide at a shifted offset instead of reproducing.
 //
-// The try body throws through an if/else rather than a bare `throw`: an
-// if/else re-anchors the compiler's own operand-height counter on exit, so
-// this shape does not rely on an unrelated, unbalanced counter elsewhere
-// happening to cancel out the defect under test.
+// The try body throws through an if/else so both arms are exercised.
 
 enum Shape { Circle(r) Square(side) }
 class Handler {

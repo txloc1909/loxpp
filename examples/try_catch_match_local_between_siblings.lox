@@ -3,10 +3,7 @@
 // keeps the slot the compiler gave it — the match-in-catch miscount must
 // not displace a local that has nothing to do with `match` or `catch`.
 //
-// The try body throws through an if/else rather than a bare `throw`: an
-// if/else re-anchors the compiler's own operand-height counter on exit, so
-// this shape does not rely on an unrelated, unbalanced counter elsewhere
-// happening to cancel out the defect under test.
+// The try body throws through an if/else so both arms are exercised.
 
 enum Shape { Circle(r) Square(side) }
 fun f() {
