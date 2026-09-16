@@ -896,6 +896,7 @@ class Resolver {
         case SymbolKind::Method:
         case SymbolKind::Field:
         case SymbolKind::EnumCtor:
+        case SymbolKind::CatchVar:
         case SymbolKind::MatchBinding:
             return false;
         }

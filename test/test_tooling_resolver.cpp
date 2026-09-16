@@ -608,8 +608,10 @@ TEST(ToolingResolverCorpus, NoCrashAndFewWarnings) {
     // total of 158 corpus files. Raised to 82 for #253/#254 probes
     // (try_catch_class_constructor_arity, try_catch_error_instance_properties_
     // catchable, try_catch_error_vs_ordinary_instance_catchability), adding 9
-    // warnings across 165 corpus files. With try/catch/throw/defer tooling
-    // support landing (issue #233), those 9 new catch-binding examples now
-    // resolve correctly too, dropping the total significantly.
-    EXPECT_LE(totalWarnings, 82u);
+    // warnings across 165 corpus files. Dropped from 82 -> 8 after implementing
+    // try/catch/throw/defer support in the tooling resolver (issue #233): all
+    // 74 false "unknown name" warnings for catch-bound identifiers across the
+    // entire merged corpus (from PR #232 examples + PR #278's new probes) now
+    // resolve correctly; the remaining 8 warnings are unrelated.
+    EXPECT_LE(totalWarnings, 8u);
 }
