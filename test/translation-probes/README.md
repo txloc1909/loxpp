@@ -77,6 +77,7 @@ each has an off-the-shelf solution.
 | `45_reflect_methods_non_instance` | `methods()` on a non-Class argument is a runtime error on every backend — an `error_probes` entry | none (error-parity gate) |
 | `46_reflect_callmethod_non_instance` | `callMethod()` on a non-Instance receiver is a runtime error on every backend — an `error_probes` entry | none (error-parity gate) |
 | `47_reflect_callmethod_closure_method` | `callMethod()`'s v1 natives-only restriction must reject a closure-backed method identically on all three backends, even though JVM/CLR have no technical need for the restriction themselves (`notes/expressiveness-roadmap.md` item 1) — an `error_probes` entry | none (error-parity gate) |
+| `48_file_visible_after_close` | a File's write-close-reopen cycle: once `close()` returns, a fresh `open()` on the same path sees everything the closed handle wrote (`spec/05-stdlib.md`, File section) — pins the after-close half of the visibility guarantee, not the buffered-before-close half, which is implementation-defined and allowed to differ | none (parity gate) |
 | `clr-only/35_folded_match_deficit_two_plus` | `normalizeFoldedOperands`'s own multi-slot repair with a fold deficit of two or more (`ADD`, `CALL`, `BUILD_LIST`, `BUILD_MAP`), plus two folded slots that are also captured-closure slots — CLR-only, see the note below the table | P8 |
 | `V1_fresh_cell` | body-local captured in a loop → **fresh cell/iter** → prints `0 1 2` | P4 |
 | `V2_shared` | mutable shared upvalue → prints `2` | P4 |
