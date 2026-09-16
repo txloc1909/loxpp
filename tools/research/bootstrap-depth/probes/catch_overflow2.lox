@@ -1,0 +1,10 @@
+fun f(n) { return f(n + 1); }
+try {
+    f(0);
+    print "no error";
+} catch (e) {
+    print "caught";
+    print e == nil;
+    print type(e);
+}
+print "after";

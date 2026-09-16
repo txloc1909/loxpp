@@ -1,0 +1,2 @@
+fun f(n) { return match n { case 0 => 0 case _ => f(n - 1) }; }
+print f(__N__);

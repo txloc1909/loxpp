@@ -1,0 +1,3 @@
+class C { init(n) { if (n > 0) { C(n - 1); } } }
+C(__N__);
+print "ok";

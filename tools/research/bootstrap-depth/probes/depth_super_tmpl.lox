@@ -1,0 +1,3 @@
+class A { m(n) { if (n == 0) return 0; return this.m(n - 1); } }
+class B < A { m(n) { return super.m(n); } }
+print B().m(__N__);

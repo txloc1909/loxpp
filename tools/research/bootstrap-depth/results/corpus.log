@@ -1,0 +1,19 @@
+### baseline bootstrap/lox_wrapper.sh
+PASS  wc.lox  (2 checks)
+PASS  word_freq.lox  (2 checks)
+
+88 passed, 0 failed, 12 skipped
+
+real	0m2.725s
+user	0m2.149s
+sys	0m0.835s
+### prototype wrapper (T=110)
+PASS  wc.lox  (2 checks)
+PASS  word_freq.lox  (2 checks)
+
+87 passed, 1 failed, 12 skipped
+
+real	0m2.544s
+user	0m2.056s
+sys	0m0.756s
+CORPUS_DONE

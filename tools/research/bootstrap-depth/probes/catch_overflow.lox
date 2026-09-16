@@ -1,0 +1,9 @@
+fun f(n) { return f(n + 1); }
+try {
+    f(0);
+    print "no error";
+} catch (e) {
+    print "caught " + e.kind;
+    print e.message;
+}
+print "after";

@@ -1,0 +1,2 @@
+fun deep(d) { if (d == 0) { return __E__; } return deep(d - 1); }
+print deep(__D__);
