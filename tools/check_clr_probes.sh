@@ -413,6 +413,10 @@ examples=(
     # `return` inside a try body.
     "examples/try_catch_return_in_catch_no_sibling.lox"
     "examples/try_catch_return_in_live_try_body.lox"
+    # A return taken from inside a still-open try must not leave a stale
+    # handler that a later, unrelated throw at the same call-frame depth
+    # could match instead of its own handler.
+    "examples/try_catch_return_then_sibling_throw.lox"
     # A [Reviewer] round found resolveRegions()'s catchEndLine computed by
     # scanning forward from catchStartLine for the FIRST CFG label — which
     # cannot tell "the label marking this handler's own true end" apart
@@ -457,6 +461,20 @@ examples=(
     "examples/test_invalid_map_key_try.lox"
     "examples/test_nan_key_try.lox"
     "examples/test_stringify_depth_guard.lox"
+    # A `match` on a value bound by `catch`, plus a sibling try/catch after
+    # it: the compiler's own local-slot accounting for a catch-bound value
+    # and for match's temporaries inside that catch block, checked on
+    # several shapes (branch-selected throw, a closure capture, a method,
+    # an ordinary local declared between two siblings, three siblings, a
+    # wildcard-guard-only match, and a catch body whose own last statement
+    # is a bare rethrow).
+    "examples/try_catch_match_branch_throw_sibling.lox"
+    "examples/try_catch_match_in_catch_closure.lox"
+    "examples/try_catch_match_in_catch_method.lox"
+    "examples/try_catch_match_local_between_siblings.lox"
+    "examples/try_catch_match_three_sibling_catches.lox"
+    "examples/try_catch_match_wildcard_guard_only.lox"
+    "examples/try_catch_match_after_bare_rethrow.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

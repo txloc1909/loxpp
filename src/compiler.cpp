@@ -2057,6 +2057,13 @@ void Compiler::tryStatement() {
     // the local variable slot.
     emitBytes(Op::SET_LOCAL, static_cast<uint8_t>(m_localCount - 1));
     markInitialized();
+    // The catch variable's cell was placed on the runtime stack by the VM's
+    // throw-unwind (handleThrow in vm.cpp), not by a compiler-emitted push,
+    // so trackOperandStack() never counted it. Sync the height the same way
+    // parseFunction() does for caller-pushed arguments, or every operand-
+    // depth computation taken from inside this scope (e.g. compileMatchBody's
+    // sibling-operand count) undercounts by one.
+    m_stackHeight = m_localCount;
 
     block();
     endScope();
@@ -2275,6 +2282,8 @@ void Compiler::trackOperandStack(Op op) {
     case Op::DEFINE_GLOBAL:
     case Op::CLOSE_UPVALUE:
     case Op::RETURN:
+    case Op::THROW: // pops the thrown value (vm.cpp: pop() before
+                    // handleThrow), mirroring RETURN's own accounting
     case Op::DEFINE_METHOD:
     case Op::INHERIT:
     case Op::JUMP_TABLE:
@@ -2296,9 +2305,6 @@ void Compiler::trackOperandStack(Op op) {
     case Op::RUN_DEFERS:
         // These operate on separate stacks (handler stack, defer list),
         // not the value stack.
-        break;
-    case Op::THROW:
-        // THROW is terminal (like RETURN). Stack height is irrelevant.
         break;
     case Op::DEFER_RECORD:
         // DEFER_RECORD pops callee and args, with argc as operand.

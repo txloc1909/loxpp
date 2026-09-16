@@ -1,0 +1,30 @@
+// The match-in-catch-plus-sibling-try/catch shape, inside a closure that
+// captures an outer local. Capture analysis reads the same compiler slot
+// numbers a local-slot miscount would corrupt, so a captured variable is
+// the sharpest way to show a bad slot count also breaks closures, not only
+// plain reads of a local.
+//
+// The try body throws through an if/else so both arms are exercised.
+
+enum Shape { Circle(r) Square(side) }
+fun makeHandler(label) {
+    fun run() {
+        try {
+            if (true) { throw Circle(3); } else { throw Square(4); }
+        } catch (e) {
+            var described = match e {
+                case Circle(r)    => "caught a circle r=" + str(r)
+                case Square(side) => "caught a square side=" + str(side)
+                case _            => "caught something else"
+            };
+            print label + ": " + described;
+        }
+        try { throw "sibling-fault"; }
+        catch (e2) { print label + " sibling caught: " + e2; }
+    }
+    return run;
+}
+makeHandler("h1")();
+
+// CHECK: h1: caught a circle r=3
+// CHECK: h1 sibling caught: sibling-fault

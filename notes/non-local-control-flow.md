@@ -12,10 +12,9 @@ every return, and there is no cleanup-on-unwind — which is also why
 destructor must never be relied on to close file handles, since GC timing is
 non-deterministic.
 
-This is a design record, not a backlog list — see
-`notes/missions/2026-09-non-local-control-flow/` (or its eventual successor)
-and the tracking issue for the actionable node breakdown, per `AGENTS.md`'s
-"file it, don't list it."
+This is a design record, not a backlog list — see the tracking issue
+(`#223`) for the actionable node breakdown, per `AGENTS.md`'s "file it,
+don't list it."
 
 ## Current architecture (verified in-repo)
 
@@ -251,4 +250,4 @@ breakdown.
 
 ## Shipped
 
-**Mission #223: non-local control flow (`try`/`catch`/`throw`/`defer`) — DONE.** All four Lox++ implementations (native VM, JVM backend, CLR backend, and the self-hosted bootstrap interpreter) implement `try`/`catch`/`throw`/`defer`, with cross-backend differential-test coverage (`tools/diff_runtimes.py`) proving they agree. The `ObjFile` file-handle leak is closed using `defer`. Closes `notes/expressiveness-roadmap.md` item 3. Seven PRs landed the work: #230–#232, #236–#237, #245–#246, plus a follow-up CLR fault-kind fix in #252. See `notes/missions/2026-09-non-local-control-flow/` for the mission's own planning record (not git-tracked — see that directory's own convention).
+**Mission #223: non-local control flow (`try`/`catch`/`throw`/`defer`) — DONE.** All four Lox++ implementations (native VM, JVM backend, CLR backend, and the self-hosted bootstrap interpreter) implement `try`/`catch`/`throw`/`defer`, with cross-backend differential-test coverage (`tools/diff_runtimes.py`) proving they agree. The `ObjFile` file-handle leak is closed using `defer`. Closes `notes/expressiveness-roadmap.md` item 3. Seven PRs landed the work: #230–#232, #236–#237, #245–#246, plus a follow-up CLR fault-kind fix in #252. The mission's own day-to-day planning record was kept in a per-mission working directory outside the repository (`notes/multi-agent-playbook.md`'s "The harness": a mission run's `brief.md` and `nodes/*.md` live at a `missionDir` host path, not in git); that directory is gone now that the mission is closed. The PR list above and tracking issue `#223` are the durable record.

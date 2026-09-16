@@ -64,6 +64,9 @@ class VM {
         return static_cast<int>(stackTop - stack);
     }
     [[nodiscard]] int frameCount() const { return m_frameCount; }
+    [[nodiscard]] int handlerStackDepth() const {
+        return static_cast<int>(m_handlerStack.size());
+    }
     [[nodiscard]] std::optional<Value> getGlobal(const std::string& name) const;
 
     // Sets the command-line arguments exposed to the program via args().
@@ -140,6 +143,15 @@ class VM {
     void defineNatives();
     ObjUpvalue* captureUpvalue(Value* local);
     void closeUpvalues(Value* last);
+    // Discards every m_handlerStack record whose frameCount equals the
+    // frame at depth m_frameCount (the frame about to be left) — see
+    // INVARIANT(handler-stack-frame-scoped) on m_handlerStack's
+    // declaration. Called from both Op::RETURN (the only exit for a
+    // defer-free function) and Op::RUN_DEFERS (which always runs before
+    // Op::RETURN in the same frame, so its own defers must not observe a
+    // record this frame no longer owns). A frame with no open region does
+    // nothing here; POP_HANDLER already removed its records.
+    void popHandlersOwnedByCurrentFrame();
     void runtimeError(const char* format, ...);
     void markRoots();
 
@@ -174,6 +186,18 @@ class VM {
     // Handler stack for try/catch — parallel to m_frames[].
     // m_handlerStack[i] records {frameCount, stackTop, catchIp} for the
     // i-th PUSH_HANDLER. THROW searches LIFO for a matching handler.
+    //
+    // INVARIANT(handler-stack-frame-scoped): on the RETURN exit path (with
+    // or without pending defers), every record with frameCount equal to
+    // the frame being left is discarded before that frame's slot in
+    // m_frames[] is reused, and before any of that frame's own defers run.
+    // Otherwise a later throw at the same or a shallower depth — including
+    // one raised by the frame's own deferred call — can match a record
+    // whose stackTop/catchIp point into a frame and a chunk that no longer
+    // exist, or into a protected region the return statement already left.
+    // This does not yet hold for every non-local exit: a `break` or
+    // `continue` that leaves a still-open protected region also skips
+    // POP_HANDLER, and that path does not discard the record.
     std::vector<HandlerRecord> m_handlerStack;
 
     // Per-frame defer lists — parallel to m_frames[]. Each entry is a

@@ -1,0 +1,33 @@
+// A catch body whose LAST statement is a bare `throw` (a plain rethrow of
+// the caught value, no `if`/`else` around it), with a `match` later in the
+// same function. Every sibling example in this set wraps its `throw` in
+// `if`/`else`, which re-anchors the compiler's own operand-height counter
+// on its own and so cannot exercise this path. `Op::THROW` pops the
+// thrown value off the runtime stack (vm.cpp's handleThrow), so the
+// compiler's own tracked height must fall by one there too, the same way
+// it already does for `return`. The catch block's bytecode is compiled
+// whether or not a given call ever reaches it, so a miscount here also
+// corrupts the branch that never throws.
+
+fun f(shouldThrow) {
+    try {
+        if (shouldThrow) { throw "boom"; }
+    } catch (e) {
+        print "caught: " + e;
+        throw e;
+    }
+    print match 1 {
+        case 1 => "one"
+        case _ => "other"
+    };
+    try { throw "sibling-fault"; }
+    catch (e2) { print "sibling caught: " + e2; }
+}
+
+try { f(true); } catch (e) { print "outer caught: " + e; }
+f(false);
+
+// CHECK: caught: boom
+// CHECK: outer caught: boom
+// CHECK: one
+// CHECK: sibling caught: sibling-fault

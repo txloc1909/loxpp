@@ -24,25 +24,40 @@ export const meta = {
 // ---------------------------------------------------------------------------
 // Mission configuration — supplied by the caller via `args`, not hardcoded.
 // See notes/multi-agent-playbook.md for what each of these means and for the
-// node specification structure `missionDir/nodes/<id>.md` must follow.
+// node specification shape (a GitHub issue's body: Deliverable, Scope,
+// Checkpoint, Hazards) that `gh issue view <n> --comments` must return.
 // ---------------------------------------------------------------------------
 
 const cfg = args || {}
 
-if (!cfg.missionDir) {
+if (!cfg.missionIssue) {
   throw new Error(
-    'backend-dag: args.missionDir is required — an absolute path to a durable ' +
-    'directory holding brief.md and nodes/*.md. Never point this at /tmp: on ' +
-    'some hosts it is a memory filesystem a service cleans, and an agent that ' +
-    'loses its instructions this way tends not to notice, let alone report it.'
+    'backend-dag: args.missionIssue is required — the tracking issue number ' +
+    'that sequences this mission\'s nodes. The stage order and node-to-issue ' +
+    'mapping live there, not in a local file.'
+  )
+}
+if (!cfg.briefPath) {
+  throw new Error(
+    'backend-dag: args.briefPath is required — an absolute path, inside this ' +
+    'repository, to the mission brief (e.g. notes/missions/<name>.md). The ' +
+    'brief holds binding mission-wide rules; it is committed, not scratch.'
   )
 }
 if (!cfg.nodes || typeof cfg.nodes !== 'object') {
-  throw new Error('backend-dag: args.nodes is required — a map of node id -> { branch, title }.')
+  throw new Error(
+    'backend-dag: args.nodes is required — a map of node id -> { branch, title, issue }. ' +
+    '`issue` is the GitHub issue number that holds this node\'s specification.'
+  )
+}
+for (const [id, n] of Object.entries(cfg.nodes)) {
+  if (!n.issue) {
+    throw new Error('backend-dag: node ' + id + ' is missing `issue` — every node needs its GitHub issue number.')
+  }
 }
 
-const MISSION = cfg.missionDir
-const BRIEF = MISSION + '/brief.md'
+const MISSION_ISSUE = cfg.missionIssue
+const BRIEF = cfg.briefPath
 const REPO = cfg.repo || '/var/home/loctran/personal/loxpp'
 const GH = cfg.githubRepo || 'txloc1909/loxpp'
 const NODES = cfg.nodes
@@ -163,23 +178,28 @@ function common(id) {
   const n = NODES[id]
   return [
     'MISSION: build a Lox++ compiler backend, node by node.',
+    'MISSION TRACKING ISSUE: #' + MISSION_ISSUE + ' (sequences every node; do not scope code work directly against it).',
     'YOUR NODE: ' + id + ' - ' + n.title,
+    'YOUR NODE ISSUE: #' + n.issue,
     'BRANCH: ' + n.branch,
     'REPO ROOT (host): ' + REPO,
     'GITHUB REPO: ' + GH,
     '',
-    'Read these files before you act, in this order:',
+    'Read these before you act, in this order:',
     '  1. ' + BRIEF + '  (the mission rules; they are binding)',
-    '  2. ' + MISSION + '/nodes/' + id + '.md  (your node specification)',
+    '  2. `gh issue view ' + n.issue + ' --repo ' + GH + ' --comments`  (your node specification)',
+    '     Use the `--comments` form. NEVER the plain `gh issue view ' + n.issue + '` — that prints the',
+    '     body only, gives no sign that comments exist, and a cross-node hazard another node left you',
+    '     lives ONLY in a comment, never in a body edit. Reading the plain form silently drops it.',
     '  3. ' + DAG_DOC,
     '  4. ' + OPCODE_DOC + '  (authoritative opcode semantics)',
     '  5. ' + REPO + '/AGENTS.md',
     '  6. ' + REPO + '/notes/multi-agent-playbook.md',
     '',
-    'If any of these files is missing or unreadable, STOP immediately and report',
-    'status "blocked_surprise" with the exact path and error. Do not continue as',
-    'if a missing file were optional — an agent working from a partial brief is',
-    'indistinguishable from one working correctly until its output is wrong.',
+    'If any of these is missing, unreadable, or the `gh issue view --comments` command itself fails',
+    '(non-zero exit, empty output), STOP immediately and report status "blocked_surprise" with the',
+    'exact command and error. Do not continue as if a missing brief or issue were optional — an agent',
+    'working from a partial spec is indistinguishable from one working correctly until its output is wrong.',
     '',
     'Hard rules:',
     '  - Write every GitHub message and every returned string in ASD-STE100 Simplified Technical English.',
@@ -188,6 +208,8 @@ function common(id) {
     '  - Use `gh` as user txloc1909. It is already authenticated with ADMIN rights.',
     '  - Run builds and tests inside the `loxpp-dev-env-managed` container. Never use `-it`.',
     '  - Never touch another agent worktree, and never touch the human `loxpp-dev` distrobox container.',
+    '  - A hazard for a LATER node goes as a `gh issue comment` on that later node\'s issue, never as an',
+    '    edit to this brief, the tracking issue, or any local file. A comment records who found it and when.',
     '',
   ].join('\n')
 }
@@ -234,10 +256,17 @@ function implPrompt(id) {
     '',
     'The PR body must contain, in this order:',
     '  - The line "[Implementer] Node ' + id + ' - ' + NODES[id].title + '".',
+    '  - The line "Closes #' + NODES[id].issue + '" on its own, so GitHub closes your node issue',
+    '    automatically the moment this PR merges. Do not close the issue by hand at any other point —',
+    '    a node issue closes at merge, never at approval, and never by a manual `gh issue close`.',
     '  - The checkpoint, copied from your node specification.',
     '  - The evidence: the real command output, in a fenced block. Do not paraphrase it.',
     '  - The design choices you made and why.',
     '  - Anything you decided to leave for a later node.',
+    '',
+    'If your work surfaces a hazard for a node that depends on this one, post it now as a',
+    '`gh issue comment` on that later node\'s issue (see the hard rules above) — do not wait for the',
+    'later node\'s agent to ask, because it will not; it just reads its issue with `--comments` once.',
     '',
     'Do NOT merge the PR. A reviewer must approve it first.',
     'Do NOT wait for CI at this step. Return as soon as the PR is open.',
@@ -528,6 +557,11 @@ function mergePrompt(id, pr) {
     '     and remove the reviewer worktree `.claude/worktrees/loxpp-review-' + id.toLowerCase() + '` if it exists.',
     '     Then `git fetch origin && git branch -D ' + NODES[id].branch + '` if the local branch remains.',
     '  6. Verify `main` is green: `cd ' + REPO + ' && git fetch origin && git log --oneline -3 origin/main`.',
+    '  7. Verify your node issue closed itself: `gh issue view ' + NODES[id].issue + ' --repo ' + GH + ' --json state -q .state`',
+    '     must print "CLOSED", because the merged PR body carried "Closes #' + NODES[id].issue + '".',
+    '     If it still says "OPEN", the merge did not close it — close it by hand with',
+    '     `gh issue close ' + NODES[id].issue + ' --repo ' + GH + ' --comment "[Implementer] closed manually: merge did not auto-close, see PR #' + pr + '"`',
+    '     and say so in your summary; that is a surprise worth reporting, not a step to silently paper over.',
     '',
     'Return merged true only when the squash-merge succeeded.',
   ].join('\n')
