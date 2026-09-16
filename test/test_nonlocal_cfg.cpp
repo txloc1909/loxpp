@@ -1,20 +1,20 @@
 // test_nonlocal_cfg.cpp — proves PUSH_HANDLER/POP_HANDLER/THROW against the
-// shared translation pipeline (cfg.cpp, abstract_stack.cpp) before any Lox++
-// syntax exists to emit them.
-//
-// notes/missions/2026-09-non-local-control-flow/nodes/X1.md is this file's
-// mandate. src/compiler.cpp does not parse try/catch/throw yet, so every
-// chunk here is hand-built — either directly through the public Chunk API
-// (chunk.h) and decoded with decodeChunk (chunk_decoder.h), or, matching
+// shared translation pipeline (cfg.cpp, abstract_stack.cpp) in isolation
+// from src/compiler.cpp, hand-building every chunk under test — either
+// directly through the public Chunk API (chunk.h) and decoded with
+// decodeChunk (chunk_decoder.h), or, matching
 // test_backend_abstract_stack.cpp's own MergeDisagreementThrows precedent,
 // as a hand-built DecodedInstruction list that bypasses Chunk/the decoder
 // entirely when only cfg.cpp/abstract_stack.cpp behavior is under test.
+// This predates compiler support for try/catch/throw (PR #231, before
+// PR #232 added it) and stays hand-built deliberately: it isolates
+// cfg.cpp/abstract_stack.cpp's own contract from whatever bytecode shape
+// the compiler happens to emit today.
 //
 // The checkpoint this file proves:
 //   1. A real Chunk can encode PUSH_HANDLER/POP_HANDLER/THROW with today's
 //      public Chunk/chunk_decoder.h API, and decodeChunk decodes them
-//      correctly (rules out the "blocked_surprise: no mutation API" case
-//      nodes/X1.md names).
+//      correctly.
 //   2. cfg.cpp classifies THROW as terminal — the same "no successor" shape
 //      as RETURN/MATCH_ERROR — and never lets PUSH_HANDLER's catch-offset
 //      operand become a generic branch: the catch-target block is a leader,
@@ -25,7 +25,7 @@
 //      generic predecessor-agreement loop, which this file also shows
 //      leaves the catch entry alone entirely (no predecessors to agree on).
 //   4. Both (2) and (3) are demonstrably necessary: reverting either one (by
-//      hand, verified separately — see this node's PR description for the
+//      hand, verified separately — see PR #231's review history for the
 //      real command output) makes a dedicated test below fail.
 
 #include "backend/abstract_stack.h"
@@ -288,9 +288,8 @@ TEST(NonlocalCfgTest, PushHandlerCatchTargetIsALeaderExcludedFromPredecessors) {
 
 // Every other block in this probe is an ordinary, non-tagged block — the
 // isHandlerEntry tag must be scoped exactly to the one real catch entry,
-// not leak onto a neighbouring block at a nearby offset (nodes/X1.md's own
-// hazard: "must not accidentally exclude unrelated legitimate merge
-// points").
+// not leak onto a neighbouring block at a nearby offset and accidentally
+// exclude an unrelated, legitimate merge point from validateMergeConsistency.
 TEST(NonlocalCfgTest, OnlyTheRealCatchBlockIsTaggedHandlerEntry) {
     Chunk chunk = buildTryCatchProbe();
     std::vector<DecodedInstruction> ins = decodeChunk(chunk);
@@ -347,10 +346,11 @@ TEST(NonlocalCfgTest, CatchEntryDepthIsCheckpointPlusOneNotDiscovered) {
     EXPECT_EQ(analysis.after[static_cast<size_t>(catchIdx)].operandDepth(), 0)
         << "the catch body's own POP consumes exactly the thrown value";
 
-    // The thrown value is a genuine temporary, not a declared local — the
-    // catch entry declares no new local by itself (X1's scope stops short
-    // of compiling a real `catch (e)` binding; a later node's compiler
-    // support decides how `e` itself becomes a local).
+    // The thrown value is a genuine temporary here, not a declared local —
+    // this hand-built probe has no `catch (e)` binding of its own. The real
+    // compiler (src/compiler.cpp) does declare `e` as a local; see
+    // abstract_stack.cpp's handling of a catch entry's bound-value slot for
+    // how that declared fact is threaded through this same analysis.
     bool foundCatchPop = false;
     for (const PopClassification& p : analysis.pops) {
         if (p.offset == 15) {
