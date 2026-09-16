@@ -1,24 +1,23 @@
 // A `return` taken from inside an open try must not leave a stale handler
-// behind. Here g's try never reaches its own POP_HANDLER (the return skips
-// it), and h's try/catch runs afterward at the same call-frame depth. h's
-// throw must be caught by h's own handler, not by g's leftover one.
+// behind. g's try never reaches its own POP_HANDLER (the return skips it).
+// The outer try wraps both the call to g and the later call to h, so h's
+// throw searches for a handler starting at the SAME call-frame depth as
+// g's leaked record: the outer try's own handler sits below it, not above
+// it, so a search that wrongly matches the leaked record instead of
+// unwinding past it corrupts the stack rather than merely catching early.
 fun g(shouldReturn) {
     try {
         if (shouldReturn) { return "early"; }
     } catch (e) { print "g caught: " + e; }
 }
 
-fun h() {
-    try {
-        throw "h-fault";
-    } catch (e) {
-        print "h caught: " + e;
-    }
-}
+fun h() { throw "h-fault"; }
 
-print g(true);
-h();
+try {
+    print g(true);
+    h();
+} catch (e) { print "outer caught: " + e; }
 print "done";
 // CHECK: early
-// CHECK: h caught: h-fault
+// CHECK: outer caught: h-fault
 // CHECK: done
