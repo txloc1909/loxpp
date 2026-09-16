@@ -7,6 +7,10 @@ import static lox.TestSupport.checkThrows;
 /** LoxOps.call (the CALL opcode's runtime dispatch) and LoxRuntime.current(). */
 public final class CallDispatchTest {
     public static void main(String[] args) {
+        // makeError() (LoxOps.java) reads LoxRuntime.current() to find the
+        // registered Error class; every checkThrows below needs it set.
+        LoxGlobals g = LoxRuntime.init();
+
         LoxClosure add = new LoxClosure("add", 2, new Object[0][]) {
             @Override
             protected Object invoke(Object self, Object[] a) {
@@ -36,7 +40,6 @@ public final class CallDispatchTest {
         checkThrows(() -> LoxOps.call(null, new Object[0]), LoxError.class,
                 "call() rejects nil the same way as any other non-callable value");
 
-        LoxGlobals g = LoxRuntime.init();
         check(LoxRuntime.current() == g, "current() returns the instance init() just built");
 
         System.exit(TestSupport.finish("CallDispatchTest"));

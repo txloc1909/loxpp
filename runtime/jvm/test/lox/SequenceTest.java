@@ -14,6 +14,10 @@ public final class SequenceTest {
     }
 
     public static void main(String[] args) {
+        // makeError() (LoxOps.java) reads LoxRuntime.current() to find the
+        // registered Error class; every checkThrows below needs it set.
+        LoxRuntime.init();
+
         LoxList built = LoxOps.buildList(new Object[] {1.0, 2.0, 3.0});
         checkEquals(3, built.elements.size(), "buildList size");
         checkEquals(1.0, built.elements.get(0), "buildList keeps first-to-last order");

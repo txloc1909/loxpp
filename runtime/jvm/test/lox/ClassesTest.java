@@ -16,6 +16,10 @@ public final class ClassesTest {
     }
 
     public static void main(String[] args) {
+        // makeError() (LoxOps.java) reads LoxRuntime.current() to find the
+        // registered Error class; every checkThrows below needs it set.
+        LoxRuntime.init();
+
         LoxClosure add = addClosure();
         checkEquals(3.0, add.call(new Object[] {1.0, 2.0}), "closure.call runs invoke");
         checkThrows(() -> add.call(new Object[] {1.0}), LoxError.class, "closure arity check");

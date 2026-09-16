@@ -6,6 +6,10 @@ import static lox.TestSupport.checkThrows;
 
 public final class ArithmeticTest {
     public static void main(String[] args) {
+        // makeError() (LoxOps.java) reads LoxRuntime.current() to find the
+        // registered Error class; every checkThrows below needs it set.
+        LoxRuntime.init();
+
         checkEquals(3.0, LoxOps.add(1.0, 2.0), "add(1,2)");
         checkEquals("ab", LoxOps.add("a", "b"), "add strings concatenates");
         checkEquals(1.0, LoxOps.subtract(3.0, 2.0), "subtract");
