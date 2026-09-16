@@ -140,6 +140,9 @@ module.exports = grammar({
       $.while_statement,
       $.break_statement,
       $.continue_statement,
+      $.try_statement,
+      $.throw_statement,
+      $.defer_statement,
       $.block,
     ),
 
@@ -182,6 +185,26 @@ module.exports = grammar({
     break_statement: _ => seq("break", ";"),
 
     continue_statement: _ => seq("continue", ";"),
+
+    // spec/02-syntax.md: tryStmt ::= "try" block "catch" "(" IDENTIFIER ")" block ;
+    try_statement: $ => seq(
+      "try",
+      field("body", $.block),
+      "catch",
+      "(",
+      field("binding", $.identifier),
+      ")",
+      field("catch_body", $.block),
+    ),
+
+    // spec/02-syntax.md: throwStmt ::= "throw" expression ";" ;
+    throw_statement: $ => seq("throw", field("value", $._expression), ";"),
+
+    // spec/02-syntax.md: deferStmt ::= "defer" call "(" arguments? ")" ";" ;
+    // `call_expression` already ends in a mandatory "(" arguments? ")", so it
+    // is exactly the "call" the spec requires here — a bare identifier or
+    // field/subscript access with no trailing call is not a defer_statement.
+    defer_statement: $ => seq("defer", field("call", $.call_expression), ";"),
 
     // -------------------------------------------------------------------
     // Expressions

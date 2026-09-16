@@ -168,3 +168,85 @@ Blocks and expression statements
       (binary_expression
         (identifier)
         (number)))))
+
+================================================================================
+Try, catch, throw
+================================================================================
+
+try {
+  throw "boom";
+} catch (e) {
+  print e;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (try_statement
+    (block
+      (throw_statement
+        (string
+          (string_content))))
+    (identifier)
+    (block
+      (print_statement
+        (identifier)))))
+
+================================================================================
+Nested try/catch
+================================================================================
+
+try {
+  try {
+    throw 1;
+  } catch (inner) {
+    throw inner;
+  }
+} catch (outer) {
+  print outer;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (try_statement
+    (block
+      (try_statement
+        (block
+          (throw_statement
+            (number)))
+        (identifier)
+        (block
+          (throw_statement
+            (identifier)))))
+    (identifier)
+    (block
+      (print_statement
+        (identifier)))))
+
+================================================================================
+Defer, plain and method-call form
+================================================================================
+
+fun f() {
+  defer cleanup();
+  defer file.close();
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameters)
+    (block
+      (defer_statement
+        (call_expression
+          (identifier)
+          (arguments)))
+      (defer_statement
+        (call_expression
+          (field_expression
+            (identifier)
+            (identifier))
+          (arguments))))))
