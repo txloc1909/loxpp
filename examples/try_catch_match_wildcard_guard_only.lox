@@ -1,0 +1,25 @@
+// A catch-bound value matched with only wildcard arms (no constructor
+// pattern), one of them guarded, followed by a sibling try/catch. This
+// exercises compileMatchBody's ident-pattern path (no literal/tag miss
+// jump) rather than the constructor-pattern path the other match-in-catch
+// regressions cover.
+//
+// The try body throws through an if/else so both arms are exercised.
+
+fun f() {
+    try {
+        if (true) { throw "boom"; } else { throw "unused"; }
+    } catch (e) {
+        var described = match e {
+            case _ if e == "boom" => "matched boom"
+            case _                => "matched something else"
+        };
+        print described;
+    }
+    try { throw "sibling-fault"; }
+    catch (e2) { print "sibling caught: " + e2; }
+}
+f();
+
+// CHECK: matched boom
+// CHECK: sibling caught: sibling-fault

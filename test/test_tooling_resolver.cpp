@@ -453,8 +453,16 @@ TEST(ToolingResolverCorpus, NoCrashAndFewWarnings) {
     // unused-local warnings for `r`/`m` in the examples that keep the
     // caught value around. Raised again, 36 -> 52, after rebasing onto
     // PR #246 (which added 13 more examples with 16 more catch-binding
-    // warnings) for a total of 149 corpus files. Raised again, 52 -> 54,
-    // for one more example with two `catch (e)` bindings hitting the same
-    // tracked gap, for a total of 150 corpus files.
-    EXPECT_LE(totalWarnings, 54u);
+    // warnings) for a total of 149 corpus files.
+    // Raised again, 52 -> 67, for 6 more match-in-catch regression examples
+    // (15 more catch-bound identifiers hitting the same tracked gap) for a
+    // total of 155 corpus files.
+    // Raised again, 67 -> 71, for 1 more regression example covering a
+    // catch body whose own last statement is a bare rethrow (4 more
+    // catch-bound identifiers hitting the same tracked gap) for a total of
+    // 156 corpus files.
+    // Raised again, 71 -> 73, after rebasing onto the return-handler-stack-
+    // leak fix (which added 1 more example with two `catch (e)` bindings
+    // hitting the same tracked gap), for a total of 157 corpus files.
+    EXPECT_LE(totalWarnings, 73u);
 }

@@ -1,0 +1,29 @@
+// The match-in-catch-plus-sibling-try/catch shape, inside a class method
+// instead of a plain function. A method body reserves local slot 0 for
+// `this`, shifting every other slot number up by one from a plain
+// function's — any local-slot miscount that only shows up at a specific
+// slot number could hide at a shifted offset instead of reproducing.
+//
+// The try body throws through an if/else so both arms are exercised.
+
+enum Shape { Circle(r) Square(side) }
+class Handler {
+    run() {
+        try {
+            if (true) { throw Circle(3); } else { throw Square(4); }
+        } catch (e) {
+            var described = match e {
+                case Circle(r)    => "caught a circle r=" + str(r)
+                case Square(side) => "caught a square side=" + str(side)
+                case _            => "caught something else"
+            };
+            print described;
+        }
+        try { throw "sibling-fault"; }
+        catch (e2) { print "sibling caught: " + e2; }
+    }
+}
+Handler().run();
+
+// CHECK: caught a circle r=3
+// CHECK: sibling caught: sibling-fault
