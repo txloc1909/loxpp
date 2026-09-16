@@ -89,9 +89,21 @@ You can also pin a specific version:
 curl -fsSL https://raw.githubusercontent.com/txloc1909/loxpp/main/install.sh | sh -s -- --version 0.1.0
 ```
 
+Or install several versions side by side. A `--slot` install writes the binary
+as `loxpp-<slot>` and leaves the default `loxpp` untouched:
+
+```bash
+# Installs loxpp-0.1 alongside the default loxpp
+curl -fsSL https://raw.githubusercontent.com/txloc1909/loxpp/main/install.sh | sh -s -- --version 0.1.0 --slot 0.1
+```
+
+Re-run with the same `--version` and `--slot` to upgrade that slot. PATH only
+ever needs the one directory, so slots need no extra PATH setup.
+
 The script downloads to `~/.local/bin/` by default. If you have `~/.local/bin`
-on your `PATH`, you can now run `loxpp`. The script verifies the SHA256 checksum
-always, and the cosign signature if `cosign` is on your `PATH`.
+on your `PATH`, you can now run `loxpp` (or `loxpp-0.1`). The script verifies
+the SHA256 checksum always, and the cosign signature if `cosign` is on your
+`PATH`.
 
 ### Upgrade
 
@@ -143,7 +155,7 @@ gh attestation verify loxpp-0.1.0-x86_64-linux.tar.gz --repo txloc1909/loxpp
 Remove these paths (the `install.sh` defaults; `$XDG_DATA_HOME` replaces
 `~/.local/share` and `$XDG_CACHE_HOME` replaces `~/.cache` when set):
 
-- `~/.local/bin/loxpp` — the binary
+- `~/.local/bin/loxpp` — the binary (remove `~/.local/bin/loxpp-<slot>` for each slotted install)
 - `~/.local/share/man/man1/loxpp.1` — the manual page
 - `~/.local/share/bash-completion/completions/loxpp` — bash completion (if present)
 - `~/.local/share/zsh/site-functions/_loxpp` — zsh completion (if present)

@@ -3,12 +3,17 @@
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/txloc1909/loxpp/main/install.sh | sh
-#   sh install.sh [--version X.Y.Z] [--bin-dir DIR] [--dry-run] [--quiet] [--no-modify-path]
+#   sh install.sh [--version X.Y.Z] [--slot NAME] [--bin-dir DIR] [--dry-run] [--quiet] [--no-modify-path]
 #
 # The same script does the first install and every later upgrade. Run it
 # again with no --version to move to the newest release; with --version to
 # pin or downgrade. The "loxpp upgrade" subcommand runs this exact script,
 # so the download and verify logic lives in one place only.
+#
+# With --slot NAME the binary installs as "loxpp-NAME" beside the default
+# "loxpp" and leaves the default untouched. Re-run with the same slot and
+# version to upgrade that slot. PATH still needs BIN_DIR, so a slotted
+# install never edits a shell profile beyond what the default install does.
 #
 # POSIX sh. Works with the BusyBox tools in Alpine (sha256sum, sed, grep,
 # wget) and with GNU coreutils in a normal distribution.
@@ -35,6 +40,7 @@ COSIGN_ISSUER='https://token.actions.githubusercontent.com'
 # --- options -----------------------------------------------------------
 
 VERSION="${LOXPP_VERSION:-}"
+SLOT=""
 BIN_DIR="${LOXPP_INSTALL_DIR:-${HOME:-}/.local/bin}"
 DRY_RUN=0
 QUIET=0
@@ -79,6 +85,9 @@ Usage:
 
 Options:
   --version X.Y.Z    Install this exact version (pin or downgrade).
+  --slot NAME        Install as "loxpp-NAME" beside "loxpp"; the default
+                     binary is left untouched. Re-run with the same slot
+                     and version to upgrade that slot.
   --bin-dir DIR      Install the binary here (default: $HOME/.local/bin).
   --dry-run          Print the steps. Change nothing.
   --quiet            Print errors only.
@@ -107,6 +116,12 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --version=*) VERSION="${1#*=}" ;;
+        --slot)
+            [ $# -ge 2 ] || die "--slot needs a value"
+            SLOT="$2"
+            shift
+            ;;
+        --slot=*) SLOT="${1#*=}" ;;
         --bin-dir)
             [ $# -ge 2 ] || die "--bin-dir needs a value"
             BIN_DIR="$2"
@@ -131,6 +146,16 @@ done
 
 # A leading "v" on the version is a common mistake. Accept it.
 VERSION="${VERSION#v}"
+
+# The slot becomes a path component (loxpp-<slot>), so it must be a plain
+# file name. Reject "/", "..", and anything outside the safe set.
+if [ -n "$SLOT" ]; then
+    case "$SLOT" in
+        .|..|*/*|*[!A-Za-z0-9._-]*)
+            die "invalid --slot: ${SLOT} (use letters, digits, '.', '_' or '-')"
+            ;;
+    esac
+fi
 
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -212,7 +237,17 @@ resolve_version() {
 
 # --- path resolve ----------------------------------------------
 
-# Follow a symlink at $BIN_DIR/loxpp to its real target, so an upgrade
+# The installed file name: "loxpp", or "loxpp-<slot>" for a slotted install.
+# A slotted install never touches the default binary.
+binary_name() {
+    if [ -n "$SLOT" ]; then
+        printf 'loxpp-%s' "$SLOT"
+    else
+        printf 'loxpp'
+    fi
+}
+
+# Follow a symlink at $BIN_DIR/<binary_name> to its real target, so an upgrade
 # writes the file the symlink points at, not the link. The atomic rename
 # then happens inside the real directory (one filesystem).
 #
@@ -220,7 +255,7 @@ resolve_version() {
 # only. A second shipped component (loxpp-lsp) needs a resolved path per
 # component - a small map or a per-component call, not one global.
 resolve_paths() {
-    _dest="${BIN_DIR}/loxpp"
+    _dest="${BIN_DIR}/$(binary_name)"
     if [ -L "$_dest" ] && command -v readlink >/dev/null 2>&1; then
         _real="$(readlink -f "$_dest" 2>/dev/null || true)"
         [ -n "$_real" ] && _dest="$_real"
@@ -236,10 +271,11 @@ resolve_paths() {
 # idempotency check in the main flow must compare each component, not one.
 installed_version() {
     _bin=""
-    if [ -x "${BIN_DIR}/loxpp" ]; then
-        _bin="${BIN_DIR}/loxpp"
-    elif command -v loxpp >/dev/null 2>&1; then
-        _bin="$(command -v loxpp)"
+    _name="$(binary_name)"
+    if [ -x "${BIN_DIR}/${_name}" ]; then
+        _bin="${BIN_DIR}/${_name}"
+    elif command -v "$_name" >/dev/null 2>&1; then
+        _bin="$(command -v "$_name")"
     fi
     [ -n "$_bin" ] || return 0
     # Line 1 of --version is: loxpp <version>
@@ -391,7 +427,9 @@ fetch_verify_install() {
     TMP_BIN=""
     say "Installed ${INSTALL_PATH}"
 
-    place_aux "$_extracted" "$_comp"
+    # The man page and completions name the default "loxpp", so a slotted
+    # install leaves them alone rather than clobber the default's files.
+    [ -n "$SLOT" ] || place_aux "$_extracted" "$_comp"
 }
 
 # --- PATH handling -------------------------------------------
@@ -469,23 +507,25 @@ handle_path() {
 resolve_version
 resolve_paths
 
+_NAME="$(binary_name)"
+
 CURRENT="$(installed_version || true)"
 if [ -n "$CURRENT" ] && [ "$CURRENT" = "$VERSION" ]; then
-    say "loxpp ${VERSION} is already installed"
+    say "${_NAME} ${VERSION} is already installed"
     exit 0
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
     if [ -n "$CURRENT" ]; then
-        say "[dry-run] loxpp ${CURRENT} -> ${VERSION}"
+        say "[dry-run] ${_NAME} ${CURRENT} -> ${VERSION}"
     else
-        say "[dry-run] loxpp ${VERSION} (fresh install)"
+        say "[dry-run] ${_NAME} ${VERSION} (fresh install)"
     fi
 else
     if [ -n "$CURRENT" ]; then
-        say "loxpp ${CURRENT} -> ${VERSION}"
+        say "${_NAME} ${CURRENT} -> ${VERSION}"
     else
-        say "loxpp ${VERSION}"
+        say "${_NAME} ${VERSION}"
     fi
 fi
 
@@ -500,5 +540,5 @@ handle_path
 if [ "$DRY_RUN" -eq 1 ]; then
     say "[dry-run] done. Nothing changed."
 else
-    say "Done. Run:  loxpp --version"
+    say "Done. Run:  ${_NAME} --version"
 fi
