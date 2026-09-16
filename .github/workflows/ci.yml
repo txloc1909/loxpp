@@ -413,7 +413,15 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "tools/build_lox_rt.sh && tools/build_lox_rt_clr.sh && tools/check_managed_toolchains.sh"
 
+      # continue-on-error: this step's own tests are independent of every
+      # later step (it rebuilds its own classes from source and produces
+      # nothing any later step reads), but an unguarded failure here used to
+      # abort the whole job — silently skipping every CLR-specific step below
+      # since Node X4 (see the "Fail the job" step at the end, which is what
+      # actually turns a failure here into a red job).
       - name: Build and test the JVM runtime library
+        id: jvm_lox_rt_test
+        continue-on-error: true
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -667,6 +675,15 @@ jobs:
               files=$(find examples -maxdepth 1 -name "*.lox" ! -name "bench_jump_table.lox" | sort)
               python3 tools/diff_runtimes.py bootstrap/lox_wrapper.sh tools/loxpp_clr_bootstrap.sh $files --exclude tools/clr_excluded_examples.txt --timeout 60
             '
+
+      # The JVM lox-rt test step above is continue-on-error so its own
+      # failure can't hide every step after it (see that step's comment).
+      # This step is what still turns that failure into a red job.
+      - name: Fail the job if the JVM runtime library's own tests failed
+        if: steps.jvm_lox_rt_test.outcome == 'failure'
+        run: |
+          echo "The 'Build and test the JVM runtime library' step failed; see its log above." >&2
+          exit 1
 
   release-static:
     name: Static musl release build
