@@ -120,6 +120,7 @@ bool includeInOutline(const Symbol& sym, bool topLevel) {
     case SymbolKind::EnumCtor: // listed under its enum via Symbol::members
     case SymbolKind::Param:
     case SymbolKind::LoopVar:
+    case SymbolKind::CatchVar:
     case SymbolKind::MatchBinding:
         return false;
     }

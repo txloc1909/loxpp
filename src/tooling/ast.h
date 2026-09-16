@@ -309,6 +309,9 @@ enum class StmtKind : std::uint8_t {
     While,
     For,
     ForIn,
+    Try,
+    Throw,
+    Defer,
     Print,
     Return,
     Break,
@@ -416,6 +419,23 @@ struct ForInStmt : Stmt {
     Name variable; // scoped to the loop
     ExprPtr iterable;
     StmtPtr body;
+};
+
+struct TryStmt : Stmt {
+    TryStmt() : Stmt(StmtKind::Try) {}
+    StmtPtr try_block;   // Block
+    Name catch_var;      // scoped to catch block
+    StmtPtr catch_block; // Block
+};
+
+struct ThrowStmt : Stmt {
+    ThrowStmt() : Stmt(StmtKind::Throw) {}
+    ExprPtr value;
+};
+
+struct DeferStmt : Stmt {
+    DeferStmt() : Stmt(StmtKind::Defer) {}
+    ExprPtr call;
 };
 
 struct PrintStmt : Stmt {

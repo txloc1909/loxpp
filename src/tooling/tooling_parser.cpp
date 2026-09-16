@@ -50,6 +50,9 @@ bool startsStatement(TokenType t) {
     case TokenType::IF:
     case TokenType::WHILE:
     case TokenType::FOR:
+    case TokenType::TRY:
+    case TokenType::THROW:
+    case TokenType::DEFER:
     case TokenType::RETURN:
     case TokenType::BREAK:
     case TokenType::CONTINUE:
@@ -550,6 +553,12 @@ class Parser {
             return ifStatement();
         case TokenType::WHILE:
             return whileStatement();
+        case TokenType::TRY:
+            return tryStatement();
+        case TokenType::THROW:
+            return throwStatement();
+        case TokenType::DEFER:
+            return deferStatement();
         case TokenType::PRINT:
             return printStatement();
         case TokenType::RETURN:
@@ -665,6 +674,42 @@ class Parser {
         }
         consume(TokenType::RIGHT_PAREN);
         node->body = statement();
+        spanTo(*node, kw.offset);
+        return node;
+    }
+
+    StmtPtr tryStatement() {
+        Token kw = advance(); // try
+        auto node = std::make_unique<TryStmt>();
+        node->try_block = blockStatement();
+        if (consume(TokenType::CATCH)) {
+            consume(TokenType::LEFT_PAREN);
+            if (check(TokenType::IDENTIFIER)) {
+                node->catch_var = nameFrom(advance());
+            } else {
+                error();
+            }
+            consume(TokenType::RIGHT_PAREN);
+            node->catch_block = blockStatement();
+        }
+        spanTo(*node, kw.offset);
+        return node;
+    }
+
+    StmtPtr throwStatement() {
+        Token kw = advance(); // throw
+        auto node = std::make_unique<ThrowStmt>();
+        node->value = expression();
+        consume(TokenType::SEMICOLON);
+        spanTo(*node, kw.offset);
+        return node;
+    }
+
+    StmtPtr deferStatement() {
+        Token kw = advance(); // defer
+        auto node = std::make_unique<DeferStmt>();
+        node->call = expression();
+        consume(TokenType::SEMICOLON);
         spanTo(*node, kw.offset);
         return node;
     }

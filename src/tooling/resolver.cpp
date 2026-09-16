@@ -277,6 +277,15 @@ class Resolver {
         case StmtKind::ForIn:
             visitForIn(static_cast<const ForInStmt&>(*stmt));
             break;
+        case StmtKind::Try:
+            visitTry(static_cast<const TryStmt&>(*stmt));
+            break;
+        case StmtKind::Throw:
+            visitExpr(static_cast<const ThrowStmt&>(*stmt).value.get());
+            break;
+        case StmtKind::Defer:
+            visitExpr(static_cast<const DeferStmt&>(*stmt).call.get());
+            break;
         case StmtKind::Print:
             visitExpr(static_cast<const PrintStmt&>(*stmt).value.get());
             break;
@@ -497,6 +506,22 @@ class Resolver {
         ++m_loopDepth;
         visitStmt(s.body.get());
         --m_loopDepth;
+        pop();
+    }
+
+    void visitTry(const TryStmt& s) {
+        // The try block is visited as-is in the current scope.
+        visitStmt(s.try_block.get());
+        // The catch variable is scoped to the catch block only. Push a
+        // catch-header scope, declare the caught variable, visit the catch
+        // body, and pop the scope so the catch variable is not visible after.
+        push(ScopeKind::Block, stmtSpan(s));
+        declareIn(m_current, s.catch_var.text, SymbolKind::CatchVar,
+                  nameSpan(s.catch_var), nameSpan(s.catch_var));
+        m_out.references.add({nameSpan(s.catch_var),
+                              m_current->findLocal(s.catch_var.text), true,
+                              false});
+        visitStmt(s.catch_block.get());
         pop();
     }
 
@@ -871,6 +896,7 @@ class Resolver {
         case SymbolKind::Method:
         case SymbolKind::Field:
         case SymbolKind::EnumCtor:
+        case SymbolKind::CatchVar:
         case SymbolKind::MatchBinding:
             return false;
         }
