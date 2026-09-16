@@ -1,10 +1,14 @@
 # Multi-agent DAG playbook
 
 Reusable doctrine for running a multi-agent mission that drives a DAG of
-implementation nodes to green, one pull request per node. Proven twice: by the
-JVM backend mission (`#96`–`#116`) and by the CLR backend mission
-(`#125`–`#153`). Written for the next such mission, so it does not need to be
-rebuilt from scratch.
+implementation nodes to green, one pull request per node. Proven three times:
+by the JVM backend mission (`#96`–`#116`), the CLR backend mission
+(`#125`–`#153`), and the non-local-control-flow mission (`#223`, `#230`–`#252`)
+that threaded `try`/`catch`/`throw`/`defer` through the native VM, the JVM
+backend, and the CLR backend, plus a fourth target the mission's own risk
+analysis had not named at the start — see "Scope a mission around every
+consumer of the surface it changes" below. Written for the next such mission,
+so it does not need to be rebuilt from scratch.
 
 The CLR mission reused all four analysis modules the JVM mission built, without
 a change. It therefore paid none of the cost of the JVM mission's two most
@@ -100,6 +104,21 @@ a blocking finding, so a series that moves between neighbouring files slips past
 it. If you see the same *mechanism* fault three rounds running, escalate by hand
 and say that is what you are doing.
 
+**The trigger's hit rate can run much higher than "expect false positives"
+implies.** The non-local-control-flow mission escalated 5 of its 7 nodes to a
+referee, and every one found a genuine structural bug, not a false positive:
+`#231`'s referee found `cfg.cpp` had several independent edge-adding call
+sites and only one had been patched; `#232`'s found a missing
+found-a-handler/exhausted-the-stack flag that made every successful throw fall
+through into the uncaught-throw report path; `#236`'s found the CLR emitter
+generating `br` where ECMA-335 requires `leave` to exit a protected region;
+`#237`'s found one fixpoint-seeding pass being treated as sufficient when
+handler seeding is itself a fixpoint; `#245`'s exhaustive audit (see "Audit
+against a countable ground truth" below) found the 17 sites round 3's own fix
+had already named, and no others. Do not read "expect false positives" as
+license to raise the trigger's threshold — a mission this size validated the
+3-round default at close to 100% precision.
+
 ## Referee decision format
 
 A referee decision that ends a stagnation loop in one round has a fixed
@@ -180,6 +199,14 @@ exception: read the tip with `git fetch origin && git rev-parse
 origin/<branch>` — a bare `rev-parse` reads a possibly stale local
 remote-tracking ref, not the true tip. An agent's report
 of its own state is a claim, and a guard built on a claim guards nothing.
+
+**This applies to a completion claim too, not only to a branch tip.** An
+agent returning "done" is also a claim. Before treating a node, a review
+round, or a cleanup pass as finished, check `git status`/`git log` in the
+actual worktree it worked in — an agent can report success having made no
+change at all, most often after losing track of which worktree it was in.
+Cross-checking the claim against git costs one command; trusting a false one
+costs a full round discovered only at the next stage.
 
 ## Run-observation tools
 
@@ -296,3 +323,103 @@ orchestrator does not build a worktree and run the code. So:
   weigh it correctly.
 - Prefer waiting for a referee when one is possible. Rule by hand only when the
   trigger has demonstrably failed to fire.
+
+## Scope a mission around every consumer of the surface it changes, not only the pipeline under risk analysis
+
+The non-local-control-flow mission's brief (`#223`) built its entire risk
+analysis around one fact: the native VM, the JVM backend, and the CLR backend
+all consume the same compiled bytecode chunk through one shared pipeline
+(`cfg.cpp`, `abstract_stack.cpp`). That fact was correct and the resulting
+node (`#231`, a probe-driven research node gating everything else) earned its
+keep — see the referee findings above. But the brief's scope followed that
+one risk analysis to its edges and stopped: the bootstrap interpreter
+(`bootstrap/loxpp_interpreter.lox`, a self-hosted Lox++-in-Lox++ parser and
+evaluator) was added as a node only after the rest of the mission had
+already merged, because it never touches the shared bytecode pipeline at all
+— it runs as an ordinary Lox++ program on top of the finished native VM — so
+a risk analysis scoped to that pipeline could not see it. A standing lesson
+already on file (`feedback_loxpp_bootstrap_limitations.md`, predating this
+mission) said plainly that a new language feature must be added to the
+bootstrap interpreter too; the brief did not consult a "what else parses or
+evaluates Lox++ source" checklist, so that lesson never reached the scoping
+step. The same blind spot would have missed the tree-sitter grammar and the
+`loxpp-lsp` resolver for the same reason — neither consumes the shared
+pipeline either.
+
+**The fix is procedural, not a smarter risk analysis.** Before closing a
+mission's node list, enumerate every tool that parses, compiles, or
+evaluates Lox++ source — grep the repo for anything that ships its own
+scanner/parser (`bootstrap/`, `editors/tree-sitter-loxpp/`,
+`tools/loxpp-lsp/`, and whatever the next one turns out to be) — and check
+each one off against the feature the mission is adding, independently of
+which specific execution pipeline the mission's main risk analysis is about.
+A pipeline-shaped risk analysis is necessary for the pipeline's own nodes; it
+is not a substitute for a surface-shaped inventory of every consumer of the
+language.
+
+## Audit against a countable ground truth, not incrementally against reported cases
+
+Three different nodes in the non-local-control-flow mission hit the same
+failure shape: a fault-site or call-site retrofit that a reviewer's specific
+test cases progressively picked apart, several rounds running, because each
+fix addressed only the sites a test had actually exercised. `#232` (native)
+started at 0 of 19 spec-listed runtime-fault kinds wired to be catchable;
+`#237` (JVM) and `#236` (CLR) each converged the same way, one review round
+at a time, on their own per-backend fault-site list. `#245` (bootstrap)
+broke the pattern: rather than trust a visual grep over `.setError(` calls —
+which a comma inside a string literal argument can silently mislead — the
+referee wrote a small parser that balances parens and brackets to count each
+call's real argument count, found 76 total calls and exactly the 17
+still-unconverted sites the previous round had already named, and confirmed
+zero remained after the fix. The difference is not effort, it is method: a
+site-by-site fix converges only on the sites a test happens to reach, while
+counting every site against a ground truth (a spec table, a `grep -c`, a
+small purpose-built scanner) either proves completeness or gives an exact
+remaining count. Reach for the second one whenever a node's deliverable is
+"every site of kind X does Y" — that shape recurs across nodes.
+
+## A gate that silently skips a failing example can hide a missing feature entirely
+
+`#236`'s reviewer found the CLR backend had not implemented `defer` at
+all — `Op::DEFER_RECORD`/`Op::RUN_DEFERS` were bare `notImplemented(in.op)`
+stubs, a missing core deliverable, not a fault-site gap. The mission's own
+regression gate (`tools/check_clr_probes.sh`) never flagged it, because that
+gate's corpus sweep silently skips any example where either side's run does
+not reach exit 0 — a total crash looks identical to "not part of this sweep"
+from the gate's own output. A corpus-sweep gate proves the examples it
+successfully compares are correct; it says nothing about the examples it
+quietly dropped. When a node's checkpoint relies on a sweep like this, check
+what the sweep does with a run that never reaches exit 0 before trusting a
+clean report from it — a silently-skipped crash is a false green, not
+missing coverage.
+
+## Rebuild fully before trusting a test result that will decide a merge
+
+`ctest` does not rebuild anything; it runs whatever binaries already exist
+under `build/`. Building only the specific targets touched by a change
+(`cmake --build build --target <targets>`) and then running the full suite
+against that partially-rebuilt tree can fail tests that have nothing to do
+with the change, because an unrelated binary still reflects source from
+before some earlier, unrelated edit in the same long-lived checkout. This
+mission's own comment-reference cleanup hit exactly that: three unrelated
+tests failed on a hardcoded corpus-size mismatch that the checked-in source
+had already fixed — the failing binary was stale, not the source. A full
+`cmake --build build` before the run that will inform a merge or cleanup
+decision costs one rebuild; treating a partial-rebuild failure as real costs
+a debugging session chasing a regression that does not exist.
+
+## Long-lived checkouts and worktrees accumulate state that outlives any one agent's turn
+
+A background process started by one agent, or a stray uncommitted diff left
+by one that edited the wrong worktree, does not go away when that agent's
+turn ends or when the orchestrator's own context gets compacted — nothing
+in either event stops a running process or reverts an edit. On a long
+mission, sweep for both periodically rather than assuming a quiet
+transcript means a quiet checkout: `git status --short` in every worktree in
+use catches a stray diff before it is mistaken for the next agent's own
+work, and it is worth checking before trusting that a worktree is clean.
+When a stray diff turns up, read it before deciding what to do with it — it
+may be superseded WIP from an abandoned attempt (safe to set aside with
+`git stash push -u -m "<tag>"`, never bare `git stash`, since the stash stack
+is shared with every other worktree) rather than something to discard
+outright.
