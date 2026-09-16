@@ -47,6 +47,7 @@ enum class SymbolKind : std::uint8_t {
     Field,
     EnumCtor,
     LoopVar,
+    CatchVar,
     MatchBinding,
 };
 

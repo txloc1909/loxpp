@@ -121,6 +121,7 @@ lsp::SymbolKind toLspSymbolKind(SymbolKind k) {
     case SymbolKind::Var:
     case SymbolKind::Param:
     case SymbolKind::LoopVar:
+    case SymbolKind::CatchVar:
     case SymbolKind::MatchBinding:
         return lsp::SymbolKind::Variable;
     }
@@ -145,6 +146,8 @@ std::string symbolKindWord(SymbolKind k) {
         return "enum constructor";
     case SymbolKind::LoopVar:
         return "loop variable";
+    case SymbolKind::CatchVar:
+        return "catch binding";
     case SymbolKind::MatchBinding:
         return "match binding";
     }
