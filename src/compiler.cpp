@@ -1349,12 +1349,8 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
 
     bool isPlainIdentCatchAll =
         isIdentPat && allCtorNames.empty() && lastMiss == -1 && !hasGuard;
-    return {lastMiss,
-            guardMiss,
-            bindingCount,
-            isPlainIdentCatchAll,
-            std::move(allCtorNames),
-            armHandlerBase};
+    return {lastMiss, guardMiss, bindingCount, isPlainIdentCatchAll,
+            std::move(allCtorNames)};
 }
 
 Compiler* Compiler::findRootCompiler() {

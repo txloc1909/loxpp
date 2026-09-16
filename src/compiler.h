@@ -104,7 +104,6 @@ class Compiler {
         int bindingCount; // locals pushed by the pattern
         bool isUnguardedCatchAll;           // true → suppress MATCH_ERROR
         std::vector<std::string> ctorNames; // constructors matched by this arm
-        int armHandlerBase;                 // m_openHandlerCount at arm start
     };
     MatchArmResult compileMatchArm(int subjectSlot, int armLocalBase,
                                    int armHandlerBase, int resultSlot,

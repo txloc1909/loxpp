@@ -244,17 +244,23 @@ TEST_F(HandlerStackLeakTest, BreakFromOpenTryBodyLeavesNoRecord) {
     // break from inside a try body inside a for loop must pop the try's
     // handler record. The loop's own frame keeps running code after the
     // break, so the record must be popped scoped to the try region, not to
-    // the frame.
+    // the frame. Proves it by throwing before the loop's frame returns,
+    // where a stale record would be matched.
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         var log = "";
-        for (var i = 0; i < 2; i = i + 1) {
-            try {
-                if (i == 0) { log = log + "A"; }
-                if (i == 1) { break; }
-            } catch (e) { log = log + "B"; }
+        fun g() {
+            for (var i = 0; i < 2; i = i + 1) {
+                try {
+                    if (i == 0) { log = log + "A"; }
+                    if (i == 1) { break; }
+                } catch (e) { log = log + "B"; }
+            }
+            throw "after-loop";
         }
-        log = log + "C";
+        try {
+            g();
+        } catch (e) { log = log + "C"; }
     )"),
               InterpretResult::OK);
     EXPECT_EQ(h.handlerStackDepth(), 0);
@@ -264,18 +270,23 @@ TEST_F(HandlerStackLeakTest, BreakFromOpenTryBodyLeavesNoRecord) {
 TEST_F(HandlerStackLeakTest, ContinueFromOpenTryBodyLeavesNoRecord) {
     // continue from inside a try body, at least across 2 loop iterations,
     // must pop the try's handler record each time without leaving stale
-    // records.
+    // records. Proves it by throwing before the loop's frame returns.
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         var log = "";
-        for (var i = 0; i < 3; i = i + 1) {
-            try {
-                if (i == 0) { log = log + "A"; }
-                if (i == 1) { continue; }
-                if (i == 2) { continue; }
-            } catch (e) { log = log + "B"; }
+        fun g() {
+            for (var i = 0; i < 3; i = i + 1) {
+                try {
+                    if (i == 0) { log = log + "A"; }
+                    if (i == 1) { continue; }
+                    if (i == 2) { continue; }
+                } catch (e) { log = log + "B"; }
+            }
+            throw "after-loop";
         }
-        log = log + "C";
+        try {
+            g();
+        } catch (e) { log = log + "C"; }
     )"),
               InterpretResult::OK);
     EXPECT_EQ(h.handlerStackDepth(), 0);
@@ -292,24 +303,27 @@ TEST_F(HandlerStackLeakTest, BreakOutOfNestedTryInsideLoop) {
     // break out of a try that is itself nested inside another try, both
     // inside the loop body. The inner try's handler must be popped; the
     // outer try's handler must survive if it's legitimately still open
-    // beyond the loop.
+    // beyond the loop. Proves it by throwing before the frame returns.
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         var log = "";
-        for (var i = 0; i < 2; i = i + 1) {
-            try {
+        fun g() {
+            for (var i = 0; i < 2; i = i + 1) {
                 try {
-                    if (i == 0) { break; }
-                    log = log + "inner:" + i + ";";
-                } catch (e1) { log = log + "inner-catch"; }
-                log = log + "outer:" + i + ";";
-            } catch (e2) { log = log + "outer-catch"; }
+                    try {
+                        if (i == 0) { break; }
+                    } catch (e1) { log = log + "A"; }
+                } catch (e2) { log = log + "B"; }
+            }
+            throw "after-loop";
         }
-        log = log + "after";
+        try {
+            g();
+        } catch (e) { log = log + "C"; }
     )"),
               InterpretResult::OK);
     EXPECT_EQ(h.handlerStackDepth(), 0);
-    EXPECT_EQ(h.getGlobalStr("log"), "after");
+    EXPECT_EQ(h.getGlobalStr("log"), "C");
 }
 
 TEST_F(HandlerStackLeakTest, BreakFromInnerTryWhileOuterTryWrapsEntireLoop) {
@@ -317,23 +331,25 @@ TEST_F(HandlerStackLeakTest, BreakFromInnerTryWhileOuterTryWrapsEntireLoop) {
     // inside the loop body that breaks. The outer handler record must
     // survive the break and only be popped when the loop exits normally.
     // This is the case a naive "pop by frameCount" fix would get wrong.
+    // Proves it by throwing inside the outer try after the loop.
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         var log = "";
-        try {
-            for (var i = 0; i < 2; i = i + 1) {
-                try {
-                    if (i == 0) { break; }
-                    log = log + "inner:" + i + ";";
-                } catch (e1) { log = log + "inner-catch"; }
-            }
-            log = log + "loop-done";
-        } catch (e2) { log = log + "outer-catch"; }
-        log = log + ":after";
+        fun g() {
+            try {
+                for (var i = 0; i < 2; i = i + 1) {
+                    try {
+                        if (i == 0) { break; }
+                    } catch (e1) { log = log + "A"; }
+                }
+                throw "outer-test";
+            } catch (e2) { log = log + "B"; }
+        }
+        g();
     )"),
               InterpretResult::OK);
     EXPECT_EQ(h.handlerStackDepth(), 0);
-    EXPECT_EQ(h.getGlobalStr("log"), "loop-done:after");
+    EXPECT_EQ(h.getGlobalStr("log"), "B");
 }
 
 TEST_F(HandlerStackLeakTest, LaterThrowAfterBreakFromLoop) {
@@ -358,26 +374,4 @@ TEST_F(HandlerStackLeakTest, LaterThrowAfterBreakFromLoop) {
               InterpretResult::OK);
     EXPECT_EQ(h.handlerStackDepth(), 0);
     EXPECT_EQ(h.getGlobalStr("log"), "outer-caught:after-loop;");
-}
-
-TEST_F(HandlerStackLeakTest, BreakFromMatchArmWithTry) {
-    // Try inside a loop with break should properly clean up handlers.
-    VMTestHarness h;
-    ASSERT_EQ(h.run(R"(
-        fun test() {
-            var result = "";
-            for (var i = 0; i < 2; i = i + 1) {
-                try {
-                    if (i == 0) { result = result + "A"; }
-                    if (i == 1) { break; }
-                } catch (e) { result = result + "C"; }
-            }
-            result = result + "B";
-            return result;
-        }
-        var r = test();
-    )"),
-              InterpretResult::OK);
-    EXPECT_EQ(h.handlerStackDepth(), 0);
-    EXPECT_EQ(h.getGlobalStr("r"), "AB");
 }
