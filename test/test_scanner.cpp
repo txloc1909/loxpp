@@ -4,6 +4,8 @@
 #include <cassert>
 #include <cstring>
 #include <iostream>
+#include <string>
+#include <unordered_set>
 #include <vector>
 
 static std::vector<Token> scanTokens(const char* source) {
@@ -141,6 +143,33 @@ TEST_F(ScannerTest, Keywords) {
     EXPECT_EQ(tokens[15].type, TokenType::VAR);
     EXPECT_EQ(tokens[16].type, TokenType::WHILE);
     EXPECT_EQ(tokens[17].type, TokenType::EOF_);
+}
+
+TEST_F(ScannerTest, LoxKeywordsComplete) {
+    // lox_keywords() is the single source of truth for the keyword list
+    // (see scanner.h). It must hold every keyword token, including `in`.
+    const std::unordered_set<std::string> expected = {
+        "and",   "break", "case", "catch", "class", "continue", "default",
+        "defer", "else",  "enum", "false", "for",   "fun",      "if",
+        "in",    "match", "nil",  "or",    "print", "return",   "super",
+        "this",  "throw", "true", "try",   "var",   "while"};
+    std::unordered_set<std::string> actual;
+    for (const char* const* kw = lox_keywords(); *kw != nullptr; ++kw) {
+        actual.insert(*kw);
+    }
+    EXPECT_EQ(actual, expected);
+
+    // Every listed keyword must scan as a keyword, not an identifier.
+    for (const char* const* kw = lox_keywords(); *kw != nullptr; ++kw) {
+        auto tokens = scanTokens(*kw);
+        ASSERT_EQ(tokens.size(), 2) << "keyword: " << *kw;
+        EXPECT_NE(tokens[0].type, TokenType::IDENTIFIER) << "keyword: " << *kw;
+    }
+
+    // `in` scans as IN (regression: the completion list missed it).
+    auto inTokens = scanTokens("in");
+    ASSERT_EQ(inTokens.size(), 2);
+    EXPECT_EQ(inTokens[0].type, TokenType::IN);
 }
 
 TEST_F(ScannerTest, ElipsisToken) {

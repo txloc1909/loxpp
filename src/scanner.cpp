@@ -6,10 +6,10 @@
 
 const char* const* lox_keywords() {
     static const char* keywords[] = {
-        "and",   "break", "case", "catch", "class",  "continue", "default",
-        "defer", "else",  "enum", "false", "for",    "fun",      "if",
-        "match", "nil",   "or",   "print", "return", "super",    "this",
-        "throw", "true",  "try",  "var",   "while",  nullptr};
+        "and",   "break", "case", "catch", "class", "continue", "default",
+        "defer", "else",  "enum", "false", "for",   "fun",      "if",
+        "in",    "match", "nil",  "or",    "print", "return",   "super",
+        "this",  "throw", "true", "try",   "var",   "while",    nullptr};
     return keywords;
 }
 
@@ -173,11 +173,11 @@ TokenType Scanner::identifierType() {
             case 'e': {
                 if (m_current - m_start > 2) {
                     if (m_start[2] == 'f') {
+                        if (m_current - m_start > 3 && m_start[3] == 'a') {
+                            return checkKeyword(4, 3, "ult",
+                                                TokenType::DEFAULT);
+                        }
                         return checkKeyword(3, 2, "er", TokenType::DEFER);
-                    }
-                    if (m_start[2] == 'f' && m_current - m_start > 3 &&
-                        m_start[3] == 'a') {
-                        return checkKeyword(4, 3, "ult", TokenType::DEFAULT);
                     }
                 }
                 break;
