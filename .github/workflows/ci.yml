@@ -34,6 +34,10 @@ jobs:
             loxpp-dev:latest \
             bash -c "find src test -name '*.cpp' -o -name '*.h' | xargs clang-format --dry-run --Werror"
 
+      # install.sh has no test harness; at least lock its POSIX-sh syntax in.
+      - name: Check install.sh syntax
+        run: sh -n install.sh
+
   tree-sitter:
     name: tree-sitter grammar
     runs-on: ubuntu-latest
