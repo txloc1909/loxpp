@@ -1,0 +1,17 @@
+fun doA() { print "defer A"; }
+fun doB() { print "defer B"; }
+fun inner() {
+  defer doA();
+  defer doB();
+  try {
+    throw "fail";
+  } catch (e) {
+    throw "rethrow";
+  }
+}
+try {
+  inner();
+} catch (e) {
+  print "caught: " + e;
+}
+print "end";
