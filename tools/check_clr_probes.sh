@@ -380,6 +380,7 @@ examples=(
     # return value already on the evaluation stack.
     "examples/defer_lifo.lox"
     "examples/defer_throw_outer_catch.lox"
+    "examples/defer_uncaught_throw.lox"
     "examples/defer_explicit_return.lox"
     # The JVM-side referee's own PR #237 regression examples (issue #240's
     # repro, plus shapes (A)/(B) from that PR's rounds 2-3), inherited by

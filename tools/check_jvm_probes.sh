@@ -91,6 +91,7 @@ probes=(
     "examples/test_throw_simple.lox"
     "examples/catch_index_error.lox"
     "examples/defer_throw_outer_catch.lox"
+    "examples/defer_uncaught_throw.lox"
     "examples/defer_lifo.lox"
     "examples/try_catch_sibling_after_terminal_catch.lox"
     "examples/try_catch_local_in_catch_body.lox"
