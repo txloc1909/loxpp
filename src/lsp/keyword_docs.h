@@ -10,17 +10,20 @@
 
 namespace loxpp::lsp {
 
-inline constexpr std::array<std::pair<std::string_view, std::string_view>, 24>
+inline constexpr std::array<std::pair<std::string_view, std::string_view>, 28>
     kKeywordDocs = {{
         {"and", "Logical conjunction. Evaluates the right side only when the "
                 "left side is truthy."},
         {"break", "Exits the innermost loop, or the innermost `match` arm "
                   "body."},
         {"case", "Starts a `match` arm: `case <pattern> => <body>`."},
+        {"catch", "Catches the value a `try` block throws and binds it to "
+                  "one identifier."},
         {"class", "Declares a class. A class body holds method declarations."},
         {"continue", "Skips to the next iteration of the innermost loop."},
         {"default", "Reserved keyword. No grammar rule uses it; a `match` "
                     "fallback arm is `case _`."},
+        {"defer", "Defers a call to function exit. Deferred calls run LIFO."},
         {"else", "The alternate branch of an `if` statement."},
         {"enum", "Declares an enum with named constructors, used in `match` "
                  "patterns. Must be at global scope."},
@@ -42,7 +45,10 @@ inline constexpr std::array<std::pair<std::string_view, std::string_view>, 24>
                    "value."},
         {"super", "Inside a method, accesses a method of the superclass."},
         {"this", "Inside a method, the instance the method was called on."},
+        {"throw", "Throws a value to the nearest enclosing `try` statement."},
         {"true", "The boolean literal true."},
+        {"try", "Runs a protected block; a thrown value runs the `catch` "
+                "block."},
         {"var", "Declares a variable. Also `var [a, b] = ...` and "
                 "`var {a, b} = ...` destructuring."},
         {"while", "Repeats its body while the condition is truthy."},
