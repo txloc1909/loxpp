@@ -251,8 +251,16 @@ manager is pure overhead.
 
 - **`install.sh --version X.Y.Z`** — reproduce a bug on an old release, pin a
   CI job.
-- **Side-by-side installs** — a future `install.sh --version 0.3.0 --slot 0.3`
-  writing `loxpp-0.3` beside `loxpp`. ~10 lines, add on request.
+- **Side-by-side installs** — `install.sh --version 0.3.0 --slot 0.3` writes
+  `loxpp-0.3` beside `loxpp` and leaves the default binary untouched. The slot
+  is a plain file-name suffix (validated to `[A-Za-z0-9._-]`); a re-run with
+  the same `--version` and `--slot` upgrades that slot, and the idempotency
+  check reads the slot binary. Man page and completions are not installed for
+  a slot: they name the default `loxpp`, and installing them would clobber the
+  default's files. `loxpp upgrade` stays non-slotted — it upgrades the default
+  binary. A slotted `loxpp-0.3 upgrade` therefore runs the installer with no
+  slot and would (as any renamed copy would) replace the default `loxpp`;
+  upgrade a slot with `install.sh --version X --slot 0.3` instead.
 - **A `.loxpp-version` shim** — a wrapper that walks up from the working
   directory for a version file and execs the matching binary. ~100 lines,
   only if demand appears.
@@ -278,8 +286,6 @@ GitHub issue, not a list here:
 - Background "new version available" nudge, on top of the
   `loxpp upgrade --check` that already exists —
   https://github.com/txloc1909/loxpp/issues/204
-- Side-by-side slotted installs (`install.sh --version X --slot X`) —
-  https://github.com/txloc1909/loxpp/issues/205
 
 ## Follow-up mission: editor-tooling distribution
 
