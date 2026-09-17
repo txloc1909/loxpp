@@ -536,7 +536,7 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     const std::vector<fs::path> files = corpusFiles();
     // examples/*.lox (111) + bootstrap/*.lox (2) + translation-probes/*.lox
     // (52)
-    ASSERT_EQ(files.size(), 165U);
+    ASSERT_EQ(files.size(), 166U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {
