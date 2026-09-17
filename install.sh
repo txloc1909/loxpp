@@ -41,6 +41,7 @@ COSIGN_ISSUER='https://token.actions.githubusercontent.com'
 
 VERSION="${LOXPP_VERSION:-}"
 SLOT=""
+SLOT_SET=0
 BIN_DIR="${LOXPP_INSTALL_DIR:-${HOME:-}/.local/bin}"
 DRY_RUN=0
 QUIET=0
@@ -119,9 +120,10 @@ while [ $# -gt 0 ]; do
         --slot)
             [ $# -ge 2 ] || die "--slot needs a value"
             SLOT="$2"
+            SLOT_SET=1
             shift
             ;;
-        --slot=*) SLOT="${1#*=}" ;;
+        --slot=*) SLOT="${1#*=}"; SLOT_SET=1 ;;
         --bin-dir)
             [ $# -ge 2 ] || die "--bin-dir needs a value"
             BIN_DIR="$2"
@@ -148,10 +150,16 @@ done
 VERSION="${VERSION#v}"
 
 # The slot becomes a path component (loxpp-<slot>), so it must be a plain
-# file name. Reject "/", "..", and anything outside the safe set.
-if [ -n "$SLOT" ]; then
+# file name. An empty value would silently mean "no slot" and upgrade the
+# default binary, so it is rejected too. Component names are reserved:
+# loxpp-lsp is the next component the manifest lists (packaging/components.toml),
+# and a slot named "lsp" would collide with its binary in BIN_DIR.
+if [ "$SLOT_SET" -eq 1 ]; then
     case "$SLOT" in
-        .|..|*/*|*[!A-Za-z0-9._-]*)
+        "")
+            die "invalid --slot: the slot name must not be empty"
+            ;;
+        .|..|lsp|*/*|*[!A-Za-z0-9._-]*)
             die "invalid --slot: ${SLOT} (use letters, digits, '.', '_' or '-')"
             ;;
     esac
@@ -274,7 +282,10 @@ installed_version() {
     _name="$(binary_name)"
     if [ -x "${BIN_DIR}/${_name}" ]; then
         _bin="${BIN_DIR}/${_name}"
-    elif command -v "$_name" >/dev/null 2>&1; then
+    # A slot is always created by this installer in BIN_DIR. The PATH
+    # fallback exists for the default binary installed elsewhere; for a
+    # slot it can only find a stale binary on PATH and misreport.
+    elif [ -z "$SLOT" ] && command -v "$_name" >/dev/null 2>&1; then
         _bin="$(command -v "$_name")"
     fi
     [ -n "$_bin" ] || return 0
