@@ -3,7 +3,6 @@
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { promisify } = require('node:util');
 const yauzl = require('yauzl');
 
 const root = path.resolve(__dirname, '..');
@@ -26,7 +25,7 @@ function readEntries(zipfile) {
     zipfile.on('error', reject);
     zipfile.on('entry', (entry) => {
       names.push(entry.fileName);
-      if (entry.fileName === 'extension.vsixmanifest') {
+      if (entry.fileName === 'extension.vsixmanifest' || entry.fileName === 'extension/package.json') {
         zipfile.openReadStream(entry, (error, stream) => {
           if (error) reject(error);
           else {
@@ -74,6 +73,21 @@ async function main() {
 
   assert.ok(packageJson.main.startsWith('./out/'), 'main must live under out/');
   assert.ok(packageJson.activationEvents.length === 0, 'activation must come from contributes');
+
+  const packaged = JSON.parse(files['extension/package.json']);
+  for (const key of ['name', 'version', 'publisher', 'main']) {
+    assert.strictEqual(packaged[key], packageJson[key], `packaged ${key} must match the source package.json`);
+  }
+  assert.deepStrictEqual(
+    packaged.contributes.languages,
+    packageJson.contributes.languages,
+    'packaged language contribution must match the source package.json'
+  );
+  assert.deepStrictEqual(
+    packaged.contributes.grammars,
+    packageJson.contributes.grammars,
+    'packaged grammar contribution must match the source package.json'
+  );
 
   console.log(`OK: ${path.basename(vsixPath)} has ${names.length} entries, all checks passed`);
 }
