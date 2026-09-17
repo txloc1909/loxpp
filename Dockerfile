@@ -60,7 +60,17 @@ FROM dev AS dev-editors
 # Node.js 22 LTS from NodeSource. Ubuntu 24.04 ships an older Node in its own
 # archive; the tree-sitter CLI needs a current LTS.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs \
+    && apt-get install -y \
+        nodejs \
+        xvfb \
+        xauth \
+        libasound2t64 \
+        libgtk-3-0 \
+        libnss3 \
+        libgbm1 \
+        libxss1 \
+        libatk-bridge2.0-0 \
+        libdrm2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Pinned so a grammar regeneration in CI matches what a contributor runs

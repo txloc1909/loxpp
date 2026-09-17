@@ -1,0 +1,105 @@
+{
+  "name": "loxpp-vscode",
+  "displayName": "Lox++",
+  "description": "Lox++ language support: syntax highlighting, diagnostics, hover, completion, and navigation via loxpp-lsp.",
+  "version": "0.1.0",
+  "publisher": "txloc1909",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/txloc1909/loxpp"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "private": true,
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Syntax highlighting is available. The language server only starts in trusted workspaces.",
+      "restrictedConfigurations": [
+        "loxpp.server.path"
+      ]
+    },
+    "virtualWorkspaces": false
+  },
+  "activationEvents": [],
+  "main": "./out/src/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "lox",
+        "aliases": [
+          "Lox++",
+          "lox"
+        ],
+        "extensions": [
+          ".lox"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lox",
+        "scopeName": "source.lox",
+        "path": "./syntaxes/lox.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Lox++",
+      "properties": {
+        "loxpp.server.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start the loxpp-lsp language server for .lox files."
+        },
+        "loxpp.server.path": {
+          "type": "string",
+          "default": "loxpp-lsp",
+          "description": "Path to the loxpp-lsp executable. Resolved from PATH by default."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "loxpp.restartServer",
+        "title": "Restart Lox++ Language Server",
+        "category": "Lox++"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "typecheck": "tsc --noEmit -p ./",
+    "watch": "tsc -w -p ./",
+    "lint": "eslint src test scripts",
+    "test": "node --test test/*.test.cjs",
+    "test:integration": "npm run compile && node scripts/integration.cjs",
+    "vscode:prepublish": "npm run compile && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=out/src/extension.js",
+    "package": "vsce package --no-dependencies && node scripts/check-package.cjs"
+  },
+  "devDependencies": {
+    "@types/node": "18.19.130",
+    "@types/vscode": "1.85.0",
+    "@typescript-eslint/eslint-plugin": "8.70.0",
+    "@typescript-eslint/parser": "8.70.0",
+    "@vscode/test-electron": "2.5.2",
+    "@vscode/vsce": "3.9.2",
+    "esbuild": "0.25.12",
+    "eslint": "9.39.5",
+    "typescript": "5.9.3",
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2",
+    "yauzl": "3.2.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "9.0.1"
+  }
+}

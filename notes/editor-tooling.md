@@ -2,7 +2,8 @@
 
 This note records the editor-tooling stack that recent work built:
 the `loxpp --check` diagnostics CLI, the `loxpp-lsp` language server, the
-`tree-sitter-loxpp` grammar, and the `loxpp.nvim` plugin.
+`tree-sitter-loxpp` grammar, the `loxpp.nvim` plugin, and the
+`loxpp-vscode` extension.
 
 It is the durable record. An earlier design draft preceded this note; where
 they differ, this note is correct.
@@ -46,6 +47,10 @@ Language semantics stay in `spec/`. This note does not repeat them.
                              |   + analyze()  ->  `loxpp --check`   |
                              +-------------------------------------+
 ```
+
+The VS Code extension in `editors/loxpp-vscode/` is another client of
+`loxpp-lsp`. It uses a TextMate grammar for highlighting, not the tree-sitter
+parser. It does not change the server's capability set.
 
 Build targets:
 
@@ -282,6 +287,12 @@ editors/
     plugin/    loxpp.lua              load guard
     scripts/   build-parser.sh
     doc/       loxpp.txt
+  loxpp-vscode/             the VS Code extension
+    src/                     language client and server lifecycle
+    syntaxes/                TextMate grammar
+    test/                    extension tests
+    language-configuration.json
+    package.json package-lock.json tsconfig.json
 ```
 
 The four `queries/loxpp/*.scm` files in the plugin are a byte-for-byte copy
@@ -314,6 +325,38 @@ so Neovim's built-in tree-sitter runtime finds it on `runtimepath`. With
 `nvim-treesitter` (`master` branch) installed, `:TSInstall loxpp` after
 `require("loxpp").setup()` is the alternative.
 
+### VS Code extension
+
+The extension for #218 is implemented in `editors/loxpp-vscode/`. It provides
+TextMate highlighting and starts `loxpp-lsp` over stdio. It does not bundle
+or download the server. Install `loxpp-lsp` separately on the extension
+host's `PATH`, or set `loxpp.server.path` to its absolute path on that host.
+For Remote SSH, WSL, and Dev Containers, the extension and server must be
+installed on the remote extension host. A local path or an unrelated build
+container path is not a remote server path.
+
+`loxpp.server.enable` defaults to `true`. Set it to `false` to keep only
+highlighting. Server setting changes restart the client; the Command Palette
+also provides **Lox++: Restart Lox++ Language Server**. The server starts only
+in trusted workspaces. TextMate highlighting works without workspace trust
+or a server. The **Lox++** output channel shows server startup errors.
+Navigation stays within one file. Rename and formatting are not supported.
+
+Build the VSIX manually from the checkout root with Node.js 22 and npm:
+
+```sh
+npm ci --prefix editors/loxpp-vscode
+npm run package --prefix editors/loxpp-vscode
+```
+
+The package script compiles the extension, creates
+`editors/loxpp-vscode/loxpp-vscode-0.1.0.vsix`, and verifies its contents.
+In VS Code, use **Extensions: Install from VSIX...** to install that file.
+The VSIX is for local, manual installation only. There is no automatic
+download or Marketplace publishing path. CI verifies the package but does
+not upload or publish it. Test commands are in
+[TESTING.md](../TESTING.md#vs-code-extension).
+
 ### Docker stages
 
 `Dockerfile` has these stages:
@@ -322,8 +365,10 @@ so Neovim's built-in tree-sitter runtime finds it on `runtimepath`. With
   tree-sitter CLI, no Neovim.**
 - `dev-editors` — `dev` plus Node.js 22, `tree-sitter-cli` 0.25.10, Neovim
   0.11.3, and `nvim-treesitter` + `nvim-lint` checkouts under
-  `/opt/nvim-plugins`. Used by the grammar and plugin CI jobs. The C++
-  toolchain is inherited, so this one image builds every piece.
+  `/opt/nvim-plugins`. It also includes Xvfb, Xauth, and Electron's Linux
+  libraries for headless VS Code tests. Used by the grammar, Neovim, and
+  VS Code CI jobs. The C++ toolchain is inherited, so this one image builds
+  every piece.
 - `dev-managed` — `dev` plus the JVM and CLR toolchains. Not used by the
   editor tooling.
 
@@ -334,6 +379,7 @@ so Neovim's built-in tree-sitter runtime finds it on `runtimepath`. With
 | `tree-sitter grammar` | `dev-editors` | `tree-sitter generate`, `tree-sitter test`, then `tree-sitter parse` over `examples/*.lox`, `bootstrap/*.lox`, and `test/translation-probes/*.lox`; fails on any `ERROR` or `MISSING` node. |
 | `loxpp-lsp language server` | `dev` | Builds `loxpp-lsp` under the ASan/UBSan `debug` preset, then runs `tools/lsp_smoke.py`. Also runs the smoke test with a good file passed as the bad file to prove the assertion can fail. |
 | `Neovim plugin` | `dev-editors` | Diffs the plugin queries against the grammar queries; builds `loxpp` + `loxpp-lsp` + the parser; runs `tools/check_nvim_plugin.sh` headless in both normal and `--fallback` mode; proves the headless test fails with a broken `loxpp-lsp`. |
+| `VS Code extension` | `dev-editors` | Builds `loxpp-lsp` with the `release` preset; runs npm install, lint, typecheck, tests, and compile; runs integration tests with `xvfb-run -a` and `LOXPP_LSP_PATH=/workspace/build/loxpp-lsp`; packages and verifies the VSIX without uploading or publishing it. |
 
 The `Build & Test` job runs the GTest suites, which include
 `test_check_diagnostics`, `test_tooling_parser`, and `test_tooling_resolver`.
@@ -403,7 +449,8 @@ issue, not a list here:
   https://github.com/txloc1909/loxpp/issues/216
 - A TextMate grammar (`editors/loxpp.tmbundle`) for VS Code and GitHub
   Linguist reach — https://github.com/txloc1909/loxpp/issues/217
-- A VS Code extension — https://github.com/txloc1909/loxpp/issues/218
+- Implemented: VS Code extension in `editors/loxpp-vscode/`, with manual
+  VSIX installation — https://github.com/txloc1909/loxpp/issues/218
 - Split `editors/tree-sitter-loxpp` and `editors/loxpp.nvim` into their own
   repositories, so `:TSInstall loxpp` and plugin managers can fetch them
   directly — https://github.com/txloc1909/loxpp/issues/219

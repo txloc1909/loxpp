@@ -87,3 +87,35 @@ TEST_F(ParserBytecodeTest, Arithmetic_Addition) {
 3. Rebuild and run tests to verify.
 
 For more details, see the comments in the test harness and example test files.
+
+## VS Code Extension
+
+Run these commands from the checkout root inside the `dev-editors` container.
+The image includes Node.js 22, the C++ toolchain, Xvfb, Xauth, and the Linux
+libraries needed by VS Code's Electron test host.
+
+```sh
+cmake --preset release -DLOXPP_LSP=ON
+cmake --build build --target loxpp-lsp
+npm ci --prefix editors/loxpp-vscode
+npm run lint --prefix editors/loxpp-vscode
+npm run typecheck --prefix editors/loxpp-vscode
+npm run test --prefix editors/loxpp-vscode
+npm run compile --prefix editors/loxpp-vscode
+LOXPP_LSP_PATH=/workspace/build/loxpp-lsp xvfb-run -a npm run test:integration --prefix editors/loxpp-vscode
+npm run package --prefix editors/loxpp-vscode
+```
+
+`LOXPP_LSP_PATH` selects the real server for the integration tests. The path
+above assumes that the checkout is mounted at `/workspace`. Use the absolute
+path to your server if you run the tests elsewhere. `xvfb-run -a` supplies a
+display for headless Linux tests. The integration runner downloads a VS Code
+test host; this is separate from the installed extension, which never
+downloads a language server.
+
+The `vscode-extension` CI job runs these checks in `dev-editors`. The package
+script creates `editors/loxpp-vscode/loxpp-vscode-0.1.0.vsix` and verifies its
+contents. CI does not upload or publish the VSIX. For manual installation,
+use **Extensions: Install from VSIX...** in VS Code. See
+[README.md](README.md#vs-code) for server setup, workspace trust, and remote
+extension hosts.
