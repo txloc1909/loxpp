@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "lsp/keyword_docs.h"
+#include "lsp/signature_help.h"
 #include "lsp/stdlib_docs.h"
 #include "tooling/document_model.h"
 #include "tooling/symbol_table.h"
@@ -396,6 +397,8 @@ json Server::onInitialize(const json& /*params*/) {
              {"documentSymbolProvider", true},
              {"completionProvider",
               {{"triggerCharacters", json::array({"."})}}},
+             {"signatureHelpProvider",
+              {{"triggerCharacters", json::array({"(", ","})}}},
          }},
         {"serverInfo", {{"name", "loxpp-lsp"}, {"version", "0.1.0"}}},
     };
@@ -584,6 +587,18 @@ json Server::onDocumentHighlight(const json& params) {
     return result;
 }
 
+json Server::onSignatureHelp(const json& params) {
+    requireReady();
+    const auto p = params.get<TextDocumentPositionParams>();
+    json result = nullptr;
+    (void)m_store.read(p.uri, [&](const DocumentModel& model) {
+        const std::size_t off =
+            model.positionToOffset(toToolingPos(p.position));
+        result = signatureHelpFor(model, off);
+    });
+    return result;
+}
+
 // -- registration -----------------------------------------------------
 
 void Server::registerHandlers() {
@@ -616,6 +631,8 @@ void Server::registerHandlers() {
                     [this](const json& p) { return onReferences(p); });
     m_rpc.onRequest("textDocument/documentHighlight",
                     [this](const json& p) { return onDocumentHighlight(p); });
+    m_rpc.onRequest("textDocument/signatureHelp",
+                    [this](const json& p) { return onSignatureHelp(p); });
 }
 
 } // namespace loxpp::lsp
