@@ -4,6 +4,7 @@
 #include <string_view>
 #include <vector>
 
+#include "lsp/model_util.h"
 #include "lsp/protocol.h"
 #include "lsp/stdlib_docs.h"
 #include "tooling/symbol_table.h"
@@ -17,13 +18,6 @@ using tooling::Scope;
 using tooling::ScopeKind;
 using tooling::Symbol;
 using tooling::SymbolKind;
-
-bool isWordChar(char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-           (c >= '0' && c <= '9') || c == '_';
-}
-
-bool isSpace(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
 // Parameter names from a signature of the form "name(a, b) -> T". Returns an
 // empty list for "name()". The stdlib table owns the format, so a missing
@@ -39,7 +33,7 @@ std::vector<std::string> paramNamesFromSignature(std::string_view sig) {
     std::vector<std::string> out;
     std::size_t start = open + 1;
     while (start < close) {
-        while (start < close && isSpace(sig[start])) {
+        while (start < close && isSpaceChar(sig[start])) {
             ++start;
         }
         std::size_t end = start;
@@ -47,7 +41,7 @@ std::vector<std::string> paramNamesFromSignature(std::string_view sig) {
             ++end;
         }
         std::size_t trim = end;
-        while (trim > start && isSpace(sig[trim - 1])) {
+        while (trim > start && isSpaceChar(sig[trim - 1])) {
             --trim;
         }
         if (trim > start) {
@@ -58,30 +52,24 @@ std::vector<std::string> paramNamesFromSignature(std::string_view sig) {
     return out;
 }
 
-std::string trimSpaces(const std::string& s) {
-    std::size_t a = 0;
-    while (a < s.size() && isSpace(s[a])) {
-        ++a;
+// True when an unescaped `"` appears at or after `from`. A string that is
+// still open at the cursor with no closer ahead is being typed, not read.
+bool hasClosingQuote(const std::string& text, std::size_t from) {
+    for (std::size_t i = from; i < text.size();) {
+        if (text[i] == '\\' && i + 1 < text.size()) {
+            i += 2;
+            continue;
+        }
+        if (text[i] == '"') {
+            return true;
+        }
+        ++i;
     }
-    std::size_t b = s.size();
-    while (b > a && isSpace(s[b - 1])) {
-        --b;
-    }
-    return s.substr(a, b - a);
+    return false;
 }
 
 // innermostScope + visible-function lookup mirror the completion path: globals
 // are late-bound, locals must be declared before the call's open paren.
-const Scope* innermostScope(const Scope* scope, std::size_t offset) {
-    for (const auto& child : scope->children) {
-        const tooling::Span s = child->span;
-        if (s.offset <= offset && offset < s.offset + s.length) {
-            return innermostScope(child.get(), offset);
-        }
-    }
-    return scope;
-}
-
 const Symbol* findUserFunction(const DocumentModel& model,
                                std::string_view name, std::size_t offset) {
     const Scope* global = model.symbols().global();
@@ -108,24 +96,6 @@ const Symbol* findUserFunction(const DocumentModel& model,
         }
     }
     return globalMatch;
-}
-
-std::vector<std::string> userParamNames(const Symbol& sym) {
-    std::vector<std::pair<std::size_t, std::string>> found;
-    if (sym.innerScope != nullptr) {
-        for (const auto& s : sym.innerScope->symbols) {
-            if (s->kind == SymbolKind::Param && !s->implicit) {
-                found.emplace_back(s->declaration.offset, s->name);
-            }
-        }
-    }
-    std::ranges::sort(found);
-    std::vector<std::string> names;
-    names.reserve(found.size());
-    for (auto& [off, name] : found) {
-        names.push_back(name);
-    }
-    return names;
 }
 
 json toSignatureJson(const std::string& label, const std::string& documentation,
@@ -197,13 +167,17 @@ std::optional<SignatureCall> enclosingCall(const std::string& text,
         }
         ++i;
     }
-    if (inString || inComment || stack.empty()) {
+    // A string still open at the cursor with no closer anywhere ahead is
+    // being typed, so the call stays visible. A trailing `//` comment never
+    // hides the call either; comment text still counts as comment below.
+    const bool danglingString = inString && !hasClosingQuote(text, offset);
+    if ((inString && !danglingString) || stack.empty()) {
         return std::nullopt;
     }
     const std::size_t open = stack.back();
 
     std::size_t j = open;
-    while (j > 0 && isSpace(text[j - 1])) {
+    while (j > 0 && isSpaceChar(text[j - 1])) {
         --j;
     }
     const std::size_t nameEnd = j;
@@ -217,12 +191,12 @@ std::optional<SignatureCall> enclosingCall(const std::string& text,
 
     std::optional<std::string> receiver;
     std::size_t k = j;
-    while (k > 0 && isSpace(text[k - 1])) {
+    while (k > 0 && isSpaceChar(text[k - 1])) {
         --k;
     }
     if (k > 0 && text[k - 1] == '.') {
         --k;
-        while (k > 0 && isSpace(text[k - 1])) {
+        while (k > 0 && isSpaceChar(text[k - 1])) {
             --k;
         }
         const std::size_t recvEnd = k;
@@ -236,6 +210,9 @@ std::optional<SignatureCall> enclosingCall(const std::string& text,
     }
 
     // Top-level commas between the paren and the cursor select the argument.
+    // A dangling string counts as plain text here; its commas may shift the
+    // index by one, which the clamp below absorbs for short signatures.
+    const bool trackStrings = !danglingString;
     int commas = 0;
     int depth = 0;
     bool sStr = false;
@@ -260,7 +237,7 @@ std::optional<SignatureCall> enclosingCall(const std::string& text,
             ++i;
             continue;
         }
-        if (c == '"') {
+        if (trackStrings && c == '"') {
             sStr = true;
             ++i;
             continue;
@@ -281,7 +258,7 @@ std::optional<SignatureCall> enclosingCall(const std::string& text,
         }
         ++i;
     }
-    if (sStr || sComment) {
+    if (sStr) {
         return std::nullopt;
     }
     return SignatureCall{callee, receiver, open, commas};
@@ -299,6 +276,11 @@ json signatureHelpFor(const DocumentModel& model, std::size_t offset) {
         if (*call->receiver == "math") {
             e = mathMemberDoc(call->callee);
         } else {
+            // Map and File method names are unique across the tables, so a
+            // bare-name match applies whatever the receiver text is. This
+            // guesses when the receiver is not a Map or File; hover makes
+            // the same guess, and the receiver type is unknown here.
+            // User-defined methods through a receiver never resolve.
             e = methodDoc(call->callee);
         }
         if (e == nullptr || e->arity == kArityConstant) {
@@ -309,18 +291,10 @@ json signatureHelpFor(const DocumentModel& model, std::size_t offset) {
             paramNamesFromSignature(e->signature), call->argIndex);
     }
 
-    if (const StdlibEntry* e = stdlibGlobalDoc(call->callee)) {
-        if (e->arity == kArityConstant) {
-            return nullptr;
-        }
-        return toSignatureJson(
-            std::string(e->signature), std::string(e->description),
-            paramNamesFromSignature(e->signature), call->argIndex);
-    }
-
+    // A user definition shadows a stdlib global of the same name.
     if (const Symbol* sym =
             findUserFunction(model, call->callee, call->openParen)) {
-        const std::vector<std::string> params = userParamNames(*sym);
+        const std::vector<std::string> params = functionParamNames(*sym);
         std::string label = "fun " + sym->name + "(";
         for (std::size_t i = 0; i < params.size(); ++i) {
             label += params[i];
@@ -329,16 +303,22 @@ json signatureHelpFor(const DocumentModel& model, std::size_t offset) {
             }
         }
         label += ")";
-        std::string doc;
-        const std::string& full = model.text();
-        std::size_t ls = full.rfind('\n', sym->declaration.offset == 0
-                                              ? 0
-                                              : sym->declaration.offset - 1);
-        ls = (ls == std::string::npos) ? 0 : ls + 1;
-        std::size_t le = full.find('\n', sym->declaration.offset);
-        le = (le == std::string::npos) ? full.size() : le;
-        doc = trimSpaces(full.substr(ls, le - ls));
+        // The declaration line up to the body brace, not the whole line.
+        std::string doc = lineTextAt(text, sym->declaration.offset);
+        const std::size_t brace = doc.find('{');
+        if (brace != std::string::npos) {
+            doc = trimmed(doc.substr(0, brace));
+        }
         return toSignatureJson(label, doc, params, call->argIndex);
+    }
+
+    if (const StdlibEntry* e = stdlibGlobalDoc(call->callee)) {
+        if (e->arity == kArityConstant) {
+            return nullptr;
+        }
+        return toSignatureJson(
+            std::string(e->signature), std::string(e->description),
+            paramNamesFromSignature(e->signature), call->argIndex);
     }
 
     return nullptr;

@@ -250,7 +250,7 @@ Handlers implemented:
 | `textDocument/definition` | Single file. |
 | `textDocument/references` | Single file. Honours `context.includeDeclaration`. |
 | `textDocument/documentHighlight` | Single file. The symbol's declaration and every in-file use — the handler always calls `referencesAt` with `includeDeclaration=true`, so the set can be wider than a `references` request that sets it to `false`. |
-| `textDocument/signatureHelp` | One signature. Stdlib globals, `math` members, Map / File methods by unique name, and in-scope user functions. `activeParameter` counts top-level commas. A variadic call clamps to the last parameter. A closed call returns null. |
+| `textDocument/signatureHelp` | One signature. A user definition wins over a stdlib global of the same name. Stdlib globals, `math` members, Map / File methods by unique name, and in-scope user free functions. Map / File matching guesses: the receiver type is unknown, so a non-Map receiver can still show the method. User methods through a dot return null for the same reason. `activeParameter` counts top-level commas. A variadic call clamps to the last parameter. An open string or a trailing comment keeps help. Null when no unmatched `(` holds the cursor. |
 
 Not advertised in v1, so a client must not expect them: `renameProvider`,
 `documentFormattingProvider`,
