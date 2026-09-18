@@ -196,6 +196,7 @@ Lox++ ships a first editor-tooling stack in [`editors/`](editors/):
 | `loxpp-lsp` | diagnostics, hover, completion, document symbols, go-to-definition, references (all within one file) | the `loxpp-lsp` binary |
 | `loxpp --check` | the compiler's static errors, as text or JSON | the `loxpp` binary; a fallback for editors without the server |
 | [`loxpp.nvim`](editors/loxpp.nvim/) | all of the above wired for Neovim, plus filetype detection and buffer options for plain Vim | Neovim (a Vim regex + quickfix path works without the binaries) |
+| [`loxpp-vscode`](editors/loxpp-vscode/) | TextMate highlighting and a client for `loxpp-lsp` | VS Code 1.85 or later; install the server separately for language features |
 
 Build the two binaries:
 
@@ -212,6 +213,39 @@ editors/loxpp.nvim/scripts/build-parser.sh
 ```
 
 Install the Neovim plugin: see [`editors/loxpp.nvim/README.md`](editors/loxpp.nvim/README.md).
+
+### VS Code
+
+Build the extension manually from the checkout root with Node.js 22 and npm:
+
+```sh
+npm ci --prefix editors/loxpp-vscode
+npm run package --prefix editors/loxpp-vscode
+```
+
+The package command compiles the extension and verifies the VSIX contents.
+In VS Code, open Extensions, select **Install from VSIX...** from the menu,
+and choose `editors/loxpp-vscode/loxpp-vscode-0.1.0.vsix`.
+The VSIX is for local, manual installation only. CI checks the package but
+does not upload or publish it. There is no Marketplace publishing step.
+
+Install `loxpp-lsp` separately on the extension host's `PATH`, or set
+`loxpp.server.path` to the executable's absolute path on that host. A path
+inside a build container does not work on the local host. For Remote SSH,
+WSL, or Dev Containers, install the extension and server on the remote
+extension host; the server path must refer to that remote host.
+The extension does not bundle or automatically download the server.
+
+`loxpp.server.enable` defaults to `true`; set it to `false` for highlighting
+only. Use **Lox++: Restart Lox++ Language Server** from the Command Palette
+to restart the server. Server setting changes also restart it.
+The server starts only in trusted workspaces. Highlighting remains available
+without workspace trust or a server. Check the **Lox++** output channel if
+the server cannot start.
+
+Language features include diagnostics, hover, completion, document symbols,
+definitions, and references. Navigation is limited to one file. Rename and
+formatting are not supported.
 
 Design, the `loxpp --check` contract, the LSP capability set, and the
 feature-parity table: [`notes/editor-tooling.md`](notes/editor-tooling.md).
