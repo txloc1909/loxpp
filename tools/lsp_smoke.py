@@ -3,8 +3,9 @@
 
 Spawns the server, speaks LSP over stdio, and checks the core features:
 initialize handshake, push diagnostics on a clean and a broken file, hover on
-a stdlib name, document symbols, go-to-definition on a local use, and member
-completion (offered for a 'math.' receiver, withheld for any other 'x.').
+a stdlib name, document symbols, go-to-definition on a local use, member
+completion (offered for a 'math.' receiver, withheld for any other 'x.'),
+and signature help on a stdlib call.
 
 Usage:
     python3 tools/lsp_smoke.py <path-to-loxpp-lsp> [--bad-file <path>]
@@ -207,6 +208,9 @@ def main():
               "initialize does not advertise rename")
         check("documentFormattingProvider" not in caps,
               "initialize does not advertise formatting")
+        sig = caps.get("signatureHelpProvider", {})
+        check(sig.get("triggerCharacters") == ["(", ","],
+              "initialize advertises signatureHelp triggers (got %s)" % sig)
         client.notify("initialized", {})
 
         # -- clean file: no diagnostics --------------------------------
@@ -293,6 +297,21 @@ def main():
         check(not leaked,
               "completion after a non-math 'x.' leaks no Map/File methods "
               "(got %s)" % leaked)
+
+        # -- signature help on a stdlib call -------------------------
+        sl, sc = line_char(CLEAN_SOURCE, "str(123)")
+        sig_help = client.request("textDocument/signatureHelp", {
+            "textDocument": {"uri": CLEAN_URI},
+            "position": {"line": sl, "character": sc + 4}})
+        sig_label = ""
+        if sig_help and sig_help.get("signatures"):
+            sig_label = sig_help["signatures"][0].get("label", "")
+        check("str(value)" in sig_label,
+              "signatureHelp on 'str(' shows its signature (got %r)"
+              % sig_label[:60])
+        if sig_help:
+            check(sig_help.get("activeParameter") == 0,
+                  "signatureHelp activeParameter is 0 in first arg")
 
     finally:
         code = client.shutdown()
