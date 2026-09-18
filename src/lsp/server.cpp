@@ -13,6 +13,7 @@
 
 #include "lsp/keyword_docs.h"
 #include "lsp/stdlib_docs.h"
+#include "scanner.h"
 #include "tooling/document_model.h"
 #include "tooling/symbol_table.h"
 
@@ -356,9 +357,12 @@ bool isRenameAlpha(char c) {
 bool isRenameDigit(char c) { return c >= '0' && c <= '9'; }
 
 // A new name must match IDENTIFIER (spec/01-lexical.md) and must not be a
-// keyword. "_" passes: it is an ordinary identifier outside match patterns.
+// keyword from lox_keywords(), the scanner's single keyword list. "_"
+// is refused as well: it binds nothing in match patterns, so renaming a
+// name to "_" would silently discard it and the result could not be
+// renamed back (rename from "_" already returns null).
 bool isValidRenameName(std::string_view name) {
-    if (name.empty() || name.size() > 255) {
+    if (name.empty()) {
         return false;
     }
     if (!isRenameAlpha(name[0])) {
@@ -369,8 +373,13 @@ bool isValidRenameName(std::string_view name) {
             return false;
         }
     }
-    if (name != "_" && !keywordDoc(name).empty()) {
+    if (name == "_") {
         return false;
+    }
+    for (const char* const* kw = ::lox_keywords(); *kw != nullptr; ++kw) {
+        if (name == *kw) {
+            return false;
+        }
     }
     return true;
 }
