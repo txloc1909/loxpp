@@ -222,6 +222,7 @@ capability object:
   "referencesProvider": true,
   "documentHighlightProvider": true,
   "documentSymbolProvider": true,
+  "renameProvider": true,
   "completionProvider": { "triggerCharacters": ["."] }
 }
 ```
@@ -249,8 +250,9 @@ Handlers implemented:
 | `textDocument/definition` | Single file. |
 | `textDocument/references` | Single file. Honours `context.includeDeclaration`. |
 | `textDocument/documentHighlight` | Single file. The symbol's declaration and every in-file use — the handler always calls `referencesAt` with `includeDeclaration=true`, so the set can be wider than a `references` request that sets it to `false`. |
+| `textDocument/rename` | Single file. Builds one edit per span from `referencesAt` with `includeDeclaration=true`. Returns null when the position has no user symbol (keyword, stdlib global, unknown name, implicit `this`/`super`, `_`, or a member name after a dot). Rejects a new name that is not an `IDENTIFIER` or that is a keyword with `InvalidParams`. |
 
-Not advertised in v1, so a client must not expect them: `renameProvider`,
+Not advertised in v1, so a client must not expect them:
 `documentFormattingProvider`, `signatureHelpProvider`,
 `workspaceSymbolProvider`, `foldingRangeProvider`,
 `semanticTokensProvider`, `codeActionProvider`. Folding and indentation come
@@ -404,7 +406,7 @@ The `Build & Test` job runs the GTest suites, which include
 | Find references / document highlight (in-file) | yes | yes | yes | yes |
 | Unused-local / unknown-name / static-rule warnings | yes (resolver; LSP only, not `--check`) | yes | yes | yes |
 | Signature help | no — v2 (arity is already in `stdlib_docs`) | yes | yes | yes |
-| Rename (in-file) | no — v2 (the reference sets already exist) | yes | yes | yes |
+| Rename (in-file) | yes (single file; member names after `.` are not linked) | yes | yes | yes |
 | Workspace symbols / cross-file navigation | no — waits on a module system | yes | yes | yes |
 | Formatting | no — no `loxpp fmt` yet | yes | yes | yes |
 | Semantic tokens | no — tree-sitter covers highlighting | yes | yes | yes |
@@ -433,8 +435,9 @@ issue, not a list here:
 - Signature help (`signatureHelpProvider`); arity and the parameter list
   already exist in `src/lsp/stdlib_docs.*` —
   https://github.com/txloc1909/loxpp/issues/210
-- In-file rename (`renameProvider`), using the edit list that `references`
-  already computes — https://github.com/txloc1909/loxpp/issues/211
+- Implemented: in-file rename (`renameProvider`), using the edit list that
+  `references` already computes —
+  https://github.com/txloc1909/loxpp/issues/211
 - Code actions from compiler errors (`codeActionProvider`) —
   https://github.com/txloc1909/loxpp/issues/212
 - Formatting: a `loxpp fmt` formatter, then `documentFormattingProvider` —
