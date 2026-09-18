@@ -415,7 +415,7 @@ pipeline either.
 mission's node list, enumerate every tool that parses, compiles, or
 evaluates Lox++ source — grep the repo for anything that ships its own
 scanner/parser (`bootstrap/`, `editors/tree-sitter-loxpp/`,
-`tools/loxpp-lsp/`, and whatever the next one turns out to be) — and check
+`src/lsp/`, and whatever the next one turns out to be) — and check
 each one off against the feature the mission is adding, independently of
 which specific execution pipeline the mission's main risk analysis is about.
 A pipeline-shaped risk analysis is necessary for the pipeline's own nodes; it
