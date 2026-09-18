@@ -43,7 +43,7 @@ class Server {
     json onDefinition(const json& params);
     json onReferences(const json& params);
     json onDocumentHighlight(const json& params);
-
+    json onCodeAction(const json& params);
     // Throws RpcError when the client calls a feature before `initialize`, or
     // any request after `shutdown`.
     void requireReady() const;

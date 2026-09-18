@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "lsp/code_action.h"
 #include "lsp/keyword_docs.h"
 #include "lsp/stdlib_docs.h"
 #include "tooling/document_model.h"
@@ -349,6 +350,58 @@ void appendGeneralCompletions(json& items, const DocumentModel& model,
     }
 }
 
+// The `context` half of a textDocument/codeAction request: the diagnostics
+// the client shows plus whether its `only` filter admits quick fixes.
+struct CodeActionContext {
+    json diagnostics = json::array();
+    bool wantsQuickFix = true;
+};
+
+CodeActionContext parseCodeActionContext(const json& params) {
+    CodeActionContext ctx;
+    if (!params.contains("context") || !params.at("context").is_object()) {
+        return ctx;
+    }
+    const json& c = params.at("context");
+    if (c.contains("diagnostics") && c.at("diagnostics").is_array()) {
+        ctx.diagnostics = c.at("diagnostics");
+    }
+    // `only` lists the kinds the client wants. A "quickfix" action matches
+    // "quickfix" itself; any other filter set matches nothing this handler
+    // offers.
+    if (c.contains("only") && c.at("only").is_array()) {
+        ctx.wantsQuickFix = false;
+        for (const json& kind : c.at("only")) {
+            if (kind.is_string() && kind.get<std::string>() == "quickfix") {
+                ctx.wantsQuickFix = true;
+            }
+        }
+    }
+    return ctx;
+}
+
+void pushQuickFix(json& result, const DocumentModel& model,
+                  const std::string& uri, const QuickFix& fix,
+                  const json* diagnostic) {
+    json action{{"title", fix.title}, {"kind", "quickfix"}};
+    if (diagnostic != nullptr) {
+        action["diagnostics"] = json::array({*diagnostic});
+    }
+    json edits = json::array();
+    for (const SourceEdit& e : fix.edits) {
+        const tooling::Position a = model.offsetToPosition(e.offset);
+        const tooling::Position b = model.offsetToPosition(e.offset + e.length);
+        edits.push_back(json{
+            {"range", Range{Position{static_cast<std::uint32_t>(a.line),
+                                     static_cast<std::uint32_t>(a.character)},
+                            Position{static_cast<std::uint32_t>(b.line),
+                                     static_cast<std::uint32_t>(b.character)}}},
+            {"newText", e.newText}});
+    }
+    action["edit"] = json{{"changes", json{{uri, edits}}}};
+    result.push_back(std::move(action));
+}
+
 } // namespace
 
 Server::Server(JsonRpc& rpc)
@@ -394,6 +447,7 @@ json Server::onInitialize(const json& /*params*/) {
              {"referencesProvider", true},
              {"documentHighlightProvider", true},
              {"documentSymbolProvider", true},
+             {"codeActionProvider", true},
              {"completionProvider",
               {{"triggerCharacters", json::array({"."})}}},
          }},
@@ -584,6 +638,35 @@ json Server::onDocumentHighlight(const json& params) {
     return result;
 }
 
+json Server::onCodeAction(const json& params) {
+    requireReady();
+    const std::string uri =
+        params.at("textDocument").at("uri").get<std::string>();
+    const Range range = params.at("range").get<Range>();
+    const CodeActionContext ctx = parseCodeActionContext(params);
+    json result = json::array();
+    if (!ctx.wantsQuickFix) {
+        return result;
+    }
+    (void)m_store.read(uri, [&](const DocumentModel& model) {
+        const std::size_t at =
+            model.positionToOffset(toToolingPos(range.start));
+        for (const QuickFix& fix :
+             matchExhaustivenessFixes(model, at, ctx.diagnostics)) {
+            const json* diag = nullptr;
+            if (fix.diagnosticIndex.has_value() &&
+                *fix.diagnosticIndex < ctx.diagnostics.size()) {
+                diag = &ctx.diagnostics[*fix.diagnosticIndex];
+            }
+            pushQuickFix(result, model, uri, fix, diag);
+        }
+        for (const QuickFix& fix : strWrapFixes(model, at)) {
+            pushQuickFix(result, model, uri, fix, nullptr);
+        }
+    });
+    return result;
+}
+
 // -- registration -----------------------------------------------------
 
 void Server::registerHandlers() {
@@ -616,6 +699,8 @@ void Server::registerHandlers() {
                     [this](const json& p) { return onReferences(p); });
     m_rpc.onRequest("textDocument/documentHighlight",
                     [this](const json& p) { return onDocumentHighlight(p); });
+    m_rpc.onRequest("textDocument/codeAction",
+                    [this](const json& p) { return onCodeAction(p); });
 }
 
 } // namespace loxpp::lsp
