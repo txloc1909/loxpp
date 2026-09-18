@@ -65,23 +65,24 @@ fun main() {
         }
         var parts = split(line, "=");
         var pair = nil;
+        var bad = false;
         try {
             pair = extractPair(parts);
         } catch (fault) {
             print "error line " + str(lineno) + ": " + fault.kind + ": " + fault.message;
             errors = errors + 1;
-            lineno = lineno + 1;
-            line = f.readline();
-            continue;
+            bad = true;
         }
-        try {
-            checkEntry(parts, pair[0], pair[1], seen);
-            seen[pair[0]] = pair[1];
-            print pair[0] + "=" + pair[1];
-            valid = valid + 1;
-        } catch (rule) {
-            print "error line " + str(lineno) + ": " + str(rule);
-            errors = errors + 1;
+        if (!bad) {
+            try {
+                checkEntry(parts, pair[0], pair[1], seen);
+                seen[pair[0]] = pair[1];
+                print pair[0] + "=" + pair[1];
+                valid = valid + 1;
+            } catch (rule) {
+                print "error line " + str(lineno) + ": " + str(rule);
+                errors = errors + 1;
+            }
         }
         lineno = lineno + 1;
         line = f.readline();
