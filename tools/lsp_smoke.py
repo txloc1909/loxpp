@@ -313,6 +313,14 @@ def main():
             check(sig_help.get("activeParameter") == 0,
                   "signatureHelp activeParameter is 0 in first arg")
 
+        # -- signature help after a closed call returns null -------------
+        al, ac = line_char(CLEAN_SOURCE, "str(123)")
+        after = client.request("textDocument/signatureHelp", {
+            "textDocument": {"uri": CLEAN_URI},
+            "position": {"line": al, "character": ac + len("str(123)")}})
+        check(after is None,
+              "signatureHelp after ')' returns null (got %r)" % (after,))
+
     finally:
         code = client.shutdown()
         if code not in (0, None):
