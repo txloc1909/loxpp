@@ -313,6 +313,10 @@ examples=(
     "examples/match_http_status.lox"
     "examples/match_state_machine.lox"
     "examples/csv_reader.lox"
+    # Per-record recovery: a short row faults with IndexOutOfBoundsError
+    # while a rule violation throws a string, each with its own catch
+    # block (fault.kind/fault.message vs str).
+    "examples/csv_cleaner.lox"
     "examples/data_pipeline.lox"
     "examples/graph_bfs_dfs.lox"
     "examples/histogram.lox"
@@ -330,6 +334,9 @@ examples=(
     # the `in` operator, SLICE syntax (`xs[a:b]`), or a match sequence
     # pattern (IS_SEQ) to run.
     "examples/config_parser.lox"
+    # Per-line recovery with duplicate and required-key checks: the same
+    # two catch shapes as csv_cleaner.lox, over key=value entries.
+    "examples/config_validator.lox"
     "examples/grep_lite.lox"
     "examples/match_dispatch.lox"
     "examples/merge_sort.lox"

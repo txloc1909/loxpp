@@ -1,0 +1,91 @@
+// csv_cleaner.lox — Robust CSV cleaning with per-row error recovery.
+//
+// Upgrades csv_reader.lox: one malformed row no longer aborts the job.
+// Demonstrates: per-record try/catch, defer for handle cleanup, summary
+// counts. A short row faults with IndexOutOfBoundsError; a rule violation
+// throws a string. Each has its own catch block, since no handler can tell
+// a fault from a string portably across backends.
+
+fun split(s, delim) {
+    var result = [];
+    var current = "";
+    var i = 0;
+    while (i < len(s)) {
+        if (s[i] == delim) {
+            result.append(current);
+            current = "";
+        } else {
+            current = current + s[i];
+        }
+        i = i + 1;
+    }
+    result.append(current);
+    return result;
+}
+
+fun extractRow(parts) {
+    return [parts[0], parts[1], parts[2]];
+}
+
+fun checkRow(parts, row) {
+    if (len(parts) != 3) throw "expected 3 columns, got " + str(len(parts));
+    if (len(row[0]) == 0) throw "empty name";
+    if (len(row[1]) == 0) throw "empty age";
+    if (len(row[2]) == 0) throw "empty city";
+    return row[0] + " " + row[1] + " " + row[2];
+}
+
+fun main() {
+    print "=== CSV Cleaner ===";
+    var f = open("examples/csv_cleaner.input", "r");
+    defer f.close();
+
+    var header = split(f.readline(), ",");
+    print "columns: " + header[0] + " " + header[1] + " " + header[2];
+
+    var ok = 0;
+    var skipped = 0;
+    var lineno = 2;
+    var line = f.readline();
+    while (line != nil) {
+        if (len(line) == 0) {
+            print "skip line " + str(lineno) + ": empty line";
+            skipped = skipped + 1;
+        } else {
+            var parts = split(line, ",");
+            var row = nil;
+            var bad = false;
+            try {
+                row = extractRow(parts);
+            } catch (fault) {
+                print "skip line " + str(lineno) + ": " + fault.kind + ": " + fault.message;
+                skipped = skipped + 1;
+                bad = true;
+            }
+            if (!bad) {
+                try {
+                    print checkRow(parts, row);
+                    ok = ok + 1;
+                } catch (rule) {
+                    print "skip line " + str(lineno) + ": " + str(rule);
+                    skipped = skipped + 1;
+                }
+            }
+        }
+        lineno = lineno + 1;
+        line = f.readline();
+    }
+    print str(ok) + " clean, " + str(skipped) + " skipped";
+}
+
+main();
+// CHECK: === CSV Cleaner ===
+// CHECK: columns: name age city
+// CHECK: Alice 30 London
+// CHECK: skip line 3: IndexOutOfBoundsError: List index out of bounds.
+// CHECK: skip line 4: expected 3 columns, got 4
+// CHECK: skip line 5: empty name
+// CHECK: Dave 28 Rome
+// CHECK: skip line 7: empty line
+// CHECK: Eve 31 Madrid
+// CHECK: 3 clean, 4 skipped
