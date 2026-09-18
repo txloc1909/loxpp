@@ -258,6 +258,26 @@ bool hasExhaustivenessError(const std::string& source) {
     return false;
 }
 
+// No line holds only spaces or tabs. The match fix folds the brace indent
+// into its edit, so it must never leave an indent-only line behind.
+bool hasWhitespaceOnlyLine(const std::string& text) {
+    std::size_t start = 0;
+    while (start <= text.size()) {
+        const std::size_t end = text.find('\n', start);
+        const std::string line =
+            text.substr(start, end == std::string::npos ? end : end - start);
+        if (!line.empty() &&
+            line.find_first_not_of(" \t") == std::string::npos) {
+            return true;
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+    return false;
+}
+
 TEST(LspCodeAction, ParsesExhaustivenessMessage) {
     auto one = loxpp::lsp::parseNonExhaustiveMatch(
         "Non-exhaustive match on enum 'Result': missing arms for: Err");
@@ -319,10 +339,49 @@ TEST(LspCodeAction, MatchFixInsertsMissingArm) {
     ASSERT_TRUE(fixes[0].diagnosticIndex.has_value());
     EXPECT_EQ(*fixes[0].diagnosticIndex, 0U);
     ASSERT_EQ(fixes[0].edits.size(), 1U);
-    EXPECT_EQ(source[fixes[0].edits[0].offset], '}');
+    // The edit replaces the brace indent, so its range holds only spaces.
+    const auto& edit = fixes[0].edits[0];
+    EXPECT_NE(edit.length, 0U);
+    EXPECT_EQ(source.substr(edit.offset, edit.length),
+              std::string(edit.length, ' '));
 
     const std::string fixed = applySourceEdits(source, fixes[0].edits);
     EXPECT_FALSE(hasExhaustivenessError(fixed)) << "fixed source:\n" << fixed;
+    EXPECT_TRUE(fixed.find("case Err => nil") != std::string::npos);
+    EXPECT_FALSE(hasWhitespaceOnlyLine(fixed)) << "fixed source:\n" << fixed;
+}
+
+TEST(LspCodeAction, MatchFixDedupesRepeatedDiagnostic) {
+    const std::string source = "enum Result { Ok(value) Err(msg) }\n"
+                               "\n"
+                               "fun label(r) {\n"
+                               "    return match r {\n"
+                               "        case Ok(v) => \"ok\"\n"
+                               "    };\n"
+                               "}\n";
+    loxpp::tooling::DocumentModel model(source);
+    json one = json::array();
+    for (const ::Diagnostic& d : analyze(source)) {
+        if (d.message.find("Non-exhaustive match") == std::string::npos) {
+            continue;
+        }
+        const auto a = model.offsetToPosition(d.offset);
+        const auto b = model.offsetToPosition(d.offset + d.length);
+        one.push_back(
+            {{"message", d.message},
+             {"range",
+              {{"start", {{"line", a.line}, {"character", a.character}}},
+               {"end", {{"line", b.line}, {"character", b.character}}}}}});
+    }
+    ASSERT_EQ(one.size(), 1U);
+
+    // The same diagnostic twice still yields one fix: applying two
+    // identical fixes would duplicate the arm.
+    json repeated = json::array({one[0], one[0]});
+    const std::vector<loxpp::lsp::QuickFix> fixes =
+        loxpp::lsp::matchExhaustivenessFixes(model, 0, repeated);
+    ASSERT_EQ(fixes.size(), 1U);
+    EXPECT_EQ(fixes[0].title, "Add missing match arm: Err");
 }
 
 TEST(LspCodeAction, MatchFixInsertsSeveralArms) {
@@ -357,6 +416,7 @@ TEST(LspCodeAction, MatchFixInsertsSeveralArms) {
 
     const std::string fixed = applySourceEdits(source, fixes[0].edits);
     EXPECT_FALSE(hasExhaustivenessError(fixed)) << "fixed source:\n" << fixed;
+    EXPECT_FALSE(hasWhitespaceOnlyLine(fixed)) << "fixed source:\n" << fixed;
 }
 
 TEST(LspCodeAction, MatchFixNeedsADiagnostic) {

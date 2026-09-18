@@ -377,6 +377,13 @@ def main():
         check(filtered == [],
               "codeAction with only=['refactor'] is empty (got %d actions)"
               % len(filtered))
+        wanted = client.request("textDocument/codeAction", {
+            "textDocument": {"uri": CLEAN_URI},
+            "range": {"start": plus_pos, "end": plus_pos},
+            "context": {"diagnostics": [],
+                        "only": ["quickfix"]}}) or []
+        check(sorted(a.get("title", "") for a in wanted) == titles,
+              "codeAction with only=['quickfix'] keeps both wraps")
 
         # -- completion: member list is gated to the 'math' receiver ----
         client.notify("textDocument/didOpen", {"textDocument": {

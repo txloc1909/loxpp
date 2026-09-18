@@ -32,8 +32,9 @@ namespace loxpp::lsp {
 
 using json = nlohmann::json;
 
-// One edit with offsets into the original document text. v1 only produces
-// insertions (length == 0); applying several means applying them in
+// One edit with offsets into the original document text. Most fixes are
+// insertions (length == 0); the match-arm fix also folds the brace indent
+// into a ranged edit. Applying several edits means applying them in
 // descending offset order so earlier offsets stay valid.
 struct SourceEdit {
     std::size_t offset = 0;
@@ -64,6 +65,9 @@ parseNonExhaustiveMatch(const std::string& message);
 // One fix per exhaustiveness diagnostic in `contextDiagnostics` whose message
 // parses and whose range sits inside a `match` expression. `requestOffset`
 // is only the fallback anchor when a diagnostic range does not parse.
+// The fix trusts the diagnostic: it finds the match by position and never
+// checks the named enum against it, so a stale diagnostic can offer arms
+// for the wrong enum. A repeated diagnostic yields one fix, not two.
 [[nodiscard]] std::vector<QuickFix>
 matchExhaustivenessFixes(const tooling::DocumentModel& model,
                          std::size_t requestOffset,

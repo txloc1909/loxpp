@@ -1,5 +1,8 @@
 #include "lsp/code_action.h"
 
+#include <algorithm>
+#include <utility>
+
 #include "token.h"
 #include "tooling/ast.h"
 #include "tooling/document_model.h"
@@ -549,6 +552,10 @@ std::vector<QuickFix> matchExhaustivenessFixes(const DocumentModel& model,
         return out;
     }
     const std::string& text = model.text();
+    // (title, insert offset) pairs already emitted. One diagnostic per arm
+    // set is normal, but a repeated diagnostic must not offer the same arms
+    // twice: applying both would duplicate each arm.
+    std::vector<std::pair<std::string, std::size_t>> seen;
     for (std::size_t i = 0; i < contextDiagnostics.size(); ++i) {
         const json& d = contextDiagnostics[i];
         if (!d.is_object()) {
@@ -601,13 +608,33 @@ std::vector<QuickFix> matchExhaustivenessFixes(const DocumentModel& model,
         if (!match->arms.empty()) {
             indent = lineIndent(text, match->arms.front().offset);
         }
+        // Indent before the brace would sit alone on its line after a pure
+        // insertion. Fold that run into the edit and re-emit it after the
+        // new arms, so no line holds only whitespace and the brace keeps
+        // its indent.
+        std::size_t editAt = insert;
+        std::size_t editLen = 0;
+        std::string braceIndent;
+        {
+            std::size_t w = insert;
+            while (w > match->offset &&
+                   (text[w - 1] == ' ' || text[w - 1] == '\t')) {
+                --w;
+            }
+            if (w != insert && w > match->offset && text[w - 1] == '\n') {
+                editAt = w;
+                editLen = insert - w;
+                braceIndent = text.substr(w, insert - w);
+            }
+        }
         std::string edit;
-        if (insert > 0 && text[insert - 1] != '\n') {
+        if (editLen == 0 && insert > 0 && text[insert - 1] != '\n') {
             edit += "\n";
         }
         for (const std::string& name : parsed->missing) {
             edit += indent + "case " + name + " => nil\n";
         }
+        edit += braceIndent;
         std::string title = parsed->missing.size() == 1
                                 ? "Add missing match arm: " + parsed->missing[0]
                                 : "Add missing match arms: ";
@@ -619,9 +646,14 @@ std::vector<QuickFix> matchExhaustivenessFixes(const DocumentModel& model,
                 }
             }
         }
+        const auto key = std::make_pair(title, editAt);
+        if (std::ranges::find(seen, key) != seen.end()) {
+            continue;
+        }
+        seen.push_back(key);
         QuickFix fix;
         fix.title = std::move(title);
-        fix.edits.push_back(SourceEdit{insert, 0, std::move(edit)});
+        fix.edits.push_back(SourceEdit{editAt, editLen, std::move(edit)});
         fix.diagnosticIndex = i;
         out.push_back(std::move(fix));
     }
