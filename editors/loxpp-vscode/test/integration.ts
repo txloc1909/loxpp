@@ -29,7 +29,7 @@ export async function run(): Promise<void> {
     language: 'lox',
     content: 'var value = ;\n'
   });
-  await vscode.window.showTextDocument(document);
+  const editor = await vscode.window.showTextDocument(document);
   await vscode.commands.executeCommand('loxpp.restartServer');
 
   const diagnostics = await waitForDiagnostics(
@@ -42,25 +42,36 @@ export async function run(): Promise<void> {
     'expected at least one error diagnostic'
   );
 
-  const hover = await vscode.commands.executeCommand<vscode.Hover[]>(
-    'vscode.executeHoverProvider',
-    document.uri,
-    new vscode.Position(0, 1)
-  );
-  assert.ok(Array.isArray(hover), 'hover must respond');
+  await editor.edit((builder) => {
+    builder.replace(
+      new vscode.Range(new vscode.Position(0, 0), new vscode.Position(1, 0)),
+      'var greeting = "hello";\nprint greeting;\n'
+    );
+  });
+  await waitForDiagnostics(document.uri, (items) => items.length === 0, 'clean diagnostics for valid code');
 
   const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
     'vscode.executeDocumentSymbolProvider',
     document.uri
   );
-  assert.ok(Array.isArray(symbols), 'document symbols must respond');
+  assert.ok(Array.isArray(symbols) && symbols.length > 0, 'expected document symbols for valid code');
+  assert.ok(symbols.some((symbol) => symbol.name === 'greeting'), 'expected a symbol named greeting');
+
+  const usage = new vscode.Position(1, 8);
+  const hover = await vscode.commands.executeCommand<vscode.Hover[]>(
+    'vscode.executeHoverProvider',
+    document.uri,
+    usage
+  );
+  assert.ok(Array.isArray(hover) && hover.length > 0, 'expected hover for a user symbol');
+  assert.ok(hover.some((entry) => entry.contents.length > 0), 'expected non-empty hover contents');
 
   const definitions = await vscode.commands.executeCommand<vscode.Location[]>(
     'vscode.executeDefinitionProvider',
     document.uri,
-    new vscode.Position(0, 1)
+    usage
   );
-  assert.ok(Array.isArray(definitions), 'definition provider must respond');
+  assert.ok(Array.isArray(definitions) && definitions.length > 0, 'expected a definition for a user symbol');
 
   await vscode.commands.executeCommand('vscode.open', document.uri);
   await vscode.commands.executeCommand('workbench.action.closeActiveEditor');

@@ -155,18 +155,17 @@
           }
         },
         {
-          "begin": "\\b(?!if\\b|else\\b|for\\b|while\\b|return\\b|print\\b|catch\\b|case\\b|var\\b|fun\\b|class\\b|enum\\b|try\\b|defer\\b|throw\\b|match\\b|this\\b|super\\b|default\\b|and\\b|or\\b|in\\b|true\\b|false\\b|nil\\b|break\\b|continue\\b)([a-zA-Z_]\\w*)(?=\\s*\\()",
-          "beginCaptures": {
+          "match": "\\b(?!if\\b|else\\b|for\\b|while\\b|return\\b|print\\b|catch\\b|case\\b|var\\b|fun\\b|class\\b|enum\\b|try\\b|defer\\b|throw\\b|match\\b|this\\b|super\\b|default\\b|and\\b|or\\b|in\\b|true\\b|false\\b|nil\\b|break\\b|continue\\b)([a-zA-Z_]\\w*)(?=\\s*\\()",
+          "captures": {
             "1": {
               "name": "entity.name.function.lox"
             }
-          },
-          "end": "(?=\\S)"
+          }
         }
       ]
     },
     "operators": {
-      "match": "=>|==|!=|<=|>=|\\.\\.\\.|[=+\\-*/%<>!]",
+      "match": "=>|==|!=|<=|>=|[=+\\-*/%<>!]",
       "name": "keyword.operator.lox"
     },
     "operators-patterns": {

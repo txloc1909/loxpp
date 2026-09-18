@@ -111,7 +111,10 @@ above assumes that the checkout is mounted at `/workspace`. Use the absolute
 path to your server if you run the tests elsewhere. `xvfb-run -a` supplies a
 display for headless Linux tests. The integration runner downloads a VS Code
 test host; this is separate from the installed extension, which never
-downloads a language server.
+downloads a language server. The runner passes `--disable-workspace-trust`,
+so the test workspace counts as trusted and the server always starts. The
+trust gate itself (the server stays stopped without trust, highlighting
+still works) is verified by hand, not by CI.
 
 The `vscode-extension` CI job runs these checks in `dev-editors`. The package
 script creates `editors/loxpp-vscode/loxpp-vscode-0.1.0.vsix` and verifies its
