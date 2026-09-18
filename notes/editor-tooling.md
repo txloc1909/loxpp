@@ -293,7 +293,17 @@ editors/
     test/                    extension tests
     language-configuration.json
     package.json package-lock.json tsconfig.json
+  loxpp.tmbundle/           the TextMate bundle
+    info.plist               bundle metadata
+    Syntaxes/                Lox++.tmLanguage.json + Lox++.tmLanguage
 ```
+
+The JSON grammar in the bundle is a byte-for-byte copy of
+`loxpp-vscode/syntaxes/lox.tmLanguage.json`. The extension tests test that
+file. The copy inherits that coverage. CI fails when the two drift (the
+`VS Code extension` job runs `tools/check_textmate_grammar.py`). The XML
+plist carries the same rules plus `fileTypes` and a grammar `uuid` for
+TextMate and Linguist consumers.
 
 The four `queries/loxpp/*.scm` files in the plugin are a byte-for-byte copy
 of `editors/tree-sitter-loxpp/queries/*.scm`. CI fails the build if the two
@@ -379,7 +389,7 @@ not upload or publish it. Test commands are in
 | `tree-sitter grammar` | `dev-editors` | `tree-sitter generate`, `tree-sitter test`, then `tree-sitter parse` over `examples/*.lox`, `bootstrap/*.lox`, and `test/translation-probes/*.lox`; fails on any `ERROR` or `MISSING` node. |
 | `loxpp-lsp language server` | `dev` | Builds `loxpp-lsp` under the ASan/UBSan `debug` preset, then runs `tools/lsp_smoke.py`. Also runs the smoke test with a good file passed as the bad file to prove the assertion can fail. |
 | `Neovim plugin` | `dev-editors` | Diffs the plugin queries against the grammar queries; builds `loxpp` + `loxpp-lsp` + the parser; runs `tools/check_nvim_plugin.sh` headless in both normal and `--fallback` mode; proves the headless test fails with a broken `loxpp-lsp`. |
-| `VS Code extension` | `dev-editors` | Builds `loxpp-lsp` with the `release` preset; runs npm install, lint, typecheck, tests, and compile; runs integration tests with `xvfb-run -a` and `LOXPP_LSP_PATH=/workspace/build/loxpp-lsp`; packages and verifies the VSIX without uploading or publishing it. |
+| `VS Code extension` | `dev-editors` | Runs `tools/check_textmate_grammar.py` (bundle/VS Code grammar sync and keyword coverage); builds `loxpp-lsp` with the `release` preset; runs npm install, lint, typecheck, tests, and compile; runs integration tests with `xvfb-run -a` and `LOXPP_LSP_PATH=/workspace/build/loxpp-lsp`; packages and verifies the VSIX without uploading or publishing it. |
 
 The `Build & Test` job runs the GTest suites, which include
 `test_check_diagnostics`, `test_tooling_parser`, and `test_tooling_resolver`.
@@ -447,8 +457,9 @@ issue, not a list here:
 - Cross-file navigation and workspace symbols; waits on a module system
   (`notes/expressiveness-roadmap.md`, not scheduled) —
   https://github.com/txloc1909/loxpp/issues/216
-- A TextMate grammar (`editors/loxpp.tmbundle`) for VS Code and GitHub
-  Linguist reach — https://github.com/txloc1909/loxpp/issues/217
+- Implemented: TextMate grammar in `editors/loxpp.tmbundle/`, with the
+  VS Code grammar as the tested source —
+  https://github.com/txloc1909/loxpp/issues/217
 - Implemented: VS Code extension in `editors/loxpp-vscode/`, with manual
   VSIX installation — https://github.com/txloc1909/loxpp/issues/218
 - Split `editors/tree-sitter-loxpp` and `editors/loxpp.nvim` into their own

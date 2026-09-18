@@ -197,6 +197,7 @@ Lox++ ships a first editor-tooling stack in [`editors/`](editors/):
 | `loxpp --check` | the compiler's static errors, as text or JSON | the `loxpp` binary; a fallback for editors without the server |
 | [`loxpp.nvim`](editors/loxpp.nvim/) | all of the above wired for Neovim, plus filetype detection and buffer options for plain Vim | Neovim (a Vim regex + quickfix path works without the binaries) |
 | [`loxpp-vscode`](editors/loxpp-vscode/) | TextMate highlighting and a client for `loxpp-lsp` | VS Code 1.85 or later; install the server separately for language features |
+| [`loxpp.tmbundle`](editors/loxpp.tmbundle/) | TextMate grammar for TextMate, Linguist, and other TextMate consumers | copy the directory into TextMate; VS Code users take `loxpp-vscode` instead |
 
 Build the two binaries:
 
