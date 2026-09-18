@@ -3,8 +3,10 @@
 
 Spawns the server, speaks LSP over stdio, and checks the core features:
 initialize handshake, push diagnostics on a clean and a broken file, hover on
-a stdlib name, document symbols, go-to-definition on a local use, and member
-completion (offered for a 'math.' receiver, withheld for any other 'x.').
+a stdlib name, document symbols, go-to-definition on a local use, in-file
+rename (edit list, null on stdlib names, InvalidParams on bad new names,
+or-pattern coverage), and member completion (offered for a 'math.' receiver,
+withheld for any other 'x.').
 
 Usage:
     python3 tools/lsp_smoke.py <path-to-loxpp-lsp> [--bad-file <path>]
@@ -42,9 +44,20 @@ var a = math.
 var b = who.
 """
 
+RENAME_MATCH_SOURCE = """\
+enum E { Move(x) Teleport(x) Quit }
+fun go(e) {
+    return match e {
+        case Move(x) or Teleport(x) => x
+        case Quit => 0
+    };
+}
+"""
+
 CLEAN_URI = "file:///smoke/clean.lox"
 BAD_URI = "file:///smoke/bad.lox"
 COMPLETION_URI = "file:///smoke/completion.lox"
+RENAME_MATCH_URI = "file:///smoke/rename_match.lox"
 
 
 class LspClient:
@@ -300,6 +313,53 @@ def main():
                 "valid identifier" in str(exc) or "-32602" in str(exc)
         check(bad_name_failed,
               "rename with '123bad' fails with InvalidParams")
+
+        def rename_fails(uri, line, character, new_name):
+            try:
+                client.request("textDocument/rename", {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": line, "character": character},
+                    "newName": new_name})
+            except RuntimeError as exc:
+                return "-32602" in str(exc)
+            return False
+
+        check(rename_fails(CLEAN_URI, rl, rc + 1, "var"),
+              "rename to keyword 'var' fails with InvalidParams")
+        check(rename_fails(CLEAN_URI, rl, rc + 1, "_"),
+              "rename to '_' fails with InvalidParams")
+
+        # A long name is a valid IDENTIFIER (no length limit in the spec).
+        long_name = "q" * 300
+        rename_long = client.request("textDocument/rename", {
+            "textDocument": {"uri": CLEAN_URI},
+            "position": {"line": rl, "character": rc + 1},
+            "newName": long_name})
+        long_edits = (rename_long.get("changes", {}).get(CLEAN_URI, [])
+                      if isinstance(rename_long, dict) else [])
+        check(len(long_edits) == 2
+              and all(e.get("newText") == long_name for e in long_edits),
+              "rename to a 300-char name yields 2 edits (got %d)"
+              % len(long_edits))
+
+        # -- rename: or-pattern repeat binding is one edit -------
+        client.notify("textDocument/didOpen", {"textDocument": {
+            "uri": RENAME_MATCH_URI, "languageId": "lox", "version": 1,
+            "text": RENAME_MATCH_SOURCE}})
+        client.pump_until_diagnostics(RENAME_MATCH_URI)
+        # "Teleport(x)" also occurs in the enum header; the case arm is the
+        # second occurrence.
+        ml, mc = line_char(RENAME_MATCH_SOURCE, "Teleport(x)", occurrence=2)
+        rename_or = client.request("textDocument/rename", {
+            "textDocument": {"uri": RENAME_MATCH_URI},
+            "position": {"line": ml, "character": mc + 9},
+            "newName": "zz"})
+        or_edits = (rename_or.get("changes", {}).get(RENAME_MATCH_URI, [])
+                    if isinstance(rename_or, dict) else [])
+        check(len(or_edits) == 3
+              and all(e.get("newText") == "zz" for e in or_edits),
+              "rename of or-pattern 'x' yields 3 edits (got %s)"
+              % (or_edits,))
 
         # -- completion: member list is gated to the 'math' receiver ----
         client.notify("textDocument/didOpen", {"textDocument": {
