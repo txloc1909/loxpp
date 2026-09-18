@@ -250,7 +250,7 @@ Handlers implemented:
 | `textDocument/definition` | Single file. |
 | `textDocument/references` | Single file. Honours `context.includeDeclaration`. |
 | `textDocument/documentHighlight` | Single file. The symbol's declaration and every in-file use — the handler always calls `referencesAt` with `includeDeclaration=true`, so the set can be wider than a `references` request that sets it to `false`. |
-| `textDocument/rename` | Single file. Builds one edit per span from `referencesAt` with `includeDeclaration=true`. Returns null when the position has no user symbol (keyword, stdlib global, unknown name, implicit `this`/`super`, `_`, or a member name after a dot). Rejects a new name that is not an `IDENTIFIER` or that is a keyword with `InvalidParams`. |
+| `textDocument/rename` | Single file. Builds one edit per span from `referencesAt` with `includeDeclaration=true`. Returns null when the position has no user symbol (keyword, stdlib global, unknown name, implicit `this`/`super`, `_`, or a member name after a dot). Rejects a new name that is not an `IDENTIFIER`, that is a keyword from `lox_keywords()`, or that is `_` (it binds nothing, so the result could not be renamed back) with `InvalidParams`. The edit is textual within the file: it does not check that the new name shadows or captures another binding. |
 
 Not advertised in v1, so a client must not expect them:
 `documentFormattingProvider`, `signatureHelpProvider`,
