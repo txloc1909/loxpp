@@ -42,9 +42,21 @@ var a = math.
 var b = who.
 """
 
+MATCH_SOURCE = """\
+enum Result { Ok(value) Err(msg) }
+
+fun label(r) {
+    return match r {
+        case Ok(v) => "ok"
+    };
+}
+"""
+
 CLEAN_URI = "file:///smoke/clean.lox"
 BAD_URI = "file:///smoke/bad.lox"
 COMPLETION_URI = "file:///smoke/completion.lox"
+MATCH_URI = "file:///smoke/match.lox"
+MATCH_FIXED_URI = "file:///smoke/match_fixed.lox"
 
 
 class LspClient:
@@ -181,6 +193,27 @@ def line_char(source, needle, occurrence=1):
     return line, character
 
 
+def offset_of(source, line, character):
+    """Byte offset of a 0-based (line, character) in an LF source."""
+    lines = source.split("\n")
+    return sum(len(text) + 1 for text in lines[:line]) + character
+
+
+def apply_edits(source, uri, changes):
+    """Applies a codeAction WorkspaceEdit to source, descending by offset."""
+    edits = list(changes.get(uri, []))
+    spans = []
+    for edit in edits:
+        start = edit["range"]["start"]
+        end = edit["range"]["end"]
+        spans.append((offset_of(source, start["line"], start["character"]),
+                      offset_of(source, end["line"], end["character"]),
+                      edit["newText"]))
+    for start, end, new_text in sorted(spans, reverse=True):
+        source = source[:start] + new_text + source[end:]
+    return source
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("server")
@@ -203,6 +236,8 @@ def main():
         check(caps.get("positionEncoding") == "utf-16",
               "initialize advertises positionEncoding utf-16")
         check(caps.get("hoverProvider") is True, "initialize advertises hover")
+        check(caps.get("codeActionProvider") is True,
+              "initialize advertises codeAction")
         check("renameProvider" not in caps,
               "initialize does not advertise rename")
         check("documentFormattingProvider" not in caps,
@@ -265,6 +300,83 @@ def main():
                   and definition["range"]["start"]["character"] == dc)
         check(ok_def, "definition of 'name' points at the parameter (got %s)"
               % (definition["range"] if definition else None))
+
+        # -- codeAction: missing match arm -------------------------
+        client.notify("textDocument/didOpen", {"textDocument": {
+            "uri": MATCH_URI, "languageId": "lox", "version": 1,
+            "text": MATCH_SOURCE}})
+        match_diags = client.pump_until_diagnostics(MATCH_URI)
+        exh = [d for d in match_diags
+               if "Non-exhaustive" in d.get("message", "")]
+        check(len(exh) == 1 and "Err" in exh[0]["message"],
+              "non-exhaustive match names the missing arm (got %s)"
+              % ([d.get("message") for d in match_diags],))
+        actions = []
+        if exh:
+            actions = client.request("textDocument/codeAction", {
+                "textDocument": {"uri": MATCH_URI},
+                "range": exh[0]["range"],
+                "context": {"diagnostics": [exh[0]]}}) or []
+        check(len(actions) == 1
+              and actions[0].get("kind") == "quickfix"
+              and "Err" in actions[0].get("title", "")
+              and actions[0].get("diagnostics") == [exh[0]],
+              "codeAction offers one quickfix for the missing arm (got %s)"
+              % ([a.get("title") for a in actions],))
+        if actions:
+            fixed = apply_edits(
+                MATCH_SOURCE, MATCH_URI,
+                actions[0]["edit"]["changes"])
+            client.notify("textDocument/didOpen", {"textDocument": {
+                "uri": MATCH_FIXED_URI, "languageId": "lox", "version": 1,
+                "text": fixed}})
+            fixed_diags = client.pump_until_diagnostics(MATCH_FIXED_URI)
+            still = [d for d in fixed_diags
+                     if "Non-exhaustive" in d.get("message", "")]
+            check(still == [],
+                  "fixed source has no exhaustiveness error (got %s)"
+                  % ([d.get("message") for d in fixed_diags],))
+
+        # -- codeAction: wrap a '+' operand in str() ----------------
+        pl, pc = line_char(CLEAN_SOURCE, "+ name")
+        plus_pos = {"line": pl, "character": pc}
+        str_actions = client.request("textDocument/codeAction", {
+            "textDocument": {"uri": CLEAN_URI},
+            "range": {"start": plus_pos, "end": plus_pos},
+            "context": {"diagnostics": []}}) or []
+        titles = sorted(a.get("title", "") for a in str_actions)
+        check(titles == ["Wrap left operand in str()",
+                         "Wrap right operand in str()"],
+              "codeAction on '+' offers both str() wraps (got %s)"
+              % (titles,))
+        right = [a for a in str_actions
+                 if a.get("title") == "Wrap right operand in str()"]
+        if right:
+            wrapped = apply_edits(
+                CLEAN_SOURCE, CLEAN_URI, right[0]["edit"]["changes"])
+            check('str(name)' in wrapped
+                  and '"hi " + str(name)' in wrapped,
+                  "applying the right wrap gives '\"hi \" + str(name)'")
+
+        # A position with no '+' and no diagnostics offers nothing, and an
+        # unrelated `only` filter suppresses even the '+' wraps.
+        sl2, sc2 = line_char(CLEAN_SOURCE, "str(123)")
+        no_plus = client.request("textDocument/codeAction", {
+            "textDocument": {"uri": CLEAN_URI},
+            "range": {"start": {"line": sl2, "character": sc2 + 1},
+                      "end": {"line": sl2, "character": sc2 + 1}},
+            "context": {"diagnostics": []}}) or []
+        check(no_plus == [],
+              "codeAction away from '+' is empty (got %d actions)"
+              % len(no_plus))
+        filtered = client.request("textDocument/codeAction", {
+            "textDocument": {"uri": CLEAN_URI},
+            "range": {"start": plus_pos, "end": plus_pos},
+            "context": {"diagnostics": [],
+                        "only": ["refactor"]}}) or []
+        check(filtered == [],
+              "codeAction with only=['refactor'] is empty (got %d actions)"
+              % len(filtered))
 
         # -- completion: member list is gated to the 'math' receiver ----
         client.notify("textDocument/didOpen", {"textDocument": {
