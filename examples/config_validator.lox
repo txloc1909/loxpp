@@ -1,0 +1,108 @@
+// config_validator.lox — Validate a key=value file with per-line recovery.
+//
+// Upgrades config_parser.lox: malformed lines are reported, not fatal, and
+// required keys are checked at the end. Demonstrates: per-line try/catch,
+// defer for handle cleanup, duplicate and required-key checks via Map. A
+// line without "=" faults with IndexOutOfBoundsError; a rule violation
+// throws a string. Each has its own catch block, since no handler can tell
+// a fault from a string portably across backends.
+
+fun split(s, delim) {
+    var result = [];
+    var current = "";
+    var i = 0;
+    while (i < len(s)) {
+        if (s[i] == delim) {
+            result.append(current);
+            current = "";
+        } else {
+            current = current + s[i];
+        }
+        i = i + 1;
+    }
+    result.append(current);
+    return result;
+}
+
+fun extractPair(parts) {
+    return [parts[0], parts[1]];
+}
+
+fun isDigits(s) {
+    if (len(s) == 0) return false;
+    var i = 0;
+    while (i < len(s)) {
+        if (!(s[i] in "0123456789")) return false;
+        i = i + 1;
+    }
+    return true;
+}
+
+fun checkEntry(parts, key, value, seen) {
+    if (len(parts) != 2) throw "want key=value, got " + str(len(parts)) + " fields";
+    if (len(key) == 0) throw "empty key";
+    if (seen.has(key)) throw "duplicate key " + key;
+    if (key == "port" and !isDigits(value)) throw "port must be digits, got " + value;
+    if (key == "host" and len(value) == 0) throw "host must not be empty";
+}
+
+fun main() {
+    print "=== Config Validator ===";
+    var f = open("examples/config_validator.input", "r");
+    defer f.close();
+
+    var seen = {};
+    var required = ["host", "port"];
+    var valid = 0;
+    var errors = 0;
+    var lineno = 1;
+    var line = f.readline();
+    while (line != nil) {
+        if (len(line) == 0 or line[0] == "#") {
+            lineno = lineno + 1;
+            line = f.readline();
+            continue;
+        }
+        var parts = split(line, "=");
+        var pair = nil;
+        try {
+            pair = extractPair(parts);
+        } catch (fault) {
+            print "error line " + str(lineno) + ": " + fault.kind + ": " + fault.message;
+            errors = errors + 1;
+            lineno = lineno + 1;
+            line = f.readline();
+            continue;
+        }
+        try {
+            checkEntry(parts, pair[0], pair[1], seen);
+            seen[pair[0]] = pair[1];
+            print pair[0] + "=" + pair[1];
+            valid = valid + 1;
+        } catch (rule) {
+            print "error line " + str(lineno) + ": " + str(rule);
+            errors = errors + 1;
+        }
+        lineno = lineno + 1;
+        line = f.readline();
+    }
+
+    for (var r in required) {
+        if (!seen.has(r)) {
+            print "missing required key: " + r;
+            errors = errors + 1;
+        }
+    }
+    print "valid: " + str(valid) + ", errors: " + str(errors);
+}
+
+main();
+// CHECK: === Config Validator ===
+// CHECK: host=localhost
+// CHECK: port=8080
+// CHECK: debug=true
+// CHECK: error line 5: IndexOutOfBoundsError: List index out of bounds.
+// CHECK: error line 6: duplicate key port
+// CHECK: timeout=abc
+// CHECK: error line 8: empty key
+// CHECK: valid: 4, errors: 3

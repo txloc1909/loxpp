@@ -1,0 +1,8 @@
+# service configuration (with faults)
+host=localhost
+port=8080
+debug=true
+badline-without-equals
+port=9090
+timeout=abc
+=emptykey
