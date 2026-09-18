@@ -222,6 +222,7 @@ capability object:
   "referencesProvider": true,
   "documentHighlightProvider": true,
   "documentSymbolProvider": true,
+  "codeActionProvider": true,
   "completionProvider": { "triggerCharacters": ["."] }
 }
 ```
@@ -249,11 +250,12 @@ Handlers implemented:
 | `textDocument/definition` | Single file. |
 | `textDocument/references` | Single file. Honours `context.includeDeclaration`. |
 | `textDocument/documentHighlight` | Single file. The symbol's declaration and every in-file use — the handler always calls `referencesAt` with `includeDeclaration=true`, so the set can be wider than a `references` request that sets it to `false`. |
+| `textDocument/codeAction` | Two `quickfix` kinds. A `Non-exhaustive match` diagnostic inserts one `case <Name> => nil` arm per named constructor before the match's closing brace. A `+` expression at the request range offers wrapping the left or the right operand in `str()` (cursor-driven: operand types are only known at runtime, so no diagnostic names them). Honours `context.only`. |
 
 Not advertised in v1, so a client must not expect them: `renameProvider`,
 `documentFormattingProvider`, `signatureHelpProvider`,
 `workspaceSymbolProvider`, `foldingRangeProvider`,
-`semanticTokensProvider`, `codeActionProvider`. Folding and indentation come
+`semanticTokensProvider`. Folding and indentation come
 from the tree-sitter queries, not from the server.
 
 The resolver warnings that reach `publishDiagnostics`: unused local, unknown
@@ -408,7 +410,7 @@ The `Build & Test` job runs the GTest suites, which include
 | Workspace symbols / cross-file navigation | no — waits on a module system | yes | yes | yes |
 | Formatting | no — no `loxpp fmt` yet | yes | yes | yes |
 | Semantic tokens | no — tree-sitter covers highlighting | yes | yes | yes |
-| Code actions / quick fixes | no — v2 | yes | yes | yes |
+| Code actions / quick fixes | yes (missing `match` arms; `str()` wrap for `+` operands) | yes | yes | yes |
 | Type inference | no — Lox++ is dynamically typed | yes | yes | partial |
 
 Corrections against the plan's table:
@@ -435,7 +437,9 @@ issue, not a list here:
   https://github.com/txloc1909/loxpp/issues/210
 - In-file rename (`renameProvider`), using the edit list that `references`
   already computes — https://github.com/txloc1909/loxpp/issues/211
-- Code actions from compiler errors (`codeActionProvider`) —
+- Implemented: code actions (`codeActionProvider`) — one `quickfix` per
+  missing `match` arm named by the exhaustiveness diagnostic, plus
+  cursor-driven `str()` wraps for `+` operands —
   https://github.com/txloc1909/loxpp/issues/212
 - Formatting: a `loxpp fmt` formatter, then `documentFormattingProvider` —
   https://github.com/txloc1909/loxpp/issues/213
