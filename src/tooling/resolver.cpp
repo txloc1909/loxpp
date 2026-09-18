@@ -660,9 +660,13 @@ class Resolver {
         if (name == "_") {
             return;
         }
-        if (armScope->findLocal(name) != nullptr) {
-            // Or-pattern alternatives bind the same name set; a repeat is the
-            // same binding, not a redeclaration.
+        if (Symbol* existing = armScope->findLocal(name)) {
+            // Or-pattern alternatives bind the same name set; a repeat is a
+            // use of the same binding, not a redeclaration. Index it so
+            // find-references (and rename built on it) covers every
+            // alternative instead of silently dropping all but the first.
+            existing->uses.push_back(span);
+            m_out.references.add({span, existing, false, false});
             return;
         }
         Symbol* sym = armScope->declare(std::string(name),
