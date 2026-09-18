@@ -16,13 +16,13 @@ set cpo&vim
 
 syntax case match
 
-" --- Keywords (23, from src/token.h) --------------------------------------
-" `true` / `false` / `nil` are constants, handled below. The other 20:
+" --- Keywords (27, from src/token.h) --------------------------------------
+" `true` / `false` / `nil` are constants, handled below. The other 24:
 syntax keyword loxKeyword       and or in var
 syntax keyword loxKeyword       this super
-syntax keyword loxConditional   if else match case default
+syntax keyword loxConditional   if else match case default try catch
 syntax keyword loxRepeat        for while
-syntax keyword loxStatement     return break continue
+syntax keyword loxStatement     return break continue throw defer
 " `print` is a statement keyword, not a builtin function.
 syntax keyword loxStatement     print
 

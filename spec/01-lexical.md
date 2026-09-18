@@ -101,9 +101,11 @@ names:
 | `and` | Logical conjunction |
 | `break` | Loop exit |
 | `case` | Match arm label |
+| `catch` | Catches the value a `try` block throws, binds one identifier (see §02-syntax) |
 | `class` | Class declaration |
 | `continue` | Loop next-iteration |
 | `default` | Reserved. Scanned as a keyword, but no grammar rule uses it. A `match` arm uses `case _` for the fallback. |
+| `defer` | Defers a call to function exit, runs LIFO (see §02-syntax) |
 | `else` | Alternate branch |
 | `enum` | Enum declaration |
 | `false` | Boolean literal |
@@ -118,7 +120,9 @@ names:
 | `return` | Function return |
 | `super` | Superclass accessor inside a method |
 | `this` | Current instance reference inside a method |
+| `throw` | Throws a value to the nearest enclosing `try` (see §02-syntax) |
 | `true` | Boolean literal |
+| `try` | Protected block with a `catch` handler (see §02-syntax) |
 | `var` | Variable declaration |
 | `while` | While loop |
 
