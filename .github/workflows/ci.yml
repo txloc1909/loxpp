@@ -273,6 +273,9 @@ jobs:
             loxpp-dev-editors:latest \
             bash -c '
               set -e
+              # The TextMate bundle ships a copy of the VS Code grammar;
+              # fail when the two drift or a keyword leaves the grammar.
+              python3 tools/check_textmate_grammar.py
               npm ci --prefix editors/loxpp-vscode
               npm run lint --prefix editors/loxpp-vscode
               npm run typecheck --prefix editors/loxpp-vscode

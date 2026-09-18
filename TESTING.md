@@ -97,6 +97,7 @@ libraries needed by VS Code's Electron test host.
 ```sh
 cmake --preset release -DLOXPP_LSP=ON
 cmake --build build --target loxpp-lsp
+python3 tools/check_textmate_grammar.py
 npm ci --prefix editors/loxpp-vscode
 npm run lint --prefix editors/loxpp-vscode
 npm run typecheck --prefix editors/loxpp-vscode
