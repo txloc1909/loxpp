@@ -233,6 +233,10 @@ probes=(
     # uncatchable message it used to be. Lives in clr-only/ (see the probe
     # file's own header comment for why); named here directly.
     "test/translation-probes/clr-only/53_stack_overflow_catchable.lox"
+    # Issue #268: pins the success side of the frame-count ceiling boundary
+    # (31_deep_recursion.lox below pins the failure side). Catches a
+    # counter that starts too high and rejects a depth native accepts.
+    "test/translation-probes/53_deep_recursion_boundary.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its

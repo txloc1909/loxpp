@@ -65,7 +65,10 @@ each has an off-the-shelf solution.
 | `28_folded_match_operand_family` | `normalizeFoldedOperands`'s own required coverage: the nine folded-operand shapes (`BUILD_LIST`, `BUILD_MAP`, `CALL`, `GET_PROPERTY`, `INVOKE`, `SET_PROPERTY`, `SET_INDEX`, `SLICE`, `IN`, each with a folded operand) plus one nested match subject; `RETURN` of a folded match is deliberately not repeated here (`checkReturnHeightZero` excludes probes by design) — `examples/or_pattern_demo.lox` already covers it | P8 |
 | `29_os_access` | the OS/world access natives (`args`, `env`, `exists`, `is_dir`, `is_file`, `stat`, `sleep`) must run byte-identically on both runtimes — the JVM runtime registers them too (`LoxRuntime`), and this probe guards against a future drift | none (parity gate) |
 | `30_bool_compare_and_string_literal` | every comparison spelling (`==`, `!=`, `>`, `>=`, `<`, `<=`, each lowering to EQUAL/GREATER/LESS optionally paired with NOT), a standalone `!`, `%`, the `true`/`false`/`nil` literals printed as values in their own right, and a string constant with a quote, a backslash, and a tab | P2 |
-| `clr-only/31_deep_recursion` | native's own frame-count ceiling (`src/vm.h` `FRAMES_MAX`), reached through ordinary self-recursive `CALL`s, must fail identically on a backend whose calling convention has no ceiling of its own — CLR-only, see the note below the table | P5, P6 |
+| `31_deep_recursion` | native's own frame-count ceiling (`src/vm.h` `FRAMES_MAX`), reached through ordinary self-recursive `CALL`s; the JVM and CLR backends now mirror the same ceiling (issue #268), so both must fail identically here too | P5, P6 |
+| `53_deep_recursion_boundary` | the success side of the boundary `31_deep_recursion` pins the failure side of: 1022 nested calls is the deepest depth every backend still accepts | P5, P6 |
+| `jvm-only/catch_overflow` | `LoxClosure`'s frame-count ceiling delivers a catchable `StackOverflowError` on the JVM backend, matching native's kind, message, and post-catch continuation — JVM-only, see the note below the table | P5, P6 |
+| `jvm-only/defer_overflow_during_unwind` | a `StackOverflowError` raised by a deferred call while another one is still unwinding is fatal on the JVM backend, not delivered to any `catchBlock` (`spec/04-semantics.md` line 1120) — JVM-only, see the note below the table | P5, P6 |
 | `32_string_nul` | a string literal holding an embedded NUL byte (`\0`): `print` must write every byte, including the text after the NUL, on native and on each managed backend (issue #129) | none (parity gate) |
 | `33_class_pattern_match_error` | a `match` whose arms are all class patterns raises a real, reachable `MATCH_ERROR` when no arm matches, through the same fused opcode as the enum case | P8 |
 | `34_match_consumed_result` | a `match` expression's result, once its own closing `POP` retires the synthetic subject local, is exposed as a named local's own value — `PRINT` and `DEFINE_GLOBAL` each need their own fold-aware read, the same way `RETURN` and `SET_GLOBAL` already do | P1, P2 |
@@ -88,23 +91,32 @@ each has an off-the-shelf solution.
 | `V5_self_recursive_closure` | a local `fun` captures its own slot (direct recursion) → prints `120` | P4 |
 | `V6_self_recursive_closure_in_loop` | self-recursive local `fun`, fresh cell per loop trip → prints `12` | P4 |
 
-`clr-only/31_deep_recursion`, `clr-only/35_folded_match_deficit_two_plus`,
-and `clr-only/53_stack_overflow_catchable` are three of the probes not
-directly in this directory. `tools/diff_runtimes.py`'s CI probes step walks
-this directory's own files (non-recursively) and compares native against
-the JVM backend. `31_deep_recursion` needs native itself to fail
-(`src/vm.h`'s `FRAMES_MAX`), which the JVM backend has no ceiling of its
-own to match, so that walk would read it as a new JVM divergence.
-`35_folded_match_deficit_two_plus` needs a fold deficit above one, which
-the JVM backend's own repair refuses outright, so every shape in it would
-abort at JVM emit time instead. `53_stack_overflow_catchable` needs the
-JVM backend to reach its own frame ceiling and deliver a catchable
-`StackOverflowError`, which is #268's own open job, not this node's — the
-JVM backend has no ceiling at all yet, so it currently dies with a raw,
-uncaught `java.lang.StackOverflowError` before the `try`/`catch` even
-runs. Placing all three one level down keeps them out of that walk while
-`tools/check_clr_probes.sh` still runs each one by name for the CLR
-checkpoint.
+`clr-only/35_folded_match_deficit_two_plus` and
+`clr-only/53_stack_overflow_catchable` are two of the probes not directly in
+this directory. `tools/diff_runtimes.py`'s CI probes step walks this
+directory's own files (non-recursively) and compares native against the
+JVM backend. `35_folded_match_deficit_two_plus` needs a fold deficit above
+one, which the JVM backend's own repair refuses outright, so every shape in
+it would abort at JVM emit time instead of matching.
+`53_stack_overflow_catchable` has not yet been promoted into this directory,
+even though the JVM backend now has its own frame ceiling (issue #268);
+promoting it is tracked separately (issue #322). Placing both one level down
+keeps them out of that walk while `tools/check_clr_probes.sh` still runs
+each one by name for the CLR checkpoint. `31_deep_recursion` used to sit
+beside them for the same reason; it moved directly into this directory once
+the JVM backend grew its own frame-count ceiling to match (issue #268).
+
+`jvm-only/catch_overflow`, `jvm-only/defer_overflow_during_unwind`,
+`jvm-only/defer_replaces_overflow`, `jvm-only/defer_overflow_kind_spoof`,
+`jvm-only/defer_throw_on_normal_return_during_unwind`, and
+`jvm-only/defer_replaces_unrelated_fault_during_unwind` sit one level down
+for the mirror-image reason: `tools/diff_runtimes.py`'s CI step for the CLR
+backend walks `clr-only/` too (comparing native against CLR), and these six
+probes were placed here while the CLR backend still delivered a
+`StackOverflowError` with the wrong catchability (issue #238). `#238` has
+since closed; promoting these probes into this directory is tracked
+separately (issue #322). `tools/check_jvm_probes.sh` runs each one by name
+for the JVM checkpoint.
 
 `clr-only/known-divergence/52_fat_frame_stack_divergence` sits one level
 below that again. `tools/diff_runtimes.py`'s CI step for the CLR backend
