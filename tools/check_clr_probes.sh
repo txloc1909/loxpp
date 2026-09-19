@@ -227,7 +227,7 @@ probes=(
     # exit), so this probe also needs the exit-code-checked loop below.
     "test/translation-probes/48_file_visible_after_close.lox"
     # Issue #238: the catch mechanism used to run every LoxError's handler
-    # body unconditionally, so a fault N1 (#267) newly made catchable on
+    # body unconditionally, so a fault #267 newly made catchable on
     # native (unbounded recursion, kind StackOverflowError) must now be
     # delivered as a real Error value here too, not left as the bare,
     # uncatchable message it used to be. Lives in clr-only/ (see the probe
