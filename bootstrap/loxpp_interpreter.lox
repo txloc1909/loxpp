@@ -1691,6 +1691,11 @@ fun reflectCallMethod(interp, args) {
     return callee.call(interp, forwarded);
 }
 
+// Calls the host args() native. A top-level helper is needed because the
+// LoxNative.call parameter is also named args, so a bare args() inside that
+// method would call the argument list instead of the host native.
+fun hostArgsList() { return args(); }
+
 class LoxNative {
     init(name) {
         this.name   = name;
@@ -1734,10 +1739,11 @@ class LoxNative {
             return InterpFile(handle);
         }
         // Each stdlib OS global below delegates to the host native of the
-        // same name. args() wraps the host list and stat() copies the host
+        // same name (args via hostArgsList, which dodges the parameter
+        // shadowing). args wraps the host list and stat copies the host
         // map so the interpreted value responds to the interpreted
         // List/Map methods; the rest pass host scalars through unwrapped.
-        if (this.name == "args") return InterpList(args());
+        if (this.name == "args") return InterpList(hostArgsList());
         if (this.name == "env") return env(args[0]);
         if (this.name == "exit") return exit(args[0]);
         if (this.name == "time") return time();
