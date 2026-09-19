@@ -82,8 +82,9 @@ VM::CallOutcome VM::call(ObjClosure* closure, int argCount,
     if (argCount != fn->arity) {
         // Arity mismatch is now catchable as ArityError, but only if a handler
         // is active. If no handler is active, fall back to uncaught error.
-        // The arity check happens before any new frame is pushed, so this does
-        // not carry the reentrancy hazard that excludes StackOverflowError.
+        // The arity check happens before any new frame is pushed, so it never
+        // needs the frame reserve StackOverflowError's own guard below relies
+        // on.
         char msg[256];
         snprintf(msg, sizeof(msg), "Expected %d arguments but got %d.",
                  fn->arity, argCount);

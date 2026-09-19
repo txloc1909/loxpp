@@ -194,23 +194,29 @@ class VM {
     Value* stackTop;
     bool m_stackOverflow{false};
     // True for the duration of one StackOverflowError's own handleThrow()
-    // call (see ScopedOverflowUnwindGuard in vm.cpp, used at both overflow
-    // guards). Draining a discarded frame's defer runs arbitrary Lox++ code
-    // (runPendingDefers() -> a nested run()), and that code can itself
-    // recurse deep enough to reach either overflow guard again — reachable
-    // only because the reserve now lets a StackOverflowError's own unwind
-    // run deferred calls at all; every frame between the original overflow
-    // and the handler can hold one. Left unguarded, each such nested
-    // overflow reenters handleThrow's own unwind loop through genuine C++
-    // recursion (run() -> runPendingDefers() -> handleThrow() ->
-    // raiseThrowableError() -> a new run()) for every remaining frame,
-    // which is unbounded by the reserve's own small size and measurably
-    // crashes the process with a real native stack overflow, not a
-    // Lox++-level fault (see test_vm_runtime.cpp's
-    // SecondOverflowDuringUnwindDoesNotHangOrCorrupt). Both overflow guards
-    // skip the catchable path while this flag is set, falling straight
-    // through to their own hard ceiling instead: the second overflow
-    // "stays fatal", per this row's own original design note.
+    // call (set and cleared by two plain assignments, at both overflow
+    // guards in vm.cpp). Draining a discarded frame's defer runs arbitrary
+    // Lox++ code (runPendingDefers() -> a nested run()), and that code can
+    // itself recurse deep enough to reach either overflow guard again —
+    // reachable only because the reserve now lets a StackOverflowError's own
+    // unwind run deferred calls at all; every frame between the original
+    // overflow and the handler can hold one. Without this flag, each such
+    // nested hit re-enters handleThrow()'s own unwind through genuine C++
+    // recursion (VM::call() -> raiseThrowableError() -> handleThrow() ->
+    // runPendingDefers() -> a nested run() -> VM::call() -> ...), one level
+    // per remaining frame, and measurably crashes the process with a real
+    // native stack overflow — verified directly: with this flag's guard
+    // condition removed from both call sites and an ASan debug build,
+    // test_vm_runtime's SecondOverflowDuringUnwindDoesNotHangOrCorrupt
+    // aborts with "AddressSanitizer: stack-overflow", not a clean test
+    // failure. (An earlier build of this guard used `==` instead of `>=`
+    // against the frame-count threshold below; that unrelated bug capped
+    // the nested recursion at one extra level and hid this crash — fixed
+    // together with this comment, not evidence the guard is unneeded.) Both
+    // overflow guards skip the catchable path while this flag is set,
+    // falling straight through to their own hard ceiling instead: the
+    // second overflow "stays fatal", per this row's own original design
+    // note.
     bool m_unwindingStackOverflow{false};
     MemoryManager m_mm;
     Table m_globals;
