@@ -1052,3 +1052,82 @@ TEST_F(StackOverflowTest,
     EXPECT_EQ(h.stackDepth(), 0);
     EXPECT_EQ(h.handlerStackDepth(), 0);
 }
+
+// ===========================================================================
+// An open try/catch must never cost even one value-stack slot (R10). R7's
+// regression test (NoHandler_ReserveDoesNotShrinkUsableDepth) covers only
+// the no-handler half; these cover the handler-active half at both overflow
+// sites: the greatest depth that succeeds with no try must also succeed
+// inside a try, and one step deeper must still fail with no try.
+// ===========================================================================
+
+// Frame-count site. DeepRecursionExceedsFramesMax_RuntimeError already
+// covers "1023 fails with no try"; this covers "1022 succeeds inside a try"
+// — the half R10 showed was still missing at the sibling (value-stack) site.
+TEST_F(StackOverflowTest,
+       CatchableFramesOverflow_TryOpenDoesNotShrinkUsableDepth) {
+    VMTestHarness h;
+    std::string src = "fun down(n) {"
+                      "  if (n == 0) return 0;"
+                      "  return down(n - 1);"
+                      "}"
+                      "var ok = false; var caught;"
+                      "try { down(1022); ok = true; }"
+                      "catch (e) { caught = e.kind; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    expect_global_bool(h, "ok", true);
+    expect_global_nil(h, "caught");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+// Value-stack site. Same 20-local-per-frame shape as the fat-frame tests
+// above, recursed to depth 743, plus N "pad" locals declared in the
+// enclosing scope so the peak lands exactly at STACK_MAX slots. Measured
+// (round-3 review): pad=13 succeeds with no try but was wrongly caught as
+// StackOverflowError inside a try (the soft threshold's own one-slot gap);
+// pad=14 fails both ways. makePadLocals(n) generates "var p0=0; ... var
+// p(n-1)=n-1;" so the exact boundary count does not need to be hand-typed.
+namespace {
+std::string makePadLocals(int count) {
+    std::string out;
+    for (int i = 0; i < count; ++i) {
+        out += "var p" + std::to_string(i) + " = " + std::to_string(i) + "; ";
+    }
+    return out;
+}
+
+std::string fatFrameDownFn() {
+    return "fun down(n) {"
+           "  var a = 1; var b = 2; var c = 3; var d = 4; var e = 5;"
+           "  var g = 6; var h = 7; var i = 8; var j = 9; var k = 10;"
+           "  var l = 11; var m = 12; var o = 13; var p = 14; var q = 15;"
+           "  var r = 16; var s = 17; var t = 18; var u = 19; var v = 20;"
+           "  if (n == 0) return 0;"
+           "  return down(n - 1);"
+           "}";
+}
+} // namespace
+
+TEST_F(StackOverflowTest,
+       CatchableStackOverflow_FatFrame_TryOpenDoesNotShrinkUsableDepth) {
+    VMTestHarness h;
+    std::string src = fatFrameDownFn() + "var ok = false; var caught;" +
+                      "try { " + makePadLocals(13) +
+                      "down(743); ok = true; }"
+                      "catch (e) { caught = e.kind; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    expect_global_bool(h, "ok", true);
+    expect_global_nil(h, "caught");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+TEST_F(StackOverflowTest,
+       CatchableStackOverflow_FatFrame_OneMoreSlot_RuntimeErrorWithNoTry) {
+    VMTestHarness h;
+    std::string src =
+        fatFrameDownFn() + "{ " + makePadLocals(14) + "down(743); }";
+    EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.stackDepth(), 0);
+}

@@ -1941,15 +1941,6 @@ void VM::push(Value value) {
         return;
     }
     *stackTop++ = value;
-    // Soft threshold at STACK_MAX itself: only latches while a handler is
-    // active, so an ordinary program with no try/catch still uses every slot
-    // up to STACK_MAX unchanged. run()'s dispatch loop checks and clears
-    // this flag once per instruction; see its own comment for why the value
-    // is kept (not dropped) here, unlike the hard-ceiling branch above.
-    if (!m_stackOverflow && !m_handlerStack.empty() &&
-        stackTop >= stack + STACK_MAX) {
-        m_stackOverflow = true;
-    }
 }
 
 Value VM::pop() { return *--stackTop; }
