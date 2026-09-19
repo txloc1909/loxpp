@@ -3,6 +3,8 @@
 // differential suite (tools/diff_runtimes.py) DIVERGEs. Every call here
 // is chosen to be deterministic across the two runtimes: nothing prints a
 // wall-clock or a file mtime (those change between the two back-to-back runs).
+// Keep the trailing newline at end of file: the bootstrap interpreter
+// rejects a program whose last line lacks one (see issue #328).
 print args();
 print exists("/tmp");
 print is_dir("/tmp");

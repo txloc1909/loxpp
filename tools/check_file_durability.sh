@@ -32,41 +32,23 @@
 # probe measures that the program ended where it names, not only that the
 # first line reached the file with a matching status.
 #
-# Usage: tools/check_file_durability.sh <runner> [--no-exit-builtin]
+# Usage: tools/check_file_durability.sh <runner>
 #
 #   <runner>            runs one Lox++ program, invoked as
 #                       "<runner> program.lox", inheriting stdout/stderr.
 #                       build/loxpp, tools/loxpp_jvm.sh, tools/loxpp_clr.sh,
 #                       and bootstrap/lox_wrapper.sh (export LANGUAGE=LOXPP
 #                       first) all match this interface.
-#   --no-exit-builtin   this consumer's stdlib has no exit() (a separately
-#                       tracked, accepted gap, out of scope here); the
-#                       script first runs "exit(0);" and requires the
-#                       undefined-variable fault, so a consumer that does
-#                       have exit() fails here instead of taking a quiet
-#                       SKIP. Only after that proof does the p5b_exit_call
-#                       probe report SKIP rather than run at all - p6 already
-#                       covers the uncaught-fault flush path this consumer
-#                       falls back to instead.
 set -uo pipefail
 
-if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
-    echo "usage: tools/check_file_durability.sh <runner> [--no-exit-builtin]" >&2
+if [ "$#" -ne 1 ]; then
+    echo "usage: tools/check_file_durability.sh <runner>" >&2
     exit 2
 fi
 runner="$1"
-no_exit_builtin=0
-if [ "$#" -eq 2 ]; then
-    if [ "$2" != "--no-exit-builtin" ]; then
-        echo "usage: tools/check_file_durability.sh <runner> [--no-exit-builtin]" >&2
-        exit 2
-    fi
-    no_exit_builtin=1
-fi
 
 failed_probes=()
 passed_probes=()
-skipped_probes=()
 
 # Writes $program_path, runs it through $runner, then compares the file it
 # wrote against $expected_content with cmp. $file_path must not exist yet -
@@ -135,16 +117,6 @@ check_probe() {
     echo "check_file_durability.sh: OK $probe_name (runner exit=$status, $(wc -c <"$file_path" | tr -d ' ') bytes)"
 }
 
-# Reports $probe_name as skipped, with $reason, instead of running it at
-# all. A skip is loud and named - never a silent OK for the wrong reason -
-# and does not count as a failure, matching tools/check_examples.py's own
-# SKIP outcome for an example excluded for a stated, known reason.
-skip_probe() {
-    local probe_name="$1" reason="$2"
-    echo "check_file_durability.sh: SKIP $probe_name ($reason)"
-    skipped_probes+=("$probe_name")
-}
-
 # p5: no close(), normal end of script.
 dir="$(mktemp -d)"
 file_path="$dir/p5.txt"
@@ -157,42 +129,22 @@ EOF
 check_probe "p5_exit_normal" $'survives-normal-exit\n' "$program_path" "$file_path" 0
 rm -rf "$dir"
 
-# p5b: no close(), explicit exit(0). Skipped on a consumer with no exit()
-# builtin - there, the program would instead end in an uncaught "undefined
-# variable" fault, the same path p6 already covers, and reporting that as
-# an OK exit(0) pass would be the wrong-reason pass this script exists to
-# catch (see the header). The flag is measured, not trusted: "exit(0);"
-# must fail with the undefined-variable fault first. The sentinel write
-# after exit(0) measures that the program ended at the exit call - a
-# consumer where exit() does nothing runs on to it and fails on content.
-if [ "$no_exit_builtin" -eq 1 ]; then
-    verify_dir="$(mktemp -d)"
-    verify_program="$verify_dir/verify_no_exit.lox"
-    printf '%s\n' 'exit(0);' >"$verify_program"
-    "$runner" "$verify_program" >"$verify_dir/stdout" 2>"$verify_dir/stderr"
-    verify_status=$?
-    if [ "$verify_status" -eq 0 ] || ! grep -q "Undefined variable 'exit'" "$verify_dir/stderr"; then
-        echo "check_file_durability.sh: FAIL p5b_exit_call (consumer was run with --no-exit-builtin but exit(0) did not fail with the undefined-variable fault; runner exit=$verify_status)" >&2
-        sed 's/^/  stderr: /' "$verify_dir/stderr" >&2
-        failed_probes+=("p5b_exit_call")
-    else
-        skip_probe "p5b_exit_call" "consumer has no exit() builtin; p6 already covers the uncaught-fault flush path this shape would otherwise fall back to"
-    fi
-    rm -rf "$verify_dir"
-else
-    dir="$(mktemp -d)"
-    file_path="$dir/p5b.txt"
-    program_path="$dir/p5b_exit_call.lox"
-    cat >"$program_path" <<EOF
+# p5b: no close(), explicit exit(0). Every consumer defines exit(), so the
+# probe always runs its own shape here. The sentinel write after exit(0)
+# measures that the program ended at the exit call - a consumer where
+# exit() does nothing runs on to it and fails on content.
+dir="$(mktemp -d)"
+file_path="$dir/p5b.txt"
+program_path="$dir/p5b_exit_call.lox"
+cat >"$program_path" <<EOF
 var w = open("$file_path", "w");
 w.writeline("survives-exit-call");
 print "p5b before exit";
 exit(0);
 w.writeline("UNREACHABLE-PAST-EXIT");
 EOF
-    check_probe "p5b_exit_call" $'survives-exit-call\n' "$program_path" "$file_path" 0
-    rm -rf "$dir"
-fi
+check_probe "p5b_exit_call" $'survives-exit-call\n' "$program_path" "$file_path" 0
+rm -rf "$dir"
 
 # p6: no close(), uncaught throw. Exits non-zero by design (see header).
 # The sentinel write after the throw measures that the throw ended the
@@ -219,8 +171,4 @@ if [ "${#failed_probes[@]}" -ne 0 ]; then
     exit 1
 fi
 
-if [ "${#skipped_probes[@]}" -ne 0 ]; then
-    echo "check_file_durability.sh: all ${#passed_probes[@]} run probe(s) OK, ${#skipped_probes[@]} skipped"
-else
-    echo "check_file_durability.sh: all ${#passed_probes[@]} probes OK"
-fi
+echo "check_file_durability.sh: all ${#passed_probes[@]} probes OK"

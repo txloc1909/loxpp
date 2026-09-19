@@ -601,11 +601,9 @@ jobs:
       # bootstrap/lox_wrapper.sh runs the self-hosted interpreter on the
       # native binary, so this needs no managed toolchain - it sits here
       # anyway, beside the other three, so a regression on any consumer of
-      # this guarantee fails in one place. --no-exit-builtin: the bootstrap
-      # interpreter does not define exit() (a separately tracked stdlib gap,
-      # not this check's concern), so its p5b_exit_call probe is skipped
-      # rather than reported OK for reaching the same uncaught-fault path
-      # p6 already covers.
+      # this guarantee fails in one place. The bootstrap interpreter
+      # defines exit() like every other consumer, so its p5b_exit_call
+      # probe runs unskipped.
       - name: Check file durability - bootstrap interpreter
         run: |
           docker run --rm \
@@ -613,7 +611,37 @@ jobs:
             -w /workspace \
             -e LANGUAGE=LOXPP \
             loxpp-dev-managed:latest \
-            bash -c "tools/check_file_durability.sh bootstrap/lox_wrapper.sh --no-exit-builtin"
+            bash -c "tools/check_file_durability.sh bootstrap/lox_wrapper.sh"
+
+      # The bootstrap interpreter defines the OS stdlib globals (issue
+      # 263) by delegating to the host. This diffs the OS-access probe
+      # between native and the bootstrap interpreter, with program
+      # arguments, so those branches and the wrapper argument forwarding
+      # cannot rot unnoticed. exit() is covered by the durability p5b
+      # probe above instead: it ends the program and has no diffable
+      # stdout past the call.
+      - name: Check bootstrap OS stdlib globals match native
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev-managed:latest \
+            bash -c '
+              native_out=$(build/loxpp test/translation-probes/29_os_access.lox alpha beta)
+              native_status=$?
+              strap_out=$(bootstrap/lox_wrapper.sh test/translation-probes/29_os_access.lox alpha beta)
+              strap_status=$?
+              if [ "$native_status" -ne "$strap_status" ]; then
+                echo "exit differs: native=$native_status bootstrap=$strap_status" >&2
+                exit 1
+              fi
+              if [ -z "$strap_out" ]; then
+                echo "bootstrap gave empty stdout; a silent failure would look like a match" >&2
+                exit 1
+              fi
+              diff <(printf "%s\n" "$native_out") <(printf "%s\n" "$strap_out")
+            '
 
       # The parity gate. Every probe must be byte-identical on native and JVM
       # stdout (differential runner, not only the check_jvm_probes.sh diff
