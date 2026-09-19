@@ -560,6 +560,46 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "tools/check_clr_probes.sh"
 
+      # spec/05-stdlib.md: every File still open when the program ends must
+      # be flushed as if close() had been called, on every exit path. Runs
+      # on all four consumers this job already has a binary for.
+      - name: Check file durability - native
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "tools/check_file_durability.sh build/loxpp"
+
+      - name: Check file durability - JVM
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "tools/check_file_durability.sh tools/loxpp_jvm.sh"
+
+      - name: Check file durability - CLR
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "tools/check_file_durability.sh tools/loxpp_clr.sh"
+
+      # bootstrap/lox_wrapper.sh runs the self-hosted interpreter on the
+      # native binary, so this needs no managed toolchain - it sits here
+      # anyway, beside the other three, so a regression on any consumer of
+      # this guarantee fails in one place.
+      - name: Check file durability - bootstrap interpreter
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev-managed:latest \
+            bash -c "tools/check_file_durability.sh bootstrap/lox_wrapper.sh"
+
       # The parity gate. Every probe must be byte-identical on native and JVM
       # stdout (differential runner, not only the check_jvm_probes.sh diff
       # loop above).
