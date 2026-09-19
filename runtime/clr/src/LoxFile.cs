@@ -17,6 +17,18 @@ public sealed class LoxFile {
     public readonly bool Writable;
     private bool m_isDirectory; // true only for a directory opened with "r" mode
 
+    // .NET runs no finalizers at process exit, so a FileStream's buffer dies
+    // with the process unless something else keeps flushing it reachable.
+    // Every writable LoxFile is added here on Open and removed on Close, so
+    // LoxRuntime's exit hooks can still flush a file the program forgot to
+    // close. The entry pins the FileStream open past the program's own
+    // logical need for it - one native handle held until process end, the
+    // same handle the program already leaks today by never closing the file.
+    private static readonly HashSet<LoxFile> s_openFiles = new();
+
+    /// <summary>Registry size, for a test to confirm Close() removes its entry rather than only checking that Open() adds one.</summary>
+    internal static int OpenRegistryCountForTests => s_openFiles.Count;
+
     private LoxFile(FileStream stream, bool readable, bool writable, bool isDirectory = false) {
         m_stream = stream;
         Readable = readable;
@@ -74,7 +86,11 @@ public sealed class LoxFile {
         }
         try {
             var stream = new FileStream(path, fileMode, access);
-            return new LoxFile(stream, readable, writable);
+            var file = new LoxFile(stream, readable, writable);
+            if (writable) {
+                s_openFiles.Add(file);
+            }
+            return file;
         } catch (Exception e) when (e is IOException || e is UnauthorizedAccessException) {
             throw new LoxError($"open(): cannot open '{path}': {e.Message}");
         }
@@ -171,6 +187,7 @@ public sealed class LoxFile {
 
     public void Close() {
         if (m_stream != null) {
+            s_openFiles.Remove(this);
             try {
                 m_stream.Close();
             } catch (IOException) {
@@ -179,6 +196,29 @@ public sealed class LoxFile {
             m_stream = null;
         }
         m_isDirectory = false;
+    }
+
+    /// <summary>
+    /// Flushes every LoxFile the program has not closed, so a buffered write
+    /// survives a process end that never reaches Close() - end of script,
+    /// exit(), or an uncaught throw. Only LoxRuntime's exit hooks call this,
+    /// after generated code has already stopped running, so no Open/Close
+    /// call can race this enumeration.
+    /// </summary>
+    internal static void FlushAllOpen() {
+        foreach (LoxFile file in s_openFiles) {
+            try {
+                file.m_stream?.Flush();
+            } catch (IOException) {
+                // Best-effort, like Close(): one file's flush failure must
+                // not stop the rest, or throw out of an exit hook and mask
+                // output that already reached LoxRuntime.Out.
+            } catch (ObjectDisposedException) {
+                // Tolerates an entry whose stream was disposed by some path
+                // other than Close() (which would have removed it here
+                // first) - an exit hook must never throw.
+            }
+        }
     }
 
     /// <summary>

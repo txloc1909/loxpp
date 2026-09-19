@@ -38,13 +38,25 @@ public static class LoxRuntime {
     private static readonly Stream s_stdin = Console.OpenStandardInput();
 
     static LoxRuntime() {
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => Out.Flush();
+        // LoxFile.FlushAllOpen() runs first at every exit hook in this
+        // class: it is internally tolerant of a disposed or already-closed
+        // entry and never throws, where Out.Flush() can (e.g. a broken
+        // stdout pipe). Flushing files first means a stdout flush failure
+        // never costs the file data this hook exists to save - only the
+        // reverse order would turn one data-loss defect into two.
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => {
+            LoxFile.FlushAllOpen();
+            Out.Flush();
+        };
         // ProcessExit does not fire when an exception (a LoxError left
         // uncaught by generated code, say) terminates the process - only
         // UnhandledException does. Without this, every line already printed
         // before that point is lost, where the native VM keeps it (it
         // writes stdout unbuffered by comparison, via straight std::printf).
-        AppDomain.CurrentDomain.UnhandledException += (_, _) => Out.Flush();
+        AppDomain.CurrentDomain.UnhandledException += (_, _) => {
+            LoxFile.FlushAllOpen();
+            Out.Flush();
+        };
     }
 
     // The one LoxGlobals instance for this process (design decision A2: one
@@ -163,6 +175,11 @@ public static class LoxRuntime {
             if (double.IsNaN(raw) || double.IsInfinity(raw) || raw > int.MaxValue || raw < int.MinValue) {
                 throw new LoxError("exit() code must be a finite number in the integer range.");
             }
+            // File flush first, same reason and order as the two exit hooks
+            // in the static constructor above: it cannot throw, where
+            // Out.Flush() can, and this call site does not run under either
+            // hook.
+            LoxFile.FlushAllOpen();
             Out.Flush(); // ProcessExit does not fire for Environment.Exit on every platform path
             Environment.Exit((int)raw); // range-guarded above, so the cast truncates toward zero, matching C
             throw new InvalidOperationException("Environment.Exit must not return");
