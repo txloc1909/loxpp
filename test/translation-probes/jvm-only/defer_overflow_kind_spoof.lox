@@ -1,0 +1,19 @@
+// Proves runtime/jvm/src/lox/LoxClosure.java's s_unwindingStackOverflow
+// guard does not key off a delivered value's "kind" field (PR #314 R6). A
+// plain instance with kind == "StackOverflowError" is thrown and caught
+// entirely inside `boom`'s own body, self-contained, while a real
+// StackOverflowError from `f` is unwinding through `boom`'s own deferred
+// call. That local catch must not clear the guard: `deepcall(500)`
+// straight after it overflows again while the first overflow is still
+// unwinding, which spec/04-semantics.md line 1120 makes fatal — matching
+// native, which never lets a value's own contents reach this guard at all.
+//
+// Lives in jvm-only/ for the same reason catch_overflow.lox does: the CLR
+// backend does not yet deliver this fault with the correct catchability
+// (issue #238).
+class Fake { init() { this.kind = "StackOverflowError"; } }
+fun deepcall(n) { if (n == 0) return 0; return deepcall(n - 1); }
+fun boom(n) { try { throw Fake(); } catch (e) { } deepcall(500); }
+fun f(n) { defer boom(n); f(n + 1); }
+try { f(0); } catch (e) { print "caught " + e.kind; }
+print "after";

@@ -945,7 +945,21 @@ public final class LoxOps {
             if (deferred.args == null) {
                 throw new LoxError("Deferred call has null args array.");
             }
-            call(deferred.callable, deferred.args);
+            try {
+                call(deferred.callable, deferred.args);
+            } catch (LoxError replacement) {
+                // spec/04-semantics.md defer Statement step 5: this
+                // deferred call's own throw, uncaught within it, replaces
+                // whatever fault was already propagating through the frame
+                // this defer list belongs to. LoxClosure.s_frameCount's
+                // own guard needs to know when its raised
+                // StackOverflowError is replaced this way, so it can keep
+                // watching the right object (a no-op unless that guard is
+                // currently active — see advanceOverflowInFlight's own
+                // comment).
+                LoxClosure.advanceOverflowInFlight(replacement);
+                throw replacement;
+            }
         }
     }
 }

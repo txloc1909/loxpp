@@ -1,0 +1,20 @@
+// Proves runtime/jvm/src/lox/LoxClosure.java delivers its own
+// StackOverflowError to a real catchBlock — kind, message, and the "after"
+// line that only runs once the catch block completes normally
+// (spec/04-semantics.md's Runtime Errors table).
+//
+// Lives in jvm-only/, not directly in translation-probes/: the CLR backend
+// (runtime/clr/src/LoxClosure.cs) raises the same ceiling fault today but,
+// as of this probe, still delivers it with the wrong catchability (see
+// issue #238) — a bug this probe would otherwise make every CLR
+// differential run report as a new divergence. Move this probe back into
+// the shared directory once #238 closes.
+fun f(n) { return f(n + 1); }
+try {
+    f(0);
+    print "no error";
+} catch (e) {
+    print "caught " + e.kind;
+    print e.message;
+}
+print "after";
