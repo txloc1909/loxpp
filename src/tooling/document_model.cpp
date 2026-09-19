@@ -57,9 +57,17 @@ std::size_t DocumentModel::positionToOffset(Position position) const {
     }
     const std::size_t line = std::min(position.line, m_lineStarts.size() - 1);
     const std::size_t lineStart = m_lineStarts[line];
-    const std::size_t lineEnd = (line + 1 < m_lineStarts.size())
-                                    ? m_lineStarts[line + 1]
-                                    : m_text.size();
+    std::size_t lineEnd = (line + 1 < m_lineStarts.size())
+                              ? m_lineStarts[line + 1]
+                              : m_text.size();
+    // m_lineStarts[next] points past the line break, so without this step a
+    // past-end character clamps onto column 0 of the next line. Keep both
+    // newline shapes here: production text is LF-only, but a model built
+    // directly can still hold CRLF.
+    while (lineEnd > lineStart &&
+           (m_text[lineEnd - 1] == '\n' || m_text[lineEnd - 1] == '\r')) {
+        --lineEnd;
+    }
     return std::min(lineStart + position.character, lineEnd);
 }
 
