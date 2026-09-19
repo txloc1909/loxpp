@@ -8,10 +8,8 @@ site in bootstrap/loxpp_interpreter.lox, and checks the caught value's
 check_bootstrap_error_kinds.py proves the SOURCE TEXT of these calls has not
 drifted; it starts no interpreter. bootstrap/loxpp_interpreter.lox is a Lox++
 program no compiler checks, so a typo in a branch nothing else exercises
-ships silently -- every one of these causes is reachable only through this
-reflection API or list.remove(), so no other test in the suite reaches these
-specific branches. This script is the run-time counterpart the static check
-cannot be.
+ships silently, and no other test in the suite reaches these branches. This
+script is the run-time counterpart the static check cannot be.
 
 Usage: tools/run_bootstrap_error_kind_causes.py
 Exits 0 if every cause below reports its expected `kind`; exits 1 and lists

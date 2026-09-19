@@ -21,29 +21,33 @@ Usage:
     tools/check_bootstrap_error_kinds.py --report    # full site-by-site audit
 
 With no arguments it is the permanent regression check. It reads every
-`.setError(` call in file order and compares each one's `kind` argument
-against EXPECTED_KINDS below -- a reviewed baseline, one entry per call, in
+`.setError(` call in file order and compares each one's kind and message
+against EXPECTED_CALLS below -- a reviewed baseline, one entry per call, in
 the same order the calls appear in the file. This is a positive manifest,
-not a denylist: it fails on a call whose `kind` reverted to a table string
-it used to alias, on a *different* table `kind` substituted for the same
+not a denylist: it fails on a call whose kind reverted to a table string it
+used to alias, on a different table kind substituted for the same
 non-table cause, on a brand-new call inserted anywhere that was never
-reviewed, and on a typo in one of this audit's own new non-table strings --
-because every one of those changes the actual kind (or the call count) away
-from what was reviewed, at that position. It also re-derives the spec's
-table kinds from spec/04-semantics.md and fails if any of this audit's own
-non-table strings has since become a real table kind, so the two files
-cannot silently drift into a new collision this script would otherwise miss.
-It cannot, by itself, decide whether some brand-new call's chosen kind
-matches its cause -- that judgment is what a human audit (--report, plus
-reading spec/04-semantics.md's Runtime Errors table) has to make before
-adding it to EXPECTED_KINDS.
+reviewed, on a typo in one of this audit's own new non-table strings, and
+on a message-only edit at an already-reviewed site that recreates a
+table-kind collision without changing that site's kind -- because every
+one of those changes the call's actual (kind, message) pair, or the call
+count, away from what was reviewed, at that position. It also re-derives
+the spec's table kinds from spec/04-semantics.md and fails if any of this
+audit's own non-table strings has since become a real table kind, so the
+two files cannot silently drift into a new collision this script would
+otherwise miss. It cannot, by itself, decide whether some brand-new call's
+chosen kind matches its cause -- that judgment is what a human audit
+(--report, plus reading spec/04-semantics.md's Runtime Errors table) has to
+make before adding it to EXPECTED_CALLS as a JUDGED entry.
 
 --report prints every `.setError(` call site in file order (line number,
-`kind`, and the message argument's leading text), grouped by whether the
-`kind` is one of the spec/04-semantics.md table kinds or not, and flags any
-line whose kind differs from EXPECTED_KINDS. It always exits 0; it is the
-tool a human audit runs to re-derive the ground truth and to regenerate
-EXPECTED_KINDS after a deliberate, reviewed change.
+whether its kind is a spec/04-semantics.md table kind, the baseline's
+JUDGED/RECORDED status, the kind, and the message argument's leading text),
+flags any line whose kind or message differs from EXPECTED_CALLS, and
+prints the derived totals at the end -- computed from the data, not
+hardcoded here. It always exits 0; it is the tool a human audit runs to
+re-derive the ground truth and to regenerate EXPECTED_CALLS after a
+deliberate, reviewed change.
 """
 
 import re
@@ -55,6 +59,8 @@ INTERPRETER_PATH = REPO_ROOT / "bootstrap" / "loxpp_interpreter.lox"
 SPEC_PATH = REPO_ROOT / "spec" / "04-semantics.md"
 
 DYNAMIC = "<dynamic>"
+JUDGED = "JUDGED"
+RECORDED = "RECORDED"
 
 # Non-table `kind` strings this file's audits have introduced so far, each
 # naming one cause the spec/04-semantics.md table does not document (see the
@@ -70,106 +76,123 @@ REVIEWED_NON_TABLE_KINDS = {
     "ValueNotFoundError",
 }
 
-# The reviewed baseline: one entry per `.setError(` call in
-# bootstrap/loxpp_interpreter.lox, in file order, holding the `kind` that
-# call is expected to pass -- DYNAMIC for a call whose `kind` argument is not
-# a plain string literal (its actual kind is chosen at run time). Two such
-# choices exist today, both between real table kinds: InvalidMapKeyError vs.
-# NaNKeyError for a Map key's validity check (six sites), and ArityError vs.
-# ConstructorArityError for a call-arity check (one site). DYNAMIC only means
-# this script cannot read the choice statically; it does not mean the choice
-# is unaudited. Regenerate this list with --report after any reviewed,
-# deliberate change to a call's `kind` or to the call count, and only then.
-EXPECTED_KINDS = [
-    "ArityError",
-    "InvalidReceiverError",
-    "ReflectionFieldNameError",
-    "ReflectionUndefinedMemberError",
-    "ReflectionUnsupportedError",
-    "NotCallableError",
-    "ArityError",
-    "LengthTypeError",
-    "ReflectionReceiverError",
-    "ReflectionReceiverError",
-    "ReflectionReceiverError",
-    "ReflectionFieldNameError",
-    "ReflectionReceiverError",
-    "ReflectionFieldNameError",
-    "ReflectionReceiverError",
-    "ReflectionFieldNameError",
-    "EmptyListError",
-    "ValueNotFoundError",
-    DYNAMIC,
-    DYNAMIC,
-    DYNAMIC,
-    DYNAMIC,
-    "IndexTypeError",
-    "IndexNotIntegerError",
-    "IndexOutOfBoundsError",
-    "IndexTypeError",
-    "IndexNotIntegerError",
-    "IndexOutOfBoundsError",
-    "NotIndexableError",
-    DYNAMIC,
-    "IndexTypeError",
-    "IndexNotIntegerError",
-    "IndexOutOfBoundsError",
-    "NotIndexableError",
-    "NotIndexableError",
-    "NotIndexableError",
-    "IndexTypeError",
-    "IndexNotIntegerError",
-    "IndexOutOfBoundsError",
-    "IndexTypeError",
-    "IndexNotIntegerError",
-    "IndexOutOfBoundsError",
-    "NotIndexableError",
-    "NotCallableError",
-    "UndefinedVariableError",
-    "UndefinedVariableError",
-    "ArithmeticTypeError",
-    "ConcatenationTypeError",
-    "ArithmeticTypeError",
-    "ArithmeticTypeError",
-    "ArithmeticTypeError",
-    "ComparisonTypeError",
-    "ComparisonTypeError",
-    "ComparisonTypeError",
-    "ComparisonTypeError",
-    "ArithmeticTypeError",
-    "IndexTypeError",
-    DYNAMIC,
-    "NotIndexableError",
-    "NotCallableError",
-    "NotCallableError",
-    "NotCallableError",
-    DYNAMIC,
-    "UndefinedPropertyError",
-    "UndefinedPropertyError",
-    "UndefinedPropertyError",
-    "UndefinedPropertyError",
-    "InvalidReceiverError",
-    "UndefinedPropertyError",
-    "InvalidReceiverError",
-    "UndefinedPropertyError",
-    "MaxDepthExceededError",
-    "NotIndexableError",
-    "IndexOutOfBoundsError",
-    "InvalidReceiverError",
-    "MatchError",
+# The reviewed baseline: one (kind, message, status) entry per `.setError(`
+# call in bootstrap/loxpp_interpreter.lox, in file order.
+#
+# `kind` is DYNAMIC for a call whose `kind` argument is not a plain string
+# literal (its actual kind is chosen at run time). Two such choices exist
+# today, both between real table kinds: InvalidMapKeyError vs. NaNKeyError
+# for a Map key's validity check, and ArityError vs. ConstructorArityError
+# for a call-arity check. DYNAMIC only means this script cannot read the
+# choice statically; it does not mean the choice is unaudited.
+#
+# `message` is the call's message argument, exactly as find_set_error_calls
+# returns it (message_raw): the literal source text between the commas,
+# quotes included, unevaluated. Checking it, not only `kind`, closes the gap
+# a kind-only baseline leaves open -- a message-only edit at an existing
+# call can recreate the exact collision this audit fixes (the cause
+# changes, the `kind` string does not) and a kind-only comparison would not
+# notice.
+#
+# `status` is JUDGED when a person has compared this call's cause against
+# its `kind`'s row in spec/04-semantics.md's table (or confirmed the `kind`
+# is deliberately non-table, for the reason given in the code comment at
+# that site), and RECORDED when the baseline only certifies that this is
+# what the call passes today -- it makes no claim that the pairing is
+# correct.
+#
+# Regenerate this list with --report after any reviewed, deliberate change
+# to a call's kind, message, or the call count. Flip a RECORDED entry to
+# JUDGED only after actually judging that specific site against the spec
+# table, never as part of an unrelated change.
+EXPECTED_CALLS = [
+    ('ArityError', '"Expected at least 2 arguments."', JUDGED),
+    ('InvalidReceiverError', '"Only instances have methods."', JUDGED),
+    ('ReflectionFieldNameError', '"Field name must be a string."', JUDGED),
+    ('ReflectionUndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
+    ('ReflectionUnsupportedError', '"callMethod does not support user-defined methods yet."', JUDGED),
+    ('NotCallableError', '"callMethod requires a callable value."', JUDGED),
+    ('ArityError', '"Expected " + str(callee.arity()) + " arguments but got " +\n                         str(len(forwarded)) + "."', JUDGED),
+    ('LengthTypeError', '"len() argument must be a String, List, or Map."', JUDGED),
+    ('ReflectionReceiverError', '"Expected an instance."', JUDGED),
+    ('ReflectionReceiverError', '"Expected a class."', JUDGED),
+    ('ReflectionReceiverError', '"Only instances have properties."', JUDGED),
+    ('ReflectionFieldNameError', '"Field name must be a string."', JUDGED),
+    ('ReflectionReceiverError', '"Only instances have properties."', JUDGED),
+    ('ReflectionFieldNameError', '"Field name must be a string."', JUDGED),
+    ('ReflectionReceiverError', '"Only instances have fields."', JUDGED),
+    ('ReflectionFieldNameError', '"Field name must be a string."', JUDGED),
+    ('EmptyListError', '"Cannot pop from an empty list."', RECORDED),
+    ('ValueNotFoundError', '"Value not found in list."', JUDGED),
+    (DYNAMIC, '"Map key must be a scalar (Nil, Bool, Number, or String)."', RECORDED),
+    (DYNAMIC, '"Map key must be a scalar (Nil, Bool, Number, or String)."', RECORDED),
+    (DYNAMIC, '"Map key must be a scalar (Nil, Bool, Number, or String)."', RECORDED),
+    (DYNAMIC, '"Map key must be a scalar (Nil, Bool, Number, or String)."', RECORDED),
+    ('IndexTypeError', '"Index must be a number."', RECORDED),
+    ('IndexNotIntegerError', '"Index must be an integer."', RECORDED),
+    ('IndexOutOfBoundsError', '"List index out of bounds."', RECORDED),
+    ('IndexTypeError', '"Index must be a number."', RECORDED),
+    ('IndexNotIntegerError', '"Index must be an integer."', RECORDED),
+    ('IndexOutOfBoundsError', '"List index out of bounds."', RECORDED),
+    ('NotIndexableError', '"Only lists, maps, and strings can be indexed."', RECORDED),
+    (DYNAMIC, '"Map key must be a scalar (Nil, Bool, Number, or String)."', RECORDED),
+    ('IndexTypeError', '"Index must be a number."', RECORDED),
+    ('IndexNotIntegerError', '"Index must be an integer."', RECORDED),
+    ('IndexOutOfBoundsError', '"List index out of bounds."', RECORDED),
+    ('NotIndexableError', '"Strings are immutable."', RECORDED),
+    ('NotIndexableError', '"Only lists and maps support index assignment."', RECORDED),
+    ('NotIndexableError', '"Slice requires a List or String."', RECORDED),
+    ('IndexTypeError', '"Slice index must be a number."', RECORDED),
+    ('IndexNotIntegerError', '"Slice index must be an integer."', RECORDED),
+    ('IndexOutOfBoundsError', '"Slice index must be non-negative."', RECORDED),
+    ('IndexTypeError', '"Slice index must be a number."', RECORDED),
+    ('IndexNotIntegerError', '"Slice index must be an integer."', RECORDED),
+    ('IndexOutOfBoundsError', '"Slice index must be non-negative."', RECORDED),
+    ('NotIndexableError', '"Value is not iterable."', RECORDED),
+    ('NotCallableError', '"Superclass must be a class."', RECORDED),
+    ('UndefinedVariableError', '"Undefined variable \'" + name + "\'."', RECORDED),
+    ('UndefinedVariableError', '"Undefined variable \'" + name + "\'."', RECORDED),
+    ('ArithmeticTypeError', '"Operand must be a number."', RECORDED),
+    ('ConcatenationTypeError', '"Operands must be two numbers or two strings."', RECORDED),
+    ('ArithmeticTypeError', '"Operands must be numbers."', RECORDED),
+    ('ArithmeticTypeError', '"Operands must be numbers."', RECORDED),
+    ('ArithmeticTypeError', '"Operands must be numbers."', RECORDED),
+    ('ComparisonTypeError', '"Operands must be numbers."', RECORDED),
+    ('ComparisonTypeError', '"Operands must be numbers."', RECORDED),
+    ('ComparisonTypeError', '"Operands must be numbers."', RECORDED),
+    ('ComparisonTypeError', '"Operands must be numbers."', RECORDED),
+    ('ArithmeticTypeError', '"Operands must be numbers."', RECORDED),
+    ('IndexTypeError', '"Left operand of \'in\' on a String must be a String."', RECORDED),
+    (DYNAMIC, '"Map key must be a scalar (Nil, Bool, Number, or String)."', RECORDED),
+    ('NotIndexableError', '"Right operand of \'in\' must be a List, String, or Map."', RECORDED),
+    ('NotCallableError', '"Can only call functions and classes."', RECORDED),
+    ('NotCallableError', '"Can only call functions and classes."', RECORDED),
+    ('NotCallableError', '"Can only call functions and classes."', RECORDED),
+    (DYNAMIC, '"Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + "."', RECORDED),
+    ('UndefinedPropertyError', '"Undefined property \'" + name + "\'."', RECORDED),
+    ('UndefinedPropertyError', '"Undefined property \'" + name + "\'."', RECORDED),
+    ('UndefinedPropertyError', '"Undefined property \'" + name + "\'."', RECORDED),
+    ('UndefinedPropertyError', '"Undefined property \'" + name + "\' on error."', RECORDED),
+    ('InvalidReceiverError', '"Only instances have properties."', RECORDED),
+    ('UndefinedPropertyError', '"Undefined property \'" + name + "\'."', RECORDED),
+    ('InvalidReceiverError', '"Only instances have fields."', RECORDED),
+    ('UndefinedPropertyError', '"Undefined property \'" + method + "\'."', RECORDED),
+    ('MaxDepthExceededError', '"Value nesting is too deep."', RECORDED),
+    ('NotIndexableError', '"Sequence destructuring requires a List."', RECORDED),
+    ('IndexOutOfBoundsError', '"Not enough elements for sequence destructuring."', RECORDED),
+    ('InvalidReceiverError', '"Object destructuring requires an instance."', RECORDED),
+    ('MatchError', '"Match expression was not exhaustive."', RECORDED),
+
 ]
 
 # The exact number of rows load_spec_table_kinds() expects to find in
 # spec/04-semantics.md's Runtime Errors table today. A change here means the
-# spec table itself changed since the last audit. Only 17 of the 56 calls
-# tagged [table] above were judged, site by site, against these 19 rows'
-# documented meanings -- the reflection-API and list.remove() call sites
-# this file's kind strings were most recently audited for (13 were renamed
-# off a table kind onto a non-table one; 4 kept a table kind, correctly).
-# The other 52 table-kind calls are recorded here as they stand today; this
-# baseline does not certify them. A table that has grown, shrunk, or
-# renamed a row calls the 17 judged sites' review back into question, so
-# this script fails rather than silently keep trusting a stale review.
+# spec table itself changed since the last audit. A table that has grown,
+# shrunk, or renamed a row calls every JUDGED site's review back into
+# question, so this script fails rather than silently keep trusting a stale
+# review. See --report for the current judged/recorded split; this script
+# does not restate that split in prose here, to avoid a second hand-written
+# copy of a number the data already holds.
 EXPECTED_SPEC_TABLE_KIND_COUNT = 19
 
 
@@ -288,23 +311,48 @@ def main() -> int:
     spec_kinds = load_spec_table_kinds(SPEC_PATH.read_text(encoding="utf-8"))
 
     if report_mode:
+        judged = sum(1 for _, _, status in EXPECTED_CALLS if status == JUDGED)
+        recorded = len(EXPECTED_CALLS) - judged
+        judged_table = sum(
+            1
+            for kind, _, status in EXPECTED_CALLS
+            if status == JUDGED and kind in spec_kinds
+        )
+        table = sum(1 for c in calls if effective_kind(c) in spec_kinds)
+        non_table_literal = sum(
+            1
+            for c in calls
+            if c["kind_literal"] is not None and c["kind_literal"] not in spec_kinds
+        )
+        dynamic = sum(1 for c in calls if c["kind_literal"] is None)
+
         print(f"{len(calls)} total .setError( calls, {len(spec_kinds)} spec table kinds\n")
         for i, c in enumerate(calls):
             kind = effective_kind(c)
             tag = "table" if kind in spec_kinds else "non-table"
-            baseline = EXPECTED_KINDS[i] if i < len(EXPECTED_KINDS) else "<no baseline entry>"
-            flag = "" if kind == baseline else f"  ** baseline says {baseline!r} **"
+            if i < len(EXPECTED_CALLS):
+                exp_kind, exp_message, status = EXPECTED_CALLS[i]
+            else:
+                exp_kind, exp_message, status = "<no baseline entry>", "<no baseline entry>", "?"
+            flag = ""
+            if kind != exp_kind or c["message_raw"] != exp_message:
+                flag = f"  ** baseline says {exp_kind!r} / {exp_message[:40]!r} **"
             msg_preview = c["message_raw"][:60].replace("\n", " ")
             print(
-                f"  line {c['line']:>5}  [{tag:>9}]  {kind:<32}  {msg_preview}{flag}"
+                f"  line {c['line']:>5}  [{tag:>9}]  [{status:>8}]  {kind:<32}  {msg_preview}{flag}"
             )
-        if len(calls) != len(EXPECTED_KINDS):
+        if len(calls) != len(EXPECTED_CALLS):
             print(
-                f"\n** call count is {len(calls)}, EXPECTED_KINDS has {len(EXPECTED_KINDS)} "
+                f"\n** call count is {len(calls)}, EXPECTED_CALLS has {len(EXPECTED_CALLS)} "
                 "entries -- a call was added or removed since the last reviewed baseline **"
             )
         distinct = sorted({c["kind_literal"] for c in calls if c["kind_literal"] is not None})
         print(f"\n{len(distinct)} distinct kind strings in use: {', '.join(distinct)}")
+        print(
+            f"\ntotals: {len(calls)} total, {table} table, {non_table_literal} non-table "
+            f"literal, {dynamic} dynamic; {judged} judged ({judged_table} of them table-kind), "
+            f"{recorded} recorded"
+        )
         return 0
 
     failures = []
@@ -327,29 +375,32 @@ def main() -> int:
         failures.append(
             f"spec/04-semantics.md's Runtime Errors table now yields "
             f"{len(spec_kinds)} kind(s), not the {EXPECTED_SPEC_TABLE_KIND_COUNT} this "
-            "audit's EXPECTED_KINDS baseline was reviewed against. Re-run --report, "
+            "audit's EXPECTED_CALLS baseline was reviewed against. Re-run --report, "
             "re-audit every table-tagged call against the new table, and update "
             "EXPECTED_SPEC_TABLE_KIND_COUNT deliberately."
         )
 
-    if len(calls) != len(EXPECTED_KINDS):
+    if len(calls) != len(EXPECTED_CALLS):
         failures.append(
             f"bootstrap/loxpp_interpreter.lox now has {len(calls)} .setError( call(s), "
-            f"but the reviewed baseline (EXPECTED_KINDS) has {len(EXPECTED_KINDS)}. A call "
+            f"but the reviewed baseline (EXPECTED_CALLS) has {len(EXPECTED_CALLS)}. A call "
             "was added or removed. Run --report, review every new or removed call's kind "
-            "against spec/04-semantics.md's table, and update EXPECTED_KINDS deliberately."
+            "and message against spec/04-semantics.md's table, and update EXPECTED_CALLS "
+            "deliberately."
         )
     else:
         for i, c in enumerate(calls):
-            actual = effective_kind(c)
-            expected = EXPECTED_KINDS[i]
-            if actual != expected:
+            actual_kind = effective_kind(c)
+            actual_message = c["message_raw"]
+            expected_kind, expected_message, _status = EXPECTED_CALLS[i]
+            if actual_kind != expected_kind or actual_message != expected_message:
                 failures.append(
-                    f"bootstrap/loxpp_interpreter.lox:{c['line']}: kind is {actual!r}, "
-                    f"but the reviewed baseline expects {expected!r} at this position. "
-                    "If this change is deliberate and reviewed against "
-                    "spec/04-semantics.md's table, update EXPECTED_KINDS; otherwise this "
-                    "is the collision this audit exists to catch."
+                    f"bootstrap/loxpp_interpreter.lox:{c['line']}: kind is {actual_kind!r} "
+                    f"(message {actual_message!r}), but the reviewed baseline expects kind "
+                    f"{expected_kind!r} (message {expected_message!r}) at this position. If "
+                    "this change is deliberate and reviewed against spec/04-semantics.md's "
+                    "table, update EXPECTED_CALLS; otherwise this is the collision this "
+                    "audit exists to catch."
                 )
 
     if failures:
