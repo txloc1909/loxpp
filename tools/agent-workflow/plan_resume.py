@@ -273,8 +273,9 @@ def main():
     print(" issue number. Merge in your mission's static `nodes` map too — for each")
     print(" issue number above, supply { branch, title, issue } under whatever")
     print(" mnemonic id you want the harness to log (match it to `issue`, not to")
-    print(" this script's key) — plus `repo`, `githubRepo`, `briefPath`, `dagDoc`,")
-    print(" `opcodeDoc`, and `targetLabel`.)")
+    print(" this script's key) — plus `repo`, `githubRepo`, `dagDoc`, `opcodeDoc`,")
+    print(" and `targetLabel`. The mission brief itself needs no argument: the")
+    print(" harness reads it from the tracking issue, `missionIssue` above.)")
 
 
 if __name__ == "__main__":

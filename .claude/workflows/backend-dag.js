@@ -37,13 +37,6 @@ if (!cfg.missionIssue) {
     'mapping live there, not in a local file.'
   )
 }
-if (!cfg.briefPath) {
-  throw new Error(
-    'backend-dag: args.briefPath is required — an absolute path, inside this ' +
-    'repository, to the mission brief (e.g. notes/missions/<name>.md). The ' +
-    'brief holds binding mission-wide rules; it is committed, not scratch.'
-  )
-}
 if (!cfg.nodes || typeof cfg.nodes !== 'object') {
   throw new Error(
     'backend-dag: args.nodes is required — a map of node id -> { branch, title, issue }. ' +
@@ -57,7 +50,6 @@ for (const [id, n] of Object.entries(cfg.nodes)) {
 }
 
 const MISSION_ISSUE = cfg.missionIssue
-const BRIEF = cfg.briefPath
 const REPO = cfg.repo || '/var/home/loctran/personal/loxpp'
 const GH = cfg.githubRepo || 'txloc1909/loxpp'
 const NODES = cfg.nodes
@@ -186,20 +178,23 @@ function common(id) {
     'GITHUB REPO: ' + GH,
     '',
     'Read these before you act, in this order:',
-    '  1. ' + BRIEF + '  (the mission rules; they are binding)',
+    '  1. `gh issue view ' + MISSION_ISSUE + ' --repo ' + GH + ' --comments`  (the mission brief:',
+    '     binding, mission-wide rules)',
     '  2. `gh issue view ' + n.issue + ' --repo ' + GH + ' --comments`  (your node specification)',
-    '     Use the `--comments` form. NEVER the plain `gh issue view ' + n.issue + '` — that prints the',
-    '     body only, gives no sign that comments exist, and a cross-node hazard another node left you',
-    '     lives ONLY in a comment, never in a body edit. Reading the plain form silently drops it.',
+    '     Use the `--comments` form for BOTH reads above. NEVER the plain `gh issue view <n>` — that',
+    '     prints the body only, gives no sign that comments exist, and a binding rule (a corrected',
+    '     dependency, a cross-node hazard another node left you) can live ONLY in a comment, never in',
+    '     a body edit. Reading the plain form silently drops it.',
     '  3. ' + DAG_DOC,
     '  4. ' + OPCODE_DOC + '  (authoritative opcode semantics)',
     '  5. ' + REPO + '/AGENTS.md',
     '  6. ' + REPO + '/notes/multi-agent-playbook.md',
     '',
-    'If any of these is missing, unreadable, or the `gh issue view --comments` command itself fails',
-    '(non-zero exit, empty output), STOP immediately and report status "blocked_surprise" with the',
-    'exact command and error. Do not continue as if a missing brief or issue were optional — an agent',
-    'working from a partial spec is indistinguishable from one working correctly until its output is wrong.',
+    'If any of these is missing or unreadable, or either `gh issue view --comments` command itself',
+    'fails (non-zero exit, empty output), STOP immediately and report status "blocked_surprise" with',
+    'the exact command and error. Do not continue as if a missing brief or issue were optional — an',
+    'agent working from a partial spec is indistinguishable from one working correctly until its',
+    'output is wrong.',
     '',
     'Hard rules:',
     '  - Write every GitHub message and every returned string in ASD-STE100 Simplified Technical English.',
@@ -209,7 +204,8 @@ function common(id) {
     '  - Run builds and tests inside the `loxpp-dev-env-managed` container. Never use `-it`.',
     '  - Never touch another agent worktree, and never touch the human `loxpp-dev` distrobox container.',
     '  - A hazard for a LATER node goes as a `gh issue comment` on that later node\'s issue, never as an',
-    '    edit to this brief, the tracking issue, or any local file. A comment records who found it and when.',
+    '    edit to the mission brief comment, the tracking issue body, or any local file. A comment',
+    '    records who found it and when.',
     '',
   ].join('\n')
 }
