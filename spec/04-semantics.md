@@ -1150,6 +1150,67 @@ same text the implementation reports when the fault is left uncaught.
 | Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field | `"ConstructorArityError"` |
 | Undefined property on an `Error` value | `try { try { [][0]; } catch (e) { e.foo; } } catch (_) { }` | `"UndefinedPropertyError"` |
 
+### Fatal Runtime Errors
+
+The causes above are every fault the native implementation delivers as a
+catchable `Error` value. Native also has a second, smaller set of faults
+that always halt the program: they are never delivered to a `catchBlock`,
+even from inside a `try` statement's `tryBlock`. Each row below is fatal
+today — this is a record of current native behavior, not a design decision
+that a future version must keep. There is no `Error.kind` for a fatal
+fault; the message is the only text the implementation reports.
+
+| Cause | Example | Message |
+|---|---|---|
+| `GET_TAG` applied to a non-enum value | a `match` constructor-pattern arm compiled against a subject that is not an `ObjEnum` at runtime | `GET_TAG: expected an enum value.` |
+| `print expr;` where evaluating `expr` left a pending native-stdlib error | native reports this whenever the stdlib error flag is still set right after evaluating `expr`; no stdlib native reachable from `print`'s own operand evaluation sets it today, so this path is currently unreachable from a Lox++ program | whatever message the failing native call reported |
+| Undefined property read on a File value | `openFile("f", "r").bogus` | `Undefined property 'bogus' on file.` |
+| Undefined property read on a Map value | `{}.bogus` | `Undefined property 'bogus' on map.` |
+| Property read on a value that is not an Instance, Map, File, or Error | `42.foo` (see [§03-types, Error](03-types.md#error) and [Property Get](#property-get)) | `Only instances have properties.` |
+| Property write on a value that is not an Instance | `42.foo = 1` | `Only instances have fields.` |
+| A field looked up by [Method Invocation](#method-invocation) shadows the method name but is not callable | `class C { init() { this.f = 1; } } C().f();` | `Can only call functions, classes and enums.` |
+| `obj.method(...)` where `method` is not found on the instance's class | `class C {} C().bogus();` | `Undefined property 'bogus'.` |
+| `list.append(...)` called with an argument count other than 1 | `[].append()` | `'append' expects 1 argument but got 0.` |
+| `list.pop(...)` called with any argument | `[].pop(1)` | `'pop' expects 0 arguments but got 1.` |
+| `list.remove(...)` called with an argument count other than 1 | `[1].remove()` | `'remove' expects 1 argument but got 0.` |
+| `list.remove(value)` where `value` is not present | `[1, 2].remove(3)` | `Value not found in list.` |
+| Undefined method invoked on a List | `[].bogus()` | `Undefined method 'bogus' on list.` |
+| Undefined method invoked on a File | `openFile("f", "r").bogus()` | `Undefined method 'bogus' on file.` |
+| Undefined method invoked on a Map | `{}.bogus()` | `Undefined method 'bogus' on map.` |
+| `class Sub < Super {}` where `Super` is not a Class | `var NotAClass = 1; class Sub < NotAClass {}` | `Superclass must be a class.` |
+| `super.method(...)` where `method` is not found on the superclass | a subclass calling a `super.` method its superclass never defined | `Undefined property 'name'.` |
+| Enum field indexed (`enumVal[i]`) with a non-Number index | indexing an `ObjEnum` value with a non-Number key | `Enum field index must be a number.` |
+| Enum field indexed with an out-of-range index | indexing an `ObjEnum` value past its field count | `Enum field index 3 out of range.` |
+| Index-assignment on a String | `"abc"[0] = "x";` (strings are immutable — see [§03-types, String](03-types.md#string)) | `Strings are immutable and cannot be indexed for assignment.` |
+| `seq[start:end]` where `seq` is not a List or String | `(42)[0:1]` | `Slice requires a List or String.` |
+| `seq[start:end]` where `start` is not a Number | `[1, 2]["a":2]` | `Slice index must be a number.` |
+| `seq[start:end]` where `start` is not integer-valued | `[1, 2][1.5:2]` | `Slice index must be an integer.` |
+| `seq[start:end]` where `start` is negative | `[1, 2][-1:2]` | `Slice index must be non-negative.` |
+| `seq[start:end]` where `end` is not a Number | `[1, 2][0:"a"]` | `Slice index must be a number.` |
+| `seq[start:end]` where `end` is not integer-valued | `[1, 2][0:1.5]` | `Slice index must be an integer.` |
+| `seq[start:end]` where `end` is negative | `[1, 2][0:-1]` | `Slice index must be non-negative.` |
+| `elem in seq` where `seq` is a String and `elem` is not a String | `1 in "abc"` | `Left operand of 'in' on a string must be a string.` |
+| `elem in seq` where `seq` is not a List, String, or Map | `1 in 42` | `Right operand of 'in' must be a list, string, or map.` |
+| `for (var x in expr)` where `expr` is not a List, String, or Map | `for (var x in 42) {}` | `Value is not iterable (expected list, string, or map).` |
+
+**Internal invariant checks are excluded.** A handful of `RAISE_ERROR` call
+sites in `src/vm.cpp` guard invariants the compiler itself is responsible
+for (for example, that `GET_ITER` always pushes an `ObjIterator` before
+`ITER_HAS_NEXT`/`ITER_NEXT` run). Their messages are prefixed `BUG:`. No
+valid Lox++ program can reach them; seeing one means the implementation,
+not the program, is broken. They are excluded from the table above and are
+not part of the language's observable behavior.
+
+**Call stack overflow's fatal fast path.** The catchable `"StackOverflowError"`
+row above already covers the general case. Native takes a direct fatal
+path — bypassing the catchable machinery — in two situations: when no
+`try` statement is active anywhere in the program (so a catch search would
+fail immediately regardless), and for the re-entrant case the paragraph
+above the catchable table already describes, where a second
+`StackOverflowError` arrives while the first is still unwinding. Both
+produce the same `"Stack overflow."` message as the catchable row; this is
+not a distinct fault.
+
 ---
 
 ## Enum Types
