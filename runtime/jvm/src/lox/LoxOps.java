@@ -923,8 +923,27 @@ public final class LoxOps {
      * @param deferList a java.util.List of DeferredCall objects
      * @throws LoxError if a deferred call throws
      */
-    @SuppressWarnings("unchecked")
     public static void runDefers(Object deferList) {
+        runDefers(deferList, null);
+    }
+
+    /**
+     * Same as {@link #runDefers(Object)}, but for the exceptional exit path:
+     * {@code propagating} is the fault this defer list is being drained for
+     * (or null on the normal-return path, where no fault is propagating).
+     * Only the generated exceptional-path handler knows which fault that
+     * is, so it is the one caller that passes it in — see
+     * {@link LoxClosure#replaceOverflowInFlight} for why identity, not a
+     * value's own fields, is what must decide whether a replacement
+     * continues the same unwind.
+     *
+     * @param deferList a java.util.List of DeferredCall objects
+     * @param propagating the fault already unwinding through this defer
+     *     list's frame, or null on the normal-return path
+     * @throws LoxError if a deferred call throws
+     */
+    @SuppressWarnings("unchecked")
+    public static void runDefers(Object deferList, LoxError propagating) {
         if (!(deferList instanceof java.util.List)) {
             return; // Not a list, nothing to do
         }
@@ -951,13 +970,15 @@ public final class LoxOps {
                 // spec/04-semantics.md defer Statement step 5: this
                 // deferred call's own throw, uncaught within it, replaces
                 // whatever fault was already propagating through the frame
-                // this defer list belongs to. LoxClosure.s_frameCount's
-                // own guard needs to know when its raised
-                // StackOverflowError is replaced this way, so it can keep
-                // watching the right object (a no-op unless that guard is
-                // currently active — see advanceOverflowInFlight's own
-                // comment).
-                LoxClosure.advanceOverflowInFlight(replacement);
+                // this defer list belongs to. Tell the guard only when
+                // `propagating` names the exact fault this replacement
+                // supersedes; a defer that throws on a normal return (no
+                // fault propagating) or that replaces some other, unrelated
+                // fault must never touch a stack-overflow unwind in
+                // progress.
+                if (propagating != null) {
+                    LoxClosure.replaceOverflowInFlight(propagating, replacement);
+                }
                 throw replacement;
             }
         }

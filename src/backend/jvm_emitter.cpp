@@ -2490,20 +2490,22 @@ std::string emitChunk(const DecodedFunction& fn,
         // Resync the depth to account for it.
         e.b.resync(1);
         // Stack: [LoxError exception]
-        // Use the defer list slot to temporarily store the exception after
-        // calling runDefers (the defer list is no longer needed at this point).
-        // But first, we need to swap so the defer list is on top for the call.
+        // This is the only site that knows which fault a defer list is
+        // being drained for: pass it to runDefers so a deferred call's own
+        // throw can be told apart from a genuine replacement of THIS fault
+        // (LoxOps.runDefers's own propagating parameter; see
+        // LoxClosure.replaceOverflowInFlight for the invariant this feeds).
+        e.b.emit("dup", +1);
+        // Stack: [LoxError exception, LoxError exception]
         e.b.emit("aload " + std::to_string(e.deferListSlot), +1);
-        // Stack: [LoxError exception, ArrayList deferList]
+        // Stack: [LoxError exception, LoxError exception, ArrayList deferList]
         e.b.emit("swap", 0);
-        // Stack: [ArrayList deferList, LoxError exception]
-        e.b.emit("astore " + std::to_string(e.deferListSlot), -1);
-        // Stack: [ArrayList deferList]
-        // Call LoxOps.runDefers() with the defer list
-        e.b.emit("invokestatic lox/LoxOps/runDefers(Ljava/lang/Object;)V", -1);
-        // Stack: []
-        // Restore and re-throw the caught exception
-        e.b.emit("aload " + std::to_string(e.deferListSlot), +1);
+        // Stack: [LoxError exception, ArrayList deferList, LoxError exception]
+        e.b.emit("invokestatic "
+                 "lox/LoxOps/runDefers(Ljava/lang/Object;Llox/LoxError;)V",
+                 -2);
+        // Stack: [LoxError exception]
+        // Re-throw the caught exception
         e.b.emit("athrow", -1);
 
         // Create an exception table entry for the defer catch-all handler.
