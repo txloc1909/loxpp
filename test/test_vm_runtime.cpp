@@ -608,11 +608,16 @@ TEST_F(StackOverflowTest, DeepRecursionExceedsStackMax_RuntimeError) {
 
 // Same 22-slot-per-frame shape as DeepRecursionExceedsStackMax_RuntimeError
 // above, but at a depth (700) chosen to overflow the *old* STACK_MAX (2048
-// slots, about 93 frames) while staying well under both of today's ceilings
-// (700 * 22 = 15400 slots, 702 frames). Without this test, nothing in the
-// suite fails if a future change reverts the STACK_MAX raise alone: every
-// other fat-frame case here targets the failing side of that raise, and the
-// thin-frame success tests below use too few slots per frame to notice it.
+// slots, about 93 frames) while staying well under today's FRAMES_MAX
+// ceiling (702 of 1024 frames). This shape overflows today's STACK_MAX at
+// depth 744 (16384 slots), so depth 700 (15400 slots) leaves only 43 frames
+// of room on the value-stack side, not "well under" -- a later change that
+// adds even a couple of slots to this frame shape can fail this test for
+// the STACK_MAX reason and not say so. Without this test at all, nothing in
+// the suite fails if a future change reverts the STACK_MAX raise alone:
+// every other fat-frame case here targets the failing side of that raise,
+// and the thin-frame success tests below use too few slots per frame to
+// notice it.
 TEST_F(StackOverflowTest,
        DeepFatFrameRecursionPastOldStackMaxCeiling_Succeeds) {
     VMTestHarness h;
