@@ -73,11 +73,13 @@ REVIEWED_NON_TABLE_KINDS = {
 # The reviewed baseline: one entry per `.setError(` call in
 # bootstrap/loxpp_interpreter.lox, in file order, holding the `kind` that
 # call is expected to pass -- DYNAMIC for a call whose `kind` argument is not
-# a plain string literal (its actual kind is chosen at run time; today that
-# is always InvalidMapKeyError vs. NaNKeyError, both real table kinds, for a
-# Map key's validity check). Regenerate this list with --report after any
-# reviewed, deliberate change to a call's `kind` or to the call count, and
-# only then.
+# a plain string literal (its actual kind is chosen at run time). Two such
+# choices exist today, both between real table kinds: InvalidMapKeyError vs.
+# NaNKeyError for a Map key's validity check (six sites), and ArityError vs.
+# ConstructorArityError for a call-arity check (one site). DYNAMIC only means
+# this script cannot read the choice statically; it does not mean the choice
+# is unaudited. Regenerate this list with --report after any reviewed,
+# deliberate change to a call's `kind` or to the call count, and only then.
 EXPECTED_KINDS = [
     "ArityError",
     "InvalidReceiverError",
@@ -159,11 +161,15 @@ EXPECTED_KINDS = [
 
 # The exact number of rows load_spec_table_kinds() expects to find in
 # spec/04-semantics.md's Runtime Errors table today. A change here means the
-# spec table itself changed since the last audit -- every one of the 57
-# already-reviewed "correct as is" table-kind calls above was judged against
-# these 19 rows' documented meanings, so a table that has grown, shrunk, or
-# renamed a row calls that judgment back into question and this script
-# fails rather than silently keep trusting a stale review.
+# spec table itself changed since the last audit. Only 17 of the 56 calls
+# tagged [table] above were judged, site by site, against these 19 rows'
+# documented meanings -- the reflection-API and list.remove() call sites
+# this file's kind strings were most recently audited for (13 were renamed
+# off a table kind onto a non-table one; 4 kept a table kind, correctly).
+# The other 52 table-kind calls are recorded here as they stand today; this
+# baseline does not certify them. A table that has grown, shrunk, or
+# renamed a row calls the 17 judged sites' review back into question, so
+# this script fails rather than silently keep trusting a stale review.
 EXPECTED_SPEC_TABLE_KIND_COUNT = 19
 
 
