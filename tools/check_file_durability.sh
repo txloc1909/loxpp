@@ -80,15 +80,21 @@ skipped_probes=()
 # vary by consumer (p6, by design - see the header): an exit of 0 there means
 # the run took the normal-exit path instead of the uncaught-fault path this
 # probe exists to cover, so it fails the probe even though the file content
-# still matches. An empty status is rejected: every probe names the path it
-# measures, so a probe with no status rule cannot exist.
+# still matches. The status rule itself is also checked: only a number or
+# "nonzero" is accepted. Any other value (including empty) exits the script
+# with an internal error instead of running the probe - a typo such as "O"
+# for "0" must not silently reopen the no-status hole this rule closes.
 check_probe() {
     local probe_name="$1" expected_content="$2" program_path="$3" file_path="$4" expected_status="${5:-}"
     local dir out err expected_path status
-    if [ -z "$expected_status" ]; then
-        echo "check_file_durability.sh: internal error: check_probe $probe_name has no expected_status" >&2
-        exit 2
-    fi
+    case "$expected_status" in
+        nonzero)
+            ;;
+        ''|*[!0-9]*)
+            echo "check_file_durability.sh: internal error: check_probe $probe_name has bad expected_status '$expected_status'" >&2
+            exit 2
+            ;;
+    esac
     dir="$(dirname "$program_path")"
     out="$dir/stdout"
     err="$dir/stderr"
