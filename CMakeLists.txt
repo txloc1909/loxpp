@@ -289,6 +289,7 @@ if(LOXPP_LSP)
         src/lsp/json_rpc.cpp
         src/lsp/document_store.cpp
         src/lsp/server.cpp
+        src/lsp/code_action.cpp
         src/lsp/signature_help.cpp
         src/lsp/stdlib_docs.cpp
     )

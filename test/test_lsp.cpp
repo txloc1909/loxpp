@@ -1,7 +1,9 @@
 // Unit tests for the loxpp-lsp building blocks that are awkward to cover from
-// the Python smoke test: JSON-RPC framing, CRLF handling, the debounce, and
-// the stdlib doc table's coverage of src/tooling/stdlib_names.h.
+// the Python smoke test: JSON-RPC framing, CRLF handling, the debounce, the
+// stdlib doc table's coverage of src/tooling/stdlib_names.h, and the
+// textDocument/codeAction quick fixes.
 
+#include "lsp/code_action.h"
 #include "lsp/document_store.h"
 #include "lsp/json_rpc.h"
 #include "lsp/protocol.h"
@@ -9,9 +11,11 @@
 #include "lsp/stdlib_docs.h"
 #include "tooling/document_model.h"
 #include "tooling/stdlib_names.h"
+#include "analyze.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -230,6 +234,246 @@ TEST(LspStdlibDocs, EveryStdlibNameHasADoc) {
         ASSERT_NE(e, nullptr) << name;
         EXPECT_FALSE(loxpp::lsp::renderHover(*e).empty());
     }
+}
+
+// Applies zero-length SourceEdits (descending by offset) to a copy of text.
+std::string applySourceEdits(std::string text,
+                             const std::vector<loxpp::lsp::SourceEdit>& edits) {
+    std::vector<loxpp::lsp::SourceEdit> sorted = edits;
+    std::ranges::sort(sorted, [](const auto& a, const auto& b) {
+        return a.offset > b.offset;
+    });
+    for (const auto& e : sorted) {
+        EXPECT_LE(e.offset + e.length, text.size());
+        text.replace(e.offset, e.length, e.newText);
+    }
+    return text;
+}
+
+bool hasExhaustivenessError(const std::string& source) {
+    for (const ::Diagnostic& d : analyze(source)) {
+        if (d.message.find("Non-exhaustive match") != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// No line holds only spaces or tabs. The match fix folds the brace indent
+// into its edit, so it must never leave an indent-only line behind.
+bool hasWhitespaceOnlyLine(const std::string& text) {
+    std::size_t start = 0;
+    while (start <= text.size()) {
+        const std::size_t end = text.find('\n', start);
+        const std::string line =
+            text.substr(start, end == std::string::npos ? end : end - start);
+        if (!line.empty() &&
+            line.find_first_not_of(" \t") == std::string::npos) {
+            return true;
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+    return false;
+}
+
+TEST(LspCodeAction, ParsesExhaustivenessMessage) {
+    auto one = loxpp::lsp::parseNonExhaustiveMatch(
+        "Non-exhaustive match on enum 'Result': missing arms for: Err");
+    ASSERT_TRUE(one.has_value());
+    EXPECT_EQ(one->enumName, "Result");
+    EXPECT_EQ(one->missing, std::vector<std::string>{"Err"});
+
+    auto many = loxpp::lsp::parseNonExhaustiveMatch(
+        "Non-exhaustive match on enum 'Op': missing arms for: Add, Sub");
+    ASSERT_TRUE(many.has_value());
+    EXPECT_EQ(many->enumName, "Op");
+    EXPECT_EQ(many->missing, (std::vector<std::string>{"Add", "Sub"}));
+
+    EXPECT_FALSE(
+        loxpp::lsp::parseNonExhaustiveMatch("Expect expression.").has_value());
+    EXPECT_FALSE(loxpp::lsp::parseNonExhaustiveMatch("").has_value());
+    // An empty arm list or a non-identifier name must not reach source text.
+    EXPECT_FALSE(loxpp::lsp::parseNonExhaustiveMatch(
+                     "Non-exhaustive match on enum 'E': missing arms for: ")
+                     .has_value());
+    EXPECT_FALSE(
+        loxpp::lsp::parseNonExhaustiveMatch(
+            "Non-exhaustive match on enum 'E': missing arms for: A; rm")
+            .has_value());
+}
+
+TEST(LspCodeAction, MatchFixInsertsMissingArm) {
+    const std::string source = "enum Result { Ok(value) Err(msg) }\n"
+                               "\n"
+                               "fun label(r) {\n"
+                               "    return match r {\n"
+                               "        case Ok(v) => \"ok\"\n"
+                               "    };\n"
+                               "}\n";
+    ASSERT_TRUE(hasExhaustivenessError(source));
+
+    loxpp::tooling::DocumentModel model(source);
+    // The context diagnostic is the compiler's own report, mapped through
+    // the model's line index the way publishDiagnostics maps it.
+    json context = json::array();
+    for (const ::Diagnostic& d : analyze(source)) {
+        if (d.message.find("Non-exhaustive match") == std::string::npos) {
+            continue;
+        }
+        const auto a = model.offsetToPosition(d.offset);
+        const auto b = model.offsetToPosition(d.offset + d.length);
+        context.push_back(
+            {{"message", d.message},
+             {"range",
+              {{"start", {{"line", a.line}, {"character", a.character}}},
+               {"end", {{"line", b.line}, {"character", b.character}}}}}});
+    }
+    ASSERT_EQ(context.size(), 1U);
+
+    const std::vector<loxpp::lsp::QuickFix> fixes =
+        loxpp::lsp::matchExhaustivenessFixes(model, 0, context);
+    ASSERT_EQ(fixes.size(), 1U);
+    EXPECT_EQ(fixes[0].title, "Add missing match arm: Err");
+    ASSERT_TRUE(fixes[0].diagnosticIndex.has_value());
+    EXPECT_EQ(*fixes[0].diagnosticIndex, 0U);
+    ASSERT_EQ(fixes[0].edits.size(), 1U);
+    // The edit replaces the brace indent, so its range holds only spaces.
+    const auto& edit = fixes[0].edits[0];
+    EXPECT_NE(edit.length, 0U);
+    EXPECT_EQ(source.substr(edit.offset, edit.length),
+              std::string(edit.length, ' '));
+
+    const std::string fixed = applySourceEdits(source, fixes[0].edits);
+    EXPECT_FALSE(hasExhaustivenessError(fixed)) << "fixed source:\n" << fixed;
+    EXPECT_TRUE(fixed.find("case Err => nil") != std::string::npos);
+    EXPECT_FALSE(hasWhitespaceOnlyLine(fixed)) << "fixed source:\n" << fixed;
+}
+
+TEST(LspCodeAction, MatchFixDedupesRepeatedDiagnostic) {
+    const std::string source = "enum Result { Ok(value) Err(msg) }\n"
+                               "\n"
+                               "fun label(r) {\n"
+                               "    return match r {\n"
+                               "        case Ok(v) => \"ok\"\n"
+                               "    };\n"
+                               "}\n";
+    loxpp::tooling::DocumentModel model(source);
+    json one = json::array();
+    for (const ::Diagnostic& d : analyze(source)) {
+        if (d.message.find("Non-exhaustive match") == std::string::npos) {
+            continue;
+        }
+        const auto a = model.offsetToPosition(d.offset);
+        const auto b = model.offsetToPosition(d.offset + d.length);
+        one.push_back(
+            {{"message", d.message},
+             {"range",
+              {{"start", {{"line", a.line}, {"character", a.character}}},
+               {"end", {{"line", b.line}, {"character", b.character}}}}}});
+    }
+    ASSERT_EQ(one.size(), 1U);
+
+    // The same diagnostic twice still yields one fix: applying two
+    // identical fixes would duplicate the arm.
+    json repeated = json::array({one[0], one[0]});
+    const std::vector<loxpp::lsp::QuickFix> fixes =
+        loxpp::lsp::matchExhaustivenessFixes(model, 0, repeated);
+    ASSERT_EQ(fixes.size(), 1U);
+    EXPECT_EQ(fixes[0].title, "Add missing match arm: Err");
+}
+
+TEST(LspCodeAction, MatchFixInsertsSeveralArms) {
+    const std::string source = "enum Light { Red Amber Green }\n"
+                               "fun go(l) {\n"
+                               "    return match l {\n"
+                               "        case Red => 1\n"
+                               "    };\n"
+                               "}\n";
+    ASSERT_TRUE(hasExhaustivenessError(source));
+
+    loxpp::tooling::DocumentModel model(source);
+    json context = json::array();
+    for (const ::Diagnostic& d : analyze(source)) {
+        if (d.message.find("Non-exhaustive match") == std::string::npos) {
+            continue;
+        }
+        const auto a = model.offsetToPosition(d.offset);
+        const auto b = model.offsetToPosition(d.offset + d.length);
+        context.push_back(
+            {{"message", d.message},
+             {"range",
+              {{"start", {{"line", a.line}, {"character", a.character}}},
+               {"end", {{"line", b.line}, {"character", b.character}}}}}});
+    }
+    ASSERT_EQ(context.size(), 1U);
+
+    const std::vector<loxpp::lsp::QuickFix> fixes =
+        loxpp::lsp::matchExhaustivenessFixes(model, 0, context);
+    ASSERT_EQ(fixes.size(), 1U);
+    EXPECT_EQ(fixes[0].title, "Add missing match arms: Amber, Green");
+
+    const std::string fixed = applySourceEdits(source, fixes[0].edits);
+    EXPECT_FALSE(hasExhaustivenessError(fixed)) << "fixed source:\n" << fixed;
+    EXPECT_FALSE(hasWhitespaceOnlyLine(fixed)) << "fixed source:\n" << fixed;
+}
+
+TEST(LspCodeAction, MatchFixNeedsADiagnostic) {
+    loxpp::tooling::DocumentModel model("var x = 1;\n");
+    EXPECT_TRUE(
+        loxpp::lsp::matchExhaustivenessFixes(model, 0, json::array()).empty());
+    // An unrelated diagnostic inside a match-free file offers no fix either.
+    const json context =
+        json::array({{{"message", "Expect expression."},
+                      {"range",
+                       {{{"start", {{{"line", 0}, {"character", 0}}}},
+                         {"end", {{{"line", 0}, {"character", 0}}}}}}}}});
+    EXPECT_TRUE(
+        loxpp::lsp::matchExhaustivenessFixes(model, 0, context).empty());
+}
+
+TEST(LspCodeAction, StrWrapOffersBothOperands) {
+    const std::string source = "print \"n=\" + n;\n";
+    loxpp::tooling::DocumentModel model(source);
+    const std::size_t plus = source.find('+');
+    ASSERT_NE(plus, std::string::npos);
+
+    const std::vector<loxpp::lsp::QuickFix> fixes =
+        loxpp::lsp::strWrapFixes(model, plus);
+    ASSERT_EQ(fixes.size(), 2U);
+    EXPECT_EQ(fixes[0].title, "Wrap left operand in str()");
+    EXPECT_EQ(fixes[1].title, "Wrap right operand in str()");
+    EXPECT_FALSE(fixes[0].diagnosticIndex.has_value());
+
+    EXPECT_EQ(applySourceEdits(source, fixes[0].edits),
+              "print str(\"n=\") + n;\n");
+    EXPECT_EQ(applySourceEdits(source, fixes[1].edits),
+              "print \"n=\" + str(n);\n");
+}
+
+TEST(LspCodeAction, StrWrapSkipsOperandsAlreadyInStr) {
+    {
+        loxpp::tooling::DocumentModel model("print str(a) + b;\n");
+        const auto fixes =
+            loxpp::lsp::strWrapFixes(model, model.text().find('+'));
+        ASSERT_EQ(fixes.size(), 1U);
+        EXPECT_EQ(fixes[0].title, "Wrap right operand in str()");
+    }
+    {
+        loxpp::tooling::DocumentModel model("print a + str(b);\n");
+        const auto fixes =
+            loxpp::lsp::strWrapFixes(model, model.text().find('+'));
+        ASSERT_EQ(fixes.size(), 1U);
+        EXPECT_EQ(fixes[0].title, "Wrap left operand in str()");
+    }
+}
+
+TEST(LspCodeAction, StrWrapNeedsAPlus) {
+    loxpp::tooling::DocumentModel model("print 1;\n");
+    EXPECT_TRUE(loxpp::lsp::strWrapFixes(model, 0).empty());
+    EXPECT_TRUE(loxpp::lsp::strWrapFixes(model, model.text().size()).empty());
 }
 
 TEST(LspSignatureHelp, StdlibGlobalTracksActiveParameter) {

@@ -43,6 +43,7 @@ class Server {
     json onDefinition(const json& params);
     json onReferences(const json& params);
     json onDocumentHighlight(const json& params);
+    json onCodeAction(const json& params);
     json onRename(const json& params);
     json onSignatureHelp(const json& params);
 
