@@ -107,6 +107,32 @@ VM::CallOutcome VM::call(ObjClosure* closure, int argCount,
         runtimeError("Expected %d arguments but got %d.", fn->arity, argCount);
         return CallOutcome::Uncaught;
     }
+    // Fires FRAME_RESERVE frames early, and only while a handler is active,
+    // so the unwind that follows (closing upvalues, draining each discarded
+    // frame's own defers, building the Error) has room before the hard
+    // ceiling below. No handler active: skip straight to the hard ceiling,
+    // same as before this reserve existed — nothing needs the room.
+    if (m_frameCount == FRAMES_MAX - STACK_OVERFLOW_FRAME_RESERVE &&
+        !m_handlerStack.empty() && !m_unwindingStackOverflow) {
+        // See m_unwindingStackOverflow's own comment (vm.h): a deferred call
+        // drained by the handleThrow() below can itself reach this same
+        // guard again. Hold the flag for exactly that call, so a nested hit
+        // falls through to the hard ceiling below instead of recursing.
+        m_unwindingStackOverflow = true;
+        ThrowOutcome outcome = raiseThrowableError(
+            "StackOverflowError", "Stack overflow.", stopAtFrameCount);
+        m_unwindingStackOverflow = false;
+        if (outcome == ThrowOutcome::HandledContinue) {
+            return CallOutcome::CaughtContinue;
+        }
+        if (outcome == ThrowOutcome::HandledStop) {
+            return CallOutcome::CaughtStop;
+        }
+        // Uncaught: raiseThrowableError() already reported it. m_frameCount
+        // is reset to 0 by then (see runtimeError()/resetStack()), so
+        // continuing to push a frame below would be reading a torn-down VM.
+        return CallOutcome::Uncaught;
+    }
     if (m_frameCount == FRAMES_MAX) {
         runtimeError("Stack overflow.");
         return CallOutcome::Uncaught;
@@ -499,8 +525,25 @@ InterpretResult VM::run(int stopAtFrameCount) {
 
     for (;;) {
         if (m_stackOverflow) {
-            RAISE_ERROR("Stack overflow.");
-            return InterpretResult::RUNTIME_ERROR;
+            // Consume the flag now: whichever branch below runs, this exact
+            // overflow event is fully handled by it (caught, reported, or
+            // re-armed by a fresh push() past the threshold later).
+            m_stackOverflow = false;
+            if (!m_handlerStack.empty() && !m_unwindingStackOverflow) {
+                // See m_unwindingStackOverflow's own comment (vm.h) and
+                // VM::call()'s matching guard: hold the flag for exactly
+                // this catch attempt, so a nested hit (from a deferred call
+                // this unwind drains) falls through to the fatal branch
+                // below instead of recursing.
+                m_unwindingStackOverflow = true;
+                ThrowOutcome outcome =
+                    tryCatchableError("StackOverflowError", "Stack overflow.");
+                m_unwindingStackOverflow = false;
+                CATCHABLE_OR_RETURN(outcome);
+            } else {
+                RAISE_ERROR("Stack overflow.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
         }
 
 #ifdef LOXPP_DEBUG_TRACE_EXECUTION
@@ -1839,6 +1882,16 @@ void VM::push(Value value) {
         return;
     }
     *stackTop++ = value;
+    // Soft threshold, STACK_OVERFLOW_STACK_RESERVE slots below the hard
+    // ceiling above: only latches while a handler is active, so an ordinary
+    // program with no try/catch still uses every slot up to STACK_MAX
+    // unchanged. run()'s dispatch loop checks and clears this flag once per
+    // instruction; see its own comment for why the value is kept (not
+    // dropped) here, unlike the hard-ceiling branch above.
+    if (!m_stackOverflow && !m_handlerStack.empty() &&
+        stackTop >= stack + (STACK_MAX - STACK_OVERFLOW_STACK_RESERVE)) {
+        m_stackOverflow = true;
+    }
 }
 
 Value VM::pop() { return *--stackTop; }

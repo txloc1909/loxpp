@@ -40,6 +40,26 @@ class VM {
     static constexpr int STACK_MAX = 16384;
     static constexpr int FRAMES_MAX = 1024;
 
+    // Both overflow guards (the frame-count check in call(), the value-stack
+    // check in push()) fire this many units before their hard ceiling above,
+    // once a handler is active, so raising StackOverflowError as a catchable
+    // Error still leaves room to unwind: closing upvalues, draining each
+    // discarded frame's pending defers (each one a real, if short-lived,
+    // nested call() — see handleThrow()/runPendingDefers()), and allocating
+    // the Error object. With no handler active neither guard reserves
+    // anything — a plain, uncaught overflow still uses every frame/slot up
+    // to the hard ceiling, unchanged from before this reserve existed.
+    // Measured directly against this reserve (test_vm_runtime.cpp's
+    // StackOverflowTest suite): one deferred call with a short (non-
+    // recursive) body needs one CallFrame and a handful of value-stack
+    // slots; a chain of ordinary calls inside that body costs more of each.
+    // A deferred call that outruns this reserve hits the hard ceiling
+    // instead — fatal, or caught by whatever handler still has room, per
+    // handleThrow()'s existing generic unwind — never a hang, since the
+    // reserve is small enough that no path through it can recurse for long.
+    static constexpr int STACK_OVERFLOW_FRAME_RESERVE = 16;
+    static constexpr int STACK_OVERFLOW_STACK_RESERVE = 64;
+
     VM() : m_globals(VmAllocator<Entry>{&m_mm}) {
         resetStack();
         m_mm.setMarkRootsCallback([this]() { markRoots(); });
@@ -173,6 +193,25 @@ class VM {
     Value stack[STACK_MAX];
     Value* stackTop;
     bool m_stackOverflow{false};
+    // True for the duration of one StackOverflowError's own handleThrow()
+    // call (see ScopedOverflowUnwindGuard in vm.cpp, used at both overflow
+    // guards). Draining a discarded frame's defer runs arbitrary Lox++ code
+    // (runPendingDefers() -> a nested run()), and that code can itself
+    // recurse deep enough to reach either overflow guard again — reachable
+    // only because the reserve now lets a StackOverflowError's own unwind
+    // run deferred calls at all; every frame between the original overflow
+    // and the handler can hold one. Left unguarded, each such nested
+    // overflow reenters handleThrow's own unwind loop through genuine C++
+    // recursion (run() -> runPendingDefers() -> handleThrow() ->
+    // raiseThrowableError() -> a new run()) for every remaining frame,
+    // which is unbounded by the reserve's own small size and measurably
+    // crashes the process with a real native stack overflow, not a
+    // Lox++-level fault (see test_vm_runtime.cpp's
+    // SecondOverflowDuringUnwindDoesNotHangOrCorrupt). Both overflow guards
+    // skip the catchable path while this flag is set, falling straight
+    // through to their own hard ceiling instead: the second overflow
+    // "stays fatal", per this row's own original design note.
+    bool m_unwindingStackOverflow{false};
     MemoryManager m_mm;
     Table m_globals;
     ObjUpvalue* m_openUpvalues{nullptr};
