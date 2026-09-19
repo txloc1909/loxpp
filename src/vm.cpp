@@ -400,9 +400,17 @@ VM::ThrowOutcome VM::raiseThrowableError(const char* kind_str, const char* msg,
     m_mm.popTempRoot(); // Unroot kind_obj
     m_mm.popTempRoot(); // Unroot msg_obj
 
-    // handleThrow will push err_obj and potentially truncate the stack.
-    // So we pass err_obj but don't manage its stack presence ourselves.
-    return handleThrow(Value{static_cast<Obj*>(err_obj)}, stopAtFrameCount);
+    // handleThrow will push err_obj and potentially truncate the stack, but
+    // only after unwinding — and each discarded frame's pending defers run
+    // during that unwind (spec/04-semantics.md defer Statement step 4), so
+    // this call can allocate before err_obj ever reaches the value stack.
+    // Root it for the whole call so a collection mid-unwind cannot free it
+    // out from under the catch block that is about to read it.
+    m_mm.pushTempRoot(err_obj);
+    ThrowOutcome outcome =
+        handleThrow(Value{static_cast<Obj*>(err_obj)}, stopAtFrameCount);
+    m_mm.popTempRoot();
+    return outcome;
 }
 
 InterpretResult VM::run(int stopAtFrameCount) {
