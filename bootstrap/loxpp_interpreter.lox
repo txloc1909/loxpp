@@ -1627,6 +1627,15 @@ fun reflectMethodNames(klass) {
 // interpreter is its own execution target, independent of the C++ VM that
 // runs it. See notes/expressiveness-roadmap.md item 1 for why the
 // restriction exists and why it applies identically everywhere.
+//
+// "ReflectionFieldNameError", "ReflectionUndefinedMemberError", and
+// "ReflectionUnsupportedError" below are not rows of the catchable-fault
+// table in spec/04-semantics.md: none of these causes can occur on native,
+// JVM, or CLR (only this reflection API can produce them, and it exists
+// only here), so they stay outside the documented, cross-backend `kind`
+// set. Each still names one specific cause and only that cause — do not
+// reuse a table `kind` for one of them, and do not reuse one of these for
+// an unrelated cause either.
 fun reflectCallMethod(interp, args) {
     var n = len(args);
     if (n < 2) {
@@ -1640,7 +1649,7 @@ fun reflectCallMethod(interp, args) {
     }
     var name = args[1];
     if (!isLoxStr(name)) {
-        interp.setError("InvalidMapKeyError", "Field name must be a string.", 0);
+        interp.setError("ReflectionFieldNameError", "Field name must be a string.", 0);
         return nil;
     }
     var callee = nil;
@@ -1653,12 +1662,12 @@ fun reflectCallMethod(interp, args) {
         found  = callee != nil;
     }
     if (!found) {
-        interp.setError("UndefinedPropertyError", "Undefined property '" + name + "'.", 0);
+        interp.setError("ReflectionUndefinedMemberError", "Undefined property '" + name + "'.", 0);
         return nil;
     }
     var tag = loxTag(callee);
     if (tag == "function" or tag == "class" or tag == "enum_ctor") {
-        interp.setError("NotCallableError", "callMethod does not support user-defined methods yet.", 0);
+        interp.setError("ReflectionUnsupportedError", "callMethod does not support user-defined methods yet.", 0);
         return nil;
     }
     if (tag != "native" and tag != "mathfn" and tag != "mapmethod" and
@@ -1733,7 +1742,7 @@ class LoxNative {
                 return nil;
             }
             if (!isLoxStr(args[1])) {
-                interp.setError("InvalidMapKeyError", "Field name must be a string.", 0);
+                interp.setError("ReflectionFieldNameError", "Field name must be a string.", 0);
                 return nil;
             }
             if (args[0].fields.has(args[1])) return args[0].fields[args[1]];
@@ -1745,7 +1754,7 @@ class LoxNative {
                 return nil;
             }
             if (!isLoxStr(args[1])) {
-                interp.setError("InvalidMapKeyError", "Field name must be a string.", 0);
+                interp.setError("ReflectionFieldNameError", "Field name must be a string.", 0);
                 return nil;
             }
             return args[0].fields.has(args[1]);
@@ -1756,7 +1765,7 @@ class LoxNative {
                 return nil;
             }
             if (!isLoxStr(args[1])) {
-                interp.setError("InvalidMapKeyError", "Field name must be a string.", 0);
+                interp.setError("ReflectionFieldNameError", "Field name must be a string.", 0);
                 return nil;
             }
             args[0].fields[args[1]] = args[2];
@@ -1830,6 +1839,12 @@ class InterpListMethod {
             }
             return this.list.elements.pop();
         }
+        // "ValueNotFoundError" (below) is not a row of the catchable-fault
+        // table in spec/04-semantics.md: native never runs this loop, so
+        // this cause never reaches native, JVM, or CLR. It names its own
+        // cause ("no element equals args[0]") and is not an index fault,
+        // so it must not share a `kind` with an actual index-out-of-range
+        // error.
         if (this.name == "remove") {
             var i = 0;
             while (i < len(this.list.elements)) {
@@ -1844,7 +1859,7 @@ class InterpListMethod {
                 }
                 i = i + 1;
             }
-            interp.setError("IndexOutOfBoundsError", "Value not found in list.", 0);
+            interp.setError("ValueNotFoundError", "Value not found in list.", 0);
             return nil;
         }
         return nil;
