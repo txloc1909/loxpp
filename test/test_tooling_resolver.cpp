@@ -555,6 +555,7 @@ TEST(ToolingResolver, PastEndOfLineStaysOnSameLine) {
     // lineStart(1) resolves while the fixed clamp onto the break does not.
     ASSERT_NE(model.symbolAt(line1Start), nullptr);
     const std::size_t pastEnd = model.positionToOffset({0, 100});
+    EXPECT_NE(pastEnd, line1Start);
     EXPECT_EQ(model.symbolAt(pastEnd), nullptr);
     EXPECT_FALSE(model.definitionAt(pastEnd).has_value());
     EXPECT_TRUE(model.referencesAt(pastEnd).empty());
