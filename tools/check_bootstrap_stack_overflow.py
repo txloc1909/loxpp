@@ -20,12 +20,14 @@ Two things a diff of stdout cannot tell apart:
   `Stack overflow.` line and no native traceback) for the same underlying
   event.
 
-CASES below covers both. check_state_restore_probes() sweeps ambient depths
-looking for one that actually interrupts stringify() mid-recursion, and
-checks stringifyDepth came back to 0. check_state_after_examples() then runs
-the example corpus with the interpreter's own state-dump hook enabled and
-asserts every restored field is back at its start value after every example,
-not only that the example exited 0.
+CASES below covers both. check_defer_count_matches_depth() checks a count,
+not a bool: every unwound call runs its own defer, not just one of them.
+check_state_restore_probes() sweeps ambient depths looking for one that
+actually interrupts stringify() mid-recursion, and checks stringifyDepth
+came back to 0. check_state_after_examples() then runs the example corpus
+with the interpreter's own state-dump hook enabled and asserts every
+restored field is back at its start value after every example, not only
+that the example exited 0.
 
 Usage:
     tools/check_bootstrap_stack_overflow.py [<examples-dir>]
@@ -97,24 +99,6 @@ CASES = [
         ["[line 0] Error: Stack overflow."],
         65,
     ),
-    (
-        "each unwound call still runs its own pending defer",
-        'var noopRuns = 0;\n'
-        'fun noop() { noopRuns = noopRuns + 1; }\n'
-        'fun f(n) {\n'
-        '    defer noop();\n'
-        '    return f(n + 1);\n'
-        '}\n'
-        'try {\n'
-        '    f(0);\n'
-        '} catch (e) {\n'
-        '    print "caught " + e.kind;\n'
-        '}\n'
-        'print noopRuns > 0;\n',
-        ["caught StackOverflowError", "true"],
-        [],
-        0,
-    ),
 ]
 
 
@@ -160,6 +144,53 @@ def check_cases() -> list[str]:
                 f"{name}: a native traceback line leaked into output: "
                 f"stdout {stdout_lines!r}, stderr {stderr_lines!r}"
             )
+    return failures
+
+
+# "Each unwound call still runs its own pending defer" is a claim about a
+# COUNT, not a bool: every one of the N frames the overflow unwound through
+# must run its own defer, not just one of them. depth/noopRuns are compared
+# by the check below instead of hard-coding the recursion's native ceiling,
+# which shifts whenever the evaluator's own frame cost changes.
+DEFER_COUNT_PROBE = (
+    "var noopRuns = 0;\n"
+    "fun noop() { noopRuns = noopRuns + 1; }\n"
+    "var depth = 0;\n"
+    "fun g(n) { defer noop(); depth = n; return g(n + 1); }\n"
+    'try { g(0); } catch (e) { print "caught " + e.kind; }\n'
+    'print "depth reached " + str(depth);\n'
+    'print "defers ran " + str(noopRuns);\n'
+)
+
+
+def check_defer_count_matches_depth() -> list[str]:
+    """Every unwound call runs its own pending defer, not just one of them."""
+    failures = []
+    stdout_lines, stderr_lines, exit_code = run(DEFER_COUNT_PROBE)
+    if exit_code != 0:
+        failures.append(
+            f"defer count probe: exited {exit_code}, stdout {stdout_lines!r}, stderr {stderr_lines!r}"
+        )
+        return failures
+    depth_m = next(
+        (re.match(r"^depth reached (\d+)$", line) for line in stdout_lines if line.startswith("depth reached ")),
+        None,
+    )
+    defers_m = next(
+        (re.match(r"^defers ran (\d+)$", line) for line in stdout_lines if line.startswith("defers ran ")),
+        None,
+    )
+    if not depth_m or not defers_m:
+        failures.append(f"defer count probe: missing depth/defers output line(s): {stdout_lines!r}")
+        return failures
+    depth = int(depth_m.group(1))
+    defers = int(defers_m.group(1))
+    # g(0) through g(depth) is depth + 1 calls, each with its own defer.
+    if defers != depth + 1:
+        failures.append(
+            f"defer count probe: recursion reached depth {depth} (depth+1={depth + 1} calls) "
+            f"but only {defers} defer(s) ran -- expected one per unwound call, not just >0"
+        )
     return failures
 
 
@@ -316,6 +347,7 @@ def main() -> int:
     examples_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else REPO_ROOT / "examples"
 
     failures = check_cases()
+    failures += check_defer_count_matches_depth()
     failures += check_state_restore_probes()
     failures += check_state_after_examples(examples_dir)
 
@@ -326,7 +358,7 @@ def main() -> int:
         return 1
     checked = [p for p in examples_dir.glob("*.lox") if p.name not in EXCLUDED_EXAMPLES]
     print(
-        f"OK: {len(CASES)} catchability/clean-stop cases, "
+        f"OK: {len(CASES)} catchability/clean-stop cases, 1 defer-count probe, "
         f"{len(STRINGIFY_DEPTH_SWEEP)} stringifyDepth-restore sweep points, and "
         f"{len(checked)} example state-restore checks, all match."
     )
