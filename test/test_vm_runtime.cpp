@@ -585,7 +585,7 @@ class StackOverflowTest : public ::testing::Test {};
 // STACK_MAX guard from the frame-count guard below only as long as one
 // frame's slot cost is greater than STACK_MAX / FRAMES_MAX (16384 / 1024 =
 // 16 slots): 22 > 16, so the value-stack limit binds first. If a future
-// change to either constant lowers that ratio to 22 or above, the
+// change to either constant raises that ratio to 22 or above, the
 // frame-count guard fires first and this test stops testing STACK_MAX.
 // n=900 exceeds the 16384-slot limit (900 * 22 = 19800) while its frame
 // count (902) stays well under FRAMES_MAX (1024).
