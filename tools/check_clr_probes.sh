@@ -13,6 +13,12 @@
 # stdout. They check that an error stays an error on the CLR backend too, not
 # only that a success stays a success.
 #
+# known_divergence_probes hold a third shape, on purpose: native must FAIL
+# and the CLR run must SUCCEED, with the exact CLR stdout recorded beside
+# each entry. These are documented gaps between the two backends' own
+# guards, not bugs this script is meant to close — the point is to catch the
+# moment either side's behaviour moves, in either direction.
+#
 # examples holds whole example programs from examples/, each one exercising
 # more of the accumulated CLR surface at once than a single probe does.
 #
@@ -264,6 +270,21 @@ error_probes=(
     "test/translation-probes/45_reflect_methods_non_instance.lox"
     "test/translation-probes/46_reflect_callmethod_non_instance.lox"
     "test/translation-probes/47_reflect_callmethod_closure_method.lox"
+)
+
+# Probes that stay wrong on purpose. native's own value-stack ceiling
+# (src/vm.h STACK_MAX) and its call-frame ceiling (FRAMES_MAX) are two
+# separate guards; the CLR backend mirrors only the frame one
+# (runtime/clr/src/LoxClosure.cs). A frame heavy enough in locals overflows
+# native's value stack well before the call chain is anywhere near
+# FRAMES_MAX, and the CLR backend has nothing to reject it with, so it runs
+# to completion where native fails. Each entry here needs native to FAIL and
+# the CLR run to SUCCEED with the exact stdout recorded beside it — the
+# opposite shape of error_probes above. This group exists to notice the
+# moment either side's behaviour changes, not to make the two sides agree;
+# a change in either direction is reported, not silently accepted.
+known_divergence_probes=(
+    "test/translation-probes/clr-only/known-divergence/52_fat_frame_stack_divergence.lox:210"
 )
 
 # Whole example programs, not single-opcode probes: each one exercises more
@@ -578,6 +599,31 @@ for probe in "${error_probes[@]}"; do
     fi
 done
 
+for entry in "${known_divergence_probes[@]}"; do
+    probe="${entry%%:*}"
+    expected_clr_out="${entry#*:}"
+    run_native "$root/$probe" >"$native_out" 2>"$native_err"
+    native_status=$?
+    if [ "$native_status" -eq 0 ]; then
+        echo "check_clr_probes.sh: FAIL $probe (native run succeeded -- the divergence this probe records may have closed on the native side; re-check and update this script)" >&2
+        failed_probes+=("$probe")
+        continue
+    fi
+    if ! "$root/tools/loxpp_clr.sh" "$root/$probe" >"$clr_out" 2>"$clr_err"; then
+        echo "check_clr_probes.sh: FAIL $probe (CLR run failed -- the divergence this probe records may have closed on the CLR side; if so, move this probe to error_probes instead)" >&2
+        cat "$clr_err" >&2
+        failed_probes+=("$probe")
+        continue
+    fi
+    actual_clr_out="$(cat "$clr_out")"
+    if [ "$actual_clr_out" != "$expected_clr_out" ]; then
+        echo "check_clr_probes.sh: FAIL $probe (CLR stdout changed: expected '$expected_clr_out', got '$actual_clr_out')" >&2
+        failed_probes+=("$probe")
+        continue
+    fi
+    echo "check_clr_probes.sh: OK $probe (known divergence unchanged: native fails, CLR prints $expected_clr_out)"
+done
+
 for example in "${examples[@]}"; do
     # examples/<name>.input holds stdin for a program that calls input(),
     # exactly as check_examples.py reads it. Most examples have none.
@@ -750,4 +796,4 @@ if [ "${#failed_probes[@]}" -ne 0 ]; then
     exit 1
 fi
 
-echo "check_clr_probes.sh: all $((${#probes[@]} + ${#error_probes[@]} + ${#examples[@]})) probes OK, corpus sweep confirms the examples group is complete"
+echo "check_clr_probes.sh: all $((${#probes[@]} + ${#error_probes[@]} + ${#known_divergence_probes[@]} + ${#examples[@]})) probes OK, corpus sweep confirms the examples group is complete"

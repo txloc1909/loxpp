@@ -10,10 +10,11 @@ namespace LoxRuntimeTests;
 /// CallFrame slots before any user call runs - verified against the
 /// release-preset native binary (build/loxpp) on the same recursive
 /// program. This covers only the frame ceiling: native also has a
-/// separate, unguarded value-stack ceiling (src/vm.h STACK_MAX) that a
-/// frame with many locals can reach first, well below depth 1024 - that
-/// path is a native buffer overflow with no defined result to match, and
-/// is tracked as a native defect, not exercised here.
+/// separate value-stack ceiling (src/vm.h STACK_MAX, guarded by
+/// VM::push) that a frame with many locals can reach first, well below
+/// depth 1024 - this class has no counterpart for it, so a program native
+/// rejects that way still runs to completion here, a known, open gap not
+/// exercised by this test (see test/translation-probes/clr-only/known-divergence).
 /// </summary>
 public static class StackDepthTest {
     public static int Run() {
