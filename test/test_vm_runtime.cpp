@@ -581,13 +581,14 @@ class StackOverflowTest : public ::testing::Test {};
 
 // Deep recursion that exceeds STACK_MAX should produce RUNTIME_ERROR, not
 // crash. down(n) declares 20 local variables per frame (plus the callee slot
-// and the argument slot, 22 slots/frame), so its stack usage overtakes
-// FRAMES_MAX * 22 well before its frame count reaches FRAMES_MAX -- the
-// margin a many-locals recursion needs so this test still isolates
-// VM::push's STACK_MAX guard from the frame-count guard below, rather than
-// hitting whichever guard is reached first by coincidence. n=900 exceeds
-// the 16384-slot limit (900 * 22 = 19800) while its frame count (902) stays
-// well under FRAMES_MAX (1024).
+// and the argument slot, 22 slots/frame). This test isolates VM::push's
+// STACK_MAX guard from the frame-count guard below only as long as one
+// frame's slot cost is greater than STACK_MAX / FRAMES_MAX (16384 / 1024 =
+// 16 slots): 22 > 16, so the value-stack limit binds first. If a future
+// change to either constant lowers that ratio to 22 or above, the
+// frame-count guard fires first and this test stops testing STACK_MAX.
+// n=900 exceeds the 16384-slot limit (900 * 22 = 19800) while its frame
+// count (902) stays well under FRAMES_MAX (1024).
 TEST_F(StackOverflowTest, DeepRecursionExceedsStackMax_RuntimeError) {
     VMTestHarness h;
     std::string src =
