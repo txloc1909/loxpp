@@ -111,6 +111,10 @@ probes=(
     # continuation. jvm-only/ because the CLR backend still delivers this
     # same fault with the wrong catchability as of this probe (issue #238).
     "test/translation-probes/jvm-only/catch_overflow.lox"
+    # Issue #268: pins the success side of the frame-count ceiling boundary
+    # (31_deep_recursion.lox below pins the failure side). Catches a
+    # counter that starts too high and rejects a depth native accepts.
+    "test/translation-probes/53_deep_recursion_boundary.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -125,6 +129,10 @@ error_probes=(
     # fail with empty stdout — native via src/vm.h's FRAMES_MAX, the JVM
     # backend via runtime/jvm/src/lox/LoxClosure.java's own counter.
     "test/translation-probes/31_deep_recursion.lox"
+    # Issue #268: a StackOverflowError raised by a deferred call while
+    # another one is still unwinding is fatal on both sides, per
+    # spec/04-semantics.md line 1120 (not delivered to any catchBlock).
+    "test/translation-probes/jvm-only/defer_overflow_during_unwind.lox"
     # Every arm names a real constructor (so
     # checkEnumExhaustiveness accepts it as exhaustive) but every guard is
     # false at run time, so no arm actually accepts the value — a real,
