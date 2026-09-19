@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <iostream>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -146,8 +147,9 @@ TEST(LspJsonRpc, WrongTypeGivesInvalidParams) {
     ASSERT_EQ(frames.size(), 1U);
     EXPECT_EQ(frames[0].at("id"), 5);
     EXPECT_EQ(frames[0].at("error").at("code"), -32602); // InvalidParams
-    const std::string message = frames[0].at("error").at("message");
-    EXPECT_EQ(message.find("json.exception"), std::string::npos) << message;
+    // A wrong type names no stable field, so the message stays generic —
+    // but it must never carry the library exception text.
+    EXPECT_EQ(frames[0].at("error").at("message"), "invalid params");
 }
 
 TEST(LspJsonRpc, RpcErrorKeepsItsOwnCodeAndMessage) {
@@ -165,6 +167,7 @@ TEST(LspJsonRpc, RpcErrorKeepsItsOwnCodeAndMessage) {
 
     const auto frames = parseFrames(out.str());
     ASSERT_EQ(frames.size(), 1U);
+    EXPECT_EQ(frames[0].at("id"), 6);
     EXPECT_EQ(frames[0].at("error").at("code"), -32602);
     EXPECT_EQ(frames[0].at("error").at("message"),
               "new name is not a valid identifier");
@@ -183,7 +186,56 @@ TEST(LspJsonRpc, NonJsonFailureStaysInternalError) {
 
     const auto frames = parseFrames(out.str());
     ASSERT_EQ(frames.size(), 1U);
+    EXPECT_EQ(frames[0].at("id"), 7);
     EXPECT_EQ(frames[0].at("error").at("code"), -32603); // InternalError
+    EXPECT_EQ(frames[0].at("error").at("message"), "boom");
+}
+
+TEST(LspJsonRpc, InvalidParamsKeepsServing) {
+    std::string input = frame({{"jsonrpc", "2.0"},
+                               {"id", 8},
+                               {"method", "need"},
+                               {"params", json::object()}});
+    input += frame({{"jsonrpc", "2.0"},
+                    {"id", 9},
+                    {"method", "ping"},
+                    {"params", json::object()}});
+    std::istringstream in(input);
+    std::ostringstream out;
+    JsonRpc rpc(in, out);
+    rpc.onRequest("need", [](const json& p) {
+        return json{{"v", p.at("missing").get<int>()}};
+    });
+    rpc.onRequest("ping", [](const json&) { return json{{"ok", true}}; });
+    rpc.run();
+
+    const auto frames = parseFrames(out.str());
+    ASSERT_EQ(frames.size(), 2U);
+    EXPECT_EQ(frames[0].at("id"), 8);
+    EXPECT_EQ(frames[0].at("error").at("code"), -32602); // InvalidParams
+    EXPECT_EQ(frames[1].at("id"), 9);
+    EXPECT_EQ(frames[1].at("result").at("ok"), true);
+}
+
+TEST(LspJsonRpc, MalformedNotificationLogsShortMessage) {
+    std::istringstream in(frame(
+        {{"jsonrpc", "2.0"}, {"method", "note"}, {"params", json::object()}}));
+    std::ostringstream out;
+    JsonRpc rpc(in, out);
+    rpc.onNotification("note", [](const json& p) {
+        (void)p.at("missing").get<std::string>();
+    });
+
+    std::ostringstream err;
+    auto* const old = std::cerr.rdbuf(err.rdbuf());
+    rpc.run();
+    std::cerr.rdbuf(old);
+
+    const std::string logged = err.str();
+    EXPECT_NE(logged.find("missing field 'missing'"), std::string::npos)
+        << logged;
+    EXPECT_EQ(logged.find("json.exception"), std::string::npos) << logged;
+    EXPECT_TRUE(out.str().empty()); // notifications get no reply
 }
 
 // A publish sink that lets a test wait for the next publish.

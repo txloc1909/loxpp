@@ -56,7 +56,8 @@ std::string missingFieldMessage(const json::out_of_range& e) {
     return "invalid params";
 }
 
-// Short wire message for a wrong type or any other JSON shape error.
+// Wrong types and other shape errors share one message: their texts carry
+// no stable field name, so only the kind travels.
 std::string invalidFieldMessage(const json::exception& e) {
     if (auto field = jsonFieldName(e.what())) {
         return "invalid params: invalid field '" + *field + "'";
