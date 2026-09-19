@@ -63,7 +63,11 @@ public abstract class LoxClosure : ILoxCallable {
                 $"Expected {Arity} arguments but got {args.Length}.", "ArityError"));
         }
         if (s_frameCount == FramesMax) {
-            throw new LoxError("Stack overflow.");
+            // A bare-message LoxError is uncatchable (LoxError.cs's own
+            // Catchable field) - native marks this fault catchable
+            // (spec/04-semantics.md, StackOverflowError), so this must
+            // carry a real Error value with that kind, not a message alone.
+            throw new LoxError(LoxRuntime.MakeError("Stack overflow.", "StackOverflowError"));
         }
         s_frameCount++;
         try {

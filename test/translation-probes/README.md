@@ -80,6 +80,7 @@ each has an off-the-shelf solution.
 | `48_file_visible_after_close` | a File's write-close-reopen cycle: once `close()` returns, a fresh `open()` on the same path sees everything the closed handle wrote (`spec/05-stdlib.md`, File section) — pins the after-close half of the visibility guarantee, not the buffered-before-close half, which is implementation-defined and allowed to differ | none (parity gate) |
 | `clr-only/35_folded_match_deficit_two_plus` | `normalizeFoldedOperands`'s own multi-slot repair with a fold deficit of two or more (`ADD`, `CALL`, `BUILD_LIST`, `BUILD_MAP`), plus two folded slots that are also captured-closure slots — CLR-only, see the note below the table | P8 |
 | `clr-only/known-divergence/52_fat_frame_stack_divergence` | a KNOWN, unclosed gap, not a checkpoint both sides must pass: a frame with enough locals overflows native's value-stack ceiling (`src/vm.h` `STACK_MAX`) well before its call chain nears the frame-count ceiling both native and CLR enforce; the CLR backend mirrors only the frame count, so it runs the same program to completion — CLR-only, see the note below the table | P5, P6 |
+| `clr-only/53_stack_overflow_catchable` | unbounded recursion overflows `LoxClosure`'s own frame-count ceiling; a live `try`/`catch` must catch a real `Error` value with kind `StackOverflowError`, matching native (spec/04-semantics.md) — CLR-only until the JVM backend gets its own frame ceiling (#268), see the note below the table | P6 |
 | `V1_fresh_cell` | body-local captured in a loop → **fresh cell/iter** → prints `0 1 2` | P4 |
 | `V2_shared` | mutable shared upvalue → prints `2` | P4 |
 | `V3_loopvar` | loop var captured directly → **one shared cell** → prints `3 3 3` | P4 |
@@ -87,17 +88,23 @@ each has an off-the-shelf solution.
 | `V5_self_recursive_closure` | a local `fun` captures its own slot (direct recursion) → prints `120` | P4 |
 | `V6_self_recursive_closure_in_loop` | self-recursive local `fun`, fresh cell per loop trip → prints `12` | P4 |
 
-`clr-only/31_deep_recursion` and `clr-only/35_folded_match_deficit_two_plus`
-are two of the probes not directly in this directory. `tools/diff_runtimes.py`'s
-CI probes step walks this directory's own files (non-recursively) and
-compares native against the JVM backend. `31_deep_recursion` needs native
-itself to fail (`src/vm.h`'s `FRAMES_MAX`), which the JVM backend has no
-ceiling of its own to match, so that walk would read it as a new JVM
-divergence. `35_folded_match_deficit_two_plus` needs a fold deficit above
-one, which the JVM backend's own repair refuses outright, so every shape in
-it would abort at JVM emit time instead. Placing both one level down keeps
-them out of that walk while `tools/check_clr_probes.sh` still runs each one
-by name for the CLR checkpoint.
+`clr-only/31_deep_recursion`, `clr-only/35_folded_match_deficit_two_plus`,
+and `clr-only/53_stack_overflow_catchable` are three of the probes not
+directly in this directory. `tools/diff_runtimes.py`'s CI probes step walks
+this directory's own files (non-recursively) and compares native against
+the JVM backend. `31_deep_recursion` needs native itself to fail
+(`src/vm.h`'s `FRAMES_MAX`), which the JVM backend has no ceiling of its
+own to match, so that walk would read it as a new JVM divergence.
+`35_folded_match_deficit_two_plus` needs a fold deficit above one, which
+the JVM backend's own repair refuses outright, so every shape in it would
+abort at JVM emit time instead. `53_stack_overflow_catchable` needs the
+JVM backend to reach its own frame ceiling and deliver a catchable
+`StackOverflowError`, which is #268's own open job, not this node's — the
+JVM backend has no ceiling at all yet, so it currently dies with a raw,
+uncaught `java.lang.StackOverflowError` before the `try`/`catch` even
+runs. Placing all three one level down keeps them out of that walk while
+`tools/check_clr_probes.sh` still runs each one by name for the CLR
+checkpoint.
 
 `clr-only/known-divergence/52_fat_frame_stack_divergence` sits one level
 below that again. `tools/diff_runtimes.py`'s CI step for the CLR backend

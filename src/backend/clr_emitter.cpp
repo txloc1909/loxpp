@@ -213,6 +213,17 @@ struct Emitter {
     // defer is absent). -1 when no rewrite is needed for this chunk.
     int handlerReturnSlot{-1};
 
+    // One shared scratch slot every emitted catch prologue stashes its
+    // LoxError into, so it can read LoxError::Catchable and, if false,
+    // rethrow with an empty evaluation stack before falling into the
+    // handler body (see emitRegionRange's own note). -1 when this chunk
+    // has no try/catch at all. Unlike handlerReturnSlot/deferReturnSlot,
+    // this is allocated for a script chunk too (a top-level try is
+    // ordinary), and it coexists with defer: each catch prologue's own
+    // use of the slot is a few instructions wide and finishes well before
+    // any nested try/catch's own prologue could reuse it.
+    int catchDispatchSlot{-1};
+
     // The exact slot count `.locals init` declares for this chunk (set by
     // buildEmitter, from the same computation emitClassBody uses for the
     // directive itself) — the upper bound `localOp` checks every slot
@@ -2131,22 +2142,35 @@ int computeHandlerReturnExtraSlots(const DecodedFunction& fn,
     return 1;
 }
 
+// The one authority for how many extra `.locals init` slots the catch
+// prologue's catchable-dispatch rewrite needs (Emitter::catchDispatchSlot)
+// — 1 if this chunk has any try/catch region at all, 0 otherwise. Unlike
+// computeHandlerReturnExtraSlots, this does not depend on isFunction or
+// defer: a script chunk's own top-level try/catch needs the slot exactly
+// as much as a function's does, and a defer-using function's try/catch
+// (nested inside its own outer .try/.finally) needs it too.
+int computeCatchDispatchExtraSlots(const FunctionStackAnalysis& analysis) {
+    return analysis.handlerEntries.empty() ? 0 : 1;
+}
+
 // The one authority for how many `.locals init` slots one chunk needs:
 // globals (1) + the Lox frame's own slots + the shuffle scratch (1) + the
 // aggregate spill area, if this chunk needs one, + defer list and temp storage
 // if defer is used, + the non-defer handler-return-rewrite slot if that is
-// used instead. buildEmitter calls this to bound `Emitter::localOp` before a
+// used instead, + the catch-dispatch slot if this chunk has any try/catch.
+// buildEmitter calls this to bound `Emitter::localOp` before a
 // single instruction emits, and emitClassBody calls it again, unchanged,
 // for the `.locals init` directive itself — one computation, not two that
 // could drift apart.
 int computeTotalLocalSlots(int maxLocalCount,
                            const AggregateNeeds& aggregateNeeds,
-                           int deferExtraSlots, int handlerReturnExtraSlots) {
+                           int deferExtraSlots, int handlerReturnExtraSlots,
+                           int catchDispatchExtraSlots) {
     bool needsScratchArea =
         aggregateNeeds.needsCalleeSlot || aggregateNeeds.maxWidth > 0;
     int extraSpillSlots = needsScratchArea ? aggregateNeeds.maxWidth + 1 : 0;
     return 1 + maxLocalCount + 1 + extraSpillSlots + deferExtraSlots +
-           handlerReturnExtraSlots;
+           handlerReturnExtraSlots + catchDispatchExtraSlots;
 }
 
 // `captureInfo` is this chunk's own entry from `analyzeCaptures`
@@ -2160,11 +2184,12 @@ Emitter buildEmitter(const DecodedFunction& fn,
     int deferExtraSlots = computeDeferExtraSlots(fn);
     int handlerReturnExtraSlots =
         computeHandlerReturnExtraSlots(fn, analysis, isFunction);
+    int catchDispatchExtraSlots = computeCatchDispatchExtraSlots(analysis);
 
     e.scratchSlot = e.baseSlot + maxLocalCount;
-    e.declaredLocalCount =
-        computeTotalLocalSlots(maxLocalCount, aggregateNeeds, deferExtraSlots,
-                               handlerReturnExtraSlots);
+    e.declaredLocalCount = computeTotalLocalSlots(
+        maxLocalCount, aggregateNeeds, deferExtraSlots, handlerReturnExtraSlots,
+        catchDispatchExtraSlots);
 
     // If defer is used, shift slot assignments to make room for defer list,
     // temp argument storage for DEFER_RECORD, and the return-value slot
@@ -2183,6 +2208,15 @@ Emitter buildEmitter(const DecodedFunction& fn,
     } else if (handlerReturnExtraSlots > 0) {
         e.handlerReturnSlot = e.scratchSlot;
         e.scratchSlot += handlerReturnExtraSlots;
+    }
+
+    // Unlike deferReturnSlot/handlerReturnSlot, this slot is independent of
+    // both defer and isFunction — any chunk with a try/catch region needs
+    // it, so it is carved out on its own, after whichever of the two
+    // blocks above already advanced scratchSlot.
+    if (catchDispatchExtraSlots > 0) {
+        e.catchDispatchSlot = e.scratchSlot;
+        e.scratchSlot += catchDispatchExtraSlots;
     }
 
     if (aggregateNeeds.needsCalleeSlot || aggregateNeeds.maxWidth > 0) {
@@ -2545,7 +2579,8 @@ void emitRegionRange(
     for (std::size_t i = begin; i < end;) {
         if (childIdx < children.size() &&
             i == regions[children[childIdx]].tryStartLine) {
-            const TryRegion& r = regions[children[childIdx]];
+            std::size_t regionIdx = children[childIdx];
+            const TryRegion& r = regions[regionIdx];
             childIdx++;
 
             result << "    .try\n    {\n";
@@ -2553,12 +2588,33 @@ void emitRegionRange(
                             r.tryEndLine, r.tryChildren, true, result, e);
             result << "    }\n";
             result << "    catch [LoxRuntime]Lox.LoxError\n    {\n";
-            // At catch entry, the CLR has pushed the LoxError exception
-            // reference onto the stack. Extract the wrapped Lox++ value
-            // via the Value property getter before any bytecode-derived
-            // handler code runs — the C# auto-property compiles to
-            // get_Value() in IL, the same pattern jvm_emitter.cpp uses
-            // for getValue() on the JVM side.
+            // Not every LoxError may enter this handler body: native's own
+            // catch mechanism (src/vm.cpp) only ever delivers a fault
+            // raised through tryCatchableError/raiseThrowableError to
+            // handleThrow — a RAISE_ERROR/runtimeError fault bypasses
+            // handleThrow entirely, so no `try` block, however live, ever
+            // sees it. LoxError::Catchable (LoxError.cs) carries that same
+            // split here; an uncatchable fault must `rethrow` past this
+            // handler, exactly as it would past a native VM handler that
+            // was never even consulted. Stashing into catchDispatchSlot
+            // (rather than `dup`-ing the exception reference on the
+            // evaluation stack) keeps this prologue's own stack depth at
+            // 1 throughout, so it needs no `.maxstack` headroom beyond
+            // what the catch entry already guarantees.
+            std::string catchableLabel =
+                "lox_catchable_" + std::to_string(regionIdx);
+            result << "    " << e.stloc(e.catchDispatchSlot) << "\n";
+            result << "    " << e.ldloc(e.catchDispatchSlot) << "\n";
+            result << "    call instance bool [LoxRuntime]Lox.LoxError"
+                      "::get_Catchable()\n";
+            result << "    brtrue " << catchableLabel << "\n";
+            result << "    rethrow\n";
+            result << catchableLabel << ":\n";
+            // Extract the wrapped Lox++ value via the Value property
+            // getter before any bytecode-derived handler code runs — the
+            // C# auto-property compiles to get_Value() in IL, the same
+            // pattern jvm_emitter.cpp uses for getValue() on the JVM side.
+            result << "    " << e.ldloc(e.catchDispatchSlot) << "\n";
             result << "    call instance object [LoxRuntime]Lox.LoxError"
                       "::get_Value()\n";
             emitRegionRange(lines, regions, labelToLine, r.catchStartLine + 1,
@@ -2807,15 +2863,16 @@ std::string emitChunk(const DecodedFunction& fn,
     int deferExtraSlots = computeDeferExtraSlots(fn);
     int handlerReturnExtraSlots =
         computeHandlerReturnExtraSlots(fn, analysis, isFunction);
+    int catchDispatchExtraSlots = computeCatchDispatchExtraSlots(analysis);
 
     Emitter e = buildEmitter(fn, analysis, maxLocalCount, aggregateNeeds,
                              captureInfo, isFunction);
     emitPrologue(e, fn, isFunction);
     emitBody(e, isFunction, childClassNames);
 
-    int totalLocals =
-        computeTotalLocalSlots(maxLocalCount, aggregateNeeds, deferExtraSlots,
-                               handlerReturnExtraSlots);
+    int totalLocals = computeTotalLocalSlots(
+        maxLocalCount, aggregateNeeds, deferExtraSlots, handlerReturnExtraSlots,
+        catchDispatchExtraSlots);
     return emitClassBody(e, fn, className, isFunction, totalLocals);
 }
 
