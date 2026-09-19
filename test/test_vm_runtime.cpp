@@ -982,3 +982,73 @@ TEST_F(StackOverflowTest, SecondOverflowDuringUnwindDoesNotHangOrCorrupt) {
     EXPECT_EQ(h.stackDepth(), 0);
     EXPECT_EQ(h.handlerStackDepth(), 0);
 }
+
+// ===========================================================================
+// handleThrow() must root thrownValue for its whole unwind (R9), not just
+// the ObjError raiseThrowableError() builds. A plain `throw` of a heap value
+// takes the same handleThrow() unwind as a StackOverflowError, so it needs
+// the same protection: a defer in the unwound frame runs arbitrary Lox++
+// code and can allocate, forcing a collection (LOXPP_STRESS_GC=1) while
+// thrownValue is off the value stack. Two shapes: a named local (the only
+// reference is the frame slot that gets reclaimed) and a temporary (never
+// named at all).
+// ===========================================================================
+
+TEST_F(StackOverflowTest,
+       CatchableThrow_NamedLocalSurvivesCollectionDuringUnwind) {
+    const char* prevStressGC = std::getenv("LOXPP_STRESS_GC");
+    std::string prevStressGCValue = prevStressGC ? prevStressGC : "";
+    ::setenv("LOXPP_STRESS_GC", "1", 1);
+    VMTestHarness h;
+    if (prevStressGC) {
+        ::setenv("LOXPP_STRESS_GC", prevStressGCValue.c_str(), 1);
+    } else {
+        ::unsetenv("LOXPP_STRESS_GC");
+    }
+    std::string src = "fun alloc(n) {"
+                      "  var s = \"\"; var i = 0;"
+                      "  while (i < 30) { s = s + \"padpadpadpad\" + str(n);"
+                      "                   i = i + 1; }"
+                      "  return s;"
+                      "}"
+                      "fun g(n) {"
+                      "  var payload = \"payload-\" + str(n);"
+                      "  defer alloc(n);"
+                      "  throw payload;"
+                      "}"
+                      "var caught;"
+                      "try { g(7); } catch (e) { caught = e; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("caught"), "payload-7");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+TEST_F(StackOverflowTest,
+       CatchableThrow_TemporarySurvivesCollectionDuringUnwind) {
+    const char* prevStressGC = std::getenv("LOXPP_STRESS_GC");
+    std::string prevStressGCValue = prevStressGC ? prevStressGC : "";
+    ::setenv("LOXPP_STRESS_GC", "1", 1);
+    VMTestHarness h;
+    if (prevStressGC) {
+        ::setenv("LOXPP_STRESS_GC", prevStressGCValue.c_str(), 1);
+    } else {
+        ::unsetenv("LOXPP_STRESS_GC");
+    }
+    std::string src = "fun alloc(n) {"
+                      "  var s = \"\"; var i = 0;"
+                      "  while (i < 30) { s = s + \"padpadpadpad\" + str(n);"
+                      "                   i = i + 1; }"
+                      "  return s;"
+                      "}"
+                      "fun g(n) {"
+                      "  defer alloc(n);"
+                      "  throw \"payload-\" + str(n);"
+                      "}"
+                      "var caught;"
+                      "try { g(7); } catch (e) { caught = e; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("caught"), "payload-7");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}

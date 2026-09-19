@@ -298,6 +298,29 @@ VM::ThrowOutcome VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
     // etc.). See ThrowOutcome's doc comment in vm.h for what each of the
     // three results means and obligates the caller to do.
 
+    // handleThrow() owns thrownValue for as long as it runs. markRoots()
+    // marks only [stack, stackTop), and Step 2 below moves stackTop to each
+    // discarded frame's own base *before* running that frame's defers, so a
+    // defer that allocates (a nested, real call — runPendingDefers() ->
+    // VM::call() -> VM::run()) can trigger a collection while thrownValue is
+    // off the stack entirely. Root it here, once, for both callers
+    // (Op::THROW and raiseThrowableError()), rather than at each call site.
+    struct ThrownValueGuard {
+        MemoryManager& mm;
+        bool rooted;
+        ThrownValueGuard(MemoryManager& mm, Value v)
+            : mm(mm), rooted(isObj(v)) {
+            if (rooted) {
+                mm.pushTempRoot(asObj(v));
+            }
+        }
+        ~ThrownValueGuard() {
+            if (rooted) {
+                mm.popTempRoot();
+            }
+        }
+    } thrownValueGuard(m_mm, thrownValue);
+
     // Step 1: Find if any live handler exists (without popping it yet).
     bool foundHandler = false;
     HandlerRecord handlerToUse;
@@ -395,10 +418,11 @@ VM::ThrowOutcome VM::raiseThrowableError(const char* kind_str, const char* msg,
         return ThrowOutcome::Uncaught;
     }
 
-    // GC safety: root intermediate strings while constructing the error.
-    // These are temporary and removed by handleThrow's stack truncation,
-    // so we only root them during the construction phase, not during
-    // handleThrow (which resets the stack).
+    // GC safety: root msg_obj/kind_obj only for the window before err_obj
+    // holds them. Once err_obj exists, its own traceObject marks both, so
+    // their liveness after that rides on err_obj staying reachable —
+    // guaranteed for the whole call below by handleThrow()'s own root on
+    // thrownValue (see its comment), not by anything here.
     ObjString* msg_obj = m_mm.makeString(msg);
     m_mm.pushTempRoot(msg_obj);
 
@@ -410,17 +434,7 @@ VM::ThrowOutcome VM::raiseThrowableError(const char* kind_str, const char* msg,
     m_mm.popTempRoot(); // Unroot kind_obj
     m_mm.popTempRoot(); // Unroot msg_obj
 
-    // handleThrow will push err_obj and potentially truncate the stack, but
-    // only after unwinding — and each discarded frame's pending defers run
-    // during that unwind (spec/04-semantics.md defer Statement step 4), so
-    // this call can allocate before err_obj ever reaches the value stack.
-    // Root it for the whole call so a collection mid-unwind cannot free it
-    // out from under the catch block that is about to read it.
-    m_mm.pushTempRoot(err_obj);
-    ThrowOutcome outcome =
-        handleThrow(Value{static_cast<Obj*>(err_obj)}, stopAtFrameCount);
-    m_mm.popTempRoot();
-    return outcome;
+    return handleThrow(Value{static_cast<Obj*>(err_obj)}, stopAtFrameCount);
 }
 
 InterpretResult VM::run(int stopAtFrameCount) {
