@@ -5,7 +5,9 @@
 #include "lsp/document_store.h"
 #include "lsp/json_rpc.h"
 #include "lsp/protocol.h"
+#include "lsp/signature_help.h"
 #include "lsp/stdlib_docs.h"
+#include "tooling/document_model.h"
 #include "tooling/stdlib_names.h"
 
 #include <gtest/gtest.h>
@@ -228,6 +230,121 @@ TEST(LspStdlibDocs, EveryStdlibNameHasADoc) {
         ASSERT_NE(e, nullptr) << name;
         EXPECT_FALSE(loxpp::lsp::renderHover(*e).empty());
     }
+}
+
+TEST(LspSignatureHelp, StdlibGlobalTracksActiveParameter) {
+    loxpp::tooling::DocumentModel model("print str(1, 2);\n");
+    const std::string& text = model.text();
+    // Inside the first and second argument of str(.
+    json first = loxpp::lsp::signatureHelpFor(model, text.find("str(") + 4);
+    ASSERT_TRUE(first.is_object());
+    EXPECT_EQ(first.at("signatures")[0].at("label"), "str(value) -> String");
+    EXPECT_EQ(first.at("activeParameter"), 0);
+    json second = loxpp::lsp::signatureHelpFor(model, text.find(", 2") + 1);
+    EXPECT_EQ(second.at("activeParameter"), 0); // one param, clamp
+}
+
+TEST(LspSignatureHelp, MathMemberAndVariadicClamp) {
+    loxpp::tooling::DocumentModel model("print math.pow(2, 3);\n");
+    const std::string& text = model.text();
+    json help = loxpp::lsp::signatureHelpFor(model, text.find("math.pow(") + 9);
+    ASSERT_TRUE(help.is_object());
+    EXPECT_EQ(help.at("signatures")[0].at("label"), "math.pow(x, y) -> Number");
+    EXPECT_EQ(help.at("activeParameter"), 0);
+    json second = loxpp::lsp::signatureHelpFor(model, text.find(", 3") + 1);
+    EXPECT_EQ(second.at("activeParameter"), 1);
+
+    // Variadic callMethod stays on the last parameter for extra args.
+    loxpp::tooling::DocumentModel v("callMethod(o, \"m\", 1, 2);\n");
+    json vhelp = loxpp::lsp::signatureHelpFor(
+        v, v.text().find(", 2", v.text().find(", 1")) + 1);
+    ASSERT_TRUE(vhelp.is_object());
+    EXPECT_EQ(vhelp.at("activeParameter"), 2);
+}
+
+TEST(LspSignatureHelp, UserFunctionAndNullCases) {
+    loxpp::tooling::DocumentModel model(
+        "fun greet(name, day) { return name; }\nprint greet(\"a\", \"b\");\n");
+    const std::string& text = model.text();
+    json help =
+        loxpp::lsp::signatureHelpFor(model, text.find("greet(\"a\"") + 6);
+    ASSERT_TRUE(help.is_object());
+    EXPECT_EQ(help.at("signatures")[0].at("label"), "fun greet(name, day)");
+    EXPECT_EQ(help.at("signatures")[0].at("documentation"),
+              "fun greet(name, day)");
+    EXPECT_EQ(help.at("activeParameter"), 0);
+    json second = loxpp::lsp::signatureHelpFor(model, text.find(", \"b\"") + 1);
+    EXPECT_EQ(second.at("activeParameter"), 1);
+
+    // Grouping parens are not a call.
+    loxpp::tooling::DocumentModel g("var x = (1 + 2);\n");
+    EXPECT_TRUE(
+        loxpp::lsp::signatureHelpFor(g, g.text().find("1 +")).is_null());
+    // Cursor after the closed call returns null.
+    EXPECT_TRUE(
+        loxpp::lsp::signatureHelpFor(model, text.find(");") + 1).is_null());
+    // Cursor in a complete string returns null.
+    loxpp::tooling::DocumentModel s("print str(\"a,b\");\n");
+    EXPECT_TRUE(
+        loxpp::lsp::signatureHelpFor(s, s.text().find("a,b") + 1).is_null());
+}
+
+TEST(LspSignatureHelp, UserDefinitionShadowsStdlib) {
+    loxpp::tooling::DocumentModel model(
+        "fun str(x, y) { return x; }\nprint str(1, 2);\n");
+    const std::string& text = model.text();
+    json help = loxpp::lsp::signatureHelpFor(model, text.find("str(1,") + 6);
+    ASSERT_TRUE(help.is_object());
+    EXPECT_EQ(help.at("signatures")[0].at("label"), "fun str(x, y)");
+    EXPECT_EQ(help.at("activeParameter"), 1);
+}
+
+TEST(LspSignatureHelp, MethodHeuristicAndLimits) {
+    // Map/File methods match by unique name for any receiver.
+    loxpp::tooling::DocumentModel m("var who = \"world\";\nprint who.keys(");
+    json help = loxpp::lsp::signatureHelpFor(m, m.text().size());
+    ASSERT_TRUE(help.is_object());
+    EXPECT_EQ(help.at("signatures")[0].at("label"), "map.keys() -> List");
+
+    // Constants have no call signature.
+    loxpp::tooling::DocumentModel c("print math.pi(");
+    EXPECT_TRUE(loxpp::lsp::signatureHelpFor(c, c.text().size()).is_null());
+    loxpp::tooling::DocumentModel o("print math(");
+    EXPECT_TRUE(loxpp::lsp::signatureHelpFor(o, o.text().size()).is_null());
+
+    // User-defined methods through a receiver do not resolve: the receiver
+    // type is unknown.
+    loxpp::tooling::DocumentModel u(
+        "class A {\n  foo(a) { return a; }\n}\nvar o = A();\nprint o.foo(1,");
+    EXPECT_TRUE(loxpp::lsp::signatureHelpFor(u, u.text().size()).is_null());
+}
+
+TEST(LspSignatureHelp, TypingStatesKeepHelp) {
+    // An open string with no closing quote is still being typed.
+    loxpp::tooling::DocumentModel s("print str(\"abc");
+    json shelp = loxpp::lsp::signatureHelpFor(s, s.text().size());
+    ASSERT_TRUE(shelp.is_object());
+    EXPECT_EQ(shelp.at("signatures")[0].at("label"), "str(value) -> String");
+
+    // A trailing comment to end of file keeps the call.
+    loxpp::tooling::DocumentModel c("print math.pow(2, // foo");
+    json chelp = loxpp::lsp::signatureHelpFor(c, c.text().size());
+    ASSERT_TRUE(chelp.is_object());
+    EXPECT_EQ(chelp.at("activeParameter"), 1);
+
+    // Nested calls: on the inner close the inner help shows; between the
+    // closes the outer help shows; past both there is no call.
+    loxpp::tooling::DocumentModel n("print str(len(\"ab\"))");
+    const std::string& t = n.text();
+    const std::size_t inner = t.find("))");
+    json innerHelp = loxpp::lsp::signatureHelpFor(n, inner);
+    ASSERT_TRUE(innerHelp.is_object());
+    EXPECT_EQ(innerHelp.at("signatures")[0].at("label"), "len(seq) -> Number");
+    json outerHelp = loxpp::lsp::signatureHelpFor(n, inner + 1);
+    ASSERT_TRUE(outerHelp.is_object());
+    EXPECT_EQ(outerHelp.at("signatures")[0].at("label"),
+              "str(value) -> String");
+    EXPECT_TRUE(loxpp::lsp::signatureHelpFor(n, inner + 2).is_null());
 }
 
 } // namespace
