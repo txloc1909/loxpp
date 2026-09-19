@@ -20,9 +20,12 @@ Two things a diff of stdout cannot tell apart:
   `Stack overflow.` line and no native traceback) for the same underlying
   event.
 
-CASES below covers both. STATE_PROBES then runs the example corpus with the
-interpreter's own state-dump hook enabled and asserts every field is back at
-its start value after every example, not only that the example exited 0.
+CASES below covers both. check_state_restore_probes() sweeps ambient depths
+looking for one that actually interrupts stringify() mid-recursion, and
+checks stringifyDepth came back to 0. check_state_after_examples() then runs
+the example corpus with the interpreter's own state-dump hook enabled and
+asserts every restored field is back at its start value after every example,
+not only that the example exited 0.
 
 Usage:
     tools/check_bootstrap_stack_overflow.py [<examples-dir>]
@@ -47,7 +50,8 @@ WRAPPER = REPO_ROOT / "bootstrap" / "lox_wrapper.sh"
 STATE_LINE_RE = re.compile(
     r"^__BOOTSTRAP_STATE__ defers=(\d+) stringifyDepth=(\d+) "
     r"returnFlag=(true|false) breakFlag=(true|false) "
-    r"continueFlag=(true|false) throwFlag=(true|false)$"
+    r"continueFlag=(true|false) throwFlag=(true|false) "
+    r"maxStringifyDepthSeen=(\d+)$"
 )
 STATE_START = {
     "defers": "0",
@@ -159,48 +163,87 @@ def check_cases() -> list[str]:
     return failures
 
 
-# Ambient call depth deep enough that native's own frame budget runs out
+# Ambient call depths swept to find where native's own frame budget runs out
 # WHILE stringify() is mid-recursion over the nested list, instead of
 # stringify()'s own 100-level depth guard firing first (see
-# notes/bootstrap-stack-depth.md) -- but not so deep that native's budget is
-# already exhausted before stringify() ever starts (empirically, well past
-# this ambient depth the interruption lands at stringifyDepth 0 or 1, too
-# shallow to distinguish "restored" from "never got that high" either way).
-# This is the one shape the example corpus does not naturally exercise: an
-# ordinary program's ambient call depth at a print site stays far short of
-# this. Caught this way empirically -- with the restore removed, this exact
-# probe leaves stringifyDepth at 53, not 0.
-STRINGIFY_DEPTH_RESTORE_PROBE = (
-    "fun deep(d, v) { if (d == 0) { print v; return 0; } return deep(d - 1, v); }\n"
-    "fun nest(n) { var v = []; var i = 0; while (i < n) { v = [v]; i = i + 1; } return v; }\n"
-    "try {\n"
-    "    deep(150, nest(5000));\n"
-    "} catch (e) {\n"
-    "    print \"caught \" + e.kind;\n"
-    "}\n"
-)
+# notes/bootstrap-stack-depth.md) -- or so deep that native's budget is
+# already exhausted before stringify() ever starts. A single fixed depth
+# cannot tell those two apart from the restored-to-0 reading alone (both read
+# stringifyDepth=0 on exit), and which depths land inside stringify() shifts
+# whenever the evaluator's own native-frames-per-call cost changes -- exactly
+# the kind of change this whole check exists to catch. Sweeping a wide band
+# and checking maxStringifyDepthSeen (see the interpreter field of that name)
+# keeps this probe meaningful even if that cost drifts.
+STRINGIFY_DEPTH_SWEEP = [60, 80, 100, 110, 120, 130, 140, 150, 160, 170, 180, 200, 220, 240, 260]
+
+# A run whose interruption never reached this deep into stringify()'s own
+# recursion proves nothing about the restore -- see MIN_STRINGIFY_DEPTH_FLOOR
+# below.
+MIN_STRINGIFY_DEPTH_FLOOR = 20
+
+
+def stringify_depth_probe(ambient_depth: int) -> str:
+    return (
+        "fun deep(d, v) { if (d == 0) { print v; return 0; } return deep(d - 1, v); }\n"
+        "fun nest(n) { var v = []; var i = 0; while (i < n) { v = [v]; i = i + 1; } return v; }\n"
+        "try {\n"
+        f"    deep({ambient_depth}, nest(5000));\n"
+        "} catch (e) {\n"
+        "    print \"caught \" + e.kind;\n"
+        "}\n"
+    )
 
 
 def check_state_restore_probes() -> list[str]:
     """Targeted probes for state a caught overflow must restore by hand,
-    beyond what the ordinary example corpus happens to exercise."""
+    beyond what the ordinary example corpus happens to exercise.
+
+    At a low ambient depth, stringify()'s OWN 100-level guard fires first: a
+    MaxDepthExceededError unwinds normally, through stringify()'s own
+    decrements, and never touches LoxFunction.call's restore-on-
+    StackOverflowError line at all. Only a run whose CAUGHT kind is
+    StackOverflowError, with maxStringifyDepthSeen already above 0, proves
+    native's own overflow landed while stringify() was mid-recursion -- the
+    one case that actually exercises the restore.
+    """
     failures = []
-    stdout_lines, _stderr_lines, exit_code = run(
-        STRINGIFY_DEPTH_RESTORE_PROBE, {"LOXPP_BOOTSTRAP_CHECK_STATE": "1"}
-    )
-    if exit_code != 0:
-        failures.append(f"stringifyDepth restore probe: exited {exit_code}, stdout {stdout_lines!r}")
-        return failures
-    state_lines = [m for m in (STATE_LINE_RE.match(line) for line in stdout_lines) if m]
-    if not state_lines:
-        failures.append(f"stringifyDepth restore probe: no __BOOTSTRAP_STATE__ line: {stdout_lines!r}")
-        return failures
-    m = state_lines[-1]
-    if m.group(2) != "0":
+    best_max_depth_seen = 0
+    exercised_the_restore = False
+    for ambient_depth in STRINGIFY_DEPTH_SWEEP:
+        stdout_lines, _stderr_lines, exit_code = run(
+            stringify_depth_probe(ambient_depth), {"LOXPP_BOOTSTRAP_CHECK_STATE": "1"}
+        )
+        if exit_code != 0:
+            failures.append(
+                f"stringifyDepth restore probe (D={ambient_depth}): exited {exit_code}, "
+                f"stdout {stdout_lines!r}"
+            )
+            continue
+        state_lines = [m for m in (STATE_LINE_RE.match(line) for line in stdout_lines) if m]
+        if not state_lines:
+            failures.append(
+                f"stringifyDepth restore probe (D={ambient_depth}): no __BOOTSTRAP_STATE__ line: "
+                f"{stdout_lines!r}"
+            )
+            continue
+        m = state_lines[-1]
+        if m.group(2) != "0":
+            failures.append(
+                f"stringifyDepth restore probe (D={ambient_depth}): stringifyDepth={m.group(2)} "
+                "after a caught overflow that interrupted stringify() mid-recursion (expected 0 -- "
+                "a leaked value here corrupts every later print in the same process, not just this one)"
+            )
+        max_depth_seen = int(m.group(7))
+        best_max_depth_seen = max(best_max_depth_seen, max_depth_seen)
+        if "caught StackOverflowError" in stdout_lines and max_depth_seen >= MIN_STRINGIFY_DEPTH_FLOOR:
+            exercised_the_restore = True
+    if not exercised_the_restore:
         failures.append(
-            f"stringifyDepth restore probe: stringifyDepth={m.group(2)} after a caught overflow "
-            "that interrupted stringify() mid-recursion (expected 0 -- a leaked value here "
-            "corrupts every later print in the same process, not just this one)"
+            f"stringifyDepth restore probe: no depth in the sweep {STRINGIFY_DEPTH_SWEEP} caught a "
+            f"StackOverflowError while stringify() was already past depth {MIN_STRINGIFY_DEPTH_FLOOR} "
+            f"(best maxStringifyDepthSeen seen anywhere={best_max_depth_seen}) -- either every run hit "
+            "stringify()'s own MaxDepthExceededError guard first, or none reached stringify() at all, "
+            "so a pass here would not prove the restore was ever exercised"
         )
     return failures
 
@@ -283,7 +326,8 @@ def main() -> int:
         return 1
     checked = [p for p in examples_dir.glob("*.lox") if p.name not in EXCLUDED_EXAMPLES]
     print(
-        f"OK: {len(CASES)} catchability/clean-stop cases and "
+        f"OK: {len(CASES)} catchability/clean-stop cases, "
+        f"{len(STRINGIFY_DEPTH_SWEEP)} stringifyDepth-restore sweep points, and "
         f"{len(checked)} example state-restore checks, all match."
     )
     return 0

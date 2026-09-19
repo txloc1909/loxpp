@@ -2080,6 +2080,12 @@ class Interpreter {
         this.thrownValue   = nil;
         this.pendingDefers = [];
         this.stringifyDepth = 0;
+        // High-water mark of stringifyDepth, for tools/check_bootstrap_stack_overflow.py
+        // only: it never decreases, so a probe can tell "the run actually
+        // recursed into stringify() before the fault" from "stringifyDepth
+        // reads 0 because stringify() never started" -- both look the same
+        // in the plain restore check below.
+        this.maxStringifyDepthSeen = 0;
         this.globals.define("clock", LoxNative("clock"));
         this.globals.define("input", LoxNative("input"));
         this.globals.define("str",   LoxNative("str"));
@@ -2823,6 +2829,9 @@ class Interpreter {
         if (isLoxStr(val)) return val;
         if (isLoxNum(val)) return str(val);
         this.stringifyDepth = this.stringifyDepth + 1;
+        if (this.stringifyDepth > this.maxStringifyDepthSeen) {
+            this.maxStringifyDepthSeen = this.stringifyDepth;
+        }
         // Best-effort only, not an architectural guarantee: each nesting
         // level here costs 2 native-VM call frames (this method plus
         // stringifyList/stringifyMap), and that budget is shared with
@@ -3126,5 +3135,6 @@ if (interpreter != nil and env("LOXPP_BOOTSTRAP_CHECK_STATE") == "1") {
           " returnFlag=" + str(interpreter.returnFlag) +
           " breakFlag=" + str(interpreter.breakFlag) +
           " continueFlag=" + str(interpreter.continueFlag) +
-          " throwFlag=" + str(interpreter.throwFlag);
+          " throwFlag=" + str(interpreter.throwFlag) +
+          " maxStringifyDepthSeen=" + str(interpreter.maxStringifyDepthSeen);
 }
