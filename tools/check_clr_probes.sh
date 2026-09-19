@@ -233,6 +233,10 @@ probes=(
     # uncatchable message it used to be. Lives in clr-only/ (see the probe
     # file's own header comment for why); named here directly.
     "test/translation-probes/clr-only/53_stack_overflow_catchable.lox"
+    # Issue #268: pins the success side of the frame-count ceiling boundary
+    # (31_deep_recursion.lox below pins the failure side). Catches a
+    # counter that starts too high and rejects a depth native accepts.
+    "test/translation-probes/53_deep_recursion_boundary.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -245,11 +249,13 @@ error_probes=(
     # Native's own frame-count ceiling (src/vm.h FRAMES_MAX): a backend
     # whose calling convention recurses its own host call stack has no
     # such ceiling unless it builds one, and a wrong build here is a
-    # silent success on stdout otherwise. Lives in clr-only/, not directly
-    # in translation-probes/, so tools/diff_runtimes.py's whole-directory
-    # walk against the JVM backend does not see it (see the probe file's
-    # own header comment for why).
-    "test/translation-probes/clr-only/31_deep_recursion.lox"
+    # silent success on stdout otherwise. Now lives directly in
+    # translation-probes/ (issue #268): both the JVM and CLR backends
+    # mirror this ceiling, so tools/diff_runtimes.py's own whole-directory
+    # walk already covers it too — this entry keeps it in this script's
+    # own exit-code-checked loop as well (see the probe file's own header
+    # comment).
+    "test/translation-probes/31_deep_recursion.lox"
     # LoxOps.Stringify's depth guard (issue #159): both sides must refuse
     # nesting depth 201, matching native's 200-depth limit.
     "test/translation-probes/clr-only/39_deep_nested_stringify.lox"

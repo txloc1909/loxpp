@@ -8,13 +8,12 @@
 // own, and must build one to match, or this depth silently succeeds where
 // native fails.
 //
-// This file lives outside the parent translation-probes directory on
-// purpose: tools/diff_runtimes.py's CI probes step walks that directory's
-// own files, non-recursively, comparing native against the JVM backend.
-// The JVM backend has no frame-count ceiling of its own, an existing gap
-// this file would otherwise make every such run report as a new
-// divergence. check_clr_probes.sh names this file directly, so the CLR
-// checkpoint still runs it.
+// Lives directly in translation-probes/, not in a per-target subdirectory:
+// both the JVM backend (runtime/jvm/src/lox/LoxClosure.java) and the CLR
+// backend (runtime/clr/src/LoxClosure.cs) mirror this ceiling, so
+// tools/diff_runtimes.py's CI probes step, which walks this directory
+// comparing native against each managed backend, sees this program agree
+// with native (both fail with empty stdout) on both.
 fun down(n) {
     if (n == 0) return 0;
     return down(n - 1);
