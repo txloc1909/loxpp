@@ -20,26 +20,30 @@ Usage:
     tools/check_bootstrap_error_kinds.py            # regression check (ctest)
     tools/check_bootstrap_error_kinds.py --report    # full site-by-site audit
 
-With no arguments it is the permanent regression check: it fails if any
-`.setError(` call reuses one of a fixed list of documented
-spec/04-semantics.md table `kind` strings for one of the specific,
-previously-mismatched causes recorded in KNOWN_COLLISIONS below (each
-entry is a scoped region -- the reflection-API branches of
-`reflectCallMethod`/`LoxNative.call`, and `InterpListMethod.call`'s
-"remove" branch -- paired with the exact old `kind` and a message
-substring). It does not, and cannot, decide on its own whether some
-future, unrelated `.setError(` call's `kind` matches that kind's
-documented cause; that judgment is exactly what a human audit (--report,
-plus reading spec/04-semantics.md's Runtime Errors table) has to make.
-Keeping the fixed list here turns that one-time audit into a standing
-regression guard: if any of these specific causes is ever changed back to
-reuse the table kind it used to alias, this check fails.
+With no arguments it is the permanent regression check. It reads every
+`.setError(` call in file order and compares each one's `kind` argument
+against EXPECTED_KINDS below -- a reviewed baseline, one entry per call, in
+the same order the calls appear in the file. This is a positive manifest,
+not a denylist: it fails on a call whose `kind` reverted to a table string
+it used to alias, on a *different* table `kind` substituted for the same
+non-table cause, on a brand-new call inserted anywhere that was never
+reviewed, and on a typo in one of this audit's own new non-table strings --
+because every one of those changes the actual kind (or the call count) away
+from what was reviewed, at that position. It also re-derives the spec's
+table kinds from spec/04-semantics.md and fails if any of this audit's own
+non-table strings has since become a real table kind, so the two files
+cannot silently drift into a new collision this script would otherwise miss.
+It cannot, by itself, decide whether some brand-new call's chosen kind
+matches its cause -- that judgment is what a human audit (--report, plus
+reading spec/04-semantics.md's Runtime Errors table) has to make before
+adding it to EXPECTED_KINDS.
 
 --report prints every `.setError(` call site in file order (line number,
 `kind`, and the message argument's leading text), grouped by whether the
-`kind` is one of the 19 spec/04-semantics.md table kinds or not. It always
-exits 0; it is the tool a human audit runs to re-derive the ground truth,
-not the check ctest runs.
+`kind` is one of the spec/04-semantics.md table kinds or not, and flags any
+line whose kind differs from EXPECTED_KINDS. It always exits 0; it is the
+tool a human audit runs to re-derive the ground truth and to regenerate
+EXPECTED_KINDS after a deliberate, reviewed change.
 """
 
 import re
@@ -50,49 +54,117 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 INTERPRETER_PATH = REPO_ROOT / "bootstrap" / "loxpp_interpreter.lox"
 SPEC_PATH = REPO_ROOT / "spec" / "04-semantics.md"
 
-# Each header locates one function or branch body by its opening line, as a
-# regex ending on the block's own opening '{' (so an unrelated same-text
-# line missing the brace -- e.g. LoxNative.arity()'s
-# `if (this.name == "setField") return 3;` -- cannot match it). The regex
-# must match exactly one place in the file; compute_regions() raises if it
-# does not.
-REGION_HEADERS = [
-    ("reflectCallMethod", re.compile(r"fun\s+reflectCallMethod\s*\([^)]*\)\s*\{")),
-    ("LoxNative.call/getField", re.compile(r'if\s*\(this\.name\s*==\s*"getField"\)\s*\{')),
-    ("LoxNative.call/hasField", re.compile(r'if\s*\(this\.name\s*==\s*"hasField"\)\s*\{')),
-    ("LoxNative.call/setField", re.compile(r'if\s*\(this\.name\s*==\s*"setField"\)\s*\{')),
-    ("InterpListMethod.call/remove", re.compile(r'if\s*\(this\.name\s*==\s*"remove"\)\s*\{')),
+DYNAMIC = "<dynamic>"
+
+# Non-table `kind` strings this file's audits have introduced so far, each
+# naming one cause the spec/04-semantics.md table does not document (see the
+# code comments at each site in bootstrap/loxpp_interpreter.lox for why).
+# These must never become a real spec table kind by coincidence; see the
+# disjointness check in main().
+REVIEWED_NON_TABLE_KINDS = {
+    "ReflectionFieldNameError",
+    "ReflectionUndefinedMemberError",
+    "ReflectionUnsupportedError",
+    "ReflectionReceiverError",
+    "LengthTypeError",
+    "ValueNotFoundError",
+}
+
+# The reviewed baseline: one entry per `.setError(` call in
+# bootstrap/loxpp_interpreter.lox, in file order, holding the `kind` that
+# call is expected to pass -- DYNAMIC for a call whose `kind` argument is not
+# a plain string literal (its actual kind is chosen at run time; today that
+# is always InvalidMapKeyError vs. NaNKeyError, both real table kinds, for a
+# Map key's validity check). Regenerate this list with --report after any
+# reviewed, deliberate change to a call's `kind` or to the call count, and
+# only then.
+EXPECTED_KINDS = [
+    "ArityError",
+    "InvalidReceiverError",
+    "ReflectionFieldNameError",
+    "ReflectionUndefinedMemberError",
+    "ReflectionUnsupportedError",
+    "NotCallableError",
+    "ArityError",
+    "LengthTypeError",
+    "ReflectionReceiverError",
+    "ReflectionReceiverError",
+    "ReflectionReceiverError",
+    "ReflectionFieldNameError",
+    "ReflectionReceiverError",
+    "ReflectionFieldNameError",
+    "ReflectionReceiverError",
+    "ReflectionFieldNameError",
+    "EmptyListError",
+    "ValueNotFoundError",
+    DYNAMIC,
+    DYNAMIC,
+    DYNAMIC,
+    DYNAMIC,
+    "IndexTypeError",
+    "IndexNotIntegerError",
+    "IndexOutOfBoundsError",
+    "IndexTypeError",
+    "IndexNotIntegerError",
+    "IndexOutOfBoundsError",
+    "NotIndexableError",
+    DYNAMIC,
+    "IndexTypeError",
+    "IndexNotIntegerError",
+    "IndexOutOfBoundsError",
+    "NotIndexableError",
+    "NotIndexableError",
+    "NotIndexableError",
+    "IndexTypeError",
+    "IndexNotIntegerError",
+    "IndexOutOfBoundsError",
+    "IndexTypeError",
+    "IndexNotIntegerError",
+    "IndexOutOfBoundsError",
+    "NotIndexableError",
+    "NotCallableError",
+    "UndefinedVariableError",
+    "UndefinedVariableError",
+    "ArithmeticTypeError",
+    "ConcatenationTypeError",
+    "ArithmeticTypeError",
+    "ArithmeticTypeError",
+    "ArithmeticTypeError",
+    "ComparisonTypeError",
+    "ComparisonTypeError",
+    "ComparisonTypeError",
+    "ComparisonTypeError",
+    "ArithmeticTypeError",
+    "IndexTypeError",
+    DYNAMIC,
+    "NotIndexableError",
+    "NotCallableError",
+    "NotCallableError",
+    "NotCallableError",
+    DYNAMIC,
+    "UndefinedPropertyError",
+    "UndefinedPropertyError",
+    "UndefinedPropertyError",
+    "UndefinedPropertyError",
+    "InvalidReceiverError",
+    "UndefinedPropertyError",
+    "InvalidReceiverError",
+    "UndefinedPropertyError",
+    "MaxDepthExceededError",
+    "NotIndexableError",
+    "IndexOutOfBoundsError",
+    "InvalidReceiverError",
+    "MatchError",
 ]
 
-# Each entry: (region_label, forbidden_kind, message_substring). A call
-# fails only when it is both inside the named region (see REGION_HEADERS)
-# and matches the (kind, message substring) pair -- plain substring
-# matching alone is not enough, because some of these message texts (e.g.
-# "Undefined property '" + name + "'.") are shared, word for word, with
-# unrelated, already-correct UndefinedPropertyError sites elsewhere in the
-# file that must not be flagged.
-KNOWN_COLLISIONS = [
-    # A reflection field-name argument that is not a String. Nothing to do
-    # with a Map literal's key, which is what InvalidMapKeyError documents.
-    ("reflectCallMethod", "InvalidMapKeyError", "Field name must be a string"),
-    ("LoxNative.call/getField", "InvalidMapKeyError", "Field name must be a string"),
-    ("LoxNative.call/hasField", "InvalidMapKeyError", "Field name must be a string"),
-    ("LoxNative.call/setField", "InvalidMapKeyError", "Field name must be a string"),
-    # reflectCallMethod: no field or method by that name on the instance.
-    # spec/04-semantics.md's UndefinedPropertyError documents property
-    # access on a caught Error value specifically, not reflection lookup
-    # on an arbitrary instance.
-    ("reflectCallMethod", "UndefinedPropertyError", "Undefined property"),
-    # reflectCallMethod: the found member is a real, callable function/
-    # class/enum constructor that this reflection API's v1 scope refuses
-    # to invoke -- an unsupported-operation cause, not "the value is not
-    # callable" (NotCallableError's documented cause).
-    ("reflectCallMethod", "NotCallableError", "does not support user-defined methods"),
-    # InterpListMethod.call's "remove" branch: no element equals the
-    # argument. Not an index fault -- IndexOutOfBoundsError documents an
-    # out-of-range numeric index, and remove() takes a value, not an index.
-    ("InterpListMethod.call/remove", "IndexOutOfBoundsError", "Value not found in list"),
-]
+# The exact number of rows load_spec_table_kinds() expects to find in
+# spec/04-semantics.md's Runtime Errors table today. A change here means the
+# spec table itself changed since the last audit -- every one of the 57
+# already-reviewed "correct as is" table-kind calls above was judged against
+# these 19 rows' documented meanings, so a table that has grown, shrunk, or
+# renamed a row calls that judgment back into question and this script
+# fails rather than silently keep trusting a stale review.
+EXPECTED_SPEC_TABLE_KIND_COUNT = 19
 
 
 def strip_string_literals(text: str) -> str:
@@ -139,47 +211,6 @@ def split_top_level_args(stripped_args: str, real_args: str) -> list[str]:
     return parts
 
 
-def find_matching_brace(stripped: str, open_idx: int) -> int:
-    """Returns the offset of the '}' that closes the '{' at `open_idx` in
-    `stripped`, counting nested braces (string contents already blanked by
-    strip_string_literals, so a brace-like character inside a message
-    argument can never be mistaken for a real one)."""
-    depth = 0
-    i = open_idx
-    while i < len(stripped):
-        if stripped[i] == "{":
-            depth += 1
-        elif stripped[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return i
-        i += 1
-    raise ValueError(f"unbalanced braces for a block opening at offset {open_idx}")
-
-
-def compute_regions(text: str, stripped: str) -> dict[str, tuple[int, int]]:
-    """Returns {label: (body_start, body_end)} for every REGION_HEADERS
-    entry: the character range strictly inside that function's or branch's
-    braces. Headers are matched against `text` (they name identifiers like
-    "getField" that strip_string_literals blanks out of `stripped`); brace
-    matching then runs on `stripped`, at the same offsets, so a brace-like
-    character inside some other call's message argument cannot be
-    mistaken for a real one. Raises if a header does not match exactly
-    once -- silence here would mean a later region check silently checks
-    nothing."""
-    regions = {}
-    for label, pattern in REGION_HEADERS:
-        matches = list(pattern.finditer(text))
-        if len(matches) != 1:
-            raise ValueError(
-                f"region header for {label!r} matched {len(matches)} times, expected exactly 1"
-            )
-        open_idx = matches[0].end() - 1  # the header regex ends on the block's '{'
-        close_idx = find_matching_brace(stripped, open_idx)
-        regions[label] = (open_idx + 1, close_idx)
-    return regions
-
-
 def find_set_error_calls(text: str) -> list[dict]:
     """Returns every `.setError(...)` call in `text`, each as
     {line, offset, kind_literal, message_raw, arg_count}. `kind_literal` is
@@ -187,8 +218,7 @@ def find_set_error_calls(text: str) -> list[dict]:
     that argument is a plain string literal (every call site today is); a
     call whose first argument is not a plain string literal gets
     kind_literal None rather than a guess. line is 1-based, the line the
-    call's `setError` token starts on; offset is its character offset, for
-    matching against compute_regions()'s ranges."""
+    call's `setError` token starts on; offset is its character offset."""
     stripped = strip_string_literals(text)
     calls = []
     for m in re.finditer(r"\.setError\(", stripped):
@@ -232,7 +262,7 @@ def find_set_error_calls(text: str) -> list[dict]:
 def load_spec_table_kinds(spec_text: str) -> set[str]:
     """Extracts every `kind` string from spec/04-semantics.md's Runtime
     Errors table -- the last column of each `| Cause | Example | kind |`
-    row -- rather than hardcoding the 19 rows here, so this script and the
+    row -- rather than hardcoding the rows here, so this script and the
     spec table cannot silently drift apart."""
     kinds = set()
     for m in re.finditer(r'\|\s*`"([A-Za-z]+)"`\s*\|', spec_text):
@@ -240,50 +270,92 @@ def load_spec_table_kinds(spec_text: str) -> set[str]:
     return kinds
 
 
+def effective_kind(call: dict) -> str:
+    return call["kind_literal"] if call["kind_literal"] is not None else DYNAMIC
+
+
 def main() -> int:
     report_mode = "--report" in sys.argv[1:]
 
     text = INTERPRETER_PATH.read_text(encoding="utf-8")
     calls = find_set_error_calls(text)
+    spec_kinds = load_spec_table_kinds(SPEC_PATH.read_text(encoding="utf-8"))
 
     if report_mode:
-        spec_kinds = load_spec_table_kinds(SPEC_PATH.read_text(encoding="utf-8"))
         print(f"{len(calls)} total .setError( calls, {len(spec_kinds)} spec table kinds\n")
-        for c in calls:
-            kind = c["kind_literal"] if c["kind_literal"] is not None else "<dynamic>"
+        for i, c in enumerate(calls):
+            kind = effective_kind(c)
             tag = "table" if kind in spec_kinds else "non-table"
+            baseline = EXPECTED_KINDS[i] if i < len(EXPECTED_KINDS) else "<no baseline entry>"
+            flag = "" if kind == baseline else f"  ** baseline says {baseline!r} **"
             msg_preview = c["message_raw"][:60].replace("\n", " ")
-            print(f"  line {c['line']:>5}  [{tag:>9}]  {kind:<32}  {msg_preview}")
+            print(
+                f"  line {c['line']:>5}  [{tag:>9}]  {kind:<32}  {msg_preview}{flag}"
+            )
+        if len(calls) != len(EXPECTED_KINDS):
+            print(
+                f"\n** call count is {len(calls)}, EXPECTED_KINDS has {len(EXPECTED_KINDS)} "
+                "entries -- a call was added or removed since the last reviewed baseline **"
+            )
         distinct = sorted({c["kind_literal"] for c in calls if c["kind_literal"] is not None})
         print(f"\n{len(distinct)} distinct kind strings in use: {', '.join(distinct)}")
         return 0
 
-    stripped = strip_string_literals(text)
-    regions = compute_regions(text, stripped)
-
     failures = []
-    for c in calls:
-        if c["kind_literal"] is None:
-            continue
-        for region_label, forbidden_kind, message_substring in KNOWN_COLLISIONS:
-            body_start, body_end = regions[region_label]
-            if not (body_start <= c["offset"] < body_end):
-                continue
-            if c["kind_literal"] == forbidden_kind and message_substring in c["message_raw"]:
+
+    # A table kind this audit deliberately gave to a non-table cause must
+    # never become a real table kind by later, unrelated spec edits -- that
+    # would silently recreate the exact ambiguity this file fixes, just with
+    # the roles of "old" and "new" reversed.
+    drifted = REVIEWED_NON_TABLE_KINDS & spec_kinds
+    if drifted:
+        failures.append(
+            "spec/04-semantics.md now documents "
+            + ", ".join(sorted(drifted))
+            + " as a table kind, but bootstrap/loxpp_interpreter.lox already uses "
+            "that exact string for a non-table cause (see REVIEWED_NON_TABLE_KINDS). "
+            "Re-audit every bootstrap call using this kind against the new table row."
+        )
+
+    if len(spec_kinds) != EXPECTED_SPEC_TABLE_KIND_COUNT:
+        failures.append(
+            f"spec/04-semantics.md's Runtime Errors table now yields "
+            f"{len(spec_kinds)} kind(s), not the {EXPECTED_SPEC_TABLE_KIND_COUNT} this "
+            "audit's EXPECTED_KINDS baseline was reviewed against. Re-run --report, "
+            "re-audit every table-tagged call against the new table, and update "
+            "EXPECTED_SPEC_TABLE_KIND_COUNT deliberately."
+        )
+
+    if len(calls) != len(EXPECTED_KINDS):
+        failures.append(
+            f"bootstrap/loxpp_interpreter.lox now has {len(calls)} .setError( call(s), "
+            f"but the reviewed baseline (EXPECTED_KINDS) has {len(EXPECTED_KINDS)}. A call "
+            "was added or removed. Run --report, review every new or removed call's kind "
+            "against spec/04-semantics.md's table, and update EXPECTED_KINDS deliberately."
+        )
+    else:
+        for i, c in enumerate(calls):
+            actual = effective_kind(c)
+            expected = EXPECTED_KINDS[i]
+            if actual != expected:
                 failures.append(
-                    f"bootstrap/loxpp_interpreter.lox:{c['line']}: "
-                    f'.setError("{forbidden_kind}", ...) inside {region_label} reuses a '
-                    f"spec/04-semantics.md table kind for a cause that is not that kind's "
-                    f"documented meaning. Give this cause its own non-table kind string."
+                    f"bootstrap/loxpp_interpreter.lox:{c['line']}: kind is {actual!r}, "
+                    f"but the reviewed baseline expects {expected!r} at this position. "
+                    "If this change is deliberate and reviewed against "
+                    "spec/04-semantics.md's table, update EXPECTED_KINDS; otherwise this "
+                    "is the collision this audit exists to catch."
                 )
 
     if failures:
-        print(f"{len(failures)} bootstrap error-kind collision(s) found:\n", file=sys.stderr)
+        print(f"{len(failures)} bootstrap error-kind audit failure(s):\n", file=sys.stderr)
         for f in failures:
             print(f"  {f}", file=sys.stderr)
         return 1
 
-    print(f"OK: {len(calls)} .setError( calls checked, 0 known kind collisions.")
+    print(
+        f"OK: {len(calls)} .setError( calls checked against the reviewed baseline, "
+        "0 mismatches."
+    )
     return 0
 
 
