@@ -53,15 +53,29 @@ public abstract class LoxClosure implements LoxCallable {
     private static int s_frameCount = 1;
 
     // True for the dynamic extent between a StackOverflowError this class
-    // raises and that same fault reaching a real try/catch — LoxError's
-    // own getValue() clears this the moment it delivers one, which is the
-    // only point that knows the unwind is over. A second overflow raised
-    // inside that extent — reachable only through a deferred call that
-    // itself recurses too deep while running during the first overflow's
-    // own unwind — is not delivered to any catchBlock
+    // raises and that same fault's resolution (delivered to a real
+    // try/catch, or the program exiting fatally) — LoxError's own
+    // getValue() clears this the moment it delivers the fault s_overflowInFlight
+    // still names, which is the only point that knows the unwind is over.
+    // A second overflow raised inside that extent — reachable only through
+    // a deferred call that itself recurses too deep while running during
+    // the first overflow's own unwind — is not delivered to any catchBlock
     // (spec/04-semantics.md line 1120); it is fatal, matching native's own
     // m_unwindingStackOverflow guard (src/vm.h).
     private static boolean s_unwindingStackOverflow = false;
+
+    // The LoxError object whose delivery to getValue() ends the unwind
+    // above. Starts as the StackOverflowError this class raises.
+    // spec/04-semantics.md's defer Statement step 5 lets a deferred call's
+    // own throw, if not caught within it, replace whatever fault was
+    // already propagating through the frame draining that defer; when that
+    // happens, LoxOps.runDefers() calls advanceOverflowInFlight() so this
+    // field tracks the replacement instead. Identity, not the delivered
+    // value's own kind field, is what must decide the unwind is over: a
+    // plain Lox++ instance can carry a field named "kind" equal to
+    // "StackOverflowError" with no connection to this guard at all, and a
+    // kind-string check would clear the guard on that alone (R6, PR #314).
+    private static LoxError s_overflowInFlight = null;
 
     public final String name; // null for the top-level script, per <script>
     public final int arity;
@@ -94,7 +108,10 @@ public abstract class LoxClosure implements LoxCallable {
             }
         } else if (s_frameCount >= FRAMES_MAX) {
             s_unwindingStackOverflow = true;
-            throw LoxOps.makeError("StackOverflowError", "Stack overflow.");
+            LoxError overflow =
+                    LoxOps.makeError("StackOverflowError", "Stack overflow.");
+            s_overflowInFlight = overflow;
+            throw overflow;
         }
         s_frameCount++;
         try {
@@ -106,12 +123,34 @@ public abstract class LoxClosure implements LoxCallable {
 
     // Package-private: LoxError.getValue() calls this, and only this,
     // exactly when the fault it is about to deliver to a real catchBlock is
-    // this class's own StackOverflowError. Resetting there — not at throw
+    // the one s_overflowInFlight names. Resetting there — not at throw
     // time — is what lets a deferred call spend the reserve above while
     // this fault is still propagating, without a later, unrelated overflow
     // being mistaken for part of the same unwind.
     static void endStackOverflowUnwind() {
         s_unwindingStackOverflow = false;
+        s_overflowInFlight = null;
+    }
+
+    // Package-private: LoxError.getValue() calls this to decide whether IT
+    // is the fault whose delivery ends the current unwind (see
+    // s_overflowInFlight's own comment) — by identity, not by inspecting
+    // the delivered value.
+    static boolean isOverflowInFlight(LoxError error) {
+        return s_unwindingStackOverflow && error == s_overflowInFlight;
+    }
+
+    // Package-private: LoxOps.runDefers() calls this when a deferred call's
+    // own throw escapes it (spec/04-semantics.md defer Statement step 5)
+    // while a StackOverflowError raised by this class is still unwinding —
+    // the replacement becomes the fault this guard now watches for
+    // (s_overflowInFlight's own comment). A no-op while no such unwind is
+    // in progress, so an ordinary defer-replaces-throw with no overflow
+    // involved never touches this guard.
+    static void advanceOverflowInFlight(LoxError replacement) {
+        if (s_unwindingStackOverflow) {
+            s_overflowInFlight = replacement;
+        }
     }
 
     protected abstract Object invoke(Object self, Object[] args);

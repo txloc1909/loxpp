@@ -115,6 +115,10 @@ probes=(
     # (31_deep_recursion.lox below pins the failure side). Catches a
     # counter that starts too high and rejects a depth native accepts.
     "test/translation-probes/53_deep_recursion_boundary.lox"
+    # PR #314 R5: a deferred call's own throw, while a StackOverflowError
+    # unwinds, replaces it — the guard must still clear so a later,
+    # unrelated overflow is caught.
+    "test/translation-probes/jvm-only/defer_replaces_overflow.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -133,6 +137,12 @@ error_probes=(
     # another one is still unwinding is fatal on both sides, per
     # spec/04-semantics.md line 1120 (not delivered to any catchBlock).
     "test/translation-probes/jvm-only/defer_overflow_during_unwind.lox"
+    # PR #314 R6: a plain instance whose "kind" field spoofs
+    # "StackOverflowError", thrown and caught entirely inside a deferred
+    # call, must not clear the unwind guard early — the real overflow still
+    # in progress must stay fatal against a second one, per
+    # spec/04-semantics.md line 1120.
+    "test/translation-probes/jvm-only/defer_overflow_kind_spoof.lox"
     # Every arm names a real constructor (so
     # checkEnumExhaustiveness accepts it as exhaustive) but every guard is
     # false at run time, so no arm actually accepts the value — a real,
