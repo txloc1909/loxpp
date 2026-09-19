@@ -100,6 +100,92 @@ TEST(LspJsonRpc, UnknownMethodGivesMethodNotFound) {
     EXPECT_EQ(frames[0].at("error").at("code"), -32601);
 }
 
+TEST(LspJsonRpc, MissingFieldGivesInvalidParams) {
+    // textDocument/rename without newName: the from_json throw must not
+    // escape as InternalError with a raw json.exception message.
+    std::istringstream in(
+        frame({{"jsonrpc", "2.0"},
+               {"id", 4},
+               {"method", "rename"},
+               {"params",
+                {{"textDocument", {{"uri", "file:///a.lox"}}},
+                 {"position", {{"line", 0}, {"character", 1}}}}}}));
+    std::ostringstream out;
+    JsonRpc rpc(in, out);
+    rpc.onRequest("rename", [](const json& p) {
+        return json{{"echo", p.at("newName").get<std::string>()}};
+    });
+    rpc.run();
+
+    const auto frames = parseFrames(out.str());
+    ASSERT_EQ(frames.size(), 1U);
+    EXPECT_EQ(frames[0].at("id"), 4);
+    EXPECT_EQ(frames[0].at("error").at("code"), -32602); // InvalidParams
+    const std::string message = frames[0].at("error").at("message");
+    EXPECT_NE(message.find("newName"), std::string::npos) << message;
+    EXPECT_NE(message.find("missing field"), std::string::npos) << message;
+    EXPECT_EQ(message.find("json.exception"), std::string::npos) << message;
+}
+
+TEST(LspJsonRpc, WrongTypeGivesInvalidParams) {
+    std::istringstream in(frame({{"jsonrpc", "2.0"},
+                                 {"id", 5},
+                                 {"method", "hover"},
+                                 {"params",
+                                  {{"textDocument", {{"uri", "file:///a.lox"}}},
+                                   {"position", "here"}}}}));
+    std::ostringstream out;
+    JsonRpc rpc(in, out);
+    rpc.onRequest("hover", [](const json& p) {
+        loxpp::lsp::TextDocumentPositionParams parsed = p;
+        return json{{"uri", parsed.uri}};
+    });
+    rpc.run();
+
+    const auto frames = parseFrames(out.str());
+    ASSERT_EQ(frames.size(), 1U);
+    EXPECT_EQ(frames[0].at("id"), 5);
+    EXPECT_EQ(frames[0].at("error").at("code"), -32602); // InvalidParams
+    const std::string message = frames[0].at("error").at("message");
+    EXPECT_EQ(message.find("json.exception"), std::string::npos) << message;
+}
+
+TEST(LspJsonRpc, RpcErrorKeepsItsOwnCodeAndMessage) {
+    std::istringstream in(frame({{"jsonrpc", "2.0"},
+                                 {"id", 6},
+                                 {"method", "rename"},
+                                 {"params", json::object()}}));
+    std::ostringstream out;
+    JsonRpc rpc(in, out);
+    rpc.onRequest("rename", [](const json&) -> json {
+        throw loxpp::lsp::RpcError{loxpp::lsp::RpcErrorCode::InvalidParams,
+                                   "new name is not a valid identifier"};
+    });
+    rpc.run();
+
+    const auto frames = parseFrames(out.str());
+    ASSERT_EQ(frames.size(), 1U);
+    EXPECT_EQ(frames[0].at("error").at("code"), -32602);
+    EXPECT_EQ(frames[0].at("error").at("message"),
+              "new name is not a valid identifier");
+}
+
+TEST(LspJsonRpc, NonJsonFailureStaysInternalError) {
+    std::istringstream in(frame({{"jsonrpc", "2.0"},
+                                 {"id", 7},
+                                 {"method", "boom"},
+                                 {"params", json::object()}}));
+    std::ostringstream out;
+    JsonRpc rpc(in, out);
+    rpc.onRequest(
+        "boom", [](const json&) -> json { throw std::runtime_error("boom"); });
+    rpc.run();
+
+    const auto frames = parseFrames(out.str());
+    ASSERT_EQ(frames.size(), 1U);
+    EXPECT_EQ(frames[0].at("error").at("code"), -32603); // InternalError
+}
+
 // A publish sink that lets a test wait for the next publish.
 class PublishSink {
   public:
