@@ -393,6 +393,17 @@ jobs:
             loxpp-dev:latest \
             bash -c "ctest --test-dir build -R BootstrapErrorKindCausesRuntime --output-on-failure --no-tests=error"
 
+      # Same trace-noise constraint as BootstrapErrorKindCausesRuntime above,
+      # so this is the one leg where BootstrapStackOverflow actually runs.
+      - name: Run bootstrap stack-overflow catchability check
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "ctest --test-dir build -R BootstrapStackOverflow --output-on-failure --no-tests=error"
+
       - name: Run Lox interpreter test suite (craftinginterpreters)
         if: matrix.preset == 'release'
         run: |

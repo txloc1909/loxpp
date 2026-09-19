@@ -202,6 +202,24 @@ if(LOXPP_PYTHON3)
     set_tests_properties(BootstrapErrorKindCausesRuntime PROPERTIES
         ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
+
+    # A target program's deep recursion borrows the same native call-frame
+    # budget bootstrap/loxpp_interpreter.lox's own execution uses (see
+    # notes/bootstrap-stack-depth.md, issue #248). This checks native's
+    # catchable StackOverflowError (issue #267) reaches the target program
+    # the same way any other runtime fault does -- caught with the spec's
+    # kind/message, or a clean halt with no native traceback when
+    # uncaught -- and that the interpreter's own per-call state
+    # (pendingDefers, stringifyDepth, the return flags) a caught overflow
+    # must restore by hand never leaks into the next program run in the
+    # same process. Same trace-noise constraint as
+    # BootstrapErrorKindCausesRuntime above.
+    add_test(NAME BootstrapStackOverflow
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_stack_overflow.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(BootstrapStackOverflow PROPERTIES
+        ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
 endif()
 
 # The *_gc targets share their source with a non-_gc twin. They run under GC

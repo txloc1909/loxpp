@@ -106,6 +106,7 @@ REVIEWED_NON_TABLE_KINDS = {
 # JUDGED only after actually judging that specific site against the spec
 # table, never as part of an unrelated change.
 EXPECTED_CALLS = [
+    ('StackOverflowError', '"Stack overflow."', JUDGED),
     ('ArityError', '"Expected at least 2 arguments."', JUDGED),
     ('InvalidReceiverError', '"Only instances have methods."', JUDGED),
     ('ReflectionFieldNameError', '"Field name must be a string."', JUDGED),

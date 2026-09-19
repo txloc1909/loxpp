@@ -89,3 +89,28 @@ recursion under the bootstrap interpreter turns out to matter beyond that,
 it should be filed as its own issue against the bootstrap interpreter
 generally, not folded into a future `stringify()`-specific fix. Filed as
 [issue #248](https://github.com/txloc1909/loxpp/issues/248).
+
+## Update: the coupling is now reported cleanly, not removed
+
+Issue #248's second half landed once native's own `StackOverflowError`
+became catchable (#267) and CLR's `catch` mechanism was fixed to match
+(#238). `LoxFunction.call` wraps its own `interp.execBlock(...)` in a host
+`try`/`catch`: a native overflow anywhere under a target-level function
+call is converted into the interpreter's own flag-based
+`StackOverflowError`, so the target program's own `try`/`catch` sees the
+spec's `kind` and `message` (`catch_overflow.lox` behaves the same under
+the bootstrap as it does natively). A second `try` around `parse()`/
+`resolve()`, and a third around `interpret()`, give the same clean
+`Stack overflow.` halt (`LOXERR65`/`LOXERR70`, never a native traceback)
+for an overflow the per-call `try` cannot reach — parser/resolver
+recursion, and a top-level recursion that never enters a target function
+call at all.
+
+This does not raise the ceiling this note measures, nor remove the shared
+budget: a call chain deep enough still exhausts the same `FRAMES_MAX`.
+What changes is what happens when it does — a spec-shaped fault instead of
+a host crash. See `tools/check_bootstrap_stack_overflow.py` for the
+checkpoint, including the state a caught overflow must restore by hand
+(`pendingDefers`, `stringifyDepth`, the return flags) because the host
+unwind that reaches the `catch` skips whatever `LoxFunction.call` would
+otherwise restore on its normal return path.
