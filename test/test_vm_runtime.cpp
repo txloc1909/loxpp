@@ -606,6 +606,31 @@ TEST_F(StackOverflowTest, DeepRecursionExceedsStackMax_RuntimeError) {
     EXPECT_EQ(h.stackDepth(), 0);
 }
 
+// Same 22-slot-per-frame shape as DeepRecursionExceedsStackMax_RuntimeError
+// above, but at a depth (700) chosen to overflow the *old* STACK_MAX (2048
+// slots, about 93 frames) while staying well under both of today's ceilings
+// (700 * 22 = 15400 slots, 702 frames). Without this test, nothing in the
+// suite fails if a future change reverts the STACK_MAX raise alone: every
+// other fat-frame case here targets the failing side of that raise, and the
+// thin-frame success tests below use too few slots per frame to notice it.
+TEST_F(StackOverflowTest,
+       DeepFatFrameRecursionPastOldStackMaxCeiling_Succeeds) {
+    VMTestHarness h;
+    std::string src =
+        "fun down(n) {"
+        "  var a = 1; var b = 2; var c = 3; var d = 4; var e = 5;"
+        "  var g = 6; var h = 7; var i = 8; var j = 9; var k = 10;"
+        "  var l = 11; var m = 12; var o = 13; var p = 14; var q = 15;"
+        "  var r = 16; var s = 17; var t = 18; var u = 19; var v = 20;"
+        "  if (n == 0) return a+b+c+d+e+g+h+i+j+k+l+m+o+p+q+r+s+t+u+v;"
+        "  return down(n - 1);"
+        "}"
+        "down(700);";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.lastResult(), from<Number>(210.0));
+    EXPECT_EQ(h.stackDepth(), 0);
+}
+
 // Recursion at a safe depth (down(50)) must still succeed with correct
 // result. The guard must not reject a legitimate deep call chain. down(50)
 // returns the sum of its 20 local variables: 1+2+...+20 = 210.
