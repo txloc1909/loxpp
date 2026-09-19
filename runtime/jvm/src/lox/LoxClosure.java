@@ -69,12 +69,13 @@ public abstract class LoxClosure implements LoxCallable {
     // spec/04-semantics.md's defer Statement step 5 lets a deferred call's
     // own throw, if not caught within it, replace whatever fault was
     // already propagating through the frame draining that defer; when that
-    // happens, LoxOps.runDefers() calls advanceOverflowInFlight() so this
-    // field tracks the replacement instead. Identity, not the delivered
-    // value's own kind field, is what must decide the unwind is over: a
-    // plain Lox++ instance can carry a field named "kind" equal to
+    // happens, LoxOps.runDefers() calls replaceOverflowInFlight() so this
+    // field tracks the replacement instead, but only when the replaced
+    // fault is the one this guard already names. Identity, not the
+    // delivered value's own kind field, is what must decide the unwind is
+    // over: a plain Lox++ instance can carry a field named "kind" equal to
     // "StackOverflowError" with no connection to this guard at all, and a
-    // kind-string check would clear the guard on that alone (R6, PR #314).
+    // kind-string check would clear the guard on that alone.
     private static LoxError s_overflowInFlight = null;
 
     public final String name; // null for the top-level script, per <script>
@@ -141,14 +142,17 @@ public abstract class LoxClosure implements LoxCallable {
     }
 
     // Package-private: LoxOps.runDefers() calls this when a deferred call's
-    // own throw escapes it (spec/04-semantics.md defer Statement step 5)
-    // while a StackOverflowError raised by this class is still unwinding —
-    // the replacement becomes the fault this guard now watches for
-    // (s_overflowInFlight's own comment). A no-op while no such unwind is
-    // in progress, so an ordinary defer-replaces-throw with no overflow
-    // involved never touches this guard.
-    static void advanceOverflowInFlight(LoxError replacement) {
-        if (s_unwindingStackOverflow) {
+    // own throw escapes it (spec/04-semantics.md defer Statement step 5),
+    // passing the exact fault this defer list is being drained for. The
+    // guard's identity moves only when `replaced` names the fault it
+    // already watches — not merely whenever the guard happens to be
+    // active — so a defer that throws on a normal return, or that replaces
+    // some other, unrelated fault while an overflow unwinds elsewhere,
+    // leaves this guard untouched. Only the generated exceptional-path
+    // handler knows which fault a defer list is being drained for, so it
+    // is the one caller that can supply `replaced` correctly.
+    static void replaceOverflowInFlight(LoxError replaced, LoxError replacement) {
+        if (s_unwindingStackOverflow && replaced == s_overflowInFlight) {
             s_overflowInFlight = replacement;
         }
     }
