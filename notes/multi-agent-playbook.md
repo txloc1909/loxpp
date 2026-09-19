@@ -135,6 +135,21 @@ a blocking finding, so a series that moves between neighbouring files slips past
 it. If you see the same *mechanism* fault three rounds running, escalate by hand
 and say that is what you are doing.
 
+**A trigger can also fire on the wrong file and still be right.** The
+stack-overflow-catchability mission's node N2 (`#268`) hit this from the
+other direction: the counter advanced on `test/translation-probes/README.md`
+for three rounds running, because every fix round happened to add a new
+probe file and touch the index — the README itself was never the defect.
+The real recurring mechanism was the JVM's `s_unwindingStackOverflow`
+guard: three differently-shaped findings (round 1's R1, round 2's R5/R6,
+round 3's R8) each caught a case where clearing that guard by matching a
+delivered value's `kind` field was neither necessary nor sufficient. The
+referee's own first step — verify the facts yourself, never the trigger's
+file label — is what caught this: the ruling named the guard's lifetime as
+the fault and treated the README as coincidental, not the other way round.
+Read the trigger's file name as "look closely at what these three rounds'
+findings have in common," not as the diagnosis itself.
+
 **The trigger's hit rate can run much higher than "expect false positives"
 implies.** The non-local-control-flow mission escalated 5 of its 7 nodes to a
 referee, and every one found a genuine structural bug, not a false positive:
@@ -148,7 +163,13 @@ handler seeding is itself a fixpoint; `#245`'s exhaustive audit (see "Audit
 against a countable ground truth" below) found the 17 sites round 3's own fix
 had already named, and no others. Do not read "expect false positives" as
 license to raise the trigger's threshold — a mission this size validated the
-3-round default at close to 100% precision.
+3-round default at close to 100% precision. The stack-overflow-catchability
+mission adds two more data points at the same precision: node N1's referee
+(`#267`) found a redundant threshold and an unrooted thrown value behind
+four rounds of one-symptom-at-a-time findings in `src/vm.cpp`, and node
+N2's referee (above) found the guard-lifetime fault the trigger had
+mislabelled. Both were genuine redesigns, not false positives, out of a
+mission with only two stagnation calls total.
 
 ## Referee decision format
 
