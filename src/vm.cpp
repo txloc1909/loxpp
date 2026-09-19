@@ -308,6 +308,17 @@ VM::ThrowOutcome VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
     while (m_frameCount > targetFrameCount) {
         int unwoundFrameIndex = m_frameCount - 1;
         closeUpvalues(m_frames[unwoundFrameIndex].slots);
+        // Reclaim this frame's own window before running its defers, not
+        // only at the end of the whole unwind (step 3 below). A deferred
+        // call's own args are already captured on ObjDeferredCall, not read
+        // off this frame's live slots, so nothing here needs them once
+        // closeUpvalues has run. Without this, an unwind through many frames
+        // (each with its own pending defer) leaves every one of those
+        // frames' operands live on the value stack at once while the defers
+        // run, so the STACK_OVERFLOW_STACK_RESERVE reserve — sized for one
+        // frame's own defer call — is exhausted by the second or third
+        // frame instead of lasting the whole unwind.
+        stackTop = m_frames[unwoundFrameIndex].slots;
         // stopAtFrameCount is OUR OWN parameter, not unwoundFrameIndex: it
         // is the boundary of whichever run() invocation is unwinding right
         // now (see vm.h), and a reentrant fault inside this defer must be

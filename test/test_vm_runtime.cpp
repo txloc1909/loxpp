@@ -789,6 +789,40 @@ TEST_F(StackOverflowTest,
     EXPECT_EQ(h.handlerStackDepth(), 0);
 }
 
+// The value-stack guard's soft threshold re-arms on every push() while a
+// handler is active, so draining a pending defer during handleThrow()'s own
+// unwind used to keep the flag latched for the whole unwind — stackTop stays
+// above the threshold until step 3's truncation, at the very end. A nested
+// run() (for the deferred call) then saw the flag with
+// m_unwindingStackOverflow already true and took the fatal branch, so a fat
+// frame with a pending defer was never catchable at all. Same shape as
+// CatchableStackOverflow_FatFrame_CaughtWithCorrectKind above, plus one
+// `defer` per frame.
+TEST_F(StackOverflowTest,
+       CatchableStackOverflow_FatFrameWithDefer_CaughtWithCorrectKind) {
+    VMTestHarness h;
+    std::string src =
+        "fun record(n) { return n; }"
+        "fun down(n) {"
+        "  var a = 1; var b = 2; var c = 3; var d = 4; var e = 5;"
+        "  var g = 6; var h = 7; var i = 8; var j = 9; var k = 10;"
+        "  var l = 11; var m = 12; var o = 13; var p = 14; var q = 15;"
+        "  var r = 16; var s = 17; var t = 18; var u = 19; var v = 20;"
+        "  defer record(n);"
+        "  down(n - 1);"
+        "}"
+        "var kind;"
+        "try {"
+        "  down(2000);"
+        "} catch (err) {"
+        "  kind = err.kind;"
+        "}";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "StackOverflowError");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
 // A handler-free deep recursion must still reach the full FRAMES_MAX ceiling
 // — the reserve must not shrink the usable depth when nothing will catch the
 // fault. Regression guard for the reserve added alongside the checks above:
