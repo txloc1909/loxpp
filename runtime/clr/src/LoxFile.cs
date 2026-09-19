@@ -26,6 +26,9 @@ public sealed class LoxFile {
     // same handle the program already leaks today by never closing the file.
     private static readonly HashSet<LoxFile> s_openFiles = new();
 
+    /// <summary>Registry size, for a test to confirm Close() removes its entry rather than only checking that Open() adds one.</summary>
+    internal static int OpenRegistryCountForTests => s_openFiles.Count;
+
     private LoxFile(FileStream stream, bool readable, bool writable, bool isDirectory = false) {
         m_stream = stream;
         Readable = readable;
