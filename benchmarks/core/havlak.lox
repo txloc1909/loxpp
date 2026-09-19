@@ -766,7 +766,7 @@ class LoopTesterApp {
 class Havlak {
   benchmark() {
     // Reduced from the JS params (15,50,10,10,5) because the original recursive
-    // doDFS overflows Lox++'s 256-frame call stack for large CFGs.  The
+    // doDFS overflows Lox++'s 1024-frame call stack for large CFGs.  The
     // iterative rewrite handles any depth but is slower due to list overhead,
     // so we scale parameters down to keep runtimes comparable.
     // (5,10,5,5,2) → 192 loops expected.

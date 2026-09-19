@@ -2787,13 +2787,11 @@ class Interpreter {
         // level here costs 2 native-VM call frames (this method plus
         // stringifyList/stringifyMap), and that budget is shared with
         // however deep the target program's own call stack already is at
-        // the print call site (FRAMES_MAX = 256, src/vm.h). At zero ambient
-        // call depth this fires safely as low as ~120; by the time the
-        // caller is ~40 frames deep -- ordinary for ordinary recursive
-        // Lox++ code -- native's own "Stack overflow." can win the race
-        // before this counter ever reaches 100. 100 catches the common,
-        // shallow-call-site case; it cannot catch every case. See
-        // notes/bootstrap-stack-depth.md.
+        // the print call site (FRAMES_MAX = 1024, src/vm.h). This guard is
+        // reliable up to an ambient call depth of about 134; past that,
+        // native's own "Stack overflow." can win the race before this
+        // counter ever reaches 100. 100 catches every ordinary call depth;
+        // it cannot catch every case. See notes/bootstrap-stack-depth.md.
         if (this.stringifyDepth > 100) {
             this.stringifyDepth = this.stringifyDepth - 1;
             this.setError("MaxDepthExceededError", "Value nesting is too deep.", 0);

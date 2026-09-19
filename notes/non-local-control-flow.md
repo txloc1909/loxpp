@@ -18,8 +18,8 @@ don't list it."
 
 ## Current architecture (verified in-repo)
 
-**Native VM** (`src/vm.h`/`vm.cpp`) — a flat `Value stack[2048]` plus a fixed
-`CallFrame m_frames[256]` array; each frame's `slots` is just a pointer into
+**Native VM** (`src/vm.h`/`vm.cpp`) — a flat `Value stack[16384]` plus a fixed
+`CallFrame m_frames[1024]` array; each frame's `slots` is just a pointer into
 the shared stack (`vm.h:26-30`). `run()` returns `InterpretResult`; every
 fault site calls `runtimeError()` (`vm.cpp:1248-1272`), which prints a frame
 trace and then unconditionally calls `resetStack()` (zeroes `stackTop` and
