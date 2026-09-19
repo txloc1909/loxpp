@@ -1691,19 +1691,28 @@ fun reflectCallMethod(interp, args) {
     return callee.call(interp, forwarded);
 }
 
+// Calls the host args() native. A top-level helper is needed because the
+// LoxNative.call parameter is also named args, so a bare args() inside that
+// method would call the argument list instead of the host native.
+fun hostArgsList() { return args(); }
+
 class LoxNative {
     init(name) {
         this.name   = name;
         this.loxTag = "native";
     }
     arity() {
-        if (this.name == "clock" or this.name == "input") return 0;
+        if (this.name == "clock" or this.name == "input" or
+            this.name == "args" or this.name == "time") return 0;
         if (this.name == "open") return 2;
         if (this.name == "setField") return 3;
         if (this.name == "getField" or this.name == "hasField") return 2;
         if (this.name == "callMethod") return -1;
         if (this.name == "type" or this.name == "fields" or
-            this.name == "methods") return 1;
+            this.name == "methods" or this.name == "env" or
+            this.name == "exit" or this.name == "sleep" or
+            this.name == "exists" or this.name == "is_dir" or
+            this.name == "is_file" or this.name == "stat") return 1;
         return 1;   // str, len
     }
     call(interp, args) {
@@ -1728,6 +1737,28 @@ class LoxNative {
         if (this.name == "open") {
             var handle = open(args[0], args[1]);
             return InterpFile(handle);
+        }
+        // Each stdlib OS global below delegates to the host native of the
+        // same name (args via hostArgsList, which dodges the parameter
+        // shadowing). args wraps the host list and stat copies the host
+        // map so the interpreted value responds to the interpreted
+        // List/Map methods; the rest pass host scalars through unwrapped.
+        if (this.name == "args") return InterpList(hostArgsList());
+        if (this.name == "env") return env(args[0]);
+        if (this.name == "exit") return exit(args[0]);
+        if (this.name == "time") return time();
+        if (this.name == "sleep") return sleep(args[0]);
+        if (this.name == "exists") return exists(args[0]);
+        if (this.name == "is_dir") return is_dir(args[0]);
+        if (this.name == "is_file") return is_file(args[0]);
+        if (this.name == "stat") {
+            var h = stat(args[0]);
+            if (h == nil) return nil;
+            var result = InterpMap();
+            var ks = h.keys();
+            var i = 0;
+            while (i < len(ks)) { result.data[ks[i]] = h[ks[i]]; i = i + 1; }
+            return result;
         }
         if (this.name == "type") return reflectTypeName(args[0]);
         // "ReflectionReceiverError" (below, at every "fields"/"methods"/
@@ -2045,6 +2076,15 @@ class Interpreter {
         this.globals.define("str",   LoxNative("str"));
         this.globals.define("len",   LoxNative("len"));
         this.globals.define("open",  LoxNative("open"));
+        this.globals.define("args",  LoxNative("args"));
+        this.globals.define("env",   LoxNative("env"));
+        this.globals.define("exit",  LoxNative("exit"));
+        this.globals.define("time",  LoxNative("time"));
+        this.globals.define("sleep", LoxNative("sleep"));
+        this.globals.define("exists",  LoxNative("exists"));
+        this.globals.define("is_dir",  LoxNative("is_dir"));
+        this.globals.define("is_file", LoxNative("is_file"));
+        this.globals.define("stat",    LoxNative("stat"));
         this.globals.define("math",  InterpMath());
         this.globals.define("type",       LoxNative("type"));
         this.globals.define("fields",     LoxNative("fields"));
