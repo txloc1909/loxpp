@@ -26,6 +26,12 @@
 # content happens to match by taking a *different* path than the one it
 # names (see p5b_exit_call below) must not be reported as an unqualified OK.
 #
+# Both the exit() and the throw shapes also carry a sentinel write past the
+# point where the program must end. A consumer where exit() (or the throw)
+# does nothing runs on to the sentinel and then fails on content, so the
+# probe measures that the program ended where it names, not only that the
+# first line reached the file with a matching status.
+#
 # Usage: tools/check_file_durability.sh <runner> [--no-exit-builtin]
 #
 #   <runner>            runs one Lox++ program, invoked as
@@ -35,10 +41,13 @@
 #                       first) all match this interface.
 #   --no-exit-builtin   this consumer's stdlib has no exit() (a separately
 #                       tracked, accepted gap, out of scope here); the
-#                       p5b_exit_call probe cannot exercise its own shape on
-#                       such a consumer, so it is reported SKIP rather than
-#                       run at all - p6 already covers the uncaught-fault
-#                       flush path this consumer falls back to instead.
+#                       script first runs "exit(0);" and requires the
+#                       undefined-variable fault, so a consumer that does
+#                       have exit() fails here instead of taking a quiet
+#                       SKIP. Only after that proof does the p5b_exit_call
+#                       probe report SKIP rather than run at all - p6 already
+#                       covers the uncaught-fault flush path this consumer
+#                       falls back to instead.
 set -uo pipefail
 
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
@@ -56,12 +65,13 @@ if [ "$#" -eq 2 ]; then
 fi
 
 failed_probes=()
+passed_probes=()
 skipped_probes=()
 
 # Writes $program_path, runs it through $runner, then compares the file it
 # wrote against $expected_content with cmp. $file_path must not exist yet -
 # a runner that fails to write it at all is reported by name, not confused
-# with a content mismatch. $expected_status, when non-empty, is the runner
+# with a content mismatch. $expected_status is the runner
 # exit status this probe's own shape requires (0 for a script that ends
 # without a fault); a probe whose file content matches by taking a
 # different path is a wrong-reason pass, not a real one, so a status
@@ -70,11 +80,21 @@ skipped_probes=()
 # vary by consumer (p6, by design - see the header): an exit of 0 there means
 # the run took the normal-exit path instead of the uncaught-fault path this
 # probe exists to cover, so it fails the probe even though the file content
-# still matches. Pass "" only for a probe with no exit-status requirement at
-# all.
+# still matches. The status rule itself is also checked: only a number or
+# "nonzero" is accepted. Any other value (including empty) exits the script
+# with an internal error instead of running the probe - a typo such as "O"
+# for "0" must not silently reopen the no-status hole this rule closes.
 check_probe() {
     local probe_name="$1" expected_content="$2" program_path="$3" file_path="$4" expected_status="${5:-}"
     local dir out err expected_path status
+    case "$expected_status" in
+        nonzero)
+            ;;
+        ''|*[!0-9]*)
+            echo "check_file_durability.sh: internal error: check_probe $probe_name has bad expected_status '$expected_status'" >&2
+            exit 2
+            ;;
+    esac
     dir="$(dirname "$program_path")"
     out="$dir/stdout"
     err="$dir/stderr"
@@ -105,12 +125,13 @@ check_probe() {
             failed_probes+=("$probe_name")
             return
         fi
-    elif [ -n "$expected_status" ] && [ "$status" -ne "$expected_status" ]; then
+    elif [ "$status" -ne "$expected_status" ]; then
         echo "check_file_durability.sh: FAIL $probe_name (expected runner exit=$expected_status, got exit=$status; file content matched anyway, so this probe took a different path than the one it names)" >&2
         failed_probes+=("$probe_name")
         return
     fi
 
+    passed_probes+=("$probe_name")
     echo "check_file_durability.sh: OK $probe_name (runner exit=$status, $(wc -c <"$file_path" | tr -d ' ') bytes)"
 }
 
@@ -140,9 +161,24 @@ rm -rf "$dir"
 # builtin - there, the program would instead end in an uncaught "undefined
 # variable" fault, the same path p6 already covers, and reporting that as
 # an OK exit(0) pass would be the wrong-reason pass this script exists to
-# catch (see the header).
+# catch (see the header). The flag is measured, not trusted: "exit(0);"
+# must fail with the undefined-variable fault first. The sentinel write
+# after exit(0) measures that the program ended at the exit call - a
+# consumer where exit() does nothing runs on to it and fails on content.
 if [ "$no_exit_builtin" -eq 1 ]; then
-    skip_probe "p5b_exit_call" "consumer has no exit() builtin; p6 already covers the uncaught-fault flush path this shape would otherwise fall back to"
+    verify_dir="$(mktemp -d)"
+    verify_program="$verify_dir/verify_no_exit.lox"
+    printf '%s\n' 'exit(0);' >"$verify_program"
+    "$runner" "$verify_program" >"$verify_dir/stdout" 2>"$verify_dir/stderr"
+    verify_status=$?
+    if [ "$verify_status" -eq 0 ] || ! grep -q "Undefined variable 'exit'" "$verify_dir/stderr"; then
+        echo "check_file_durability.sh: FAIL p5b_exit_call (consumer was run with --no-exit-builtin but exit(0) did not fail with the undefined-variable fault; runner exit=$verify_status)" >&2
+        sed 's/^/  stderr: /' "$verify_dir/stderr" >&2
+        failed_probes+=("p5b_exit_call")
+    else
+        skip_probe "p5b_exit_call" "consumer has no exit() builtin; p6 already covers the uncaught-fault flush path this shape would otherwise fall back to"
+    fi
+    rm -rf "$verify_dir"
 else
     dir="$(mktemp -d)"
     file_path="$dir/p5b.txt"
@@ -152,12 +188,16 @@ var w = open("$file_path", "w");
 w.writeline("survives-exit-call");
 print "p5b before exit";
 exit(0);
+w.writeline("UNREACHABLE-PAST-EXIT");
 EOF
     check_probe "p5b_exit_call" $'survives-exit-call\n' "$program_path" "$file_path" 0
     rm -rf "$dir"
 fi
 
 # p6: no close(), uncaught throw. Exits non-zero by design (see header).
+# The sentinel write after the throw measures that the throw ended the
+# program - a consumer where the throw does nothing runs on to it and fails
+# on content.
 dir="$(mktemp -d)"
 file_path="$dir/p6.txt"
 program_path="$dir/p6_uncaught_throw_noclose.lox"
@@ -166,6 +206,7 @@ var w = open("$file_path", "w");
 w.writeline("survives-uncaught-throw");
 print "p6 before throw";
 throw "boom";
+w.writeline("UNREACHABLE-PAST-THROW");
 EOF
 check_probe "p6_uncaught_throw_noclose" $'survives-uncaught-throw\n' "$program_path" "$file_path" nonzero
 rm -rf "$dir"
@@ -179,7 +220,7 @@ if [ "${#failed_probes[@]}" -ne 0 ]; then
 fi
 
 if [ "${#skipped_probes[@]}" -ne 0 ]; then
-    echo "check_file_durability.sh: all $((3 - ${#skipped_probes[@]})) run probe(s) OK, ${#skipped_probes[@]} skipped"
+    echo "check_file_durability.sh: all ${#passed_probes[@]} run probe(s) OK, ${#skipped_probes[@]} skipped"
 else
-    echo "check_file_durability.sh: all 3 probes OK"
+    echo "check_file_durability.sh: all ${#passed_probes[@]} probes OK"
 fi
