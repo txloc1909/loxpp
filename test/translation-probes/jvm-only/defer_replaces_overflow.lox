@@ -1,0 +1,19 @@
+// Proves runtime/jvm/src/lox/LoxClosure.java's s_unwindingStackOverflow
+// guard is cleared when the StackOverflowError it raised is replaced
+// during its own unwind, not only when a StackOverflowError itself reaches
+// a catchBlock (PR #314 R5). `boom` calls `one` with the wrong arity, so
+// the deferred call raises a catchable ArityError while the first
+// StackOverflowError unwinds; that ArityError, not a StackOverflowError,
+// is what the first `try` actually catches. The guard must still clear, so
+// the second, unrelated overflow later in the program is caught too.
+//
+// Lives in jvm-only/ for the same reason catch_overflow.lox does: the CLR
+// backend does not yet deliver this fault with the correct catchability
+// (issue #238).
+fun one(a) { return a; }
+fun boom() { one(); }
+fun f(n) { defer boom(); f(n + 1); }
+try { f(0); } catch (e) { print "c1 " + e.kind; }
+fun g(n) { return g(n + 1); }
+try { g(0); } catch (e) { print "c2 " + e.kind; }
+print "after";
