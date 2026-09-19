@@ -544,6 +544,37 @@ TEST(ToolingResolver, OffsetPositionRoundTrip) {
     EXPECT_EQ(model.positionToOffset(p), cOff);
 }
 
+TEST(ToolingResolver, PastEndOfLineStaysOnSameLine) {
+    const std::string src = "var aaa = 1;\naaa = 2;\n";
+    DocumentModel model(src);
+    const std::size_t line0End = src.find('\n');
+    const std::size_t line1Start = line0End + 1;
+    EXPECT_EQ(model.positionToOffset({0, 100}), line0End);
+
+    // The next line starts with a use of aaa, so the old clamp onto
+    // lineStart(1) resolves while the fixed clamp onto the break does not.
+    ASSERT_NE(model.symbolAt(line1Start), nullptr);
+    const std::size_t pastEnd = model.positionToOffset({0, 100});
+    EXPECT_NE(pastEnd, line1Start);
+    EXPECT_EQ(model.symbolAt(pastEnd), nullptr);
+    EXPECT_FALSE(model.definitionAt(pastEnd).has_value());
+    EXPECT_TRUE(model.referencesAt(pastEnd).empty());
+
+    // CRLF line break folds the same way, past the CR as well.
+    const std::string crlf = "var aaa = 1;\r\naaa = 2;\r\n";
+    DocumentModel crlfModel(crlf);
+    EXPECT_EQ(crlfModel.positionToOffset({0, 100}),
+              std::string("var aaa = 1;").size());
+
+    // Last line without a trailing break clamps to end of text.
+    const std::string noTrail = "var aaa = 1;\naaa = 2;";
+    DocumentModel noTrailModel(noTrail);
+    EXPECT_EQ(noTrailModel.positionToOffset({1, 100}), noTrail.size());
+
+    // An out-of-range line still clamps to the last line.
+    EXPECT_EQ(noTrailModel.positionToOffset({99, 100}), noTrail.size());
+}
+
 TEST(ToolingResolver, RebuildReplacesState) {
     DocumentModel model("var first = 1;\n");
     EXPECT_TRUE(model.warnings().empty());
