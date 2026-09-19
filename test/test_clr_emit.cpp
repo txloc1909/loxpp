@@ -2459,6 +2459,50 @@ TEST(EmitScript, CatchBodyWithMatchKeepsDispatchLabelsInsideCatchRegion) {
         << j;
 }
 
+// A native fault is either always delivered to a live handler
+// (tryCatchableError/raiseThrowableError) or never delivered at all
+// (RAISE_ERROR/runtimeError) — src/vm.cpp never lets a `try` see a fault of
+// the second kind. Issue #238: the emitted `catch [LoxRuntime]Lox.LoxError`
+// used to run its handler body unconditionally, so an uncatchable
+// LoxError.cs bare-message fault (Value == null) was delivered anyway,
+// with the caught value silently nil instead of propagating like native.
+// The fix reads LoxError::Catchable before running the handler body and
+// rethrows when it is false; this pins the exact prologue shape so a
+// regression that drops the check (or reorders it after get_Value()) fails
+// here instead of only showing up as a wrong answer in an integration run.
+TEST(EmitScript, CatchPrologueChecksCatchableBeforeRunningHandlerBody) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("try { throw \"boom\"; } catch (e) { print e; }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = clr::emitScript(fn, analysis, "LoxMain");
+
+    std::string catchBody = extractFirstCatchBody(j);
+    ASSERT_FALSE(catchBody.empty()) << j;
+    expectEveryBranchTargetIsLabeled(catchBody);
+
+    std::size_t getCatchablePos =
+        catchBody.find("call instance bool [LoxRuntime]Lox.LoxError"
+                       "::get_Catchable()");
+    ASSERT_NE(getCatchablePos, std::string::npos)
+        << "catch body never checks LoxError::Catchable:\n"
+        << j;
+    std::size_t rethrowPos = catchBody.find("rethrow");
+    ASSERT_NE(rethrowPos, std::string::npos)
+        << "catch body has no rethrow path for an uncatchable fault:\n"
+        << j;
+    std::size_t getValuePos =
+        catchBody.find("call instance object [LoxRuntime]Lox.LoxError"
+                       "::get_Value()");
+    ASSERT_NE(getValuePos, std::string::npos) << j;
+
+    // The Catchable check and its rethrow must run BEFORE the handler ever
+    // reads Value — a handler body must never observe a value from a fault
+    // it should not have caught at all.
+    EXPECT_LT(getCatchablePos, rethrowPos) << j;
+    EXPECT_LT(rethrowPos, getValuePos) << j;
+}
+
 TEST(EmitProgram, TerminalCatchBodyWithBranchingInFunctionStaysBalanced) {
     // Combines two previously-fixed shapes: a catch body that is the
     // function's own last code (its own POP_HANDLER never runs — round-3's
