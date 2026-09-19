@@ -71,6 +71,8 @@ each has an off-the-shelf solution.
 | `jvm-only/defer_overflow_during_unwind` | a `StackOverflowError` raised by a deferred call while another one is still unwinding is fatal on the JVM backend, not delivered to any `catchBlock` (`spec/04-semantics.md` line 1120) — JVM-only, see the note below the table | P5, P6 |
 | `jvm-only/defer_replaces_overflow` | a deferred call's own throw, uncaught within it, replaces a `StackOverflowError` still unwinding (`spec/04-semantics.md` defer Statement step 5); the unwind guard must still clear so a later, unrelated overflow is caught — JVM-only, see the note below the table | P5, P6 |
 | `jvm-only/defer_overflow_kind_spoof` | a plain instance whose `kind` field spoofs `"StackOverflowError"`, thrown and caught entirely inside a deferred call, must not clear the unwind guard early while a real `StackOverflowError` is still unwinding — JVM-only, see the note below the table | P5, P6 |
+| `jvm-only/defer_throw_on_normal_return_during_unwind` | a deferred call's throw on a normal return (no fault propagating out of the deferring frame) must not be handed the unwind guard's identity, even while an unrelated `StackOverflowError` unwinds elsewhere — JVM-only, see the note below the table | P5, P6 |
+| `jvm-only/defer_replaces_unrelated_fault_during_unwind` | a deferred call's throw that replaces a different, unrelated fault must not be handed the unwind guard's identity while an unrelated `StackOverflowError` unwinds elsewhere — JVM-only, see the note below the table | P5, P6 |
 | `32_string_nul` | a string literal holding an embedded NUL byte (`\0`): `print` must write every byte, including the text after the NUL, on native and on each managed backend (issue #129) | none (parity gate) |
 | `33_class_pattern_match_error` | a `match` whose arms are all class patterns raises a real, reachable `MATCH_ERROR` when no arm matches, through the same fused opcode as the enum case | P8 |
 | `34_match_consumed_result` | a `match` expression's result, once its own closing `POP` retires the synthetic subject local, is exposed as a named local's own value — `PRINT` and `DEFINE_GLOBAL` each need their own fold-aware read, the same way `RETURN` and `SET_GLOBAL` already do | P1, P2 |
@@ -104,13 +106,15 @@ it moved directly into this directory once the JVM backend grew its own
 frame-count ceiling to match (issue #268).
 
 `jvm-only/catch_overflow`, `jvm-only/defer_overflow_during_unwind`,
-`jvm-only/defer_replaces_overflow`, and `jvm-only/defer_overflow_kind_spoof`
-sit one level down for the mirror-image reason: `tools/diff_runtimes.py`'s
-CI step for the CLR backend walks `clr-only/` too (comparing native against
-CLR), and the CLR backend still delivers a `StackOverflowError` with the
-wrong catchability (issue #238) — all four probes would report a false CLR
-divergence there. `tools/check_jvm_probes.sh` runs each one by name for the
-JVM checkpoint; move them back into this directory once #238 closes.
+`jvm-only/defer_replaces_overflow`, `jvm-only/defer_overflow_kind_spoof`,
+`jvm-only/defer_throw_on_normal_return_during_unwind`, and
+`jvm-only/defer_replaces_unrelated_fault_during_unwind` sit one level down
+for the mirror-image reason: `tools/diff_runtimes.py`'s CI step for the CLR
+backend walks `clr-only/` too (comparing native against CLR), and the CLR
+backend still delivers a `StackOverflowError` with the wrong catchability
+(issue #238) — all six probes would report a false CLR divergence there.
+`tools/check_jvm_probes.sh` runs each one by name for the JVM checkpoint;
+move them back into this directory once #238 closes.
 
 `clr-only/known-divergence/52_fat_frame_stack_divergence` sits one level
 below that again. `tools/diff_runtimes.py`'s CI step for the CLR backend

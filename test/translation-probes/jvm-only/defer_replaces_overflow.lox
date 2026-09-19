@@ -1,7 +1,7 @@
 // Proves runtime/jvm/src/lox/LoxClosure.java's s_unwindingStackOverflow
 // guard is cleared when the StackOverflowError it raised is replaced
 // during its own unwind, not only when a StackOverflowError itself reaches
-// a catchBlock (PR #314 R5). `boom` calls `one` with the wrong arity, so
+// a catchBlock. `boom` calls `one` with the wrong arity, so
 // the deferred call raises a catchable ArityError while the first
 // StackOverflowError unwinds; that ArityError, not a StackOverflowError,
 // is what the first `try` actually catches. The guard must still clear, so

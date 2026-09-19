@@ -1,5 +1,5 @@
 // Proves runtime/jvm/src/lox/LoxClosure.java's s_unwindingStackOverflow
-// guard does not key off a delivered value's "kind" field (PR #314 R6). A
+// guard does not key off a delivered value's "kind" field. A
 // plain instance with kind == "StackOverflowError" is thrown and caught
 // entirely inside `boom`'s own body, self-contained, while a real
 // StackOverflowError from `f` is unwinding through `boom`'s own deferred
