@@ -266,4 +266,17 @@ inline void from_json(const json& j, TextDocumentPositionParams& p) {
     j.at("position").get_to(p.position);
 }
 
+// Params for textDocument/rename: a position plus the new name.
+struct RenameParams {
+    std::string uri;
+    Position position;
+    std::string newName;
+};
+
+inline void from_json(const json& j, RenameParams& p) {
+    j.at("textDocument").at("uri").get_to(p.uri);
+    j.at("position").get_to(p.position);
+    j.at("newName").get_to(p.newName);
+}
+
 } // namespace loxpp::lsp

@@ -302,6 +302,35 @@ fun go(e) {
     EXPECT_EQ(def->offset, offsetOf(src, "Move(x)", 2) + 5);
 }
 
+TEST(ToolingResolver, OrPatternRepeatBindingIsAReference) {
+    const std::string src = R"(enum E { Move(x) Teleport(x) Quit }
+fun go(e) {
+  return match e {
+    case Move(x) or Teleport(x) => x
+    case Quit => 0
+  };
+}
+)";
+    DocumentModel model(src);
+    EXPECT_TRUE(warningMessages(model).empty());
+
+    // The second alternative repeats the binding; it is a use of the same
+    // symbol so rename rewrites every alternative, not all but one.
+    // ("Teleport(x)" also appears in the enum header; the case arm is the
+    // second occurrence.)
+    const std::size_t repeat = offsetOf(src, "Teleport(x)", 2) + 9;
+    auto def = model.definitionAt(repeat);
+    ASSERT_TRUE(def);
+    EXPECT_EQ(def->offset, offsetOf(src, "Move(x)", 2) + 5);
+
+    const std::size_t decl = offsetOf(src, "Move(x)", 2) + 5;
+    auto refs = model.referencesAt(decl, /*includeDeclaration=*/true);
+    ASSERT_EQ(refs.size(), 3u); // declaration + repeat + body use
+    EXPECT_EQ(refs[0].offset, decl);
+    EXPECT_EQ(refs[1].offset, repeat);
+    EXPECT_EQ(refs[2].offset, offsetOf(src, "=> x") + 3);
+}
+
 TEST(ToolingResolver, AtBindingBindsOuterAndInner) {
     const std::string src = R"(enum Tree { Leaf(v) Node(l, r) }
 fun describe(t) {

@@ -15,6 +15,7 @@
 #include "lsp/model_util.h"
 #include "lsp/signature_help.h"
 #include "lsp/stdlib_docs.h"
+#include "scanner.h"
 #include "tooling/document_model.h"
 #include "tooling/symbol_table.h"
 
@@ -297,6 +298,40 @@ void appendGeneralCompletions(json& items, const DocumentModel& model,
     }
 }
 
+bool isRenameAlpha(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+}
+
+bool isRenameDigit(char c) { return c >= '0' && c <= '9'; }
+
+// A new name must match IDENTIFIER (spec/01-lexical.md) and must not be a
+// keyword from lox_keywords(), the scanner's single keyword list. "_"
+// is refused as well: it binds nothing in match patterns, so renaming a
+// name to "_" would silently discard it and the result could not be
+// renamed back (rename from "_" already returns null).
+bool isValidRenameName(std::string_view name) {
+    if (name.empty()) {
+        return false;
+    }
+    if (!isRenameAlpha(name[0])) {
+        return false;
+    }
+    for (char c : name) {
+        if (!isRenameAlpha(c) && !isRenameDigit(c)) {
+            return false;
+        }
+    }
+    if (name == "_") {
+        return false;
+    }
+    for (const char* const* kw = ::lox_keywords(); *kw != nullptr; ++kw) {
+        if (name == *kw) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 Server::Server(JsonRpc& rpc)
@@ -342,6 +377,7 @@ json Server::onInitialize(const json& /*params*/) {
              {"referencesProvider", true},
              {"documentHighlightProvider", true},
              {"documentSymbolProvider", true},
+             {"renameProvider", true},
              {"completionProvider",
               {{"triggerCharacters", json::array({"."})}}},
              {"signatureHelpProvider",
@@ -534,6 +570,38 @@ json Server::onDocumentHighlight(const json& params) {
     return result;
 }
 
+json Server::onRename(const json& params) {
+    requireReady();
+    const auto p = params.get<RenameParams>();
+    if (!isValidRenameName(p.newName)) {
+        throw RpcError{RpcErrorCode::InvalidParams,
+                       "new name is not a valid identifier"};
+    }
+    json result = nullptr;
+    (void)m_store.read(p.uri, [&](const DocumentModel& model) {
+        const std::size_t off =
+            model.positionToOffset(toToolingPos(p.position));
+        const Symbol* sym = model.symbolAt(off);
+        // No user symbol here (keyword, stdlib global, unknown name), or a
+        // symbol with no stable spelling (implicit this/super, "_"): nothing
+        // to rename. Member names after a dot have no reference link either.
+        if (sym == nullptr || sym->implicit || sym->name == "_") {
+            return;
+        }
+        const std::vector<Span> spans = model.referencesAt(off, true);
+        if (spans.empty()) {
+            return;
+        }
+        json edits = json::array();
+        for (const Span& span : spans) {
+            edits.push_back(json{{"range", spanToRange(model, span)},
+                                 {"newText", p.newName}});
+        }
+        result = json{{"changes", json{{p.uri, edits}}}};
+    });
+    return result;
+}
+
 json Server::onSignatureHelp(const json& params) {
     requireReady();
     const auto p = params.get<TextDocumentPositionParams>();
@@ -578,6 +646,8 @@ void Server::registerHandlers() {
                     [this](const json& p) { return onReferences(p); });
     m_rpc.onRequest("textDocument/documentHighlight",
                     [this](const json& p) { return onDocumentHighlight(p); });
+    m_rpc.onRequest("textDocument/rename",
+                    [this](const json& p) { return onRename(p); });
     m_rpc.onRequest("textDocument/signatureHelp",
                     [this](const json& p) { return onSignatureHelp(p); });
 }
