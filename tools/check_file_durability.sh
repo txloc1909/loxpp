@@ -13,11 +13,15 @@
 # still fails.
 #
 # The p6 shape ends in an uncaught throw and exits non-zero, differently on
-# each consumer (70 native, 1 JVM, 134 CLR, 70 bootstrap). This script must
-# not require exit 0 to check that shape's file - skipping a non-zero run
-# and calling that a pass is exactly the false green
-# tools/check_clr_probes.sh's corpus sweep is documented to give for a run
-# that never reaches exit 0. p5 and p5b, by contrast, both end without an
+# each consumer (70 native, 1 JVM, 134 CLR, 70 bootstrap), so it cannot be
+# checked against one fixed exit code the way p5/p5b are. It is still checked
+# against "non-zero", not left with no status rule at all - an exit of 0
+# there means the run took the normal-exit path instead of the
+# uncaught-fault path this probe exists to cover, and every consumer today
+# gives a non-zero code for it, so this rule costs nothing. Skipping the
+# status check entirely and trusting file content alone is exactly the false
+# green tools/check_clr_probes.sh's corpus sweep is documented to give for a
+# run that never reaches exit 0. p5 and p5b, by contrast, both end without an
 # uncaught fault, so both are checked against exit 0 - a probe whose file
 # content happens to match by taking a *different* path than the one it
 # names (see p5b_exit_call below) must not be reported as an unqualified OK.
@@ -61,8 +65,13 @@ skipped_probes=()
 # exit status this probe's own shape requires (0 for a script that ends
 # without a fault); a probe whose file content matches by taking a
 # different path is a wrong-reason pass, not a real one, so a status
-# mismatch fails the probe even when cmp agrees. Pass "" for a probe whose
-# exit status is allowed to vary (p6, by design - see the header).
+# mismatch fails the probe even when cmp agrees. Pass "nonzero" for a probe
+# whose own shape requires a fault exit but whose exact code is allowed to
+# vary by consumer (p6, by design - see the header): an exit of 0 there means
+# the run took the normal-exit path instead of the uncaught-fault path this
+# probe exists to cover, so it fails the probe even though the file content
+# still matches. Pass "" only for a probe with no exit-status requirement at
+# all.
 check_probe() {
     local probe_name="$1" expected_content="$2" program_path="$3" file_path="$4" expected_status="${5:-}"
     local dir out err expected_path status
@@ -90,7 +99,13 @@ check_probe() {
         return
     fi
 
-    if [ -n "$expected_status" ] && [ "$status" -ne "$expected_status" ]; then
+    if [ "$expected_status" = "nonzero" ]; then
+        if [ "$status" -eq 0 ]; then
+            echo "check_file_durability.sh: FAIL $probe_name (expected a non-zero runner exit, got exit=0; file content matched anyway, so this probe took the normal-exit path instead of the uncaught-fault path it names)" >&2
+            failed_probes+=("$probe_name")
+            return
+        fi
+    elif [ -n "$expected_status" ] && [ "$status" -ne "$expected_status" ]; then
         echo "check_file_durability.sh: FAIL $probe_name (expected runner exit=$expected_status, got exit=$status; file content matched anyway, so this probe took a different path than the one it names)" >&2
         failed_probes+=("$probe_name")
         return
@@ -152,7 +167,7 @@ w.writeline("survives-uncaught-throw");
 print "p6 before throw";
 throw "boom";
 EOF
-check_probe "p6_uncaught_throw_noclose" $'survives-uncaught-throw\n' "$program_path" "$file_path"
+check_probe "p6_uncaught_throw_noclose" $'survives-uncaught-throw\n' "$program_path" "$file_path" nonzero
 rm -rf "$dir"
 
 if [ "${#failed_probes[@]}" -ne 0 ]; then
