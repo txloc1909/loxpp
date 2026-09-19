@@ -535,8 +535,10 @@ std::size_t measureProgramDepth(const Program& prog) {
 TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     const std::vector<fs::path> files = corpusFiles();
     // examples/*.lox (114) + bootstrap/*.lox (2) + translation-probes/*.lox
-    // (52)
-    ASSERT_EQ(files.size(), 168U);
+    // (53 - issue #268 moved 31_deep_recursion.lox back in from
+    // translation-probes/clr-only/, which this non-recursive scan does not
+    // read)
+    ASSERT_EQ(files.size(), 169U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {
