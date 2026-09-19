@@ -1630,10 +1630,8 @@ fun reflectMethodNames(klass) {
 //
 // "ReflectionFieldNameError", "ReflectionUndefinedMemberError",
 // "ReflectionUnsupportedError", and "ReflectionReceiverError" below are not
-// rows of the catchable-fault table in spec/04-semantics.md. Native has this
-// same reflection API (src/stdlib/reflect_api.cpp) and produces every one of
-// these causes with the same message text, so the cause itself is not
-// unique to this interpreter — but native only ever raises it through its
+// rows of the catchable-fault table in spec/04-semantics.md. Native reaches
+// these same causes (src/stdlib/reflect_api.cpp) only through its
 // always-fatal path (nativeRuntimeError(), exit 70), never as a catchable
 // value. So none of these causes has an existing `.kind` on native, JVM, or
 // CLR to collide with, and these strings stay outside the documented,
@@ -1720,10 +1718,10 @@ class LoxNative {
             if (vtag == "map")  return len(v.data);
             // "LengthTypeError": len() is not an index operation, so this is
             // not NotIndexableError's documented cause ("Index of
-            // non-List/non-Map", e.g. 42[0]) even though native's own len()
-            // (src/stdlib/globals.cpp) raises the same message text -- always
-            // through its fatal path, so there is no existing `.kind` here to
-            // collide with.
+            // non-List/non-Map", e.g. 42[0]). Native's own len()
+            // (src/stdlib/globals.cpp) reaches this same cause only through
+            // its always-fatal path, so there is no existing `.kind` here
+            // to collide with.
             interp.setError("LengthTypeError", "len() argument must be a String, List, or Map.", 0);
             return nil;
         }
@@ -1741,7 +1739,7 @@ class LoxNative {
         // ("Only instances have methods."), which genuinely does invoke a
         // method and keeps InvalidReceiverError. Native's own getField/
         // hasField/setField/fields/methods (src/stdlib/reflect_api.cpp)
-        // raise the same messages, but only through their always-fatal path.
+        // reach this same cause only through their always-fatal path.
         if (this.name == "fields") {
             if (loxTag(args[0]) != "instance") {
                 interp.setError("ReflectionReceiverError", "Expected an instance.", 0);
@@ -1860,13 +1858,13 @@ class InterpListMethod {
             return this.list.elements.pop();
         }
         // "ValueNotFoundError" (below) is not a row of the catchable-fault
-        // table in spec/04-semantics.md. Native has its own remove(), and
-        // raises this exact message (src/vm.cpp, RAISE_ERROR("Value not
-        // found in list.")) -- but only through its always-fatal path,
-        // never as a catchable value, so there is no existing `.kind` here
-        // to collide with. It names its own cause ("no element equals
-        // args[0]") and is not an index fault, so it must not share a
-        // `kind` with an actual index-out-of-range error.
+        // table in spec/04-semantics.md. Native has its own remove()
+        // (src/vm.cpp, RAISE_ERROR) and reaches this same cause only
+        // through its always-fatal path, never as a catchable value, so
+        // there is no existing `.kind` here to collide with. It names its
+        // own cause ("no element equals args[0]") and is not an index
+        // fault, so it must not share a `kind` with an actual
+        // index-out-of-range error.
         if (this.name == "remove") {
             var i = 0;
             while (i < len(this.list.elements)) {
