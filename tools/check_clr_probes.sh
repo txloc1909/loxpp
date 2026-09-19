@@ -609,6 +609,31 @@ for entry in "${known_divergence_probes[@]}"; do
         failed_probes+=("$probe")
         continue
     fi
+    # A non-zero exit alone does not say native failed the way this probe
+    # claims. Only its own "Stack overflow." report proves a controlled
+    # guard fired at all -- a crash (segfault, std::out_of_range, ...) also
+    # exits non-zero and prints no such line.
+    if ! grep -q "Stack overflow\." "$native_err"; then
+        echo "check_clr_probes.sh: FAIL $probe (native run failed, but not with the expected Stack overflow. report -- the divergence this probe records may have changed shape)" >&2
+        cat "$native_err" >&2
+        failed_probes+=("$probe")
+        continue
+    fi
+    # src/vm.h's two guards print the identical "Stack overflow." line, so
+    # that check alone cannot tell which one fired. This probe exists only
+    # to record the STACK_MAX guard specifically (FRAMES_MAX's own overflow
+    # already has its own coverage in error_probes above), so also check the
+    # frame-trace depth: the value-stack guard must fire well short of
+    # FRAMES_MAX, or the frame-count guard fired instead and this probe no
+    # longer isolates the guard it claims to.
+    frames_max="$(grep -oE 'FRAMES_MAX = [0-9]+' "$root/src/vm.h" | grep -oE '[0-9]+')"
+    frame_lines="$(grep -c '^\[line ' "$native_err")"
+    if [ "$frame_lines" -ge $((frames_max * 9 / 10)) ]; then
+        echo "check_clr_probes.sh: FAIL $probe (native failed at $frame_lines frames, within 10% of FRAMES_MAX=$frames_max -- looks like the frame-count guard fired, not STACK_MAX)" >&2
+        cat "$native_err" >&2
+        failed_probes+=("$probe")
+        continue
+    fi
     if ! "$root/tools/loxpp_clr.sh" "$root/$probe" >"$clr_out" 2>"$clr_err"; then
         echo "check_clr_probes.sh: FAIL $probe (CLR run failed -- the divergence this probe records may have closed on the CLR side; if so, move this probe to error_probes instead)" >&2
         cat "$clr_err" >&2
