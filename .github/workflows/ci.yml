@@ -590,7 +590,11 @@ jobs:
       # bootstrap/lox_wrapper.sh runs the self-hosted interpreter on the
       # native binary, so this needs no managed toolchain - it sits here
       # anyway, beside the other three, so a regression on any consumer of
-      # this guarantee fails in one place.
+      # this guarantee fails in one place. --no-exit-builtin: the bootstrap
+      # interpreter does not define exit() (a separately tracked stdlib gap,
+      # not this check's concern), so its p5b_exit_call probe is skipped
+      # rather than reported OK for reaching the same uncaught-fault path
+      # p6 already covers.
       - name: Check file durability - bootstrap interpreter
         run: |
           docker run --rm \
@@ -598,7 +602,7 @@ jobs:
             -w /workspace \
             -e LANGUAGE=LOXPP \
             loxpp-dev-managed:latest \
-            bash -c "tools/check_file_durability.sh bootstrap/lox_wrapper.sh"
+            bash -c "tools/check_file_durability.sh bootstrap/lox_wrapper.sh --no-exit-builtin"
 
       # The parity gate. Every probe must be byte-identical on native and JVM
       # stdout (differential runner, not only the check_jvm_probes.sh diff

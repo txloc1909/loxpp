@@ -12,34 +12,59 @@
 # expected bytes, not just a length, so a right-sized but wrong-content file
 # still fails.
 #
-# The p6 shape ends in an uncaught throw and exits non-zero by design. This
-# script must not require exit 0 to check that shape's file - skipping a
-# non-zero run and calling that a pass is exactly the false green
+# The p6 shape ends in an uncaught throw and exits non-zero, differently on
+# each consumer (70 native, 1 JVM, 134 CLR, 70 bootstrap). This script must
+# not require exit 0 to check that shape's file - skipping a non-zero run
+# and calling that a pass is exactly the false green
 # tools/check_clr_probes.sh's corpus sweep is documented to give for a run
-# that never reaches exit 0.
+# that never reaches exit 0. p5 and p5b, by contrast, both end without an
+# uncaught fault, so both are checked against exit 0 - a probe whose file
+# content happens to match by taking a *different* path than the one it
+# names (see p5b_exit_call below) must not be reported as an unqualified OK.
 #
-# Usage: tools/check_file_durability.sh <runner>
+# Usage: tools/check_file_durability.sh <runner> [--no-exit-builtin]
 #
-#   <runner>   runs one Lox++ program, invoked as "<runner> program.lox",
-#              inheriting stdout/stderr. build/loxpp, tools/loxpp_jvm.sh,
-#              tools/loxpp_clr.sh, and bootstrap/lox_wrapper.sh (export
-#              LANGUAGE=LOXPP first) all match this interface.
+#   <runner>            runs one Lox++ program, invoked as
+#                       "<runner> program.lox", inheriting stdout/stderr.
+#                       build/loxpp, tools/loxpp_jvm.sh, tools/loxpp_clr.sh,
+#                       and bootstrap/lox_wrapper.sh (export LANGUAGE=LOXPP
+#                       first) all match this interface.
+#   --no-exit-builtin   this consumer's stdlib has no exit() (a separately
+#                       tracked, accepted gap, out of scope here); the
+#                       p5b_exit_call probe cannot exercise its own shape on
+#                       such a consumer, so it is reported SKIP rather than
+#                       run at all - p6 already covers the uncaught-fault
+#                       flush path this consumer falls back to instead.
 set -uo pipefail
 
-if [ "$#" -ne 1 ]; then
-    echo "usage: tools/check_file_durability.sh <runner>" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+    echo "usage: tools/check_file_durability.sh <runner> [--no-exit-builtin]" >&2
     exit 2
 fi
 runner="$1"
+no_exit_builtin=0
+if [ "$#" -eq 2 ]; then
+    if [ "$2" != "--no-exit-builtin" ]; then
+        echo "usage: tools/check_file_durability.sh <runner> [--no-exit-builtin]" >&2
+        exit 2
+    fi
+    no_exit_builtin=1
+fi
 
 failed_probes=()
+skipped_probes=()
 
 # Writes $program_path, runs it through $runner, then compares the file it
 # wrote against $expected_content with cmp. $file_path must not exist yet -
 # a runner that fails to write it at all is reported by name, not confused
-# with a content mismatch.
+# with a content mismatch. $expected_status, when non-empty, is the runner
+# exit status this probe's own shape requires (0 for a script that ends
+# without a fault); a probe whose file content matches by taking a
+# different path is a wrong-reason pass, not a real one, so a status
+# mismatch fails the probe even when cmp agrees. Pass "" for a probe whose
+# exit status is allowed to vary (p6, by design - see the header).
 check_probe() {
-    local probe_name="$1" expected_content="$2" program_path="$3" file_path="$4"
+    local probe_name="$1" expected_content="$2" program_path="$3" file_path="$4" expected_status="${5:-}"
     local dir out err expected_path status
     dir="$(dirname "$program_path")"
     out="$dir/stdout"
@@ -57,14 +82,31 @@ check_probe() {
 
     expected_path="$dir/expected"
     printf '%s' "$expected_content" >"$expected_path"
-    if cmp -s "$expected_path" "$file_path"; then
-        echo "check_file_durability.sh: OK $probe_name (runner exit=$status, $(wc -c <"$file_path" | tr -d ' ') bytes)"
-    else
+    if ! cmp -s "$expected_path" "$file_path"; then
         echo "check_file_durability.sh: FAIL $probe_name (runner exit=$status, content mismatch)" >&2
         echo "  expected: $(printf '%q' "$expected_content")" >&2
         echo "  actual:   $(printf '%q' "$(cat "$file_path" 2>/dev/null)")" >&2
         failed_probes+=("$probe_name")
+        return
     fi
+
+    if [ -n "$expected_status" ] && [ "$status" -ne "$expected_status" ]; then
+        echo "check_file_durability.sh: FAIL $probe_name (expected runner exit=$expected_status, got exit=$status; file content matched anyway, so this probe took a different path than the one it names)" >&2
+        failed_probes+=("$probe_name")
+        return
+    fi
+
+    echo "check_file_durability.sh: OK $probe_name (runner exit=$status, $(wc -c <"$file_path" | tr -d ' ') bytes)"
+}
+
+# Reports $probe_name as skipped, with $reason, instead of running it at
+# all. A skip is loud and named - never a silent OK for the wrong reason -
+# and does not count as a failure, matching tools/check_examples.py's own
+# SKIP outcome for an example excluded for a stated, known reason.
+skip_probe() {
+    local probe_name="$1" reason="$2"
+    echo "check_file_durability.sh: SKIP $probe_name ($reason)"
+    skipped_probes+=("$probe_name")
 }
 
 # p5: no close(), normal end of script.
@@ -76,21 +118,29 @@ var w = open("$file_path", "w");
 w.writeline("survives-normal-exit");
 print "p5 done";
 EOF
-check_probe "p5_exit_normal" $'survives-normal-exit\n' "$program_path" "$file_path"
+check_probe "p5_exit_normal" $'survives-normal-exit\n' "$program_path" "$file_path" 0
 rm -rf "$dir"
 
-# p5b: no close(), explicit exit(0).
-dir="$(mktemp -d)"
-file_path="$dir/p5b.txt"
-program_path="$dir/p5b_exit_call.lox"
-cat >"$program_path" <<EOF
+# p5b: no close(), explicit exit(0). Skipped on a consumer with no exit()
+# builtin - there, the program would instead end in an uncaught "undefined
+# variable" fault, the same path p6 already covers, and reporting that as
+# an OK exit(0) pass would be the wrong-reason pass this script exists to
+# catch (see the header).
+if [ "$no_exit_builtin" -eq 1 ]; then
+    skip_probe "p5b_exit_call" "consumer has no exit() builtin; p6 already covers the uncaught-fault flush path this shape would otherwise fall back to"
+else
+    dir="$(mktemp -d)"
+    file_path="$dir/p5b.txt"
+    program_path="$dir/p5b_exit_call.lox"
+    cat >"$program_path" <<EOF
 var w = open("$file_path", "w");
 w.writeline("survives-exit-call");
 print "p5b before exit";
 exit(0);
 EOF
-check_probe "p5b_exit_call" $'survives-exit-call\n' "$program_path" "$file_path"
-rm -rf "$dir"
+    check_probe "p5b_exit_call" $'survives-exit-call\n' "$program_path" "$file_path" 0
+    rm -rf "$dir"
+fi
 
 # p6: no close(), uncaught throw. Exits non-zero by design (see header).
 dir="$(mktemp -d)"
@@ -113,4 +163,8 @@ if [ "${#failed_probes[@]}" -ne 0 ]; then
     exit 1
 fi
 
-echo "check_file_durability.sh: all 3 probes OK"
+if [ "${#skipped_probes[@]}" -ne 0 ]; then
+    echo "check_file_durability.sh: all $((3 - ${#skipped_probes[@]})) run probe(s) OK, ${#skipped_probes[@]} skipped"
+else
+    echo "check_file_durability.sh: all 3 probes OK"
+fi
