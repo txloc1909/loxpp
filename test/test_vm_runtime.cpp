@@ -15,6 +15,7 @@
 #include "container_objects.h"
 #include <gtest/gtest.h>
 #include <cmath>
+#include <cstdlib>
 #include <optional>
 
 // ===========================================================================
@@ -888,6 +889,48 @@ TEST_F(StackOverflowTest,
                "with no frame's defer skipped, at list index "
             << idx;
     }
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+// The StackOverflowError object itself must survive a collection that runs
+// during its own unwind. Each unwound frame's defer here allocates a fresh
+// string, and LOXPP_STRESS_GC=1 (set for VMTestHarness's own VM, restored
+// after) forces a collection on every one of those allocations, so one runs
+// between the Error's construction and the moment handleThrow() finally
+// pushes it for the catch block to read. An Error left unrooted across that
+// window is reclaimed and replaced by whatever allocation runs next, so the
+// catch block reads freed memory instead of the StackOverflowError.
+TEST_F(StackOverflowTest,
+       CatchableFramesOverflow_AllocatingDeferSurvivesCollection) {
+    const char* prevStressGC = std::getenv("LOXPP_STRESS_GC");
+    std::string prevStressGCValue = prevStressGC ? prevStressGC : "";
+    ::setenv("LOXPP_STRESS_GC", "1", 1);
+    // MemoryManager reads this once at construction (see its own comment),
+    // so it must be set before VMTestHarness's VM member exists, and it is
+    // safe to restore right after — no VM constructed later in this test
+    // reads it again.
+    VMTestHarness h;
+    if (prevStressGC) {
+        ::setenv("LOXPP_STRESS_GC", prevStressGCValue.c_str(), 1);
+    } else {
+        ::unsetenv("LOXPP_STRESS_GC");
+    }
+    std::string src = "fun record(n) { return \"padded-\" + str(n); }"
+                      "fun f(n) {"
+                      "  defer record(n);"
+                      "  f(n + 1);"
+                      "}"
+                      "var kind; var msg;"
+                      "try {"
+                      "  f(0);"
+                      "} catch (e) {"
+                      "  kind = e.kind;"
+                      "  msg = e.message;"
+                      "}";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "StackOverflowError");
+    EXPECT_EQ(h.getGlobalStr("msg"), "Stack overflow.");
     EXPECT_EQ(h.stackDepth(), 0);
     EXPECT_EQ(h.handlerStackDepth(), 0);
 }
