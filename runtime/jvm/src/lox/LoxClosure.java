@@ -59,9 +59,8 @@ public abstract class LoxClosure implements LoxCallable {
     // inside that extent — reachable only through a deferred call that
     // itself recurses too deep while running during the first overflow's
     // own unwind — is not delivered to any catchBlock
-    // (spec/04-semantics.md); it is fatal, matching native's own
-    // m_unwindingStackOverflow guard (src/vm.h) and the reproduction a
-    // reviewer of that native change posted on this class's own issue.
+    // (spec/04-semantics.md line 1120); it is fatal, matching native's own
+    // m_unwindingStackOverflow guard (src/vm.h).
     private static boolean s_unwindingStackOverflow = false;
 
     public final String name; // null for the top-level script, per <script>
