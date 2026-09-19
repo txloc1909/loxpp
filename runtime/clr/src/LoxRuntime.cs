@@ -38,13 +38,19 @@ public static class LoxRuntime {
     private static readonly Stream s_stdin = Console.OpenStandardInput();
 
     static LoxRuntime() {
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => Out.Flush();
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => {
+            Out.Flush();
+            LoxFile.FlushAllOpen();
+        };
         // ProcessExit does not fire when an exception (a LoxError left
         // uncaught by generated code, say) terminates the process - only
         // UnhandledException does. Without this, every line already printed
         // before that point is lost, where the native VM keeps it (it
         // writes stdout unbuffered by comparison, via straight std::printf).
-        AppDomain.CurrentDomain.UnhandledException += (_, _) => Out.Flush();
+        AppDomain.CurrentDomain.UnhandledException += (_, _) => {
+            Out.Flush();
+            LoxFile.FlushAllOpen();
+        };
     }
 
     // The one LoxGlobals instance for this process (design decision A2: one
@@ -164,6 +170,7 @@ public static class LoxRuntime {
                 throw new LoxError("exit() code must be a finite number in the integer range.");
             }
             Out.Flush(); // ProcessExit does not fire for Environment.Exit on every platform path
+            LoxFile.FlushAllOpen();
             Environment.Exit((int)raw); // range-guarded above, so the cast truncates toward zero, matching C
             throw new InvalidOperationException("Environment.Exit must not return");
         }));
