@@ -82,8 +82,9 @@ VM::CallOutcome VM::call(ObjClosure* closure, int argCount,
     if (argCount != fn->arity) {
         // Arity mismatch is now catchable as ArityError, but only if a handler
         // is active. If no handler is active, fall back to uncaught error.
-        // The arity check happens before any new frame is pushed, so this does
-        // not carry the reentrancy hazard that excludes StackOverflowError.
+        // The arity check happens before any new frame is pushed, so it never
+        // needs the frame reserve StackOverflowError's own guard below relies
+        // on.
         char msg[256];
         snprintf(msg, sizeof(msg), "Expected %d arguments but got %d.",
                  fn->arity, argCount);
@@ -107,7 +108,48 @@ VM::CallOutcome VM::call(ObjClosure* closure, int argCount,
         runtimeError("Expected %d arguments but got %d.", fn->arity, argCount);
         return CallOutcome::Uncaught;
     }
-    if (m_frameCount == FRAMES_MAX) {
+    // Fires at FRAMES_MAX itself — the same threshold whether or not a
+    // handler is active — so an open try/catch never changes how deep a
+    // program that does not overflow can go (see
+    // STACK_OVERFLOW_FRAME_RESERVE's own comment in vm.h). Only when a
+    // handler is active does hitting it raise a catchable StackOverflowError
+    // instead of going straight to the hard ceiling below: that unwind
+    // (closing upvalues, draining each discarded frame's own defers,
+    // building the Error) spends the reserve capacity held above FRAMES_MAX.
+    // This must be `>=`, not `==`: m_frameCount only increases, so a try
+    // opened after it has already passed FRAMES_MAX would never see an exact
+    // match again.
+    if (m_frameCount >= FRAMES_MAX && !m_handlerStack.empty() &&
+        !m_unwindingStackOverflow) {
+        // See m_unwindingStackOverflow's own comment (vm.h): a deferred call
+        // drained by the handleThrow() below can itself reach this same
+        // guard again. Hold the flag for exactly that call, so a nested hit
+        // falls through to the hard ceiling below instead of recursing.
+        m_unwindingStackOverflow = true;
+        ThrowOutcome outcome = raiseThrowableError(
+            "StackOverflowError", "Stack overflow.", stopAtFrameCount);
+        m_unwindingStackOverflow = false;
+        if (outcome == ThrowOutcome::HandledContinue) {
+            return CallOutcome::CaughtContinue;
+        }
+        if (outcome == ThrowOutcome::HandledStop) {
+            return CallOutcome::CaughtStop;
+        }
+        // Uncaught: raiseThrowableError() already reported it. m_frameCount
+        // is reset to 0 by then (see runtimeError()/resetStack()), so
+        // continuing to push a frame below would be reading a torn-down VM.
+        return CallOutcome::Uncaught;
+    }
+    // No handler active: the true hard ceiling, unaffected by the reserve,
+    // same depth as before the reserve existed. While unwinding a
+    // StackOverflowError (m_unwindingStackOverflow), the ceiling moves out to
+    // FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE — the physical capacity
+    // m_frames[] actually has — so a deferred call drained during that
+    // unwind can use the reserve; past that, it stays fatal rather than
+    // recursing into the same handler again.
+    if (m_frameCount >=
+        FRAMES_MAX +
+            (m_unwindingStackOverflow ? STACK_OVERFLOW_FRAME_RESERVE : 0)) {
         runtimeError("Stack overflow.");
         return CallOutcome::Uncaught;
     }
@@ -256,6 +298,29 @@ VM::ThrowOutcome VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
     // etc.). See ThrowOutcome's doc comment in vm.h for what each of the
     // three results means and obligates the caller to do.
 
+    // handleThrow() owns thrownValue for as long as it runs. markRoots()
+    // marks only [stack, stackTop), and Step 2 below moves stackTop to each
+    // discarded frame's own base *before* running that frame's defers, so a
+    // defer that allocates (a nested, real call — runPendingDefers() ->
+    // VM::call() -> VM::run()) can trigger a collection while thrownValue is
+    // off the stack entirely. Root it here, once, for both callers
+    // (Op::THROW and raiseThrowableError()), rather than at each call site.
+    struct ThrownValueGuard {
+        MemoryManager& mm;
+        bool rooted;
+        ThrownValueGuard(MemoryManager& mm, Value v)
+            : mm(mm), rooted(isObj(v)) {
+            if (rooted) {
+                mm.pushTempRoot(asObj(v));
+            }
+        }
+        ~ThrownValueGuard() {
+            if (rooted) {
+                mm.popTempRoot();
+            }
+        }
+    } thrownValueGuard(m_mm, thrownValue);
+
     // Step 1: Find if any live handler exists (without popping it yet).
     bool foundHandler = false;
     HandlerRecord handlerToUse;
@@ -277,6 +342,17 @@ VM::ThrowOutcome VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
     while (m_frameCount > targetFrameCount) {
         int unwoundFrameIndex = m_frameCount - 1;
         closeUpvalues(m_frames[unwoundFrameIndex].slots);
+        // Reclaim this frame's own window before running its defers, not
+        // only at the end of the whole unwind (step 3 below). A deferred
+        // call's own args are already captured on ObjDeferredCall, not read
+        // off this frame's live slots, so nothing here needs them once
+        // closeUpvalues has run. Without this, an unwind through many frames
+        // (each with its own pending defer) leaves every one of those
+        // frames' operands live on the value stack at once while the defers
+        // run, so the STACK_OVERFLOW_STACK_RESERVE reserve — sized for one
+        // frame's own defer call — is exhausted by the second or third
+        // frame instead of lasting the whole unwind.
+        stackTop = m_frames[unwoundFrameIndex].slots;
         // stopAtFrameCount is OUR OWN parameter, not unwoundFrameIndex: it
         // is the boundary of whichever run() invocation is unwinding right
         // now (see vm.h), and a reentrant fault inside this defer must be
@@ -342,10 +418,11 @@ VM::ThrowOutcome VM::raiseThrowableError(const char* kind_str, const char* msg,
         return ThrowOutcome::Uncaught;
     }
 
-    // GC safety: root intermediate strings while constructing the error.
-    // These are temporary and removed by handleThrow's stack truncation,
-    // so we only root them during the construction phase, not during
-    // handleThrow (which resets the stack).
+    // GC safety: root msg_obj/kind_obj only for the window before err_obj
+    // holds them. Once err_obj exists, its own traceObject marks both, so
+    // their liveness after that rides on err_obj staying reachable —
+    // guaranteed for the whole call below by handleThrow()'s own root on
+    // thrownValue (see its comment), not by anything here.
     ObjString* msg_obj = m_mm.makeString(msg);
     m_mm.pushTempRoot(msg_obj);
 
@@ -357,8 +434,6 @@ VM::ThrowOutcome VM::raiseThrowableError(const char* kind_str, const char* msg,
     m_mm.popTempRoot(); // Unroot kind_obj
     m_mm.popTempRoot(); // Unroot msg_obj
 
-    // handleThrow will push err_obj and potentially truncate the stack.
-    // So we pass err_obj but don't manage its stack presence ourselves.
     return handleThrow(Value{static_cast<Obj*>(err_obj)}, stopAtFrameCount);
 }
 
@@ -499,8 +574,25 @@ InterpretResult VM::run(int stopAtFrameCount) {
 
     for (;;) {
         if (m_stackOverflow) {
-            RAISE_ERROR("Stack overflow.");
-            return InterpretResult::RUNTIME_ERROR;
+            // Consume the flag now: whichever branch below runs, this exact
+            // overflow event is fully handled by it (caught, reported, or
+            // re-armed by a fresh push() past the threshold later).
+            m_stackOverflow = false;
+            if (!m_handlerStack.empty() && !m_unwindingStackOverflow) {
+                // See m_unwindingStackOverflow's own comment (vm.h) and
+                // VM::call()'s matching guard: hold the flag for exactly
+                // this catch attempt, so a nested hit (from a deferred call
+                // this unwind drains) falls through to the fatal branch
+                // below instead of recursing.
+                m_unwindingStackOverflow = true;
+                ThrowOutcome outcome =
+                    tryCatchableError("StackOverflowError", "Stack overflow.");
+                m_unwindingStackOverflow = false;
+                CATCHABLE_OR_RETURN(outcome);
+            } else {
+                RAISE_ERROR("Stack overflow.");
+                return InterpretResult::RUNTIME_ERROR;
+            }
         }
 
 #ifdef LOXPP_DEBUG_TRACE_EXECUTION
@@ -1834,7 +1926,17 @@ void VM::resetStack() {
 }
 
 void VM::push(Value value) {
-    if (stackTop == stack + STACK_MAX) {
+    // Same threshold, STACK_MAX, whether or not a handler is active (see
+    // STACK_OVERFLOW_STACK_RESERVE's own comment in vm.h): an open try/catch
+    // must never change how deep a program that does not overflow can go.
+    // While unwinding a StackOverflowError (m_unwindingStackOverflow), the
+    // ceiling moves out to STACK_MAX + STACK_OVERFLOW_STACK_RESERVE — the
+    // physical capacity `stack` actually has — so a deferred call drained
+    // during that unwind can use the reserve; past that, it stays fatal.
+    std::ptrdiff_t hardCeiling =
+        STACK_MAX +
+        (m_unwindingStackOverflow ? STACK_OVERFLOW_STACK_RESERVE : 0);
+    if (stackTop == stack + hardCeiling) {
         m_stackOverflow = true;
         return;
     }
