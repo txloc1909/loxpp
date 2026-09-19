@@ -1,0 +1,12 @@
+// Issue #238: a runtime fault native never delivers to any handler
+// (RAISE_ERROR("Only instances have properties.") in src/vm.cpp) must
+// propagate past a live try/catch, not be caught with the caught value
+// silently nil. Native fails here with exit 70; a backend that catches
+// this instead is wrong even though it does not crash.
+try {
+    print 42.foo;
+    print "SHOULD_NOT_REACH";
+} catch (e) {
+    print "SHOULD_NOT_CATCH";
+}
+print "unreachable";

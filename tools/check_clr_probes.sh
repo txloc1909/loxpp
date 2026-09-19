@@ -226,6 +226,13 @@ probes=(
     # cannot even run (both sides give empty stdout and a matching non-zero
     # exit), so this probe also needs the exit-code-checked loop below.
     "test/translation-probes/48_file_visible_after_close.lox"
+    # Issue #238: the catch mechanism used to run every LoxError's handler
+    # body unconditionally, so a fault N1 (#267) newly made catchable on
+    # native (unbounded recursion, kind StackOverflowError) must now be
+    # delivered as a real Error value here too, not left as the bare,
+    # uncatchable message it used to be. Lives in clr-only/ (see the probe
+    # file's own header comment for why); named here directly.
+    "test/translation-probes/clr-only/53_stack_overflow_catchable.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -270,6 +277,14 @@ error_probes=(
     "test/translation-probes/45_reflect_methods_non_instance.lox"
     "test/translation-probes/46_reflect_callmethod_non_instance.lox"
     "test/translation-probes/47_reflect_callmethod_closure_method.lox"
+    # Issue #238: the catch mechanism used to catch every LoxError
+    # unconditionally, including a fault native never delivers to any
+    # handler at all (RAISE_ERROR("Only instances have properties."), not
+    # in spec/04-semantics.md's Runtime Errors table). This probe wraps
+    # that exact fault in a live try/catch; both sides must still fail,
+    # with the catch block never running (its own SHOULD_NOT_CATCH/
+    # SHOULD_NOT_REACH prints must not appear in stdout).
+    "examples/try_catch_instance_property_not_caught.lox"
 )
 
 # Probes that stay wrong on purpose. native's own value-stack ceiling
