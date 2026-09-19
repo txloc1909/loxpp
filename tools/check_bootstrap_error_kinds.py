@@ -80,11 +80,11 @@ REVIEWED_NON_TABLE_KINDS = {
 # call in bootstrap/loxpp_interpreter.lox, in file order.
 #
 # `kind` is DYNAMIC for a call whose `kind` argument is not a plain string
-# literal (its actual kind is chosen at run time). Two such choices exist
-# today, both between real table kinds: InvalidMapKeyError vs. NaNKeyError
-# for a Map key's validity check, and ArityError vs. ConstructorArityError
-# for a call-arity check. DYNAMIC only means this script cannot read the
-# choice statically; it does not mean the choice is unaudited.
+# literal (its actual kind is chosen at run time). The choices today are
+# both between real table kinds: InvalidMapKeyError vs. NaNKeyError for a
+# Map key check, and ArityError vs. ConstructorArityError for a call-arity
+# check. DYNAMIC only means this script cannot read the choice statically;
+# it does not mean the choice is unaudited.
 #
 # `message` is the call's message argument, exactly as find_set_error_calls
 # returns it (message_raw): the literal source text between the commas,
@@ -329,7 +329,15 @@ def main() -> int:
         print(f"{len(calls)} total .setError( calls, {len(spec_kinds)} spec table kinds\n")
         for i, c in enumerate(calls):
             kind = effective_kind(c)
-            tag = "table" if kind in spec_kinds else "non-table"
+            if c["kind_literal"] is None:
+                # A DYNAMIC call's real kind is chosen at run time between
+                # real table kinds (see EXPECTED_CALLS's own comment on
+                # DYNAMIC), so it is neither table nor non-table by
+                # construction; tag it distinctly rather than fall into
+                # "non-table" through effective_kind()'s placeholder string.
+                tag = "dynamic"
+            else:
+                tag = "table" if kind in spec_kinds else "non-table"
             if i < len(EXPECTED_CALLS):
                 exp_kind, exp_message, status = EXPECTED_CALLS[i]
             else:
