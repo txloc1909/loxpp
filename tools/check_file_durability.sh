@@ -26,37 +26,22 @@
 # content happens to match by taking a *different* path than the one it
 # names (see p5b_exit_call below) must not be reported as an unqualified OK.
 #
-# Usage: tools/check_file_durability.sh <runner> [--no-exit-builtin]
+# Usage: tools/check_file_durability.sh <runner>
 #
 #   <runner>            runs one Lox++ program, invoked as
 #                       "<runner> program.lox", inheriting stdout/stderr.
 #                       build/loxpp, tools/loxpp_jvm.sh, tools/loxpp_clr.sh,
 #                       and bootstrap/lox_wrapper.sh (export LANGUAGE=LOXPP
 #                       first) all match this interface.
-#   --no-exit-builtin   this consumer's stdlib has no exit() (a separately
-#                       tracked, accepted gap, out of scope here); the
-#                       p5b_exit_call probe cannot exercise its own shape on
-#                       such a consumer, so it is reported SKIP rather than
-#                       run at all - p6 already covers the uncaught-fault
-#                       flush path this consumer falls back to instead.
 set -uo pipefail
 
-if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
-    echo "usage: tools/check_file_durability.sh <runner> [--no-exit-builtin]" >&2
+if [ "$#" -ne 1 ]; then
+    echo "usage: tools/check_file_durability.sh <runner>" >&2
     exit 2
 fi
 runner="$1"
-no_exit_builtin=0
-if [ "$#" -eq 2 ]; then
-    if [ "$2" != "--no-exit-builtin" ]; then
-        echo "usage: tools/check_file_durability.sh <runner> [--no-exit-builtin]" >&2
-        exit 2
-    fi
-    no_exit_builtin=1
-fi
 
 failed_probes=()
-skipped_probes=()
 
 # Writes $program_path, runs it through $runner, then compares the file it
 # wrote against $expected_content with cmp. $file_path must not exist yet -
@@ -114,16 +99,6 @@ check_probe() {
     echo "check_file_durability.sh: OK $probe_name (runner exit=$status, $(wc -c <"$file_path" | tr -d ' ') bytes)"
 }
 
-# Reports $probe_name as skipped, with $reason, instead of running it at
-# all. A skip is loud and named - never a silent OK for the wrong reason -
-# and does not count as a failure, matching tools/check_examples.py's own
-# SKIP outcome for an example excluded for a stated, known reason.
-skip_probe() {
-    local probe_name="$1" reason="$2"
-    echo "check_file_durability.sh: SKIP $probe_name ($reason)"
-    skipped_probes+=("$probe_name")
-}
-
 # p5: no close(), normal end of script.
 dir="$(mktemp -d)"
 file_path="$dir/p5.txt"
@@ -136,26 +111,19 @@ EOF
 check_probe "p5_exit_normal" $'survives-normal-exit\n' "$program_path" "$file_path" 0
 rm -rf "$dir"
 
-# p5b: no close(), explicit exit(0). Skipped on a consumer with no exit()
-# builtin - there, the program would instead end in an uncaught "undefined
-# variable" fault, the same path p6 already covers, and reporting that as
-# an OK exit(0) pass would be the wrong-reason pass this script exists to
-# catch (see the header).
-if [ "$no_exit_builtin" -eq 1 ]; then
-    skip_probe "p5b_exit_call" "consumer has no exit() builtin; p6 already covers the uncaught-fault flush path this shape would otherwise fall back to"
-else
-    dir="$(mktemp -d)"
-    file_path="$dir/p5b.txt"
-    program_path="$dir/p5b_exit_call.lox"
-    cat >"$program_path" <<EOF
+# p5b: no close(), explicit exit(0). Every consumer defines exit(), so
+# the probe always runs its own shape here.
+dir="$(mktemp -d)"
+file_path="$dir/p5b.txt"
+program_path="$dir/p5b_exit_call.lox"
+cat >"$program_path" <<EOF
 var w = open("$file_path", "w");
 w.writeline("survives-exit-call");
 print "p5b before exit";
 exit(0);
 EOF
-    check_probe "p5b_exit_call" $'survives-exit-call\n' "$program_path" "$file_path" 0
-    rm -rf "$dir"
-fi
+check_probe "p5b_exit_call" $'survives-exit-call\n' "$program_path" "$file_path" 0
+rm -rf "$dir"
 
 # p6: no close(), uncaught throw. Exits non-zero by design (see header).
 dir="$(mktemp -d)"
@@ -178,8 +146,4 @@ if [ "${#failed_probes[@]}" -ne 0 ]; then
     exit 1
 fi
 
-if [ "${#skipped_probes[@]}" -ne 0 ]; then
-    echo "check_file_durability.sh: all $((3 - ${#skipped_probes[@]})) run probe(s) OK, ${#skipped_probes[@]} skipped"
-else
-    echo "check_file_durability.sh: all 3 probes OK"
-fi
+echo "check_file_durability.sh: all 3 probes OK"
