@@ -190,6 +190,51 @@ inline void to_json(json& j, const CompletionItem& c) {
     }
 }
 
+// -- Signature help ----------------------------------------------------
+
+// LSP ParameterInformation with a plain string label. The spec also allows
+// a [start, end] offset pair; this server always sends the name form.
+struct ParameterInformation {
+    std::string label;
+    std::optional<std::string> documentation;
+};
+
+inline void to_json(json& j, const ParameterInformation& p) {
+    j = json{{"label", p.label}};
+    if (p.documentation) {
+        j["documentation"] = *p.documentation;
+    }
+}
+
+struct SignatureInformation {
+    std::string label;
+    std::optional<std::string> documentation;
+    std::vector<ParameterInformation> parameters;
+};
+
+inline void to_json(json& j, const SignatureInformation& s) {
+    j = json{{"label", s.label}, {"parameters", s.parameters}};
+    if (s.documentation) {
+        j["documentation"] = *s.documentation;
+    }
+}
+
+struct SignatureHelp {
+    std::vector<SignatureInformation> signatures;
+    std::optional<int> activeSignature;
+    std::optional<int> activeParameter;
+};
+
+inline void to_json(json& j, const SignatureHelp& h) {
+    j = json{{"signatures", h.signatures}};
+    if (h.activeSignature) {
+        j["activeSignature"] = *h.activeSignature;
+    }
+    if (h.activeParameter) {
+        j["activeParameter"] = *h.activeParameter;
+    }
+}
+
 // -- Text document sync -------------------------------------------------
 
 struct TextDocumentItem {
@@ -219,6 +264,19 @@ struct TextDocumentPositionParams {
 inline void from_json(const json& j, TextDocumentPositionParams& p) {
     j.at("textDocument").at("uri").get_to(p.uri);
     j.at("position").get_to(p.position);
+}
+
+// Params for textDocument/rename: a position plus the new name.
+struct RenameParams {
+    std::string uri;
+    Position position;
+    std::string newName;
+};
+
+inline void from_json(const json& j, RenameParams& p) {
+    j.at("textDocument").at("uri").get_to(p.uri);
+    j.at("position").get_to(p.position);
+    j.at("newName").get_to(p.newName);
 }
 
 } // namespace loxpp::lsp

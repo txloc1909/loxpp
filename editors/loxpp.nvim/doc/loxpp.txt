@@ -18,7 +18,7 @@ CONTENTS                                                        *loxpp-contents*
 
   1. a tree-sitter grammar for scope-aware highlighting, folds and indents;
   2. the `loxpp-lsp` language server for diagnostics, hover, completion,
-     go-to-definition and find-references;
+     go-to-definition, find-references and rename;
   3. a `loxpp --check` fallback through |nvim-lint| for users who build the
      `loxpp` interpreter but not the server.
 
@@ -110,7 +110,7 @@ Highlighting~
 Diagnostics~
   With `loxpp-lsp` running, the server owns diagnostics (errors from the
   compiler plus lint warnings: unused local, undefined name, and more), and
-  also hover, completion, definition, references and document symbols.
+   also hover, completion, definition, references, rename and document symbols.
   Without the server, `loxpp --check --format json` runs on save through
   |nvim-lint| and reports the compiler's static errors only.
 

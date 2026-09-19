@@ -290,6 +290,7 @@ if(LOXPP_LSP)
         src/lsp/document_store.cpp
         src/lsp/server.cpp
         src/lsp/code_action.cpp
+        src/lsp/signature_help.cpp
         src/lsp/stdlib_docs.cpp
     )
     # loxpp_tooling is an OBJECT library that PUBLIC-links loxpp_core; CMake

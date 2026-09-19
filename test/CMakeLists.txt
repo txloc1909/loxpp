@@ -155,6 +155,7 @@ if(LOXPP_LSP)
         ${PROJECT_SOURCE_DIR}/src/lsp/document_store.cpp
         ${PROJECT_SOURCE_DIR}/src/lsp/server.cpp
         ${PROJECT_SOURCE_DIR}/src/lsp/code_action.cpp
+        ${PROJECT_SOURCE_DIR}/src/lsp/signature_help.cpp
         ${PROJECT_SOURCE_DIR}/src/lsp/stdlib_docs.cpp
         CORE loxpp_tooling)
     target_link_libraries(test_lsp PRIVATE loxpp_core Threads::Threads)

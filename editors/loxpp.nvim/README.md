@@ -7,7 +7,7 @@ Three layers, each optional:
 | Layer | Gives you | Needs |
 |---|---|---|
 | tree-sitter grammar | scope-aware highlighting, folds, indents | a compiled `parser/loxpp.so` + a C compiler |
-| `loxpp-lsp` | diagnostics, hover, completion, go-to-definition, references, document symbols | `loxpp-lsp` on `$PATH`, Neovim ≥ 0.11 (or 0.10 + `nvim-lspconfig`) |
+| `loxpp-lsp` | diagnostics, hover, completion, go-to-definition, references, rename, document symbols | `loxpp-lsp` on `$PATH`, Neovim ≥ 0.11 (or 0.10 + `nvim-lspconfig`) |
 | `loxpp --check` fallback | compiler static errors on save | `loxpp` on `$PATH`, [`nvim-lint`](https://github.com/mfussenegger/nvim-lint) |
 
 Filetype detection, buffer options, a regex syntax fallback, and a
