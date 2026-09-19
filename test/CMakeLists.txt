@@ -164,6 +164,46 @@ endif()
 
 add_test(NAME TestMain COMMAND test_main)
 
+# bootstrap/loxpp_interpreter.lox is a Lox++ program, not C++, so no compiler
+# checks its setError() kind-string choices. BootstrapErrorKindAudit guards
+# the static invariant a compiler cannot: no setError() call reuses a
+# spec/04-semantics.md table `kind` for a cause that kind does not document
+# (see the script's own docstring for the full rationale).
+# BootstrapErrorKindCausesRuntime is the run-time counterpart: it starts the
+# interpreter and checks the caught `.kind` at every site the static audit
+# covers, so a typo the static check's text comparison would not construct
+# (it only compares what is there, not what runs) still fails a test.
+# python3 is optional, not a build-wide requirement, so a host without it can
+# still configure and build the VM; these two tests are simply skipped.
+find_program(LOXPP_PYTHON3 python3)
+if(LOXPP_PYTHON3)
+    add_test(NAME BootstrapErrorKindAudit
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_error_kinds.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+    # LOXPP_DEBUG_TRACE_EXECUTION/LOXPP_DEBUG_PRINT_CODE (on by default for a
+    # Debug build) make build/loxpp print a full disassembly of every
+    # function it compiles, plus a per-instruction trace of everything it
+    # runs -- including the bootstrap interpreter's own several-thousand-line
+    # implementation, not just the tiny probe program it interprets. That
+    # noise drowns out the single-line `.kind` output this test reads, on
+    # every run, not just occasionally. BootstrapErrorKindCausesRuntime skips
+    # itself via ctest's own SKIP_RETURN_CODE when it detects this, rather
+    # than fail on noise it can never parse around, or silently pass without
+    # checking anything.
+    if(LOXPP_DEBUG_TRACE_EXECUTION OR LOXPP_DEBUG_PRINT_CODE)
+        set(LOXPP_BOOTSTRAP_TRACE_ENABLED 1)
+    else()
+        set(LOXPP_BOOTSTRAP_TRACE_ENABLED 0)
+    endif()
+    add_test(NAME BootstrapErrorKindCausesRuntime
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/run_bootstrap_error_kind_causes.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(BootstrapErrorKindCausesRuntime PROPERTIES
+        ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+endif()
+
 # The *_gc targets share their source with a non-_gc twin. They run under GC
 # stress through the ctest ENVIRONMENT below, which MemoryManager reads once
 # per VM; the twin, run with no such variable, keeps the normal GC schedule.
