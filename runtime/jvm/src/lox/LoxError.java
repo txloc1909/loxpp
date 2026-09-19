@@ -35,6 +35,13 @@ public final class LoxError extends RuntimeException {
         if (value == null) {
             throw this;
         }
+        if (value instanceof LoxInstance
+                && "StackOverflowError".equals(((LoxInstance)value).fields.get("kind"))) {
+            // This fault is about to reach a real catchBlock, so the unwind
+            // LoxClosure started when it raised it is over — see
+            // LoxClosure.endStackOverflowUnwind()'s own comment.
+            LoxClosure.endStackOverflowUnwind();
+        }
         return value;
     }
 }
