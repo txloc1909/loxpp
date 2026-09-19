@@ -164,6 +164,16 @@ endif()
 
 add_test(NAME TestMain COMMAND test_main)
 
+# bootstrap/loxpp_interpreter.lox is a Lox++ program, not C++, so no compiler
+# checks its setError() kind-string choices. This guards the one invariant a
+# compiler cannot: no setError() call reuses a spec/04-semantics.md table
+# `kind` for a cause that kind does not document (see the script's own
+# docstring for the full rationale).
+find_program(LOXPP_PYTHON3 python3 REQUIRED)
+add_test(NAME BootstrapErrorKindAudit
+    COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_error_kinds.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
 # The *_gc targets share their source with a non-_gc twin. They run under GC
 # stress through the ctest ENVIRONMENT below, which MemoryManager reads once
 # per VM; the twin, run with no such variable, keeps the normal GC schedule.
