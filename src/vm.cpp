@@ -108,18 +108,19 @@ VM::CallOutcome VM::call(ObjClosure* closure, int argCount,
         runtimeError("Expected %d arguments but got %d.", fn->arity, argCount);
         return CallOutcome::Uncaught;
     }
-    // Fires at or above the FRAME_RESERVE threshold, and only while a handler
-    // is active, so the unwind that follows (closing upvalues, draining each
-    // discarded frame's own defers, building the Error) has room before the
-    // hard ceiling below. This must be `>=`, not `==`: m_frameCount only
-    // increases, so a try opened after it has already passed the threshold
-    // (a handler installed deeper than FRAMES_MAX - RESERVE) would never see
-    // an exact match again, and the reserve would silently stop applying for
-    // the rest of that call chain. No handler active: skip straight to the
-    // hard ceiling, same as before this reserve existed — nothing needs the
-    // room.
-    if (m_frameCount >= FRAMES_MAX - STACK_OVERFLOW_FRAME_RESERVE &&
-        !m_handlerStack.empty() && !m_unwindingStackOverflow) {
+    // Fires at FRAMES_MAX itself — the same threshold whether or not a
+    // handler is active — so an open try/catch never changes how deep a
+    // program that does not overflow can go (see
+    // STACK_OVERFLOW_FRAME_RESERVE's own comment in vm.h). Only when a
+    // handler is active does hitting it raise a catchable StackOverflowError
+    // instead of going straight to the hard ceiling below: that unwind
+    // (closing upvalues, draining each discarded frame's own defers,
+    // building the Error) spends the reserve capacity held above FRAMES_MAX.
+    // This must be `>=`, not `==`: m_frameCount only increases, so a try
+    // opened after it has already passed FRAMES_MAX would never see an exact
+    // match again.
+    if (m_frameCount >= FRAMES_MAX && !m_handlerStack.empty() &&
+        !m_unwindingStackOverflow) {
         // See m_unwindingStackOverflow's own comment (vm.h): a deferred call
         // drained by the handleThrow() below can itself reach this same
         // guard again. Hold the flag for exactly that call, so a nested hit
@@ -139,7 +140,16 @@ VM::CallOutcome VM::call(ObjClosure* closure, int argCount,
         // continuing to push a frame below would be reading a torn-down VM.
         return CallOutcome::Uncaught;
     }
-    if (m_frameCount == FRAMES_MAX) {
+    // No handler active: the true hard ceiling, unaffected by the reserve,
+    // same depth as before the reserve existed. While unwinding a
+    // StackOverflowError (m_unwindingStackOverflow), the ceiling moves out to
+    // FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE — the physical capacity
+    // m_frames[] actually has — so a deferred call drained during that
+    // unwind can use the reserve; past that, it stays fatal rather than
+    // recursing into the same handler again.
+    if (m_frameCount >=
+        FRAMES_MAX +
+            (m_unwindingStackOverflow ? STACK_OVERFLOW_FRAME_RESERVE : 0)) {
         runtimeError("Stack overflow.");
         return CallOutcome::Uncaught;
     }
@@ -1902,19 +1912,28 @@ void VM::resetStack() {
 }
 
 void VM::push(Value value) {
-    if (stackTop == stack + STACK_MAX) {
+    // Same threshold, STACK_MAX, whether or not a handler is active (see
+    // STACK_OVERFLOW_STACK_RESERVE's own comment in vm.h): an open try/catch
+    // must never change how deep a program that does not overflow can go.
+    // While unwinding a StackOverflowError (m_unwindingStackOverflow), the
+    // ceiling moves out to STACK_MAX + STACK_OVERFLOW_STACK_RESERVE — the
+    // physical capacity `stack` actually has — so a deferred call drained
+    // during that unwind can use the reserve; past that, it stays fatal.
+    std::ptrdiff_t hardCeiling =
+        STACK_MAX +
+        (m_unwindingStackOverflow ? STACK_OVERFLOW_STACK_RESERVE : 0);
+    if (stackTop == stack + hardCeiling) {
         m_stackOverflow = true;
         return;
     }
     *stackTop++ = value;
-    // Soft threshold, STACK_OVERFLOW_STACK_RESERVE slots below the hard
-    // ceiling above: only latches while a handler is active, so an ordinary
-    // program with no try/catch still uses every slot up to STACK_MAX
-    // unchanged. run()'s dispatch loop checks and clears this flag once per
-    // instruction; see its own comment for why the value is kept (not
-    // dropped) here, unlike the hard-ceiling branch above.
+    // Soft threshold at STACK_MAX itself: only latches while a handler is
+    // active, so an ordinary program with no try/catch still uses every slot
+    // up to STACK_MAX unchanged. run()'s dispatch loop checks and clears
+    // this flag once per instruction; see its own comment for why the value
+    // is kept (not dropped) here, unlike the hard-ceiling branch above.
     if (!m_stackOverflow && !m_handlerStack.empty() &&
-        stackTop >= stack + (STACK_MAX - STACK_OVERFLOW_STACK_RESERVE)) {
+        stackTop >= stack + STACK_MAX) {
         m_stackOverflow = true;
     }
 }

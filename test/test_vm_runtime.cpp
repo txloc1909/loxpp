@@ -759,19 +759,16 @@ TEST_F(StackOverflowTest,
 }
 
 // Catchability must not depend on how deep the try/catch itself was opened.
-// The frame-count guard used `==` against the reserve threshold, so once
-// m_frameCount had already passed FRAMES_MAX - STACK_OVERFLOW_FRAME_RESERVE
-// (frame counts only increase), a try opened deeper than that never saw the
-// guard fire again — the check for `==` was never true a second time — and
-// unbounded recursion below it fell straight to the fatal hard ceiling
-// instead of being caught. deep() recurses to exactly one frame short of the
-// threshold before opening the try, so boom()'s very first call already sees
-// a frame count at the threshold.
+// The frame-count guard must test `>=`, not `==`, against FRAMES_MAX: the
+// frame count only increases, so a try opened at or past that threshold must
+// still see the guard fire on the very next call, not require passing
+// through an exact value it may already be beyond. deep() recurses to
+// exactly one frame short of FRAMES_MAX before opening the try, so boom()'s
+// very first call already sees a frame count at the threshold.
 TEST_F(StackOverflowTest,
        CatchableFramesOverflow_TryOpenedPastReserveThreshold) {
     VMTestHarness h;
-    const int thresholdDepth =
-        VM::FRAMES_MAX - VM::STACK_OVERFLOW_FRAME_RESERVE - 1;
+    const int thresholdDepth = VM::FRAMES_MAX - 3;
     std::string src = "fun boom(n) { return boom(n + 1); }"
                       "fun deep(n) {"
                       "  if (n == 0) {"
@@ -789,13 +786,11 @@ TEST_F(StackOverflowTest,
     EXPECT_EQ(h.handlerStackDepth(), 0);
 }
 
-// The value-stack guard's soft threshold re-arms on every push() while a
-// handler is active, so draining a pending defer during handleThrow()'s own
-// unwind used to keep the flag latched for the whole unwind — stackTop stays
-// above the threshold until step 3's truncation, at the very end. A nested
-// run() (for the deferred call) then saw the flag with
-// m_unwindingStackOverflow already true and took the fatal branch, so a fat
-// frame with a pending defer was never catchable at all. Same shape as
+// A pending defer must be catchable even on the frame that first crossed the
+// value-stack threshold: handleThrow()'s unwind must reclaim each discarded
+// frame's own stack window (see handleThrow()'s comment) before running its
+// defer, so the reserve lasts the whole unwind instead of being exhausted by
+// the second or third frame's defer alone. Same shape as
 // CatchableStackOverflow_FatFrame_CaughtWithCorrectKind above, plus one
 // `defer` per frame.
 TEST_F(StackOverflowTest,

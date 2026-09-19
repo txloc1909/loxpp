@@ -40,23 +40,25 @@ class VM {
     static constexpr int STACK_MAX = 16384;
     static constexpr int FRAMES_MAX = 1024;
 
-    // Both overflow guards (the frame-count check in call(), the value-stack
-    // check in push()) fire this many units before their hard ceiling above,
-    // once a handler is active, so raising StackOverflowError as a catchable
-    // Error still leaves room to unwind: closing upvalues, draining each
-    // discarded frame's pending defers (each one a real, if short-lived,
-    // nested call() — see handleThrow()/runPendingDefers()), and allocating
-    // the Error object. With no handler active neither guard reserves
-    // anything — a plain, uncaught overflow still uses every frame/slot up
-    // to the hard ceiling, unchanged from before this reserve existed.
-    // Measured directly against this reserve (test_vm_runtime.cpp's
+    // Extra capacity held ABOVE the two ceilings above, spent only while a
+    // StackOverflowError's own unwind is in progress (see
+    // m_unwindingStackOverflow). Both overflow guards (the frame-count check
+    // in call(), the value-stack check in push()) still fire exactly at
+    // FRAMES_MAX/STACK_MAX, for every program, handler or not — this reserve
+    // is not subtracted from that threshold, so an open try/catch never
+    // changes how deep a program that does not overflow can go. The room it
+    // buys is spent afterward: closing upvalues, draining each discarded
+    // frame's pending defers (each one a real, if short-lived, nested call()
+    // — see handleThrow()/runPendingDefers()), and allocating the Error
+    // object. Measured directly against this reserve (test_vm_runtime.cpp's
     // StackOverflowTest suite): one deferred call with a short (non-
     // recursive) body needs one CallFrame and a handful of value-stack
     // slots; a chain of ordinary calls inside that body costs more of each.
-    // A deferred call that outruns this reserve hits the hard ceiling
-    // instead — fatal, or caught by whatever handler still has room, per
-    // handleThrow()'s existing generic unwind — never a hang, since the
-    // reserve is small enough that no path through it can recurse for long.
+    // A deferred call that outruns this reserve hits the true hard ceiling
+    // (FRAMES_MAX/STACK_MAX plus this reserve) instead — fatal, or caught by
+    // whatever handler still has room, per handleThrow()'s existing generic
+    // unwind — never a hang, since the reserve is small enough that no path
+    // through it can recurse for long.
     static constexpr int STACK_OVERFLOW_FRAME_RESERVE = 16;
     static constexpr int STACK_OVERFLOW_STACK_RESERVE = 64;
 
@@ -188,9 +190,15 @@ class VM {
     ThrowOutcome raiseThrowableError(const char* kind_str, const char* msg,
                                      int stopAtFrameCount = 0);
 
-    CallFrame m_frames[FRAMES_MAX];
+    // Sized FRAMES_MAX/STACK_MAX plus the reserve above, not just
+    // FRAMES_MAX/STACK_MAX: the reserve is spent above those ceilings, while
+    // a StackOverflowError unwinds (see m_unwindingStackOverflow and
+    // STACK_OVERFLOW_FRAME_RESERVE/STACK_OVERFLOW_STACK_RESERVE), so the
+    // physical storage must reach past them or that unwind's own pushes run
+    // out of bounds.
+    CallFrame m_frames[FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE];
     int m_frameCount{0};
-    Value stack[STACK_MAX];
+    Value stack[STACK_MAX + STACK_OVERFLOW_STACK_RESERVE];
     Value* stackTop;
     bool m_stackOverflow{false};
     // True for the duration of one StackOverflowError's own handleThrow()
@@ -198,25 +206,18 @@ class VM {
     // guards in vm.cpp). Draining a discarded frame's defer runs arbitrary
     // Lox++ code (runPendingDefers() -> a nested run()), and that code can
     // itself recurse deep enough to reach either overflow guard again —
-    // reachable only because the reserve now lets a StackOverflowError's own
+    // reachable only because the reserve lets a StackOverflowError's own
     // unwind run deferred calls at all; every frame between the original
     // overflow and the handler can hold one. Without this flag, each such
     // nested hit re-enters handleThrow()'s own unwind through genuine C++
     // recursion (VM::call() -> raiseThrowableError() -> handleThrow() ->
     // runPendingDefers() -> a nested run() -> VM::call() -> ...), one level
-    // per remaining frame, and measurably crashes the process with a real
-    // native stack overflow — verified directly: with this flag's guard
-    // condition removed from both call sites and an ASan debug build,
-    // test_vm_runtime's SecondOverflowDuringUnwindDoesNotHangOrCorrupt
-    // aborts with "AddressSanitizer: stack-overflow", not a clean test
-    // failure. (An earlier build of this guard used `==` instead of `>=`
-    // against the frame-count threshold below; that unrelated bug capped
-    // the nested recursion at one extra level and hid this crash — fixed
-    // together with this comment, not evidence the guard is unneeded.) Both
-    // overflow guards skip the catchable path while this flag is set,
-    // falling straight through to their own hard ceiling instead: the
-    // second overflow "stays fatal", per this row's own original design
-    // note.
+    // per remaining frame, crashing the process with a real native stack
+    // overflow instead of a Lox++-level fault. Both overflow guards skip the
+    // catchable path while this flag is set, falling straight through to
+    // their own hard ceiling (FRAMES_MAX/STACK_MAX plus the reserve) instead:
+    // the second overflow stays fatal, it is never handed to the same
+    // handler a second time.
     bool m_unwindingStackOverflow{false};
     MemoryManager m_mm;
     Table m_globals;
@@ -245,15 +246,19 @@ class VM {
     // jump already left.
     std::vector<HandlerRecord> m_handlerStack;
 
-    // Per-frame defer lists — parallel to m_frames[]. Each entry is a
-    // vector of ObjClosure* (thunks) pending invocation LIFO.
-    std::array<std::vector<Value>, FRAMES_MAX> m_deferLists;
+    // Per-frame defer lists — parallel to m_frames[], so sized to match it
+    // (FRAMES_MAX plus the reserve; see m_frames' own comment). Each entry is
+    // a vector of ObjClosure* (thunks) pending invocation LIFO.
+    std::array<std::vector<Value>, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
+        m_deferLists;
 
 #ifdef LOXPP_PROFILE
     ProfilerData m_profilerData;
     // Parallel to m_frames[]: active ProfileFunctionScope per call depth.
-    // .emplace() at function entry; .reset() at Op::RETURN.
-    std::array<std::optional<ProfileFunctionScope>, FRAMES_MAX>
+    // .emplace() at function entry; .reset() at Op::RETURN. Sized to match
+    // m_frames (FRAMES_MAX plus the reserve; see its own comment).
+    std::array<std::optional<ProfileFunctionScope>,
+               FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
         m_profilerScopes;
 
   public:
