@@ -107,12 +107,17 @@ VM::CallOutcome VM::call(ObjClosure* closure, int argCount,
         runtimeError("Expected %d arguments but got %d.", fn->arity, argCount);
         return CallOutcome::Uncaught;
     }
-    // Fires FRAME_RESERVE frames early, and only while a handler is active,
-    // so the unwind that follows (closing upvalues, draining each discarded
-    // frame's own defers, building the Error) has room before the hard
-    // ceiling below. No handler active: skip straight to the hard ceiling,
-    // same as before this reserve existed — nothing needs the room.
-    if (m_frameCount == FRAMES_MAX - STACK_OVERFLOW_FRAME_RESERVE &&
+    // Fires at or above the FRAME_RESERVE threshold, and only while a handler
+    // is active, so the unwind that follows (closing upvalues, draining each
+    // discarded frame's own defers, building the Error) has room before the
+    // hard ceiling below. This must be `>=`, not `==`: m_frameCount only
+    // increases, so a try opened after it has already passed the threshold
+    // (a handler installed deeper than FRAMES_MAX - RESERVE) would never see
+    // an exact match again, and the reserve would silently stop applying for
+    // the rest of that call chain. No handler active: skip straight to the
+    // hard ceiling, same as before this reserve existed — nothing needs the
+    // room.
+    if (m_frameCount >= FRAMES_MAX - STACK_OVERFLOW_FRAME_RESERVE &&
         !m_handlerStack.empty() && !m_unwindingStackOverflow) {
         // See m_unwindingStackOverflow's own comment (vm.h): a deferred call
         // drained by the handleThrow() below can itself reach this same

@@ -758,6 +758,37 @@ TEST_F(StackOverflowTest,
     EXPECT_EQ(h.handlerStackDepth(), 0);
 }
 
+// Catchability must not depend on how deep the try/catch itself was opened.
+// The frame-count guard used `==` against the reserve threshold, so once
+// m_frameCount had already passed FRAMES_MAX - STACK_OVERFLOW_FRAME_RESERVE
+// (frame counts only increase), a try opened deeper than that never saw the
+// guard fire again — the check for `==` was never true a second time — and
+// unbounded recursion below it fell straight to the fatal hard ceiling
+// instead of being caught. deep() recurses to exactly one frame short of the
+// threshold before opening the try, so boom()'s very first call already sees
+// a frame count at the threshold.
+TEST_F(StackOverflowTest,
+       CatchableFramesOverflow_TryOpenedPastReserveThreshold) {
+    VMTestHarness h;
+    const int thresholdDepth =
+        VM::FRAMES_MAX - VM::STACK_OVERFLOW_FRAME_RESERVE - 1;
+    std::string src = "fun boom(n) { return boom(n + 1); }"
+                      "fun deep(n) {"
+                      "  if (n == 0) {"
+                      "    try { boom(0); } catch (e) { kind = e.kind; }"
+                      "    return 0;"
+                      "  }"
+                      "  return deep(n - 1);"
+                      "}"
+                      "var kind;"
+                      "deep(" +
+                      std::to_string(thresholdDepth) + ");";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "StackOverflowError");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
 // A handler-free deep recursion must still reach the full FRAMES_MAX ceiling
 // — the reserve must not shrink the usable depth when nothing will catch the
 // fault. Regression guard for the reserve added alongside the checks above:
