@@ -226,6 +226,10 @@ probes=(
     # cannot even run (both sides give empty stdout and a matching non-zero
     # exit), so this probe also needs the exit-code-checked loop below.
     "test/translation-probes/48_file_visible_after_close.lox"
+    # Issue #268: pins the success side of the frame-count ceiling boundary
+    # (31_deep_recursion.lox below pins the failure side). Catches a
+    # counter that starts too high and rejects a depth native accepts.
+    "test/translation-probes/53_deep_recursion_boundary.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
