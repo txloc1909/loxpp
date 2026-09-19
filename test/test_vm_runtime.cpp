@@ -984,7 +984,7 @@ TEST_F(StackOverflowTest, SecondOverflowDuringUnwindDoesNotHangOrCorrupt) {
 }
 
 // ===========================================================================
-// handleThrow() must root thrownValue for its whole unwind (R9), not just
+// handleThrow() must root thrownValue for its whole unwind, not just
 // the ObjError raiseThrowableError() builds. A plain `throw` of a heap value
 // takes the same handleThrow() unwind as a StackOverflowError, so it needs
 // the same protection: a defer in the unwound frame runs arbitrary Lox++
@@ -1054,16 +1054,16 @@ TEST_F(StackOverflowTest,
 }
 
 // ===========================================================================
-// An open try/catch must never cost even one value-stack slot (R10). R7's
-// regression test (NoHandler_ReserveDoesNotShrinkUsableDepth) covers only
-// the no-handler half; these cover the handler-active half at both overflow
-// sites: the greatest depth that succeeds with no try must also succeed
-// inside a try, and one step deeper must still fail with no try.
+// An open try/catch must never cost even one value-stack slot.
+// NoHandler_ReserveDoesNotShrinkUsableDepth covers only the no-handler
+// half; these cover the handler-active half at both overflow sites: the
+// greatest depth that succeeds with no try must also succeed inside a try,
+// and one step deeper must still fail with no try.
 // ===========================================================================
 
 // Frame-count site. DeepRecursionExceedsFramesMax_RuntimeError already
 // covers "1023 fails with no try"; this covers "1022 succeeds inside a try"
-// — the half R10 showed was still missing at the sibling (value-stack) site.
+// — the half that was still missing at the sibling (value-stack) site.
 TEST_F(StackOverflowTest,
        CatchableFramesOverflow_TryOpenDoesNotShrinkUsableDepth) {
     VMTestHarness h;
@@ -1083,10 +1083,10 @@ TEST_F(StackOverflowTest,
 
 // Value-stack site. Same 20-local-per-frame shape as the fat-frame tests
 // above, recursed to depth 743, plus N "pad" locals declared in the
-// enclosing scope so the peak lands exactly at STACK_MAX slots. Measured
-// (round-3 review): pad=13 succeeds with no try but was wrongly caught as
-// StackOverflowError inside a try (the soft threshold's own one-slot gap);
-// pad=14 fails both ways. makePadLocals(n) generates "var p0=0; ... var
+// enclosing scope so the peak lands exactly at STACK_MAX slots. Measured:
+// pad=13 succeeds with no try but was wrongly caught as StackOverflowError
+// inside a try (the soft threshold's own one-slot gap); pad=14 fails both
+// ways. makePadLocals(n) generates "var p0=0; ... var
 // p(n-1)=n-1;" so the exact boundary count does not need to be hand-typed.
 namespace {
 std::string makePadLocals(int count) {
