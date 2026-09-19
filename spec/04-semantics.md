@@ -1117,8 +1117,11 @@ which case it does not halt the program; instead it is delivered to that
 `try` statement's `catchBlock` as an `Error` value, exactly as the
 [`throw` Statement](#throw-statement) describes for any other thrown
 value. An error that occurs during the execution of the `catchBlock`
-itself is not caught by that same `try` statement. Every cause below is
-catchable this way.
+itself is not caught by that same `try` statement. A `StackOverflowError`
+that is raised while another `StackOverflowError` is already unwinding —
+that is, by a deferred call that runs during that unwind — is not
+delivered to any `catchBlock`; it halts the program as an uncaught error.
+Every cause below is catchable this way.
 
 The table lists each cause, an example, and the `kind` field
 ([§03-types](03-types.md#error)) of the `Error` value delivered to

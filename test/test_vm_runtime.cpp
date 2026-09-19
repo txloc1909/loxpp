@@ -12,8 +12,10 @@
 //   reads.
 
 #include "test_harness.h"
+#include "container_objects.h"
 #include <gtest/gtest.h>
 #include <cmath>
+#include <cstdlib>
 #include <optional>
 
 // ===========================================================================
@@ -699,5 +701,433 @@ TEST_F(StackOverflowTest, DeepRecursionExceedsFramesMax_RuntimeError) {
                       "down(1023);";
     EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR);
     // Stack must be clean after a runtime error, same as the STACK_MAX path.
+    EXPECT_EQ(h.stackDepth(), 0);
+}
+
+// ===========================================================================
+// Catchable StackOverflowError (spec/04-semantics.md's Runtime Errors table)
+// ===========================================================================
+//
+// With no handler active, the two tests above are unaffected: recursion still
+// runs all the way to FRAMES_MAX/STACK_MAX before failing, unchanged from
+// before VM::STACK_OVERFLOW_FRAME_RESERVE/STACK_OVERFLOW_STACK_RESERVE
+// existed. The tests below cover the case a handler IS active.
+
+// Unbounded recursion under a try/catch must be caught as a StackOverflowError
+// Error value, not fall through to the fatal path, on the frame-count guard.
+TEST_F(StackOverflowTest, CatchableFramesOverflow_CaughtWithCorrectKind) {
+    VMTestHarness h;
+    std::string src = "fun f(n) { return f(n + 1); }"
+                      "var kind; var msg;"
+                      "try {"
+                      "  f(0);"
+                      "} catch (e) {"
+                      "  kind = e.kind;"
+                      "  msg = e.message;"
+                      "}";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "StackOverflowError");
+    EXPECT_EQ(h.getGlobalStr("msg"), "Stack overflow.");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+// Same fault, but reached through the value-stack guard (push()) instead of
+// the frame-count guard, via the same fat-frame shape the STACK_MAX test
+// above uses. Proves both overflow sites, not just VM::call()'s, are wired.
+TEST_F(StackOverflowTest,
+       CatchableStackOverflow_FatFrame_CaughtWithCorrectKind) {
+    VMTestHarness h;
+    std::string src =
+        "fun down(n) {"
+        "  var a = 1; var b = 2; var c = 3; var d = 4; var e = 5;"
+        "  var g = 6; var h = 7; var i = 8; var j = 9; var k = 10;"
+        "  var l = 11; var m = 12; var o = 13; var p = 14; var q = 15;"
+        "  var r = 16; var s = 17; var t = 18; var u = 19; var v = 20;"
+        "  if (n == 0) return a+b+c+d+e+g+h+i+j+k+l+m+o+p+q+r+s+t+u+v;"
+        "  return down(n - 1);"
+        "}"
+        "var kind;"
+        "try {"
+        "  down(2000);"
+        "} catch (err) {"
+        "  kind = err.kind;"
+        "}";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "StackOverflowError");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+// Catchability must not depend on how deep the try/catch itself was opened.
+// The frame-count guard must test `>=`, not `==`, against FRAMES_MAX: the
+// frame count only increases, so a try opened at or past that threshold must
+// still see the guard fire on the very next call, not require passing
+// through an exact value it may already be beyond. deep() recurses to
+// exactly one frame short of FRAMES_MAX before opening the try, so boom()'s
+// very first call already sees a frame count at the threshold.
+TEST_F(StackOverflowTest,
+       CatchableFramesOverflow_TryOpenedPastReserveThreshold) {
+    VMTestHarness h;
+    const int thresholdDepth = VM::FRAMES_MAX - 3;
+    std::string src = "fun boom(n) { return boom(n + 1); }"
+                      "fun deep(n) {"
+                      "  if (n == 0) {"
+                      "    try { boom(0); } catch (e) { kind = e.kind; }"
+                      "    return 0;"
+                      "  }"
+                      "  return deep(n - 1);"
+                      "}"
+                      "var kind;"
+                      "deep(" +
+                      std::to_string(thresholdDepth) + ");";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "StackOverflowError");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+// A pending defer must be catchable even on the frame that first crossed the
+// value-stack threshold: handleThrow()'s unwind must reclaim each discarded
+// frame's own stack window (see handleThrow()'s comment) before running its
+// defer, so the reserve lasts the whole unwind instead of being exhausted by
+// the second or third frame's defer alone. Same shape as
+// CatchableStackOverflow_FatFrame_CaughtWithCorrectKind above, plus one
+// `defer` per frame.
+TEST_F(StackOverflowTest,
+       CatchableStackOverflow_FatFrameWithDefer_CaughtWithCorrectKind) {
+    VMTestHarness h;
+    std::string src =
+        "fun record(n) { return n; }"
+        "fun down(n) {"
+        "  var a = 1; var b = 2; var c = 3; var d = 4; var e = 5;"
+        "  var g = 6; var h = 7; var i = 8; var j = 9; var k = 10;"
+        "  var l = 11; var m = 12; var o = 13; var p = 14; var q = 15;"
+        "  var r = 16; var s = 17; var t = 18; var u = 19; var v = 20;"
+        "  defer record(n);"
+        "  down(n - 1);"
+        "}"
+        "var kind;"
+        "try {"
+        "  down(2000);"
+        "} catch (err) {"
+        "  kind = err.kind;"
+        "}";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "StackOverflowError");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+// A handler-free deep recursion must still reach the full FRAMES_MAX ceiling
+// — the reserve must not shrink the usable depth when nothing will catch the
+// fault. Regression guard for the reserve added alongside the checks above:
+// with no handler active, VM::call()'s early check must never fire, so this
+// stays exactly the DeepestFramesMaxRecursion_Succeeds/
+// DeepRecursionExceedsFramesMax_RuntimeError pair's own boundary (1022 ok,
+// 1023 fatal), not FRAMES_MAX - STACK_OVERFLOW_FRAME_RESERVE.
+TEST_F(StackOverflowTest, NoHandler_ReserveDoesNotShrinkUsableDepth) {
+    VMTestHarness h;
+    std::string src =
+        "fun down(n) {"
+        "  if (n == 0) return 0;"
+        "  return down(n - 1);"
+        "}"
+        "down(" +
+        std::to_string(VM::FRAMES_MAX - VM::STACK_OVERFLOW_FRAME_RESERVE) +
+        ");";
+    ASSERT_EQ(h.run(src), InterpretResult::OK)
+        << "a depth inside the reserve window must still succeed when no "
+           "handler is active to use that reserve";
+}
+
+// Every frame unwound on the way to the handler must run its own pending
+// defer (spec/04-semantics.md's defer Statement, step 4) — not just the
+// handful nearest the overflow that fit without the reserve. Each recursion
+// level's defer appends its own depth to a list; the list, once caught, must
+// hold every depth from the deepest call down to (but not including) the
+// frame that installed the handler, in unwind order (deepest first).
+//
+// f's body calls f(n + 1) as a bare statement, not `return f(n + 1);`: an
+// explicit-value return would run this frame's own RUN_DEFERS (and so
+// record(n)) before evaluating the return expression, since
+// Compiler::returnStatement() emits RUN_DEFERS ahead of the returned
+// expression rather than after it — every existing defer example returns
+// bare (`return;`) or falls off the end, so this ordering defect has no
+// covering test yet (tracked separately; not this node's own mechanism).
+// The bare-statement shape here reaches only the fall-off-the-end path,
+// which is unaffected, so this test isolates handleThrow()'s own unwind-time
+// draining — the mechanism this node actually adds — from that defect.
+TEST_F(StackOverflowTest,
+       CatchableFramesOverflow_DrainsEveryUnwoundFramesDefer) {
+    VMTestHarness h;
+    std::string src = "var ran = [];"
+                      "fun record(n) { ran.append(n); }"
+                      "fun f(n) {"
+                      "  defer record(n);"
+                      "  f(n + 1);"
+                      "}"
+                      "var kind;"
+                      "try {"
+                      "  f(0);"
+                      "} catch (e) {"
+                      "  kind = e.kind;"
+                      "}";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "StackOverflowError");
+    auto ranVal = h.getGlobal("ran");
+    ASSERT_TRUE(ranVal.has_value());
+    ASSERT_TRUE(isList(*ranVal));
+    ObjList* ran = asObjList(as<Obj*>(*ranVal));
+    // The deepest frame (whichever one first hit the reserve boundary) drains
+    // first, so its recorded depth is the list's first (highest) entry.
+    ASSERT_FALSE(ran->elements.empty());
+    for (std::size_t idx = 1; idx < ran->elements.size(); ++idx) {
+        EXPECT_EQ(as<Number>(ran->elements[idx - 1]) - 1,
+                  as<Number>(ran->elements[idx]))
+            << "defers must run in LIFO unwind order (deepest frame first), "
+               "with no frame's defer skipped, at list index "
+            << idx;
+    }
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+// The StackOverflowError object itself must survive a collection that runs
+// during its own unwind. Each unwound frame's defer here allocates a fresh
+// string, and LOXPP_STRESS_GC=1 (set for VMTestHarness's own VM, restored
+// after) forces a collection on every one of those allocations, so one runs
+// between the Error's construction and the moment handleThrow() finally
+// pushes it for the catch block to read. An Error left unrooted across that
+// window is reclaimed and replaced by whatever allocation runs next, so the
+// catch block reads freed memory instead of the StackOverflowError.
+TEST_F(StackOverflowTest,
+       CatchableFramesOverflow_AllocatingDeferSurvivesCollection) {
+    const char* prevStressGC = std::getenv("LOXPP_STRESS_GC");
+    std::string prevStressGCValue = prevStressGC ? prevStressGC : "";
+    ::setenv("LOXPP_STRESS_GC", "1", 1);
+    // MemoryManager reads this once at construction (see its own comment),
+    // so it must be set before VMTestHarness's VM member exists, and it is
+    // safe to restore right after — no VM constructed later in this test
+    // reads it again.
+    VMTestHarness h;
+    if (prevStressGC) {
+        ::setenv("LOXPP_STRESS_GC", prevStressGCValue.c_str(), 1);
+    } else {
+        ::unsetenv("LOXPP_STRESS_GC");
+    }
+    std::string src = "fun record(n) { return \"padded-\" + str(n); }"
+                      "fun f(n) {"
+                      "  defer record(n);"
+                      "  f(n + 1);"
+                      "}"
+                      "var kind; var msg;"
+                      "try {"
+                      "  f(0);"
+                      "} catch (e) {"
+                      "  kind = e.kind;"
+                      "  msg = e.message;"
+                      "}";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "StackOverflowError");
+    EXPECT_EQ(h.getGlobalStr("msg"), "Stack overflow.");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+// A deferred call that itself recurses far enough to outrun the reserve must
+// not hang or corrupt VM state. This directly exercises the "prove a new
+// check can fail" hazard the frame reserve exists to bound: with the guard
+// in VM::call()/push() removed (m_unwindingStackOverflow ignored), this
+// program does not hang — it crashes. Every one of `f`'s ~1000 unwound
+// frames hands its own recorded `boom(n)` to handleThrow()'s unwind loop;
+// boom's own 500-deep recursion reaches the reserve boundary again while the
+// ORIGINAL StackOverflowError's handleThrow() call is still on the C++ call
+// stack, and an unguarded second catch attempt there reenters handleThrow()
+// through genuine C++ recursion (run() -> runPendingDefers() ->
+// handleThrow() -> raiseThrowableError() -> a new run()) once per remaining
+// frame — verified directly: reverting m_unwindingStackOverflow's guard at
+// both sites reproduces a real AddressSanitizer stack-overflow abort inside
+// this exact test, not a graceful Lox++-level fault. The fix makes the
+// second overflow "stay fatal" (this row's own original design note) rather
+// than try to catch it again: the outer try/catch below never runs its
+// catchBlock, the whole program halts uncaught, and the check here is that
+// halting is all it does — no crash, no hang, and a fully torn-down VM.
+TEST_F(StackOverflowTest, SecondOverflowDuringUnwindDoesNotHangOrCorrupt) {
+    VMTestHarness h;
+    // f(n + 1) is a bare statement, not a return expression — see the
+    // comment on CatchableFramesOverflow_DrainsEveryUnwoundFramesDefer for
+    // why: this keeps every frame's defer pending until handleThrow's own
+    // unwind, which is what this test means to stress.
+    std::string src = "fun deepcall(n) {"
+                      "  if (n == 0) return 0;"
+                      "  return deepcall(n - 1);"
+                      "}"
+                      "fun boom(n) { deepcall(500); }"
+                      "fun f(n) {"
+                      "  defer boom(n);"
+                      "  f(n + 1);"
+                      "}"
+                      "try {"
+                      "  f(0);"
+                      "} catch (e) {"
+                      "}";
+    // The second, deeper overflow (inside boom's own deepcall(500)) reaches
+    // the true FRAMES_MAX ceiling before it can be drained to completion, so
+    // this resolves as a hard, uncaught error — not the outer try/catch
+    // catching it — matching the "stays fatal" design this reserve accepts.
+    EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR);
+    // Whatever path the second overflow took, the VM must land in a clean,
+    // fully-unwound state — never a stray handler, frame, or stack value.
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+// ===========================================================================
+// handleThrow() must root thrownValue for its whole unwind, not just
+// the ObjError raiseThrowableError() builds. A plain `throw` of a heap value
+// takes the same handleThrow() unwind as a StackOverflowError, so it needs
+// the same protection: a defer in the unwound frame runs arbitrary Lox++
+// code and can allocate, forcing a collection (LOXPP_STRESS_GC=1) while
+// thrownValue is off the value stack. Two shapes: a named local (the only
+// reference is the frame slot that gets reclaimed) and a temporary (never
+// named at all).
+// ===========================================================================
+
+TEST_F(StackOverflowTest,
+       CatchableThrow_NamedLocalSurvivesCollectionDuringUnwind) {
+    const char* prevStressGC = std::getenv("LOXPP_STRESS_GC");
+    std::string prevStressGCValue = prevStressGC ? prevStressGC : "";
+    ::setenv("LOXPP_STRESS_GC", "1", 1);
+    VMTestHarness h;
+    if (prevStressGC) {
+        ::setenv("LOXPP_STRESS_GC", prevStressGCValue.c_str(), 1);
+    } else {
+        ::unsetenv("LOXPP_STRESS_GC");
+    }
+    std::string src = "fun alloc(n) {"
+                      "  var s = \"\"; var i = 0;"
+                      "  while (i < 30) { s = s + \"padpadpadpad\" + str(n);"
+                      "                   i = i + 1; }"
+                      "  return s;"
+                      "}"
+                      "fun g(n) {"
+                      "  var payload = \"payload-\" + str(n);"
+                      "  defer alloc(n);"
+                      "  throw payload;"
+                      "}"
+                      "var caught;"
+                      "try { g(7); } catch (e) { caught = e; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("caught"), "payload-7");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+TEST_F(StackOverflowTest,
+       CatchableThrow_TemporarySurvivesCollectionDuringUnwind) {
+    const char* prevStressGC = std::getenv("LOXPP_STRESS_GC");
+    std::string prevStressGCValue = prevStressGC ? prevStressGC : "";
+    ::setenv("LOXPP_STRESS_GC", "1", 1);
+    VMTestHarness h;
+    if (prevStressGC) {
+        ::setenv("LOXPP_STRESS_GC", prevStressGCValue.c_str(), 1);
+    } else {
+        ::unsetenv("LOXPP_STRESS_GC");
+    }
+    std::string src = "fun alloc(n) {"
+                      "  var s = \"\"; var i = 0;"
+                      "  while (i < 30) { s = s + \"padpadpadpad\" + str(n);"
+                      "                   i = i + 1; }"
+                      "  return s;"
+                      "}"
+                      "fun g(n) {"
+                      "  defer alloc(n);"
+                      "  throw \"payload-\" + str(n);"
+                      "}"
+                      "var caught;"
+                      "try { g(7); } catch (e) { caught = e; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("caught"), "payload-7");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+// ===========================================================================
+// An open try/catch must never cost even one value-stack slot.
+// NoHandler_ReserveDoesNotShrinkUsableDepth covers only the no-handler
+// half; these cover the handler-active half at both overflow sites: the
+// greatest depth that succeeds with no try must also succeed inside a try,
+// and one step deeper must still fail with no try.
+// ===========================================================================
+
+// Frame-count site. DeepRecursionExceedsFramesMax_RuntimeError already
+// covers "1023 fails with no try"; this covers "1022 succeeds inside a try"
+// — the half that was still missing at the sibling (value-stack) site.
+TEST_F(StackOverflowTest,
+       CatchableFramesOverflow_TryOpenDoesNotShrinkUsableDepth) {
+    VMTestHarness h;
+    std::string src = "fun down(n) {"
+                      "  if (n == 0) return 0;"
+                      "  return down(n - 1);"
+                      "}"
+                      "var ok = false; var caught;"
+                      "try { down(1022); ok = true; }"
+                      "catch (e) { caught = e.kind; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    expect_global_bool(h, "ok", true);
+    expect_global_nil(h, "caught");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+// Value-stack site. Same 20-local-per-frame shape as the fat-frame tests
+// above, recursed to depth 743, plus N "pad" locals declared in the
+// enclosing scope so the peak lands exactly at STACK_MAX slots. Measured:
+// pad=13 succeeds with no try but was wrongly caught as StackOverflowError
+// inside a try (the soft threshold's own one-slot gap); pad=14 fails both
+// ways. makePadLocals(n) generates "var p0=0; ... var
+// p(n-1)=n-1;" so the exact boundary count does not need to be hand-typed.
+namespace {
+std::string makePadLocals(int count) {
+    std::string out;
+    for (int i = 0; i < count; ++i) {
+        out += "var p" + std::to_string(i) + " = " + std::to_string(i) + "; ";
+    }
+    return out;
+}
+
+std::string fatFrameDownFn() {
+    return "fun down(n) {"
+           "  var a = 1; var b = 2; var c = 3; var d = 4; var e = 5;"
+           "  var g = 6; var h = 7; var i = 8; var j = 9; var k = 10;"
+           "  var l = 11; var m = 12; var o = 13; var p = 14; var q = 15;"
+           "  var r = 16; var s = 17; var t = 18; var u = 19; var v = 20;"
+           "  if (n == 0) return 0;"
+           "  return down(n - 1);"
+           "}";
+}
+} // namespace
+
+TEST_F(StackOverflowTest,
+       CatchableStackOverflow_FatFrame_TryOpenDoesNotShrinkUsableDepth) {
+    VMTestHarness h;
+    std::string src = fatFrameDownFn() + "var ok = false; var caught;" +
+                      "try { " + makePadLocals(13) +
+                      "down(743); ok = true; }"
+                      "catch (e) { caught = e.kind; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    expect_global_bool(h, "ok", true);
+    expect_global_nil(h, "caught");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+TEST_F(StackOverflowTest,
+       CatchableStackOverflow_FatFrame_OneMoreSlot_RuntimeErrorWithNoTry) {
+    VMTestHarness h;
+    std::string src =
+        fatFrameDownFn() + "{ " + makePadLocals(14) + "down(743); }";
+    EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR);
     EXPECT_EQ(h.stackDepth(), 0);
 }

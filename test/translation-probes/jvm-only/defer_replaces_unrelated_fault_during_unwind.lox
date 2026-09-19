@@ -1,0 +1,25 @@
+// Proves runtime/jvm/src/lox/LoxClosure.java's s_unwindingStackOverflow
+// guard follows only the fault it is actually watching for, not any
+// replacement a deferred call happens to produce. `inner` exits by its own
+// throw `W`; its deferred call's throw `Y` replaces `W` per
+// spec/04-semantics.md defer Statement step 5 — a real replacement, but of
+// `W`, never of the StackOverflowError unwinding elsewhere in the program.
+// `boom` catches `Y` locally; that must not clear the guard, so
+// `deepcall(500)` right after it overflows again while the first overflow
+// is still unwinding, which spec/04-semantics.md line 1119 makes fatal —
+// matching native, which distinguishes "replaces the fault I am unwinding"
+// from "replaces some other fault entirely" by tracking the exact fault
+// object, not merely whether some unwind happens to be in progress.
+//
+// Lives in jvm-only/ for the same reason catch_overflow.lox does: the CLR
+// backend does not yet deliver this fault with the correct catchability
+// (issue #238).
+class W {}
+class Y {}
+fun ty() { throw Y(); }
+fun inner() { defer ty(); throw W(); }
+fun deepcall(n) { if (n == 0) return 0; return deepcall(n - 1); }
+fun boom(n) { try { inner(); } catch (e) { } deepcall(500); }
+fun f(n) { defer boom(n); f(n + 1); }
+try { f(0); } catch (e) { print "caught " + e.kind; }
+print "after";

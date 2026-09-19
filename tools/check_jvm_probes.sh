@@ -106,6 +106,19 @@ probes=(
     "examples/try_catch_class_constructor_arity.lox"
     "examples/try_catch_error_instance_properties_catchable.lox"
     "examples/try_catch_error_vs_ordinary_instance_catchability.lox"
+    # Issue #268: LoxClosure's own frame-count ceiling delivers a catchable
+    # StackOverflowError, matching native's kind, message, and post-catch
+    # continuation. jvm-only/ because the CLR backend still delivers this
+    # same fault with the wrong catchability as of this probe (issue #238).
+    "test/translation-probes/jvm-only/catch_overflow.lox"
+    # Issue #268: pins the success side of the frame-count ceiling boundary
+    # (31_deep_recursion.lox below pins the failure side). Catches a
+    # counter that starts too high and rejects a depth native accepts.
+    "test/translation-probes/53_deep_recursion_boundary.lox"
+    # Issue #268: a deferred call's own throw, while a StackOverflowError
+    # unwinds, replaces it — the guard must still clear so a later,
+    # unrelated overflow is caught.
+    "test/translation-probes/jvm-only/defer_replaces_overflow.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -116,6 +129,33 @@ probes=(
 # and that printed text must match exactly too.
 error_probes=(
     "test/translation-probes/24_call_before_closure.lox"
+    # Issue #268: LoxClosure's own frame-count ceiling. Both sides must
+    # fail with empty stdout — native via src/vm.h's FRAMES_MAX, the JVM
+    # backend via runtime/jvm/src/lox/LoxClosure.java's own counter.
+    "test/translation-probes/31_deep_recursion.lox"
+    # Issue #268: a StackOverflowError raised by a deferred call while
+    # another one is still unwinding is fatal on both sides, per
+    # spec/04-semantics.md line 1120 (not delivered to any catchBlock).
+    "test/translation-probes/jvm-only/defer_overflow_during_unwind.lox"
+    # Issue #268: a plain instance whose "kind" field spoofs
+    # "StackOverflowError", thrown and caught entirely inside a deferred
+    # call, must not clear the unwind guard early — the real overflow still
+    # in progress must stay fatal against a second one, per
+    # spec/04-semantics.md line 1120.
+    "test/translation-probes/jvm-only/defer_overflow_kind_spoof.lox"
+    # Issue #268: a deferred call's throw on a NORMAL return (no fault
+    # propagating out of the deferring frame at all) must not be handed the
+    # unwind guard's identity, even while an unrelated StackOverflowError
+    # unwinds elsewhere in the program — the real overflow still in
+    # progress must stay fatal against a second one, per
+    # spec/04-semantics.md line 1120.
+    "test/translation-probes/jvm-only/defer_throw_on_normal_return_during_unwind.lox"
+    # Issue #268: a deferred call's throw that replaces a DIFFERENT,
+    # unrelated fault (not the StackOverflowError unwinding elsewhere in
+    # the program) must not be handed the unwind guard's identity — the
+    # real overflow still in progress must stay fatal against a second one,
+    # per spec/04-semantics.md line 1120.
+    "test/translation-probes/jvm-only/defer_replaces_unrelated_fault_during_unwind.lox"
     # Every arm names a real constructor (so
     # checkEnumExhaustiveness accepts it as exhaustive) but every guard is
     # false at run time, so no arm actually accepts the value — a real,

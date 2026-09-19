@@ -3,6 +3,8 @@
 #include <cctype>
 #include <cstddef>
 #include <iostream>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -25,6 +27,42 @@ std::string trim(std::string s) {
         ++start;
     }
     return s.substr(start);
+}
+
+// The key name inside a nlohmann error text, if any:
+// "[json.exception.out_of_range.403] key 'newName' not found" -> "newName".
+std::optional<std::string> jsonFieldName(const char* what) {
+    if (what == nullptr) {
+        return std::nullopt;
+    }
+    const std::string text(what);
+    const std::size_t open = text.find('\'');
+    if (open == std::string::npos) {
+        return std::nullopt;
+    }
+    const std::size_t close = text.find('\'', open + 1);
+    if (close == std::string::npos || close == open + 1) {
+        return std::nullopt;
+    }
+    return text.substr(open + 1, close - open - 1);
+}
+
+// Short wire message for a missing key. The raw exception text names
+// library ids that mean nothing to a client, so only the field travels.
+std::string missingFieldMessage(const json::out_of_range& e) {
+    if (auto field = jsonFieldName(e.what())) {
+        return "invalid params: missing field '" + *field + "'";
+    }
+    return "invalid params";
+}
+
+// Wrong types and other shape errors share one message: their texts carry
+// no stable field name, so only the kind travels.
+std::string invalidFieldMessage(const json::exception& e) {
+    if (auto field = jsonFieldName(e.what())) {
+        return "invalid params: invalid field '" + *field + "'";
+    }
+    return "invalid params";
 }
 
 } // namespace
@@ -140,6 +178,12 @@ void JsonRpc::dispatch(const json& message) {
             sendResult(id, it->second(params));
         } catch (const RpcError& e) {
             sendError(id, e.code, e.message);
+        } catch (const json::out_of_range& e) {
+            sendError(id, RpcErrorCode::InvalidParams, missingFieldMessage(e));
+        } catch (const json::type_error& e) {
+            sendError(id, RpcErrorCode::InvalidParams, invalidFieldMessage(e));
+        } catch (const json::exception& e) {
+            sendError(id, RpcErrorCode::InvalidParams, invalidFieldMessage(e));
         } catch (const std::exception& e) {
             sendError(id, RpcErrorCode::InternalError, e.what());
         }
@@ -152,6 +196,12 @@ void JsonRpc::dispatch(const json& message) {
     }
     try {
         it->second(params);
+    } catch (const json::out_of_range& e) {
+        logLine(std::string("notification handler error: ") +
+                missingFieldMessage(e));
+    } catch (const json::exception& e) {
+        logLine(std::string("notification handler error: ") +
+                invalidFieldMessage(e));
     } catch (const std::exception& e) {
         logLine(std::string("notification handler error: ") + e.what());
     }

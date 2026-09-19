@@ -1475,8 +1475,41 @@ class LoxFunction {
             i = i + 1;
         }
         var savedDefers = interp.pendingDefers;
+        var savedStringifyDepth = interp.stringifyDepth;
         interp.pendingDefers = [];
-        interp.execBlock(this.body, callEnv);
+        // This interpreter is itself a Lox++ program, run by the native VM,
+        // so a deeply recursive TARGET program borrows native's own call-
+        // frame budget through this method's own recursion. Native delivers
+        // that exhaustion as a catchable StackOverflowError (see #267); the
+        // try here is what makes the fault visible to the target program's
+        // own try/catch, converting it into this interpreter's flag-based
+        // error the same way every other runtime fault already is, then
+        // falling through to the ordinary code below -- exactly as if
+        // execBlock had simply returned with throwFlag set.
+        try {
+            interp.execBlock(this.body, callEnv);
+        } catch (e) {
+            if (e.kind != "StackOverflowError") throw e;
+            // pendingDefers needs no repair: this try's own scope holds only
+            // THIS call's own accumulated defers at the moment of the fault
+            // -- the overflow is native refusing to enter the NEXT frame, so
+            // no deeper LoxFunction.call ever started, let alone left
+            // anything behind -- and the code below drains it exactly as it
+            // does on the normal path. stringifyDepth is different: it is a
+            // plain counter on the interpreter, not scoped to a call, and a
+            // deep value print interrupted mid-recursion (this.body's own
+            // execStmt calling stringify(), still inside this try) leaves it
+            // above its value at entry with none of stringify()'s own
+            // decrements having run. returnFlag/returnValue are cleared on
+            // general principle: execBlock returns as soon as either is set,
+            // so the statement whose own evaluation just overflowed cannot
+            // have set them already, but nothing enforces that as an
+            // invariant of this file.
+            interp.stringifyDepth = savedStringifyDepth;
+            interp.returnFlag     = false;
+            interp.returnValue    = nil;
+            interp.setError("StackOverflowError", "Stack overflow.", 0);
+        }
         var funcDefers = interp.pendingDefers;
         interp.pendingDefers = savedDefers;
         // Capture the return value from this function's own execution, before defers run.
@@ -1487,6 +1520,13 @@ class LoxFunction {
             interp.returnFlag  = false;
             interp.returnValue = nil;
         }
+        // This loop runs after the try above has already exited, so a
+        // StackOverflowError here is caught by an ANCESTOR call's own try,
+        // not this one -- this function's own remaining deferred calls
+        // (the ones this loop has not reached yet) do not run. Known limit,
+        // not fixed here: draining defers is itself unbounded recursion
+        // through the same evaluator, so wrapping this loop only moves the
+        // same problem one level in, onto whichever deferred call runs last.
         var j = len(funcDefers) - 1;
         while (j >= 0) {
             var defer_item = funcDefers[j];
@@ -2071,6 +2111,12 @@ class Interpreter {
         this.thrownValue   = nil;
         this.pendingDefers = [];
         this.stringifyDepth = 0;
+        // High-water mark of stringifyDepth, for tools/check_bootstrap_stack_overflow.py
+        // only: it never decreases, so a probe can tell "the run actually
+        // recursed into stringify() before the fault" from "stringifyDepth
+        // reads 0 because stringify() never started" -- both look the same
+        // in the plain restore check below.
+        this.maxStringifyDepthSeen = 0;
         this.globals.define("clock", LoxNative("clock"));
         this.globals.define("input", LoxNative("input"));
         this.globals.define("str",   LoxNative("str"));
@@ -2823,6 +2869,9 @@ class Interpreter {
         if (isLoxStr(val)) return val;
         if (isLoxNum(val)) return str(val);
         this.stringifyDepth = this.stringifyDepth + 1;
+        if (this.stringifyDepth > this.maxStringifyDepthSeen) {
+            this.maxStringifyDepthSeen = this.stringifyDepth;
+        }
         // Best-effort only, not an architectural guarantee: each nesting
         // level here costs 2 native-VM call frames (this method plus
         // stringifyList/stringifyMap), and that budget is shared with
@@ -3074,13 +3123,58 @@ if (len(source) > 0 and source[len(source) - 1] == "\n") {
 var scanner = Scanner(source);
 var tokens  = scanner.scanTokens();
 
-var parser = Parser(tokens);
-var stmts  = parser.parse();
-if (!scanner.hadError and !parser.hadError) {
-    var resolver = Resolver();
-    resolver.resolve(stmts);
-    if (!resolver.hadError) {
-        var interpreter = Interpreter(resolver.locals);
-        interpreter.interpret(stmts);
+var parser      = Parser(tokens);
+var stmts       = nil;
+var interpreter = nil;
+
+// parse() and resolve() are the bootstrap's own recursive-descent /
+// tree-walk code, not target-level function calls, so LoxFunction.call's
+// own try (below) never sees a fault raised while they run. A source
+// program nested deep enough -- `((((...))))`, or blocks nested inside
+// blocks -- borrows the same native call-frame budget and can overflow
+// before any target code ever executes. This wrap turns that into the
+// same LOXERR65 compile error a syntax error already reports, instead of
+// a native traceback.
+try {
+    stmts = parser.parse();
+    if (!scanner.hadError and !parser.hadError) {
+        var resolver = Resolver();
+        resolver.resolve(stmts);
+        if (!resolver.hadError) {
+            interpreter = Interpreter(resolver.locals);
+            // The per-call try in LoxFunction.call already converts an
+            // overflow inside a target function call into this
+            // interpreter's own flag-based error, which unwinds like any
+            // other caught-or-uncaught fault from there. This outer try is
+            // the backstop for the one case that skips every LoxFunction
+            // frame: recursion that never enters a target function call at
+            // all (e.g. a self-referential top-level expression), where a
+            // host StackOverflowError would otherwise reach here directly.
+            try {
+                interpreter.interpret(stmts);
+            } catch (e) {
+                if (e.kind != "StackOverflowError") throw e;
+                print "LOXERR70 " + e.message;
+            }
+        }
     }
+} catch (e) {
+    if (e.kind != "StackOverflowError") throw e;
+    print "LOXERR65 [line 0] Error: " + e.message;
+}
+
+// Test-only hook (tools/check_bootstrap_stack_overflow.py): after a run,
+// report whether per-call interpreter state that a caught overflow must
+// restore by hand actually returned to its start value. A silently leaked
+// restore does not fail the program it happens in -- it degrades every
+// program run afterward in the same process -- so this cannot be checked
+// by reading a single example's own output.
+if (interpreter != nil and env("LOXPP_BOOTSTRAP_CHECK_STATE") == "1") {
+    print "__BOOTSTRAP_STATE__ defers=" + str(len(interpreter.pendingDefers)) +
+          " stringifyDepth=" + str(interpreter.stringifyDepth) +
+          " returnFlag=" + str(interpreter.returnFlag) +
+          " breakFlag=" + str(interpreter.breakFlag) +
+          " continueFlag=" + str(interpreter.continueFlag) +
+          " throwFlag=" + str(interpreter.throwFlag) +
+          " maxStringifyDepthSeen=" + str(interpreter.maxStringifyDepthSeen);
 }

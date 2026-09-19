@@ -134,6 +134,12 @@ class LspClient:
         return result["message"]
 
     def request(self, method, params, timeout=10.0):
+        result, error = self.request_raw(method, params, timeout)
+        if error is not None:
+            raise RuntimeError("%s failed: %s" % (method, error))
+        return result
+
+    def request_raw(self, method, params, timeout=10.0):
         self._next_id += 1
         my_id = self._next_id
         self._write({"jsonrpc": "2.0", "id": my_id, "method": method, "params": params})
@@ -142,9 +148,7 @@ class LspClient:
             if message is None:
                 raise EOFError("server closed the stream waiting for %s" % method)
             if message.get("id") == my_id:
-                if "error" in message:
-                    raise RuntimeError("%s failed: %s" % (method, message["error"]))
-                return message.get("result")
+                return message.get("result"), message.get("error")
             self._absorb_notification(message)
 
     def notify(self, method, params):
@@ -450,6 +454,19 @@ def main():
               "rename to keyword 'var' fails with InvalidParams")
         check(rename_fails(CLEAN_URI, rl, rc + 1, "_"),
               "rename to '_' fails with InvalidParams")
+
+        # A rename without newName misses a required param. The shared
+        # dispatch path must answer InvalidParams and name the field, not
+        # InternalError with a raw json.exception message.
+        _, missing_error = client.request_raw("textDocument/rename", {
+            "textDocument": {"uri": CLEAN_URI},
+            "position": {"line": rl, "character": rc + 1}})
+        check(missing_error is not None
+              and missing_error.get("code") == -32602
+              and "newName" in missing_error.get("message", "")
+              and "json.exception" not in missing_error.get("message", ""),
+              "rename without newName fails with InvalidParams naming newName "
+              "(got %s)" % (missing_error,))
 
         # A long name is a valid IDENTIFIER (no length limit in the spec).
         long_name = "q" * 300

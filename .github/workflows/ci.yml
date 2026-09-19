@@ -393,6 +393,17 @@ jobs:
             loxpp-dev:latest \
             bash -c "ctest --test-dir build -R BootstrapErrorKindCausesRuntime --output-on-failure --no-tests=error"
 
+      # Same trace-noise constraint as BootstrapErrorKindCausesRuntime above,
+      # so this is the one leg where BootstrapStackOverflow actually runs.
+      - name: Run bootstrap stack-overflow catchability check
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "ctest --test-dir build -R BootstrapStackOverflow --output-on-failure --no-tests=error"
+
       - name: Run Lox interpreter test suite (craftinginterpreters)
         if: matrix.preset == 'release'
         run: |
@@ -604,14 +615,17 @@ jobs:
 
       # The parity gate. Every probe must be byte-identical on native and JVM
       # stdout (differential runner, not only the check_jvm_probes.sh diff
-      # loop above).
+      # loop above). Also reads translation-probes/jvm-only/ — the JVM twin
+      # of translation-probes/clr-only/ below: a probe the JVM backend is
+      # ready for but the CLR backend is not yet (issue #268's
+      # catch_overflow.lox, until #238 closes).
       - name: JVM differential suite - probes
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/ test/translation-probes/jvm-only/"
 
       # The full example corpus on the JVM backend, zero failures. --exclude
       # skips the map-iteration-order-sensitive examples

@@ -1,0 +1,16 @@
+// Pins the success side of the frame-count ceiling that
+// 31_deep_recursion.lox already pins the failure side of: 1022 nested
+// calls is the deepest depth that stays under src/vm.h's FRAMES_MAX (1024)
+// on native (see 31_deep_recursion.lox's own header for the arithmetic),
+// and both the JVM (runtime/jvm/src/lox/LoxClosure.java) and the CLR
+// (runtime/clr/src/LoxClosure.cs) counters must agree.
+//
+// The two probes together catch an off-by-one in either direction: a
+// counter that starts too low lets 31_deep_recursion.lox (1023) wrongly
+// succeed; a counter that starts too high makes this probe (1022) wrongly
+// fail. Neither probe alone can see the other's mistake.
+fun down(n) {
+    if (n == 0) return 0;
+    return down(n - 1);
+}
+print down(1022);

@@ -48,12 +48,20 @@ via `args`:
   nodes (see "Node specification structure" below). The stage order and the
   full node-to-issue list live there, in git-hosted, reviewable, permanent
   GitHub state — never in a local directory a host can lose.
-- `briefPath` — absolute path, inside this repository, to the mission brief
-  (`notes/missions/<name>.md`). The brief holds binding mission-wide rules:
-  role assignments, the DAG diagram, execution notes. It does **not** hold
-  per-node specifications — those are GitHub issue bodies now, one issue per
-  node (see below). Treat a missing or unreadable brief as a hard failure,
-  not as optional.
+- The mission brief needs no argument of its own. Every agent reads it with
+  `gh issue view <missionIssue> --repo <githubRepo> --comments` — the same
+  tracking issue `missionIssue` already names, read the same way a node
+  reads its own spec. The brief holds binding mission-wide rules: role
+  assignments, execution notes, and any correction to the tracking issue's
+  own body (a changed dependency, a redesigned node) posted as a later
+  comment. It does **not** hold per-node specifications — those are GitHub
+  issue bodies, one issue per node (see below). A committed local file for
+  this (an earlier design of this harness used `briefPath`, a
+  `notes/missions/<name>.md` file) is what #264 set out to remove: mission
+  state belongs in git-hosted, reviewable, permanent GitHub state, not in a
+  file a host can lose or that goes stale the moment the mission closes.
+  Treat a missing or unreadable brief (the `gh issue view` call itself
+  failing) as a hard failure, not as optional.
 - `nodes` — a map of node id → `{ branch, title, issue }`. `issue` is the
   node's own GitHub issue number; `id` is any mnemonic the mission wants for
   logging (it does not have to match the issue number, though matching it is
