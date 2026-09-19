@@ -106,6 +106,11 @@ probes=(
     "examples/try_catch_class_constructor_arity.lox"
     "examples/try_catch_error_instance_properties_catchable.lox"
     "examples/try_catch_error_vs_ordinary_instance_catchability.lox"
+    # Issue #268: LoxClosure's own frame-count ceiling delivers a catchable
+    # StackOverflowError, matching native's kind, message, and post-catch
+    # continuation. jvm-only/ because the CLR backend still delivers this
+    # same fault with the wrong catchability as of this probe (issue #238).
+    "test/translation-probes/jvm-only/catch_overflow.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -116,6 +121,10 @@ probes=(
 # and that printed text must match exactly too.
 error_probes=(
     "test/translation-probes/24_call_before_closure.lox"
+    # Issue #268: LoxClosure's own frame-count ceiling. Both sides must
+    # fail with empty stdout — native via src/vm.h's FRAMES_MAX, the JVM
+    # backend via runtime/jvm/src/lox/LoxClosure.java's own counter.
+    "test/translation-probes/31_deep_recursion.lox"
     # Every arm names a real constructor (so
     # checkEnumExhaustiveness accepts it as exhaustive) but every guard is
     # false at run time, so no arm actually accepts the value — a real,
