@@ -5,8 +5,8 @@ Spawns the server, speaks LSP over stdio, and checks the core features:
 initialize handshake, push diagnostics on a clean and a broken file, hover on
 a stdlib name, document symbols, go-to-definition on a local use, in-file
 rename (edit list, null on stdlib names, InvalidParams on bad new names,
-or-pattern coverage), and member completion (offered for a 'math.' receiver,
-withheld for any other 'x.').
+or-pattern coverage), member completion (offered for a 'math.' receiver,
+withheld for any other 'x.'), and signature help on a stdlib call.
 
 Usage:
     python3 tools/lsp_smoke.py <path-to-loxpp-lsp> [--bad-file <path>]
@@ -220,6 +220,9 @@ def main():
               "initialize advertises rename")
         check("documentFormattingProvider" not in caps,
               "initialize does not advertise formatting")
+        sig = caps.get("signatureHelpProvider", {})
+        check(sig.get("triggerCharacters") == ["(", ","],
+              "initialize advertises signatureHelp triggers (got %s)" % sig)
         client.notify("initialized", {})
 
         # -- clean file: no diagnostics --------------------------------
@@ -388,6 +391,29 @@ def main():
         check(not leaked,
               "completion after a non-math 'x.' leaks no Map/File methods "
               "(got %s)" % leaked)
+
+        # -- signature help on a stdlib call -------------------------
+        sl, sc = line_char(CLEAN_SOURCE, "str(123)")
+        sig_help = client.request("textDocument/signatureHelp", {
+            "textDocument": {"uri": CLEAN_URI},
+            "position": {"line": sl, "character": sc + 4}})
+        sig_label = ""
+        if sig_help and sig_help.get("signatures"):
+            sig_label = sig_help["signatures"][0].get("label", "")
+        check("str(value)" in sig_label,
+              "signatureHelp on 'str(' shows its signature (got %r)"
+              % sig_label[:60])
+        if sig_help:
+            check(sig_help.get("activeParameter") == 0,
+                  "signatureHelp activeParameter is 0 in first arg")
+
+        # -- signature help after a closed call returns null -------------
+        al, ac = line_char(CLEAN_SOURCE, "str(123)")
+        after = client.request("textDocument/signatureHelp", {
+            "textDocument": {"uri": CLEAN_URI},
+            "position": {"line": al, "character": ac + len("str(123)")}})
+        check(after is None,
+              "signatureHelp after ')' returns null (got %r)" % (after,))
 
     finally:
         code = client.shutdown()

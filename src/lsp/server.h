@@ -44,6 +44,7 @@ class Server {
     json onReferences(const json& params);
     json onDocumentHighlight(const json& params);
     json onRename(const json& params);
+    json onSignatureHelp(const json& params);
 
     // Throws RpcError when the client calls a feature before `initialize`, or
     // any request after `shutdown`.

@@ -12,6 +12,8 @@
 #include <vector>
 
 #include "lsp/keyword_docs.h"
+#include "lsp/model_util.h"
+#include "lsp/signature_help.h"
 #include "lsp/stdlib_docs.h"
 #include "scanner.h"
 #include "tooling/document_model.h"
@@ -28,11 +30,6 @@ using tooling::Span;
 using tooling::Symbol;
 using tooling::SymbolKind;
 
-bool isWordChar(char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-           (c >= '0' && c <= '9') || c == '_';
-}
-
 // The [A-Za-z0-9_] run that covers `offset` (or ends just before it).
 std::pair<std::size_t, std::size_t> wordAround(const std::string& text,
                                                std::size_t offset) {
@@ -46,27 +43,6 @@ std::pair<std::size_t, std::size_t> wordAround(const std::string& text,
         ++end;
     }
     return {start, end - start};
-}
-
-std::string trimmed(std::string s) {
-    std::size_t a = 0;
-    while (a < s.size() && (s[a] == ' ' || s[a] == '\t')) {
-        ++a;
-    }
-    std::size_t b = s.size();
-    while (b > a && (s[b - 1] == ' ' || s[b - 1] == '\t' || s[b - 1] == '\r')) {
-        --b;
-    }
-    return s.substr(a, b - a);
-}
-
-std::string lineTextAt(const std::string& text, std::size_t offset) {
-    offset = std::min(offset, text.size());
-    std::size_t start = text.rfind('\n', offset == 0 ? 0 : offset - 1);
-    start = (start == std::string::npos) ? 0 : start + 1;
-    std::size_t end = text.find('\n', offset);
-    end = (end == std::string::npos) ? text.size() : end;
-    return trimmed(text.substr(start, end - start));
 }
 
 // The identifier that a `.` before `wordStart` is a member of, if any.
@@ -170,34 +146,6 @@ CompletionItemKind toCompletionKind(SymbolKind k) {
     }
 }
 
-std::vector<std::string> functionParams(const Symbol& sym) {
-    std::vector<std::pair<std::size_t, std::string>> found;
-    if (sym.innerScope != nullptr) {
-        for (const auto& s : sym.innerScope->symbols) {
-            if (s->kind == SymbolKind::Param && !s->implicit) {
-                found.emplace_back(s->declaration.offset, s->name);
-            }
-        }
-    }
-    std::ranges::sort(found);
-    std::vector<std::string> names;
-    names.reserve(found.size());
-    for (auto& [off, name] : found) {
-        names.push_back(name);
-    }
-    return names;
-}
-
-const Scope* innermostScope(const Scope* scope, std::size_t offset) {
-    for (const auto& child : scope->children) {
-        const Span s = child->span;
-        if (s.offset <= offset && offset < s.offset + s.length) {
-            return innermostScope(child.get(), offset);
-        }
-    }
-    return scope;
-}
-
 // User symbols visible as a bare name at `offset`: the global scope (globals
 // are late-bound, so all of them) plus every enclosing local scope's symbols
 // that are declared before `offset`.
@@ -228,7 +176,7 @@ std::vector<const Symbol*> visibleSymbols(const DocumentModel& model,
 std::string renderUserSymbol(const DocumentModel& model, const Symbol& sym) {
     std::string out = symbolKindWord(kindOf(sym)) + " `" + sym.name + "`";
     if (sym.kind == SymbolKind::Function || sym.kind == SymbolKind::Method) {
-        const std::vector<std::string> params = functionParams(sym);
+        const std::vector<std::string> params = functionParamNames(sym);
         out += "\n\n```lox\nfun " + sym.name + "(";
         for (std::size_t i = 0; i < params.size(); ++i) {
             out += params[i];
@@ -432,6 +380,8 @@ json Server::onInitialize(const json& /*params*/) {
              {"renameProvider", true},
              {"completionProvider",
               {{"triggerCharacters", json::array({"."})}}},
+             {"signatureHelpProvider",
+              {{"triggerCharacters", json::array({"(", ","})}}},
          }},
         {"serverInfo", {{"name", "loxpp-lsp"}, {"version", "0.1.0"}}},
     };
@@ -652,6 +602,18 @@ json Server::onRename(const json& params) {
     return result;
 }
 
+json Server::onSignatureHelp(const json& params) {
+    requireReady();
+    const auto p = params.get<TextDocumentPositionParams>();
+    json result = nullptr;
+    (void)m_store.read(p.uri, [&](const DocumentModel& model) {
+        const std::size_t off =
+            model.positionToOffset(toToolingPos(p.position));
+        result = signatureHelpFor(model, off);
+    });
+    return result;
+}
+
 // -- registration -----------------------------------------------------
 
 void Server::registerHandlers() {
@@ -686,6 +648,8 @@ void Server::registerHandlers() {
                     [this](const json& p) { return onDocumentHighlight(p); });
     m_rpc.onRequest("textDocument/rename",
                     [this](const json& p) { return onRename(p); });
+    m_rpc.onRequest("textDocument/signatureHelp",
+                    [this](const json& p) { return onSignatureHelp(p); });
 }
 
 } // namespace loxpp::lsp

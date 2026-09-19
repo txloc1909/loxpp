@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>contactName</key>
+	<string>Lox++ contributors</string>
+	<key>description</key>
+	<string>Lox++ language bundle: TextMate grammar for .lox source files.</string>
+	<key>name</key>
+	<string>Lox++</string>
+	<key>uuid</key>
+	<string>5f458838-a750-40e1-862d-afdb248b0af3</string>
+</dict>
+</plist>

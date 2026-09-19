@@ -223,7 +223,8 @@ capability object:
   "documentHighlightProvider": true,
   "documentSymbolProvider": true,
   "renameProvider": true,
-  "completionProvider": { "triggerCharacters": ["."] }
+  "completionProvider": { "triggerCharacters": ["."] },
+  "signatureHelpProvider": { "triggerCharacters": ["(", ","] }
 }
 ```
 
@@ -251,9 +252,10 @@ Handlers implemented:
 | `textDocument/references` | Single file. Honours `context.includeDeclaration`. |
 | `textDocument/documentHighlight` | Single file. The symbol's declaration and every in-file use — the handler always calls `referencesAt` with `includeDeclaration=true`, so the set can be wider than a `references` request that sets it to `false`. |
 | `textDocument/rename` | Single file. Builds one edit per span from `referencesAt` with `includeDeclaration=true`. Returns null when the position has no user symbol (keyword, stdlib global, unknown name, implicit `this`/`super`, `_`, or a member name after a dot). Rejects a new name that is not an `IDENTIFIER`, that is a keyword from `lox_keywords()`, or that is `_` (it binds nothing, so the result could not be renamed back) with `InvalidParams`. The edit is textual within the file: it does not check that the new name shadows or captures another binding. |
+| `textDocument/signatureHelp` | One signature. A user definition wins over a stdlib global of the same name. Stdlib globals, `math` members, Map / File methods by unique name, and in-scope user free functions. Map / File matching guesses: the receiver type is unknown, so a non-Map receiver can still show the method. User methods through a dot return null for the same reason. `activeParameter` counts top-level commas. A variadic call clamps to the last parameter. An open string or a trailing comment keeps help. Null when no unmatched `(` holds the cursor. |
 
 Not advertised in v1, so a client must not expect them:
-`documentFormattingProvider`, `signatureHelpProvider`,
+`documentFormattingProvider`,
 `workspaceSymbolProvider`, `foldingRangeProvider`,
 `semanticTokensProvider`, `codeActionProvider`. Folding and indentation come
 from the tree-sitter queries, not from the server.
@@ -295,7 +297,17 @@ editors/
     test/                    extension tests
     language-configuration.json
     package.json package-lock.json tsconfig.json
+  loxpp.tmbundle/           the TextMate bundle
+    info.plist               bundle metadata
+    Syntaxes/                Lox++.tmLanguage.json + Lox++.tmLanguage
 ```
+
+The JSON grammar in the bundle is a byte-for-byte copy of
+`loxpp-vscode/syntaxes/lox.tmLanguage.json`. The extension tests test that
+file. The copy inherits that coverage. CI fails when the two drift (the
+`VS Code extension` job runs `tools/check_textmate_grammar.py`). The XML
+plist carries the same rules plus `fileTypes` and a grammar `uuid` for
+TextMate and Linguist consumers.
 
 The four `queries/loxpp/*.scm` files in the plugin are a byte-for-byte copy
 of `editors/tree-sitter-loxpp/queries/*.scm`. CI fails the build if the two
@@ -381,7 +393,7 @@ not upload or publish it. Test commands are in
 | `tree-sitter grammar` | `dev-editors` | `tree-sitter generate`, `tree-sitter test`, then `tree-sitter parse` over `examples/*.lox`, `bootstrap/*.lox`, and `test/translation-probes/*.lox`; fails on any `ERROR` or `MISSING` node. |
 | `loxpp-lsp language server` | `dev` | Builds `loxpp-lsp` under the ASan/UBSan `debug` preset, then runs `tools/lsp_smoke.py`. Also runs the smoke test with a good file passed as the bad file to prove the assertion can fail. |
 | `Neovim plugin` | `dev-editors` | Diffs the plugin queries against the grammar queries; builds `loxpp` + `loxpp-lsp` + the parser; runs `tools/check_nvim_plugin.sh` headless in both normal and `--fallback` mode; proves the headless test fails with a broken `loxpp-lsp`. |
-| `VS Code extension` | `dev-editors` | Builds `loxpp-lsp` with the `release` preset; runs npm install, lint, typecheck, tests, and compile; runs integration tests with `xvfb-run -a` and `LOXPP_LSP_PATH=/workspace/build/loxpp-lsp`; packages and verifies the VSIX without uploading or publishing it. |
+| `VS Code extension` | `dev-editors` | Runs `tools/check_textmate_grammar.py` (bundle/VS Code grammar sync and keyword coverage); builds `loxpp-lsp` with the `release` preset; runs npm install, lint, typecheck, tests, and compile; runs integration tests with `xvfb-run -a` and `LOXPP_LSP_PATH=/workspace/build/loxpp-lsp`; packages and verifies the VSIX without uploading or publishing it. |
 
 The `Build & Test` job runs the GTest suites, which include
 `test_check_diagnostics`, `test_tooling_parser`, and `test_tooling_resolver`.
@@ -405,7 +417,7 @@ The `Build & Test` job runs the GTest suites, which include
 | Go to definition (in-file) | yes | yes | yes | yes |
 | Find references / document highlight (in-file) | yes | yes | yes | yes |
 | Unused-local / unknown-name / static-rule warnings | yes (resolver; LSP only, not `--check`) | yes | yes | yes |
-| Signature help | no — v2 (arity is already in `stdlib_docs`) | yes | yes | yes |
+| Signature help | yes | yes | yes | yes |
 | Rename (in-file) | yes (single file; member names after `.` are not linked) | yes | yes | yes |
 | Workspace symbols / cross-file navigation | no — waits on a module system | yes | yes | yes |
 | Formatting | no — no `loxpp fmt` yet | yes | yes | yes |
@@ -432,8 +444,7 @@ Corrections against the plan's table:
 Each item below is small on this base, and each is a standalone GitHub
 issue, not a list here:
 
-- Signature help (`signatureHelpProvider`); arity and the parameter list
-  already exist in `src/lsp/stdlib_docs.*` —
+- Implemented: signature help (`signatureHelpProvider`) —
   https://github.com/txloc1909/loxpp/issues/210
 - Implemented: in-file rename (`renameProvider`), using the edit list that
   `references` already computes —
@@ -450,8 +461,9 @@ issue, not a list here:
 - Cross-file navigation and workspace symbols; waits on a module system
   (`notes/expressiveness-roadmap.md`, not scheduled) —
   https://github.com/txloc1909/loxpp/issues/216
-- A TextMate grammar (`editors/loxpp.tmbundle`) for VS Code and GitHub
-  Linguist reach — https://github.com/txloc1909/loxpp/issues/217
+- Implemented: TextMate grammar in `editors/loxpp.tmbundle/`, with the
+  VS Code grammar as the tested source —
+  https://github.com/txloc1909/loxpp/issues/217
 - Implemented: VS Code extension in `editors/loxpp-vscode/`, with manual
   VSIX installation — https://github.com/txloc1909/loxpp/issues/218
 - Split `editors/tree-sitter-loxpp` and `editors/loxpp.nvim` into their own
