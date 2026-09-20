@@ -399,7 +399,7 @@ public static class LoxOps {
     /// it with a `throw` itself.
     /// </summary>
     public static LoxError MatchError() => new(LoxRuntime.MakeError(
-        "MatchError: no matching arm.", "MatchError"));
+        "No matching arm in match expression.", "MatchError"));
 
     // ------------------------------------------------------------------
     // instanceof / properties / methods
@@ -463,7 +463,11 @@ public static class LoxOps {
     }
 
     public static object SetProperty(object obj, string name, object value) {
-        if (obj is not LoxInstance instance) {
+        // Same ErrorClass reference check as GetProperty: vm.cpp's
+        // Op::SET_PROPERTY tests isInstance, and an ObjError is not an
+        // ObjInstance there, so a caught fault must refuse a field write
+        // the same way an ordinary non-instance value does.
+        if (obj is not LoxInstance instance || ReferenceEquals(instance.Klass, LoxRuntime.ErrorClass)) {
             throw new LoxError("Only instances have fields.");
         }
         instance.Fields[name] = value;
@@ -1011,16 +1015,16 @@ public static class LoxOps {
                 continue; // Skip non-DeferredCall items
             }
 
-            // Invoke the deferred call
-            if (deferred.Callable == null) {
-                throw new LoxError(LoxRuntime.MakeError(
-                    "Deferred call has null callable.",
-                    "RuntimeError"));
-            }
-            if (deferred.Args == null) {
-                throw new LoxError(LoxRuntime.MakeError(
-                    "Deferred call has null args array.",
-                    "RuntimeError"));
+            // vm.cpp's runPendingDefers only recognizes a Closure, Native,
+            // BoundMethod, or BoundNative callee (fatal, no kind, per
+            // spec/04-semantics.md's Fatal Runtime Errors table) - it does
+            // NOT accept a Class or enum constructor, unlike Op::CALL's own
+            // check. LoxMapMethod/LoxFileMethod are this runtime's
+            // BoundNative equivalent (see their own doc comments), so this
+            // list mirrors vm.cpp's exactly rather than testing
+            // ILoxCallable, which LoxClass and LoxEnumCtor also implement.
+            if (deferred.Callable is not (LoxClosure or LoxNative or LoxBoundMethod or LoxMapMethod or LoxFileMethod)) {
+                throw new LoxError("Deferred callable has unexpected type.");
             }
             Call(deferred.Callable, deferred.Args);
         }
