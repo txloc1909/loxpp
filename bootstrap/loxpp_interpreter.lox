@@ -1680,7 +1680,7 @@ fun reflectMethodNames(klass) {
 // cause — do not reuse a table `kind` for one of them, and do not reuse one
 // of these for an unrelated cause either.
 //
-// The two checks below that DO keep a table kind ("InvalidReceiverError" for
+// The three checks below that DO keep a table kind ("InvalidReceiverError" for
 // the receiver check, "ArityError" for the forwarded-call arity check, and
 // "NotCallableError" for the final not-callable fallback) are the exception:
 // each genuinely re-enters the same language-level fault the table kind
@@ -2360,10 +2360,10 @@ class Interpreter {
         var iterable = this.evalExpr(iterableExpr, env);
         if (this.throwFlag) return;
         var tag = loxTag(iterable);
-        // Native's own for-in guard is an always-fatal RAISE_ERROR site
-        // (src/vm.cpp Op::FOR_IN_ITER_NEXT or its check), a different
-        // opcode from GET_INDEX's catchable NotIndexableError -- this
-        // needs its own kind, not that one's.
+        // Native's own for-in guard is an always-fatal RAISE_ERROR site,
+        // Op::GET_ITER (src/vm.cpp:1616-1623), a different opcode from
+        // GET_INDEX's catchable NotIndexableError -- this needs its own
+        // kind, not that one's.
         if (tag != "list" and !isLoxStr(iterable) and tag != "map") {
             this.setError("ForInNotIterableError", "Value is not iterable.", varLine);
             return;
@@ -2484,9 +2484,9 @@ class Interpreter {
             superclass = this.lookupVariable(super_id, super_name, super_line, env);
             if (this.throwFlag) return;
             // A bad superclass is not a call: native's own check here is an
-            // always-fatal RAISE_ERROR site (src/vm.cpp Op::CLASS), separate
-            // from the catchable NotCallableError the call opcodes raise --
-            // this needs its own kind, not that one's.
+            // always-fatal RAISE_ERROR site, Op::INHERIT (src/vm.cpp:1172-1176),
+            // separate from the catchable NotCallableError the call opcodes
+            // raise -- this needs its own kind, not that one's.
             if (loxTag(superclass) != "class") {
                 this.setError("InvalidSuperclassError", "Superclass must be a class.", super_line);
                 return;
@@ -2836,9 +2836,10 @@ class Interpreter {
     // resolves the callee before it knows whether a call follows. Native's
     // fused Op::INVOKE reaches that call-syntax case through its own,
     // separate, catchable InvalidReceiverError (examples/
-    // try_catch_invalid_receiver.lox pins this cross-backend); evalGet
+    // try_catch_invalid_receiver.lox pins this cross-backend); evalGet alone
     // cannot tell the two cases apart, so it keeps the kind that matches the
-    // tested, observable one.
+    // tested, observable case (`42.foo()`). Separating them would need a
+    // call-context flag threaded from evalCall, which this node does not add.
     evalGet(objectExpr, name, line, env) {
         var object = this.evalExpr(objectExpr, env);
         if (this.throwFlag) return nil;
