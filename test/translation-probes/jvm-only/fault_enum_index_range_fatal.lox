@@ -1,3 +1,4 @@
 enum E { A(x) }
 var v = A(1);
-v[3];
+try { v[3]; } catch (e) { print "CAUGHT " + e.kind; }
+print "after";
