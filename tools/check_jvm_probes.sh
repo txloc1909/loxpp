@@ -208,11 +208,11 @@ error_probes=(
     "test/translation-probes/jvm-only/fault_set_index_string_fatal.lox"
     "test/translation-probes/jvm-only/fault_stringify_too_deep_print.lox"
     "test/translation-probes/jvm-only/fault_stringify_too_deep_in_try.lox"
-    # Round-1 review of PR #345: a `defer`red call holding a non-callable
-    # value, or a class construction, must be fatal (native's own
-    # `runDefers`, src/vm.cpp lines 245-261), not delivered to any
-    # catchBlock. Each probe puts the fault inside a try so a wrong,
-    # catchable disposition prints and exits 0 instead of failing to run.
+    # A `defer`red call holding a non-callable value, or a class
+    # construction, must be fatal (native's own `runDefers`, src/vm.cpp
+    # lines 245-261), not delivered to any catchBlock. Each probe puts the
+    # fault inside a try so a wrong, catchable disposition prints and exits
+    # 0 instead of failing to run.
     "test/translation-probes/jvm-only/fault_defer_noncallable_value_fatal.lox"
     "test/translation-probes/jvm-only/fault_defer_class_construction_fatal.lox"
 )
