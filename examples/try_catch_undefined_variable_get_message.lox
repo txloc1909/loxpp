@@ -1,0 +1,1 @@
+try { print undeclared; } catch (e) { print e.kind; print e.message; }

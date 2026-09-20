@@ -1,0 +1,2 @@
+class C { init() { this.f = 1; } }
+C().f();

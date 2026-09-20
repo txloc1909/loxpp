@@ -119,6 +119,22 @@ probes=(
     # unwinds, replaces it — the guard must still clear so a later,
     # unrelated overflow is caught.
     "test/translation-probes/jvm-only/defer_replaces_overflow.lox"
+    # Mission #288 node #333: JVM fault sites wired against N1's completed
+    # spec/04-semantics.md table (spec/03-types.md's Error section for the
+    # message/kind fields). Each probe below pins one catchable row's exact
+    # kind and message text, not only that some Error is delivered.
+    "examples/try_catch_concatenation_type_error.lox"
+    "examples/try_catch_undefined_property_on_error_message.lox"
+    "examples/try_catch_invoke_on_error_invalid_receiver.lox"
+    "examples/try_catch_set_index_not_indexable.lox"
+    "examples/try_catch_match_error_message.lox"
+    "examples/try_catch_undefined_variable_get_message.lox"
+    "examples/try_catch_undefined_variable_set_message.lox"
+    "examples/try_catch_ctor_arity_no_init_message.lox"
+    "examples/try_catch_enum_ctor_arity_message.lox"
+    "examples/try_catch_notcallable_ordinary_call.lox"
+    "examples/try_catch_invalid_receiver_message.lox"
+    "examples/try_catch_error_property_read_still_works.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
@@ -179,6 +195,19 @@ error_probes=(
     "test/translation-probes/45_reflect_methods_non_instance.lox"
     "test/translation-probes/46_reflect_callmethod_non_instance.lox"
     "test/translation-probes/47_reflect_callmethod_closure_method.lox"
+    # Mission #288 node #333: fault sites native routes through RAISE_ERROR
+    # (fatal, never delivered to a catchBlock), which the JVM backend had
+    # wired as catchable instead (over-catching) or left unguarded entirely
+    # (the stringify depth guard, added for this node — see
+    # spec/04-semantics.md's Fatal Runtime Errors section).
+    "test/translation-probes/jvm-only/fault_set_property_on_error_fatal.lox"
+    "test/translation-probes/jvm-only/fault_invoke_field_not_callable_fatal.lox"
+    "test/translation-probes/jvm-only/fault_invoke_method_not_found_fatal.lox"
+    "test/translation-probes/jvm-only/fault_enum_index_type_fatal.lox"
+    "test/translation-probes/jvm-only/fault_enum_index_range_fatal.lox"
+    "test/translation-probes/jvm-only/fault_set_index_string_fatal.lox"
+    "test/translation-probes/jvm-only/fault_stringify_too_deep_print.lox"
+    "test/translation-probes/jvm-only/fault_stringify_too_deep_in_try.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
