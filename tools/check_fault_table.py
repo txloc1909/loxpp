@@ -246,15 +246,14 @@ FATAL_ROWS = [
         "class C {} var c = C(); c.bogus;",
         expected_message="Undefined property 'bogus'.",
     ),
-    # Fused site (issue #348): bootstrap's tree-walker gives this the same
-    # catchable kind it gives `42.foo()` (a call), because it cannot tell a
-    # plain property-get apart from a call target the way native's
-    # opcode-level dispatch does. Native, JVM, and CLR are fatal here.
+    # Fused site (issue #348): bootstrap's tree-walker used to give this
+    # the same catchable kind it gives `42.foo()` (a call), because it could
+    # not tell a plain property-get apart from a call target. Now it
+    # distinguishes them by tracking whether property access is a call target.
     Row(
         "property_get_non_instance",
         "fatal",
         "42.foo;",
-        skip={BOOTSTRAP: "issue #348: bootstrap catches this fused site"},
         expected_message="Only instances have properties.",
     ),
     Row(
@@ -263,12 +262,13 @@ FATAL_ROWS = [
         "42.foo = 1;",
         expected_message="Only instances have fields.",
     ),
-    # Fused site (issue #348): see property_get_non_instance above.
+    # Fused site (issue #348): bootstrap now distinguishes property-access
+    # sources, making calls to non-callable field values fatal while keeping
+    # calls to non-callable literal values catchable.
     Row(
         "invoke_field_not_callable",
         "fatal",
         "class C { init() { this.f = 1; } } C().f();",
-        skip={BOOTSTRAP: "issue #348: bootstrap catches this fused site"},
         expected_message="Can only call functions, classes and enums.",
     ),
     Row(
@@ -566,6 +566,21 @@ for _row in FATAL_ROWS:
         # Node #349: bootstrap now indexes enum values, matching native's
         # fatal disposition on out-of-range error, so it is exempt from the
         # blanket skip below.
+        continue
+    if _row.name == "property_get_non_instance":
+        # Node #348: bootstrap now distinguishes plain property reads
+        # (fatal) from method calls (catchable), so it is exempt from the
+        # blanket skip below.
+        continue
+    if _row.name == "invoke_field_not_callable":
+        # Node #348: bootstrap now distinguishes calls to field values
+        # (fatal) from calls to literal values (catchable), so it is exempt
+        # from the blanket skip below.
+        continue
+    if _row.name == "stdlib_native_arity":
+        # Node #348: bootstrap now distinguishes stdlib native arity errors
+        # (fatal) from user function arity errors (catchable), so it is
+        # exempt from the blanket skip below.
         continue
     _row.skip.setdefault(BOOTSTRAP, _BOOTSTRAP_FATAL_DEFAULT_SKIP)
 

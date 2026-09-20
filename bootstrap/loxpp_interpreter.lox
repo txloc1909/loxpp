@@ -2119,6 +2119,8 @@ class Interpreter {
         this.throwFlag     = false;
         this.thrownValue   = nil;
         this.pendingDefers = [];
+        this.evaluatingCallTarget = false;
+        this.lastValueFromField = false;
         this.stringifyDepth = 0;
         // High-water mark of stringifyDepth, for tools/check_bootstrap_stack_overflow.py
         // only: it never decreases, so a probe can tell "the run actually
@@ -2817,16 +2819,19 @@ class Interpreter {
     }
 
     evalCall(calleeExpr, paren_line, argsExprs, env) {
+        this.evaluatingCallTarget = true;
         var callee = this.evalExpr(calleeExpr, env);
+        this.evaluatingCallTarget = false;
+        var calleeFromField = this.lastValueFromField;
         if (this.throwFlag) return nil;
-        if (callee == nil or callee == true or callee == false) {
-            this.setError("NotCallableError", "Can only call functions and classes.", paren_line);
+        // Calling a non-callable field value is fatal on native. Check before
+        // checking for basic non-callables.
+        if (calleeFromField and (callee == nil or callee == true or callee == false or isLoxStr(callee) or isLoxNum(callee))) {
+            this.lastValueFromField = false;
+            this.fatalError("Can only call functions, classes and enums.");
             return nil;
         }
-        if (isLoxStr(callee) or isLoxNum(callee)) {
-            this.setError("NotCallableError", "Can only call functions and classes.", paren_line);
-            return nil;
-        }
+        this.lastValueFromField = false;
         var args = [];
         var i = 0;
         while (i < len(argsExprs)) {
@@ -2835,9 +2840,24 @@ class Interpreter {
             args.append(arg);
             i = i + 1;
         }
-        var tag = callee.loxTag;
+        // Check if the callee is callable. All non-callable checks are handled here.
+        if (callee == nil or callee == true or callee == false or isLoxStr(callee) or isLoxNum(callee)) {
+            this.setError("NotCallableError", "Can only call functions and classes.", paren_line);
+            return nil;
+        }
+        // Get the tag of the callee if it has one
+        var tag = nil;
+        if (callee != nil and callee != true and callee != false and !isLoxStr(callee) and !isLoxNum(callee)) {
+            tag = callee.loxTag;
+        }
         if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "enum_ctor") {
             this.setError("NotCallableError", "Can only call functions and classes.", paren_line);
+            return nil;
+        }
+        // Stdlib natives with wrong arity are fatal on native. Check and handle
+        // before the general arity check to keep setError calls separate.
+        if ((tag == "native" or tag == "mathfn" or tag == "listmethod" or tag == "mapmethod" or tag == "filemethod") and callee.arity() != -1 and len(args) != callee.arity()) {
+            this.fatalError("Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".");
             return nil;
         }
         if (callee.arity() != -1 and len(args) != callee.arity()) {
@@ -2899,13 +2919,28 @@ class Interpreter {
             return nil;
         }
         if (loxTag(object) != "instance") {
+            // Plain property reads on non-instances (`42.foo;`) are fatal on native.
+            // Method calls on non-instances (`42.foo()`) are catchable with
+            // InvalidReceiverError. Distinguish them by checking the call context.
+            this.lastValueFromField = false;
+            if (!this.evaluatingCallTarget) {
+                this.fatalError("Only instances have properties.");
+                return nil;
+            }
             this.setError("InvalidReceiverError", "Only instances have properties.", line);
             return nil;
         }
         var val = object.instGet(name, 0);
         if (val == nil and !object.fields.has(name) and object.klass.findMethod(name) == nil) {
+            this.lastValueFromField = false;
             this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
+        }
+        // Mark if we're returning a field value (not a method)
+        if (object.fields.has(name)) {
+            this.lastValueFromField = true;
+        } else {
+            this.lastValueFromField = false;
         }
         return val;
     }

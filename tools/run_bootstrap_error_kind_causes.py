@@ -228,17 +228,17 @@ PROBES = [
     ("call of a non-callable value (fused, catchable)", "try { 42(); } catch (e) { print e.kind; }",
      CATCHABLE, "NotCallableError", '"Can only call functions and classes."'),
     ("field shadowing a method, not callable (fused, fatal)",
-     "class C { init() { this.f = 1; } } try { C().f(); } catch (e) { print e.kind; }",
+     "class C { init() { this.f = 1; } } C().f();",
      FATAL, "NotCallableError", '"Can only call functions and classes."'),
     ("wrong argument count (fused, catchable)", "fun f(a) {} try { f(1, 2); } catch (e) { print e.kind; }",
      CATCHABLE, "ArityError",
      '"Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + "."'),
-    ("native function called with wrong arity (fused, fatal)", "try { len(); } catch (e) { print e.kind; }",
+    ("native function called with wrong arity (fused, fatal)", "len();",
      FATAL, "ArityError",
      '"Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + "."'),
     ("method call on a non-instance (fused, catchable)", "try { 42.foo(); } catch (e) { print e.kind; }",
      CATCHABLE, "InvalidReceiverError", '"Only instances have properties."'),
-    ("plain property get on a non-instance (fused, fatal)", "try { 42.foo; } catch (e) { print e.kind; }",
+    ("plain property get on a non-instance (fused, fatal)", "42.foo;",
      FATAL, "InvalidReceiverError", '"Only instances have properties."'),
 
     # --- the one exemption: table kind, fatal-only, pending #338 ---
@@ -366,11 +366,24 @@ def main() -> int:
         native_out, native_exit = run_case(program, [str(NATIVE)])
         boot_out, boot_exit = run_case(program, [str(WRAPPER)])
 
-        if boot_exit != 0 or boot_out != kind:
-            failures.append(
-                f"{name}: bootstrap expected to catch {kind!r} and exit 0, got "
-                f"exit {boot_exit}, stdout {boot_out!r}"
-            )
+        # For fused pairs (Wave 3, issue #348), bootstrap should now match native:
+        # fatal on both, or catchable on both. Check the pair against the fused list.
+        is_fused = (kind, _message) in FUSED_PAIRS
+
+        if is_fused and disposition == FATAL:
+            # Bootstrap should now be fatal, matching native
+            if boot_exit != 70:
+                failures.append(
+                    f"{name}: declared 'fatal' (fused, Wave 3 fix), but bootstrap exited "
+                    f"{boot_exit}, expected 70"
+                )
+        else:
+            # All other cases: bootstrap should catch the error
+            if boot_exit != 0 or boot_out != kind:
+                failures.append(
+                    f"{name}: bootstrap expected to catch {kind!r} and exit 0, got "
+                    f"exit {boot_exit}, stdout {boot_out!r}"
+                )
 
         if disposition == CATCHABLE:
             if native_exit != 0 or native_out != kind:

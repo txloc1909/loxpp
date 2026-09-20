@@ -186,7 +186,6 @@ EXPECTED_CALLS = [
     ('InRightOperandTypeError', '"Right operand of \'in\' must be a List, String, or Map."', JUDGED),
     ('NotCallableError', '"Can only call functions and classes."', RECORDED),
     ('NotCallableError', '"Can only call functions and classes."', RECORDED),
-    ('NotCallableError', '"Can only call functions and classes."', RECORDED),
     (DYNAMIC, '"Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + "."', RECORDED),
     ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
     ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
