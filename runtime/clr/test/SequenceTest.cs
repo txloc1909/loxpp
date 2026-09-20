@@ -108,7 +108,7 @@ public static class SequenceTest {
         t.Check(!LoxOps.IsSeq(new LoxMap()), "map is not IS_SEQ (matches Op::IS_SEQ, not the spec protocol)");
         t.Check(!LoxOps.IsSeq(1.0), "number is not a sequence");
 
-        t.CheckEquals("MatchError: no matching arm.", LoxOps.MatchError().Message,
+        t.CheckEquals("No matching arm in match expression.", LoxOps.MatchError().Message,
             "matchError builds a LoxError with the vm.cpp message");
 
         return t.Finish("SequenceTest");
