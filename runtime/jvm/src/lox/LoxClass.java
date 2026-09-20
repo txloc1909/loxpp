@@ -57,8 +57,10 @@ public final class LoxClass implements LoxCallable {
         if (init != null) {
             init.callAsSelf(instance, args);
         } else if (args.length != 0) {
+            // Native's own text (src/vm.cpp's CALL, isClass branch) is this
+            // exact literal — it does not report the actual argument count.
             throw LoxOps.makeError("ConstructorArityError",
-                                   "Expected 0 arguments but got " + args.length + ".");
+                                   "Expected 0 arguments but got some.");
         }
         return instance;
     }

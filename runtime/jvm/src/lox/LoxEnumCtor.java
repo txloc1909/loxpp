@@ -22,9 +22,11 @@ public final class LoxEnumCtor implements LoxCallable {
     @Override
     public Object call(Object[] args) {
         if (args.length != arity) {
+            // Native's own text (src/vm.cpp's CALL, isEnumCtor branch) is
+            // this exact literal — it does not name the constructor or
+            // report either count.
             throw LoxOps.makeError("ConstructorArityError",
-                    "'" + ctorName + "' expects " + arity
-                    + " argument(s) but got " + args.length + ".");
+                    "Constructor called with wrong arity.");
         }
         return new LoxEnum(this, args.clone());
     }
