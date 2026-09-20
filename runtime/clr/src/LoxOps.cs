@@ -779,6 +779,12 @@ public static class LoxOps {
         if (v is LoxClass klass) {
             return klass.Name;
         }
+        // Same reference check LoxRuntime.TypeNameOf and GetProperty use for
+        // a caught fault: format is "kind: message" (src/object.cpp's
+        // ObjType::ERROR case), not the generic "<Class> instance" text.
+        if (v is LoxInstance errorInstance && ReferenceEquals(errorInstance.Klass, LoxRuntime.ErrorClass)) {
+            return $"{errorInstance.Fields["kind"]}: {errorInstance.Fields["message"]}";
+        }
         if (v is LoxInstance instance) {
             return $"{instance.Klass.Name} instance";
         }
