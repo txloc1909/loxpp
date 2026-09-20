@@ -72,6 +72,10 @@ public final class ReflectionTest {
         Object userErrorInstance = userError.call(new Object[0]);
         checkEquals("Instance", call(globals, "type", userErrorInstance),
                 "type(instance of a user class named Error) is still Instance");
+        // A Lox++ program must not be able to name the Error class and call
+        // it, or it could build its own lookalike Error value (spec/03-types.md).
+        checkThrows(() -> globals.get("Error"), LoxError.class,
+                "Error is not a global on JVM, so a program cannot build its own lookalike");
         checkEquals("List", call(globals, "type", new LoxList()), "type(list)");
         checkEquals("Map", call(globals, "type", map), "type(map)");
 
