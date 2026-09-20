@@ -22,9 +22,12 @@ public sealed class LoxEnumCtor : ILoxCallable {
 
     public object Call(object[] args) {
         if (args.Length != Arity) {
+            // vm.cpp's Op::CALL enum-ctor arm reports this fixed text for
+            // every enum constructor, unlike a class's own arity fault
+            // (LoxClass.Call) - it names neither the constructor nor the
+            // counts.
             throw new LoxError(LoxRuntime.MakeError(
-                $"'{CtorName}' expects {Arity} argument(s) but got {args.Length}.",
-                "ConstructorArityError"));
+                "Constructor called with wrong arity.", "ConstructorArityError"));
         }
         return new LoxEnum(this, (object[])args.Clone());
     }

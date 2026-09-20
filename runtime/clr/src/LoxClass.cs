@@ -62,8 +62,12 @@ public sealed class LoxClass : ILoxCallable {
         if (init != null) {
             init.CallAsSelf(instance, args);
         } else if (args.Length != 0) {
+            // vm.cpp's Op::CALL literally reports "...got some." here - it
+            // never interpolates the actual count for this arm (unlike
+            // ArityError on a closure call, which does) - so this must
+            // match that fixed text, not build one from args.Length.
             throw new LoxError(LoxRuntime.MakeError(
-                $"Expected 0 arguments but got {args.Length}.", "ConstructorArityError"));
+                "Expected 0 arguments but got some.", "ConstructorArityError"));
         }
         return instance;
     }

@@ -346,7 +346,12 @@ public static class LoxRuntime {
     }
 
     private static LoxInstance RequireInstance(object v, string message) {
-        if (v is not LoxInstance instance) {
+        // src/stdlib/reflect_api.cpp gates every one of these natives on
+        // isInstance(), and an ObjError is not an ObjInstance there - a
+        // caught fault must be refused here the same way, not accepted
+        // because it happens to be backed by a plain LoxInstance on this
+        // runtime (see ErrorClass's own doc comment).
+        if (v is not LoxInstance instance || ReferenceEquals(instance.Klass, ErrorClass)) {
             throw new LoxError(message);
         }
         return instance;
