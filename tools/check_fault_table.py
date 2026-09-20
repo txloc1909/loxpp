@@ -340,7 +340,6 @@ FATAL_ROWS = [
         "fatal",
         'v["a"];',
         setup="enum E { A(x) } var v = A(1);\n",
-        skip={BOOTSTRAP: "issue #349: bootstrap cannot index an enum value at all"},
         expected_message="Enum field index must be a number.",
     ),
     Row(
@@ -348,7 +347,6 @@ FATAL_ROWS = [
         "fatal",
         "v[3];",
         setup="enum E { A(x) } var v = A(1);\n",
-        skip={BOOTSTRAP: "issue #349: bootstrap cannot index an enum value at all"},
         expected_message="Enum field index 3 out of range.",
     ),
     Row(
@@ -551,6 +549,16 @@ for _row in FATAL_ROWS:
     if _row.name == "defer_noncallable_value":
         # Node #351: bootstrap now faults on a deferred non-callable value,
         # matching native's fatal disposition, so it is exempt from the
+        # blanket skip below.
+        continue
+    if _row.name == "enum_index_type_error":
+        # Node #349: bootstrap now indexes enum values, matching native's
+        # fatal disposition on type error, so it is exempt from the blanket
+        # skip below.
+        continue
+    if _row.name == "enum_index_out_of_range":
+        # Node #349: bootstrap now indexes enum values, matching native's
+        # fatal disposition on out-of-range error, so it is exempt from the
         # blanket skip below.
         continue
     _row.skip.setdefault(BOOTSTRAP, _BOOTSTRAP_FATAL_DEFAULT_SKIP)

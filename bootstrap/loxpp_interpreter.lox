@@ -2281,6 +2281,17 @@ class Interpreter {
             if (fl < 0 or fl >= len(object)) { this.setError("IndexOutOfBoundsError", "List index out of bounds.", line); return nil; }
             return object[fl];
         }
+        if (loxTag(object) == "enum_val") {
+            if (!isLoxNum(index)) { this.fatalError("Enum field index must be a number."); return nil; }
+            var fl;
+            if (index >= 0) {
+                fl = math.floor(index);
+            } else {
+                fl = math.ceil(index);
+            }
+            if (fl < 0 or fl >= len(object.fields)) { this.fatalError("Enum field index " + str(fl) + " out of range."); return nil; }
+            return object.fields[fl];
+        }
         this.setError("NotIndexableError", "Only lists, maps, and strings can be indexed.", line);
         return nil;
     }
