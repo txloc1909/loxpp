@@ -571,6 +571,20 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "tools/check_clr_probes.sh"
 
+      # Mission #288 node #336: for every row of spec/04-semantics.md's
+      # Runtime Errors and Fatal Runtime Errors tables, checks that native,
+      # JVM, CLR, and the bootstrap interpreter agree on whether the fault
+      # is caught or halts the program, and (when caught) on kind, message,
+      # type(), and str(). Runs on all four consumers this job already has
+      # a binary for.
+      - name: Check fault table - differential
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/check_fault_table.py"
+
       # spec/05-stdlib.md: every File still open when the program ends must
       # be flushed as if close() had been called, on every exit path. Runs
       # on all four consumers this job already has a binary for.

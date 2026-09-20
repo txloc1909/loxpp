@@ -1,0 +1,561 @@
+#!/usr/bin/env python3
+"""
+Mission #288 node #336: differential fault test across all four consumers.
+
+For every row of spec/04-semantics.md's Runtime Errors table (the catchable
+table) and its Fatal Runtime Errors table, plus the five Error-as-receiver
+reflection rows spec/03-types.md's Error section implies (fields/getField/
+hasField/setField/callMethod all reject an Error value), this script runs
+one small Lox++ program through all four consumers -- native (build/loxpp),
+JVM (tools/loxpp_jvm.sh), CLR (tools/loxpp_clr.sh), and the bootstrap
+interpreter (bootstrap/lox_wrapper.sh) -- and checks that they agree on:
+
+  - whether the fault is CAUGHT (delivered to a catchBlock) or FATAL
+    (halts the program, never reaching the catchBlock);
+  - for a CAUGHT row: `e.kind`, `e.message`, `type(e)`, and `str(e)`.
+
+A row's own disposition (catchable vs. fatal) is native's -- native defines
+the ground truth (spec/04-semantics.md). Every row is therefore run with
+the SAME program shape on all four consumers and classified by what its
+stdout actually contains, not by which table the row came from: a
+consumer that disagrees with native's disposition shows up as an outcome
+mismatch, exactly like a kind or message mismatch would.
+
+Two known outcomes are not run through this comparison at all: a row's
+`skip` set. A row is skipped for a consumer only when an earlier mission
+node's review already found and filed the exact divergence (see each row's
+own comment). Skipping a row does not weaken the check for the other three
+consumers running that same row.
+
+Usage:
+    tools/check_fault_table.py [--native PATH] [--jvm PATH] [--clr PATH]
+                                [--bootstrap PATH] [--timeout SECONDS]
+
+Exits 0 when every non-skipped (row, consumer) pair matches native's
+outcome on caught-vs-halted, and (for a caught row) on kind/message/type/
+str wherever that field is not itself skipped for that consumer. Exits 1
+and prints every mismatch otherwise.
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SPEC_PATH = REPO_ROOT / "spec" / "04-semantics.md"
+
+NATIVE = "native"
+JVM = "jvm"
+CLR = "clr"
+BOOTSTRAP = "bootstrap"
+
+# A row's program prints these markers (never "kind"/"message"/"type"/"str"
+# text a fault message could itself contain) so a run's outcome is read from
+# a fixed vocabulary, not guessed from arbitrary program output.
+CAUGHT_MARKER = "__CAUGHT__"
+AFTER_MARKER = "__AFTER__"
+UNREACHABLE_MARKER = "__UNREACHABLE__"
+
+CAUGHT_TEMPLATE = """{setup}try {{
+    {body}
+}} catch (e) {{
+    print "{caught}";
+    print e.kind;
+    print e.message;
+    print type(e);
+    print str(e);
+}}
+print "{after}";
+"""
+
+FATAL_TEMPLATE = """{setup}try {{
+    {body}
+    print "{unreachable}";
+}} catch (_) {{
+    print "{caught}";
+}}
+print "{after}";
+"""
+
+
+@dataclass
+class Row:
+    name: str  # short id, used in output and as the probe file stem
+    disposition: str  # "caught" or "fatal" -- native's own ground truth
+    body: str  # the fault-causing code, ending in ';'
+    setup: str = ""  # code that runs before the try, ending in ';' (or "")
+    expected_kind: str | None = None  # required when disposition == "caught"
+    skip: dict[str, str] = field(default_factory=dict)  # consumer -> reason, skips the whole row
+    skip_fields: dict[str, set[str]] = field(default_factory=dict)  # consumer -> {"type", "str", "message"}
+
+    def program(self) -> str:
+        if self.disposition == "caught":
+            return CAUGHT_TEMPLATE.format(
+                setup=self.setup, body=self.body, caught=CAUGHT_MARKER, after=AFTER_MARKER
+            )
+        return FATAL_TEMPLATE.format(
+            setup=self.setup,
+            body=self.body,
+            unreachable=UNREACHABLE_MARKER,
+            caught=CAUGHT_MARKER,
+            after=AFTER_MARKER,
+        )
+
+
+# --- Catchable Runtime Errors table (spec/04-semantics.md, 19 rows) -------
+#
+# Most Example cells are bare expressions the spec table lists standalone;
+# a few reference a name the cell itself never declares (`m`, `list`) or are
+# prose, not code ("Unbounded recursion") -- `setup` below supplies exactly
+# what each such cell is missing, without changing the fault it exercises.
+CATCHABLE_ROWS = [
+    Row("arithmetic_type_error", "caught", '"a" - 1;', expected_kind="ArithmeticTypeError"),
+    Row("comparison_type_error", "caught", '"a" < 1;', expected_kind="ComparisonTypeError"),
+    Row("concatenation_type_error", "caught", '1 + "a";', expected_kind="ConcatenationTypeError"),
+    Row("not_callable_error", "caught", "42();", expected_kind="NotCallableError"),
+    Row("arity_error", "caught", "fun f(a) {} f(1, 2);", expected_kind="ArityError"),
+    Row("undefined_variable_error", "caught", "print undeclared;", expected_kind="UndefinedVariableError"),
+    # `f` is declared OUTSIDE the try (setup), not inside it: a self-recursive
+    # local function declared inside a try block fails JVM bytecode
+    # verification (issue #350) -- an emission bug unrelated to this table
+    # row, which a top-level declaration avoids while still exercising the
+    # same StackOverflowError fault.
+    Row(
+        "stack_overflow_error",
+        "caught",
+        "f();",
+        setup="fun f() { return f(); }\n",
+        expected_kind="StackOverflowError",
+    ),
+    Row("not_indexable_error", "caught", "42[0];", expected_kind="NotIndexableError"),
+    Row("index_type_error", "caught", 'list["a"];', setup="var list = [];\n", expected_kind="IndexTypeError"),
+    Row(
+        "index_not_integer_error",
+        "caught",
+        "list[1.5];",
+        setup="var list = [];\n",
+        expected_kind="IndexNotIntegerError",
+    ),
+    Row("index_out_of_bounds_error", "caught", "[][0];", expected_kind="IndexOutOfBoundsError"),
+    Row("empty_list_error", "caught", "[].pop();", expected_kind="EmptyListError"),
+    Row("nan_key_error", "caught", "m[0/0] = 1;", setup="var m = {};\n", expected_kind="NaNKeyError"),
+    Row(
+        "invalid_map_key_error",
+        "caught",
+        "m[[1,2]] = 1;",
+        setup="var m = {};\n",
+        expected_kind="InvalidMapKeyError",
+    ),
+    # MaxDepthExceededError: native reports this fatal today (see the
+    # FATAL_ROWS entry below), the opposite disposition from this table
+    # row. Issue #338 owns which disposition is correct; this test does not
+    # run this row, on any consumer, until that is settled.
+    Row("invalid_receiver_error", "caught", "42.foo();", expected_kind="InvalidReceiverError"),
+    Row(
+        "match_error",
+        "caught",
+        'match 99 { case 1 => "one" };',
+        expected_kind="MatchError",
+    ),
+    Row(
+        "constructor_arity_error",
+        "caught",
+        "ok(1, 2);",
+        setup="enum E { ok(x) }\n",
+        expected_kind="ConstructorArityError",
+    ),
+    # This row's own Example is already a nested try/catch (the fault it
+    # names -- an undefined property read on a caught Error -- can only be
+    # produced by first catching one). The outer catch here is the probe's
+    # own instrumentation, not part of the row's Example.
+    Row(
+        "undefined_property_on_error",
+        "caught",
+        "try { [][0]; } catch (e) { e.foo; }",
+        expected_kind="UndefinedPropertyError",
+    ),
+]
+
+# --- Fatal Runtime Errors table (spec/04-semantics.md) --------------------
+#
+# Every Example below is copied from the spec table as-is: the round-2/
+# round-4 review already made each one self-contained and runnable.
+FATAL_ROWS = [
+    Row(
+        "get_tag_non_enum",
+        "fatal",
+        "enum Result { Ok(v) Err(m) } match 1 { case Ok(v) => v case Err(m) => -1 };",
+    ),
+    # Value nested too deep to print: fatal on native today, with no
+    # `Error.kind`, but this exact fault keeps a catchable row
+    # (MaxDepthExceededError) in the table above -- the opposite
+    # disposition. Issue #338 decides which is correct; until then, this is
+    # not one settled ground truth to diff the other three consumers
+    # against, so this test does not run it.
+    Row(
+        "stdlib_native_arity",
+        "fatal",
+        "clock(1);",
+    ),
+    # A stdlib native's own error text is not enumerated by spec/04-semantics.md
+    # (see the Fatal Runtime Errors section's own note); native and the JVM
+    # backend report different text for the same open() failure (native names
+    # the path once, the JVM's IOException message repeats it). Disposition
+    # (fatal on every consumer) is still checked; the message text is not.
+    Row(
+        "stdlib_open_failure",
+        "fatal",
+        'open("/no/such/path", "r");',
+        skip_fields={JVM: {"message"}, CLR: {"message"}, BOOTSTRAP: {"message"}},
+    ),
+    Row(
+        "undefined_property_on_file",
+        "fatal",
+        'var f = open("/tmp/loxpp_fault_table_probe.txt", "w"); f.write("x"); '
+        'var g = open("/tmp/loxpp_fault_table_probe.txt", "r"); g.bogus;',
+    ),
+    Row("undefined_property_on_map", "fatal", "var m = {}; m.bogus;"),
+    Row("undefined_property_on_instance", "fatal", "class C {} var c = C(); c.bogus;"),
+    # Fused site (issue #348): bootstrap's tree-walker gives this the same
+    # catchable kind it gives `42.foo()` (a call), because it cannot tell a
+    # plain property-get apart from a call target the way native's
+    # opcode-level dispatch does. Native, JVM, and CLR are fatal here.
+    Row(
+        "property_get_non_instance",
+        "fatal",
+        "42.foo;",
+        skip={BOOTSTRAP: "issue #348: bootstrap catches this fused site"},
+    ),
+    Row("property_set_non_instance", "fatal", "42.foo = 1;"),
+    # Fused site (issue #348): see property_get_non_instance above.
+    Row(
+        "invoke_field_not_callable",
+        "fatal",
+        "class C { init() { this.f = 1; } } C().f();",
+        skip={BOOTSTRAP: "issue #348: bootstrap catches this fused site"},
+    ),
+    Row("invoke_method_not_found", "fatal", "class C {} C().bogus();"),
+    Row("list_append_wrong_arity", "fatal", "[].append();"),
+    Row("list_pop_wrong_arity", "fatal", "[].pop(1);"),
+    Row("list_remove_wrong_arity", "fatal", "[1].remove();"),
+    Row("list_remove_value_not_found", "fatal", "[1, 2].remove(3);"),
+    Row("undefined_method_on_list", "fatal", "[].bogus();"),
+    Row(
+        "undefined_method_on_file",
+        "fatal",
+        'var f = open("/tmp/loxpp_fault_table_probe2.txt", "w"); f.write("x"); '
+        'var g = open("/tmp/loxpp_fault_table_probe2.txt", "r"); g.bogus();',
+    ),
+    Row("undefined_method_on_map", "fatal", "var m = {}; m.bogus();"),
+    Row(
+        "superclass_not_a_class",
+        "fatal",
+        "var NotAClass = 1; class Sub < NotAClass {}",
+    ),
+    Row(
+        "super_method_not_found",
+        "fatal",
+        "class A {} class B < A { m() { super.zzz(); } } B().m();",
+    ),
+    # Missing feature (issue #349): bootstrap cannot index an ObjEnum value
+    # at all, so it never reaches this fault's own message.
+    Row(
+        "enum_index_type_error",
+        "fatal",
+        'enum E { A(x) } var v = A(1); v["a"];',
+        skip={BOOTSTRAP: "issue #349: bootstrap cannot index an enum value at all"},
+    ),
+    Row(
+        "enum_index_out_of_range",
+        "fatal",
+        "enum E { A(x) } var v = A(1); v[3];",
+        skip={BOOTSTRAP: "issue #349: bootstrap cannot index an enum value at all"},
+    ),
+    Row("string_index_assignment", "fatal", '"abc"[0] = "x";'),
+    Row("slice_non_list_string", "fatal", "(42)[0:1];"),
+    Row("slice_start_non_number", "fatal", '[1, 2]["a":2];'),
+    Row("slice_start_non_integer", "fatal", "[1, 2][1.5:2];"),
+    Row("slice_start_negative", "fatal", "[1, 2][-1:2];"),
+    Row("slice_end_non_number", "fatal", '[1, 2][0:"a"];'),
+    Row("slice_end_non_integer", "fatal", "[1, 2][0:1.5];"),
+    Row("slice_end_negative", "fatal", "[1, 2][0:-1];"),
+    Row("in_string_non_string_elem", "fatal", '1 in "abc";'),
+    Row("in_non_indexable", "fatal", "1 in 42;"),
+    Row("for_in_non_iterable", "fatal", "for (var x in 42) {}"),
+    # A `defer`red call holding a non-callable value must be fatal (native's
+    # runDefers). The CLR backend fails to *compile* a variant of this shape
+    # that closes over a caught `e` inside a nested function (issue found
+    # during this node's own build; a plain local variable, not a capture,
+    # reaches the same runtime fault on every consumer without hitting that
+    # unrelated CLR emitter gap).
+    # Issue #351: bootstrap neither faults nor catches anything here -- the
+    # non-callable deferred value is silently never invoked. That is a
+    # third, distinct shape from the general by-design pattern the other
+    # fatal rows share (see _BOOTSTRAP_FATAL_DEFAULT_SKIP below): not
+    # caught, not fatal, nothing reported at all.
+    Row(
+        "defer_noncallable_value",
+        "fatal",
+        "fun g() { var x = 42; defer x(); } g();",
+        skip={BOOTSTRAP: "issue #351: bootstrap silently never invokes the deferred call, no fault at all"},
+    ),
+]
+
+# --- Error-as-receiver reflection rows -------------------------------------
+#
+# spec/03-types.md's Error section (lines 223-225) makes a write to any name
+# on an Error value a runtime error; the reflection natives are a second
+# door onto the same restriction, separate from `.` property access. `e` is
+# bound the same way in every row: a caught IndexOutOfBoundsError.
+_REFLECT_SETUP = "try { var x = []; print x[0]; } catch (e) {\n"
+REFLECT_ROWS = [
+    Row("reflect_fields_on_error", "fatal", "fields(e);\n}", setup=_REFLECT_SETUP),
+    Row("reflect_getfield_on_error", "fatal", 'getField(e, "kind");\n}', setup=_REFLECT_SETUP),
+    Row("reflect_hasfield_on_error", "fatal", 'hasField(e, "kind");\n}', setup=_REFLECT_SETUP),
+    Row("reflect_setfield_on_error", "fatal", 'setField(e, "kind", 5);\n}', setup=_REFLECT_SETUP),
+    Row("reflect_callmethod_on_error", "fatal", 'callMethod(e, "foo");\n}', setup=_REFLECT_SETUP),
+]
+
+ALL_ROWS = CATCHABLE_ROWS + FATAL_ROWS + REFLECT_ROWS
+
+# --- Bootstrap's own disposition model -------------------------------------
+#
+# Node #335's own scope (issue #335) was "wire every setError() call site's
+# `kind` string to the N1 table, no aliasing" -- never message-text parity,
+# and never matching native's catchable/fatal split. Two facts, both
+# already documented outside this script, follow from that scope:
+#
+# 1. Every catchable-table row's `kind` is proven correct by node #335's own
+#    regression test (tools/check_bootstrap_error_kinds.py); this script
+#    re-checks it here as a cross-consumer proof, but does not also demand
+#    bootstrap's message text match native's -- that was never node #335's
+#    deliverable. `type()`/`str()` are a separate, real gap (issue #347).
+# 2. Bootstrap's tree-walker delivers EVERY Fatal Runtime Errors table cause
+#    as a catchable Error, by design (see
+#    tools/run_bootstrap_error_kind_causes.py's own module docstring) --
+#    there is no fatal path on bootstrap for most of these rows to compare
+#    against native's. Comparing bootstrap's outcome against native's fatal
+#    disposition, row by row, would report ~30 "divergences" that are all
+#    the same one architectural fact, not 30 distinct defects. The Error-
+#    as-receiver reflection rows are the one Fatal-table-shaped exception:
+#    those go through the reflection natives' own type checks, which DO
+#    halt bootstrap the same way they halt native, so REFLECT_ROWS is left
+#    fully compared, not defaulted to skip.
+#
+# A row that found a genuine, specific defect underneath this general
+# pattern (a real kind ambiguity, a missing feature, a silently-swallowed
+# fault) keeps its own specific `skip` reason and issue number instead of
+# this default -- see property_get_non_instance, invoke_field_not_callable,
+# enum_index_type_error, enum_index_out_of_range, and
+# defer_noncallable_value above.
+_BOOTSTRAP_FATAL_DEFAULT_SKIP = (
+    "bootstrap delivers every Fatal Runtime Errors table cause as a catchable "
+    "Error by design (see tools/run_bootstrap_error_kind_causes.py); node #335's "
+    "own scope was kind-string correctness, not matching native's fatal "
+    "disposition"
+)
+for _row in FATAL_ROWS:
+    _row.skip.setdefault(BOOTSTRAP, _BOOTSTRAP_FATAL_DEFAULT_SKIP)
+
+for _row in CATCHABLE_ROWS:
+    fields = _row.skip_fields.setdefault(BOOTSTRAP, set())
+    # kind is compared (node #335's actual deliverable); message text and
+    # type()/str() are not (see the module note above and issue #347).
+    fields.update({"message", "type", "str"})
+
+
+def load_spec_table_kind_count() -> int:
+    """Counts the catchable table's data rows in spec/04-semantics.md.
+
+    Not a full re-derivation of every row's text -- CATCHABLE_ROWS already
+    hand-transcribes each row's kind and Example -- but a change to the
+    table's row count (a row added or removed) with no matching change here
+    fails loudly instead of silently checking a stale corpus.
+    """
+    text = SPEC_PATH.read_text(encoding="utf-8")
+    start = text.index("## Runtime Errors")
+    end = text.index("### Fatal Runtime Errors", start)
+    section = text[start:end]
+    rows = [
+        line
+        for line in section.splitlines()
+        if line.startswith("|") and "---" not in line and "Cause" not in line
+    ]
+    return len(rows)
+
+
+@dataclass
+class RunResult:
+    outcome: str  # "caught", "fatal", or "crash" (neither marker seen -- see module docstring hazard)
+    kind: str | None = None
+    message: str | None = None
+    type_: str | None = None
+    str_: str | None = None
+
+
+class ConsumerCommand:
+    def __init__(self, kind: str, argv: list[str]) -> None:
+        self.kind = kind
+        self.argv = argv
+
+    def run(self, program_path: Path, timeout: float) -> subprocess.CompletedProcess:
+        full_env = os.environ.copy()
+        if self.kind == BOOTSTRAP:
+            full_env["LANGUAGE"] = "LOXPP"
+        return subprocess.run(
+            self.argv + [str(program_path)],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=full_env,
+        )
+
+
+def classify(stdout: str) -> RunResult:
+    lines = stdout.splitlines()
+    if CAUGHT_MARKER in lines:
+        idx = lines.index(CAUGHT_MARKER)
+        rest = lines[idx + 1 :]
+        # A fatal-template run's catch block prints only CAUGHT_MARKER
+        # (see FATAL_TEMPLATE) -- reaching it at all is itself the
+        # divergence from native, whether or not AFTER_MARKER follows.
+        if len(rest) >= 4:
+            return RunResult(
+                outcome="caught", kind=rest[0], message=rest[1], type_=rest[2], str_=rest[3]
+            )
+        return RunResult(outcome="caught")
+    if UNREACHABLE_MARKER in lines or AFTER_MARKER in lines:
+        # The fatal template printed UNREACHABLE_MARKER (the fault did not
+        # fire at all -- a corpus bug, not a real "fatal" outcome) or a
+        # caught-template run somehow reached AFTER_MARKER without its own
+        # catch block markers (also a corpus bug: the fault never fired).
+        return RunResult(outcome="crash")
+    return RunResult(outcome="fatal")
+
+
+def run_row(row: Row, commands: dict[str, ConsumerCommand], workdir: Path, timeout: float) -> dict[str, RunResult]:
+    program_path = workdir / f"{row.name}.lox"
+    program_path.write_text(row.program(), encoding="utf-8")
+    results: dict[str, RunResult] = {}
+    for consumer, command in commands.items():
+        if consumer in row.skip:
+            continue
+        try:
+            proc = command.run(program_path, timeout)
+        except subprocess.TimeoutExpired:
+            results[consumer] = RunResult(outcome="crash")
+            continue
+        results[consumer] = classify(proc.stdout)
+    return results
+
+
+def compare(row: Row, native_result: RunResult, other: RunResult, consumer: str) -> list[str]:
+    problems = []
+    if other.outcome != native_result.outcome:
+        problems.append(
+            f"outcome: native={native_result.outcome} {consumer}={other.outcome}"
+        )
+        return problems
+    if native_result.outcome != "caught":
+        return problems
+    skip = row.skip_fields.get(consumer, set())
+    if row.expected_kind is not None and native_result.kind != row.expected_kind:
+        problems.append(
+            f"native's own kind ({native_result.kind}) does not match the table's "
+            f"expected kind ({row.expected_kind}) -- corpus bug, fix the row"
+        )
+    if "kind" not in skip and other.kind != native_result.kind:
+        problems.append(f"kind: native={native_result.kind!r} {consumer}={other.kind!r}")
+    if "message" not in skip and other.message != native_result.message:
+        problems.append(f"message: native={native_result.message!r} {consumer}={other.message!r}")
+    if "type" not in skip and other.type_ != native_result.type_:
+        problems.append(f"type(): native={native_result.type_!r} {consumer}={other.type_!r}")
+    if "str" not in skip and other.str_ != native_result.str_:
+        problems.append(f"str(): native={native_result.str_!r} {consumer}={other.str_!r}")
+    return problems
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--native", default=str(REPO_ROOT / "build" / "loxpp"))
+    parser.add_argument("--jvm", default=str(REPO_ROOT / "tools" / "loxpp_jvm.sh"))
+    parser.add_argument("--clr", default=str(REPO_ROOT / "tools" / "loxpp_clr.sh"))
+    parser.add_argument("--bootstrap", default=str(REPO_ROOT / "bootstrap" / "lox_wrapper.sh"))
+    parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument(
+        "--only", default=None, help="run only rows whose name contains this substring (for debugging)"
+    )
+    args = parser.parse_args()
+
+    commands = {
+        NATIVE: ConsumerCommand(NATIVE, [args.native]),
+        JVM: ConsumerCommand(JVM, [args.jvm]),
+        CLR: ConsumerCommand(CLR, [args.clr]),
+        BOOTSTRAP: ConsumerCommand(BOOTSTRAP, [args.bootstrap]),
+    }
+
+    # MaxDepthExceededError is the one catchable-table row this script does
+    # not run at all (see CATCHABLE_ROWS's own comment): its disposition
+    # conflicts with the Fatal Runtime Errors table's own row for the same
+    # fault, and issue #338, not this test, decides which is correct.
+    excluded_catchable_rows = 1
+    spec_row_count = load_spec_table_kind_count()
+    if spec_row_count != len(CATCHABLE_ROWS) + excluded_catchable_rows:
+        print(
+            f"check_fault_table.py: spec/04-semantics.md's catchable table has "
+            f"{spec_row_count} row(s), but CATCHABLE_ROWS covers "
+            f"{len(CATCHABLE_ROWS)} (+{excluded_catchable_rows} deliberately "
+            "excluded, see MaxDepthExceededError's comment). The table changed; "
+            "update this script's corpus to match.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    rows = ALL_ROWS
+    if args.only:
+        rows = [r for r in rows if args.only in r.name]
+        if not rows:
+            print(f"check_fault_table.py: no row matches --only {args.only!r}", file=sys.stderr)
+            sys.exit(2)
+
+    diverged = 0
+    skipped_rows = 0
+    with tempfile.TemporaryDirectory(prefix="loxpp_fault_table_") as tmp:
+        workdir = Path(tmp)
+        for row in rows:
+            results = run_row(row, commands, workdir, args.timeout)
+            native_result = results.get(NATIVE)
+            if native_result is None:
+                print(f"SKIP        {row.name}  (native itself is skipped for this row)")
+                skipped_rows += 1
+                continue
+
+            row_ok = True
+            row_notes = []
+            for consumer in (JVM, CLR, BOOTSTRAP):
+                if consumer in row.skip:
+                    row_notes.append(f"{consumer} SKIPPED ({row.skip[consumer]})")
+                    continue
+                other_result = results[consumer]
+                problems = compare(row, native_result, other_result, consumer)
+                if problems:
+                    row_ok = False
+                    for problem in problems:
+                        print(f"DIVERGE     {row.name}  [{consumer}]  {problem}")
+                    diverged += 1
+
+            if row_ok:
+                suffix = f"  ({'; '.join(row_notes)})" if row_notes else ""
+                print(f"MATCH       {row.name}  ({native_result.outcome}){suffix}")
+
+    print()
+    print(f"{len(rows) - skipped_rows} row(s) checked, {skipped_rows} row(s) not runnable, {diverged} divergence(s)")
+    sys.exit(1 if diverged else 0)
+
+
+if __name__ == "__main__":
+    main()
