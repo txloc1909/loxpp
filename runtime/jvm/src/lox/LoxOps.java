@@ -792,7 +792,8 @@ public final class LoxOps {
             // LoxRuntime.makeError), told apart only by its class's identity.
             LoxInstance inst = (LoxInstance)v;
             if (inst.klass == LoxRuntime.ERROR_CLASS) {
-                return inst.fields.get("kind") + ": " + inst.fields.get("message");
+                return stringify(inst.fields.get("kind")) + ": "
+                    + stringify(inst.fields.get("message"));
             }
             return inst.klass.name + " instance";
         }
