@@ -2819,19 +2819,33 @@ class Interpreter {
     }
 
     evalCall(calleeExpr, paren_line, argsExprs, env) {
+        var savedEvaluatingCallTarget = this.evaluatingCallTarget;
         this.evaluatingCallTarget = true;
-        var callee = this.evalExpr(calleeExpr, env);
-        this.evaluatingCallTarget = false;
+        var savedLastValueFromField = this.lastValueFromField;
+        var savedStringifyDepth = this.stringifyDepth;
+        var callee = nil;
+        try {
+            callee = this.evalExpr(calleeExpr, env);
+        } catch (e) {
+            if (e.kind != "StackOverflowError") throw e;
+            this.evaluatingCallTarget = savedEvaluatingCallTarget;
+            this.lastValueFromField = savedLastValueFromField;
+            this.stringifyDepth = savedStringifyDepth;
+            this.returnFlag = false;
+            this.returnValue = nil;
+            this.setError("StackOverflowError", "Stack overflow.", 0);
+            return nil;
+        }
+        this.evaluatingCallTarget = savedEvaluatingCallTarget;
         var calleeFromField = this.lastValueFromField;
+        this.lastValueFromField = savedLastValueFromField;
         if (this.throwFlag) return nil;
         // Calling a non-callable field value is fatal on native. Check before
         // checking for basic non-callables.
         if (calleeFromField and (callee == nil or callee == true or callee == false or isLoxStr(callee) or isLoxNum(callee))) {
-            this.lastValueFromField = false;
             this.fatalError("Can only call functions, classes and enums.");
             return nil;
         }
-        this.lastValueFromField = false;
         var args = [];
         var i = 0;
         while (i < len(argsExprs)) {
@@ -2890,29 +2904,50 @@ class Interpreter {
     // tested, observable case (`42.foo()`). Separating them would need a
     // call-context flag threaded from evalCall, which this node does not add.
     evalGet(objectExpr, name, line, env) {
-        var object = this.evalExpr(objectExpr, env);
-        if (this.throwFlag) return nil;
+        var savedLastValueFromField = this.lastValueFromField;
+        var savedStringifyDepth = this.stringifyDepth;
+        var object = nil;
+        try {
+            object = this.evalExpr(objectExpr, env);
+        } catch (e) {
+            if (e.kind != "StackOverflowError") throw e;
+            this.lastValueFromField = savedLastValueFromField;
+            this.stringifyDepth = savedStringifyDepth;
+            this.returnFlag = false;
+            this.returnValue = nil;
+            this.setError("StackOverflowError", "Stack overflow.", 0);
+            return nil;
+        }
+        if (this.throwFlag) {
+            this.lastValueFromField = savedLastValueFromField;
+            return nil;
+        }
         if (loxTag(object) == "math") {
+            this.lastValueFromField = savedLastValueFromField;
             if (name == "pi") return math.pi;
             if (name == "e")  return math.e;
             return InterpMathFn(name);
         }
         if (loxTag(object) == "list") {
+            this.lastValueFromField = savedLastValueFromField;
             if (name == "append" or name == "pop" or name == "remove") return InterpListMethod(name, object);
             this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }
         if (loxTag(object) == "map") {
+            this.lastValueFromField = savedLastValueFromField;
             if (name == "has" or name == "del" or name == "keys" or name == "values" or name == "entries") return InterpMapMethod(name, object);
             this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }
         if (loxTag(object) == "file") {
+            this.lastValueFromField = savedLastValueFromField;
             if (name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close") return InterpFileMethod(name, object);
             this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }
         if (loxTag(object) == "error") {
+            this.lastValueFromField = savedLastValueFromField;
             if (name == "kind") return object.kind;
             if (name == "message") return object.message;
             this.setError("UndefinedPropertyError", "Undefined property '" + name + "' on error.", line);
@@ -2922,7 +2957,7 @@ class Interpreter {
             // Plain property reads on non-instances (`42.foo;`) are fatal on native.
             // Method calls on non-instances (`42.foo()`) are catchable with
             // InvalidReceiverError. Distinguish them by checking the call context.
-            this.lastValueFromField = false;
+            this.lastValueFromField = savedLastValueFromField;
             if (!this.evaluatingCallTarget) {
                 this.fatalError("Only instances have properties.");
                 return nil;
@@ -2932,7 +2967,7 @@ class Interpreter {
         }
         var val = object.instGet(name, 0);
         if (val == nil and !object.fields.has(name) and object.klass.findMethod(name) == nil) {
-            this.lastValueFromField = false;
+            this.lastValueFromField = savedLastValueFromField;
             this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }
@@ -2940,7 +2975,7 @@ class Interpreter {
         if (object.fields.has(name)) {
             this.lastValueFromField = true;
         } else {
-            this.lastValueFromField = false;
+            this.lastValueFromField = savedLastValueFromField;
         }
         return val;
     }

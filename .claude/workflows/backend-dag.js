@@ -8,16 +8,12 @@ export const meta = {
     // ids/titles so the progress-tree preview is accurate. A phase() call
     // for an id missing here still works; it just gets its own unlabeled
     // progress group instead of a named preview.
-    { title: 'C-RT', detail: 'C# runtime library, its tests, and the CLR link smoke test' },
-    { title: 'C-N4', detail: 'straight-line CIL emit, --target clr, and the run harness' },
-    { title: 'C-N5', detail: 'control flow, labels, and IL legality' },
-    { title: 'C-N6', detail: 'functions and calls' },
-    { title: 'C-N7', detail: 'closures and upvalues [BUG GATE]' },
-    { title: 'C-N8', detail: 'classes, methods, super, and the shared depth-0 authority' },
-    { title: 'C-N9', detail: 'aggregates, slices, membership, and iterators' },
-    { title: 'C-N10', detail: 'match and enum dispatch' },
-    { title: 'C-N11', detail: 'differential corpus gate, native vs JVM vs CLR' },
-    { title: 'C-N12', detail: 'self-hosted interpreter gate [MISSION GATE]' },
+    { title: '351', detail: 'T1 - bootstrap: fault on a defer of a non-callable value' },
+    { title: '349', detail: 'T2 - bootstrap: index an enum value, and its two fatal rows' },
+    { title: '347', detail: 'T3 - bootstrap: Error identity, type() and str() on a caught Error' },
+    { title: '348', detail: 'T4 - bootstrap: split three fused sites, catchable vs fatal' },
+    { title: '301', detail: 'T5 - bootstrap: 13 remaining table-kind aliasing sites' },
+    { title: '354', detail: 'T6 - bootstrap: catchable-row message text parity [MISSION GATE]' },
   ],
 }
 
@@ -58,6 +54,23 @@ const NODES = cfg.nodes
 const TARGET_LABEL = cfg.targetLabel || 'target-specific'
 const DAG_DOC = cfg.dagDoc || (REPO + '/notes/backend-implementation-dag.md')
 const OPCODE_DOC = cfg.opcodeDoc || (REPO + '/notes/bytecode-translation-problems.md')
+// What this mission builds, in one clause after "MISSION: ". Defaults to the
+// backend-build wording the harness was first written for; a non-backend
+// mission (e.g. a cross-consumer semantics fix) must override this.
+const MISSION_DESC = cfg.missionDescription || 'build a Lox++ compiler backend, node by node.'
+
+// Per-role model overrides. Defaults reproduce the models this harness ran
+// with before they were made configurable, so an args-less run is unchanged.
+// A role's model is a mission-level choice: a cheap implementer paired with a
+// strong reviewer shifts work from writing to reviewing, and the 3-round
+// dispute and stagnation limits are what keep that trade honest.
+const IMPL_MODEL = cfg.implModel || 'sonnet'
+const REVIEW_MODEL = cfg.reviewModel || 'opus'
+const REFEREE_MODEL = cfg.refereeModel || 'fable'
+const RESEARCH_MODEL = cfg.researchModel || cfg.refereeModel || 'fable'
+// Merge is an implementer-role step, but it rebases onto a moved main and
+// resolves conflicts, so it gets its own knob rather than following IMPL_MODEL.
+const MERGE_MODEL = cfg.mergeModel || 'sonnet'
 
 const MAX_REVIEW_ROUNDS = 8      // hard stop on the implementer/reviewer loop
 const DISPUTE_LIMIT = 3          // rounds a tag may stay disputed before the referee decides
@@ -169,7 +182,7 @@ const MERGE_SCHEMA = {
 function common(id) {
   const n = NODES[id]
   return [
-    'MISSION: build a Lox++ compiler backend, node by node.',
+    'MISSION: ' + MISSION_DESC,
     'MISSION TRACKING ISSUE: #' + MISSION_ISSUE + ' (sequences every node; do not scope code work directly against it).',
     'YOUR NODE: ' + id + ' - ' + n.title,
     'YOUR NODE ISSUE: #' + n.issue,
@@ -592,7 +605,7 @@ async function runNode(id, res) {
     log('node ' + id + ': resuming on open PR #' + res.pr)
     if (res.phase === 'merge') {
       const mg0 = await agent(mergePrompt(id, res.pr), {
-        model: 'sonnet', label: 'merge:' + id, phase: ph, schema: MERGE_SCHEMA,
+        model: MERGE_MODEL, label: 'merge:' + id, phase: ph, schema: MERGE_SCHEMA,
       })
       if (!mg0) { result.status = 'agent_died'; return result }
       result.log.push('merge(resumed): merged=' + mg0.merged + ' - ' + mg0.summary)
@@ -601,7 +614,7 @@ async function runNode(id, res) {
     }
   } else {
     log('node ' + id + ': implementer starts')
-    impl = await agent(implPrompt(id), { model: 'sonnet', label: 'impl:' + id, phase: ph, schema: IMPL_SCHEMA })
+    impl = await agent(implPrompt(id), { model: IMPL_MODEL, label: 'impl:' + id, phase: ph, schema: IMPL_SCHEMA })
     if (!impl) { result.status = 'agent_died'; return result }
     result.log.push('impl-1: ' + impl.status + ' - ' + impl.summary)
     if (impl.pr) result.pr = impl.pr
@@ -613,7 +626,7 @@ async function runNode(id, res) {
     unblocks += 1
     log('node ' + id + ': researcher unblocks (attempt ' + unblocks + ')')
     const res = await agent(unblockPrompt(id, impl.blocker || impl.summary), {
-      model: 'fable', label: 'research:' + id + ':' + unblocks, phase: ph, schema: RESEARCH_SCHEMA,
+      model: RESEARCH_MODEL, label: 'research:' + id + ':' + unblocks, phase: ph, schema: RESEARCH_SCHEMA,
     })
     if (!res) { result.status = 'agent_died'; return result }
     result.log.push('research-' + unblocks + ': ' + res.mission_status + ' - ' + res.guidance)
@@ -623,7 +636,7 @@ async function runNode(id, res) {
       return result
     }
     impl = await agent(resumePrompt(id, impl.blocker, res.guidance), {
-      model: 'sonnet', label: 'impl:' + id + ':resume' + unblocks, phase: ph, schema: IMPL_SCHEMA,
+      model: IMPL_MODEL, label: 'impl:' + id + ':resume' + unblocks, phase: ph, schema: IMPL_SCHEMA,
     })
     if (!impl) { result.status = 'agent_died'; return result }
     result.log.push('impl-resume-' + unblocks + ': ' + impl.status + ' - ' + impl.summary)
@@ -665,7 +678,7 @@ async function runNode(id, res) {
       repushes += 1
       log('node ' + id + ': branch tip did not move; implementer re-pushes (attempt ' + repushes + ')')
       const rp = await agent(repushPrompt(id, pr, reviewedSha), {
-        model: 'sonnet', label: 'impl:' + id + ':repush' + round + '-' + repushes, phase: ph, schema: FIX_SCHEMA,
+        model: IMPL_MODEL, label: 'impl:' + id + ':repush' + round + '-' + repushes, phase: ph, schema: FIX_SCHEMA,
       })
       if (!rp) { result.status = 'agent_died'; return result }
       result.log.push('repush-' + round + '-' + repushes + ': ' + rp.status + ' sha=' + (rp.head_sha || '?'))
@@ -678,7 +691,7 @@ async function runNode(id, res) {
     }
 
     const rev = await agent(reviewPrompt(id, pr, round), {
-      model: 'opus', label: 'review:' + id + ':r' + round, phase: ph, schema: REVIEW_SCHEMA,
+      model: REVIEW_MODEL, label: 'review:' + id + ':r' + round, phase: ph, schema: REVIEW_SCHEMA,
     })
     if (!rev) { result.status = 'agent_died'; return result }
     reviewedSha = lastFixSha
@@ -716,7 +729,7 @@ async function runNode(id, res) {
     if (stuck.length === 0 && stagnant.length > 0) {
       log('node ' + id + ': referee breaks stagnation on ' + stagnant.join(', '))
       const ref = await agent(refereePrompt(id, pr, stagnant, 'stagnation'), {
-        model: 'fable', label: 'referee:' + id + ':stagnation' + round, phase: ph, schema: REFEREE_SCHEMA,
+        model: REFEREE_MODEL, label: 'referee:' + id + ':stagnation' + round, phase: ph, schema: REFEREE_SCHEMA,
       })
       if (!ref) { result.status = 'agent_died'; return result }
       result.log.push('referee-stagnation-' + round + ': ' + JSON.stringify(ref.decisions || []))
@@ -731,7 +744,7 @@ async function runNode(id, res) {
     if (stuck.length > 0) {
       log('node ' + id + ': referee decides ' + stuck.join(', '))
       const ref = await agent(refereePrompt(id, pr, stuck, 'dispute'), {
-        model: 'fable', label: 'referee:' + id + ':r' + round, phase: ph, schema: REFEREE_SCHEMA,
+        model: REFEREE_MODEL, label: 'referee:' + id + ':r' + round, phase: ph, schema: REFEREE_SCHEMA,
       })
       if (!ref) { result.status = 'agent_died'; return result }
       result.log.push('referee-' + round + ': ' + JSON.stringify(ref.decisions || []))
@@ -744,7 +757,7 @@ async function runNode(id, res) {
     }
 
     let fix = await agent(fixPrompt(id, pr, round, rev.summary), {
-      model: 'sonnet', label: 'impl:' + id + ':fix' + round, phase: ph, schema: FIX_SCHEMA,
+      model: IMPL_MODEL, label: 'impl:' + id + ':fix' + round, phase: ph, schema: FIX_SCHEMA,
     })
     if (!fix) { result.status = 'agent_died'; return result }
     result.log.push('fix-' + round + ': ' + fix.status + ' - ' + fix.summary)
@@ -754,7 +767,7 @@ async function runNode(id, res) {
     while (fix && fix.status === 'blocked_surprise' && fixUnblocks < MAX_UNBLOCKS) {
       fixUnblocks += 1
       const res = await agent(unblockPrompt(id, fix.blocker || fix.summary), {
-        model: 'fable', label: 'research:' + id + ':fix' + round + '-' + fixUnblocks, phase: ph, schema: RESEARCH_SCHEMA,
+        model: RESEARCH_MODEL, label: 'research:' + id + ':fix' + round + '-' + fixUnblocks, phase: ph, schema: RESEARCH_SCHEMA,
       })
       if (!res) { result.status = 'agent_died'; return result }
       result.log.push('research-fix-' + round + '-' + fixUnblocks + ': ' + res.mission_status)
@@ -764,7 +777,7 @@ async function runNode(id, res) {
         return result
       }
       fix = await agent(resumePrompt(id, fix.blocker, res.guidance), {
-        model: 'sonnet', label: 'impl:' + id + ':fixresume' + round + '-' + fixUnblocks, phase: ph, schema: FIX_SCHEMA,
+        model: IMPL_MODEL, label: 'impl:' + id + ':fixresume' + round + '-' + fixUnblocks, phase: ph, schema: FIX_SCHEMA,
       })
       if (!fix) { result.status = 'agent_died'; return result }
       result.log.push('fix-resume-' + round + '-' + fixUnblocks + ': ' + fix.status)
@@ -786,7 +799,7 @@ async function runNode(id, res) {
   // --- merge --------------------------------------------------------------
   log('node ' + id + ': approved; merge starts')
   const mg = await agent(mergePrompt(id, pr), {
-    model: 'sonnet', label: 'merge:' + id, phase: ph, schema: MERGE_SCHEMA,
+    model: MERGE_MODEL, label: 'merge:' + id, phase: ph, schema: MERGE_SCHEMA,
   })
   if (!mg) { result.status = 'agent_died'; return result }
   result.log.push('merge: merged=' + mg.merged + ' ci=' + (mg.ci_status || '?') + ' - ' + mg.summary)
