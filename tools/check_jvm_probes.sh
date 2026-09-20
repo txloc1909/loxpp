@@ -215,6 +215,17 @@ error_probes=(
     # 0 instead of failing to run.
     "test/translation-probes/jvm-only/fault_defer_noncallable_value_fatal.lox"
     "test/translation-probes/jvm-only/fault_defer_class_construction_fatal.lox"
+    # A caught Error value is a LoxInstance under the hood (see makeError),
+    # so every instanceof LoxInstance site in the reflection natives
+    # (LoxRuntime.requireInstance) is a second door onto it besides
+    # LoxOps.setProperty/invoke. Each probe puts the natives call directly in
+    # the catch block, with a print after it, so a wrong (non-fatal)
+    # disposition prints and exits 0 instead of matching native's fatal exit.
+    "test/translation-probes/jvm-only/fault_reflect_setfield_on_error_fatal.lox"
+    "test/translation-probes/jvm-only/fault_reflect_fields_on_error_fatal.lox"
+    "test/translation-probes/jvm-only/fault_reflect_getfield_on_error_fatal.lox"
+    "test/translation-probes/jvm-only/fault_reflect_hasfield_on_error_fatal.lox"
+    "test/translation-probes/jvm-only/fault_reflect_callmethod_on_error_fatal.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

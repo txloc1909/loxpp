@@ -436,8 +436,13 @@ public final class LoxRuntime {
                                         v.getClass());
     }
 
+    // A caught Error value is a LoxInstance under the hood (see makeError),
+    // so this check must also reject it by class identity: native treats an
+    // Error value as having no fields or methods (spec/03-types.md 223-225),
+    // not as a plain instance.
     private static LoxInstance requireInstance(Object v, String message) {
-        if (!(v instanceof LoxInstance)) {
+        if (!(v instanceof LoxInstance) ||
+            ((LoxInstance)v).klass == ERROR_CLASS) {
             throw new LoxError(message);
         }
         return (LoxInstance)v;

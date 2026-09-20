@@ -1,0 +1,4 @@
+try { var x = []; print x[0]; } catch (e) {
+  print callMethod(e, "foo");
+}
+print "after";
