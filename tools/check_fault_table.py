@@ -171,7 +171,8 @@ CATCHABLE_ROWS = [
     Row(
         "call_non_callable_after_field_read",
         "caught",
-        "class C { init() { this.g = 1; } } var c = C(); var y = c.g; try { 42(); } catch (e) { print e.kind; }",
+        "42();",
+        setup="class C { init() { this.g = 1; } } var c = C(); var y = c.g;\n",
         expected_kind="NotCallableError",
     ),
     Row(
@@ -608,6 +609,16 @@ for _row in FATAL_ROWS:
         # (fatal) from user function arity errors (catchable), so it is
         # exempt from the blanket skip below.
         continue
+    if _row.name == "invoke_chained_property_get":
+        # Node #348: bootstrap's fused call site stays fatal through a
+        # chained property get (`42.foo.bar()`), matching native, so it is
+        # exempt from the blanket skip below.
+        continue
+    if _row.name == "invoke_grouped_property_get":
+        # Node #348: bootstrap's fused call site stays fatal through a
+        # grouping (`(42.foo)()`), matching native, so it is exempt from
+        # the blanket skip below.
+        continue
     _row.skip.setdefault(BOOTSTRAP, _BOOTSTRAP_FATAL_DEFAULT_SKIP)
 
 for _row in CATCHABLE_ROWS:
@@ -855,12 +866,19 @@ def main() -> None:
     # conflicts with the Fatal Runtime Errors table's own row for the same
     # fault, and issue #338, not this test, decides which is correct.
     excluded_catchable_rows = 1
+    # call_non_callable_after_field_read is a second CATCHABLE_ROWS entry for
+    # the same spec row as not_callable_error: regression armor for issue
+    # #348 (a bare 42() must stay catchable even after an earlier field
+    # read), not a new spec table row. It must not count against the 1:1
+    # mapping this invariant checks between CATCHABLE_ROWS and spec rows.
+    extra_catchable_rows = 1
     spec_row_count = load_spec_table_kind_count()
-    if spec_row_count != len(CATCHABLE_ROWS) + excluded_catchable_rows:
+    if spec_row_count != len(CATCHABLE_ROWS) - extra_catchable_rows + excluded_catchable_rows:
         print(
             f"check_fault_table.py: spec/04-semantics.md's catchable table has "
             f"{spec_row_count} row(s), but CATCHABLE_ROWS covers "
-            f"{len(CATCHABLE_ROWS)} (+{excluded_catchable_rows} deliberately "
+            f"{len(CATCHABLE_ROWS)} (-{extra_catchable_rows} regression-only entry "
+            f"for an existing row, +{excluded_catchable_rows} deliberately "
             "excluded, see MaxDepthExceededError's comment). The table changed; "
             "update this script's corpus to match.",
             file=sys.stderr,
@@ -872,12 +890,21 @@ def main() -> None:
     # own module comment). Guards FATAL_ROWS against the table changing
     # underneath it the same way the check above guards CATCHABLE_ROWS.
     excluded_fatal_rows = 1
+    # invoke_chained_property_get and invoke_grouped_property_get are
+    # regression armor for issue #348: they exercise the same spec row as
+    # property_get_non_instance ("42.foo;" -- "Only instances have
+    # properties.") through a chained-get and a grouping shape instead of a
+    # bare name, to pin the fused call site's syntactic dispatch. Neither is
+    # a new spec table row, so both must not count against the 1:1 mapping
+    # this invariant checks between FATAL_ROWS and spec rows.
+    extra_fatal_rows = 2
     spec_fatal_row_count = load_spec_fatal_row_count()
-    if spec_fatal_row_count != len(FATAL_ROWS) + excluded_fatal_rows:
+    if spec_fatal_row_count != len(FATAL_ROWS) - extra_fatal_rows + excluded_fatal_rows:
         print(
             f"check_fault_table.py: spec/04-semantics.md's Fatal Runtime Errors "
             f"table has {spec_fatal_row_count} row(s), but FATAL_ROWS covers "
-            f"{len(FATAL_ROWS)} (+{excluded_fatal_rows} deliberately excluded, "
+            f"{len(FATAL_ROWS)} (-{extra_fatal_rows} regression-only entries for "
+            f"an existing row, +{excluded_fatal_rows} deliberately excluded, "
             "see the canonical-string depth row's comment). The table changed; "
             "update this script's corpus to match.",
             file=sys.stderr,
