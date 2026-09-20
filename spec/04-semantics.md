@@ -398,15 +398,17 @@ Where:
 for (var x in expr) body
 ```
 
-Iterates over the elements of a sequence. A List iterates in order. A String
+Iterates over the elements of a List or a String, or over the keys of a Map.
+A List iterates in order. A String
 iterates its single-character substrings in order. A Map iterates over keys
 in unspecified order.
 
 1. Evaluate `expr` exactly once. The result must be a **List**, a **String**,
    or a **Map**; any other value is a **runtime error**
    ("Value is not iterable (expected list, string, or map).").
-2. An internal **iterator** is created, holding a reference to the sequence and
-   a cursor starting at `0`. The iterator is not accessible to user code.
+2. An internal **iterator** is created, holding a reference to the iterated
+   value and a cursor starting at `0`. The iterator is not accessible to
+   user code.
    For a Map, the iterator also records the size (the number of key-value
    pairs).
 3. Before each iteration, the next element is located:

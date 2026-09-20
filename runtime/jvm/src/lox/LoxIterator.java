@@ -39,7 +39,8 @@ public final class LoxIterator {
         }
     }
 
-    public boolean hasNext() {        if (collection instanceof LoxList) {
+    public boolean hasNext() {
+        if (collection instanceof LoxList) {
             return index < ((LoxList) collection).elements.size();
         }
         if (collection instanceof String) {

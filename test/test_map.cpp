@@ -382,6 +382,27 @@ TEST(Map, ForInReturnAfterMutationOk) {
     EXPECT_EQ(h.getGlobalStr("r"), "left");
 }
 
+TEST(Map, ForInThrowAfterMutationOk) {
+    VMTestHarness h;
+    // Throw unwinds without another iterator step: the catch sees the
+    // thrown value, not the size fault.
+    ASSERT_EQ(h.run(R"(
+        var caught = "";
+        try {
+            var m = {1: "a", 2: "b"};
+            for (var k in m) {
+                m[3] = "c";
+                throw "x";
+            }
+        } catch (e) {
+            caught = e;
+        }
+        var r = caught;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "x");
+}
+
 TEST(Map, ForInNestedInnerMutationErrors) {
     VMTestHarness h;
     // The inner insert changes the size the outer iterator recorded.
