@@ -1641,6 +1641,15 @@ fun reflectTypeName(v) {
     if (tag == "file") return "File";
     if (tag == "enum_ctor") return "EnumConstructor";
     if (tag == "enum_val") return "Enum";
+    // spec/03-types.md's type() table gives "Error" for a caught Error
+    // value, and native/JVM/CLR already agree on it. Only this one case
+    // was missing here: tools/check_fault_table.py's REFLECT_ROWS bind a
+    // caught Error to a local and check type(e) == "Error" as a guard
+    // against a corpus bug that binds it to something else, and that guard
+    // reported a false failure on bootstrap alone until this line existed.
+    // str()'s "kind: message" form for an Error is a separate gap
+    // (issue #347) that this line does not touch.
+    if (tag == "error") return "Error";
     return "Unknown";
 }
 
