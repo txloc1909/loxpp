@@ -93,18 +93,26 @@ class Row:
     skip: dict[str, str] = field(default_factory=dict)  # consumer -> reason, skips the whole row
     skip_fields: dict[str, set[str]] = field(default_factory=dict)  # consumer -> {"type", "str", "message"}
 
-    def program(self) -> str:
+    def program(self, workdir: Path | None = None) -> str:
         if self.disposition == "caught":
-            return CAUGHT_TEMPLATE.format(
+            text = CAUGHT_TEMPLATE.format(
                 setup=self.setup, body=self.body, caught=CAUGHT_MARKER, after=AFTER_MARKER
             )
-        return FATAL_TEMPLATE.format(
-            setup=self.setup,
-            body=self.body,
-            unreachable=UNREACHABLE_MARKER,
-            caught=CAUGHT_MARKER,
-            after=AFTER_MARKER,
-        )
+        else:
+            text = FATAL_TEMPLATE.format(
+                setup=self.setup,
+                body=self.body,
+                unreachable=UNREACHABLE_MARKER,
+                caught=CAUGHT_MARKER,
+                after=AFTER_MARKER,
+            )
+        # A row's body/setup may carry the literal token __WORKDIR__ (never a
+        # `.format()` placeholder, since body/setup themselves can hold `{`
+        # and `}` from map/set literals) in place of a file path, so a File
+        # row writes only inside this run's own temporary directory.
+        if workdir is not None:
+            text = text.replace("__WORKDIR__", str(workdir))
+        return text
 
 
 # --- Catchable Runtime Errors table (spec/04-semantics.md, 19 rows) -------
@@ -222,8 +230,8 @@ FATAL_ROWS = [
     Row(
         "undefined_property_on_file",
         "fatal",
-        'var f = open("/tmp/loxpp_fault_table_probe.txt", "w"); f.write("x"); '
-        'var g = open("/tmp/loxpp_fault_table_probe.txt", "r"); g.bogus;',
+        'var f = open("__WORKDIR__/loxpp_fault_table_probe.txt", "w"); f.write("x"); '
+        'var g = open("__WORKDIR__/loxpp_fault_table_probe.txt", "r"); g.bogus;',
         expected_message="Undefined property 'bogus' on file.",
     ),
     Row(
@@ -302,8 +310,8 @@ FATAL_ROWS = [
     Row(
         "undefined_method_on_file",
         "fatal",
-        'var f = open("/tmp/loxpp_fault_table_probe2.txt", "w"); f.write("x"); '
-        'var g = open("/tmp/loxpp_fault_table_probe2.txt", "r"); g.bogus();',
+        'var f = open("__WORKDIR__/loxpp_fault_table_probe2.txt", "w"); f.write("x"); '
+        'var g = open("__WORKDIR__/loxpp_fault_table_probe2.txt", "r"); g.bogus();',
         expected_message="Undefined method 'bogus' on file.",
     ),
     Row(
@@ -444,13 +452,48 @@ _REFLECT_SETUP = (
     "    try { var x = []; print x[0]; } catch (e) { return e; }\n"
     "}\n"
     "var e = __reflectErr();\n"
+    # Guards each reflection row against a corpus bug that binds `e` to
+    # something other than a genuine Error: a wrong receiver here must be
+    # visible as its own divergence, not silently pass a row whose natives
+    # reject any non-instance the same way they reject an Error.
+    'if (type(e) != "Error") { print "__UNREACHABLE__"; }\n'
 )
 REFLECT_ROWS = [
-    Row("reflect_fields_on_error", "fatal", "fields(e);", setup=_REFLECT_SETUP),
-    Row("reflect_getfield_on_error", "fatal", 'getField(e, "kind");', setup=_REFLECT_SETUP),
-    Row("reflect_hasfield_on_error", "fatal", 'hasField(e, "kind");', setup=_REFLECT_SETUP),
-    Row("reflect_setfield_on_error", "fatal", 'setField(e, "kind", 5);', setup=_REFLECT_SETUP),
-    Row("reflect_callmethod_on_error", "fatal", 'callMethod(e, "foo");', setup=_REFLECT_SETUP),
+    Row(
+        "reflect_fields_on_error",
+        "fatal",
+        "fields(e);",
+        setup=_REFLECT_SETUP,
+        expected_message="Expected an instance.",
+    ),
+    Row(
+        "reflect_getfield_on_error",
+        "fatal",
+        'getField(e, "kind");',
+        setup=_REFLECT_SETUP,
+        expected_message="Only instances have properties.",
+    ),
+    Row(
+        "reflect_hasfield_on_error",
+        "fatal",
+        'hasField(e, "kind");',
+        setup=_REFLECT_SETUP,
+        expected_message="Only instances have properties.",
+    ),
+    Row(
+        "reflect_setfield_on_error",
+        "fatal",
+        'setField(e, "kind", 5);',
+        setup=_REFLECT_SETUP,
+        expected_message="Only instances have fields.",
+    ),
+    Row(
+        "reflect_callmethod_on_error",
+        "fatal",
+        'callMethod(e, "foo");',
+        setup=_REFLECT_SETUP,
+        expected_message="Only instances have methods.",
+    ),
 ]
 
 # Reflection-on-Error is fatal on native, JVM, and CLR, but bootstrap's
@@ -517,6 +560,32 @@ for _row in CATCHABLE_ROWS:
     fields.update({"message", "type", "str"})
 
 
+def validate_row_anchors(rows: list[Row]) -> None:
+    """Every row must carry the literal its disposition is checked against.
+
+    A "caught" row with no expected_kind, or a "fatal" row with no
+    expected_message, can still print MATCH: compare() only checks a literal
+    against native's own output when the row supplies one. Failing loudly
+    here, before any row runs, closes that entry point for every row at
+    once instead of one row at a time as each is separately noticed.
+    """
+    for row in rows:
+        if row.disposition == "caught" and row.expected_kind is None:
+            print(
+                f"check_fault_table.py: row {row.name!r} is 'caught' but has no "
+                "expected_kind",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        if row.disposition == "fatal" and row.expected_message is None:
+            print(
+                f"check_fault_table.py: row {row.name!r} is 'fatal' but has no "
+                "expected_message",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+
 def load_spec_table_kind_count() -> int:
     """Counts the catchable table's data rows in spec/04-semantics.md.
 
@@ -567,10 +636,12 @@ COMPILE_ERROR_EXIT_CODE = 65
 
 @dataclass
 class RunResult:
-    # "caught", "fatal", "compile_error" (program did not compile -- a
-    # corpus bug, never a real row outcome), or "crash" (neither marker
-    # seen although the program compiled and ran -- see module docstring
-    # hazard).
+    # "caught", "caught_halted" (reached the catch block's markers but never
+    # printed AFTER_MARKER -- the program halted before running to
+    # completion, a real divergence from a "caught" disposition), "fatal",
+    # "compile_error" (program did not compile -- a corpus bug, never a real
+    # row outcome), or "crash" (neither marker seen although the program
+    # compiled and ran -- see module docstring hazard).
     outcome: str
     kind: str | None = None
     message: str | None = None
@@ -612,11 +683,16 @@ def classify(returncode: int, stdout: str, stderr: str) -> RunResult:
         # A fatal-template run's catch block prints only CAUGHT_MARKER
         # (see FATAL_TEMPLATE) -- reaching it at all is itself the
         # divergence from native, whether or not AFTER_MARKER follows.
+        # A caught-template run that never reaches AFTER_MARKER halted
+        # somewhere between the catch block and the end of the program --
+        # a real divergence from a row's "caught" disposition, not the same
+        # outcome as a run that ran to completion.
+        outcome = "caught" if AFTER_MARKER in lines else "caught_halted"
         if len(rest) >= 4:
             return RunResult(
-                outcome="caught", kind=rest[0], message=rest[1], type_=rest[2], str_=rest[3]
+                outcome=outcome, kind=rest[0], message=rest[1], type_=rest[2], str_=rest[3]
             )
-        return RunResult(outcome="caught")
+        return RunResult(outcome=outcome)
     if UNREACHABLE_MARKER in lines or AFTER_MARKER in lines:
         # The fatal template printed UNREACHABLE_MARKER (the fault did not
         # fire at all -- a corpus bug, not a real "fatal" outcome) or a
@@ -635,7 +711,7 @@ def classify(returncode: int, stdout: str, stderr: str) -> RunResult:
 
 def run_row(row: Row, commands: dict[str, ConsumerCommand], workdir: Path, timeout: float) -> dict[str, RunResult]:
     program_path = workdir / f"{row.name}.lox"
-    program_path.write_text(row.program(), encoding="utf-8")
+    program_path.write_text(row.program(workdir), encoding="utf-8")
     results: dict[str, RunResult] = {}
     for consumer, command in commands.items():
         if consumer in row.skip:
@@ -712,6 +788,8 @@ def main() -> None:
         CLR: ConsumerCommand(CLR, [args.clr]),
         BOOTSTRAP: ConsumerCommand(BOOTSTRAP, [args.bootstrap]),
     }
+
+    validate_row_anchors(ALL_ROWS)
 
     # MaxDepthExceededError is the one catchable-table row this script does
     # not run at all (see CATCHABLE_ROWS's own comment): its disposition
