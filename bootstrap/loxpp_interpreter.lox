@@ -1669,19 +1669,29 @@ fun reflectMethodNames(klass) {
 // restriction exists and why it applies identically everywhere.
 //
 // "ReflectionFieldNameError", "ReflectionUndefinedMemberError",
-// "ReflectionUnsupportedError", and "ReflectionReceiverError" below are not
-// rows of the catchable-fault table in spec/04-semantics.md. Native reaches
-// these same causes (src/stdlib/reflect_api.cpp) only through its
-// always-fatal path (nativeRuntimeError(), exit 70), never as a catchable
-// value. So none of these causes has an existing `.kind` on native, JVM, or
-// CLR to collide with, and these strings stay outside the documented,
-// cross-backend `kind` set for that reason. Each still names one specific
-// cause and only that cause — do not reuse a table `kind` for one of them,
-// and do not reuse one of these for an unrelated cause either.
+// "ReflectionUnsupportedError", "ReflectionReceiverError", and
+// "ReflectionArityError" below are not rows of the catchable-fault table in
+// spec/04-semantics.md. Native reaches these same causes
+// (src/stdlib/reflect_api.cpp) only through its always-fatal path
+// (nativeRuntimeError(), exit 70), never as a catchable value. So none of
+// these causes has an existing `.kind` on native, JVM, or CLR to collide
+// with, and these strings stay outside the documented, cross-backend `kind`
+// set for that reason. Each still names one specific cause and only that
+// cause — do not reuse a table `kind` for one of them, and do not reuse one
+// of these for an unrelated cause either.
+//
+// The two checks below that DO keep a table kind ("InvalidReceiverError" for
+// the receiver check, "ArityError" for the forwarded-call arity check, and
+// "NotCallableError" for the final not-callable fallback) are the exception:
+// each genuinely re-enters the same language-level fault the table kind
+// already names — this function just reaches it through reflection instead
+// of `.`/`()` syntax. "ReflectionArityError" above is different: it is
+// `callMethod`'s own required-argument-count check on itself, before any
+// method has even been resolved, so it is not that fault.
 fun reflectCallMethod(interp, args) {
     var n = len(args);
     if (n < 2) {
-        interp.setError("ArityError", "Expected at least 2 arguments.", 0);
+        interp.setError("ReflectionArityError", "Expected at least 2 arguments.", 0);
         return nil;
     }
     var instance = args[0];
@@ -2299,11 +2309,20 @@ class Interpreter {
             object.elements[fl] = val;
             return val;
         }
-        if (isLoxStr(object)) { this.setError("NotIndexableError", "Strings are immutable.", line); return nil; }
+        // Native raises this through its own always-fatal RAISE_ERROR site,
+        // separate from SET_INDEX's catchable NotIndexableError path below
+        // (src/vm.cpp Op::SET_INDEX) -- so it needs its own kind, not that
+        // one's.
+        if (isLoxStr(object)) { this.setError("StringImmutableError", "Strings are immutable.", line); return nil; }
         this.setError("NotIndexableError", "Only lists and maps support index assignment.", line);
         return nil;
     }
 
+    // Native validates a slice through its own always-fatal RAISE_ERROR
+    // sites (src/vm.cpp Op::SLICE), never through the catchable Index*/
+    // NotIndexableError machinery Op::GET_INDEX and Op::SET_INDEX use above
+    // -- so every kind in this method is its own, not a reuse of an Index*
+    // table kind for a slice-shaped cause.
     evalSlice(objectExpr, startExpr, endExpr, line, env) {
         var object = this.evalExpr(objectExpr, env);
         if (this.throwFlag) return nil;
@@ -2312,13 +2331,13 @@ class Interpreter {
         var endV = this.evalExpr(endExpr, env);
         if (this.throwFlag) return nil;
         var tag = loxTag(object);
-        if (tag != "list" and !isLoxStr(object)) { this.setError("NotIndexableError", "Slice requires a List or String.", line); return nil; }
-        if (!isLoxNum(startV)) { this.setError("IndexTypeError", "Slice index must be a number.", line); return nil; }
-        if (math.floor(startV) != startV) { this.setError("IndexNotIntegerError", "Slice index must be an integer.", line); return nil; }
-        if (startV < 0) { this.setError("IndexOutOfBoundsError", "Slice index must be non-negative.", line); return nil; }
-        if (!isLoxNum(endV)) { this.setError("IndexTypeError", "Slice index must be a number.", line); return nil; }
-        if (math.floor(endV) != endV) { this.setError("IndexNotIntegerError", "Slice index must be an integer.", line); return nil; }
-        if (endV < 0) { this.setError("IndexOutOfBoundsError", "Slice index must be non-negative.", line); return nil; }
+        if (tag != "list" and !isLoxStr(object)) { this.setError("NotSliceableError", "Slice requires a List or String.", line); return nil; }
+        if (!isLoxNum(startV)) { this.setError("SliceIndexTypeError", "Slice index must be a number.", line); return nil; }
+        if (math.floor(startV) != startV) { this.setError("SliceIndexNotIntegerError", "Slice index must be an integer.", line); return nil; }
+        if (startV < 0) { this.setError("SliceIndexNegativeError", "Slice index must be non-negative.", line); return nil; }
+        if (!isLoxNum(endV)) { this.setError("SliceIndexTypeError", "Slice index must be a number.", line); return nil; }
+        if (math.floor(endV) != endV) { this.setError("SliceIndexNotIntegerError", "Slice index must be an integer.", line); return nil; }
+        if (endV < 0) { this.setError("SliceIndexNegativeError", "Slice index must be non-negative.", line); return nil; }
         var s = startV;
         var e = endV;
         if (tag == "list") {
@@ -2717,6 +2736,9 @@ class Interpreter {
             // Floor-mod: result sign matches divisor.
             return left - math.floor(left / right) * right;
         }
+        // `in`'s own operand-type checks are always fatal on native
+        // (src/vm.cpp Op::IN, RAISE_ERROR), a separate opcode from indexing
+        // -- neither IndexTypeError nor NotIndexableError applies here.
         if (opL == "in") {
             var rtag = loxTag(right);
             if (rtag == "list") {
@@ -2728,7 +2750,7 @@ class Interpreter {
                 return false;
             }
             if (isLoxStr(right)) {
-                if (!isLoxStr(left)) { this.setError("IndexTypeError", "Left operand of 'in' on a String must be a String.", opLine); return nil; }
+                if (!isLoxStr(left)) { this.setError("InLeftOperandTypeError", "Left operand of 'in' on a String must be a String.", opLine); return nil; }
                 return left in right;
             }
             if (rtag == "map") {
@@ -2740,7 +2762,7 @@ class Interpreter {
                 }
                 return right.data.has(left);
             }
-            this.setError("NotIndexableError", "Right operand of 'in' must be a List, String, or Map.", opLine);
+            this.setError("InRightOperandTypeError", "Right operand of 'in' must be a List, String, or Map.", opLine);
             return nil;
         }
         return nil;
@@ -2790,6 +2812,25 @@ class Interpreter {
         return callee.call(this, args);
     }
 
+    // Undefined-member faults below use "UndefinedMemberError", not the
+    // table's "UndefinedPropertyError" -- that kind is reserved for a
+    // narrower table cause (an undefined property read on a caught Error
+    // value itself, the "error" branch below), and native's own undefined-
+    // member faults on every other receiver type are separate, always-fatal
+    // RAISE_ERROR sites (src/vm.cpp Op::GET_PROPERTY) with no catchable kind
+    // of their own.
+    //
+    // The non-instance fallback just below keeps the table's
+    // "InvalidReceiverError", even though it is also examples/
+    // try_catch_instance_property_not_caught.lox's plain-property-read case
+    // (`42.foo;`, fatal on native, no kind) -- because evalGet also serves
+    // as the get-half of a method call (`42.foo()`), and this tree-walker
+    // resolves the callee before it knows whether a call follows. Native's
+    // fused Op::INVOKE reaches that call-syntax case through its own,
+    // separate, catchable InvalidReceiverError (examples/
+    // try_catch_invalid_receiver.lox pins this cross-backend); evalGet
+    // cannot tell the two cases apart, so it keeps the kind that matches the
+    // tested, observable one.
     evalGet(objectExpr, name, line, env) {
         var object = this.evalExpr(objectExpr, env);
         if (this.throwFlag) return nil;
@@ -2800,17 +2841,17 @@ class Interpreter {
         }
         if (loxTag(object) == "list") {
             if (name == "append" or name == "pop" or name == "remove") return InterpListMethod(name, object);
-            this.setError("UndefinedPropertyError", "Undefined property '" + name + "'.", line);
+            this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }
         if (loxTag(object) == "map") {
             if (name == "has" or name == "del" or name == "keys" or name == "values" or name == "entries") return InterpMapMethod(name, object);
-            this.setError("UndefinedPropertyError", "Undefined property '" + name + "'.", line);
+            this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }
         if (loxTag(object) == "file") {
             if (name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close") return InterpFileMethod(name, object);
-            this.setError("UndefinedPropertyError", "Undefined property '" + name + "'.", line);
+            this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }
         if (loxTag(object) == "error") {
@@ -2825,17 +2866,20 @@ class Interpreter {
         }
         var val = object.instGet(name, 0);
         if (val == nil and !object.fields.has(name) and object.klass.findMethod(name) == nil) {
-            this.setError("UndefinedPropertyError", "Undefined property '" + name + "'.", line);
+            this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }
         return val;
     }
 
+    // Native's Op::SET_PROPERTY raises this fatally with its own message,
+    // separate from Op::INVOKE's catchable InvalidReceiverError -- keep the
+    // two kinds distinct.
     evalSet(objectExpr, name, line, valueExpr, env) {
         var object = this.evalExpr(objectExpr, env);
         if (this.throwFlag) return nil;
         if (loxTag(object) != "instance") {
-            this.setError("InvalidReceiverError", "Only instances have fields.", line);
+            this.setError("InvalidFieldReceiverError", "Only instances have fields.", line);
             return nil;
         }
         var val = this.evalExpr(valueExpr, env);
@@ -2844,13 +2888,17 @@ class Interpreter {
         return val;
     }
 
+    // Native's fallback for a missing superclass method is its own
+    // always-fatal RAISE_ERROR site (src/vm.cpp Op::GET_SUPER), so this uses
+    // "UndefinedMemberError" like evalGet's other non-Error receivers, not
+    // the Error-value-only "UndefinedPropertyError".
     evalSuper(id, method, line, env) {
         var dist       = this.locals[id];
         var superclass = env.getAt(dist, "super");
         var object     = env.getAt(dist - 1, "this");
         var fn         = superclass.findMethod(method);
         if (fn == nil) {
-            this.setError("UndefinedPropertyError", "Undefined property '" + method + "'.", line);
+            this.setError("UndefinedMemberError", "Undefined property '" + method + "'.", line);
             return nil;
         }
         return fn.bind(object);
@@ -2943,6 +2991,10 @@ class Interpreter {
         }
     }
 
+    // Destructuring a field reads it exactly the way `source.fieldName`
+    // does (spec/04-semantics.md, Destructuring Declaration), so a
+    // non-instance source is the same fault evalGet's own non-instance
+    // check reports -- share its "InvalidReceiverError" kind.
     execObjDestructure(names, line, initializer, env) {
         var val = this.evalExpr(initializer, env);
         if (this.throwFlag) return;

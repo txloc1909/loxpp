@@ -105,6 +105,72 @@ CASES = [
         'try { setField(42, "x", 1); } catch (e) { print e.kind; }',
         "ReflectionReceiverError",
     ),
+    (
+        "callMethod() own arity",
+        'try { callMethod(); } catch (e) { print e.kind; }',
+        "ReflectionArityError",
+    ),
+    (
+        "string index assignment",
+        'try { "abc"[0] = "x"; } catch (e) { print e.kind; }',
+        "StringImmutableError",
+    ),
+    (
+        "slice of a non-List/String",
+        'try { (42)[0:1]; } catch (e) { print e.kind; }',
+        "NotSliceableError",
+    ),
+    (
+        "slice bound wrong type",
+        'try { [1, 2]["a":2]; } catch (e) { print e.kind; }',
+        "SliceIndexTypeError",
+    ),
+    (
+        "slice bound not integer",
+        'try { [1, 2][1.5:2]; } catch (e) { print e.kind; }',
+        "SliceIndexNotIntegerError",
+    ),
+    (
+        "slice bound negative",
+        'try { [1, 2][-1:2]; } catch (e) { print e.kind; }',
+        "SliceIndexNegativeError",
+    ),
+    (
+        "'in' left operand wrong type",
+        'try { 1 in "abc"; } catch (e) { print e.kind; }',
+        "InLeftOperandTypeError",
+    ),
+    (
+        "'in' right operand wrong type",
+        "try { 1 in 42; } catch (e) { print e.kind; }",
+        "InRightOperandTypeError",
+    ),
+    (
+        "undefined member on an Instance",
+        'class C {} try { C().bogus; } catch (e) { print e.kind; }',
+        "UndefinedMemberError",
+    ),
+    (
+        "undefined member on a List",
+        "try { [].bogus; } catch (e) { print e.kind; }",
+        "UndefinedMemberError",
+    ),
+    (
+        "undefined member on a Map",
+        "try { var m = {}; m.bogus; } catch (e) { print e.kind; }",
+        "UndefinedMemberError",
+    ),
+    (
+        "undefined member via super",
+        "class A {} class B < A { m() { super.zzz(); } } "
+        "try { B().m(); } catch (e) { print e.kind; }",
+        "UndefinedMemberError",
+    ),
+    (
+        "property write on a non-instance",
+        "try { 42.foo = 1; } catch (e) { print e.kind; }",
+        "InvalidFieldReceiverError",
+    ),
 ]
 
 
