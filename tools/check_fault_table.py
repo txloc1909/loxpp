@@ -89,6 +89,7 @@ class Row:
     body: str  # the fault-causing code, ending in ';'
     setup: str = ""  # code that runs before the try, ending in ';' (or "")
     expected_kind: str | None = None  # required when disposition == "caught"
+    expected_message: str | None = None  # spec's Message column literal, when disposition == "fatal"
     skip: dict[str, str] = field(default_factory=dict)  # consumer -> reason, skips the whole row
     skip_fields: dict[str, set[str]] = field(default_factory=dict)  # consumer -> {"type", "str", "message"}
 
@@ -182,17 +183,17 @@ CATCHABLE_ROWS = [
 
 # --- Fatal Runtime Errors table (spec/04-semantics.md) --------------------
 #
-# Every Example below is copied from the spec table as-is: the round-2/
-# round-4 review already made each one self-contained and runnable.
+# Every Example below is self-contained and runnable as its own program.
 FATAL_ROWS = [
     # `enum` is only legal at global scope, so the declaration goes in
     # `setup` (emitted before the `try`); only the faulting `match` goes in
-    # `body` (see PR #352 review round 1, R2).
+    # `body`.
     Row(
         "get_tag_non_enum",
         "fatal",
         "match 1 { case Ok(v) => v case Err(m) => -1 };",
         setup="enum Result { Ok(v) Err(m) }\n",
+        expected_message="GET_TAG: expected an enum value.",
     ),
     # Value nested too deep to print: fatal on native today, with no
     # `Error.kind`, but this exact fault keeps a catchable row
@@ -204,6 +205,7 @@ FATAL_ROWS = [
         "stdlib_native_arity",
         "fatal",
         "clock(1);",
+        expected_message="Expected 0 arguments but got 1.",
     ),
     # A stdlib native's own error text is not enumerated by spec/04-semantics.md
     # (see the Fatal Runtime Errors section's own note); native and the JVM
@@ -215,15 +217,27 @@ FATAL_ROWS = [
         "fatal",
         'open("/no/such/path", "r");',
         skip_fields={JVM: {"message"}, CLR: {"message"}, BOOTSTRAP: {"message"}},
+        expected_message="open(): cannot open '/no/such/path': No such file or directory",
     ),
     Row(
         "undefined_property_on_file",
         "fatal",
         'var f = open("/tmp/loxpp_fault_table_probe.txt", "w"); f.write("x"); '
         'var g = open("/tmp/loxpp_fault_table_probe.txt", "r"); g.bogus;',
+        expected_message="Undefined property 'bogus' on file.",
     ),
-    Row("undefined_property_on_map", "fatal", "var m = {}; m.bogus;"),
-    Row("undefined_property_on_instance", "fatal", "class C {} var c = C(); c.bogus;"),
+    Row(
+        "undefined_property_on_map",
+        "fatal",
+        "var m = {}; m.bogus;",
+        expected_message="Undefined property 'bogus' on map.",
+    ),
+    Row(
+        "undefined_property_on_instance",
+        "fatal",
+        "class C {} var c = C(); c.bogus;",
+        expected_message="Undefined property 'bogus'.",
+    ),
     # Fused site (issue #348): bootstrap's tree-walker gives this the same
     # catchable kind it gives `42.foo()` (a call), because it cannot tell a
     # plain property-get apart from a call target the way native's
@@ -233,47 +247,93 @@ FATAL_ROWS = [
         "fatal",
         "42.foo;",
         skip={BOOTSTRAP: "issue #348: bootstrap catches this fused site"},
+        expected_message="Only instances have properties.",
     ),
-    Row("property_set_non_instance", "fatal", "42.foo = 1;"),
+    Row(
+        "property_set_non_instance",
+        "fatal",
+        "42.foo = 1;",
+        expected_message="Only instances have fields.",
+    ),
     # Fused site (issue #348): see property_get_non_instance above.
     Row(
         "invoke_field_not_callable",
         "fatal",
         "class C { init() { this.f = 1; } } C().f();",
         skip={BOOTSTRAP: "issue #348: bootstrap catches this fused site"},
+        expected_message="Can only call functions, classes and enums.",
     ),
-    Row("invoke_method_not_found", "fatal", "class C {} C().bogus();"),
-    Row("list_append_wrong_arity", "fatal", "[].append();"),
-    Row("list_pop_wrong_arity", "fatal", "[].pop(1);"),
-    Row("list_remove_wrong_arity", "fatal", "[1].remove();"),
-    Row("list_remove_value_not_found", "fatal", "[1, 2].remove(3);"),
-    Row("undefined_method_on_list", "fatal", "[].bogus();"),
+    Row(
+        "invoke_method_not_found",
+        "fatal",
+        "class C {} C().bogus();",
+        expected_message="Undefined property 'bogus'.",
+    ),
+    Row(
+        "list_append_wrong_arity",
+        "fatal",
+        "[].append();",
+        expected_message="'append' expects 1 argument but got 0.",
+    ),
+    Row(
+        "list_pop_wrong_arity",
+        "fatal",
+        "[].pop(1);",
+        expected_message="'pop' expects 0 arguments but got 1.",
+    ),
+    Row(
+        "list_remove_wrong_arity",
+        "fatal",
+        "[1].remove();",
+        expected_message="'remove' expects 1 argument but got 0.",
+    ),
+    Row(
+        "list_remove_value_not_found",
+        "fatal",
+        "[1, 2].remove(3);",
+        expected_message="Value not found in list.",
+    ),
+    Row(
+        "undefined_method_on_list",
+        "fatal",
+        "[].bogus();",
+        expected_message="Undefined method 'bogus' on list.",
+    ),
     Row(
         "undefined_method_on_file",
         "fatal",
         'var f = open("/tmp/loxpp_fault_table_probe2.txt", "w"); f.write("x"); '
         'var g = open("/tmp/loxpp_fault_table_probe2.txt", "r"); g.bogus();',
+        expected_message="Undefined method 'bogus' on file.",
     ),
-    Row("undefined_method_on_map", "fatal", "var m = {}; m.bogus();"),
+    Row(
+        "undefined_method_on_map",
+        "fatal",
+        "var m = {}; m.bogus();",
+        expected_message="Undefined method 'bogus' on map.",
+    ),
     Row(
         "superclass_not_a_class",
         "fatal",
         "var NotAClass = 1; class Sub < NotAClass {}",
+        expected_message="Superclass must be a class.",
     ),
     Row(
         "super_method_not_found",
         "fatal",
         "class A {} class B < A { m() { super.zzz(); } } B().m();",
+        expected_message="Undefined property 'zzz'.",
     ),
     # Missing feature (issue #349): bootstrap cannot index an ObjEnum value
     # at all, so it never reaches this fault's own message. `enum` is only
-    # legal at global scope, so it goes in `setup`, not `body` (R2).
+    # legal at global scope, so it goes in `setup`, not `body`.
     Row(
         "enum_index_type_error",
         "fatal",
         'v["a"];',
         setup="enum E { A(x) } var v = A(1);\n",
         skip={BOOTSTRAP: "issue #349: bootstrap cannot index an enum value at all"},
+        expected_message="Enum field index must be a number.",
     ),
     Row(
         "enum_index_out_of_range",
@@ -281,18 +341,74 @@ FATAL_ROWS = [
         "v[3];",
         setup="enum E { A(x) } var v = A(1);\n",
         skip={BOOTSTRAP: "issue #349: bootstrap cannot index an enum value at all"},
+        expected_message="Enum field index 3 out of range.",
     ),
-    Row("string_index_assignment", "fatal", '"abc"[0] = "x";'),
-    Row("slice_non_list_string", "fatal", "(42)[0:1];"),
-    Row("slice_start_non_number", "fatal", '[1, 2]["a":2];'),
-    Row("slice_start_non_integer", "fatal", "[1, 2][1.5:2];"),
-    Row("slice_start_negative", "fatal", "[1, 2][-1:2];"),
-    Row("slice_end_non_number", "fatal", '[1, 2][0:"a"];'),
-    Row("slice_end_non_integer", "fatal", "[1, 2][0:1.5];"),
-    Row("slice_end_negative", "fatal", "[1, 2][0:-1];"),
-    Row("in_string_non_string_elem", "fatal", '1 in "abc";'),
-    Row("in_non_indexable", "fatal", "1 in 42;"),
-    Row("for_in_non_iterable", "fatal", "for (var x in 42) {}"),
+    Row(
+        "string_index_assignment",
+        "fatal",
+        '"abc"[0] = "x";',
+        expected_message="Strings are immutable and cannot be indexed for assignment.",
+    ),
+    Row(
+        "slice_non_list_string",
+        "fatal",
+        "(42)[0:1];",
+        expected_message="Slice requires a List or String.",
+    ),
+    Row(
+        "slice_start_non_number",
+        "fatal",
+        '[1, 2]["a":2];',
+        expected_message="Slice index must be a number.",
+    ),
+    Row(
+        "slice_start_non_integer",
+        "fatal",
+        "[1, 2][1.5:2];",
+        expected_message="Slice index must be an integer.",
+    ),
+    Row(
+        "slice_start_negative",
+        "fatal",
+        "[1, 2][-1:2];",
+        expected_message="Slice index must be non-negative.",
+    ),
+    Row(
+        "slice_end_non_number",
+        "fatal",
+        '[1, 2][0:"a"];',
+        expected_message="Slice index must be a number.",
+    ),
+    Row(
+        "slice_end_non_integer",
+        "fatal",
+        "[1, 2][0:1.5];",
+        expected_message="Slice index must be an integer.",
+    ),
+    Row(
+        "slice_end_negative",
+        "fatal",
+        "[1, 2][0:-1];",
+        expected_message="Slice index must be non-negative.",
+    ),
+    Row(
+        "in_string_non_string_elem",
+        "fatal",
+        '1 in "abc";',
+        expected_message="Left operand of 'in' on a string must be a string.",
+    ),
+    Row(
+        "in_non_indexable",
+        "fatal",
+        "1 in 42;",
+        expected_message="Right operand of 'in' must be a list, string, or map.",
+    ),
+    Row(
+        "for_in_non_iterable",
+        "fatal",
+        "for (var x in 42) {}",
+        expected_message="Value is not iterable (expected list, string, or map).",
+    ),
     # A `defer`red call holding a non-callable value must be fatal (native's
     # runDefers). The CLR backend fails to *compile* a variant of this shape
     # that closes over a caught `e` inside a nested function (issue found
@@ -309,6 +425,7 @@ FATAL_ROWS = [
         "fatal",
         "fun g() { var x = 42; defer x(); } g();",
         skip={BOOTSTRAP: "issue #351: bootstrap silently never invokes the deferred call, no fault at all"},
+        expected_message="Deferred callable has unexpected type.",
     ),
 ]
 
@@ -318,9 +435,10 @@ FATAL_ROWS = [
 # on an Error value a runtime error; the reflection natives are a second
 # door onto the same restriction, separate from `.` property access. `e` is
 # bound the same way in every row: a caught IndexOutOfBoundsError, captured
-# by a top-level helper (not nested inside FATAL_TEMPLATE's own `try`,
-# which put an unclosed brace in `body` and left the generated `try` with
-# no `catch` -- PR #352 review round 1, R3).
+# by a top-level helper run in `setup`, before FATAL_TEMPLATE's own `try`.
+# The helper's own try/catch closes itself, so the generated program keeps
+# FATAL_TEMPLATE's `try { ... } catch (_) { ... }` shape intact for the row's
+# fault-causing `body`.
 _REFLECT_SETUP = (
     "fun __reflectErr() {\n"
     "    try { var x = []; print x[0]; } catch (e) { return e; }\n"
@@ -382,12 +500,20 @@ _BOOTSTRAP_FATAL_DEFAULT_SKIP = (
     "disposition"
 )
 for _row in FATAL_ROWS:
+    if _row.name == "stdlib_open_failure":
+        # Unlike the rest of FATAL_ROWS, bootstrap agrees with native's
+        # fatal disposition here (only the message text differs, already
+        # handled by this row's own skip_fields), so it is exempt from the
+        # blanket skip below.
+        continue
     _row.skip.setdefault(BOOTSTRAP, _BOOTSTRAP_FATAL_DEFAULT_SKIP)
 
 for _row in CATCHABLE_ROWS:
     fields = _row.skip_fields.setdefault(BOOTSTRAP, set())
-    # kind is compared (node #335's actual deliverable); message text and
-    # type()/str() are not (see the module note above and issue #347).
+    # kind is compared (node #335's actual deliverable). type()/str() are
+    # not: issue #347 tracks bootstrap's own Error identity gap. message
+    # text is not either: issue #354 tracks bootstrap's message text
+    # disagreeing with native's Runtime Errors table on 12 of 18 rows.
     fields.update({"message", "type", "str"})
 
 
@@ -415,10 +541,9 @@ def load_spec_fatal_row_count() -> int:
     """Counts the Fatal Runtime Errors table's data rows in spec/04-semantics.md.
 
     Guards FATAL_ROWS against corpus drift the same way
-    load_spec_table_kind_count guards CATCHABLE_ROWS (PR #352 review round
-    1, R5) -- a row added to or removed from the fatal table with no
-    matching change here fails loudly instead of silently checking a stale
-    corpus.
+    load_spec_table_kind_count guards CATCHABLE_ROWS -- a row added to or
+    removed from the fatal table with no matching change here fails loudly
+    instead of silently checking a stale corpus.
     """
     text = SPEC_PATH.read_text(encoding="utf-8")
     start = text.index("### Fatal Runtime Errors")
@@ -435,9 +560,8 @@ def load_spec_fatal_row_count() -> int:
 # Exit code every consumer uses for a compile-time (parse) error, distinct
 # from a run-time fault's own exit code, which differs by consumer (native
 # 70, JVM 1, CLR 134 via an unhandled .NET exception). A row whose program
-# never compiles proves nothing about the fault it names (PR #352 review
-# round 1, R1/R2/R3): classify() must tell the two apart, not read "no
-# marker on stdout" as "fatal" the way an earlier version of this script did.
+# never compiles proves nothing about the fault it names: classify() must
+# tell the two apart, not read "no marker on stdout" as "fatal".
 COMPILE_ERROR_EXIT_CODE = 65
 
 
@@ -499,11 +623,11 @@ def classify(returncode: int, stdout: str, stderr: str) -> RunResult:
         # caught-template run somehow reached AFTER_MARKER without its own
         # catch block markers (also a corpus bug: the fault never fired).
         return RunResult(outcome="crash")
-    # No marker at all: the program halted before printing one. This used
-    # to be read as "fatal" unconditionally, which also matched a program
-    # that never compiled (PR #352 review round 1, R1) -- every consumer
-    # here exits with COMPILE_ERROR_EXIT_CODE on a parse failure, so that
-    # exit code, not the absence of a marker, is what "fatal" requires.
+    # No marker at all: the program halted before printing one. That alone
+    # does not mean "fatal" -- a program that never compiled also prints no
+    # marker. Every consumer here exits with COMPILE_ERROR_EXIT_CODE on a
+    # parse failure, so that exit code, not the absence of a marker, is
+    # what "fatal" requires.
     if returncode == COMPILE_ERROR_EXIT_CODE:
         return RunResult(outcome="compile_error", message=_first_stderr_line(stderr))
     return RunResult(outcome="fatal", message=_first_stderr_line(stderr))
@@ -533,11 +657,17 @@ def compare(row: Row, native_result: RunResult, other: RunResult, consumer: str)
         )
         return problems
     if native_result.outcome == "fatal":
+        if row.expected_message is not None and native_result.message != row.expected_message:
+            problems.append(
+                f"native's own message ({native_result.message!r}) does not match "
+                f"the spec table's Message column ({row.expected_message!r}) -- "
+                "corpus bug, fix the row"
+            )
         # Fatal message text is compared as a substring, not equality: each
         # consumer wraps the same message in its own prefix/trailer (native
         # "[line N] in script", the JVM's "Exception in thread \"main\"
         # lox.LoxError: ", the CLR's ".NET Unhandled exception. Lox.LoxError:
-        # " plus a stack trace) -- see PR #352 review round 1, R4.
+        # " plus a stack trace).
         skip = row.skip_fields.get(consumer, set())
         if "message" not in skip:
             native_msg = native_result.message or ""
@@ -603,8 +733,7 @@ def main() -> None:
     # The canonical-string depth row is the one Fatal table row this script
     # does not run at all (issue #338 owns its disposition; see FATAL_ROWS's
     # own module comment). Guards FATAL_ROWS against the table changing
-    # underneath it the same way the check above guards CATCHABLE_ROWS
-    # (PR #352 review round 1, R5).
+    # underneath it the same way the check above guards CATCHABLE_ROWS.
     excluded_fatal_rows = 1
     spec_fatal_row_count = load_spec_fatal_row_count()
     if spec_fatal_row_count != len(FATAL_ROWS) + excluded_fatal_rows:
@@ -639,13 +768,25 @@ def main() -> None:
                 continue
             if native_result.outcome == "compile_error":
                 # Native itself never reached the fault: the row's program
-                # is broken, not any consumer's behavior (PR #352 review
-                # round 1, R1/R2/R3). Report it as a failure rather than
-                # silently passing every consumer, which is what let three
-                # enum rows and five reflection rows through round 1.
+                # is broken, not any consumer's behavior. Report it as a
+                # failure rather than silently passing every consumer.
                 print(
                     f"ERROR       {row.name}  native does not compile this row's "
                     f"program: {native_result.message!r} -- corpus bug, fix the row"
+                )
+                diverged += 1
+                continue
+            if native_result.outcome != row.disposition:
+                # The row's declared disposition is native's own ground
+                # truth (see the module docstring). Compare it against
+                # native's actual outcome so a later change in native's own
+                # behavior (a Fatal row native starts to catch, or the
+                # reverse) shows up as a divergence instead of silently
+                # matching every other consumer against a stale label.
+                print(
+                    f"DIVERGE     {row.name}  [native]  disposition: row declares "
+                    f"{row.disposition!r} but native's own outcome is "
+                    f"{native_result.outcome!r}"
                 )
                 diverged += 1
                 continue
