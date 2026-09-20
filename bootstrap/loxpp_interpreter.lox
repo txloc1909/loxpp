@@ -1669,25 +1669,24 @@ fun reflectMethodNames(klass) {
 // restriction exists and why it applies identically everywhere.
 //
 // "ReflectionFieldNameError", "ReflectionUndefinedMemberError",
-// "ReflectionUnsupportedError", "ReflectionReceiverError", and
-// "ReflectionArityError" below are not rows of the catchable-fault table in
-// spec/04-semantics.md. Native reaches these same causes
-// (src/stdlib/reflect_api.cpp) only through its always-fatal path
-// (nativeRuntimeError(), exit 70), never as a catchable value. So none of
-// these causes has an existing `.kind` on native, JVM, or CLR to collide
-// with, and these strings stay outside the documented, cross-backend `kind`
-// set for that reason. Each still names one specific cause and only that
-// cause — do not reuse a table `kind` for one of them, and do not reuse one
-// of these for an unrelated cause either.
+// "ReflectionUnsupportedError", "ReflectionReceiverError",
+// "ReflectionArityError", "ReflectionNotCallableError", and
+// "ReflectionNativeArityError" below are not rows of the catchable-fault
+// table in spec/04-semantics.md. Native reaches every cause in this
+// function (src/stdlib/reflect_api.cpp's callMethodNative) only through its
+// always-fatal path (nativeRuntimeError(), exit 70), never as a catchable
+// value. So none of these causes has an existing `.kind` on native, JVM, or
+// CLR to collide with, and these strings stay outside the documented,
+// cross-backend `kind` set for that reason. Each still names one specific
+// cause and only that cause — do not reuse a table `kind` for one of them,
+// and do not reuse one of these for an unrelated cause either.
 //
-// The three checks below that DO keep a table kind ("InvalidReceiverError" for
-// the receiver check, "ArityError" for the forwarded-call arity check, and
-// "NotCallableError" for the final not-callable fallback) are the exception:
-// each genuinely re-enters the same language-level fault the table kind
-// already names — this function just reaches it through reflection instead
-// of `.`/`()` syntax. "ReflectionArityError" above is different: it is
-// `callMethod`'s own required-argument-count check on itself, before any
-// method has even been resolved, so it is not that fault.
+// "ReflectionNotCallableError" and "ReflectionNativeArityError" are
+// deliberately distinct from the table's "NotCallableError" and
+// "ArityError": callMethod supports natives only (see the comment above
+// this function), so it can never reach the general call/arity fault a
+// `.`/`()` call site reaches — reusing either table kind here would claim a
+// catchability this path does not have.
 fun reflectCallMethod(interp, args) {
     var n = len(args);
     if (n < 2) {
@@ -1696,7 +1695,7 @@ fun reflectCallMethod(interp, args) {
     }
     var instance = args[0];
     if (loxTag(instance) != "instance") {
-        interp.setError("InvalidReceiverError", "Only instances have methods.", 0);
+        interp.setError("ReflectionReceiverError", "Only instances have methods.", 0);
         return nil;
     }
     var name = args[1];
@@ -1724,7 +1723,7 @@ fun reflectCallMethod(interp, args) {
     }
     if (tag != "native" and tag != "mathfn" and tag != "mapmethod" and
         tag != "filemethod" and tag != "listmethod") {
-        interp.setError("NotCallableError", "callMethod requires a callable value.", 0);
+        interp.setError("ReflectionNotCallableError", "callMethod requires a callable value.", 0);
         return nil;
     }
     var forwarded = [];
@@ -1734,7 +1733,7 @@ fun reflectCallMethod(interp, args) {
         i = i + 1;
     }
     if (callee.arity() != len(forwarded)) {
-        interp.setError("ArityError", "Expected " + str(callee.arity()) + " arguments but got " +
+        interp.setError("ReflectionNativeArityError", "Expected " + str(callee.arity()) + " arguments but got " +
                          str(len(forwarded)) + ".", 0);
         return nil;
     }
@@ -1812,15 +1811,13 @@ class LoxNative {
         }
         if (this.name == "type") return reflectTypeName(args[0]);
         // "ReflectionReceiverError" (below, at every "fields"/"methods"/
-        // "getField"/"hasField"/"setField" argument-type check): these calls
-        // reflect on an Instance or Class argument, they do not invoke a
-        // method on one, so InvalidReceiverError's documented cause ("Method
-        // called on non-instance/non-list/non-map", e.g. 42.foo()) does not
-        // apply -- unlike "callMethod"'s own receiver check just above
-        // ("Only instances have methods."), which genuinely does invoke a
-        // method and keeps InvalidReceiverError. Native's own getField/
-        // hasField/setField/fields/methods (src/stdlib/reflect_api.cpp)
-        // reach this same cause only through their always-fatal path.
+        // "getField"/"hasField"/"setField" argument-type check, and at
+        // "callMethod"'s own receiver check above): none of these reach the
+        // table's "InvalidReceiverError" cause ("Method called on
+        // non-instance/non-list/non-map", e.g. 42.foo()) -- native's own
+        // getField/hasField/setField/fields/methods/callMethod
+        // (src/stdlib/reflect_api.cpp) reach every one of these causes only
+        // through their always-fatal path, never as a catchable value.
         if (this.name == "fields") {
             if (loxTag(args[0]) != "instance") {
                 interp.setError("ReflectionReceiverError", "Expected an instance.", 0);

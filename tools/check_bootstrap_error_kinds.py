@@ -87,6 +87,8 @@ REVIEWED_NON_TABLE_KINDS = {
     "ForInNotIterableError",
     "InvalidSuperclassError",
     "InvalidDestructureReceiverError",
+    "ReflectionNotCallableError",
+    "ReflectionNativeArityError",
 }
 
 # The reviewed baseline: one (kind, message, status) entry per `.setError(`
@@ -121,12 +123,12 @@ REVIEWED_NON_TABLE_KINDS = {
 EXPECTED_CALLS = [
     ('StackOverflowError', '"Stack overflow."', JUDGED),
     ('ReflectionArityError', '"Expected at least 2 arguments."', JUDGED),
-    ('InvalidReceiverError', '"Only instances have methods."', JUDGED),
+    ('ReflectionReceiverError', '"Only instances have methods."', JUDGED),
     ('ReflectionFieldNameError', '"Field name must be a string."', JUDGED),
     ('ReflectionUndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
     ('ReflectionUnsupportedError', '"callMethod does not support user-defined methods yet."', JUDGED),
-    ('NotCallableError', '"callMethod requires a callable value."', JUDGED),
-    ('ArityError', '"Expected " + str(callee.arity()) + " arguments but got " +\n                         str(len(forwarded)) + "."', JUDGED),
+    ('ReflectionNotCallableError', '"callMethod requires a callable value."', JUDGED),
+    ('ReflectionNativeArityError', '"Expected " + str(callee.arity()) + " arguments but got " +\n                         str(len(forwarded)) + "."', JUDGED),
     ('LengthTypeError', '"len() argument must be a String, List, or Map."', JUDGED),
     ('ReflectionReceiverError', '"Expected an instance."', JUDGED),
     ('ReflectionReceiverError', '"Expected a class."', JUDGED),
