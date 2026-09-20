@@ -55,13 +55,15 @@ public static class LoxOps {
         if (a is string sa && b is string sb) {
             return sa + sb;
         }
-        if (a is string || b is string) {
-            throw new LoxError(LoxRuntime.MakeError(
-                "Operands must be two numbers, two strings, or a string and a number.",
-                "ConcatenationTypeError"));
+        // vm.cpp Op::ADD has no arithmetic-only arm: any non-two-String pair
+        // that is also not two Numbers raises ConcatenationTypeError, never
+        // CheckNumbers' ArithmeticTypeError.
+        if (a is double da && b is double db) {
+            return da + db;
         }
-        CheckNumbers(a, b);
-        return (double)a + (double)b;
+        throw new LoxError(LoxRuntime.MakeError(
+            "Operands must be two numbers, two strings, or a string and a number.",
+            "ConcatenationTypeError"));
     }
 
     public static object Subtract(object a, object b) {
