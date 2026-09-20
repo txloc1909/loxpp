@@ -164,6 +164,16 @@ CATCHABLE_ROWS = [
     # row. Issue #338 owns which disposition is correct; this test does not
     # run this row, on any consumer, until that is settled.
     Row("invalid_receiver_error", "caught", "42.foo();", expected_kind="InvalidReceiverError"),
+    # Regression row for issue #348: calling a plain non-callable value must
+    # stay catchable even after a previous field read. The old code tracked
+    # field reads with interpreter state that could leak across statements,
+    # making `42()` fatal when a field was read earlier.
+    Row(
+        "call_non_callable_after_field_read",
+        "caught",
+        "class C { init() { this.g = 1; } } var c = C(); var y = c.g; try { 42(); } catch (e) { print e.kind; }",
+        expected_kind="NotCallableError",
+    ),
     Row(
         "match_error",
         "caught",
@@ -420,6 +430,22 @@ FATAL_ROWS = [
         "fatal",
         "var m = {1: 1}; for (var k in m) { m[2] = 2; }",
         expected_message="Map changed size during iteration.",
+    ),
+    # Regression rows for issue #348: bootstrap's fused property-access site
+    # must remain fatal when the call target involves chained property gets
+    # or grouping, since native's fused Op::INVOKE can only split the two cases
+    # when the source is a direct property access (`obj.prop(args)`).
+    Row(
+        "invoke_chained_property_get",
+        "fatal",
+        "42.foo.bar();",
+        expected_message="Only instances have properties.",
+    ),
+    Row(
+        "invoke_grouped_property_get",
+        "fatal",
+        "(42.foo)();",
+        expected_message="Only instances have properties.",
     ),
     # A `defer`red call holding a non-callable value must be fatal (native's
     # runDefers). The CLR backend fails to *compile* a variant of this shape

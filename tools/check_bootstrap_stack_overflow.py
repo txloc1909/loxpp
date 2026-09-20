@@ -288,18 +288,48 @@ EXCLUDED_EXAMPLES = {"bench_jump_table.lox"}
 
 
 def check_state_after_examples(examples_dir: Path) -> list[str]:
+    """Check state restoration per example, using native as ground truth.
+
+    For each example, run it on native and bootstrap. Bootstrap's exit code
+    must match native's. If bootstrap prints a state line, compare it to
+    STATE_START. If bootstrap prints no state line, accept it only when
+    both exit non-zero (70 or 65) with the same code, stderr is one line,
+    and there is no traceback.
+    """
     failures = []
+    native_bin = REPO_ROOT / "build" / "loxpp"
+    if not native_bin.exists():
+        return [f"native VM not found at {native_bin}"]
+
     examples = sorted(
         p for p in examples_dir.glob("*.lox") if p.name not in EXCLUDED_EXAMPLES
     )
     if not examples:
         return [f"no .lox files found under {examples_dir}"]
+
     for example in examples:
-        env = dict(os.environ, LANGUAGE="LOXPP", LOXPP_BOOTSTRAP_CHECK_STATE="1")
         input_file = example.with_suffix(".input")
         stdin_data = input_file.read_text() if input_file.exists() else None
+
+        # Run on native
         try:
-            result = subprocess.run(
+            native_result = subprocess.run(
+                [str(native_bin), str(example)],
+                capture_output=True,
+                text=True,
+                input=stdin_data,
+                env=dict(os.environ, LANGUAGE="LOXPP"),
+                timeout=60,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            failures.append(f"{example.name}: native timed out")
+            continue
+
+        # Run on bootstrap with state dump enabled
+        env = dict(os.environ, LANGUAGE="LOXPP", LOXPP_BOOTSTRAP_CHECK_STATE="1")
+        try:
+            boot_result = subprocess.run(
                 [str(WRAPPER), str(example)],
                 capture_output=True,
                 text=True,
@@ -309,27 +339,61 @@ def check_state_after_examples(examples_dir: Path) -> list[str]:
                 check=False,
             )
         except subprocess.TimeoutExpired:
-            failures.append(f"{example.name}: timed out")
+            failures.append(f"{example.name}: bootstrap timed out")
             continue
-        state_lines = [
-            m for m in (STATE_LINE_RE.match(line) for line in result.stdout.splitlines()) if m
-        ]
-        if not state_lines:
-            failures.append(f"{example.name}: no __BOOTSTRAP_STATE__ line in stdout")
-            continue
-        m = state_lines[-1]
-        actual = {
-            "defers": m.group(1),
-            "stringifyDepth": m.group(2),
-            "returnFlag": m.group(3),
-            "breakFlag": m.group(4),
-            "continueFlag": m.group(5),
-            "throwFlag": m.group(6),
-        }
-        if actual != STATE_START:
+
+        # Check: bootstrap exit code must equal native exit code
+        if boot_result.returncode != native_result.returncode:
             failures.append(
-                f"{example.name}: interpreter state not restored after run: {actual}"
+                f"{example.name}: bootstrap exited {boot_result.returncode}, "
+                f"native exited {native_result.returncode}"
             )
+            continue
+
+        # If bootstrap printed a state line, check it
+        state_lines = [
+            m for m in (STATE_LINE_RE.match(line) for line in boot_result.stdout.splitlines()) if m
+        ]
+        if state_lines:
+            m = state_lines[-1]
+            actual = {
+                "defers": m.group(1),
+                "stringifyDepth": m.group(2),
+                "returnFlag": m.group(3),
+                "breakFlag": m.group(4),
+                "continueFlag": m.group(5),
+                "throwFlag": m.group(6),
+            }
+            if actual != STATE_START:
+                failures.append(
+                    f"{example.name}: interpreter state not restored after run: {actual}"
+                )
+        else:
+            # No state line printed. This is OK only for fatal halts
+            # matching native, with clean stderr.
+            if boot_result.returncode not in (70, 65):
+                # Not a fatal halt, should have printed state
+                failures.append(
+                    f"{example.name}: no __BOOTSTRAP_STATE__ line in stdout "
+                    f"and exit code {boot_result.returncode} is not fatal (70 or 65)"
+                )
+                continue
+
+            stderr_lines = boot_result.stderr.strip().split('\n') if boot_result.stderr.strip() else []
+            if len(stderr_lines) != 1:
+                failures.append(
+                    f"{example.name}: no __BOOTSTRAP_STATE__ line and stderr "
+                    f"has {len(stderr_lines)} lines, expected 1"
+                )
+                continue
+
+            # Check for traceback
+            has_traceback = "] in " in boot_result.stdout or "] in " in boot_result.stderr
+            if has_traceback:
+                failures.append(
+                    f"{example.name}: no __BOOTSTRAP_STATE__ line but traceback found in output"
+                )
+
     return failures
 
 
