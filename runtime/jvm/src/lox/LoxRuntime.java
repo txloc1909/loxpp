@@ -91,6 +91,18 @@ public final class LoxRuntime {
         return sawByte ? line.toString() : null;
     }
 
+    /**
+     * The one class object every {@link #makeError} value shares.
+     * spec/03-types.md's Error section: "No built-in global name or literal
+     * syntax constructs an Error value directly" — a Lox++ program can never
+     * reach this object to build a lookalike, so reference equality against
+     * it (see LoxOps.getProperty, LoxRuntime.typeNameOf, and
+     * LoxOps.stringify) reliably tells a genuine caught-fault value apart
+     * from any user-defined instance, including one a user names "Error"
+     * themselves.
+     */
+    public static final LoxClass ERROR_CLASS = new LoxClass("Error", null);
+
     public static LoxGlobals init() {
         LoxGlobals globals = new LoxGlobals();
         registerGlobals(globals);
@@ -98,7 +110,7 @@ public final class LoxRuntime {
         registerReflection(globals);
         // Register the Error class as a global so Error instances can be
         // created
-        globals.define("Error", new LoxClass("Error", null));
+        globals.define("Error", ERROR_CLASS);
         current = globals;
         return globals;
     }
@@ -116,14 +128,7 @@ public final class LoxRuntime {
      * and `error.message` in a catch block.
      */
     public static Object makeError(String kind, String message) {
-        Object errorClassObj = current().get("Error");
-        if (!(errorClassObj instanceof LoxClass)) {
-            // Error class not initialized; fallback (should not happen in
-            // normal use)
-            return null;
-        }
-        LoxClass errorClass = (LoxClass)errorClassObj;
-        LoxInstance error = new LoxInstance(errorClass);
+        LoxInstance error = new LoxInstance(ERROR_CLASS);
         error.fields.put("kind", kind);
         error.fields.put("message", message);
         return error;
@@ -404,6 +409,12 @@ public final class LoxRuntime {
             return "Class";
         }
         if (v instanceof LoxInstance) {
+            // Must run before the generic Instance check below: a caught
+            // Error value is a plain LoxInstance under the hood (see
+            // makeError), told apart only by its class's identity.
+            if (((LoxInstance)v).klass == ERROR_CLASS) {
+                return "Error";
+            }
             return "Instance";
         }
         if (v instanceof LoxList) {

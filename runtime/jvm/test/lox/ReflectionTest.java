@@ -61,6 +61,17 @@ public final class ReflectionTest {
 
         checkEquals("Class", call(globals, "type", klass), "type(class)");
         checkEquals("Instance", call(globals, "type", instance), "type(instance)");
+
+        Object caughtError = LoxRuntime.makeError("SomeError", "boom");
+        checkEquals("Error", call(globals, "type", caughtError),
+                "type(caught Error) is Error, not Instance");
+        // A user class literally named "Error" must not be mistaken for the
+        // one the runtime builds via makeError() (spec/03-types.md: no
+        // built-in name or literal syntax constructs a lookalike).
+        LoxClass userError = new LoxClass("Error", null);
+        Object userErrorInstance = userError.call(new Object[0]);
+        checkEquals("Instance", call(globals, "type", userErrorInstance),
+                "type(instance of a user class named Error) is still Instance");
         checkEquals("List", call(globals, "type", new LoxList()), "type(list)");
         checkEquals("Map", call(globals, "type", map), "type(map)");
 

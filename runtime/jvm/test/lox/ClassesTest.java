@@ -16,8 +16,6 @@ public final class ClassesTest {
     }
 
     public static void main(String[] args) {
-        // makeError() (LoxOps.java) reads LoxRuntime.current() to find the
-        // registered Error class; every checkThrows below needs it set.
         LoxRuntime.init();
 
         LoxClosure add = addClosure();

@@ -75,6 +75,16 @@ public final class StringifyTest {
         checkEquals("Dog", LoxOps.stringify(klass), "stringify(class)");
         LoxInstance instance = new LoxInstance(klass);
         checkEquals("Dog instance", LoxOps.stringify(instance), "stringify(instance)");
+
+        Object caughtError = LoxRuntime.makeError("SomeError", "boom");
+        checkEquals("SomeError: boom", LoxOps.stringify(caughtError),
+                "stringify(caught Error) is \"kind: message\", not \"Error instance\"");
+        // A user class literally named "Error" must still stringify the
+        // ordinary way (spec/03-types.md: no built-in name or literal syntax
+        // constructs a lookalike).
+        LoxClass userError = new LoxClass("Error", null);
+        checkEquals("Error instance", LoxOps.stringify(new LoxInstance(userError)),
+                "stringify(instance of a user class named Error) is unaffected");
         checkEquals("<fn greet>", LoxOps.stringify(new LoxBoundMethod(instance, fn)),
                 "stringify(bound method)");
 
