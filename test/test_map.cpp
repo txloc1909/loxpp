@@ -309,6 +309,63 @@ TEST(Map, ForInCollectsAllKeys) {
     EXPECT_EQ(h.getGlobalStr("r"), "6");
 }
 
+TEST(Map, ForInInsertErrors) {
+    VMTestHarness h;
+    // Single entry: the insert lands on the last iteration, so the error
+    // must fire on the post-body size check, not only before binding.
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a"};
+        for (var k in m) {
+            m[2] = "b";
+        }
+    )"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(Map, ForInDeleteErrors) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a", 2: "b"};
+        for (var k in m) {
+            m.del(k);
+        }
+    )"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(Map, ForInUpdateExistingKeyOk) {
+    VMTestHarness h;
+    // Writing a value to a key that already exists changes no size.
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a", 2: "b"};
+        for (var k in m) {
+            m[k] = "z";
+        }
+        var r = len(m);
+        var v = m[1];
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "2");
+    EXPECT_EQ(h.getGlobalStr("v"), "z");
+}
+
+TEST(Map, ForInBreakAfterMutationOk) {
+    VMTestHarness h;
+    // Break leaves the loop without another iterator step, so no error.
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a", 2: "b"};
+        var seen = 0;
+        for (var k in m) {
+            seen = seen + 1;
+            m[99] = "z";
+            break;
+        }
+        var r = seen;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "1");
+}
+
 // ---------------------------------------------------------------------------
 // Bound native method calls (regression test for issue #139)
 // ---------------------------------------------------------------------------

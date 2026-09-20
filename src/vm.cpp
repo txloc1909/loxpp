@@ -1622,7 +1622,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
                     "Value is not iterable (expected list, string, or map).");
                 return InterpretResult::RUNTIME_ERROR;
             }
-            ObjIterator* it = m_mm.create<ObjIterator>(iterable, 0);
+            ObjIterator* it = m_mm.create<ObjIterator>(
+                iterable, 0,
+                isMap(iterable) ? asObjMap(as<Obj*>(iterable))->map.count()
+                                : 0);
             stackTop[-1] = Value{static_cast<Obj*>(it)}; // replace in-place
             break;
         }
@@ -1643,8 +1646,13 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 has = it->index <
                       (int)asObjString(as<Obj*>(it->collection))->chars.size();
             } else if (isMap(it->collection)) {
-                // Scan forward from current index for the next occupied bucket.
+                // Fail fast on size change, as Python does for dicts.
                 auto* map = asObjMap(as<Obj*>(it->collection));
+                if (map->map.count() != it->expectedCount) {
+                    RAISE_ERROR("Map changed size during iteration.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
+                // Scan forward from current index for the next occupied bucket.
                 int i = it->index;
                 while (i < map->map.capacity() &&
                        map->map.entryAt(i)->state != MapSlot::OCCUPIED) {
@@ -1682,6 +1690,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 // Skip past empty/tombstone buckets to the next occupied one,
                 // push its key, then advance the cursor past it.
                 auto* map = asObjMap(as<Obj*>(it->collection));
+                if (map->map.count() != it->expectedCount) {
+                    RAISE_ERROR("Map changed size during iteration.");
+                    return InterpretResult::RUNTIME_ERROR;
+                }
                 while (it->index < map->map.capacity() &&
                        map->map.entryAt(it->index)->state !=
                            MapSlot::OCCUPIED) {

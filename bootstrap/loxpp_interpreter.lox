@@ -2362,21 +2362,30 @@ class Interpreter {
         // GET_INDEX's catchable NotIndexableError -- this needs its own
         // kind, not that one's.
         if (tag != "list" and !isLoxStr(iterable) and tag != "map") {
-            this.setError("ForInNotIterableError", "Value is not iterable.", varLine);
+            this.setError("ForInNotIterableError", "Value is not iterable (expected list, string, or map).", varLine);
             return;
         }
         var loopEnv = Environment(env);
         loopEnv.define(varName, nil);
         if (tag == "map") {
             var ks = iterable.data.keys();
+            var startSize = len(iterable.data);
             var i = 0;
             while (i < len(ks)) {
+                if (len(iterable.data) != startSize) {
+                    this.setError("MapSizeChangedError", "Map changed size during iteration.", varLine);
+                    return;
+                }
                 loopEnv.define(varName, ks[i]);
                 this.execStmt(body, loopEnv);
                 if (this.returnFlag or this.throwFlag) return;
                 if (this.breakFlag) { this.breakFlag = false; return; }
                 if (this.continueFlag) { this.continueFlag = false; }
                 i = i + 1;
+                if (len(iterable.data) != startSize) {
+                    this.setError("MapSizeChangedError", "Map changed size during iteration.", varLine);
+                    return;
+                }
             }
             return;
         }
