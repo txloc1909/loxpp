@@ -309,6 +309,147 @@ TEST(Map, ForInCollectsAllKeys) {
     EXPECT_EQ(h.getGlobalStr("r"), "6");
 }
 
+TEST(Map, ForInInsertErrors) {
+    VMTestHarness h;
+    // Single entry: the insert lands on the last iteration, so the error
+    // must fire on the post-body size check, not only before binding.
+    // Message text is proven by the for_in_map_size_changed fault-table row.
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a"};
+        for (var k in m) {
+            m[2] = "b";
+        }
+    )"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(Map, ForInDeleteErrors) {
+    VMTestHarness h;
+    // Message text is proven by the for_in_map_size_changed fault-table row.
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a", 2: "b"};
+        for (var k in m) {
+            m.del(k);
+        }
+    )"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(Map, ForInInsertPastGrowErrors) {
+    VMTestHarness h;
+    // Twelve entries fill a capacity-16 table to its 0.75 load limit, so
+    // the in-loop insert rehashes under the live cursor. The size check
+    // must still fire instead of visiting moved buckets.
+    ASSERT_EQ(h.run(R"(
+        var m = {};
+        var i = 0;
+        while (i < 12) { m[i] = i; i = i + 1; }
+        for (var k in m) {
+            m[100 + k] = k;
+        }
+    )"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(Map, ForInContinueAfterMutationErrors) {
+    VMTestHarness h;
+    // Continue returns to the iterator step, which must report the change.
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a", 2: "b"};
+        for (var k in m) {
+            m[3] = "c";
+            continue;
+        }
+    )"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(Map, ForInReturnAfterMutationOk) {
+    VMTestHarness h;
+    // Return leaves the loop without another iterator step, so no error.
+    ASSERT_EQ(h.run(R"(
+        fun f() {
+            var m = {1: "a", 2: "b"};
+            for (var k in m) {
+                m[3] = "c";
+                return "left";
+            }
+            return "fell-off";
+        }
+        var r = f();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "left");
+}
+
+TEST(Map, ForInThrowAfterMutationOk) {
+    VMTestHarness h;
+    // Throw unwinds without another iterator step: the catch sees the
+    // thrown value, not the size fault.
+    ASSERT_EQ(h.run(R"(
+        var caught = "";
+        try {
+            var m = {1: "a", 2: "b"};
+            for (var k in m) {
+                m[3] = "c";
+                throw "x";
+            }
+        } catch (e) {
+            caught = e;
+        }
+        var r = caught;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "x");
+}
+
+TEST(Map, ForInNestedInnerMutationErrors) {
+    VMTestHarness h;
+    // The inner insert changes the size the outer iterator recorded.
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a", 2: "b"};
+        for (var a in m) {
+            for (var b in m) {
+                m[3] = "c";
+            }
+        }
+    )"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(Map, ForInUpdateExistingKeyOk) {
+    VMTestHarness h;
+    // Writing a value to a key that already exists changes no size.
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a", 2: "b"};
+        for (var k in m) {
+            m[k] = "z";
+        }
+        var r = len(m);
+        var v = m[1];
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "2");
+    EXPECT_EQ(h.getGlobalStr("v"), "z");
+}
+
+TEST(Map, ForInBreakAfterMutationOk) {
+    VMTestHarness h;
+    // Break leaves the loop without another iterator step, so no error.
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a", 2: "b"};
+        var seen = 0;
+        for (var k in m) {
+            seen = seen + 1;
+            m[99] = "z";
+            break;
+        }
+        var r = seen;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "1");
+}
+
 // ---------------------------------------------------------------------------
 // Bound native method calls (regression test for issue #139)
 // ---------------------------------------------------------------------------

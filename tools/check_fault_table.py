@@ -415,6 +415,12 @@ FATAL_ROWS = [
         "for (var x in 42) {}",
         expected_message="Value is not iterable (expected list, string, or map).",
     ),
+    Row(
+        "for_in_map_size_changed",
+        "fatal",
+        "var m = {1: 1}; for (var k in m) { m[2] = 2; }",
+        expected_message="Map changed size during iteration.",
+    ),
     # A `defer`red call holding a non-callable value must be fatal (native's
     # runDefers). The CLR backend fails to *compile* a variant of this shape
     # that closes over a caught `e` inside a nested function (issue found

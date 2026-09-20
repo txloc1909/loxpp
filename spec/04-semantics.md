@@ -395,20 +395,32 @@ Where:
 ### `for`-in Statement
 
 ```
-for ( var x in expr ) body
+for (var x in expr) body
 ```
 
-Iterates over the elements of a sequence in order.
+Iterates over the elements of a List or a String, or over the keys of a Map.
+A List iterates in order. A String
+iterates its single-character substrings in order. A Map iterates over keys
+in unspecified order.
 
-1. Evaluate `expr` exactly once. The result must be a **List** or a **String**;
-   any other value is a **runtime error** ("Value is not iterable.").
-2. An internal **iterator** is created, holding a reference to the sequence and
-   a cursor starting at `0`. The iterator is not accessible to user code.
-3. Before each iteration, the cursor is compared to the length of the sequence.
-   If `cursor ≥ length`, the loop exits.
-4. Otherwise, the element at `cursor` is bound to `x` and `body` executes.
+1. Evaluate `expr` exactly once. The result must be a **List**, a **String**,
+   or a **Map**; any other value is a **runtime error**
+   ("Value is not iterable (expected list, string, or map).").
+2. An internal **iterator** is created, holding a reference to the iterated
+   value and a cursor starting at `0`. The iterator is not accessible to
+   user code.
+   For a Map, the iterator also records the size (the number of key-value
+   pairs).
+3. Before each iteration, the next element is located:
+   - For a **List** or **String**: if `cursor ≥ length`, the loop exits.
+   - For a **Map**: the recorded size is compared to the current size first
+     (see Mutation during iteration below). Then the cursor, a bucket index,
+     scans forward to the next occupied bucket within the capacity; if there
+     is none, the loop exits.
+4. Otherwise, the located element is bound to `x` and `body` executes.
    - For a **List**: `x` is bound to the element value.
    - For a **String**: `x` is bound to a single-character String.
+   - For a **Map**: `x` is bound to the next key.
 5. After the body, the cursor advances by one and the loop repeats from step 3.
 
 `x` is scoped to the loop statement; it is not accessible after the loop exits.
@@ -419,6 +431,16 @@ assigns to it. It is not a new binding per iteration. See
 **Mutation during iteration**: modifying the List while iterating is defined.
 Elements appended to the List at indices beyond the current cursor will be
 visited. Removing elements is not directly possible (List has no `remove`).
+If the size of a Map differs from the recorded size at the next iterator
+step, that step is a **runtime error**
+("Map changed size during iteration."). This covers inserting a new key and
+removing a key, including growth that rehashes the Map, and matches Python,
+which reports the same fault for a dictionary size change. The check runs at
+the next iterator step only: `break`, `return`, or `throw` before that step
+exits the loop without an error. Assigning a value to a key that already
+exists does not change the size and is permitted. Mutations that restore the
+net size within one iteration (a remove plus an insert) are not detected;
+which keys such an iteration visits is unspecified (see issue #362).
 
 **`break`** and **`continue`** work as described below.
 
@@ -1197,6 +1219,7 @@ fault; the message is the only text the implementation reports.
 | `elem in seq` where `seq` is a String and `elem` is not a String | `1 in "abc";` | `Left operand of 'in' on a string must be a string.` |
 | `elem in seq` where `seq` is not a List, String, or Map | `1 in 42;` | `Right operand of 'in' must be a list, string, or map.` |
 | `for (var x in expr)` where `expr` is not a List, String, or Map | `for (var x in 42) {}` | `Value is not iterable (expected list, string, or map).` |
+| Map size changed during `for`-in iteration | `var m = {1: 1}; for (var k in m) { m[2] = 2; }` | `Map changed size during iteration.` |
 
 **`print`'s depth-limit fault is the same fault the catchable table calls
 `MaxDepthExceededError`.** `Op::PRINT` clears any pending stdlib error
