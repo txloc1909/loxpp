@@ -432,7 +432,6 @@ FATAL_ROWS = [
         "defer_noncallable_value",
         "fatal",
         "fun g() { var x = 42; defer x(); } g();",
-        skip={BOOTSTRAP: "issue #351: bootstrap silently never invokes the deferred call, no fault at all"},
         expected_message="Deferred callable has unexpected type.",
     ),
 ]
@@ -547,6 +546,11 @@ for _row in FATAL_ROWS:
         # Unlike the rest of FATAL_ROWS, bootstrap agrees with native's
         # fatal disposition here (only the message text differs, already
         # handled by this row's own skip_fields), so it is exempt from the
+        # blanket skip below.
+        continue
+    if _row.name == "defer_noncallable_value":
+        # Node #351: bootstrap now faults on a deferred non-callable value,
+        # matching native's fatal disposition, so it is exempt from the
         # blanket skip below.
         continue
     _row.skip.setdefault(BOOTSTRAP, _BOOTSTRAP_FATAL_DEFAULT_SKIP)

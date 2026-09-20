@@ -1545,6 +1545,8 @@ class LoxFunction {
                         interp.thrownValue = savedValue;
                     }
                 }
+            } else {
+                interp.fatalError("Deferred callable has unexpected type.");
             }
             j = j - 1;
         }
@@ -2156,6 +2158,11 @@ class Interpreter {
         }
     }
 
+    fatalError(msg) {
+        print "LOXERR70 " + msg;
+        exit(70);
+    }
+
     isValidMapKey(v) {
         if (v == nil or v == true or v == false) return true;
         if (isLoxStr(v)) return true;
@@ -2604,7 +2611,7 @@ class Interpreter {
             var tag = loxTag(callee);
             if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "enum_ctor") {
                 i = i - 1;
-                continue;
+                this.fatalError("Deferred callable has unexpected type.");
             }
             if (callee.arity() != -1 and len(args) != callee.arity()) {
                 i = i - 1;
