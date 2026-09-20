@@ -371,11 +371,21 @@ def main() -> int:
         is_fused = (kind, _message) in FUSED_PAIRS
 
         if is_fused and disposition == FATAL:
-            # Bootstrap should now be fatal, matching native
+            # Bootstrap should now be fatal, matching native. Exit code alone
+            # cannot tell a fatal halt from an uncaught catchable fault --
+            # both exit 70 on the unfixed interpreter, since execTry never
+            # gets control back either way. Only "the catch block printed
+            # nothing" proves the fault never reached the catch, so both
+            # conditions are required (referee ruling, PR #364, answer 5).
             if boot_exit != 70:
                 failures.append(
                     f"{name}: declared 'fatal' (fused, Wave 3 fix), but bootstrap exited "
                     f"{boot_exit}, expected 70"
+                )
+            elif boot_out != "":
+                failures.append(
+                    f"{name}: declared 'fatal' (fused, Wave 3 fix), but bootstrap's catch "
+                    f"block printed {boot_out!r} -- the fault was caught, not fatal"
                 )
         else:
             # All other cases: bootstrap should catch the error
