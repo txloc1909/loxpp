@@ -2820,15 +2820,10 @@ class Interpreter {
         // Use syntactic dispatch to decide the call-target context.
         // Only direct Get expressions (e.g. obj.method()) use the call-target path.
         // Grouping and all other wrappings become fatal just like bare non-callables.
-        var callee = nil;
-        match calleeExpr {
-            case Get{object, name, line} => {
-                callee = this.evalGet(object, name, line, env, true);
-            }
-            case _ => {
-                callee = this.evalExpr(calleeExpr, env);
-            }
-        }
+        var callee = match calleeExpr {
+            case Get{object, name, line} => this.evalGet(object, name, line, env, true)
+            case _                       => this.evalExpr(calleeExpr, env)
+        };
         if (this.throwFlag) return nil;
         var args = [];
         var i = 0;
