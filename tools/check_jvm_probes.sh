@@ -123,18 +123,18 @@ probes=(
     # spec/04-semantics.md table (spec/03-types.md's Error section for the
     # message/kind fields). Each probe below pins one catchable row's exact
     # kind and message text, not only that some Error is delivered.
-    "examples/try_catch_concatenation_type_error.lox"
-    "examples/try_catch_undefined_property_on_error_message.lox"
-    "examples/try_catch_invoke_on_error_invalid_receiver.lox"
-    "examples/try_catch_set_index_not_indexable.lox"
-    "examples/try_catch_match_error_message.lox"
-    "examples/try_catch_undefined_variable_get_message.lox"
-    "examples/try_catch_undefined_variable_set_message.lox"
-    "examples/try_catch_ctor_arity_no_init_message.lox"
-    "examples/try_catch_enum_ctor_arity_message.lox"
-    "examples/try_catch_notcallable_ordinary_call.lox"
-    "examples/try_catch_invalid_receiver_message.lox"
-    "examples/try_catch_error_property_read_still_works.lox"
+    "test/translation-probes/jvm-only/try_catch_concatenation_type_error.lox"
+    "test/translation-probes/jvm-only/try_catch_undefined_property_on_error_message.lox"
+    "test/translation-probes/jvm-only/try_catch_invoke_on_error_invalid_receiver.lox"
+    "test/translation-probes/jvm-only/try_catch_set_index_not_indexable.lox"
+    "test/translation-probes/jvm-only/try_catch_match_error_message.lox"
+    "test/translation-probes/jvm-only/try_catch_undefined_variable_get_message.lox"
+    "test/translation-probes/jvm-only/try_catch_undefined_variable_set_message.lox"
+    "test/translation-probes/jvm-only/try_catch_ctor_arity_no_init_message.lox"
+    "test/translation-probes/jvm-only/try_catch_enum_ctor_arity_message.lox"
+    "test/translation-probes/jvm-only/try_catch_notcallable_ordinary_call.lox"
+    "test/translation-probes/jvm-only/try_catch_invalid_receiver_message.lox"
+    "test/translation-probes/jvm-only/try_catch_error_property_read_still_works.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
