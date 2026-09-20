@@ -526,13 +526,6 @@ REFLECT_ROWS = [
     ),
 ]
 
-# Reflection-on-Error is fatal on native, JVM, and CLR, but bootstrap's
-# reflection natives deliver a catchable `ReflectionReceiverError` instead
-# (issue #353) -- a real behavior gap, not a corpus bug, so every reflect
-# row skips bootstrap rather than reporting the same divergence five times.
-for _row in REFLECT_ROWS:
-    _row.skip[BOOTSTRAP] = "issue #353: bootstrap makes reflection-on-Error catchable, not fatal"
-
 ALL_ROWS = CATCHABLE_ROWS + FATAL_ROWS + REFLECT_ROWS
 
 # --- Bootstrap's own disposition model -------------------------------------
@@ -554,11 +547,12 @@ ALL_ROWS = CATCHABLE_ROWS + FATAL_ROWS + REFLECT_ROWS
 #    against native's. Comparing bootstrap's outcome against native's fatal
 #    disposition, row by row, would report ~30 "divergences" that are all
 #    the same one architectural fact, not 30 distinct defects. The Error-
-#    as-receiver reflection rows turned out to be the SAME architectural
-#    fact, not an exception to it: running each one against bootstrap shows
-#    it also delivers a catchable `ReflectionReceiverError`, not a halt (see
-#    issue #353), so REFLECT_ROWS skips bootstrap too, for the same reason
-#    as the rest of this table.
+#    as-receiver reflection rows (REFLECT_ROWS) used to share this same
+#    architectural gap (issue #353): bootstrap delivered a catchable
+#    `ReflectionReceiverError` instead of a halt. Issue #353 closed that gap
+#    by calling `Interpreter.fatalError` at each of the five reflection
+#    natives when the receiver is an Error, so REFLECT_ROWS now compares
+#    bootstrap against native like any other row and carries no skip.
 #
 # A row that found a genuine, specific defect underneath this general
 # pattern (a real kind ambiguity, a missing feature, a silently-swallowed
