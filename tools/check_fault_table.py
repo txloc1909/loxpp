@@ -617,11 +617,11 @@ for _row in FATAL_ROWS:
 
 for _row in CATCHABLE_ROWS:
     fields = _row.skip_fields.setdefault(BOOTSTRAP, set())
-    # kind is compared (node #335's actual deliverable). type()/str() are
-    # not: issue #347 tracks bootstrap's own Error identity gap. message
-    # text is not either: issue #354 tracks bootstrap's message text
-    # disagreeing with native's Runtime Errors table on 12 of 18 rows.
-    fields.update({"message", "type", "str"})
+    # kind is compared (node #335's actual deliverable), and so are type()
+    # and str() (issue #347's Error-identity fix). message text is still
+    # not: issue #354 tracks bootstrap's message text disagreeing with
+    # native's Runtime Errors table on 12 of 18 rows.
+    fields.update({"message"})
 
 
 def validate_row_anchors(rows: list[Row]) -> None:
