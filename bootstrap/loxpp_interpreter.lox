@@ -2849,7 +2849,15 @@ class Interpreter {
         }
         // Stdlib natives with wrong arity are fatal on native. Check and handle
         // before the general arity check to keep setError calls separate.
-        if ((tag == "native" or tag == "mathfn" or tag == "listmethod" or tag == "mapmethod" or tag == "filemethod") and callee.arity() != -1 and len(args) != callee.arity()) {
+        // List methods use native's own custom text (spec, Fatal Runtime
+        // Errors table); other method natives use the generic text.
+        if (tag == "listmethod" and callee.arity() != -1 and len(args) != callee.arity()) {
+            var noun = "arguments";
+            if (callee.arity() == 1) noun = "argument";
+            this.fatalError("'" + callee.name + "' expects " + str(callee.arity()) + " " + noun + " but got " + str(len(args)) + ".");
+            return nil;
+        }
+        if ((tag == "native" or tag == "mathfn" or tag == "mapmethod" or tag == "filemethod") and callee.arity() != -1 and len(args) != callee.arity()) {
             this.fatalError("Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".");
             return nil;
         }

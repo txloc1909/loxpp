@@ -609,6 +609,18 @@ for _row in FATAL_ROWS:
         # (fatal) from user function arity errors (catchable), so it is
         # exempt from the blanket skip below.
         continue
+    if _row.name == "list_append_wrong_arity":
+        # Issue #365: bootstrap reports native's own custom text and halts,
+        # so it is exempt from the blanket skip below.
+        continue
+    if _row.name == "list_pop_wrong_arity":
+        # Issue #365: bootstrap reports native's own custom text and halts,
+        # so it is exempt from the blanket skip below.
+        continue
+    if _row.name == "list_remove_wrong_arity":
+        # Issue #365: bootstrap reports native's own custom text and halts,
+        # so it is exempt from the blanket skip below.
+        continue
     if _row.name == "invoke_chained_property_get":
         # Node #348: bootstrap's fused call site stays fatal through a
         # chained property get (`42.foo.bar()`), matching native, so it is
