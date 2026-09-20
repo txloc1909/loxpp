@@ -2603,8 +2603,8 @@ class Interpreter {
             var args = defer_item[1];
             var tag = loxTag(callee);
             if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "enum_ctor") {
-                i = i - 1;
-                continue;
+                this.setError("DeferError", "Deferred callable has unexpected type.", 0);
+                break;
             }
             if (callee.arity() != -1 and len(args) != callee.arity()) {
                 i = i - 1;
