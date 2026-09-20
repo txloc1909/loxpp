@@ -2119,8 +2119,6 @@ class Interpreter {
         this.throwFlag     = false;
         this.thrownValue   = nil;
         this.pendingDefers = [];
-        this.evaluatingCallTarget = false;
-        this.lastValueFromField = false;
         this.stringifyDepth = 0;
         // High-water mark of stringifyDepth, for tools/check_bootstrap_stack_overflow.py
         // only: it never decreases, so a probe can tell "the run actually
@@ -2668,7 +2666,7 @@ class Interpreter {
             case Binary{op, left, right}        => this.evalBinary(op, left, right, env)
             case Logical{op, left, right}       => this.evalLogical(op, left, right, env)
             case Call{callee, paren_line, args} => this.evalCall(callee, paren_line, args, env)
-            case Get{object, name, line}        => this.evalGet(object, name, line, env)
+            case Get{object, name, line}        => this.evalGet(object, name, line, env, false)
             case Set{object, name, line, value} => this.evalSet(object, name, line, value, env)
             case ThisExpr{id, line}             => this.lookupVariable(id, "this", 0, env)
             case SuperExpr{id, method, line}    => this.evalSuper(id, method, line, env)
@@ -2819,33 +2817,19 @@ class Interpreter {
     }
 
     evalCall(calleeExpr, paren_line, argsExprs, env) {
-        var savedEvaluatingCallTarget = this.evaluatingCallTarget;
-        this.evaluatingCallTarget = true;
-        var savedLastValueFromField = this.lastValueFromField;
-        var savedStringifyDepth = this.stringifyDepth;
+        // Use syntactic dispatch to decide the call-target context.
+        // Only direct Get expressions (e.g. obj.method()) use the call-target path.
+        // Grouping and all other wrappings become fatal just like bare non-callables.
         var callee = nil;
-        try {
-            callee = this.evalExpr(calleeExpr, env);
-        } catch (e) {
-            if (e.kind != "StackOverflowError") throw e;
-            this.evaluatingCallTarget = savedEvaluatingCallTarget;
-            this.lastValueFromField = savedLastValueFromField;
-            this.stringifyDepth = savedStringifyDepth;
-            this.returnFlag = false;
-            this.returnValue = nil;
-            this.setError("StackOverflowError", "Stack overflow.", 0);
-            return nil;
+        match calleeExpr {
+            case Get{object, name, line} => {
+                callee = this.evalGet(object, name, line, env, true);
+            }
+            case _ => {
+                callee = this.evalExpr(calleeExpr, env);
+            }
         }
-        this.evaluatingCallTarget = savedEvaluatingCallTarget;
-        var calleeFromField = this.lastValueFromField;
-        this.lastValueFromField = savedLastValueFromField;
         if (this.throwFlag) return nil;
-        // Calling a non-callable field value is fatal on native. Check before
-        // checking for basic non-callables.
-        if (calleeFromField and (callee == nil or callee == true or callee == false or isLoxStr(callee) or isLoxNum(callee))) {
-            this.fatalError("Can only call functions, classes and enums.");
-            return nil;
-        }
         var args = [];
         var i = 0;
         while (i < len(argsExprs)) {
@@ -2891,63 +2875,32 @@ class Interpreter {
     // RAISE_ERROR sites (src/vm.cpp Op::GET_PROPERTY) with no catchable kind
     // of their own.
     //
-    // The non-instance fallback just below keeps the table's
-    // "InvalidReceiverError", even though it is also examples/
-    // try_catch_instance_property_not_caught.lox's plain-property-read case
-    // (`42.foo;`, fatal on native, no kind) -- because evalGet also serves
-    // as the get-half of a method call (`42.foo()`), and this tree-walker
-    // resolves the callee before it knows whether a call follows. Native's
-    // fused Op::INVOKE reaches that call-syntax case through its own,
-    // separate, catchable InvalidReceiverError (examples/
-    // try_catch_invalid_receiver.lox pins this cross-backend); evalGet alone
-    // cannot tell the two cases apart, so it keeps the kind that matches the
-    // tested, observable case (`42.foo()`). Separating them would need a
-    // call-context flag threaded from evalCall, which this node does not add.
-    evalGet(objectExpr, name, line, env) {
-        var savedLastValueFromField = this.lastValueFromField;
-        var savedStringifyDepth = this.stringifyDepth;
-        var object = nil;
-        try {
-            object = this.evalExpr(objectExpr, env);
-        } catch (e) {
-            if (e.kind != "StackOverflowError") throw e;
-            this.lastValueFromField = savedLastValueFromField;
-            this.stringifyDepth = savedStringifyDepth;
-            this.returnFlag = false;
-            this.returnValue = nil;
-            this.setError("StackOverflowError", "Stack overflow.", 0);
-            return nil;
-        }
-        if (this.throwFlag) {
-            this.lastValueFromField = savedLastValueFromField;
-            return nil;
-        }
+    // Receive isCallTarget to distinguish plain property reads from method calls
+    // on non-instances. See evalCall's syntactic dispatch.
+    evalGet(objectExpr, name, line, env, isCallTarget) {
+        var object = this.evalExpr(objectExpr, env);
+        if (this.throwFlag) return nil;
         if (loxTag(object) == "math") {
-            this.lastValueFromField = savedLastValueFromField;
             if (name == "pi") return math.pi;
             if (name == "e")  return math.e;
             return InterpMathFn(name);
         }
         if (loxTag(object) == "list") {
-            this.lastValueFromField = savedLastValueFromField;
             if (name == "append" or name == "pop" or name == "remove") return InterpListMethod(name, object);
             this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }
         if (loxTag(object) == "map") {
-            this.lastValueFromField = savedLastValueFromField;
             if (name == "has" or name == "del" or name == "keys" or name == "values" or name == "entries") return InterpMapMethod(name, object);
             this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }
         if (loxTag(object) == "file") {
-            this.lastValueFromField = savedLastValueFromField;
             if (name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close") return InterpFileMethod(name, object);
             this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }
         if (loxTag(object) == "error") {
-            this.lastValueFromField = savedLastValueFromField;
             if (name == "kind") return object.kind;
             if (name == "message") return object.message;
             this.setError("UndefinedPropertyError", "Undefined property '" + name + "' on error.", line);
@@ -2956,9 +2909,8 @@ class Interpreter {
         if (loxTag(object) != "instance") {
             // Plain property reads on non-instances (`42.foo;`) are fatal on native.
             // Method calls on non-instances (`42.foo()`) are catchable with
-            // InvalidReceiverError. Distinguish them by checking the call context.
-            this.lastValueFromField = savedLastValueFromField;
-            if (!this.evaluatingCallTarget) {
+            // InvalidReceiverError. Use isCallTarget to distinguish them.
+            if (!isCallTarget) {
                 this.fatalError("Only instances have properties.");
                 return nil;
             }
@@ -2967,15 +2919,14 @@ class Interpreter {
         }
         var val = object.instGet(name, 0);
         if (val == nil and !object.fields.has(name) and object.klass.findMethod(name) == nil) {
-            this.lastValueFromField = savedLastValueFromField;
             this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }
-        // Mark if we're returning a field value (not a method)
-        if (object.fields.has(name)) {
-            this.lastValueFromField = true;
-        } else {
-            this.lastValueFromField = savedLastValueFromField;
+        // Calling a non-callable field value is fatal on native. Check before
+        // checking for basic non-callables.
+        if (isCallTarget and object.fields.has(name) and (val == nil or val == true or val == false or isLoxStr(val) or isLoxNum(val))) {
+            this.fatalError("Can only call functions, classes and enums.");
+            return nil;
         }
         return val;
     }
