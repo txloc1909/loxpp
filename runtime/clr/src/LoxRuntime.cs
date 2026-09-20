@@ -314,6 +314,13 @@ public static class LoxRuntime {
         if (v is LoxClass) {
             return "Class";
         }
+        // A caught fault is a plain LoxInstance whose class is the shared
+        // ErrorClass singleton (see ErrorClass's own doc comment) - checked
+        // by reference so a user class literally named "Error" still reports
+        // as "Instance".
+        if (v is LoxInstance errorCheck && ReferenceEquals(errorCheck.Klass, ErrorClass)) {
+            return "Error";
+        }
         if (v is LoxInstance) {
             return "Instance";
         }
