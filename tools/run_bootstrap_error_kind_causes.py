@@ -366,11 +366,34 @@ def main() -> int:
         native_out, native_exit = run_case(program, [str(NATIVE)])
         boot_out, boot_exit = run_case(program, [str(WRAPPER)])
 
-        if boot_exit != 0 or boot_out != kind:
-            failures.append(
-                f"{name}: bootstrap expected to catch {kind!r} and exit 0, got "
-                f"exit {boot_exit}, stdout {boot_out!r}"
-            )
+        # For fused pairs (Wave 3, issue #348), bootstrap should now match native:
+        # fatal on both, or catchable on both. Check the pair against the fused list.
+        is_fused = (kind, _message) in FUSED_PAIRS
+
+        if is_fused and disposition == FATAL:
+            # Bootstrap should now be fatal, matching native. Exit code alone
+            # cannot tell a fatal halt from an uncaught catchable fault --
+            # both exit 70 on the unfixed interpreter, since execTry never
+            # gets control back either way. Only "the catch block printed
+            # nothing" proves the fault never reached the catch, so both
+            # conditions are required (referee ruling, PR #364, answer 5).
+            if boot_exit != 70:
+                failures.append(
+                    f"{name}: declared 'fatal' (fused, Wave 3 fix), but bootstrap exited "
+                    f"{boot_exit}, expected 70"
+                )
+            elif boot_out != "":
+                failures.append(
+                    f"{name}: declared 'fatal' (fused, Wave 3 fix), but bootstrap's catch "
+                    f"block printed {boot_out!r} -- the fault was caught, not fatal"
+                )
+        else:
+            # All other cases: bootstrap should catch the error
+            if boot_exit != 0 or boot_out != kind:
+                failures.append(
+                    f"{name}: bootstrap expected to catch {kind!r} and exit 0, got "
+                    f"exit {boot_exit}, stdout {boot_out!r}"
+                )
 
         if disposition == CATCHABLE:
             if native_exit != 0 or native_out != kind:

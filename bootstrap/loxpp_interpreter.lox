@@ -2666,7 +2666,7 @@ class Interpreter {
             case Binary{op, left, right}        => this.evalBinary(op, left, right, env)
             case Logical{op, left, right}       => this.evalLogical(op, left, right, env)
             case Call{callee, paren_line, args} => this.evalCall(callee, paren_line, args, env)
-            case Get{object, name, line}        => this.evalGet(object, name, line, env)
+            case Get{object, name, line}        => this.evalGet(object, name, line, env, false)
             case Set{object, name, line, value} => this.evalSet(object, name, line, value, env)
             case ThisExpr{id, line}             => this.lookupVariable(id, "this", 0, env)
             case SuperExpr{id, method, line}    => this.evalSuper(id, method, line, env)
@@ -2817,16 +2817,14 @@ class Interpreter {
     }
 
     evalCall(calleeExpr, paren_line, argsExprs, env) {
-        var callee = this.evalExpr(calleeExpr, env);
+        // Use syntactic dispatch to decide the call-target context.
+        // Only direct Get expressions (e.g. obj.method()) use the call-target path.
+        // Grouping and all other wrappings become fatal just like bare non-callables.
+        var callee = match calleeExpr {
+            case Get{object, name, line} => this.evalGet(object, name, line, env, true)
+            case _                       => this.evalExpr(calleeExpr, env)
+        };
         if (this.throwFlag) return nil;
-        if (callee == nil or callee == true or callee == false) {
-            this.setError("NotCallableError", "Can only call functions and classes.", paren_line);
-            return nil;
-        }
-        if (isLoxStr(callee) or isLoxNum(callee)) {
-            this.setError("NotCallableError", "Can only call functions and classes.", paren_line);
-            return nil;
-        }
         var args = [];
         var i = 0;
         while (i < len(argsExprs)) {
@@ -2835,9 +2833,24 @@ class Interpreter {
             args.append(arg);
             i = i + 1;
         }
-        var tag = callee.loxTag;
+        // Check if the callee is callable. All non-callable checks are handled here.
+        if (callee == nil or callee == true or callee == false or isLoxStr(callee) or isLoxNum(callee)) {
+            this.setError("NotCallableError", "Can only call functions and classes.", paren_line);
+            return nil;
+        }
+        // Get the tag of the callee if it has one
+        var tag = nil;
+        if (callee != nil and callee != true and callee != false and !isLoxStr(callee) and !isLoxNum(callee)) {
+            tag = callee.loxTag;
+        }
         if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "enum_ctor") {
             this.setError("NotCallableError", "Can only call functions and classes.", paren_line);
+            return nil;
+        }
+        // Stdlib natives with wrong arity are fatal on native. Check and handle
+        // before the general arity check to keep setError calls separate.
+        if ((tag == "native" or tag == "mathfn" or tag == "listmethod" or tag == "mapmethod" or tag == "filemethod") and callee.arity() != -1 and len(args) != callee.arity()) {
+            this.fatalError("Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".");
             return nil;
         }
         if (callee.arity() != -1 and len(args) != callee.arity()) {
@@ -2857,19 +2870,9 @@ class Interpreter {
     // RAISE_ERROR sites (src/vm.cpp Op::GET_PROPERTY) with no catchable kind
     // of their own.
     //
-    // The non-instance fallback just below keeps the table's
-    // "InvalidReceiverError", even though it is also examples/
-    // try_catch_instance_property_not_caught.lox's plain-property-read case
-    // (`42.foo;`, fatal on native, no kind) -- because evalGet also serves
-    // as the get-half of a method call (`42.foo()`), and this tree-walker
-    // resolves the callee before it knows whether a call follows. Native's
-    // fused Op::INVOKE reaches that call-syntax case through its own,
-    // separate, catchable InvalidReceiverError (examples/
-    // try_catch_invalid_receiver.lox pins this cross-backend); evalGet alone
-    // cannot tell the two cases apart, so it keeps the kind that matches the
-    // tested, observable case (`42.foo()`). Separating them would need a
-    // call-context flag threaded from evalCall, which this node does not add.
-    evalGet(objectExpr, name, line, env) {
+    // Receive isCallTarget to distinguish plain property reads from method calls
+    // on non-instances. See evalCall's syntactic dispatch.
+    evalGet(objectExpr, name, line, env, isCallTarget) {
         var object = this.evalExpr(objectExpr, env);
         if (this.throwFlag) return nil;
         if (loxTag(object) == "math") {
@@ -2899,12 +2902,25 @@ class Interpreter {
             return nil;
         }
         if (loxTag(object) != "instance") {
+            // Plain property reads on non-instances (`42.foo;`) are fatal on native.
+            // Method calls on non-instances (`42.foo()`) are catchable with
+            // InvalidReceiverError. Use isCallTarget to distinguish them.
+            if (!isCallTarget) {
+                this.fatalError("Only instances have properties.");
+                return nil;
+            }
             this.setError("InvalidReceiverError", "Only instances have properties.", line);
             return nil;
         }
         var val = object.instGet(name, 0);
         if (val == nil and !object.fields.has(name) and object.klass.findMethod(name) == nil) {
             this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
+            return nil;
+        }
+        // Calling a non-callable field value is fatal on native. Check before
+        // checking for basic non-callables.
+        if (isCallTarget and object.fields.has(name) and (val == nil or val == true or val == false or isLoxStr(val) or isLoxNum(val))) {
+            this.fatalError("Can only call functions, classes and enums.");
             return nil;
         }
         return val;

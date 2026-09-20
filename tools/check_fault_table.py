@@ -164,6 +164,17 @@ CATCHABLE_ROWS = [
     # row. Issue #338 owns which disposition is correct; this test does not
     # run this row, on any consumer, until that is settled.
     Row("invalid_receiver_error", "caught", "42.foo();", expected_kind="InvalidReceiverError"),
+    # Regression row for issue #348: calling a plain non-callable value must
+    # stay catchable even after a previous field read. The old code tracked
+    # field reads with interpreter state that could leak across statements,
+    # making `42()` fatal when a field was read earlier.
+    Row(
+        "call_non_callable_after_field_read",
+        "caught",
+        "42();",
+        setup="class C { init() { this.g = 1; } } var c = C(); var y = c.g;\n",
+        expected_kind="NotCallableError",
+    ),
     Row(
         "match_error",
         "caught",
@@ -246,15 +257,14 @@ FATAL_ROWS = [
         "class C {} var c = C(); c.bogus;",
         expected_message="Undefined property 'bogus'.",
     ),
-    # Fused site (issue #348): bootstrap's tree-walker gives this the same
-    # catchable kind it gives `42.foo()` (a call), because it cannot tell a
-    # plain property-get apart from a call target the way native's
-    # opcode-level dispatch does. Native, JVM, and CLR are fatal here.
+    # Fused site (issue #348): bootstrap's tree-walker used to give this
+    # the same catchable kind it gives `42.foo()` (a call), because it could
+    # not tell a plain property-get apart from a call target. Now it
+    # distinguishes them by tracking whether property access is a call target.
     Row(
         "property_get_non_instance",
         "fatal",
         "42.foo;",
-        skip={BOOTSTRAP: "issue #348: bootstrap catches this fused site"},
         expected_message="Only instances have properties.",
     ),
     Row(
@@ -263,12 +273,13 @@ FATAL_ROWS = [
         "42.foo = 1;",
         expected_message="Only instances have fields.",
     ),
-    # Fused site (issue #348): see property_get_non_instance above.
+    # Fused site (issue #348): bootstrap now distinguishes property-access
+    # sources, making calls to non-callable field values fatal while keeping
+    # calls to non-callable literal values catchable.
     Row(
         "invoke_field_not_callable",
         "fatal",
         "class C { init() { this.f = 1; } } C().f();",
-        skip={BOOTSTRAP: "issue #348: bootstrap catches this fused site"},
         expected_message="Can only call functions, classes and enums.",
     ),
     Row(
@@ -421,6 +432,22 @@ FATAL_ROWS = [
         "var m = {1: 1}; for (var k in m) { m[2] = 2; }",
         expected_message="Map changed size during iteration.",
     ),
+    # Regression rows for issue #348: bootstrap's fused property-access site
+    # must remain fatal when the call target involves chained property gets
+    # or grouping, since native's fused Op::INVOKE can only split the two cases
+    # when the source is a direct property access (`obj.prop(args)`).
+    Row(
+        "invoke_chained_property_get",
+        "fatal",
+        "42.foo.bar();",
+        expected_message="Only instances have properties.",
+    ),
+    Row(
+        "invoke_grouped_property_get",
+        "fatal",
+        "(42.foo)();",
+        expected_message="Only instances have properties.",
+    ),
     # A `defer`red call holding a non-callable value must be fatal (native's
     # runDefers). The CLR backend fails to *compile* a variant of this shape
     # that closes over a caught `e` inside a nested function (issue found
@@ -566,6 +593,31 @@ for _row in FATAL_ROWS:
         # Node #349: bootstrap now indexes enum values, matching native's
         # fatal disposition on out-of-range error, so it is exempt from the
         # blanket skip below.
+        continue
+    if _row.name == "property_get_non_instance":
+        # Node #348: bootstrap now distinguishes plain property reads
+        # (fatal) from method calls (catchable), so it is exempt from the
+        # blanket skip below.
+        continue
+    if _row.name == "invoke_field_not_callable":
+        # Node #348: bootstrap now distinguishes calls to field values
+        # (fatal) from calls to literal values (catchable), so it is exempt
+        # from the blanket skip below.
+        continue
+    if _row.name == "stdlib_native_arity":
+        # Node #348: bootstrap now distinguishes stdlib native arity errors
+        # (fatal) from user function arity errors (catchable), so it is
+        # exempt from the blanket skip below.
+        continue
+    if _row.name == "invoke_chained_property_get":
+        # Node #348: bootstrap's fused call site stays fatal through a
+        # chained property get (`42.foo.bar()`), matching native, so it is
+        # exempt from the blanket skip below.
+        continue
+    if _row.name == "invoke_grouped_property_get":
+        # Node #348: bootstrap's fused call site stays fatal through a
+        # grouping (`(42.foo)()`), matching native, so it is exempt from
+        # the blanket skip below.
         continue
     _row.skip.setdefault(BOOTSTRAP, _BOOTSTRAP_FATAL_DEFAULT_SKIP)
 
@@ -814,12 +866,19 @@ def main() -> None:
     # conflicts with the Fatal Runtime Errors table's own row for the same
     # fault, and issue #338, not this test, decides which is correct.
     excluded_catchable_rows = 1
+    # call_non_callable_after_field_read is a second CATCHABLE_ROWS entry for
+    # the same spec row as not_callable_error: regression armor for issue
+    # #348 (a bare 42() must stay catchable even after an earlier field
+    # read), not a new spec table row. It must not count against the 1:1
+    # mapping this invariant checks between CATCHABLE_ROWS and spec rows.
+    extra_catchable_rows = 1
     spec_row_count = load_spec_table_kind_count()
-    if spec_row_count != len(CATCHABLE_ROWS) + excluded_catchable_rows:
+    if spec_row_count != len(CATCHABLE_ROWS) - extra_catchable_rows + excluded_catchable_rows:
         print(
             f"check_fault_table.py: spec/04-semantics.md's catchable table has "
             f"{spec_row_count} row(s), but CATCHABLE_ROWS covers "
-            f"{len(CATCHABLE_ROWS)} (+{excluded_catchable_rows} deliberately "
+            f"{len(CATCHABLE_ROWS)} (-{extra_catchable_rows} regression-only entry "
+            f"for an existing row, +{excluded_catchable_rows} deliberately "
             "excluded, see MaxDepthExceededError's comment). The table changed; "
             "update this script's corpus to match.",
             file=sys.stderr,
@@ -831,12 +890,21 @@ def main() -> None:
     # own module comment). Guards FATAL_ROWS against the table changing
     # underneath it the same way the check above guards CATCHABLE_ROWS.
     excluded_fatal_rows = 1
+    # invoke_chained_property_get and invoke_grouped_property_get are
+    # regression armor for issue #348: they exercise the same spec row as
+    # property_get_non_instance ("42.foo;" -- "Only instances have
+    # properties.") through a chained-get and a grouping shape instead of a
+    # bare name, to pin the fused call site's syntactic dispatch. Neither is
+    # a new spec table row, so both must not count against the 1:1 mapping
+    # this invariant checks between FATAL_ROWS and spec rows.
+    extra_fatal_rows = 2
     spec_fatal_row_count = load_spec_fatal_row_count()
-    if spec_fatal_row_count != len(FATAL_ROWS) + excluded_fatal_rows:
+    if spec_fatal_row_count != len(FATAL_ROWS) - extra_fatal_rows + excluded_fatal_rows:
         print(
             f"check_fault_table.py: spec/04-semantics.md's Fatal Runtime Errors "
             f"table has {spec_fatal_row_count} row(s), but FATAL_ROWS covers "
-            f"{len(FATAL_ROWS)} (+{excluded_fatal_rows} deliberately excluded, "
+            f"{len(FATAL_ROWS)} (-{extra_fatal_rows} regression-only entries for "
+            f"an existing row, +{excluded_fatal_rows} deliberately excluded, "
             "see the canonical-string depth row's comment). The table changed; "
             "update this script's corpus to match.",
             file=sys.stderr,
