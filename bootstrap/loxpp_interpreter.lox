@@ -3039,7 +3039,9 @@ class Interpreter {
         } else if (vtag == "enum_val") {
             result = this.stringifyEnumVal(val);
         } else if (vtag == "error") {
-            result = val.message;
+            // spec/03-types.md line 315: str() on an Error is "kind: message",
+            // matching LoxError.toString() -- not val.message alone.
+            result = val.toString();
         } else {
             result = val.toString();
         }
