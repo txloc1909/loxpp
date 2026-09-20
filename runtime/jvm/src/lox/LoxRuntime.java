@@ -108,9 +108,6 @@ public final class LoxRuntime {
         registerGlobals(globals);
         registerMath(globals);
         registerReflection(globals);
-        // Register the Error class as a global so Error instances can be
-        // created
-        globals.define("Error", ERROR_CLASS);
         current = globals;
         return globals;
     }
