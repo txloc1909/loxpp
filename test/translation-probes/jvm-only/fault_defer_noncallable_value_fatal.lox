@@ -1,0 +1,3 @@
+fun g() { var x = 42; defer x(); }
+try { g(); } catch (e) { print "CAUGHT " + e.kind; }
+print "after";

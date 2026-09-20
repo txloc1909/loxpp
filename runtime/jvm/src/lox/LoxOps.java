@@ -1016,6 +1016,18 @@ public final class LoxOps {
             if (deferred.args == null) {
                 throw new LoxError("Deferred call has null args array.");
             }
+            // Native's own runDefers (src/vm.cpp) accepts only BoundMethod,
+            // Closure, Native and BoundNative; a LoxClass or LoxEnumCtor
+            // callable is fatal there, even though both implement
+            // LoxCallable and would otherwise go through call()'s ordinary
+            // catchable NotCallableError path. This runtime represents a
+            // native BoundNative as a plain LoxNative (see LoxMap/LoxFile
+            // GET_PROPERTY), so LoxNative covers both.
+            if (!(deferred.callable instanceof LoxClosure ||
+                    deferred.callable instanceof LoxNative ||
+                    deferred.callable instanceof LoxBoundMethod)) {
+                throw new LoxError("Deferred callable has unexpected type.");
+            }
             try {
                 call(deferred.callable, deferred.args);
             } catch (LoxError replacement) {
