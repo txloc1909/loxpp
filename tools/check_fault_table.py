@@ -615,17 +615,6 @@ for _row in FATAL_ROWS:
         continue
     _row.skip.setdefault(BOOTSTRAP, _BOOTSTRAP_FATAL_DEFAULT_SKIP)
 
-for _row in CATCHABLE_ROWS:
-    fields = _row.skip_fields.setdefault(BOOTSTRAP, set())
-    # kind is compared (node #335's actual deliverable), and so is type()
-    # (issue #347's fix). str() is kind + ": " + message
-    # (spec/03-types.md line 315), so it cannot be compared until message
-    # text agrees -- issue #354 tracks bootstrap's message text
-    # disagreeing with native's Runtime Errors table on 12 of 18 rows.
-    # #354 removes "message" and "str" together, in one step: fixing the
-    # message text is exactly what makes str() agree too.
-    fields.update({"message", "str"})
-
 
 def validate_row_anchors(rows: list[Row]) -> None:
     """Every row must carry the literal its disposition is checked against.
