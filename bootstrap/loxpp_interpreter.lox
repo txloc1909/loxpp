@@ -2360,8 +2360,12 @@ class Interpreter {
         var iterable = this.evalExpr(iterableExpr, env);
         if (this.throwFlag) return;
         var tag = loxTag(iterable);
+        // Native's own for-in guard is an always-fatal RAISE_ERROR site
+        // (src/vm.cpp Op::FOR_IN_ITER_NEXT or its check), a different
+        // opcode from GET_INDEX's catchable NotIndexableError -- this
+        // needs its own kind, not that one's.
         if (tag != "list" and !isLoxStr(iterable) and tag != "map") {
-            this.setError("NotIndexableError", "Value is not iterable.", varLine);
+            this.setError("ForInNotIterableError", "Value is not iterable.", varLine);
             return;
         }
         var loopEnv = Environment(env);
@@ -2479,8 +2483,12 @@ class Interpreter {
         if (super_id != nil) {
             superclass = this.lookupVariable(super_id, super_name, super_line, env);
             if (this.throwFlag) return;
+            // A bad superclass is not a call: native's own check here is an
+            // always-fatal RAISE_ERROR site (src/vm.cpp Op::CLASS), separate
+            // from the catchable NotCallableError the call opcodes raise --
+            // this needs its own kind, not that one's.
             if (loxTag(superclass) != "class") {
-                this.setError("NotCallableError", "Superclass must be a class.", super_line);
+                this.setError("InvalidSuperclassError", "Superclass must be a class.", super_line);
                 return;
             }
         }
@@ -2993,13 +3001,17 @@ class Interpreter {
 
     // Destructuring a field reads it exactly the way `source.fieldName`
     // does (spec/04-semantics.md, Destructuring Declaration), so a
-    // non-instance source is the same fault evalGet's own non-instance
-    // check reports -- share its "InvalidReceiverError" kind.
+    // non-instance source hits the same fault evalGet's own non-instance,
+    // non-call check hits: native's always-fatal "Only instances have
+    // properties." (src/vm.cpp Op::GET_PROPERTY), not the catchable
+    // "InvalidReceiverError" row, whose one documented cause is a method
+    // call on a non-instance (`42.foo()`) -- destructuring is never a call,
+    // so it needs its own kind, not that one's.
     execObjDestructure(names, line, initializer, env) {
         var val = this.evalExpr(initializer, env);
         if (this.throwFlag) return;
         if (loxTag(val) != "instance") {
-            this.setError("InvalidReceiverError", "Object destructuring requires an instance.", line);
+            this.setError("InvalidDestructureReceiverError", "Object destructuring requires an instance.", line);
             return;
         }
         var i = 0;

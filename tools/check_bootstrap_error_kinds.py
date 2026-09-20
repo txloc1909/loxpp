@@ -84,6 +84,9 @@ REVIEWED_NON_TABLE_KINDS = {
     "InRightOperandTypeError",
     "UndefinedMemberError",
     "InvalidFieldReceiverError",
+    "ForInNotIterableError",
+    "InvalidSuperclassError",
+    "InvalidDestructureReceiverError",
 }
 
 # The reviewed baseline: one (kind, message, status) entry per `.setError(`
@@ -159,8 +162,8 @@ EXPECTED_CALLS = [
     ('SliceIndexTypeError', '"Slice index must be a number."', JUDGED),
     ('SliceIndexNotIntegerError', '"Slice index must be an integer."', JUDGED),
     ('SliceIndexNegativeError', '"Slice index must be non-negative."', JUDGED),
-    ('NotIndexableError', '"Value is not iterable."', RECORDED),
-    ('NotCallableError', '"Superclass must be a class."', RECORDED),
+    ('ForInNotIterableError', '"Value is not iterable."', JUDGED),
+    ('InvalidSuperclassError', '"Superclass must be a class."', JUDGED),
     ('UndefinedVariableError', '"Undefined variable \'" + name + "\'."', RECORDED),
     ('UndefinedVariableError', '"Undefined variable \'" + name + "\'."', RECORDED),
     ('ArithmeticTypeError', '"Operand must be a number."', RECORDED),
@@ -191,7 +194,7 @@ EXPECTED_CALLS = [
     ('MaxDepthExceededError', '"Value nesting is too deep."', RECORDED),
     ('NotIndexableError', '"Sequence destructuring requires a List."', RECORDED),
     ('IndexOutOfBoundsError', '"Not enough elements for sequence destructuring."', RECORDED),
-    ('InvalidReceiverError', '"Object destructuring requires an instance."', JUDGED),
+    ('InvalidDestructureReceiverError', '"Object destructuring requires an instance."', JUDGED),
     ('MatchError', '"Match expression was not exhaustive."', RECORDED),
 ]
 

@@ -171,6 +171,22 @@ CASES = [
         "try { 42.foo = 1; } catch (e) { print e.kind; }",
         "InvalidFieldReceiverError",
     ),
+    (
+        "for-in on a non-iterable",
+        "try { for (var x in 42) {} } catch (e) { print e.kind; }",
+        "ForInNotIterableError",
+    ),
+    (
+        "superclass is not a class",
+        "var N = 1; fun f() { class Sub < N {} } "
+        "try { f(); } catch (e) { print e.kind; }",
+        "InvalidSuperclassError",
+    ),
+    (
+        "object destructuring of a non-instance",
+        "try { var {a} = 42; } catch (e) { print e.kind; }",
+        "InvalidDestructureReceiverError",
+    ),
 ]
 
 
