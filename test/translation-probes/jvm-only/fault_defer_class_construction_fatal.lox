@@ -1,0 +1,4 @@
+class C {}
+fun g() { defer C(); }
+try { g(); } catch (e) { print "CAUGHT " + e.kind; }
+print "done";

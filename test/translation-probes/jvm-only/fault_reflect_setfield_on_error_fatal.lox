@@ -1,0 +1,6 @@
+try { var x = []; print x[0]; } catch (e) {
+  setField(e, "kind", 5);
+  print e.kind;
+  print str(e);
+}
+print "after";

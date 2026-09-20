@@ -69,7 +69,7 @@ public final class LoxOps {
         if (a instanceof String || b instanceof String) {
             throw makeError(
                 "ConcatenationTypeError",
-                "Operands must be both strings or both numbers.");
+                "Operands must be two numbers, two strings, or a string and a number.");
         }
         checkNumbers(a, b);
         return (Double)a + (Double)b;
@@ -330,15 +330,16 @@ public final class LoxOps {
                              // null
         }
         if (collection instanceof LoxEnum) {
+            // Enum field indexing is fatal on native (vm.cpp's GET_INDEX
+            // uses RAISE_ERROR here, not tryCatchableError) — unlike List/
+            // String/Map indexing just above, which is catchable.
             if (!(index instanceof Double)) {
-                throw makeError("IndexTypeError",
-                                    "Enum field index must be a number.");
+                throw new LoxError("Enum field index must be a number.");
             }
             Object[] payload = ((LoxEnum)collection).payload;
             int idx = (int)(double)(Double)index;
             if (idx < 0 || idx >= payload.length) {
-                throw makeError("IndexOutOfBoundsError",
-                                    "Enum field index " + idx +
+                throw new LoxError("Enum field index " + idx +
                                         " out of range.");
             }
             return payload[idx];
@@ -350,8 +351,10 @@ public final class LoxOps {
     public static Object setIndex(Object collection, Object index,
                                   Object value) {
         if (collection instanceof String) {
-            throw makeError(
-                "NotIndexableError",
+            // Fatal on native (vm.cpp's SET_INDEX uses RAISE_ERROR here) —
+            // unlike the "not a List or Map at all" case just below, which
+            // is catchable.
+            throw new LoxError(
                 "Strings are immutable and cannot be indexed for assignment.");
         }
         if (collection instanceof LoxMap) {
@@ -408,7 +411,7 @@ public final class LoxOps {
      * and follows it with an athrow itself.
      */
     public static LoxError matchError() {
-        return makeError("MatchError", "MatchError: no matching arm.");
+        return makeError("MatchError", "No matching arm in match expression.");
     }
 
     /**
@@ -482,8 +485,10 @@ public final class LoxOps {
             // undefined ones via catch binding). Ordinary instances get a
             // fatal fault.
             if (instance.klass == LoxRuntime.ERROR_CLASS) {
+                // Native's own text (src/vm.cpp's GET_PROPERTY, isError
+                // branch) does not name the property.
                 throw makeError("UndefinedPropertyError",
-                                    "Undefined property '" + name + "'.");
+                                    "Undefined property on error.");
             }
             throw new LoxError("Undefined property '" + name + "'.");
         }
@@ -491,7 +496,13 @@ public final class LoxOps {
     }
 
     public static Object setProperty(Object obj, String name, Object value) {
-        if (!(obj instanceof LoxInstance)) {
+        // Native's Error is a distinct ObjError type, not an ObjInstance
+        // (src/vm.cpp's SET_PROPERTY only accepts isInstance), so writing
+        // to any name on a caught Error — including "message" or "kind" —
+        // is fatal there. This runtime's Error is a LoxInstance under the
+        // hood, so it must be excluded here explicitly.
+        if (!(obj instanceof LoxInstance) ||
+                ((LoxInstance)obj).klass == LoxRuntime.ERROR_CLASS) {
             throw new LoxError("Only instances have fields.");
         }
         ((LoxInstance)obj).fields.put(name, value);
@@ -561,28 +572,38 @@ public final class LoxOps {
      * not on one static type.
      */
     public static Object invoke(Object receiver, String name, Object[] args) {
-        if (receiver instanceof LoxInstance) {
+        // Native's INVOKE opcode (src/vm.cpp) dispatches on isInstance/
+        // isList/isFile/isMap, and its Error type is a distinct ObjError,
+        // not an ObjInstance — an Error receiver falls straight to the
+        // catchable "invalid receiver" case at the bottom. This runtime's
+        // Error is a LoxInstance under the hood, so it must be excluded
+        // from the instance branch below to land on the same case.
+        if (receiver instanceof LoxInstance &&
+                ((LoxInstance)receiver).klass != LoxRuntime.ERROR_CLASS) {
             LoxInstance instance = (LoxInstance)receiver;
             if (instance.fields.containsKey(name)) {
                 Object fieldVal = instance.fields.get(name);
                 // vm.cpp lines 518-533 call only a closure or a native field
                 // this way; a class, an enum constructor, or a bound method
                 // is a runtime error here, even though all four implement
-                // LoxCallable.
+                // LoxCallable. This is fatal on native (RAISE_ERROR), unlike
+                // an ordinary CALL of a non-callable value.
                 if (fieldVal instanceof LoxClosure) {
                     return ((LoxClosure)fieldVal).call(args);
                 }
                 if (fieldVal instanceof LoxNative) {
                     return ((LoxNative)fieldVal).call(args);
                 }
-                throw makeError(
-                    "NotCallableError",
+                throw new LoxError(
                     "Can only call functions, classes and enums.");
             }
+            // Fatal on native (RAISE_ERROR): INVOKE's own method-not-found
+            // case never special-cases Error (Error is excluded above, and
+            // an ordinary instance has no catchable UndefinedPropertyError
+            // path here — only GET_PROPERTY's Error branch does).
             LoxClosure method = instance.klass.findMethod(name);
             if (method == null) {
-                throw makeError("UndefinedPropertyError",
-                                    "Undefined property '" + name + "'.");
+                throw new LoxError("Undefined property '" + name + "'.");
             }
             return method.callAsSelf(instance, args);
         }
@@ -596,7 +617,7 @@ public final class LoxOps {
             return invokeMapMethod((LoxMap)receiver, name, args);
         }
         throw makeError("InvalidReceiverError",
-                        "Only instances, files, and maps have methods.");
+                        "Method called on invalid receiver.");
     }
 
     private static Object invokeListMethod(LoxList list, String name,
@@ -760,6 +781,15 @@ public final class LoxOps {
         LoxRuntime.out.print('\n');
     }
 
+    // Matches src/object.h's kMaxStringifyDepth and src/object.cpp's
+    // per-call DepthGuard: native counts nesting depth by incrementing on
+    // every heap value it stringifies, not on nil/bool/number (which are
+    // not heap objects there and never reach the guard) — so the check
+    // below runs after those three branches, to land on the same boundary
+    // per value shape.
+    private static final int MAX_STRINGIFY_DEPTH = 200;
+    private static int s_stringifyDepth = 0;
+
     public static String stringify(Object v) {
         if (v == null) {
             return "nil";
@@ -770,6 +800,21 @@ public final class LoxOps {
         if (v instanceof Double) {
             return formatNumber((Double)v);
         }
+        if (s_stringifyDepth == MAX_STRINGIFY_DEPTH) {
+            // A raw, valueless LoxError is uncatchable, even inside a
+            // try/catch (spec/04-semantics.md's Fatal Runtime Errors
+            // section) — matching native's own fatal disposition here.
+            throw new LoxError("Value nesting is too deep.");
+        }
+        s_stringifyDepth++;
+        try {
+            return stringifyObj(v);
+        } finally {
+            s_stringifyDepth--;
+        }
+    }
+
+    private static String stringifyObj(Object v) {
         if (v instanceof String) {
             return (String)v;
         }
@@ -970,6 +1015,18 @@ public final class LoxOps {
             }
             if (deferred.args == null) {
                 throw new LoxError("Deferred call has null args array.");
+            }
+            // Native's own runDefers (src/vm.cpp) accepts only BoundMethod,
+            // Closure, Native and BoundNative; a LoxClass or LoxEnumCtor
+            // callable is fatal there, even though both implement
+            // LoxCallable and would otherwise go through call()'s ordinary
+            // catchable NotCallableError path. This runtime represents a
+            // native BoundNative as a plain LoxNative (see LoxMap/LoxFile
+            // GET_PROPERTY), so LoxNative covers both.
+            if (!(deferred.callable instanceof LoxClosure ||
+                    deferred.callable instanceof LoxNative ||
+                    deferred.callable instanceof LoxBoundMethod)) {
+                throw new LoxError("Deferred callable has unexpected type.");
             }
             try {
                 call(deferred.callable, deferred.args);

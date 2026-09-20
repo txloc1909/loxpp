@@ -1,0 +1,3 @@
+class C { init() { this.f = 1; } }
+try { C().f(); } catch (e) { print "CAUGHT " + e.kind; }
+print "after";

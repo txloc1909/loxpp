@@ -1,0 +1,3 @@
+class C {}
+try { C().bogus(); } catch (e) { print "CAUGHT " + e.kind; }
+print "after";

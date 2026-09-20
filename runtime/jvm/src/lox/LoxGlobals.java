@@ -24,7 +24,9 @@ public final class LoxGlobals {
     public Object get(String name) {
         Object v = values.get(name);
         if (v == null) {
-            throw LoxOps.makeError("UndefinedVariableError", "Undefined variable '" + name + "'.");
+            // Native's own text (src/vm.cpp's GET_GLOBAL) does not name the
+            // variable.
+            throw LoxOps.makeError("UndefinedVariableError", "Undefined variable.");
         }
         return unbox(v);
     }
@@ -34,7 +36,7 @@ public final class LoxGlobals {
         Object prev = values.put(name, box(value));
         if (prev == null) {
             values.remove(name);
-            throw LoxOps.makeError("UndefinedVariableError", "Undefined variable '" + name + "'.");
+            throw LoxOps.makeError("UndefinedVariableError", "Undefined variable.");
         }
     }
 

@@ -1,0 +1,2 @@
+try { "abc"[0] = "x"; } catch (e) { print "CAUGHT " + e.kind; }
+print "after";

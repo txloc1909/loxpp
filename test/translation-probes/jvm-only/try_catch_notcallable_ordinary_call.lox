@@ -1,0 +1,1 @@
+try { 42(); } catch (e) { print e.kind; print e.message; }

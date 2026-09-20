@@ -1,0 +1,8 @@
+try {
+  var a = [1];
+  var i = 0;
+  while (i < 300) { a = [a]; i = i + 1; }
+  print a;
+} catch (e) {
+  print "caught";
+}

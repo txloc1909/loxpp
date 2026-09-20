@@ -1,0 +1,4 @@
+try { var x = []; print x[0]; } catch (e) {
+  e.kind = 123;
+  print str(e);
+}
