@@ -673,5 +673,10 @@ TEST(ToolingResolverCorpus, NoCrashAndFewWarnings) {
     // 74 false "unknown name" warnings for catch-bound identifiers across the
     // entire merged corpus (from PR #232 examples + PR #278's new probes) now
     // resolve correctly; the remaining 8 warnings are unrelated.
-    EXPECT_LE(totalWarnings, 8u);
+    // Raised again, 8 -> 11, for node #333's (JVM fault-table wiring) 3 new
+    // catchable-row probes: try_catch_ctor_arity_no_init_message.lox
+    // (unused local 'p'), try_catch_undefined_variable_get_message.lox and
+    // try_catch_undefined_variable_set_message.lox (both an intentional
+    // undeclared-name reference, the fault under test).
+    EXPECT_LE(totalWarnings, 11u);
 }
