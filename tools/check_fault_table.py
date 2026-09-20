@@ -185,10 +185,14 @@ CATCHABLE_ROWS = [
 # Every Example below is copied from the spec table as-is: the round-2/
 # round-4 review already made each one self-contained and runnable.
 FATAL_ROWS = [
+    # `enum` is only legal at global scope, so the declaration goes in
+    # `setup` (emitted before the `try`); only the faulting `match` goes in
+    # `body` (see PR #352 review round 1, R2).
     Row(
         "get_tag_non_enum",
         "fatal",
-        "enum Result { Ok(v) Err(m) } match 1 { case Ok(v) => v case Err(m) => -1 };",
+        "match 1 { case Ok(v) => v case Err(m) => -1 };",
+        setup="enum Result { Ok(v) Err(m) }\n",
     ),
     # Value nested too deep to print: fatal on native today, with no
     # `Error.kind`, but this exact fault keeps a catchable row
@@ -262,17 +266,20 @@ FATAL_ROWS = [
         "class A {} class B < A { m() { super.zzz(); } } B().m();",
     ),
     # Missing feature (issue #349): bootstrap cannot index an ObjEnum value
-    # at all, so it never reaches this fault's own message.
+    # at all, so it never reaches this fault's own message. `enum` is only
+    # legal at global scope, so it goes in `setup`, not `body` (R2).
     Row(
         "enum_index_type_error",
         "fatal",
-        'enum E { A(x) } var v = A(1); v["a"];',
+        'v["a"];',
+        setup="enum E { A(x) } var v = A(1);\n",
         skip={BOOTSTRAP: "issue #349: bootstrap cannot index an enum value at all"},
     ),
     Row(
         "enum_index_out_of_range",
         "fatal",
-        "enum E { A(x) } var v = A(1); v[3];",
+        "v[3];",
+        setup="enum E { A(x) } var v = A(1);\n",
         skip={BOOTSTRAP: "issue #349: bootstrap cannot index an enum value at all"},
     ),
     Row("string_index_assignment", "fatal", '"abc"[0] = "x";'),
@@ -310,15 +317,30 @@ FATAL_ROWS = [
 # spec/03-types.md's Error section (lines 223-225) makes a write to any name
 # on an Error value a runtime error; the reflection natives are a second
 # door onto the same restriction, separate from `.` property access. `e` is
-# bound the same way in every row: a caught IndexOutOfBoundsError.
-_REFLECT_SETUP = "try { var x = []; print x[0]; } catch (e) {\n"
+# bound the same way in every row: a caught IndexOutOfBoundsError, captured
+# by a top-level helper (not nested inside FATAL_TEMPLATE's own `try`,
+# which put an unclosed brace in `body` and left the generated `try` with
+# no `catch` -- PR #352 review round 1, R3).
+_REFLECT_SETUP = (
+    "fun __reflectErr() {\n"
+    "    try { var x = []; print x[0]; } catch (e) { return e; }\n"
+    "}\n"
+    "var e = __reflectErr();\n"
+)
 REFLECT_ROWS = [
-    Row("reflect_fields_on_error", "fatal", "fields(e);\n}", setup=_REFLECT_SETUP),
-    Row("reflect_getfield_on_error", "fatal", 'getField(e, "kind");\n}', setup=_REFLECT_SETUP),
-    Row("reflect_hasfield_on_error", "fatal", 'hasField(e, "kind");\n}', setup=_REFLECT_SETUP),
-    Row("reflect_setfield_on_error", "fatal", 'setField(e, "kind", 5);\n}', setup=_REFLECT_SETUP),
-    Row("reflect_callmethod_on_error", "fatal", 'callMethod(e, "foo");\n}', setup=_REFLECT_SETUP),
+    Row("reflect_fields_on_error", "fatal", "fields(e);", setup=_REFLECT_SETUP),
+    Row("reflect_getfield_on_error", "fatal", 'getField(e, "kind");', setup=_REFLECT_SETUP),
+    Row("reflect_hasfield_on_error", "fatal", 'hasField(e, "kind");', setup=_REFLECT_SETUP),
+    Row("reflect_setfield_on_error", "fatal", 'setField(e, "kind", 5);', setup=_REFLECT_SETUP),
+    Row("reflect_callmethod_on_error", "fatal", 'callMethod(e, "foo");', setup=_REFLECT_SETUP),
 ]
+
+# Reflection-on-Error is fatal on native, JVM, and CLR, but bootstrap's
+# reflection natives deliver a catchable `ReflectionReceiverError` instead
+# (issue #353) -- a real behavior gap, not a corpus bug, so every reflect
+# row skips bootstrap rather than reporting the same divergence five times.
+for _row in REFLECT_ROWS:
+    _row.skip[BOOTSTRAP] = "issue #353: bootstrap makes reflection-on-Error catchable, not fatal"
 
 ALL_ROWS = CATCHABLE_ROWS + FATAL_ROWS + REFLECT_ROWS
 
@@ -341,10 +363,11 @@ ALL_ROWS = CATCHABLE_ROWS + FATAL_ROWS + REFLECT_ROWS
 #    against native's. Comparing bootstrap's outcome against native's fatal
 #    disposition, row by row, would report ~30 "divergences" that are all
 #    the same one architectural fact, not 30 distinct defects. The Error-
-#    as-receiver reflection rows are the one Fatal-table-shaped exception:
-#    those go through the reflection natives' own type checks, which DO
-#    halt bootstrap the same way they halt native, so REFLECT_ROWS is left
-#    fully compared, not defaulted to skip.
+#    as-receiver reflection rows turned out to be the SAME architectural
+#    fact, not an exception to it: running each one against bootstrap shows
+#    it also delivers a catchable `ReflectionReceiverError`, not a halt (see
+#    issue #353), so REFLECT_ROWS skips bootstrap too, for the same reason
+#    as the rest of this table.
 #
 # A row that found a genuine, specific defect underneath this general
 # pattern (a real kind ambiguity, a missing feature, a silently-swallowed
@@ -388,9 +411,43 @@ def load_spec_table_kind_count() -> int:
     return len(rows)
 
 
+def load_spec_fatal_row_count() -> int:
+    """Counts the Fatal Runtime Errors table's data rows in spec/04-semantics.md.
+
+    Guards FATAL_ROWS against corpus drift the same way
+    load_spec_table_kind_count guards CATCHABLE_ROWS (PR #352 review round
+    1, R5) -- a row added to or removed from the fatal table with no
+    matching change here fails loudly instead of silently checking a stale
+    corpus.
+    """
+    text = SPEC_PATH.read_text(encoding="utf-8")
+    start = text.index("### Fatal Runtime Errors")
+    end = text.index("## Enum Types", start)
+    section = text[start:end]
+    rows = [
+        line
+        for line in section.splitlines()
+        if line.startswith("|") and "---" not in line and "Cause" not in line
+    ]
+    return len(rows)
+
+
+# Exit code every consumer uses for a compile-time (parse) error, distinct
+# from a run-time fault's own exit code, which differs by consumer (native
+# 70, JVM 1, CLR 134 via an unhandled .NET exception). A row whose program
+# never compiles proves nothing about the fault it names (PR #352 review
+# round 1, R1/R2/R3): classify() must tell the two apart, not read "no
+# marker on stdout" as "fatal" the way an earlier version of this script did.
+COMPILE_ERROR_EXIT_CODE = 65
+
+
 @dataclass
 class RunResult:
-    outcome: str  # "caught", "fatal", or "crash" (neither marker seen -- see module docstring hazard)
+    # "caught", "fatal", "compile_error" (program did not compile -- a
+    # corpus bug, never a real row outcome), or "crash" (neither marker
+    # seen although the program compiled and ran -- see module docstring
+    # hazard).
+    outcome: str
     kind: str | None = None
     message: str | None = None
     type_: str | None = None
@@ -415,7 +472,15 @@ class ConsumerCommand:
         )
 
 
-def classify(stdout: str) -> RunResult:
+def _first_stderr_line(stderr: str) -> str:
+    for line in stderr.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return ""
+
+
+def classify(returncode: int, stdout: str, stderr: str) -> RunResult:
     lines = stdout.splitlines()
     if CAUGHT_MARKER in lines:
         idx = lines.index(CAUGHT_MARKER)
@@ -434,7 +499,14 @@ def classify(stdout: str) -> RunResult:
         # caught-template run somehow reached AFTER_MARKER without its own
         # catch block markers (also a corpus bug: the fault never fired).
         return RunResult(outcome="crash")
-    return RunResult(outcome="fatal")
+    # No marker at all: the program halted before printing one. This used
+    # to be read as "fatal" unconditionally, which also matched a program
+    # that never compiled (PR #352 review round 1, R1) -- every consumer
+    # here exits with COMPILE_ERROR_EXIT_CODE on a parse failure, so that
+    # exit code, not the absence of a marker, is what "fatal" requires.
+    if returncode == COMPILE_ERROR_EXIT_CODE:
+        return RunResult(outcome="compile_error", message=_first_stderr_line(stderr))
+    return RunResult(outcome="fatal", message=_first_stderr_line(stderr))
 
 
 def run_row(row: Row, commands: dict[str, ConsumerCommand], workdir: Path, timeout: float) -> dict[str, RunResult]:
@@ -449,7 +521,7 @@ def run_row(row: Row, commands: dict[str, ConsumerCommand], workdir: Path, timeo
         except subprocess.TimeoutExpired:
             results[consumer] = RunResult(outcome="crash")
             continue
-        results[consumer] = classify(proc.stdout)
+        results[consumer] = classify(proc.returncode, proc.stdout, proc.stderr)
     return results
 
 
@@ -459,6 +531,19 @@ def compare(row: Row, native_result: RunResult, other: RunResult, consumer: str)
         problems.append(
             f"outcome: native={native_result.outcome} {consumer}={other.outcome}"
         )
+        return problems
+    if native_result.outcome == "fatal":
+        # Fatal message text is compared as a substring, not equality: each
+        # consumer wraps the same message in its own prefix/trailer (native
+        # "[line N] in script", the JVM's "Exception in thread \"main\"
+        # lox.LoxError: ", the CLR's ".NET Unhandled exception. Lox.LoxError:
+        # " plus a stack trace) -- see PR #352 review round 1, R4.
+        skip = row.skip_fields.get(consumer, set())
+        if "message" not in skip:
+            native_msg = native_result.message or ""
+            other_msg = other.message or ""
+            if not native_msg or native_msg not in other_msg:
+                problems.append(f"message: native={native_msg!r} not found in {consumer}={other_msg!r}")
         return problems
     if native_result.outcome != "caught":
         return problems
@@ -515,6 +600,24 @@ def main() -> None:
         )
         sys.exit(2)
 
+    # The canonical-string depth row is the one Fatal table row this script
+    # does not run at all (issue #338 owns its disposition; see FATAL_ROWS's
+    # own module comment). Guards FATAL_ROWS against the table changing
+    # underneath it the same way the check above guards CATCHABLE_ROWS
+    # (PR #352 review round 1, R5).
+    excluded_fatal_rows = 1
+    spec_fatal_row_count = load_spec_fatal_row_count()
+    if spec_fatal_row_count != len(FATAL_ROWS) + excluded_fatal_rows:
+        print(
+            f"check_fault_table.py: spec/04-semantics.md's Fatal Runtime Errors "
+            f"table has {spec_fatal_row_count} row(s), but FATAL_ROWS covers "
+            f"{len(FATAL_ROWS)} (+{excluded_fatal_rows} deliberately excluded, "
+            "see the canonical-string depth row's comment). The table changed; "
+            "update this script's corpus to match.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     rows = ALL_ROWS
     if args.only:
         rows = [r for r in rows if args.only in r.name]
@@ -524,6 +627,7 @@ def main() -> None:
 
     diverged = 0
     skipped_rows = 0
+    per_consumer_skips = {JVM: 0, CLR: 0, BOOTSTRAP: 0}
     with tempfile.TemporaryDirectory(prefix="loxpp_fault_table_") as tmp:
         workdir = Path(tmp)
         for row in rows:
@@ -533,12 +637,25 @@ def main() -> None:
                 print(f"SKIP        {row.name}  (native itself is skipped for this row)")
                 skipped_rows += 1
                 continue
+            if native_result.outcome == "compile_error":
+                # Native itself never reached the fault: the row's program
+                # is broken, not any consumer's behavior (PR #352 review
+                # round 1, R1/R2/R3). Report it as a failure rather than
+                # silently passing every consumer, which is what let three
+                # enum rows and five reflection rows through round 1.
+                print(
+                    f"ERROR       {row.name}  native does not compile this row's "
+                    f"program: {native_result.message!r} -- corpus bug, fix the row"
+                )
+                diverged += 1
+                continue
 
             row_ok = True
             row_notes = []
             for consumer in (JVM, CLR, BOOTSTRAP):
                 if consumer in row.skip:
                     row_notes.append(f"{consumer} SKIPPED ({row.skip[consumer]})")
+                    per_consumer_skips[consumer] += 1
                     continue
                 other_result = results[consumer]
                 problems = compare(row, native_result, other_result, consumer)
@@ -554,6 +671,10 @@ def main() -> None:
 
     print()
     print(f"{len(rows) - skipped_rows} row(s) checked, {skipped_rows} row(s) not runnable, {diverged} divergence(s)")
+    print(
+        "per-consumer row skips: "
+        + ", ".join(f"{consumer}={count}" for consumer, count in per_consumer_skips.items())
+    )
     sys.exit(1 if diverged else 0)
 
 
