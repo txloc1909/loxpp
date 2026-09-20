@@ -1121,7 +1121,8 @@ itself is not caught by that same `try` statement. A `StackOverflowError`
 that is raised while another `StackOverflowError` is already unwinding —
 that is, by a deferred call that runs during that unwind — is not
 delivered to any `catchBlock`; it halts the program as an uncaught error.
-Every cause below is catchable this way.
+Every cause in the table below is catchable this way; see
+[Fatal Runtime Errors](#fatal-runtime-errors) for the faults that are not.
 
 The table lists each cause, an example, and the `kind` field
 ([§03-types](03-types.md#error)) of the `Error` value delivered to
@@ -1144,11 +1145,121 @@ same text the implementation reports when the fault is left uncaught.
 | `pop` on empty list | `[].pop()` | `"EmptyListError"` |
 | NaN used as map key | `m[0/0] = 1` | `"NaNKeyError"` |
 | Object (non-String) used as map key | `m[[1,2]] = 1` | `"InvalidMapKeyError"` |
-| Value nested too deep to print | a list that holds a list, many thousand levels deep | `"MaxDepthExceededError"` |
+| Value nested too deep to print | a list that holds a list, many thousand levels deep; native today reports this as fatal — see [Fatal Runtime Errors](#fatal-runtime-errors) and #338 | `"MaxDepthExceededError"` |
 | Method called on non-instance/non-list/non-map | `42.foo()` | `"InvalidReceiverError"` |
 | No arm matches in a `match` expression | `match 99 { case 1 => "one" }` | `"MatchError"` |
 | Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field | `"ConstructorArityError"` |
 | Undefined property on an `Error` value | `try { try { [][0]; } catch (e) { e.foo; } } catch (_) { }` | `"UndefinedPropertyError"` |
+
+### Fatal Runtime Errors
+
+The causes above are every fault the native implementation delivers as a
+catchable `Error` value. Native also has a second, **larger** set of faults
+that always halt the program: they are never delivered to a `catchBlock`,
+even from inside a `try` statement's `tryBlock`. Each row below is fatal
+today — this is a record of current native behavior, not a design decision
+that a future version must keep. There is no `Error.kind` for a fatal
+fault; the message is the only text the implementation reports.
+
+| Cause | Example | Message |
+|---|---|---|
+| `GET_TAG` applied to a non-enum value | `enum Result { Ok(v) Err(m) } match 1 { case Ok(v) => v case Err(m) => -1 };` | `GET_TAG: expected an enum value.` |
+| `print` of a value nested deeper than the implementation's canonical-string depth limit (200 heap levels today) | `var a = [1]; var i = 0; while (i < 300) { a = [a]; i = i + 1; } print a;` | `Value nesting is too deep.` |
+| A native function is called with an argument count other than its arity | `clock(1);` | `Expected 0 arguments but got 1.` |
+| A `defer`red call holds a value that is not a Closure, Native, BoundMethod, or BoundNative | `fun g() { var x = 42; defer x(); } g();` (the compiler checks only that `defer` is followed by a call expression — `defer 42;` fails to compile with `Expect a call expression after 'defer'.` — not that the callee is callable, so a variable holding a non-callable value reaches this check at run time) | `Deferred callable has unexpected type.` |
+| A stdlib native function reports its own error while running | `open("/no/such/path", "r");` | `open(): cannot open '/no/such/path': No such file or directory` |
+| Undefined property read on a File value | `var f = open("/tmp/f.txt", "w"); f.write("x"); var g = open("/tmp/f.txt", "r"); g.bogus;` (a missing path fails first with the stdlib-error row above) | `Undefined property 'bogus' on file.` |
+| Undefined property read on a Map value | `var m = {}; m.bogus;` | `Undefined property 'bogus' on map.` |
+| Property read on an Instance where the name is neither a field nor a method | `class C {} var c = C(); c.bogus;` | `Undefined property 'bogus'.` |
+| Property read on a value that is not an Instance, Map, File, or Error | `42.foo;` (see [§03-types, Error](03-types.md#error) and [Property Get](#property-get)) | `Only instances have properties.` |
+| Property write on a value that is not an Instance | `42.foo = 1;` | `Only instances have fields.` |
+| A field looked up by [Method Invocation](#method-invocation) shadows the method name but is not callable | `class C { init() { this.f = 1; } } C().f();` | `Can only call functions, classes and enums.` |
+| `obj.method(...)` where `method` is not found on the instance's class | `class C {} C().bogus();` | `Undefined property 'bogus'.` |
+| `list.append(...)` called with an argument count other than 1 | `[].append();` | `'append' expects 1 argument but got 0.` |
+| `list.pop(...)` called with any argument | `[].pop(1);` | `'pop' expects 0 arguments but got 1.` |
+| `list.remove(...)` called with an argument count other than 1 | `[1].remove();` | `'remove' expects 1 argument but got 0.` |
+| `list.remove(value)` where `value` is not present | `[1, 2].remove(3);` | `Value not found in list.` |
+| Undefined method invoked on a List | `[].bogus();` | `Undefined method 'bogus' on list.` |
+| Undefined method invoked on a File | `var f = open("/tmp/f.txt", "w"); f.write("x"); var g = open("/tmp/f.txt", "r"); g.bogus();` (a missing path fails first with the stdlib-error row above) | `Undefined method 'bogus' on file.` |
+| Undefined method invoked on a Map | `var m = {}; m.bogus();` | `Undefined method 'bogus' on map.` |
+| `class Sub < Super {}` where `Super` is not a Class | `var NotAClass = 1; class Sub < NotAClass {}` | `Superclass must be a class.` |
+| `super.method(...)` where `method` is not found on the superclass | `class A {} class B < A { m() { super.zzz(); } } B().m();` | `Undefined property 'zzz'.` |
+| Enum field indexed (`enumVal[i]`) with a non-Number index | `enum E { A(x) } var v = A(1); v["a"];` | `Enum field index must be a number.` |
+| Enum field indexed with an out-of-range index | `enum E { A(x) } var v = A(1); v[3];` | `Enum field index 3 out of range.` |
+| Index-assignment on a String | `"abc"[0] = "x";` (strings are immutable — see [§03-types, String](03-types.md#string)) | `Strings are immutable and cannot be indexed for assignment.` |
+| `seq[start:end]` where `seq` is not a List or String | `(42)[0:1];` | `Slice requires a List or String.` |
+| `seq[start:end]` where `start` is not a Number | `[1, 2]["a":2];` | `Slice index must be a number.` |
+| `seq[start:end]` where `start` is not integer-valued | `[1, 2][1.5:2];` | `Slice index must be an integer.` |
+| `seq[start:end]` where `start` is negative | `[1, 2][-1:2];` | `Slice index must be non-negative.` |
+| `seq[start:end]` where `end` is not a Number | `[1, 2][0:"a"];` | `Slice index must be a number.` |
+| `seq[start:end]` where `end` is not integer-valued | `[1, 2][0:1.5];` | `Slice index must be an integer.` |
+| `seq[start:end]` where `end` is negative | `[1, 2][0:-1];` | `Slice index must be non-negative.` |
+| `elem in seq` where `seq` is a String and `elem` is not a String | `1 in "abc";` | `Left operand of 'in' on a string must be a string.` |
+| `elem in seq` where `seq` is not a List, String, or Map | `1 in 42;` | `Right operand of 'in' must be a list, string, or map.` |
+| `for (var x in expr)` where `expr` is not a List, String, or Map | `for (var x in 42) {}` | `Value is not iterable (expected list, string, or map).` |
+
+**`print`'s depth-limit fault is the same fault the catchable table calls
+`MaxDepthExceededError`.** `Op::PRINT` clears any pending stdlib error
+before it stringifies its operand, so the row above is not a stdlib-error
+path; it is the canonical-string depth guard in `stringifyObj`
+(`src/object.cpp`), which also fires the same way, with the same message,
+when `str()` calls into the same guard through a native call. Native today
+halts the program on this fault with no `Error.kind`, even inside a `try`
+statement — the opposite disposition from the catchable table's
+`MaxDepthExceededError` row. Issue #338 tracks which disposition is
+correct; this node records native's current behavior only.
+
+**A stdlib native's own error text is not enumerated here.** The row above
+gives one example message; the text a stdlib native reports differs call
+by call and is defined by that native, not by `src/vm.cpp`. Enumerating
+every `nativeRuntimeError` string under `src/stdlib/` is out of this
+node's scope (`runtimeError` call sites in `src/vm.cpp` only) and is a
+follow-up issue if it is wanted.
+
+**Internal invariant checks are excluded.** A handful of `RAISE_ERROR` call
+sites in `src/vm.cpp` guard invariants the compiler itself is responsible
+for (for example, that `GET_ITER` always pushes an `ObjIterator` before
+`ITER_HAS_NEXT`/`ITER_NEXT` run). Their messages are prefixed `BUG:`. No
+valid Lox++ program can reach them; seeing one means the implementation,
+not the program, is broken. They are excluded from the table above and are
+not part of the language's observable behavior.
+
+**Call stack overflow's fatal fast path.** The catchable `"StackOverflowError"`
+row above already covers the general case. Native takes a direct fatal
+path — bypassing the catchable machinery — in two situations: when no
+`try` statement is active anywhere in the program (so a catch search would
+fail immediately regardless), and for the re-entrant case the paragraph
+above the catchable table already describes, where a second
+`StackOverflowError` arrives while the first is still unwinding. Both
+produce the same `"Stack overflow."` message as the catchable row; this is
+not a distinct fault.
+
+**Shared uncaught-fault reporting is not a distinct fault, except one
+documented mismatch.** `handleThrow` reports the final "no handler found"
+message for every catchable row above from two call sites of its own. When
+the unhandled value is an `Error` value — including an explicit uncaught
+`throw` of an `Error` — it reuses that value's own `message` field
+unchanged, matching the [`throw` Statement](#throw-statement)'s own text.
+When an explicit uncaught `throw` carries a value that is **not** an
+`Error` value, native reports `Uncaught throw: ` followed by the value's
+canonical string representation (for example, `throw 42;` reports
+`Uncaught throw: 42`) — the `Uncaught throw: ` prefix is not mentioned by
+the `throw` Statement section's own wording. This mismatch is tracked as
+issue #341. Likewise,
+`raiseThrowableError`'s fallback for when the `Error` class itself is not
+yet initialized cannot fire once any Lox++ program has started running —
+the class is created during VM setup, before user code executes — so no
+valid program can reach it.
+
+**Wrong argument count's fatal fast path.** The catchable `"ArityError"` row
+above already covers the general case: calling a Lox++ function with the
+wrong number of arguments while a `try` statement's handler is active. When
+no handler is active anywhere in the program, native skips constructing the
+`Error` value entirely and reports the same `"Expected 0 arguments but got
+1."`-shaped message as a direct fatal error (native's own arity and the
+call's argument count) — the ordinary "no handler, so uncaught" outcome the
+[Runtime Errors](#runtime-errors) section already describes, not a distinct
+fault.
 
 ---
 
