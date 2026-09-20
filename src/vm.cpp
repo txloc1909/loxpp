@@ -1622,10 +1622,9 @@ InterpretResult VM::run(int stopAtFrameCount) {
                     "Value is not iterable (expected list, string, or map).");
                 return InterpretResult::RUNTIME_ERROR;
             }
+            Obj* obj = as<Obj*>(iterable);
             ObjIterator* it = m_mm.create<ObjIterator>(
-                iterable, 0,
-                isMap(iterable) ? asObjMap(as<Obj*>(iterable))->map.count()
-                                : 0);
+                iterable, 0, isObjMap(obj) ? asObjMap(obj)->map.count() : -1);
             stackTop[-1] = Value{static_cast<Obj*>(it)}; // replace in-place
             break;
         }
@@ -1648,7 +1647,7 @@ InterpretResult VM::run(int stopAtFrameCount) {
             } else if (isMap(it->collection)) {
                 // Fail fast on size change, as Python does for dicts.
                 auto* map = asObjMap(as<Obj*>(it->collection));
-                if (map->map.count() != it->expectedCount) {
+                if (map->map.count() != it->expectedSize) {
                     RAISE_ERROR("Map changed size during iteration.");
                     return InterpretResult::RUNTIME_ERROR;
                 }
@@ -1690,7 +1689,7 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 // Skip past empty/tombstone buckets to the next occupied one,
                 // push its key, then advance the cursor past it.
                 auto* map = asObjMap(as<Obj*>(it->collection));
-                if (map->map.count() != it->expectedCount) {
+                if (map->map.count() != it->expectedSize) {
                     RAISE_ERROR("Map changed size during iteration.");
                     return InterpretResult::RUNTIME_ERROR;
                 }

@@ -313,6 +313,7 @@ TEST(Map, ForInInsertErrors) {
     VMTestHarness h;
     // Single entry: the insert lands on the last iteration, so the error
     // must fire on the post-body size check, not only before binding.
+    // Message text is proven by the for_in_map_size_changed fault-table row.
     ASSERT_EQ(h.run(R"(
         var m = {1: "a"};
         for (var k in m) {
@@ -324,10 +325,72 @@ TEST(Map, ForInInsertErrors) {
 
 TEST(Map, ForInDeleteErrors) {
     VMTestHarness h;
+    // Message text is proven by the for_in_map_size_changed fault-table row.
     ASSERT_EQ(h.run(R"(
         var m = {1: "a", 2: "b"};
         for (var k in m) {
             m.del(k);
+        }
+    )"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(Map, ForInInsertPastGrowErrors) {
+    VMTestHarness h;
+    // Twelve entries fill a capacity-16 table to its 0.75 load limit, so
+    // the in-loop insert rehashes under the live cursor. The size check
+    // must still fire instead of visiting moved buckets.
+    ASSERT_EQ(h.run(R"(
+        var m = {};
+        var i = 0;
+        while (i < 12) { m[i] = i; i = i + 1; }
+        for (var k in m) {
+            m[100 + k] = k;
+        }
+    )"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(Map, ForInContinueAfterMutationErrors) {
+    VMTestHarness h;
+    // Continue returns to the iterator step, which must report the change.
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a", 2: "b"};
+        for (var k in m) {
+            m[3] = "c";
+            continue;
+        }
+    )"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(Map, ForInReturnAfterMutationOk) {
+    VMTestHarness h;
+    // Return leaves the loop without another iterator step, so no error.
+    ASSERT_EQ(h.run(R"(
+        fun f() {
+            var m = {1: "a", 2: "b"};
+            for (var k in m) {
+                m[3] = "c";
+                return "left";
+            }
+            return "fell-off";
+        }
+        var r = f();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "left");
+}
+
+TEST(Map, ForInNestedInnerMutationErrors) {
+    VMTestHarness h;
+    // The inner insert changes the size the outer iterator recorded.
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a", 2: "b"};
+        for (var a in m) {
+            for (var b in m) {
+                m[3] = "c";
+            }
         }
     )"),
               InterpretResult::RUNTIME_ERROR);

@@ -472,6 +472,22 @@ TEST_F(SequenceVMTest, ForIn_List_Nested) {
     EXPECT_EQ(h.getGlobalStr("r"), "66");
 }
 
+TEST_F(SequenceVMTest, ForIn_List_AppendDuringIteration) {
+    // Appended elements at indices beyond the cursor are visited.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var xs = [1];
+        var sum = 0;
+        for (var x in xs) {
+            sum = sum + x;
+            if (x < 3) xs.append(x + 1);
+        }
+        var r = sum;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "6"); // 1 + 2 + 3
+}
+
 // ---------------------------------------------------------------------------
 // `for (var c in string)` character iteration
 // ---------------------------------------------------------------------------

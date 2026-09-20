@@ -2369,10 +2369,12 @@ class Interpreter {
         loopEnv.define(varName, nil);
         if (tag == "map") {
             var ks = iterable.data.keys();
-            var startSize = len(iterable.data);
+            var expectedSize = len(iterable.data);
             var i = 0;
             while (i < len(ks)) {
-                if (len(iterable.data) != startSize) {
+                // Pre-body check: catches a mutation from an earlier
+                // iteration (including via continue) before binding.
+                if (len(iterable.data) != expectedSize) {
                     this.setError("MapSizeChangedError", "Map changed size during iteration.", varLine);
                     return;
                 }
@@ -2382,7 +2384,10 @@ class Interpreter {
                 if (this.breakFlag) { this.breakFlag = false; return; }
                 if (this.continueFlag) { this.continueFlag = false; }
                 i = i + 1;
-                if (len(iterable.data) != startSize) {
+                // Post-body check: a mutation on the last iteration has no
+                // later binding to catch it, so check before looping back.
+                // Break and return leave above without reaching this check.
+                if (len(iterable.data) != expectedSize) {
                     this.setError("MapSizeChangedError", "Map changed size during iteration.", varLine);
                     return;
                 }

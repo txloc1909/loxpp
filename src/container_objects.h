@@ -22,12 +22,13 @@ inline bool isList(const Value& v) { return isValueOfType<ObjType::LIST>(v); }
 struct ObjIterator : public Obj {
     Value collection; // ObjList*, ObjString*, or ObjMap* being iterated
     int index;        // current cursor position
-    // Map size at GET_ITER; size change during map iteration is an error.
-    int expectedCount;
+    // Map size recorded at GET_ITER; -1 unless collection is a Map. A size
+    // change during map iteration is an error.
+    int expectedSize;
 
-    ObjIterator(Value coll, int idx = 0, int expected = 0)
+    ObjIterator(Value coll, int idx = 0, int expected = -1)
         : Obj(ObjType::ITERATOR), collection(coll), index(idx),
-          expectedCount(expected) {}
+          expectedSize(expected) {}
 };
 
 inline bool isObjIterator(Obj* o) { return isObjType(o, ObjType::ITERATOR); }

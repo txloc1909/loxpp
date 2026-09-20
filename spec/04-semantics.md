@@ -395,23 +395,27 @@ Where:
 ### `for`-in Statement
 
 ```
-for ( var x in expr ) body
+for (var x in expr) body
 ```
 
-Iterates over the elements of a sequence. A List iterates in order. A Map
-iterates over keys in unspecified order.
+Iterates over the elements of a sequence. A List iterates in order. A String
+iterates its single-character substrings in order. A Map iterates over keys
+in unspecified order.
 
 1. Evaluate `expr` exactly once. The result must be a **List**, a **String**,
    or a **Map**; any other value is a **runtime error**
    ("Value is not iterable (expected list, string, or map).").
 2. An internal **iterator** is created, holding a reference to the sequence and
    a cursor starting at `0`. The iterator is not accessible to user code.
-   For a Map, the iterator also records the number of key-value pairs.
-3. Before each iteration, the cursor is compared to the length of the sequence.
-   If `cursor ≥ length`, the loop exits. For a Map, the length is the number
-   of occupied buckets at or after the cursor, and the recorded size is
-   compared to the current size first (see Mutation during iteration below).
-4. Otherwise, the element at `cursor` is bound to `x` and `body` executes.
+   For a Map, the iterator also records the size (the number of key-value
+   pairs).
+3. Before each iteration, the next element is located:
+   - For a **List** or **String**: if `cursor ≥ length`, the loop exits.
+   - For a **Map**: the recorded size is compared to the current size first
+     (see Mutation during iteration below). Then the cursor, a bucket index,
+     scans forward to the next occupied bucket within the capacity; if there
+     is none, the loop exits.
+4. Otherwise, the located element is bound to `x` and `body` executes.
    - For a **List**: `x` is bound to the element value.
    - For a **String**: `x` is bound to a single-character String.
    - For a **Map**: `x` is bound to the next key.
@@ -425,10 +429,16 @@ assigns to it. It is not a new binding per iteration. See
 **Mutation during iteration**: modifying the List while iterating is defined.
 Elements appended to the List at indices beyond the current cursor will be
 visited. Removing elements is not directly possible (List has no `remove`).
-Changing the size of a Map while iterating it is a **runtime error**
+If the size of a Map differs from the recorded size at the next iterator
+step, that step is a **runtime error**
 ("Map changed size during iteration."). This covers inserting a new key and
-removing a key, including growth that rehashes the Map. Assigning a value to
-a key that already exists does not change the size and is permitted.
+removing a key, including growth that rehashes the Map, and matches Python,
+which reports the same fault for a dictionary size change. The check runs at
+the next iterator step only: `break`, `return`, or `throw` before that step
+exits the loop without an error. Assigning a value to a key that already
+exists does not change the size and is permitted. Mutations that restore the
+net size within one iteration (a remove plus an insert) are not detected;
+which keys such an iteration visits is unspecified (see issue #362).
 
 **`break`** and **`continue`** work as described below.
 

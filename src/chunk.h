@@ -56,7 +56,7 @@ enum class Op : Byte {
     SET_INDEX, // pops value, index, list/map; sets [index]=value; pushes value
     SLICE,     // pops end, start, seq; pushes new List|String slice
     IN,        // pops seq (rhs) then elem (lhs); pushes bool membership result
-    GET_ITER,  // pops List|String|Map → pushes ObjIterator{cursor=0, size}
+    GET_ITER,  // pops List|String|Map → pushes ObjIterator{cursor=0, expectedSize (map only)}
     ITER_HAS_NEXT, // pops iterator copy → pushes bool (cursor < length)
     ITER_NEXT, // pops iterator copy → pushes element/key at cursor, advances
     MATCH_ERROR, // no operands — raises MatchError; VM never returns

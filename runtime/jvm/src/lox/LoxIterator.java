@@ -39,8 +39,7 @@ public final class LoxIterator {
         }
     }
 
-    public boolean hasNext() {
-        if (collection instanceof LoxList) {
+    public boolean hasNext() {        if (collection instanceof LoxList) {
             return index < ((LoxList) collection).elements.size();
         }
         if (collection instanceof String) {
@@ -53,6 +52,11 @@ public final class LoxIterator {
         throw new LoxError("BUG: LoxIterator holds an unexpected collection type.");
     }
 
+    /**
+     * Requires a preceding true hasNext(): the compiler always emits
+     * ITER_HAS_NEXT before ITER_NEXT with no user code between them, so
+     * calling next() past the end is unreachable from a valid program.
+     */
     public Object next() {
         if (collection instanceof LoxList) {
             return ((LoxList) collection).elements.get(index++);

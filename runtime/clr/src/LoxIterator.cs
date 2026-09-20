@@ -51,6 +51,10 @@ public sealed class LoxIterator {
         throw new LoxError("BUG: LoxIterator holds an unexpected collection type.");
     }
 
+    /// <summary>Requires a preceding true HasNext(): the compiler always
+    /// emits ITER_HAS_NEXT before ITER_NEXT with no user code between them,
+    /// so calling Next() past the end is unreachable from a valid program.
+    /// </summary>
     public object Next() {
         if (Collection is LoxList list) {
             return list.Elements[m_index++];
