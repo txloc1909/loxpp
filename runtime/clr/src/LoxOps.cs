@@ -531,7 +531,11 @@ public static class LoxOps {
 
     /// <summary>The INVOKE fast path: dispatches on the receiver's runtime kind (P6), not on one static type.</summary>
     public static object Invoke(object receiver, string name, object[] args) {
-        if (receiver is LoxInstance instance) {
+        // Same ErrorClass reference check as GetProperty/SetProperty: vm.cpp's
+        // Op::INVOKE tests isInstance, and an ObjError is not an ObjInstance
+        // there, so a caught fault falls through to the final else arm
+        // (InvalidReceiverError) instead of taking the instance-method path.
+        if (receiver is LoxInstance instance && !ReferenceEquals(instance.Klass, LoxRuntime.ErrorClass)) {
             if (instance.Fields.TryGetValue(name, out object fieldVal)) {
                 // Accept the field kinds src/vm.cpp accepts in Op::INVOKE's
                 // field-shadow arm, and refuse every other callable with the
