@@ -481,8 +481,7 @@ public final class LoxOps {
             // Error instances can access their fields (.kind, .message, or
             // undefined ones via catch binding). Ordinary instances get a
             // fatal fault.
-            LoxClass errorClass = (LoxClass)LoxRuntime.current().get("Error");
-            if (instance.klass == errorClass) {
+            if (instance.klass == LoxRuntime.ERROR_CLASS) {
                 throw makeError("UndefinedPropertyError",
                                     "Undefined property '" + name + "'.");
             }
@@ -788,7 +787,15 @@ public final class LoxOps {
             return ((LoxClass)v).name;
         }
         if (v instanceof LoxInstance) {
-            return ((LoxInstance)v).klass.name + " instance";
+            // Must run before the generic "<Class> instance" form below: a
+            // caught Error value is a plain LoxInstance under the hood (see
+            // LoxRuntime.makeError), told apart only by its class's identity.
+            LoxInstance inst = (LoxInstance)v;
+            if (inst.klass == LoxRuntime.ERROR_CLASS) {
+                return stringify(inst.fields.get("kind")) + ": "
+                    + stringify(inst.fields.get("message"));
+            }
+            return inst.klass.name + " instance";
         }
         if (v instanceof LoxFile) {
             return "<file>";
