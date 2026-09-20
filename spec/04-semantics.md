@@ -1121,7 +1121,8 @@ itself is not caught by that same `try` statement. A `StackOverflowError`
 that is raised while another `StackOverflowError` is already unwinding —
 that is, by a deferred call that runs during that unwind — is not
 delivered to any `catchBlock`; it halts the program as an uncaught error.
-Every cause below is catchable this way.
+Every cause in the table below is catchable this way; see
+[Fatal Runtime Errors](#fatal-runtime-errors) for the faults that are not.
 
 The table lists each cause, an example, and the `kind` field
 ([§03-types](03-types.md#error)) of the `Error` value delivered to
@@ -1153,7 +1154,7 @@ same text the implementation reports when the fault is left uncaught.
 ### Fatal Runtime Errors
 
 The causes above are every fault the native implementation delivers as a
-catchable `Error` value. Native also has a second, smaller set of faults
+catchable `Error` value. Native also has a second, **larger** set of faults
 that always halt the program: they are never delivered to a `catchBlock`,
 even from inside a `try` statement's `tryBlock`. Each row below is fatal
 today — this is a record of current native behavior, not a design decision
@@ -1162,10 +1163,13 @@ fault; the message is the only text the implementation reports.
 
 | Cause | Example | Message |
 |---|---|---|
-| `GET_TAG` applied to a non-enum value | a `match` constructor-pattern arm compiled against a subject that is not an `ObjEnum` at runtime | `GET_TAG: expected an enum value.` |
-| `print expr;` where evaluating `expr` left a pending native-stdlib error | native reports this whenever the stdlib error flag is still set right after evaluating `expr`; no stdlib native reachable from `print`'s own operand evaluation sets it today, so this path is currently unreachable from a Lox++ program | whatever message the failing native call reported |
-| Undefined property read on a File value | `openFile("f", "r").bogus` | `Undefined property 'bogus' on file.` |
-| Undefined property read on a Map value | `{}.bogus` | `Undefined property 'bogus' on map.` |
+| `GET_TAG` applied to a non-enum value | `enum Result { Ok(v) Err(m) } match 1 { case Ok(v) => v case Err(m) => -1 };` | `GET_TAG: expected an enum value.` |
+| `print expr;` where evaluating `expr` left a pending native-stdlib error | native reports this whenever the stdlib error flag is still set right after evaluating `expr`; no stdlib native reachable from `print`'s own operand evaluation sets it today, so this exact path is currently unreachable from a Lox++ program (contrast the next row, a different call site that carries the same class of stdlib error and is reachable) | whatever message the failing native call reported |
+| A native function is called with an argument count other than its arity | `clock(1)` | `Expected %d arguments but got %d.` (with native's own arity and the call's argument count) |
+| A stdlib native function reports its own error while running | `open("/no/such/path", "r")` | whatever message the failing native call reported, for example `open(): cannot open '/no/such/path': No such file or directory` |
+| Undefined property read on a File value | `open("f.txt", "r").bogus` (the file must exist, or the call fails first with the stdlib-error row above) | `Undefined property 'bogus' on file.` |
+| Undefined property read on a Map value | `var m = {}; m.bogus;` | `Undefined property 'bogus' on map.` |
+| Property read on an Instance where the name is neither a field nor a method | `class C {} var c = C(); c.bogus;` | `Undefined property 'bogus'.` |
 | Property read on a value that is not an Instance, Map, File, or Error | `42.foo` (see [§03-types, Error](03-types.md#error) and [Property Get](#property-get)) | `Only instances have properties.` |
 | Property write on a value that is not an Instance | `42.foo = 1` | `Only instances have fields.` |
 | A field looked up by [Method Invocation](#method-invocation) shadows the method name but is not callable | `class C { init() { this.f = 1; } } C().f();` | `Can only call functions, classes and enums.` |
@@ -1175,12 +1179,12 @@ fault; the message is the only text the implementation reports.
 | `list.remove(...)` called with an argument count other than 1 | `[1].remove()` | `'remove' expects 1 argument but got 0.` |
 | `list.remove(value)` where `value` is not present | `[1, 2].remove(3)` | `Value not found in list.` |
 | Undefined method invoked on a List | `[].bogus()` | `Undefined method 'bogus' on list.` |
-| Undefined method invoked on a File | `openFile("f", "r").bogus()` | `Undefined method 'bogus' on file.` |
-| Undefined method invoked on a Map | `{}.bogus()` | `Undefined method 'bogus' on map.` |
+| Undefined method invoked on a File | `open("f.txt", "r").bogus()` (the file must exist) | `Undefined method 'bogus' on file.` |
+| Undefined method invoked on a Map | `var m = {}; m.bogus();` | `Undefined method 'bogus' on map.` |
 | `class Sub < Super {}` where `Super` is not a Class | `var NotAClass = 1; class Sub < NotAClass {}` | `Superclass must be a class.` |
-| `super.method(...)` where `method` is not found on the superclass | a subclass calling a `super.` method its superclass never defined | `Undefined property 'name'.` |
-| Enum field indexed (`enumVal[i]`) with a non-Number index | indexing an `ObjEnum` value with a non-Number key | `Enum field index must be a number.` |
-| Enum field indexed with an out-of-range index | indexing an `ObjEnum` value past its field count | `Enum field index 3 out of range.` |
+| `super.method(...)` where `method` is not found on the superclass | `class A {} class B < A { m() { super.zzz(); } } B().m();` | `Undefined property 'zzz'.` |
+| Enum field indexed (`enumVal[i]`) with a non-Number index | `enum E { A(x) } var v = A(1); v["a"];` | `Enum field index must be a number.` |
+| Enum field indexed with an out-of-range index | `enum E { A(x) } var v = A(1); v[3];` | `Enum field index 3 out of range.` |
 | Index-assignment on a String | `"abc"[0] = "x";` (strings are immutable — see [§03-types, String](03-types.md#string)) | `Strings are immutable and cannot be indexed for assignment.` |
 | `seq[start:end]` where `seq` is not a List or String | `(42)[0:1]` | `Slice requires a List or String.` |
 | `seq[start:end]` where `start` is not a Number | `[1, 2]["a":2]` | `Slice index must be a number.` |
@@ -1199,7 +1203,11 @@ for (for example, that `GET_ITER` always pushes an `ObjIterator` before
 `ITER_HAS_NEXT`/`ITER_NEXT` run). Their messages are prefixed `BUG:`. No
 valid Lox++ program can reach them; seeing one means the implementation,
 not the program, is broken. They are excluded from the table above and are
-not part of the language's observable behavior.
+not part of the language's observable behavior. One more site is excluded
+on the same grounds even though its message lacks the `BUG:` prefix:
+`runPendingDefers`'s "Deferred callable has unexpected type." fires only if
+a deferred call was recorded holding a value the compiler should never let
+through `defer`; no valid Lox++ program can build one.
 
 **Call stack overflow's fatal fast path.** The catchable `"StackOverflowError"`
 row above already covers the general case. Native takes a direct fatal
@@ -1210,6 +1218,25 @@ above the catchable table already describes, where a second
 `StackOverflowError` arrives while the first is still unwinding. Both
 produce the same `"Stack overflow."` message as the catchable row; this is
 not a distinct fault.
+
+**Shared uncaught-fault reporting is not a distinct fault.** `handleThrow`
+reports the final "no handler found" message for every catchable row above
+(and for an explicit uncaught `throw` — see the [`throw`
+Statement](#throw-statement)) from two call sites of its own. Both reuse
+the cause's own message; neither introduces a new one. Likewise,
+`raiseThrowableError`'s fallback for when the `Error` class itself is not
+yet initialized cannot fire once any Lox++ program has started running —
+the class is created during VM setup, before user code executes — so no
+valid program can reach it.
+
+**Wrong argument count's fatal fast path.** The catchable `"ArityError"` row
+above already covers the general case: calling a Lox++ function with the
+wrong number of arguments while a `try` statement's handler is active. When
+no handler is active anywhere in the program, native skips constructing the
+`Error` value entirely and reports the same `"Expected %d arguments but got
+%d."` message as a direct fatal error — the ordinary "no handler, so
+uncaught" outcome the [Runtime Errors](#runtime-errors) section already
+describes, not a distinct fault.
 
 ---
 
