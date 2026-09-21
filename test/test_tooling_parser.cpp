@@ -538,9 +538,10 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // (54 - issue #268 raised this by two, not one: 31_deep_recursion.lox
     // moved out of clr-only/ into this directory, entering this
     // non-recursive scan for the first time, and 53_deep_recursion_boundary.lox
-    // is new here too. 52 + 2 = 54. jvm-only/ and clr-only/ probes stay
-    // uncounted, since this scan is non-recursive)
-    ASSERT_EQ(files.size(), 171U);
+    // is new here too. 52 + 2 = 54. Issue #362 adds
+    // 55_for_in_map_net_zero.lox, raising this to 55. jvm-only/ and clr-only/
+    // probes stay uncounted, since this scan is non-recursive)
+    ASSERT_EQ(files.size(), 172U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {
