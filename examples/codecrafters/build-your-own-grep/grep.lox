@@ -1,0 +1,681 @@
+// grep.lox — Codecrafters "Build your own grep" implemented in pure Lox++.
+//
+// A small extended-regex engine (no stdlib regex: none exists) plus the
+// grep CLI the public stage descriptions require:
+//
+//   your_grep.sh -E <pattern> [-o] [-r] [--color=always|never] [files...]
+//
+// Exit 0 when any line matches, 1 otherwise. With file operands every
+// matching line prints whole; with several files each line carries a
+// "path:" prefix. -o prints only matched spans. --color=always wraps
+// spans in the ANSI sequences the wrapper passes via LOXPP_COLOR_OPEN/
+// LOXPP_COLOR_CLOSE (ESC is not writable as a Lox++ literal, and Lox++
+// has no isatty, so the shell wrapper owns TTY detection and recursive
+// directory expansion — Lox++ has no readdir).
+
+// ---------- character classes (relational ops are Number-only,
+// so classify via `in` against ordered alphabets) ----------
+var DIGITS = "0123456789";
+var LOWER = "abcdefghijklmnopqrstuvwxyz";
+var UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+var WORDCHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+
+fun isDigitChar(c) {
+    return c in DIGITS;
+}
+
+fun isWordChar(c) {
+    return c in WORDCHARS;
+}
+
+fun digitVal(c) {
+    var i = 0;
+    while (i < 10) {
+        if (DIGITS[i] == c) {
+            return i;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+// Expand one "a-z" range using the ordered alphabets (no ord() exists).
+fun expandRange(a, b) {
+    var n = 0;
+    while (n < 3) {
+        var alpha = DIGITS;
+        if (n == 1) {
+            alpha = LOWER;
+        }
+        if (n == 2) {
+            alpha = UPPER;
+        }
+        var ia = -1;
+        var ib = -1;
+        var k = 0;
+        while (k < len(alpha)) {
+            if (alpha[k] == a) {
+                ia = k;
+            }
+            if (alpha[k] == b) {
+                ib = k;
+            }
+            k = k + 1;
+        }
+        if (ia != -1 and ib != -1) {
+            if (ia <= ib) {
+                return alpha[ia:ib + 1];
+            }
+        }
+        n = n + 1;
+    }
+    return a + "-" + b;
+}
+
+// ---------- parser (recursive descent over globals) ----------
+var P = "";
+var PLEN = 0;
+var PPOS = 0;
+var PEND = 0;
+var NGROUPS = 0;
+
+fun parseNumAt(j) {
+    var v = 0;
+    var k = j;
+    var any = false;
+    while (k < PEND and P[k] in DIGITS) {
+        v = v * 10 + digitVal(P[k]);
+        any = true;
+        k = k + 1;
+    }
+    if (any == false) {
+        return nil;
+    }
+    return [v, k];
+}
+
+// "{" parsed only on a complete "{n}", "{n,}", "{n,m}"; otherwise the
+// brace stays for parseAtom to take as a literal.
+fun tryBrace(atom) {
+    var r1 = parseNumAt(PPOS + 1);
+    if (r1 == nil) {
+        return atom;
+    }
+    var min = r1[0];
+    var k = r1[1];
+    var max = min;
+    if (k < PEND and P[k] == ",") {
+        k = k + 1;
+        var r2 = parseNumAt(k);
+        if (r2 == nil) {
+            max = nil;
+        } else {
+            max = r2[0];
+            k = r2[1];
+        }
+    }
+    if (k < PEND and P[k] == "}") {
+        if (max != nil and max < min) {
+            return atom;
+        }
+        PPOS = k + 1;
+        return {"t": "rep", "min": min, "max": max, "child": atom};
+    }
+    return atom;
+}
+
+fun parseClass() {
+    var j = PPOS + 1;
+    var neg = false;
+    if (j < PEND and P[j] == "^") {
+        neg = true;
+        j = j + 1;
+    }
+    var chars = "";
+    while (j < PEND and P[j] != "]") {
+        var cc = P[j];
+        if (cc == "\\" and j + 1 < PEND) {
+            var e = P[j + 1];
+            if (e == "d") {
+                chars = chars + DIGITS;
+                j = j + 2;
+            } else {
+                if (e == "w") {
+                    chars = chars + WORDCHARS;
+                    j = j + 2;
+                } else {
+                    chars = chars + e;
+                    j = j + 2;
+                }
+            }
+        } else {
+            if (j + 2 < PEND and P[j + 1] == "-" and P[j + 2] != "]") {
+                chars = chars + expandRange(cc, P[j + 2]);
+                j = j + 3;
+            } else {
+                chars = chars + cc;
+                j = j + 1;
+            }
+        }
+    }
+    if (j < PEND and P[j] == "]") {
+        j = j + 1;
+    }
+    PPOS = j;
+    return {"t": "class", "chars": chars, "neg": neg};
+}
+
+fun parseAtom() {
+    var c = P[PPOS];
+    if (c == "(") {
+        PPOS = PPOS + 1;
+        NGROUPS = NGROUPS + 1;
+        var id = NGROUPS;
+        var inner = parseAlts();
+        if (PPOS < PEND and P[PPOS] == ")") {
+            PPOS = PPOS + 1;
+        }
+        return {"t": "grp", "id": id, "child": inner};
+    }
+    if (c == "[") {
+        return parseClass();
+    }
+    if (c == "\\") {
+        if (PPOS + 1 >= PEND) {
+            PPOS = PPOS + 1;
+            return {"t": "lit", "c": "\\"};
+        }
+        var e = P[PPOS + 1];
+        PPOS = PPOS + 2;
+        if (e == "d") {
+            return {"t": "digit"};
+        }
+        if (e == "w") {
+            return {"t": "word"};
+        }
+        if (e in "123456789") {
+            return {"t": "ref", "id": digitVal(e)};
+        }
+        return {"t": "lit", "c": e};
+    }
+    if (c == ".") {
+        PPOS = PPOS + 1;
+        return {"t": "dot"};
+    }
+    PPOS = PPOS + 1;
+    return {"t": "lit", "c": c};
+}
+
+fun parseSeq() {
+    var items = [];
+    while (PPOS < PEND and P[PPOS] != "|" and P[PPOS] != ")") {
+        var atom = parseAtom();
+        if (PPOS < PEND) {
+            var q = P[PPOS];
+            if (q == "*") {
+                PPOS = PPOS + 1;
+                atom = {"t": "rep", "min": 0, "max": nil, "child": atom};
+            } else {
+                if (q == "+") {
+                    PPOS = PPOS + 1;
+                    atom = {"t": "rep", "min": 1, "max": nil, "child": atom};
+                } else {
+                    if (q == "?") {
+                        PPOS = PPOS + 1;
+                        atom = {"t": "rep", "min": 0, "max": 1, "child": atom};
+                    } else {
+                        if (q == "{") {
+                            atom = tryBrace(atom);
+                        }
+                    }
+                }
+            }
+        }
+        items.append(atom);
+    }
+    return {"t": "seq", "items": items};
+}
+
+fun parseAlts() {
+    var first = parseSeq();
+    if (PPOS < PEND and P[PPOS] == "|") {
+        var opts = [first];
+        while (PPOS < PEND and P[PPOS] == "|") {
+            PPOS = PPOS + 1;
+            opts.append(parseSeq());
+        }
+        return {"t": "alt", "opts": opts};
+    }
+    return first;
+}
+
+fun compilePattern(pattern) {
+    P = pattern;
+    PLEN = len(pattern);
+    PPOS = 0;
+    PEND = PLEN;
+    NGROUPS = 0;
+    var anchoredStart = false;
+    var anchoredEnd = false;
+    if (PLEN > 0 and P[0] == "^") {
+        anchoredStart = true;
+        PPOS = 1;
+    }
+    // A trailing "$" is an anchor only when not escaped by an odd run
+    // of backslashes (a literal "\$" keeps its backslash escape).
+    if (PLEN > 0 and P[PLEN - 1] == "$") {
+        var bs = 0;
+        var i = PLEN - 2;
+        while (i >= 0 and P[i] == "\\") {
+            bs = bs + 1;
+            i = i - 1;
+        }
+        if (bs % 2 == 0) {
+            anchoredEnd = true;
+            PEND = PLEN - 1;
+        }
+    }
+    var body = parseAlts();
+    return {"anchoredStart": anchoredStart, "anchoredEnd": anchoredEnd, "body": body};
+}
+
+// ---------- matcher (backtracking; -1 is failure) ----------
+var S = "";
+var SLEN = 0;
+
+fun copyGroups(g) {
+    var c = [];
+    for (var x in g) {
+        c.append(x);
+    }
+    return c;
+}
+
+fun restoreGroups(g, snap) {
+    var i = 0;
+    while (i < len(snap)) {
+        g[i] = snap[i];
+        i = i + 1;
+    }
+}
+
+fun newGroups() {
+    var g = [nil];
+    var i = 0;
+    while (i < NGROUPS) {
+        g.append(nil);
+        i = i + 1;
+    }
+    return g;
+}
+
+fun matchNode(node, pos, groups) {
+    var t = node["t"];
+    if (t == "lit") {
+        if (pos < SLEN and S[pos] == node["c"]) {
+            return pos + 1;
+        }
+        return -1;
+    }
+    if (t == "dot") {
+        if (pos < SLEN) {
+            return pos + 1;
+        }
+        return -1;
+    }
+    if (t == "digit") {
+        if (pos < SLEN and isDigitChar(S[pos])) {
+            return pos + 1;
+        }
+        return -1;
+    }
+    if (t == "word") {
+        if (pos < SLEN and isWordChar(S[pos])) {
+            return pos + 1;
+        }
+        return -1;
+    }
+    if (t == "class") {
+        if (pos < SLEN) {
+            var hit = S[pos] in node["chars"];
+            if (hit != node["neg"]) {
+                return pos + 1;
+            }
+        }
+        return -1;
+    }
+    if (t == "seq") {
+        return matchSeqRange(node["items"], 0, pos, groups);
+    }
+    if (t == "alt") {
+        var entry = copyGroups(groups);
+        for (var opt in node["opts"]) {
+            var r = matchNode(opt, pos, groups);
+            if (r != -1) {
+                return r;
+            }
+            restoreGroups(groups, entry);
+        }
+        restoreGroups(groups, entry);
+        return -1;
+    }
+    if (t == "grp") {
+        var r = matchNode(node["child"], pos, groups);
+        if (r == -1) {
+            return -1;
+        }
+        groups[node["id"]] = S[pos:r];
+        return r;
+    }
+    if (t == "ref") {
+        var id = node["id"];
+        if (id >= len(groups)) {
+            return pos;
+        }
+        var txt = groups[id];
+        if (txt == nil) {
+            return pos;
+        }
+        var n = len(txt);
+        if (n == 0) {
+            return pos;
+        }
+        if (pos + n > SLEN) {
+            return -1;
+        }
+        if (S[pos:pos + n] == txt) {
+            return pos + n;
+        }
+        return -1;
+    }
+    return -1;
+}
+
+// Failure restores groups to the entry state; success leaves the
+// winning path's captures behind.
+fun matchSeqRange(items, i, pos, groups) {
+    if (i >= len(items)) {
+        return pos;
+    }
+    var item = items[i];
+    if (item["t"] == "rep") {
+        return matchRep(item, items, i, pos, groups);
+    }
+    var snap = copyGroups(groups);
+    var p2 = matchNode(item, pos, groups);
+    if (p2 == -1) {
+        restoreGroups(groups, snap);
+        return -1;
+    }
+    var r = matchSeqRange(items, i + 1, p2, groups);
+    if (r == -1) {
+        restoreGroups(groups, snap);
+        return -1;
+    }
+    return r;
+}
+
+fun matchRep(rep, items, i, pos, groups) {
+    var entry = copyGroups(groups);
+    var min = rep["min"];
+    var max = rep["max"];
+    var ends = [pos];
+    var states = [copyGroups(groups)];
+    var cur = pos;
+    while (true) {
+        if (max != nil) {
+            if (len(ends) - 1 >= max) {
+                break;
+            }
+        }
+        var snap = copyGroups(groups);
+        var nxt = matchNode(rep["child"], cur, groups);
+        if (nxt == -1) {
+            restoreGroups(groups, snap);
+            break;
+        }
+        if (nxt <= cur) {
+            restoreGroups(groups, snap);
+            break;
+        }
+        cur = nxt;
+        ends.append(cur);
+        states.append(copyGroups(groups));
+    }
+    var k = len(ends) - 1;
+    while (k >= min) {
+        restoreGroups(groups, states[k]);
+        var r = matchSeqRange(items, i + 1, ends[k], groups);
+        if (r != -1) {
+            return r;
+        }
+        k = k - 1;
+    }
+    restoreGroups(groups, entry);
+    return -1;
+}
+
+fun findFrom(prog, from) {
+    var body = prog["body"];
+    if (prog["anchoredStart"]) {
+        var g = newGroups();
+        var r = matchNode(body, 0, g);
+        if (r != -1) {
+            if (prog["anchoredEnd"] == false or r == SLEN) {
+                return [0, r, g];
+            }
+        }
+        return nil;
+    }
+    var s = from;
+    while (s <= SLEN) {
+        var g2 = newGroups();
+        var r2 = matchNode(body, s, g2);
+        if (r2 != -1) {
+            if (prog["anchoredEnd"] == false or r2 == SLEN) {
+                return [s, r2, g2];
+            }
+        }
+        s = s + 1;
+    }
+    return nil;
+}
+
+// Leftmost non-overlapping spans; empty matches advance by one char.
+fun allSpans(prog) {
+    var out = [];
+    if (prog["anchoredStart"]) {
+        var m = findFrom(prog, 0);
+        if (m != nil) {
+            out.append([m[0], m[1]]);
+        }
+        return out;
+    }
+    var from = 0;
+    while (from <= SLEN) {
+        var m2 = findFrom(prog, from);
+        if (m2 == nil) {
+            break;
+        }
+        out.append([m2[0], m2[1]]);
+        if (m2[1] > m2[0]) {
+            from = m2[1];
+        } else {
+            from = m2[0] + 1;
+        }
+    }
+    return out;
+}
+
+// ---------- output ----------
+fun emitLine(line, prefix, prog, onlyMatching, useColor, colorOpen, colorClose) {
+    if (onlyMatching) {
+        var spans = allSpans(prog);
+        for (var sp in spans) {
+            var text = S[sp[0]:sp[1]];
+            if (useColor) {
+                text = colorOpen + text + colorClose;
+            }
+            if (prefix == "") {
+                print text;
+            } else {
+                print prefix + text;
+            }
+        }
+        return len(spans) > 0;
+    }
+    var m = findFrom(prog, 0);
+    if (m == nil) {
+        return false;
+    }
+    if (useColor) {
+        var spans2 = allSpans(prog);
+        var out = "";
+        var cur = 0;
+        for (var sp2 in spans2) {
+            out = out + S[cur:sp2[0]] + colorOpen + S[sp2[0]:sp2[1]] + colorClose;
+            cur = sp2[1];
+        }
+        out = out + S[cur:SLEN];
+        if (prefix == "") {
+            print out;
+        } else {
+            print prefix + out;
+        }
+        return true;
+    }
+    if (prefix == "") {
+        print line;
+    } else {
+        print prefix + line;
+    }
+    return true;
+}
+
+fun processLines(lines, prefix, prog, onlyMatching, useColor, colorOpen, colorClose) {
+    var matched = false;
+    for (var line in lines) {
+        S = line;
+        SLEN = len(line);
+        if (emitLine(line, prefix, prog, onlyMatching, useColor, colorOpen, colorClose)) {
+            matched = true;
+        }
+    }
+    return matched;
+}
+
+// ---------- CLI ----------
+fun main() {
+    var a = args();
+    var pattern = nil;
+    var onlyMatching = false;
+    var colorMode = "never";
+    var files = [];
+    var i = 0;
+    while (i < len(a)) {
+        var t = a[i];
+        if (t == "-E") {
+            if (i + 1 >= len(a)) {
+                exit(2);
+            }
+            pattern = a[i + 1];
+            i = i + 2;
+        } else {
+            if (t == "-o") {
+                onlyMatching = true;
+                i = i + 1;
+            } else {
+                if (t == "-r") {
+                    // Accepted: the wrapper expands directories to files.
+                    i = i + 1;
+                } else {
+                    if (t == "--color=always") {
+                        colorMode = "always";
+                        i = i + 1;
+                    } else {
+                        if (t == "--color=never") {
+                            colorMode = "never";
+                            i = i + 1;
+                        } else {
+                            if (t == "--color=auto") {
+                                // No isatty in Lox++; the wrapper resolves
+                                // auto beforehand. Fall back to plain.
+                                colorMode = "never";
+                                i = i + 1;
+                            } else {
+                                if (t == "--color") {
+                                    if (i + 1 >= len(a)) {
+                                        exit(2);
+                                    }
+                                    colorMode = a[i + 1];
+                                    i = i + 2;
+                                } else {
+                                    if (len(t) > 2 and t[0:2] == "-E") {
+                                        pattern = t[2:len(t)];
+                                        i = i + 1;
+                                    } else {
+                                        files.append(t);
+                                        i = i + 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (pattern == nil) {
+        exit(2);
+    }
+    var prog = compilePattern(pattern);
+    var useColor = false;
+    var colorOpen = "";
+    var colorClose = "";
+    if (colorMode == "always") {
+        var o = env("LOXPP_COLOR_OPEN");
+        var c = env("LOXPP_COLOR_CLOSE");
+        if (o != nil and c != nil) {
+            useColor = true;
+            colorOpen = o;
+            colorClose = c;
+        }
+    }
+    var matched = false;
+    if (len(files) == 0) {
+        var lines = [];
+        var line = input();
+        while (line != nil) {
+            lines.append(line);
+            line = input();
+        }
+        matched = processLines(lines, "", prog, onlyMatching, useColor, colorOpen, colorClose);
+    } else {
+        var multi = len(files) > 1;
+        for (var fi = 0; fi < len(files); fi = fi + 1) {
+            var f = files[fi];
+            if (is_dir(f)) {
+                continue;
+            }
+            if (exists(f) == false) {
+                continue;
+            }
+            var fh = open(f, "r");
+            var flines = fh.readlines();
+            fh.close();
+            var prefix = "";
+            if (multi) {
+                prefix = f + ":";
+            }
+            if (processLines(flines, prefix, prog, onlyMatching, useColor, colorOpen, colorClose)) {
+                matched = true;
+            }
+        }
+    }
+    if (matched) {
+        exit(0);
+    }
+    exit(1);
+}
+
+main();
