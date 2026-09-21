@@ -92,6 +92,11 @@ class Row:
     expected_message: str | None = None  # spec's Message column literal, when disposition == "fatal"
     skip: dict[str, str] = field(default_factory=dict)  # consumer -> reason, skips the whole row
     skip_fields: dict[str, set[str]] = field(default_factory=dict)  # consumer -> {"type", "str", "message"}
+    # consumer -> a substring that must appear in that consumer's own fatal
+    # message, checked in place of the normal native-message-is-a-substring
+    # comparison when "message" is in skip_fields for that consumer (issue
+    # #374): a real, weaker property instead of no check at all.
+    message_contains: dict[str, str] = field(default_factory=dict)
 
     def program(self, workdir: Path | None = None) -> str:
         if self.disposition == "caught":
@@ -268,15 +273,24 @@ FATAL_ROWS = [
         expected_message="Expected 0 arguments but got 1.",
     ),
     # A stdlib native's own error text is not enumerated by spec/04-semantics.md
-    # (see the Fatal Runtime Errors section's own note); native and the JVM
-    # backend report different text for the same open() failure (native names
-    # the path once, the JVM's IOException message repeats it). Disposition
-    # (fatal on every consumer) is still checked; the message text is not.
+    # (see the Fatal Runtime Errors section's own note); native, JVM, and
+    # CLR each report a different OS/runtime-level reason for the same
+    # open() failure (native: "No such file or directory"; JVM's IOException
+    # repeats the path before its own parenthesized reason; CLR's own
+    # exception text is worded differently again) -- full message equality
+    # is not realistic across three different OS/runtime error-reporting
+    # conventions. Issue #374 decided this: assert the weaker, still-real
+    # property that every consumer's message names the failing path,
+    # instead of skipping the field outright. The bootstrap interpreter
+    # calls the same native open() bootstrap itself runs under, so its
+    # message matches native exactly -- no skip needed there at all.
+    # Disposition (fatal on every consumer) is always checked regardless.
     Row(
         "stdlib_open_failure",
         "fatal",
         'open("/no/such/path", "r");',
-        skip_fields={JVM: {"message"}, CLR: {"message"}, BOOTSTRAP: {"message"}},
+        skip_fields={JVM: {"message"}, CLR: {"message"}},
+        message_contains={JVM: "/no/such/path", CLR: "/no/such/path"},
         expected_message="open(): cannot open '/no/such/path': No such file or directory",
     ),
     # Issue #375: unlike an index read/write, a map/set literal, or `in`
@@ -1049,6 +1063,15 @@ def compare(row: Row, native_result: RunResult, other: RunResult, consumer: str)
             other_msg = other.message or ""
             if not native_msg or native_msg not in other_msg:
                 problems.append(f"message: native={native_msg!r} not found in {consumer}={other_msg!r}")
+        elif consumer in row.message_contains:
+            wanted = row.message_contains[consumer]
+            other_msg = other.message or ""
+            if wanted not in other_msg:
+                problems.append(
+                    f"message: {consumer}={other_msg!r} does not contain the required "
+                    f"substring {wanted!r} (full native-message match is skipped for this "
+                    "row/consumer; see the row's own comment)"
+                )
         return problems
     if native_result.outcome != "caught":
         return problems
