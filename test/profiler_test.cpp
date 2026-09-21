@@ -133,6 +133,37 @@ TEST_F(ProfilerTest, GcStatsPopulated) {
         << "Expected non-zero bytes freed after GC";
 }
 
+// ---------------------------------------------------------------------------
+// 5. Call chain deeper than 64 frames stays in bounds (issue #299).
+//
+// frameEnterNs runs parallel to m_frames[]. Depth 200 exceeds the old
+// hardcoded size (64) but stays well below FRAMES_MAX, so it fails
+// before the fix and passes after it.
+// ---------------------------------------------------------------------------
+
+TEST_F(ProfilerTest, DeepRecursionPast64Frames) {
+    VM vm;
+    InterpretResult result = vm.interpret(R"(
+        fun recurse(n) {
+            if (n <= 0) return 0;
+            return recurse(n - 1);
+        }
+        recurse(200);
+    )");
+    ASSERT_EQ(result, InterpretResult::OK) << "200-deep chain must run clean";
+    const ProfilerData& data = vm.profilerData();
+
+    const FunctionStats* stats = nullptr;
+    for (const auto& [fn, s] : data.funcTable) {
+        if (s.name == "recurse") {
+            stats = &s;
+            break;
+        }
+    }
+    ASSERT_NE(stats, nullptr) << "No profiler entry for 'recurse'";
+    EXPECT_EQ(stats->callCount, 201u) << "recurse(200) must record 201 calls";
+}
+
 #else // LOXPP_PROFILE not defined
 
 // Placeholder so the test binary compiles and reports a clear skip message.
