@@ -1,3 +1,4 @@
+using System.Reflection;
 using Lox;
 
 namespace LoxRuntimeTests;
@@ -33,6 +34,35 @@ public static class StackDepthTest {
             "1022 nested Lox calls succeed, the deepest native's own frame ceiling allows");
         t.CheckThrows(() => down.Call(new object[] { 1023.0 }), typeof(LoxError),
             "1023 nested Lox calls overflow, the same depth src/vm.cpp's FRAMES_MAX rejects");
+
+        // The ceiling check must use >=, not ==: s_frameCount only grows,
+        // so a count already past FramesMax (a handler opened past the
+        // ceiling) never hits an exact match again. No Lox program reaches
+        // that state through normal calls, so drive it direct here.
+        FieldInfo countField = typeof(LoxClosure).GetField(
+            "s_frameCount", BindingFlags.NonPublic | BindingFlags.Static);
+        int savedCount = (int)countField.GetValue(null);
+        try {
+            countField.SetValue(null, 1025);
+            DelegateClosure trivial = new DelegateClosure(
+                "trivial", 0, new object[0][], (self, a) => 0.0);
+            try {
+                trivial.Call(new object[0]);
+                t.Check(false,
+                    "a call past FramesMax overflows instead of running");
+            } catch (LoxError e) {
+                t.Check(e.Catchable,
+                    "an overflow past FramesMax stays catchable");
+                LoxInstance inst = e.Value as LoxInstance;
+                object kind = null;
+                bool hasKind = inst != null &&
+                    inst.Fields.TryGetValue("kind", out kind);
+                t.Check(hasKind && (kind as string) == "StackOverflowError",
+                    "an overflow past FramesMax carries kind StackOverflowError");
+            }
+        } finally {
+            countField.SetValue(null, savedCount);
+        }
 
         return t.Finish("StackDepthTest");
     }
