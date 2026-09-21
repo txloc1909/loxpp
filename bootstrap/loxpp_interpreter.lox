@@ -1544,6 +1544,20 @@ class LoxFunction {
                         interp.throwFlag = savedThrow;
                         interp.thrownValue = savedValue;
                     }
+                } else {
+                    // Matches native's own VM::call: an arity mismatch on a
+                    // deferred call is the ordinary catchable ArityError, not
+                    // a fatal fault -- native's VM::runPendingDefers calls the
+                    // same VM::call() a normal call uses, so any handler still
+                    // live around this function's own caller sees it (issue
+                    // #359 measured only the no-handler shape, where this and
+                    // an uncaught halt look identical). Matches native's own
+                    // "abandon any remaining sibling defers" rule too
+                    // (src/vm.cpp's runPendingDefers): the mismatched call
+                    // never started, so nothing here drains the defers that
+                    // have not run yet.
+                    interp.setError("ArityError", "Expected " + str(callee.arity()) + " arguments but got " + str(len(defer_args)) + ".", 0);
+                    break;
                 }
             } else {
                 interp.fatalError("Deferred callable has unexpected type.");
@@ -2686,8 +2700,14 @@ class Interpreter {
                 this.fatalError("Deferred callable has unexpected type.");
             }
             if (callee.arity() != -1 and len(args) != callee.arity()) {
+                // Unlike LoxFunction.call's own defer drain (issue #359),
+                // this method only runs while finalizing an already-uncaught
+                // throw (interpret()'s own throwFlag branch, below every
+                // live try/catch) -- no handler can ever be reachable here,
+                // so this stays fatal, matching native's own equivalent
+                // no-handler-found disposition.
                 i = i - 1;
-                continue;
+                this.fatalError("Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".");
             }
             var savedThrow = this.throwFlag;
             var savedValue = this.thrownValue;

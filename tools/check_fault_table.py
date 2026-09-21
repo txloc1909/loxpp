@@ -127,6 +127,16 @@ CATCHABLE_ROWS = [
     Row("concatenation_type_error", "caught", '1 + "a";', expected_kind="ConcatenationTypeError"),
     Row("not_callable_error", "caught", "42();", expected_kind="NotCallableError"),
     Row("arity_error", "caught", "fun f(a) {} f(1, 2);", expected_kind="ArityError"),
+    # A deferred call's own arity mismatch (issue #359): the same ArityError
+    # kind as an ordinary call, through VM::runPendingDefers -> VM::call, not
+    # a new spec table row.
+    Row(
+        "arity_error_deferred_call",
+        "caught",
+        "g();",
+        setup="fun needsOne(a) {}\nfun g() { defer needsOne(); }\n",
+        expected_kind="ArityError",
+    ),
     Row("undefined_variable_error", "caught", "print undeclared;", expected_kind="UndefinedVariableError"),
     # `f` is declared OUTSIDE the try (setup), not inside it: a self-recursive
     # local function declared inside a try block fails JVM bytecode
@@ -685,6 +695,9 @@ CATCHABLE_REGRESSION_ROWS = {
     # Found while working issue #367: a second entry for the same spec row
     # as constructor_arity_error, pinning the no-init-class aliasing bug.
     "constructor_arity_error_no_init_class",
+    # Issue #359: a deferred call's own arity mismatch shares arity_error's
+    # spec row, through a different call site (VM::runPendingDefers).
+    "arity_error_deferred_call",
 }
 
 FATAL_REGRESSION_ROWS = {
