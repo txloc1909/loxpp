@@ -123,7 +123,9 @@ analyzeHandlerDepthIns(const std::vector<DecodedInstruction>& ins,
     }
 
     auto setBefore = [&](int idx, int depth, std::vector<int>& worklist) {
-        if (!out.reached[static_cast<size_t>(idx)]) {
+        // vector<bool> packs bits: its proxy reference has no plain
+        // operator!, so compare against false instead.
+        if (out.reached[static_cast<size_t>(idx)] == false) {
             out.reached[static_cast<size_t>(idx)] = true;
             out.before[static_cast<size_t>(idx)] = depth;
             worklist.push_back(idx);
