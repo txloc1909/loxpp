@@ -2,6 +2,7 @@
 #include <string>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 #include "value.h"
 #include "chunk.h"
@@ -58,6 +59,12 @@ class VMTestHarness {
 
     // Run a complete Lox++ program and return the interpret result.
     InterpretResult run(const std::string& source);
+
+    // Run with handler-depth tracing armed. Records (chunk offset, handler
+    // depth) before each dispatched instruction. Single-chunk programs
+    // only: callers compare offsets against the decoded script chunk.
+    std::vector<std::pair<int, int>>
+    runWithHandlerTrace(const std::string& source, InterpretResult* out);
 
     // Stack depth at the moment of the call.
     int stackDepth() const { return m_vm.stackDepth(); }

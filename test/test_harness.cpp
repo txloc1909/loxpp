@@ -106,6 +106,19 @@ InterpretResult VMTestHarness::run(const std::string& source) {
     return m_vm.interpret(source);
 }
 
+std::vector<std::pair<int, int>>
+VMTestHarness::runWithHandlerTrace(const std::string& source,
+                                   InterpretResult* out) {
+    std::vector<std::pair<int, int>> trace;
+    m_vm.setHandlerDepthTrace(&trace);
+    InterpretResult result = m_vm.interpret(source);
+    m_vm.setHandlerDepthTrace(nullptr);
+    if (out != nullptr) {
+        *out = result;
+    }
+    return trace;
+}
+
 std::string VMTestHarness::getGlobalStr(const std::string& name) const {
     auto v = m_vm.getGlobal(name);
     if (!v)
