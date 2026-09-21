@@ -115,7 +115,7 @@ class Row:
         return text
 
 
-# --- Catchable Runtime Errors table (spec/04-semantics.md, 19 rows) -------
+# --- Catchable Runtime Errors table (spec/04-semantics.md, 18 rows) -------
 #
 # Most Example cells are bare expressions the spec table lists standalone;
 # a few reference a name the cell itself never declares (`m`, `list`) or are
@@ -159,10 +159,6 @@ CATCHABLE_ROWS = [
         setup="var m = {};\n",
         expected_kind="InvalidMapKeyError",
     ),
-    # MaxDepthExceededError: native reports this fatal today (see the
-    # FATAL_ROWS entry below), the opposite disposition from this table
-    # row. Issue #338 owns which disposition is correct; this test does not
-    # run this row, on any consumer, until that is settled.
     Row("invalid_receiver_error", "caught", "42.foo();", expected_kind="InvalidReceiverError"),
     # Regression row for issue #348: calling a plain non-callable value must
     # stay catchable even after a previous field read. The old code tracked
@@ -214,12 +210,13 @@ FATAL_ROWS = [
         setup="enum Result { Ok(v) Err(m) }\n",
         expected_message="GET_TAG: expected an enum value.",
     ),
-    # Value nested too deep to print: fatal on native today, with no
-    # `Error.kind`, but this exact fault keeps a catchable row
-    # (MaxDepthExceededError) in the table above -- the opposite
-    # disposition. Issue #338 decides which is correct; until then, this is
-    # not one settled ground truth to diff the other three consumers
-    # against, so this test does not run it.
+    Row(
+        "max_depth_exceeded",
+        "fatal",
+        "print a;",
+        setup="var a = [1]; var i = 0; while (i < 300) { a = [a]; i = i + 1; }\n",
+        expected_message="Value nesting is too deep.",
+    ),
     Row(
         "stdlib_native_arity",
         "fatal",
@@ -567,6 +564,11 @@ _BOOTSTRAP_FATAL_DEFAULT_SKIP = (
     "disposition"
 )
 for _row in FATAL_ROWS:
+    if _row.name == "max_depth_exceeded":
+        # Issue #325: bootstrap's stringify() guard now calls fatalError,
+        # matching native/JVM/CLR's fatal disposition, so it is exempt from
+        # the blanket skip below.
+        continue
     if _row.name == "stdlib_open_failure":
         # Unlike the rest of FATAL_ROWS, bootstrap agrees with native's
         # fatal disposition here (only the message text differs, already
@@ -859,11 +861,7 @@ def main() -> None:
 
     validate_row_anchors(ALL_ROWS)
 
-    # MaxDepthExceededError is the one catchable-table row this script does
-    # not run at all (see CATCHABLE_ROWS's own comment): its disposition
-    # conflicts with the Fatal Runtime Errors table's own row for the same
-    # fault, and issue #338, not this test, decides which is correct.
-    excluded_catchable_rows = 1
+    excluded_catchable_rows = 0
     # call_non_callable_after_field_read is a second CATCHABLE_ROWS entry for
     # the same spec row as not_callable_error: regression armor for issue
     # #348 (a bare 42() must stay catchable even after an earlier field
@@ -876,18 +874,13 @@ def main() -> None:
             f"check_fault_table.py: spec/04-semantics.md's catchable table has "
             f"{spec_row_count} row(s), but CATCHABLE_ROWS covers "
             f"{len(CATCHABLE_ROWS)} (-{extra_catchable_rows} regression-only entry "
-            f"for an existing row, +{excluded_catchable_rows} deliberately "
-            "excluded, see MaxDepthExceededError's comment). The table changed; "
+            "for an existing row). The table changed; "
             "update this script's corpus to match.",
             file=sys.stderr,
         )
         sys.exit(2)
 
-    # The canonical-string depth row is the one Fatal table row this script
-    # does not run at all (issue #338 owns its disposition; see FATAL_ROWS's
-    # own module comment). Guards FATAL_ROWS against the table changing
-    # underneath it the same way the check above guards CATCHABLE_ROWS.
-    excluded_fatal_rows = 1
+    excluded_fatal_rows = 0
     # invoke_chained_property_get and invoke_grouped_property_get are
     # regression armor for issue #348: they exercise the same spec row as
     # property_get_non_instance ("42.foo;" -- "Only instances have
@@ -902,8 +895,7 @@ def main() -> None:
             f"check_fault_table.py: spec/04-semantics.md's Fatal Runtime Errors "
             f"table has {spec_fatal_row_count} row(s), but FATAL_ROWS covers "
             f"{len(FATAL_ROWS)} (-{extra_fatal_rows} regression-only entries for "
-            f"an existing row, +{excluded_fatal_rows} deliberately excluded, "
-            "see the canonical-string depth row's comment). The table changed; "
+            "an existing row). The table changed; "
             "update this script's corpus to match.",
             file=sys.stderr,
         )
