@@ -1,0 +1,20 @@
+// Issue #316: native holds VM::m_unwindingStackOverflow (src/vm.cpp) for
+// the duration of one StackOverflowError's own unwind, so a SECOND
+// overflow that happens from a deferred call running during that unwind
+// is fatal, not delivered to the live handler below. Before this fix, the
+// CLR backend's frame-count ceiling (LoxClosure.CallAsSelf) had no such
+// guard and caught this cleanly instead -- the opposite of native.
+//
+// This file lives outside the parent translation-probes directory, and
+// outside examples/, on purpose, matching 53_stack_overflow_catchable.lox's
+// own note: it is the reentrant twin of that probe, so it stays beside it.
+fun deepcall(n) { if (n == 0) return 0; return deepcall(n - 1); }
+fun boom(n) { deepcall(500); }
+fun f(n) { defer boom(n); f(n + 1); }
+try {
+    f(0);
+    print "no error";
+} catch (e) {
+    print "caught " + e.kind;
+}
+print "after";

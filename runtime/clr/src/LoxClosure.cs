@@ -45,6 +45,18 @@ public abstract class LoxClosure : ILoxCallable {
     // succeed than FRAMES_MAX allows natively.
     private static int s_frameCount = 1;
 
+    // Mirrors src/vm.cpp's VM::m_unwindingStackOverflow: set for the
+    // duration of one StackOverflowError's own unwind (from the moment the
+    // ceiling throws it until the specific catch that receives it runs -
+    // see LoxOps.NotifyErrorCaught, called from the shared catch prologue
+    // clr_emitter.cpp emits for every try/catch). A second overflow that
+    // hits the ceiling while this is still true (e.g. from a deferred call
+    // running during that unwind) goes fatal below instead of catchable -
+    // native holds the same guard for the same reason: the alternative is
+    // genuine re-entrant unwinding, which native's own C++ call structure
+    // cannot support past one level either.
+    internal static bool s_unwindingStackOverflow = false;
+
     public readonly string Name; // null for the top-level script, per <script>
     public readonly int Arity;
     public readonly object[][] Upvalues;
@@ -66,10 +78,17 @@ public abstract class LoxClosure : ILoxCallable {
         // past FramesMax (a handler opened past the ceiling) would never
         // see an exact match again. Matches src/vm.cpp VM::call().
         if (s_frameCount >= FramesMax) {
+            if (s_unwindingStackOverflow) {
+                // A second overflow while the first is still unwinding -
+                // matches native's RAISE_ERROR("Stack overflow.") fatal
+                // path (src/vm.cpp), not tryCatchableError's catchable one.
+                throw new LoxError("Stack overflow.");
+            }
             // A bare-message LoxError is uncatchable (LoxError.cs's own
             // Catchable field) - native marks this fault catchable
             // (spec/04-semantics.md, StackOverflowError), so this must
             // carry a real Error value with that kind, not a message alone.
+            s_unwindingStackOverflow = true;
             throw new LoxError(LoxRuntime.MakeError("Stack overflow.", "StackOverflowError"));
         }
         s_frameCount++;

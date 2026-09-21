@@ -404,6 +404,34 @@ public static class LoxOps {
         "No matching arm in match expression.", "MatchError"));
 
     // ------------------------------------------------------------------
+    // catch dispatch
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Called from the shared catch prologue clr_emitter.cpp emits for
+    /// every try/catch, right after a catchable LoxError's Value is known
+    /// but before the handler body runs. Clears LoxClosure's
+    /// s_unwindingStackOverflow guard when (and only when) the value just
+    /// caught is specifically a StackOverflowError - an unrelated caught
+    /// value (different kind, or not an Error at all) must not touch the
+    /// guard, or a second overflow that happens later, while a real
+    /// StackOverflowError is still unwinding, would wrongly be allowed to
+    /// catch (issue #316). Public, not internal: this is called from the
+    /// generated program's own assembly (clr_emitter.cpp), which only sees
+    /// LoxRuntime's public surface - the same reason MakeError, MatchError,
+    /// and LoxError's own Catchable/Value properties are public rather than
+    /// internal despite never being called from Lox++ source directly.
+    /// </summary>
+    public static void NotifyErrorCaught(LoxError e) {
+        if (e.Value is LoxInstance instance &&
+            ReferenceEquals(instance.Klass, LoxRuntime.ErrorClass) &&
+            instance.Fields.TryGetValue("kind", out object kind) &&
+            (kind as string) == "StackOverflowError") {
+            LoxClosure.s_unwindingStackOverflow = false;
+        }
+    }
+
+    // ------------------------------------------------------------------
     // instanceof / properties / methods
     // ------------------------------------------------------------------
 

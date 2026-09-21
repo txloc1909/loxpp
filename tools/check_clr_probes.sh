@@ -291,6 +291,13 @@ error_probes=(
     # with the catch block never running (its own SHOULD_NOT_CATCH/
     # SHOULD_NOT_REACH prints must not appear in stdout).
     "examples/try_catch_instance_property_not_caught.lox"
+    # Issue #316: a second overflow while the first is still unwinding
+    # (here, from a deferred call) must be fatal on the CLR backend too,
+    # matching native's m_unwindingStackOverflow guard -- not caught by
+    # the live handler below, the way a single, non-reentrant overflow is
+    # (53_stack_overflow_catchable.lox, above). Lives in clr-only/ (see the
+    # probe file's own header comment); named here directly.
+    "test/translation-probes/clr-only/54_stack_overflow_reentrant_fatal.lox"
 )
 
 # Probes that stay wrong on purpose. native's own value-stack ceiling
