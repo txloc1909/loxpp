@@ -160,8 +160,6 @@ PROBES = [
     ("undefined member via super",
      "class A {} class B < A { m() { super.zzz(); } } try { B().m(); } catch (e) { print e.kind; }",
      FATAL, "UndefinedMemberError", '"Undefined property \'" + method + "\'."'),
-    ("property write on a non-instance", "try { 42.foo = 1; } catch (e) { print e.kind; }",
-     FATAL, "InvalidFieldReceiverError", '"Only instances have fields."'),
     ("for-in on a non-iterable", "try { for (var x in 42) {} } catch (e) { print e.kind; }",
      FATAL, "ForInNotIterableError", '"Value is not iterable (expected list, string, or map)."'),
     ("map size changed during for-in", "try { var m = {1: 1}; for (var k in m) { m[2] = 2; } } catch (e) { print e.kind; }",

@@ -535,6 +535,17 @@ REFLECT_ROWS = [
         setup=_REFLECT_SETUP,
         expected_message="Only instances have fields.",
     ),
+    # Issue #355: the plain `.` write door onto the same restriction --
+    # spec/03-types.md's Error section makes a write to any name on an
+    # Error value a runtime error, and the reflection door above (setField)
+    # is not the only way to reach it.
+    Row(
+        "property_set_on_error",
+        "fatal",
+        'e.kind = "z";',
+        setup=_REFLECT_SETUP,
+        expected_message="Only instances have fields.",
+    ),
     Row(
         "reflect_callmethod_on_error",
         "fatal",
@@ -589,6 +600,11 @@ for _row in FATAL_ROWS:
         # Issue #325: bootstrap's stringify() guard now calls fatalError,
         # matching native/JVM/CLR's fatal disposition, so it is exempt from
         # the blanket skip below.
+        continue
+    if _row.name == "property_set_non_instance":
+        # Issue #355: bootstrap's evalSet now calls fatalError for a
+        # non-instance receiver, matching native's fatal disposition, so
+        # it is exempt from the blanket skip below.
         continue
     if _row.name == "stdlib_open_failure":
         # Unlike the rest of FATAL_ROWS, bootstrap agrees with native's
