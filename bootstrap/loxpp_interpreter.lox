@@ -2012,6 +2012,11 @@ class InterpListMethod {
 class InterpMap {
     init() {
         this.data   = {};
+        // Structural version for the for-in fail-fast check. evalIndexSet
+        // and del bump it on a real insert or erase only. It lives in this
+        // wrapper, not in the native map in data, which interpreted code
+        // cannot read a counter from.
+        this.version = 0;
         this.loxTag = "map";
     }
     toString() { return "<map>"; }
@@ -2040,7 +2045,11 @@ class InterpMapMethod {
                 interp.setInvalidMapKeyError(args[0], 0);
                 return nil;
             }
-            if (this.map.data.has(args[0])) this.map.data.del(args[0]);
+            // Count only a real erase: a miss leaves iteration valid.
+            if (this.map.data.has(args[0])) {
+                this.map.data.del(args[0]);
+                this.map.version = this.map.version + 1;
+            }
             return nil;
         }
         if (this.name == "keys") {
@@ -2354,6 +2363,9 @@ class Interpreter {
             }
             var val = this.evalExpr(valueExpr, env);
             if (this.throwFlag) return nil;
+            // Count only a new key: an overwrite leaves iteration valid,
+            // while a paired erase plus insert must still trip the check.
+            if (!object.data.has(index)) object.version = object.version + 1;
             object.data[index] = val;
             return val;
         }
@@ -2430,12 +2442,14 @@ class Interpreter {
         loopEnv.define(varName, nil);
         if (tag == "map") {
             var ks = iterable.data.keys();
-            var expectedSize = len(iterable.data);
+            // Snapshot the structural version, not the size: a paired
+            // erase plus insert restores the net size but still bumps it.
+            var expectedVersion = iterable.version;
             var i = 0;
             while (i < len(ks)) {
                 // Pre-body check: catches a mutation from an earlier
                 // iteration (including via continue) before binding.
-                if (len(iterable.data) != expectedSize) {
+                if (iterable.version != expectedVersion) {
                     this.setError("MapSizeChangedError", "Map changed size during iteration.", varLine);
                     return;
                 }
@@ -2448,7 +2462,7 @@ class Interpreter {
                 // Post-body check: a mutation on the last iteration has no
                 // later binding to catch it, so check before looping back.
                 // Break and return leave above without reaching this check.
-                if (len(iterable.data) != expectedSize) {
+                if (iterable.version != expectedVersion) {
                     this.setError("MapSizeChangedError", "Map changed size during iteration.", varLine);
                     return;
                 }
