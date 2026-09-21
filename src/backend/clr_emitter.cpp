@@ -2610,6 +2610,19 @@ void emitRegionRange(
             result << "    brtrue " << catchableLabel << "\n";
             result << "    rethrow\n";
             result << catchableLabel << ":\n";
+            // Notify the runtime this specific value was just caught,
+            // before any bytecode-derived handler code runs (issue #316):
+            // LoxOps.NotifyErrorCaught clears LoxClosure's
+            // s_unwindingStackOverflow guard when, and only when, this
+            // value's kind is StackOverflowError — the one clear point
+            // that mirrors src/vm.cpp's m_unwindingStackOverflow, since
+            // every try/catch this emitter generates shares this same
+            // prologue. Void return, so the stack is empty again right
+            // after — the Value extraction below reloads catchDispatchSlot
+            // itself rather than relying on anything this call left behind.
+            result << "    " << e.ldloc(e.catchDispatchSlot) << "\n";
+            result << "    call void [LoxRuntime]Lox.LoxOps"
+                      "::NotifyErrorCaught(class [LoxRuntime]Lox.LoxError)\n";
             // Extract the wrapped Lox++ value via the Value property
             // getter before any bytecode-derived handler code runs — the
             // C# auto-property compiles to get_Value() in IL, the same

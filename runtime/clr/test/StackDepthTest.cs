@@ -35,6 +35,19 @@ public static class StackDepthTest {
         t.CheckThrows(() => down.Call(new object[] { 1023.0 }), typeof(LoxError),
             "1023 nested Lox calls overflow, the same depth src/vm.cpp's FRAMES_MAX rejects");
 
+        // The overflow above set LoxClosure.s_unwindingStackOverflow
+        // (issue #316's reentrant-overflow guard) and left it set: this
+        // test catches the LoxError directly in C#, bypassing the
+        // generated-CIL catch prologue (clr_emitter.cpp) whose
+        // LoxOps.NotifyErrorCaught call is the only thing that clears it
+        // in a real Lox++ program. Clear it by hand here so the next
+        // overflow check below is independent of this one, the same way
+        // it would be for two unrelated try/catch blocks in actual Lox++
+        // source.
+        FieldInfo unwindingField = typeof(LoxClosure).GetField(
+            "s_unwindingStackOverflow", BindingFlags.NonPublic | BindingFlags.Static);
+        unwindingField.SetValue(null, false);
+
         // The ceiling check must use >=, not ==: s_frameCount only grows,
         // so a count already past FramesMax (a handler opened past the
         // ceiling) never hits an exact match again. No Lox program reaches
@@ -62,6 +75,32 @@ public static class StackDepthTest {
             }
         } finally {
             countField.SetValue(null, savedCount);
+        }
+
+        // Issue #316: a second overflow while the first is still
+        // unwinding (s_unwindingStackOverflow already true, e.g. from a
+        // deferred call running mid-unwind) must be fatal, not catchable
+        // -- matching src/vm.cpp's m_unwindingStackOverflow. A real Lox++
+        // program sets this flag only through the ceiling check itself;
+        // drive it directly here, the same way the block above drives
+        // s_frameCount directly, since no C# unit test runs through the
+        // generated-CIL catch prologue that would set it another way.
+        unwindingField.SetValue(null, true);
+        try {
+            countField.SetValue(null, 1025);
+            DelegateClosure trivial = new DelegateClosure(
+                "trivial", 0, new object[0][], (self, a) => 0.0);
+            try {
+                trivial.Call(new object[0]);
+                t.Check(false,
+                    "a call past FramesMax while already unwinding an overflow still overflows");
+            } catch (LoxError e) {
+                t.Check(!e.Catchable,
+                    "a second overflow while the first is still unwinding is fatal, not catchable");
+            }
+        } finally {
+            countField.SetValue(null, savedCount);
+            unwindingField.SetValue(null, false);
         }
 
         return t.Finish("StackDepthTest");
