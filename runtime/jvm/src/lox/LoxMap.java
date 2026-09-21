@@ -39,6 +39,17 @@ public final class LoxMap {
 
     private final Map<Object, Slot> entries = new LinkedHashMap<>();
 
+    // Structural version, bumped on a real insert or a real erase only.
+    // A repeat write of one key and a remove of a missing key leave it
+    // alone. LoxIterator snapshots it at construction, so a paired erase
+    // plus insert that restores the net size still trips the check.
+    private int version;
+
+    /** Structural version for the for-in fail-fast check. */
+    int version() {
+        return version;
+    }
+
     // -0.0 and 0.0 must hash and look up identically, matching IEEE 754
     // numeric equality (value.cpp's hashValue canonicalizes the same way).
     // java.lang.Double.equals/hashCode treat them as distinct, so lookups
@@ -52,7 +63,13 @@ public final class LoxMap {
     }
 
     public void put(Object key, Object value) {
-        entries.put(normalizeKey(key), new Slot(key, value));
+        Object normalized = normalizeKey(key);
+        // Count only a new key: an overwrite leaves iteration valid, while
+        // a paired erase plus insert must still trip the iterator check.
+        if (!entries.containsKey(normalized)) {
+            version++;
+        }
+        entries.put(normalized, new Slot(key, value));
     }
 
     public Object get(Object key) {
@@ -65,7 +82,10 @@ public final class LoxMap {
     }
 
     public void remove(Object key) {
-        entries.remove(normalizeKey(key));
+        // Count only a real erase: a miss leaves iteration valid.
+        if (entries.remove(normalizeKey(key)) != null) {
+            version++;
+        }
     }
 
     public int size() {

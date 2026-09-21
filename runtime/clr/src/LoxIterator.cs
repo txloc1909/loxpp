@@ -6,14 +6,16 @@ namespace Lox;
 /// Backs the GET_ITER / ITER_HAS_NEXT / ITER_NEXT protocol. List and String
 /// read the live collection by cursor (a growing list is visited further,
 /// as in vm.cpp's ObjIterator). A Map snapshots its keys at construction
-/// for order, and records the size: a size change during the loop is an
-/// error ("Map changed size during iteration."), as in vm.cpp and Python's
-/// dict rule. Writing a value to a key that already exists is permitted.
+/// for order, and records the structural version: any insert or erase
+/// during the loop is an error ("Map changed size during iteration."),
+/// as in vm.cpp and Python's dict rule — even a paired erase plus insert
+/// that restores the net size. Writing a value to a key that already
+/// exists is permitted.
 /// </summary>
 public sealed class LoxIterator {
     public readonly object Collection;
     private readonly List<object> m_mapKeys; // non-null only when Collection is a LoxMap
-    private readonly int m_expectedMapSize; // -1 unless Collection is a LoxMap
+    private readonly int m_expectedMapVersion; // -1 unless Collection is a LoxMap
     private int m_index;
 
     public LoxIterator(object collection) {
@@ -23,16 +25,16 @@ public sealed class LoxIterator {
             foreach (var e in map.Entries()) {
                 m_mapKeys.Add(e.Key);
             }
-            m_expectedMapSize = map.Size();
+            m_expectedMapVersion = map.Version;
         } else {
             m_mapKeys = null;
-            m_expectedMapSize = -1;
+            m_expectedMapVersion = -1;
         }
     }
 
-    private void CheckMapSize() {
+    private void CheckMapVersion() {
         if (m_mapKeys != null &&
-                ((LoxMap)Collection).Size() != m_expectedMapSize) {
+                ((LoxMap)Collection).Version != m_expectedMapVersion) {
             throw new LoxError("Map changed size during iteration.");
         }
     }
@@ -45,7 +47,7 @@ public sealed class LoxIterator {
             return m_index < s.Length;
         }
         if (m_mapKeys != null) {
-            CheckMapSize();
+            CheckMapVersion();
             return m_index < m_mapKeys.Count;
         }
         throw new LoxError("BUG: LoxIterator holds an unexpected collection type.");
@@ -63,7 +65,7 @@ public sealed class LoxIterator {
             return s[m_index++].ToString();
         }
         if (m_mapKeys != null) {
-            CheckMapSize();
+            CheckMapVersion();
             return m_mapKeys[m_index++];
         }
         throw new LoxError("BUG: LoxIterator holds an unexpected collection type.");

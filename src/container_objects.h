@@ -22,13 +22,14 @@ inline bool isList(const Value& v) { return isValueOfType<ObjType::LIST>(v); }
 struct ObjIterator : public Obj {
     Value collection; // ObjList*, ObjString*, or ObjMap* being iterated
     int index;        // current cursor position
-    // Map size recorded at GET_ITER; -1 unless collection is a Map. A size
-    // change during map iteration is an error.
-    int expectedSize;
+    // Map structural version recorded at GET_ITER; -1 unless collection is a
+    // Map. Any insert or erase during map iteration is an error, even when a
+    // paired erase and insert restore the net size.
+    int expectedVersion;
 
     ObjIterator(Value coll, int idx = 0, int expected = -1)
         : Obj(ObjType::ITERATOR), collection(coll), index(idx),
-          expectedSize(expected) {}
+          expectedVersion(expected) {}
 };
 
 inline bool isObjIterator(Obj* o) { return isObjType(o, ObjType::ITERATOR); }
@@ -111,6 +112,10 @@ struct MapPolicy {
 struct ObjMap : public Obj {
     ObjClass* klass; // shared s_mapClass, for method dispatch
     CoreHashMap<MapEntry, MapPolicy, VmAllocator<MapEntry>> map;
+    // Structural version, bumped by mapSet on a new key and by mapDel on a
+    // real erase only. Overwrites and misses leave it alone. Plain int packs
+    // with CoreHashMap's own counts; wrap needs 2B changes in one loop.
+    int version{0};
 
     ObjMap(ObjClass* k, VmAllocator<MapEntry> alloc)
         : Obj(ObjType::MAP), klass(k), map(alloc) {}

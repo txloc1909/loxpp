@@ -1,0 +1,12 @@
+// Issue #362: an erase plus an insert in one for-in body restores the net
+// size, so a size check misses it and the loop ends silently. The
+// structural version check must fail on every backend instead, with empty
+// stdout. The insert key derives from the loop variable: a plain use in
+// m.del(k) alone does not satisfy the tooling resolver's unused-local pass
+// (see issue #387). An error_probes entry in tools/check_jvm_probes.sh and
+// tools/check_clr_probes.sh.
+var m = {1: "a"};
+for (var k in m) {
+    m.del(k);
+    m[k + 100] = "b";
+}

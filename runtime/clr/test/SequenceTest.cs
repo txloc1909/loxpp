@@ -94,6 +94,27 @@ public static class SequenceTest {
         t.Check(!it.HasNext(), "iterator exhausted");
         t.CheckThrows(() => LoxOps.GetIter(true), typeof(LoxError), "getIter on a non-iterable");
 
+        LoxMap im = LoxOps.BuildMap(new object[] { "a", 1.0, "b", 2.0 });
+        LoxIterator mit = LoxOps.GetIter(im);
+        t.Check(mit.HasNext(), "map iterator has first key");
+        mit.Next();
+        im.Remove("a");
+        im.Put("c", 3.0); // net size restored: the version check must still fire
+        t.CheckThrows(() => mit.HasNext(), typeof(LoxError), "erase plus insert trips the map iterator");
+        LoxMap nm = LoxOps.BuildMap(new object[] { "a", 1.0 });
+        LoxIterator nit = LoxOps.GetIter(nm);
+        nm.Put("b", 2.0);
+        t.CheckThrows(() => nit.Next(), typeof(LoxError), "insert trips the map iterator on Next() too");
+
+        LoxMap om = LoxOps.BuildMap(new object[] { "a", 1.0, "b", 2.0 });
+        LoxIterator oit = LoxOps.GetIter(om);
+        om.Put("a", 9.0); // overwrite of a live key: no structural change
+        t.Check(oit.HasNext(), "overwrite of a live key keeps iteration valid");
+        LoxMap dm = LoxOps.BuildMap(new object[] { "a", 1.0 });
+        LoxIterator dit = LoxOps.GetIter(dm);
+        dm.Remove("missing"); // miss: no structural change
+        t.Check(dit.HasNext(), "del of a missing key keeps iteration valid");
+
         // ITER_HAS_NEXT/ITER_NEXT's own opcode-level wrappers, over the raw
         // object the generated CIL actually holds.
         object iterAsObject = LoxOps.GetIter(ListOf(5.0, 6.0));

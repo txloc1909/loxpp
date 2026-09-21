@@ -226,6 +226,10 @@ error_probes=(
     "test/translation-probes/jvm-only/fault_reflect_getfield_on_error_fatal.lox"
     "test/translation-probes/jvm-only/fault_reflect_hasfield_on_error_fatal.lox"
     "test/translation-probes/jvm-only/fault_reflect_callmethod_on_error_fatal.lox"
+    # Issue #362: an erase plus an insert in one for-in body restores the
+    # net size, so a size check misses it. Both sides must fail with empty
+    # stdout — the structural version check reports it instead.
+    "test/translation-probes/55_for_in_map_net_zero.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

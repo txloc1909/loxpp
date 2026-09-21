@@ -312,7 +312,7 @@ TEST(Map, ForInCollectsAllKeys) {
 TEST(Map, ForInInsertErrors) {
     VMTestHarness h;
     // Single entry: the insert lands on the last iteration, so the error
-    // must fire on the post-body size check, not only before binding.
+    // must fire on the post-body version check, not only before binding.
     // Message text is proven by the for_in_map_size_changed fault-table row.
     ASSERT_EQ(h.run(R"(
         var m = {1: "a"};
@@ -335,10 +335,55 @@ TEST(Map, ForInDeleteErrors) {
               InterpretResult::RUNTIME_ERROR);
 }
 
+TEST(Map, ForInErasePlusInsertErrors) {
+    VMTestHarness h;
+    // An erase plus an insert in one body restores the net size, so a size
+    // check would miss it. The version check must still fire.
+    // Message text is proven by the for_in_map_size_changed fault-table row.
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a", 2: "b"};
+        for (var k in m) {
+            m.del(k);
+            m[99] = "z";
+        }
+    )"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(Map, ForInErasePlusInsertOnLastIterationErrors) {
+    VMTestHarness h;
+    // Single entry: the net-zero pair lands on the last iteration, so the
+    // error must fire on the post-body version check.
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a"};
+        for (var k in m) {
+            m.del(1);
+            m[2] = "b";
+        }
+    )"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(Map, ForInDelMissingOk) {
+    VMTestHarness h;
+    // Deleting a key that is not present changes nothing structural.
+    ASSERT_EQ(h.run(R"(
+        var m = {1: "a", 2: "b"};
+        var count = 0;
+        for (var k in m) {
+            m.del(999);
+            count = count + 1;
+        }
+        var r = count;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "2");
+}
+
 TEST(Map, ForInInsertPastGrowErrors) {
     VMTestHarness h;
     // Twelve entries fill a capacity-16 table to its 0.75 load limit, so
-    // the in-loop insert rehashes under the live cursor. The size check
+    // the in-loop insert rehashes under the live cursor. The version check
     // must still fire instead of visiting moved buckets.
     ASSERT_EQ(h.run(R"(
         var m = {};
@@ -405,7 +450,7 @@ TEST(Map, ForInThrowAfterMutationOk) {
 
 TEST(Map, ForInNestedInnerMutationErrors) {
     VMTestHarness h;
-    // The inner insert changes the size the outer iterator recorded.
+    // The inner insert changes the version the outer iterator recorded.
     ASSERT_EQ(h.run(R"(
         var m = {1: "a", 2: "b"};
         for (var a in m) {
@@ -419,7 +464,8 @@ TEST(Map, ForInNestedInnerMutationErrors) {
 
 TEST(Map, ForInUpdateExistingKeyOk) {
     VMTestHarness h;
-    // Writing a value to a key that already exists changes no size.
+    // Writing a value to a key that already exists changes nothing
+    // structural.
     ASSERT_EQ(h.run(R"(
         var m = {1: "a", 2: "b"};
         for (var k in m) {
