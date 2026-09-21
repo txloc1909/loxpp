@@ -399,7 +399,7 @@ function fixPrompt(id, pr, round, reviewSummary) {
     '  1. Read the full thread. The findings are INLINE comments, so list them with their ids:',
     '       gh api repos/' + GH + '/pulls/' + pr + '/comments --paginate \\',
     '         --jq \'.[] | "\\(.id)\\t\\(.path):\\(.line)\\t\\(.body[0:100])"\'',
-    '     Also read the top-level summary: `' + prViewCmd(pr) + '`.',,
+    '     Also read the top-level summary: `' + prViewCmd(pr) + '`.',
     '  2. Go back to your worktree: `' + REPO + '/.claude/worktrees/loxpp-<branch-with-dashes>`.',
     '     If it is gone, recreate it from the branch.',
     '  3. For each finding, do ONE of:',
