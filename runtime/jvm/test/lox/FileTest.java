@@ -6,6 +6,9 @@ import static lox.TestSupport.checkThrows;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Locale;
 
 public final class FileTest {
     public static void main(String[] args) throws IOException {
@@ -79,6 +82,61 @@ public final class FileTest {
         LoxFile forInvoke = LoxFile.open(rwTmp.getAbsolutePath(), "r");
         checkEquals("seed", LoxOps.invoke(forInvoke, "read", new Object[0]), "invoke() dispatches file methods directly");
         forInvoke.close();
+
+        // Directory opens: on Linux, fopen(dir, "r") succeeds but read(2)
+        // fails with EISDIR. LoxFile.open must return a file and defer to
+        // read()/readline()/readlines().
+        if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux")) {
+            Path dirPath = Files.createTempDirectory("lox-rt-file-dir-test");
+            try {
+                String dir = dirPath.toString();
+                LoxFile dirReader = LoxFile.open(dir, "r");
+                check(dirReader != null, "open(directory, \"r\") succeeds and returns a file");
+                checkEquals("", dirReader.read(), "read() on a directory gives empty string");
+                checkEquals("", dirReader.read(), "read() on a directory again gives empty string");
+                checkEquals(null, dirReader.readline(), "readline() on a directory gives nil");
+                LoxList emptyList = (LoxList) dirReader.readlines();
+                checkEquals(0, emptyList.elements.size(), "readlines() on a directory gives an empty list");
+                checkThrows(() -> dirReader.write("x"), LoxError.class,
+                        "write() on a read-only directory file raises an error");
+                checkThrows(() -> dirReader.writeline("x"), LoxError.class,
+                        "writeline() on a read-only directory file raises an error");
+                dirReader.close();
+                checkThrows(dirReader::read, LoxError.class,
+                        "read() on a closed directory file raises an error");
+                checkThrows(dirReader::readline, LoxError.class,
+                        "readline() on a closed directory file raises an error");
+                dirReader.close();
+                checkThrows(() -> LoxFile.open(dir, "w"), LoxError.class,
+                        "open(directory, \"w\") raises an error");
+                checkThrows(() -> LoxFile.open(dir, "a"), LoxError.class,
+                        "open(directory, \"a\") raises an error");
+                checkThrows(() -> LoxFile.open(dir, "r+"), LoxError.class,
+                        "open(directory, \"r+\") raises an error");
+                checkThrows(() -> LoxFile.open(dir, "bogus"), LoxError.class,
+                        "open(directory, \"bogus\") raises an error for invalid mode");
+
+                Path symlinkPath = dirPath.resolveSibling(
+                        dirPath.getFileName() + "-link-" + System.nanoTime());
+                try {
+                    Files.createSymbolicLink(symlinkPath, dirPath);
+                    LoxFile symlinkReader = LoxFile.open(symlinkPath.toString(), "r");
+                    check(symlinkReader != null, "open(link to directory, \"r\") succeeds");
+                    checkEquals("", symlinkReader.read(),
+                            "read() on a link to a directory gives empty string");
+                    symlinkReader.close();
+                } finally {
+                    Files.deleteIfExists(symlinkPath);
+                }
+
+                String missing = dirPath.resolve("lox-rt-file-dir-missing-" + System.nanoTime() + ".txt")
+                        .toString();
+                checkThrows(() -> LoxFile.open(missing, "r"), LoxError.class,
+                        "open(missing path, \"r\") raises an error even with directory check");
+            } finally {
+                Files.deleteIfExists(dirPath);
+            }
+        }
 
         System.exit(TestSupport.finish("FileTest"));
     }
