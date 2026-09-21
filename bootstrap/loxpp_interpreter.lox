@@ -3290,6 +3290,16 @@ var parser      = Parser(tokens);
 var stmts       = nil;
 var interpreter = nil;
 
+// Test-only hook (tools/check_bootstrap_headroom.sh): burn PAD plain
+// native call frames before interpret(), so the check can measure how
+// much frame budget each example has left. env() returns nil when the
+// variable is not set, and the call site below then runs interpret()
+// directly as before.
+fun __pad(d) {
+    if (d > 0) { __pad(d - 1); return; }
+    interpreter.interpret(stmts);
+}
+
 // parse() and resolve() are the bootstrap's own recursive-descent /
 // tree-walk code, not target-level function calls, so LoxFunction.call's
 // own try (below) never sees a fault raised while they run. A source
@@ -3314,7 +3324,12 @@ try {
             // all (e.g. a self-referential top-level expression), where a
             // host StackOverflowError would otherwise reach here directly.
             try {
-                interpreter.interpret(stmts);
+                var pad = env("LOXPP_BOOTSTRAP_PAD");
+                if (pad == nil) {
+                    interpreter.interpret(stmts);
+                } else {
+                    __pad(parseIntStr(pad));
+                }
             } catch (e) {
                 if (e.kind != "StackOverflowError") throw e;
                 print "LOXERR70 " + e.message;
