@@ -49,7 +49,7 @@ via `args`:
   full node-to-issue list live there, in git-hosted, reviewable, permanent
   GitHub state — never in a local directory a host can lose.
 - The mission brief needs no argument of its own. Every agent reads it with
-  `gh issue view <missionIssue> --repo <githubRepo> --comments` — the same
+  the full `--json --template` issue form below — the same
   tracking issue `missionIssue` already names, read the same way a node
   reads its own spec. The brief holds binding mission-wide rules: role
   assignments, execution notes, and any correction to the tracking issue's
@@ -79,16 +79,32 @@ Before a new mission's first run, edit `meta.phases` in the script to name
 that mission's real nodes — it drives the progress-tree preview and must stay
 a literal, so it cannot be derived from `args.nodes` automatically.
 
-Every agent reads its node specification with
-`gh issue view <issue> --repo <githubRepo> --comments` — **never** the plain
-`gh issue view <issue>`. The plain form prints the body only; it gives no
+Every agent reads its node specification with the full `--json --template`
+issue form — **never** the plain `gh issue view <issue>` and **never**
+`gh issue view <issue> --comments`. The plain form prints the body only; it gives no
 sign that comments exist, and a cross-node hazard left by an earlier node
 lives only in a comment (see "Node specification structure"). An agent that
 uses the plain form gets a spec with a silently missing hazard, the same
-failure mode a lost mission directory used to cause. The harness prompt
-always gives the full command, and an agent whose `gh issue view --comments`
+failure mode a lost mission directory used to cause. The `--comments` form is
+worse without a terminal: it prints only the comment list and drops the body,
+so an issue with no comments reads as empty output with exit code 0. The harness prompt
+always gives the full command, and an agent whose issue-read
 call fails stops with `blocked_surprise` rather than continuing on a partial
 read.
+
+Issue form (one call returns title, body, count, and each comment):
+
+```
+gh issue view <issue> --repo <githubRepo> --json title,body,comments \
+  --template '{{.title}}{{"\n\n"}}{{.body}}{{"\n\n=== comments: "}}{{len .comments}}{{"\n"}}{{range .comments}}{{"\n--- "}}{{.author.login}} {{.createdAt}}{{"\n"}}{{.body}}{{"\n"}}{{end}}'
+```
+
+PR form (adds reviews):
+
+```
+gh pr view <pr> --repo <githubRepo> --json title,body,comments,reviews \
+  --template '{{.title}}{{"\n\n"}}{{.body}}{{"\n\n=== comments: "}}{{len .comments}}{{"\n"}}{{range .comments}}{{"\n--- "}}{{.author.login}} {{.createdAt}}{{"\n"}}{{.body}}{{"\n"}}{{end}}{{"\n=== reviews: "}}{{len .reviews}}{{"\n"}}{{range .reviews}}{{"\n--- "}}{{.author.login}} {{.createdAt}} {{.state}}{{"\n"}}{{.body}}{{"\n"}}{{end}}'
+```
 
 ## Escalation limits
 
@@ -187,9 +203,10 @@ live in the issue body. This is the live channel between nodes — a merged
 node that finds a hazard for a node it blocks posts a **comment** on that
 later node's issue, never a body edit. A comment records who found the
 hazard and when; a body edit hides both. This is why every agent reads its
-node with `gh issue view <n> --repo <githubRepo> --comments` and never with
+node with the full `--json --template` issue form and never with
 the plain form (see "The harness" above) — a hazard that arrived after the
-issue was filed is invisible to the plain form.
+issue was filed is invisible to the plain form, and the `--comments` form
+drops the body without a terminal.
 
 Worked shape, generalized from the JVM mission's N4 (a mid-complexity node —
 a first straight-line code generator), as an issue body:

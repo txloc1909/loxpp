@@ -25,7 +25,8 @@ export const meta = {
 // Mission configuration — supplied by the caller via `args`, not hardcoded.
 // See notes/multi-agent-playbook.md for what each of these means and for the
 // node specification shape (a GitHub issue's body: Deliverable, Scope,
-// Checkpoint, Hazards) that `gh issue view <n> --comments` must return.
+// Checkpoint, Hazards) that issueViewCmd() must return. Never read an issue
+// or a PR with `--comments`: without a terminal that form drops the body.
 // ---------------------------------------------------------------------------
 
 const cfg = args || {}
@@ -58,6 +59,22 @@ const NODES = cfg.nodes
 const TARGET_LABEL = cfg.targetLabel || 'target-specific'
 const DAG_DOC = cfg.dagDoc || (REPO + '/notes/backend-implementation-dag.md')
 const OPCODE_DOC = cfg.opcodeDoc || (REPO + '/notes/bytecode-translation-problems.md')
+
+// Non-TTY-safe readers. `gh issue view --comments` and `gh pr view
+// --comments` print only the comment list when stdout is not a terminal, so
+// an issue with no comments reads as empty output. The --json --template
+// form below returns title, body, an explicit count, and each comment in one
+// call, with or without a terminal.
+const ISSUE_READ_TMPL = '{{.title}}{{"\\n\\n"}}{{.body}}{{"\\n\\n=== comments: "}}{{len .comments}}{{"\\n"}}{{range .comments}}{{"\\n--- "}}{{.author.login}} {{.createdAt}}{{"\\n"}}{{.body}}{{"\\n"}}{{end}}'
+const PR_READ_TMPL = '{{.title}}{{"\\n\\n"}}{{.body}}{{"\\n\\n=== comments: "}}{{len .comments}}{{"\\n"}}{{range .comments}}{{"\\n--- "}}{{.author.login}} {{.createdAt}}{{"\\n"}}{{.body}}{{"\\n"}}{{end}}{{"\\n=== reviews: "}}{{len .reviews}}{{"\\n"}}{{range .reviews}}{{"\\n--- "}}{{.author.login}} {{.createdAt}} {{.state}}{{"\\n"}}{{.body}}{{"\\n"}}{{end}}'
+
+function issueViewCmd(num) {
+  return 'gh issue view ' + num + ' --repo ' + GH + ' --json title,body,comments --template \'' + ISSUE_READ_TMPL + '\''
+}
+
+function prViewCmd(num) {
+  return 'gh pr view ' + num + ' --repo ' + GH + ' --json title,body,comments,reviews --template \'' + PR_READ_TMPL + '\''
+}
 
 const MAX_REVIEW_ROUNDS = 8      // hard stop on the implementer/reviewer loop
 const DISPUTE_LIMIT = 3          // rounds a tag may stay disputed before the referee decides
@@ -178,19 +195,21 @@ function common(id) {
     'GITHUB REPO: ' + GH,
     '',
     'Read these before you act, in this order:',
-    '  1. `gh issue view ' + MISSION_ISSUE + ' --repo ' + GH + ' --comments`  (the mission brief:',
+    '  1. `' + issueViewCmd(MISSION_ISSUE) + '`  (the mission brief:',
     '     binding, mission-wide rules)',
-    '  2. `gh issue view ' + n.issue + ' --repo ' + GH + ' --comments`  (your node specification)',
-    '     Use the `--comments` form for BOTH reads above. NEVER the plain `gh issue view <n>` — that',
+    '  2. `' + issueViewCmd(n.issue) + '`  (your node specification)',
+    '     Use the full `--json --template` form for BOTH reads above. NEVER the plain `gh issue view <n>` — that',
     '     prints the body only, gives no sign that comments exist, and a binding rule (a corrected',
     '     dependency, a cross-node hazard another node left you) can live ONLY in a comment, never in',
     '     a body edit. Reading the plain form silently drops it.',
+    '     NEVER use `gh issue view --comments` either — without a terminal it prints only the',
+    '     comment list and drops the body, so an issue with no comments reads as empty output.',
     '  3. ' + DAG_DOC,
     '  4. ' + OPCODE_DOC + '  (authoritative opcode semantics)',
     '  5. ' + REPO + '/AGENTS.md',
     '  6. ' + REPO + '/notes/multi-agent-playbook.md',
     '',
-    'If any of these is missing or unreadable, or either `gh issue view --comments` command itself',
+    'If any of these is missing or unreadable, or either issue-read command itself',
     'fails (non-zero exit, empty output), STOP immediately and report status "blocked_surprise" with',
     'the exact command and error. Do not continue as if a missing brief or issue were optional — an',
     'agent working from a partial spec is indistinguishable from one working correctly until its',
@@ -262,7 +281,8 @@ function implPrompt(id) {
     '',
     'If your work surfaces a hazard for a node that depends on this one, post it now as a',
     '`gh issue comment` on that later node\'s issue (see the hard rules above) — do not wait for the',
-    'later node\'s agent to ask, because it will not; it just reads its issue with `--comments` once.',
+    'later node\'s agent to ask, because it will not; it just reads its issue once with the full',
+    ' `--json --template` form.',
     '',
     'Do NOT merge the PR. A reviewer must approve it first.',
     'Do NOT wait for CI at this step. Return as soon as the PR is open.',
@@ -310,7 +330,7 @@ function reviewPrompt(id, pr, round) {
     'TASK: review this PR adversarially. Assume it is wrong until you prove it is right.',
     '',
     'Steps:',
-    '  1. Read the whole thread: `gh pr view ' + pr + ' --repo ' + GH + ' --comments`',
+    '  1. Read the whole thread: `' + prViewCmd(pr) + '`',
     '     and the diff: `gh pr diff ' + pr + ' --repo ' + GH + '`.',
     '  2. Make your OWN worktree from the PR branch and verify the checkpoint YOURSELF:',
     '     `cd ' + REPO + ' && git fetch origin && git worktree add .claude/worktrees/loxpp-review-' + id.toLowerCase() + ' ' + NODES[id].branch + '`',
@@ -379,7 +399,7 @@ function fixPrompt(id, pr, round, reviewSummary) {
     '  1. Read the full thread. The findings are INLINE comments, so list them with their ids:',
     '       gh api repos/' + GH + '/pulls/' + pr + '/comments --paginate \\',
     '         --jq \'.[] | "\\(.id)\\t\\(.path):\\(.line)\\t\\(.body[0:100])"\'',
-    '     Also read the top-level summary: `gh pr view ' + pr + ' --repo ' + GH + ' --comments`.',
+    '     Also read the top-level summary: `' + prViewCmd(pr) + '`.',,
     '  2. Go back to your worktree: `' + REPO + '/.claude/worktrees/loxpp-<branch-with-dashes>`.',
     '     If it is gone, recreate it from the branch.',
     '  3. For each finding, do ONE of:',
@@ -392,7 +412,7 @@ function fixPrompt(id, pr, round, reviewSummary) {
     '     The reader must see your answer next to the code it is about.',
     '  4. Re-run the checkpoint and the regression commands. Format and lint.',
     '  5. **Re-read the thread before you push.** A decision can arrive while you work. Run',
-    '     `gh pr view ' + pr + ' --repo ' + GH + ' --comments` again, and look for a comment that starts',
+    '     `' + prViewCmd(pr) + '` again, and look for a comment that starts',
     '     with "[Orchestrator]" or "[Researcher] REFEREE DECISION". Such a comment is BINDING and',
     '     it overrides the reviewer finding it answers. Also re-read section 8 of the brief, because',
     '     the orchestrator writes every ruling there too.',
@@ -502,7 +522,7 @@ function refereePrompt(id, pr, tags, reason) {
     'TASK: decide each dispute. Your decision is final and binding on both agents.',
     '',
     'Steps:',
-    '  1. Read the whole thread: `gh pr view ' + pr + ' --repo ' + GH + ' --comments`.',
+    '  1. Read the whole thread: `' + prViewCmd(pr) + '`.',
     '  2. Read the diff: `gh pr diff ' + pr + ' --repo ' + GH + '`.',
     '  3. For each disputed tag, VERIFY THE FACTS YOURSELF FIRST — run the code, read `spec/` and',
     '     `src/`. Do not take either agent\'s word for it. The decision priority is spec > implementation > design notes.',
@@ -524,7 +544,7 @@ function mergePrompt(id, pr) {
     'TASK: land the PR.',
     '',
     'Steps:',
-    '  1. Confirm the approval: `gh pr view ' + pr + ' --repo ' + GH + ' --comments`.',
+    '  1. Confirm the approval: `' + prViewCmd(pr) + '`.',
     '     Look for a comment whose first line is exactly "[Reviewer] APPROVED".',
     '  2. Rebase on the latest `main` in your worktree: `git fetch origin && git rebase origin/main`.',
     '     Fix any conflict. Re-run the checkpoint after the rebase. Force-push with `--force-with-lease`.',

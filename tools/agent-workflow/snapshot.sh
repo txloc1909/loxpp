@@ -128,7 +128,12 @@ PY
 
 while read -r N; do
   [ -n "$N" ] || continue
-  gh pr view "$N" --repo "$GH_REPO" --comments > "$OUT/github/pr-$N-thread.md" 2>&1
+  # Never use --comments here: without a terminal it drops the body and a
+  # zero-comment PR snapshots as an empty file. The --json --template form
+  # returns title, body, count, and each comment in one call.
+  gh pr view "$N" --repo "$GH_REPO" --json title,body,comments,reviews \
+    --template '{{.title}}{{"\n\n"}}{{.body}}{{"\n\n=== comments: "}}{{len .comments}}{{"\n"}}{{range .comments}}{{"\n--- "}}{{.author.login}} {{.createdAt}}{{"\n"}}{{.body}}{{"\n"}}{{end}}{{"\n=== reviews: "}}{{len .reviews}}{{"\n"}}{{range .reviews}}{{"\n--- "}}{{.author.login}} {{.createdAt}} {{.state}}{{"\n"}}{{.body}}{{"\n"}}{{end}}' \
+    > "$OUT/github/pr-$N-thread.md" 2>&1
   gh pr diff "$N" --repo "$GH_REPO"            > "$OUT/github/pr-$N.diff"    2>&1
 done < "$OUT/github/mission-prs.txt"
 
