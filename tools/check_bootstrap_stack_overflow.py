@@ -308,13 +308,19 @@ EXCLUDED_EXAMPLES = {"bench_jump_table.lox"}
 
 
 def check_state_after_examples(examples_dir: Path) -> list[str]:
-    """Check state restoration per example, using native as ground truth.
+    """Check state restoration and stdout identity per example, using native
+    as ground truth.
 
     For each example, run it on native and bootstrap. Bootstrap's exit code
     must match native's. If bootstrap prints a state line, compare it to
     STATE_START. If bootstrap prints no state line, accept it only when
     both exit non-zero (70 or 65) with the same code, stderr is one line,
-    and there is no traceback.
+    and there is no traceback. Separately, bootstrap's stdout (with its own
+    trailing __BOOTSTRAP_STATE__ line, which native never prints, removed
+    first) must equal native's stdout exactly -- this is the only place a
+    canonical-string-representation mismatch (issue #367: an enum value
+    missing its enum name) would show up, since no other check compares
+    plain stdout content between these two consumers.
     """
     failures = []
     native_bin = REPO_ROOT / "build" / "loxpp"
@@ -370,9 +376,24 @@ def check_state_after_examples(examples_dir: Path) -> list[str]:
             )
             continue
 
+        # stdout content, with the state marker line (never printed by
+        # native) removed, must match native's stdout exactly.
+        boot_stdout_lines = boot_result.stdout.splitlines()
+        boot_content_lines = [
+            line for line in boot_stdout_lines if not STATE_LINE_RE.match(line)
+        ]
+        boot_content = "\n".join(boot_content_lines)
+        native_content = native_result.stdout.rstrip("\n")
+        if boot_content.rstrip("\n") != native_content:
+            failures.append(
+                f"{example.name}: bootstrap stdout does not match native "
+                f"(state line excluded) -- native: {native_content[:200]!r}, "
+                f"bootstrap: {boot_content[:200]!r}"
+            )
+
         # If bootstrap printed a state line, check it
         state_lines = [
-            m for m in (STATE_LINE_RE.match(line) for line in boot_result.stdout.splitlines()) if m
+            m for m in (STATE_LINE_RE.match(line) for line in boot_stdout_lines) if m
         ]
         if state_lines:
             m = state_lines[-1]

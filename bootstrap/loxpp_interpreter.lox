@@ -2118,25 +2118,32 @@ class InterpFileMethod {
 }
 
 class LoxEnumCtor {
-    init(tag, fields) {
-        this.tag    = tag;
-        this.fields = fields;
-        this.loxTag = "enum_ctor";
+    init(enumName, tag, fields) {
+        this.enumName = enumName;
+        this.tag      = tag;
+        this.fields   = fields;
+        this.loxTag   = "enum_ctor";
     }
     arity() { return len(this.fields); }
-    call(interp, args) { return LoxEnumValue(this.tag, args); }
+    call(interp, args) { return LoxEnumValue(this.enumName, this.tag, args); }
     toString() { return "<enum ctor " + this.tag + ">"; }
 }
 
 class LoxEnumValue {
-    init(tag, fields) {
-        this.tag    = tag;
-        this.fields = fields;
-        this.loxTag = "enum_val";
+    init(enumName, tag, fields) {
+        this.enumName = enumName;
+        this.tag      = tag;
+        this.fields   = fields;
+        this.loxTag   = "enum_val";
     }
     toString() {
-        if (len(this.fields) == 0) return this.tag;
-        return this.tag + "(...)";
+        // spec/03-types.md's Canonical String Representation: an enum
+        // value's own qualified name (EnumName::CtorName), matching
+        // src/object.cpp's ObjType::ENUM case -- src/object.cpp is the
+        // ground truth every consumer's stringify path must agree with.
+        var qualified = this.enumName + "::" + this.tag;
+        if (len(this.fields) == 0) return qualified;
+        return qualified + "(...)";
     }
 }
 
@@ -2921,6 +2928,15 @@ class Interpreter {
         if (callee.arity() != -1 and len(args) != callee.arity()) {
             if (tag == "enum_ctor") {
                 this.setError("ConstructorArityError", "Constructor called with wrong arity.", paren_line);
+            } else if (tag == "class" and callee.findMethod("init") == nil) {
+                // A class with no init() always has arity 0 (LoxClass.arity()
+                // above) -- src/vm.cpp's own no-init branch (Op::CALL,
+                // isClass(callee)) reports this exact fixed text, not the
+                // real argument count, when called with any non-zero
+                // argument count. A class WITH an init() falls through to
+                // the ArityError branch below instead, matching native's own
+                // call() dispatch through the closure's real arity.
+                this.setError("ConstructorArityError", "Expected 0 arguments but got some.", paren_line);
             } else {
                 this.setError("ArityError", "Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".", paren_line);
             }
@@ -3074,8 +3090,9 @@ class Interpreter {
     }
 
     stringifyEnumVal(val) {
-        if (len(val.fields) == 0) return val.tag;
-        var s = val.tag + "(";
+        var qualified = val.enumName + "::" + val.tag;
+        if (len(val.fields) == 0) return qualified;
+        var s = qualified + "(";
         var i = 0;
         while (i < len(val.fields)) {
             if (i > 0) s = s + ", ";
@@ -3089,7 +3106,7 @@ class Interpreter {
         env.define(name, nil);
         var i = 0;
         while (i < len(ctor_names)) {
-            var ctor = LoxEnumCtor(ctor_names[i], ctor_fields_list[i]);
+            var ctor = LoxEnumCtor(name, ctor_names[i], ctor_fields_list[i]);
             env.define(ctor_names[i], ctor);
             i = i + 1;
         }
