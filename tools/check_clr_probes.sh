@@ -648,6 +648,10 @@ for entry in "${known_divergence_probes[@]}"; do
     # FRAMES_MAX, or the frame-count guard fired instead and this probe no
     # longer isolates the guard it claims to.
     frames_max="$(grep -oE 'FRAMES_MAX = [0-9]+' "$root/src/vm.h" | grep -oE '[0-9]+')"
+    if [ -z "$frames_max" ]; then
+        # FRAMES_MAX aliases loxpp::kFramesMax (src/vm_limits.h); read it there.
+        frames_max="$(grep -oE 'kFramesMax = [0-9]+' "$root/src/vm_limits.h" | grep -oE '[0-9]+')"
+    fi
     frame_lines="$(grep -c '^\[line ' "$native_err")"
     if [ "$frame_lines" -ge $((frames_max * 9 / 10)) ]; then
         echo "check_clr_probes.sh: FAIL $probe (native failed at $frame_lines frames, within 10% of FRAMES_MAX=$frames_max -- looks like the frame-count guard fired, not STACK_MAX)" >&2
