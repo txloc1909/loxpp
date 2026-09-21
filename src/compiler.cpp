@@ -2042,6 +2042,11 @@ void Compiler::tryStatement() {
     // Patch the handler offset now that we know where the catch block is
     patchJump(handlerOffset);
 
+    // THROW removes its own record before it jumps to catchIp, so no
+    // record is open on the catch path. The count must show this before
+    // the catch block compiles, or break and continue in catch emit one
+    // POP_HANDLER too many.
+
     m_parser->consume(TokenType::CATCH, "Expect 'catch' after try block.");
     m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after 'catch'.");
     m_parser->consume(TokenType::IDENTIFIER,
@@ -2051,6 +2056,8 @@ void Compiler::tryStatement() {
                       "Expect ')' after catch identifier.");
 
     m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' for catch block.");
+
+    m_openHandlerCount--;
 
     // The catch block starts with the thrown value on the stack (pushed by
     // THROW). Bind it to the catch variable.
@@ -2075,11 +2082,14 @@ void Compiler::tryStatement() {
     // throw inside catchBlock must escape to an outer handler, not this
     // one — see spec/04-semantics.md's throw-statement rules). So the
     // POP_HANDLER below belongs only to the normal-completion path; the
-    // catch path must skip it.
+    // catch path must skip it. The count was decreased at catch entry,
+    // so raise it here for the normal path which still holds its record.
     int skipPopJump = emitJump(Op::JUMP);
 
     // Patch the skip jump to jump past the catch block.
     patchJump(skipCatchJump);
+
+    m_openHandlerCount++;
 
     // Pop the exception handler after the try block completes normally.
     emitByte(Op::POP_HANDLER);

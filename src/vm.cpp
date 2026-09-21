@@ -612,6 +612,12 @@ InterpretResult VM::run(int stopAtFrameCount) {
         }
 #endif
 
+        if (m_handlerDepthTrace != nullptr) {
+            int currentOffset = static_cast<int>(ip - chunk->cbegin());
+            m_handlerDepthTrace->emplace_back(
+                currentOffset, static_cast<int>(m_handlerStack.size()));
+        }
+
         Byte instruction = readByte();
 #ifdef LOXPP_PROFILE
         m_profilerData.opcodeTable[instruction].count++;

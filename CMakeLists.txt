@@ -102,6 +102,7 @@ set(LOXPP_CORE_SOURCES
     src/backend/chunk_decoder.cpp
     src/backend/cfg.cpp
     src/backend/abstract_stack.cpp
+    src/backend/handler_depth.cpp
     src/backend/capture_analysis.cpp
     src/backend/zero_depth_local.cpp
     src/backend/native_pops.cpp

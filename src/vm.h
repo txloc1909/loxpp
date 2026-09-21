@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 enum class InterpretResult : std::uint8_t {
@@ -94,6 +95,13 @@ class VM {
         return static_cast<int>(m_handlerStack.size());
     }
     [[nodiscard]] std::optional<Value> getGlobal(const std::string& name) const;
+
+    // Test-only trace of (chunk offset, handler depth) before each
+    // dispatched instruction. Null unless a test arms it. No effect on
+    // release behavior: run() only appends when this is set.
+    void setHandlerDepthTrace(std::vector<std::pair<int, int>>* trace) {
+        m_handlerDepthTrace = trace;
+    }
 
     // Sets the command-line arguments exposed to the program via args().
     void setArgs(std::vector<std::string> args) {
@@ -242,9 +250,11 @@ class VM {
     // i-th PUSH_HANDLER. THROW searches LIFO for a matching handler.
     //
     // INVARIANT(handler-stack-scoped-cleanup): on every non-local control-flow
-    // exit that leaves a protected region (RETURN, break, or continue), every
-    // handler record opened since that exit started is discarded via
-    // POP_HANDLER before the jump occurs. On RETURN paths (with or without
+    // exit that leaves a protected region (RETURN, or break/continue from a
+    // try body or from a catch block), every handler record opened since
+    // that exit started is discarded via POP_HANDLER before the jump occurs.
+    // A catch block holds no record of its own try: THROW already removed
+    // it. On RETURN paths (with or without
     // pending defers), every record with frameCount equal to the frame being
     // left is also discarded before that frame's slot in m_frames[] is reused,
     // and before any of that frame's own defers run. This ensures no throw at
@@ -253,6 +263,10 @@ class VM {
     // frame and a chunk that no longer exist, or into a protected region the
     // jump already left.
     std::vector<HandlerRecord> m_handlerStack;
+
+    // Backing store for setHandlerDepthTrace(). Never read by the VM
+    // itself; the test harness owns the pointed-to vector.
+    std::vector<std::pair<int, int>>* m_handlerDepthTrace{nullptr};
 
     // Per-frame defer lists — parallel to m_frames[], so sized to match it
     // (FRAMES_MAX plus the reserve; see m_frames' own comment). Each entry is

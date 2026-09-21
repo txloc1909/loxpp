@@ -33,6 +33,7 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/backend/chunk_decoder.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/cfg.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/abstract_stack.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/handler_depth.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/capture_analysis.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/zero_depth_local.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/native_pops.cpp
@@ -132,6 +133,8 @@ loxpp_add_test(test_backend_capture test_backend_capture.cpp CORE loxpp_test_cor
 loxpp_add_test(test_nonlocal_cfg    test_nonlocal_cfg.cpp    CORE loxpp_test_core PROBE)
 loxpp_add_test(test_handler_stack_leak    test_handler_stack_leak.cpp CORE loxpp_test_core)
 loxpp_add_test(test_handler_stack_leak_gc test_handler_stack_leak.cpp CORE loxpp_test_core)
+loxpp_add_test(test_handler_depth_invariant test_handler_depth_invariant.cpp
+                                                             CORE loxpp_test_core PROBE)
 loxpp_add_test(test_jvm_emit        test_jvm_emit.cpp        CORE loxpp_test_core PROBE)
 loxpp_add_test(test_clr_emit        test_clr_emit.cpp        CORE loxpp_test_core PROBE)
 loxpp_add_test(test_stringify_depth_guard test_stringify_depth_guard.cpp
@@ -245,7 +248,7 @@ set(LOXPP_GTEST_TARGETS
     test_list_pattern_gc test_at_binding test_at_binding_gc test_profiler
     test_chunk_decoder test_backend_cfg test_backend_abstract_stack
     test_backend_capture test_nonlocal_cfg test_handler_stack_leak
-    test_handler_stack_leak_gc test_jvm_emit test_clr_emit
+    test_handler_stack_leak_gc test_handler_depth_invariant test_jvm_emit test_clr_emit
     test_stringify_depth_guard
     test_check_diagnostics test_tooling_parser test_tooling_resolver)
 if(LOXPP_LSP)

@@ -217,9 +217,11 @@ class Compiler {
     // for method calls so they compile as GET_PROPERTY + CALL instead, allowing
     // CALL to be patched to DEFER_RECORD without special INVOKE handling.
     bool m_disableInvokeFusion{false};
-    // Count of currently-open handler records in the bytecode; incremented by
-    // tryStatement() after PUSH_HANDLER, decremented after POP_HANDLER. Used
-    // by break/continue to emit the correct number of cleanup POP_HANDLER ops.
+    // Count of handler records open at the current emit point. It matches
+    // the runtime handler stack depth on each path: PUSH_HANDLER adds one,
+    // the normal-path POP_HANDLER removes one, and catch entry removes one
+    // because THROW already removed it. Used by break/continue to emit the
+    // correct number of cleanup POP_HANDLER ops.
     int m_openHandlerCount{0};
 
     Local m_locals[UINT8_COUNT];

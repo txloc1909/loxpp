@@ -106,6 +106,23 @@ InterpretResult VMTestHarness::run(const std::string& source) {
     return m_vm.interpret(source);
 }
 
+std::vector<std::pair<int, int>>
+VMTestHarness::runWithHandlerTrace(const std::string& source,
+                                   InterpretResult* out) {
+    std::vector<std::pair<int, int>> trace;
+    m_vm.setHandlerDepthTrace(&trace);
+    // Disarm on every path out, including a C++ throw from interpret.
+    struct Disarm {
+        VM* vm;
+        ~Disarm() { vm->setHandlerDepthTrace(nullptr); }
+    } disarm{&m_vm};
+    InterpretResult result = m_vm.interpret(source);
+    if (out != nullptr) {
+        *out = result;
+    }
+    return trace;
+}
+
 std::string VMTestHarness::getGlobalStr(const std::string& name) const {
     auto v = m_vm.getGlobal(name);
     if (!v)
