@@ -293,11 +293,109 @@ TEST_F(HandlerStackLeakTest, ContinueFromOpenTryBodyLeavesNoRecord) {
     EXPECT_EQ(h.getGlobalStr("log"), "AC");
 }
 
-// NOTE: Break/continue from catch blocks that threw exceptions involve a
-// complex interaction with the throw handler system where the handler is
-// already popped by handleThrow() before entering the catch block. This is a
-// limitation to be addressed in a follow-up issue. The core issue #273 (break
-// from try body) is fixed and well-tested below.
+// Tests for break/continue from catch blocks (issues #286 and #287):
+// THROW already removes the record before catch runs, so no POP_HANDLER
+// is due on these paths. Each test throws before the frame returns, where
+// a wrong cleanup would be matched.
+
+TEST_F(HandlerStackLeakTest, ContinueFromCatchLeavesNoRecord) {
+    // Exact shape from issue #286 with continue from catch.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        fun g() {
+            var i = 0;
+            while (i < 2) {
+                try { throw "boom"; } catch (a) { log = log + "first;"; i = i + 1; continue; }
+                try { log = log + "second;"; } catch (b) { log = log + "never;"; }
+                i = i + 1;
+            }
+            throw "after-loop";
+        }
+        try {
+            g();
+        } catch (e) { log = log + "outer-caught:" + e + ";"; }
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+    EXPECT_EQ(h.getGlobalStr("log"), "first;first;outer-caught:after-loop;");
+}
+
+TEST_F(HandlerStackLeakTest, BreakFromCatchLeavesNoRecord) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        fun g() {
+            for (var i = 0; i < 3; i = i + 1) {
+                try { throw "boom"; } catch (e) { log = log + "catch;"; break; }
+            }
+            throw "after-loop";
+        }
+        try {
+            g();
+        } catch (e) { log = log + "outer-caught:" + e + ";"; }
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+    EXPECT_EQ(h.getGlobalStr("log"), "catch;outer-caught:after-loop;");
+}
+
+TEST_F(HandlerStackLeakTest, BreakFromCatchKeepsOuterTryRecord) {
+    // Inner catch breaks. Outer try wraps the loop and must still catch.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        fun g() {
+            try {
+                for (var i = 0; i < 2; i = i + 1) {
+                    try { throw "boom"; } catch (e1) { log = log + "inner;"; break; }
+                }
+                throw "outer-test";
+            } catch (e2) { log = log + "outer:" + e2 + ";"; }
+        }
+        g();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+    EXPECT_EQ(h.getGlobalStr("log"), "inner;outer:outer-test;");
+}
+
+TEST_F(HandlerStackLeakTest, ContinueFromCatchInForInLoop) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        fun g() {
+            for (var item in [1, 2]) {
+                try { throw "boom"; } catch (e) { log = log + "caught;"; continue; }
+                log = log + "unreached;";
+            }
+            throw "after-loop";
+        }
+        try {
+            g();
+        } catch (e) { log = log + "outer-caught:" + e + ";"; }
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+    EXPECT_EQ(h.getGlobalStr("log"), "caught;caught;outer-caught:after-loop;");
+}
+
+TEST_F(HandlerStackLeakTest, ThrowFromCatchEscapesOwnTry) {
+    // A throw in catch must reach the outer handler, never the own one.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        fun g() {
+            try {
+                try { throw "first"; } catch (e) { throw "second"; }
+            } catch (outer) { log = log + "outer:" + outer + ";"; }
+        }
+        g();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+    EXPECT_EQ(h.getGlobalStr("log"), "outer:second;");
+}
 
 TEST_F(HandlerStackLeakTest, BreakOutOfNestedTryInsideLoop) {
     // break out of a try that is itself nested inside another try, both
