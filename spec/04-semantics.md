@@ -1259,18 +1259,15 @@ above the catchable table already describes, where a second
 produce the same `"Stack overflow."` message as the catchable row; this is
 not a distinct fault.
 
-**Shared uncaught-fault reporting is not a distinct fault, except one
-documented mismatch.** `handleThrow` reports the final "no handler found"
-message for every catchable row above from two call sites of its own. When
-the unhandled value is an `Error` value — including an explicit uncaught
-`throw` of an `Error` — it reuses that value's own `message` field
-unchanged, matching the [`throw` Statement](#throw-statement)'s own text.
-When an explicit uncaught `throw` carries a value that is **not** an
-`Error` value, native reports `Uncaught throw: ` followed by the value's
-canonical string representation (for example, `throw 42;` reports
-`Uncaught throw: 42`) — the `Uncaught throw: ` prefix is not mentioned by
-the `throw` Statement section's own wording. This mismatch is tracked as
-issue #341. Likewise,
+**Shared uncaught-fault reporting is not a distinct fault.** `handleThrow`
+reports the final "no handler found" message for every catchable row above
+from two call sites of its own. When the unhandled value is an `Error`
+value — including an explicit uncaught `throw` of an `Error` — it reuses
+that value's own `message` field unchanged. When an explicit uncaught
+`throw` carries a value that is **not** an `Error` value, native reports
+that value's canonical string representation with no added prefix (for
+example, `throw 42;` reports `42`) — both branches match the [`throw`
+Statement](#throw-statement)'s own text this way. Likewise,
 `raiseThrowableError`'s fallback for when the `Error` class itself is not
 yet initialized cannot fire once any Lox++ program has started running —
 the class is created during VM setup, before user code executes — so no

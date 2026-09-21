@@ -400,7 +400,7 @@ VM::ThrowOutcome VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
         runtimeError("%s", err->message->chars.c_str());
     } else {
         std::string thrownStr = stringify(thrownValue);
-        runtimeError("Uncaught throw: %s", thrownStr.c_str());
+        runtimeError("%s", thrownStr.c_str());
     }
     return ThrowOutcome::Uncaught;
 }
