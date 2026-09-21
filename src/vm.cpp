@@ -1630,7 +1630,7 @@ InterpretResult VM::run(int stopAtFrameCount) {
             }
             Obj* obj = as<Obj*>(iterable);
             ObjIterator* it = m_mm.create<ObjIterator>(
-                iterable, 0, isObjMap(obj) ? asObjMap(obj)->map.count() : -1);
+                iterable, 0, isObjMap(obj) ? asObjMap(obj)->version : -1);
             stackTop[-1] = Value{static_cast<Obj*>(it)}; // replace in-place
             break;
         }
@@ -1651,9 +1651,11 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 has = it->index <
                       (int)asObjString(as<Obj*>(it->collection))->chars.size();
             } else if (isMap(it->collection)) {
-                // Fail fast on size change, as Python does for dicts.
+                // Fail fast on structural change, as Python does for dicts.
+                // A version check also trips a paired erase plus insert that
+                // restores the net size, which a size check would miss.
                 auto* map = asObjMap(as<Obj*>(it->collection));
-                if (map->map.count() != it->expectedSize) {
+                if (map->version != it->expectedVersion) {
                     RAISE_ERROR("Map changed size during iteration.");
                     return InterpretResult::RUNTIME_ERROR;
                 }
@@ -1695,7 +1697,7 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 // Skip past empty/tombstone buckets to the next occupied one,
                 // push its key, then advance the cursor past it.
                 auto* map = asObjMap(as<Obj*>(it->collection));
-                if (map->map.count() != it->expectedSize) {
+                if (map->version != it->expectedVersion) {
                     RAISE_ERROR("Map changed size during iteration.");
                     return InterpretResult::RUNTIME_ERROR;
                 }

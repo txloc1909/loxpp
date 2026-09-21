@@ -56,9 +56,9 @@ enum class Op : Byte {
     SET_INDEX, // pops value, index, list/map; sets [index]=value; pushes value
     SLICE,     // pops end, start, seq; pushes new List|String slice
     IN,        // pops seq (rhs) then elem (lhs); pushes bool membership result
-    GET_ITER,  // pops List|String|Map → pushes ObjIterator{cursor=0, expectedSize (map only)}
-    ITER_HAS_NEXT, // pops iterator copy → pushes bool (cursor < length; map: size-check then scan)
-    ITER_NEXT, // pops iterator copy → pushes element/key at cursor, advances (map: size-check then scan)
+    GET_ITER,  // pops List|String|Map → pushes ObjIterator{cursor=0, expectedVersion (map only)}
+    ITER_HAS_NEXT, // pops iterator copy → pushes bool (cursor < length; map: version-check then scan)
+    ITER_NEXT, // pops iterator copy → pushes element/key at cursor, advances (map: version-check then scan)
     MATCH_ERROR, // no operands — raises MatchError; VM never returns
     // min_tag (1 byte), count (1 byte), then count×2 forward-offset bytes.
     // Pops the tag integer; if tag-min_tag is in [0,count) jumps to that arm's
