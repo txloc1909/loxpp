@@ -44,6 +44,15 @@ public sealed class LoxMap {
     // looks up the same slot as 0.0.
     private readonly Dictionary<object, Slot> m_entries = new();
 
+    // Structural version, bumped on a real insert or a real erase only.
+    // A repeat write of one key and a remove of a missing key leave it
+    // alone. LoxIterator snapshots it at construction, so a paired erase
+    // plus insert that restores the net size still trips the check.
+    private int m_version;
+
+    /// <summary>Structural version for the for-in fail-fast check.</summary>
+    internal int Version => m_version;
+
     // Insertion order of the live keys, kept alongside m_entries so
     // iteration order is deterministic within one run (see class summary).
     // A LinkedList, not a List: each Slot holds the LinkedListNode a `del`
@@ -72,10 +81,16 @@ public sealed class LoxMap {
         // whole Slot is replaced rather than only its value. The order node
         // itself is reused on a repeat write, so the key keeps its original
         // insertion position instead of moving to the end.
+        bool isNew = !m_entries.ContainsKey(normalized);
         LinkedListNode<object> orderNode = m_entries.TryGetValue(normalized, out Slot existing)
             ? existing.OrderNode
             : m_order.AddLast(normalized);
         m_entries[normalized] = new Slot(key, value, orderNode);
+        // Count only a new key: an overwrite leaves iteration valid, while
+        // a paired erase plus insert must still trip the iterator check.
+        if (isNew) {
+            m_version++;
+        }
     }
 
     public object Get(object key) {
@@ -90,6 +105,8 @@ public sealed class LoxMap {
         object normalized = NormalizeKey(key);
         if (m_entries.Remove(normalized, out Slot slot)) {
             m_order.Remove(slot.OrderNode); // O(1): unlinks the node directly, no scan
+            // Count only a real erase: a miss leaves iteration valid.
+            m_version++;
         }
     }
 
