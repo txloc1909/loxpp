@@ -578,6 +578,18 @@ for _row in FATAL_ROWS:
         # matching native's fatal disposition, so it is exempt from the
         # blanket skip below.
         continue
+    if _row.name == "list_append_wrong_arity":
+        # Issue #365: bootstrap reports native's own custom text and halts,
+        # so it is exempt from the blanket skip below.
+        continue
+    if _row.name == "list_pop_wrong_arity":
+        # Issue #365: bootstrap reports native's own custom text and halts,
+        # so it is exempt from the blanket skip below.
+        continue
+    if _row.name == "list_remove_wrong_arity":
+        # Issue #365: bootstrap reports native's own custom text and halts,
+        # so it is exempt from the blanket skip below.
+        continue
     if _row.name == "enum_index_type_error":
         # Node #349: bootstrap now indexes enum values, matching native's
         # fatal disposition on type error, so it is exempt from the blanket
