@@ -8,6 +8,7 @@
 //   2. Op::CALL count == Op::RETURN count (balanced for any program).
 //   3. selfNs <= totalNs for every profiled function.
 //   4. GC stats are populated after an allocation-heavy program.
+//   5. Call chain deeper than 64 frames stays in bounds (issue #299).
 
 #include "test_harness.h"
 #include "vm.h"
