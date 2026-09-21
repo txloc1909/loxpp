@@ -38,8 +38,11 @@ Binary resolution: `build/loxpp` beside the checkout first, then
 
 `\d` is `[0-9]` and `\w` is `[A-Za-z0-9_]` — GNU `grep -E` instead
 reads `\d` as literal `d`, so `diff_grep.sh` translates those two
-classes for the GNU side only. Everything else (`+ ? * {n,m} . [] [^]
-^ $ ( ) | \1..`) agrees with GNU byte-for-byte on the battery.
+classes for the GNU side only. Anchors work at the pattern ends only:
+`^a|b$` reads as `^(a|b)$`, and a mid-pattern `^` or `$` is a literal.
+A missing file exits 2 with no message (Lox++ has no stderr channel).
+Everything else (`+ ? * {n,m} . [] [^] ( ) | \1..`) agrees with GNU
+byte-for-byte on the battery.
 
 ## Run
 

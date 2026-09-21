@@ -147,5 +147,32 @@ check "color-multiline" 0 "$COLOR_WANT" \
 # --color=auto piped (not a TTY) must stay plain
 check "color-auto-pipe" 0 "I have 3 apples" "I have 3 apples" --color=auto -E '\d'
 
+# ---- review round 1 regressions ----
+# -r prefixes even when the tree holds one file (blocking finding).
+mkdir -p "$TMPD/sd"
+printf 'apple\n' >"$TMPD/sd/only.txt"
+(
+    cd "$TMPD" || exit 1
+    got_out=$("$PROG" -r -E "apple" sd/ 2>/dev/null)
+    got_rc=$?
+    if [ "$got_rc" = 0 ] && [ "$got_out" = "sd/only.txt:apple" ]; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        printf 'FAIL recursive-single-file\n  got rc=%s out=%q\n' "$got_rc" "$got_out"
+    fi
+)
+# --color space form highlights; auto space form stays plain on a pipe.
+check "color-space-form" 0 "I have ${OPEN}3${CLOSE} apples" "I have 3 apples" --color always -E '\d'
+check "color-auto-space-pipe" 0 "I have 3 apples" "I have 3 apples" --color auto -E '\d'
+# -o skips empty spans when a real span exists; else one empty line.
+check "only-empty-spans" 0 "aa" "aab" -o -E 'a*'
+check "only-all-empty" 0 "" "b" -o -E 'a*'
+# Missing files exit 2 and win over a match; dirs without -r exit 2.
+check "missing-file" 2 "" "" -E "apple" /nonexistent-xyz-loxpp
+printf 'apple\n' >"$TMPD/ok.txt"
+check "missing-plus-match" 2 "$TMPD/ok.txt:apple" "" -E "apple" "$TMPD/ok.txt" /nonexistent-xyz-loxpp
+check "dir-without-r" 2 "" "" -E "apple" "$TMPD/sd"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -48,16 +48,33 @@ while [ "$left" -gt 0 ]; do
             left=$((left - 1))
             ;;
         --color)
-            if [ "$left" -ge 2 ] && [ "${2:-}" = "auto" ]; then
-                if [ -t 1 ]; then
-                    CV="always"
-                else
-                    CV="never"
-                fi
-                set -- "$@" "--color" "--color=$CV"
-                shift
-                shift
-                left=$((left - 2))
+            # Fold the space form into the = form so the rest of the
+            # chain sees one shape. auto still follows stdout's TTY.
+            if [ "$left" -ge 2 ]; then
+                case "$2" in
+                    auto)
+                        if [ -t 1 ]; then
+                            CV="always"
+                        else
+                            CV="never"
+                        fi
+                        set -- "$@" "--color=$CV"
+                        shift
+                        shift
+                        left=$((left - 2))
+                        ;;
+                    always|never)
+                        set -- "$@" "--color=$2"
+                        shift
+                        shift
+                        left=$((left - 2))
+                        ;;
+                    *)
+                        set -- "$@" "$1"
+                        shift
+                        left=$((left - 1))
+                        ;;
+                esac
             else
                 set -- "$@" "$1"
                 shift

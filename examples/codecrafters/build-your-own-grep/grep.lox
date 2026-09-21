@@ -511,7 +511,15 @@ fun allSpans(prog) {
 fun emitLine(line, prefix, prog, onlyMatching, useColor, colorOpen, colorClose) {
     if (onlyMatching) {
         var spans = allSpans(prog);
+        // GNU -o never prints a zero-length span, but such a span
+        // still counts as a match for the exit code.
+        var printed = [];
         for (var sp in spans) {
+            if (sp[1] > sp[0]) {
+                printed.append(sp);
+            }
+        }
+        for (var sp in printed) {
             var text = S[sp[0]:sp[1]];
             if (useColor) {
                 text = colorOpen + text + colorClose;
@@ -569,6 +577,7 @@ fun main() {
     var a = args();
     var pattern = nil;
     var onlyMatching = false;
+    var recursive = false;
     var colorMode = "never";
     var files = [];
     var i = 0;
@@ -586,7 +595,9 @@ fun main() {
                 i = i + 1;
             } else {
                 if (t == "-r") {
-                    // Accepted: the wrapper expands directories to files.
+                    // The wrapper expands directories to files; the
+                    // flag tells us to always use the path prefix.
+                    recursive = true;
                     i = i + 1;
                 } else {
                     if (t == "--color=always") {
@@ -642,6 +653,9 @@ fun main() {
         }
     }
     var matched = false;
+    // Lox++ has no stderr channel, so file faults surface as exit 2
+    // with no message. The fault wins over a match, as in GNU grep.
+    var hadError = false;
     if (len(files) == 0) {
         var lines = [];
         var line = input();
@@ -651,26 +665,36 @@ fun main() {
         }
         matched = processLines(lines, "", prog, onlyMatching, useColor, colorOpen, colorClose);
     } else {
-        var multi = len(files) > 1;
+        var usePrefix = len(files) > 1;
+        if (recursive) {
+            usePrefix = true;
+        }
         for (var fi = 0; fi < len(files); fi = fi + 1) {
             var f = files[fi];
             if (is_dir(f)) {
+                if (recursive == false) {
+                    hadError = true;
+                }
                 continue;
             }
             if (exists(f) == false) {
+                hadError = true;
                 continue;
             }
             var fh = open(f, "r");
             var flines = fh.readlines();
             fh.close();
             var prefix = "";
-            if (multi) {
+            if (usePrefix) {
                 prefix = f + ":";
             }
             if (processLines(flines, prefix, prog, onlyMatching, useColor, colorOpen, colorClose)) {
                 matched = true;
             }
         }
+    }
+    if (hadError) {
+        exit(2);
     }
     if (matched) {
         exit(0);

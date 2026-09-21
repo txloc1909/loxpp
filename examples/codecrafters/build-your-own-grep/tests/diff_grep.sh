@@ -73,7 +73,7 @@ for pat in "${PATTERNS[@]}"; do
 done
 
 # -o mode parity (whole stdout)
-for pat in '\d+' 'cat' '(cat|dog)' '\w+'; do
+for pat in '\d+' 'cat' '(cat|dog)' '\w+' 'a*' 'x*'; do
     g_out=$(grep -E -o -e "$(gnu_pat "$pat")" "$TMPD/lines.txt" 2>/dev/null)
     g_rc=$?
     l_out=$(printf '%s\n' "${INPUTS[@]}" | "$PROG" -o -E "$pat" 2>/dev/null)
