@@ -1947,7 +1947,10 @@ void VM::push(Value value) {
     std::ptrdiff_t hardCeiling =
         STACK_MAX +
         (m_unwindingStackOverflow ? STACK_OVERFLOW_STACK_RESERVE : 0);
-    if (stackTop == stack + hardCeiling) {
+    // Use >=, not ==: the ceiling moves with m_unwindingStackOverflow, and
+    // stackTop only grows, so a pointer already past STACK_MAX when the flag
+    // clears would never hit an exact match again.
+    if (stackTop >= stack + hardCeiling) {
         m_stackOverflow = true;
         return;
     }

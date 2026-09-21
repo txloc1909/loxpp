@@ -97,6 +97,10 @@ class VM {
     }
 
   private:
+    // White-box seam for StackOverflowTest. No Lox program can place
+    // stackTop past the moving ceiling (handleThrow() resets it first), so
+    // the regression test drives push() directly through this hook.
+    friend struct VMTestAccess;
     void resetStack();
     void push(Value value);
     Value pop();
