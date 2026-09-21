@@ -111,8 +111,12 @@ VMTestHarness::runWithHandlerTrace(const std::string& source,
                                    InterpretResult* out) {
     std::vector<std::pair<int, int>> trace;
     m_vm.setHandlerDepthTrace(&trace);
+    // Disarm on every path out, including a C++ throw from interpret.
+    struct Disarm {
+        VM* vm;
+        ~Disarm() { vm->setHandlerDepthTrace(nullptr); }
+    } disarm{&m_vm};
     InterpretResult result = m_vm.interpret(source);
-    m_vm.setHandlerDepthTrace(nullptr);
     if (out != nullptr) {
         *out = result;
     }

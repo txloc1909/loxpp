@@ -174,6 +174,35 @@ TEST(HandlerDepthTest, MergeDisagreementThrows) {
     EXPECT_THROW(analyzeHandlerDepthIns(ins, "merge"), std::runtime_error);
 }
 
+TEST(HandlerDepthTest, SharedCatchAtSameDepthAgrees) {
+    // Two regions may name one catch entry in hand-built input. Both
+    // seeds state depth 0, so the pass completes.
+    std::vector<DecodedInstruction> ins = {
+        makeIns(0, Op::PUSH_HANDLER, 5),
+        makeIns(1, Op::POP_HANDLER),
+        makeIns(2, Op::PUSH_HANDLER, 5),
+        makeIns(3, Op::POP_HANDLER),
+        makeIns(4, Op::NIL),
+        makeIns(5, Op::NIL),
+    };
+    HandlerDepthAnalysis a = analyzeHandlerDepthIns(ins, "shared-agree");
+    EXPECT_EQ(a.before[5], 0);
+}
+
+TEST(HandlerDepthTest, SharedCatchAtOtherDepthThrows) {
+    // The second seed states depth 1 against depth 0: disagreement.
+    std::vector<DecodedInstruction> ins = {
+        makeIns(0, Op::PUSH_HANDLER, 5),
+        makeIns(1, Op::PUSH_HANDLER, 5),
+        makeIns(2, Op::POP_HANDLER),
+        makeIns(3, Op::POP_HANDLER),
+        makeIns(4, Op::NIL),
+        makeIns(5, Op::NIL),
+    };
+    EXPECT_THROW(analyzeHandlerDepthIns(ins, "shared-disagree"),
+                 std::runtime_error);
+}
+
 TEST(HandlerDepthTest, BalancedLoopBackEdge) {
     std::vector<DecodedInstruction> ins = {
         makeIns(0, Op::NIL),

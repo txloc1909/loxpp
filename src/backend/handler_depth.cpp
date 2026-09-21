@@ -42,20 +42,28 @@ analyzeHandlerDepthIns(const std::vector<DecodedInstruction>& ins,
         offsetToIndex[ins[i].offset] = static_cast<int>(i);
     }
 
+    // One lookup style for all jump targets: missing targets throw
+    // runtime_error with the source offset, never bare out_of_range.
+    auto targetIndex = [&](int fromOffset, int targetOffset) {
+        auto it = offsetToIndex.find(targetOffset);
+        if (it == offsetToIndex.end()) {
+            throw std::runtime_error(
+                "handler_depth: jump at offset " + std::to_string(fromOffset) +
+                " targets unknown offset " + std::to_string(targetOffset) +
+                " in " + functionId);
+        }
+        return it->second;
+    };
+
     // Catch entries are never ordinary branch targets (chunk.h). Collect
     // them first so no edge below lands on one by accident.
     std::vector<bool> isCatchEntry(ins.size(), false);
     std::vector<int> pushToCatch(ins.size(), -1);
     for (size_t i = 0; i < ins.size(); i++) {
         if (ins[i].op == Op::PUSH_HANDLER) {
-            auto it = offsetToIndex.find(ins[i].jumpTarget);
-            if (it == offsetToIndex.end()) {
-                throw std::runtime_error(
-                    "handler_depth: PUSH_HANDLER at offset " +
-                    std::to_string(ins[i].offset) + " targets unknown offset");
-            }
-            isCatchEntry[static_cast<size_t>(it->second)] = true;
-            pushToCatch[i] = it->second;
+            int catchIdx = targetIndex(ins[i].offset, ins[i].jumpTarget);
+            isCatchEntry[static_cast<size_t>(catchIdx)] = true;
+            pushToCatch[i] = catchIdx;
         }
     }
 
@@ -91,30 +99,29 @@ analyzeHandlerDepthIns(const std::vector<DecodedInstruction>& ins,
         int idx = static_cast<int>(i);
         int fallthrough = (i + 1 < ins.size()) ? idx + 1 : -1;
         switch (ins[i].op) {
-        case Op::RETURN:
-        case Op::THROW:
-        case Op::MATCH_ERROR:
-            break;
         case Op::JUMP:
         case Op::LOOP:
-            addEdge(idx, offsetToIndex.at(ins[i].jumpTarget));
+            addEdge(idx, targetIndex(ins[i].offset, ins[i].jumpTarget));
             break;
         case Op::PUSH_HANDLER:
         case Op::JUMP_IF_FALSE:
-            addEdge(idx, offsetToIndex.at(ins[i].jumpTarget));
+            addEdge(idx, targetIndex(ins[i].offset, ins[i].jumpTarget));
             if (fallthrough >= 0) {
                 addEdge(idx, fallthrough);
             }
             break;
         case Op::JUMP_TABLE:
             for (const auto& arm : ins[i].jumpTable) {
-                addEdge(idx, offsetToIndex.at(arm.target));
+                addEdge(idx, targetIndex(ins[i].offset, arm.target));
             }
             if (fallthrough >= 0) {
                 addEdge(idx, fallthrough);
             }
             break;
         default:
+            if (isTerminal(ins[i].op)) {
+                break;
+            }
             if (fallthrough >= 0) {
                 addEdge(idx, fallthrough);
             }
@@ -143,14 +150,13 @@ analyzeHandlerDepthIns(const std::vector<DecodedInstruction>& ins,
     // A catch entry is seeded from its own PUSH_HANDLER, not from generic
     // predecessors: THROW removes the record before it jumps, so the depth
     // at catch entry equals the depth before the PUSH. Only a reached PUSH
-    // seeds its catch; a dead try seeds nothing.
-    std::vector<bool> catchSeeded(ins.size(), false);
+    // seeds its catch; a dead try seeds nothing. A second PUSH for one
+    // catch rechecks depth agreement through setBefore.
     auto maybeSeedCatch = [&](int pushIdx, std::vector<int>& wl) {
         int catchIdx = pushToCatch[static_cast<size_t>(pushIdx)];
-        if (catchIdx < 0 || catchSeeded[static_cast<size_t>(catchIdx)]) {
+        if (catchIdx < 0) {
             return;
         }
-        catchSeeded[static_cast<size_t>(catchIdx)] = true;
         setBefore(catchIdx, out.before[static_cast<size_t>(pushIdx)], wl);
     };
 
