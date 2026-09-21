@@ -2,6 +2,8 @@ package lox;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 
 /**
  * Mirrors src/stdlib/file_api.cpp's ObjFile over a RandomAccessFile, which is
@@ -13,11 +15,13 @@ public final class LoxFile {
     private RandomAccessFile raf; // null once closed
     public final boolean readable;
     public final boolean writable;
+    private boolean isDirectory; // true only for a directory opened with "r" mode
 
-    private LoxFile(RandomAccessFile raf, boolean readable, boolean writable) {
+    private LoxFile(RandomAccessFile raf, boolean readable, boolean writable, boolean isDirectory) {
         this.raf = raf;
         this.readable = readable;
         this.writable = writable;
+        this.isDirectory = isDirectory;
     }
 
     public static LoxFile open(String path, String mode) {
@@ -48,6 +52,15 @@ public final class LoxFile {
             throw new LoxError(
                     "open(): invalid mode. Expected \"r\", \"w\", \"a\", or \"r+\".");
         }
+        // Linux fopen(path, "r") succeeds on a directory; only a later read(2)
+        // fails with EISDIR. RandomAccessFile throws at construction time for
+        // a directory, so detect it first and defer to the read methods.
+        // Only mode "r" can open a directory; "w", "a", "r+" still raise.
+        if (mode.equals("r") && isLinux()) {
+            if (isDirectoryPath(path)) {
+                return new LoxFile(null, true, false, true);
+            }
+        }
         try {
             RandomAccessFile raf = new RandomAccessFile(path, readable && !writable ? "r" : "rw");
             if (truncate) {
@@ -56,14 +69,27 @@ public final class LoxFile {
             if (append) {
                 raf.seek(raf.length());
             }
-            return new LoxFile(raf, readable, writable);
+            return new LoxFile(raf, readable, writable, false);
         } catch (IOException e) {
             throw new LoxError("open(): cannot open '" + path + "': " + e.getMessage());
         }
     }
 
+    private static boolean isLinux() {
+        String os = System.getProperty("os.name", "");
+        return os.toLowerCase(java.util.Locale.ROOT).contains("linux");
+    }
+
+    private static boolean isDirectoryPath(String path) {
+        try {
+            return Files.isDirectory(Paths.get(path));
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
     private void checkOpen(String method) {
-        if (raf == null) {
+        if (raf == null && !isDirectory) {
             throw new LoxError("Cannot call '" + method + "' on a closed file.");
         }
     }
@@ -72,6 +98,11 @@ public final class LoxFile {
         checkOpen("read");
         if (!readable) {
             throw new LoxError("File is not open for reading.");
+        }
+        // A directory opened with "r": read(2) fails with EISDIR on Linux.
+        // Return "" to match native fopen/read behavior; each read gives "".
+        if (isDirectory) {
+            return "";
         }
         try {
             byte[] buf = new byte[(int) (raf.length() - raf.getFilePointer())];
@@ -87,6 +118,10 @@ public final class LoxFile {
         checkOpen("readline");
         if (!readable) {
             throw new LoxError("File is not open for reading.");
+        }
+        // A directory opened with "r": native fgets gives no line, so nil.
+        if (isDirectory) {
+            return null;
         }
         try {
             StringBuilder line = new StringBuilder();
@@ -144,6 +179,7 @@ public final class LoxFile {
             }
             raf = null;
         }
+        isDirectory = false;
     }
 
     /**
