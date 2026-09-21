@@ -958,13 +958,14 @@ collection[key]
    b. If `key` is present in the map, the expression evaluates to its associated
       value.
    c. If `key` is absent, the expression evaluates to `nil`.
-4. If `collection` is a **List**:
+4. If `collection` is a **List** or a **String**:
    a. If `key` is not a Number, this is a **runtime error** ("List index must be a number.").
    b. If `key` is not an integer-valued number (i.e., `key ≠ floor(key)`),
       this is a **runtime error** ("List index must be an integer.").
    c. Let `i` be the integer value of `key`.
    d. If `i < 0` or `i ≥ length(collection)`, this is a **runtime error** ("List index out of bounds.").
-   e. The expression evaluates to `collection[i]`.
+   e. For a List, the expression evaluates to `collection[i]`. For a String,
+      it evaluates to the one-character String at position `i`.
 5. Otherwise, this is a **runtime error** ("Only lists and maps can be indexed.").
 
 Note: since there is no separate integer type, `list[1]` and `list[1.0]` are
@@ -1161,9 +1162,9 @@ same text the implementation reports when the fault is left uncaught.
 | Undefined global variable | `print undeclared;` | `"UndefinedVariableError"` |
 | Call stack overflow | Unbounded recursion | `"StackOverflowError"` |
 | Index of non-List/non-Map | `42[0]` | `"NotIndexableError"` |
-| Non-Number list index | `list["a"]` | `"IndexTypeError"` |
-| Fractional list index | `list[1.5]` | `"IndexNotIntegerError"` |
-| List index out of bounds | `[][0]` | `"IndexOutOfBoundsError"` |
+| Non-Number List or String index | `list["a"]` | `"IndexTypeError"` |
+| Fractional List or String index | `list[1.5]` | `"IndexNotIntegerError"` |
+| List or String index out of bounds | `[][0]` | `"IndexOutOfBoundsError"` |
 | `pop` on empty list | `[].pop()` | `"EmptyListError"` |
 | NaN used as map key | `m[0/0] = 1` | `"NaNKeyError"` |
 | Object (non-String) used as map key | `m[[1,2]] = 1` | `"InvalidMapKeyError"` |

@@ -150,6 +150,27 @@ CATCHABLE_ROWS = [
         expected_kind="IndexNotIntegerError",
     ),
     Row("index_out_of_bounds_error", "caught", "[][0];", expected_kind="IndexOutOfBoundsError"),
+    # Regression rows for issue #371: spec/04-semantics.md's Index Get section
+    # and these same three table rows now cover a String receiver too, not
+    # only a List -- these three rows pin that a String receiver gets the
+    # identical kind (and, per issue #371's own measurement, the identical
+    # "List index ..." message text -- native reuses the List-receiver text
+    # unchanged for a String) a List receiver gets, on every consumer.
+    Row("index_type_error_string", "caught", 's["a"];', setup='var s = "abc";\n', expected_kind="IndexTypeError"),
+    Row(
+        "index_not_integer_error_string",
+        "caught",
+        "s[1.5];",
+        setup='var s = "abc";\n',
+        expected_kind="IndexNotIntegerError",
+    ),
+    Row(
+        "index_out_of_bounds_error_string",
+        "caught",
+        "s[10];",
+        setup='var s = "abc";\n',
+        expected_kind="IndexOutOfBoundsError",
+    ),
     Row("empty_list_error", "caught", "[].pop();", expected_kind="EmptyListError"),
     Row("nan_key_error", "caught", "m[0/0] = 1;", setup="var m = {};\n", expected_kind="NaNKeyError"),
     Row(
@@ -865,9 +886,13 @@ def main() -> None:
     # call_non_callable_after_field_read is a second CATCHABLE_ROWS entry for
     # the same spec row as not_callable_error: regression armor for issue
     # #348 (a bare 42() must stay catchable even after an earlier field
-    # read), not a new spec table row. It must not count against the 1:1
-    # mapping this invariant checks between CATCHABLE_ROWS and spec rows.
-    extra_catchable_rows = 1
+    # read), not a new spec table row. index_type_error_string,
+    # index_not_integer_error_string, and index_out_of_bounds_error_string
+    # (issue #371) are three more: a String receiver shares its spec row
+    # with the matching List row, not a row of its own. None of the four
+    # count against the 1:1 mapping this invariant checks between
+    # CATCHABLE_ROWS and spec rows.
+    extra_catchable_rows = 4
     spec_row_count = load_spec_table_kind_count()
     if spec_row_count != len(CATCHABLE_ROWS) - extra_catchable_rows + excluded_catchable_rows:
         print(
