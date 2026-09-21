@@ -357,6 +357,33 @@ FATAL_ROWS = [
         setup="enum E { A(x) } var v = A(1);\n",
         expected_message="Enum field index 3 out of range.",
     ),
+    # Regression armor for issue #363: a NaN/infinite/oversized index has no
+    # well-defined narrowing conversion to int on any consumer (C++
+    # static_cast, Java narrowing conversion, C# unchecked (int) cast are
+    # all unspecified/UB for these inputs) and used to leak that garbage
+    # value into the message, or -- on JVM's NaN case -- silently land the
+    # conversion's own zero result in bounds and skip the fault entirely.
+    Row(
+        "enum_index_nan",
+        "fatal",
+        "v[0.0/0.0];",
+        setup="enum E { A(x) } var v = A(1);\n",
+        expected_message="Enum field index -nan out of range.",
+    ),
+    Row(
+        "enum_index_infinity",
+        "fatal",
+        "v[1.0/0.0];",
+        setup="enum E { A(x) } var v = A(1);\n",
+        expected_message="Enum field index inf out of range.",
+    ),
+    Row(
+        "enum_index_oversized",
+        "fatal",
+        "v[99999999999.0];",
+        setup="enum E { A(x) } var v = A(1);\n",
+        expected_message="Enum field index 1e+11 out of range.",
+    ),
     Row(
         "string_index_assignment",
         "fatal",
@@ -600,6 +627,16 @@ for _row in FATAL_ROWS:
     if _row.name == "enum_index_out_of_range":
         # Node #349: bootstrap now indexes enum values, matching native's
         # fatal disposition on out-of-range error, so it is exempt from the
+        # blanket skip below.
+        continue
+    if _row.name in (
+        "enum_index_nan",
+        "enum_index_infinity",
+        "enum_index_oversized",
+    ):
+        # Issue #363: bootstrap's own enum index-get already formats a
+        # NaN/infinite/oversized index the same way native's stringify()
+        # does, so it already matches on this row -- exempt from the
         # blanket skip below.
         continue
     if _row.name == "property_get_non_instance":
@@ -888,7 +925,14 @@ def main() -> None:
     # bare name, to pin the fused call site's syntactic dispatch. Neither is
     # a new spec table row, so both must not count against the 1:1 mapping
     # this invariant checks between FATAL_ROWS and spec rows.
-    extra_fatal_rows = 2
+    #
+    # enum_index_nan, enum_index_infinity, and enum_index_oversized are
+    # regression armor for issue #363: all three exercise the same spec row
+    # as enum_index_out_of_range ("v[3];" -- "Enum field index 3 out of
+    # range.") with a NaN, infinite, or oversized index instead of an
+    # ordinary in-int-range one, to pin the narrowing-conversion guard every
+    # consumer needed. None is a new spec table row.
+    extra_fatal_rows = 5
     spec_fatal_row_count = load_spec_fatal_row_count()
     if spec_fatal_row_count != len(FATAL_ROWS) - extra_fatal_rows + excluded_fatal_rows:
         print(

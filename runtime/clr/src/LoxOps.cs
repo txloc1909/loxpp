@@ -346,6 +346,17 @@ public static class LoxOps {
                 throw new LoxError("Enum field index must be a number.");
             }
             object[] payload = e.Payload;
+            // NaN, +-infinity, and a magnitude outside int's range have no
+            // well-defined (int) conversion (unchecked in C# silently lands
+            // on an unspecified value — observed as int.MinValue on this
+            // runtime for every one of these cases, which can read as
+            // in-bounds for a small enum) and can never be a valid field
+            // index either way, so report them out of range directly from
+            // the value's own text instead of narrowing first — matches
+            // src/object.cpp's stringify().
+            if (!double.IsFinite(d) || d < int.MinValue || d > int.MaxValue) {
+                throw new LoxError($"Enum field index {FormatNumber(d)} out of range.");
+            }
             int idx = (int)d;
             if (idx < 0 || idx >= payload.Length) {
                 throw new LoxError($"Enum field index {idx} out of range.");
