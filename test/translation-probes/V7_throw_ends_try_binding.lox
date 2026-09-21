@@ -1,0 +1,26 @@
+// V7_throw_ends_try_binding.lox — verification probe (issue #386).
+//
+// A throw unwinds past try-body locals without running endScope, so the
+// unwinding side must end their bindings itself. The first half throws a
+// string, the second half faults with IndexOutOfBoundsError: both share
+// the one unwind. Expected output:
+//
+// boom
+// 42
+// IndexOutOfBoundsError
+// 2
+var fns = [];
+try {
+    var x = 41;
+    fun c() { return x + 1; }
+    fns.append(c);
+    throw "boom";
+} catch (e) { print e; }
+print fns[0]();
+try {
+    var y = 1;
+    fun d() { return y + 1; }
+    fns.append(d);
+    var z = [1][5];
+} catch (e) { print e.kind; }
+print fns[1]();
