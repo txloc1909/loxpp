@@ -621,6 +621,67 @@ REFLECT_ROWS = [
 
 ALL_ROWS = CATCHABLE_ROWS + FATAL_ROWS + REFLECT_ROWS
 
+# --- Named regression-only rows (issue #368) --------------------------------
+#
+# Each entry here duplicates an existing spec table row under a different
+# shape (a different receiver, a different edge-case value) to pin a
+# specific past bug, not to cover a new spec row. Held by NAME, not by a bare
+# count: `main()`'s row-count gate below checks that these exact names are
+# present in CATCHABLE_ROWS/FATAL_ROWS, in addition to the arithmetic (spec
+# row count + this set's size == the table's row count). A count-only check
+# cannot tell "these three known regression rows are present" from "three
+# different, unbacked rows were swapped in" -- the totals still agree either
+# way. Checking the names closes that gap: a swap changes which names are
+# present even when the total does not change.
+CATCHABLE_REGRESSION_ROWS = {
+    # Issue #348: a bare 42() must stay catchable even after an earlier
+    # field read (regression armor for the same spec row as
+    # not_callable_error).
+    "call_non_callable_after_field_read",
+    # Issue #371: a String receiver shares its spec row with the matching
+    # List row, not a row of its own.
+    "index_type_error_string",
+    "index_not_integer_error_string",
+    "index_out_of_bounds_error_string",
+    # Found while working issue #367: a second entry for the same spec row
+    # as constructor_arity_error, pinning the no-init-class aliasing bug.
+    "constructor_arity_error_no_init_class",
+}
+
+FATAL_REGRESSION_ROWS = {
+    # Issue #348: pins the fused call site's syntactic dispatch through a
+    # chained-get and a grouping shape, same spec row as
+    # property_get_non_instance.
+    "invoke_chained_property_get",
+    "invoke_grouped_property_get",
+    # Issue #363: same spec row as enum_index_out_of_range, with a NaN,
+    # infinite, or oversized index instead of an ordinary in-range one.
+    "enum_index_nan",
+    "enum_index_infinity",
+    "enum_index_oversized",
+    # Issue #375: map_del_invalid_key exercises the same spec row as
+    # map_has_invalid_key through Map.del instead of Map.has, to pin both
+    # natives, not a second spec table row.
+    "map_del_invalid_key",
+}
+
+
+def check_named_regression_rows(rows: list[Row], regression_names: set[str], table_label: str) -> list[str]:
+    """Returns failure strings (empty if none): every name in
+    `regression_names` must actually be a row in `rows`, by name -- not just
+    a count match. See CATCHABLE_REGRESSION_ROWS's own comment for why a bare
+    count cannot catch a swapped-in unbacked row."""
+    present = {r.name for r in rows}
+    missing = regression_names - present
+    if not missing:
+        return []
+    return [
+        f"check_fault_table.py: {table_label}'s declared regression-only row(s) "
+        f"{sorted(missing)!r} are not present by name -- a row was renamed or "
+        "removed without updating CATCHABLE_REGRESSION_ROWS/FATAL_REGRESSION_ROWS."
+    ]
+
+
 # --- Bootstrap's own disposition model -------------------------------------
 #
 # Node #335's own scope (issue #335) was "wire every setError() call site's
@@ -977,63 +1038,38 @@ def main() -> None:
 
     validate_row_anchors(ALL_ROWS)
 
-    excluded_catchable_rows = 0
-    # call_non_callable_after_field_read is a second CATCHABLE_ROWS entry for
-    # the same spec row as not_callable_error: regression armor for issue
-    # #348 (a bare 42() must stay catchable even after an earlier field
-    # read), not a new spec table row. index_type_error_string,
-    # index_not_integer_error_string, and index_out_of_bounds_error_string
-    # (issue #371) are three more: a String receiver shares its spec row
-    # with the matching List row, not a row of its own.
-    # constructor_arity_error_no_init_class is a fifth: a second entry for
-    # the same spec row as constructor_arity_error, regression armor for
-    # the no-init-class aliasing bug found while working #367. None of
-    # these five count against the 1:1 mapping this invariant checks
-    # between CATCHABLE_ROWS and spec rows.
-    extra_catchable_rows = 5
+    # See CATCHABLE_REGRESSION_ROWS/FATAL_REGRESSION_ROWS's own comment
+    # (issue #368): each gate below checks both the arithmetic (spec row
+    # count + the named regression set's size == the table's row count) and
+    # that every declared regression-only name is actually present in the
+    # table, by name -- not a bare count, which cannot tell a declared
+    # regression row from an unrelated unbacked row that happens to keep the
+    # total the same.
+    gate_failures: list[str] = []
     spec_row_count = load_spec_table_kind_count()
-    if spec_row_count != len(CATCHABLE_ROWS) - extra_catchable_rows + excluded_catchable_rows:
-        print(
+    if spec_row_count != len(CATCHABLE_ROWS) - len(CATCHABLE_REGRESSION_ROWS):
+        gate_failures.append(
             f"check_fault_table.py: spec/04-semantics.md's catchable table has "
             f"{spec_row_count} row(s), but CATCHABLE_ROWS covers "
-            f"{len(CATCHABLE_ROWS)} (-{extra_catchable_rows} regression-only entry "
-            "for an existing row). The table changed; "
-            "update this script's corpus to match.",
-            file=sys.stderr,
+            f"{len(CATCHABLE_ROWS)} (-{len(CATCHABLE_REGRESSION_ROWS)} named "
+            "regression-only entries). The table changed; update this script's "
+            "corpus to match."
         )
-        sys.exit(2)
+    gate_failures += check_named_regression_rows(CATCHABLE_ROWS, CATCHABLE_REGRESSION_ROWS, "CATCHABLE_ROWS")
 
-    excluded_fatal_rows = 0
-    # invoke_chained_property_get and invoke_grouped_property_get are
-    # regression armor for issue #348: they exercise the same spec row as
-    # property_get_non_instance ("42.foo;" -- "Only instances have
-    # properties.") through a chained-get and a grouping shape instead of a
-    # bare name, to pin the fused call site's syntactic dispatch. Neither is
-    # a new spec table row, so both must not count against the 1:1 mapping
-    # this invariant checks between FATAL_ROWS and spec rows.
-    #
-    # enum_index_nan, enum_index_infinity, and enum_index_oversized are
-    # regression armor for issue #363: all three exercise the same spec row
-    # as enum_index_out_of_range ("v[3];" -- "Enum field index 3 out of
-    # range.") with a NaN, infinite, or oversized index instead of an
-    # ordinary in-int-range one, to pin the narrowing-conversion guard every
-    # consumer needed. None is a new spec table row.
-    #
-    # map_del_invalid_key is regression armor for issue #375: it exercises
-    # the same spec row as map_has_invalid_key ("Map.has(key) or
-    # Map.del(key) called with an invalid key") through Map.del instead of
-    # Map.has, to pin both natives, not a second spec table row.
-    extra_fatal_rows = 6
     spec_fatal_row_count = load_spec_fatal_row_count()
-    if spec_fatal_row_count != len(FATAL_ROWS) - extra_fatal_rows + excluded_fatal_rows:
-        print(
+    if spec_fatal_row_count != len(FATAL_ROWS) - len(FATAL_REGRESSION_ROWS):
+        gate_failures.append(
             f"check_fault_table.py: spec/04-semantics.md's Fatal Runtime Errors "
             f"table has {spec_fatal_row_count} row(s), but FATAL_ROWS covers "
-            f"{len(FATAL_ROWS)} (-{extra_fatal_rows} regression-only entries for "
-            "an existing row). The table changed; "
-            "update this script's corpus to match.",
-            file=sys.stderr,
+            f"{len(FATAL_ROWS)} (-{len(FATAL_REGRESSION_ROWS)} named regression-only "
+            "entries). The table changed; update this script's corpus to match."
         )
+    gate_failures += check_named_regression_rows(FATAL_ROWS, FATAL_REGRESSION_ROWS, "FATAL_ROWS")
+
+    if gate_failures:
+        for f in gate_failures:
+            print(f, file=sys.stderr)
         sys.exit(2)
 
     rows = ALL_ROWS
