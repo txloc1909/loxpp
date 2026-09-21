@@ -2035,14 +2035,23 @@ class InterpMapMethod {
     call(interp, args) {
         if (this.name == "has") {
             if (!interp.isValidMapKey(args[0])) {
-                interp.setInvalidMapKeyError(args[0], 0);
+                // Unlike an index read/write, a set/map literal, or `in`
+                // (interp.setInvalidMapKeyError, catchable, kind-split by
+                // cause), native's Map.has/Map.del reach this through the
+                // stdlib-native error path, fatal with one combined
+                // message regardless of cause -- a pre-existing native-VM
+                // asymmetry (see runtime/clr/src/LoxOps.cs's
+                // CheckMapKeyForNativeMethod), not a bootstrap choice.
+                interp.fatalError(
+                    "Map keys must be Bool, Number, Nil, or String. NaN is not allowed.");
                 return nil;
             }
             return this.map.data.has(args[0]);
         }
         if (this.name == "del") {
             if (!interp.isValidMapKey(args[0])) {
-                interp.setInvalidMapKeyError(args[0], 0);
+                interp.fatalError(
+                    "Map keys must be Bool, Number, Nil, or String. NaN is not allowed.");
                 return nil;
             }
             // Count only a real erase: a miss leaves iteration valid.

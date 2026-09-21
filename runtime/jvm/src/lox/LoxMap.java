@@ -124,12 +124,12 @@ public final class LoxMap {
         switch (name) {
         case "has":
             return new LoxNative("has", 1, a -> {
-                LoxOps.checkMapKey(a[0]);
+                LoxOps.checkMapKeyForNativeMethod(a[0]);
                 return has(a[0]);
             });
         case "del":
             return new LoxNative("del", 1, a -> {
-                LoxOps.checkMapKey(a[0]);
+                LoxOps.checkMapKeyForNativeMethod(a[0]);
                 remove(a[0]);
                 return null;
             });

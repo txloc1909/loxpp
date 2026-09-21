@@ -174,6 +174,27 @@ public final class LoxOps {
     }
 
     /**
+     * The `has`/`del` map-method key check. Unlike {@link #checkMapKey},
+     * this mirrors map_api.cpp's mapHasNative/mapDelNative exactly: a
+     * single uncatchable fault with one combined message, not a catchable,
+     * kind-split one. vm.cpp's opcodes (BUILD_MAP, IN, GET_INDEX,
+     * SET_INDEX) and its native map methods (has/del) are not symmetric
+     * here — this is a pre-existing native-VM design, not a JVM-specific
+     * choice (see runtime/clr/src/LoxOps.cs's CheckMapKeyForNativeMethod,
+     * which mirrors the same asymmetry).
+     */
+    static void checkMapKeyForNativeMethod(Object key) {
+        if (key == null || key instanceof Boolean || key instanceof String) {
+            return;
+        }
+        if (key instanceof Double && !Double.isNaN((Double)key)) {
+            return;
+        }
+        throw new LoxError(
+            "Map keys must be Bool, Number, Nil, or String. NaN is not allowed.");
+    }
+
+    /**
      * Operand order matches the on-stack order (elem below seq) — chunk.h's IN
      * pops [elem, seq].
      */
@@ -681,11 +702,11 @@ public final class LoxOps {
         switch (name) {
         case "has":
             requireArity(args, 1, "has");
-            checkMapKey(args[0]);
+            checkMapKeyForNativeMethod(args[0]);
             return map.has(args[0]);
         case "del":
             requireArity(args, 1, "del");
-            checkMapKey(args[0]);
+            checkMapKeyForNativeMethod(args[0]);
             map.remove(args[0]);
             return null;
         case "keys": {

@@ -256,6 +256,30 @@ FATAL_ROWS = [
         skip_fields={JVM: {"message"}, CLR: {"message"}, BOOTSTRAP: {"message"}},
         expected_message="open(): cannot open '/no/such/path': No such file or directory",
     ),
+    # Issue #375: unlike an index read/write, a map/set literal, or `in`
+    # (the catchable table's NaNKeyError/InvalidMapKeyError rows above),
+    # Map.has/Map.del are stdlib native methods, and reach this same
+    # cause through the stdlib-native error path -- fatal, one combined
+    # message regardless of NaN vs. a non-String object key. A
+    # pre-existing native-VM asymmetry between the opcode-level and
+    # stdlib-native forms of the same cause, not a defect in one consumer.
+    Row(
+        "map_has_invalid_key",
+        "fatal",
+        "m.has([1, 2]);",
+        setup="var m = {};\n",
+        expected_message="Map keys must be Bool, Number, Nil, or String. NaN is not allowed.",
+    ),
+    # Regression armor: map_has_invalid_key's own spec row ("Map.has(key)
+    # or Map.del(key)") covers both natives with one Example; this row
+    # pins Map.del specifically, not a second spec table row.
+    Row(
+        "map_del_invalid_key",
+        "fatal",
+        "m.del(0.0/0.0);",
+        setup="var m = {};\n",
+        expected_message="Map keys must be Bool, Number, Nil, or String. NaN is not allowed.",
+    ),
     Row(
         "undefined_property_on_file",
         "fatal",
@@ -623,6 +647,11 @@ for _row in FATAL_ROWS:
         # handled by this row's own skip_fields), so it is exempt from the
         # blanket skip below.
         continue
+    if _row.name in ("map_has_invalid_key", "map_del_invalid_key"):
+        # Issue #375: bootstrap's Map.has/Map.del now call fatalError with
+        # native's own combined message, matching native/JVM/CLR, so both
+        # rows are exempt from the blanket skip below.
+        continue
     if _row.name == "defer_noncallable_value":
         # Node #351: bootstrap now faults on a deferred non-callable value,
         # matching native's fatal disposition, so it is exempt from the
@@ -957,7 +986,12 @@ def main() -> None:
     # range.") with a NaN, infinite, or oversized index instead of an
     # ordinary in-int-range one, to pin the narrowing-conversion guard every
     # consumer needed. None is a new spec table row.
-    extra_fatal_rows = 5
+    #
+    # map_del_invalid_key is regression armor for issue #375: it exercises
+    # the same spec row as map_has_invalid_key ("Map.has(key) or
+    # Map.del(key) called with an invalid key") through Map.del instead of
+    # Map.has, to pin both natives, not a second spec table row.
+    extra_fatal_rows = 6
     spec_fatal_row_count = load_spec_fatal_row_count()
     if spec_fatal_row_count != len(FATAL_ROWS) - extra_fatal_rows + excluded_fatal_rows:
         print(
