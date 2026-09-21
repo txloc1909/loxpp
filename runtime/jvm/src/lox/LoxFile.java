@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.Locale;
 
 /**
  * Mirrors src/stdlib/file_api.cpp's ObjFile over a RandomAccessFile, which is
@@ -77,7 +78,7 @@ public final class LoxFile {
 
     private static boolean isLinux() {
         String os = System.getProperty("os.name", "");
-        return os.toLowerCase(java.util.Locale.ROOT).contains("linux");
+        return os.toLowerCase(Locale.ROOT).contains("linux");
     }
 
     private static boolean isDirectoryPath(String path) {

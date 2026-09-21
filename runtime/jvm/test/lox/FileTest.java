@@ -99,9 +99,14 @@ public final class FileTest {
                 checkEquals(0, emptyList.elements.size(), "readlines() on a directory gives an empty list");
                 checkThrows(() -> dirReader.write("x"), LoxError.class,
                         "write() on a read-only directory file raises an error");
+                checkThrows(() -> dirReader.writeline("x"), LoxError.class,
+                        "writeline() on a read-only directory file raises an error");
                 dirReader.close();
                 checkThrows(dirReader::read, LoxError.class,
                         "read() on a closed directory file raises an error");
+                checkThrows(dirReader::readline, LoxError.class,
+                        "readline() on a closed directory file raises an error");
+                dirReader.close();
                 checkThrows(() -> LoxFile.open(dir, "w"), LoxError.class,
                         "open(directory, \"w\") raises an error");
                 checkThrows(() -> LoxFile.open(dir, "a"), LoxError.class,
