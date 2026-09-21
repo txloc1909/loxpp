@@ -617,6 +617,45 @@ REFLECT_ROWS = [
         setup=_REFLECT_SETUP,
         expected_message="Only instances have methods.",
     ),
+    # A non-instance, non-Error receiver (a Number here) is fatal the same
+    # way an Error receiver is (issue #370: bootstrap special-cased only the
+    # Error receiver, every other non-instance receiver stayed catchable).
+    Row(
+        "reflect_fields_on_number",
+        "fatal",
+        "fields(42);",
+        expected_message="Expected an instance.",
+    ),
+    Row(
+        "reflect_methods_on_number",
+        "fatal",
+        "methods(42);",
+        expected_message="Expected a class.",
+    ),
+    Row(
+        "reflect_getfield_on_number",
+        "fatal",
+        'getField(42, "x");',
+        expected_message="Only instances have properties.",
+    ),
+    Row(
+        "reflect_hasfield_on_number",
+        "fatal",
+        'hasField(42, "x");',
+        expected_message="Only instances have properties.",
+    ),
+    Row(
+        "reflect_setfield_on_number",
+        "fatal",
+        'setField(42, "x", 1);',
+        expected_message="Only instances have fields.",
+    ),
+    Row(
+        "reflect_callmethod_on_number",
+        "fatal",
+        'callMethod(42, "foo");',
+        expected_message="Only instances have methods.",
+    ),
 ]
 
 ALL_ROWS = CATCHABLE_ROWS + FATAL_ROWS + REFLECT_ROWS
