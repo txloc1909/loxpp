@@ -121,6 +121,7 @@ REVIEWED_NON_TABLE_KINDS = {
 # table, never as part of an unrelated change.
 EXPECTED_CALLS = [
     ('StackOverflowError', '"Stack overflow."', JUDGED),
+    ('ArityError', '"Expected " + str(callee.arity()) + " arguments but got " + str(len(defer_args)) + "."', JUDGED),
     ('ReflectionArityError', '"Expected at least 2 arguments."', JUDGED),
     ('ReflectionFieldNameError', '"Field name must be a string."', JUDGED),
     ('ReflectionUndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),

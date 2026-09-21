@@ -229,6 +229,14 @@ PROBES = [
      CATCHABLE, "InvalidReceiverError", '"Method called on invalid receiver."'),
     ("plain property get on a non-instance (fused, fatal)", "try { 42.foo; } catch (e) { print e.kind; }",
      FATAL, "InvalidReceiverError", '"Method called on invalid receiver."'),
+
+    # --- issue #359: a deferred call's own arity mismatch is the ordinary
+    # catchable ArityError, through a distinct message-building call site
+    # (VM::runPendingDefers -> VM::call, not the direct-call site) ---
+    ("deferred call's own arity mismatch",
+     "fun needsOne(a) {} fun g() { defer needsOne(); } try { g(); } catch (e) { print e.kind; }",
+     CATCHABLE, "ArityError",
+     '"Expected " + str(callee.arity()) + " arguments but got " + str(len(defer_args)) + "."'),
 ]
 
 
