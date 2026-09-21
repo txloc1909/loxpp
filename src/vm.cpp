@@ -24,6 +24,7 @@
 #include <cstring>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <unistd.h>
 
@@ -1412,6 +1413,18 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 }
                 double n = as<Number>(indexVal);
                 auto* e = asObjEnum(as<Obj*>(collectionVal));
+                // NaN, +-infinity, and a magnitude outside int's range have
+                // no well-defined static_cast<int> result (UB) and can
+                // never be a valid field index either way, so report them
+                // out of range directly from the Value's own text instead
+                // of casting first.
+                if (!std::isfinite(n) ||
+                    n < static_cast<double>(std::numeric_limits<int>::min()) ||
+                    n > static_cast<double>(std::numeric_limits<int>::max())) {
+                    RAISE_ERROR("Enum field index %s out of range.",
+                                stringify(indexVal).c_str());
+                    return InterpretResult::RUNTIME_ERROR;
+                }
                 int idx = static_cast<int>(n);
                 if (idx < 0 || idx >= static_cast<int>(e->fields.size())) {
                     RAISE_ERROR("Enum field index %d out of range.", idx);

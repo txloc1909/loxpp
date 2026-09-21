@@ -336,8 +336,21 @@ public final class LoxOps {
             if (!(index instanceof Double)) {
                 throw new LoxError("Enum field index must be a number.");
             }
+            double n = (Double)index;
             Object[] payload = ((LoxEnum)collection).payload;
-            int idx = (int)(double)(Double)index;
+            // NaN, +-infinity, and a magnitude outside int's range have no
+            // well-defined narrowing conversion to int (JLS 5.1.3 sends
+            // NaN to 0 and an out-of-range value to Integer.MIN_VALUE/
+            // MAX_VALUE, silently landing in bounds for a small enum) and
+            // can never be a valid field index either way, so report them
+            // out of range directly from the value's own text instead of
+            // narrowing first — matches src/object.cpp's stringify().
+            if (!Double.isFinite(n) || n < Integer.MIN_VALUE ||
+                    n > Integer.MAX_VALUE) {
+                throw new LoxError("Enum field index " + formatNumber(n) +
+                                        " out of range.");
+            }
+            int idx = (int)n;
             if (idx < 0 || idx >= payload.length) {
                 throw new LoxError("Enum field index " + idx +
                                         " out of range.");
