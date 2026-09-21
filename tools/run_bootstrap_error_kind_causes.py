@@ -166,6 +166,8 @@ PROBES = [
      FATAL, "ForInNotIterableError", '"Value is not iterable (expected list, string, or map)."'),
     ("map size changed during for-in", "try { var m = {1: 1}; for (var k in m) { m[2] = 2; } } catch (e) { print e.kind; }",
      FATAL, "MapSizeChangedError", '"Map changed size during iteration."'),
+    ("map net-zero change during for-in", "try { var m = {1: \"a\"}; for (var k in m) { m.del(1); m[2] = \"b\"; } } catch (e) { print e.kind; }",
+     FATAL, "MapSizeChangedError", '"Map changed size during iteration."'),
     ("superclass is not a class",
      "var N = 1; fun f() { class Sub < N {} } try { f(); } catch (e) { print e.kind; }",
      FATAL, "InvalidSuperclassError", '"Superclass must be a class."'),

@@ -412,11 +412,10 @@ in unspecified order.
    For a Map, the iterator also records the structural version.
 3. Before each iteration, the next element is located:
    - For a **List** or **String**: if `cursor ≥ length`, the loop exits.
-   - For a **Map**: the recorded version is compared to the current version
-     first (see Mutation during iteration below). Then the cursor, a bucket
-     index,
-      scans forward to the next occupied bucket within the capacity; if there
-      is none, the loop exits.
+   - For a **Map**: the recorded version is compared to the current
+     version first (see Mutation during iteration below). Then the
+     cursor, a bucket index, scans forward to the next occupied bucket
+     within the capacity; if there is none, the loop exits.
 4. Otherwise, the located element is bound to `x` and `body` executes.
    - For a **List**: `x` is bound to the element value.
    - For a **String**: `x` is bound to a single-character String.
