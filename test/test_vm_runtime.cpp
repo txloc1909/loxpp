@@ -1131,3 +1131,57 @@ TEST_F(StackOverflowTest,
     EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR);
     EXPECT_EQ(h.stackDepth(), 0);
 }
+
+// push() tests a moving ceiling (STACK_MAX, or STACK_MAX plus the reserve
+// while unwinding a StackOverflowError), so it must use >=, not ==: a
+// pointer already past STACK_MAX when the flag clears would never hit an
+// exact match again. No Lox program can reach that state (handleThrow()
+// resets stackTop first), so drive push() directly through the VMTestAccess
+// seam instead.
+struct VMTestAccess {
+    static void setStackTop(VM& vm, int depth) {
+        vm.stackTop = vm.stack + depth;
+    }
+    static void setUnwinding(VM& vm, bool v) {
+        vm.m_unwindingStackOverflow = v;
+    }
+    static void push(VM& vm, Value v) { vm.push(v); }
+    static bool overflowFlag(const VM& vm) { return vm.m_stackOverflow; }
+    static int depth(const VM& vm) {
+        return static_cast<int>(vm.stackTop - vm.stack);
+    }
+};
+
+TEST_F(StackOverflowTest, PushPastCeiling_SetsOverflow) {
+    // At the ceiling: both == and >= trip. Guards the boundary itself.
+    {
+        VM vm;
+        VMTestAccess::setUnwinding(vm, false);
+        VMTestAccess::setStackTop(vm, VM::STACK_MAX);
+        VMTestAccess::push(vm, from<Number>(1.0));
+        EXPECT_TRUE(VMTestAccess::overflowFlag(vm));
+        EXPECT_EQ(VMTestAccess::depth(vm), VM::STACK_MAX);
+    }
+    // One past the ceiling with the reserve cleared: only >= trips. This is
+    // the #313 hazard — the ceiling just moved down from STACK_MAX plus the
+    // reserve, leaving stackTop above it.
+    {
+        VM vm;
+        VMTestAccess::setUnwinding(vm, false);
+        VMTestAccess::setStackTop(vm, VM::STACK_MAX + 1);
+        VMTestAccess::push(vm, from<Number>(1.0));
+        EXPECT_TRUE(VMTestAccess::overflowFlag(vm));
+        EXPECT_EQ(VMTestAccess::depth(vm), VM::STACK_MAX + 1);
+    }
+    // At the physical end with the reserve cleared: only >= trips.
+    {
+        VM vm;
+        VMTestAccess::setUnwinding(vm, false);
+        VMTestAccess::setStackTop(vm, VM::STACK_MAX +
+                                          VM::STACK_OVERFLOW_STACK_RESERVE);
+        VMTestAccess::push(vm, from<Number>(1.0));
+        EXPECT_TRUE(VMTestAccess::overflowFlag(vm));
+        EXPECT_EQ(VMTestAccess::depth(vm),
+                  VM::STACK_MAX + VM::STACK_OVERFLOW_STACK_RESERVE);
+    }
+}
