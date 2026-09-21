@@ -205,6 +205,19 @@ CATCHABLE_ROWS = [
         setup="enum E { ok(x) }\n",
         expected_kind="ConstructorArityError",
     ),
+    # Regression row: a class with no init() has arity 0 (this row's own
+    # `expected_kind` above covers only the enum-constructor shape). Found
+    # while adding issue #367's stdout-identity check to
+    # tools/check_bootstrap_stack_overflow.py, which surfaced
+    # examples/try_catch_class_constructor_arity.lox aliasing this to plain
+    # ArityError on bootstrap.
+    Row(
+        "constructor_arity_error_no_init_class",
+        "caught",
+        "C(1, 2);",
+        setup="class C {}\n",
+        expected_kind="ConstructorArityError",
+    ),
     # This row's own Example is already a nested try/catch (the fault it
     # names -- an undefined property read on a caught Error -- can only be
     # produced by first catching one). The outer catch here is the probe's
@@ -889,10 +902,13 @@ def main() -> None:
     # read), not a new spec table row. index_type_error_string,
     # index_not_integer_error_string, and index_out_of_bounds_error_string
     # (issue #371) are three more: a String receiver shares its spec row
-    # with the matching List row, not a row of its own. None of the four
-    # count against the 1:1 mapping this invariant checks between
-    # CATCHABLE_ROWS and spec rows.
-    extra_catchable_rows = 4
+    # with the matching List row, not a row of its own.
+    # constructor_arity_error_no_init_class is a fifth: a second entry for
+    # the same spec row as constructor_arity_error, regression armor for
+    # the no-init-class aliasing bug found while working #367. None of
+    # these five count against the 1:1 mapping this invariant checks
+    # between CATCHABLE_ROWS and spec rows.
+    extra_catchable_rows = 5
     spec_row_count = load_spec_table_kind_count()
     if spec_row_count != len(CATCHABLE_ROWS) - extra_catchable_rows + excluded_catchable_rows:
         print(

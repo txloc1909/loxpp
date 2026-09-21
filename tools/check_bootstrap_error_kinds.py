@@ -183,6 +183,7 @@ EXPECTED_CALLS = [
     ('NotCallableError', '"Can only call functions, classes and enums."', RECORDED),
     ('NotCallableError', '"Can only call functions, classes and enums."', RECORDED),
     ('ConstructorArityError', '"Constructor called with wrong arity."', RECORDED),
+    ('ConstructorArityError', '"Expected 0 arguments but got some."', RECORDED),
     ('ArityError', '"Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + "."', RECORDED),
     ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
     ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
