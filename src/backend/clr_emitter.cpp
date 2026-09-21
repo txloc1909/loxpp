@@ -2381,6 +2381,7 @@ bool isLabelOnlyLine(const std::string& l) {
 // vector this struct's own entry lives in, so a region's children may
 // themselves have children.
 struct TryRegion {
+    int pushHandlerOffset{-1};
     std::size_t tryStartLine{};
     std::size_t tryEndLine{}; // exclusive
     std::size_t catchStartLine{};
@@ -2409,6 +2410,7 @@ resolveRegions(const std::vector<std::string>& lines,
         }
 
         TryRegion r;
+        r.pushHandlerOffset = handler.pushHandlerOffset;
         r.tryStartLine = tryStartIt->second;
         r.catchStartLine = catchStartIt->second;
 
@@ -2568,6 +2570,47 @@ buildLabelIndex(const std::vector<std::string>& lines) {
 // (`e.handlerReturnSlot`), which is unscoped — a `leave` from any nesting
 // depth reaches kHandlerReturnExitLabel directly (see asLeaveIfExiting's
 // own note).
+// Live local count at a PUSH_HANDLER offset: bindings below it survive
+// the unwind into the catch, slots at and above it are abandoned there.
+int pushCheckpointLocalCount(const Emitter& e, int pushHandlerOffset) {
+    for (size_t i = 0; i < e.fn.instructions.size(); i++) {
+        if (e.fn.instructions[i].offset == pushHandlerOffset) {
+            return e.analysis.before[i].localCount;
+        }
+    }
+    throw std::runtime_error(
+        "clr_emitter: no instruction at PUSH_HANDLER offset " +
+        std::to_string(pushHandlerOffset));
+}
+
+// Captured Lox slots abandoned by the unwind into one catch, in slot
+// order. Only captured slots can still hold a ref-cell; lower slots are
+// still-live outer bindings and must keep their cells.
+std::vector<int> abandonedCapturedSlots(const Emitter& e,
+                                        int pushHandlerOffset) {
+    int checkpoint = pushCheckpointLocalCount(e, pushHandlerOffset);
+    std::vector<int> slots;
+    for (int slot : e.capturedSlots) {
+        if (slot >= checkpoint) {
+            slots.push_back(slot);
+        }
+    }
+    std::sort(slots.begin(), slots.end());
+    return slots;
+}
+
+// Extra .maxstack headroom for the catch-entry reset below: one transient
+// cell above the single caught value. 0 when no region in this chunk
+// abandons a captured slot.
+int catchCellResetStackExtra(const Emitter& e) {
+    for (const auto& handler : e.analysis.handlerEntries) {
+        if (!abandonedCapturedSlots(e, handler.pushHandlerOffset).empty()) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void emitRegionRange(
     const std::vector<std::string>& lines,
     const std::vector<TryRegion>& regions,
@@ -2599,8 +2642,9 @@ void emitRegionRange(
             // was never even consulted. Stashing into catchDispatchSlot
             // (rather than `dup`-ing the exception reference on the
             // evaluation stack) keeps this prologue's own stack depth at
-            // 1 throughout, so it needs no `.maxstack` headroom beyond
-            // what the catch entry already guarantees.
+            // 1 throughout, apart from the cell reset below whose one
+            // transient push catchCellResetStackExtra already accounts
+            // for in .maxstack.
             std::string catchableLabel =
                 "lox_catchable_" + std::to_string(regionIdx);
             result << "    " << e.stloc(e.catchDispatchSlot) << "\n";
@@ -2630,6 +2674,17 @@ void emitRegionRange(
             result << "    " << e.ldloc(e.catchDispatchSlot) << "\n";
             result << "    call instance object [LoxRuntime]Lox.LoxError"
                       "::get_Value()\n";
+            // End cells abandoned by the unwind (issue 386): bindings
+            // dropped between PUSH_HANDLER and the throw are dead at catch
+            // entry, but their CIL slots may still hold ref-cells. A later
+            // captured store or cell seed would mistake a dead cell for a
+            // live one and alias it, so drop each one back to null first.
+            // Straight-line stores only; the transient push is covered by
+            // catchCellResetStackExtra's .maxstack headroom.
+            for (int loxSlot : abandonedCapturedSlots(e, r.pushHandlerOffset)) {
+                result << "    ldnull\n";
+                result << "    " << e.stloc(e.slotForLocal(loxSlot)) << "\n";
+            }
             emitRegionRange(lines, regions, labelToLine, r.catchStartLine + 1,
                             r.catchEndLine, r.catchChildren, true, result, e);
             result << "    }\n";
@@ -2841,7 +2896,8 @@ std::string emitClassBody(const Emitter& e, const DecodedFunction& fn,
                "managed\n  {\n";
         out << "    .entrypoint\n";
     }
-    out << "    .maxstack " << std::max(1, e.b.maxDepth) << "\n";
+    out << "    .maxstack "
+        << std::max(1, e.b.maxDepth + catchCellResetStackExtra(e)) << "\n";
     out << "    .locals init (";
     for (int i = 0; i < totalLocals; i++) {
         if (i > 0) {
