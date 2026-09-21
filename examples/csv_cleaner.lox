@@ -54,22 +54,21 @@ fun main() {
         } else {
             var parts = split(line, ",");
             var row = nil;
-            var bad = false;
             try {
                 row = extractRow(parts);
             } catch (fault) {
                 print "skip line " + str(lineno) + ": " + fault.kind + ": " + fault.message;
                 skipped = skipped + 1;
-                bad = true;
+                lineno = lineno + 1;
+                line = f.readline();
+                continue;
             }
-            if (!bad) {
-                try {
-                    print checkRow(parts, row);
-                    ok = ok + 1;
-                } catch (rule) {
-                    print "skip line " + str(lineno) + ": " + str(rule);
-                    skipped = skipped + 1;
-                }
+            try {
+                print checkRow(parts, row);
+                ok = ok + 1;
+            } catch (rule) {
+                print "skip line " + str(lineno) + ": " + str(rule);
+                skipped = skipped + 1;
             }
         }
         lineno = lineno + 1;
