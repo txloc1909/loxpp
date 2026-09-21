@@ -298,6 +298,10 @@ error_probes=(
     # (53_stack_overflow_catchable.lox, above). Lives in clr-only/ (see the
     # probe file's own header comment); named here directly.
     "test/translation-probes/clr-only/54_stack_overflow_reentrant_fatal.lox"
+    # Issue #362: an erase plus an insert in one for-in body restores the
+    # net size, so a size check misses it. Both sides must fail with empty
+    # stdout — the structural version check reports it instead.
+    "test/translation-probes/55_for_in_map_net_zero.lox"
 )
 
 # Probes that stay wrong on purpose. native's own value-stack ceiling

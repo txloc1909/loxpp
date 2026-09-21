@@ -1,0 +1,10 @@
+// Issue #362: an erase plus an insert in one for-in body restores the net
+// size, so a size check misses it and the loop ends silently. The
+// structural version check must fail on every backend instead, with empty
+// stdout. An error_probes entry in tools/check_jvm_probes.sh and
+// tools/check_clr_probes.sh.
+var m = {1: "a"};
+for (var k in m) {
+    m.del(1);
+    m[2] = "b";
+}
