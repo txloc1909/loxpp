@@ -266,3 +266,147 @@ TEST_F(ClosureTest, CapturedMatchArmBindingClosesOnArmExit) {
     EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("result1")), 9.0);
     EXPECT_EQ(h.stackDepth(), 0);
 }
+
+// ---------------------------------------------------------------------------
+// 6. Closures over try-body locals abandoned by throw (issue #386).
+// A throw unwinds past try-body locals without running endScope, so
+// handleThrow must close their upvalues itself. Otherwise the catch block
+// reuses the slots and the escaped closure observes the new content.
+// ---------------------------------------------------------------------------
+
+TEST_F(ClosureTest, CapturedTryLocalSurvivesThrow) {
+    // Exact shape from issue #386.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        var fns = [];
+        try {
+            var x = 41;
+            fun c() { return x + 1; }
+            fns.append(c);
+            throw "boom";
+        } catch (e) { log = log + e + ";"; }
+        log = log + str(fns[0]()) + ";";
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("log"), "boom;42;");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+TEST_F(ClosureTest, CapturedTryLocalSurvivesFault) {
+    // Same shape, but a runtime fault instead of an explicit throw: both
+    // share the one unwind in handleThrow.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        var fns = [];
+        try {
+            var x = 41;
+            fun c() { return x + 1; }
+            fns.append(c);
+            var y = [1][5];
+        } catch (e) { log = log + e.kind + ";"; }
+        log = log + str(fns[0]()) + ";";
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("log"), "IndexOutOfBoundsError;42;");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+TEST_F(ClosureTest, CapturedTryLocalPerIterationWithThrow) {
+    // Each loop trip captures its own x, then throws past it. Every
+    // closure must keep its own trip's value, not the last slot reuse.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var fns = [];
+        for (var i = 0; i < 3; i = i + 1) {
+            try {
+                var x = i * 10;
+                fun c() { return x; }
+                fns.append(c);
+                throw "skip";
+            } catch (e) {}
+        }
+        var r0 = fns[0]();
+        var r1 = fns[1]();
+        var r2 = fns[2]();
+    )"),
+              InterpretResult::OK);
+    EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("r0")), 0.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("r1")), 10.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("r2")), 20.0);
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+TEST_F(ClosureTest, CapturedInnerTryLocalSurvivesOuterCatch) {
+    // Closure in an inner try body, thrown past both the inner and the
+    // outer region into the outer catch.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        var fns = [];
+        try {
+            try {
+                var x = 41;
+                fun c() { return x + 1; }
+                fns.append(c);
+                throw "inner";
+            } catch (e1) { throw "outer-" + e1; }
+        } catch (e2) { log = log + e2 + ";"; }
+        log = log + str(fns[0]()) + ";";
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("log"), "outer-inner;42;");
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+TEST_F(ClosureTest, ReusedSlotAfterThrowStartsFreshBinding) {
+    // The reverse direction: after the throw, a new closure over a new
+    // local in the same reused slot must not observe the closed cell.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var fns = [];
+        try {
+            var x = 41;
+            fun c() { return x + 1; }
+            fns.append(c);
+            throw "boom";
+        } catch (e) {
+            var y = 7;
+            fun d() { return y; }
+            fns.append(d);
+        }
+        var sum = fns[0]() + fns[1]();
+    )"),
+              InterpretResult::OK);
+    EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("sum")), 49.0);
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}
+
+TEST_F(ClosureTest, CapturedTryLocalInFunctionWithReturn) {
+    // Same shape inside a function frame that returns afterward: the
+    // frame-scoped handler drain must not disturb the closed cell.
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun make() {
+            var fns = [];
+            try {
+                var x = 41;
+                fun c() { return x + 1; }
+                fns.append(c);
+                throw "boom";
+            } catch (e) {}
+            return fns[0]();
+        }
+        var result = make();
+    )"),
+              InterpretResult::OK);
+    EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("result")), 42.0);
+    EXPECT_EQ(h.stackDepth(), 0);
+    EXPECT_EQ(h.handlerStackDepth(), 0);
+}

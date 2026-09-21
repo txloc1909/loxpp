@@ -383,6 +383,11 @@ VM::ThrowOutcome VM::handleThrow(Value thrownValue, int stopAtFrameCount) {
 
     // Step 3: After unwinding is complete, decide what to do.
     if (foundHandler) {
+        // The handler's own frame survives, so step 2 closed nothing in
+        // it. Close upvalues for the dropped region first: the catch block
+        // reuses those slots, and an open upvalue would alias the new
+        // content. The checkpoint bounds the region from below.
+        closeUpvalues(handlerToUse.stackTop);
         // Truncate stack to checkpoint and push thrown value.
         stackTop = handlerToUse.stackTop;
         push(thrownValue);

@@ -1,0 +1,33 @@
+// 55_throw_ends_try_binding.lox — verification probe (issue #386).
+//
+// A throw unwinds past try-body locals without running endScope, so the
+// unwinding side must end their bindings itself. The first half throws a
+// string, the second half faults with IndexOutOfBoundsError: both share
+// the one unwind. The throws sit behind flags so the normal-path close
+// stays a live close (the capture corpus holds no dead closes).
+//
+// Lives in clr-only/ until issue #388 lets the JVM side verify this
+// shape too (the JVM backend currently rejects any closure over a
+// try-body local at class-verify time).
+// Expected output:
+//
+// boom
+// 42
+// IndexOutOfBoundsError
+// 2
+var fns = [];
+var doThrow = true;
+try {
+    var x = 41;
+    fun c() { return x + 1; }
+    fns.append(c);
+    if (doThrow) { throw "boom"; }
+} catch (e) { print e; }
+print fns[0]();
+try {
+    var y = 1;
+    fun d() { return y + 1; }
+    fns.append(d);
+    if (doThrow) { print [1][5]; }
+} catch (e) { print e.kind; }
+print fns[1]();

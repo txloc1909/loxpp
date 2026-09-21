@@ -158,6 +158,11 @@ probes=(
     "test/translation-probes/V4_mutate_through_upvalue.lox"
     "test/translation-probes/V5_self_recursive_closure.lox"
     "test/translation-probes/V6_self_recursive_closure_in_loop.lox"
+    # A throw unwinds past try-body locals without running endScope: the
+    # catch prologue must end their cells itself (issue #386), for an
+    # explicit throw and a runtime fault alike. Lives in clr-only/ until
+    # issue #388 lets the JVM side verify this shape too.
+    "test/translation-probes/clr-only/55_throw_ends_try_binding.lox"
     "test/translation-probes/12_list_map_index.lox"
     # Classes, methods, and super: `this` = slot 0, `init` returns `this`,
     # SET_PROPERTY/DEFINE_METHOD leave a value (P2), and `super` is compiled
