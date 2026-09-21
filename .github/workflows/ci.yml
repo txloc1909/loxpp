@@ -377,6 +377,23 @@ jobs:
             loxpp-dev:latest \
             bash -c "python3 tools/check_examples.py bootstrap/lox_wrapper.sh examples/"
 
+      # Issue #323: the bootstrap interpreter borrows the native VM's own
+      # call-frame budget (see notes/bootstrap-stack-depth.md), so any
+      # refactor that adds frames per evaluator cycle shrinks how deep a
+      # target program may recurse before it overflows. This guards the
+      # margin two ways: the example corpus must survive 256 extra native
+      # frames, and the seven recursion-shape probes must reach 90% of
+      # their post-F10 ceilings. Release only, like the step above: the
+      # debug preset's instruction trace floods the wrapper's stdout.
+      - name: Run bootstrap headroom check
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "tools/check_bootstrap_headroom.sh"
+
       # This ctest entry always skips itself on the debug leg (its own build
       # traces every instruction it runs -- see test/CMakeLists.txt), so this
       # is the one leg where it actually executes. --no-tests=error is load-
