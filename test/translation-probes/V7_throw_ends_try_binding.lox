@@ -3,24 +3,27 @@
 // A throw unwinds past try-body locals without running endScope, so the
 // unwinding side must end their bindings itself. The first half throws a
 // string, the second half faults with IndexOutOfBoundsError: both share
-// the one unwind. Expected output:
+// the one unwind. The throws sit behind flags so the normal-path close
+// stays a live close (the capture corpus holds no dead closes).
+// Expected output:
 //
 // boom
 // 42
 // IndexOutOfBoundsError
 // 2
 var fns = [];
+var doThrow = true;
 try {
     var x = 41;
     fun c() { return x + 1; }
     fns.append(c);
-    throw "boom";
+    if (doThrow) { throw "boom"; }
 } catch (e) { print e; }
 print fns[0]();
 try {
     var y = 1;
     fun d() { return y + 1; }
     fns.append(d);
-    var z = [1][5];
+    if (doThrow) { print [1][5]; }
 } catch (e) { print e.kind; }
 print fns[1]();
