@@ -3016,7 +3016,7 @@ class Interpreter {
         var object = this.evalExpr(objectExpr, env);
         if (this.throwFlag) return nil;
         if (loxTag(object) != "instance") {
-            this.setError("InvalidFieldReceiverError", "Only instances have fields.", line);
+            this.fatalError("Only instances have fields.");
             return nil;
         }
         var val = this.evalExpr(valueExpr, env);
