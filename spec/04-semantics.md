@@ -1173,6 +1173,12 @@ same text the implementation reports when the fault is left uncaught.
 | Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field | `"ConstructorArityError"` |
 | Undefined property on an `Error` value | `try { try { [][0]; } catch (e) { e.foo; } } catch (_) { }` | `"UndefinedPropertyError"` |
 
+**The two map-key rows above cover an index read or write, a map or set
+literal, and `in`.** `Map.has(key)` and `Map.del(key)` are stdlib native
+methods, not one of those four forms, and an invalid key given to either
+is fatal — see the Fatal Runtime Errors table's own `Map.has`/`Map.del`
+row below, and [Fatal Runtime Errors](#fatal-runtime-errors) generally.
+
 ### Fatal Runtime Errors
 
 The causes above are every fault the native implementation delivers as a
@@ -1190,6 +1196,7 @@ fault; the message is the only text the implementation reports.
 | A native function is called with an argument count other than its arity | `clock(1);` | `Expected 0 arguments but got 1.` |
 | A `defer`red call holds a value that is not a Closure, Native, BoundMethod, or BoundNative | `fun g() { var x = 42; defer x(); } g();` (the compiler checks only that `defer` is followed by a call expression — `defer 42;` fails to compile with `Expect a call expression after 'defer'.` — not that the callee is callable, so a variable holding a non-callable value reaches this check at run time) | `Deferred callable has unexpected type.` |
 | A stdlib native function reports its own error while running | `open("/no/such/path", "r");` | `open(): cannot open '/no/such/path': No such file or directory` |
+| `Map.has(key)` or `Map.del(key)` called with an invalid key | `var m = {}; m.has([1, 2]);` | `Map keys must be Bool, Number, Nil, or String. NaN is not allowed.` |
 | Undefined property read on a File value | `var f = open("/tmp/f.txt", "w"); f.write("x"); var g = open("/tmp/f.txt", "r"); g.bogus;` (a missing path fails first with the stdlib-error row above) | `Undefined property 'bogus' on file.` |
 | Undefined property read on a Map value | `var m = {}; m.bogus;` | `Undefined property 'bogus' on map.` |
 | Property read on an Instance where the name is neither a field nor a method | `class C {} var c = C(); c.bogus;` | `Undefined property 'bogus'.` |
