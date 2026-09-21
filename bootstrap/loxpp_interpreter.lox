@@ -1680,9 +1680,9 @@ fun reflectMethodNames(klass) {
 // restriction exists and why it applies identically everywhere.
 //
 // "ReflectionFieldNameError", "ReflectionUndefinedMemberError",
-// "ReflectionUnsupportedError", "ReflectionReceiverError",
-// "ReflectionArityError", "ReflectionNotCallableError", and
-// "ReflectionNativeArityError" below are not rows of the catchable-fault
+// "ReflectionUnsupportedError", "ReflectionArityError",
+// "ReflectionNotCallableError", and "ReflectionNativeArityError" below are
+// not rows of the catchable-fault
 // table in spec/04-semantics.md. Native reaches every cause in this
 // function (src/stdlib/reflect_api.cpp's callMethodNative) only through its
 // always-fatal path (nativeRuntimeError(), exit 70), never as a catchable
@@ -1705,15 +1705,12 @@ fun reflectCallMethod(interp, args) {
         return nil;
     }
     var instance = args[0];
-    // An Error receiver halts here too, ahead of the catchable check below
-    // -- see the comment on the "fields"/"getField"/"hasField"/"setField"
-    // checks in LoxNative.call for why (issue #353).
-    if (loxTag(instance) == "error") {
-        interp.fatalError("Only instances have methods.");
-        return nil;
-    }
+    // Every non-instance receiver halts here, matching native's own
+    // always-fatal isInstance() check (src/stdlib/reflect_api.cpp) -- an
+    // Error receiver is not special-cased separately from any other
+    // non-instance receiver (issue #370; #353 fixed the Error case alone).
     if (loxTag(instance) != "instance") {
-        interp.setError("ReflectionReceiverError", "Only instances have methods.", 0);
+        interp.fatalError("Only instances have methods.");
         return nil;
     }
     var name = args[1];
@@ -1828,49 +1825,32 @@ class LoxNative {
             return result;
         }
         if (this.name == "type") return reflectTypeName(args[0]);
-        // "ReflectionReceiverError" (below, at every "fields"/"methods"/
-        // "getField"/"hasField"/"setField" argument-type check, and at
-        // "callMethod"'s own receiver check above): none of these reach the
-        // table's "InvalidReceiverError" cause ("Method called on
-        // non-instance/non-list/non-map", e.g. 42.foo()) -- native's own
-        // getField/hasField/setField/fields/methods/callMethod
-        // (src/stdlib/reflect_api.cpp) reach every one of these causes only
-        // through their always-fatal path, never as a catchable value.
-        //
-        // An Error receiver is checked and halted first, ahead of the
-        // ReflectionReceiverError checks below: native, JVM, and CLR all
-        // halt on an Error receiver here (issue #353), and a value's Error
-        // membership is only ever visible locally, from the argument itself
-        // -- never from interpreter state that could outlive this call (see
-        // #348's referee ruling on stale-flag disposition). Every other
-        // non-instance/non-class receiver keeps the existing catchable
-        // ReflectionReceiverError; that gap is real but out of this issue's
-        // scope.
+        // Every non-instance/non-class receiver below halts, matching
+        // native's own always-fatal isInstance()/isClass() checks
+        // (src/stdlib/reflect_api.cpp) -- none of these reach the table's
+        // "InvalidReceiverError" cause ("Method called on non-instance/
+        // non-list/non-map", e.g. 42.foo()). An Error receiver is not
+        // special-cased separately from any other non-instance receiver
+        // (issue #370; #353 fixed the Error case alone, for "fields"/
+        // "getField"/"hasField"/"setField"/"callMethod" only -- "methods"
+        // never got that fix either, so it shares the same widening here).
         if (this.name == "fields") {
-            if (loxTag(args[0]) == "error") {
-                interp.fatalError("Expected an instance.");
-                return nil;
-            }
             if (loxTag(args[0]) != "instance") {
-                interp.setError("ReflectionReceiverError", "Expected an instance.", 0);
+                interp.fatalError("Expected an instance.");
                 return nil;
             }
             return InterpList(args[0].fields.keys());
         }
         if (this.name == "methods") {
             if (loxTag(args[0]) != "class") {
-                interp.setError("ReflectionReceiverError", "Expected a class.", 0);
+                interp.fatalError("Expected a class.");
                 return nil;
             }
             return InterpList(reflectMethodNames(args[0]));
         }
         if (this.name == "getField") {
-            if (loxTag(args[0]) == "error") {
-                interp.fatalError("Only instances have properties.");
-                return nil;
-            }
             if (loxTag(args[0]) != "instance") {
-                interp.setError("ReflectionReceiverError", "Only instances have properties.", 0);
+                interp.fatalError("Only instances have properties.");
                 return nil;
             }
             if (!isLoxStr(args[1])) {
@@ -1881,12 +1861,8 @@ class LoxNative {
             return nil;
         }
         if (this.name == "hasField") {
-            if (loxTag(args[0]) == "error") {
-                interp.fatalError("Only instances have properties.");
-                return nil;
-            }
             if (loxTag(args[0]) != "instance") {
-                interp.setError("ReflectionReceiverError", "Only instances have properties.", 0);
+                interp.fatalError("Only instances have properties.");
                 return nil;
             }
             if (!isLoxStr(args[1])) {
@@ -1896,12 +1872,8 @@ class LoxNative {
             return args[0].fields.has(args[1]);
         }
         if (this.name == "setField") {
-            if (loxTag(args[0]) == "error") {
-                interp.fatalError("Only instances have fields.");
-                return nil;
-            }
             if (loxTag(args[0]) != "instance") {
-                interp.setError("ReflectionReceiverError", "Only instances have fields.", 0);
+                interp.fatalError("Only instances have fields.");
                 return nil;
             }
             if (!isLoxStr(args[1])) {
