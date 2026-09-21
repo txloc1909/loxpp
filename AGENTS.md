@@ -112,7 +112,8 @@ gh run watch <run-id> --repo txloc1909/loxpp
 gh run view <run-id> --log-failed --repo txloc1909/loxpp   # on failure
 
 # 9. Resolve review comments → push → re-watch → repeat until approved
-gh pr view <pr-number> --repo txloc1909/loxpp --comments
+gh pr view <pr-number> --repo txloc1909/loxpp --json title,body,comments,reviews --template '{{.title}}{{"\n\n"}}{{.body}}{{"\n\n=== comments: "}}{{len .comments}}{{"\n"}}{{range .comments}}{{"\n--- "}}{{.author.login}} {{.createdAt}}{{"\n"}}{{.body}}{{"\n"}}{{end}}{{"\n=== reviews: "}}{{len .reviews}}{{"\n"}}{{range .reviews}}{{"\n--- "}}{{.author.login}} {{.createdAt}} {{.state}}{{"\n"}}{{.body}}{{"\n"}}{{end}}'
+# Never use `--comments` here: without a terminal it drops the body.
 
 # 10. Merge (squash)
 gh pr merge <pr-number> --repo txloc1909/loxpp --squash
