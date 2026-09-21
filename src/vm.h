@@ -4,6 +4,7 @@
 #include "class_objects.h"
 #include "memory_manager.h"
 #include "table.h"
+#include "vm_limits.h"
 #include "stdlib/stdlib_context.h"
 
 #include <cstdint>
@@ -15,6 +16,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 enum class InterpretResult : std::uint8_t {
@@ -37,8 +39,8 @@ struct CallFrame {
 
 class VM {
   public:
-    static constexpr int STACK_MAX = 16384;
-    static constexpr int FRAMES_MAX = 1024;
+    static constexpr int STACK_MAX = loxpp::kStackMax;
+    static constexpr int FRAMES_MAX = loxpp::kFramesMax;
 
     // Extra capacity held ABOVE the two ceilings above, spent only while a
     // StackOverflowError's own unwind is in progress (see
@@ -59,8 +61,10 @@ class VM {
     // whatever handler still has room, per handleThrow()'s existing generic
     // unwind — never a hang, since the reserve is small enough that no path
     // through it can recurse for long.
-    static constexpr int STACK_OVERFLOW_FRAME_RESERVE = 16;
-    static constexpr int STACK_OVERFLOW_STACK_RESERVE = 64;
+    static constexpr int STACK_OVERFLOW_FRAME_RESERVE =
+        loxpp::kStackOverflowFrameReserve;
+    static constexpr int STACK_OVERFLOW_STACK_RESERVE =
+        loxpp::kStackOverflowStackReserve;
 
     VM() : m_globals(VmAllocator<Entry>{&m_mm}) {
         resetStack();
@@ -271,3 +275,11 @@ class VM {
   private:
 #endif
 };
+
+#ifdef LOXPP_PROFILE
+// frameEnterNs runs parallel to m_frames[]; its size must track any change
+// to the frame budget or the overflow reserve.
+static_assert(std::tuple_size_v<decltype(ProfilerData::frameEnterNs)> ==
+                  VM::FRAMES_MAX + VM::STACK_OVERFLOW_FRAME_RESERVE,
+              "frameEnterNs size must match m_frames capacity");
+#endif

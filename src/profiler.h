@@ -5,6 +5,7 @@
 #include "chunk.h"
 #include "exec_objects.h"
 #include "object.h"
+#include "vm_limits.h"
 
 #include <algorithm>
 #include <array>
@@ -54,8 +55,9 @@ struct ProfilerData {
     std::unordered_map<ObjFunction*, FunctionStats> funcTable;
 
     // Per-frame call-entry timestamps, parallel to VM::m_frames[].
-    // Size matches VM::FRAMES_MAX = 64.
-    std::array<int64_t, 64> frameEnterNs{};
+    // Sized to match it (FRAMES_MAX plus the overflow reserve).
+    std::array<int64_t, loxpp::kFramesMax + loxpp::kStackOverflowFrameReserve>
+        frameEnterNs{};
 
     GcStats gc{};
     int64_t programStartNs{0};
