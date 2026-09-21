@@ -2593,12 +2593,14 @@ class Interpreter {
     execPrint(expr, env) {
         var val = this.evalExpr(expr, env);
         if (this.throwFlag) return;
-        // stringify() can itself raise (e.g. MaxDepthExceededError, via the
-        // depth guard) partway through building the string. Check before
-        // printing -- native suppresses the fwrite entirely in this case
-        // (src/vm.cpp's Op::PRINT), so printing the partial/truncated
-        // string here would be a garbage-output divergence, not merely a
-        // late error.
+        // stringify() can itself raise a catchable fault partway through
+        // building the string (its own depth guard is fatal, not catchable,
+        // since #325 -- but stringifying a nested value can still run
+        // arbitrary Lox++ code, e.g. a user class's own toString()).
+        // Check before printing -- native suppresses the fwrite entirely in
+        // this case (src/vm.cpp's Op::PRINT), so printing the
+        // partial/truncated string here would be a garbage-output
+        // divergence, not merely a late error.
         var s = this.stringify(val);
         if (this.throwFlag) return;
         print s;
@@ -3035,8 +3037,7 @@ class Interpreter {
         // counter ever reaches 100. 100 catches every ordinary call depth;
         // it cannot catch every case. See notes/bootstrap-stack-depth.md.
         if (this.stringifyDepth > 100) {
-            this.stringifyDepth = this.stringifyDepth - 1;
-            this.setError("MaxDepthExceededError", "Value nesting is too deep.", 0);
+            this.fatalError("Value nesting is too deep.");
             return "...";
         }
         var vtag = loxTag(val);

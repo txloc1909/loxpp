@@ -1167,7 +1167,6 @@ same text the implementation reports when the fault is left uncaught.
 | `pop` on empty list | `[].pop()` | `"EmptyListError"` |
 | NaN used as map key | `m[0/0] = 1` | `"NaNKeyError"` |
 | Object (non-String) used as map key | `m[[1,2]] = 1` | `"InvalidMapKeyError"` |
-| Value nested too deep to print | a list that holds a list, many thousand levels deep; native today reports this as fatal — see [Fatal Runtime Errors](#fatal-runtime-errors) and #338 | `"MaxDepthExceededError"` |
 | Method called on non-instance/non-list/non-map | `42.foo()` | `"InvalidReceiverError"` |
 | No arm matches in a `match` expression | `match 99 { case 1 => "one" }` | `"MatchError"` |
 | Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field | `"ConstructorArityError"` |
@@ -1221,16 +1220,19 @@ fault; the message is the only text the implementation reports.
 | `for (var x in expr)` where `expr` is not a List, String, or Map | `for (var x in 42) {}` | `Value is not iterable (expected list, string, or map).` |
 | Map size changed during `for`-in iteration | `var m = {1: 1}; for (var k in m) { m[2] = 2; }` | `Map changed size during iteration.` |
 
-**`print`'s depth-limit fault is the same fault the catchable table calls
-`MaxDepthExceededError`.** `Op::PRINT` clears any pending stdlib error
-before it stringifies its operand, so the row above is not a stdlib-error
-path; it is the canonical-string depth guard in `stringifyObj`
-(`src/object.cpp`), which also fires the same way, with the same message,
-when `str()` calls into the same guard through a native call. Native today
-halts the program on this fault with no `Error.kind`, even inside a `try`
-statement — the opposite disposition from the catchable table's
-`MaxDepthExceededError` row. Issue #338 tracks which disposition is
-correct; this node records native's current behavior only.
+**`print`'s depth-limit fault is fatal, with no `Error.kind`, on every
+consumer.** `Op::PRINT` clears any pending stdlib error before it
+stringifies its operand, so the row above is not a stdlib-error path; it is
+the canonical-string depth guard in `stringifyObj` (`src/object.cpp`), which
+also fires the same way, with the same message, when `str()` calls into the
+same guard through a native call. Native, the JVM backend, and the CLR
+backend all halt the program on this fault, even inside a `try` statement —
+the JVM and CLR guards say so explicitly, in a comment, at their own
+matching depth check. There is no catchable-table row for this fault: an
+earlier draft of this table gave it one (kind `MaxDepthExceededError`), the
+opposite disposition from every implementation; the bootstrap interpreter
+was the only consumer that followed that draft, and it now matches the
+other three instead (see #325).
 
 **A stdlib native's own error text is not enumerated here.** The row above
 gives one example message; the text a stdlib native reports differs call

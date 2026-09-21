@@ -40,12 +40,6 @@ construction, without anyone re-reading it:
    cause catchably at all, so bootstrap's own kind cannot be aliasing a
    native table row nobody has seen.
 
-One exemption: `MaxDepthExceededError` / "Value nesting is too deep." is
-fatal on native yet keeps its table kind, because spec/04-semantics.md
-names this exact fault in both the catchable and the Fatal Runtime Errors
-tables, and issue #338, not this script, decides which disposition is
-correct.
-
 Three pairs are "fused": the same bootstrap call site serves two different
 native causes, one catchable and one fatal, because bootstrap's tree-walker
 cannot tell them apart the way native's opcode-level dispatch can (the same
@@ -109,9 +103,6 @@ FUSED_PAIRS = {
     ("InvalidReceiverError", '"Method called on invalid receiver."'),
     ("ArityError", '"Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + "."'),
 }
-
-# The one exemption (see module docstring): table kind, fatal-only, pending #338.
-MAXDEPTH_EXEMPT = {("MaxDepthExceededError", '"Value nesting is too deep."')}
 
 # (name, program, disposition, kind, message) -- `message` must equal, byte
 # for byte, an EXPECTED_CALLS message string (or a DYNAMIC message's
@@ -245,11 +236,6 @@ PROBES = [
      CATCHABLE, "InvalidReceiverError", '"Method called on invalid receiver."'),
     ("plain property get on a non-instance (fused, fatal)", "try { 42.foo; } catch (e) { print e.kind; }",
      FATAL, "InvalidReceiverError", '"Method called on invalid receiver."'),
-
-    # --- the one exemption: table kind, fatal-only, pending #338 ---
-    ("value nested too deep to print",
-     "var a = [1]; var i = 0; while (i < 300) { a = [a]; i = i + 1; } try { print a; } catch (e) { print e.kind; }",
-     FATAL, "MaxDepthExceededError", '"Value nesting is too deep."'),
 ]
 
 
@@ -330,19 +316,18 @@ def main() -> int:
         dispositions = {d for d, _n, _k in matches}
         is_table = target_kind in spec_kinds
         if is_table:
-            if CATCHABLE not in dispositions and pair not in MAXDEPTH_EXEMPT:
+            if CATCHABLE not in dispositions:
                 failures.append(
                     f"alias: {target_kind!r} is a spec/04-semantics.md table kind, but "
                     f"({target_kind!r}, {message[:50]!r}) has no 'catchable' probe -- "
                     "nothing proves native actually delivers this cause catchably "
                     "under this kind."
                 )
-            if FATAL in dispositions and pair not in FUSED_PAIRS and pair not in MAXDEPTH_EXEMPT:
+            if FATAL in dispositions and pair not in FUSED_PAIRS:
                 failures.append(
                     f"alias: ({target_kind!r}, {message[:50]!r}) is a table kind with a "
-                    "'fatal' probe, but it is not one of the FUSED_PAIRS entries and not "
-                    "the MAXDEPTH_EXEMPT entry. No other pair may mix a fatal probe with "
-                    "a table kind."
+                    "'fatal' probe, but it is not one of the FUSED_PAIRS entries. No other "
+                    "pair may mix a fatal probe with a table kind."
                 )
         else:
             if CATCHABLE in dispositions:

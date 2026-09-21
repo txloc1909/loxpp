@@ -229,26 +229,46 @@ def check_state_restore_probes() -> list[str]:
     """Targeted probes for state a caught overflow must restore by hand,
     beyond what the ordinary example corpus happens to exercise.
 
-    At a low ambient depth, stringify()'s OWN 100-level guard fires first: a
-    MaxDepthExceededError unwinds normally, through stringify()'s own
-    decrements, and never touches LoxFunction.call's restore-on-
-    StackOverflowError line at all. Only a run whose CAUGHT kind is
-    StackOverflowError, with maxStringifyDepthSeen already above 0, proves
-    native's own overflow landed while stringify() was mid-recursion -- the
-    one case that actually exercises the restore.
+    At a low ambient depth, stringify()'s OWN 100-level guard fires first.
+    Since #325 that guard is fatal (fatalError -> exit(70)), matching
+    native/JVM/CLR, so a run it wins is a clean halt with no
+    __BOOTSTRAP_STATE__ line at all -- accepted the same way
+    check_state_after_examples() accepts a fatal halt elsewhere in this
+    file: exit 70/65, exactly one clean stderr line, no traceback. There is
+    nothing to restore in that case -- the process exits before control
+    ever returns to LoxFunction.call's own restore-on-StackOverflowError
+    line. Only a run whose CAUGHT kind is StackOverflowError, with
+    maxStringifyDepthSeen already above 0, proves native's own overflow
+    landed while stringify() was mid-recursion -- the one case that
+    actually exercises the restore.
     """
     failures = []
     best_max_depth_seen = 0
     exercised_the_restore = False
     for ambient_depth in STRINGIFY_DEPTH_SWEEP:
-        stdout_lines, _stderr_lines, exit_code = run(
+        stdout_lines, stderr_lines, exit_code = run(
             stringify_depth_probe(ambient_depth), {"LOXPP_BOOTSTRAP_CHECK_STATE": "1"}
         )
         if exit_code != 0:
-            failures.append(
-                f"stringifyDepth restore probe (D={ambient_depth}): exited {exit_code}, "
-                f"stdout {stdout_lines!r}"
-            )
+            if exit_code not in (70, 65):
+                failures.append(
+                    f"stringifyDepth restore probe (D={ambient_depth}): exited {exit_code}, "
+                    f"stdout {stdout_lines!r}, stderr {stderr_lines!r}"
+                )
+                continue
+            if len(stderr_lines) != 1:
+                failures.append(
+                    f"stringifyDepth restore probe (D={ambient_depth}): fatal exit "
+                    f"{exit_code} (stringify()'s own depth guard, #325) but stderr has "
+                    f"{len(stderr_lines)} line(s), expected 1: {stderr_lines!r}"
+                )
+                continue
+            if any("] in " in line for line in stdout_lines + stderr_lines):
+                failures.append(
+                    f"stringifyDepth restore probe (D={ambient_depth}): fatal exit "
+                    f"{exit_code} but output has a native traceback: stdout "
+                    f"{stdout_lines!r}, stderr {stderr_lines!r}"
+                )
             continue
         state_lines = [m for m in (STATE_LINE_RE.match(line) for line in stdout_lines) if m]
         if not state_lines:
@@ -273,7 +293,7 @@ def check_state_restore_probes() -> list[str]:
             f"stringifyDepth restore probe: no depth in the sweep {STRINGIFY_DEPTH_SWEEP} caught a "
             f"StackOverflowError while stringify() was already past depth {MIN_STRINGIFY_DEPTH_FLOOR} "
             f"(best maxStringifyDepthSeen seen anywhere={best_max_depth_seen}) -- either every run hit "
-            "stringify()'s own MaxDepthExceededError guard first, or none reached stringify() at all, "
+            "stringify()'s own depth guard (fatal, #325) first, or none reached stringify() at all, "
             "so a pass here would not prove the restore was ever exercised"
         )
     return failures

@@ -192,7 +192,6 @@ EXPECTED_CALLS = [
     ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
     ('InvalidFieldReceiverError', '"Only instances have fields."', JUDGED),
     ('UndefinedMemberError', '"Undefined property \'" + method + "\'."', JUDGED),
-    ('MaxDepthExceededError', '"Value nesting is too deep."', RECORDED),
     ('NotIndexableError', '"Sequence destructuring requires a List."', RECORDED),
     ('IndexOutOfBoundsError', '"Not enough elements for sequence destructuring."', RECORDED),
     ('InvalidDestructureReceiverError', '"Object destructuring requires an instance."', JUDGED),
@@ -207,7 +206,7 @@ EXPECTED_CALLS = [
 # review. See --report for the current judged/recorded split; this script
 # does not restate that split in prose here, to avoid a second hand-written
 # copy of a number the data already holds.
-EXPECTED_SPEC_TABLE_KIND_COUNT = 19
+EXPECTED_SPEC_TABLE_KIND_COUNT = 18
 
 
 def strip_string_literals(text: str) -> str:
