@@ -142,6 +142,18 @@ CATCHABLE_ROWS = [
         setup="fun needsOne(a) {}\nfun g() { defer needsOne(); }\n",
         expected_kind="ArityError",
     ),
+    # Issue #405: a deferred call's own arity mismatch, found while draining
+    # defers for a frame that is ALREADY unwinding an unrelated throw --
+    # native always lets the newly found fault replace whichever throw was
+    # in flight, handler present or not. Same ArityError kind and spec row
+    # as arity_error_deferred_call above, through a different program shape.
+    Row(
+        "arity_error_deferred_call_during_throw",
+        "caught",
+        "g();",
+        setup='fun needsOne(a) {}\nfun g() { defer needsOne(); throw "boom"; }\n',
+        expected_kind="ArityError",
+    ),
     Row("undefined_variable_error", "caught", "print undeclared;", expected_kind="UndefinedVariableError"),
     # `f` is declared OUTSIDE the try (setup), not inside it: a self-recursive
     # local function declared inside a try block fails JVM bytecode
@@ -712,6 +724,9 @@ CATCHABLE_REGRESSION_ROWS = {
     # Issue #359: a deferred call's own arity mismatch shares arity_error's
     # spec row, through a different call site (VM::runPendingDefers).
     "arity_error_deferred_call",
+    # Issue #405: same cause, found while draining defers during an
+    # already-in-flight throw instead of a normal return.
+    "arity_error_deferred_call_during_throw",
 }
 
 FATAL_REGRESSION_ROWS = {

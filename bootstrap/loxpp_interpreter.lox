@@ -1556,7 +1556,21 @@ class LoxFunction {
                     // (src/vm.cpp's runPendingDefers): the mismatched call
                     // never started, so nothing here drains the defers that
                     // have not run yet.
-                    interp.setError("ArityError", "Expected " + str(callee.arity()) + " arguments but got " + str(len(defer_args)) + ".", 0);
+                    //
+                    // Set throwFlag/thrownValue directly, not through
+                    // setError -- setError refuses to overwrite an
+                    // already-set throwFlag, but native's own unwind
+                    // (VM::handleThrow draining VM::runPendingDefers, both
+                    // src/vm.cpp) always lets a fault found while draining
+                    // defers replace whichever throw was already in flight,
+                    // handler present or not (issue #405, verified directly
+                    // against native both ways). This is the one call site
+                    // that can run while a throw is already in flight (an
+                    // uncaught throw propagating out through this function),
+                    // so it is the one place setError's usual "first fault
+                    // wins" guard must not apply.
+                    interp.throwFlag = true;
+                    interp.thrownValue = LoxError("ArityError", "Expected " + str(callee.arity()) + " arguments but got " + str(len(defer_args)) + ".");
                     break;
                 }
             } else {
