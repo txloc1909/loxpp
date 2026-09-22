@@ -99,6 +99,7 @@ loxpp_add_test(test_local_variables test_local_variables.cpp CORE loxpp_test_cor
 loxpp_add_test(test_control_flow    test_control_flow.cpp    CORE loxpp_test_core)
 loxpp_add_test(test_vm_runtime      test_vm_runtime.cpp      CORE loxpp_test_core)
 loxpp_add_test(test_print_nul       test_print_nul.cpp       CORE loxpp_test_core)
+loxpp_add_test(test_file_nul        test_file_nul.cpp        CORE loxpp_test_core)
 loxpp_add_test(test_os_api          test_os_api.cpp          CORE loxpp_test_core)
 loxpp_add_test(test_reflect_api     test_reflect_api.cpp     CORE loxpp_test_core)
 loxpp_add_test(test_reflect_api_gc  test_reflect_api.cpp     CORE loxpp_test_core)
@@ -239,7 +240,7 @@ set(LOXPP_GC_STRESS_TARGETS
 # names would otherwise collide.
 set(LOXPP_GTEST_TARGETS
     test_scanner test_parser_vm test_parser_bytecode test_table test_allocator
-    test_local_variables test_control_flow test_vm_runtime test_print_nul
+    test_local_variables test_control_flow test_vm_runtime test_print_nul test_file_nul
     test_os_api test_reflect_api test_reflect_api_gc test_closures
     test_stress_gc test_gc_regression test_inheritance test_list test_list_gc
     test_map test_map_gc test_var_destructure test_enum test_enum_gc
