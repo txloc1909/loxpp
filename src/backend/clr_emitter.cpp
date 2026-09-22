@@ -2611,6 +2611,16 @@ int catchCellResetStackExtra(const Emitter& e) {
     return 0;
 }
 
+// Extra .maxstack headroom for a defer-using function's own outer
+// catch-based unwind (injectTryCatchDirectives): its LoxError clause peaks
+// at depth 2 (`dup` on the caught exception, then `get_Catchable()`'s
+// receiver-pop/bool-push leaves both the exception and the bool live at
+// once) before either operand is popped. 0 when this chunk does not use
+// defer, since that catch is emitted only then.
+int deferOuterCatchStackExtra(const Emitter& e) {
+    return e.deferListSlot >= 0 ? 2 : 0;
+}
+
 void emitRegionRange(
     const std::vector<std::string>& lines,
     const std::vector<TryRegion>& regions,
@@ -2794,7 +2804,8 @@ std::string injectTryCatchDirectives(const std::string& bodyText,
         }
     }
 
-    // If defer is used, wrap from the first label onward in .try/.finally
+    // If defer is used, wrap from the first label onward in .try/catch (see
+    // the catch clauses below for why this is not a plain .try/.finally).
     if (functionUsesDefer) {
         // Emit prologue (before first label) outside the try block
         for (std::size_t i = 0; i < firstLabelIdx; i++) {
@@ -2802,6 +2813,7 @@ std::string injectTryCatchDirectives(const std::string& bodyText,
         }
 
         std::string deferExitLabel = "defer_exit";
+        std::string deferRunLabel = "defer_run_defers";
         result += "    .try\n    {\n";
 
         // `leave` empties the evaluation stack (ECMA-335 III.3.64), so a
@@ -2853,23 +2865,51 @@ std::string injectTryCatchDirectives(const std::string& bodyText,
             }
         }
 
-        // Emit the defer .finally block. ECMA-335 III.1.7.5 requires a
-        // .finally handler to end with `endfinally` — the CLR verifier
-        // rejects (InvalidProgramException, at JIT time, same as the
-        // .try/.catch `br`-vs-`leave` defect this emitter already works
-        // around) a finally body that merely falls through to whatever
-        // follows the block.
+        // A `finally` block runs on every exit from its `.try`, exceptional
+        // or not, with no way to inspect the in-flight exception — but
+        // native only drains a function's pending defers while unwinding a
+        // CATCHABLE fault (src/vm.cpp's handleThrow, reached through
+        // tryCatchableError/raiseThrowableError); a fault raised through
+        // RAISE_ERROR/plain runtimeError bypasses handleThrow entirely, so
+        // no defer ever runs for it, however many pending defers this call
+        // has (issue #319). Two `catch` clauses replace the `finally` so
+        // the exceptional path can make that same check: the first inspects
+        // LoxError::Catchable (mirroring the emitRegionRange catch
+        // prologue's own use of that flag) and skips RunDefers when it is
+        // false, rethrowing untouched; the second is a safety net for any
+        // non-LoxError .NET exception, which native has no catchable/
+        // uncatchable split for, so it always runs defers, matching this
+        // method's prior finally-based behavior. Neither clause fires on
+        // the ordinary (non-exceptional) `leave defer_exit` exit — that
+        // path never enters a catch handler — so RunDefers is called again,
+        // unconditionally, at defer_exit below for that case.
         result += "    }\n";
-        result += "    finally\n";
-        result += "    {\n";
+        result += "    catch [LoxRuntime]Lox.LoxError\n    {\n";
+        result += "      dup\n";
+        result += "      call instance bool [LoxRuntime]Lox.LoxError"
+                  "::get_Catchable()\n";
+        result += "      brtrue " + deferRunLabel + "\n";
+        result += "      pop\n";
+        result += "      rethrow\n";
+        result += "    " + deferRunLabel + ":\n";
+        result += "      pop\n";
         result += "      " + e.ldloc(e.deferListSlot) + "\n";
         result += "      call void [LoxRuntime]Lox.LoxOps::RunDefers(object)\n";
-        result += "      endfinally\n";
+        result += "      rethrow\n";
+        result += "    }\n";
+        result += "    catch [System.Runtime]System.Object\n    {\n";
+        result += "      pop\n";
+        result += "      " + e.ldloc(e.deferListSlot) + "\n";
+        result += "      call void [LoxRuntime]Lox.LoxOps::RunDefers(object)\n";
+        result += "      rethrow\n";
         result += "    }\n";
 
-        // Emit the exit label, reload the return value `leave` discarded
-        // from the stack, and the final ret.
+        // Emit the exit label, run defers for the ordinary (non-exceptional)
+        // exit, reload the return value `leave` discarded from the stack,
+        // and the final ret.
         result += deferExitLabel + ":\n";
+        result += "    " + e.ldloc(e.deferListSlot) + "\n";
+        result += "    call void [LoxRuntime]Lox.LoxOps::RunDefers(object)\n";
         result += "    " + e.ldloc(e.deferReturnSlot) + "\n";
         result += "    ret\n";
     } else {
@@ -2897,7 +2937,9 @@ std::string emitClassBody(const Emitter& e, const DecodedFunction& fn,
         out << "    .entrypoint\n";
     }
     out << "    .maxstack "
-        << std::max(1, e.b.maxDepth + catchCellResetStackExtra(e)) << "\n";
+        << std::max(1, e.b.maxDepth + catchCellResetStackExtra(e) +
+                           deferOuterCatchStackExtra(e))
+        << "\n";
     out << "    .locals init (";
     for (int i = 0; i < totalLocals; i++) {
         if (i > 0) {
