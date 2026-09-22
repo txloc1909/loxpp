@@ -1,0 +1,26 @@
+// Regression example for GitHub issue #311.
+//
+// spec/04-semantics.md, defer Statement step 4: pending deferred calls run
+// "when the enclosing function call exits" -- that is, after the function
+// has computed its own return value, not before.
+//
+// Each level of this recursion defers a call that announces the level is
+// about to exit. If `return EXPR;` ran its defers BEFORE evaluating EXPR
+// (the bug), level N's defer would run before the recursive call inside
+// its own return statement, printing in call order: 0, 1, 2, 3. The
+// correct order is the reverse: each level exits (and so runs its defer)
+// only after the recursive call underneath it has itself returned, so the
+// deepest level exits first: 3, 2, 1, 0.
+fun onExit(level) {
+    print "level " + str(level) + " exits";
+}
+
+fun countUp(level) {
+    defer onExit(level);
+    if (level >= 3) {
+        return level;
+    }
+    return countUp(level + 1);
+}
+
+print "result: " + str(countUp(0));
