@@ -57,6 +57,26 @@ public final class LoxOps {
 
     public static boolean isHandlerLive() { return handlerDepth > 0; }
 
+    /**
+     * Boxed (an {@code Integer}) so the generated program's own
+     * Object-typed local (jvm_emitter.cpp's Emitter::savedHandlerDepthSlot)
+     * can hold the snapshot directly. JVM permits {@code areturn} from
+     * inside a still-open protected region — unlike CIL, nothing forces an
+     * early return through a shared exit point — so a `return` there
+     * leaves PUSH_HANDLER's own enterHandler() call unmatched: neither
+     * POP_HANDLER's translation nor the handler-entry code's own
+     * exitHandler() call ever runs on that path either. getHandlerDepth()/
+     * restoreHandlerDepth() let emitReturn snapshot this counter at
+     * function entry and restore it at every actual return, undoing that
+     * leak regardless of how many regions were abandoned this way (issue
+     * #319, reviewer round 2).
+     */
+    public static Object getHandlerDepth() { return handlerDepth; }
+
+    public static void restoreHandlerDepth(Object depth) {
+        handlerDepth = (Integer)depth;
+    }
+
     // ------------------------------------------------------------------
     // Truthiness (operator! in value.h: numbers and objects are truthy)
     // ------------------------------------------------------------------
