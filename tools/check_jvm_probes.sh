@@ -251,6 +251,14 @@ error_probes=(
     # sides must fail with empty stdout, not "d\n" repeated once per
     # unwound frame.
     "test/translation-probes/58_defer_overflow_fatal_fast_path.lox"
+    # Issue #319 (reviewer round 2): a `return` out of a still-open
+    # try/catch used to leak LoxOps.isHandlerLive() by one, permanently —
+    # JVM permits `areturn` from inside a still-open protected region, so
+    # it never ran the handler-entry code's own exitHandler() call.
+    # pre()'s own leaked return, unrelated to g()'s later arity fault,
+    # made g() wrongly look like it had a live handler. Both sides must
+    # fail with empty stdout, not "defer-g\n".
+    "test/translation-probes/59_return_out_of_try_leak.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

@@ -1,0 +1,20 @@
+// Issue #319 (reviewer round 2): a `return` out of a still-open try/catch
+// must not leak the managed backends' handler-liveness counter (CLR:
+// LoxOps.HandlerLive; JVM: LoxOps.isHandlerLive() — src/vm.h's own
+// VM::m_handlerStack has no such leak, since it is frame-scoped and native
+// pops it explicitly on every frame exit, not just a `return` reached via
+// its own bytecode-level POP_HANDLER). pre()'s `return 1;` inside its own
+// try — no defer, no fault, unrelated to g() below — exits via `leave`/
+// `areturn` from inside a still-open protected region, past the point
+// each backend's normal-exit cleanup runs. Before the fix, this left the
+// counter permanently inflated by one, so g()'s later, unrelated arity
+// fault (no `try` live anywhere by the time g() runs) looked catchable
+// and ran its pending defer. Delete the `pre();` call and all three
+// backends already agreed, proving pre()'s own leaked count — not
+// anything about g() itself — is what this probe pins.
+fun note(s) { print s; }
+fun pre() { try { return 1; } catch (e) { return 2; } }
+fun h(a) { return a; }
+fun g() { defer note("defer-g"); h(); }
+pre();
+g();
