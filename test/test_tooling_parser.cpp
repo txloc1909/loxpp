@@ -552,8 +552,9 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // 58_defer_overflow_fatal_fast_path.lox, raising this to 180. The
     // reviewer round 2 fix adds
     // test/translation-probes/59_return_out_of_try_leak.lox, raising this
-    // to 181.
-    ASSERT_EQ(files.size(), 181U);
+    // to 181. Issue #326 adds examples/defer_stack_overflow_count.lox,
+    // raising this to 182.
+    ASSERT_EQ(files.size(), 182U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {

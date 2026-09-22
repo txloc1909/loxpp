@@ -778,22 +778,26 @@ jobs:
       # CLR twin of the examples check: the full example corpus on the CLR
       # backend, zero failures. --exclude skips the
       # map-iteration-order-sensitive examples
-      # (tools/clr_excluded_examples.txt); the native path below still runs
-      # every example, unchanged.
+      # (tools/clr_excluded_examples.txt) and the examples the CLR backend
+      # cannot run at all yet (tools/clr_crash_excluded_examples.txt); the
+      # native path below still runs every example, unchanged.
       - name: CLR differential suite - examples
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "python3 tools/check_examples.py tools/loxpp_clr.sh examples/ --exclude tools/clr_excluded_examples.txt"
+            bash -c "python3 tools/check_examples.py tools/loxpp_clr.sh examples/ --exclude tools/clr_excluded_examples.txt --exclude tools/clr_crash_excluded_examples.txt"
 
       # Permutation guard for the CLR exclusion list itself. check_examples.py
       # SKIPs an excluded name; it never runs it, so it cannot tell a real
       # permutation from a content bug. This step runs diff_runtimes.py over
       # exactly the names in tools/clr_excluded_examples.txt (read from the
       # file, so a new entry is covered with no CI edit) and fails the gate
-      # if any one of them stops being a permutation of native stdout.
+      # if any one of them stops being a permutation of native stdout. It
+      # must not read tools/clr_crash_excluded_examples.txt: those entries
+      # are not permutations, they are programs the CLR side cannot finish
+      # at all, so this guard would always fail on them.
       - name: CLR differential suite - excluded examples stay permutations
         run: |
           docker run --rm \
@@ -807,13 +811,28 @@ jobs:
       # (examples/bench_jump_table.lox, examples/remove.lox) could print a
       # wrong answer with CI green. This step compares full stdout for every
       # example instead.
+      #
+      # tools/diff_runtimes.py's --exclude only excuses a map-order
+      # permutation (tools/clr_excluded_examples.txt); it has no "the other
+      # side cannot even finish" mode. So the examples named in
+      # tools/clr_crash_excluded_examples.txt are left out of the file list
+      # by name, the same way examples/bench_jump_table.lox is left out of
+      # the self-hosted-interpreter sweep further below for its own,
+      # different reason (a timeout, not a crash).
       - name: CLR differential suite - full example corpus
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_clr.sh examples/ --exclude tools/clr_excluded_examples.txt"
+            bash -c '
+              crash_excluded=$(awk "!/^[[:space:]]*#/ && NF {print \$1}" tools/clr_crash_excluded_examples.txt)
+              files=$(find examples -maxdepth 1 -name "*.lox" | sort)
+              for name in $crash_excluded; do
+                files=$(echo "$files" | grep -vxF "examples/$name")
+              done
+              python3 tools/diff_runtimes.py build/loxpp tools/loxpp_clr.sh $files --exclude tools/clr_excluded_examples.txt
+            '
 
       # The self-hosted interpreter compiles, assembles, and runs on the CLR
       # backend, and interprets a Lox++ program correctly. The CLR twin of the
