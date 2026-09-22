@@ -1191,6 +1191,15 @@ today — this is a record of current native behavior, not a design decision
 that a future version must keep. There is no `Error.kind` for a fatal
 fault; the message is the only text the implementation reports.
 
+A fatal fault also skips every pending deferred call — not only the ones
+belonging to a function whose call the fault unwinds past, but the ones
+belonging to the function where the fault happened. This differs from a
+catchable fault left uncaught, where [`throw`
+Statement](#throw-statement) step 5 still runs every pending deferred call
+on the way to the top: a fatal fault halts the program immediately at the
+point of the fault, the same way an uncaught catchable fault halts it only
+after every pending deferred call on the unwind path has already run.
+
 | Cause | Example | Message |
 |---|---|---|
 | `GET_TAG` applied to a non-enum value | `enum Result { Ok(v) Err(m) } match 1 { case Ok(v) => v case Err(m) => -1 };` | `GET_TAG: expected an enum value.` |
