@@ -2106,10 +2106,11 @@ class InterpFileMethod {
         this.loxTag = "filemethod";
     }
     arity() {
-        if (this.name == "readline" or this.name == "readlines" or this.name == "close") return 0;
+        if (this.name == "read" or this.name == "readline" or this.name == "readlines" or this.name == "close") return 0;
         return 1;
     }
     call(interp, args) {
+        if (this.name == "read")      return this.file.handle.read();
         if (this.name == "readline")  return this.file.handle.readline();
         if (this.name == "readlines") {
             var lines = this.file.handle.readlines();
@@ -2989,7 +2990,7 @@ class Interpreter {
             return nil;
         }
         if (loxTag(object) == "file") {
-            if (name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close") return InterpFileMethod(name, object);
+            if (name == "read" or name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close") return InterpFileMethod(name, object);
             this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }
