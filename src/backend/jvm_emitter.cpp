@@ -154,16 +154,19 @@ struct Emitter {
     int argScratchBase{-1};
 
     // Snapshot of LoxOps.handlerDepth taken at function entry (emitPrologue),
-    // restored at every one of this function's own exit points (emitReturn,
-    // and the exceptional-exit paths in emitChunk's defer catch-all handler
-    // and the genuine-try/catch handler-entry code) — closes the leak a
-    // `return` (JVM permits `areturn` from inside a still-open protected
-    // region; unlike CIL, no `leave`-style redirection hides it) would
-    // otherwise leave in that process-global counter (issue #319, reviewer
-    // round 2): PUSH_HANDLER's own enterHandler() call is unmatched on that
-    // path, since neither POP_HANDLER's translation nor the handler-entry
-    // code's own exitHandler() call ever runs for a region left this way.
-    // Allocated in buildEmitter whenever this chunk has any try/catch
+    // restored at every one of this function's own exit points: emitReturn
+    // (every actual return, explicit or the implicit trailing one), and the
+    // two exceptional-exit paths in emitChunk's defer catch-all handler
+    // (the catchable-with-runDefers branch and the uncatchable-skip-
+    // runDefers branch). This closes the leak a `return` (JVM permits
+    // `areturn` from inside a still-open protected region; unlike CIL, no
+    // `leave`-style redirection hides it) would otherwise leave in that
+    // process-global counter (issue #319, reviewer round 2): PUSH_HANDLER's
+    // own enterHandler() call is unmatched on that path, since neither
+    // POP_HANDLER's translation nor the genuine-try/catch handler-entry
+    // code's own exitHandler() call (a plain decrement, not a restore —
+    // see that call site's own comment) ever runs for a region left this
+    // way. Allocated in buildEmitter whenever this chunk has any try/catch
     // region, though only a function chunk's own prologue and exit points
     // actually populate/use it — a script chunk's top-level `return` is a
     // static error, so its own top-level try/catch can never be jumped
