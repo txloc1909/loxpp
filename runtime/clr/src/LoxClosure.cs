@@ -71,6 +71,16 @@ public abstract class LoxClosure : ILoxCallable {
 
     public object CallAsSelf(object self, object[] args) {
         if (args.Length != Arity) {
+            // src/vm.cpp VM::call() makes ArityError catchable only when a
+            // handler is live somewhere in the program; with none live, it
+            // calls runtimeError() directly, bypassing the catchable
+            // machinery entirely (issue #319). LoxOps.HandlerLive mirrors
+            // that same dynamic (call-stack-dependent, not per-call-site)
+            // test.
+            if (!LoxOps.HandlerLive) {
+                throw new LoxError(
+                    $"Expected {Arity} arguments but got {args.Length}.");
+            }
             throw new LoxError(LoxRuntime.MakeError(
                 $"Expected {Arity} arguments but got {args.Length}.", "ArityError"));
         }
@@ -82,6 +92,16 @@ public abstract class LoxClosure : ILoxCallable {
                 // A second overflow while the first is still unwinding -
                 // matches native's RAISE_ERROR("Stack overflow.") fatal
                 // path (src/vm.cpp), not tryCatchableError's catchable one.
+                throw new LoxError("Stack overflow.");
+            }
+            if (!LoxOps.HandlerLive) {
+                // src/vm.cpp VM::call() takes the same fatal fast path
+                // (no handler live anywhere in the program) for the first
+                // overflow too - it never constructs the catchable
+                // StackOverflowError Error value in that case (issue
+                // #319). s_unwindingStackOverflow stays false: this fault
+                // is never delivered, so there is no unwind for a second
+                // overflow to be re-entrant with.
                 throw new LoxError("Stack overflow.");
             }
             // A bare-message LoxError is uncatchable (LoxError.cs's own

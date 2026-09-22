@@ -230,6 +230,35 @@ error_probes=(
     # net size, so a size check misses it. Both sides must fail with empty
     # stdout — the structural version check reports it instead.
     "test/translation-probes/55_for_in_map_net_zero.lox"
+    # Issue #319: a fatal fault must not run a pending deferred call, not
+    # even the one belonging to the function where the fault happens. The
+    # JVM backend's per-function catch-all handler used to call runDefers
+    # unconditionally before rethrowing; both sides must fail with empty
+    # stdout, not "defer-g\n".
+    "examples/defer_uncatchable_fault.lox"
+    # Issue #319: the wrong-argument-count fatal fast path is dynamic (no
+    # handler live anywhere in the program), not a static property of the
+    # call site. LoxClosure.callAsSelf used to build a catchable ArityError
+    # unconditionally, so LoxOps.isHandlerLive() is what tells this case
+    # apart from a live-handler ArityError
+    # (try_catch_class_constructor_arity.lox already covers that one).
+    # Both sides must fail with empty stdout, not "defer-g\n".
+    "test/translation-probes/57_defer_arity_fatal_fast_path.lox"
+    # Issue #319: the call-stack-overflow fatal fast path is the same
+    # dynamic check, for the first (non-reentrant) overflow — distinct
+    # from FRAMES_RESERVE's own re-entrant case (defer_overflow_during_
+    # unwind.lox, above), which a live handler DOES catch first. Both
+    # sides must fail with empty stdout, not "d\n" repeated once per
+    # unwound frame.
+    "test/translation-probes/58_defer_overflow_fatal_fast_path.lox"
+    # Issue #319 (reviewer round 2): a `return` out of a still-open
+    # try/catch used to leak LoxOps.isHandlerLive() by one, permanently —
+    # JVM permits `areturn` from inside a still-open protected region, so
+    # it never ran the handler-entry code's own exitHandler() call.
+    # pre()'s own leaked return, unrelated to g()'s later arity fault,
+    # made g() wrongly look like it had a live handler. Both sides must
+    # fail with empty stdout, not "defer-g\n".
+    "test/translation-probes/59_return_out_of_try_leak.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

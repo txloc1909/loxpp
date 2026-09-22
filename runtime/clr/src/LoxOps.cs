@@ -442,6 +442,47 @@ public static class LoxOps {
         }
     }
 
+    // Count of PUSH_HANDLER regions currently open across the whole call
+    // stack - mirrors src/vm.h's VM::m_handlerStack.size(), read the same
+    // way VM::call() reads it: a fault's fatal-fast-path check (no handler
+    // live anywhere in the program) tests emptiness, not any static,
+    // per-call-site knowledge of whether a try/catch encloses this call
+    // (issue #319 - LoxClosure.CallAsSelf's arity and stack-overflow
+    // checks). EnterHandler is called from the generated program's own
+    // PUSH_HANDLER translation (clr_emitter.cpp); ExitHandler is called
+    // both from POP_HANDLER (the normal-exit path) and from the shared
+    // catch prologue clr_emitter.cpp emits for every try/catch
+    // (exceptional exit - POP_HANDLER's own translation never runs on that
+    // path, the same reason RunDefers needed a second call site for
+    // defer-using functions, see injectTryCatchDirectives).
+    private static int s_handlerDepth;
+
+    public static void EnterHandler() { s_handlerDepth++; }
+
+    public static void ExitHandler() { s_handlerDepth--; }
+
+    public static bool HandlerLive => s_handlerDepth > 0;
+
+    /// <summary>
+    /// Boxed so the generated program's own object-typed locals (every
+    /// `.locals init` slot clr_emitter.cpp declares is `object`) can hold
+    /// the snapshot without an explicit `box` instruction of their own -
+    /// see emitPrologue's own comment for why a function needs this
+    /// snapshot at all (issue #319, reviewer round 2).
+    /// </summary>
+    public static object GetHandlerDepth() => s_handlerDepth;
+
+    /// <summary>
+    /// Restores the counter to a snapshot GetHandlerDepth returned earlier,
+    /// undoing any leak an early exit from inside a still-open protected
+    /// region left in it. Called from every one of a function's own exit
+    /// points, not paired 1:1 with EnterHandler/ExitHandler the way those
+    /// two are with each other - see emitPrologue's own comment.
+    /// </summary>
+    public static void RestoreHandlerDepth(object depth) {
+        s_handlerDepth = (int)depth;
+    }
+
     // ------------------------------------------------------------------
     // instanceof / properties / methods
     // ------------------------------------------------------------------

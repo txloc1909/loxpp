@@ -1,0 +1,9 @@
+// Issue #319: a fatal fault (RAISE_ERROR in src/vm.cpp; here, a property
+// read on a Number, "Only instances have properties.") must halt the
+// program before any pending deferred call runs, even the one belonging to
+// the function where the fault happens. Native fails here with exit 70 and
+// empty stdout; a backend that prints "defer-g" first is wrong even though
+// it still crashes in the end.
+fun note(s) { print s; }
+fun g() { defer note("defer-g"); print 42.foo; }
+g();

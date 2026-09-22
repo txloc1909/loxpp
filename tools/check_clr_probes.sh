@@ -307,6 +307,34 @@ error_probes=(
     # net size, so a size check misses it. Both sides must fail with empty
     # stdout — the structural version check reports it instead.
     "test/translation-probes/55_for_in_map_net_zero.lox"
+    # Issue #319: a fatal fault must not run a pending deferred call, not
+    # even the one belonging to the function where the fault happens. The
+    # CLR backend's outer .try wrapping a defer-using function used to run
+    # RunDefers unconditionally on the way out (a plain .try/.finally has no
+    # way to see the in-flight exception at all); both sides must fail with
+    # empty stdout, not "defer-g\n".
+    "examples/defer_uncatchable_fault.lox"
+    # Issue #319: the wrong-argument-count fatal fast path is dynamic (no
+    # handler live anywhere in the program), not a static property of the
+    # call site. LoxClosure.CallAsSelf used to build a catchable ArityError
+    # unconditionally, so LoxOps.HandlerLive is what tells this case apart
+    # from a live-handler ArityError (53_stack_overflow_catchable.lox,
+    # above, and try_catch_class_constructor_arity.lox already cover that
+    # one). Both sides must fail with empty stdout, not "defer-g\n".
+    "test/translation-probes/57_defer_arity_fatal_fast_path.lox"
+    # Issue #319: the call-stack-overflow fatal fast path is the same
+    # dynamic check, for the first (non-reentrant) overflow. Both sides
+    # must fail with empty stdout, not "d\n" repeated once per unwound
+    # frame.
+    "test/translation-probes/58_defer_overflow_fatal_fast_path.lox"
+    # Issue #319 (reviewer round 2): a `return` out of a still-open
+    # try/catch used to leak LoxOps.HandlerLive by one, permanently — the
+    # CLR outer .try wrapping a defer/handler-return-using function's own
+    # `ret` became `leave`, past the point EnterHandler's own
+    # ExitHandler call runs. pre()'s own leaked return, unrelated to g()'s
+    # later arity fault, made g() wrongly look like it had a live handler.
+    # Both sides must fail with empty stdout, not "defer-g\n".
+    "test/translation-probes/59_return_out_of_try_leak.lox"
 )
 
 # Probes that stay wrong on purpose. native's own value-stack ceiling

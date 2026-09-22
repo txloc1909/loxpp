@@ -153,6 +153,26 @@ struct Emitter {
     int calleeScratchSlot{-1};
     int argScratchBase{-1};
 
+    // Snapshot of LoxOps.handlerDepth taken at function entry (emitPrologue),
+    // restored at every one of this function's own exit points: emitReturn
+    // (every actual return, explicit or the implicit trailing one), and the
+    // two exceptional-exit paths in emitChunk's defer catch-all handler
+    // (the catchable-with-runDefers branch and the uncatchable-skip-
+    // runDefers branch). This closes the leak a `return` (JVM permits
+    // `areturn` from inside a still-open protected region; unlike CIL, no
+    // `leave`-style redirection hides it) would otherwise leave in that
+    // process-global counter (issue #319, reviewer round 2): PUSH_HANDLER's
+    // own enterHandler() call is unmatched on that path, since neither
+    // POP_HANDLER's translation nor the genuine-try/catch handler-entry
+    // code's own exitHandler() call (a plain decrement, not a restore —
+    // see that call site's own comment) ever runs for a region left this
+    // way. Allocated in buildEmitter whenever this chunk has any try/catch
+    // region, though only a function chunk's own prologue and exit points
+    // actually populate/use it — a script chunk's top-level `return` is a
+    // static error, so its own top-level try/catch can never be jumped
+    // past this way. -1 when this chunk has no try/catch at all.
+    int savedHandlerDepthSlot{-1};
+
     // This pass's own forward walk, updated in offset order by
     // finishInstruction: the slot the most RECENTLY DECLARED invisible-var
     // site bound. -1 is a sentinel for "no site has run yet", not a real
@@ -1596,6 +1616,24 @@ void emitMatchError(Emitter& e) {
 // so the deficit is always 0 and normalizeFoldedOperands never has anything
 // to do before a script's own `return`.
 void emitReturn(Emitter& e, bool isScript) {
+    // Restore LoxOps' handler-liveness counter to this function's own entry
+    // snapshot (emitPrologue) before every actual return, explicit or the
+    // implicit trailing one endCompiler appends — this is every return
+    // point a function chunk has, protected region or not (issue #319,
+    // reviewer round 2; see Emitter::savedHandlerDepthSlot's own comment).
+    // Stack-safe before `areturn`: getHandlerDepth pushes exactly one value
+    // and restoreHandlerDepth pops exactly one, a net-zero pair that sits
+    // above the already-pushed return value without disturbing it. Never
+    // fires for a script (isScript, guarded the same way emitPrologue's own
+    // snapshot is): its implicit trailing `return` cannot be reached from
+    // inside a still-open protected region (`return` at the top level is a
+    // static error), and savedHandlerDepthSlot was never snapshotted there.
+    if (!isScript && e.savedHandlerDepthSlot >= 0) {
+        e.b.emit("aload " + std::to_string(e.savedHandlerDepthSlot), +1);
+        e.b.emit("invokestatic lox/LoxOps/restoreHandlerDepth"
+                 "(Ljava/lang/Object;)V",
+                 -1);
+    }
     if (isScript) {
         // vm.cpp: frameCount reaches 0, result discarded.
         e.b.emit("return", 0);
@@ -1620,6 +1658,11 @@ void emitPushHandler(Emitter& e, const DecodedInstruction& in) {
     std::string regionStartLabel =
         "try_" + std::to_string(in.offset) + "_start";
     e.b.label(regionStartLabel);
+    // Counts this region as live for LoxClosure's own arity/overflow
+    // fatal-fast-path checks (issue #319) — see LoxOps.enterHandler's own
+    // comment for why this mirrors src/vm.h's VM::m_handlerStack. A
+    // static call with no arguments and a void return: net stack effect 0.
+    e.b.emit("invokestatic lox/LoxOps/enterHandler()V", 0);
 
     // Record the region information for emission of .catch directive later.
     Emitter::ActiveRegion region;
@@ -1642,6 +1685,12 @@ void emitPopHandler(Emitter& e, const DecodedInstruction& in) {
         throw std::runtime_error(
             "jvm_emitter: POP_HANDLER without matching PUSH_HANDLER");
     }
+
+    // Normal (non-exceptional) exit from the region PUSH_HANDLER opened —
+    // see LoxOps.exitHandler's own comment for the exceptional-exit
+    // counterpart, emitted at the handler-entry site in emitBody instead
+    // (this position's own translation never runs on that path).
+    e.b.emit("invokestatic lox/LoxOps/exitHandler()V", 0);
 
     Emitter::ActiveRegion region = e.activeRegions.back();
     e.activeRegions.pop_back();
@@ -1882,6 +1931,17 @@ Emitter buildEmitter(const DecodedFunction& fn,
     e.baseSlot = isScript ? 2 : 4;
     e.globalsSlot = e.baseSlot - 1;
     e.scratchSlot = e.baseSlot + maxLocalCount;
+
+    // Reserved before calleeScratchSlot/argScratchBase/deferListSlot below,
+    // so each of those naturally shifts past it — see
+    // Emitter::savedHandlerDepthSlot's own comment for why this chunk needs
+    // a dedicated, long-lived slot (not the shared scratchSlot convention
+    // the rest of this function follows) whenever it has any try/catch.
+    if (!analysis.handlerEntries.empty()) {
+        e.savedHandlerDepthSlot = e.scratchSlot;
+        e.scratchSlot += 1;
+    }
+
     if (maxSpillWidth > 0) {
         // calleeScratchSlot is CALL's own extra slot (emitCall) —
         // emitBuildList spills only into argScratchBase, one slot per
@@ -1981,6 +2041,19 @@ void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isScript) {
         e.b.emit("dup", +1);
         e.b.emit("invokespecial java/util/ArrayList/<init>()V", -1);
         e.b.emit("astore " + std::to_string(e.deferListSlot), -1);
+    }
+
+    // Snapshot LoxOps' handler-liveness counter for this function's own
+    // frame-exit cleanup (issue #319, reviewer round 2) — see
+    // Emitter::savedHandlerDepthSlot's own comment. Scripts never need
+    // this: a top-level `return` is a static error (compiler.cpp), so a
+    // script-level try/catch's own PUSH_HANDLER can never be jumped past
+    // this way.
+    if (!isScript && e.savedHandlerDepthSlot >= 0) {
+        e.b.emit("invokestatic lox/LoxOps/getHandlerDepth()"
+                 "Ljava/lang/Object;",
+                 +1);
+        e.b.emit("astore " + std::to_string(e.savedHandlerDepthSlot), -1);
     }
 }
 
@@ -2172,6 +2245,16 @@ void emitBody(Emitter& e, bool isScript,
             // exception wrapper.
             if (e.handlerEntryOffsets.find(in.offset) !=
                 e.handlerEntryOffsets.end()) {
+                // This region's own PUSH_HANDLER counted it live for
+                // LoxOps.isHandlerLive() (issue #319); entering this
+                // handler block at all — whether getValue() below ends up
+                // delivering the fault or rethrowing it — is this
+                // region's exceptional exit, the counterpart to
+                // POP_HANDLER's normal-exit exitHandler() call
+                // (LoxOps.exitHandler's own comment). A static call with
+                // no arguments and a void return: net stack effect 0, safe
+                // before the stack still holds [LoxError].
+                e.b.emit("invokestatic lox/LoxOps/exitHandler()V", 0);
                 // Stack before: [LoxError]
                 // Extract the value field and leave it on the stack
                 e.b.emit("invokevirtual lox/LoxError/getValue()"
@@ -2483,29 +2566,70 @@ std::string emitChunk(const DecodedFunction& fn,
         std::string deferCatchAllEndLabel = "L_defer_body_end";
         e.b.label(deferCatchAllEndLabel);
 
-        // Emit the catch-all handler code
+        // Emit the catch-all handler code. Only a CATCHABLE fault — one
+        // native's src/vm.cpp raises through tryCatchableError/
+        // raiseThrowableError, reaching handleThrow — drains this
+        // function's pending defers while it unwinds; a fault raised
+        // through RAISE_ERROR/plain runtimeError never reaches handleThrow
+        // at all, so no defer ever runs for it, however many pending
+        // defers this call has (issue #319). LoxError.isCatchable()
+        // mirrors that split (LoxError.java) without getValue()'s own
+        // side effect (getValue() rethrows the uncatchable case itself,
+        // which would abandon this handler's protected region instead of
+        // letting it skip RunDefers and rethrow cleanly).
         e.deferCatchAllHandlerLabel = "L_defer_catch_all";
         e.b.label(e.deferCatchAllHandlerLabel);
         // When the handler is invoked, the JVM has the exception on the stack.
         // Resync the depth to account for it.
         e.b.resync(1);
+        int handlerEntryDepth = e.b.depth;
+        std::string uncatchableLabel = "L_defer_uncatchable";
         // Stack: [LoxError exception]
-        // This is the only site that knows which fault a defer list is
-        // being drained for: pass it to runDefers so a deferred call's own
-        // throw can be told apart from a genuine replacement of THIS fault
-        // (LoxOps.runDefers's own propagating parameter; see
-        // LoxClosure.replaceOverflowInFlight for the invariant this feeds).
         e.b.emit("dup", +1);
-        // Stack: [LoxError exception, LoxError exception]
+        // Stack: [exn, exn]
+        e.b.emit("invokevirtual lox/LoxError/isCatchable()Z", 0);
+        // Stack: [exn, bool]
+        e.b.emit("ifeq " + uncatchableLabel, -1);
+        // Stack: [exn]. Catchable: this is the only site that knows which
+        // fault a defer list is being drained for; pass it to runDefers so
+        // a deferred call's own throw can be told apart from a genuine
+        // replacement of THIS fault (LoxOps.runDefers's own propagating
+        // parameter; see LoxClosure.replaceOverflowInFlight for the
+        // invariant this feeds).
+        e.b.emit("dup", +1);
+        // Stack: [exn, exn]
         e.b.emit("aload " + std::to_string(e.deferListSlot), +1);
-        // Stack: [LoxError exception, LoxError exception, ArrayList deferList]
+        // Stack: [exn, exn, deferList]
         e.b.emit("swap", 0);
-        // Stack: [LoxError exception, ArrayList deferList, LoxError exception]
+        // Stack: [exn, deferList, exn]
         e.b.emit("invokestatic "
                  "lox/LoxOps/runDefers(Ljava/lang/Object;Llox/LoxError;)V",
                  -2);
-        // Stack: [LoxError exception]
+        // Stack: [exn]
+        // Restore LoxOps' handler-liveness counter to this function's own
+        // entry snapshot before this exceptional exit — see
+        // Emitter::savedHandlerDepthSlot's own comment (issue #319,
+        // reviewer round 2). Net stack effect 0 (aload pushes 1,
+        // restoreHandlerDepth pops 1), safe here regardless: [exn] stays
+        // put underneath.
+        if (e.savedHandlerDepthSlot >= 0) {
+            e.b.emit("aload " + std::to_string(e.savedHandlerDepthSlot), +1);
+            e.b.emit("invokestatic lox/LoxOps/restoreHandlerDepth"
+                     "(Ljava/lang/Object;)V",
+                     -1);
+        }
         // Re-throw the caught exception
+        e.b.emit("athrow", -1);
+        e.b.label(uncatchableLabel);
+        e.b.resync(handlerEntryDepth);
+        // Stack: [exn]. Uncatchable: skip RunDefers, restore the same
+        // snapshot, rethrow untouched.
+        if (e.savedHandlerDepthSlot >= 0) {
+            e.b.emit("aload " + std::to_string(e.savedHandlerDepthSlot), +1);
+            e.b.emit("invokestatic lox/LoxOps/restoreHandlerDepth"
+                     "(Ljava/lang/Object;)V",
+                     -1);
+        }
         e.b.emit("athrow", -1);
 
         // Create an exception table entry for the defer catch-all handler.

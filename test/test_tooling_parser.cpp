@@ -545,8 +545,15 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // 56_file_nul.lox, raising this to 58. Issue #311 adds
     // examples/defer_return_value.lox, raising this to 59. The issue #386
     // probe lives in clr-only/, so it stays uncounted here. jvm-only/ and
-    // clr-only/ probes stay uncounted, since this scan is non-recursive)
-    ASSERT_EQ(files.size(), 177U);
+    // clr-only/ probes stay uncounted, since this scan is non-recursive.
+    // 116 + 2 + 59 = 177. Issue #319 adds examples/defer_uncatchable_fault.lox,
+    // raising the total to 178, then
+    // test/translation-probes/57_defer_arity_fatal_fast_path.lox and
+    // 58_defer_overflow_fatal_fast_path.lox, raising this to 180. The
+    // reviewer round 2 fix adds
+    // test/translation-probes/59_return_out_of_try_leak.lox, raising this
+    // to 181.
+    ASSERT_EQ(files.size(), 181U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {

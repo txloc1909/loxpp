@@ -95,6 +95,16 @@ public abstract class LoxClosure implements LoxCallable {
 
     public final Object callAsSelf(Object self, Object[] args) {
         if (args.length != arity) {
+            // src/vm.cpp VM::call() makes ArityError catchable only when a
+            // handler is live somewhere in the program; with none live, it
+            // calls runtimeError() directly, bypassing the catchable
+            // machinery entirely (issue #319). LoxOps.isHandlerLive()
+            // mirrors that same dynamic (call-stack-dependent, not
+            // per-call-site) test.
+            if (!LoxOps.isHandlerLive()) {
+                throw new LoxError(
+                        "Expected " + arity + " arguments but got " + args.length + ".");
+            }
             throw LoxOps.makeError("ArityError",
                     "Expected " + arity + " arguments but got " + args.length + ".");
         }
@@ -108,6 +118,16 @@ public abstract class LoxClosure implements LoxCallable {
                 throw new LoxError("Stack overflow.");
             }
         } else if (s_frameCount >= FRAMES_MAX) {
+            if (!LoxOps.isHandlerLive()) {
+                // src/vm.cpp VM::call() takes the same fatal fast path (no
+                // handler live anywhere in the program) for the first
+                // overflow too — it never constructs the catchable
+                // StackOverflowError Error value in that case (issue
+                // #319). s_unwindingStackOverflow stays false: this fault
+                // is never delivered, so there is no unwind for a second
+                // overflow to be re-entrant with.
+                throw new LoxError("Stack overflow.");
+            }
             s_unwindingStackOverflow = true;
             LoxError overflow =
                     LoxOps.makeError("StackOverflowError", "Stack overflow.");

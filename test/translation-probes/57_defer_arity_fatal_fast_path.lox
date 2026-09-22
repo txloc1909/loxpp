@@ -1,0 +1,12 @@
+// Issue #319: the wrong-argument-count fatal fast path (spec/04-semantics.md,
+// "Wrong argument count's fatal fast path") must skip every pending
+// deferred call too, the same way any other fatal fault does — no `try`
+// statement is active anywhere in this program, so native never reaches
+// the catchable ArityError construction at all (src/vm.cpp VM::call()).
+// Both managed backends must agree: empty stdout, no "defer-g". An
+// error_probes entry in tools/check_jvm_probes.sh and
+// tools/check_clr_probes.sh.
+fun note(s) { print s; }
+fun h(a) { return a; }
+fun g() { defer note("defer-g"); h(); }
+g();

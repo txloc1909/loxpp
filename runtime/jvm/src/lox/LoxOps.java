@@ -31,6 +31,53 @@ public final class LoxOps {
     }
 
     // ------------------------------------------------------------------
+    // Handler liveness (issue #319)
+    // ------------------------------------------------------------------
+
+    /**
+     * Count of PUSH_HANDLER regions currently open across the whole call
+     * stack — mirrors src/vm.h's VM::m_handlerStack.size(), read the same
+     * way VM::call() reads it: a fault's fatal-fast-path check (no handler
+     * live anywhere in the program) tests emptiness, not any static,
+     * per-call-site knowledge of whether a try/catch encloses this call
+     * (LoxClosure.callAsSelf's arity and stack-overflow checks).
+     * enterHandler() is called from the generated program's own
+     * PUSH_HANDLER translation (jvm_emitter.cpp); exitHandler() is called
+     * both from POP_HANDLER (the normal-exit path) and from the shared
+     * handler-entry code jvm_emitter.cpp emits for every try/catch
+     * (exceptional exit — POP_HANDLER's own translation never runs on
+     * that path, the same reason runDefers needed a second call site for
+     * defer-using functions, see emitChunk's defer catch-all handler).
+     */
+    private static int handlerDepth;
+
+    public static void enterHandler() { handlerDepth++; }
+
+    public static void exitHandler() { handlerDepth--; }
+
+    public static boolean isHandlerLive() { return handlerDepth > 0; }
+
+    /**
+     * Boxed (an {@code Integer}) so the generated program's own
+     * Object-typed local (jvm_emitter.cpp's Emitter::savedHandlerDepthSlot)
+     * can hold the snapshot directly. JVM permits {@code areturn} from
+     * inside a still-open protected region — unlike CIL, nothing forces an
+     * early return through a shared exit point — so a `return` there
+     * leaves PUSH_HANDLER's own enterHandler() call unmatched: neither
+     * POP_HANDLER's translation nor the handler-entry code's own
+     * exitHandler() call ever runs on that path either. getHandlerDepth()/
+     * restoreHandlerDepth() let emitReturn snapshot this counter at
+     * function entry and restore it at every actual return, undoing that
+     * leak regardless of how many regions were abandoned this way (issue
+     * #319, reviewer round 2).
+     */
+    public static Object getHandlerDepth() { return handlerDepth; }
+
+    public static void restoreHandlerDepth(Object depth) {
+        handlerDepth = (Integer)depth;
+    }
+
+    // ------------------------------------------------------------------
     // Truthiness (operator! in value.h: numbers and objects are truthy)
     // ------------------------------------------------------------------
 

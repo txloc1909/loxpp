@@ -24,6 +24,21 @@ public final class LoxError extends RuntimeException {
     }
 
     /**
+     * True if this fault reaches a live Lox try/catch (and, on the
+     * exceptional-exit path, a function's own pending defers — issue #319):
+     * mirrors runtime/clr/src/LoxError.cs's Catchable property, and
+     * src/vm.cpp's split between a fault raised through
+     * tryCatchableError/raiseThrowableError (reaches handleThrow) and one
+     * raised through RAISE_ERROR/plain runtimeError (never does). Unlike
+     * {@link #getValue()}, this has no side effect, so callers that only
+     * need the flag — not the wrapped value — can check it without
+     * triggering getValue()'s own rethrow-if-uncatchable behavior.
+     */
+    public boolean isCatchable() {
+        return value != null;
+    }
+
+    /**
      * Get the Lox++ value being thrown. Returns the original value if this
      * error wraps a user throw. If this is an internally-raised fault
      * (value == null), rethrow the exception instead of returning it,

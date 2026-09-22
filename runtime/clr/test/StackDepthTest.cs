@@ -52,9 +52,23 @@ public static class StackDepthTest {
         // so a count already past FramesMax (a handler opened past the
         // ceiling) never hits an exact match again. No Lox program reaches
         // that state through normal calls, so drive it direct here.
+        //
+        // src/vm.cpp VM::call() only takes the catchable StackOverflowError
+        // path when a handler is live somewhere in the program
+        // (!m_handlerStack.empty()); with none live it goes straight to
+        // the fatal "Stack overflow." path instead (issue #319). LoxOps.
+        // EnterHandler/ExitHandler is the CLR mirror of that same dynamic,
+        // call-stack-scoped check (LoxOps.HandlerLive) — a public API, so
+        // no reflection is needed here the way s_frameCount/
+        // s_unwindingStackOverflow need it. Push one before the overflow
+        // below so this scenario matches what a live Lox try/catch would
+        // give it, the same way test/translation-probes/clr-only/
+        // 53_stack_overflow_catchable.lox exercises the catchable case
+        // end to end through generated CIL.
         FieldInfo countField = typeof(LoxClosure).GetField(
             "s_frameCount", BindingFlags.NonPublic | BindingFlags.Static);
         int savedCount = (int)countField.GetValue(null);
+        LoxOps.EnterHandler();
         try {
             countField.SetValue(null, 1025);
             DelegateClosure trivial = new DelegateClosure(
@@ -65,7 +79,7 @@ public static class StackDepthTest {
                     "a call past FramesMax overflows instead of running");
             } catch (LoxError e) {
                 t.Check(e.Catchable,
-                    "an overflow past FramesMax stays catchable");
+                    "an overflow past FramesMax with a handler live stays catchable");
                 LoxInstance inst = e.Value as LoxInstance;
                 object kind = null;
                 bool hasKind = inst != null &&
@@ -75,6 +89,7 @@ public static class StackDepthTest {
             }
         } finally {
             countField.SetValue(null, savedCount);
+            LoxOps.ExitHandler();
         }
 
         // Issue #316: a second overflow while the first is still
