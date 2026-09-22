@@ -1,0 +1,5 @@
+// Regression test for issue #328: a source file whose last line has no
+// trailing newline must run the same as one that does. This file is saved
+// deliberately without a final newline -- do not "fix" it by adding one.
+// CHECK: ok
+print "ok";
