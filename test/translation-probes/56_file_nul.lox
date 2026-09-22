@@ -1,0 +1,69 @@
+// Regression test for issue #401: File.read/readline/readlines must handle NUL bytes.
+// All four backends (native, JVM, CLR, bootstrap) must return full binary content.
+
+var path = "test/translation-probes/56_file_nul.bin";
+
+// Write test file with NUL bytes: "A\0BCDEFGH" (9 bytes)
+var w = open(path, "w");
+w.write("A\0BCDEFGH");
+w.close();
+
+// Test read()
+var r = open(path, "r");
+var data = r.read();
+r.close();
+print "read_len=" + str(len(data));
+print "read_byte0=" + str(data[0]);  // "A"
+print "read_byte1=" + str(data[1]);  // "\0"
+print "read_byte2=" + str(data[2]);  // "B"
+print "read_byte8=" + str(data[8]);  // "H"
+
+// Test readline() - single line with NULs, no trailing newline
+w = open(path, "w");
+w.write("line1\0with\0nuls");
+w.close();
+r = open(path, "r");
+var line = r.readline();
+r.close();
+print "readline_len=" + str(len(line));
+print "readline_content=" + line;
+
+// Test readline() - line with NULs followed by newline
+w = open(path, "w");
+w.write("line1\0with\0nuls\nline2\n");
+w.close();
+r = open(path, "r");
+line = r.readline();
+var line2 = r.readline();
+r.close();
+print "readline2_len=" + str(len(line));
+print "readline2_content=" + line;
+print "readline3_len=" + str(len(line2));
+print "readline3_content=" + line2;
+
+// Test readlines() - multiple lines with NULs
+w = open(path, "w");
+w.write("A\0B\nC\0D\nE\n");
+w.close();
+r = open(path, "r");
+var lines = r.readlines();
+r.close();
+print "readlines_count=" + str(len(lines));
+print "readlines_0_len=" + str(len(lines[0]));
+print "readlines_0_content=" + lines[0];
+print "readlines_1_len=" + str(len(lines[1]));
+print "readlines_1_content=" + lines[1];
+print "readlines_2_len=" + str(len(lines[2]));
+print "readlines_2_content=" + lines[2];
+
+// Test empty file
+w = open(path, "w");
+w.close();
+r = open(path, "r");
+lines = r.readlines();
+r.close();
+print "empty_readlines_count=" + str(len(lines));
+print "empty_readlines_is_nil=" + str(lines == nil);
+
+// Cleanup - file will be overwritten on next run
+// No os.remove in stdlib, file is temp anyway
