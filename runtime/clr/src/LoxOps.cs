@@ -442,6 +442,27 @@ public static class LoxOps {
         }
     }
 
+    // Count of PUSH_HANDLER regions currently open across the whole call
+    // stack - mirrors src/vm.h's VM::m_handlerStack.size(), read the same
+    // way VM::call() reads it: a fault's fatal-fast-path check (no handler
+    // live anywhere in the program) tests emptiness, not any static,
+    // per-call-site knowledge of whether a try/catch encloses this call
+    // (issue #319 - LoxClosure.CallAsSelf's arity and stack-overflow
+    // checks). EnterHandler is called from the generated program's own
+    // PUSH_HANDLER translation (clr_emitter.cpp); ExitHandler is called
+    // both from POP_HANDLER (the normal-exit path) and from the shared
+    // catch prologue clr_emitter.cpp emits for every try/catch
+    // (exceptional exit - POP_HANDLER's own translation never runs on that
+    // path, the same reason RunDefers needed a second call site for
+    // defer-using functions, see injectTryCatchDirectives).
+    private static int s_handlerDepth;
+
+    public static void EnterHandler() { s_handlerDepth++; }
+
+    public static void ExitHandler() { s_handlerDepth--; }
+
+    public static bool HandlerLive => s_handlerDepth > 0;
+
     // ------------------------------------------------------------------
     // instanceof / properties / methods
     // ------------------------------------------------------------------

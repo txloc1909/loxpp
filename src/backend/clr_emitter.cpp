@@ -1995,6 +1995,12 @@ void emitBody(Emitter& e, bool isFunction,
             std::string handlerLabel = "tryStart_" + std::to_string(in.offset);
             e.b.label(handlerLabel);
             e.pushHandlerLabels[in.offset] = handlerLabel;
+            // Counts this region as live for LoxClosure's own arity/
+            // overflow fatal-fast-path checks (issue #319) - see
+            // LoxOps.EnterHandler's own comment for why this mirrors
+            // src/vm.h's VM::m_handlerStack. Net stack effect 0: a static
+            // call with no arguments and a void return.
+            e.b.emit("call void [LoxRuntime]Lox.LoxOps::EnterHandler()", 0, 0);
             break;
         }
         case Op::POP_HANDLER: {
@@ -2003,6 +2009,12 @@ void emitBody(Emitter& e, bool isFunction,
             std::string endLabel = "tryEnd_" + std::to_string(in.offset);
             e.b.label(endLabel);
             e.popHandlerLabels[in.offset] = endLabel;
+            // Normal (non-exceptional) exit from the region PUSH_HANDLER
+            // opened above - see LoxOps.ExitHandler's own comment for the
+            // exceptional-exit counterpart, emitted at the catch prologue
+            // in emitRegionRange instead (POP_HANDLER's own translation
+            // never runs on that path).
+            e.b.emit("call void [LoxRuntime]Lox.LoxOps::ExitHandler()", 0, 0);
             break;
         }
         case Op::THROW: {
@@ -2641,6 +2653,16 @@ void emitRegionRange(
                             r.tryEndLine, r.tryChildren, true, result, e);
             result << "    }\n";
             result << "    catch [LoxRuntime]Lox.LoxError\n    {\n";
+            // This region's own PUSH_HANDLER counted it live for
+            // LoxOps.HandlerLive (issue #319); entering this catch
+            // prologue at all - whether the fault below turns out
+            // Catchable or not - is this region's exceptional exit, the
+            // counterpart to POP_HANDLER's normal-exit ExitHandler call
+            // above (LoxOps.ExitHandler's own comment). Net stack effect
+            // 0, so it is safe here regardless of the stack-depth
+            // discipline the rest of this prologue keeps.
+            result << "    call void [LoxRuntime]Lox.LoxOps::ExitHandler()"
+                      "\n";
             // Not every LoxError may enter this handler body: native's own
             // catch mechanism (src/vm.cpp) only ever delivers a fault
             // raised through tryCatchableError/raiseThrowableError to
