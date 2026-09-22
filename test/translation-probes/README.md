@@ -67,6 +67,8 @@ each has an off-the-shelf solution.
 | `30_bool_compare_and_string_literal` | every comparison spelling (`==`, `!=`, `>`, `>=`, `<`, `<=`, each lowering to EQUAL/GREATER/LESS optionally paired with NOT), a standalone `!`, `%`, the `true`/`false`/`nil` literals printed as values in their own right, and a string constant with a quote, a backslash, and a tab | P2 |
 | `31_deep_recursion` | native's own frame-count ceiling (`src/vm.h` `FRAMES_MAX`), reached through ordinary self-recursive `CALL`s; the JVM and CLR backends now mirror the same ceiling (issue #268), so both must fail identically here too | P5, P6 |
 | `53_deep_recursion_boundary` | the success side of the boundary `31_deep_recursion` pins the failure side of: 1022 nested calls is the deepest depth every backend still accepts | P5, P6 |
+| `57_stack_overflow_catchable` | unbounded recursion overflows `LoxClosure`'s own frame-count ceiling; a live `try`/`catch` must catch a real `Error` value with kind `StackOverflowError`, matching native (spec/04-semantics.md) — promoted from clr-only (issue #322) | P6 |
+| `58_stack_overflow_reentrant_fatal` | a second `StackOverflowError` raised by a deferred call while the first is still unwinding is fatal, not delivered to any `catchBlock` (spec/04-semantics.md line 1120) — promoted from clr-only (issue #322), companion to `57_stack_overflow_catchable` | P5, P6 |
 | `jvm-only/catch_overflow` | `LoxClosure`'s frame-count ceiling delivers a catchable `StackOverflowError` on the JVM backend, matching native's kind, message, and post-catch continuation — JVM-only, see the note below the table | P5, P6 |
 | `jvm-only/defer_overflow_during_unwind` | a `StackOverflowError` raised by a deferred call while another one is still unwinding is fatal on the JVM backend, not delivered to any `catchBlock` (`spec/04-semantics.md` line 1120) — JVM-only, see the note below the table | P5, P6 |
 | `jvm-only/defer_replaces_overflow` | a deferred call's own throw, uncaught within it, replaces a `StackOverflowError` still unwinding (`spec/04-semantics.md` defer Statement step 5); the unwind guard must still clear so a later, unrelated overflow is caught — JVM-only, see the note below the table | P5, P6 |
@@ -96,32 +98,32 @@ each has an off-the-shelf solution.
 | `V5_self_recursive_closure` | a local `fun` captures its own slot (direct recursion) → prints `120` | P4 |
 | `V6_self_recursive_closure_in_loop` | self-recursive local `fun`, fresh cell per loop trip → prints `12` | P4 |
 
-`clr-only/35_folded_match_deficit_two_plus` and
-`clr-only/53_stack_overflow_catchable` are two of the probes not directly in
+`clr-only/35_folded_match_deficit_two_plus` is one of the probes not directly in
 this directory. `tools/diff_runtimes.py`'s CI probes step walks this
 directory's own files (non-recursively) and compares native against the
 JVM backend. `35_folded_match_deficit_two_plus` needs a fold deficit above
 one, which the JVM backend's own repair refuses outright, so every shape in
 it would abort at JVM emit time instead of matching.
-`53_stack_overflow_catchable` has not yet been promoted into this directory,
-even though the JVM backend now has its own frame ceiling (issue #268);
-promoting it is tracked separately (issue #322). Placing both one level down
-keeps them out of that walk while `tools/check_clr_probes.sh` still runs
-each one by name for the CLR checkpoint. `31_deep_recursion` used to sit
-beside them for the same reason; it moved directly into this directory once
-the JVM backend grew its own frame-count ceiling to match (issue #268).
+`53_stack_overflow_catchable` and `54_stack_overflow_reentrant_fatal` have been promoted
+into this directory as `57_stack_overflow_catchable` and `58_stack_overflow_reentrant_fatal`
+(issue #322) now that both backends have catchable stack overflow parity.
+`31_deep_recursion` used to sit beside them for the same reason; it moved directly into
+this directory once the JVM backend grew its own frame-count ceiling to match (issue #268).
 
-`jvm-only/catch_overflow`, `jvm-only/defer_overflow_during_unwind`,
-`jvm-only/defer_replaces_overflow`, `jvm-only/defer_overflow_kind_spoof`,
-`jvm-only/defer_throw_on_normal_return_during_unwind`, and
-`jvm-only/defer_replaces_unrelated_fault_during_unwind` sit one level down
+`jvm-only/catch_overflow`, `jvm-only/defer_replaces_overflow` sit one level down
 for the mirror-image reason: `tools/diff_runtimes.py`'s CI step for the CLR
-backend walks `clr-only/` too (comparing native against CLR), and these six
-probes were placed here while the CLR backend still delivered a
+backend walks `clr-only/` too (comparing native against CLR), and these two
+probes remain here while the CLR backend still delivers a
 `StackOverflowError` with the wrong catchability (issue #238). `#238` has
-since closed; promoting these probes into this directory is tracked
-separately (issue #322). `tools/check_jvm_probes.sh` runs each one by name
-for the JVM checkpoint.
+since closed for most cases; promoting these two probes into this directory
+is tracked separately (issue #322). `tools/check_jvm_probes.sh` runs each one
+by name for the JVM checkpoint.
+
+`jvm-only/defer_overflow_during_unwind`, `jvm-only/defer_overflow_kind_spoof`,
+`jvm-only/defer_throw_on_normal_return_during_unwind`, and
+`jvm-only/defer_replaces_unrelated_fault_during_unwind` have been promoted
+into this directory (issue #322) now that both backends match on these
+stack-overflow unwind guard behaviors.
 
 `clr-only/known-divergence/52_fat_frame_stack_divergence` sits one level
 below that again. `tools/diff_runtimes.py`'s CI step for the CLR backend

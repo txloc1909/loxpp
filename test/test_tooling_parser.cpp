@@ -545,6 +545,7 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // 56_file_nul.lox, raising this to 58. Issue #311 adds
     // examples/defer_return_value.lox, raising this to 59. The issue #386
     // probe lives in clr-only/, so it stays uncounted here. jvm-only/ and
+<<<<<<< HEAD
     // clr-only/ probes stay uncounted, since this scan is non-recursive.
     // 116 + 2 + 59 = 177. Issue #319 adds examples/defer_uncatchable_fault.lox,
     // raising the total to 178, then
