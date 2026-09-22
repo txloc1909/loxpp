@@ -24,3 +24,8 @@ fun countUp(level) {
 }
 
 print "result: " + str(countUp(0));
+// CHECK: level 3 exits
+// CHECK: level 2 exits
+// CHECK: level 1 exits
+// CHECK: level 0 exits
+// CHECK: result: 3
