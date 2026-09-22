@@ -2483,29 +2483,51 @@ std::string emitChunk(const DecodedFunction& fn,
         std::string deferCatchAllEndLabel = "L_defer_body_end";
         e.b.label(deferCatchAllEndLabel);
 
-        // Emit the catch-all handler code
+        // Emit the catch-all handler code. Only a CATCHABLE fault — one
+        // native's src/vm.cpp raises through tryCatchableError/
+        // raiseThrowableError, reaching handleThrow — drains this
+        // function's pending defers while it unwinds; a fault raised
+        // through RAISE_ERROR/plain runtimeError never reaches handleThrow
+        // at all, so no defer ever runs for it, however many pending
+        // defers this call has (issue #319). LoxError.isCatchable()
+        // mirrors that split (LoxError.java) without getValue()'s own
+        // side effect (getValue() rethrows the uncatchable case itself,
+        // which would abandon this handler's protected region instead of
+        // letting it skip RunDefers and rethrow cleanly).
         e.deferCatchAllHandlerLabel = "L_defer_catch_all";
         e.b.label(e.deferCatchAllHandlerLabel);
         // When the handler is invoked, the JVM has the exception on the stack.
         // Resync the depth to account for it.
         e.b.resync(1);
+        int handlerEntryDepth = e.b.depth;
+        std::string uncatchableLabel = "L_defer_uncatchable";
         // Stack: [LoxError exception]
-        // This is the only site that knows which fault a defer list is
-        // being drained for: pass it to runDefers so a deferred call's own
-        // throw can be told apart from a genuine replacement of THIS fault
-        // (LoxOps.runDefers's own propagating parameter; see
-        // LoxClosure.replaceOverflowInFlight for the invariant this feeds).
         e.b.emit("dup", +1);
-        // Stack: [LoxError exception, LoxError exception]
+        // Stack: [exn, exn]
+        e.b.emit("invokevirtual lox/LoxError/isCatchable()Z", 0);
+        // Stack: [exn, bool]
+        e.b.emit("ifeq " + uncatchableLabel, -1);
+        // Stack: [exn]. Catchable: this is the only site that knows which
+        // fault a defer list is being drained for; pass it to runDefers so
+        // a deferred call's own throw can be told apart from a genuine
+        // replacement of THIS fault (LoxOps.runDefers's own propagating
+        // parameter; see LoxClosure.replaceOverflowInFlight for the
+        // invariant this feeds).
+        e.b.emit("dup", +1);
+        // Stack: [exn, exn]
         e.b.emit("aload " + std::to_string(e.deferListSlot), +1);
-        // Stack: [LoxError exception, LoxError exception, ArrayList deferList]
+        // Stack: [exn, exn, deferList]
         e.b.emit("swap", 0);
-        // Stack: [LoxError exception, ArrayList deferList, LoxError exception]
+        // Stack: [exn, deferList, exn]
         e.b.emit("invokestatic "
                  "lox/LoxOps/runDefers(Ljava/lang/Object;Llox/LoxError;)V",
                  -2);
-        // Stack: [LoxError exception]
+        // Stack: [exn]
         // Re-throw the caught exception
+        e.b.emit("athrow", -1);
+        e.b.label(uncatchableLabel);
+        e.b.resync(handlerEntryDepth);
+        // Stack: [exn]. Uncatchable: skip RunDefers, rethrow untouched.
         e.b.emit("athrow", -1);
 
         // Create an exception table entry for the defer catch-all handler.
