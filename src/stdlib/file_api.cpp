@@ -37,8 +37,9 @@ static Value fileReadNative(int /*argc*/, Value* args) {
     }
     std::string buf;
     char chunk[4096];
-    while (std::fgets(chunk, sizeof(chunk), file->handle)) {
-        buf += chunk;
+    size_t got;
+    while ((got = std::fread(chunk, 1, sizeof(chunk), file->handle)) > 0) {
+        buf.append(chunk, got);
     }
     return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(buf)))};
 }
@@ -54,16 +55,28 @@ static Value fileReadlineNative(int /*argc*/, Value* args) {
     }
     std::string line;
     char chunk[4096];
-    bool got = false;
-    while (std::fgets(chunk, sizeof(chunk), file->handle)) {
-        got = true;
-        line += chunk;
-        if (!line.empty() && line.back() == '\n') {
-            line.pop_back();
+    bool sawByte = false;
+    while (true) {
+        size_t got = std::fread(chunk, 1, sizeof(chunk), file->handle);
+        if (got == 0) {
             break;
         }
+        sawByte = true;
+        size_t i = 0;
+        while (i < got) {
+            if (chunk[i] == '\n') {
+                line.append(chunk, i);
+                std::fseek(file->handle,
+                           static_cast<long>(i + 1 - static_cast<long>(got)),
+                           SEEK_CUR);
+                return Value{static_cast<Obj*>(
+                    getActiveMM()->makeString(std::move(line)))};
+            }
+            i++;
+        }
+        line.append(chunk, got);
     }
-    if (!got) {
+    if (!sawByte) {
         return from<Nil>(Nil{});
     }
     return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(line)))};
@@ -91,17 +104,36 @@ static Value fileReadlinesNative(int /*argc*/, Value* args) {
         mm->popTempRoot();
         line.clear();
     };
-    while (std::fgets(chunk, sizeof(chunk), file->handle)) {
-        line += chunk;
-        if (!line.empty() && line.back() == '\n') {
-            line.pop_back();
-            flush();
+    bool sawByte = false;
+    while (true) {
+        size_t got = std::fread(chunk, 1, sizeof(chunk), file->handle);
+        if (got == 0) {
+            break;
+        }
+        sawByte = true;
+        size_t i = 0;
+        while (i < got) {
+            if (chunk[i] == '\n') {
+                line.append(chunk, i);
+                flush();
+                std::fseek(file->handle,
+                           static_cast<long>(i + 1 - static_cast<long>(got)),
+                           SEEK_CUR);
+                break;
+            }
+            i++;
+        }
+        if (i == got) {
+            line.append(chunk, got);
         }
     }
     if (!line.empty()) {
         flush(); // trailing line with no newline
     }
     mm->popTempRoot();
+    if (!sawByte) {
+        return from<Nil>(Nil{}); // EOF immediately
+    }
     return Value{static_cast<Obj*>(list)};
 }
 

@@ -138,6 +138,64 @@ public final class FileTest {
             }
         }
 
+        // Issue #401: NUL byte handling in File.read/readline/readlines
+        // Create a temp file with NUL bytes
+        File nulTmp = File.createTempFile("lox-rt-file-nul", ".bin");
+        nulTmp.deleteOnExit();
+        String nulPath = nulTmp.getAbsolutePath();
+
+        // Test read() with NUL bytes
+        LoxFile nulWriter = LoxFile.open(nulPath, "w");
+        nulWriter.write("A\0BCDEFGH");
+        nulWriter.close();
+
+        LoxFile nulReader = LoxFile.open(nulPath, "r");
+        String readData = (String) nulReader.read();
+        nulReader.close();
+        checkEquals(9, readData.length(), "read() returns all 9 bytes including NUL");
+        checkEquals('A', readData.charAt(0), "first byte is 'A'");
+        checkEquals('\0', readData.charAt(1), "second byte is NUL");
+        checkEquals('B', readData.charAt(2), "third byte is 'B'");
+        checkEquals('H', readData.charAt(8), "last byte is 'H'");
+
+        // Test readline() with NULs in line (no trailing newline)
+        nulWriter = LoxFile.open(nulPath, "w");
+        nulWriter.write("line1\0with\0nuls");
+        nulWriter.close();
+
+        nulReader = LoxFile.open(nulPath, "r");
+        String line1 = (String) nulReader.readline();
+        nulReader.close();
+        checkEquals(15, line1.length(), "readline() preserves NULs in line without newline");
+        checkEquals("line1\0with\0nuls", line1, "readline() content matches");
+
+        // Test readline() with NULs and trailing newline
+        nulWriter = LoxFile.open(nulPath, "w");
+        nulWriter.write("line1\0with\0nuls\nline2\n");
+        nulWriter.close();
+
+        nulReader = LoxFile.open(nulPath, "r");
+        line1 = (String) nulReader.readline();
+        String line2 = (String) nulReader.readline();
+        nulReader.close();
+        checkEquals(15, line1.length(), "first line length with NULs");
+        checkEquals("line1\0with\0nuls", line1, "first line content");
+        checkEquals(5, line2.length(), "second line length");
+        checkEquals("line2", line2, "second line content");
+
+        // Test readlines() with multiple lines containing NULs
+        nulWriter = LoxFile.open(nulPath, "w");
+        nulWriter.write("A\0B\nC\0D\nE\n");
+        nulWriter.close();
+
+        nulReader = LoxFile.open(nulPath, "r");
+        LoxList nulLines = (LoxList) nulReader.readlines();
+        nulReader.close();
+        checkEquals(3, nulLines.elements.size(), "readlines() returns 3 lines");
+        checkEquals("A\0B", nulLines.elements.get(0), "first line: A\\0B");
+        checkEquals("C\0D", nulLines.elements.get(1), "second line: C\\0D");
+        checkEquals("E", nulLines.elements.get(2), "third line: E");
+
         System.exit(TestSupport.finish("FileTest"));
     }
 }
