@@ -635,7 +635,9 @@ defer callee ( arguments ) ;
    pending deferred call recorded during this function call runs,
    most-recently-recorded first (LIFO order), before the call is
    considered fully exited. Each deferred call's own return value is
-   discarded.
+   discarded. For `return expression;`, `expression` is evaluated before
+   any pending deferred call runs, so a deferred call cannot change the
+   value that `return` yields.
 5. If running a deferred call itself executes a `throw`, that new throw
    replaces whatever was already causing this function call to exit: a
    `return` value in progress is discarded, and an in-flight throw already
