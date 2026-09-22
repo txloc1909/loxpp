@@ -543,8 +543,9 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // to 55. Issue #378 adds 56_file_read.lox, raising this to 56. Issue
     // #329 adds 56_math_constants.lox, raising this to 57. The issue #386
     // probe lives in clr-only/, so it stays uncounted here. jvm-only/ and
-    // clr-only/ probes stay uncounted, since this scan is non-recursive)
-    ASSERT_EQ(files.size(), 175U);
+    // clr-only/ probes stay uncounted, since this scan is non-recursive.
+    // Issue #311 adds examples/defer_return_value.lox, raising this to 176.
+    ASSERT_EQ(files.size(), 176U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {
