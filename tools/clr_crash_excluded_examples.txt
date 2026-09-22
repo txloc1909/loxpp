@@ -1,0 +1,16 @@
+# Examples excluded from the CLR path because the CLR backend cannot run
+# them at all today — it crashes or hangs before printing a matching
+# result. This is a DIFFERENT excuse from tools/clr_excluded_examples.txt,
+# which excuses only a map-order permutation (both sides finish and agree,
+# just in a different line order). An entry here means the two sides do
+# not even finish the same way, so tools/diff_runtimes.py's permutation
+# guard must never see these names: they belong only in
+# tools/check_examples.py's --exclude list (a plain skip, no permutation
+# check) and in a by-name filter on any CI step that diffs the full
+# examples/ corpus through tools/diff_runtimes.py directly.
+#
+# Every entry needs its own tracking issue, open until the entry is
+# removed.
+#
+# file                              reason
+defer_stack_overflow_count.lox     CLR crashes with an unhandled exception instead of catching the StackOverflowError (issue #426); runtime/clr/src/LoxClosure.cs has no equivalent of native's STACK_OVERFLOW_FRAME_RESERVE / JVM's FRAMES_RESERVE

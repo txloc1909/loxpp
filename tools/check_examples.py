@@ -12,14 +12,16 @@ For each examples/*.lox file (alphabetical order):
   6. Report PASS / FAIL / SKIP per file, then exit 1 if any failed.
 
 Usage:
-    python3 tools/check_examples.py <loxpp-binary> <examples-dir> [--exclude <file>]
+    python3 tools/check_examples.py <loxpp-binary> <examples-dir> [--exclude <file>]...
 
 --exclude <file> names a file with one excluded example per line: the file
-name, then a reason. tools/jvm_excluded_examples.txt and
-tools/clr_excluded_examples.txt are two such files — the map-order-sensitive
-examples each managed backend legitimately reorders (spec leaves map
-iteration order unspecified). An excluded file is skipped, not run, and
-reported as SKIP with its reason.
+name, then a reason. Repeatable: pass --exclude more than once to skip names
+from more than one list at once (for example, the current backend's
+map-order list plus its own known-crash list — a name on either list is
+skipped). tools/jvm_excluded_examples.txt and tools/clr_excluded_examples.txt
+are two such files — the map-order-sensitive examples each managed backend
+legitimately reorders (spec leaves map iteration order unspecified). An
+excluded file is skipped, not run, and reported as SKIP with its reason.
 
 <examples-dir> that resolves to zero .lox files — because it does not
 exist, or is empty — is an error (exit 2), not a silent zero-file pass:
@@ -84,21 +86,23 @@ def match_checks(checks: list[str], lines: list[str]) -> tuple[bool, str | None]
 
 def main() -> None:
     args = sys.argv[1:]
-    exclude_path: Path | None = None
-    if "--exclude" in args:
+    exclude_paths: list[Path] = []
+    while "--exclude" in args:
         i = args.index("--exclude")
         if i + 1 >= len(args):
-            print(f"Usage: {sys.argv[0]} <loxpp> <examples-dir> [--exclude <file>]", file=sys.stderr)
+            print(f"Usage: {sys.argv[0]} <loxpp> <examples-dir> [--exclude <file>]...", file=sys.stderr)
             sys.exit(2)
-        exclude_path = Path(args[i + 1])
+        exclude_paths.append(Path(args[i + 1]))
         del args[i : i + 2]
 
     if len(args) != 2:
-        print(f"Usage: {sys.argv[0]} <loxpp> <examples-dir> [--exclude <file>]", file=sys.stderr)
+        print(f"Usage: {sys.argv[0]} <loxpp> <examples-dir> [--exclude <file>]...", file=sys.stderr)
         sys.exit(2)
 
     loxpp, examples_dir = args[0], Path(args[1])
-    excluded = parse_exclude_file(exclude_path) if exclude_path else {}
+    excluded: dict[str, str] = {}
+    for exclude_path in exclude_paths:
+        excluded.update(parse_exclude_file(exclude_path))
 
     lox_files = sorted(examples_dir.glob("*.lox"))
     if not lox_files:
