@@ -1,0 +1,12 @@
+// Regression test for issue #329: bootstrap's math.inf and math.nan
+// resolved to a native-fn value (InterpMathFn) instead of a Number.
+
+print math.pi;
+print math.e;
+print math.inf;
+print math.nan;
+print -math.inf;
+print math.inf > 1000000000.0;
+print type(math.inf);
+print type(math.nan);
+print math.nan == math.nan;
