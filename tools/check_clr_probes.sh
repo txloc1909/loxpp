@@ -307,6 +307,13 @@ error_probes=(
     # net size, so a size check misses it. Both sides must fail with empty
     # stdout — the structural version check reports it instead.
     "test/translation-probes/55_for_in_map_net_zero.lox"
+    # Issue #319: a fatal fault must not run a pending deferred call, not
+    # even the one belonging to the function where the fault happens. The
+    # CLR backend's outer .try wrapping a defer-using function used to run
+    # RunDefers unconditionally on the way out (a plain .try/.finally has no
+    # way to see the in-flight exception at all); both sides must fail with
+    # empty stdout, not "defer-g\n".
+    "examples/defer_uncatchable_fault.lox"
 )
 
 # Probes that stay wrong on purpose. native's own value-stack ceiling
