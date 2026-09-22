@@ -1197,8 +1197,8 @@ belonging to the function where the fault happened. This differs from a
 catchable fault left uncaught, where [`throw`
 Statement](#throw-statement) step 5 still runs every pending deferred call
 on the way to the top: a fatal fault halts the program immediately at the
-point of the fault, the same way an uncaught catchable fault halts it only
-after every pending deferred call on the unwind path has already run.
+point of the fault, while an uncaught catchable fault halts it only after
+every pending deferred call on the unwind path has already run.
 
 | Cause | Example | Message |
 |---|---|---|
