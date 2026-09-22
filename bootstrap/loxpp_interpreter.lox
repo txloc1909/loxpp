@@ -1098,7 +1098,7 @@ class Resolver {
             case ObjDestructure{names, line, initializer}     => this.resolveDestructure(names, line, initializer)
             case TryStmt{try_block, catch_var, catch_block}   => this.resolveTry(try_block, catch_var, catch_block)
             case ThrowStmt{line, value}                       => this.resolveThrow(value)
-            case DeferStmt{line, callee, args}                => this.resolveDefer(callee, args)
+            case DeferStmt{line, callee, args}                => this.resolveDefer(line, callee, args)
         };
     }
 
@@ -1198,7 +1198,10 @@ class Resolver {
         this.resolveExpr(value);
     }
 
-    resolveDefer(callee, args) {
+    resolveDefer(line, callee, args) {
+        if (this.currentFunction == "NONE") {
+            this.resError("defer", line, "Can't defer at the top level.");
+        }
         this.resolveExpr(callee);
         var i = 0;
         while (i < len(args)) {
