@@ -1,0 +1,19 @@
+// Regression test for issue #378: the bootstrap interpreter had no
+// file.read() method. All backends must expose it with arity 0.
+
+var path = "test/translation-probes/56_file_read.tmp";
+
+var w = open(path, "w");
+w.write("first line\nsecond line\n");
+w.close();
+
+var r = open(path, "r");
+var data = r.read();
+r.close();
+print "read=" + data;
+print "read_len=" + str(len(data));
+
+var empty = open(path, "r");
+empty.readlines();
+print "at_eof=" + empty.read();
+empty.close();
