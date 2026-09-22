@@ -2978,8 +2978,10 @@ class Interpreter {
         var object = this.evalExpr(objectExpr, env);
         if (this.throwFlag) return nil;
         if (loxTag(object) == "math") {
-            if (name == "pi") return math.pi;
-            if (name == "e")  return math.e;
+            if (name == "pi")  return math.pi;
+            if (name == "e")   return math.e;
+            if (name == "inf") return math.inf;
+            if (name == "nan") return math.nan;
             return InterpMathFn(name);
         }
         if (loxTag(object) == "list") {
