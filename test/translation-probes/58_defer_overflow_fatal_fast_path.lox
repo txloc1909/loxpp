@@ -1,0 +1,13 @@
+// Issue #319: the call-stack-overflow fatal fast path
+// (spec/04-semantics.md, "Call stack overflow's fatal fast path") must
+// skip every pending deferred call too, the same way any other fatal
+// fault does — no `try` statement is active anywhere in this program, so
+// native never reaches the catchable StackOverflowError construction at
+// all (src/vm.cpp VM::call()). This is not issue #326: that issue is
+// about a stack overflow a live `try` statement catches; this program has
+// no `try` statement at all. Both managed backends must agree: empty
+// stdout, no "d" lines. An error_probes entry in
+// tools/check_jvm_probes.sh and tools/check_clr_probes.sh.
+fun note(s) { print s; }
+fun rec(n) { defer note("d"); return rec(n + 1); }
+rec(0);

@@ -236,6 +236,21 @@ error_probes=(
     # unconditionally before rethrowing; both sides must fail with empty
     # stdout, not "defer-g\n".
     "examples/defer_uncatchable_fault.lox"
+    # Issue #319: the wrong-argument-count fatal fast path is dynamic (no
+    # handler live anywhere in the program), not a static property of the
+    # call site. LoxClosure.callAsSelf used to build a catchable ArityError
+    # unconditionally, so LoxOps.isHandlerLive() is what tells this case
+    # apart from a live-handler ArityError
+    # (try_catch_class_constructor_arity.lox already covers that one).
+    # Both sides must fail with empty stdout, not "defer-g\n".
+    "test/translation-probes/57_defer_arity_fatal_fast_path.lox"
+    # Issue #319: the call-stack-overflow fatal fast path is the same
+    # dynamic check, for the first (non-reentrant) overflow — distinct
+    # from FRAMES_RESERVE's own re-entrant case (defer_overflow_during_
+    # unwind.lox, above), which a live handler DOES catch first. Both
+    # sides must fail with empty stdout, not "d\n" repeated once per
+    # unwound frame.
+    "test/translation-probes/58_defer_overflow_fatal_fast_path.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

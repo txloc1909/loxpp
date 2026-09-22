@@ -547,8 +547,10 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // probe lives in clr-only/, so it stays uncounted here. jvm-only/ and
     // clr-only/ probes stay uncounted, since this scan is non-recursive.
     // 116 + 2 + 59 = 177. Issue #319 adds examples/defer_uncatchable_fault.lox,
-    // raising the total to 178.
-    ASSERT_EQ(files.size(), 178U);
+    // raising the total to 178, then
+    // test/translation-probes/57_defer_arity_fatal_fast_path.lox and
+    // 58_defer_overflow_fatal_fast_path.lox, raising this to 180.
+    ASSERT_EQ(files.size(), 180U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {
