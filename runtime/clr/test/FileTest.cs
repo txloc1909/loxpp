@@ -173,6 +173,65 @@ public static class FileTest {
             }
         }
 
+        // Issue #401: NUL byte handling in File.Read/Readline/Readlines
+        // Create a temp file with NUL bytes
+        string nulPath = Path.Combine(Path.GetTempPath(), $"lox-rt-file-nul-{System.Guid.NewGuid():N}.bin");
+        try {
+            // Test Read() with NUL bytes
+            LoxFile nulWriter = LoxFile.Open(nulPath, "w");
+            nulWriter.Write("A\0BCDEFGH");
+            nulWriter.Close();
+
+            LoxFile nulReader = LoxFile.Open(nulPath, "r");
+            string readData = (string)nulReader.Read();
+            nulReader.Close();
+            t.CheckEquals(9, readData.Length, "Read() returns all 9 bytes including NUL");
+            t.CheckEquals('A', readData[0], "first byte is 'A'");
+            t.CheckEquals('\0', readData[1], "second byte is NUL");
+            t.CheckEquals('B', readData[2], "third byte is 'B'");
+            t.CheckEquals('H', readData[8], "last byte is 'H'");
+
+            // Test Readline() with NULs in line (no trailing newline)
+            nulWriter = LoxFile.Open(nulPath, "w");
+            nulWriter.Write("line1\0with\0nuls");
+            nulWriter.Close();
+
+            nulReader = LoxFile.Open(nulPath, "r");
+            string line1 = (string)nulReader.Readline();
+            nulReader.Close();
+            t.CheckEquals(15, line1.Length, "Readline() preserves NULs in line without newline");
+            t.CheckEquals("line1\0with\0nuls", line1, "Readline() content matches");
+
+            // Test Readline() with NULs and trailing newline
+            nulWriter = LoxFile.Open(nulPath, "w");
+            nulWriter.Write("line1\0with\0nuls\nline2\n");
+            nulWriter.Close();
+
+            nulReader = LoxFile.Open(nulPath, "r");
+            line1 = (string)nulReader.Readline();
+            string line2 = (string)nulReader.Readline();
+            nulReader.Close();
+            t.CheckEquals(15, line1.Length, "first line length with NULs");
+            t.CheckEquals("line1\0with\0nuls", line1, "first line content");
+            t.CheckEquals(5, line2.Length, "second line length");
+            t.CheckEquals("line2", line2, "second line content");
+
+            // Test Readlines() with multiple lines containing NULs
+            nulWriter = LoxFile.Open(nulPath, "w");
+            nulWriter.Write("A\0B\nC\0D\nE\n");
+            nulWriter.Close();
+
+            nulReader = LoxFile.Open(nulPath, "r");
+            var lines = (LoxList)nulReader.Readlines();
+            nulReader.Close();
+            t.CheckEquals(3, lines.Elements.Count, "Readlines() returns 3 lines");
+            t.CheckEquals("A\0B", lines.Elements[0], "first line: A\\0B");
+            t.CheckEquals("C\0D", lines.Elements[1], "second line: C\\0D");
+            t.CheckEquals("E", lines.Elements[2], "third line: E");
+        } finally {
+            File.Delete(nulPath);
+        }
+
         return t.Finish("FileTest");
     }
 }
