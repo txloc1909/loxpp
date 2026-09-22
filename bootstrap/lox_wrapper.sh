@@ -14,7 +14,14 @@ case "${LANGUAGE:-LOX}" in
         INTERPRETER="${SCRIPT_DIR}/loxpp_interpreter.lox"
         # Sentinel protocol: wrap source so that subsequent input() calls in
         # the interpreted program can still read from the caller's stdin.
-        FEED_CMD='{ printf "__SOURCE_BEGIN__\n"; cat "$SRC"; printf "__SOURCE_END__\n"; cat; }'
+        # If $SRC's last line has no trailing newline, "cat" and the
+        # __SOURCE_END__ printf below would glue onto the same line,
+        # corrupting the interpreted program's last line with the sentinel
+        # text (issue #328). Insert one only when $SRC itself needs it:
+        # tail -c 1 prints the file's last byte, and command substitution
+        # strips a trailing newline from its own output, so the test comes
+        # back empty exactly when that last byte already was "\n".
+        FEED_CMD='{ printf "__SOURCE_BEGIN__\n"; cat "$SRC"; [ -s "$SRC" ] && [ -n "$(tail -c 1 "$SRC")" ] && printf "\n"; printf "__SOURCE_END__\n"; cat; }'
         ;;
     *)
         INTERPRETER="${SCRIPT_DIR}/lox_interpreter.lox"

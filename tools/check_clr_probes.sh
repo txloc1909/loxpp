@@ -548,6 +548,9 @@ examples=(
     "examples/try_catch_class_constructor_arity.lox"
     "examples/try_catch_error_instance_properties_catchable.lox"
     "examples/try_catch_error_vs_ordinary_instance_catchability.lox"
+    # Issue #328 regression: this file is saved deliberately without a
+    # trailing newline on its last line.
+    "examples/no_trailing_newline.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
