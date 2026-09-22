@@ -1,0 +1,26 @@
+// A stack overflow that unwinds past a chain of defer-holding frames runs
+// exactly one deferred call per frame that was entered — the same count a
+// plain throw gets (see examples/defer_lifo.lox). calls == runs is checked
+// instead of an absolute recursion depth, because each backend hits its
+// own stack ceiling at a different depth: the equality is what must hold,
+// not the depth.
+var calls = 0;
+var runs = 0;
+fun noop() { runs = runs + 1; }
+fun g(n) {
+    calls = calls + 1;
+    defer noop();
+    return g(n + 1);
+}
+try {
+    g(0);
+} catch (e) {
+    print e.kind;
+}
+if (calls == runs) {
+    print "one defer per call";
+} else {
+    print "MISMATCH";
+}
+// CHECK: StackOverflowError
+// CHECK: one defer per call

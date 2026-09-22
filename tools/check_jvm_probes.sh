@@ -93,6 +93,10 @@ probes=(
     "examples/defer_throw_outer_catch.lox"
     "examples/defer_uncaught_throw.lox"
     "examples/defer_lifo.lox"
+    # Issue #326: a stack overflow that unwinds past a chain of
+    # defer-holding frames runs exactly one deferred call per frame
+    # entered, matching native (root cause and fix: issue #311 / PR #419).
+    "examples/defer_stack_overflow_count.lox"
     "examples/try_catch_sibling_after_terminal_catch.lox"
     "examples/try_catch_local_in_catch_body.lox"
     "examples/try_catch_local_before_and_in_catch.lox"
