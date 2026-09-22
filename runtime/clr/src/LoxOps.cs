@@ -463,6 +463,26 @@ public static class LoxOps {
 
     public static bool HandlerLive => s_handlerDepth > 0;
 
+    /// <summary>
+    /// Boxed so the generated program's own object-typed locals (every
+    /// `.locals init` slot clr_emitter.cpp declares is `object`) can hold
+    /// the snapshot without an explicit `box` instruction of their own -
+    /// see emitPrologue's own comment for why a function needs this
+    /// snapshot at all (issue #319, reviewer round 2).
+    /// </summary>
+    public static object GetHandlerDepth() => s_handlerDepth;
+
+    /// <summary>
+    /// Restores the counter to a snapshot GetHandlerDepth returned earlier,
+    /// undoing any leak an early exit from inside a still-open protected
+    /// region left in it. Called from every one of a function's own exit
+    /// points, not paired 1:1 with EnterHandler/ExitHandler the way those
+    /// two are with each other - see emitPrologue's own comment.
+    /// </summary>
+    public static void RestoreHandlerDepth(object depth) {
+        s_handlerDepth = (int)depth;
+    }
+
     // ------------------------------------------------------------------
     // instanceof / properties / methods
     // ------------------------------------------------------------------

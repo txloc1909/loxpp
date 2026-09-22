@@ -224,6 +224,21 @@ struct Emitter {
     // any nested try/catch's own prologue could reuse it.
     int catchDispatchSlot{-1};
 
+    // Snapshot of LoxOps.HandlerDepth taken at function entry (emitPrologue),
+    // restored at every one of this function's own exit points — closes the
+    // leak a `return` (or any other early exit) out of a still-open
+    // protected region would otherwise leave in that process-global counter
+    // (issue #319, reviewer round 2): PUSH_HANDLER's own EnterHandler call
+    // is unmatched on that path, since neither POP_HANDLER's translation
+    // nor the catch prologue's own ExitHandler call ever runs for a region
+    // left this way. Allocated alongside catchDispatchSlot (same condition:
+    // any chunk with a try/catch region), though only a function chunk's
+    // own prologue and exit points actually populate/use it — a script
+    // chunk's top-level `return` is a static error, so its own top-level
+    // try/catch can never be jumped past this way. -1 when this chunk has
+    // no try/catch at all.
+    int savedHandlerDepthSlot{-1};
+
     // The exact slot count `.locals init` declares for this chunk (set by
     // buildEmitter, from the same computation emitClassBody uses for the
     // directive itself) — the upper bound `localOp` checks every slot
@@ -2155,14 +2170,19 @@ int computeHandlerReturnExtraSlots(const DecodedFunction& fn,
 }
 
 // The one authority for how many extra `.locals init` slots the catch
-// prologue's catchable-dispatch rewrite needs (Emitter::catchDispatchSlot)
-// — 1 if this chunk has any try/catch region at all, 0 otherwise. Unlike
-// computeHandlerReturnExtraSlots, this does not depend on isFunction or
-// defer: a script chunk's own top-level try/catch needs the slot exactly
-// as much as a function's does, and a defer-using function's try/catch
-// (nested inside its own outer .try/.finally) needs it too.
+// prologue's catchable-dispatch rewrite AND the handler-liveness-counter
+// snapshot (Emitter::catchDispatchSlot, Emitter::savedHandlerDepthSlot)
+// need together — 2 if this chunk has any try/catch region at all, 0
+// otherwise. Unlike computeHandlerReturnExtraSlots, this does not depend
+// on isFunction or defer: a script chunk's own top-level try/catch needs
+// catchDispatchSlot exactly as much as a function's does, and a
+// defer-using function's try/catch (nested inside its own outer
+// .try/.catch) needs it too. savedHandlerDepthSlot only goes unused for a
+// script chunk (see its own declaration comment), but it is simplest to
+// allocate it wherever catchDispatchSlot is allocated, one shared
+// condition instead of two that could drift apart.
 int computeCatchDispatchExtraSlots(const FunctionStackAnalysis& analysis) {
-    return analysis.handlerEntries.empty() ? 0 : 1;
+    return analysis.handlerEntries.empty() ? 0 : 2;
 }
 
 // The one authority for how many `.locals init` slots one chunk needs:
@@ -2222,12 +2242,13 @@ Emitter buildEmitter(const DecodedFunction& fn,
         e.scratchSlot += handlerReturnExtraSlots;
     }
 
-    // Unlike deferReturnSlot/handlerReturnSlot, this slot is independent of
-    // both defer and isFunction — any chunk with a try/catch region needs
-    // it, so it is carved out on its own, after whichever of the two
-    // blocks above already advanced scratchSlot.
+    // Unlike deferReturnSlot/handlerReturnSlot, these two slots are
+    // independent of both defer and isFunction — any chunk with a try/catch
+    // region needs them, so they are carved out on their own, after
+    // whichever of the two blocks above already advanced scratchSlot.
     if (catchDispatchExtraSlots > 0) {
         e.catchDispatchSlot = e.scratchSlot;
+        e.savedHandlerDepthSlot = e.scratchSlot + 1;
         e.scratchSlot += catchDispatchExtraSlots;
     }
 
@@ -2316,6 +2337,27 @@ void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isFunction) {
                  "List`1<object>::.ctor()",
                  0, +1);
         e.b.emit(e.stloc(e.deferListSlot), 1, -1);
+    }
+
+    // Snapshot LoxOps' handler-liveness counter for this function's own
+    // frame-exit cleanup (issue #319, reviewer round 2). A `return` (or
+    // any other early exit) from inside a still-open protected region
+    // jumps via `leave` straight to this function's own exit epilogue,
+    // past both PUSH_HANDLER's own EnterHandler call and whichever
+    // ExitHandler call (POP_HANDLER's translation, or the catch prologue)
+    // would otherwise have matched it — leaking one count per region
+    // abandoned this way, permanently, since the counter is process-global
+    // state, not scoped to this call's own frame. Restoring this snapshot
+    // at every one of this function's own exit points
+    // (injectTryCatchDirectives, emitNonDeferTryCatch) closes that leak
+    // regardless of which construct caused it or how many regions were
+    // abandoned. Scripts never need this: a top-level `return` is a static
+    // error (compiler.cpp), so a script-level try/catch's own PUSH_HANDLER can
+    // never be jumped past this way.
+    if (isFunction && e.savedHandlerDepthSlot >= 0) {
+        e.b.emit("call object [LoxRuntime]Lox.LoxOps::GetHandlerDepth()", 0,
+                 +1);
+        e.b.emit(e.stloc(e.savedHandlerDepthSlot), 1, -1);
     }
 }
 
@@ -2732,8 +2774,7 @@ void emitRegionRange(
                              : std::nullopt;
             if (leave) {
                 result << *leave << "\n";
-            } else if (protectedRegion && e.handlerReturnSlot >= 0 &&
-                       isBareRet(l)) {
+            } else if (e.handlerReturnSlot >= 0 && isBareRet(l)) {
                 // A plain `ret` inside a .try{}/catch{} is as illegal as
                 // the `br` above — ECMA-335 III.1.7.5 — and, unlike a
                 // defer-using function (whose single outer .try/.finally
@@ -2744,6 +2785,18 @@ void emitRegionRange(
                 // implicit trailing `ret` always sits after — never
                 // inside — every top-level try/catch region), so the
                 // value `ret` was about to consume is always present here.
+                //
+                // Not gated on `protectedRegion` (unlike the `br` rewrite
+                // above): a `ret` OUTSIDE any protected region is already
+                // legal CIL as-is, but routing it through the same
+                // kHandlerReturnExitLabel epilogue anyway — where a
+                // restore of LoxOps' handler-liveness counter now runs
+                // (issue #319, reviewer round 2) — closes the leak a
+                // `return` from inside an EARLIER, already-closed
+                // protected region in this same function could otherwise
+                // leave behind. A plain `leave` used where no protected
+                // region needs unwinding behaves exactly like `br`
+                // (ECMA-335 III.3.40).
                 std::string indent = l.substr(0, l.find_first_not_of(" \t"));
                 result << indent << e.stloc(e.handlerReturnSlot) << "\n";
                 result << indent << "leave " << kHandlerReturnExitLabel << "\n";
@@ -2780,13 +2833,40 @@ std::string emitNonDeferTryCatch(const std::vector<std::string>& lines,
     // Only a function whose try/catch actually contains a `return` gets a
     // `leave kHandlerReturnExitLabel` above — append the label and its
     // reload+ret epilogue only when that rewrite actually fired, so a
-    // try/catch with no `return` inside gets no dead code.
+    // try/catch with no `return` inside gets no dead code. Every `ret` in
+    // this function is rewritten this way now (see the ret-rewrite above),
+    // so this epilogue is this function's one true exit point whenever it
+    // is reachable at all — the right (and only) place to restore
+    // LoxOps' handler-liveness counter to the snapshot emitPrologue took,
+    // undoing any leak a `return` out of a still-open protected region
+    // left behind (issue #319, reviewer round 2).
     if (result.find(kHandlerReturnExitLabel) != std::string::npos) {
         result += std::string(kHandlerReturnExitLabel) + ":\n";
+        if (e.savedHandlerDepthSlot >= 0) {
+            result += "    " + e.ldloc(e.savedHandlerDepthSlot) + "\n";
+            result += "    call void [LoxRuntime]Lox.LoxOps"
+                      "::RestoreHandlerDepth(object)\n";
+        }
         result += "    " + e.ldloc(e.handlerReturnSlot) + "\n";
         result += "    ret\n";
     }
     return result;
+}
+
+// The IL that restores LoxOps' handler-liveness counter to the snapshot
+// emitPrologue took at function entry (Emitter::savedHandlerDepthSlot's own
+// comment; issue #319, reviewer round 2) — "" when this chunk has no
+// try/catch at all. Six-space indented for the defer-using outer wrapper's
+// own catch clauses in injectTryCatchDirectives, which is the only caller;
+// factored out to keep that function's own cognitive complexity down, the
+// same reasoning emitNonDeferTryCatch was split out for.
+std::string restoreHandlerDepthIl(const Emitter& e) {
+    if (e.savedHandlerDepthSlot < 0) {
+        return "";
+    }
+    return "      " + e.ldloc(e.savedHandlerDepthSlot) + "\n" +
+           "      call void [LoxRuntime]Lox.LoxOps::RestoreHandlerDepth"
+           "(object)\n";
 }
 
 // Inject .try/catch directives for exception handling regions into the
@@ -2905,6 +2985,22 @@ std::string injectTryCatchDirectives(const std::string& bodyText,
         // the ordinary (non-exceptional) `leave defer_exit` exit — that
         // path never enters a catch handler — so RunDefers is called again,
         // unconditionally, at defer_exit below for that case.
+        // A `return` from inside a still-open protected region below leaves
+        // via `leave defer_exit` — past PUSH_HANDLER's own EnterHandler
+        // call, with no matching ExitHandler ever running for it, since
+        // neither POP_HANDLER's translation nor this catch prologue's own
+        // ExitHandler call is reached on that path either. That leaves
+        // LoxOps' handler-liveness counter permanently inflated by one for
+        // every region abandoned this way (issue #319, reviewer round 2):
+        // process-global state, not scoped to this call's own frame, so
+        // the leak outlives this function and corrupts a LATER, unrelated
+        // arity/overflow fatal-fast-path check anywhere else in the
+        // program. Restoring the entry snapshot (emitPrologue) at every
+        // one of this function's own exit points below — before RunDefers
+        // runs, matching native's popHandlersOwnedByCurrentFrame being
+        // called from Op::RUN_DEFERS itself — closes the leak regardless
+        // of which construct caused it or how many regions were abandoned.
+        std::string restoreHandlerDepth = restoreHandlerDepthIl(e);
         result += "    }\n";
         result += "    catch [LoxRuntime]Lox.LoxError\n    {\n";
         result += "      dup\n";
@@ -2912,15 +3008,18 @@ std::string injectTryCatchDirectives(const std::string& bodyText,
                   "::get_Catchable()\n";
         result += "      brtrue " + deferRunLabel + "\n";
         result += "      pop\n";
+        result += restoreHandlerDepth;
         result += "      rethrow\n";
         result += "    " + deferRunLabel + ":\n";
         result += "      pop\n";
+        result += restoreHandlerDepth;
         result += "      " + e.ldloc(e.deferListSlot) + "\n";
         result += "      call void [LoxRuntime]Lox.LoxOps::RunDefers(object)\n";
         result += "      rethrow\n";
         result += "    }\n";
         result += "    catch [System.Runtime]System.Object\n    {\n";
         result += "      pop\n";
+        result += restoreHandlerDepth;
         result += "      " + e.ldloc(e.deferListSlot) + "\n";
         result += "      call void [LoxRuntime]Lox.LoxOps::RunDefers(object)\n";
         result += "      rethrow\n";
@@ -2930,6 +3029,7 @@ std::string injectTryCatchDirectives(const std::string& bodyText,
         // exit, reload the return value `leave` discarded from the stack,
         // and the final ret.
         result += deferExitLabel + ":\n";
+        result += restoreHandlerDepth;
         result += "    " + e.ldloc(e.deferListSlot) + "\n";
         result += "    call void [LoxRuntime]Lox.LoxOps::RunDefers(object)\n";
         result += "    " + e.ldloc(e.deferReturnSlot) + "\n";
