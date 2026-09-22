@@ -1,13 +1,40 @@
-# Examples excluded from the CLR path because the CLR backend cannot run
-# them at all today — it crashes or hangs before printing a matching
-# result. This is a DIFFERENT excuse from tools/clr_excluded_examples.txt,
-# which excuses only a map-order permutation (both sides finish and agree,
-# just in a different line order). An entry here means the two sides do
-# not even finish the same way, so tools/diff_runtimes.py's permutation
-# guard must never see these names: they belong only in
-# tools/check_examples.py's --exclude list (a plain skip, no permutation
-# check) and in a by-name filter on any CI step that diffs the full
-# examples/ corpus through tools/diff_runtimes.py directly.
+# Examples excluded from running THE COMPILED PROGRAM DIRECTLY on the CLR
+# backend, because the CLR backend cannot run them at all today — it
+# crashes or hangs before printing a matching result. This is a DIFFERENT
+# excuse from tools/clr_excluded_examples.txt, which excuses only a
+# map-order permutation (both sides finish and agree, just in a different
+# line order). An entry here means the two sides do not even finish the
+# same way, so tools/diff_runtimes.py's permutation guard must never see
+# these names: they belong only in tools/check_examples.py's --exclude
+# list (a plain skip, no permutation check) and in a by-name filter on any
+# CI step that diffs the full examples/ corpus through
+# tools/diff_runtimes.py directly.
+#
+# Scope: this file names a gap in COMPILING Lox++ straight to the CLR
+# backend, not a gap in the CLR backend itself in general. The self-hosted
+# interpreter (bootstrap/loxpp_interpreter.lox), when IT is compiled to
+# the CLR backend and used to run one of these examples, does not
+# necessarily share the same crash — verified for
+# defer_stack_overflow_count.lox below, whose interpreter-mediated run
+# matches native byte for byte. So the two CI steps that run examples
+# THROUGH the self-hosted interpreter on the CLR backend must keep running
+# every name listed here, not skip it with this file.
+#
+# Staleness: unlike tools/clr_excluded_examples.txt, this file has no
+# direct staleness check of its own. But tools/check_clr_probes.sh's
+# corpus sweep reads only tools/clr_excluded_examples.txt for its
+# in_excluded_list skip, not this file, so a name listed only here still
+# reaches that sweep's native/CLR run every time the script runs. Today
+# the CLR side of that run fails and the sweep silently continues (a
+# crash looks the same, to that loop, as an example nobody has gotten to
+# yet). Once the underlying issue is fixed and the CLR side starts
+# finishing with byte-identical output, that same sweep will start
+# reporting the example under "run to completion and match native byte
+# for byte, but are missing from the examples group" — the same message
+# it gives any byte-identical example that has not yet been added to the
+# script's own examples array. That message is the signal to remove the
+# entry from this file (and un-filter it from the CI steps and
+# tools/check_examples.py call that reference this file today).
 #
 # Every entry needs its own tracking issue, open until the entry is
 # removed.
