@@ -2011,18 +2011,42 @@ void Compiler::returnStatement() {
         if (m_type == FunctionType::INITIALIZER) {
             m_parser->error("Can't return a value from an initializer.");
         }
-        // Run deferred calls before returning a value. Gated on m_hasDefer
-        // (set by parseFunction()'s look-ahead): a defer-free function's
-        // chunk must carry no RUN_DEFERS at all, since neither the JVM nor
-        // the CLR emitter translates it yet, and it must not become the
-        // reason an otherwise-ordinary function can no longer target them.
-        if (m_hasDefer) {
-            emitByte(Op::RUN_DEFERS);
-        }
+        // Compute the return value FIRST (spec/04-semantics.md's defer
+        // Statement step 4: pending defers run "when the enclosing function
+        // call exits", after the function has its result). Only then run
+        // deferred calls, gated on m_hasDefer (set by parseFunction()'s
+        // look-ahead: a defer-free function's chunk must carry no
+        // RUN_DEFERS at all, since neither the JVM nor the CLR emitter
+        // translates it yet).
         expression();
         m_parser->consume(TokenType::SEMICOLON,
                           "Expect ';' after return value.");
-        emitByte(Op::RETURN);
+        if (m_hasDefer) {
+            // A deferred call is a real nested call: it can push and pop
+            // the shared operand stack. Stash the return value in a
+            // synthetic local slot (same trick as compileMatchBody's
+            // `(match_result)`/`(match)` locals) so RUN_DEFERS's nested
+            // calls can freely grow and shrink the stack above it without
+            // disturbing it, then reload it once every defer has run.
+            Token resultName{TokenType::IDENTIFIER, "(return_value)",
+                             m_parser->m_previous.line};
+            addLocal(resultName);
+            markInitialized();
+            int resultSlot = m_localCount - 1;
+            emitByte(Op::RUN_DEFERS);
+            emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(resultSlot));
+            emitByte(Op::RETURN);
+            // RETURN discards this whole frame at runtime, so the
+            // synthetic local's slot never needs an explicit POP. But the
+            // compiler's own slot bookkeeping must drop it here, or any
+            // statement compiled after this early return (still-reachable
+            // dead code in the same block) would get its local slots
+            // shifted up by one.
+            m_localCount--;
+            m_stackHeight--;
+        } else {
+            emitByte(Op::RETURN);
+        }
     }
 }
 

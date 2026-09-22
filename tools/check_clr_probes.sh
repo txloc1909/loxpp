@@ -447,6 +447,9 @@ examples=(
     "examples/defer_throw_outer_catch.lox"
     "examples/defer_uncaught_throw.lox"
     "examples/defer_explicit_return.lox"
+    # defer_return_value.lox (issue #311): `return EXPR;` must evaluate
+    # EXPR before any pending defer runs, not after.
+    "examples/defer_return_value.lox"
     # The JVM-side referee's own PR #237 regression examples (issue #240's
     # repro, plus shapes (A)/(B) from that PR's rounds 2-3), inherited by
     # this branch's rebase onto main for the shared local-recognition and
