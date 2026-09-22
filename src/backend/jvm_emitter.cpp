@@ -1620,6 +1620,11 @@ void emitPushHandler(Emitter& e, const DecodedInstruction& in) {
     std::string regionStartLabel =
         "try_" + std::to_string(in.offset) + "_start";
     e.b.label(regionStartLabel);
+    // Counts this region as live for LoxClosure's own arity/overflow
+    // fatal-fast-path checks (issue #319) — see LoxOps.enterHandler's own
+    // comment for why this mirrors src/vm.h's VM::m_handlerStack. A
+    // static call with no arguments and a void return: net stack effect 0.
+    e.b.emit("invokestatic lox/LoxOps/enterHandler()V", 0);
 
     // Record the region information for emission of .catch directive later.
     Emitter::ActiveRegion region;
@@ -1642,6 +1647,12 @@ void emitPopHandler(Emitter& e, const DecodedInstruction& in) {
         throw std::runtime_error(
             "jvm_emitter: POP_HANDLER without matching PUSH_HANDLER");
     }
+
+    // Normal (non-exceptional) exit from the region PUSH_HANDLER opened —
+    // see LoxOps.exitHandler's own comment for the exceptional-exit
+    // counterpart, emitted at the handler-entry site in emitBody instead
+    // (this position's own translation never runs on that path).
+    e.b.emit("invokestatic lox/LoxOps/exitHandler()V", 0);
 
     Emitter::ActiveRegion region = e.activeRegions.back();
     e.activeRegions.pop_back();
@@ -2172,6 +2183,16 @@ void emitBody(Emitter& e, bool isScript,
             // exception wrapper.
             if (e.handlerEntryOffsets.find(in.offset) !=
                 e.handlerEntryOffsets.end()) {
+                // This region's own PUSH_HANDLER counted it live for
+                // LoxOps.isHandlerLive() (issue #319); entering this
+                // handler block at all — whether getValue() below ends up
+                // delivering the fault or rethrowing it — is this
+                // region's exceptional exit, the counterpart to
+                // POP_HANDLER's normal-exit exitHandler() call
+                // (LoxOps.exitHandler's own comment). A static call with
+                // no arguments and a void return: net stack effect 0, safe
+                // before the stack still holds [LoxError].
+                e.b.emit("invokestatic lox/LoxOps/exitHandler()V", 0);
                 // Stack before: [LoxError]
                 // Extract the value field and leave it on the stack
                 e.b.emit("invokevirtual lox/LoxError/getValue()"
