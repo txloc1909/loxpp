@@ -16,7 +16,7 @@ This is a design record, not a backlog list — see the tracking issue
 (`#223`) for the actionable node breakdown, per `AGENTS.md`'s "file it,
 don't list it."
 
-## Current architecture (verified in-repo)
+## Architecture (at the creation of this record)
 
 **Native VM** (`src/vm.h`/`vm.cpp`) — a flat `Value stack[16384]` plus a fixed
 `CallFrame m_frames[1024]` array; each frame's `slots` is just a pointer into
