@@ -556,8 +556,9 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // raising this to 182. Issue #420 adds
     // examples/defer_match_subexpression.lox, raising this to 183, then
     // examples/defer_method_call_with_arg_match.lox (round 2, reviewer
-    // finding), raising this to 184.
-    ASSERT_EQ(files.size(), 184U);
+    // finding), raising this to 184. Issue #421 adds
+    // examples/defer_sibling_runs_after_throw.lox, raising this to 185.
+    ASSERT_EQ(files.size(), 185U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {

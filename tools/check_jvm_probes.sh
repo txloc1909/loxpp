@@ -91,6 +91,12 @@ probes=(
     "examples/test_throw_simple.lox"
     "examples/catch_index_error.lox"
     "examples/defer_throw_outer_catch.lox"
+    # defer_sibling_runs_after_throw.lox (issue #421): a deferred call that
+    # itself throws must not stop the drain — every deferred call recorded
+    # before it (LIFO, so it runs AFTER the throwing one) still runs before
+    # the throw propagates (spec/04-semantics.md defer Statement step 5).
+    # Already correct on the JVM backend; added here to lock that in.
+    "examples/defer_sibling_runs_after_throw.lox"
     "examples/defer_uncaught_throw.lox"
     "examples/defer_lifo.lox"
     # Issue #326: a stack overflow that unwinds past a chain of

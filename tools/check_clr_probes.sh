@@ -473,6 +473,13 @@ examples=(
     # return value already on the evaluation stack.
     "examples/defer_lifo.lox"
     "examples/defer_throw_outer_catch.lox"
+    # defer_sibling_runs_after_throw.lox (issue #421): a deferred call that
+    # itself throws must not stop the drain — every deferred call recorded
+    # before it (LIFO, so it runs AFTER the throwing one) still runs before
+    # the throw propagates (spec/04-semantics.md defer Statement step 5).
+    # defer_throw_outer_catch.lox above has only one defer, so it never
+    # exercises a sibling still pending when the throw happens.
+    "examples/defer_sibling_runs_after_throw.lox"
     "examples/defer_uncaught_throw.lox"
     "examples/defer_explicit_return.lox"
     # defer_return_value.lox (issue #311): `return EXPR;` must evaluate

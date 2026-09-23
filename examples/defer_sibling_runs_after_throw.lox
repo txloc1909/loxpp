@@ -1,0 +1,26 @@
+// Issue #421: a deferred call that itself throws must not stop the drain.
+// spec/04-semantics.md defer Statement step 5 requires every deferred call
+// recorded BEFORE the one that throws to still run, in the same LIFO order,
+// before the throw continues propagating. This differs from
+// defer_throw_outer_catch.lox (only one defer, so no sibling to miss) and
+// defer_lifo.lox (its throwing defer has no earlier-recorded sibling of its
+// own) — neither exposes a drain that stops early.
+
+fun boom() { throw "boom"; }
+fun note(s) { print s; }
+
+fun f() {
+    defer note("first");
+    defer boom();
+    defer note("last");
+}
+
+try {
+    f();
+} catch (e) {
+    print "caught " + e;
+}
+
+// CHECK: last
+// CHECK: first
+// CHECK: caught boom
