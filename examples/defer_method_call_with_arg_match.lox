@@ -1,0 +1,38 @@
+// Regression example for GitHub issue #420 (round 2, reviewer finding).
+//
+// deferStatement() patches a deferred call's trailing Op::CALL to
+// Op::DEFER_RECORD and re-anchors m_stackHeight for the difference between
+// the two opcodes' stack effects. That re-anchor only works if the CALL it
+// patches already has correct m_stackHeight bookkeeping to start from.
+//
+// Compiler::dot()'s defer-context branch (used for a deferred METHOD call,
+// `defer obj.method(...)`) emits its own Op::CALL through
+// emitBytes(Op::CALL, argCount), which already applies CALL's bookkeeping
+// (m_stackHeight -= argCount). The branch used to subtract argCount a
+// second time right after -- a leftover from the sibling INVOKE-fusion
+// branch just above it, where that same line IS needed, because that
+// branch emits its operand byte through the plain, non-bookkeeping
+// emitByte(Byte) overload. The extra subtraction is invisible for a
+// zero-argument deferred method call (defer obj.close()), but for one or
+// more arguments it drifts m_stackHeight too low by argCount, and that
+// wrong starting point corrupts compileMatchBody()'s phantom-local slot
+// for a `match` used as the return expression, the same way issue #420's
+// original defect did through the plain-call path in deferStatement().
+class Logger {
+    log(msg) {
+        print "log: " + str(msg);
+    }
+}
+
+fun classify(tag) {
+    var l = Logger();
+    defer l.log(1);
+    return match tag {
+        case "a" => 10
+        case _ => 20
+    };
+}
+
+print "result: " + str(classify("a"));
+// CHECK: log: 1
+// CHECK: result: 10
