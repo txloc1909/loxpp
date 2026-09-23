@@ -587,6 +587,10 @@ examples=(
     # compiling the `defer` made compileMatchBody() read the wrong stack
     # slot as the match operand.
     "examples/defer_match_subexpression.lox"
+    # Issue #420 round 2 (reviewer finding): the same drift, reached
+    # through a deferred METHOD call with an argument instead of a plain
+    # call.
+    "examples/defer_method_call_with_arg_match.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
