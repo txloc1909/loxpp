@@ -1,0 +1,34 @@
+// Regression example for GitHub issue #420.
+//
+// Compiler::deferStatement() compiles a deferred call's bytecode as
+// Op::CALL, then patches the last opcode byte to Op::DEFER_RECORD. The
+// bytecode patch alone used to leave m_stackHeight one cell too high for the
+// rest of the enclosing function, because CALL and DEFER_RECORD have
+// different stack effects (CALL pushes a result; DEFER_RECORD does not).
+//
+// compileMatchBody() derives its phantom-local slot for the match operand
+// from m_stackHeight. In a function with both an active `defer` and a
+// `match` used as the whole `return` expression, the drifted m_stackHeight
+// made compileMatchBody() read the wrong stack slot: not the value being
+// matched, so no arm's pattern could ever compare correctly against it.
+//
+// This deliberately keeps `match` as the sole `return` expression, not
+// sandwiched with another live operand (`return 1 + match ...;`), so the
+// example does not also exercise the JVM/CLR "deficit of two or more"
+// folded-operand gap tracked in notes/bytecode-translation-problems.md
+// (unowned, unrelated to this issue).
+fun onExit() {
+    print "exiting";
+}
+
+fun classify(tag) {
+    defer onExit();
+    return match tag {
+        case "a" => 10
+        case _ => 20
+    };
+}
+
+print "result: " + str(classify("a"));
+// CHECK: exiting
+// CHECK: result: 10

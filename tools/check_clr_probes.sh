@@ -582,6 +582,15 @@ examples=(
     # Issue #328 regression: this file is saved deliberately without a
     # trailing newline on its last line.
     "examples/no_trailing_newline.lox"
+    # Issue #420: a function with an active `defer` and a `match` used
+    # inside a `return` expression. A drifted m_stackHeight after
+    # compiling the `defer` made compileMatchBody() read the wrong stack
+    # slot as the match operand.
+    "examples/defer_match_subexpression.lox"
+    # Issue #420 round 2 (reviewer finding): the same drift, reached
+    # through a deferred METHOD call with an argument instead of a plain
+    # call.
+    "examples/defer_method_call_with_arg_match.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
