@@ -1093,6 +1093,18 @@ public static class LoxOps {
             return; // Not a list, nothing to do
         }
 
+        // spec/04-semantics.md defer Statement step 5: a deferred call that
+        // itself throws does not stop the drain — every deferred call
+        // recorded before it still runs, LIFO, before the throw continues
+        // propagating. Only a CATCHABLE throw gets this treatment (an
+        // uncatchable/fatal fault halts immediately and skips every
+        // remaining deferred call, per the Fatal Runtime Errors table), so
+        // the catch below is narrowed to LoxError.Catchable. Later throws
+        // replace earlier ones, matching step 5's "the new throw replaces
+        // whatever was already causing this function call to exit" — this
+        // loop just keeps overwriting `pending` with the newest one.
+        LoxError? pending = null;
+
         // Run in LIFO order by repeatedly popping from the end
         while (list.Count > 0) {
             object? lastItem = list[list.Count - 1];
@@ -1112,7 +1124,15 @@ public static class LoxOps {
             if (deferred.Callable is not (LoxClosure or LoxNative or LoxBoundMethod or LoxMapMethod or LoxFileMethod)) {
                 throw new LoxError("Deferred callable has unexpected type.");
             }
-            Call(deferred.Callable, deferred.Args);
+            try {
+                Call(deferred.Callable, deferred.Args);
+            } catch (LoxError e) when (e.Catchable) {
+                pending = e;
+            }
+        }
+
+        if (pending is not null) {
+            throw pending;
         }
     }
 }
