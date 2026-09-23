@@ -2162,6 +2162,12 @@ void Compiler::deferStatement() {
     }
     // The argc byte (chunk->at(callPos + 1)) stays the same.
     chunk->patch(callPos, static_cast<Byte>(Op::DEFER_RECORD));
+    // expression() already ran CALL's bookkeeping (m_stackHeight -= argc,
+    // matching CALL's "pop args, push result" net effect). DEFER_RECORD
+    // pops one more slot (the callee) and pushes nothing, so re-anchor here
+    // or m_stackHeight drifts one cell too high for the rest of the
+    // function — see issue #420.
+    m_stackHeight--;
 
     m_parser->consume(TokenType::SEMICOLON,
                       "Expect ';' after defer statement.");
