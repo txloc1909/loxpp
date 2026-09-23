@@ -554,8 +554,10 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // test/translation-probes/59_return_out_of_try_leak.lox, raising this
     // to 181. Issue #326 adds examples/defer_stack_overflow_count.lox,
     // raising this to 182. Issue #420 adds
-    // examples/defer_match_subexpression.lox, raising this to 183.
-    ASSERT_EQ(files.size(), 183U);
+    // examples/defer_match_subexpression.lox, raising this to 183, then
+    // examples/defer_method_call_with_arg_match.lox (round 2, reviewer
+    // finding), raising this to 184.
+    ASSERT_EQ(files.size(), 184U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {
