@@ -138,11 +138,16 @@ enum Pattern {
     AtPat(at_name, subpat)
 }
 
+// bodyStmts is the arm's leading declarations/statements (possibly ending in
+// a break/continue/return that leaves bodyExpr unused). bodyExpr is the
+// arm's final value expression, or nil when the arm body ends in a jump
+// instead of an expression.
 class MatchArm {
-    init(pats, guard, body) {
-        this.pats  = pats;
-        this.guard = guard;
-        this.body  = body;
+    init(pats, guard, bodyStmts, bodyExpr) {
+        this.pats      = pats;
+        this.guard     = guard;
+        this.bodyStmts = bodyStmts;
+        this.bodyExpr  = bodyExpr;
     }
 }
 
@@ -903,11 +908,60 @@ class Parser {
             if (this.matchT("IF")) guard = this.expression();
             this.expect("FAT_ARROW", "Expect '=>' after match pattern.");
             if (this.panicMode) break;
-            var body = this.expression();
-            arms.append(MatchArm(pats, guard, body));
+            arms.append(this.matchArmBody(pats, guard));
         }
         this.expect("RIGHT_BRACE", "Expect '}' after match arms.");
         return MatchExpr(subject, arms);
+    }
+
+    // armBody ::= "{" declaration* expression "}" | expression
+    // (spec/02-syntax.md). Mirrors Compiler::compileMatchBody
+    // (src/compiler.cpp): inside the block form, only var/fun/class/enum
+    // declarations, a terminal break/continue/return, and bare expression
+    // statements are allowed before the closing brace -- not arbitrary
+    // statements like if/while/print. A leading control-flow statement is
+    // rejected the same way a stray keyword is: expression() sees it and
+    // reports "Expect expression."
+    matchArmBody(pats, guard) {
+        if (!this.matchT("LEFT_BRACE")) {
+            return MatchArm(pats, guard, [], this.expression());
+        }
+        var stmts = [];
+        var tailExpr = nil;
+        var endsWithJump = false;
+        while (!this.check("RIGHT_BRACE") and !this.isAtEnd()) {
+            if (this.check("VAR") or this.check("FUN") or
+                this.check("CLASS") or this.check("ENUM")) {
+                var d = this.declaration();
+                if (d != nil) stmts.append(d);
+            } else if (this.matchT("BREAK")) {
+                stmts.append(this.breakStatement());
+                endsWithJump = true;
+                break;
+            } else if (this.matchT("CONTINUE")) {
+                stmts.append(this.continueStatement());
+                endsWithJump = true;
+                break;
+            } else if (this.matchT("RETURN")) {
+                stmts.append(this.returnStatement());
+                endsWithJump = true;
+                break;
+            } else {
+                var expr = this.expression();
+                if (this.panicMode) break;
+                if (this.matchT("SEMICOLON")) {
+                    stmts.append(ExpressionStmt(expr));
+                } else {
+                    tailExpr = expr;
+                    break;
+                }
+            }
+        }
+        this.expect("RIGHT_BRACE", "Expect '}' after match arm body.");
+        if (tailExpr == nil and !endsWithJump and !this.panicMode) {
+            this.softError(this.previous(), "Match arm body must end with an expression.");
+        }
+        return MatchArm(pats, guard, stmts, tailExpr);
     }
 
     parseMatchArmPatterns() {
@@ -1013,6 +1067,7 @@ class Resolver {
         this.currentClass    = "NONE";
         this.hadError        = false;
         this.loopDepth       = 0;
+        this.matchArmDepth   = 0;
         this.enumCtors       = {};
     }
 
@@ -1213,7 +1268,7 @@ class Resolver {
 
 
     resolveBreak(line) {
-        if (this.loopDepth == 0)
+        if (this.loopDepth == 0 and this.matchArmDepth == 0)
             this.resError("break", line, "Cannot use 'break' outside a loop or match.");
     }
 
@@ -1392,7 +1447,13 @@ class Resolver {
                 j = j + 1;
             }
             if (arm.guard != nil) this.resolveExpr(arm.guard);
-            this.resolveExpr(arm.body);
+            // matchArmDepth (not loopDepth) makes break legal here even with
+            // no enclosing loop; continue still requires a real enclosing
+            // loop, so it is deliberately not touched.
+            this.matchArmDepth = this.matchArmDepth + 1;
+            this.resolveStmts(arm.bodyStmts);
+            this.matchArmDepth = this.matchArmDepth - 1;
+            if (arm.bodyExpr != nil) this.resolveExpr(arm.bodyExpr);
             this.endScope();
             i = i + 1;
         }
@@ -3207,11 +3268,44 @@ class Interpreter {
                     if (this.throwFlag) return nil;
                     if (!this.isTruthy(guardVal)) doBody = false;
                 }
-                if (doBody) return this.evalExpr(arm.body, armEnv);
+                if (doBody) {
+                    // No leading statements (the pre-#434 plain-expression
+                    // arm, or a `{ }` block with nothing but a tail
+                    // expression): evaluate it directly, matching the exact
+                    // pre-#434 call depth. tools/check_bootstrap_headroom.sh
+                    // (issue #248) calibrates a floor for match-shaped
+                    // recursion against that depth; routing this common case
+                    // through evalMatchArmBody's extra native frame broke it.
+                    if (len(arm.bodyStmts) == 0) return this.evalExpr(arm.bodyExpr, armEnv);
+                    return this.evalMatchArmBody(arm, armEnv);
+                }
             }
             i = i + 1;
         }
         this.setError("MatchError", "No matching arm in match expression.", 0);
+        return nil;
+    }
+
+    // Runs an arm's leading statements, then its tail expression (if any).
+    // break is caught here -- match owns it, per spec/04-semantics.md, so it
+    // never escapes to an enclosing loop. continue and return are left set:
+    // statement-level callers (execBlock, and the explicit checks in
+    // while/for bodies) already look at these flags right after evaluating
+    // this arm's match expression and propagate them like any other
+    // statement. Known limit: if the match itself sits inside a larger
+    // expression instead of being evaluated directly as a statement, these
+    // flags can leak past evaluators (evalBinary, evalUnary, ...) that only
+    // check throwFlag between subexpressions.
+    evalMatchArmBody(arm, env) {
+        var i = 0;
+        while (i < len(arm.bodyStmts)) {
+            this.execStmt(arm.bodyStmts[i], env);
+            if (this.returnFlag or this.throwFlag) return nil;
+            if (this.breakFlag) { this.breakFlag = false; return nil; }
+            if (this.continueFlag) return nil;
+            i = i + 1;
+        }
+        if (arm.bodyExpr != nil) return this.evalExpr(arm.bodyExpr, env);
         return nil;
     }
 
