@@ -1,13 +1,12 @@
 // Regression for issue #350: a self-recursive local `fun`, declared inside
-// a `try` block and never called. On the JVM backend, the closure's own
-// slot goes straight from "never written" to an Object[1] capture cell
-// (seedSelfCaptureCell) at the point it declares itself -- and that first
-// write used to sit inside the try-protected region. The classic verifier
-// that assembles this backend's classes (no StackMapTable) rejects any
-// register whose type is not consistent across an entire guarded region,
-// including the instructions that run before its first-ever write, so it
-// used to reject this class with "VerifyError: Register N contains wrong
-// type" even though `f` is never actually called.
+// a `try` block and never called. The `catch (e)` clause binds `e` with a
+// SET_LOCAL that used to read-before-write the slot it reuses, to decide
+// whether that slot already held a capture cell (isFreshDeclaration's own
+// note in jvm_emitter.cpp). That read sits at the very top of the handler,
+// so the classic verifier assembling this backend's classes (no
+// StackMapTable) saw it as reachable before `f`'s own slot was ever
+// written, and rejected the class with "VerifyError: Register N contains
+// wrong type" -- even though `f` is never actually called.
 
 try {
     fun f() { return f(); }

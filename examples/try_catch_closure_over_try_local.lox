@@ -2,8 +2,11 @@
 // local declared inside the try body that captures it, called only after
 // the whole try/catch statement completes. Same root cause as #350's own
 // self-recursion shape (examples/try_catch_self_recursive_closure.lox):
-// the captured slot's raw-to-cell transition used to sit inside the
-// try-protected region, so the classic verifier rejected the class with
+// the `catch (e)` clause's own SET_LOCAL used to read-before-write the
+// slot it binds, to decide whether that slot already held a capture cell
+// (isFreshDeclaration's own note in jvm_emitter.cpp), and the classic
+// verifier assembling this backend's classes rejected that read as
+// reachable before the captured local's slot was ever written --
 // "VerifyError: Register N contains wrong type".
 
 var fns = [];
