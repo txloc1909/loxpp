@@ -310,6 +310,84 @@ void joinInto(OpenOrigins& acc, const OpenOrigins& incoming,
     }
 }
 
+// Static, reachability-independent facts about this chunk's PUSH_HANDLER /
+// THROW / catch-block relationships, precomputed once by
+// buildHandlerSeedPoints and consulted on every advanceDataflow call inside
+// runDataflow's fixpoint. See buildHandlerSeedPoints for how each map is
+// built and why a catch block needs seeding from more than one point.
+struct HandlerSeedPoints {
+    std::unordered_map<int, int> catchBlockByPushOffset;
+    std::unordered_map<int, int> catchBlockByThrowOffset;
+    // catchBlock -> the frame height right before its own PUSH_HANDLER
+    // (vm.cpp's `handlerToUse.stackTop`). closeUpvalues(stackTop) on unwind
+    // closes every capture opened AT OR ABOVE this height (inside the
+    // protected region) and leaves every capture BELOW it open — so a
+    // snapshot seeded into this catch block must keep only slots below this
+    // threshold, or a capture the unwind actually closes would wrongly
+    // appear to survive into catch. A slot open right at PUSH_HANDLER's own
+    // point is always below its own threshold trivially (nothing has grown
+    // the frame past that height yet), so filtering there is a no-op; it
+    // only bites for a THROW snapshot, taken after the try body may have
+    // pushed and captured its own new locals.
+    std::unordered_map<int, int> catchBlockThreshold;
+};
+
+// A THROW reachable inside a protected try region does not end the
+// function the way RETURN does — dynamically, it transfers to the
+// INNERMOST still-open PUSH_HANDLER's catch block (vm.cpp's own handler
+// stack is LIFO), carrying forward whatever of THIS frame's own captures
+// closeUpvalues(stackTop) leaves open. A catch block's own predecessor set
+// must include this, not just the pre-PUSH_HANDLER checkpoint: a slot from
+// an outer scope can be captured for the FIRST time inside the try body,
+// after PUSH_HANDLER but before the throw (V_try_catch_shared_capture-shaped
+// programs), and that capture is exactly as "already open" for catch's own
+// purposes as one that predates the try entirely.
+//
+// Structural, independent of reachability — exactly like Pass 0's own
+// trySeedHandlerEntries and abstract_stack.cpp's
+// matchPushHandlersToPopHandlers — a LIFO scan over program order, since
+// POP_HANDLER carries no operand naming its own PUSH_HANDLER (chunk.h). A
+// THROW with no open PUSH_HANDLER at all (propagates past this function
+// entirely) gets no entry.
+HandlerSeedPoints
+buildHandlerSeedPoints(const Cfg& cfg,
+                       const std::unordered_map<int, int>& heightBefore) {
+    HandlerSeedPoints seeds;
+    for (const HandlerEntry& he : cfg.handlerEntries) {
+        seeds.catchBlockByPushOffset[he.pushHandlerOffset] = he.catchBlock;
+        // `heightBefore` (Pass 0) holds no entry for an unreachable
+        // PUSH_HANDLER (a dead try, per computeFrameHeightsForCfg's own
+        // trySeedHandlerEntries) -- leave this catch block's threshold
+        // unset rather than throw; advanceDataflow's Pass 1 worklist can
+        // then never reach it either (both passes share the same
+        // forward-from-block-0 reachability over this CFG), so
+        // seedCatchBlock's own lookup guard is the only consumer and simply
+        // no-ops.
+        auto it = heightBefore.find(he.pushHandlerOffset);
+        if (it != heightBefore.end()) {
+            seeds.catchBlockThreshold[he.catchBlock] = it->second;
+        }
+    }
+
+    std::vector<int> openCatchBlocks;
+    for (const BasicBlock& block : cfg.blocks) {
+        for (const DecodedInstruction& in : block.instructions) {
+            if (in.op == Op::PUSH_HANDLER) {
+                openCatchBlocks.push_back(
+                    seeds.catchBlockByPushOffset.at(in.offset));
+            } else if (in.op == Op::POP_HANDLER) {
+                if (!openCatchBlocks.empty()) {
+                    openCatchBlocks.pop_back();
+                }
+            } else if (in.op == Op::THROW && !openCatchBlocks.empty()) {
+                seeds.catchBlockByThrowOffset[in.offset] =
+                    openCatchBlocks.back();
+            }
+        }
+    }
+    return seeds;
+}
+
 // Advances `state` across one block's own instructions, for the DATAFLOW
 // FIXPOINT only (see runDataflow) — a cheap advance whose sole job is to
 // converge the per-block ENTRY states that seed the attribution walk
@@ -321,21 +399,91 @@ void joinInto(OpenOrigins& acc, const OpenOrigins& incoming,
 // has it open, otherwise leave `state` untouched — a dynamic no-op on this
 // path, exactly matching what `vm.cpp`'s `closeUpvalues` does when nothing
 // is open at that stack location.
-void advanceDataflow(const BasicBlock& block, OpenOrigins& state,
-                     const std::unordered_map<int, int>& heightBefore) {
+//
+// A PUSH_HANDLER or THROW found here (via `seedPoints`, from
+// buildHandlerSeedPoints) does not itself affect `state` — neither is a
+// captured-slot instruction — but each names a real predecessor of some
+// catch block, one buildCfg deliberately never wires as a generic successor
+// edge (see BasicBlock::isHandlerEntry). Snapshot `state` there (filtered to
+// that catch block's own threshold — see HandlerSeedPoints) into
+// `handlerSeedsOut` so the caller can seed the catch block the same way
+// trySeedHandlerEntries seeds Pass 0's height. An empty, unfiltered, or
+// PUSH_HANDLER-only seed would each get some shape wrong: empty makes a
+// closure inside `catch` that captures an already-open outer local start a
+// fresh, unshared instance instead of reusing the one `vm.cpp`'s handler
+// unwind (`closeUpvalues(handlerToUse.stackTop)`) leaves open; unfiltered
+// would let a capture the SAME unwind actually closes leak into catch
+// anyway; PUSH_HANDLER-only would miss an outer local's first-ever capture
+// happening later, inside the try body, before the throw.
+// Filters `state` down to the slots below `catchBlock`'s own checkpoint
+// height (HandlerSeedPoints::catchBlockThreshold) and records the result as
+// one more seed for it. A `catchBlock` with no threshold entry names an
+// unreachable PUSH_HANDLER (buildHandlerSeedPoints's own note) -- a no-op,
+// since Pass 1's own worklist can then never reach it either.
+void seedCatchBlockFrom(
+    int catchBlock, const OpenOrigins& state,
+    const HandlerSeedPoints& seedPoints,
+    std::vector<std::pair<int, OpenOrigins>>& handlerSeedsOut) {
+    auto thresholdIt = seedPoints.catchBlockThreshold.find(catchBlock);
+    if (thresholdIt == seedPoints.catchBlockThreshold.end()) {
+        return;
+    }
+    int threshold = thresholdIt->second;
+    OpenOrigins filtered;
+    for (const auto& [slot, origin] : state) {
+        if (slot < threshold) {
+            filtered.emplace(slot, origin);
+        }
+    }
+    handlerSeedsOut.emplace_back(catchBlock, std::move(filtered));
+}
+
+// Records one CLOSURE instruction's own local (isLocal) captures into
+// `state` -- opening a fresh instance for a slot not already open, exactly
+// like `vm.cpp`'s `captureUpvalue` reusing an already-open upvalue instead
+// of creating a second one for the same stack slot.
+void recordClosureCaptures(const DecodedInstruction& in, OpenOrigins& state) {
+    for (const ClosureUpvalue& up : in.upvalues) {
+        if (!up.isLocal) {
+            continue; // a grandparent's slot, not this chunk's
+        }
+        if (!state.contains(up.index)) {
+            state[up.index] = in.offset;
+        }
+    }
+}
+
+// If `offset` names one of `seedPoints`' own PUSH_HANDLER/THROW offsets,
+// seeds its catch block from `state` right there (seedCatchBlockFrom) --
+// shared by advanceDataflow's own PUSH_HANDLER and THROW cases, which only
+// differ in which of `seedPoints`' two maps they consult.
+void seedIfHandlerPoint(
+    int offset, const std::unordered_map<int, int>& catchBlockByOffset,
+    const OpenOrigins& state, const HandlerSeedPoints& seedPoints,
+    std::vector<std::pair<int, OpenOrigins>>& handlerSeedsOut) {
+    auto it = catchBlockByOffset.find(offset);
+    if (it != catchBlockByOffset.end()) {
+        seedCatchBlockFrom(it->second, state, seedPoints, handlerSeedsOut);
+    }
+}
+
+void advanceDataflow(
+    const BasicBlock& block, OpenOrigins& state,
+    const std::unordered_map<int, int>& heightBefore,
+    const HandlerSeedPoints& seedPoints,
+    std::vector<std::pair<int, OpenOrigins>>& handlerSeedsOut) {
     for (const DecodedInstruction& in : block.instructions) {
         if (in.op == Op::CLOSURE) {
-            for (const ClosureUpvalue& up : in.upvalues) {
-                if (!up.isLocal) {
-                    continue; // a grandparent's slot, not this chunk's
-                }
-                if (!state.contains(up.index)) {
-                    state[up.index] = in.offset;
-                }
-            }
+            recordClosureCaptures(in, state);
         } else if (in.op == Op::CLOSE_UPVALUE) {
             int slot = heightBefore.at(in.offset) - 1;
             state.erase(slot); // a no-op if `state` does not hold `slot`
+        } else if (in.op == Op::PUSH_HANDLER) {
+            seedIfHandlerPoint(in.offset, seedPoints.catchBlockByPushOffset,
+                               state, seedPoints, handlerSeedsOut);
+        } else if (in.op == Op::THROW) {
+            seedIfHandlerPoint(in.offset, seedPoints.catchBlockByThrowOffset,
+                               state, seedPoints, handlerSeedsOut);
         }
         // POP and everything else: no captured-slot effect.
     }
@@ -350,6 +498,15 @@ void advanceDataflow(const BasicBlock& block, OpenOrigins& state,
 // A slot's openness at a block can depend on a LOOP back-edge that this pass
 // has not reached yet on a first forward pass (V3_loopvar), so this is a
 // worklist fixpoint, not a single pass.
+//
+// A catch block is seeded the same way: it has no generic predecessor edge
+// (BasicBlock::isHandlerEntry), so it never gets merged into by the
+// successors loop below on its own. Instead, every time the block holding
+// its PUSH_HANDLER is (re)processed, advanceDataflow reports the open-slots
+// snapshot from exactly that point in the walk (handlerSeedsOut), and that
+// snapshot is joined into the catch block's entry state here, exactly like
+// an ordinary successor merge — see advanceDataflow's own comment for why
+// an empty seed would be wrong.
 struct DataflowResult {
     std::vector<OpenOrigins> entryState;
     // uint8_t, not bool: std::vector<bool>'s proxy reference makes `!v[i]`
@@ -371,6 +528,8 @@ DataflowResult runDataflow(const Cfg& cfg,
     std::vector<uint8_t> exitComputed(n, 0);
     std::deque<int> worklist;
 
+    HandlerSeedPoints seedPoints = buildHandlerSeedPoints(cfg, heightBefore);
+
     if (n > 0) {
         result.reachable[0] = 1; // block 0 is the chunk's entry
         worklist.push_back(0);
@@ -381,7 +540,9 @@ DataflowResult runDataflow(const Cfg& cfg,
         worklist.pop_front();
 
         OpenOrigins next = result.entryState[static_cast<size_t>(b)];
-        advanceDataflow(cfg.blocks[static_cast<size_t>(b)], next, heightBefore);
+        std::vector<std::pair<int, OpenOrigins>> handlerSeeds;
+        advanceDataflow(cfg.blocks[static_cast<size_t>(b)], next, heightBefore,
+                        seedPoints, handlerSeeds);
 
         // A block's very first computation must propagate even when `next`
         // happens to equal a default-constructed (empty) exitState — that
@@ -391,6 +552,26 @@ DataflowResult runDataflow(const Cfg& cfg,
                        next != exitState[static_cast<size_t>(b)];
         exitState[static_cast<size_t>(b)] = next;
         exitComputed[static_cast<size_t>(b)] = 1;
+
+        // Seeded from `entryState[b]`, which only ever changes on a round
+        // where `b` is (re)pushed onto the worklist — i.e. every time this
+        // loop body runs for `b` at all — so this must run unconditionally
+        // here, not gated behind `changed` (that flag tracks the whole
+        // block's exit state, not the mid-block snapshot at PUSH_HANDLER;
+        // see advanceDataflow).
+        for (auto& [catchBlock, seedState] : handlerSeeds) {
+            OpenOrigins merged =
+                result.entryState[static_cast<size_t>(catchBlock)];
+            joinInto(merged, seedState, aliases);
+            if (result.reachable[static_cast<size_t>(catchBlock)] == 0 ||
+                merged != result.entryState[static_cast<size_t>(catchBlock)]) {
+                result.reachable[static_cast<size_t>(catchBlock)] = 1;
+                result.entryState[static_cast<size_t>(catchBlock)] =
+                    std::move(merged);
+                worklist.push_back(catchBlock);
+            }
+        }
+
         if (!changed) {
             continue;
         }
