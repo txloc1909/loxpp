@@ -77,6 +77,7 @@ editors/loxpp-vscode/*.vsix
 # during its own run — not a committed baseline like examples/*.output.
 test/translation-probes/*.tmp
 
-# The build-*/ ignore above (for build dirs) also matches the Codecrafters
-# challenge dir; re-include it — challenge sources are committed.
-!examples/codecrafters/build-your-own-grep/
+# The build-*/ ignore above (for build dirs) also matches every
+# Codecrafters "build-your-own-*" challenge dir; re-include them —
+# challenge sources are committed.
+!examples/codecrafters/build-your-own-*/
