@@ -1213,12 +1213,12 @@ class Resolver {
 
     resolveBreak(line) {
         if (this.loopDepth == 0)
-            this.resError("break", line, "Can't use 'break' outside of a loop.");
+            this.resError("break", line, "Cannot use 'break' outside a loop or match.");
     }
 
     resolveContinue(line) {
         if (this.loopDepth == 0)
-            this.resError("continue", line, "Can't use 'continue' outside of a loop.");
+            this.resError("continue", line, "Cannot use 'continue' outside a loop.");
     }
 
     resolveForStmt(init, cond, inc, body) {
