@@ -598,6 +598,10 @@ examples=(
     # through a deferred METHOD call with an argument instead of a plain
     # call.
     "examples/defer_method_call_with_arg_match.lox"
+    # Issue #320: a closure declared inside a catch body (self-recursive
+    # local fun, and a shared outer capture across try/catch) used to
+    # crash capture_analysis.cpp's dataflow pass before any IL was emitted.
+    "examples/try_catch_closure_declared_in_catch_body.lox"
 )
 
 if [ ! -x "$native_bin" ]; then

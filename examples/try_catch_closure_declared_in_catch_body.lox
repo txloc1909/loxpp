@@ -1,0 +1,46 @@
+// Issue #320: a closure declared inside a catch body used to crash the
+// CLR (and, identically, the JVM) emitter -- "CLOSURE captures local slot N
+// that capture analysis does not report" -- because capture_analysis.cpp's
+// dataflow pass never marked a catch block reachable (a catch block has no
+// ordinary predecessor edge; see capture_analysis.cpp's own comment on
+// buildCfg). Native never hit this, since it tracks open upvalues at run
+// time, not through this compile-time analysis.
+//
+// Part 1: a self-recursive local `fun` declared inside `catch`, the exact
+// repro shape from the issue.
+try {
+    throw "x";
+} catch (e) {
+    fun g(n) {
+        if (n == 0) return 0;
+        return g(n - 1);
+    }
+    print g(3);
+}
+
+// Part 2: a closure in the try body and a closure in the catch body
+// capturing the SAME outer local, one of which mutates it -- proving they
+// share one runtime cell, not two. vm.cpp's handler unwind only closes
+// captures opened INSIDE the protected try region, so `shared`'s upvalue,
+// opened by inTry before the throw, survives into catch and inCatch must
+// reuse it.
+fun outer() {
+    var shared = 1;
+    var bump = nil;
+    var read = nil;
+    try {
+        fun inTry() { shared = shared + 1; }
+        bump = inTry;
+        throw "boom";
+    } catch (e2) {
+        fun inCatch() { return shared; }
+        read = inCatch;
+    }
+    bump();
+    bump();
+    print read();
+}
+outer();
+
+// CHECK: 0
+// CHECK: 3

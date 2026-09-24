@@ -2503,6 +2503,111 @@ TEST(EmitScript, CatchPrologueChecksCatchableBeforeRunningHandlerBody) {
     EXPECT_LT(rethrowPos, getValuePos) << j;
 }
 
+// Issue #320: a self-recursive local `fun` declared inside a `catch` body
+// used to abort emission before writing any IL ("clr_emitter: CLOSURE
+// captures local slot N that capture analysis does not report") --
+// capture_analysis.cpp's Pass 1 never marked a catch block reachable (see
+// this file's own capture_analysis.cpp for the root cause), so g's own
+// self-capture never got a recorded live range, and checkAllCapturesAreReported
+// (this file, above) threw. The same shape in a `try` body always worked;
+// this pins the catch-body case as a regression, not merely a
+// capture_analysis.cpp unit test (test_backend_capture.cpp's
+// ClosureDeclaredInCatchBodyGetsALiveRange checks the analysis layer
+// directly; this checks the emitter actually consumes that fix without
+// throwing).
+TEST(EmitProgram, SelfRecursiveLocalFunInCatchBodyEmitsWithoutThrowing) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("try { throw \"x\"; } catch (e) {"
+                     "  fun g(n) { if (n == 0) return 0; return g(n - 1); }"
+                     "  print g(3);"
+                     "}"
+                     "print \"after\";",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    std::string catchBody = extractFirstCatchBody(il);
+    ASSERT_FALSE(catchBody.empty()) << il;
+    expectEveryBranchTargetIsLabeled(il);
+    // g's own class (LoxFn$0, emitProgram's pre-order naming) must actually
+    // get constructed and called inside the catch body -- this is what
+    // capture_analysis.cpp's missing catch-block seed used to prevent from
+    // ever being reached: checkAllCapturesAreReported threw before any of
+    // this was emitted.
+    EXPECT_NE(catchBody.find("newobj instance void LoxFn$0::.ctor"),
+              std::string::npos)
+        << "g's own closure must be constructed inside the catch body:\n"
+        << il;
+    EXPECT_NE(catchBody.find("call void [LoxRuntime]Lox.LoxOps::Print"),
+              std::string::npos)
+        << "the catch body's own print g(3) call must survive:\n"
+        << il;
+    // "after" is printed AFTER the whole try/catch statement, not part of
+    // the catch body -- confirms the extracted region did not over-grow.
+    EXPECT_EQ(catchBody.find(clr::ilasmStringLiteral("after")),
+              std::string::npos)
+        << il;
+}
+
+// Issue #320's second scenario (approved plan, decision 2): a closure in the
+// `try` body and a closure in the `catch` body capturing the SAME outer
+// local (declared before the try). This pins that emitProgram still
+// produces well-formed IL for the shape, and that BOTH CLOSURE sites reach
+// the captured-slot lowering -- but, unlike
+// SelfRecursiveLocalFunInCatchBodyEmitsWithoutThrowing above, this specific
+// check CANNOT be made to fail by reverting only capture_analysis.cpp's fix
+// (proven: reverting it and rerunning this exact test still emits two
+// "isinst object[]" occurrences, byte-for-byte). The reason is
+// clr_emitter.cpp's own design: `e.capturedSlots` is captured-slot
+// MEMBERSHIP only, not per-range identity (clr_emitter.cpp's comment on its
+// own build loop), and `ensureCapturedCell` decides raw-vs-cell with a
+// RUNTIME `isinst` check keyed by the CIL slot, not by which static live
+// range capture_analysis.cpp attributed a CLOSURE to (this file's
+// top-of-file note). Since `shared` is ALSO captured by inTry, in the
+// try body's own reachable code, membership already holds before this fix
+// lands, and ensureCapturedCell's idempotent check already makes inCatch
+// reuse inTry's cell at runtime regardless of whether the analysis reports
+// one merged live range or two separate, unmerged ones.
+//
+// The real regression coverage for that merge -- an analysis-internal
+// invariant violation (two live ranges for one slot, overlapping in program
+// order) an earlier, narrower version of this fix produced for exactly this
+// shape -- lives in test_backend_capture.cpp's
+// TryBodyAndCatchBodyClosuresShareOneOuterCapture, which DOES fail without
+// the fix (both by its own size==1-vs-2 assertion and by
+// validateCaptureAnalysis's own overlap check, which fires first). A
+// same-shape mutation probe (bump `shared` from the try-body closure, read
+// it from the catch-body closure) was also run by hand through
+// tools/loxpp_clr.sh on both the pre-fix and post-fix commit and printed
+// the same, correct result (3) either way -- confirming this is a real but
+// CLR-latent imprecision, not a CLR runtime bug, for this particular shape.
+TEST(EmitProgram, TryAndCatchClosuresSharingOneOuterLocalStillEmitsCleanly) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("fun outer() {"
+                                      "  var shared = 1;"
+                                      "  var fromTry = nil;"
+                                      "  var fromCatch = nil;"
+                                      "  try {"
+                                      "    fun inTry() { return shared; }"
+                                      "    fromTry = inTry;"
+                                      "    throw \"boom\";"
+                                      "  } catch (e) {"
+                                      "    fun inCatch() { return shared; }"
+                                      "    fromCatch = inCatch;"
+                                      "  }"
+                                      "  print fromTry();"
+                                      "  print fromCatch();"
+                                      "}"
+                                      "outer();",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::string il = clr::emitProgram(fn, tree, "LoxMain");
+
+    expectEveryBranchTargetIsLabeled(il);
+    EXPECT_EQ(countOccurrences(il, "isinst object[]"), 2) << il;
+}
+
 TEST(EmitProgram, TerminalCatchBodyWithBranchingInFunctionStaysBalanced) {
     // Combines two previously-fixed shapes: a catch body that is the
     // function's own last code (its own POP_HANDLER never runs — round-3's
