@@ -1,0 +1,34 @@
+// Generalization of issue #350/#388's fix: a closure capturing a local
+// declared in an OUTER try, itself inside an INNER, nested try/catch that
+// throws and is caught. The trigger is the OUTER catch's own `e` binding,
+// not the inner one: once the outer try's own scope closes (normally, or
+// if a fault ever escaped the inner catch), `e` reuses `x`'s slot — the
+// captured, still-live-via-`f` slot — even though this specific run never
+// actually enters the outer catch (the inner one handles the throw).
+// isFreshDeclaration (jvm_emitter.cpp) must still recognize that binding
+// as a fresh declaration, because the verifier checks every catch clause
+// a class contains, whether or not a given run ever reaches it. Confirmed:
+// this program hits the original "VerifyError: Register N contains wrong
+// type" when isFreshDeclaration is disabled.
+
+var fns = [];
+var doThrow = true;
+try {
+    var x = 5;
+    try {
+        fun f() { return x; }
+        fns.append(f);
+        // Gated behind a flag, not an unconditional throw: an unconditional
+        // throw here would make the inner try body's own normal-completion
+        // close structurally unreachable, which the capture corpus keeps
+        // at zero (test_backend_capture.cpp's own CaptureAnalysisTest.
+        // NoAssertionFailureOnExamples measures this across every example)
+        // — see test/translation-probes/60_throw_ends_try_binding.lox's
+        // own header comment for the same pattern.
+        if (doThrow) { throw "inner"; }
+    } catch (e) { print "inner caught " + e; }
+} catch (e) { print "outer " + e; }
+print fns[0]();
+
+// CHECK: inner caught inner
+// CHECK: 5

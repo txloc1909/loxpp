@@ -704,11 +704,58 @@ void emitGetLocal(Emitter& e, const DecodedInstruction& in) {
     }
 }
 
+// A catch clause's own binding (`catch (e) { ... }`, compiler.cpp's
+// tryStatement) is the one shape where a real, decoded SET_LOCAL
+// instruction is ALSO registered as an invisible-var declaring site for
+// the SAME slot at its OWN offset (abstract_stack.cpp's
+// findDeclaringPushIndices: the caught value has no push instruction of
+// its own — the exception mechanism places it there — so the catch entry
+// itself is the declaring site, the same way a plain `var`'s declaration
+// is). That double registration is this function's signal that `in` is a
+// fresh declaration, not an assignment, no matter what `e.isCaptured`
+// says about its slot index.
+//
+// This is the fix for issues #350 and #388: without it, a catch binding
+// whose slot index `capturedSlots` already marks captured (coarse,
+// slot-index only — its own note above) went through
+// emitCapturedStore's raw-or-cell check, whose FIRST instruction is an
+// unconditional `aload` of that slot. That read sits at the very top of
+// the exception handler — the one program point the classic verifier
+// (this emitter's classes carry no StackMapTable — see assembleClass)
+// treats as reachable from EVERY instruction in the guarded try region,
+// including ones that run before the slot's own first-ever write (a
+// self-recursive local `fun`'s own seed, #350; a captured local's own
+// declaring store, #388 — both can sit inside the same try they are
+// read from). An unwritten JVM local carries no usable type there, so
+// reading it rejects the whole class: "VerifyError: Register N contains
+// wrong type". A fresh declaration never needs to read the slot's OLD
+// content at all, so removing that read removes the only place this
+// backend ever performed one before the region's own guaranteed write.
+//
+// The same fix also closes a correctness bug this read caused whenever
+// the slot's stale content was a STILL-LIVE cell from an earlier,
+// escaped closure's capture in the same try body (a local captured by a
+// closure that outlives the try, stored somewhere and called after the
+// catch runs): the check's "already a cell" branch would `aastore` `e`'s
+// value INTO that live cell, silently overwriting the escaped closure's
+// own captured value instead of binding `e`. A declaration must always
+// plain-`astore` over the slot instead, exactly like
+// `finishInstruction`'s own invisible-var store already does for every
+// OTHER declaration.
+bool isFreshDeclaration(const Emitter& e, const DecodedInstruction& in) {
+    auto it = e.invisibleVarsByOffset.find(in.offset);
+    if (it == e.invisibleVarsByOffset.end()) {
+        return false;
+    }
+    return std::find(it->second.begin(), it->second.end(), in.byteOperand) !=
+           it->second.end();
+}
+
 void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
                   bool& consumedFollowingPop) {
     int slot = e.jvmSlotForLocal(in.byteOperand);
     bool fuse = e.fusablePop(i);
-    bool captured = e.isCaptured(in.byteOperand);
+    bool captured = e.isCaptured(in.byteOperand) && !isFreshDeclaration(e, in);
     // before[i].operandDepth() == 0 means the full abstract-stack analysis
     // already folded the peeked value into a named local (the eager
     // invisible-var materialization, abstract_stack.h) — nothing sits on the

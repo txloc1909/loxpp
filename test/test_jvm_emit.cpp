@@ -2989,3 +2989,156 @@ TEST(EmitProgram, CaughtValueIsRecognizedWhenFunctionAlsoUsesDefer) {
         << "(computeMaxLocalCount + 1, jvm_emitter.cpp) can land on top of "
         << "it and silently drop the deferred call (issue #240)";
 }
+
+// Issues #350/#388: the catch clause's own binding used to read its
+// slot's stale content unconditionally (emitCapturedStore's raw-or-cell
+// check, first instruction `aload N`) whenever that slot's index
+// `capturedSlots` already marked captured. That read sits at the very
+// top of the exception handler, the one point the classic verifier
+// (this emitter's classes carry no StackMapTable) treats as reachable
+// from every instruction in the guarded try region — including ones
+// that run before the slot's own first-ever write, which a
+// self-recursive local `fun`'s own seed (#350) or a captured local's
+// own declaring store (#388) can both do from inside that same try.
+// isFreshDeclaration (jvm_emitter.cpp) recognizes the catch binding and
+// routes it to a plain store instead, removing that read entirely.
+TEST(EmitProgram, SelfRecursiveLocalFunDeclaredInsideTryVerifiesOnJvm) {
+    // #350's own repro: a self-recursive local `fun` declared inside a
+    // `try`, never called. Before isFreshDeclaration, `e`'s own binding
+    // (reusing `f`'s slot) read that slot with an `instanceof` check
+    // before `f`'s own seed could be proven to have run on every
+    // exception path, and tools/loxpp_jvm.sh on this program reported
+    // "VerifyError: Register N contains wrong type" (confirmed manually
+    // against the unpatched emitter).
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("try {\n"
+                                      "    fun f() { return f(); }\n"
+                                      "    print \"declared\";\n"
+                                      "} catch (e) { print \"no\"; }\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+    ASSERT_EQ(classes.size(), 2u);
+    const std::string& j = classes[0].source;
+
+    // f's own Lox slot 1 (jvmSlotForLocal(1) with baseSlot=2 for a script)
+    // is 3. The exact defect: emitCapturedStore's raw-or-cell check reads
+    // the slot (`aload`/`instanceof`) BEFORE the catch binding's own first
+    // write to it — the read-before-write the classic verifier rejects,
+    // since it cannot prove the slot is defined at handler entry across
+    // every exception-source instruction in the guarded region. A fresh
+    // declaration must never do that: its first touch of the slot must be
+    // a write.
+    std::size_t handlerStart = j.find("getValue()Ljava/lang/Object;");
+    ASSERT_NE(handlerStart, std::string::npos) << j;
+    std::size_t firstWrite = j.find("astore 3", handlerStart);
+    ASSERT_NE(firstWrite, std::string::npos) << j;
+    std::size_t firstRead = j.find("instanceof", handlerStart);
+    if (firstRead != std::string::npos) {
+        EXPECT_GT(firstRead, firstWrite)
+            << "the catch binding's own first touch of its slot must be a "
+               "write, never a read of the slot's stale content — a read "
+               "there is what the classic verifier rejected:\n"
+            << j;
+    }
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// #388's own repro: a closure over a plain (non-self-recursive) local
+// declared inside the try body it is captured from, read only after the
+// whole try/catch completes. Same fix, different capture shape — here the
+// catch body's own `print e` DOES legitimately read the slot afterward
+// (a real GET_LOCAL, correctly using the raw-or-cell check), so this test
+// also proves that legitimate read is not mistaken for the defect: only a
+// read reachable BEFORE the binding's own first write is disallowed.
+TEST(EmitProgram, ClosureOverATryBodyLocalVerifiesOnJvm) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("var fns = [];\n"
+                                      "try {\n"
+                                      "    var x = 41;\n"
+                                      "    fun c() { return x + 1; }\n"
+                                      "    fns.append(c);\n"
+                                      "} catch (e) { print e; }\n"
+                                      "print fns[0]();\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+    ASSERT_EQ(classes.size(), 2u);
+    const std::string& j = classes[0].source;
+
+    std::size_t handlerStart = j.find("getValue()Ljava/lang/Object;");
+    ASSERT_NE(handlerStart, std::string::npos) << j;
+    std::size_t firstWrite = j.find("astore 3", handlerStart);
+    ASSERT_NE(firstWrite, std::string::npos) << j;
+    std::size_t firstRead = j.find("instanceof", handlerStart);
+    ASSERT_NE(firstRead, std::string::npos)
+        << "print e's own read must still be present:\n"
+        << j;
+    EXPECT_GT(firstRead, firstWrite)
+        << "the catch binding's own first touch of its slot must be a "
+           "write, never a read of the slot's stale content — a read "
+           "there is what the classic verifier rejected:\n"
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// A catch clause's own binding (`catch (e) { ... }`) is always a FRESH
+// declaration, never an assignment to an existing captured local — but its
+// slot index can be one `capturedSlots` already marks captured, from an
+// earlier, DIFFERENT local in the same try body that a closure captured
+// and that closure can still be live (escaped the try via a global, a
+// list, a return — #388's own shape again, with a throw added so the
+// catch clause actually runs). Before isFreshDeclaration (jvm_emitter.cpp),
+// `e`'s own SET_LOCAL went through emitCapturedStore's raw-or-cell check,
+// which sees that still-live cell and `aastore`s `e`'s value INTO it —
+// silently overwriting the escaped closure's own captured value instead of
+// binding `e`. This is a correctness bug, not a verifier rejection, so it
+// is pinned on the emitted shape here (see tools/check_jvm_probes.sh's
+// catch_binding_reuses_escaped_capture_cell.lox for the runtime proof).
+TEST(EmitScript,
+     CatchBindingReusingAnEscapedCaptureCellSlotDoesNotWriteThroughToIt) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("var fns = [];\n"
+                                      "try {\n"
+                                      "  var x = 41;\n"
+                                      "  fun c() { return x + 1; }\n"
+                                      "  fns.append(c);\n"
+                                      "  throw \"boom\";\n"
+                                      "} catch (e) { print e; }\n"
+                                      "print fns[0]();\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+    ASSERT_EQ(classes.size(), 2u);
+    const std::string& j = classes[0].source;
+
+    // The catch handler block runs from its own label to the next one
+    // (goto ...); isolate that slice so the try body's OWN (correct)
+    // instanceof checks for x's capture do not hide a regression here.
+    std::size_t handlerLabelPos = j.find(" using L_");
+    ASSERT_NE(handlerLabelPos, std::string::npos) << j;
+    std::string handlerLabel =
+        j.substr(handlerLabelPos + std::string(" using L_").size(),
+                 j.find('\n', handlerLabelPos) - handlerLabelPos -
+                     std::string(" using L_").size());
+    std::size_t handlerStart = j.find("L_" + handlerLabel + ":");
+    ASSERT_NE(handlerStart, std::string::npos) << j;
+    std::size_t handlerEnd = j.find("goto ", handlerStart);
+    ASSERT_NE(handlerEnd, std::string::npos) << j;
+    std::string handlerBlock =
+        j.substr(handlerStart, handlerEnd - handlerStart);
+
+    // The handler block's own `print e` also reads slot 3 through the
+    // ordinary runtime raw-or-cell check (emitCapturedGetLocal) — that one
+    // is correct (a read must still see whatever type is actually there)
+    // and does its own `aaload`, never `aastore`. Only the catch BINDING's
+    // own write must never reach an `aastore`.
+    EXPECT_EQ(handlerBlock.find("aastore"), std::string::npos)
+        << "the catch binding must never aastore e's value into whatever "
+           "escaped closure still holds this slot's old cell:\n"
+        << handlerBlock;
+    expectEveryJumpTargetIsLabeled(j);
+}

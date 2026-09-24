@@ -1,0 +1,25 @@
+// Extra JVM coverage for issue #350's shape family: a self-recursive local
+// `fun`, re-declared on every iteration of a `for` loop, with the loop
+// inside a `try` block (V6_self_recursive_closure_in_loop.lox's own shape,
+// wrapped in a try). Each iteration must still seed its own fresh
+// self-capture cell (seedSelfCaptureCell, jvm_emitter.cpp) -- two closures
+// from different iterations must stay distinct, not alias the same cell.
+// Unlike the other examples in this group, this one does not actually
+// need this PR's own fix: `f` is declared one block deeper than the try's
+// own top-level scope (inside the loop body), so the catch clause's own
+// `e` binding reuses a DIFFERENT, uncaptured slot, not `f`'s -- confirmed
+// by running this file against the emitter with both #350/#388 fixes
+// removed, which already prints `false` correctly. Kept anyway as
+// coverage that self-recursion inside a loop inside a try/catch still
+// verifies and runs correctly end to end.
+
+var fns = [];
+try {
+    for (var i = 0; i < 3; i = i + 1) {
+        fun f() { return f; }
+        fns.append(f);
+    }
+} catch (e) { print e; }
+print (fns[0] == fns[1]);
+
+// CHECK: false

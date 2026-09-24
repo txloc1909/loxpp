@@ -1,4 +1,4 @@
-// 55_throw_ends_try_binding.lox — verification probe (issue #386).
+// 60_throw_ends_try_binding.lox — verification probe (issue #386).
 //
 // A throw unwinds past try-body locals without running endScope, so the
 // unwinding side must end their bindings itself. The first half throws a
@@ -6,9 +6,10 @@
 // the one unwind. The throws sit behind flags so the normal-path close
 // stays a live close (the capture corpus holds no dead closes).
 //
-// Lives in clr-only/ until issue #388 lets the JVM side verify this
-// shape too (the JVM backend currently rejects any closure over a
-// try-body local at class-verify time).
+// Moved out of clr-only/ (was 55_throw_ends_try_binding.lox there) once
+// issue #388's fix let the JVM side verify and run this shape too. Runs
+// identically on native, JVM, and CLR now; wired into both
+// tools/check_jvm_probes.sh and tools/check_clr_probes.sh.
 // Expected output:
 //
 // boom

@@ -160,9 +160,10 @@ probes=(
     "test/translation-probes/V6_self_recursive_closure_in_loop.lox"
     # A throw unwinds past try-body locals without running endScope: the
     # catch prologue must end their cells itself (issue #386), for an
-    # explicit throw and a runtime fault alike. Lives in clr-only/ until
-    # issue #388 lets the JVM side verify this shape too.
-    "test/translation-probes/clr-only/55_throw_ends_try_binding.lox"
+    # explicit throw and a runtime fault alike. Moved out of clr-only/ once
+    # issue #388's fix let the JVM side verify and run this shape too — now
+    # also wired into tools/check_jvm_probes.sh.
+    "test/translation-probes/60_throw_ends_try_binding.lox"
     "test/translation-probes/12_list_map_index.lox"
     # Classes, methods, and super: `this` = slot 0, `init` returns `this`,
     # SET_PROPERTY/DEFINE_METHOD leave a value (P2), and `super` is compiled
@@ -598,6 +599,20 @@ examples=(
     # through a deferred METHOD call with an argument instead of a plain
     # call.
     "examples/defer_method_call_with_arg_match.lox"
+    # Issues #350/#388 (JVM-side fix; CLR already ran these correctly, so
+    # they only join the examples group here rather than needing a CLR-side
+    # change): the two original repros, four generalizations, and a
+    # correctness bug found while fixing #350/#388 where a catch clause's
+    # own binding could write through into a still-live capture cell an
+    # earlier, escaped closure in the same try body held. See each probe's
+    # own header comment and tools/check_jvm_probes.sh's matching entries.
+    "examples/try_catch_self_recursive_closure.lox"
+    "examples/try_catch_closure_over_try_local.lox"
+    "examples/try_catch_self_recursion_with_sibling_capture.lox"
+    "examples/try_catch_loop_fresh_cell.lox"
+    "examples/try_catch_nested_closure_escapes.lox"
+    "examples/try_catch_self_recursive_closure_in_loop.lox"
+    "examples/try_catch_catch_binding_reuses_capture_cell.lox"
     # Issue #320: a closure declared inside a catch body (self-recursive
     # local fun, and a shared outer capture across try/catch) used to
     # crash capture_analysis.cpp's dataflow pass before any IL was emitted.

@@ -1,0 +1,16 @@
+// Regression for issue #350: a self-recursive local `fun`, declared inside
+// a `try` block and never called. The `catch (e)` clause binds `e` with a
+// SET_LOCAL that used to read-before-write the slot it reuses, to decide
+// whether that slot already held a capture cell (isFreshDeclaration's own
+// note in jvm_emitter.cpp). That read sits at the very top of the handler,
+// so the classic verifier assembling this backend's classes (no
+// StackMapTable) saw it as reachable before `f`'s own slot was ever
+// written, and rejected the class with "VerifyError: Register N contains
+// wrong type" -- even though `f` is never actually called.
+
+try {
+    fun f() { return f(); }
+    print "declared";
+} catch (e) { print "no"; }
+
+// CHECK: declared

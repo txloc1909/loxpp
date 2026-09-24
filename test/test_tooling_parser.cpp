@@ -564,8 +564,13 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // regression probes at this directory's top level too, raising this
     // to 191. Issue #320 adds
     // examples/try_catch_closure_declared_in_catch_body.lox, raising this
-    // to 192.
-    ASSERT_EQ(files.size(), 192U);
+    // to 192. Issues #350/#388 add seven examples/try_catch_*.lox
+    // regressions (see tools/check_jvm_probes.sh's matching entries),
+    // raising this to 199, then
+    // test/translation-probes/60_throw_ends_try_binding.lox moves out of
+    // clr-only/ (uncounted there) into this directory (issue #388's own
+    // fix lets it verify and run on JVM too), raising this to 200.
+    ASSERT_EQ(files.size(), 200U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {
