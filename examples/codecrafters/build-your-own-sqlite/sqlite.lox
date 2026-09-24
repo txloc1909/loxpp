@@ -1,0 +1,609 @@
+// sqlite.lox — Codecrafters "Build your own SQLite" implemented in pure Lox++.
+//
+//   your_sqlite.sh <database> <command>
+//
+// <command> is one of the dot-commands ".dbinfo" / ".tables", or a SQL
+// string: "SELECT COUNT(*) FROM t", "SELECT a, b FROM t",
+// "SELECT a, b FROM t WHERE c = 'literal'".
+//
+// Lox++ has no bitwise operators and no ord()/chr(), but a SQLite file is
+// pure binary: varints, big-endian ints, and 256 distinct byte values, most
+// not writable as Lox++ string literals (only \" \\ \n \t \r \0 exist). The
+// wrapper points LOXPP_BYTE_TABLE at a committed 256-byte file holding bytes
+// 0x00..0xFF in order; ord()/chr() below are Lox++ lookup tables built from
+// it, the same trick your_grep.sh uses for the ESC byte.
+
+// ---------- byte table: ord()/chr() over all 256 byte values ----------
+
+var ORD = {};
+var CHR = [];
+
+fun loadByteTable() {
+    var path = env("LOXPP_BYTE_TABLE");
+    var f = open(path, "r");
+    var table = f.read();
+    f.close();
+    var i = 0;
+    while (i < 256) {
+        var c = table[i:i + 1];
+        ORD[c] = i;
+        CHR.append(c);
+        i = i + 1;
+    }
+}
+
+fun ord(c) {
+    return ORD[c];
+}
+
+// ---------- low-level byte / varint / signed-int decoding ----------
+
+fun byteAt(s, i) {
+    return ord(s[i:i + 1]);
+}
+
+fun u16(s, off) {
+    return byteAt(s, off) * 256 + byteAt(s, off + 1);
+}
+
+fun u32(s, off) {
+    return ((byteAt(s, off) * 256 + byteAt(s, off + 1)) * 256 + byteAt(s, off + 2)) * 256
+        + byteAt(s, off + 3);
+}
+
+// Signed big-endian integer of n bytes. Exact for n <= 6 (fits a double's
+// 53-bit mantissa); n == 8 (record serial type 6, a rare column type) loses
+// precision near the top of the 64-bit range, same documented trade-off as
+// the varint/page-count decoding below.
+fun signedInt(s, off, n) {
+    var v = 0;
+    var i = 0;
+    while (i < n) {
+        v = v * 256 + byteAt(s, off + i);
+        i = i + 1;
+    }
+    var half = math.pow(2, n * 8 - 1);
+    if (v >= half) {
+        v = v - math.pow(2, n * 8);
+    }
+    return v;
+}
+
+// SQLite varint: 1-9 bytes, base-128 big-endian; bytes 1-8 use the top bit
+// as a continuation flag, byte 9 (if reached) contributes all 8 bits.
+// Returns [value, bytesConsumed].
+fun readVarint(s, off) {
+    var value = 0;
+    var i = 0;
+    while (i < 8) {
+        var b = byteAt(s, off + i);
+        if (b >= 128) {
+            value = value * 128 + (b - 128);
+            i = i + 1;
+        } else {
+            return [value * 128 + b, i + 1];
+        }
+    }
+    var last = byteAt(s, off + 8);
+    return [value * 256 + last, 9];
+}
+
+// ---------- page access ----------
+
+var DB = "";
+var PAGE_SIZE = 0;
+
+fun pageBytes(pageNum) {
+    var start = (pageNum - 1) * PAGE_SIZE;
+    return DB[start:start + PAGE_SIZE];
+}
+
+// Page 1 carries the 100-byte file header before its own b-tree header;
+// every other page's b-tree header starts at the page's own byte 0.
+fun btreeHeaderOffset(pageNum) {
+    if (pageNum == 1) {
+        return 100;
+    }
+    return 0;
+}
+
+// Table b-tree page types: 5 = interior, 13 = leaf.
+fun parsePageHeader(pageNum) {
+    var pg = pageBytes(pageNum);
+    var ho = btreeHeaderOffset(pageNum);
+    var pageType = byteAt(pg, ho);
+    var numCells = u16(pg, ho + 3);
+    var headerLen = 8;
+    var rightMost = nil;
+    if (pageType == 2 or pageType == 5) {
+        rightMost = u32(pg, ho + 8);
+        headerLen = 12;
+    }
+    var ptrStart = ho + headerLen;
+    var offsets = [];
+    var i = 0;
+    while (i < numCells) {
+        offsets.append(u16(pg, ptrStart + i * 2));
+        i = i + 1;
+    }
+    return {
+        "type": pageType,
+        "numCells": numCells,
+        "rightMost": rightMost,
+        "offsets": offsets,
+        "bytes": pg
+    };
+}
+
+// Collects every [rowid, payload] leaf cell reachable from pageNum, walking
+// interior table pages depth-first. Overflow pages are not implemented
+// (payload_size that runs past the page is silently truncated by Lox++'s
+// clamped slicing) — every base-stage sample database keeps rows small
+// enough that this never triggers, matching the challenge's own stage-3
+// note that overflow handling is out of scope.
+fun collectRows(pageNum, out) {
+    var h = parsePageHeader(pageNum);
+    if (h["type"] == 13) {
+        var i = 0;
+        while (i < h["numCells"]) {
+            var off = h["offsets"][i];
+            var sizeR = readVarint(h["bytes"], off);
+            var payloadSize = sizeR[0];
+            var p = off + sizeR[1];
+            var ridR = readVarint(h["bytes"], p);
+            var rowid = ridR[0];
+            p = p + ridR[1];
+            var payload = h["bytes"][p:p + payloadSize];
+            out.append([rowid, payload]);
+            i = i + 1;
+        }
+    } else if (h["type"] == 5) {
+        var i = 0;
+        while (i < h["numCells"]) {
+            var off = h["offsets"][i];
+            var child = u32(h["bytes"], off);
+            collectRows(child, out);
+            i = i + 1;
+        }
+        collectRows(h["rightMost"], out);
+    }
+    return out;
+}
+
+// ---------- record format ----------
+
+// Serial type -> value. Column type 7 (IEEE-754 float) is not decoded: no
+// base-stage test uses a float column, and 64-bit bit-twiddling without
+// bitwise operators is not worth the complexity here; it decodes as nil,
+// an honest gap rather than a wrong number.
+fun parseRecord(payload) {
+    var hdrR = readVarint(payload, 0);
+    var headerLen = hdrR[0];
+    var pos = hdrR[1];
+    var serialTypes = [];
+    while (pos < headerLen) {
+        var r = readVarint(payload, pos);
+        serialTypes.append(r[0]);
+        pos = pos + r[1];
+    }
+    var values = [];
+    var bodyPos = headerLen;
+    var i = 0;
+    while (i < len(serialTypes)) {
+        var st = serialTypes[i];
+        var val = nil;
+        var size = 0;
+        if (st == 0) {
+            val = nil;
+        } else if (st == 1) {
+            size = 1;
+            val = signedInt(payload, bodyPos, 1);
+        } else if (st == 2) {
+            size = 2;
+            val = signedInt(payload, bodyPos, 2);
+        } else if (st == 3) {
+            size = 3;
+            val = signedInt(payload, bodyPos, 3);
+        } else if (st == 4) {
+            size = 4;
+            val = signedInt(payload, bodyPos, 4);
+        } else if (st == 5) {
+            size = 6;
+            val = signedInt(payload, bodyPos, 6);
+        } else if (st == 6) {
+            size = 8;
+            val = signedInt(payload, bodyPos, 8);
+        } else if (st == 7) {
+            size = 8;
+            val = nil;
+        } else if (st == 8) {
+            val = 0;
+        } else if (st == 9) {
+            val = 1;
+        } else if (st >= 12 and st % 2 == 0) {
+            size = (st - 12) / 2;
+            val = payload[bodyPos:bodyPos + size];
+        } else {
+            size = (st - 13) / 2;
+            val = payload[bodyPos:bodyPos + size];
+        }
+        values.append(val);
+        bodyPos = bodyPos + size;
+        i = i + 1;
+    }
+    return values;
+}
+
+// ---------- schema (sqlite_schema, a.k.a. sqlite_master, always page 1) ----------
+
+fun loadSchema() {
+    var rows = collectRows(1, []);
+    var schema = [];
+    var i = 0;
+    while (i < len(rows)) {
+        var vals = parseRecord(rows[i][1]);
+        schema.append({
+            "type": vals[0],
+            "name": vals[1],
+            "tblName": vals[2],
+            "rootpage": vals[3],
+            "sql": vals[4]
+        });
+        i = i + 1;
+    }
+    return schema;
+}
+
+fun findTable(schema, name) {
+    var i = 0;
+    while (i < len(schema)) {
+        if (schema[i]["type"] == "table" and schema[i]["name"] == name) {
+            return schema[i];
+        }
+        i = i + 1;
+    }
+    return nil;
+}
+
+// ---------- CREATE TABLE column list ----------
+
+var ALPHA_LOWER = "abcdefghijklmnopqrstuvwxyz";
+var ALPHA_UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+var IDENT_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+var WHITESPACE = " \t\n\r";
+
+fun upperChar(c) {
+    var i = 0;
+    while (i < 26) {
+        if (c == ALPHA_LOWER[i:i + 1]) {
+            return ALPHA_UPPER[i:i + 1];
+        }
+        i = i + 1;
+    }
+    return c;
+}
+
+fun upper(s) {
+    var out = "";
+    var i = 0;
+    while (i < len(s)) {
+        out = out + upperChar(s[i:i + 1]);
+        i = i + 1;
+    }
+    return out;
+}
+
+fun isWhitespace(c) {
+    return c in WHITESPACE;
+}
+
+fun startsWith(s, prefix) {
+    return len(s) >= len(prefix) and s[0:len(prefix)] == prefix;
+}
+
+fun trim(s) {
+    var start = 0;
+    while (start < len(s) and isWhitespace(s[start:start + 1])) {
+        start = start + 1;
+    }
+    var end = len(s);
+    while (end > start and isWhitespace(s[end - 1:end])) {
+        end = end - 1;
+    }
+    return s[start:end];
+}
+
+// Splits the top-level, comma-separated column definitions out of a
+// CREATE TABLE statement's "sql" text. Handles the parenthesised shapes
+// this challenge's sample databases use (e.g. "DECIMAL(10,2)" nested
+// inside one column's type) by tracking paren depth.
+fun splitColumnDefs(inner) {
+    var parts = [];
+    var current = "";
+    var depth = 0;
+    var i = 0;
+    while (i < len(inner)) {
+        var c = inner[i:i + 1];
+        if (c == "(") {
+            depth = depth + 1;
+            current = current + c;
+        } else if (c == ")") {
+            depth = depth - 1;
+            current = current + c;
+        } else if (c == "," and depth == 0) {
+            parts.append(current);
+            current = "";
+        } else {
+            current = current + c;
+        }
+        i = i + 1;
+    }
+    parts.append(current);
+    return parts;
+}
+
+// Parses "CREATE TABLE name (col1 TYPE ..., col2 TYPE ..., ...)" into a
+// list of column names in declaration order, plus the 0-based index of the
+// INTEGER PRIMARY KEY column (or -1 if none) — that column's stored value
+// is always NULL in the record; the real value is the cell's rowid.
+fun parseColumns(sql) {
+    var open = -1;
+    var i = 0;
+    while (i < len(sql)) {
+        if (sql[i:i + 1] == "(") {
+            open = i;
+            break;
+        }
+        i = i + 1;
+    }
+    var close = len(sql) - 1;
+    while (close > open and sql[close:close + 1] != ")") {
+        close = close - 1;
+    }
+    var inner = sql[open + 1:close];
+    var defs = splitColumnDefs(inner);
+    var names = [];
+    var rowidAliasIndex = -1;
+    var i2 = 0;
+    while (i2 < len(defs)) {
+        var def = trim(defs[i2]);
+        var nameEnd = 0;
+        while (nameEnd < len(def) and def[nameEnd:nameEnd + 1] in IDENT_CHARS) {
+            nameEnd = nameEnd + 1;
+        }
+        var name = def[0:nameEnd];
+        names.append(name);
+        var upperDef = upper(def);
+        if (("INTEGER" in upperDef) and ("PRIMARY KEY" in upperDef)) {
+            rowidAliasIndex = i2;
+        }
+        i2 = i2 + 1;
+    }
+    return [names, rowidAliasIndex];
+}
+
+// ---------- SQL tokenizer ----------
+
+fun isIdentStart(c) {
+    return (c in ALPHA_LOWER) or (c in ALPHA_UPPER) or c == "_" or c == "*";
+}
+
+// Tokenizes a query into {"kind": ..., "text": ...} tokens. Kinds: "ident"
+// (identifiers/keywords/"*"), "string" (a '...' literal, content unescaped),
+// "punct" (single-character "," "(" ")" "=").
+fun tokenize(q) {
+    var tokens = [];
+    var i = 0;
+    while (i < len(q)) {
+        var c = q[i:i + 1];
+        if (isWhitespace(c)) {
+            i = i + 1;
+        } else if (isIdentStart(c)) {
+            var start = i;
+            while (i < len(q) and (q[i:i + 1] in IDENT_CHARS or q[i:i + 1] == "*")) {
+                i = i + 1;
+            }
+            tokens.append({"kind": "ident", "text": q[start:i]});
+        } else if (c == "'") {
+            var start2 = i + 1;
+            var j = start2;
+            while (j < len(q) and q[j:j + 1] != "'") {
+                j = j + 1;
+            }
+            tokens.append({"kind": "string", "text": q[start2:j]});
+            i = j + 1;
+        } else {
+            tokens.append({"kind": "punct", "text": c});
+            i = i + 1;
+        }
+    }
+    return tokens;
+}
+
+// ---------- SQL parser + executor ----------
+
+// A parsed query: {"count": Bool, "columns": [names] | nil, "table": name,
+// "whereCol": name | nil, "whereVal": string | nil}.
+fun parseQuery(q) {
+    var tokens = tokenize(q);
+    var pos = 1; // skip SELECT
+    var isCount = false;
+    var columns = [];
+
+    if (upper(tokens[pos]["text"]) == "COUNT") {
+        isCount = true;
+        pos = pos + 1; // COUNT
+        pos = pos + 1; // (
+        pos = pos + 1; // *
+        pos = pos + 1; // )
+    } else {
+        var more = true;
+        while (more) {
+            columns.append(tokens[pos]["text"]);
+            pos = pos + 1;
+            if (pos < len(tokens) and tokens[pos]["text"] == ",") {
+                pos = pos + 1;
+            } else {
+                more = false;
+            }
+        }
+    }
+
+    pos = pos + 1; // FROM
+    var table = tokens[pos]["text"];
+    pos = pos + 1;
+
+    var whereCol = nil;
+    var whereVal = nil;
+    if (pos < len(tokens) and upper(tokens[pos]["text"]) == "WHERE") {
+        pos = pos + 1;
+        whereCol = tokens[pos]["text"];
+        pos = pos + 1; // =
+        pos = pos + 1;
+        whereVal = tokens[pos]["text"];
+        pos = pos + 1;
+    }
+
+    return {
+        "count": isCount,
+        "columns": columns,
+        "table": table,
+        "whereCol": whereCol,
+        "whereVal": whereVal
+    };
+}
+
+fun columnIndex(names, name) {
+    var i = 0;
+    while (i < len(names)) {
+        if (names[i] == name) {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fun stringify(v) {
+    if (v == nil) {
+        return "";
+    }
+    if (type(v) == "Number") {
+        return str(v);
+    }
+    return v;
+}
+
+fun runSelect(schema, query) {
+    var table = findTable(schema, query["table"]);
+    var parsed = parseColumns(table["sql"]);
+    var names = parsed[0];
+    var rowidAliasIndex = parsed[1];
+
+    var rows = collectRows(table["rootpage"], []);
+
+    var whereIdx = -1;
+    if (query["whereCol"] != nil) {
+        whereIdx = columnIndex(names, query["whereCol"]);
+    }
+
+    if (query["count"]) {
+        var count = 0;
+        var i = 0;
+        while (i < len(rows)) {
+            var vals = parseRecord(rows[i][1]);
+            if (rowidAliasIndex >= 0) {
+                vals[rowidAliasIndex] = rows[i][0];
+            }
+            if (whereIdx < 0 or vals[whereIdx] == query["whereVal"]) {
+                count = count + 1;
+            }
+            i = i + 1;
+        }
+        print str(count);
+        return;
+    }
+
+    var selIdx = [];
+    var i2 = 0;
+    while (i2 < len(query["columns"])) {
+        selIdx.append(columnIndex(names, query["columns"][i2]));
+        i2 = i2 + 1;
+    }
+
+    var i = 0;
+    while (i < len(rows)) {
+        var vals = parseRecord(rows[i][1]);
+        if (rowidAliasIndex >= 0) {
+            vals[rowidAliasIndex] = rows[i][0];
+        }
+        if (whereIdx < 0 or vals[whereIdx] == query["whereVal"]) {
+            var out = "";
+            var j = 0;
+            while (j < len(selIdx)) {
+                if (j > 0) {
+                    out = out + "|";
+                }
+                out = out + stringify(vals[selIdx[j]]);
+                j = j + 1;
+            }
+            print out;
+        }
+        i = i + 1;
+    }
+}
+
+// ---------- entry point ----------
+
+fun main() {
+    var a = args();
+    var dbPath = a[0];
+    var command = a[1];
+
+    loadByteTable();
+
+    var f = open(dbPath, "r");
+    DB = f.read();
+    f.close();
+
+    PAGE_SIZE = u16(DB, 16);
+    if (PAGE_SIZE == 0) {
+        PAGE_SIZE = 65536;
+    }
+
+    if (command == ".dbinfo") {
+        var h = parsePageHeader(1);
+        print "database page size: " + str(PAGE_SIZE);
+        print "number of tables: " + str(h["numCells"]);
+        return;
+    }
+
+    if (command == ".tables") {
+        var schema = loadSchema();
+        var names = [];
+        var i = 0;
+        while (i < len(schema)) {
+            if (schema[i]["type"] == "table" and !startsWith(schema[i]["name"], "sqlite_")) {
+                names.append(schema[i]["name"]);
+            }
+            i = i + 1;
+        }
+        var out = "";
+        i = 0;
+        while (i < len(names)) {
+            if (i > 0) {
+                out = out + " ";
+            }
+            out = out + names[i];
+            i = i + 1;
+        }
+        print out;
+        return;
+    }
+
+    var schema = loadSchema();
+    var query = parseQuery(command);
+    runSelect(schema, query);
+}
+
+main();
