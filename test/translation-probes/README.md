@@ -70,11 +70,11 @@ each has an off-the-shelf solution.
 | `57_stack_overflow_catchable` | unbounded recursion overflows `LoxClosure`'s own frame-count ceiling; a live `try`/`catch` must catch a real `Error` value with kind `StackOverflowError`, matching native (spec/04-semantics.md) — promoted from clr-only (issue #322) | P6 |
 | `58_stack_overflow_reentrant_fatal` | a second `StackOverflowError` raised by a deferred call while the first is still unwinding is fatal, not delivered to any `catchBlock` (spec/04-semantics.md line 1120) — promoted from clr-only (issue #322), companion to `57_stack_overflow_catchable` | P5, P6 |
 | `jvm-only/catch_overflow` | `LoxClosure`'s frame-count ceiling delivers a catchable `StackOverflowError` on the JVM backend, matching native's kind, message, and post-catch continuation — JVM-only, see the note below the table | P5, P6 |
-| `jvm-only/defer_overflow_during_unwind` | a `StackOverflowError` raised by a deferred call while another one is still unwinding is fatal on the JVM backend, not delivered to any `catchBlock` (`spec/04-semantics.md` line 1120) — JVM-only, see the note below the table | P5, P6 |
+| `defer_overflow_during_unwind` | a `StackOverflowError` raised by a deferred call while another one is still unwinding is fatal on every backend, not delivered to any `catchBlock` (`spec/04-semantics.md` line 1120) — promoted from jvm-only (issue #322) | P5, P6 |
 | `jvm-only/defer_replaces_overflow` | a deferred call's own throw, uncaught within it, replaces a `StackOverflowError` still unwinding (`spec/04-semantics.md` defer Statement step 5); the unwind guard must still clear so a later, unrelated overflow is caught — JVM-only, see the note below the table | P5, P6 |
-| `jvm-only/defer_overflow_kind_spoof` | a plain instance whose `kind` field spoofs `"StackOverflowError"`, thrown and caught entirely inside a deferred call, must not clear the unwind guard early while a real `StackOverflowError` is still unwinding — JVM-only, see the note below the table | P5, P6 |
-| `jvm-only/defer_throw_on_normal_return_during_unwind` | a deferred call's throw on a normal return (no fault propagating out of the deferring frame) must not be handed the unwind guard's identity, even while an unrelated `StackOverflowError` unwinds elsewhere — JVM-only, see the note below the table | P5, P6 |
-| `jvm-only/defer_replaces_unrelated_fault_during_unwind` | a deferred call's throw that replaces a different, unrelated fault must not be handed the unwind guard's identity while an unrelated `StackOverflowError` unwinds elsewhere — JVM-only, see the note below the table | P5, P6 |
+| `defer_overflow_kind_spoof` | a plain instance whose `kind` field spoofs `"StackOverflowError"`, thrown and caught entirely inside a deferred call, must not clear the unwind guard early while a real `StackOverflowError` is still unwinding — promoted from jvm-only (issue #322) | P5, P6 |
+| `defer_throw_on_normal_return_during_unwind` | a deferred call's throw on a normal return (no fault propagating out of the deferring frame) must not be handed the unwind guard's identity, even while an unrelated `StackOverflowError` unwinds elsewhere — promoted from jvm-only (issue #322) | P5, P6 |
+| `defer_replaces_unrelated_fault_during_unwind` | a deferred call's throw that replaces a different, unrelated fault must not be handed the unwind guard's identity while an unrelated `StackOverflowError` unwinds elsewhere — promoted from jvm-only (issue #322) | P5, P6 |
 | `32_string_nul` | a string literal holding an embedded NUL byte (`\0`): `print` must write every byte, including the text after the NUL, on native and on each managed backend (issue #129) | none (parity gate) |
 | `33_class_pattern_match_error` | a `match` whose arms are all class patterns raises a real, reachable `MATCH_ERROR` when no arm matches, through the same fused opcode as the enum case | P8 |
 | `34_match_consumed_result` | a `match` expression's result, once its own closing `POP` retires the synthetic subject local, is exposed as a named local's own value — `PRINT` and `DEFINE_GLOBAL` each need their own fold-aware read, the same way `RETURN` and `SET_GLOBAL` already do | P1, P2 |
@@ -90,7 +90,6 @@ each has an off-the-shelf solution.
 | `55_for_in_map_net_zero` | an erase plus an insert in one `for`-in body restores the net size, so a size check misses it — the structural version check must still fail on every backend, with empty stdout (issue #362) — an `error_probes` entry | none (error-parity gate) |
 | `clr-only/35_folded_match_deficit_two_plus` | `normalizeFoldedOperands`'s own multi-slot repair with a fold deficit of two or more (`ADD`, `CALL`, `BUILD_LIST`, `BUILD_MAP`), plus two folded slots that are also captured-closure slots — CLR-only, see the note below the table | P8 |
 | `clr-only/known-divergence/52_fat_frame_stack_divergence` | a KNOWN, unclosed gap, not a checkpoint both sides must pass: a frame with enough locals overflows native's value-stack ceiling (`src/vm.h` `STACK_MAX`) well before its call chain nears the frame-count ceiling both native and CLR enforce; the CLR backend mirrors only the frame count, so it runs the same program to completion — CLR-only, see the note below the table | P5, P6 |
-| `clr-only/53_stack_overflow_catchable` | unbounded recursion overflows `LoxClosure`'s own frame-count ceiling; a live `try`/`catch` must catch a real `Error` value with kind `StackOverflowError`, matching native (spec/04-semantics.md) — CLR-only until the JVM backend gets its own frame ceiling (#268), see the note below the table | P6 |
 | `V1_fresh_cell` | body-local captured in a loop → **fresh cell/iter** → prints `0 1 2` | P4 |
 | `V2_shared` | mutable shared upvalue → prints `2` | P4 |
 | `V3_loopvar` | loop var captured directly → **one shared cell** → prints `3 3 3` | P4 |
@@ -119,11 +118,11 @@ since closed for most cases; promoting these two probes into this directory
 is tracked separately (issue #322). `tools/check_jvm_probes.sh` runs each one
 by name for the JVM checkpoint.
 
-`jvm-only/defer_overflow_during_unwind`, `jvm-only/defer_overflow_kind_spoof`,
-`jvm-only/defer_throw_on_normal_return_during_unwind`, and
-`jvm-only/defer_replaces_unrelated_fault_during_unwind` have been promoted
-into this directory (issue #322) now that both backends match on these
-stack-overflow unwind guard behaviors.
+`defer_overflow_during_unwind`, `defer_overflow_kind_spoof`,
+`defer_throw_on_normal_return_during_unwind`, and
+`defer_replaces_unrelated_fault_during_unwind` used to sit in `jvm-only/`
+too. They have been promoted into this directory (issue #322) now that
+both backends match on these stack-overflow unwind guard behaviors.
 
 `clr-only/known-divergence/52_fat_frame_stack_divergence` sits one level
 below that again. `tools/diff_runtimes.py`'s CI step for the CLR backend
