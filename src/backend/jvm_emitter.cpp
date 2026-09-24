@@ -715,18 +715,33 @@ void emitGetLocal(Emitter& e, const DecodedInstruction& in) {
 // fresh declaration, not an assignment, no matter what `e.isCaptured`
 // says about its slot index.
 //
-// The distinction matters because `capturedSlots` is coarse, slot-index
-// only (its own note above): the slot `e` binds into may still hold a
-// LIVE cell from an EARLIER, escaped closure's capture in this same try
-// body (#388's own shape — a local captured by a closure that outlives
-// the try, stored somewhere and called after the catch runs). Routing a
-// fresh declaration through emitCapturedStore's raw-or-cell check would
-// see that live cell, take its "already a cell" branch, and `aastore`
-// `e`'s value INTO it — silently overwriting the escaped closure's own
-// captured value, not `e`'s slot. A declaration must always plain-`astore`
-// over the slot instead, exactly like `finishInstruction`'s own
-// invisible-var store already does for every OTHER declaration — see
-// isFreshDeclaration's own note.
+// This is the fix for issues #350 and #388: without it, a catch binding
+// whose slot index `capturedSlots` already marks captured (coarse,
+// slot-index only — its own note above) went through
+// emitCapturedStore's raw-or-cell check, whose FIRST instruction is an
+// unconditional `aload` of that slot. That read sits at the very top of
+// the exception handler — the one program point the classic verifier
+// (this emitter's classes carry no StackMapTable — see assembleClass)
+// treats as reachable from EVERY instruction in the guarded try region,
+// including ones that run before the slot's own first-ever write (a
+// self-recursive local `fun`'s own seed, #350; a captured local's own
+// declaring store, #388 — both can sit inside the same try they are
+// read from). An unwritten JVM local carries no usable type there, so
+// reading it rejects the whole class: "VerifyError: Register N contains
+// wrong type". A fresh declaration never needs to read the slot's OLD
+// content at all, so removing that read removes the only place this
+// backend ever performed one before the region's own guaranteed write.
+//
+// The same fix also closes a correctness bug this read caused whenever
+// the slot's stale content was a STILL-LIVE cell from an earlier,
+// escaped closure's capture in the same try body (a local captured by a
+// closure that outlives the try, stored somewhere and called after the
+// catch runs): the check's "already a cell" branch would `aastore` `e`'s
+// value INTO that live cell, silently overwriting the escaped closure's
+// own captured value instead of binding `e`. A declaration must always
+// plain-`astore` over the slot instead, exactly like
+// `finishInstruction`'s own invisible-var store already does for every
+// OTHER declaration.
 bool isFreshDeclaration(const Emitter& e, const DecodedInstruction& in) {
     auto it = e.invisibleVarsByOffset.find(in.offset);
     if (it == e.invisibleVarsByOffset.end()) {
@@ -2033,42 +2048,6 @@ Emitter buildEmitter(const DecodedFunction& fn,
     return e;
 }
 
-// A captured slot's JVM register can be read by the runtime raw-or-cell
-// check (emitCapturedGetLocal/emitCapturedStore/ensureCapturedCell) from
-// inside an exception handler whose guarded region starts before that
-// slot's own Lox declaration ever runs — a self-recursive local `fun`
-// declared inside a `try` (#350), or any local captured while its own
-// declaring `try` is still open (#388). The classic verifier (this
-// emitter's classes carry no StackMapTable — see assembleClass) computes
-// an exception handler's entry type for every register as the join over
-// EVERY instruction in the guarded region, since any one of them could be
-// where the exception happens — including instructions that run before
-// the slot's first-ever write. An unwritten JVM local carries no usable
-// type at that point ("top"), so a later read rejects the whole class
-// ("Register N contains wrong type"), even though no Lox program can ever
-// actually observe that stale/absent value: the guarded region's own
-// declaring store (or, for a reused slot, the catch clause's own binding)
-// always overwrites it before any real use.
-//
-// Defining every captured slot to `null` here, before the function body's
-// first instruction, gives the verifier one consistent type for the whole
-// function — including every guarded region the body goes on to open, at
-// any nesting depth — with no runtime effect: every real declaration
-// still re-`astore`s (or self-seeds, seedSelfCaptureCell) the slot
-// unconditionally, exactly as it always has. `capturedSlots` is coarse,
-// slot-index-only (its own note above), which is exactly what this needs:
-// one write per physical register, covering every incarnation and every
-// try region that register's index ever appears inside, not just the
-// first one.
-void preinitCapturedSlots(Emitter& e) {
-    std::vector<int> slots(e.capturedSlots.begin(), e.capturedSlots.end());
-    std::sort(slots.begin(), slots.end());
-    for (int loxSlot : slots) {
-        e.b.emit("aconst_null", +1);
-        e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(loxSlot)), -1);
-    }
-}
-
 // The globals reference and, for a function chunk only, the argument
 // prologue (P5): `invoke`'s own JVM parameters are `self` (slot 1) and
 // `args` (slot 2, an Object[]). Copies `self` into the Lox frame's own
@@ -2077,7 +2056,6 @@ void preinitCapturedSlots(Emitter& e) {
 // argument prologue at all (frame slot 0 is the script's own never-read
 // callee, same as before functions/calls support existed).
 void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isScript) {
-    preinitCapturedSlots(e);
     if (isScript) {
         // Forward main's argv (JVM slot 0 — see jvm_emitter.h's layout) so
         // the args() native answers the same way the native VM's does. Runs

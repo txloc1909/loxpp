@@ -111,19 +111,26 @@ probes=(
     "examples/try_catch_invalid_receiver.lox"
     "examples/try_catch_nested_terminal_outer_catch.lox"
     "examples/try_catch_local_in_catch_then_sibling.lox"
-    # Issues #350/#388: a captured local's JVM register held one type
-    # (raw value) before its first capture and another (Object[1] cell)
-    # from then on, in one JVM local slot — the classic verifier this
-    # backend's classes rely on (no StackMapTable) rejected the class
-    # whenever that transition sat inside a try-protected region
-    # ("VerifyError: Register N contains wrong type"). preinitCapturedSlots
-    # (jvm_emitter.cpp) closes the gap; the probes below cover the two
-    # original repros, four generalizations (self-recursion plus a sibling
-    # capture, a loop-fresh-cell local, a nested try, self-recursion in a
-    # loop), and a correctness bug found while fixing it: a catch clause's
-    # own binding used to write through into a still-live cell an earlier,
-    # escaped closure in the same try body held (see the probe's own
-    # header comment).
+    # Issues #350/#388: a catch clause's own binding read its slot's stale
+    # content unconditionally (emitCapturedStore's raw-or-cell check)
+    # whenever that slot's index was already marked captured. That read
+    # sits at the very top of the exception handler, the one point the
+    # classic verifier this backend's classes rely on (no StackMapTable)
+    # treats as reachable from every instruction in the guarded try
+    # region — including ones that run before the slot's own first-ever
+    # write, which a self-recursive local `fun`'s own seed (#350) or a
+    # captured local's own declaring store (#388) can both do from inside
+    # that same try. The verifier rejected the class:
+    # "VerifyError: Register N contains wrong type". isFreshDeclaration
+    # (jvm_emitter.cpp) recognizes the catch binding and routes it to a
+    # plain store instead, closing the gap. The probes below cover the two
+    # original repros, three generalizations that DO need this fix
+    # (self-recursion plus a sibling capture, a nested try, a catch
+    # binding that would otherwise write through into a still-live cell
+    # an earlier, escaped closure in the same try body held), and two more
+    # (a loop-fresh-cell local, self-recursion in a loop) that turn out
+    # not to need it — kept anyway as end-to-end coverage; each probe's
+    # own header comment says which.
     "examples/try_catch_self_recursive_closure.lox"
     "examples/try_catch_closure_over_try_local.lox"
     "examples/try_catch_self_recursion_with_sibling_capture.lox"

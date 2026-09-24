@@ -1051,11 +1051,6 @@ TEST(EmitProgram, ZeroUpvalueClosureConstructsGeneratedClass) {
     // Argument prologue (P5): self (JVM slot 1) copied into slot 4 (`a`'s
     // Lox-frame-slot-0 mirror, baseSlot=4 for a function chunk), then
     // args[0]/args[1] unpacked into slots 5/6 (`a`, `b`).
-    // No captured local anywhere in this chunk: the prologue's own captured-
-    // slot preinit (preinitCapturedSlots) has nothing to write, so this
-    // shape stays byte-identical to before that pass existed — the plain
-    // argument copy below is still the FIRST thing the prologue emits.
-    EXPECT_EQ(fn0.find("aconst_null"), std::string::npos) << fn0;
     EXPECT_NE(fn0.find("aload 1\n    astore 4\n"), std::string::npos) << fn0;
     EXPECT_NE(fn0.find("aload 2\n"
                        "    iconst_0\n"
@@ -2995,23 +2990,24 @@ TEST(EmitProgram, CaughtValueIsRecognizedWhenFunctionAlsoUsesDefer) {
         << "it and silently drop the deferred call (issue #240)";
 }
 
-// Issues #350/#388: a captured local's JVM register holds one type (raw
-// value) before its first capture and another (Object[1] cell) from then
-// on. The classic verifier that assembles this emitter's classes (no
-// StackMapTable) rejects that register with VerifyError whenever the
-// raw-to-cell transition sits inside a try-protected region, because it
-// computes the exception handler's entry type as the join over every
-// instruction in the region — including ones that run before the slot's
-// own first-ever write. preinitCapturedSlots (jvm_emitter.cpp, called from
-// emitPrologue) closes the gap by defining every captured slot to `null`
-// before the function body's first instruction, so the register always has
-// SOME type by the time any try region opens, at any nesting depth.
-TEST(EmitProgram, SelfRecursiveLocalFunDeclaredInsideTryPreinitializesItsSlot) {
+// Issues #350/#388: the catch clause's own binding used to read its
+// slot's stale content unconditionally (emitCapturedStore's raw-or-cell
+// check, first instruction `aload N`) whenever that slot's index
+// `capturedSlots` already marked captured. That read sits at the very
+// top of the exception handler, the one point the classic verifier
+// (this emitter's classes carry no StackMapTable) treats as reachable
+// from every instruction in the guarded try region — including ones
+// that run before the slot's own first-ever write, which a
+// self-recursive local `fun`'s own seed (#350) or a captured local's
+// own declaring store (#388) can both do from inside that same try.
+// isFreshDeclaration (jvm_emitter.cpp) recognizes the catch binding and
+// routes it to a plain store instead, removing that read entirely.
+TEST(EmitProgram, SelfRecursiveLocalFunDeclaredInsideTryVerifiesOnJvm) {
     // #350's own repro: a self-recursive local `fun` declared inside a
-    // `try`, never called. Reverting preinitCapturedSlots's own call in
-    // emitPrologue reproduces the bug this test pins: the prologue's very
-    // first instructions would no longer be the null preinit below, and
-    // tools/loxpp_jvm.sh on this same program would report
+    // `try`, never called. Before isFreshDeclaration, `e`'s own binding
+    // (reusing `f`'s slot) read that slot with an `instanceof` check
+    // before `f`'s own seed could be proven to have run on every
+    // exception path, and tools/loxpp_jvm.sh on this program reported
     // "VerifyError: Register N contains wrong type" (confirmed manually
     // against the unpatched emitter).
     MemoryManager mm;
@@ -3027,25 +3023,36 @@ TEST(EmitProgram, SelfRecursiveLocalFunDeclaredInsideTryPreinitializesItsSlot) {
     const std::string& j = classes[0].source;
 
     // f's own Lox slot 1 (jvmSlotForLocal(1) with baseSlot=2 for a script)
-    // is 3. The null preinit must run before try_0_start — the ONLY
-    // instructions between the globals setup and the first label are the
-    // preinit's own `aconst_null; astore 3`.
-    std::size_t preinitPos = j.find("aconst_null\n    astore 3\n");
-    ASSERT_NE(preinitPos, std::string::npos) << j;
-    std::size_t tryStartPos = j.find("try_0_start:");
-    ASSERT_NE(tryStartPos, std::string::npos) << j;
-    EXPECT_LT(preinitPos, tryStartPos)
-        << "the captured slot must be null-preinitialized before the try "
-           "region opens, or the classic verifier rejects the class:\n"
-        << j;
+    // is 3. The exact defect: emitCapturedStore's raw-or-cell check reads
+    // the slot (`aload`/`instanceof`) BEFORE the catch binding's own first
+    // write to it — the read-before-write the classic verifier rejects,
+    // since it cannot prove the slot is defined at handler entry across
+    // every exception-source instruction in the guarded region. A fresh
+    // declaration must never do that: its first touch of the slot must be
+    // a write.
+    std::size_t handlerStart = j.find("getValue()Ljava/lang/Object;");
+    ASSERT_NE(handlerStart, std::string::npos) << j;
+    std::size_t firstWrite = j.find("astore 3", handlerStart);
+    ASSERT_NE(firstWrite, std::string::npos) << j;
+    std::size_t firstRead = j.find("instanceof", handlerStart);
+    if (firstRead != std::string::npos) {
+        EXPECT_GT(firstRead, firstWrite)
+            << "the catch binding's own first touch of its slot must be a "
+               "write, never a read of the slot's stale content — a read "
+               "there is what the classic verifier rejected:\n"
+            << j;
+    }
     expectEveryJumpTargetIsLabeled(j);
 }
 
 // #388's own repro: a closure over a plain (non-self-recursive) local
 // declared inside the try body it is captured from, read only after the
-// whole try/catch completes. Same fix, different capture shape — this
-// pins that preinitCapturedSlots does not depend on self-recursion.
-TEST(EmitProgram, ClosureOverATryBodyLocalPreinitializesItsSlot) {
+// whole try/catch completes. Same fix, different capture shape — here the
+// catch body's own `print e` DOES legitimately read the slot afterward
+// (a real GET_LOCAL, correctly using the raw-or-cell check), so this test
+// also proves that legitimate read is not mistaken for the defect: only a
+// read reachable BEFORE the binding's own first write is disallowed.
+TEST(EmitProgram, ClosureOverATryBodyLocalVerifiesOnJvm) {
     MemoryManager mm;
     DecodedFunction fn = decodeScript("var fns = [];\n"
                                       "try {\n"
@@ -3061,29 +3068,20 @@ TEST(EmitProgram, ClosureOverATryBodyLocalPreinitializesItsSlot) {
     ASSERT_EQ(classes.size(), 2u);
     const std::string& j = classes[0].source;
 
-    std::size_t preinitPos = j.find("aconst_null\n    astore 3\n");
-    ASSERT_NE(preinitPos, std::string::npos) << j;
-    std::size_t tryStartPos = j.find("try_5_start:");
-    ASSERT_NE(tryStartPos, std::string::npos) << j;
-    EXPECT_LT(preinitPos, tryStartPos)
-        << "the captured slot must be null-preinitialized before the try "
-           "region opens, or the classic verifier rejects the class:\n"
+    std::size_t handlerStart = j.find("getValue()Ljava/lang/Object;");
+    ASSERT_NE(handlerStart, std::string::npos) << j;
+    std::size_t firstWrite = j.find("astore 3", handlerStart);
+    ASSERT_NE(firstWrite, std::string::npos) << j;
+    std::size_t firstRead = j.find("instanceof", handlerStart);
+    ASSERT_NE(firstRead, std::string::npos)
+        << "print e's own read must still be present:\n"
+        << j;
+    EXPECT_GT(firstRead, firstWrite)
+        << "the catch binding's own first touch of its slot must be a "
+           "write, never a read of the slot's stale content — a read "
+           "there is what the classic verifier rejected:\n"
         << j;
     expectEveryJumpTargetIsLabeled(j);
-}
-
-// A chunk with no captured locals at all draws an empty capturedSlots set
-// (jvm_emitter.cpp), so preinitCapturedSlots must add nothing — every probe
-// that predates this fix stays byte-identical. try/catch alone, with no
-// closure anywhere, is the plainest such shape.
-TEST(EmitScript, TryCatchWithNoCapturedLocalsGetsNoPreinit) {
-    MemoryManager mm;
-    DecodedFunction fn =
-        decodeScript("try { print 1; } catch (e) { print e; }", mm);
-    FunctionStackAnalysis analysis = analyzeStack(fn);
-    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
-
-    EXPECT_EQ(j.find("aconst_null\n    astore"), std::string::npos) << j;
 }
 
 // A catch clause's own binding (`catch (e) { ... }`) is always a FRESH

@@ -1,9 +1,15 @@
 // Generalization of issue #350/#388's fix: a closure capturing a local
 // declared in an OUTER try, itself inside an INNER, nested try/catch that
-// throws and is caught. preinitCapturedSlots (jvm_emitter.cpp) runs once
-// per function, so it must cover a captured slot no matter how many
-// try-protected regions, nested or sibling, the function body goes on to
-// open around it.
+// throws and is caught. The trigger is the OUTER catch's own `e` binding,
+// not the inner one: once the outer try's own scope closes (normally, or
+// if a fault ever escaped the inner catch), `e` reuses `x`'s slot — the
+// captured, still-live-via-`f` slot — even though this specific run never
+// actually enters the outer catch (the inner one handles the throw).
+// isFreshDeclaration (jvm_emitter.cpp) must still recognize that binding
+// as a fresh declaration, because the verifier checks every catch clause
+// a class contains, whether or not a given run ever reaches it. Confirmed:
+// this program hits the original "VerifyError: Register N contains wrong
+// type" when isFreshDeclaration is disabled.
 
 var fns = [];
 var doThrow = true;

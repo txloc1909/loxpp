@@ -1,8 +1,12 @@
 // Generalization of issue #350/#388's fix: a self-recursive local `fun`
 // AND a second local `fun` that captures an ordinary local, both declared
-// (and both captured) inside the SAME try block. Both captured slots must
-// be null-preinitialized before the try region opens (preinitCapturedSlots,
-// jvm_emitter.cpp), not just the one either original issue named alone.
+// (and both captured) inside the SAME try block. The catch clause's own
+// `e` binding reuses `x`'s slot (the first of the three top-level try
+// locals to be freed) -- isFreshDeclaration (jvm_emitter.cpp) must still
+// recognize it as a fresh declaration and route it to a plain store, not
+// just for the single-capture shape either original issue named alone.
+// Confirmed: this program hits the original "VerifyError: Register N
+// contains wrong type" when isFreshDeclaration is disabled.
 
 var fns = [];
 try {

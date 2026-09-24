@@ -1,11 +1,15 @@
-// Generalization of issue #350/#388's fix: a captured local re-declared on
-// every iteration of a `for` loop, with the whole loop inside a `try`
-// block (V1_fresh_cell.lox's own shape, wrapped in a try). Each iteration
-// must still get its own fresh cell (0, 1, 2 -- not 2, 2, 2) once the try
-// no longer blocks the class at verify time; preinitCapturedSlots
-// (jvm_emitter.cpp) runs once at function entry, not once per loop
-// iteration, so it must not interfere with the per-iteration re-seed
-// finishInstruction's own plain store already does.
+// Extra JVM coverage for issues #350/#388's shape family: a captured local
+// re-declared on every iteration of a `for` loop, with the whole loop
+// inside a `try` block (V1_fresh_cell.lox's own shape, wrapped in a try).
+// Each iteration must still get its own fresh cell (0, 1, 2 -- not 2, 2,
+// 2). Unlike the other examples in this group, this one does not actually
+// need this PR's own fix: `snapshot` is declared one block deeper than the
+// try's own top-level scope (inside the loop body), so the catch clause's
+// own `e` binding reuses a DIFFERENT, uncaptured slot, not `snapshot`'s —
+// confirmed by running this file against the emitter with both #350/#388
+// fixes removed, which already prints 0, 1, 2 correctly. Kept anyway as
+// coverage that a loop-fresh-cell closure inside a try/catch still
+// verifies and runs correctly end to end.
 
 var fns = [];
 try {
