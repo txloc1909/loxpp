@@ -3085,3 +3085,62 @@ TEST(EmitScript, TryCatchWithNoCapturedLocalsGetsNoPreinit) {
 
     EXPECT_EQ(j.find("aconst_null\n    astore"), std::string::npos) << j;
 }
+
+// A catch clause's own binding (`catch (e) { ... }`) is always a FRESH
+// declaration, never an assignment to an existing captured local — but its
+// slot index can be one `capturedSlots` already marks captured, from an
+// earlier, DIFFERENT local in the same try body that a closure captured
+// and that closure can still be live (escaped the try via a global, a
+// list, a return — #388's own shape again, with a throw added so the
+// catch clause actually runs). Before isFreshDeclaration (jvm_emitter.cpp),
+// `e`'s own SET_LOCAL went through emitCapturedStore's raw-or-cell check,
+// which sees that still-live cell and `aastore`s `e`'s value INTO it —
+// silently overwriting the escaped closure's own captured value instead of
+// binding `e`. This is a correctness bug, not a verifier rejection, so it
+// is pinned on the emitted shape here (see tools/check_jvm_probes.sh's
+// catch_binding_reuses_escaped_capture_cell.lox for the runtime proof).
+TEST(EmitScript,
+     CatchBindingReusingAnEscapedCaptureCellSlotDoesNotWriteThroughToIt) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("var fns = [];\n"
+                                      "try {\n"
+                                      "  var x = 41;\n"
+                                      "  fun c() { return x + 1; }\n"
+                                      "  fns.append(c);\n"
+                                      "  throw \"boom\";\n"
+                                      "} catch (e) { print e; }\n"
+                                      "print fns[0]();\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+    ASSERT_EQ(classes.size(), 2u);
+    const std::string& j = classes[0].source;
+
+    // The catch handler block runs from its own label to the next one
+    // (goto ...); isolate that slice so the try body's OWN (correct)
+    // instanceof checks for x's capture do not hide a regression here.
+    std::size_t handlerLabelPos = j.find(" using L_");
+    ASSERT_NE(handlerLabelPos, std::string::npos) << j;
+    std::string handlerLabel =
+        j.substr(handlerLabelPos + std::string(" using L_").size(),
+                 j.find('\n', handlerLabelPos) - handlerLabelPos -
+                     std::string(" using L_").size());
+    std::size_t handlerStart = j.find("L_" + handlerLabel + ":");
+    ASSERT_NE(handlerStart, std::string::npos) << j;
+    std::size_t handlerEnd = j.find("goto ", handlerStart);
+    ASSERT_NE(handlerEnd, std::string::npos) << j;
+    std::string handlerBlock =
+        j.substr(handlerStart, handlerEnd - handlerStart);
+
+    // The handler block's own `print e` also reads slot 3 through the
+    // ordinary runtime raw-or-cell check (emitCapturedGetLocal) — that one
+    // is correct (a read must still see whatever type is actually there)
+    // and does its own `aaload`, never `aastore`. Only the catch BINDING's
+    // own write must never reach an `aastore`.
+    EXPECT_EQ(handlerBlock.find("aastore"), std::string::npos)
+        << "the catch binding must never aastore e's value into whatever "
+           "escaped closure still holds this slot's old cell:\n"
+        << handlerBlock;
+    expectEveryJumpTargetIsLabeled(j);
+}

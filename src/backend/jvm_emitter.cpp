@@ -704,11 +704,43 @@ void emitGetLocal(Emitter& e, const DecodedInstruction& in) {
     }
 }
 
+// A catch clause's own binding (`catch (e) { ... }`, compiler.cpp's
+// tryStatement) is the one shape where a real, decoded SET_LOCAL
+// instruction is ALSO registered as an invisible-var declaring site for
+// the SAME slot at its OWN offset (abstract_stack.cpp's
+// findDeclaringPushIndices: the caught value has no push instruction of
+// its own — the exception mechanism places it there — so the catch entry
+// itself is the declaring site, the same way a plain `var`'s declaration
+// is). That double registration is this function's signal that `in` is a
+// fresh declaration, not an assignment, no matter what `e.isCaptured`
+// says about its slot index.
+//
+// The distinction matters because `capturedSlots` is coarse, slot-index
+// only (its own note above): the slot `e` binds into may still hold a
+// LIVE cell from an EARLIER, escaped closure's capture in this same try
+// body (#388's own shape — a local captured by a closure that outlives
+// the try, stored somewhere and called after the catch runs). Routing a
+// fresh declaration through emitCapturedStore's raw-or-cell check would
+// see that live cell, take its "already a cell" branch, and `aastore`
+// `e`'s value INTO it — silently overwriting the escaped closure's own
+// captured value, not `e`'s slot. A declaration must always plain-`astore`
+// over the slot instead, exactly like `finishInstruction`'s own
+// invisible-var store already does for every OTHER declaration — see
+// isFreshDeclaration's own note.
+bool isFreshDeclaration(const Emitter& e, const DecodedInstruction& in) {
+    auto it = e.invisibleVarsByOffset.find(in.offset);
+    if (it == e.invisibleVarsByOffset.end()) {
+        return false;
+    }
+    return std::find(it->second.begin(), it->second.end(), in.byteOperand) !=
+           it->second.end();
+}
+
 void emitSetLocal(Emitter& e, std::size_t i, const DecodedInstruction& in,
                   bool& consumedFollowingPop) {
     int slot = e.jvmSlotForLocal(in.byteOperand);
     bool fuse = e.fusablePop(i);
-    bool captured = e.isCaptured(in.byteOperand);
+    bool captured = e.isCaptured(in.byteOperand) && !isFreshDeclaration(e, in);
     // before[i].operandDepth() == 0 means the full abstract-stack analysis
     // already folded the peeked value into a named local (the eager
     // invisible-var materialization, abstract_stack.h) — nothing sits on the
