@@ -1928,3 +1928,101 @@ TEST(CaptureAnalysisTest, BreakOnlyForLoopRoutesThroughSharedAfterLoopClose) {
     EXPECT_TRUE(info.unreachableCloseOffsets.empty());
     EXPECT_TRUE(info.staticallyDeadCloseOffsets.empty());
 }
+
+// Regression for issue #320: a self-recursive local `fun` declared inside a
+// `catch` body. buildCfg never wires a generic predecessor edge into a
+// catch-target block (BasicBlock::isHandlerEntry) -- its real predecessors
+// are every THROW the protected region can reach, which this pass cannot
+// see. Pass 0 (computeFrameHeightsForCfg) already seeds a catch block's
+// entry by hand from its own PUSH_HANDLER; Pass 1 (runDataflow) did not,
+// so it never marked the catch block reachable, and Pass 2 then skipped
+// recording g's self-capture entirely, even though g runs at runtime
+// exactly like any other closure (native prints 0).
+TEST(CaptureAnalysisTest, ClosureDeclaredInCatchBodyGetsALiveRange) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer() {
+          try {
+            throw "boom";
+          } catch (e) {
+            fun g(n) { if (n == 0) return 0; return g(n - 1); }
+            print g(3);
+          }
+          print "after";
+        }
+        outer();
+    )",
+                                   "issue_320_catch_body_self_recursive_local");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* g = findByName(c.tree, "g");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(g, nullptr);
+    const FunctionCaptureInfo& gInfo = infoFor(c.captures, g->id);
+    ASSERT_FALSE(gInfo.ownUpvalues.empty())
+        << "g captures itself for its own recursive call";
+    int slot = gInfo.ownUpvalues.at(0).index;
+
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, slot);
+    ASSERT_EQ(ranges.size(), 1U)
+        << "one CLOSURE declares g, so exactly one live range must cover "
+        << "its self-capture";
+    EXPECT_EQ(ranges[0].capturingClosureOffsets.size(), 1U);
+}
+
+// Regression for issue #320's second scenario (approved plan, decision 2): a
+// closure in the try body and a closure in the catch body that capture the
+// same OUTER local (declared before the try) must resolve to the SAME live
+// range -- one shared cell. vm.cpp's handler unwind
+// (closeUpvalues(handlerToUse.stackTop)) only closes captures opened INSIDE
+// the protected try region; a capture from an outer scope stays open across
+// the unwind, so the catch body's closure must reuse it, not open a second,
+// unshared instance. This is the part ClosureDeclaredInCatchBodyGetsALiveRange
+// does not cover: that test's catch-body closure captures itself fresh, with
+// nothing already open to (wrongly) fail to share.
+TEST(CaptureAnalysisTest, TryBodyAndCatchBodyClosuresShareOneOuterCapture) {
+    Compiled c =
+        compileAndAnalyze(R"(
+        fun outer() {
+          var shared = 1;
+          var fromTry = nil;
+          var fromCatch = nil;
+          try {
+            fun inTry() { return shared; }
+            fromTry = inTry;
+            throw "boom";
+          } catch (e) {
+            fun inCatch() { return shared; }
+            fromCatch = inCatch;
+          }
+          print fromTry();
+          print fromCatch();
+        }
+        outer();
+    )",
+                          "issue_320_try_and_catch_share_outer_capture");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* inTry = findByName(c.tree, "inTry");
+    const DecodedFunction* inCatch = findByName(c.tree, "inCatch");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(inTry, nullptr);
+    ASSERT_NE(inCatch, nullptr);
+    const FunctionCaptureInfo& inTryInfo = infoFor(c.captures, inTry->id);
+    const FunctionCaptureInfo& inCatchInfo = infoFor(c.captures, inCatch->id);
+    ASSERT_FALSE(inTryInfo.ownUpvalues.empty());
+    ASSERT_FALSE(inCatchInfo.ownUpvalues.empty());
+    int slot = inTryInfo.ownUpvalues.at(0).index;
+    EXPECT_EQ(inCatchInfo.ownUpvalues.at(0).index, slot)
+        << "both closures capture the same outer local slot";
+
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, slot);
+    ASSERT_EQ(ranges.size(), 1U)
+        << "shared is captured before the try, so both closures must reuse "
+        << "the same already-open instance -- one cell, not two";
+    EXPECT_EQ(ranges[0].capturingClosureOffsets.size(), 2U)
+        << "both inTry's and inCatch's CLOSURE instructions must attribute "
+        << "to this one range";
+    EXPECT_TRUE(ranges[0].closedImplicitly)
+        << "shared is declared in outer's own top-level scope, so its cell "
+        << "closes with the frame, not an explicit CLOSE_UPVALUE";
+}

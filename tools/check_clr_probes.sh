@@ -236,9 +236,9 @@ probes=(
     # body unconditionally, so a fault #267 newly made catchable on
     # native (unbounded recursion, kind StackOverflowError) must now be
     # delivered as a real Error value here too, not left as the bare,
-    # uncatchable message it used to be. Lives in clr-only/ (see the probe
-    # file's own header comment for why); named here directly.
-    "test/translation-probes/clr-only/53_stack_overflow_catchable.lox"
+    # uncatchable message it used to be. Promoted to shared directory
+    # (issue #322) now that both backends deliver catchable StackOverflowError.
+    "test/translation-probes/57_stack_overflow_catchable.lox"
     # Issue #268: pins the success side of the frame-count ceiling boundary
     # (31_deep_recursion.lox below pins the failure side). Catches a
     # counter that starts too high and rejects a depth native accepts.
@@ -301,9 +301,9 @@ error_probes=(
     # (here, from a deferred call) must be fatal on the CLR backend too,
     # matching native's m_unwindingStackOverflow guard -- not caught by
     # the live handler below, the way a single, non-reentrant overflow is
-    # (53_stack_overflow_catchable.lox, above). Lives in clr-only/ (see the
-    # probe file's own header comment); named here directly.
-    "test/translation-probes/clr-only/54_stack_overflow_reentrant_fatal.lox"
+    # (57_stack_overflow_catchable.lox, above). Promoted to shared directory
+    # (issue #322) now that both backends match on reentrant overflow.
+    "test/translation-probes/58_stack_overflow_reentrant_fatal.lox"
     # Issue #362: an erase plus an insert in one for-in body restores the
     # net size, so a size check misses it. Both sides must fail with empty
     # stdout — the structural version check reports it instead.
@@ -319,7 +319,7 @@ error_probes=(
     # handler live anywhere in the program), not a static property of the
     # call site. LoxClosure.CallAsSelf used to build a catchable ArityError
     # unconditionally, so LoxOps.HandlerLive is what tells this case apart
-    # from a live-handler ArityError (53_stack_overflow_catchable.lox,
+    # from a live-handler ArityError (57_stack_overflow_catchable.lox,
     # above, and try_catch_class_constructor_arity.lox already cover that
     # one). Both sides must fail with empty stdout, not "defer-g\n".
     "test/translation-probes/57_defer_arity_fatal_fast_path.lox"
@@ -613,6 +613,10 @@ examples=(
     "examples/try_catch_nested_closure_escapes.lox"
     "examples/try_catch_self_recursive_closure_in_loop.lox"
     "examples/try_catch_catch_binding_reuses_capture_cell.lox"
+    # Issue #320: a closure declared inside a catch body (self-recursive
+    # local fun, and a shared outer capture across try/catch) used to
+    # crash capture_analysis.cpp's dataflow pass before any IL was emitted.
+    "examples/try_catch_closure_declared_in_catch_body.lox"
 )
 
 if [ ! -x "$native_bin" ]; then
