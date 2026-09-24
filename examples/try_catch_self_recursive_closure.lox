@@ -1,0 +1,17 @@
+// Regression for issue #350: a self-recursive local `fun`, declared inside
+// a `try` block and never called. On the JVM backend, the closure's own
+// slot goes straight from "never written" to an Object[1] capture cell
+// (seedSelfCaptureCell) at the point it declares itself -- and that first
+// write used to sit inside the try-protected region. The classic verifier
+// that assembles this backend's classes (no StackMapTable) rejects any
+// register whose type is not consistent across an entire guarded region,
+// including the instructions that run before its first-ever write, so it
+// used to reject this class with "VerifyError: Register N contains wrong
+// type" even though `f` is never actually called.
+
+try {
+    fun f() { return f(); }
+    print "declared";
+} catch (e) { print "no"; }
+
+// CHECK: declared

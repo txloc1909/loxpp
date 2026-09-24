@@ -1,0 +1,17 @@
+// Generalization of issue #350's fix: a self-recursive local `fun`,
+// re-declared on every iteration of a `for` loop, with the loop inside a
+// `try` block (V6_self_recursive_closure_in_loop.lox's own shape, wrapped
+// in a try). Each iteration must still seed its own fresh self-capture
+// cell (seedSelfCaptureCell, jvm_emitter.cpp) -- two closures from
+// different iterations must stay distinct, not alias the same cell.
+
+var fns = [];
+try {
+    for (var i = 0; i < 3; i = i + 1) {
+        fun f() { return f; }
+        fns.append(f);
+    }
+} catch (e) { print e; }
+print (fns[0] == fns[1]);
+
+// CHECK: false

@@ -111,6 +111,30 @@ probes=(
     "examples/try_catch_invalid_receiver.lox"
     "examples/try_catch_nested_terminal_outer_catch.lox"
     "examples/try_catch_local_in_catch_then_sibling.lox"
+    # Issues #350/#388: a captured local's JVM register held one type
+    # (raw value) before its first capture and another (Object[1] cell)
+    # from then on, in one JVM local slot — the classic verifier this
+    # backend's classes rely on (no StackMapTable) rejected the class
+    # whenever that transition sat inside a try-protected region
+    # ("VerifyError: Register N contains wrong type"). preinitCapturedSlots
+    # (jvm_emitter.cpp) closes the gap; the probes below cover the two
+    # original repros, four generalizations (self-recursion plus a sibling
+    # capture, a loop-fresh-cell local, a nested try, self-recursion in a
+    # loop), and a correctness bug found while fixing it: a catch clause's
+    # own binding used to write through into a still-live cell an earlier,
+    # escaped closure in the same try body held (see the probe's own
+    # header comment).
+    "examples/try_catch_self_recursive_closure.lox"
+    "examples/try_catch_closure_over_try_local.lox"
+    "examples/try_catch_self_recursion_with_sibling_capture.lox"
+    "examples/try_catch_loop_fresh_cell.lox"
+    "examples/try_catch_nested_closure_escapes.lox"
+    "examples/try_catch_self_recursive_closure_in_loop.lox"
+    "examples/try_catch_catch_binding_reuses_capture_cell.lox"
+    # Issue #386's own probe (issue #388's fix let it verify and run on
+    # JVM too — moved out of clr-only/, see the probe's own header
+    # comment). Also wired into tools/check_clr_probes.sh.
+    "test/translation-probes/60_throw_ends_try_binding.lox"
     # Issue #253/#254: fault-classification fixes for JVM backend (catchable
     # error construction and Error instance property access).
     "examples/try_catch_class_constructor_arity.lox"

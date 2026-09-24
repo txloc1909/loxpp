@@ -1,0 +1,28 @@
+// Generalization of issue #350/#388's fix: a closure capturing a local
+// declared in an OUTER try, itself inside an INNER, nested try/catch that
+// throws and is caught. preinitCapturedSlots (jvm_emitter.cpp) runs once
+// per function, so it must cover a captured slot no matter how many
+// try-protected regions, nested or sibling, the function body goes on to
+// open around it.
+
+var fns = [];
+var doThrow = true;
+try {
+    var x = 5;
+    try {
+        fun f() { return x; }
+        fns.append(f);
+        // Gated behind a flag, not an unconditional throw: an unconditional
+        // throw here would make the inner try body's own normal-completion
+        // close structurally unreachable, which the capture corpus keeps
+        // at zero (test_backend_capture.cpp's own CaptureAnalysisTest.
+        // NoAssertionFailureOnExamples measures this across every example)
+        // — see test/translation-probes/60_throw_ends_try_binding.lox's
+        // own header comment for the same pattern.
+        if (doThrow) { throw "inner"; }
+    } catch (e) { print "inner caught " + e; }
+} catch (e) { print "outer " + e; }
+print fns[0]();
+
+// CHECK: inner caught inner
+// CHECK: 5

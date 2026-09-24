@@ -1,0 +1,22 @@
+// Generalization of issue #350/#388's fix: a captured local re-declared on
+// every iteration of a `for` loop, with the whole loop inside a `try`
+// block (V1_fresh_cell.lox's own shape, wrapped in a try). Each iteration
+// must still get its own fresh cell (0, 1, 2 -- not 2, 2, 2) once the try
+// no longer blocks the class at verify time; preinitCapturedSlots
+// (jvm_emitter.cpp) runs once at function entry, not once per loop
+// iteration, so it must not interfere with the per-iteration re-seed
+// finishInstruction's own plain store already does.
+
+var fns = [];
+try {
+    for (var i = 0; i < 3; i = i + 1) {
+        var snapshot = i;
+        fun f() { return snapshot; }
+        fns.append(f);
+    }
+} catch (e) { print e; }
+for (var i = 0; i < 3; i = i + 1) print fns[i]();
+
+// CHECK: 0
+// CHECK: 1
+// CHECK: 2

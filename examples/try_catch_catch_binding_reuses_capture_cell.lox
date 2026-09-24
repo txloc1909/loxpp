@@ -1,0 +1,32 @@
+// Regression for a correctness bug found while fixing issues #350/#388: a
+// catch clause's own binding (`catch (e) { ... }`) is always a FRESH
+// declaration, never an assignment to an existing captured local -- but on
+// the JVM backend its slot index can be one `capturedSlots` already marks
+// captured, from an earlier, DIFFERENT local in the same try body whose
+// closure escapes the try (here, `c`, appended to `fns` and called after
+// the catch runs). Before this fix, `e`'s own SET_LOCAL went through the
+// generic captured-slot raw-or-cell check (emitCapturedStore), which saw
+// that still-live cell and wrote `e`'s value INTO it -- silently
+// corrupting `c`'s own captured value instead of binding `e`. This program
+// used to print "boom" correctly, then crash on `fns[0]()` with a type
+// error, because `x`'s cell held "boom" instead of 41 by the time `c` ran.
+
+var fns = [];
+var doThrow = true;
+try {
+    var x = 41;
+    fun c() { return x + 1; }
+    fns.append(c);
+    // Gated behind a flag, not an unconditional throw: an unconditional
+    // throw here would make the try body's own normal-completion close
+    // structurally unreachable, which the capture corpus keeps at zero
+    // (test_backend_capture.cpp's own CaptureAnalysisTest.
+    // NoAssertionFailureOnExamples measures this across every example) —
+    // see test/translation-probes/60_throw_ends_try_binding.lox's own
+    // header comment for the same pattern.
+    if (doThrow) { throw "boom"; }
+} catch (e) { print e; }
+print fns[0]();
+
+// CHECK: boom
+// CHECK: 42

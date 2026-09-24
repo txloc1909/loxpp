@@ -1,0 +1,17 @@
+// Regression for issue #388: a closure over a plain (non-self-recursive)
+// local declared inside the try body that captures it, called only after
+// the whole try/catch statement completes. Same root cause as #350's own
+// self-recursion shape (examples/try_catch_self_recursive_closure.lox):
+// the captured slot's raw-to-cell transition used to sit inside the
+// try-protected region, so the classic verifier rejected the class with
+// "VerifyError: Register N contains wrong type".
+
+var fns = [];
+try {
+    var x = 41;
+    fun c() { return x + 1; }
+    fns.append(c);
+} catch (e) { print e; }
+print str(fns[0]());
+
+// CHECK: 42

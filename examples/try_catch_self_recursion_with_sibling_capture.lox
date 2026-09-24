@@ -1,0 +1,17 @@
+// Generalization of issue #350/#388's fix: a self-recursive local `fun`
+// AND a second local `fun` that captures an ordinary local, both declared
+// (and both captured) inside the SAME try block. Both captured slots must
+// be null-preinitialized before the try region opens (preinitCapturedSlots,
+// jvm_emitter.cpp), not just the one either original issue named alone.
+
+var fns = [];
+try {
+    var x = 10;
+    fun f() { return f; }
+    fun g() { return x; }
+    fns.append(f);
+    fns.append(g);
+} catch (e) { print e; }
+print fns[1]();
+
+// CHECK: 10

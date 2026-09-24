@@ -558,7 +558,13 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // examples/defer_method_call_with_arg_match.lox (round 2, reviewer
     // finding), raising this to 184. Issue #421 adds
     // examples/defer_sibling_runs_after_throw.lox, raising this to 185.
-    ASSERT_EQ(files.size(), 185U);
+    // Issues #350/#388 add seven examples/try_catch_*.lox regressions
+    // (see tools/check_jvm_probes.sh's matching entries), raising this to
+    // 192, then test/translation-probes/60_throw_ends_try_binding.lox
+    // moves out of clr-only/ (uncounted there) into this directory (issue
+    // #388's own fix lets it verify and run on JVM too), raising this to
+    // 193.
+    ASSERT_EQ(files.size(), 193U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {
