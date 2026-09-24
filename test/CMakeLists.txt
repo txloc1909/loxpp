@@ -224,6 +224,21 @@ if(LOXPP_PYTHON3)
     set_tests_properties(BootstrapStackOverflow PROPERTIES
         ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
+
+    # Issue #410: none of the Resolver's compile-time static errors (break/
+    # continue outside a loop, return outside a function, defer outside a
+    # function) had an automated check that bootstrap's message and exit
+    # code match native's compiler. Same trace-noise constraint as
+    # BootstrapErrorKindCausesRuntime above -- the check reads only stderr,
+    # so the debug preset's trace noise (which lands on stdout) would not by
+    # itself corrupt it, but this test still skips on a debug build to stay
+    # consistent with its bootstrap-ctest siblings above.
+    add_test(NAME BootstrapResolverErrorParity
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_resolver_errors.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(BootstrapResolverErrorParity PROPERTIES
+        ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
 endif()
 
 # The *_gc targets share their source with a non-_gc twin. They run under GC
