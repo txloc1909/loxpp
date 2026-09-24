@@ -9,6 +9,9 @@ the second oracle in diff_sqlite.py.
   sample.db      - two small single-page tables (base stages 1-7).
   superheroes.db - one table spanning many pages, forcing interior table
                    b-tree traversal (base stage 8).
+  companies.db   - one large table with a single-column index and a rare
+                   match (6 rows out of 50,000), mirroring the challenge's
+                   own idx_companies_country shape (base stage 9).
 """
 import os
 import random
@@ -76,7 +79,35 @@ def make_superheroes_db():
     print("wrote", path, os.path.getsize(path))
 
 
+def make_companies_db():
+    path = os.path.join(FIXTURES, "companies.db")
+    if os.path.exists(path):
+        os.remove(path)
+    con = sqlite3.connect(path)
+    cur = con.cursor()
+    cur.execute(
+        "CREATE TABLE companies (id integer primary key autoincrement, name text, country text)"
+    )
+    random.seed(7)
+    countries = [
+        "france", "japan", "brazil", "kenya", "norway", "chile", "qatar", "spain",
+        "peru", "laos", "nepal", "ghana", "wales", "malta", "sudan", "yemen",
+    ]
+    eritrea_ids = set(random.sample(range(1, 50001), 6))
+    rows = []
+    for i in range(1, 50001):
+        name = "company-%05d" % i
+        country = "eritrea" if i in eritrea_ids else random.choice(countries)
+        rows.append((name, country))
+    cur.executemany("INSERT INTO companies (name, country) VALUES (?, ?)", rows)
+    cur.execute("CREATE INDEX idx_companies_country ON companies (country)")
+    con.commit()
+    con.close()
+    print("wrote", path, os.path.getsize(path))
+
+
 if __name__ == "__main__":
     os.makedirs(FIXTURES, exist_ok=True)
     make_sample_db()
     make_superheroes_db()
+    make_companies_db()

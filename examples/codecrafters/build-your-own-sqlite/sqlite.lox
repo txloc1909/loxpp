@@ -170,6 +170,41 @@ fun collectRows(pageNum, out) {
     return out;
 }
 
+// Point lookup of one row by rowid, descending the table b-tree via each
+// interior cell's key (the largest rowid in that cell's left subtree) —
+// O(depth) page visits instead of a full collectRows() scan. Returns the
+// matching leaf cell's payload, or nil if rowid is absent.
+fun findRowByRowid(pageNum, rowid) {
+    var h = parsePageHeader(pageNum);
+    if (h["type"] == 13) {
+        var i = 0;
+        while (i < h["numCells"]) {
+            var off = h["offsets"][i];
+            var sizeR = readVarint(h["bytes"], off);
+            var payloadSize = sizeR[0];
+            var p = off + sizeR[1];
+            var ridR = readVarint(h["bytes"], p);
+            if (ridR[0] == rowid) {
+                p = p + ridR[1];
+                return h["bytes"][p:p + payloadSize];
+            }
+            i = i + 1;
+        }
+        return nil;
+    }
+    var i = 0;
+    while (i < h["numCells"]) {
+        var off = h["offsets"][i];
+        var child = u32(h["bytes"], off);
+        var keyR = readVarint(h["bytes"], off + 4);
+        if (rowid <= keyR[0]) {
+            return findRowByRowid(child, rowid);
+        }
+        i = i + 1;
+    }
+    return findRowByRowid(h["rightMost"], rowid);
+}
+
 // ---------- record format ----------
 
 // Serial type -> value. Column type 7 (IEEE-754 float) is not decoded: no
@@ -232,6 +267,120 @@ fun parseRecord(payload) {
         i = i + 1;
     }
     return values;
+}
+
+// ---------- index b-tree (page types 2 = interior, 10 = leaf) ----------
+
+// Relational operators are Number-only in Lox++ (spec/04-semantics.md
+// "Comparison"), so ordering two index-key Strings needs a manual
+// byte-by-byte compare. Returns <0, 0, >0 like C's strcmp.
+fun strCompare(a, b) {
+    var n = len(a);
+    if (len(b) < n) {
+        n = len(b);
+    }
+    var i = 0;
+    while (i < n) {
+        var ca = byteAt(a, i);
+        var cb = byteAt(b, i);
+        if (ca != cb) {
+            return ca - cb;
+        }
+        i = i + 1;
+    }
+    return len(a) - len(b);
+}
+
+// An index leaf cell is varint(payloadSize) + payload — no separate rowid
+// varint (unlike a table leaf cell): the record itself carries the
+// rowid as its last column.
+fun indexLeafPayload(bytes, off) {
+    var sizeR = readVarint(bytes, off);
+    var p = off + sizeR[1];
+    return bytes[p:p + sizeR[0]];
+}
+
+// An index interior cell is a 4-byte left-child pointer followed by the
+// same varint(payloadSize) + payload as a leaf cell: interior cells carry
+// real index entries, not just routing thresholds like a table interior
+// cell does. Returns [childPage, payload].
+fun indexInteriorCell(bytes, off) {
+    var child = u32(bytes, off);
+    var sizeR = readVarint(bytes, off + 4);
+    var p = off + 4 + sizeR[1];
+    return [child, bytes[p:p + sizeR[0]]];
+}
+
+// Collects the rowids of every index entry whose (single, text) key
+// equals targetVal, appending to out. Exploits b-tree ordering to prune:
+// on an interior page, a cell whose key is greater than targetVal proves
+// every cell and child to its right is too (index entries sort by key
+// then by rowid, so equal keys can still span more than one cell/page —
+// scanning continues, rather than stopping, while keys stay equal).
+// O(depth + matches) page visits, not a full-table scan.
+fun walkIndex(pageNum, targetVal, out) {
+    var h = parsePageHeader(pageNum);
+    if (h["type"] == 10) {
+        var i = 0;
+        while (i < h["numCells"]) {
+            var payload = indexLeafPayload(h["bytes"], h["offsets"][i]);
+            var vals = parseRecord(payload);
+            var cmp = strCompare(vals[0], targetVal);
+            if (cmp == 0) {
+                out.append(vals[len(vals) - 1]);
+            } else if (cmp > 0) {
+                return;
+            }
+            i = i + 1;
+        }
+        return;
+    }
+    var i = 0;
+    while (i < h["numCells"]) {
+        var cell = indexInteriorCell(h["bytes"], h["offsets"][i]);
+        var vals = parseRecord(cell[1]);
+        var cmp = strCompare(targetVal, vals[0]);
+        if (cmp < 0) {
+            walkIndex(cell[0], targetVal, out);
+            return;
+        } else if (cmp == 0) {
+            walkIndex(cell[0], targetVal, out);
+            out.append(vals[len(vals) - 1]);
+        }
+        i = i + 1;
+    }
+    walkIndex(h["rightMost"], targetVal, out);
+}
+
+// Parses "CREATE INDEX name ON table (column)" into [table, column].
+// Single-column only — matches the challenge's idx_companies_country
+// shape; a multi-column CREATE INDEX is not recognised by findIndexFor.
+fun parseIndexInfo(sql) {
+    var tokens = tokenize(sql);
+    var i = 0;
+    while (upper(tokens[i]["text"]) != "ON") {
+        i = i + 1;
+    }
+    var table = tokens[i + 1]["text"];
+    var column = tokens[i + 3]["text"]; // skip ON, table, "("
+    return [table, column];
+}
+
+// Finds a single-column index on tableName.columnName, returning its
+// root page, or nil if none exists — the caller then falls back to a
+// full table scan.
+fun findIndexFor(schema, tableName, columnName) {
+    var i = 0;
+    while (i < len(schema)) {
+        if (schema[i]["type"] == "index" and schema[i]["tblName"] == tableName) {
+            var info = parseIndexInfo(schema[i]["sql"]);
+            if (info[1] == columnName) {
+                return schema[i]["rootpage"];
+            }
+        }
+        i = i + 1;
+    }
+    return nil;
 }
 
 // ---------- schema (sqlite_schema, a.k.a. sqlite_master, always page 1) ----------
@@ -494,33 +643,66 @@ fun stringify(v) {
     return v;
 }
 
+// Gathers the value list for every row matching the query's WHERE clause
+// (or every row, when there is none), applying the rowid-alias
+// substitution along the way. Uses an index for an indexed equality
+// WHERE (O(depth + matches) page visits: walkIndex() to the matching
+// rowids, then findRowByRowid() per rowid); falls back to a full table
+// scan otherwise — collectRows() plus an in-Lox++ filter, exactly like
+// the pre-index base stages.
+fun matchingRows(schema, table, names, rowidAliasIndex, query) {
+    var results = [];
+    var whereIdx = -1;
+    if (query["whereCol"] != nil) {
+        whereIdx = columnIndex(names, query["whereCol"]);
+    }
+
+    var idxRoot = nil;
+    if (query["whereCol"] != nil) {
+        idxRoot = findIndexFor(schema, query["table"], query["whereCol"]);
+    }
+
+    if (idxRoot != nil) {
+        var rowids = [];
+        walkIndex(idxRoot, query["whereVal"], rowids);
+        var i = 0;
+        while (i < len(rowids)) {
+            var payload = findRowByRowid(table["rootpage"], rowids[i]);
+            var vals = parseRecord(payload);
+            if (rowidAliasIndex >= 0) {
+                vals[rowidAliasIndex] = rowids[i];
+            }
+            results.append(vals);
+            i = i + 1;
+        }
+        return results;
+    }
+
+    var rows = collectRows(table["rootpage"], []);
+    var i = 0;
+    while (i < len(rows)) {
+        var vals = parseRecord(rows[i][1]);
+        if (rowidAliasIndex >= 0) {
+            vals[rowidAliasIndex] = rows[i][0];
+        }
+        if (whereIdx < 0 or vals[whereIdx] == query["whereVal"]) {
+            results.append(vals);
+        }
+        i = i + 1;
+    }
+    return results;
+}
+
 fun runSelect(schema, query) {
     var table = findTable(schema, query["table"]);
     var parsed = parseColumns(table["sql"]);
     var names = parsed[0];
     var rowidAliasIndex = parsed[1];
 
-    var rows = collectRows(table["rootpage"], []);
-
-    var whereIdx = -1;
-    if (query["whereCol"] != nil) {
-        whereIdx = columnIndex(names, query["whereCol"]);
-    }
+    var rows = matchingRows(schema, table, names, rowidAliasIndex, query);
 
     if (query["count"]) {
-        var count = 0;
-        var i = 0;
-        while (i < len(rows)) {
-            var vals = parseRecord(rows[i][1]);
-            if (rowidAliasIndex >= 0) {
-                vals[rowidAliasIndex] = rows[i][0];
-            }
-            if (whereIdx < 0 or vals[whereIdx] == query["whereVal"]) {
-                count = count + 1;
-            }
-            i = i + 1;
-        }
-        print str(count);
+        print str(len(rows));
         return;
     }
 
@@ -533,22 +715,17 @@ fun runSelect(schema, query) {
 
     var i = 0;
     while (i < len(rows)) {
-        var vals = parseRecord(rows[i][1]);
-        if (rowidAliasIndex >= 0) {
-            vals[rowidAliasIndex] = rows[i][0];
-        }
-        if (whereIdx < 0 or vals[whereIdx] == query["whereVal"]) {
-            var out = "";
-            var j = 0;
-            while (j < len(selIdx)) {
-                if (j > 0) {
-                    out = out + "|";
-                }
-                out = out + stringify(vals[selIdx[j]]);
-                j = j + 1;
+        var vals = rows[i];
+        var out = "";
+        var j = 0;
+        while (j < len(selIdx)) {
+            if (j > 0) {
+                out = out + "|";
             }
-            print out;
+            out = out + stringify(vals[selIdx[j]]);
+            j = j + 1;
         }
+        print out;
         i = i + 1;
     }
 }
