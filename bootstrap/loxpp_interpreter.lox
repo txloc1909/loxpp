@@ -1201,6 +1201,7 @@ class Resolver {
     resolveDefer(line, callee, args) {
         if (this.currentFunction == "NONE") {
             this.resError("defer", line, "Can't defer at the top level.");
+            return;
         }
         this.resolveExpr(callee);
         var i = 0;
@@ -1235,6 +1236,7 @@ class Resolver {
     resolveReturn(line, value) {
         if (this.currentFunction == "NONE") {
             this.resError("return", line, "Can't return from top-level code.");
+            return;
         }
         if (value != nil) {
             if (this.currentFunction == "INITIALIZER") {

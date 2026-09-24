@@ -75,6 +75,15 @@ CASES = [
     # `nothing` need not exist: both compilers reject the statement before
     # ever asking whether the callee resolves to anything.
     Case("defer_outside_function", "defer nothing();\n"),
+    # `this`/`super` are themselves invalid outside a class, so a return/
+    # defer value that uses one exercises whether the "outside a function"
+    # check actually stops there. Native's compiler returns immediately
+    # after the first error (src/compiler.cpp's returnStatement/
+    # deferStatement) and never parses the value/callee at all; a bootstrap
+    # Resolver that fell through to resolveExpr(value/callee) after its own
+    # resError would print this second, native-never-produces error too.
+    Case("return_value_outside_function", "return this;\n"),
+    Case("defer_callee_outside_function", "defer this();\n"),
 ]
 
 
