@@ -20,6 +20,7 @@ ROOT = os.path.dirname(HERE)
 PROG = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "your_sqlite.sh")
 SAMPLE = os.path.join(HERE, "fixtures", "sample.db")
 SUPERHEROES = os.path.join(HERE, "fixtures", "superheroes.db")
+COMPANIES = os.path.join(HERE, "fixtures", "companies.db")
 
 CASES = [
     (SAMPLE, "SELECT COUNT(*) FROM apples"),
@@ -35,6 +36,13 @@ CASES = [
     (SUPERHEROES, "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes'"),
     (SUPERHEROES, "SELECT id, name FROM superheroes WHERE eye_color = 'Blue Eyes'"),
     (SUPERHEROES, "SELECT name FROM superheroes WHERE eye_color = 'no such color'"),
+    # companies.db has idx_companies_country on country: these exercise the
+    # index-scan path (walkIndex + findRowByRowid), not the full-scan
+    # fallback the other cases above use.
+    (COMPANIES, "SELECT COUNT(*) FROM companies"),
+    (COMPANIES, "SELECT id, name FROM companies WHERE country = 'eritrea'"),
+    (COMPANIES, "SELECT id, name FROM companies WHERE country = 'france'"),
+    (COMPANIES, "SELECT id FROM companies WHERE country = 'no such country'"),
 ]
 
 
