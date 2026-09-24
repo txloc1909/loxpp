@@ -2001,6 +2001,42 @@ Emitter buildEmitter(const DecodedFunction& fn,
     return e;
 }
 
+// A captured slot's JVM register can be read by the runtime raw-or-cell
+// check (emitCapturedGetLocal/emitCapturedStore/ensureCapturedCell) from
+// inside an exception handler whose guarded region starts before that
+// slot's own Lox declaration ever runs — a self-recursive local `fun`
+// declared inside a `try` (#350), or any local captured while its own
+// declaring `try` is still open (#388). The classic verifier (this
+// emitter's classes carry no StackMapTable — see assembleClass) computes
+// an exception handler's entry type for every register as the join over
+// EVERY instruction in the guarded region, since any one of them could be
+// where the exception happens — including instructions that run before
+// the slot's first-ever write. An unwritten JVM local carries no usable
+// type at that point ("top"), so a later read rejects the whole class
+// ("Register N contains wrong type"), even though no Lox program can ever
+// actually observe that stale/absent value: the guarded region's own
+// declaring store (or, for a reused slot, the catch clause's own binding)
+// always overwrites it before any real use.
+//
+// Defining every captured slot to `null` here, before the function body's
+// first instruction, gives the verifier one consistent type for the whole
+// function — including every guarded region the body goes on to open, at
+// any nesting depth — with no runtime effect: every real declaration
+// still re-`astore`s (or self-seeds, seedSelfCaptureCell) the slot
+// unconditionally, exactly as it always has. `capturedSlots` is coarse,
+// slot-index-only (its own note above), which is exactly what this needs:
+// one write per physical register, covering every incarnation and every
+// try region that register's index ever appears inside, not just the
+// first one.
+void preinitCapturedSlots(Emitter& e) {
+    std::vector<int> slots(e.capturedSlots.begin(), e.capturedSlots.end());
+    std::sort(slots.begin(), slots.end());
+    for (int loxSlot : slots) {
+        e.b.emit("aconst_null", +1);
+        e.b.emit("astore " + std::to_string(e.jvmSlotForLocal(loxSlot)), -1);
+    }
+}
+
 // The globals reference and, for a function chunk only, the argument
 // prologue (P5): `invoke`'s own JVM parameters are `self` (slot 1) and
 // `args` (slot 2, an Object[]). Copies `self` into the Lox frame's own
@@ -2009,6 +2045,7 @@ Emitter buildEmitter(const DecodedFunction& fn,
 // argument prologue at all (frame slot 0 is the script's own never-read
 // callee, same as before functions/calls support existed).
 void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isScript) {
+    preinitCapturedSlots(e);
     if (isScript) {
         // Forward main's argv (JVM slot 0 — see jvm_emitter.h's layout) so
         // the args() native answers the same way the native VM's does. Runs

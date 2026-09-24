@@ -1051,6 +1051,11 @@ TEST(EmitProgram, ZeroUpvalueClosureConstructsGeneratedClass) {
     // Argument prologue (P5): self (JVM slot 1) copied into slot 4 (`a`'s
     // Lox-frame-slot-0 mirror, baseSlot=4 for a function chunk), then
     // args[0]/args[1] unpacked into slots 5/6 (`a`, `b`).
+    // No captured local anywhere in this chunk: the prologue's own captured-
+    // slot preinit (preinitCapturedSlots) has nothing to write, so this
+    // shape stays byte-identical to before that pass existed — the plain
+    // argument copy below is still the FIRST thing the prologue emits.
+    EXPECT_EQ(fn0.find("aconst_null"), std::string::npos) << fn0;
     EXPECT_NE(fn0.find("aload 1\n    astore 4\n"), std::string::npos) << fn0;
     EXPECT_NE(fn0.find("aload 2\n"
                        "    iconst_0\n"
@@ -2988,4 +2993,95 @@ TEST(EmitProgram, CaughtValueIsRecognizedWhenFunctionAlsoUsesDefer) {
         << "function also uses defer, or the defer list's own slot "
         << "(computeMaxLocalCount + 1, jvm_emitter.cpp) can land on top of "
         << "it and silently drop the deferred call (issue #240)";
+}
+
+// Issues #350/#388: a captured local's JVM register holds one type (raw
+// value) before its first capture and another (Object[1] cell) from then
+// on. The classic verifier that assembles this emitter's classes (no
+// StackMapTable) rejects that register with VerifyError whenever the
+// raw-to-cell transition sits inside a try-protected region, because it
+// computes the exception handler's entry type as the join over every
+// instruction in the region — including ones that run before the slot's
+// own first-ever write. preinitCapturedSlots (jvm_emitter.cpp, called from
+// emitPrologue) closes the gap by defining every captured slot to `null`
+// before the function body's first instruction, so the register always has
+// SOME type by the time any try region opens, at any nesting depth.
+TEST(EmitProgram, SelfRecursiveLocalFunDeclaredInsideTryPreinitializesItsSlot) {
+    // #350's own repro: a self-recursive local `fun` declared inside a
+    // `try`, never called. Reverting preinitCapturedSlots's own call in
+    // emitPrologue reproduces the bug this test pins: the prologue's very
+    // first instructions would no longer be the null preinit below, and
+    // tools/loxpp_jvm.sh on this same program would report
+    // "VerifyError: Register N contains wrong type" (confirmed manually
+    // against the unpatched emitter).
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("try {\n"
+                                      "    fun f() { return f(); }\n"
+                                      "    print \"declared\";\n"
+                                      "} catch (e) { print \"no\"; }\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+    ASSERT_EQ(classes.size(), 2u);
+    const std::string& j = classes[0].source;
+
+    // f's own Lox slot 1 (jvmSlotForLocal(1) with baseSlot=2 for a script)
+    // is 3. The null preinit must run before try_0_start — the ONLY
+    // instructions between the globals setup and the first label are the
+    // preinit's own `aconst_null; astore 3`.
+    std::size_t preinitPos = j.find("aconst_null\n    astore 3\n");
+    ASSERT_NE(preinitPos, std::string::npos) << j;
+    std::size_t tryStartPos = j.find("try_0_start:");
+    ASSERT_NE(tryStartPos, std::string::npos) << j;
+    EXPECT_LT(preinitPos, tryStartPos)
+        << "the captured slot must be null-preinitialized before the try "
+           "region opens, or the classic verifier rejects the class:\n"
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// #388's own repro: a closure over a plain (non-self-recursive) local
+// declared inside the try body it is captured from, read only after the
+// whole try/catch completes. Same fix, different capture shape — this
+// pins that preinitCapturedSlots does not depend on self-recursion.
+TEST(EmitProgram, ClosureOverATryBodyLocalPreinitializesItsSlot) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("var fns = [];\n"
+                                      "try {\n"
+                                      "    var x = 41;\n"
+                                      "    fun c() { return x + 1; }\n"
+                                      "    fns.append(c);\n"
+                                      "} catch (e) { print e; }\n"
+                                      "print fns[0]();\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+    ASSERT_EQ(classes.size(), 2u);
+    const std::string& j = classes[0].source;
+
+    std::size_t preinitPos = j.find("aconst_null\n    astore 3\n");
+    ASSERT_NE(preinitPos, std::string::npos) << j;
+    std::size_t tryStartPos = j.find("try_5_start:");
+    ASSERT_NE(tryStartPos, std::string::npos) << j;
+    EXPECT_LT(preinitPos, tryStartPos)
+        << "the captured slot must be null-preinitialized before the try "
+           "region opens, or the classic verifier rejects the class:\n"
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// A chunk with no captured locals at all draws an empty capturedSlots set
+// (jvm_emitter.cpp), so preinitCapturedSlots must add nothing — every probe
+// that predates this fix stays byte-identical. try/catch alone, with no
+// closure anywhere, is the plainest such shape.
+TEST(EmitScript, TryCatchWithNoCapturedLocalsGetsNoPreinit) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("try { print 1; } catch (e) { print e; }", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_EQ(j.find("aconst_null\n    astore"), std::string::npos) << j;
 }
