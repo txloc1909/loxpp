@@ -562,8 +562,10 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // 58_stack_overflow_reentrant_fatal.lox from clr-only/ into this
     // non-recursive scan, and adds four jvm-only defer/overflow-unwind
     // regression probes at this directory's top level too, raising this
-    // to 191.
-    ASSERT_EQ(files.size(), 191U);
+    // to 191. Issue #320 adds
+    // examples/try_catch_closure_declared_in_catch_body.lox, raising this
+    // to 192.
+    ASSERT_EQ(files.size(), 192U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {
