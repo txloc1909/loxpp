@@ -3268,7 +3268,17 @@ class Interpreter {
                     if (this.throwFlag) return nil;
                     if (!this.isTruthy(guardVal)) doBody = false;
                 }
-                if (doBody) return this.evalMatchArmBody(arm, armEnv);
+                if (doBody) {
+                    // No leading statements (the pre-#434 plain-expression
+                    // arm, or a `{ }` block with nothing but a tail
+                    // expression): evaluate it directly, matching the exact
+                    // pre-#434 call depth. tools/check_bootstrap_headroom.sh
+                    // (issue #248) calibrates a floor for match-shaped
+                    // recursion against that depth; routing this common case
+                    // through evalMatchArmBody's extra native frame broke it.
+                    if (len(arm.bodyStmts) == 0) return this.evalExpr(arm.bodyExpr, armEnv);
+                    return this.evalMatchArmBody(arm, armEnv);
+                }
             }
             i = i + 1;
         }
