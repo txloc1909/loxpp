@@ -491,6 +491,15 @@ examples=(
     # defer_return_value.lox (issue #311): `return EXPR;` must evaluate
     # EXPR before any pending defer runs, not after.
     "examples/defer_return_value.lox"
+    # defer_stack_overflow_count.lox (issue #326): a stack overflow that
+    # unwinds past a chain of defer-holding frames must run exactly one
+    # deferred call per frame entered. Only passed on CLR once issue #446's
+    # fix (LoxClosure's own FramesMaxReserve, mirroring src/vm.h's
+    # STACK_OVERFLOW_FRAME_RESERVE) gave a deferred call room to actually
+    # run before its own frame's s_frameCount was decremented — every
+    # unwound frame's own `noop()` call needs this, not only
+    # defer_replaces_overflow.lox's single one.
+    "examples/defer_stack_overflow_count.lox"
     # The JVM-side referee's own PR #237 regression examples (issue #240's
     # repro, plus shapes (A)/(B) from that PR's rounds 2-3), inherited by
     # this branch's rebase onto main for the shared local-recognition and
