@@ -149,9 +149,9 @@ probes=(
     "examples/try_catch_error_vs_ordinary_instance_catchability.lox"
     # Issue #268: LoxClosure's own frame-count ceiling delivers a catchable
     # StackOverflowError, matching native's kind, message, and post-catch
-    # continuation. jvm-only/ because the CLR backend still delivers this
-    # same fault with the wrong catchability as of this probe (issue #238).
-    "test/translation-probes/jvm-only/catch_overflow.lox"
+    # continuation. Promoted out of jvm-only/ (issue #445) once a live CLR
+    # run confirmed this exact probe now matches native too.
+    "test/translation-probes/catch_overflow.lox"
     # Issue #268: pins the success side of the frame-count ceiling boundary
     # (31_deep_recursion.lox below pins the failure side). Catches a
     # counter that starts too high and rejects a depth native accepts.

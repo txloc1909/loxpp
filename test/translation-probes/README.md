@@ -69,7 +69,7 @@ each has an off-the-shelf solution.
 | `53_deep_recursion_boundary` | the success side of the boundary `31_deep_recursion` pins the failure side of: 1022 nested calls is the deepest depth every backend still accepts | P5, P6 |
 | `57_stack_overflow_catchable` | unbounded recursion overflows `LoxClosure`'s own frame-count ceiling; a live `try`/`catch` must catch a real `Error` value with kind `StackOverflowError`, matching native (spec/04-semantics.md) — promoted from clr-only (issue #322) | P6 |
 | `58_stack_overflow_reentrant_fatal` | a second `StackOverflowError` raised by a deferred call while the first is still unwinding is fatal, not delivered to any `catchBlock` (spec/04-semantics.md line 1120) — promoted from clr-only (issue #322), companion to `57_stack_overflow_catchable` | P5, P6 |
-| `jvm-only/catch_overflow` | `LoxClosure`'s frame-count ceiling delivers a catchable `StackOverflowError` on the JVM backend, matching native's kind, message, and post-catch continuation — JVM-only, see the note below the table | P5, P6 |
+| `catch_overflow` | `LoxClosure`'s frame-count ceiling delivers a catchable `StackOverflowError`, matching native's kind, message, and post-catch continuation — promoted from jvm-only (issue #445) | P5, P6 |
 | `defer_overflow_during_unwind` | a `StackOverflowError` raised by a deferred call while another one is still unwinding is fatal on every backend, not delivered to any `catchBlock` (`spec/04-semantics.md` line 1120) — promoted from jvm-only (issue #322) | P5, P6 |
 | `jvm-only/defer_replaces_overflow` | a deferred call's own throw, uncaught within it, replaces a `StackOverflowError` still unwinding (`spec/04-semantics.md` defer Statement step 5); the unwind guard must still clear so a later, unrelated overflow is caught — JVM-only, see the note below the table | P5, P6 |
 | `defer_overflow_kind_spoof` | a plain instance whose `kind` field spoofs `"StackOverflowError"`, thrown and caught entirely inside a deferred call, must not clear the unwind guard early while a real `StackOverflowError` is still unwinding — promoted from jvm-only (issue #322) | P5, P6 |
@@ -109,14 +109,16 @@ into this directory as `57_stack_overflow_catchable` and `58_stack_overflow_reen
 `31_deep_recursion` used to sit beside them for the same reason; it moved directly into
 this directory once the JVM backend grew its own frame-count ceiling to match (issue #268).
 
-`jvm-only/catch_overflow`, `jvm-only/defer_replaces_overflow` sit one level down
-for the mirror-image reason: `tools/diff_runtimes.py`'s CI step for the CLR
-backend walks `clr-only/` too (comparing native against CLR), and these two
-probes remain here while the CLR backend still delivers a
-`StackOverflowError` with the wrong catchability (issue #238). `#238` has
-since closed for most cases; promoting these two probes into this directory
-is tracked separately (issue #322). `tools/check_jvm_probes.sh` runs each one
-by name for the JVM checkpoint.
+`jvm-only/defer_replaces_overflow` sits one level down for the mirror-image
+reason: `tools/diff_runtimes.py`'s CI step for the CLR backend walks
+`clr-only/` too (comparing native against CLR), and this probe stays here
+because the CLR backend still crashes on it (`SIGABRT`, an unhandled
+`LoxError: Stack overflow.` propagating out of `LoxOps.RunDefers`/
+`LoxClosure.Call` — issue #417, reopened with a fresh repro). `catch_overflow`
+used to sit beside it for the same #238 reason; that issue is closed and a
+live CLR run now confirms `catch_overflow` matches native, so it moved into
+this directory (issue #445). `tools/check_jvm_probes.sh` still runs
+`defer_replaces_overflow` by name for the JVM checkpoint.
 
 `defer_overflow_during_unwind`, `defer_overflow_kind_spoof`,
 `defer_throw_on_normal_return_during_unwind`, and
