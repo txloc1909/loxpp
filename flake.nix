@@ -31,7 +31,7 @@
         "-G" "Ninja"
       ];
       mkLoxppDerivation = derivationArgs:
-        pkgs.clangStdenv.mkDerivation ({
+        pkgs.stdenv.mkDerivation ({
           name = derivationArgs.name;
           src = pkgs.cleanSource ./.;
           nativeBuildInputs = buildDeps;
@@ -73,11 +73,6 @@
 
       devShells.default = pkgs.mkShell {
         buildInputs = buildDeps ++ [
-          clang-format
-          clang-tidy
-          ccache
-          tree-sitter
-          neovim
           git
         ];
         shellHook = ''
