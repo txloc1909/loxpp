@@ -92,26 +92,56 @@ public static class StackDepthTest {
             LoxOps.ExitHandler();
         }
 
-        // Issue #316: a second overflow while the first is still
-        // unwinding (s_unwindingStackOverflow already true, e.g. from a
-        // deferred call running mid-unwind) must be fatal, not catchable
-        // -- matching src/vm.cpp's m_unwindingStackOverflow. A real Lox++
-        // program sets this flag only through the ceiling check itself;
-        // drive it directly here, the same way the block above drives
-        // s_frameCount directly, since no C# unit test runs through the
-        // generated-CIL catch prologue that would set it another way.
+        // Issue #446: a deferred call drained mid-unwind (the generated
+        // catch prologue's own call to LoxOps.RunDefers, clr_emitter.cpp)
+        // runs while its own frame's s_frameCount has not yet been
+        // decremented -- that only happens in this class's own `finally`,
+        // once Invoke returns to it -- so it needs room of its own above
+        // FramesMax to make any nested call at all while
+        // s_unwindingStackOverflow is still true. FramesMaxReserve is that
+        // room (mirrors src/vm.h's STACK_OVERFLOW_FRAME_RESERVE). A real
+        // Lox++ program sets s_unwindingStackOverflow only through the
+        // ceiling check itself; drive it directly here, the same way the
+        // block above drives s_frameCount directly, since no C# unit test
+        // runs through the generated-CIL catch prologue that would set it
+        // another way.
+        // Expected reserve size (src/vm.h's own STACK_OVERFLOW_FRAME_RESERVE
+        // and runtime/jvm/src/lox/LoxClosure.java's FRAMES_RESERVE, both
+        // 16) is a LITERAL here, not read from LoxClosure.FramesMaxReserve
+        // via reflection: reading it back would make this test check the
+        // ceiling logic's own internal consistency with whatever the
+        // constant happens to be, not that the constant is actually big
+        // enough -- shrinking FramesMaxReserve by mistake would move both
+        // boundaries below and the checks would still "pass" against each
+        // other. A literal boundary is what actually catches that.
+        const int expectedReserve = 16;
+
         unwindingField.SetValue(null, true);
         try {
-            countField.SetValue(null, 1025);
-            DelegateClosure trivial = new DelegateClosure(
-                "trivial", 0, new object[0][], (self, a) => 0.0);
+            // Within the reserve: succeeds, matching a deferred call
+            // drained mid-unwind that itself makes an ordinary,
+            // non-recursive call.
+            countField.SetValue(null, 1024 + expectedReserve - 1);
+            DelegateClosure withinReserve = new DelegateClosure(
+                "withinReserve", 0, new object[0][], (self, a) => 42.0);
+            t.CheckEquals(42.0, withinReserve.Call(new object[0]),
+                "a call within the reserve while unwinding an overflow succeeds");
+
+            // At or past the reserve: fatal, not catchable, matching
+            // issue #316's original guard -- the reserve is small enough
+            // that no path through it can recurse for long, so a call
+            // that outruns it too is a genuine second overflow, not a
+            // shallow deferred call.
+            countField.SetValue(null, 1024 + expectedReserve);
+            DelegateClosure pastReserve = new DelegateClosure(
+                "pastReserve", 0, new object[0][], (self, a) => 0.0);
             try {
-                trivial.Call(new object[0]);
+                pastReserve.Call(new object[0]);
                 t.Check(false,
-                    "a call past FramesMax while already unwinding an overflow still overflows");
+                    "a call past the reserve while already unwinding an overflow still overflows");
             } catch (LoxError e) {
                 t.Check(!e.Catchable,
-                    "a second overflow while the first is still unwinding is fatal, not catchable");
+                    "a second overflow past the reserve while the first is still unwinding is fatal, not catchable");
             }
         } finally {
             countField.SetValue(null, savedCount);
