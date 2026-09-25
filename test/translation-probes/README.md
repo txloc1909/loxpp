@@ -114,7 +114,8 @@ reason: `tools/diff_runtimes.py`'s CI step for the CLR backend walks
 `clr-only/` too (comparing native against CLR), and this probe stays here
 because the CLR backend still crashes on it (`SIGABRT`, an unhandled
 `LoxError: Stack overflow.` propagating out of `LoxOps.RunDefers`/
-`LoxClosure.Call` — issue #417, reopened with a fresh repro). `catch_overflow`
+`LoxClosure.Call` — issue #446, a fresh repro superseding #417, closed
+2026-09-22 with no linked fix). `catch_overflow`
 used to sit beside it for the same #238 reason; that issue is closed and a
 live CLR run now confirms `catch_overflow` matches native, so it moved into
 this directory (issue #445). `tools/check_jvm_probes.sh` still runs
