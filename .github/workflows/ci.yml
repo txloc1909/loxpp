@@ -446,6 +446,84 @@ jobs:
               dart tool/bin/test.dart jlox --interpreter /workspace/bootstrap/lox_wrapper.sh
             "
 
+  codecrafters:
+    name: Codecrafters challenge suites
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dev image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          target: dev
+          tags: loxpp-dev:latest
+          cache-from: type=gha,scope=dev
+          cache-to: type=gha,mode=max,scope=dev
+
+      # release-preset key so this reuses build-and-test's release cache
+      # instead of starting cold.
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-codecrafters-${{ github.sha }}
+          restore-keys: |
+            ccache-codecrafters-
+            ccache-release-
+
+      # release, not debug: the debug preset's per-instruction trace would
+      # flood the stdout every case here asserts exactly, same reason
+      # build-and-test's bootstrap/differential steps use release.
+      - name: Build loxpp
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e CCACHE_DIR=/workspace/.ccache \
+            -e CCACHE_MAXSIZE=400M \
+            -e CCACHE_COMPRESS=1 \
+            loxpp-dev:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp"
+
+      - name: Build your own grep - transcribed stage suite
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            examples/codecrafters/build-your-own-grep/tests/run_stages.sh
+
+      - name: Build your own grep - differential vs GNU grep -E
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            examples/codecrafters/build-your-own-grep/tests/diff_grep.sh
+
+      # The fixtures are committed binaries (see the example's README); no
+      # generation step here, since gen_fixtures.py's output is not
+      # byte-stable across runs and running it would just dirty the tree.
+      - name: Build your own SQLite - transcribed stage suite
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            examples/codecrafters/build-your-own-sqlite/tests/run_stages.sh
+
+      - name: Build your own SQLite - differential vs Python sqlite3
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            python3 examples/codecrafters/build-your-own-sqlite/tests/diff_sqlite.py
+
   variant-value:
     name: Value representation (std::variant smoke)
     runs-on: ubuntu-latest
