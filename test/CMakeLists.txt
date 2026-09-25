@@ -13,7 +13,7 @@ endif()
 # compile it twice, once per flag variant.
 #
 # There are two variants because LOXPP_PROFILE changes the object code and
-# cannot be mixed at link time: it adds a member to MemoryManager and VM and
+# cannot be mixed at link time: it adds a member to MemoryManager and Runtime and
 # pulls in profiler.h. Each test executable links exactly one variant, so no
 # translation unit ever sees two definitions of the same symbol.
 #
@@ -24,6 +24,7 @@ endif()
 # does not.
 set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/vm.cpp
+    ${PROJECT_SOURCE_DIR}/src/runtime.cpp
     ${PROJECT_SOURCE_DIR}/src/math.cpp
     ${PROJECT_SOURCE_DIR}/src/compiler.cpp
     ${PROJECT_SOURCE_DIR}/src/parser.cpp
