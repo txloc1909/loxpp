@@ -569,8 +569,10 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // raising this to 199, then
     // test/translation-probes/60_throw_ends_try_binding.lox moves out of
     // clr-only/ (uncounted there) into this directory (issue #388's own
-    // fix lets it verify and run on JVM too), raising this to 200.
-    ASSERT_EQ(files.size(), 200U);
+    // fix lets it verify and run on JVM too), raising this to 200. Issue
+    // #445 promotes catch_overflow.lox out of jvm-only/ (uncounted there)
+    // once a live CLR run confirmed it matches native, raising this to 201.
+    ASSERT_EQ(files.size(), 201U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {

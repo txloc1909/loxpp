@@ -243,6 +243,11 @@ probes=(
     # (31_deep_recursion.lox below pins the failure side). Catches a
     # counter that starts too high and rejects a depth native accepts.
     "test/translation-probes/53_deep_recursion_boundary.lox"
+    # LoxClosure's own frame-count ceiling delivers a catchable
+    # StackOverflowError, matching native's kind, message, and post-catch
+    # continuation. Promoted out of jvm-only/ (issue #445) once a live CLR
+    # run confirmed this exact probe now matches native too.
+    "test/translation-probes/catch_overflow.lox"
 )
 
 # Probes that must FAIL on both sides: a global function called before its
