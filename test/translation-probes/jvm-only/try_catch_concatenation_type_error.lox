@@ -1,1 +1,0 @@
-try { print 1 + "a"; } catch (e) { print e.kind; print e.message; }

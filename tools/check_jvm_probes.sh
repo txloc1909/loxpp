@@ -163,18 +163,14 @@ probes=(
     # Mission #288 node #333: JVM fault sites wired against N1's completed
     # spec/04-semantics.md table (spec/03-types.md's Error section for the
     # message/kind fields). Each probe below pins one catchable row's exact
-    # kind and message text, not only that some Error is delivered.
-    "test/translation-probes/jvm-only/try_catch_concatenation_type_error.lox"
-    "test/translation-probes/jvm-only/try_catch_undefined_property_on_error_message.lox"
+    # kind and message text that tools/check_fault_table.py's own spec-table
+    # rows do not already cover for JVM (issue #442 point 5: seven sibling
+    # probes here duplicated a fault-table row byte-for-byte and were
+    # removed once that was confirmed against a live JVM run).
     "test/translation-probes/jvm-only/try_catch_invoke_on_error_invalid_receiver.lox"
     "test/translation-probes/jvm-only/try_catch_set_index_not_indexable.lox"
-    "test/translation-probes/jvm-only/try_catch_match_error_message.lox"
-    "test/translation-probes/jvm-only/try_catch_undefined_variable_get_message.lox"
     "test/translation-probes/jvm-only/try_catch_undefined_variable_set_message.lox"
-    "test/translation-probes/jvm-only/try_catch_ctor_arity_no_init_message.lox"
     "test/translation-probes/jvm-only/try_catch_enum_ctor_arity_message.lox"
-    "test/translation-probes/jvm-only/try_catch_notcallable_ordinary_call.lox"
-    "test/translation-probes/jvm-only/try_catch_invalid_receiver_message.lox"
     "test/translation-probes/jvm-only/try_catch_error_property_read_still_works.lox"
 )
 
