@@ -105,6 +105,24 @@ on your `PATH`, you can now run `loxpp` (or `loxpp-0.1`). The script verifies
 the SHA256 checksum always, and the cosign signature if `cosign` is on your
 `PATH`.
 
+### Nix
+
+If you use Nix, loxpp is available as a flake:
+
+```bash
+# Install the interpreter
+nix run .#loxpp
+
+# Enter the development shell
+nix develop
+
+# Build the language server
+nix build .#packages.loxpp-lsp
+```
+
+The flake targets `x86_64-linux` and ships release builds only.
+See `flake.nix` for details.
+
 ### Upgrade
 
 Re-run the install command (it is idempotent — re-running does not reinstall if

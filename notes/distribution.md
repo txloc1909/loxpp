@@ -276,13 +276,44 @@ Cargo), fold version selection into **that** tool. Do not ship a standalone
 The first bug report of the form "my program ran on `loxpp` 0.N and breaks on
 0.M" that coincides with a second project needing 0.N.
 
+## Nix flake
+
+Lox++ ships as a Nix flake for Nix users, resolving issue #203.
+
+The flake at the repository root (`flake.nix`, `flake.lock`) provides:
+
+- **`packages.loxpp`** — the Lox++ interpreter, built with the `release`
+  preset (clang, ninja, lld)
+- **`packages.loxpp-lsp`** — the language server, built with `-DLOXPP_LSP=ON`
+- **`devShells.default`** — a development shell with clang, cmake, ninja,
+  clang-format, clang-tidy, ccache, tree-sitter, and Neovim
+
+Usage:
+
+```bash
+# Install the interpreter
+nix run .#loxpp
+
+# Build the interpreter
+nix build .#packages.loxpp
+
+# Enter the development shell
+nix develop
+
+# Build the language server
+nix build .#packages.loxpp-lsp
+```
+
+The flake targets `x86_64-linux` and uses the same `release` CMake preset
+as the CI build. Only release builds are shipped — no debug package.
+
+See `flake.nix` and `flake.lock` for the implementation.
+
 ## Deferred work
 
 Not complex, but not urgent, or waiting on a decision. Each is a standalone
 GitHub issue, not a list here:
 
-- Nix flake, worth doing once the release machinery has users to validate
-  against — https://github.com/txloc1909/loxpp/issues/203
 - Background "new version available" nudge, on top of the
   `loxpp upgrade --check` that already exists —
   https://github.com/txloc1909/loxpp/issues/204
