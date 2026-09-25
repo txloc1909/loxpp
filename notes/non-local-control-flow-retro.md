@@ -3,13 +3,15 @@
 ## Purpose
 
 `try`/`catch`/`throw`/`defer` (mission #223) was declared done on 2026-09-15.
-Bug discovery didn't stop there: a second mission (#288, fault taxonomy) and
-a third (#414, defer semantics) were needed to actually stabilize it, and a
-fourth loose end (#421) is still open as of this writing. This note draws
-process lessons from that history, to apply to the next feature with the
-same shape — coroutines/generators, `notes/expressiveness-roadmap.md` item
-5, which suspends/resumes across the same shared-bytecode pipeline and will
-stress the same failure modes harder.
+Bug discovery didn't stop there: a second mission (#288, fault taxonomy), a
+third (#414, defer semantics), and a fourth wave of unrelated gaps
+(#431/#320 and #350/#388 in the JVM/CLR backends, #434 in the bootstrap
+parser) all followed before the feature actually stabilized, running
+through 2026-09-24. This note draws process lessons from that history, to
+apply to the next feature with the same shape — coroutines/generators,
+`notes/expressiveness-roadmap.md` item 5, which suspends/resumes across the
+same shared-bytecode pipeline and will stress the same failure modes
+harder.
 
 Every claim below cites a GitHub issue or PR number, not a section of this or
 any other note. Numbers are permanent and their content is fixed at merge/close
@@ -17,7 +19,7 @@ time. To re-derive the scale claim below yourself: `gh issue list --repo
 txloc1909/loxpp --search "defer OR throw OR catch OR handler OR fault OR
 non-local" --state all`.
 
-## What happened, in three waves
+## What happened, in four waves
 
 **Wave 1 — the mission itself.** Tracking issue #223, seven nodes:
 #224 (PR #231, prove the shared-bytecode CFG/merge-consistency risk before
@@ -51,8 +53,35 @@ fatal, PR #423), #326 (a stack-overflow unwind ran one fewer deferred call
 than the frames it unwound, PR #427) — all three merged without referee
 escalation. But #414 opened three more follow-ups in the process: #420
 (this session, PR #428), #421 (CLR stops draining defers once one of them
-itself throws — still open), #426 (CLR didn't catch a stack overflow at
-all in a function with a defer — fixed alongside #326 by PR #427).
+itself throws — closed by PR #430), #426 (CLR didn't catch a stack
+overflow at all in a function with a defer — fixed alongside #326 by PR
+#427).
+
+**Wave 4 — capture-analysis and compile-time gaps, on 2026-09-24.** #431
+(JVM: a closure capturing a local declared *inside* a `catch` body, or
+capturing the catch-bound value `e` itself, fails at emit time — "capture
+analysis does not report" this slot) turned out to share one root cause
+with the older #320 (the same crash on CLR): `capture_analysis.cpp`'s
+Pass 1 (which captured slots are open) never seeded a catch block's entry
+state, so Pass 2 treated any closure declared inside `catch` as
+unreachable and silently dropped its capture. Pass 0 (frame height)
+already had a hand-written seed for catch blocks, from the block's own
+`PUSH_HANDLER` — Pass 1 just never got the matching one. PR #433 fixed
+both issues from one change, in shared code, confirmed against both
+backends. Separately, PR #432 closed #350/#388 — a JVM `VerifyError` from
+the catch binding `e`'s own store reading its slot's stale content before
+its first write, reachable because the classic verifier treats
+catch-handler entry as reachable from anywhere in the guarded region. And
+#434, found while investigating an unrelated resolver-message issue
+(#410), showed bootstrap's parser had never supported the block form of a
+`match` arm body at all — `break`/`continue` inside `case ... => { ... }`
+failed to parse, a gap native's compiler and spec (`armBody`,
+`spec/02-syntax.md`) had allowed since before mission #223 existed. Found
+while building PR #435 (a differential harness for bootstrap's own
+resolver/compile-time errors, closing #410 — the gap #410 had already
+flagged: bootstrap's compile-time path had never been diffed against
+native's the way its runtime fault path was by #288/#336) and fixed
+separately by PR #439.
 
 ## Four root causes, each recurring more than once
 
@@ -66,7 +95,15 @@ other. #240 (defer's list slot colliding with a catch-bound variable, JVM
 producing wrong output) were found only after that — both by PR #269,
 post-merge, re-diagnosed from scratch rather than caught by the JVM or CLR
 node's own review while the design was still fresh in that implementer's
-head.
+head. The same gap existed one level up, at compile time, and stayed
+open even longer: #410 named it directly ("no differential harness for
+bootstrap's compile-time (resolver) errors against native") on 2026-09-22,
+but nothing built one until PR #435 landed on 2026-09-24, nine days after
+mission #223 first closed. #434 (bootstrap's parser silently rejecting
+`break`/`continue` inside a `match` arm block) was found by hand while
+building that harness, hours before it merged — evidence the gap #410
+flagged was real, not evidence the fix came in time to catch it
+mechanically.
 
 **2. The spec stated intent, not a contract.** #225/PR #230 wrote grammar
 and prose ("mark each fault catchable via try"). Prose over a ~30-fault ×
@@ -93,7 +130,19 @@ The compiler-side version of the same class recurred separately: #240 and
 #242 (both PR #269, match/catch local-slot collisions), then #420 and its
 own round-2 companion bug in `dot()`'s defer branch (both PR #428, one
 found only because an independent reviewer agent swept the surrounding
-code instead of trusting the original fix's scope).
+code instead of trusting the original fix's scope). It recurred a sixth
+time on 2026-09-24: #320/#431 (PR #433) is the same "a
+compiler/analysis-declared contract for catch-entry state must
+be carried through every pass that touches it, not assumed" shape,
+specific to `capture_analysis.cpp` — Pass 0 (frame height) had a
+hand-written catch-entry seed, but nobody had propagated the same seed to
+Pass 1 (open-capture tracking), so the fix that unified handler-stack
+unwind (#384/PR #385, in the *VM's* unwind code) never touched the
+*compile-time* capture-analysis pass that has its own, separate notion of
+catch-block reachability. Naming the bug class once, per #384's own
+review, was not enough to make every future pass over the same CFG apply
+it — the class has to be checked against by name at each new pass's
+review, not assumed inherited from a sibling pass's fix.
 
 **4. Partial porting — some call sites converted, others missed — recurred
 on every port.** Native's fault sites got converted to the catchable
@@ -132,7 +181,26 @@ backends had each independently under/over-ported.
    insight paid for itself three times before #223 even shipped (#231,
    #237, #236) and a fourth time after (#384/PR #385) — naming it once, in
    writing, before the second occurrence would have saved at least two of
-   those.
+   those. It cost a sixth occurrence anyway (#320/#431, PR #433) because
+   "write it into the design doc" was never checked against every pass
+   that shares the same underlying data (here, `capture_analysis.cpp`'s
+   three passes over one CFG) — only against every *node*. A constraint on
+   catch-block reachability belongs to the CFG/analysis layer itself, not
+   to whichever node happened to be open when it was named; the design doc
+   entry has to say so explicitly, or the next pass added to that same
+   file has no reason to go looking for it.
+5. **A mission's differential-testing gate has to cover every phase the
+   feature touches — compile-time included, not only runtime.** #229/PR
+   #246 (Wave 1) and #336/PR #352 (Wave 2, fault taxonomy) both diffed
+   *runtime* behavior across all four consumers. Nothing diffed
+   *compile-time* behavior (resolver/parser errors) the same way, so
+   bootstrap's `match`-arm-block parser gap (#434) sat unnoticed from
+   mission #223's close until #410 named the missing harness, nine days
+   later, and #434 itself was only found by hand while that harness (PR
+   #435) was being built — not by the harness catching it, since it
+   didn't exist yet. A "differential tests" node's Definition of Done must
+   name both phases, not assume compile-time parity follows from runtime
+   parity.
 
 ## Cross-reference
 
