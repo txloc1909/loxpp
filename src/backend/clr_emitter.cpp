@@ -196,6 +196,17 @@ struct Emitter {
     int deferListSlot{-1};
     int deferTempSlotBase{-1};
 
+    // Holds the exact exception object a defer-using function's own outer
+    // catch clauses (injectTryCatchDirectives) caught, across the
+    // get_Catchable() dispatch and the call to LoxOps::RunDefers — the
+    // fault that call's own `propagating` parameter names (issue #446: a
+    // deferred call made from inside this catch, while its own frame's
+    // s_frameCount has not yet been decremented, needs to be told which
+    // fault it may be replacing, so LoxClosure's stack-overflow-unwind
+    // guard can follow a replacement instead of only ever seeing the
+    // original). -1 if defer is not used.
+    int deferPropagatingSlot{-1};
+
     // Holds a defer-using function's return value across `leave` — `leave`
     // empties the evaluation stack (ECMA-335 III.3.64), so a value already
     // pushed for `ret` does not survive being redirected to `leave
@@ -2131,11 +2142,12 @@ AggregateNeeds computeAggregateNeeds(const DecodedFunction& fn,
 // The one authority for how many extra `.locals init` slots defer support
 // needs in one chunk: 0 if the chunk does not use defer; otherwise 1 (the
 // defer list) + 2 + the widest DEFER_RECORD argc seen (DEFER_RECORD's own
-// calleeSlot/argsSlot/arraySlot temps) + 1 (deferReturnSlot, holding the
-// function's return value across the `leave` that exits the .try region —
-// see Emitter::deferReturnSlot). buildEmitter and emitChunk both call this,
-// instead of each recomputing it, so the slot count buildEmitter assigns
-// from can never drift from the one emitChunk later declares.
+// calleeSlot/argsSlot/arraySlot temps) + 1 (deferPropagatingSlot) + 1
+// (deferReturnSlot, holding the function's return value across the `leave`
+// that exits the .try region — see Emitter::deferReturnSlot). buildEmitter
+// and emitChunk both call this, instead of each recomputing it, so the slot
+// count buildEmitter assigns from can never drift from the one emitChunk
+// later declares.
 int computeDeferExtraSlots(const DecodedFunction& fn) {
     if (!usesDefer(fn)) {
         return 0;
@@ -2148,8 +2160,8 @@ int computeDeferExtraSlots(const DecodedFunction& fn) {
         }
     }
     // 1 (defer list) + 2 + maxDeferArgc (DEFER_RECORD's own temps) + 1
-    // (deferReturnSlot).
-    return 1 + (2 + maxDeferArgc) + 1;
+    // (deferPropagatingSlot) + 1 (deferReturnSlot).
+    return 1 + (2 + maxDeferArgc) + 1 + 1;
 }
 
 // The one authority for how many extra `.locals init` slots the
@@ -2237,6 +2249,7 @@ Emitter buildEmitter(const DecodedFunction& fn,
         e.scratchSlot =
             e.deferListSlot + deferExtraSlots; // next available scratch
         e.deferReturnSlot = e.scratchSlot - 1; // last slot in the defer block
+        e.deferPropagatingSlot = e.deferReturnSlot - 1; // second-to-last
     } else if (handlerReturnExtraSlots > 0) {
         e.handlerReturnSlot = e.scratchSlot;
         e.scratchSlot += handlerReturnExtraSlots;
@@ -3003,18 +3016,30 @@ std::string injectTryCatchDirectives(const std::string& bodyText,
         std::string restoreHandlerDepth = restoreHandlerDepthIl(e);
         result += "    }\n";
         result += "    catch [LoxRuntime]Lox.LoxError\n    {\n";
-        result += "      dup\n";
+        // Stash the caught exception (rather than `dup`-ing it and letting
+        // both copies fall through to a `pop`, the region-catch prologue's
+        // own pattern) so it survives to be passed as RunDefers' own
+        // `propagating` argument below — issue #446: a deferred call made
+        // from inside this handler runs while this frame's own
+        // s_frameCount has not yet been decremented (that only happens in
+        // LoxClosure.CallAsSelf's own `finally`, once Invoke returns to
+        // it), so LoxClosure needs to know which fault, if any, that call
+        // may be replacing to keep its stack-overflow-unwind guard
+        // following the replacement instead of only ever seeing the
+        // original.
+        result += "      " + e.stloc(e.deferPropagatingSlot) + "\n";
+        result += "      " + e.ldloc(e.deferPropagatingSlot) + "\n";
         result += "      call instance bool [LoxRuntime]Lox.LoxError"
                   "::get_Catchable()\n";
         result += "      brtrue " + deferRunLabel + "\n";
-        result += "      pop\n";
         result += restoreHandlerDepth;
         result += "      rethrow\n";
         result += "    " + deferRunLabel + ":\n";
-        result += "      pop\n";
         result += restoreHandlerDepth;
         result += "      " + e.ldloc(e.deferListSlot) + "\n";
-        result += "      call void [LoxRuntime]Lox.LoxOps::RunDefers(object)\n";
+        result += "      " + e.ldloc(e.deferPropagatingSlot) + "\n";
+        result += "      call void [LoxRuntime]Lox.LoxOps::RunDefers"
+                  "(object, class [LoxRuntime]Lox.LoxError)\n";
         result += "      rethrow\n";
         result += "    }\n";
         result += "    catch [System.Runtime]System.Object\n    {\n";

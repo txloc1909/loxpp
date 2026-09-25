@@ -422,23 +422,23 @@ public static class LoxOps {
     /// Called from the shared catch prologue clr_emitter.cpp emits for
     /// every try/catch, right after a catchable LoxError's Value is known
     /// but before the handler body runs. Clears LoxClosure's
-    /// s_unwindingStackOverflow guard when (and only when) the value just
-    /// caught is specifically a StackOverflowError - an unrelated caught
-    /// value (different kind, or not an Error at all) must not touch the
-    /// guard, or a second overflow that happens later, while a real
-    /// StackOverflowError is still unwinding, would wrongly be allowed to
-    /// catch (issue #316). Public, not internal: this is called from the
-    /// generated program's own assembly (clr_emitter.cpp), which only sees
-    /// LoxRuntime's public surface - the same reason MakeError, MatchError,
-    /// and LoxError's own Catchable/Value properties are public rather than
-    /// internal despite never being called from Lox++ source directly.
+    /// s_unwindingStackOverflow guard when (and only when) `e` is
+    /// specifically the fault LoxClosure.IsOverflowInFlight is watching for
+    /// — by identity, not by inspecting the delivered value's own fields
+    /// (issue #446): a plain Lox++ instance can carry a field named "kind"
+    /// equal to "StackOverflowError" with no connection to this guard at
+    /// all, and a kind-string check would clear the guard on that alone,
+    /// letting a later, unrelated overflow wrongly catch while a real one
+    /// is still unwinding (issue #316, the bug this replaced). Public, not
+    /// internal: this is called from the generated program's own assembly
+    /// (clr_emitter.cpp), which only sees LoxRuntime's public surface - the
+    /// same reason MakeError, MatchError, and LoxError's own
+    /// Catchable/Value properties are public rather than internal despite
+    /// never being called from Lox++ source directly.
     /// </summary>
     public static void NotifyErrorCaught(LoxError e) {
-        if (e.Value is LoxInstance instance &&
-            ReferenceEquals(instance.Klass, LoxRuntime.ErrorClass) &&
-            instance.Fields.TryGetValue("kind", out object kind) &&
-            (kind as string) == "StackOverflowError") {
-            LoxClosure.s_unwindingStackOverflow = false;
+        if (LoxClosure.IsOverflowInFlight(e)) {
+            LoxClosure.EndStackOverflowUnwind();
         }
     }
 
@@ -1084,11 +1084,34 @@ public static class LoxOps {
     }
 
     /// <summary>
-    /// Run all deferred calls in LIFO order. Called at function exit (both normal
-    /// return and exceptional paths) when defer is used. The deferList can be
-    /// a List[object] or null; if null or empty, this is a no-op.
+    /// Run all deferred calls in LIFO order, on the normal-return exit path
+    /// (no fault is propagating through the enclosing frame). Equivalent to
+    /// <see cref="RunDefers(object?, LoxError?)"/> with a null
+    /// <c>propagating</c>. The deferList can be a List[object] or null; if
+    /// null or empty, this is a no-op.
     /// </summary>
     public static void RunDefers(object? deferList) {
+        RunDefers(deferList, null);
+    }
+
+    /// <summary>
+    /// Run all deferred calls in LIFO order. Called at function exit (both
+    /// normal return and exceptional paths) when defer is used. The
+    /// deferList can be a List[object] or null; if null or empty, this is a
+    /// no-op.
+    /// </summary>
+    /// <param name="deferList">a List[object] of DeferredCall objects, or null</param>
+    /// <param name="propagating">
+    /// the fault already unwinding through this defer list's own frame, or
+    /// null on the normal-return path. Only the generated exceptional-path
+    /// catch prologue (clr_emitter.cpp) knows which fault that is — the
+    /// exact object its own catch clause caught, stashed before this call —
+    /// so it is the one caller that supplies it. See
+    /// <see cref="LoxClosure.ReplaceOverflowInFlight"/> for why identity,
+    /// not a value's own fields, is what must decide whether a replacement
+    /// continues the same stack-overflow unwind.
+    /// </param>
+    public static void RunDefers(object? deferList, LoxError? propagating) {
         if (deferList is not List<object?> list) {
             return; // Not a list, nothing to do
         }
@@ -1127,6 +1150,16 @@ public static class LoxOps {
             try {
                 Call(deferred.Callable, deferred.Args);
             } catch (LoxError e) when (e.Catchable) {
+                // This deferred call's own throw replaces `propagating`
+                // (spec/04-semantics.md step 5). Tell the guard only when
+                // `propagating` is the exact fault it is watching for; a
+                // defer that throws on a normal return (propagating ==
+                // null) or that replaces some other, unrelated fault must
+                // never touch a stack-overflow unwind in progress
+                // elsewhere.
+                if (propagating is not null) {
+                    LoxClosure.ReplaceOverflowInFlight(propagating, e);
+                }
                 pending = e;
             }
         }
