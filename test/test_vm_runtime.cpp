@@ -1140,15 +1140,15 @@ TEST_F(StackOverflowTest,
 // seam instead.
 struct VMTestAccess {
     static void setStackTop(VM& vm, int depth) {
-        vm.stackTop = vm.stack + depth;
+        vm.m_rt.stackTop = vm.m_rt.stack + depth;
     }
     static void setUnwinding(VM& vm, bool v) {
-        vm.m_unwindingStackOverflow = v;
+        vm.m_rt.m_unwindingStackOverflow = v;
     }
-    static void push(VM& vm, Value v) { vm.push(v); }
-    static bool overflowFlag(const VM& vm) { return vm.m_stackOverflow; }
+    static void push(VM& vm, Value v) { vm.m_rt.push(v); }
+    static bool overflowFlag(const VM& vm) { return vm.m_rt.m_stackOverflow; }
     static int depth(const VM& vm) {
-        return static_cast<int>(vm.stackTop - vm.stack);
+        return static_cast<int>(vm.m_rt.stackTop - vm.m_rt.stack);
     }
 };
 

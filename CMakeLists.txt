@@ -112,6 +112,7 @@ set(LOXPP_CORE_SOURCES
     src/table.cpp
     src/memory_manager.cpp
     src/math.cpp
+    src/runtime.cpp
     src/vm.cpp
     src/scanner.cpp
     src/token.cpp
@@ -208,7 +209,7 @@ endif()
 # constructor.
 
 # Runtime profiler: per-opcode counts, function timing, GC stats. It adds data
-# members to VM and MemoryManager (src/vm.h, src/memory_manager.h), so the
+# members to Runtime and MemoryManager (src/runtime.h, src/memory_manager.h), so the
 # whole program must be compiled with it or without it — the layouts cannot be
 # link-mixed. loxpp_core is the non-profile variant and stays that way for the
 # tooling binaries that link it, so a profiling loxpp is built straight from
