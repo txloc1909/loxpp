@@ -7,12 +7,10 @@
 // than re-reading them from Runtime on every instruction) is what makes the
 // dispatch loop fast, and only the loop itself needs them.
 //
-// This split is Layer 2 of the QBE backend proposal (notes/qbe-backend.md,
-// stage S1): once compiled code exists (a later stage), it calls the same
-// entry points this class exposes — push/pop/peek, call(), and the op*()
-// opcode helpers below — through a C wrapper, instead of going through
-// VM::run()'s switch. Nothing in this class assumes an interpreter is
-// driving it.
+// Compiled Lox++ code calls the entry points this class exposes —
+// push/pop/peek, call(), and the op*() opcode helpers below — through a
+// C wrapper, instead of going through VM::run()'s switch. Nothing in this
+// class assumes an interpreter is driving it.
 //
 // A representative slice of opcode bodies (the ones with the most runtime
 // polymorphism: CALL/INVOKE/SUPER_INVOKE dispatch, GET_PROPERTY/GET_SUPER,
