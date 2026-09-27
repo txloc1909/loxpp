@@ -234,6 +234,8 @@ explicitly rather than discovered in CI.
 
 - `notes/concurrency-model-next-steps.md` — the sequence this doc belongs to;
   item 6 revisits it.
+- `notes/actor-model-design.md` — the open problems that remain once the actor
+  model is committed, framed as the questions item 6 must answer.
 - `notes/concurrency_in_bytecode_vms.md` — design space, literature, and GC
   options per model.
 - `notes/profiler-concurrency-notes.md` — profiler impact by model.
