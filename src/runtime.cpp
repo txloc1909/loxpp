@@ -798,14 +798,19 @@ Runtime::OpResult Runtime::opInherit() {
 }
 
 std::optional<Runtime::MapKeyError> Runtime::mapKeyError(Value indexVal) {
-    if (is<Number>(indexVal) && std::isnan(as<Number>(indexVal))) {
+    // isValidMapKey() (value.h) is the single source of truth for the rule
+    // itself — used here and by map.has()/map.del() (stdlib/map_api.cpp).
+    // Once it says no, is<Number> alone tells which of its two rejection
+    // reasons applies: a rejected Number is always NaN, and a rejected Obj*
+    // is always non-string — those are the only two ways it says no.
+    if (isValidMapKey(indexVal)) {
+        return std::nullopt;
+    }
+    if (is<Number>(indexVal)) {
         return MapKeyError{"NaNKeyError", "NaN cannot be used as a map key."};
     }
-    if (is<Obj*>(indexVal) && as<Obj*>(indexVal)->type != ObjType::STRING) {
-        return MapKeyError{"InvalidMapKeyError",
-                           "Map keys must be Bool, Number, Nil, or String."};
-    }
-    return std::nullopt;
+    return MapKeyError{"InvalidMapKeyError",
+                       "Map keys must be Bool, Number, Nil, or String."};
 }
 
 std::optional<Runtime::OpResult> Runtime::checkMapKey(Value indexVal,
