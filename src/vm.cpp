@@ -157,13 +157,18 @@ InterpretResult VM::run(int stopAtFrameCount) {
     // Dispatches the result of a Runtime op*() opcode helper (see
     // runtime.h's Runtime::OpResult). Returns a value only when run() must
     // return immediately; std::nullopt means "the opcode is done, resume
-    // dispatch" (frame/ip/chunk are reloaded first — a correct no-op unless
-    // the helper pushed a frame or a caught error unwound one).
+    // dispatch" — frame/ip/chunk are reloaded first only for Resumed (the
+    // helper pushed a frame or a caught error unwound one); OK means they
+    // are already exactly what the caller has, so skipping the reload is
+    // more than a correct no-op — it is one dispatch's whole reason to
+    // still be on the fast path.
     auto dispatchOp =
         [this, &frame, &ip,
          &chunk](Runtime::OpResult result) -> std::optional<InterpretResult> {
         switch (result) {
         case Runtime::OpResult::OK:
+            return std::nullopt;
+        case Runtime::OpResult::Resumed:
             FrameSync::loadTop(m_rt.m_frames, m_rt.m_frameCount, frame, ip,
                                chunk);
             return std::nullopt;

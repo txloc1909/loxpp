@@ -149,23 +149,26 @@ class Runtime {
 
     // Outcome of an op*() opcode helper below. These helpers can allocate,
     // call (pushing a new CallFrame), and throw (unwinding zero or more
-    // frames) — Continue, Stop and Fatal collapse ThrowOutcome and
-    // CallOutcome above into the three shapes a caller actually has to
-    // react to differently:
-    //   OK:    everything the helper did (if anything) is committed to
-    //          m_frames/m_frameCount already; the caller reloads frame/ip/
-    //          chunk from the current top of m_frames before resuming
-    //          dispatch. Covers plain success, a caught error resolved
-    //          within the caller's own run() invocation, and a completed
-    //          call push — the reload is a correct no-op in the first case
-    //          and load-bearing in the other two.
-    //   Stop:  resolved by a handler outside the caller's own run()
-    //          invocation (ThrowOutcome::HandledStop/CallOutcome::
-    //          CaughtStop). Caller returns InterpretResult::OK immediately
-    //          without touching frame/ip/chunk.
-    //   Fatal: uncaught error already reported via runtimeError(). Caller
-    //          returns InterpretResult::RUNTIME_ERROR immediately.
-    enum class OpResult : std::uint8_t { OK, Stop, Fatal };
+    // frames) — OK, Resumed, Stop and Fatal collapse ThrowOutcome and
+    // CallOutcome above into the four shapes a caller actually has to react
+    // to differently:
+    //   OK:      plain success — frame/ip/chunk are exactly what the caller
+    //            already has; no reload needed. An op*() only returns this
+    //            literally, never via fromThrow/fromCall — both of those
+    //            cover a path that can touch m_frames.
+    //   Resumed: the helper pushed a call frame (CallOutcome::Pushed) or an
+    //            error was caught within the caller's own run() invocation
+    //            (ThrowOutcome::HandledContinue/CallOutcome::CaughtContinue)
+    //            — m_frames/m_frameCount already reflect it; the caller must
+    //            reload frame/ip/chunk from the current top before resuming
+    //            dispatch.
+    //   Stop:    resolved by a handler outside the caller's own run()
+    //            invocation (ThrowOutcome::HandledStop/CallOutcome::
+    //            CaughtStop). Caller returns InterpretResult::OK immediately
+    //            without touching frame/ip/chunk.
+    //   Fatal:   uncaught error already reported via runtimeError(). Caller
+    //            returns InterpretResult::RUNTIME_ERROR immediately.
+    enum class OpResult : std::uint8_t { OK, Resumed, Stop, Fatal };
 
     // White-box seam for StackOverflowTest and VM's own interpreter loop.
     friend class VM;
@@ -311,7 +314,7 @@ class Runtime {
         case ThrowOutcome::HandledStop:
             return OpResult::Stop;
         case ThrowOutcome::HandledContinue:
-            return OpResult::OK;
+            return OpResult::Resumed;
         }
         return OpResult::Fatal; // unreachable
     }
@@ -319,7 +322,7 @@ class Runtime {
         switch (outcome) {
         case CallOutcome::Pushed:
         case CallOutcome::CaughtContinue:
-            return OpResult::OK;
+            return OpResult::Resumed;
         case CallOutcome::CaughtStop:
             return OpResult::Stop;
         case CallOutcome::Uncaught:
