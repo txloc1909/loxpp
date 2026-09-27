@@ -39,12 +39,14 @@ instead of upfront guesswork.
 
 ## Actionable items
 
-1. **Write a decision doc before touching code.** Add
-   `notes/concurrency-model-decision.md` scoring CSP (Go) vs. actor/isolated-heap
+1. **Write a decision doc before touching code. DONE.**
+   `notes/concurrency-model-decision.md` scores CSP (Go) vs. actor/isolated-heap
    (BEAM) vs. OS-threads (JVM) against Lox++'s actual constraints: the
    share-nothing/copy-by-value stance already adopted, the single
-   non-thread-safe `MemoryManager` per `VM`, and the three-backend reality.
-   This satisfies the `AGENTS.md` planning policy — plan and get approval
+   non-thread-safe `MemoryManager` per `VM`, and the four-implementation reality
+   (native, JVM, CLR, bootstrap). It records a provisional actor lead but
+   deliberately makes no model commitment; item 6 owns that decision. This
+   satisfies the `AGENTS.md` planning policy — plan and get approval
    before any language change.
 
 2. **Scope and build item 5 (coroutines/generators) first, independent of the
