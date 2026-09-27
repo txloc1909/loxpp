@@ -153,18 +153,24 @@ InterpretResult VM::run(int stopAtFrameCount) {
         return outcome;
     };
 
-    // Dispatches the result of a Runtime op*() opcode helper (see
-    // runtime.h's Runtime::OpResult). Returns a value only when run() must
-    // return immediately; std::nullopt means "the opcode is done, resume
-    // dispatch" — frame/ip/chunk are reloaded first only for Resumed (the
-    // helper pushed a frame or a caught error unwound one); OK means they
-    // are already exactly what the caller has, so skipping the reload is
-    // more than a correct no-op — it is one dispatch's whole reason to
-    // still be on the fast path.
-    auto dispatchOp =
-        [this, &frame, &ip,
-         &chunk](Runtime::OpResult result) -> std::optional<InterpretResult> {
-        switch (result) {
+    // Calls a Runtime op*() opcode helper and dispatches its result (see
+    // runtime.h's Runtime::OpResult). Takes the call itself, not an
+    // already-evaluated result, so it can flush frame->ip immediately
+    // before invoking it: a runtimeError() raised inside must see this
+    // opcode's own line, and nothing but convention enforced that flush at
+    // each of the ~11 call sites when it lived there instead (the old
+    // single-file VM's FrameSync did this via its constructor, structurally,
+    // not by convention). Returns a value only when run() must return
+    // immediately; std::nullopt means "the opcode is done, resume dispatch"
+    // — frame/ip/chunk are reloaded first only for Resumed (the helper
+    // pushed a frame or a caught error unwound one); OK means they are
+    // already exactly what the caller has, so skipping the reload is more
+    // than a correct no-op — it is one dispatch's whole reason to still be
+    // on the fast path.
+    auto dispatchOp = [this, &frame, &ip,
+                       &chunk](auto&& call) -> std::optional<InterpretResult> {
+        frame->ip = ip;
+        switch (Runtime::OpResult result = call(); result) {
         case Runtime::OpResult::OK:
             return std::nullopt;
         case Runtime::OpResult::Resumed:
@@ -456,9 +462,8 @@ InterpretResult VM::run(int stopAtFrameCount) {
         }
         case Op::CALL: {
             int argCount = readByte();
-            frame->ip = ip;
-            if (auto ret =
-                    dispatchOp(m_rt.opCall(argCount, stopAtFrameCount))) {
+            if (auto ret = dispatchOp(
+                    [&] { return m_rt.opCall(argCount, stopAtFrameCount); })) {
                 return *ret;
             }
             break;
@@ -472,9 +477,9 @@ InterpretResult VM::run(int stopAtFrameCount) {
         }
         case Op::GET_PROPERTY: {
             ObjString* name = asObjString(readConstant());
-            frame->ip = ip;
-            if (auto ret =
-                    dispatchOp(m_rt.opGetProperty(name, stopAtFrameCount))) {
+            if (auto ret = dispatchOp([&] {
+                    return m_rt.opGetProperty(name, stopAtFrameCount);
+                })) {
                 return *ret;
             }
             break;
@@ -503,24 +508,22 @@ InterpretResult VM::run(int stopAtFrameCount) {
         case Op::INVOKE: {
             ObjString* name = asObjString(readConstant());
             int argCount = readByte();
-            frame->ip = ip;
-            if (auto ret = dispatchOp(
-                    m_rt.opInvoke(name, argCount, stopAtFrameCount))) {
+            if (auto ret = dispatchOp([&] {
+                    return m_rt.opInvoke(name, argCount, stopAtFrameCount);
+                })) {
                 return *ret;
             }
             break;
         }
         case Op::INHERIT: {
-            frame->ip = ip;
-            if (auto ret = dispatchOp(m_rt.opInherit())) {
+            if (auto ret = dispatchOp([&] { return m_rt.opInherit(); })) {
                 return *ret;
             }
             break;
         }
         case Op::GET_SUPER: {
             ObjString* name = asObjString(readConstant());
-            frame->ip = ip;
-            if (auto ret = dispatchOp(m_rt.opGetSuper(name))) {
+            if (auto ret = dispatchOp([&] { return m_rt.opGetSuper(name); })) {
                 return *ret;
             }
             break;
@@ -528,9 +531,9 @@ InterpretResult VM::run(int stopAtFrameCount) {
         case Op::SUPER_INVOKE: {
             ObjString* name = asObjString(readConstant());
             int argCount = readByte();
-            frame->ip = ip;
-            if (auto ret = dispatchOp(
-                    m_rt.opSuperInvoke(name, argCount, stopAtFrameCount))) {
+            if (auto ret = dispatchOp([&] {
+                    return m_rt.opSuperInvoke(name, argCount, stopAtFrameCount);
+                })) {
                 return *ret;
             }
             break;
@@ -651,15 +654,15 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::GET_INDEX: {
-            frame->ip = ip;
-            if (auto ret = dispatchOp(m_rt.opGetIndex(stopAtFrameCount))) {
+            if (auto ret = dispatchOp(
+                    [&] { return m_rt.opGetIndex(stopAtFrameCount); })) {
                 return *ret;
             }
             break;
         }
         case Op::SET_INDEX: {
-            frame->ip = ip;
-            if (auto ret = dispatchOp(m_rt.opSetIndex(stopAtFrameCount))) {
+            if (auto ret = dispatchOp(
+                    [&] { return m_rt.opSetIndex(stopAtFrameCount); })) {
                 return *ret;
             }
             break;
@@ -784,22 +787,19 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::GET_ITER: {
-            frame->ip = ip;
-            if (auto ret = dispatchOp(m_rt.opGetIter())) {
+            if (auto ret = dispatchOp([&] { return m_rt.opGetIter(); })) {
                 return *ret;
             }
             break;
         }
         case Op::ITER_HAS_NEXT: {
-            frame->ip = ip;
-            if (auto ret = dispatchOp(m_rt.opIterHasNext())) {
+            if (auto ret = dispatchOp([&] { return m_rt.opIterHasNext(); })) {
                 return *ret;
             }
             break;
         }
         case Op::ITER_NEXT: {
-            frame->ip = ip;
-            if (auto ret = dispatchOp(m_rt.opIterNext())) {
+            if (auto ret = dispatchOp([&] { return m_rt.opIterNext(); })) {
                 return *ret;
             }
             break;
@@ -888,31 +888,15 @@ InterpretResult VM::run(int stopAtFrameCount) {
         case Op::THROW: {
             Value thrownValue = m_rt.pop();
             // Use the shared unwind implementation (same as runtime faults).
-            // Sync frame->ip before calling handleThrow for error reporting.
-            frame->ip = ip;
-            Runtime::ThrowOutcome outcome =
-                m_rt.handleThrow(thrownValue, stopAtFrameCount);
-            if (outcome == Runtime::ThrowOutcome::Uncaught) {
-                // No handler found, runtimeError was called, and the stack
-                // was reset.
-                return InterpretResult::RUNTIME_ERROR;
+            // dispatchOp flushes frame->ip before calling handleThrowOp, so
+            // a runtimeError() raised inside sees the THROW's own line; its
+            // OpResult switch collapses Uncaught/HandledStop/HandledContinue
+            // exactly the way fromThrow() maps them everywhere else.
+            if (auto ret = dispatchOp([&] {
+                    return m_rt.handleThrowOp(thrownValue, stopAtFrameCount);
+                })) {
+                return *ret;
             }
-            if (outcome == Runtime::ThrowOutcome::HandledStop) {
-                // Handled, but by a handler outside THIS run() invocation's
-                // own frame range (possibly several reentrant handleThrow
-                // calls down — see ThrowOutcome's doc comment in runtime.h).
-                // m_frameCount may even be 0 here (the resolution ran the
-                // rest of the program to completion) — do NOT touch
-                // frame/ip/chunk; FrameSync::loadTop would read out of
-                // bounds. Hand control back to whichever context started
-                // this run() invocation.
-                return InterpretResult::OK;
-            }
-            // HandledContinue: a handler was found and set up, and this
-            // run() invocation's own frame context is still live. Reload
-            // frame/ip/chunk from the new top and continue dispatch.
-            FrameSync::loadTop(m_rt.m_frames, m_rt.m_frameCount, frame, ip,
-                               chunk);
             break;
         }
         }

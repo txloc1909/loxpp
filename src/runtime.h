@@ -52,6 +52,8 @@ enum class InterpretResult : std::uint8_t {
     RUNTIME_ERROR,
 };
 
+struct ObjMap; // container_objects.h; only a pointer is needed here.
+
 struct HandlerRecord {
     int frameCount;                // number of frames at push time
     Value* stackTop;               // stack pointer at push time
@@ -268,6 +270,14 @@ class Runtime {
                                                const char* noun,
                                                int stopAtFrameCount,
                                                int* outIdx);
+
+    // Shared by opIterHasNext's and opIterNext's map branches — reports
+    // "Map changed size during iteration." (and returns true) if map's
+    // version has moved past what the iterator captured at GET_ITER time;
+    // false means iteration may proceed. See ObjIterator::expectedVersion's
+    // own comment for why a version check catches what a size check would
+    // miss (a paired erase+insert restoring the net size).
+    bool mapIterationInvalidated(ObjMap* map, int expectedVersion);
     ObjUpvalue* captureUpvalue(Value* local);
     void closeUpvalues(Value* last);
     // Discards every m_handlerStack record whose frameCount equals the
@@ -325,6 +335,14 @@ class Runtime {
     OpResult opGetIter();
     OpResult opIterHasNext();
     OpResult opIterNext();
+
+    // Op::THROW's own op*()-shaped entry point: handleThrow() collapsed
+    // through fromThrow() (private below) into the same OpResult contract
+    // every other op*() call site uses, so Op::THROW can go through
+    // dispatchOp() too instead of hand-rolling the outcome switch.
+    OpResult handleThrowOp(Value thrownValue, int stopAtFrameCount) {
+        return fromThrow(handleThrow(thrownValue, stopAtFrameCount));
+    }
 
     // Runtime state inspection (for testing and debugging).
     [[nodiscard]] int stackDepth() const {
