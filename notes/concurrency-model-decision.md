@@ -28,7 +28,8 @@ channels: it is growable stacks, async preemption, work-stealing deques, and a
 netpoller. BEAM is per-process heaps, reduction-counting fairness, and
 copy-on-send. The JVM is a full shared-memory model, locks, and a concurrent
 collector. Choosing the label without the package underestimates the work;
-choosing the package without four backends in mind risks divergence.
+choosing the package without every target in mind — native, the QBE backend
+that replaces CLR, the JVM, and the bootstrap — risks divergence.
 
 ## The constraints any model must survive
 
@@ -63,15 +64,22 @@ reloaded from the top of `m_frames` on destruction
 `yield` must "flush, save the frame/stack slice, and reload on resume" at this
 same seam. Whatever the model, stackful suspension reuses this.
 
-**C5 — Four implementations, not three.**
-The native C++ VM (`src/vm.cpp`), the JVM backend
-(`src/backend/jvm_emitter.cpp` + `runtime/jvm/`), the CLR backend
-(`src/backend/clr_emitter.cpp` + `runtime/clr/`), and the self-hosted
-tree-walking interpreter (`bootstrap/loxpp_interpreter.lox`) all implement the
-language. The bootstrap runs *on top of* the VM and has no host-thread or
-host-scheduler access of its own. `tools/diff_runtimes.py` compares the managed
-backends against native, so any observable semantic must match across all of
-them or be explicitly out of scope for the differing backends.
+**C5 — Four targets, three independent surfaces, and the CLR slot is being
+replaced.**
+The language has four implementations today: the native C++ VM (`src/vm.cpp`),
+the JVM backend (`src/backend/jvm_emitter.cpp` + `runtime/jvm/`), the CLR
+backend (`src/backend/clr_emitter.cpp` + `runtime/clr/`), and the self-hosted
+tree-walking interpreter (`bootstrap/loxpp_interpreter.lox`). The CLR backend
+is scheduled for deletion once the QBE backend passes its parity gate
+(`notes/qbe-backend.md:18-22,292`), leaving native, QBE, JVM, and bootstrap.
+**QBE is not an independent implementation:** it reuses the native runtime
+(`notes/qbe-backend.md:34-44`), so native-vs-QBE output checks code generation,
+not runtime semantics; only the JVM checks runtime behavior independently. The
+three independent surfaces for any language feature are therefore native/QBE,
+the JVM, and the bootstrap. `tools/diff_runtimes.py` compares them, so any
+observable semantic must match across all of them or be explicitly out of
+scope. The bootstrap runs on top of the VM and has no host-thread or
+host-scheduler access of its own.
 
 **C6 — The profiler is coupled to the single stack.**
 `m_profilerScopes[]` is parallel to `m_frames[]` (`src/vm.h:277-284`), and the
@@ -96,6 +104,16 @@ Collection is stop-the-world mark-sweep over `allObjects`
 records that GC item 11 (generational/incremental) must wait for this model
 go/no-go because the model sets the collector's shape.
 
+**C9 — QBE compiles each Lox call to a real C frame.**
+The QBE backend keeps clox's fused stack: a call passes a pointer to the callee's
+stack window, and each Lox call uses a real C frame, with overflow checked
+against `kFramesMax` on the C stack (`notes/qbe-backend.md:50-68,245-251`).
+This is natural for a model whose unit is a whole task-owned stack, but hostile
+to mid-frame stackful suspension: `yield` and goroutine switches would need
+either a separate C stack per task or suspend points that unwind out of every
+compiled frame. Any suspend/GC-root design must be proven on QBE, not only in
+the interpreter loop.
+
 ## Scoring
 
 Each criterion is scored 1 (worst fit for Lox++ / highest cost) to 5 (best fit /
@@ -105,14 +123,14 @@ reshapes work that already exists or is already planned.
 | # | Criterion (weight) | CSP — Go | Actor/isolated heap — BEAM | OS threads — JVM |
 |---|---|---|---|---|
 | 1 | GC redesign cost (20) | 2 — shared heap needs a concurrent collector; C1, C8 | 5 — per-task heap reuses `MemoryManager` as-is; C1 | 2 — shared heap, contended `bytesAllocated`/gray stack; C1, C8 |
-| 2 | Four-backend parity incl. bootstrap (20) | 2 — goroutine runtime must be defined in `spec/` and reimplemented on all four; bootstrap has no scheduler; C5 | 4 — task = own VM; message copy is backend-neutral spec surface; still needs a scheduler in native/bootstrap; C5 | 3 — JVM/CLR host threads are native; bootstrap cannot expose them at all; C5 |
+| 2 | Independent-surface parity (native/QBE, JVM, bootstrap) (20) | 2 — goroutine runtime must be defined in `spec/` and implemented across native/QBE, JVM, and bootstrap; bootstrap has no scheduler; C5 | 4 — task = own VM; message copy is an implementation-neutral spec surface; still needs a scheduler in native/QBE and bootstrap; C5 | 3 — the JVM hosts threads natively; bootstrap cannot expose them at all; C5 |
 | 3 | Fit with the share-nothing messaging stance (15) | 3 — CSP is shared-but-structured; safe only if send copies; C7 | 5 — isolation is the model; matches the stance directly | 1 — shared heap plus locks is the opposite of the adopted stance |
 | 4 | Runtime/scheduler infrastructure required (15) | 1 — work-stealing, growable stacks, async preemption, netpoller | 3 — scheduler needed, but per-task stacks and copy-on-send are simpler than Go's package | 4 — OS schedules; low custom infrastructure, high per-task cost |
-| 5 | Reuse of coroutine suspend/resume (10) | 5 — goroutines are stackful coroutines at the same `FrameSync` seam; C4 | 3 — isolated tasks can be separate VMs, but lightweight actors want the same machinery | 1 — blocking OS threads share nothing with the `yield` seam |
+| 5 | Reuse of coroutine suspend/resume (10) | 4 — goroutines are stackful coroutines at the same `FrameSync` seam, but QBE's real C frames make mid-frame suspension costly; C4, C9 | 3 — isolated tasks can be separate VMs, but lightweight actors want the same machinery | 1 — blocking OS threads share nothing with the `yield` seam |
 | 6 | User safety for a dynamic audience (10) | 5 — channels are safe-by-default | 5 — no shared state to race on | 2 — locks/atomics are error-prone |
 | 7 | Memory-model complexity (5) | 2 — shared-heap memory model | 5 — no shared memory model needed | 1 — weakest definition in the space |
 | 8 | Profiler rework (5) | 2 — fibers sharing one VM break `m_profilerScopes[]`; C6 | 5 — per-task `ProfilerData`, least disruptive; C6 | 2 — contended GC stats, per-thread merge; C6 |
-| | **Weighted total (of 500)** | **260** | **430** | **220** |
+| | **Weighted total (of 500)** | **250** | **430** | **220** |
 
 ## Reading the matrix
 
@@ -122,7 +140,14 @@ matches the current unit of ownership. A task that owns one `VM` and one
 `MemoryManager` needs no concurrent collector, no per-fiber frame array, and no
 shared profiler — constraints C1, C2, C6, and C8 all fall out instead of being
 solved. Its costs are the ones already named in `concurrency-model-next-steps.md`:
-message copying (C7) and a scheduler (C5).
+message copying (C7) and a scheduler.
+
+The QBE plan reinforces that lead rather than weakening it. QBE inherits the
+native runtime, so a native-runtime-centric model reaches QBE for free, and the
+parity burden drops to the JVM and bootstrap. The one candidate penalized by
+QBE is Go's stackful goroutines: mid-frame suspension is awkward when every Lox
+call is a real C frame (C9), whereas an actor task owns a whole stack and
+switches at task granularity.
 
 Two cautions against over-reading that result:
 
@@ -138,23 +163,29 @@ Two cautions against over-reading that result:
 The OS-threads model is the worst fit on the criteria Lox++ cares about — it
 contradicts the share-nothing stance, requires the hardest GC work, exposes the
 error-prone primitives the language has so far avoided, and is unimplementable
-in the bootstrap. Its one advantage, native host-thread support on JVM/CLR,
-would make those two backends observably stronger than native and the
-bootstrap, which `tools/diff_runtimes.py` exists to prevent.
+in the bootstrap. Its one advantage, native host-thread support on the JVM,
+would make that backend observably stronger than native/QBE and the bootstrap,
+which `tools/diff_runtimes.py` exists to prevent.
 
 ## Per-backend mapping
 
-| Model | Native C++ VM | JVM backend | CLR backend | Bootstrap interpreter |
-|---|---|---|---|---|
-| CSP (Go) | New scheduler, growable stacks, channels in `vm.cpp` | Goroutines → host threads/virtual threads; channels in `LoxRuntime.java` | Same in `LoxRuntime.cs` | Needs a scheduler written in Lox++ itself, or excluded |
-| Actor / isolated heap | One `VM` per task; scheduler copies messages | One runtime instance per task; copy via shared serialization | Same in C# | Feasible: tasks as interpreter instances in one Lox++ process |
-| OS threads | pthreads per task; thread-safe GC required | `Thread` + shared heap; concurrent GC in the runtime | Same with `System.Threading` | No host threads exist to expose |
+The CLR column is omitted: it is retired at QBE parity gate S7
+(`notes/qbe-backend.md:292`). QBE shares the native runtime, so the two are
+listed separately only where their code shapes differ.
 
-The differential-testing requirement (C5) is the sharpest edge: if one backend
+| Model | Native C++ VM | QBE backend | JVM backend | Bootstrap interpreter |
+|---|---|---|---|---|
+| CSP (Go) | New scheduler, growable stacks, channels in the runtime | Inherits native's runtime, but a suspend point must survive real C frames (C9) | Goroutines → host threads/virtual threads; channels in `LoxRuntime.java` | Needs a scheduler written in Lox++ itself, or excluded |
+| Actor / isolated heap | One `VM` per task; scheduler copies messages | Same runtime as native; no QBE-specific work beyond the shared runtime | One runtime instance per task; copy via shared serialization | Feasible: tasks as interpreter instances in one Lox++ process |
+| OS threads | pthreads per task; thread-safe GC required | Same runtime as native; QBE frames complicate root scanning across task boundaries | `Thread` + shared heap; concurrent GC in the runtime | No host threads exist to expose |
+
+The differential-testing requirement (C5) is the sharpest edge: if one target
 exposes a primitive the others cannot, semantics diverge and
-`tools/diff_runtimes.py` fails. Any concurrency surface must therefore be
-specified in `spec/` in backend-neutral observable terms, with any
-backend-gated exception recorded explicitly rather than discovered in CI.
+`tools/diff_runtimes.py` fails. Native and QBE share one runtime, so they
+cannot diverge on runtime semantics — but the JVM and bootstrap can. Any
+concurrency surface must therefore be specified in `spec/` in
+implementation-neutral observable terms, with any exception recorded
+explicitly rather than discovered in CI.
 
 ## Provisional recommendation
 
@@ -162,10 +193,12 @@ backend-gated exception recorded explicitly rather than discovered in CI.
    already orders. It is the model-agnostic stepping stone: CSP goroutines,
    actor tasks, and async I/O all need suspend/resume at the `FrameSync` seam
    (C4), and it is useful standalone (lazy sequences, custom iterables) even if
-   item 7 never ships.
+   item 7 never ships. Item 5's plan must now include QBE: a suspend point has
+   to be expressible in QBE-compiled code, not only in the interpreter loop
+   (C9).
 2. **Do not commit to a model in this doc.** The static scores favor actor, but
    the source note's arguments against committing now — no measured suspension
-   cost, no GC groundwork, and three-way backend-divergence risk — all still
+   cost, no GC groundwork, and cross-implementation divergence risk — all still
    hold.
 3. **Revisit at item 6** with real data from item 5, then choose between a
    Go-style scheduler and isolated per-task heaps.
@@ -181,8 +214,10 @@ backend-gated exception recorded explicitly rather than discovered in CI.
 - A decision on stack ownership (per-VM, per-task, or per-OS-thread) and heap
   ownership (shared or isolated), as `profiler-concurrency-notes.md:63-70`
   requires.
-- A four-backend feasibility check, bootstrap included, with any backend-gated
-  exception named in `spec/` before implementation.
+- A cross-implementation feasibility check — native/QBE, JVM, and bootstrap —
+  with any implementation-gated exception named in `spec/` before
+  implementation. For QBE specifically: how a suspend point and GC root
+  accounting survive its one-real-C-frame-per-call code shape (C9).
 - A concrete message/value story for C7: deep copy, immutability, or a
   serialization format over maps and primitives.
 - An explicit go/no-go, per `concurrency-model-next-steps.md` item 7.
@@ -206,5 +241,7 @@ backend-gated exception recorded explicitly rather than discovered in CI.
   (parallelism), and the share-nothing messaging stance.
 - `notes/benchmark_report_2026-08-26.md` §5 item 11 and "Dependencies on the
   expressiveness roadmap" — why GC waits for this decision.
-- `spec/README.md` — the implementation-independent contract all four
-  implementations must satisfy.
+- `notes/qbe-backend.md` — the QBE backend that replaces CLR after parity gate
+  S7, its reuse of the native runtime, and its real-C-frame code shape.
+- `spec/README.md` — the implementation-independent contract every target must
+  satisfy.

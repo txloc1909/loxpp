@@ -43,8 +43,10 @@ instead of upfront guesswork.
    `notes/concurrency-model-decision.md` scores CSP (Go) vs. actor/isolated-heap
    (BEAM) vs. OS-threads (JVM) against Lox++'s actual constraints: the
    share-nothing/copy-by-value stance already adopted, the single
-   non-thread-safe `MemoryManager` per `VM`, and the four-implementation reality
-   (native, JVM, CLR, bootstrap). It records a provisional actor lead but
+   non-thread-safe `MemoryManager` per `VM`, and the implementation reality:
+   native and the incoming QBE backend share one runtime, the JVM and the
+   bootstrap are independent, and CLR retires at QBE's parity gate. It records
+   a provisional actor lead but
    deliberately makes no model commitment; item 6 owns that decision. This
    satisfies the `AGENTS.md` planning policy — plan and get approval
    before any language change.
