@@ -2,7 +2,6 @@
 #include "debug.h"
 #include "objects.h"
 #include "object.h"
-#include "compiler.h"
 #include "utility.h"
 
 #include "stdlib/stdlib_context.h"
@@ -16,26 +15,10 @@
 #include <unistd.h>
 
 InterpretResult VM::interpret(const std::string& source) {
-    // Guard against dangling class pointers from a prior VM instance. GC can
-    // fire inside compile(), and markRoots() must not dereference a pointer
-    // that was freed when the previous VM's MemoryManager was destroyed.
-    m_rt.m_fileClass = nullptr;
-    m_rt.m_mapClass = nullptr;
-    ObjFunction* fn = compile(source, &m_rt.m_mm);
-    if (fn == nullptr) {
+    ObjClosure* closure = m_rt.loadSource(source);
+    if (closure == nullptr) {
         return InterpretResult::COMPILE_ERROR;
     }
-
-    // Root fn on the stack before any allocation (defineNatives,
-    // create<ObjClosure>) can trigger GC. Without this, fn is unreachable
-    // between compile() returning and push(closure) — the Compiler has already
-    // been destroyed and m_currentCompiler is nullptr.
-    m_rt.push(Value{static_cast<Obj*>(fn)});
-    setActiveContext(&m_rt.m_stdlibCtx);
-    m_rt.defineNatives();
-    ObjClosure* closure = m_rt.m_mm.create<ObjClosure>(fn);
-    m_rt.stackTop[-1] =
-        Value{static_cast<Obj*>(closure)}; // replace fn with its closure
     // No handler can be active yet (nothing has executed), so the only
     // reachable outcome here is Pushed or Uncaught.
     if (m_rt.call(closure, 0) == Runtime::ThrowOutcome::Uncaught) {

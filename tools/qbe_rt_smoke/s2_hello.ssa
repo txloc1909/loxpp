@@ -1,0 +1,40 @@
+# Hand-written checkpoint for the QBE backend's S2 node (libloxrt.a and
+# startup). Links against the real libloxrt.a — not a throwaway stand-in the
+# way tools/toolchain_smoke's fixtures do — because this is the first check
+# that the C interface (src/backend/rt_capi.h) is itself a valid QBE-callable
+# ABI, not just a valid C++ one.
+#
+# main() starts a Runtime with an empty embedded program (no compiled
+# function code to attach — this node's checkpoint only needs the stdlib
+# and the print/call primitives, not a real compiled Lox function; that is
+# straight-line code's own checkpoint), prints a string, then calls the
+# "clock" stdlib native through rt_call — the same polymorphic dispatch a
+# real compiled CALL will use once one exists.
+data $empty_source = { b 0 }
+data $clock_name = { b "clock", b 0 }
+data $greeting = { b "hello from qbe", b 0 }
+
+export function w $main() {
+@start
+	%rt =l call $rt_startup(l $empty_source, l 0, l 0)
+	%rtnull =w ceql %rt, 0
+	jnz %rtnull, @fail, @havert
+@havert
+	%s =l call $rt_new_string(l %rt, l $greeting)
+	call $rt_push(l %rt, l %s)
+	%pstatus =w call $rt_op_print(l %rt)
+	%pbad =w cnew %pstatus, 0
+	jnz %pbad, @fail, @printok
+@printok
+	%clockfn =l call $rt_get_global(l %rt, l $clock_name)
+	call $rt_push(l %rt, l %clockfn)
+	%cstatus =w call $rt_call(l %rt, w 0)
+	%cbad =w cnew %cstatus, 0
+	jnz %cbad, @fail, @callok
+@callok
+	%result =l call $rt_pop(l %rt)
+	call $rt_shutdown(l %rt)
+	ret 0
+@fail
+	ret 1
+}

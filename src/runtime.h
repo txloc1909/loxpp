@@ -52,7 +52,8 @@ enum class InterpretResult : std::uint8_t {
     RUNTIME_ERROR,
 };
 
-struct ObjMap; // container_objects.h; only a pointer is needed here.
+struct ObjMap;        // container_objects.h; only a pointer is needed here.
+class DiagnosticSink; // diagnostic.h; only a pointer is needed here.
 
 struct HandlerRecord {
     int frameCount;                // number of frames at push time
@@ -182,6 +183,19 @@ class Runtime {
 
     void resetStack();
 
+    // Compiles `source`, defines the stdlib, and wraps the result in an
+    // ObjClosure rooted on the stack at slot 0 — the shared first half of
+    // VM::interpret() and rt_startup() (backend/rt_capi.cpp, the QBE
+    // backend's embed-and-recompile startup path). Neither caller needs
+    // bytecode dispatch for this part: it stops short of pushing the first
+    // CallFrame (call(closure, 0)) so a compile error and an uncaught
+    // arity/overflow fault from that call stay distinguishable outcomes to
+    // the caller, the same distinction VM::interpret() already made.
+    // Returns nullptr on a compile error (already reported to stderr, or
+    // collected in `sink` when one is given).
+    ObjClosure* loadSource(const std::string& source,
+                           DiagnosticSink* sink = nullptr);
+
     // Defined inline (not in runtime.cpp): these are called on every single
     // opcode dispatch, and vm.cpp is a separate translation unit from
     // runtime.cpp with no LTO — an out-of-line definition here measured
@@ -214,6 +228,22 @@ class Runtime {
     }
     Value pop() { return *--stackTop; }
     Value peek(int distance) { return stackTop[-1 - distance]; }
+
+    // Compiled code (backend/rt_capi.cpp) writes its own stack slots
+    // directly at base + 8h instead of going through push(), so it needs a
+    // way to tell this Runtime where its own top now is before any call
+    // that can allocate or unwind — see notes/qbe-backend.md, hazard Q1.
+    // Neither accessor re-checks STACK_MAX: the compiled code that computed
+    // `top` already knows its own height, the same way push()'s caller does
+    // not re-check a height it already holds.
+    [[nodiscard]] Value* top() const { return stackTop; }
+    void setTop(Value* newTop) { stackTop = newTop; }
+
+    // Base of the value stack — slot 0 of the outermost call. Compiled code
+    // needs this once, at startup, to compute its own initial stack window;
+    // every call after that gets its window from the CallFrame the runtime
+    // hands back (frame->slots).
+    [[nodiscard]] Value* stackBase() { return stack; }
 
     // Runs pending defers for m_frames[frameIndex] LIFO, each to completion
     // (via a nested run() call) before the next one starts, so ordering and
@@ -355,6 +385,33 @@ class Runtime {
     [[nodiscard]] std::optional<Value> getGlobal(const std::string& name) const;
     [[nodiscard]] Value lastResult() const { return m_lastResult; }
 
+    // Compiled code needs the allocator directly to build strings, lists,
+    // and maps with no VM::run() opcode wrapping it (backend/rt_capi.cpp).
+    [[nodiscard]] MemoryManager& memoryManager() { return m_mm; }
+
+    // Clears any error a previous stdlib native call left set. Op::PRINT
+    // (vm.cpp) calls the equivalent of this before stringify(), because
+    // stringify() can call back into stdlib code (e.g. a Map's own
+    // to-string); a stale flag from an unrelated earlier call must not be
+    // mistaken for one stringify() just raised.
+    void clearNativeError() { m_stdlibCtx.clearError(); }
+
+    // True if a stdlib native call set an error since the last
+    // clearNativeError(). Clears the flag either way, so a caller cannot
+    // observe the same error twice. Mirrors the check every native-call
+    // site (callNative, and vm.cpp's own Op::PRINT) already makes on
+    // m_stdlibCtx.nativeError.
+    bool takeNativeError(std::string* msg) {
+        if (!m_stdlibCtx.nativeError) {
+            return false;
+        }
+        if (msg != nullptr) {
+            *msg = m_stdlibCtx.nativeErrorMsg;
+        }
+        m_stdlibCtx.clearError();
+        return true;
+    }
+
     // Test-only trace of (chunk offset, handler depth) before each
     // dispatched instruction. Null unless a test arms it. No effect on
     // release behavior: VM::run() only appends when this is set.
@@ -380,6 +437,20 @@ class Runtime {
         }
         return OpResult::Fatal; // unreachable
     }
+
+    // opCall()'s closure branch when the callee's function->code is already
+    // attached (rt_attach_code, backend/rt_capi.cpp): pushes the CallFrame
+    // exactly as call() does (same arity check, same stack-overflow check,
+    // same GC-visible bookkeeping), then invokes the attached code directly
+    // instead of leaving the frame for VM::run() to interpret. The compiled
+    // callee's own bytecode offset, defer list, and open upvalues are its
+    // own business; this only owns the frame's entry and exit. A nonzero
+    // return from the compiled code means it already reported a fatal
+    // error the same way a failing native call does — there is no
+    // catchable-throw status yet; that needs the handler-aware unwind this
+    // call does not attempt.
+    OpResult callCompiled(ObjClosure* closure, int argCount,
+                          int stopAtFrameCount);
 
     // Sized FRAMES_MAX/STACK_MAX plus the reserve above, not just
     // FRAMES_MAX/STACK_MAX: the reserve is spent above those ceilings, while

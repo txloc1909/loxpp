@@ -303,6 +303,24 @@ if(LOXPP_LSP)
     target_include_directories(loxpp-lsp PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
 endif()
 
+# libloxrt.a: the QBE backend's runtime library. A --target qbe program
+# links its generated code against this, not against loxpp_core directly —
+# see notes/qbe-backend.md, "Runtime reuse" Layer 3. It bundles the same
+# object code as loxpp_core (the whole interpreter minus main.cpp) plus the
+# C interface (src/backend/rt_capi.cpp) compiled code calls through the C
+# ABI. Bundling loxpp_core's objects wholesale — rather than a trimmed
+# source list — keeps this one static library in sync with loxpp_core by
+# construction; it costs a few unused object files (e.g. vm.cpp, the JVM/CLR
+# emitters), which a release build is free to strip.
+add_library(loxrt STATIC
+    src/backend/rt_capi.cpp
+    $<TARGET_OBJECTS:loxpp_core>
+)
+target_include_directories(loxrt PUBLIC ${PROJECT_SOURCE_DIR}/src)
+if(LOXPP_CORE_PUBLIC_DEFINITIONS)
+    target_compile_definitions(loxrt PUBLIC ${LOXPP_CORE_PUBLIC_DEFINITIONS})
+endif()
+
 option(LOXPP_BUILD_TESTS "Build the GTest suite" ON)
 
 if(LOXPP_BUILD_TESTS)
