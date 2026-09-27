@@ -31,6 +31,36 @@ public final class LoxOps {
     }
 
     // ------------------------------------------------------------------
+    // Operator overloading dispatch (issue #472)
+    // ------------------------------------------------------------------
+
+    /**
+     * True for a user instance. A caught Error value is a LoxInstance under
+     * ERROR_CLASS here but a distinct ObjError on native (which never
+     * dispatches operator methods on it), so it must be excluded.
+     */
+    private static boolean isOperatorReceiver(Object v) {
+        return v instanceof LoxInstance &&
+               ((LoxInstance)v).klass != LoxRuntime.ERROR_CLASS;
+    }
+
+    /** The resolved dunder method on {@code receiver}, or null when absent. */
+    private static LoxClosure findDunder(Object receiver, String name) {
+        if (!isOperatorReceiver(receiver)) {
+            return null;
+        }
+        return ((LoxInstance)receiver).klass.findMethod(name);
+    }
+
+    private static boolean checkBooleanResult(Object result) {
+        if (!(result instanceof Boolean)) {
+            throw makeError("OperatorResultTypeError",
+                            "Operator method must return a Boolean.");
+        }
+        return (Boolean)result;
+    }
+
+    // ------------------------------------------------------------------
     // Handler liveness (issue #319)
     // ------------------------------------------------------------------
 
@@ -110,31 +140,55 @@ public final class LoxOps {
     }
 
     public static Object add(Object a, Object b) {
+        if (a instanceof Double && b instanceof Double) {
+            return (Double)a + (Double)b;
+        }
         if (a instanceof String && b instanceof String) {
             return (String)a + (String)b;
         }
-        if (a instanceof String || b instanceof String) {
-            throw makeError(
-                "ConcatenationTypeError",
-                "Operands must be two numbers, two strings, or a string and a number.");
+        LoxClosure dunder = findDunder(a, "__add__");
+        if (dunder != null) {
+            return dunder.callAsSelf(a, new Object[] {b});
         }
-        checkNumbers(a, b);
-        return (Double)a + (Double)b;
+        throw makeError(
+            "ConcatenationTypeError",
+            "Operands must be two numbers, two strings, or a string and a number.");
     }
 
     public static Object subtract(Object a, Object b) {
+        if (a instanceof Double && b instanceof Double) {
+            return (Double)a - (Double)b;
+        }
+        LoxClosure dunder = findDunder(a, "__sub__");
+        if (dunder != null) {
+            return dunder.callAsSelf(a, new Object[] {b});
+        }
         checkNumbers(a, b);
-        return (Double)a - (Double)b;
+        throw new AssertionError("checkNumbers must throw");
     }
 
     public static Object multiply(Object a, Object b) {
+        if (a instanceof Double && b instanceof Double) {
+            return (Double)a * (Double)b;
+        }
+        LoxClosure dunder = findDunder(a, "__mul__");
+        if (dunder != null) {
+            return dunder.callAsSelf(a, new Object[] {b});
+        }
         checkNumbers(a, b);
-        return (Double)a * (Double)b;
+        throw new AssertionError("checkNumbers must throw");
     }
 
     public static Object divide(Object a, Object b) {
+        if (a instanceof Double && b instanceof Double) {
+            return (Double)a / (Double)b;
+        }
+        LoxClosure dunder = findDunder(a, "__div__");
+        if (dunder != null) {
+            return dunder.callAsSelf(a, new Object[] {b});
+        }
         checkNumbers(a, b);
-        return (Double)a / (Double)b;
+        throw new AssertionError("checkNumbers must throw");
     }
 
     /**
@@ -142,17 +196,34 @@ public final class LoxOps {
      * matching vm.cpp exactly.
      */
     public static Object modulo(Object a, Object b) {
-        checkNumbers(a, b);
-        double bd = (Double)b;
-        double result =
-            (Double)a % bd; // Java's `%` on doubles is fmod, per JLS 15.17.3
-        if (result != 0 && (result < 0) != (bd < 0)) {
-            result += bd;
+        if (a instanceof Double && b instanceof Double) {
+            double bd = (Double)b;
+            double result =
+                (Double)a % bd; // Java's `%` on doubles is fmod, per JLS 15.17.3
+            if (result != 0 && (result < 0) != (bd < 0)) {
+                result += bd;
+            }
+            return result;
         }
-        return result;
+        LoxClosure dunder = findDunder(a, "__mod__");
+        if (dunder != null) {
+            return dunder.callAsSelf(a, new Object[] {b});
+        }
+        checkNumbers(a, b);
+        throw new AssertionError("checkNumbers must throw");
     }
 
-    public static Object negate(Object a) { return -checkNumber(a); }
+    public static Object negate(Object a) {
+        if (a instanceof Double) {
+            return -((Double)a);
+        }
+        LoxClosure dunder = findDunder(a, "__neg__");
+        if (dunder != null) {
+            return dunder.callAsSelf(a, new Object[0]);
+        }
+        checkNumber(a);
+        throw new AssertionError("checkNumber must throw");
+    }
 
     // ------------------------------------------------------------------
     // Comparisons
@@ -166,6 +237,25 @@ public final class LoxOps {
      * time), so string equality is special-cased here instead.
      */
     public static boolean equal(Object a, Object b) {
+        if (a instanceof Double && b instanceof Double) {
+            return ((Double)a).doubleValue() == ((Double)b).doubleValue();
+        }
+        // __eq__ on the left operand, before the type-based fallthrough, so an
+        // Instance that defines it overrides identity equality.
+        LoxClosure dunder = findDunder(a, "__eq__");
+        if (dunder != null) {
+            return checkBooleanResult(dunder.callAsSelf(a, new Object[] {b}));
+        }
+        return identityEqual(a, b);
+    }
+
+    /**
+     * The value/identity equality the built-in operators and the internal
+     * comparison sites use. Unlike {@link #equal}, it never consults
+     * {@code __eq__}: `in` against a List and `list.remove` keep identity
+     * equality (spec/03-types.md, spec/04-semantics.md).
+     */
+    private static boolean identityEqual(Object a, Object b) {
         if (a instanceof Double && b instanceof Double) {
             return ((Double)a).doubleValue() == ((Double)b).doubleValue();
         }
@@ -190,13 +280,27 @@ public final class LoxOps {
     }
 
     public static boolean greater(Object a, Object b) {
+        if (a instanceof Double && b instanceof Double) {
+            return (Double)a > (Double)b;
+        }
+        LoxClosure dunder = findDunder(a, "__gt__");
+        if (dunder != null) {
+            return checkBooleanResult(dunder.callAsSelf(a, new Object[] {b}));
+        }
         checkNumbersForComparison(a, b);
-        return (Double)a > (Double)b;
+        throw new AssertionError("checkNumbersForComparison must throw");
     }
 
     public static boolean less(Object a, Object b) {
+        if (a instanceof Double && b instanceof Double) {
+            return (Double)a < (Double)b;
+        }
+        LoxClosure dunder = findDunder(a, "__lt__");
+        if (dunder != null) {
+            return checkBooleanResult(dunder.callAsSelf(a, new Object[] {b}));
+        }
         checkNumbersForComparison(a, b);
-        return (Double)a < (Double)b;
+        throw new AssertionError("checkNumbersForComparison must throw");
     }
 
     // ------------------------------------------------------------------
@@ -248,7 +352,7 @@ public final class LoxOps {
     public static boolean in(Object elem, Object seq) {
         if (seq instanceof LoxList) {
             for (Object v : ((LoxList)seq).elements) {
-                if (equal(v, elem)) {
+                if (identityEqual(v, elem)) {
                     return true;
                 }
             }
@@ -264,6 +368,10 @@ public final class LoxOps {
         if (seq instanceof LoxMap) {
             checkMapKey(elem);
             return ((LoxMap)seq).has(elem);
+        }
+        LoxClosure dunder = findDunder(seq, "__contains__");
+        if (dunder != null) {
+            return checkBooleanResult(dunder.callAsSelf(seq, new Object[] {elem}));
         }
         throw new LoxError(
             "Right operand of 'in' must be a list, string, or map.");
@@ -644,6 +752,10 @@ public final class LoxOps {
         if (callee instanceof LoxCallable) {
             return ((LoxCallable)callee).call(args);
         }
+        LoxClosure dunder = findDunder(callee, "__call__");
+        if (dunder != null) {
+            return dunder.callAsSelf(callee, args);
+        }
         throw makeError("NotCallableError",
                             "Can only call functions, classes and enums.");
     }
@@ -726,7 +838,7 @@ public final class LoxOps {
                                    args.length + ".");
             }
             for (int i = 0; i < list.elements.size(); i++) {
-                if (equal(list.elements.get(i), args[0])) {
+                if (identityEqual(list.elements.get(i), args[0])) {
                     list.elements.remove(i);
                     return null;
                 }

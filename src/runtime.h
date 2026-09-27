@@ -366,6 +366,24 @@ class Runtime {
     OpResult opIterHasNext();
     OpResult opIterNext();
 
+    // Arithmetic / comparison / containment operators. Each one owns the
+    // slow path of its opcode: the built-in number (and for ADD, string) fast
+    // path is inlined in VM::run(), and these are called only once that fast
+    // path has failed. They then try the operator-overloading method on the
+    // operand (see tryBinaryMethod below) and fall back to the same error the
+    // opcode raised before operator overloading existed. The QBE backend
+    // reuses these, so the method fallback must not live inline in vm.cpp.
+    OpResult opAdd(int stopAtFrameCount);
+    OpResult opSubtract(int stopAtFrameCount);
+    OpResult opMultiply(int stopAtFrameCount);
+    OpResult opDivide(int stopAtFrameCount);
+    OpResult opModulo(int stopAtFrameCount);
+    OpResult opNegate(int stopAtFrameCount);
+    OpResult opLess(int stopAtFrameCount);
+    OpResult opGreater(int stopAtFrameCount);
+    OpResult opEqual(int stopAtFrameCount);
+    OpResult opIn(int stopAtFrameCount);
+
     // Op::THROW's own op*()-shaped entry point: handleThrow() collapsed
     // through fromThrow() (private below) into the same OpResult contract
     // every other op*() call site uses, so Op::THROW can go through
@@ -452,6 +470,53 @@ class Runtime {
     OpResult callCompiled(ObjClosure* closure, int argCount,
                           int stopAtFrameCount);
 
+    // The operator-overloading protocol methods, in the order they are
+    // interned into m_protocolNames. `Count` is the array size.
+    enum class Protocol : std::uint8_t {
+        Add,
+        Sub,
+        Mul,
+        Div,
+        Mod,
+        Neg,
+        Lt,
+        Gt,
+        Eq,
+        Contains,
+        Call,
+        Count,
+    };
+
+    // Interns the protocol names into m_protocolNames. Called once from
+    // defineNatives(), after the VM is assembled but before any bytecode can
+    // run, so a dispatch helper never interns on the hot path.
+    void initProtocolNames();
+
+    // Dispatches a binary operator to `proto`'s method on the LEFT operand
+    // (peek(1)), passing the RIGHT operand (peek(0)) as the single argument.
+    // The left operand's class method table is the only lookup; a field named
+    // like the method never participates. Returns nullopt when the left
+    // operand is not an Instance that defines the method, in which case the
+    // caller falls through to the opcode's own error. Otherwise returns the
+    // OpResult of the method call, whose result is left on the stack.
+    std::optional<OpResult> tryBinaryMethod(Protocol proto,
+                                            int stopAtFrameCount);
+
+    // tryBinaryMethod plus Boolean-result validation: the pushed frame is
+    // marked so Op::RETURN validates its result as a Boolean and raises the
+    // catchable OperatorResultTypeError otherwise.
+    std::optional<OpResult> tryBinaryMethodBool(Protocol proto,
+                                                int stopAtFrameCount);
+
+    // Calls `method` — a resolved ObjClosure whose receiver already sits at
+    // stackTop[-argCount-1] — and, when `checkBool`, marks the pushed frame so
+    // Op::RETURN validates its result as a Boolean. The method itself runs in
+    // the ordinary interpreter loop; the validation happens at RETURN, not
+    // here, so a throw from the method propagates normally with no re-entrant
+    // run() invocation to confuse it with a caught throw.
+    OpResult dispatchMethod(ObjClosure* method, int argCount,
+                            int stopAtFrameCount, bool checkBool);
+
     // Sized FRAMES_MAX/STACK_MAX plus the reserve above, not just
     // FRAMES_MAX/STACK_MAX: the reserve is spent above those ceilings, while
     // a StackOverflowError unwinds (see m_unwindingStackOverflow and
@@ -483,6 +548,8 @@ class Runtime {
     bool m_unwindingStackOverflow{false};
     MemoryManager m_mm;
     Table m_globals;
+    std::array<ObjString*, static_cast<std::size_t>(Protocol::Count)>
+        m_protocolNames{};
     ObjUpvalue* m_openUpvalues{nullptr};
     Value m_lastResult; // For testing/debugging only -- stores the value
                         // popped by Op::POP.
@@ -519,6 +586,13 @@ class Runtime {
     // a vector of ObjClosure* (thunks) pending invocation LIFO.
     std::array<std::vector<Value>, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
         m_deferLists;
+
+    // Parallel to m_frames[]: whether the frame's result must be a Boolean,
+    // checked by Op::RETURN (operator-overloading result validation). Set by
+    // dispatchMethod(), cleared by RETURN, callCompiled(), handleThrow()'s
+    // unwind loop, and resetStack(). Sized to match m_frames.
+    std::array<bool, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
+        m_frameBoolCheck{};
 
     // See setInterpretLoop() above.
     std::function<InterpretResult(int)> m_runLoop;

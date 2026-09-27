@@ -176,6 +176,7 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
     Value result = pop();
     closeUpvalues(frame->slots);
     popHandlersOwnedByCurrentFrame();
+    m_frameBoolCheck[m_frameCount - 1] = false;
     m_frameCount--;
     stackTop = frame->slots;
     push(result);
@@ -358,6 +359,7 @@ Runtime::ThrowOutcome Runtime::handleThrow(Value thrownValue,
     while (m_frameCount > targetFrameCount) {
         int unwoundFrameIndex = m_frameCount - 1;
         closeUpvalues(m_frames[unwoundFrameIndex].slots);
+        m_frameBoolCheck[unwoundFrameIndex] = false;
         // Reclaim this frame's own window before running its defers, not
         // only at the end of the whole unwind (step 3 below). A deferred
         // call's own args are already captured on ObjDeferredCall, not read
@@ -497,6 +499,7 @@ bool Runtime::bindMethod(ObjClass* klass, ObjString* name) {
 }
 
 void Runtime::defineNatives() {
+    initProtocolNames();
     StdlibRegistrar reg(m_mm, m_globals);
     registerGlobals(reg);
     m_fileClass = registerFileAPI(reg);
@@ -560,6 +563,11 @@ void Runtime::markRoots() {
     if (m_errorClass) {
         m_mm.markObject(m_errorClass);
     }
+    for (ObjString* name : m_protocolNames) {
+        if (name) {
+            m_mm.markObject(name);
+        }
+    }
 }
 
 void Runtime::resetStack() {
@@ -570,6 +578,61 @@ void Runtime::resetStack() {
     for (auto& deferList : m_deferLists) {
         deferList.clear();
     }
+    m_frameBoolCheck.fill(false);
+}
+
+void Runtime::initProtocolNames() {
+    const char* names[] = {"__add__", "__sub__",      "__mul__", "__div__",
+                           "__mod__", "__neg__",      "__lt__",  "__gt__",
+                           "__eq__",  "__contains__", "__call__"};
+    for (std::size_t i = 0; i < m_protocolNames.size(); i++) {
+        m_protocolNames[i] = m_mm.makeString(names[i]);
+    }
+}
+
+std::optional<Runtime::OpResult>
+Runtime::tryBinaryMethod(Protocol proto, int stopAtFrameCount) {
+    Value left = peek(1);
+    if (!isInstance(left)) {
+        return std::nullopt;
+    }
+    ObjInstance* instance = asObjInstance(as<Obj*>(left));
+    Value method;
+    if (!instance->klass->methods.get(
+            m_protocolNames[static_cast<std::size_t>(proto)], method)) {
+        return std::nullopt;
+    }
+    return dispatchMethod(asObjClosure(as<Obj*>(method)), 1, stopAtFrameCount,
+                          false);
+}
+
+std::optional<Runtime::OpResult>
+Runtime::tryBinaryMethodBool(Protocol proto, int stopAtFrameCount) {
+    Value left = peek(1);
+    if (!isInstance(left)) {
+        return std::nullopt;
+    }
+    ObjInstance* instance = asObjInstance(as<Obj*>(left));
+    Value method;
+    if (!instance->klass->methods.get(
+            m_protocolNames[static_cast<std::size_t>(proto)], method)) {
+        return std::nullopt;
+    }
+    return dispatchMethod(asObjClosure(as<Obj*>(method)), 1, stopAtFrameCount,
+                          true);
+}
+
+Runtime::OpResult Runtime::dispatchMethod(ObjClosure* method, int argCount,
+                                          int stopAtFrameCount,
+                                          bool checkBool) {
+    ThrowOutcome outcome = call(method, argCount, stopAtFrameCount);
+    if (outcome != ThrowOutcome::Pushed) {
+        return fromThrow(outcome);
+    }
+    if (checkBool) {
+        m_frameBoolCheck[m_frameCount - 1] = true;
+    }
+    return OpResult::Resumed;
 }
 
 // --- op*() opcode helpers ------------------------------------------------
@@ -634,6 +697,18 @@ Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
         pop(); // pop the ObjEnumCtor from the callee slot
         push(Value{static_cast<Obj*>(enumVal)});
         return OpResult::OK;
+    }
+    if (isInstance(callee)) {
+        ObjInstance* instance = asObjInstance(as<Obj*>(callee));
+        Value method;
+        if (instance->klass->methods.get(
+                m_protocolNames[static_cast<std::size_t>(Protocol::Call)],
+                method)) {
+            // The receiver already sits at stackTop[-argCount-1], which
+            // becomes slot 0 of the new frame.
+            return dispatchMethod(asObjClosure(as<Obj*>(method)), argCount,
+                                  stopAtFrameCount, false);
+        }
     }
     return fromThrow(raiseThrowableError(
         "NotCallableError", "Can only call functions, classes and enums.",
@@ -1118,4 +1193,185 @@ Runtime::OpResult Runtime::opIterNext() {
         return OpResult::Fatal;
     }
     return OpResult::OK;
+}
+
+// --- arithmetic / comparison / containment op*() helpers ------------------
+//
+// Each one owns its opcode's slow path: VM::run() inlines the double-double
+// number fast path (and, for ADD, nothing else — string concat is not a
+// number fast path, so it lives here for QBE reuse), so these are reached
+// only when that fast path failed. They try the operator-overloading method
+// on the operand, then fall back to the same error the opcode raised before
+// operator overloading existed.
+
+Runtime::OpResult Runtime::opAdd(int stopAtFrameCount) {
+    if (isString(peek(0)) && isString(peek(1))) {
+        auto* b_str = asObjString(pop());
+        auto* a_str = asObjString(pop());
+        std::string result;
+        result.reserve(a_str->chars.size() + b_str->chars.size());
+        result.append(a_str->chars.data(), a_str->chars.size());
+        result.append(b_str->chars.data(), b_str->chars.size());
+        push(Value{static_cast<Obj*>(m_mm.makeString(std::move(result)))});
+        return OpResult::OK;
+    }
+    if (auto r = tryBinaryMethod(Protocol::Add, stopAtFrameCount)) {
+        return *r;
+    }
+    return fromThrow(raiseThrowableError(
+        "ConcatenationTypeError",
+        "Operands must be two numbers, two strings, or a string and a number.",
+        stopAtFrameCount));
+}
+
+Runtime::OpResult Runtime::opSubtract(int stopAtFrameCount) {
+    if (auto r = tryBinaryMethod(Protocol::Sub, stopAtFrameCount)) {
+        return *r;
+    }
+    return fromThrow(raiseThrowableError(
+        "ArithmeticTypeError", "Operands must be numbers.", stopAtFrameCount));
+}
+
+Runtime::OpResult Runtime::opMultiply(int stopAtFrameCount) {
+    if (auto r = tryBinaryMethod(Protocol::Mul, stopAtFrameCount)) {
+        return *r;
+    }
+    return fromThrow(raiseThrowableError(
+        "ArithmeticTypeError", "Operands must be numbers.", stopAtFrameCount));
+}
+
+Runtime::OpResult Runtime::opDivide(int stopAtFrameCount) {
+    if (auto r = tryBinaryMethod(Protocol::Div, stopAtFrameCount)) {
+        return *r;
+    }
+    return fromThrow(raiseThrowableError(
+        "ArithmeticTypeError", "Operands must be numbers.", stopAtFrameCount));
+}
+
+Runtime::OpResult Runtime::opModulo(int stopAtFrameCount) {
+    // Unlike ADD/SUBTRACT/MULTIPLY/DIVIDE, MODULO's number case is not a plain
+    // double-double computation — its floor-division sign correction means the
+    // QBE backend does not inline it (notes/qbe-backend.md Q5), so the full
+    // number case lives here rather than in VM::run().
+    if (is<Number>(peek(0)) && is<Number>(peek(1))) {
+        Number b = as<Number>(pop());
+        Number a = as<Number>(pop());
+        Number result = std::fmod(a, b);
+        if (result != 0 && (result < 0) != (b < 0)) {
+            result += b;
+        }
+        push(from<Number>(result));
+        return OpResult::OK;
+    }
+    if (auto r = tryBinaryMethod(Protocol::Mod, stopAtFrameCount)) {
+        return *r;
+    }
+    return fromThrow(raiseThrowableError(
+        "ArithmeticTypeError", "Operands must be numbers.", stopAtFrameCount));
+}
+
+Runtime::OpResult Runtime::opNegate(int stopAtFrameCount) {
+    Value operand = peek(0);
+    if (isInstance(operand)) {
+        ObjInstance* instance = asObjInstance(as<Obj*>(operand));
+        Value method;
+        if (instance->klass->methods.get(
+                m_protocolNames[static_cast<std::size_t>(Protocol::Neg)],
+                method)) {
+            return dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
+                                  stopAtFrameCount, false);
+        }
+    }
+    return fromThrow(raiseThrowableError(
+        "ArithmeticTypeError", "Operand must be a number.", stopAtFrameCount));
+}
+
+Runtime::OpResult Runtime::opLess(int stopAtFrameCount) {
+    if (auto r = tryBinaryMethodBool(Protocol::Lt, stopAtFrameCount)) {
+        return *r;
+    }
+    return fromThrow(raiseThrowableError(
+        "ComparisonTypeError", "Operands must be numbers.", stopAtFrameCount));
+}
+
+Runtime::OpResult Runtime::opGreater(int stopAtFrameCount) {
+    if (auto r = tryBinaryMethodBool(Protocol::Gt, stopAtFrameCount)) {
+        return *r;
+    }
+    return fromThrow(raiseThrowableError(
+        "ComparisonTypeError", "Operands must be numbers.", stopAtFrameCount));
+}
+
+Runtime::OpResult Runtime::opEqual(int stopAtFrameCount) {
+    Value b = peek(0);
+    Value a = peek(1);
+    if (auto r = tryBinaryMethodBool(Protocol::Eq, stopAtFrameCount)) {
+        return *r;
+    }
+    pop();
+    pop();
+    push(from<bool>(a == b));
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::opIn(int stopAtFrameCount) {
+    Value seq = peek(0);
+    Value elem = peek(1);
+    if (isList(seq)) {
+        auto* list = asObjList(as<Obj*>(seq));
+        bool found = false;
+        for (const auto& v : list->elements) {
+            if (v == elem) {
+                found = true;
+                break;
+            }
+        }
+        pop();
+        pop();
+        push(from<bool>(found));
+        return OpResult::OK;
+    }
+    if (isString(seq)) {
+        if (!isString(elem)) {
+            runtimeError("Left operand of 'in' on a string must be a string.");
+            return OpResult::Fatal;
+        }
+        auto* haystack = asObjString(as<Obj*>(seq));
+        auto* needle = asObjString(as<Obj*>(elem));
+        bool found =
+            haystack->chars.find(needle->chars.data(), 0,
+                                 needle->chars.size()) != LoxString::npos;
+        pop();
+        pop();
+        push(from<bool>(found));
+        return OpResult::OK;
+    }
+    if (isMap(seq)) {
+        if (auto err = checkMapKey(elem, stopAtFrameCount)) {
+            return *err;
+        }
+        auto* map = asObjMap(as<Obj*>(seq));
+        Value dummy{Nil{}};
+        pop();
+        pop();
+        push(from<bool>(map->mapGet(elem, dummy)));
+        return OpResult::OK;
+    }
+    if (isInstance(seq)) {
+        ObjInstance* instance = asObjInstance(as<Obj*>(seq));
+        Value method;
+        if (instance->klass->methods.get(
+                m_protocolNames[static_cast<std::size_t>(Protocol::Contains)],
+                method)) {
+            // __contains__ lives on the container, which is the RIGHT operand
+            // of `x in c`. Swap so the container becomes the receiver (slot 0)
+            // and the element the argument (slot 1).
+            stackTop[-2] = seq;
+            stackTop[-1] = elem;
+            return dispatchMethod(asObjClosure(as<Obj*>(method)), 1,
+                                  stopAtFrameCount, true);
+        }
+    }
+    runtimeError("Right operand of 'in' must be a list, string, or map.");
+    return OpResult::Fatal;
 }

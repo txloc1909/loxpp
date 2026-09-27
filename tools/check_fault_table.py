@@ -255,6 +255,21 @@ CATCHABLE_ROWS = [
         "try { [][0]; } catch (e) { e.foo; }",
         expected_kind="UndefinedPropertyError",
     ),
+    # Operator overloading result validation (issue #472): an operator method
+    # whose result must be a Boolean returned something else. CLR is excluded
+    # from the operator-overloading mission (#472); bootstrap's dispatch is a
+    # separately filed follow-up (#474).
+    Row(
+        "operator_result_type_error",
+        "caught",
+        "C() == C();",
+        setup="class C { __eq__(o) { return 42; } }\n",
+        expected_kind="OperatorResultTypeError",
+        skip={
+            CLR: "CLR backend is excluded from operator overloading (#472)",
+            BOOTSTRAP: "bootstrap operator-overloading dispatch is deferred (#474)",
+        },
+    ),
 ]
 
 # --- Fatal Runtime Errors table (spec/04-semantics.md) --------------------
