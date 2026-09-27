@@ -31,7 +31,6 @@ InterpretResult VM::interpret(const std::string& source) {
     // between compile() returning and push(closure) — the Compiler has already
     // been destroyed and m_currentCompiler is nullptr.
     m_rt.push(Value{static_cast<Obj*>(fn)});
-    m_rt.m_stdlibCtx.mm = &m_rt.m_mm;
     setActiveContext(&m_rt.m_stdlibCtx);
     m_rt.defineNatives();
     ObjClosure* closure = m_rt.m_mm.create<ObjClosure>(fn);

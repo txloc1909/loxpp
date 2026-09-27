@@ -99,6 +99,12 @@ class Runtime {
 #ifdef LOXPP_PROFILE
         m_mm.setProfilerData(&m_profilerData);
 #endif
+        // m_mm's address is fixed for this object's lifetime, so this is a
+        // one-time invariant, not something VM::interpret() needs to redo on
+        // every REPL line — unlike setActiveContext(&m_stdlibCtx), which
+        // VM::interpret() still sets on every call, since that points a
+        // global/thread-local at whichever VM is currently active.
+        m_stdlibCtx.mm = &m_mm;
     }
 
     // Set once by VM's constructor to `[this](int stop){ return run(stop); }`
@@ -291,6 +297,13 @@ class Runtime {
     // other caller with its own program counter (see notes/qbe-backend.md)
     // can do the same: decode the operand itself, store its own bytecode
     // offset into the frame, and call the same function.
+    //
+    // Defined out-of-line (runtime.cpp), unlike push/pop/peek above: each
+    // one is a full opcode body, not a one-line primitive the compiler
+    // would inline into VM::run()'s loop either way, so the cross-TU call
+    // this costs on every CALL/property/index/iterator dispatch is the same
+    // trade-off this PR's own fib(32) checkpoint (see the PR description)
+    // measured for the split as a whole, not an unmeasured one.
     OpResult opCall(int argCount, int stopAtFrameCount);
     OpResult opInvoke(ObjString* name, int argCount, int stopAtFrameCount);
     OpResult opGetProperty(ObjString* name, int stopAtFrameCount);
