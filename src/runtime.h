@@ -234,10 +234,24 @@ class Runtime {
     bool callBoundNative(ObjBoundNative* bn, int argCount);
     bool bindMethod(ObjClass* klass, ObjString* name);
     void defineNatives();
-    // Shared by opGetIndex's and opSetIndex's map branches — the same two
-    // throwable checks (NaN key, non-string object key), byte-for-byte.
-    // Returns nullopt when indexVal is a valid map key; otherwise the
-    // OpResult the caller should return immediately.
+
+    // The two throwable checks a map key must pass (NaN key, non-string
+    // object key) — kind/message pair, or nullopt when indexVal is valid.
+    // Shared by every map-key check site: opGetIndex/opSetIndex below (via
+    // checkMapKey(), which wraps this for the op*()/OpResult convention)
+    // and VM::run()'s own BUILD_MAP/Op::IN cases (which raise it through
+    // tryCatchableError() instead, the convention opcodes still inline in
+    // VM::run() use). One rule, two callers each wrapping it their own way.
+    struct MapKeyError {
+        const char* kind;
+        const char* message;
+    };
+    static std::optional<MapKeyError> mapKeyError(Value indexVal);
+
+    // Shared by opGetIndex's and opSetIndex's map branches — raises
+    // mapKeyError() above through the op*() convention. Returns nullopt
+    // when indexVal is a valid map key; otherwise the OpResult the caller
+    // should return immediately.
     std::optional<OpResult> checkMapKey(Value indexVal, int stopAtFrameCount);
     ObjUpvalue* captureUpvalue(Value* local);
     void closeUpvalues(Value* last);

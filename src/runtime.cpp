@@ -797,18 +797,22 @@ Runtime::OpResult Runtime::opInherit() {
     return OpResult::OK;
 }
 
-std::optional<Runtime::OpResult> Runtime::checkMapKey(Value indexVal,
-                                                      int stopAtFrameCount) {
+std::optional<Runtime::MapKeyError> Runtime::mapKeyError(Value indexVal) {
     if (is<Number>(indexVal) && std::isnan(as<Number>(indexVal))) {
-        return fromThrow(raiseThrowableError("NaNKeyError",
-                                             "NaN cannot be used as a map key.",
-                                             stopAtFrameCount));
+        return MapKeyError{"NaNKeyError", "NaN cannot be used as a map key."};
     }
     if (is<Obj*>(indexVal) && as<Obj*>(indexVal)->type != ObjType::STRING) {
-        return fromThrow(raiseThrowableError(
-            "InvalidMapKeyError",
-            "Map keys must be Bool, Number, Nil, or String.",
-            stopAtFrameCount));
+        return MapKeyError{"InvalidMapKeyError",
+                           "Map keys must be Bool, Number, Nil, or String."};
+    }
+    return std::nullopt;
+}
+
+std::optional<Runtime::OpResult> Runtime::checkMapKey(Value indexVal,
+                                                      int stopAtFrameCount) {
+    if (auto err = mapKeyError(indexVal)) {
+        return fromThrow(
+            raiseThrowableError(err->kind, err->message, stopAtFrameCount));
     }
     return std::nullopt;
 }

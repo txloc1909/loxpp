@@ -620,22 +620,13 @@ InterpretResult VM::run(int stopAtFrameCount) {
             bool errorCaught = false;
             for (int i = 0; i < count; i++) {
                 Value key = m_rt.peek(2 * (count - 1 - i) + 1);
-                // Check for NaN first
-                if (is<Number>(key) && std::isnan(as<Number>(key))) {
+                if (auto err = Runtime::mapKeyError(key)) {
                     // The macro's own early returns cover Uncaught/HandledStop;
                     // reaching here means HandledContinue, so break out of this
                     // validation loop (not the outer switch — errorCaught does
                     // that below) same as before.
-                    CATCHABLE_OR_RETURN(tryCatchableError(
-                        "NaNKeyError", "NaN cannot be used as a map key."));
-                    errorCaught = true;
-                    break;
-                }
-                // Then check for invalid object types (non-String)
-                if (is<Obj*>(key) && as<Obj*>(key)->type != ObjType::STRING) {
-                    CATCHABLE_OR_RETURN(tryCatchableError(
-                        "InvalidMapKeyError",
-                        "Map keys must be Bool, Number, Nil, or String."));
+                    CATCHABLE_OR_RETURN(
+                        tryCatchableError(err->kind, err->message));
                     errorCaught = true;
                     break;
                 }
@@ -778,15 +769,9 @@ InterpretResult VM::run(int stopAtFrameCount) {
                              LoxString::npos;
                 m_rt.push(from<bool>(found));
             } else if (isMap(seq)) {
-                if (is<Number>(elem) && std::isnan(as<Number>(elem))) {
-                    CATCHABLE_OR_RETURN(tryCatchableError(
-                        "NaNKeyError", "NaN cannot be used as a map key."));
-                    break;
-                }
-                if (is<Obj*>(elem) && as<Obj*>(elem)->type != ObjType::STRING) {
-                    CATCHABLE_OR_RETURN(tryCatchableError(
-                        "InvalidMapKeyError",
-                        "Map keys must be Bool, Number, Nil, or String."));
+                if (auto err = Runtime::mapKeyError(elem)) {
+                    CATCHABLE_OR_RETURN(
+                        tryCatchableError(err->kind, err->message));
                     break;
                 }
                 auto* map = asObjMap(as<Obj*>(seq));
