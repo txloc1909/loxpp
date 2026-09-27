@@ -1,9 +1,9 @@
 #pragma once
 
-// Shared VM capacity limits. vm.h and profiler.h both need the frame budget,
-// but vm.h includes profiler.h under LOXPP_PROFILE, so profiler.h cannot
-// include vm.h to read VM::FRAMES_MAX. This header is the single source of
-// truth both include instead.
+// Shared VM capacity limits. runtime.h and profiler.h both need the frame
+// budget, but runtime.h includes profiler.h under LOXPP_PROFILE, so
+// profiler.h cannot include runtime.h to read Runtime::FRAMES_MAX. This
+// header is the single source of truth both include instead.
 namespace loxpp {
 
 inline constexpr int kFramesMax = 1024;

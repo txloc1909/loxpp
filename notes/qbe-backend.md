@@ -60,7 +60,7 @@ stack and no verifier. So the QBE backend keeps clox's model:
 Consequences:
 
 - A call passes a pointer to the callee's window of the stack, exactly as
-  `VM::call` does (`slots = stackTop - argc - 1`). Slot 0 stays the
+  `Runtime::call` does (`slots = stackTop - argc - 1`). Slot 0 stays the
   callee or receiver.
 - `markRoots()` already scans `stack..stackTop`, so GC rooting needs no new
   mechanism.
