@@ -153,6 +153,29 @@ RUN curl -fsSL "https://api.nuget.org/v3-flatcontainer/runtime.linux-x64.microso
         /usr/local/bin/ilasm \
     && rm -rf /tmp/ilasm.nupkg /tmp/ilasm
 
+# --- dev-qbe -----------------------------------------------------------------
+# Adds the QBE compiler backend needed by the (future) --target qbe backend.
+# Kept out of `dev` so the C++-only jobs don't pay to build a second compiler
+# they never invoke. See notes/qbe-backend.md.
+FROM dev AS dev-qbe
+
+# QBE ships no binary releases; build from the pinned source tarball. Verify
+# the digest, matching the pattern the dev-managed stage uses for Jasmin and
+# ilasm. Record the pinned git commit in /opt/qbe/VERSION: `qbe` itself has
+# no `-v` flag, so this is the only place check_qbe_toolchain.sh can read the
+# exact version it is checking, the same record-the-baseline reason
+# check_managed_toolchains.sh prints javac/dotnet versions.
+RUN curl -fsSL "https://c9x.me/compile/release/qbe-1.3.tar.xz" \
+        -o /tmp/qbe.tar.xz \
+    && echo "d587905d620dc5e1d2bfa7c2cc642b9b837aa89a3188c6e37b53d756cf66e320  /tmp/qbe.tar.xz" \
+        | sha256sum -c - \
+    && tar -xJf /tmp/qbe.tar.xz -C /tmp \
+    && make -C /tmp/qbe-1.3 \
+    && install -Dm755 /tmp/qbe-1.3/qbe /usr/local/bin/qbe \
+    && mkdir -p /opt/qbe \
+    && printf 'qbe 1.3 (c0818978acec60ebb6167fade60fb7012cbf20ca)\n' > /opt/qbe/VERSION \
+    && rm -rf /tmp/qbe.tar.xz /tmp/qbe-1.3
+
 # --- release-static --------------------------------------------------------
 # Alpine 3.22 with musl libc for a fully static build. Separate stage, same
 # Dockerfile, independent of the glibc dev stages above. This stage carries
