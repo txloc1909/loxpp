@@ -276,7 +276,7 @@ Runtime::ThrowOutcome Runtime::handleThrow(Value thrownValue,
     HandlerRecord handlerToUse;
     int handlerIndex = -1;
     for (int i = (int)m_handlerStack.size() - 1; i >= 0; i--) {
-        HandlerRecord handler = m_handlerStack[i];
+        const HandlerRecord& handler = m_handlerStack[i];
         if (handler.frameCount <= m_frameCount) {
             // Found a live handler (innermost one, since we iterate LIFO).
             foundHandler = true;
@@ -969,6 +969,14 @@ Runtime::OpResult Runtime::opGetIter() {
     return OpResult::OK;
 }
 
+bool Runtime::mapIterationInvalidated(ObjMap* map, int expectedVersion) {
+    if (map->version != expectedVersion) {
+        runtimeError("Map changed size during iteration.");
+        return true;
+    }
+    return false;
+}
+
 Runtime::OpResult Runtime::opIterHasNext() {
     Value top = pop();
     // Invariant: value must be an ObjIterator (guaranteed by GET_ITER).
@@ -985,12 +993,9 @@ Runtime::OpResult Runtime::opIterHasNext() {
         has = it->index <
               (int)asObjString(as<Obj*>(it->collection))->chars.size();
     } else if (isMap(it->collection)) {
-        // Fail fast on structural change, as Python does for dicts. A
-        // version check also trips a paired erase plus insert that restores
-        // the net size, which a size check would miss.
+        // Fail fast on structural change, as Python does for dicts.
         auto* map = asObjMap(as<Obj*>(it->collection));
-        if (map->version != it->expectedVersion) {
-            runtimeError("Map changed size during iteration.");
+        if (mapIterationInvalidated(map, it->expectedVersion)) {
             return OpResult::Fatal;
         }
         // Scan forward from current index for the next occupied bucket.
@@ -1029,8 +1034,7 @@ Runtime::OpResult Runtime::opIterNext() {
         // Skip past empty/tombstone buckets to the next occupied one, push
         // its key, then advance the cursor past it.
         auto* map = asObjMap(as<Obj*>(it->collection));
-        if (map->version != it->expectedVersion) {
-            runtimeError("Map changed size during iteration.");
+        if (mapIterationInvalidated(map, it->expectedVersion)) {
             return OpResult::Fatal;
         }
         while (it->index < map->map.capacity() &&
