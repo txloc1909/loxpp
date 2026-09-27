@@ -1021,6 +1021,18 @@ jobs:
             loxpp-dev-qbe:latest \
             bash -c "tools/check_qbe_toolchain.sh"
 
+      # Builds libloxrt.a (the release preset: a debug build's sanitizer
+      # flags would need their runtime linked into s2_hello too, which the
+      # checkpoint's own plain `cc` link line does not do) and round-trips
+      # this node's checkpoint through it.
+      - name: Check libloxrt.a + startup (S2)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-qbe:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxrt -j\$(nproc) && tools/check_qbe_libloxrt.sh"
+
   release-static:
     name: Static musl release build
     runs-on: ubuntu-latest

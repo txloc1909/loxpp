@@ -105,3 +105,13 @@ struct DecodedFunction {
 // Walks the whole tree reachable from `root` — the top-level script
 // function — decoding every chunk it finds.
 DecodedFunction decodeFunctionTree(ObjFunction* root);
+
+// FNV-1a over a chunk's raw bytes (opcodes and operands, not the constant
+// pool — ValueArray holds pointers for object constants, which are not
+// stable across a recompile). The QBE backend's startup verification keys
+// on this: an emitter computes it once, at compile time, over the same
+// chunk it is generating code for, and embeds it next to that function's id
+// and arity; startup recomputes it over the freshly recompiled chunk and
+// the two must agree, or the embedded source and the compiled code have
+// drifted apart (notes/qbe-backend.md, "Startup").
+uint64_t hashChunkBytes(const Chunk& chunk);

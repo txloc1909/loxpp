@@ -40,6 +40,7 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/backend/native_pops.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/jvm_emitter.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/clr_emitter.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/rt_capi.cpp
     ${PROJECT_SOURCE_DIR}/src/value.cpp
     ${PROJECT_SOURCE_DIR}/src/object.cpp
     ${PROJECT_SOURCE_DIR}/src/container_objects.cpp
@@ -149,6 +150,7 @@ target_link_libraries(test_tooling_parser PRIVATE loxpp_core)
 loxpp_add_test(test_tooling_resolver test_tooling_resolver.cpp CORE loxpp_tooling PROBE)
 target_link_libraries(test_tooling_resolver PRIVATE loxpp_core)
 loxpp_add_test(test_check_diagnostics test_check_diagnostics.cpp CORE loxpp_test_core)
+loxpp_add_test(test_backend_rt_capi test_backend_rt_capi.cpp CORE loxpp_test_core)
 
 # loxpp-lsp building blocks: JSON-RPC framing, CRLF handling, the
 # diagnostics debounce, and the stdlib doc table. Links the src/lsp sources

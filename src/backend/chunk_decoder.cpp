@@ -221,3 +221,16 @@ DecodedFunction decodeFunctionNode(ObjFunction* fn, std::string id) {
 DecodedFunction decodeFunctionTree(ObjFunction* root) {
     return decodeFunctionNode(root, "0");
 }
+
+uint64_t hashChunkBytes(const Chunk& chunk) {
+    // FNV-1a, 64-bit. No cryptographic property is needed here — only that
+    // two different chunks are astronomically unlikely to collide, which
+    // this offers cheaply and deterministically across processes/platforms
+    // (no dependence on ASLR, pointer values, or hash-seed randomization).
+    uint64_t hash = 0xcbf29ce484222325ULL;
+    for (std::size_t i = 0; i < chunk.size(); i++) {
+        hash ^= chunk.at(static_cast<int>(i));
+        hash *= 0x100000001b3ULL;
+    }
+    return hash;
+}

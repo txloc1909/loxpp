@@ -3,6 +3,7 @@
 #include "object.h"
 #include "utility.h"
 #include "compiler.h"
+#include "backend/rt_abi.h"
 
 #include "stdlib/stdlib_registrar.h"
 #include "stdlib/globals.h"
@@ -141,6 +142,26 @@ Runtime::ThrowOutcome Runtime::call(ObjClosure* closure, int argCount,
     }
 #endif
     return ThrowOutcome::Pushed;
+}
+
+Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
+                                        int stopAtFrameCount) {
+    ThrowOutcome outcome = call(closure, argCount, stopAtFrameCount);
+    if (outcome != ThrowOutcome::Pushed) {
+        // call() already reported an arity mismatch or stack overflow (and,
+        // if a handler was active, already unwound to it) — no frame of
+        // ours was pushed, so there is nothing here to pop back off.
+        return fromThrow(outcome);
+    }
+    CallFrame* frame = &m_frames[m_frameCount - 1];
+    auto code = reinterpret_cast<RtCompiledFn>(closure->function->code);
+    int status = code(this, frame->slots);
+    // The compiled callee has already run its own Lox-level RETURN to
+    // completion by the time its C function returns, so this frame's exit
+    // is this call's own responsibility to close out, the same way call()
+    // just made pushing it this call's own responsibility.
+    m_frameCount--;
+    return status == 0 ? OpResult::OK : OpResult::Fatal;
 }
 
 ObjUpvalue* Runtime::captureUpvalue(Value* local) {
@@ -542,8 +563,11 @@ Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
                                                          : OpResult::Fatal;
     }
     if (isClosure(callee)) {
-        return fromThrow(
-            call(asObjClosure(callee), argCount, stopAtFrameCount));
+        ObjClosure* closure = asObjClosure(callee);
+        if (closure->function->code != nullptr) {
+            return callCompiled(closure, argCount, stopAtFrameCount);
+        }
+        return fromThrow(call(closure, argCount, stopAtFrameCount));
     }
     if (isBoundMethod(callee)) {
         ObjBoundMethod* bound = asObjBoundMethod(as<Obj*>(callee));
