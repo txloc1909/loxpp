@@ -5,7 +5,7 @@
 // all of that) lives in Runtime (runtime.h); this class caches the current
 // frame/ip/chunk in local variables for dispatch speed and drives the
 // switch in run(). See runtime.h's own top comment for why the two are
-// split this way and what it is a step toward.
+// split this way.
 
 #include "runtime.h"
 
@@ -15,12 +15,16 @@
 
 class VM {
   public:
-    static constexpr int STACK_MAX = loxpp::kStackMax;
-    static constexpr int FRAMES_MAX = loxpp::kFramesMax;
+    // Re-exported from Runtime, not loxpp::k* directly, so these two
+    // classes' limits can't drift apart from independent edits: Runtime is
+    // the one that actually enforces them (call()/push()); VM only needs
+    // them for test/test_vm_runtime.cpp's VM::-qualified assertions.
+    static constexpr int STACK_MAX = Runtime::STACK_MAX;
+    static constexpr int FRAMES_MAX = Runtime::FRAMES_MAX;
     static constexpr int STACK_OVERFLOW_FRAME_RESERVE =
-        loxpp::kStackOverflowFrameReserve;
+        Runtime::STACK_OVERFLOW_FRAME_RESERVE;
     static constexpr int STACK_OVERFLOW_STACK_RESERVE =
-        loxpp::kStackOverflowStackReserve;
+        Runtime::STACK_OVERFLOW_STACK_RESERVE;
 
     VM() {
         // The one place Runtime needs the interpreter loop back — see
