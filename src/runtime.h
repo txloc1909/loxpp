@@ -14,16 +14,16 @@
 // VM::run()'s switch; see notes/qbe-backend.md for the design this shape
 // supports.
 //
-// Only a slice of opcode bodies has moved into the op*() methods below so
-// far — the ones with the most runtime polymorphism: CALL/INVOKE/
-// SUPER_INVOKE dispatch, GET_PROPERTY/GET_SUPER, INHERIT, GET_INDEX/
-// SET_INDEX, and the iterator ops. Everything else (arithmetic,
-// locals/globals, control flow, RETURN, defer/handler bookkeeping) is still
-// inline in VM::run(), reached through the friendship grant below.
+// A slice of opcode bodies — the ones with the most runtime polymorphism:
+// CALL/INVOKE/SUPER_INVOKE dispatch, GET_PROPERTY/GET_SUPER, INHERIT,
+// GET_INDEX/SET_INDEX, and the iterator ops — is implemented as the op*()
+// methods below. Arithmetic, locals/globals, control flow, RETURN, and
+// defer/handler bookkeeping are implemented inline in VM::run() instead,
+// reached through the friendship grant below.
 //
 // VM::run() needs raw access to this class's own bookkeeping (m_frames,
-// stack/stackTop, m_handlerStack, ...) for the opcodes that have not moved
-// out yet, so VM is a friend rather than going through a pile of one-off
+// stack/stackTop, m_handlerStack, ...) for the opcodes it implements
+// inline, so VM is a friend rather than going through a pile of one-off
 // accessors that would only exist to satisfy that one caller. The op*()
 // methods and the other operations below are public so that a caller other
 // than VM can reach them without being a friend.
@@ -182,8 +182,9 @@ class Runtime {
     // roughly 4x slower on a call-heavy benchmark (fib(32), release preset)
     // because the compiler could no longer inline them into VM::run()'s
     // loop. Keep the operand-stack primitives header-only so any TU that
-    // includes runtime.h — including QBE's future C wrappers — gets the
-    // same inlining that the single-file VM used to get for free.
+    // includes runtime.h gets the same inlining that the single-file VM
+    // used to get for free — see notes/qbe-backend.md for why that matters
+    // to more than just vm.cpp.
     void push(Value value) {
         // Same threshold, STACK_MAX, whether or not a handler is active (see
         // STACK_OVERFLOW_STACK_RESERVE's own comment above): an open
@@ -233,6 +234,11 @@ class Runtime {
     bool callBoundNative(ObjBoundNative* bn, int argCount);
     bool bindMethod(ObjClass* klass, ObjString* name);
     void defineNatives();
+    // Shared by opGetIndex's and opSetIndex's map branches — the same two
+    // throwable checks (NaN key, non-string object key), byte-for-byte.
+    // Returns nullopt when indexVal is a valid map key; otherwise the
+    // OpResult the caller should return immediately.
+    std::optional<OpResult> checkMapKey(Value indexVal, int stopAtFrameCount);
     ObjUpvalue* captureUpvalue(Value* local);
     void closeUpvalues(Value* last);
     // Discards every m_handlerStack record whose frameCount equals the

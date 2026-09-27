@@ -513,7 +513,7 @@ void Runtime::resetStack() {
     }
 }
 
-// --- op*() opcode helpers (Layer 1) -------------------------------------
+// --- op*() opcode helpers ------------------------------------------------
 
 Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
     Value callee = peek(argCount);
@@ -797,6 +797,22 @@ Runtime::OpResult Runtime::opInherit() {
     return OpResult::OK;
 }
 
+std::optional<Runtime::OpResult> Runtime::checkMapKey(Value indexVal,
+                                                      int stopAtFrameCount) {
+    if (is<Number>(indexVal) && std::isnan(as<Number>(indexVal))) {
+        return fromThrow(raiseThrowableError("NaNKeyError",
+                                             "NaN cannot be used as a map key.",
+                                             stopAtFrameCount));
+    }
+    if (is<Obj*>(indexVal) && as<Obj*>(indexVal)->type != ObjType::STRING) {
+        return fromThrow(raiseThrowableError(
+            "InvalidMapKeyError",
+            "Map keys must be Bool, Number, Nil, or String.",
+            stopAtFrameCount));
+    }
+    return std::nullopt;
+}
+
 Runtime::OpResult Runtime::opGetIndex(int stopAtFrameCount) {
     Value indexVal = pop();
     Value collectionVal = pop();
@@ -848,16 +864,8 @@ Runtime::OpResult Runtime::opGetIndex(int stopAtFrameCount) {
         return OpResult::OK;
     }
     if (isMap(collectionVal)) {
-        if (is<Number>(indexVal) && std::isnan(as<Number>(indexVal))) {
-            return fromThrow(raiseThrowableError(
-                "NaNKeyError", "NaN cannot be used as a map key.",
-                stopAtFrameCount));
-        }
-        if (is<Obj*>(indexVal) && as<Obj*>(indexVal)->type != ObjType::STRING) {
-            return fromThrow(raiseThrowableError(
-                "InvalidMapKeyError",
-                "Map keys must be Bool, Number, Nil, or String.",
-                stopAtFrameCount));
+        if (auto err = checkMapKey(indexVal, stopAtFrameCount)) {
+            return *err;
         }
         auto* map = asObjMap(as<Obj*>(collectionVal));
         Value result{Nil{}}; // default nil — returned when key absent
@@ -906,16 +914,8 @@ Runtime::OpResult Runtime::opSetIndex(int stopAtFrameCount) {
         return OpResult::Fatal;
     }
     if (isMap(listVal)) {
-        if (is<Number>(indexVal) && std::isnan(as<Number>(indexVal))) {
-            return fromThrow(raiseThrowableError(
-                "NaNKeyError", "NaN cannot be used as a map key.",
-                stopAtFrameCount));
-        }
-        if (is<Obj*>(indexVal) && as<Obj*>(indexVal)->type != ObjType::STRING) {
-            return fromThrow(raiseThrowableError(
-                "InvalidMapKeyError",
-                "Map keys must be Bool, Number, Nil, or String.",
-                stopAtFrameCount));
+        if (auto err = checkMapKey(indexVal, stopAtFrameCount)) {
+            return *err;
         }
         auto* map = asObjMap(as<Obj*>(listVal));
         // Root the map: it was popped and may be a temporary; mapSet can
