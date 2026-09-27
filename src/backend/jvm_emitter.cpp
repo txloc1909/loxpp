@@ -1707,7 +1707,7 @@ void emitPushHandler(Emitter& e, const DecodedInstruction& in) {
     e.b.label(regionStartLabel);
     // Counts this region as live for LoxClosure's own arity/overflow
     // fatal-fast-path checks (issue #319) — see LoxOps.enterHandler's own
-    // comment for why this mirrors src/vm.h's VM::m_handlerStack. A
+    // comment for why this mirrors src/runtime.h's Runtime::m_handlerStack. A
     // static call with no arguments and a void return: net stack effect 0.
     e.b.emit("invokestatic lox/LoxOps/enterHandler()V", 0);
 

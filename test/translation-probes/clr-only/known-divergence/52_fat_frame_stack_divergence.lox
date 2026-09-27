@@ -5,7 +5,7 @@
 // call chain itself (about 902 frames) stays well under FRAMES_MAX (1024).
 //
 // Native rejects this with its own "Stack overflow." (the STACK_MAX guard,
-// VM::push) and exit 70, the same controlled path FRAMES_MAX uses. The CLR
+// Runtime::push) and exit 70, the same controlled path FRAMES_MAX uses. The CLR
 // backend mirrors FRAMES_MAX (runtime/clr/src/LoxClosure.cs) but has no
 // counterpart for STACK_MAX -- it counts calls, not value-stack slots -- so
 // this same program runs to completion on CLR and prints 210, exit 0.

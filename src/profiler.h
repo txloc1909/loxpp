@@ -54,7 +54,7 @@ struct ProfilerData {
     // Per-function stats. Key is ObjFunction* (stable for program lifetime).
     std::unordered_map<ObjFunction*, FunctionStats> funcTable;
 
-    // Per-frame call-entry timestamps, parallel to VM::m_frames[].
+    // Per-frame call-entry timestamps, parallel to Runtime::m_frames[].
     // Sized to match it (FRAMES_MAX plus the overflow reserve).
     std::array<int64_t, loxpp::kFramesMax + loxpp::kStackOverflowFrameReserve>
         frameEnterNs{};

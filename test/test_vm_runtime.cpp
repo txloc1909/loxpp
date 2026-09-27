@@ -583,7 +583,7 @@ class StackOverflowTest : public ::testing::Test {};
 
 // Deep recursion that exceeds STACK_MAX should produce RUNTIME_ERROR, not
 // crash. down(n) declares 20 local variables per frame (plus the callee slot
-// and the argument slot, 22 slots/frame). This test isolates VM::push's
+// and the argument slot, 22 slots/frame). This test isolates Runtime::push's
 // STACK_MAX guard from the frame-count guard below only as long as one
 // frame's slot cost is greater than STACK_MAX / FRAMES_MAX (16384 / 1024 =
 // 16 slots): 22 > 16, so the value-stack limit binds first. If a future
@@ -734,7 +734,8 @@ TEST_F(StackOverflowTest, CatchableFramesOverflow_CaughtWithCorrectKind) {
 
 // Same fault, but reached through the value-stack guard (push()) instead of
 // the frame-count guard, via the same fat-frame shape the STACK_MAX test
-// above uses. Proves both overflow sites, not just VM::call()'s, are wired.
+// above uses. Proves both overflow sites, not just Runtime::call()'s, are
+// wired.
 TEST_F(StackOverflowTest,
        CatchableStackOverflow_FatFrame_CaughtWithCorrectKind) {
     VMTestHarness h;
@@ -822,8 +823,8 @@ TEST_F(StackOverflowTest,
 // A handler-free deep recursion must still reach the full FRAMES_MAX ceiling
 // — the reserve must not shrink the usable depth when nothing will catch the
 // fault. Regression guard for the reserve added alongside the checks above:
-// with no handler active, VM::call()'s early check must never fire, so this
-// stays exactly the DeepestFramesMaxRecursion_Succeeds/
+// with no handler active, Runtime::call()'s early check must never fire, so
+// this stays exactly the DeepestFramesMaxRecursion_Succeeds/
 // DeepRecursionExceedsFramesMax_RuntimeError pair's own boundary (1022 ok,
 // 1023 fatal), not FRAMES_MAX - STACK_OVERFLOW_FRAME_RESERVE.
 TEST_F(StackOverflowTest, NoHandler_ReserveDoesNotShrinkUsableDepth) {
@@ -938,7 +939,7 @@ TEST_F(StackOverflowTest,
 // A deferred call that itself recurses far enough to outrun the reserve must
 // not hang or corrupt VM state. This directly exercises the "prove a new
 // check can fail" hazard the frame reserve exists to bound: with the guard
-// in VM::call()/push() removed (m_unwindingStackOverflow ignored), this
+// in Runtime::call()/push() removed (m_unwindingStackOverflow ignored), this
 // program does not hang — it crashes. Every one of `f`'s ~1000 unwound
 // frames hands its own recorded `boom(n)` to handleThrow()'s unwind loop;
 // boom's own 500-deep recursion reaches the reserve boundary again while the
@@ -1140,16 +1141,14 @@ TEST_F(StackOverflowTest,
 // seam instead.
 struct VMTestAccess {
     static void setStackTop(VM& vm, int depth) {
-        vm.stackTop = vm.stack + depth;
+        vm.m_rt.stackTop = vm.m_rt.stack + depth;
     }
     static void setUnwinding(VM& vm, bool v) {
-        vm.m_unwindingStackOverflow = v;
+        vm.m_rt.m_unwindingStackOverflow = v;
     }
-    static void push(VM& vm, Value v) { vm.push(v); }
-    static bool overflowFlag(const VM& vm) { return vm.m_stackOverflow; }
-    static int depth(const VM& vm) {
-        return static_cast<int>(vm.stackTop - vm.stack);
-    }
+    static void push(VM& vm, Value v) { vm.m_rt.push(v); }
+    static bool overflowFlag(const VM& vm) { return vm.m_rt.m_stackOverflow; }
+    static int depth(const VM& vm) { return vm.stackDepth(); }
 };
 
 TEST_F(StackOverflowTest, PushPastCeiling_SetsOverflow) {

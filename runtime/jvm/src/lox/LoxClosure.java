@@ -95,7 +95,7 @@ public abstract class LoxClosure implements LoxCallable {
 
     public final Object callAsSelf(Object self, Object[] args) {
         if (args.length != arity) {
-            // src/vm.cpp VM::call() makes ArityError catchable only when a
+            // src/runtime.cpp Runtime::call() makes ArityError catchable only when a
             // handler is live somewhere in the program; with none live, it
             // calls runtimeError() directly, bypassing the catchable
             // machinery entirely (issue #319). LoxOps.isHandlerLive()
@@ -119,7 +119,7 @@ public abstract class LoxClosure implements LoxCallable {
             }
         } else if (s_frameCount >= FRAMES_MAX) {
             if (!LoxOps.isHandlerLive()) {
-                // src/vm.cpp VM::call() takes the same fatal fast path (no
+                // src/runtime.cpp Runtime::call() takes the same fatal fast path (no
                 // handler live anywhere in the program) for the first
                 // overflow too — it never constructs the catchable
                 // StackOverflowError Error value in that case (issue

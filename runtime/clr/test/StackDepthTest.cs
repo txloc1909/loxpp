@@ -12,7 +12,7 @@ namespace LoxRuntimeTests;
 /// release-preset native binary (build/loxpp) on the same recursive
 /// program. This covers only the frame ceiling: native also has a
 /// separate value-stack ceiling (src/vm.h STACK_MAX, guarded by
-/// VM::push) that a frame with many locals can reach first, well below
+/// Runtime::push) that a frame with many locals can reach first, well below
 /// depth 1024 - this class has no counterpart for it, so a program native
 /// rejects that way still runs to completion here, a known, open gap not
 /// exercised by this test (see test/translation-probes/clr-only/known-divergence).
@@ -53,7 +53,7 @@ public static class StackDepthTest {
         // ceiling) never hits an exact match again. No Lox program reaches
         // that state through normal calls, so drive it direct here.
         //
-        // src/vm.cpp VM::call() only takes the catchable StackOverflowError
+        // src/runtime.cpp Runtime::call() only takes the catchable StackOverflowError
         // path when a handler is live somewhere in the program
         // (!m_handlerStack.empty()); with none live it goes straight to
         // the fatal "Stack overflow." path instead (issue #319). LoxOps.

@@ -15,9 +15,9 @@ namespace Lox;
 /// matching ObjFunction::arity.
 /// </summary>
 public abstract class LoxClosure : ILoxCallable {
-    // vm.cpp's own CallFrame ceiling (src/vm.h FRAMES_MAX). Generated CIL
+    // runtime.cpp's own CallFrame ceiling (src/vm.h FRAMES_MAX). Generated CIL
     // recurses the real CLR call stack one frame per Lox call - unlike
-    // vm.cpp's fixed CallFrame array, nothing here bounds that on its own,
+    // runtime.h's fixed CallFrame array, nothing here bounds that on its own,
     // and the real stack tolerates far more than 1024 nested calls before
     // it would fault. Counting here keeps every recursion depth that
     // native accepts or rejects agreeing on the CLR backend too, with the
@@ -28,7 +28,7 @@ public abstract class LoxClosure : ILoxCallable {
     // Native actually has TWO ceilings, not one: src/vm.h's STACK_MAX
     // (16384 value-stack slots, shared by every live frame) can be reached
     // first by a frame with many locals, well below 1024 frames deep -
-    // src/vm.cpp's own VM::push guards every write against it and reports
+    // src/runtime.h's own Runtime::push guards every write against it and reports
     // the same "Stack overflow." native reports for FRAMES_MAX, so that
     // path is controlled on the native side, not a buffer overflow. This
     // counter reproduces only the frame ceiling; nothing here counts
@@ -61,7 +61,7 @@ public abstract class LoxClosure : ILoxCallable {
     // succeed than FRAMES_MAX allows natively.
     private static int s_frameCount = 1;
 
-    // Mirrors src/vm.cpp's VM::m_unwindingStackOverflow: set for the
+    // Mirrors src/runtime.h's Runtime::m_unwindingStackOverflow: set for the
     // duration of one StackOverflowError's own unwind (from the moment the
     // ceiling throws it until s_overflowInFlight names it is genuinely
     // delivered to a real catchBlock — see EndStackOverflowUnwind, called
@@ -98,7 +98,7 @@ public abstract class LoxClosure : ILoxCallable {
 
     public object CallAsSelf(object self, object[] args) {
         if (args.Length != Arity) {
-            // src/vm.cpp VM::call() makes ArityError catchable only when a
+            // src/runtime.cpp Runtime::call() makes ArityError catchable only when a
             // handler is live somewhere in the program; with none live, it
             // calls runtimeError() directly, bypassing the catchable
             // machinery entirely (issue #319). LoxOps.HandlerLive mirrors
@@ -113,23 +113,23 @@ public abstract class LoxClosure : ILoxCallable {
         }
         // Use >=, not ==: s_frameCount only grows, so a call that starts
         // past FramesMax (a handler opened past the ceiling) would never
-        // see an exact match again. Matches src/vm.cpp VM::call().
+        // see an exact match again. Matches src/runtime.cpp Runtime::call().
         if (s_unwindingStackOverflow) {
             // Already unwinding one StackOverflowError: only the reserve
             // stands between here and fatal, and no further catchable
             // attempt is made (see s_unwindingStackOverflow's own comment)
-            // — matches native's own reserve-widened ceiling (VM::call(),
+            // — matches native's own reserve-widened ceiling (Runtime::call(),
             // src/vm.h STACK_OVERFLOW_FRAME_RESERVE).
             if (s_frameCount >= FramesMax + FramesMaxReserve) {
                 // A bare-message LoxError is uncatchable (LoxError.cs's own
                 // Catchable field) — matches native's RAISE_ERROR("Stack
-                // overflow.") fatal path (src/vm.cpp), not
+                // overflow.") fatal path (src/runtime.cpp), not
                 // tryCatchableError's catchable one.
                 throw new LoxError("Stack overflow.");
             }
         } else if (s_frameCount >= FramesMax) {
             if (!LoxOps.HandlerLive) {
-                // src/vm.cpp VM::call() takes the same fatal fast path
+                // src/runtime.cpp Runtime::call() takes the same fatal fast path
                 // (no handler live anywhere in the program) for the first
                 // overflow too - it never constructs the catchable
                 // StackOverflowError Error value in that case (issue

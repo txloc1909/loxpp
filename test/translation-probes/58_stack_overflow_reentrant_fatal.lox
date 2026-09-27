@@ -1,4 +1,4 @@
-// Issue #316: native holds VM::m_unwindingStackOverflow (src/vm.cpp) for
+// Issue #316: native holds Runtime::m_unwindingStackOverflow (src/runtime.cpp) for
 // the duration of one StackOverflowError's own unwind, so a SECOND
 // overflow that happens from a deferred call running during that unwind
 // is fatal, not delivered to the live handler below. Before this fix, the
