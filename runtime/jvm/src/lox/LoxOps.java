@@ -246,6 +246,19 @@ public final class LoxOps {
         if (dunder != null) {
             return checkBooleanResult(dunder.callAsSelf(a, new Object[] {b}));
         }
+        return identityEqual(a, b);
+    }
+
+    /**
+     * The value/identity equality the built-in operators and the internal
+     * comparison sites use. Unlike {@link #equal}, it never consults
+     * {@code __eq__}: `in` against a List and `list.remove` keep identity
+     * equality (spec/03-types.md, spec/04-semantics.md).
+     */
+    private static boolean identityEqual(Object a, Object b) {
+        if (a instanceof Double && b instanceof Double) {
+            return ((Double)a).doubleValue() == ((Double)b).doubleValue();
+        }
         if (a instanceof Double || b instanceof Double) {
             return false;
         }
@@ -339,7 +352,7 @@ public final class LoxOps {
     public static boolean in(Object elem, Object seq) {
         if (seq instanceof LoxList) {
             for (Object v : ((LoxList)seq).elements) {
-                if (equal(v, elem)) {
+                if (identityEqual(v, elem)) {
                     return true;
                 }
             }
@@ -825,7 +838,7 @@ public final class LoxOps {
                                    args.length + ".");
             }
             for (int i = 0; i < list.elements.size(); i++) {
-                if (equal(list.elements.get(i), args[0])) {
+                if (identityEqual(list.elements.get(i), args[0])) {
                     list.elements.remove(i);
                     return null;
                 }

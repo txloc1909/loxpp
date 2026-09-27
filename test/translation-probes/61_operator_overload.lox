@@ -37,5 +37,11 @@ print 10 in box;
 print 3 in box;
 print box(5);
 
+class AlwaysEq { __eq__(o) { return true; } }
+var e1 = AlwaysEq();
+var e2 = AlwaysEq();
+print e1 in [e2];
+print e1 == e2;
+
 print 1 + 2;
 print "x" + "y";
