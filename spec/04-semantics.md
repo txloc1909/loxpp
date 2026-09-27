@@ -158,6 +158,56 @@ Any violation is a **runtime error**.
 `a == b` and `a != b` are defined for all type combinations and never produce
 a runtime error. See [03-types.md § Equality](03-types.md#equality).
 
+### Operator Overloading
+
+An Instance may define special methods ("dunder" methods) that the operators
+above dispatch to. The dispatch order is fixed:
+
+1. **Built-in branch first.** The operator's ordinary behaviour applies when
+   the operands match the built-in types (Numbers for arithmetic and
+   comparison; Numbers, Strings, or the concatenation case for `+`; List,
+   String, or Map for `in`).
+2. **Then the user method.** When the built-in branch does not apply, the
+   operator tries the method on its receiver — the left operand for the
+   arithmetic, comparison, and equality operators, the container (right
+   operand) for `in`, and the called value for `()`. If the receiver is an
+   Instance whose class defines the method, the method is called with the
+   other operand (or operands) as its argument(s). There are no reflected
+   (right-operand) methods.
+3. **Otherwise the same error as today.** A receiver that is not an Instance,
+   or an Instance whose class does not define the method, raises exactly the
+   error the operator raised before operator overloading existed.
+
+Method lookup reads the class **method table** only; a field whose name
+happens to equal a dunder name never participates.
+
+| Operator | Method | Receiver |
+|---|---|---|
+| `a + b` | `__add__(b)` | `a` |
+| `a - b` | `__sub__(b)` | `a` |
+| `a * b` | `__mul__(b)` | `a` |
+| `a / b` | `__div__(b)` | `a` |
+| `a % b` | `__mod__(b)` | `a` |
+| `-a` | `__neg__()` | `a` |
+| `a < b` | `__lt__(b)` | `a` |
+| `a > b` | `__gt__(b)` | `a` |
+| `a == b` | `__eq__(b)` | `a` |
+| `x in c` | `__contains__(x)` | `c` |
+| `f()` on an Instance | `__call__(...)` | `f` |
+
+`a != b` is `==` then logical negation: it derives from `__eq__` and has no
+method of its own. `a <= b` is `!(a > b)` and `a >= b` is `!(a < b)`; each
+dispatches `__gt__` / `__lt__` and negates the result, with no `__le__` /
+`__ge__` method.
+
+The result of `__eq__`, `__lt__`, `__gt__`, and `__contains__` must be a
+Boolean. Any other result raises a catchable `OperatorResultTypeError` (see
+[Runtime Errors](#runtime-errors)). The result of every other method in the
+table above is unconstrained.
+
+Internal equality — `in` against a List, `list.remove`, and map-key equality —
+always uses identity equality and never consults `__eq__`.
+
 ### Logical Operators (Short-Circuit)
 
 `and` and `or` do **not** necessarily return a Boolean; they return one of
@@ -1174,6 +1224,7 @@ same text the implementation reports when the fault is left uncaught.
 | No arm matches in a `match` expression | `match 99 { case 1 => "one" }` | `"MatchError"` |
 | Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field | `"ConstructorArityError"` |
 | Undefined property on an `Error` value | `try { try { [][0]; } catch (e) { e.foo; } } catch (_) { }` | `"UndefinedPropertyError"` |
+| Operator method returned a non-Boolean | `class C { __eq__(o) { return 42; } } C() == C()` | `"OperatorResultTypeError"` |
 
 **The two map-key rows above cover an index read or write, a map or set
 literal, and `in`.** `Map.has(key)` and `Map.del(key)` are stdlib native

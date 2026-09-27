@@ -62,17 +62,6 @@ InterpretResult VM::run(int stopAtFrameCount) {
         }                                                                      \
     } while (false)
 
-#define BINARY_OP(valueType, op, kind_str, msg)                                \
-    do {                                                                       \
-        if (!is<Number>(m_rt.peek(0)) || !is<Number>(m_rt.peek(1))) {          \
-            CATCHABLE_OR_RETURN(tryCatchableError(kind_str, msg));             \
-            break;                                                             \
-        }                                                                      \
-        Number b = as<Number>(m_rt.pop());                                     \
-        Number a = as<Number>(m_rt.pop());                                     \
-        m_rt.push(as<valueType>(a op b));                                      \
-    } while (false)
-
     // Local to VM::run(). The single place that knows how to derive the
     // register-cached ip/chunk from the live CallFrame array — used for the
     // initial load below, for Op::RETURN's reload, and (via
@@ -241,77 +230,115 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::EQUAL: {
-            Value b = m_rt.pop();
-            Value a = m_rt.pop();
-            m_rt.push(from<bool>(a == b));
+            if (is<Number>(m_rt.peek(0)) && is<Number>(m_rt.peek(1))) {
+                Number b = as<Number>(m_rt.pop());
+                Number a = as<Number>(m_rt.pop());
+                m_rt.push(from<bool>(a == b));
+            } else {
+                if (auto ret = dispatchOp(
+                        [&] { return m_rt.opEqual(stopAtFrameCount); })) {
+                    return *ret;
+                }
+            }
             break;
         }
         case Op::GREATER: {
-            BINARY_OP(bool, >, "ComparisonTypeError",
-                      "Operands must be numbers.");
+            if (is<Number>(m_rt.peek(0)) && is<Number>(m_rt.peek(1))) {
+                Number b = as<Number>(m_rt.pop());
+                Number a = as<Number>(m_rt.pop());
+                m_rt.push(from<bool>(a > b));
+            } else {
+                if (auto ret = dispatchOp(
+                        [&] { return m_rt.opGreater(stopAtFrameCount); })) {
+                    return *ret;
+                }
+            }
             break;
         }
         case Op::LESS: {
-            BINARY_OP(bool, <, "ComparisonTypeError",
-                      "Operands must be numbers.");
+            if (is<Number>(m_rt.peek(0)) && is<Number>(m_rt.peek(1))) {
+                Number b = as<Number>(m_rt.pop());
+                Number a = as<Number>(m_rt.pop());
+                m_rt.push(from<bool>(a < b));
+            } else {
+                if (auto ret = dispatchOp(
+                        [&] { return m_rt.opLess(stopAtFrameCount); })) {
+                    return *ret;
+                }
+            }
             break;
         }
         case Op::NEGATE: {
-            if (!is<Number>(m_rt.peek(0))) {
-                CATCHABLE_OR_RETURN(tryCatchableError(
-                    "ArithmeticTypeError", "Operand must be a number."));
-                break;
+            if (is<Number>(m_rt.peek(0))) {
+                m_rt.push(from<Number>(-as<Number>(m_rt.pop())));
+            } else {
+                if (auto ret = dispatchOp(
+                        [&] { return m_rt.opNegate(stopAtFrameCount); })) {
+                    return *ret;
+                }
             }
-            m_rt.push(from<Number>(-as<Number>(m_rt.pop())));
             break;
         }
         case Op::ADD: {
-            if (isString(m_rt.peek(0)) && isString(m_rt.peek(1))) {
-                auto* b_str = asObjString(m_rt.pop());
-                auto* a_str = asObjString(m_rt.pop());
-                std::string result;
-                result.reserve(a_str->chars.size() + b_str->chars.size());
-                result.append(a_str->chars.data(), a_str->chars.size());
-                result.append(b_str->chars.data(), b_str->chars.size());
-                m_rt.push(Value{static_cast<Obj*>(
-                    m_rt.m_mm.makeString(std::move(result)))});
+            if (is<Number>(m_rt.peek(0)) && is<Number>(m_rt.peek(1))) {
+                Number b = as<Number>(m_rt.pop());
+                Number a = as<Number>(m_rt.pop());
+                m_rt.push(from<Number>(a + b));
             } else {
-                BINARY_OP(Number, +, "ConcatenationTypeError",
-                          "Operands must be two numbers, two strings, or a "
-                          "string and a number.");
+                if (auto ret = dispatchOp(
+                        [&] { return m_rt.opAdd(stopAtFrameCount); })) {
+                    return *ret;
+                }
             }
             break;
         }
         case Op::SUBTRACT: {
-            BINARY_OP(Number, -, "ArithmeticTypeError",
-                      "Operands must be numbers.");
+            if (is<Number>(m_rt.peek(0)) && is<Number>(m_rt.peek(1))) {
+                Number b = as<Number>(m_rt.pop());
+                Number a = as<Number>(m_rt.pop());
+                m_rt.push(from<Number>(a - b));
+            } else {
+                if (auto ret = dispatchOp(
+                        [&] { return m_rt.opSubtract(stopAtFrameCount); })) {
+                    return *ret;
+                }
+            }
             break;
         }
         case Op::MULTIPLY: {
-            BINARY_OP(Number, *, "ArithmeticTypeError",
-                      "Operands must be numbers.");
+            if (is<Number>(m_rt.peek(0)) && is<Number>(m_rt.peek(1))) {
+                Number b = as<Number>(m_rt.pop());
+                Number a = as<Number>(m_rt.pop());
+                m_rt.push(from<Number>(a * b));
+            } else {
+                if (auto ret = dispatchOp(
+                        [&] { return m_rt.opMultiply(stopAtFrameCount); })) {
+                    return *ret;
+                }
+            }
             break;
         }
         case Op::DIVIDE: {
-            BINARY_OP(Number, /, "ArithmeticTypeError",
-                      "Operands must be numbers.");
+            if (is<Number>(m_rt.peek(0)) && is<Number>(m_rt.peek(1))) {
+                Number b = as<Number>(m_rt.pop());
+                Number a = as<Number>(m_rt.pop());
+                m_rt.push(from<Number>(a / b));
+            } else {
+                if (auto ret = dispatchOp(
+                        [&] { return m_rt.opDivide(stopAtFrameCount); })) {
+                    return *ret;
+                }
+            }
             break;
         }
         case Op::MODULO: {
-            if (!is<Number>(m_rt.peek(0)) || !is<Number>(m_rt.peek(1))) {
-                CATCHABLE_OR_RETURN(tryCatchableError(
-                    "ArithmeticTypeError", "Operands must be numbers."));
-                break;
+            // No inline fast path: MODULO's floor-division number case lives in
+            // Runtime::opModulo (see its own comment — the QBE backend reuses
+            // it, and the sign correction is not a plain double-double case).
+            if (auto ret = dispatchOp(
+                    [&] { return m_rt.opModulo(stopAtFrameCount); })) {
+                return *ret;
             }
-            Number b = as<Number>(m_rt.pop());
-            Number a = as<Number>(m_rt.pop());
-            Number result = std::fmod(a, b);
-            // Floor-division semantics: result has same sign as b (Python/Lua
-            // behavior)
-            if (result != 0 && (result < 0) != (b < 0)) {
-                result += b;
-            }
-            m_rt.push(from<Number>(result));
             break;
         }
         case Op::NOT: {
@@ -559,6 +586,8 @@ InterpretResult VM::run(int stopAtFrameCount) {
             // defers already had this done by RUN_DEFERS below, before its
             // defers ran; this is then a no-op.
             m_rt.popHandlersOwnedByCurrentFrame();
+            bool checkBool = m_rt.m_frameBoolCheck[m_rt.m_frameCount - 1];
+            m_rt.m_frameBoolCheck[m_rt.m_frameCount - 1] = false;
 #ifdef LOXPP_PROFILE
             // Destroy the function scope before decrementing frameCount so the
             // depth index still points to this frame's slot.
@@ -575,6 +604,15 @@ InterpretResult VM::run(int stopAtFrameCount) {
             m_rt.push(result);
             FrameSync::loadTop(m_rt.m_frames, m_rt.m_frameCount, frame, ip,
                                chunk);
+            if (checkBool && !is<bool>(result)) {
+                // An operator-overloading method returned a non-Boolean. The
+                // method frame is already gone, so this raises at the caller's
+                // operator site and any handler there (or above) can catch it.
+                CATCHABLE_OR_RETURN(tryCatchableError(
+                    "OperatorResultTypeError",
+                    "Operator method must return a Boolean."));
+                break;
+            }
             if (m_rt.m_frameCount <= stopAtFrameCount) {
                 // A nested run() (draining a deferred call — see
                 // Runtime::runPendingDefers) reached the depth it was asked
@@ -729,43 +767,9 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::IN: {
-            Value seq = m_rt.pop();
-            Value elem = m_rt.pop();
-            if (isList(seq)) {
-                auto* list = asObjList(as<Obj*>(seq));
-                bool found = false;
-                for (const auto& v : list->elements) {
-                    if (v == elem) {
-                        found = true;
-                        break;
-                    }
-                }
-                m_rt.push(from<bool>(found));
-            } else if (isString(seq)) {
-                if (!isString(elem)) {
-                    RAISE_ERROR(
-                        "Left operand of 'in' on a string must be a string.");
-                    return InterpretResult::RUNTIME_ERROR;
-                }
-                auto* haystack = asObjString(as<Obj*>(seq));
-                auto* needle = asObjString(as<Obj*>(elem));
-                bool found = haystack->chars.find(needle->chars.data(), 0,
-                                                  needle->chars.size()) !=
-                             LoxString::npos;
-                m_rt.push(from<bool>(found));
-            } else if (isMap(seq)) {
-                if (auto err = Runtime::mapKeyError(elem)) {
-                    CATCHABLE_OR_RETURN(
-                        tryCatchableError(err->kind, err->message));
-                    break;
-                }
-                auto* map = asObjMap(as<Obj*>(seq));
-                Value dummy;
-                m_rt.push(from<bool>(map->mapGet(elem, dummy)));
-            } else {
-                RAISE_ERROR(
-                    "Right operand of 'in' must be a list, string, or map.");
-                return InterpretResult::RUNTIME_ERROR;
+            if (auto ret =
+                    dispatchOp([&] { return m_rt.opIn(stopAtFrameCount); })) {
+                return *ret;
             }
             break;
         }
@@ -885,7 +889,6 @@ InterpretResult VM::run(int stopAtFrameCount) {
         }
     }
 
-#undef BINARY_OP
 #undef CATCHABLE_OR_RETURN
 #undef RAISE_ERROR
 }

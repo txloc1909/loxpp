@@ -1,0 +1,41 @@
+class Vec {
+  init(x) { this.x = x; }
+  __add__(o) { return this.x + o.x; }
+  __sub__(o) { return this.x - o.x; }
+  __mul__(o) { return this.x * o.x; }
+  __div__(o) { return this.x / o.x; }
+  __mod__(o) { return this.x % o.x; }
+  __neg__() { return -this.x; }
+  __lt__(o) { return this.x < o.x; }
+  __gt__(o) { return this.x > o.x; }
+  __eq__(o) { return this.x == o.x; }
+}
+
+class Box {
+  init(x) { this.x = x; }
+  __contains__(v) { return v == this.x; }
+  __call__(n) { return this.x + n; }
+}
+
+var a = Vec(3);
+var b = Vec(4);
+print a + b;
+print a - b;
+print a * b;
+print a / b;
+print a % b;
+print -a;
+print a < b;
+print a > b;
+print a == b;
+print a != b;
+print a <= b;
+print a >= b;
+
+var box = Box(10);
+print 10 in box;
+print 3 in box;
+print box(5);
+
+print 1 + 2;
+print "x" + "y";

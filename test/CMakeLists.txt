@@ -120,6 +120,7 @@ loxpp_add_test(test_class_pattern    test_class_pattern.cpp   CORE loxpp_test_co
 loxpp_add_test(test_class_pattern_gc test_class_pattern.cpp   CORE loxpp_test_core)
 loxpp_add_test(test_match_expr      test_match_expr.cpp      CORE loxpp_test_core)
 loxpp_add_test(test_slice          test_slice.cpp           CORE loxpp_test_core)
+loxpp_add_test(test_operator_overload test_operator_overload.cpp CORE loxpp_test_core)
 loxpp_add_test(test_or_pattern      test_or_pattern.cpp      CORE loxpp_test_core)
 loxpp_add_test(test_or_pattern_gc   test_or_pattern.cpp      CORE loxpp_test_core)
 loxpp_add_test(test_seq_destructure test_seq_destructure.cpp CORE loxpp_test_core)
@@ -274,6 +275,7 @@ set(LOXPP_GTEST_TARGETS
     test_stress_gc test_gc_regression test_inheritance test_list test_list_gc
     test_map test_map_gc test_var_destructure test_enum test_enum_gc
     test_class_pattern test_class_pattern_gc test_match_expr test_slice
+    test_operator_overload
     test_or_pattern test_or_pattern_gc test_seq_destructure test_list_pattern
     test_list_pattern_gc test_at_binding test_at_binding_gc test_profiler
     test_chunk_decoder test_backend_cfg test_backend_abstract_stack

@@ -76,6 +76,9 @@ probes=(
     # hasField()/setField()/callMethod(), now supported on native, JVM, and
     # CLR alike (src/stdlib/reflect_api.cpp, LoxRuntime.registerReflection).
     "test/translation-probes/40_reflection.lox"
+    # Operator overloading (issue #472): dunder dispatch for arithmetic,
+    # comparison, equality, containment, and call.
+    "test/translation-probes/61_operator_overload.lox"
     # Visibility after close() (spec/05-stdlib.md, File section): the
     # differential corpus sweep alone reports a false MATCH when a probe
     # cannot even run (both sides give empty stdout and a matching non-zero

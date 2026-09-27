@@ -280,7 +280,13 @@ The `==` and `!=` operators compare two values.
   - Classes, Instances, BoundMethods, Bound built-in methods, Lists, Maps, and Errors use identity
     equality: two values are equal only if they are the exact same object
 
-Equality never produces a runtime error regardless of the types being compared.
+Equality never produces a runtime error regardless of the types being compared,
+**except** that an Instance whose class defines `__eq__` dispatches to it (see
+[§04-semantics, Operator Overloading](04-semantics.md#operator-overloading)),
+and a `__eq__` that does not return a Boolean raises a catchable
+`OperatorResultTypeError`. Internal equality (`in` against a List,
+`list.remove`, and map-key equality) always uses identity equality and never
+consults `__eq__`.
 
 ---
 

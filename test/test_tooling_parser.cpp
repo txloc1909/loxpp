@@ -572,7 +572,9 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // fix lets it verify and run on JVM too), raising this to 200. Issue
     // #445 promotes catch_overflow.lox out of jvm-only/ (uncounted there)
     // once a live CLR run confirmed it matches native, raising this to 201.
-    ASSERT_EQ(files.size(), 201U);
+    // Issue #472 adds test/translation-probes/61_operator_overload.lox,
+    // raising this to 202.
+    ASSERT_EQ(files.size(), 202U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {
