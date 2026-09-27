@@ -1,0 +1,8 @@
+# Malformed on purpose: %undefined is never assigned. Proves QBE's own
+# parser/type-checker still rejects bad IL on this image, the CLR-fixture
+# counterpart of stack_mismatch.il's malformed-IL rejection check.
+export function w $main() {
+@start
+	%r =w add 1, %undefined
+	ret %r
+}

@@ -1,0 +1,7 @@
+# Hand-written QBE IL. main() calls into the C++ static library built from
+# hello_rt.cpp and returns its result as the process exit code.
+export function w $main() {
+@start
+	%r =w call $lox_rt_hello()
+	ret %r
+}

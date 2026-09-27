@@ -991,6 +991,36 @@ jobs:
           echo "The 'Build and test the JVM runtime library' step failed; see its log above." >&2
           exit 1
 
+  qbe-toolchain:
+    name: QBE toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dev-qbe image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          target: dev-qbe
+          tags: loxpp-dev-qbe:latest
+          # Also read the dev scope so this job reuses the base layers the
+          # C++-only jobs already built instead of rebuilding them.
+          cache-from: |
+            type=gha,scope=dev-qbe
+            type=gha,scope=dev
+          cache-to: type=gha,mode=min,scope=dev-qbe
+
+      - name: Check QBE toolchain
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-qbe:latest \
+            bash -c "tools/check_qbe_toolchain.sh"
+
   release-static:
     name: Static musl release build
     runs-on: ubuntu-latest
