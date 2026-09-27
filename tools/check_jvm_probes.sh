@@ -77,8 +77,10 @@ probes=(
     # CLR alike (src/stdlib/reflect_api.cpp, LoxRuntime.registerReflection).
     "test/translation-probes/40_reflection.lox"
     # Operator overloading (issue #472): dunder dispatch for arithmetic,
-    # comparison, equality, containment, and call.
-    "test/translation-probes/61_operator_overload.lox"
+    # comparison, equality, containment, and call. jvm-only: the CLR backend
+    # is excluded from operator overloading and is deleted after the QBE
+    # parity gate.
+    "test/translation-probes/jvm-only/61_operator_overload.lox"
     # Visibility after close() (spec/05-stdlib.md, File section): the
     # differential corpus sweep alone reports a false MATCH when a probe
     # cannot even run (both sides give empty stdout and a matching non-zero
