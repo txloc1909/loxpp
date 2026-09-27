@@ -21,11 +21,21 @@ namespace {
 // it into RT_OP_FATAL instead of calling std::terminate — compiled code has
 // no unwinding tables to run a C++ exception through (Q2,
 // notes/qbe-backend.md).
+//
+// Every OTHER path to OpResult::Fatal goes through Runtime::runtimeError(),
+// which calls resetStack() before returning, so a caller that observes
+// Fatal can always assume stackTop/m_frameCount are already clean. A stray
+// C++ exception unwinds straight past whatever partial frame/stack
+// bookkeeping its throw point left behind, so this catch restores that
+// same invariant itself — the one path to Fatal that does not already run
+// through runtimeError() still leaves the Runtime in the state every
+// Fatal caller relies on.
 template <typename F>
-int rtGuard(F&& body) noexcept {
+int rtGuard(Runtime* rt, F&& body) noexcept {
     try {
         return static_cast<int>(body());
     } catch (...) {
+        rt->resetStack();
         return static_cast<int>(Runtime::OpResult::Fatal);
     }
 }
@@ -127,7 +137,7 @@ Value rt_get_global(Runtime* rt, const char* name) noexcept {
 }
 
 int rt_op_print(Runtime* rt) noexcept {
-    return rtGuard([&] {
+    return rtGuard(rt, [&] {
         // Mirrors Op::PRINT's own body (vm.cpp): clear before stringify()
         // (which can itself call back into stdlib code, e.g. a Map's own
         // to-string), then check after.
@@ -145,50 +155,52 @@ int rt_op_print(Runtime* rt) noexcept {
 }
 
 int rt_call(Runtime* rt, int argCount) noexcept {
-    return rtGuard([&] { return rt->opCall(argCount, 0); });
+    return rtGuard(rt, [&] { return rt->opCall(argCount, 0); });
 }
 
 int rt_op_invoke(Runtime* rt, ObjString* name, int argCount,
                  int stopAtFrameCount) noexcept {
     return rtGuard(
-        [&] { return rt->opInvoke(name, argCount, stopAtFrameCount); });
+        rt, [&] { return rt->opInvoke(name, argCount, stopAtFrameCount); });
 }
 
 int rt_op_get_property(Runtime* rt, ObjString* name,
                        int stopAtFrameCount) noexcept {
-    return rtGuard([&] { return rt->opGetProperty(name, stopAtFrameCount); });
+    return rtGuard(rt,
+                   [&] { return rt->opGetProperty(name, stopAtFrameCount); });
 }
 
 int rt_op_get_super(Runtime* rt, ObjString* name) noexcept {
-    return rtGuard([&] { return rt->opGetSuper(name); });
+    return rtGuard(rt, [&] { return rt->opGetSuper(name); });
 }
 
 int rt_op_super_invoke(Runtime* rt, ObjString* name, int argCount,
                        int stopAtFrameCount) noexcept {
-    return rtGuard(
-        [&] { return rt->opSuperInvoke(name, argCount, stopAtFrameCount); });
+    return rtGuard(rt, [&] {
+        return rt->opSuperInvoke(name, argCount, stopAtFrameCount);
+    });
 }
 
 int rt_op_inherit(Runtime* rt) noexcept {
-    return rtGuard([&] { return rt->opInherit(); });
+    return rtGuard(rt, [&] { return rt->opInherit(); });
 }
 
 int rt_op_get_index(Runtime* rt, int stopAtFrameCount) noexcept {
-    return rtGuard([&] { return rt->opGetIndex(stopAtFrameCount); });
+    return rtGuard(rt, [&] { return rt->opGetIndex(stopAtFrameCount); });
 }
 
 int rt_op_set_index(Runtime* rt, int stopAtFrameCount) noexcept {
-    return rtGuard([&] { return rt->opSetIndex(stopAtFrameCount); });
+    return rtGuard(rt, [&] { return rt->opSetIndex(stopAtFrameCount); });
 }
 
 int rt_op_get_iter(Runtime* rt) noexcept {
-    return rtGuard([&] { return rt->opGetIter(); });
+    return rtGuard(rt, [&] { return rt->opGetIter(); });
 }
 
 int rt_op_iter_has_next(Runtime* rt) noexcept {
-    return rtGuard([&] { return rt->opIterHasNext(); });
+    return rtGuard(rt, [&] { return rt->opIterHasNext(); });
 }
 
 int rt_op_iter_next(Runtime* rt) noexcept {
-    return rtGuard([&] { return rt->opIterNext(); });
+    return rtGuard(rt, [&] { return rt->opIterNext(); });
 }
