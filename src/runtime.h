@@ -7,26 +7,26 @@
 // than re-reading them from Runtime on every instruction) is what makes the
 // dispatch loop fast, and only the loop itself needs them.
 //
-// Compiled Lox++ code calls the entry points this class exposes —
-// push/pop/peek, call(), and the op*() opcode helpers below — through a
-// C wrapper, instead of going through VM::run()'s switch. Nothing in this
-// class assumes an interpreter is driving it.
+// push/pop/peek, call(), and the op*() opcode helpers below take only the
+// operands their opcode already decoded from the bytecode stream (a
+// constant-pool name, an argument count) — never ip/chunk. That keeps this
+// class usable by any caller that owns its own program counter, not only
+// VM::run()'s switch; see notes/qbe-backend.md for the design this shape
+// supports.
 //
-// A representative slice of opcode bodies (the ones with the most runtime
-// polymorphism: CALL/INVOKE/SUPER_INVOKE dispatch, GET_PROPERTY/GET_SUPER,
-// INHERIT, GET_INDEX/SET_INDEX, and the iterator ops) has moved into the
-// op*() methods below — Layer 1 of the same proposal. The rest (arithmetic,
+// Only a slice of opcode bodies has moved into the op*() methods below so
+// far — the ones with the most runtime polymorphism: CALL/INVOKE/
+// SUPER_INVOKE dispatch, GET_PROPERTY/GET_SUPER, INHERIT, GET_INDEX/
+// SET_INDEX, and the iterator ops. Everything else (arithmetic,
 // locals/globals, control flow, RETURN, defer/handler bookkeeping) is still
-// inline in VM::run(), reached through the friendship grant below; the
-// design doc's Layer 1 section marks that remaining work.
+// inline in VM::run(), reached through the friendship grant below.
 //
 // VM::run() needs raw access to this class's own bookkeeping (m_frames,
 // stack/stackTop, m_handlerStack, ...) for the opcodes that have not moved
 // out yet, so VM is a friend rather than going through a pile of one-off
 // accessors that would only exist to satisfy that one caller. The op*()
-// methods and the other operations below are public because QBE's C
-// wrappers (a later stage) are not friends — they can only reach this class
-// through its public surface.
+// methods and the other operations below are public so that a caller other
+// than VM can reach them without being a friend.
 
 #include "exec_objects.h"
 #include "class_objects.h"
@@ -260,17 +260,17 @@ class Runtime {
     ThrowOutcome raiseThrowableError(const char* kind_str, const char* msg,
                                      int stopAtFrameCount = 0);
 
-    // --- op*() opcode helpers (Layer 1) -------------------------------
+    // --- op*() opcode helpers --------------------------------------------
     //
     // Each one has the stack effect of the opcode it implements and takes,
     // beyond `this`, only the operands that opcode already decoded from the
     // bytecode stream (a constant-pool name, an argument count) — never
     // ip/chunk. The interpreter loop decodes those operands (it has ip/
     // chunk), flushes the current frame's ip so a runtimeError() raised in
-    // here reports the right line, and then calls straight through. A QBE
-    // wrapper does the same: read its own copy of the operand out of the
-    // compiled constant, store the bytecode offset into its frame slot
-    // (Q4 in notes/qbe-backend.md), and call the same function.
+    // here reports the right line, and then calls straight through. Any
+    // other caller with its own program counter (see notes/qbe-backend.md)
+    // can do the same: decode the operand itself, store its own bytecode
+    // offset into the frame, and call the same function.
     OpResult opCall(int argCount, int stopAtFrameCount);
     OpResult opInvoke(ObjString* name, int argCount, int stopAtFrameCount);
     OpResult opGetProperty(ObjString* name, int stopAtFrameCount);
