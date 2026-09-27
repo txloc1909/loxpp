@@ -36,8 +36,8 @@ public final class LoxOps {
 
     /**
      * Count of PUSH_HANDLER regions currently open across the whole call
-     * stack — mirrors src/vm.h's VM::m_handlerStack.size(), read the same
-     * way VM::call() reads it: a fault's fatal-fast-path check (no handler
+     * stack — mirrors src/runtime.h's Runtime::m_handlerStack.size(), read the same
+     * way Runtime::call() reads it: a fault's fatal-fast-path check (no handler
      * live anywhere in the program) tests emptiness, not any static,
      * per-call-site knowledge of whether a try/catch encloses this call
      * (LoxClosure.callAsSelf's arity and stack-overflow checks).

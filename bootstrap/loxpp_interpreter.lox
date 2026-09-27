@@ -1611,23 +1611,23 @@ class LoxFunction {
                         interp.thrownValue = savedValue;
                     }
                 } else {
-                    // Matches native's own VM::call: an arity mismatch on a
-                    // deferred call is the ordinary catchable ArityError, not
-                    // a fatal fault -- native's VM::runPendingDefers calls the
-                    // same VM::call() a normal call uses, so any handler still
-                    // live around this function's own caller sees it (issue
-                    // #359 measured only the no-handler shape, where this and
-                    // an uncaught halt look identical). Matches native's own
-                    // "abandon any remaining sibling defers" rule too
-                    // (src/vm.cpp's runPendingDefers): the mismatched call
-                    // never started, so nothing here drains the defers that
-                    // have not run yet.
+                    // Matches native's own Runtime::call: an arity mismatch on
+                    // a deferred call is the ordinary catchable ArityError,
+                    // not a fatal fault -- native's Runtime::runPendingDefers
+                    // calls the same Runtime::call() a normal call uses, so
+                    // any handler still live around this function's own
+                    // caller sees it (issue #359 measured only the no-handler
+                    // shape, where this and an uncaught halt look identical).
+                    // Matches native's own "abandon any remaining sibling
+                    // defers" rule too (src/runtime.cpp's runPendingDefers):
+                    // the mismatched call never started, so nothing here
+                    // drains the defers that have not run yet.
                     //
                     // Set throwFlag/thrownValue directly, not through
                     // setError -- setError refuses to overwrite an
                     // already-set throwFlag, but native's own unwind
-                    // (VM::handleThrow draining VM::runPendingDefers, both
-                    // src/vm.cpp) always lets a fault found while draining
+                    // (Runtime::handleThrow draining Runtime::runPendingDefers,
+                    // both src/runtime.cpp) always lets a fault found while draining
                     // defers replace whichever throw was already in flight,
                     // handler present or not (issue #405, verified directly
                     // against native both ways). This is the one call site

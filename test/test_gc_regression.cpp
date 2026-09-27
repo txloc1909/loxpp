@@ -11,7 +11,7 @@
 #include <gtest/gtest.h>
 
 // ---------------------------------------------------------------------------
-// Bug #31: ObjNative unrooted in VM::defineNative (vm.cpp:430)
+// Bug #31: ObjNative unrooted in Runtime::defineNatives (runtime.cpp:440)
 //
 // Timeline under LOXPP_STRESS_GC:
 //   interpret() calls compile() — bytesAllocated >> 0 after compilation.
@@ -39,7 +39,7 @@ TEST(GcRegression, Bug31_NativeUnrootedInDefineNative) {
     // str() is a native function registered by defineNatives() inside
     // interpret().  Under ASAN+STRESS_GC this test aborts during VM
     // initialisation — before the Lox code even begins executing — with a
-    // heap-use-after-free pointing into VM::defineNative / sweep().
+    // heap-use-after-free pointing into Runtime::defineNatives / sweep().
     ASSERT_EQ(h.run(R"(
         var result = str(123);
     )"),

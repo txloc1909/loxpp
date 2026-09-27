@@ -2024,8 +2024,8 @@ void emitBody(Emitter& e, bool isFunction,
             // Counts this region as live for LoxClosure's own arity/
             // overflow fatal-fast-path checks (issue #319) - see
             // LoxOps.EnterHandler's own comment for why this mirrors
-            // src/vm.h's VM::m_handlerStack. Net stack effect 0: a static
-            // call with no arguments and a void return.
+            // src/runtime.h's Runtime::m_handlerStack. Net stack effect 0: a
+            // static call with no arguments and a void return.
             e.b.emit("call void [LoxRuntime]Lox.LoxOps::EnterHandler()", 0, 0);
             break;
         }
