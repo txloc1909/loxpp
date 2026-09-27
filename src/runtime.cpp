@@ -30,8 +30,8 @@ std::optional<Value> Runtime::getGlobal(const std::string& name) const {
     return out;
 }
 
-Runtime::CallOutcome Runtime::call(ObjClosure* closure, int argCount,
-                                   int stopAtFrameCount) {
+Runtime::ThrowOutcome Runtime::call(ObjClosure* closure, int argCount,
+                                    int stopAtFrameCount) {
     ObjFunction* fn = closure->function;
     if (argCount != fn->arity) {
         // Arity mismatch is now catchable as ArityError, but only if a handler
@@ -51,16 +51,14 @@ Runtime::CallOutcome Runtime::call(ObjClosure* closure, int argCount,
             // invocation's own frame bookkeeping.
             ThrowOutcome outcome =
                 raiseThrowableError("ArityError", msg, stopAtFrameCount);
-            if (outcome == ThrowOutcome::HandledContinue) {
-                return CallOutcome::CaughtContinue;
-            }
-            if (outcome == ThrowOutcome::HandledStop) {
-                return CallOutcome::CaughtStop;
+            if (outcome == ThrowOutcome::HandledContinue ||
+                outcome == ThrowOutcome::HandledStop) {
+                return outcome;
             }
         }
         // No handler found, or error class not ready; uncaught error.
         runtimeError("Expected %d arguments but got %d.", fn->arity, argCount);
-        return CallOutcome::Uncaught;
+        return ThrowOutcome::Uncaught;
     }
     // Fires at FRAMES_MAX itself — the same threshold whether or not a
     // handler is active — so an open try/catch never changes how deep a
@@ -84,16 +82,11 @@ Runtime::CallOutcome Runtime::call(ObjClosure* closure, int argCount,
         ThrowOutcome outcome = raiseThrowableError(
             "StackOverflowError", "Stack overflow.", stopAtFrameCount);
         m_unwindingStackOverflow = false;
-        if (outcome == ThrowOutcome::HandledContinue) {
-            return CallOutcome::CaughtContinue;
-        }
-        if (outcome == ThrowOutcome::HandledStop) {
-            return CallOutcome::CaughtStop;
-        }
-        // Uncaught: raiseThrowableError() already reported it. m_frameCount
-        // is reset to 0 by then (see runtimeError()/resetStack()), so
+        // Uncaught falls through to this same return unchanged:
+        // raiseThrowableError() already reported it, and m_frameCount is
+        // reset to 0 by then (see runtimeError()/resetStack()), so
         // continuing to push a frame below would be reading a torn-down VM.
-        return CallOutcome::Uncaught;
+        return outcome;
     }
     // No handler active: the true hard ceiling, unaffected by the reserve,
     // same depth as before the reserve existed. While unwinding a
@@ -106,7 +99,7 @@ Runtime::CallOutcome Runtime::call(ObjClosure* closure, int argCount,
         FRAMES_MAX +
             (m_unwindingStackOverflow ? STACK_OVERFLOW_FRAME_RESERVE : 0)) {
         runtimeError("Stack overflow.");
-        return CallOutcome::Uncaught;
+        return ThrowOutcome::Uncaught;
     }
     CallFrame* frame = &m_frames[m_frameCount++];
     frame->closure = closure;
@@ -120,7 +113,7 @@ Runtime::CallOutcome Runtime::call(ObjClosure* closure, int argCount,
         m_profilerScopes[depth].emplace(m_profilerData, closure, depth, parent);
     }
 #endif
-    return CallOutcome::Pushed;
+    return ThrowOutcome::Pushed;
 }
 
 ObjUpvalue* Runtime::captureUpvalue(Value* local) {
@@ -194,7 +187,7 @@ InterpretResult Runtime::runPendingDefers(int frameIndex,
         // Handle various callable types (similar to Op::CALL dispatch).
         // For BoundMethod, replace the method on the stack with the receiver,
         // then call the underlying method closure.
-        CallOutcome outcome;
+        ThrowOutcome outcome;
         if (isBoundMethod(calleeVal)) {
             ObjBoundMethod* bound = asObjBoundMethod(as<Obj*>(calleeVal));
             stackTop[-argCount - 1] = bound->receiver;
@@ -204,22 +197,22 @@ InterpretResult Runtime::runPendingDefers(int frameIndex,
             outcome = call(closure, argCount, stopAtFrameCount);
         } else if (isNative(calleeVal)) {
             ObjNative* native = asObjNative(as<Obj*>(calleeVal));
-            outcome = callNative(native, argCount) ? CallOutcome::Pushed
-                                                   : CallOutcome::Uncaught;
+            outcome = callNative(native, argCount) ? ThrowOutcome::Pushed
+                                                   : ThrowOutcome::Uncaught;
         } else if (isBoundNative(calleeVal)) {
             ObjBoundNative* bound = asObjBoundNative(as<Obj*>(calleeVal));
-            outcome = callBoundNative(bound, argCount) ? CallOutcome::Pushed
-                                                       : CallOutcome::Uncaught;
+            outcome = callBoundNative(bound, argCount) ? ThrowOutcome::Pushed
+                                                       : ThrowOutcome::Uncaught;
         } else {
             // Unexpected callable type in deferred call
             runtimeError("Deferred callable has unexpected type.");
             return InterpretResult::RUNTIME_ERROR;
         }
 
-        if (outcome == CallOutcome::Uncaught) {
+        if (outcome == ThrowOutcome::Uncaught) {
             return InterpretResult::RUNTIME_ERROR;
         }
-        if (outcome != CallOutcome::Pushed) {
+        if (outcome != ThrowOutcome::Pushed) {
             // The deferred call's own arity mismatch was caught instead of
             // pushing a new frame. Any handler reachable here was pushed
             // before frameIndex's own function was even called (a handler
@@ -522,13 +515,14 @@ Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
                                                          : OpResult::Fatal;
     }
     if (isClosure(callee)) {
-        return fromCall(call(asObjClosure(callee), argCount, stopAtFrameCount));
+        return fromThrow(
+            call(asObjClosure(callee), argCount, stopAtFrameCount));
     }
     if (isBoundMethod(callee)) {
         ObjBoundMethod* bound = asObjBoundMethod(as<Obj*>(callee));
         // Slot 0 of the new frame = receiver (= this).
         stackTop[-argCount - 1] = bound->receiver;
-        return fromCall(call(bound->method, argCount, stopAtFrameCount));
+        return fromThrow(call(bound->method, argCount, stopAtFrameCount));
     }
     if (isBoundNative(callee)) {
         ObjBoundNative* bn = asObjBoundNative(as<Obj*>(callee));
@@ -543,8 +537,8 @@ Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
         ObjString* initStr = m_mm.findString("init");
         Value initMethod;
         if (initStr && klass->methods.get(initStr, initMethod)) {
-            return fromCall(call(asObjClosure(as<Obj*>(initMethod)), argCount,
-                                 stopAtFrameCount));
+            return fromThrow(call(asObjClosure(as<Obj*>(initMethod)), argCount,
+                                  stopAtFrameCount));
         }
         if (argCount != 0) {
             return fromThrow(raiseThrowableError(
@@ -587,8 +581,8 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
         if (instance->fields.get(name, fieldVal)) {
             stackTop[-argCount - 1] = fieldVal;
             if (isClosure(fieldVal)) {
-                return fromCall(call(asObjClosure(as<Obj*>(fieldVal)), argCount,
-                                     stopAtFrameCount));
+                return fromThrow(call(asObjClosure(as<Obj*>(fieldVal)),
+                                      argCount, stopAtFrameCount));
             }
             if (isNative(fieldVal)) {
                 return callNative(asObjNative(as<Obj*>(fieldVal)), argCount)
@@ -617,7 +611,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
                        ? OpResult::OK
                        : OpResult::Fatal;
         }
-        return fromCall(
+        return fromThrow(
             call(asObjClosure(methodObj), argCount, stopAtFrameCount));
     }
     if (isList(receiver)) {
@@ -779,7 +773,7 @@ Runtime::OpResult Runtime::opSuperInvoke(ObjString* name, int argCount,
         runtimeError("Undefined property '%s'.", name->chars.c_str());
         return OpResult::Fatal;
     }
-    return fromCall(
+    return fromThrow(
         call(asObjClosure(as<Obj*>(method)), argCount, stopAtFrameCount));
 }
 

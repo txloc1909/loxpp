@@ -117,61 +117,59 @@ class Runtime {
         m_runLoop = std::move(loop);
     }
 
-    // Outcome of a throw/catch dispatch (handleThrow/raiseThrowableError).
-    // stopAtFrameCount always names the boundary of whichever run()
-    // invocation is currently, actually dispatching — the run() parameter
-    // itself for Op::THROW and the tryCatchableError lambda, and the same
-    // value threaded down through runPendingDefers/call() for a reentrant
-    // fault inside a running defer. Uncaught: no handler found, runtimeError()
-    // already called — caller returns InterpretResult::RUNTIME_ERROR.
-    // HandledContinue: a handler was found (here, or by a reentrant call
-    // several levels down) and the resulting m_frameCount is still above the
-    // caller's own stopAtFrameCount — the caller's own frame context is still
-    // live; it must FrameSync::loadTop (or let its own ambient FrameSync
-    // guard do so) and continue dispatch normally. HandledStop: handled, but
-    // the resulting m_frameCount is at or below the caller's own
-    // stopAtFrameCount — control now belongs to a different, less-nested
-    // run() invocation. The caller must NOT read frame/ip/chunk (m_frameCount
-    // may even be 0, making that read out of bounds) and must return
-    // InterpretResult::OK immediately.
+    // Outcome of a throw/catch dispatch (handleThrow/raiseThrowableError) or
+    // of call() — the two used to be separate enums (CallOutcome/
+    // ThrowOutcome) with identical Uncaught/HandledContinue-or-CaughtContinue/
+    // HandledStop-or-CaughtStop cases and a hand-written converter between
+    // them; call()'s arity/overflow checks already just relabeled whatever
+    // ThrowOutcome they got from raiseThrowableError(), so Pushed is the only
+    // case call() ever adds. stopAtFrameCount always names the boundary of
+    // whichever run() invocation is currently, actually dispatching — the
+    // run() parameter itself for Op::THROW and the tryCatchableError lambda,
+    // and the same value threaded down through runPendingDefers/call() for a
+    // reentrant fault inside a running defer.
+    //   Uncaught:        no handler found, runtimeError() already called —
+    //                     caller returns InterpretResult::RUNTIME_ERROR.
+    //   HandledContinue: a handler was found (here, or by a reentrant call
+    //                     several levels down) and the resulting
+    //                     m_frameCount is still above the caller's own
+    //                     stopAtFrameCount — the caller's own frame context
+    //                     is still live; it must FrameSync::loadTop (or let
+    //                     its own ambient FrameSync guard do so) and
+    //                     continue dispatch normally.
+    //   HandledStop:      handled, but the resulting m_frameCount is at or
+    //                     below the caller's own stopAtFrameCount — control
+    //                     now belongs to a different, less-nested run()
+    //                     invocation. The caller must NOT read frame/ip/
+    //                     chunk (m_frameCount may even be 0, making that
+    //                     read out of bounds) and must return
+    //                     InterpretResult::OK immediately.
+    //   Pushed:           call() only — a new frame is on top of m_frames;
+    //                     proceed normally, the same as HandledContinue.
     enum class ThrowOutcome : std::uint8_t {
         Uncaught,
         HandledContinue,
-        HandledStop
-    };
-
-    // Outcome of call(). Pushed: a new frame is on top of m_frames; proceed
-    // normally. CaughtContinue/CaughtStop: no new frame was pushed — an
-    // arity mismatch was itself caught (see ThrowOutcome above for what the
-    // two names mean) — the caller must react exactly as it would to the
-    // matching ThrowOutcome. Uncaught: hard, already-reported error — caller
-    // returns InterpretResult::RUNTIME_ERROR.
-    enum class CallOutcome : std::uint8_t {
+        HandledStop,
         Pushed,
-        CaughtContinue,
-        CaughtStop,
-        Uncaught,
     };
 
     // Outcome of an op*() opcode helper below. These helpers can allocate,
     // call (pushing a new CallFrame), and throw (unwinding zero or more
-    // frames) — OK, Resumed, Stop and Fatal collapse ThrowOutcome and
-    // CallOutcome above into the four shapes a caller actually has to react
-    // to differently:
+    // frames) — OK, Resumed, Stop and Fatal collapse ThrowOutcome above into
+    // the four shapes a caller actually has to react to differently:
     //   OK:      plain success — frame/ip/chunk are exactly what the caller
     //            already has; no reload needed. An op*() only returns this
-    //            literally, never via fromThrow/fromCall — both of those
-    //            cover a path that can touch m_frames.
-    //   Resumed: the helper pushed a call frame (CallOutcome::Pushed) or an
+    //            literally, never via fromThrow — that covers a path that
+    //            can touch m_frames.
+    //   Resumed: the helper pushed a call frame (ThrowOutcome::Pushed) or an
     //            error was caught within the caller's own run() invocation
-    //            (ThrowOutcome::HandledContinue/CallOutcome::CaughtContinue)
-    //            — m_frames/m_frameCount already reflect it; the caller must
-    //            reload frame/ip/chunk from the current top before resuming
-    //            dispatch.
+    //            (ThrowOutcome::HandledContinue) — m_frames/m_frameCount
+    //            already reflect it; the caller must reload frame/ip/chunk
+    //            from the current top before resuming dispatch.
     //   Stop:    resolved by a handler outside the caller's own run()
-    //            invocation (ThrowOutcome::HandledStop/CallOutcome::
-    //            CaughtStop). Caller returns InterpretResult::OK immediately
-    //            without touching frame/ip/chunk.
+    //            invocation (ThrowOutcome::HandledStop). Caller returns
+    //            InterpretResult::OK immediately without touching
+    //            frame/ip/chunk.
     //   Fatal:   uncaught error already reported via runtimeError(). Caller
     //            returns InterpretResult::RUNTIME_ERROR immediately.
     enum class OpResult : std::uint8_t { OK, Resumed, Stop, Fatal };
@@ -234,8 +232,8 @@ class Runtime {
     // `frameIndex` is still live.
     InterpretResult runPendingDefers(int frameIndex, int stopAtFrameCount);
 
-    CallOutcome call(ObjClosure* closure, int argCount,
-                     int stopAtFrameCount = 0);
+    ThrowOutcome call(ObjClosure* closure, int argCount,
+                      int stopAtFrameCount = 0);
     bool callNative(ObjNative* native, int argCount);
     bool callBoundNative(ObjBoundNative* bn, int argCount);
     bool bindMethod(ObjClass* klass, ObjString* name);
@@ -347,19 +345,8 @@ class Runtime {
         case ThrowOutcome::HandledStop:
             return OpResult::Stop;
         case ThrowOutcome::HandledContinue:
+        case ThrowOutcome::Pushed:
             return OpResult::Resumed;
-        }
-        return OpResult::Fatal; // unreachable
-    }
-    static OpResult fromCall(CallOutcome outcome) {
-        switch (outcome) {
-        case CallOutcome::Pushed:
-        case CallOutcome::CaughtContinue:
-            return OpResult::Resumed;
-        case CallOutcome::CaughtStop:
-            return OpResult::Stop;
-        case CallOutcome::Uncaught:
-            return OpResult::Fatal;
         }
         return OpResult::Fatal; // unreachable
     }

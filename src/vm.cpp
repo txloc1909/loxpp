@@ -38,7 +38,7 @@ InterpretResult VM::interpret(const std::string& source) {
         Value{static_cast<Obj*>(closure)}; // replace fn with its closure
     // No handler can be active yet (nothing has executed), so the only
     // reachable outcome here is Pushed or Uncaught.
-    if (m_rt.call(closure, 0) == Runtime::CallOutcome::Uncaught) {
+    if (m_rt.call(closure, 0) == Runtime::ThrowOutcome::Uncaught) {
         return InterpretResult::RUNTIME_ERROR;
     }
 #ifdef LOXPP_PROFILE
