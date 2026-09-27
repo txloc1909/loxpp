@@ -533,6 +533,10 @@ public final class LoxOps {
             }
             return payload[idx];
         }
+        LoxClosure dunder = findDunder(collection, "__index_get__");
+        if (dunder != null) {
+            return dunder.callAsSelf(collection, new Object[] {index});
+        }
         throw makeError("NotIndexableError",
                             "Only lists, strings, and maps can be indexed.");
     }
@@ -550,6 +554,11 @@ public final class LoxOps {
             checkMapKey(index);
             ((LoxMap)collection).put(index, value);
             return value;
+        }
+        LoxClosure dunder = findDunder(collection, "__index_set__");
+        if (dunder != null) {
+            dunder.callAsSelf(collection, new Object[] {index, value});
+            return value; // assignment value, not the method's return
         }
         if (!(collection instanceof LoxList)) {
             throw makeError(

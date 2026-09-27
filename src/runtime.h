@@ -484,6 +484,8 @@ class Runtime {
         Eq,
         Contains,
         Call,
+        IndexGet,
+        IndexSet,
         Count,
     };
 
@@ -513,9 +515,13 @@ class Runtime {
     // Op::RETURN validates its result as a Boolean. The method itself runs in
     // the ordinary interpreter loop; the validation happens at RETURN, not
     // here, so a throw from the method propagates normally with no re-entrant
-    // run() invocation to confuse it with a caught throw.
+    // run() invocation to confuse it with a caught throw. When `resultOverride`
+    // is non-null, Op::RETURN discards the method's actual return and pushes
+    // `*resultOverride` instead (used by __index_set__, whose assignment value
+    // is the assigned value, not the method's return).
     OpResult dispatchMethod(ObjClosure* method, int argCount,
-                            int stopAtFrameCount, bool checkBool);
+                            int stopAtFrameCount, bool checkBool,
+                            const Value* resultOverride = nullptr);
 
     // Sized FRAMES_MAX/STACK_MAX plus the reserve above, not just
     // FRAMES_MAX/STACK_MAX: the reserve is spent above those ceilings, while
@@ -593,6 +599,15 @@ class Runtime {
     // unwind loop, and resetStack(). Sized to match m_frames.
     std::array<bool, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
         m_frameBoolCheck{};
+
+    // Parallel to m_frames[]: when m_frameResultOverrideSet[i] is true,
+    // Op::RETURN pushes m_frameResultOverride[i] instead of the method's
+    // actual return (__index_set__'s assignment value). Same set/clear sites
+    // as m_frameBoolCheck.
+    std::array<bool, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
+        m_frameResultOverrideSet{};
+    std::array<Value, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
+        m_frameResultOverride{};
 
     // See setInterpretLoop() above.
     std::function<InterpretResult(int)> m_runLoop;

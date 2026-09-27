@@ -177,6 +177,7 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
     closeUpvalues(frame->slots);
     popHandlersOwnedByCurrentFrame();
     m_frameBoolCheck[m_frameCount - 1] = false;
+    m_frameResultOverrideSet[m_frameCount - 1] = false;
     m_frameCount--;
     stackTop = frame->slots;
     push(result);
@@ -360,6 +361,7 @@ Runtime::ThrowOutcome Runtime::handleThrow(Value thrownValue,
         int unwoundFrameIndex = m_frameCount - 1;
         closeUpvalues(m_frames[unwoundFrameIndex].slots);
         m_frameBoolCheck[unwoundFrameIndex] = false;
+        m_frameResultOverrideSet[unwoundFrameIndex] = false;
         // Reclaim this frame's own window before running its defers, not
         // only at the end of the whole unwind (step 3 below). A deferred
         // call's own args are already captured on ObjDeferredCall, not read
@@ -579,12 +581,14 @@ void Runtime::resetStack() {
         deferList.clear();
     }
     m_frameBoolCheck.fill(false);
+    m_frameResultOverrideSet.fill(false);
 }
 
 void Runtime::initProtocolNames() {
-    const char* names[] = {"__add__", "__sub__",      "__mul__", "__div__",
-                           "__mod__", "__neg__",      "__lt__",  "__gt__",
-                           "__eq__",  "__contains__", "__call__"};
+    const char* names[] = {
+        "__add__",  "__sub__",       "__mul__",      "__div__", "__mod__",
+        "__neg__",  "__lt__",        "__gt__",       "__eq__",  "__contains__",
+        "__call__", "__index_get__", "__index_set__"};
     for (std::size_t i = 0; i < m_protocolNames.size(); i++) {
         m_protocolNames[i] = m_mm.makeString(names[i]);
     }
@@ -623,14 +627,19 @@ Runtime::tryBinaryMethodBool(Protocol proto, int stopAtFrameCount) {
 }
 
 Runtime::OpResult Runtime::dispatchMethod(ObjClosure* method, int argCount,
-                                          int stopAtFrameCount,
-                                          bool checkBool) {
+                                          int stopAtFrameCount, bool checkBool,
+                                          const Value* resultOverride) {
     ThrowOutcome outcome = call(method, argCount, stopAtFrameCount);
     if (outcome != ThrowOutcome::Pushed) {
         return fromThrow(outcome);
     }
+    int idx = m_frameCount - 1;
     if (checkBool) {
-        m_frameBoolCheck[m_frameCount - 1] = true;
+        m_frameBoolCheck[idx] = true;
+    }
+    if (resultOverride != nullptr) {
+        m_frameResultOverride[idx] = *resultOverride;
+        m_frameResultOverrideSet[idx] = true;
     }
     return OpResult::Resumed;
 }
@@ -1047,6 +1056,19 @@ Runtime::OpResult Runtime::opGetIndex(int stopAtFrameCount) {
         push(e->fields[static_cast<size_t>(idx)]);
         return OpResult::OK;
     }
+    if (isInstance(collectionVal)) {
+        ObjInstance* instance = asObjInstance(as<Obj*>(collectionVal));
+        Value method;
+        if (instance->klass->methods.get(
+                m_protocolNames[static_cast<std::size_t>(Protocol::IndexGet)],
+                method)) {
+            // Receiver is the collection, argument is the index.
+            push(collectionVal);
+            push(indexVal);
+            return dispatchMethod(asObjClosure(as<Obj*>(method)), 1,
+                                  stopAtFrameCount, false);
+        }
+    }
     return fromThrow(raiseThrowableError(
         "NotIndexableError", "Only lists, strings, and maps can be indexed.",
         stopAtFrameCount));
@@ -1081,6 +1103,22 @@ Runtime::OpResult Runtime::opSetIndex(int stopAtFrameCount) {
         m_mm.popTempRoot();
         push(val);
         return OpResult::OK;
+    }
+    if (isInstance(listVal)) {
+        ObjInstance* instance = asObjInstance(as<Obj*>(listVal));
+        Value method;
+        if (instance->klass->methods.get(
+                m_protocolNames[static_cast<std::size_t>(Protocol::IndexSet)],
+                method)) {
+            // Receiver is the collection, arguments are the index and the
+            // value. The assignment evaluates to `val`, not the method's
+            // return, so the result is overridden.
+            push(listVal);
+            push(indexVal);
+            push(val);
+            return dispatchMethod(asObjClosure(as<Obj*>(method)), 2,
+                                  stopAtFrameCount, false, &val);
+        }
     }
     if (!isList(listVal)) {
         return fromThrow(raiseThrowableError(

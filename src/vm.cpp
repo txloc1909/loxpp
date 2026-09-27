@@ -588,6 +588,11 @@ InterpretResult VM::run(int stopAtFrameCount) {
             m_rt.popHandlersOwnedByCurrentFrame();
             bool checkBool = m_rt.m_frameBoolCheck[m_rt.m_frameCount - 1];
             m_rt.m_frameBoolCheck[m_rt.m_frameCount - 1] = false;
+            bool overrideSet =
+                m_rt.m_frameResultOverrideSet[m_rt.m_frameCount - 1];
+            Value overrideVal =
+                m_rt.m_frameResultOverride[m_rt.m_frameCount - 1];
+            m_rt.m_frameResultOverrideSet[m_rt.m_frameCount - 1] = false;
 #ifdef LOXPP_PROFILE
             // Destroy the function scope before decrementing frameCount so the
             // depth index still points to this frame's slot.
@@ -601,7 +606,7 @@ InterpretResult VM::run(int stopAtFrameCount) {
             }
             // Discard the callee's stack window and push return value.
             m_rt.stackTop = frame->slots;
-            m_rt.push(result);
+            m_rt.push(overrideSet ? overrideVal : result);
             FrameSync::loadTop(m_rt.m_frames, m_rt.m_frameCount, frame, ip,
                                chunk);
             if (checkBool && !is<bool>(result)) {
