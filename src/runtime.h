@@ -257,6 +257,17 @@ class Runtime {
     // when indexVal is a valid map key; otherwise the OpResult the caller
     // should return immediately.
     std::optional<OpResult> checkMapKey(Value indexVal, int stopAtFrameCount);
+
+    // Shared by opGetIndex's and opSetIndex's List/String branches — the
+    // same three throwable checks (must be a number, must be an integer,
+    // must be in bounds for a collection of `size` elements), differing
+    // only in `noun` ("List"/"String") for the message text. On success,
+    // writes the validated index to *outIdx and returns nullopt; on
+    // failure, the OpResult the caller should return immediately.
+    std::optional<OpResult> checkSequenceIndex(Value indexVal, size_t size,
+                                               const char* noun,
+                                               int stopAtFrameCount,
+                                               int* outIdx);
     ObjUpvalue* captureUpvalue(Value* local);
     void closeUpvalues(Value* last);
     // Discards every m_handlerStack record whose frameCount equals the
@@ -299,9 +310,10 @@ class Runtime {
     // Defined out-of-line (runtime.cpp), unlike push/pop/peek above: each
     // one is a full opcode body, not a one-line primitive the compiler
     // would inline into VM::run()'s loop either way, so the cross-TU call
-    // this costs on every CALL/property/index/iterator dispatch is the same
-    // trade-off this PR's own fib(32) checkpoint (see the PR description)
-    // measured for the split as a whole, not an unmeasured one.
+    // this costs on every CALL/property/index/iterator dispatch is priced
+    // into the same release-preset fib(32) measurement that covers the
+    // split as a whole (median of 3 runs: 0.243s on this split vs 0.298s
+    // single-file), not a separate, unmeasured cost.
     OpResult opCall(int argCount, int stopAtFrameCount);
     OpResult opInvoke(ObjString* name, int argCount, int stopAtFrameCount);
     OpResult opGetProperty(ObjString* name, int stopAtFrameCount);

@@ -816,49 +816,50 @@ std::optional<Runtime::OpResult> Runtime::checkMapKey(Value indexVal,
     return std::nullopt;
 }
 
+std::optional<Runtime::OpResult>
+Runtime::checkSequenceIndex(Value indexVal, size_t size, const char* noun,
+                            int stopAtFrameCount, int* outIdx) {
+    char msg[64];
+    if (!is<Number>(indexVal)) {
+        snprintf(msg, sizeof(msg), "%s index must be a number.", noun);
+        return fromThrow(
+            raiseThrowableError("IndexTypeError", msg, stopAtFrameCount));
+    }
+    double n = as<Number>(indexVal);
+    if (n != std::floor(n)) {
+        snprintf(msg, sizeof(msg), "%s index must be an integer.", noun);
+        return fromThrow(
+            raiseThrowableError("IndexNotIntegerError", msg, stopAtFrameCount));
+    }
+    int idx = static_cast<int>(n);
+    if (idx < 0 || idx >= static_cast<int>(size)) {
+        snprintf(msg, sizeof(msg), "%s index out of bounds.", noun);
+        return fromThrow(raiseThrowableError("IndexOutOfBoundsError", msg,
+                                             stopAtFrameCount));
+    }
+    *outIdx = idx;
+    return std::nullopt;
+}
+
 Runtime::OpResult Runtime::opGetIndex(int stopAtFrameCount) {
     Value indexVal = pop();
     Value collectionVal = pop();
     if (isList(collectionVal)) {
-        if (!is<Number>(indexVal)) {
-            return fromThrow(raiseThrowableError("IndexTypeError",
-                                                 "List index must be a number.",
-                                                 stopAtFrameCount));
-        }
-        double n = as<Number>(indexVal);
-        if (n != std::floor(n)) {
-            return fromThrow(raiseThrowableError(
-                "IndexNotIntegerError", "List index must be an integer.",
-                stopAtFrameCount));
-        }
         auto* list = asObjList(as<Obj*>(collectionVal));
-        int idx = static_cast<int>(n);
-        if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
-            return fromThrow(raiseThrowableError("IndexOutOfBoundsError",
-                                                 "List index out of bounds.",
-                                                 stopAtFrameCount));
+        int idx = 0;
+        if (auto err = checkSequenceIndex(indexVal, list->elements.size(),
+                                          "List", stopAtFrameCount, &idx)) {
+            return *err;
         }
         push(list->elements[idx]);
         return OpResult::OK;
     }
     if (isString(collectionVal)) {
-        if (!is<Number>(indexVal)) {
-            return fromThrow(raiseThrowableError(
-                "IndexTypeError", "String index must be a number.",
-                stopAtFrameCount));
-        }
-        double n = as<Number>(indexVal);
-        if (n != std::floor(n)) {
-            return fromThrow(raiseThrowableError(
-                "IndexNotIntegerError", "String index must be an integer.",
-                stopAtFrameCount));
-        }
         auto* str = asObjString(as<Obj*>(collectionVal));
-        int idx = static_cast<int>(n);
-        if (idx < 0 || idx >= static_cast<int>(str->chars.size())) {
-            return fromThrow(raiseThrowableError("IndexOutOfBoundsError",
-                                                 "String index out of bounds.",
-                                                 stopAtFrameCount));
+        int idx = 0;
+        if (auto err = checkSequenceIndex(indexVal, str->chars.size(), "String",
+                                          stopAtFrameCount, &idx)) {
+            return *err;
         }
         // Copy char before makeString (GC-safe: same pattern as ADD)
         char ch = str->chars[idx];
@@ -943,23 +944,11 @@ Runtime::OpResult Runtime::opSetIndex(int stopAtFrameCount) {
             "Only lists and maps can be indexed for assignment.",
             stopAtFrameCount));
     }
-    if (!is<Number>(indexVal)) {
-        return fromThrow(raiseThrowableError("IndexTypeError",
-                                             "List index must be a number.",
-                                             stopAtFrameCount));
-    }
-    double n = as<Number>(indexVal);
-    if (n != std::floor(n)) {
-        return fromThrow(raiseThrowableError("IndexNotIntegerError",
-                                             "List index must be an integer.",
-                                             stopAtFrameCount));
-    }
     auto* list = asObjList(as<Obj*>(listVal));
-    int idx = static_cast<int>(n);
-    if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
-        return fromThrow(raiseThrowableError("IndexOutOfBoundsError",
-                                             "List index out of bounds.",
-                                             stopAtFrameCount));
+    int idx = 0;
+    if (auto err = checkSequenceIndex(indexVal, list->elements.size(), "List",
+                                      stopAtFrameCount, &idx)) {
+        return *err;
     }
     list->elements[idx] = val;
     push(val); // assignment is an expression; its value is the assigned value
