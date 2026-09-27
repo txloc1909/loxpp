@@ -1148,9 +1148,7 @@ struct VMTestAccess {
     }
     static void push(VM& vm, Value v) { vm.m_rt.push(v); }
     static bool overflowFlag(const VM& vm) { return vm.m_rt.m_stackOverflow; }
-    static int depth(const VM& vm) {
-        return static_cast<int>(vm.m_rt.stackTop - vm.m_rt.stack);
-    }
+    static int depth(const VM& vm) { return vm.stackDepth(); }
 };
 
 TEST_F(StackOverflowTest, PushPastCeiling_SetsOverflow) {
