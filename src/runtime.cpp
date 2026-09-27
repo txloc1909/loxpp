@@ -176,6 +176,7 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
     Value result = pop();
     closeUpvalues(frame->slots);
     popHandlersOwnedByCurrentFrame();
+    m_frameBoolCheck[m_frameCount - 1] = false;
     m_frameCount--;
     stackTop = frame->slots;
     push(result);

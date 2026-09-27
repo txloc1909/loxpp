@@ -589,8 +589,8 @@ class Runtime {
 
     // Parallel to m_frames[]: whether the frame's result must be a Boolean,
     // checked by Op::RETURN (operator-overloading result validation). Set by
-    // dispatchMethod(), cleared by RETURN, handleThrow()'s unwind loop, and
-    // resetStack(). Sized to match m_frames.
+    // dispatchMethod(), cleared by RETURN, callCompiled(), handleThrow()'s
+    // unwind loop, and resetStack(). Sized to match m_frames.
     std::array<bool, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
         m_frameBoolCheck{};
 
