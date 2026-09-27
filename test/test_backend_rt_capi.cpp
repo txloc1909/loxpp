@@ -32,6 +32,9 @@ int fakeCompiledOk(Runtime* rt, Value* base) {
     g_record->calls++;
     g_record->rt = rt;
     g_record->base = base;
+    // The C-ABI return convention (rt_abi.h): leave the return value as the
+    // single value on top of the stack before returning 0.
+    rt->push(Value{});
     return 0;
 }
 
@@ -39,7 +42,38 @@ int fakeCompiledFatal(Runtime* rt, Value* base) {
     g_record->calls++;
     g_record->rt = rt;
     g_record->base = base;
+    // A real compiled function that fails reaches this contract the same
+    // way an interpreted RETURN's own error paths do: it reports through
+    // runtimeError() (which resets the whole Runtime) before returning
+    // nonzero. callCompiled relies on that — it does not reset anything
+    // itself on a nonzero return (see callCompiled's own comment).
+    rt->runtimeError("fake fatal error");
     return 1;
+}
+
+int fakeCompiledThrows(Runtime*, Value*) {
+    throw 42; // a stray C++ exception, not a reported runtime error (R3)
+}
+
+ObjUpvalue* g_capturedUpvalue = nullptr;
+
+int fakeCompiledCapturesOwnLocal(Runtime* rt, Value* base) {
+    // Simulate a nested closure capturing this compiled function's own
+    // local (the pattern CLOSURE's isLocal upvalues build — S4's job).
+    rt->push(Value{42.0}); // base[1]: the captured local
+    g_capturedUpvalue = rt->captureUpvalue(&base[1]);
+    rt->push(Value{}); // return value: nil
+    return 0;
+}
+
+int fakeCompiledReturnsComputedValue(Runtime* rt, Value*) {
+    // Two locals a real compiled body might declare, to prove they do not
+    // leak past the callee's own return (R2) — only the last value pushed,
+    // the return value, must survive callCompiled's frame collapse.
+    rt->push(Value{1.0});
+    rt->push(Value{2.0});
+    rt->push(Value{99.0});
+    return 0;
 }
 
 // Finds "0.0" — the first function constant in a one-function script's own
@@ -80,7 +114,7 @@ TEST(RtCallCompiled, PushesFrameCallsCodeAndPopsOnSuccess) {
     EXPECT_EQ(record.base, calleeSlot);
 }
 
-TEST(RtCallCompiled, NonzeroReturnIsFatalAndStillPopsTheFrame) {
+TEST(RtCallCompiled, NonzeroReturnIsFatalAndLeavesRuntimeAlreadyReset) {
     Runtime rt;
     ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
     fn->arity = 0;
@@ -91,12 +125,88 @@ TEST(RtCallCompiled, NonzeroReturnIsFatalAndStillPopsTheFrame) {
     g_record = &record;
 
     rt.push(Value{static_cast<Obj*>(closure)});
-    int framesBefore = rt.frameCount();
     int status = rt_call(&rt, 0);
 
     EXPECT_EQ(status, static_cast<int>(Runtime::OpResult::Fatal));
-    EXPECT_EQ(rt.frameCount(), framesBefore);
     EXPECT_EQ(record.calls, 1);
+    // A nonzero return means the callee already reported the error through
+    // runtimeError(), which already reset the whole Runtime (resetStack()).
+    // callCompiled must not touch m_frameCount again on this path — doing
+    // so would double-decrement a count that is already 0.
+    EXPECT_EQ(rt.frameCount(), 0);
+}
+
+// R1 (blocking, PR #473 review round 1): callCompiled skipped
+// closeUpvalues(frame->slots) before popping the frame, unlike Op::RETURN
+// (vm.cpp). A nested closure capturing one of a compiled function's own
+// locals stayed open across the return, so a later, unrelated push() into
+// the reused stack slot was silently observed through the "captured" value.
+TEST(RtCallCompiled, ClosesUpvaluesCapturedOverItsOwnFrameOnReturn) {
+    Runtime rt;
+    ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    fn->arity = 0;
+    fn->code = reinterpret_cast<void*>(&fakeCompiledCapturesOwnLocal);
+    ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+
+    rt.push(Value{static_cast<Obj*>(closure)});
+    g_capturedUpvalue = nullptr;
+
+    int status = rt_call(&rt, 0);
+
+    EXPECT_EQ(status, static_cast<int>(Runtime::OpResult::OK));
+    ASSERT_NE(g_capturedUpvalue, nullptr);
+    EXPECT_EQ(g_capturedUpvalue->location, &g_capturedUpvalue->closed)
+        << "the upvalue must be closed before callCompiled pops the frame, "
+           "or a later stack reuse silently corrupts the captured value";
+    ASSERT_TRUE(is<Number>(g_capturedUpvalue->closed));
+    EXPECT_EQ(as<Number>(g_capturedUpvalue->closed), 42.0);
+}
+
+// R2 (blocking, PR #473 review round 1): pins down the return-value
+// convention Op::RETURN mirrors — before returning 0, a compiled function
+// leaves its return value as the single value on top of the stack.
+// callCompiled then collapses the callee's whole window (locals included)
+// and leaves exactly that one value at the frame's own base slot.
+TEST(RtCallCompiled, ReturnConventionLeavesExactlyOneValueAtFrameBase) {
+    Runtime rt;
+    ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    fn->arity = 0;
+    fn->code = reinterpret_cast<void*>(&fakeCompiledReturnsComputedValue);
+    ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+
+    Value* base = rt.top();
+    rt.push(Value{static_cast<Obj*>(closure)});
+
+    int status = rt_call(&rt, 0);
+
+    EXPECT_EQ(status, static_cast<int>(Runtime::OpResult::OK));
+    EXPECT_EQ(rt.top(), base + 1)
+        << "compiled locals must not leak past the callee's own return";
+    Value result = rt_pop(&rt);
+    ASSERT_TRUE(is<Number>(result));
+    EXPECT_EQ(as<Number>(result), 99.0);
+}
+
+// R3 (blocking, PR #473 review round 1): rtGuard's catch turned a stray
+// C++ exception into Fatal but left m_frameCount inconsistent — unlike
+// every other path to Fatal, which goes through runtimeError()'s own
+// resetStack(). A compiled function's body can throw partway through
+// callCompiled, after call() already pushed the CallFrame.
+TEST(RtCallCompiled, ExceptionDuringCallLeavesFrameCountConsistent) {
+    Runtime rt;
+    ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    fn->arity = 0;
+    fn->code = reinterpret_cast<void*>(&fakeCompiledThrows);
+    ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+
+    rt.push(Value{static_cast<Obj*>(closure)});
+
+    int status = rt_call(&rt, 0);
+
+    EXPECT_EQ(status, static_cast<int>(Runtime::OpResult::Fatal));
+    EXPECT_EQ(rt.frameCount(), 0)
+        << "rtGuard must reset the Runtime (resetStack()), not just report "
+           "Fatal, on a caught exception — otherwise the frame count leaks";
 }
 
 // Proves the check can fail: an arity mismatch must reject the call before

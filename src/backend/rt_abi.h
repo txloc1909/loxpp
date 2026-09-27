@@ -15,4 +15,15 @@ class Runtime;
 // on success; a nonzero return means the callee already reported a fatal
 // error, the same contract a failing native call already has
 // (Runtime::callNative, src/runtime.cpp).
+//
+// Return convention on success (Runtime::callCompiled, src/runtime.cpp,
+// mirrors Op::RETURN in vm.cpp exactly): immediately before returning 0,
+// the callee must leave its return value as the single value on top of the
+// runtime stack (rt_push()), above every local it declared — the same
+// "one value at the top" contract Op::RETURN's own `pop()` relies on.
+// `rt_set_top()` (Q1) alone is not enough: `callCompiled` pops that value
+// itself, so it must actually be there. `callCompiled` then closes any
+// upvalue captured over this call's own frame slots, collapses the
+// call's stack window, and pushes the return value at its base — the
+// caller never sees the callee's locals.
 using RtCompiledFn = int (*)(Runtime*, Value*);

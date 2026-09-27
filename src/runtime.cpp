@@ -156,12 +156,30 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
     CallFrame* frame = &m_frames[m_frameCount - 1];
     auto code = reinterpret_cast<RtCompiledFn>(closure->function->code);
     int status = code(this, frame->slots);
-    // The compiled callee has already run its own Lox-level RETURN to
-    // completion by the time its C function returns, so this frame's exit
-    // is this call's own responsibility to close out, the same way call()
-    // just made pushing it this call's own responsibility.
+    if (status != 0) {
+        // Nonzero means the compiled callee already reported a fatal error
+        // through runtimeError() (rt_abi.h's own contract on RtCompiledFn),
+        // which already called resetStack() and zeroed m_frameCount for the
+        // whole Runtime. There is no frame left here for this call to close
+        // out — doing so would double-decrement an already-reset count.
+        return OpResult::Fatal;
+    }
+    // The C-ABI return convention for a compiled function, mirroring
+    // Op::RETURN (vm.cpp) exactly: before returning 0, the callee leaves
+    // its return value as the single value on top of the stack (the same
+    // "one value at the top" contract RETURN's own `Value result = pop()`
+    // relies on) — not at a fixed slot, and not via rt_set_top alone. This
+    // call then performs the same frame-exit RETURN performs: close any
+    // upvalue a nested closure captured over this frame's own locals,
+    // drop any handler this frame owns, collapse the callee's stack
+    // window, and push the return value back at the base of that window.
+    Value result = pop();
+    closeUpvalues(frame->slots);
+    popHandlersOwnedByCurrentFrame();
     m_frameCount--;
-    return status == 0 ? OpResult::OK : OpResult::Fatal;
+    stackTop = frame->slots;
+    push(result);
+    return OpResult::OK;
 }
 
 ObjUpvalue* Runtime::captureUpvalue(Value* local) {
