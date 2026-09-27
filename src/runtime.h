@@ -52,7 +52,8 @@ enum class InterpretResult : std::uint8_t {
     RUNTIME_ERROR,
 };
 
-struct ObjMap; // container_objects.h; only a pointer is needed here.
+struct ObjMap;        // container_objects.h; only a pointer is needed here.
+class DiagnosticSink; // diagnostic.h; only a pointer is needed here.
 
 struct HandlerRecord {
     int frameCount;                // number of frames at push time
@@ -181,6 +182,19 @@ class Runtime {
     friend struct VMTestAccess;
 
     void resetStack();
+
+    // Compiles `source`, defines the stdlib, and wraps the result in an
+    // ObjClosure rooted on the stack at slot 0 — the shared first half of
+    // VM::interpret() and rt_startup() (backend/rt_capi.cpp, the QBE
+    // backend's embed-and-recompile startup path). Neither caller needs
+    // bytecode dispatch for this part: it stops short of pushing the first
+    // CallFrame (call(closure, 0)) so a compile error and an uncaught
+    // arity/overflow fault from that call stay distinguishable outcomes to
+    // the caller, the same distinction VM::interpret() already made.
+    // Returns nullptr on a compile error (already reported to stderr, or
+    // collected in `sink` when one is given).
+    ObjClosure* loadSource(const std::string& source,
+                           DiagnosticSink* sink = nullptr);
 
     // Defined inline (not in runtime.cpp): these are called on every single
     // opcode dispatch, and vm.cpp is a separate translation unit from

@@ -2,6 +2,7 @@
 #include "objects.h"
 #include "object.h"
 #include "utility.h"
+#include "compiler.h"
 
 #include "stdlib/stdlib_registrar.h"
 #include "stdlib/globals.h"
@@ -28,6 +29,32 @@ std::optional<Value> Runtime::getGlobal(const std::string& name) const {
         return std::nullopt;
     }
     return out;
+}
+
+ObjClosure* Runtime::loadSource(const std::string& source,
+                                DiagnosticSink* sink) {
+    // Guard against dangling class pointers from a prior loadSource() call
+    // on this same Runtime (a REPL line, or a second rt_startup() on a
+    // process that already ran one program). GC can fire inside compile(),
+    // and markRoots() must not dereference a pointer a previous program's
+    // class definitions left behind.
+    m_fileClass = nullptr;
+    m_mapClass = nullptr;
+    ObjFunction* fn = compile(source, &m_mm, sink);
+    if (fn == nullptr) {
+        return nullptr;
+    }
+    // Root fn on the stack before any allocation (defineNatives,
+    // create<ObjClosure>) can trigger GC. Without this, fn is unreachable
+    // between compile() returning and the closure replacing it below — the
+    // Compiler has already been destroyed and m_currentCompiler is nullptr.
+    push(Value{static_cast<Obj*>(fn)});
+    setActiveContext(&m_stdlibCtx);
+    defineNatives();
+    ObjClosure* closure = m_mm.create<ObjClosure>(fn);
+    stackTop[-1] =
+        Value{static_cast<Obj*>(closure)}; // replace fn with its closure
+    return closure;
 }
 
 Runtime::ThrowOutcome Runtime::call(ObjClosure* closure, int argCount,
