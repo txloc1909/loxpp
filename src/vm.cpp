@@ -415,8 +415,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::MATCH_ERROR: {
-            CATCHABLE_OR_RETURN(tryCatchableError(
-                "MatchError", "No matching arm in match expression."));
+            if (auto ret = dispatchOp(
+                    [&] { return m_rt.opMatchError(stopAtFrameCount); })) {
+                return *ret;
+            }
             break;
         }
         case Op::JUMP_TABLE: {
@@ -435,13 +437,9 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::GET_TAG: {
-            Value val = m_rt.pop();
-            if (!isEnumValue(val)) {
-                RAISE_ERROR("GET_TAG: expected an enum value.");
-                return InterpretResult::RUNTIME_ERROR;
+            if (auto ret = dispatchOp([&] { return m_rt.opGetTag(); })) {
+                return *ret;
             }
-            auto tag = static_cast<double>(asObjEnum(as<Obj*>(val))->ctor->tag);
-            m_rt.push(Value{tag});
             break;
         }
         case Op::IS_SEQ: {
@@ -478,9 +476,7 @@ InterpretResult VM::run(int stopAtFrameCount) {
         }
         case Op::CLASS: {
             ObjString* name = asObjString(readConstant());
-            ObjClass* klass = m_rt.m_mm.create<ObjClass>(
-                name, VmAllocator<Entry>{&m_rt.m_mm});
-            m_rt.push(Value{static_cast<Obj*>(klass)});
+            m_rt.opClass(name);
             break;
         }
         case Op::GET_PROPERTY: {
@@ -493,24 +489,16 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::SET_PROPERTY: {
-            if (!isInstance(m_rt.peek(1))) {
-                RAISE_ERROR("Only instances have fields.");
-                return InterpretResult::RUNTIME_ERROR;
-            }
-            ObjInstance* instance = asObjInstance(as<Obj*>(m_rt.peek(1)));
             ObjString* name = asObjString(readConstant());
-            instance->fields.set(name, m_rt.peek(0));
-            Value val = m_rt.pop(); // value
-            m_rt.pop();             // instance
-            m_rt.push(val);         // assignment is an expression
+            if (auto ret =
+                    dispatchOp([&] { return m_rt.opSetProperty(name); })) {
+                return *ret;
+            }
             break;
         }
         case Op::DEFINE_METHOD: {
             ObjString* name = asObjString(readConstant());
-            Value method = m_rt.peek(0); // ObjClosure* on top
-            ObjClass* klass = asObjClass(as<Obj*>(m_rt.peek(1))); // class below
-            klass->methods.set(name, method);
-            m_rt.pop(); // pop closure; leave class on stack for next method
+            m_rt.opDefineMethod(name);
             break;
         }
         case Op::INVOKE: {
@@ -652,54 +640,18 @@ InterpretResult VM::run(int stopAtFrameCount) {
         }
         case Op::BUILD_LIST: {
             uint8_t count = readByte();
-            ObjList* list =
-                m_rt.m_mm.create<ObjList>(VmAllocator<Value>{&m_rt.m_mm});
-            m_rt.m_mm.pushTempRoot(
-                list); // protect across resize's potential GC
-            list->elements.resize(count);
-            for (int i = count - 1; i >= 0; i--) {
-                list->elements[i] = m_rt.pop();
+            if (auto ret =
+                    dispatchOp([&] { return m_rt.opBuildList(count); })) {
+                return *ret;
             }
-            m_rt.m_mm.popTempRoot();
-            m_rt.push(Value{static_cast<Obj*>(list)});
             break;
         }
         case Op::BUILD_MAP: {
             uint8_t count = readByte();
-            // Validate all keys before any allocation. Stack (top to bottom):
-            //   val_{n-1}, key_{n-1}, ..., val_0, key_0
-            bool errorCaught = false;
-            for (int i = 0; i < count; i++) {
-                Value key = m_rt.peek(2 * (count - 1 - i) + 1);
-                if (auto err = Runtime::mapKeyError(key)) {
-                    // The macro's own early returns cover Uncaught/HandledStop;
-                    // reaching here means HandledContinue, so break out of this
-                    // validation loop (not the outer switch — errorCaught does
-                    // that below) same as before.
-                    CATCHABLE_OR_RETURN(
-                        tryCatchableError(err->kind, err->message));
-                    errorCaught = true;
-                    break;
-                }
+            if (auto ret = dispatchOp(
+                    [&] { return m_rt.opBuildMap(count, stopAtFrameCount); })) {
+                return *ret;
             }
-            if (errorCaught) {
-                break;
-            }
-            ObjMap* map = m_rt.m_mm.create<ObjMap>(
-                m_rt.m_mapClass, VmAllocator<MapEntry>{&m_rt.m_mm});
-            // Values are still on the stack → GC-rooted; map is temp-rooted
-            // so it survives any GC triggered by mapSet's grow.
-            m_rt.m_mm.pushTempRoot(map);
-            for (int i = 0; i < count; i++) {
-                Value key = m_rt.peek(2 * (count - 1 - i) + 1);
-                Value val = m_rt.peek(2 * (count - 1 - i));
-                map->mapSet(key, val);
-            }
-            m_rt.m_mm.popTempRoot();
-            for (int i = 0; i < 2 * count; i++) {
-                m_rt.pop();
-            }
-            m_rt.push(Value{static_cast<Obj*>(map)});
             break;
         }
         case Op::GET_INDEX: {
@@ -717,80 +669,8 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::SLICE: {
-            // Stack (bottom→top): seq, start, end
-            Value endVal = m_rt.peek(0);
-            Value startVal = m_rt.peek(1);
-            Value seqVal = m_rt.peek(2);
-
-            if (!isList(seqVal) && !isString(seqVal)) {
-                RAISE_ERROR("Slice requires a List or String.");
-                return InterpretResult::RUNTIME_ERROR;
-            }
-            if (!is<Number>(startVal)) {
-                RAISE_ERROR("Slice index must be a number.");
-                return InterpretResult::RUNTIME_ERROR;
-            }
-            double startD = as<Number>(startVal);
-            if (startD != std::floor(startD)) {
-                RAISE_ERROR("Slice index must be an integer.");
-                return InterpretResult::RUNTIME_ERROR;
-            }
-            if (startD < 0.0) {
-                RAISE_ERROR("Slice index must be non-negative.");
-                return InterpretResult::RUNTIME_ERROR;
-            }
-            if (!is<Number>(endVal)) {
-                RAISE_ERROR("Slice index must be a number.");
-                return InterpretResult::RUNTIME_ERROR;
-            }
-            double endD = as<Number>(endVal);
-            if (endD != std::floor(endD)) {
-                RAISE_ERROR("Slice index must be an integer.");
-                return InterpretResult::RUNTIME_ERROR;
-            }
-            if (endD < 0.0) {
-                RAISE_ERROR("Slice index must be non-negative.");
-                return InterpretResult::RUNTIME_ERROR;
-            }
-
-            if (isList(seqVal)) {
-                auto* src = asObjList(as<Obj*>(seqVal));
-                int n = static_cast<int>(src->elements.size());
-                int s = static_cast<int>(std::min(startD, (double)n));
-                int e = static_cast<int>(std::min(endD, (double)n));
-                int count = (s < e) ? e - s : 0;
-
-                ObjList* result =
-                    m_rt.m_mm.create<ObjList>(VmAllocator<Value>{&m_rt.m_mm});
-                // seqVal is still at peek(2) → src is GC-rooted on the stack
-                m_rt.m_mm.pushTempRoot(result);
-                result->elements.resize(count); // may trigger GC
-                src = asObjList(
-                    as<Obj*>(m_rt.peek(2))); // re-read after potential GC
-                for (int i = 0; i < count; i++) {
-                    result->elements[i] = src->elements[s + i];
-                }
-                m_rt.m_mm.popTempRoot();
-                m_rt.pop();
-                m_rt.pop();
-                m_rt.pop();
-                m_rt.push(Value{static_cast<Obj*>(result)});
-            } else {
-                // String — copy chars to local buffer while src is still on
-                // stack
-                auto* src = asObjString(as<Obj*>(seqVal));
-                int n = static_cast<int>(src->chars.size());
-                int s = static_cast<int>(std::min(startD, (double)n));
-                int e = static_cast<int>(std::min(endD, (double)n));
-                std::string substr =
-                    (s < e) ? std::string(src->chars.data() + s,
-                                          static_cast<size_t>(e - s))
-                            : std::string{};
-                m_rt.pop();
-                m_rt.pop();
-                m_rt.pop();
-                m_rt.push(Value{static_cast<Obj*>(
-                    m_rt.m_mm.makeString(std::move(substr)))});
+            if (auto ret = dispatchOp([&] { return m_rt.opSlice(); })) {
+                return *ret;
             }
             break;
         }

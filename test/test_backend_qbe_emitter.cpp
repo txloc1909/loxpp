@@ -149,39 +149,29 @@ TEST(QbeEmitter, ReturnSetsTopAndReturnsZero) {
 // this node's scope (S5 the rest of the language, S6 errors), and the
 // emitter must say so rather than emit silently wrong code for it.
 
-TEST(QbeEmitter, ThrowsNamingAnUnsupportedOpcode) {
-    // BUILD_LIST is S5's job (notes/qbe-backend.md, "Staged plan") — lists
-    // and maps are out of scope for S4's own CALL/CLOSURE/upvalues.
-    EXPECT_THROW(
-        {
-            try {
-                emitScriptFrom("var x = [1];");
-            } catch (const std::exception& e) {
-                EXPECT_NE(std::string(e.what()).find("BUILD_LIST"),
-                          std::string::npos);
-                throw;
-            }
-        },
-        std::runtime_error);
+TEST(QbeEmitter, EmitsBuildListRatherThanThrowing) {
+    // BUILD_LIST is S5's job (notes/qbe-backend.md, "Staged plan", #458) —
+    // out of scope for S4, but supported from here on: no throw, and the
+    // slow-path call this opcode lowers to actually appears.
+    std::string ssa = emitScriptFrom("var x = [1];");
+    EXPECT_NE(ssa.find("rt_op_build_list"), std::string::npos);
 }
 
 TEST(QbeEmitter, ThrowsOnPushHandler) {
+    // THROW/PUSH_HANDLER stay out of scope until S6 (#459) — the general
+    // "names the unsupported opcode" behavior EmitsBuildListRatherThan
+    // Throwing above no longer covers, now that S5 has closed the BUILD_LIST
+    // gap that test used to exercise it with.
     EXPECT_THROW(emitScriptFrom("try { throw 1; } catch (e) { print e; }"),
                  std::runtime_error);
 }
 
-TEST(QbeEmitter, ThrowsOnNonNumberConstant) {
-    EXPECT_THROW(
-        {
-            try {
-                emitScriptFrom("print \"hi\";");
-            } catch (const std::exception& e) {
-                EXPECT_NE(std::string(e.what()).find("CONSTANT"),
-                          std::string::npos);
-                throw;
-            }
-        },
-        std::runtime_error);
+TEST(QbeEmitter, EmitsNonNumberConstantRatherThanThrowing) {
+    // A String constant is read back via rt_constant_at rather than
+    // re-encoded (S5, #458; bytecode-translation-problems.md P6,
+    // "materialise") — no throw, and the read-back call actually appears.
+    std::string ssa = emitScriptFrom("print \"hi\";");
+    EXPECT_NE(ssa.find("rt_constant_at"), std::string::npos);
 }
 
 // ---------------------------------------------------------------------
@@ -206,9 +196,10 @@ TEST(QbeEmitter, CallSetsTopAndPassesArgCountAsAWord) {
 
 TEST(QbeEmitter, ClosureReadsItsFunctionConstantThroughItsOwnClosure) {
     // CLOSURE has no constant pool of its own to read from at compile
-    // time (rt_capi.h) — it must ask the currently executing closure
-    // (base[0]) for its function constant, at runtime, by index.
+    // time (rt_capi.h) — it must ask the currently executing closure, via
+    // rt_current_closure, for its function constant, at runtime, by index.
     std::string ssa = emitScriptFrom("fun f() { return 1; } print f;");
+    EXPECT_NE(ssa.find("call $rt_current_closure(l %rt)"), std::string::npos);
     EXPECT_NE(ssa.find("call $rt_constant_at(l %rt, l"), std::string::npos);
     EXPECT_NE(ssa.find("call $rt_new_closure(l %rt, l"), std::string::npos);
 }
@@ -258,4 +249,67 @@ TEST(QbeEmitter, CloseUpvalueEmitsRtCloseUpvalues) {
         "for (var i = 0; i < 3; i = i + 1) { var snapshot = i; fun f() { "
         "return snapshot; } }");
     EXPECT_NE(ssa.find("call $rt_close_upvalues(l %rt, l"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------
+// S5 (#458): classes, methods, aggregates, iterators, slicing, membership,
+// match dispatch.
+// ---------------------------------------------------------------------
+
+TEST(QbeEmitter, MethodReadsItsConstantThroughRtCurrentClosureNotSlotZero) {
+    // Regression: a method's own base[0] holds the receiver ("this"), not
+    // its closure — unlike a plain CALL-entered function. Reading addr(0)
+    // for "my own closure" (the pre-#458 CLOSURE/GET_UPVALUE/SET_UPVALUE
+    // shortcut this node's CONSTANT/SET_PROPERTY lowering copied) hands
+    // rt_constant_at an ObjInstance* it silently misreads as an
+    // ObjClosure*, corrupting the property name pointer SET_PROPERTY then
+    // dereferences. init()'s own SSA (id "0.0") must go through
+    // rt_current_closure instead.
+    std::string ssa =
+        emitNestedFrom("class C { init(x) { this.x = x; } }", {0});
+    EXPECT_NE(ssa.find("call $rt_current_closure(l %rt)"), std::string::npos);
+    EXPECT_NE(ssa.find("call $rt_op_set_property(l %rt, l"), std::string::npos);
+}
+
+TEST(QbeEmitter, ClassAndInvokeLowerToTheirRtOpWrappers) {
+    std::string ssa =
+        emitScriptFrom("class C { get() { return 1; } } print C().get();");
+    EXPECT_NE(ssa.find("call $rt_op_class(l %rt, l"), std::string::npos);
+    EXPECT_NE(ssa.find("call $rt_op_invoke(l %rt, l"), std::string::npos);
+}
+
+TEST(QbeEmitter, SuperInvokeLowersToRtOpSuperInvoke) {
+    // rt_op_inherit is emitted where the top-level script defines B < A;
+    // super.greet() itself lives in B's own greet() method — both classes'
+    // methods nest directly under the script (id "0.0" A.greet, "0.1"
+    // B.greet), not under their own class.
+    std::string script =
+        "class A { greet() { return 1; } } "
+        "class B < A { greet() { return super.greet() + 1; } } "
+        "print B().greet();";
+    EXPECT_NE(emitScriptFrom(script).find("call $rt_op_inherit(l %rt)"),
+              std::string::npos);
+    std::string methodSsa = emitNestedFrom(script, {1});
+    EXPECT_NE(methodSsa.find("call $rt_op_super_invoke(l %rt, l"),
+              std::string::npos);
+}
+
+TEST(QbeEmitter, SliceAndInLowerToTheirRtOpWrappers) {
+    std::string ssa =
+        emitScriptFrom("var s = \"hi\"; print s[0:1]; print 1 in [1];");
+    EXPECT_NE(ssa.find("call $rt_op_slice(l %rt)"), std::string::npos);
+    EXPECT_NE(ssa.find("call $rt_op_in(l %rt,"), std::string::npos);
+}
+
+TEST(QbeEmitter, JumpTableLowersToACompareChain) {
+    // P8 (bytecode-translation-problems.md, hazard Q8): QBE has no switch
+    // and no indirect jump — each arm becomes its own `ceqw`/`jnz` pair
+    // rather than one dispatch instruction.
+    std::string ssa = emitScriptFrom(
+        "enum E { A B } var e = A(); var n = match e { case A => 0 case B "
+        "=> 1 }; print n;");
+    EXPECT_NE(ssa.find("call $rt_op_get_tag(l %rt)"), std::string::npos);
+    EXPECT_NE(ssa.find("ceqw"), std::string::npos);
+    // No QBE switch/jump-table construct exists to accidentally emit.
+    EXPECT_EQ(ssa.find("switch"), std::string::npos);
 }

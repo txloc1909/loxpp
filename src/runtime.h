@@ -366,6 +366,20 @@ class Runtime {
     OpResult opIterHasNext();
     OpResult opIterNext();
 
+    // Classes, methods, aggregates, slicing, and match dispatch (S5, #458),
+    // moved out of VM::run() the same way as the op*() methods above so the
+    // QBE backend (backend/rt_capi.h) reaches them with no runtime
+    // duplication. opClass/opDefineMethod have no error path in VM::run()
+    // either, matching opDefineGlobal's shape above.
+    void opClass(ObjString* name);
+    OpResult opSetProperty(ObjString* name);
+    void opDefineMethod(ObjString* name);
+    OpResult opBuildList(int count);
+    OpResult opBuildMap(int count, int stopAtFrameCount);
+    OpResult opSlice();
+    OpResult opGetTag();
+    OpResult opMatchError(int stopAtFrameCount);
+
     // Arithmetic / comparison / containment operators. Each one owns the
     // slow path of its opcode: the built-in number (and for ADD, string) fast
     // path is inlined in VM::run(), and these are called only once that fast
@@ -413,6 +427,17 @@ class Runtime {
         return static_cast<int>(stackTop - stack);
     }
     [[nodiscard]] int frameCount() const { return m_frameCount; }
+    // The currently running frame's own closure — CallFrame::closure, set
+    // by call()/callCompiled() when the frame was pushed. Used by the QBE
+    // backend's rt_current_closure (backend/rt_capi.h) to reach a compiled
+    // function's own constant pool/upvalues: base[0] holds that closure
+    // only for a directly-called function, never for a method (base[0]
+    // there is the receiver, "this" — S5, #458), so compiled code cannot
+    // read it back out of its own stack window the way CLOSURE/GET_UPVALUE/
+    // CONSTANT once assumed.
+    [[nodiscard]] ObjClosure* currentClosure() const {
+        return m_frameCount > 0 ? m_frames[m_frameCount - 1].closure : nullptr;
+    }
     [[nodiscard]] int handlerStackDepth() const {
         return static_cast<int>(m_handlerStack.size());
     }
@@ -514,6 +539,24 @@ class Runtime {
     // call does not attempt.
     OpResult callCompiled(ObjClosure* closure, int argCount,
                           int stopAtFrameCount);
+
+    // Dispatches to callCompiled() when `closure` already has attached code,
+    // else falls back to call()+fromThrow() — the same branch opCall()'s
+    // closure case already makes inline (above). Every other site that runs
+    // a resolved ObjClosure straight (init(), the instance/super fast-path
+    // method call, a bound method's underlying closure) must branch the
+    // same way: under the QBE backend there is no VM::run() loop left to
+    // pick a bare call()'s pushed-but-not-run frame back up (OpResult::
+    // Resumed's own contract above: "reload frame/ip/chunk from the
+    // current top before resuming dispatch") — nothing would ever run it
+    // (S5, #458). Not used by dispatchMethod(): a ResultCheck/
+    // resultOverride-bearing protocol dispatch onto a compiled callee still
+    // leaves that same gap open, since compiled RETURN
+    // (backend/qbe_emitter.cpp) does not consult m_frameResultCheck/
+    // m_frameResultOverride the way Op::RETURN does — out of this node's
+    // scope, tracked as a hazard on #460 (S7 parity gate).
+    OpResult invokeClosure(ObjClosure* closure, int argCount,
+                           int stopAtFrameCount);
 
     // The operator-overloading protocol methods, in the order they are
     // interned into m_protocolNames. `Count` is the array size.

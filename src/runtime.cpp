@@ -184,6 +184,14 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
     return OpResult::OK;
 }
 
+Runtime::OpResult Runtime::invokeClosure(ObjClosure* closure, int argCount,
+                                         int stopAtFrameCount) {
+    if (closure->function->code != nullptr) {
+        return callCompiled(closure, argCount, stopAtFrameCount);
+    }
+    return fromThrow(call(closure, argCount, stopAtFrameCount));
+}
+
 ObjUpvalue* Runtime::captureUpvalue(Value* local) {
     ObjUpvalue* prev = nullptr;
     ObjUpvalue* cur = m_openUpvalues;
@@ -254,41 +262,64 @@ InterpretResult Runtime::runPendingDefers(int frameIndex,
 
         // Handle various callable types (similar to Op::CALL dispatch).
         // For BoundMethod, replace the method on the stack with the receiver,
-        // then call the underlying method closure.
-        ThrowOutcome outcome;
+        // then call the underlying method closure. BoundMethod and Closure
+        // go through invokeClosure(), not a bare call(): the callee can be a
+        // compiled closure (function->code != nullptr, an interpreted
+        // fallback frame deferring into QBE-compiled code — rt_capi.h's own
+        // "interpreted-fallback closure" split), and a bare call() would
+        // push a CallFrame that nothing here would ever run, the same
+        // "pushed frame nobody runs" bug invokeClosure() fixes at every
+        // other direct-call site in this file.
+        OpResult callResult;
         if (isBoundMethod(calleeVal)) {
             ObjBoundMethod* bound = asObjBoundMethod(as<Obj*>(calleeVal));
             stackTop[-argCount - 1] = bound->receiver;
-            outcome = call(bound->method, argCount, stopAtFrameCount);
+            callResult =
+                invokeClosure(bound->method, argCount, stopAtFrameCount);
         } else if (isClosure(calleeVal)) {
             ObjClosure* closure = asObjClosure(as<Obj*>(calleeVal));
-            outcome = call(closure, argCount, stopAtFrameCount);
+            callResult = invokeClosure(closure, argCount, stopAtFrameCount);
         } else if (isNative(calleeVal)) {
             ObjNative* native = asObjNative(as<Obj*>(calleeVal));
-            outcome = callNative(native, argCount) ? ThrowOutcome::Pushed
-                                                   : ThrowOutcome::Uncaught;
+            callResult =
+                callNative(native, argCount) ? OpResult::OK : OpResult::Fatal;
         } else if (isBoundNative(calleeVal)) {
             ObjBoundNative* bound = asObjBoundNative(as<Obj*>(calleeVal));
-            outcome = callBoundNative(bound, argCount) ? ThrowOutcome::Pushed
-                                                       : ThrowOutcome::Uncaught;
+            callResult = callBoundNative(bound, argCount) ? OpResult::OK
+                                                          : OpResult::Fatal;
         } else {
             // Unexpected callable type in deferred call
             runtimeError("Deferred callable has unexpected type.");
             return InterpretResult::RUNTIME_ERROR;
         }
 
-        if (outcome == ThrowOutcome::Uncaught) {
+        if (callResult == OpResult::Fatal) {
             return InterpretResult::RUNTIME_ERROR;
         }
-        if (outcome != ThrowOutcome::Pushed) {
-            // The deferred call's own arity mismatch was caught instead of
-            // pushing a new frame. Any handler reachable here was pushed
-            // before frameIndex's own function was even called (a handler
-            // scoped inside that function's body is already popped by the
-            // time RUN_DEFERS runs), so frameIndex no longer exists — there
-            // is no new frame to run to completion. Per defer step 5's
-            // documented limitation, abandon any remaining sibling defers
-            // rather than still running them.
+        if (callResult == OpResult::OK) {
+            // A native call already ran, or invokeClosure() ran a compiled
+            // closure to completion internally (Runtime::callCompiled) and
+            // already popped its own frame — either way there is no pending
+            // frame here to run to completion. Move on to the next deferred
+            // call.
+            continue;
+        }
+        // callResult is Stop or Resumed. Resumed covers two different
+        // ThrowOutcomes (see OpResult's own doc comment): a frame genuinely
+        // pushed for this call (ThrowOutcome::Pushed), or this call's own
+        // arity/overflow fault caught by a handler elsewhere
+        // (ThrowOutcome::HandledContinue). call()'s arity/overflow check
+        // runs before any push, so only the first case can leave
+        // m_frameCount at frameIndex + 2; use that to tell them apart
+        // instead of threading ThrowOutcome itself through invokeClosure().
+        if (callResult == OpResult::Stop || m_frameCount != frameIndex + 2) {
+            // No frame was pushed for this call. Any handler reachable here
+            // was pushed before frameIndex's own function was even called (a
+            // handler scoped inside that function's body is already popped
+            // by the time RUN_DEFERS runs), so frameIndex no longer exists
+            // — there is no new frame to run to completion. Per defer step
+            // 5's documented limitation, abandon any remaining sibling
+            // defers rather than still running them.
             return InterpretResult::OK;
         }
         InterpretResult result = m_runLoop(frameIndex + 1);
@@ -654,17 +685,13 @@ Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
                                                          : OpResult::Fatal;
     }
     if (isClosure(callee)) {
-        ObjClosure* closure = asObjClosure(callee);
-        if (closure->function->code != nullptr) {
-            return callCompiled(closure, argCount, stopAtFrameCount);
-        }
-        return fromThrow(call(closure, argCount, stopAtFrameCount));
+        return invokeClosure(asObjClosure(callee), argCount, stopAtFrameCount);
     }
     if (isBoundMethod(callee)) {
         ObjBoundMethod* bound = asObjBoundMethod(as<Obj*>(callee));
         // Slot 0 of the new frame = receiver (= this).
         stackTop[-argCount - 1] = bound->receiver;
-        return fromThrow(call(bound->method, argCount, stopAtFrameCount));
+        return invokeClosure(bound->method, argCount, stopAtFrameCount);
     }
     if (isBoundNative(callee)) {
         ObjBoundNative* bn = asObjBoundNative(as<Obj*>(callee));
@@ -679,8 +706,8 @@ Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
         ObjString* initStr = m_mm.findString("init");
         Value initMethod;
         if (initStr && klass->methods.get(initStr, initMethod)) {
-            return fromThrow(call(asObjClosure(as<Obj*>(initMethod)), argCount,
-                                  stopAtFrameCount));
+            return invokeClosure(asObjClosure(as<Obj*>(initMethod)), argCount,
+                                 stopAtFrameCount);
         }
         if (argCount != 0) {
             return fromThrow(raiseThrowableError(
@@ -735,8 +762,8 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
         if (instance->fields.get(name, fieldVal)) {
             stackTop[-argCount - 1] = fieldVal;
             if (isClosure(fieldVal)) {
-                return fromThrow(call(asObjClosure(as<Obj*>(fieldVal)),
-                                      argCount, stopAtFrameCount));
+                return invokeClosure(asObjClosure(as<Obj*>(fieldVal)), argCount,
+                                     stopAtFrameCount);
             }
             if (isNative(fieldVal)) {
                 return callNative(asObjNative(as<Obj*>(fieldVal)), argCount)
@@ -765,8 +792,8 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
                        ? OpResult::OK
                        : OpResult::Fatal;
         }
-        return fromThrow(
-            call(asObjClosure(methodObj), argCount, stopAtFrameCount));
+        return invokeClosure(asObjClosure(methodObj), argCount,
+                             stopAtFrameCount);
     }
     if (isList(receiver)) {
         ObjList* list = asObjList(as<Obj*>(receiver));
@@ -927,8 +954,8 @@ Runtime::OpResult Runtime::opSuperInvoke(ObjString* name, int argCount,
         runtimeError("Undefined property '%s'.", name->chars.c_str());
         return OpResult::Fatal;
     }
-    return fromThrow(
-        call(asObjClosure(as<Obj*>(method)), argCount, stopAtFrameCount));
+    return invokeClosure(asObjClosure(as<Obj*>(method)), argCount,
+                         stopAtFrameCount);
 }
 
 Runtime::OpResult Runtime::opInherit() {
@@ -1244,6 +1271,169 @@ Runtime::OpResult Runtime::opIterNext() {
         return OpResult::Fatal;
     }
     return OpResult::OK;
+}
+
+// --- classes, methods, aggregates, slicing, match dispatch (S5, #458) -----
+//
+// Moved out of VM::run() the same way as the property/index/iterator op*()
+// methods above (S1's Layer 1), so the QBE backend (backend/rt_capi.h)
+// reaches them with no separate implementation. opClass and opDefineMethod
+// have no error path in VM::run() either, matching opDefineGlobal's shape.
+
+void Runtime::opClass(ObjString* name) {
+    ObjClass* klass = m_mm.create<ObjClass>(name, VmAllocator<Entry>{&m_mm});
+    push(Value{static_cast<Obj*>(klass)});
+}
+
+Runtime::OpResult Runtime::opSetProperty(ObjString* name) {
+    if (!isInstance(peek(1))) {
+        runtimeError("Only instances have fields.");
+        return OpResult::Fatal;
+    }
+    ObjInstance* instance = asObjInstance(as<Obj*>(peek(1)));
+    instance->fields.set(name, peek(0));
+    Value val = pop(); // value
+    pop();             // instance
+    push(val);         // assignment is an expression
+    return OpResult::OK;
+}
+
+void Runtime::opDefineMethod(ObjString* name) {
+    Value method = peek(0);                          // ObjClosure* on top
+    ObjClass* klass = asObjClass(as<Obj*>(peek(1))); // class below
+    klass->methods.set(name, method);
+    pop(); // pop closure; leave class on stack for next method
+}
+
+Runtime::OpResult Runtime::opBuildList(int count) {
+    ObjList* list = m_mm.create<ObjList>(VmAllocator<Value>{&m_mm});
+    m_mm.pushTempRoot(list); // protect across resize's potential GC
+    list->elements.resize(static_cast<std::size_t>(count));
+    for (int i = count - 1; i >= 0; i--) {
+        list->elements[static_cast<std::size_t>(i)] = pop();
+    }
+    m_mm.popTempRoot();
+    push(Value{static_cast<Obj*>(list)});
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::opBuildMap(int count, int stopAtFrameCount) {
+    // Validate all keys before any allocation. Stack (top to bottom):
+    //   val_{n-1}, key_{n-1}, ..., val_0, key_0
+    for (int i = 0; i < count; i++) {
+        Value key = peek(2 * (count - 1 - i) + 1);
+        if (auto err = checkMapKey(key, stopAtFrameCount)) {
+            return *err;
+        }
+    }
+    ObjMap* map = m_mm.create<ObjMap>(m_mapClass, VmAllocator<MapEntry>{&m_mm});
+    // Values are still on the stack -> GC-rooted; map is temp-rooted so it
+    // survives any GC triggered by mapSet's grow.
+    m_mm.pushTempRoot(map);
+    for (int i = 0; i < count; i++) {
+        Value key = peek(2 * (count - 1 - i) + 1);
+        Value val = peek(2 * (count - 1 - i));
+        map->mapSet(key, val);
+    }
+    m_mm.popTempRoot();
+    for (int i = 0; i < 2 * count; i++) {
+        pop();
+    }
+    push(Value{static_cast<Obj*>(map)});
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::opSlice() {
+    // Stack (bottom -> top): seq, start, end
+    Value endVal = peek(0);
+    Value startVal = peek(1);
+    Value seqVal = peek(2);
+
+    if (!isList(seqVal) && !isString(seqVal)) {
+        runtimeError("Slice requires a List or String.");
+        return OpResult::Fatal;
+    }
+    if (!is<Number>(startVal)) {
+        runtimeError("Slice index must be a number.");
+        return OpResult::Fatal;
+    }
+    double startD = as<Number>(startVal);
+    if (startD != std::floor(startD)) {
+        runtimeError("Slice index must be an integer.");
+        return OpResult::Fatal;
+    }
+    if (startD < 0.0) {
+        runtimeError("Slice index must be non-negative.");
+        return OpResult::Fatal;
+    }
+    if (!is<Number>(endVal)) {
+        runtimeError("Slice index must be a number.");
+        return OpResult::Fatal;
+    }
+    double endD = as<Number>(endVal);
+    if (endD != std::floor(endD)) {
+        runtimeError("Slice index must be an integer.");
+        return OpResult::Fatal;
+    }
+    if (endD < 0.0) {
+        runtimeError("Slice index must be non-negative.");
+        return OpResult::Fatal;
+    }
+
+    if (isList(seqVal)) {
+        auto* src = asObjList(as<Obj*>(seqVal));
+        int n = static_cast<int>(src->elements.size());
+        int s = static_cast<int>(std::min(startD, static_cast<double>(n)));
+        int e = static_cast<int>(std::min(endD, static_cast<double>(n)));
+        int count = (s < e) ? e - s : 0;
+
+        ObjList* result = m_mm.create<ObjList>(VmAllocator<Value>{&m_mm});
+        // seqVal is still at peek(2) -> src is GC-rooted on the stack.
+        m_mm.pushTempRoot(result);
+        result->elements.resize(static_cast<std::size_t>(count)); // may GC
+        src = asObjList(as<Obj*>(peek(2))); // re-read after potential GC
+        for (int i = 0; i < count; i++) {
+            result->elements[static_cast<std::size_t>(i)] =
+                src->elements[static_cast<std::size_t>(s + i)];
+        }
+        m_mm.popTempRoot();
+        pop();
+        pop();
+        pop();
+        push(Value{static_cast<Obj*>(result)});
+    } else {
+        // String -- copy chars to a local buffer while src is still on stack.
+        auto* src = asObjString(as<Obj*>(seqVal));
+        int n = static_cast<int>(src->chars.size());
+        int s = static_cast<int>(std::min(startD, static_cast<double>(n)));
+        int e = static_cast<int>(std::min(endD, static_cast<double>(n)));
+        std::string substr = (s < e)
+                                 ? std::string(src->chars.data() + s,
+                                               static_cast<std::size_t>(e - s))
+                                 : std::string{};
+        pop();
+        pop();
+        pop();
+        push(Value{static_cast<Obj*>(m_mm.makeString(std::move(substr)))});
+    }
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::opGetTag() {
+    Value val = pop();
+    if (!isEnumValue(val)) {
+        runtimeError("GET_TAG: expected an enum value.");
+        return OpResult::Fatal;
+    }
+    auto tag = static_cast<double>(asObjEnum(as<Obj*>(val))->ctor->tag);
+    push(Value{tag});
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::opMatchError(int stopAtFrameCount) {
+    return fromThrow(raiseThrowableError("MatchError",
+                                         "No matching arm in match expression.",
+                                         stopAtFrameCount));
 }
 
 // --- arithmetic / comparison / containment op*() helpers ------------------

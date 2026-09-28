@@ -137,6 +137,25 @@ int rt_op_get_iter(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_iter_has_next(Runtime* rt) noexcept;
 int rt_op_iter_next(Runtime* rt) noexcept;
 
+// Classes, methods, aggregates, slicing, and match dispatch (S5, #458).
+// rt_op_class/rt_op_define_method have no error path, matching
+// rt_op_define_global's shape above.
+int rt_op_class(Runtime* rt, ObjString* name) noexcept;
+int rt_op_set_property(Runtime* rt, ObjString* name) noexcept;
+int rt_op_define_method(Runtime* rt, ObjString* name) noexcept;
+int rt_op_build_list(Runtime* rt, int count) noexcept;
+int rt_op_build_map(Runtime* rt, int count, int stopAtFrameCount) noexcept;
+int rt_op_slice(Runtime* rt) noexcept;
+int rt_op_get_tag(Runtime* rt) noexcept;
+int rt_op_match_error(Runtime* rt, int stopAtFrameCount) noexcept;
+
+// rt_op_in/rt_op_len: the wrappers T1 (#465) and T3 (#467) left for this
+// node to add, since Runtime::opIn/opLen already existed but had no QBE-
+// callable entry point yet (issue #472's cross-mission coordination
+// comment on #462).
+int rt_op_in(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_len(Runtime* rt, int stopAtFrameCount) noexcept;
+
 // One wrapper per Runtime::op*() arithmetic/comparison helper (runtime.h,
 // moved out of vm.cpp by the operator-overloading mission's T1 node). Each
 // is the slow path only: the emitter (backend/qbe_emitter.h) inlines the
@@ -173,15 +192,24 @@ int rt_op_set_global(Runtime* rt, ObjString* name,
 // closeUpvalues mechanism unchanged, the same code path VM::run()'s
 // Op::CLOSURE/GET_UPVALUE/SET_UPVALUE/CLOSE_UPVALUE cases already use.
 
+// The currently executing frame's own closure, as a Value — Runtime::
+// currentClosure(). base[0] holds this only when the frame was entered by
+// a direct CALL on a closure Value; a method's own frame (init(), INVOKE,
+// SUPER_INVOKE — S5, #458) has the receiver ("this") at base[0] instead,
+// so compiled code cannot reach its own closure by reading its stack
+// window the way CLOSURE/GET_UPVALUE/SET_UPVALUE/CONSTANT once assumed
+// (notes/qbe-backend.md, "The central design choice", was about the
+// window layout, not this). Every one of those reads its own closure via
+// this call now, not addr(0).
+Value rt_current_closure(Runtime* rt) noexcept;
+
 // Reads constant `constantIndex` from `closure`'s own function's constant
-// pool. CLOSURE is the only S4 opcode that needs this: compiled code has
-// no constant pool of its own (this header's own file comment), so it asks
-// the CURRENTLY EXECUTING frame's own closure (compiled code's calling
-// convention keeps this at base[0] — notes/qbe-backend.md, "The central
-// design choice") for its function constant, rather than embedding a
-// pointer literal at compile time — the target ObjFunction only gets a
-// real address after rt_startup's embed-and-recompile step runs, long
-// after this code was emitted.
+// pool. Compiled code has no constant pool of its own (this header's own
+// file comment), so every caller passes rt_current_closure(rt)'s own
+// result here — never a Value read out of the frame's own stack window —
+// rather than embedding a pointer literal at compile time: the target
+// ObjFunction only gets a real address after rt_startup's
+// embed-and-recompile step runs, long after this code was emitted.
 Value rt_constant_at(Runtime* rt, Value closure, int constantIndex) noexcept;
 
 // Allocates a new ObjClosure over the ObjFunction `functionConstant`

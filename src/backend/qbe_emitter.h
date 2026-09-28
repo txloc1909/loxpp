@@ -1,20 +1,26 @@
 #pragma once
 
-// QBE code generator (S3/S4, notes/qbe-backend.md — "Staged plan", rows S3
-// and S4, and hazards Q3/Q5/Q8). Covers straight-line code, jumps, and calls/
-// closures: CONSTANT/NIL/TRUE/FALSE, POP, GET_LOCAL/SET_LOCAL, DEFINE_GLOBAL/
-// GET_GLOBAL/SET_GLOBAL, PRINT, ADD/SUBTRACT/MULTIPLY/DIVIDE/MODULO/NEGATE/
-// LESS/GREATER/EQUAL, JUMP/JUMP_IF_FALSE/LOOP, CALL, CLOSURE/GET_UPVALUE/
-// SET_UPVALUE/CLOSE_UPVALUE (no capture analysis — S4 relies on the VM's own
-// captureUpvalue/closeUpvalues, unchanged), and RETURN's own C-ABI epilogue
-// (rt_abi.h — every compiled function needs this, regardless of how simple
-// its body is). Every compiled function's own prologue also checks its
-// analyzed max stack height against STACK_MAX (Q3: compiled code writes its
-// own frame's slots directly, bypassing push()'s own check entirely — see
+// QBE code generator (S3/S4/S5, notes/qbe-backend.md — "Staged plan", rows
+// S3-S5, and hazards Q3/Q5/Q8/P8). Covers straight-line code, jumps, calls/
+// closures, and the rest of the language: CONSTANT (Number, and any other
+// constant type via rt_constant_at)/NIL/TRUE/FALSE, POP, GET_LOCAL/
+// SET_LOCAL, DEFINE_GLOBAL/GET_GLOBAL/SET_GLOBAL, PRINT, ADD/SUBTRACT/
+// MULTIPLY/DIVIDE/MODULO/NEGATE/LESS/GREATER/EQUAL/IN/LEN, JUMP/
+// JUMP_IF_FALSE/LOOP/JUMP_TABLE (lowered to a compare chain — P8, no QBE
+// switch or indirect jump), CALL, CLOSURE/GET_UPVALUE/SET_UPVALUE/
+// CLOSE_UPVALUE (no capture analysis — S4 relies on the VM's own
+// captureUpvalue/closeUpvalues, unchanged), CLASS/GET_PROPERTY/
+// SET_PROPERTY/DEFINE_METHOD/INVOKE/INHERIT/GET_SUPER/SUPER_INVOKE,
+// BUILD_LIST/BUILD_MAP/GET_INDEX/SET_INDEX/SLICE, GET_ITER/ITER_HAS_NEXT/
+// ITER_NEXT, GET_TAG/MATCH_ERROR, and RETURN's own C-ABI epilogue (rt_abi.h
+// — every compiled function needs this, regardless of how simple its body
+// is). Every compiled function's own prologue also checks its analyzed max
+// stack height against STACK_MAX (Q3: compiled code writes its own frame's
+// slots directly, bypassing push()'s own check entirely — see
 // Runtime::checkStackOverflow's comment, runtime.h). Any other opcode throws
 // std::runtime_error naming it, rather than emitting silently wrong code — a
-// later node (S5 the rest of the language, S6 errors) extends the switch
-// this file's own emitInstruction() holds.
+// later node (S6 errors: THROW, PUSH_HANDLER/POP_HANDLER, DEFER_RECORD/
+// RUN_DEFERS) extends the switch this file's own emitInstruction() holds.
 //
 // Keeps clox's fused stack (notes/qbe-backend.md, "The central design
 // choice"): the abstract_stack height at an offset fixes that value's own

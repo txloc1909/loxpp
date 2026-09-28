@@ -166,6 +166,54 @@ class Emitter {
         return ptr;
     }
 
+    // The currently executing function's own closure, as a Value — never
+    // read out of the frame's own stack window (addr(0)): base[0] is that
+    // closure only when this frame was entered by a direct CALL on a
+    // closure Value. A method's own frame (init(), INVOKE, SUPER_INVOKE —
+    // S5, #458) has the receiver ("this") at base[0] instead, so reading
+    // addr(0) there hands rt_constant_at/rt_get_upvalue/rt_set_upvalue an
+    // ObjInstance* it then misreads as an ObjClosure*. rt_current_closure
+    // (rt_capi.h) asks the Runtime's own current CallFrame instead, which
+    // is correct regardless of how this frame was entered.
+    std::string ownClosureBits() {
+        std::string bits = newTemp();
+        m_body << "\t" << bits << " =l call $rt_current_closure(l %rt)\n";
+        return bits;
+    }
+
+    // Reads constant `constantIndex` from the CURRENTLY EXECUTING function's
+    // own constant pool, via rt_constant_at (rt_capi.h) — the same
+    // mechanism CLOSURE already uses for its own FUNCTION constant. Unlike
+    // internedNamePtr above, this never re-interns anything at runtime: the
+    // constant already exists as a real object, built by rt_startup's own
+    // embed-and-recompile step, so this just reads the SAME Value the
+    // native VM's own CONSTANT/GET_PROPERTY/etc. read from this function's
+    // chunk (S5, #458 — "materialise", bytecode-translation-problems.md
+    // P6).
+    std::string constantValueBits(int constantIndex) {
+        // ownClosureBits() itself emits an instruction as a side effect
+        // (its own `call`), so — like addr() — it must be computed as its
+        // own statement first, never inlined into this ongoing m_body <<
+        // chain: doing so interleaves the two instructions' text (see
+        // Op::CLOSURE's own comment on this same hazard).
+        std::string ownClosure = ownClosureBits();
+        std::string bits = newTemp();
+        m_body << "\t" << bits << " =l call $rt_constant_at(l %rt, l "
+               << ownClosure << ", w " << constantIndex << ")\n";
+        return bits;
+    }
+
+    // Same as constantValueBits, but masks off OBJ_TAG (value.h) to return
+    // the raw ObjString* every rt_op_* wrapper taking a `name` argument
+    // expects (rt_capi.h) — the constant at this index must be a String.
+    std::string constantStringPtr(int constantIndex) {
+        std::string bits = constantValueBits(constantIndex);
+        std::string ptr = newTemp();
+        m_body << "\t" << ptr << " =l and " << bits << ", " << (~OBJ_TAG)
+               << "\n";
+        return ptr;
+    }
+
     // QBE `data` string bodies take a quoted C string; backslash and quote
     // are the only bytes that need escaping to stay inside one `b "..."`
     // item. A global-variable name is always a valid Lox++ identifier
@@ -357,11 +405,18 @@ class Emitter {
         case Op::CONSTANT: {
             Value v = m_fn.function->chunk.getConstant(
                 static_cast<uint16_t>(ins.constantIndex));
-            if (!is<Number>(v)) {
-                unsupported(ins.op); // only Number constants — S5 (#458)
+            if (is<Number>(v)) {
+                auto bits = std::bit_cast<uint64_t>(as<Number>(v));
+                storel(std::to_string(bits), addr(before.height));
+            } else {
+                // Any other constant type (String, enum-ctor object, ...)
+                // already exists as a real object, built by rt_startup's
+                // embed-and-recompile step — read it back rather than
+                // re-encode it (S5, #458; bytecode-translation-problems.md
+                // P6, "materialise").
+                std::string bits = constantValueBits(ins.constantIndex);
+                storel(bits, addr(before.height));
             }
-            auto bits = std::bit_cast<uint64_t>(as<Number>(v));
-            storel(std::to_string(bits), addr(before.height));
             break;
         }
         case Op::NIL:
@@ -469,8 +524,13 @@ class Emitter {
         case Op::JUMP:
         case Op::LOOP:
         case Op::JUMP_IF_FALSE:
+        case Op::JUMP_TABLE:
             break; // control transfer is emitted once, after the block's
                    // last instruction — see emitBlock's own terminator step.
+                   // JUMP_TABLE's own tag value (pushed by the preceding
+                   // GET_TAG) is read there, at its own `before.height`, the
+                   // same way JUMP_IF_FALSE's own falsyCheck reads its
+                   // condition — see emitJumpTableTerminator.
         case Op::CALL: {
             // rt_call dispatches on the callee's kind exactly as VM::run()'s
             // Op::CALL does (Runtime::opCall) — closure, native, bound
@@ -492,17 +552,17 @@ class Emitter {
                     "qbe_emitter: CLOSURE constant is not a function — "
                     "decoder/compiler drift");
             }
-            // base[0] is always the currently executing frame's own
-            // closure (notes/qbe-backend.md's calling convention) — the
-            // only way compiled code can reach its own function's constant
-            // pool (rt_capi.h's own file comment: compiled code has no
-            // constant pool of its own).
-            std::string ownClosureBits = loadl(addr(0));
+            // ownClosureBits() (never addr(0) — S5, #458: base[0] is the
+            // receiver, not the closure, inside a method's own frame) is
+            // the only way compiled code can reach its own function's
+            // constant pool (rt_capi.h's own file comment: compiled code
+            // has no constant pool of its own).
+            std::string ownClosure = ownClosureBits();
             std::string fnConstBits = newTemp();
             m_body << "\t" << fnConstBits
                    << " =l call $rt_constant_at(l %rt, "
                       "l "
-                   << ownClosureBits << ", w " << ins.constantIndex << ")\n";
+                   << ownClosure << ", w " << ins.constantIndex << ")\n";
             // Q1: set top to cover every existing local before the
             // allocating rt_new_closure call. addr() itself emits an
             // instruction as a side effect, so it must be computed as its
@@ -530,27 +590,27 @@ class Emitter {
                 } else {
                     m_body << "\tcall $rt_forward_upvalue(l %rt, l "
                            << newClosureBits << ", w " << i << ", l "
-                           << ownClosureBits << ", w "
-                           << static_cast<int>(uv.index) << ")\n";
+                           << ownClosure << ", w " << static_cast<int>(uv.index)
+                           << ")\n";
                 }
             }
             break;
         }
         case Op::GET_UPVALUE: {
-            std::string ownClosureBits = loadl(addr(0));
+            std::string ownClosure = ownClosureBits();
             std::string v = newTemp();
             m_body << "\t" << v << " =l call $rt_get_upvalue(l %rt, l "
-                   << ownClosureBits << ", w " << ins.byteOperand << ")\n";
+                   << ownClosure << ", w " << ins.byteOperand << ")\n";
             storel(v, addr(before.height));
             break;
         }
         case Op::SET_UPVALUE: {
             // Peek family (P2): leaves `v` on the stack — SET_UPVALUE is an
             // assignment expression, same as SET_LOCAL/SET_GLOBAL.
-            std::string ownClosureBits = loadl(addr(0));
+            std::string ownClosure = ownClosureBits();
             std::string v = loadl(addr(before.height - 1));
-            m_body << "\tcall $rt_set_upvalue(l %rt, l " << ownClosureBits
-                   << ", w " << ins.byteOperand << ", l " << v << ")\n";
+            m_body << "\tcall $rt_set_upvalue(l %rt, l " << ownClosure << ", w "
+                   << ins.byteOperand << ", l " << v << ")\n";
             break;
         }
         case Op::CLOSE_UPVALUE: {
@@ -570,6 +630,117 @@ class Emitter {
             m_body << "\tret 0\n";
             break;
         }
+        // --- S5 (#458): classes, methods, aggregates, iterators, slicing,
+        // membership, and match dispatch. Every wrapper below already
+        // mutates the real Runtime stack the same way push()/pop() do
+        // (Runtime::op*(), runtime.cpp), so — exactly like CALL/GET_INDEX
+        // above — nothing here needs to load/store a result itself: the
+        // next instruction's own addr(after.height - 1) already points at
+        // it once rt_set_top (Q1) and the call have run.
+        case Op::CLASS: {
+            std::string name = constantStringPtr(ins.constantIndex);
+            callSlowPath("rt_op_class", before.height, {name}, std::nullopt);
+            break;
+        }
+        case Op::GET_PROPERTY: {
+            std::string name = constantStringPtr(ins.constantIndex);
+            callSlowPath("rt_op_get_property", before.height, {name},
+                         /*stopAtFrameCount=*/0);
+            break;
+        }
+        case Op::SET_PROPERTY: {
+            std::string name = constantStringPtr(ins.constantIndex);
+            callSlowPath("rt_op_set_property", before.height, {name},
+                         std::nullopt); // fatal-only, no stopAtFrameCount
+            break;
+        }
+        case Op::DEFINE_METHOD: {
+            std::string name = constantStringPtr(ins.constantIndex);
+            callSlowPath("rt_op_define_method", before.height, {name},
+                         std::nullopt);
+            break;
+        }
+        case Op::INVOKE: {
+            std::string name = constantStringPtr(ins.constantIndex);
+            callSlowPathTyped(
+                "rt_op_invoke", before.height,
+                {"l " + name, "w " + std::to_string(ins.byteOperand), "w 0"});
+            break;
+        }
+        case Op::INHERIT:
+            callSlowPath("rt_op_inherit", before.height, {},
+                         std::nullopt); // no stopAtFrameCount
+            break;
+        case Op::GET_SUPER: {
+            std::string name = constantStringPtr(ins.constantIndex);
+            callSlowPath("rt_op_get_super", before.height, {name},
+                         std::nullopt); // no stopAtFrameCount
+            break;
+        }
+        case Op::SUPER_INVOKE: {
+            std::string name = constantStringPtr(ins.constantIndex);
+            callSlowPathTyped(
+                "rt_op_super_invoke", before.height,
+                {"l " + name, "w " + std::to_string(ins.byteOperand), "w 0"});
+            break;
+        }
+        case Op::BUILD_LIST:
+            callSlowPathTyped("rt_op_build_list", before.height,
+                              {"w " + std::to_string(ins.byteOperand)});
+            break;
+        case Op::BUILD_MAP:
+            callSlowPathTyped("rt_op_build_map", before.height,
+                              {"w " + std::to_string(ins.byteOperand), "w 0"});
+            break;
+        case Op::GET_INDEX:
+            callSlowPath("rt_op_get_index", before.height, {},
+                         /*stopAtFrameCount=*/0);
+            break;
+        case Op::SET_INDEX:
+            callSlowPath("rt_op_set_index", before.height, {},
+                         /*stopAtFrameCount=*/0);
+            break;
+        case Op::SLICE:
+            callSlowPath("rt_op_slice", before.height, {},
+                         std::nullopt); // fatal-only, no stopAtFrameCount
+            break;
+        case Op::IN:
+            callSlowPath("rt_op_in", before.height, {},
+                         /*stopAtFrameCount=*/0);
+            break;
+        case Op::LEN:
+            callSlowPath("rt_op_len", before.height, {},
+                         /*stopAtFrameCount=*/0);
+            break;
+        case Op::GET_ITER:
+            callSlowPath("rt_op_get_iter", before.height, {},
+                         /*stopAtFrameCount=*/0);
+            break;
+        case Op::ITER_HAS_NEXT:
+            callSlowPath("rt_op_iter_has_next", before.height, {},
+                         std::nullopt); // no stopAtFrameCount
+            break;
+        case Op::ITER_NEXT:
+            callSlowPath("rt_op_iter_next", before.height, {},
+                         std::nullopt); // no stopAtFrameCount
+            break;
+        case Op::GET_TAG:
+            callSlowPath("rt_op_get_tag", before.height, {},
+                         std::nullopt); // fatal-only, no stopAtFrameCount
+            break;
+        case Op::MATCH_ERROR:
+            // Always throws (there is no non-error stack effect for this
+            // opcode — see vm.cpp). This node supports no PUSH_HANDLER
+            // (qbe_emitter.h's file comment), so any raise here is Uncaught
+            // by construction; callSlowPathTyped's own generic fatal-only
+            // handling already `ret 1`s on that status. The unreachable
+            // "ok" fallthrough it also emits (mirrored so this call site
+            // matches every other wrapper's shape) still needs its own
+            // terminator, since MATCH_ERROR ends its own cfg block with no
+            // successor (S6, #459 owns real catchability here).
+            callSlowPathTyped("rt_op_match_error", before.height, {"w 0"});
+            m_body << "\tret 1\n";
+            break;
         default:
             unsupported(ins.op);
         }
@@ -621,18 +792,26 @@ class Emitter {
     void emitTerminator(const BasicBlock& block, std::size_t blockIndex,
                         const Cfg& cfg) {
         if (block.successors.empty()) {
-            // Only RETURN's own emitInstruction() ends a block with no cfg
-            // successor and no more work to do here; anything else reaching
-            // here is a decoder/cfg-analysis mismatch this node cannot
-            // recover from (THROW/JUMP_TABLE are out of scope — S5/S6).
-            if (block.instructions.empty() ||
-                block.instructions.back().op != Op::RETURN) {
+            // RETURN's own emitInstruction() already emitted `ret 0`;
+            // MATCH_ERROR's already emitted `ret 1` (it always throws, and
+            // this node supports no PUSH_HANDLER — see its own
+            // emitInstruction case). Anything else reaching here is a
+            // decoder/cfg-analysis mismatch this node cannot recover from
+            // (THROW is out of scope — S6, #459).
+            Op lastOp = block.instructions.empty()
+                            ? Op{}
+                            : block.instructions.back().op;
+            if (lastOp != Op::RETURN && lastOp != Op::MATCH_ERROR) {
                 throw std::runtime_error(
                     "qbe_emitter: terminal block with no cfg successor and "
-                    "no RETURN — an out-of-scope terminal opcode (THROW, "
-                    "JUMP_TABLE — see S5/S6)");
+                    "no RETURN/MATCH_ERROR — an out-of-scope terminal "
+                    "opcode (THROW — see S6, #459)");
             }
-            return; // RETURN already emitted `ret 0`.
+            return;
+        }
+        if (block.instructions.back().op == Op::JUMP_TABLE) {
+            emitJumpTableTerminator(block, cfg);
+            return;
         }
         if (block.successors.size() == 1) {
             m_body << "\tjmp @"
@@ -661,8 +840,68 @@ class Emitter {
         }
         (void)blockIndex;
         throw std::runtime_error(
-            "qbe_emitter: block with an unsupported branch shape (JUMP_TABLE "
-            "— see S5, #458)");
+            "qbe_emitter: block with an unsupported branch shape");
+    }
+
+    // P8 (bytecode-translation-problems.md, notes/qbe-backend.md hazard
+    // Q8/P8): QBE's only terminators are jmp/jnz/ret — no switch, no
+    // indirect jump. Lowers JUMP_TABLE to a compare chain: one `ceqw` +
+    // `jnz` per arm, in `ins.jumpTable` order, falling through to the next
+    // comparison on a miss and finally to the fallthrough/default block
+    // (cfg.cpp's own wireSuccessors: one FORWARD_BRANCH edge per arm, in
+    // arm order, then one optional trailing FALL_THROUGH edge — that
+    // ordering is exactly `block.successors`' own layout, checked below
+    // rather than assumed).
+    //
+    // The tag was pushed by the preceding GET_TAG as a Number Value (a
+    // plain double bit pattern, never boxed — Q5/Q6); JUMP_TABLE pops it
+    // (abstract_stack.cpp: "no push") and compares as a word integer, so
+    // this reads it here at the instruction's own `before.height`, exactly
+    // as JUMP_IF_FALSE's own falsyCheck reads its condition.
+    void emitJumpTableTerminator(const BasicBlock& block, const Cfg& cfg) {
+        const DecodedInstruction& jt = block.instructions.back();
+        const auto& [before, after] = stateOf(jt.offset);
+        (void)after;
+        if (block.successors.size() != jt.jumpTable.size() &&
+            block.successors.size() != jt.jumpTable.size() + 1) {
+            throw std::runtime_error(
+                "qbe_emitter: JUMP_TABLE successor count does not match its "
+                "own arm count plus an optional fallthrough — cfg/decoder "
+                "drift");
+        }
+        std::string tagBits = loadl(addr(before.height - 1));
+        std::string tagD = newTemp();
+        m_body << "\t" << tagD << " =d cast " << tagBits << "\n";
+        std::string tagW = newTemp();
+        m_body << "\t" << tagW << " =w dtosi " << tagD << "\n";
+
+        std::optional<std::string> fallthroughLabel;
+        if (block.successors.size() == jt.jumpTable.size() + 1) {
+            fallthroughLabel =
+                cfg.blocks[block.successors.back().targetBlock].label;
+        }
+
+        for (std::size_t i = 0; i < jt.jumpTable.size(); i++) {
+            const JumpTableArm& arm = jt.jumpTable[i];
+            const std::string& armLabel =
+                cfg.blocks[block.successors[i].targetBlock].label;
+            std::string hit = newTemp();
+            m_body << "\t" << hit << " =w ceqw " << tagW << ", " << arm.tag
+                   << "\n";
+            std::string missLabel =
+                "@" + m_symbol + "_jt" + std::to_string(m_tempCounter);
+            m_body << "\tjnz " << hit << ", @" << armLabel << ", " << missLabel
+                   << "\n";
+            m_body << missLabel << "\n";
+        }
+        if (fallthroughLabel.has_value()) {
+            m_body << "\tjmp @" << *fallthroughLabel << "\n";
+        } else {
+            // No arm matched and no fallthrough exists (the table covers
+            // every reachable tag) — unreachable in practice, but QBE still
+            // requires an explicit terminator for this block.
+            m_body << "\tret 1\n";
+        }
     }
 };
 
