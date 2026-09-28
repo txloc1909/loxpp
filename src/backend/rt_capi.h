@@ -58,8 +58,24 @@ struct RtFunctionDesc {
 // heap-allocated Runtime on success; on a compile error or any desc
 // mismatch, writes a diagnostic to stderr and returns nullptr. The caller
 // owns the returned Runtime and must release it with rt_shutdown().
+//
+// `requireAllCompiled` (S4, #457, hazard R4 on issue #457 — found reviewing
+// S2's PR #473): when true, rt_startup additionally walks the WHOLE
+// rebuilt function tree and fails (with a diagnostic naming the missing
+// function's id) unless every function in it got code attached. Calling an
+// interpreted-fallback closure (function->code == nullptr) from compiled
+// code pushes a CallFrame nobody ever interprets — VM::run()'s dispatch
+// loop, opCall()'s only consumer that can drain it, never runs in a
+// --target qbe binary — leaving the Runtime with a dangling frame and no
+// diagnostic (Runtime::OpResult::Resumed is a status meaningful only
+// inside that loop). Defaults to false so existing callers (this node's
+// own unit tests, S2/S3's checkpoint harnesses, each of which
+// deliberately compiles only part of a program) are unaffected; a
+// whole-program driver — S4's own checkpoint harness, and any later
+// `--target qbe` front end — should pass true.
 Runtime* rt_startup(const char* source, const RtFunctionDesc* descs,
-                    std::size_t nDescs) noexcept;
+                    std::size_t nDescs,
+                    bool requireAllCompiled = false) noexcept;
 
 void rt_shutdown(Runtime* rt) noexcept;
 
@@ -149,6 +165,59 @@ int rt_op_get_global(Runtime* rt, ObjString* name,
                      int stopAtFrameCount) noexcept;
 int rt_op_set_global(Runtime* rt, ObjString* name,
                      int stopAtFrameCount) noexcept;
+
+// CALL/RETURN/CLOSURE/upvalues/CLOSE_UPVALUE (S4, #457). No capture
+// analysis at this stage (notes/qbe-backend.md, "Staged plan", row S4):
+// every one of these reaches the VM's own existing captureUpvalue/
+// closeUpvalues mechanism unchanged, the same code path VM::run()'s
+// Op::CLOSURE/GET_UPVALUE/SET_UPVALUE/CLOSE_UPVALUE cases already use.
+
+// Reads constant `constantIndex` from `closure`'s own function's constant
+// pool. CLOSURE is the only S4 opcode that needs this: compiled code has
+// no constant pool of its own (this header's own file comment), so it asks
+// the CURRENTLY EXECUTING frame's own closure (compiled code's calling
+// convention keeps this at base[0] — notes/qbe-backend.md, "The central
+// design choice") for its function constant, rather than embedding a
+// pointer literal at compile time — the target ObjFunction only gets a
+// real address after rt_startup's embed-and-recompile step runs, long
+// after this code was emitted.
+Value rt_constant_at(Runtime* rt, Value closure, int constantIndex) noexcept;
+
+// Allocates a new ObjClosure over the ObjFunction `functionConstant`
+// wraps (a Value from rt_constant_at above). Every upvalue slot the
+// target function declares (ObjFunction::upvalueCount) is still nullptr
+// on return — the emitter fills each one immediately after, via
+// rt_capture_local_upvalue or rt_forward_upvalue below, the same two-step
+// vm.cpp's own CLOSURE case runs (create the closure, root it by storing
+// it to its own stack slot, then capture each upvalue).
+Value rt_new_closure(Runtime* rt, Value functionConstant) noexcept;
+
+// The isLocal=1 case of CLOSURE's own upvalue loop (vm.cpp):
+// closure->upvalues[upvalueIndex] = rt->captureUpvalue(localSlot).
+void rt_capture_local_upvalue(Runtime* rt, Value closure, int upvalueIndex,
+                              Value* localSlot) noexcept;
+
+// The isLocal=0 case: forwards an upvalue the enclosing function already
+// captured — closure->upvalues[upvalueIndex] =
+// parentClosure->upvalues[parentUpvalueIndex]. Never allocates.
+void rt_forward_upvalue(Runtime* rt, Value closure, int upvalueIndex,
+                        Value parentClosure, int parentUpvalueIndex) noexcept;
+
+// GET_UPVALUE / SET_UPVALUE's own bodies (vm.cpp). SET_UPVALUE peeks, like
+// every other member of the P2 assignment-is-an-expression family — the
+// emitter, not this wrapper, is responsible for leaving `v` on the stack.
+Value rt_get_upvalue(Runtime* rt, Value closure, int index) noexcept;
+void rt_set_upvalue(Runtime* rt, Value closure, int index, Value v) noexcept;
+
+// CLOSE_UPVALUE's own body (vm.cpp): rt->closeUpvalues(last).
+void rt_close_upvalues(Runtime* rt, Value* last) noexcept;
+
+// Q1/Q3 (notes/qbe-backend.md): see Runtime::checkStackOverflow's own
+// comment (runtime.h) for why compiled code needs this check at all.
+// Returns 0 on success; a nonzero return follows the same fatal-vs-
+// catchable convention every other rt_op_* wrapper here does.
+int rt_check_stack(Runtime* rt, Value* neededTop,
+                   int stopAtFrameCount) noexcept;
 
 } // extern "C"
 

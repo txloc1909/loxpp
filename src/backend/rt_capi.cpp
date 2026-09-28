@@ -53,6 +53,30 @@ const DecodedFunction* findById(const DecodedFunction& node,
     return nullptr;
 }
 
+// S4 (#457), hazard R4 on issue #457: walks the whole rebuilt tree and
+// reports the first function with no code attached. See rt_capi.h's own
+// comment on rt_startup's requireAllCompiled parameter for why a missing
+// desc must fail loudly here instead of surfacing as a dangling,
+// never-interpreted CallFrame at whatever later call reaches it.
+bool allFunctionsHaveCode(const DecodedFunction& node) {
+    if (node.function->code == nullptr) {
+        std::fprintf(stderr,
+                     "rt_startup: function '%s' has no compiled code "
+                     "attached, but requireAllCompiled was set — every "
+                     "function in a whole-program --target qbe build must "
+                     "be compiled; an interpreted fallback frame would "
+                     "never be run to completion.\n",
+                     node.id.c_str());
+        return false;
+    }
+    for (const DecodedFunction& child : node.nested) {
+        if (!allFunctionsHaveCode(child)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 bool rt_attach_code(const DecodedFunction& root,
@@ -88,7 +112,7 @@ bool rt_attach_code(const DecodedFunction& root,
 }
 
 Runtime* rt_startup(const char* source, const RtFunctionDesc* descs,
-                    std::size_t nDescs) noexcept {
+                    std::size_t nDescs, bool requireAllCompiled) noexcept {
     try {
         auto* rt = new Runtime();
         ObjClosure* closure = rt->loadSource(source != nullptr ? source : "");
@@ -104,6 +128,10 @@ Runtime* rt_startup(const char* source, const RtFunctionDesc* descs,
                 delete rt;
                 return nullptr;
             }
+        }
+        if (requireAllCompiled && !allFunctionsHaveCode(tree)) {
+            delete rt;
+            return nullptr;
         }
         return rt;
     } catch (const std::exception& e) {
@@ -256,4 +284,51 @@ int rt_op_get_global(Runtime* rt, ObjString* name,
 int rt_op_set_global(Runtime* rt, ObjString* name,
                      int stopAtFrameCount) noexcept {
     return rtGuard(rt, [&] { return rt->opSetGlobal(name, stopAtFrameCount); });
+}
+
+Value rt_constant_at(Runtime*, Value closure, int constantIndex) noexcept {
+    return asObjClosure(closure)->function->chunk.getConstant(
+        static_cast<uint16_t>(constantIndex));
+}
+
+Value rt_new_closure(Runtime* rt, Value functionConstant) noexcept {
+    ObjFunction* fn = asObjFunction(functionConstant);
+    auto* cl = rt->memoryManager().create<ObjClosure>(fn);
+    return Value{static_cast<Obj*>(cl)};
+}
+
+void rt_capture_local_upvalue(Runtime* rt, Value closure, int upvalueIndex,
+                              Value* localSlot) noexcept {
+    asObjClosure(closure)->upvalues[static_cast<std::size_t>(upvalueIndex)] =
+        rt->captureUpvalue(localSlot);
+}
+
+void rt_forward_upvalue(Runtime*, Value closure, int upvalueIndex,
+                        Value parentClosure, int parentUpvalueIndex) noexcept {
+    asObjClosure(closure)->upvalues[static_cast<std::size_t>(upvalueIndex)] =
+        asObjClosure(parentClosure)
+            ->upvalues[static_cast<std::size_t>(parentUpvalueIndex)];
+}
+
+Value rt_get_upvalue(Runtime*, Value closure, int index) noexcept {
+    return *asObjClosure(closure)
+                ->upvalues[static_cast<std::size_t>(index)]
+                ->location;
+}
+
+void rt_set_upvalue(Runtime*, Value closure, int index, Value v) noexcept {
+    *asObjClosure(closure)
+         ->upvalues[static_cast<std::size_t>(index)]
+         ->location = v;
+}
+
+void rt_close_upvalues(Runtime* rt, Value* last) noexcept {
+    rt->closeUpvalues(last);
+}
+
+int rt_check_stack(Runtime* rt, Value* neededTop,
+                   int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] {
+        return rt->checkStackOverflow(neededTop, stopAtFrameCount);
+    });
 }
