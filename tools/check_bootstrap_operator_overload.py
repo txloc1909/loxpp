@@ -111,12 +111,14 @@ CASES = [
         "print t[0];\n",
     ),
     Case(
+        # The result depends on the argument order, so a swapped start/end is
+        # visible: 3*100 + 4 is not 4*100 + 3.
         "slice",
         "class S {\n"
         "  init(n) { this.n = n; }\n"
-        "  __slice__(start, end) { return this.n + start + end; }\n"
+        "  __slice__(start, end) { return this.n + start * 100 + end; }\n"
         "}\n"
-        "print S(100)[1:2];\n"
+        "print S(1000)[3:4];\n"
         "print [10, 20, 30, 40][1:3];\n"
         "print \"hello\"[1:3];\n",
     ),
