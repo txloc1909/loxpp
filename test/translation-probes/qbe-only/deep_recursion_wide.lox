@@ -1,0 +1,39 @@
+// deep_recursion_wide.lox — proves the STACK_MAX check (emitStackCheck,
+// qbe_emitter.cpp), not just the pre-existing FRAMES_MAX guard
+// (Runtime::call, vm_limits.h). deep_recursion.lox's count(n) uses only a
+// few stack slots per frame, so Runtime::call's own kFramesMax (1024)
+// guard always fires first there — the new per-function STACK_MAX check
+// this node adds is never exercised by anything else in the S4 checkpoint
+// (found in review, PR #481, R1).
+//
+// count_wide(n) keeps 20 locals live in every frame. kStackMax / kFramesMax
+// = 16384 / 1024 = 16, so more than 16 locals per frame is required to
+// overflow the VALUE stack before the FRAME count does. Measured (native,
+// vm.cpp's own push()): this program overflows the value stack at call
+// depth 713, well under the 1024-frame ceiling — so a correct STACK_MAX
+// check must catch this before FRAMES_MAX ever could. n = 900 clears that
+// 713-deep threshold with a comfortable margin while staying under
+// kFramesMax, so FRAMES_MAX never becomes a confound.
+//
+// Without a working STACK_MAX check, compiled code keeps writing locals
+// straight past the reserved value-stack region — silent memory
+// corruption, not a clean error. In practice this corrupts nearby Runtime
+// state before the recursion can finish, so the run still exits non-zero
+// (loxpp's one generic status for every uncaught runtime error) with
+// empty stdout, same as a real overflow — but the actual diagnostic text
+// differs ("Can only call functions, classes and enums.", not "Stack
+// overflow."). check_qbe_s4_calls_closures.sh checks that text for this
+// probe specifically, since exit-code/stdout parity alone cannot tell the
+// two apart.
+fun count_wide(n) {
+  var a = 1; var b = 2; var c = 3; var d = 4; var e = 5;
+  var f = 6; var g = 7; var h = 8; var i = 9; var j = 10;
+  var k = 11; var l = 12; var m = 13; var o = 14; var p = 15;
+  var q = 16; var r = 17; var s = 18; var t = 19; var u = 20;
+  if (n < 1) {
+    return a + b + c + d + e + f + g + h + i + j + k + l + m + o + p + q + r +
+        s + t + u;
+  }
+  return 1 + count_wide(n - 1);
+}
+print count_wide(900);

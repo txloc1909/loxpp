@@ -1,0 +1,25 @@
+// V1_fresh_cell_no_lists.lox — the same hazard V1_fresh_cell.lox pins down
+// (a captured local declared INSIDE a loop body must get a fresh cell every
+// iteration, or all the closures alias and observe the last value), adapted
+// for the S4 checkpoint: BUILD_LIST/GET_INDEX/SET_INDEX are S5's job
+// (notes/qbe-backend.md, "Staged plan"), so this probe retains each
+// closure through a global variable instead of a list slot. Same semantic
+// question, no list opcodes.
+var f0 = nil;
+var f1 = nil;
+var f2 = nil;
+
+fun make() {
+  for (var i = 0; i < 3; i = i + 1) {
+    var snapshot = i;
+    fun f() { return snapshot; }
+    if (i == 0) f0 = f;
+    if (i == 1) f1 = f;
+    if (i == 2) f2 = f;
+  }
+}
+
+make();
+print f0();
+print f1();
+print f2();

@@ -1,0 +1,23 @@
+// V3_loopvar_no_lists.lox — the same hazard V3_loopvar.lox pins down (a
+// closure that captures the LOOP VARIABLE ITSELF, not a body-local, shares
+// one open upvalue across every iteration — CLOSE_UPVALUE sits once, after
+// the loop, not per iteration), adapted for the S4 checkpoint the same way
+// V1_fresh_cell_no_lists.lox is: no BUILD_LIST/GET_INDEX/SET_INDEX (S5's
+// job), globals instead of a list slot.
+var f0 = nil;
+var f1 = nil;
+var f2 = nil;
+
+fun make() {
+  for (var i = 0; i < 3; i = i + 1) {
+    fun f() { return i; }
+    if (i == 0) f0 = f;
+    if (i == 1) f1 = f;
+    if (i == 2) f2 = f;
+  }
+}
+
+make();
+print f0();
+print f1();
+print f2();

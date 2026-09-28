@@ -458,6 +458,35 @@ class Runtime {
         m_stdlibCtx.args = std::move(args);
     }
 
+    // Q1/Q3 (notes/qbe-backend.md): compiled code (backend/rt_capi.cpp)
+    // writes its own frame's local/temporary slots directly at base + 8h,
+    // bypassing push()'s own STACK_MAX check entirely. Without a check of
+    // its own, an unbounded compiled recursion would write straight past
+    // `stack[STACK_MAX + STACK_OVERFLOW_STACK_RESERVE]` — memory
+    // corruption, not a reported error. `neededTop` is the highest address
+    // this call's own frame can ever reach (its own analyzed max stack
+    // height, from the compiler emitting this check once at function
+    // entry) — mirrors call()'s own FRAMES_MAX guard exactly (same
+    // handler-active/unwinding widening, same catchable-vs-fatal split),
+    // so the QBE and native paths overflow at the same call depth.
+    OpResult checkStackOverflow(Value* neededTop, int stopAtFrameCount) {
+        std::ptrdiff_t hardCeiling =
+            STACK_MAX +
+            (m_unwindingStackOverflow ? STACK_OVERFLOW_STACK_RESERVE : 0);
+        if (neededTop <= stack + hardCeiling) {
+            return OpResult::OK;
+        }
+        if (!m_handlerStack.empty() && !m_unwindingStackOverflow) {
+            m_unwindingStackOverflow = true;
+            ThrowOutcome outcome = raiseThrowableError(
+                "StackOverflowError", "Stack overflow.", stopAtFrameCount);
+            m_unwindingStackOverflow = false;
+            return fromThrow(outcome);
+        }
+        runtimeError("Stack overflow.");
+        return OpResult::Fatal;
+    }
+
   private:
     static OpResult fromThrow(ThrowOutcome outcome) {
         switch (outcome) {

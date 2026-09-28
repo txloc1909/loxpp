@@ -1,0 +1,17 @@
+// deep_recursion.lox — Q3's own measured test (notes/qbe-backend.md):
+// "1040 small frames fit easily in an 8 MB C stack, but ... needs a
+// measured test." Every Lox call compiled code makes is a real C call
+// (rt_call -> Runtime::call -> the compiled callee's own `call` back into
+// rt_call for its own recursive call), unlike native's own VM::run(),
+// which recurses the C stack only for defer/class-init, never for an
+// ordinary CALL. No try/catch here (PUSH_HANDLER is S6's job, #459) — this
+// probe instead drives plain, uncaught recursion well past native's own
+// frame-count ceiling (kFramesMax, vm_limits.h) and checks that: (a) the
+// process does not crash (the C stack holds — Q3's own question), and (b)
+// it fails with the same stdout (empty), exit status, and "Stack
+// overflow." diagnostic as native's own uncaught StackOverflowError.
+fun count(n) {
+  if (n < 1) return 0;
+  return 1 + count(n - 1);
+}
+print count(2000);

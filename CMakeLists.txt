@@ -338,6 +338,21 @@ if(LOXPP_CORE_PUBLIC_DEFINITIONS)
     target_compile_definitions(qbe_emit_probe PRIVATE ${LOXPP_CORE_PUBLIC_DEFINITIONS})
 endif()
 
+# qbe_emit_program: S4's own checkpoint driver (#457, tools/check_qbe_s4_
+# calls_closures.sh). Unlike qbe_emit_probe (one function, no CLOSURE/CALL),
+# this compiles a WHOLE program — the top-level script plus every nested
+# function — and emits one QBE .ssa translation unit plus one RtFunctionDesc
+# line per function.
+add_executable(qbe_emit_program
+    tools/qbe_emit_program.cpp
+    src/backend/qbe_emitter.cpp
+    $<TARGET_OBJECTS:loxpp_core>
+)
+target_include_directories(qbe_emit_program PRIVATE ${PROJECT_SOURCE_DIR}/src)
+if(LOXPP_CORE_PUBLIC_DEFINITIONS)
+    target_compile_definitions(qbe_emit_program PRIVATE ${LOXPP_CORE_PUBLIC_DEFINITIONS})
+endif()
+
 option(LOXPP_BUILD_TESTS "Build the GTest suite" ON)
 
 if(LOXPP_BUILD_TESTS)

@@ -6,6 +6,7 @@
 #include "object.h"
 #include "value.h"
 
+#include <algorithm>
 #include <bit>
 #include <optional>
 #include <sstream>
@@ -53,6 +54,17 @@ class Emitter {
             m_stateAt.emplace(fn.instructions[i].offset,
                               std::pair{analysis.before[i], analysis.after[i]});
             m_reachedAt.emplace(fn.instructions[i].offset, analysis.reached[i]);
+            // Q3 (notes/qbe-backend.md): the high-water mark over every
+            // REACHED instruction's raw height (locals and temporaries
+            // together — StackState::height, not operandDepth()) is this
+            // function's own worst-case slot usage. Skipping unreached
+            // instructions matches leaderReached()'s own treatment of the
+            // compiler's trailing NIL;RETURN below — its height is
+            // meaningless dead-code bookkeeping, not a real bound.
+            if (analysis.reached[i]) {
+                m_maxHeight = std::max({m_maxHeight, analysis.before[i].height,
+                                        analysis.after[i].height});
+            }
         }
     }
 
@@ -60,11 +72,18 @@ class Emitter {
         Cfg cfg = buildCfg(m_fn.instructions);
         if (!cfg.handlerEntries.empty()) {
             throw std::runtime_error(
-                "qbe_emitter: PUSH_HANDLER not supported by this node (S3 "
-                "straight-line code and jumps) — see S6, #459");
+                "qbe_emitter: PUSH_HANDLER not supported by this node (S3/S4 "
+                "straight-line code, jumps, calls and closures) — see S6, "
+                "#459");
+        }
+        if (cfg.blocks.empty()) {
+            throw std::runtime_error(
+                "qbe_emitter: function with no basic blocks — "
+                "decoder/compiler drift");
         }
 
         m_body << "export function w $" << m_symbol << "(l %rt, l %base) {\n";
+        emitStackCheck(cfg.blocks.front().label);
         for (std::size_t bi = 0; bi < cfg.blocks.size(); bi++) {
             emitBlock(cfg.blocks[bi], bi, cfg);
         }
@@ -84,6 +103,7 @@ class Emitter {
     std::ostringstream m_body;
     int m_tempCounter{0};
     int m_dataCounter{0};
+    int m_maxHeight{0};
 
     std::string newTemp() { return "%t" + std::to_string(m_tempCounter++); }
 
@@ -172,30 +192,19 @@ class Emitter {
         return t;
     }
 
-    // Runs the slow path (an rt_op_* call) and, on a nonzero status,
+    // Runs a runtime call whose arguments (beyond `l %rt`) are already typed
+    // (each entry is a full "l %x" / "w 5" token) and, on a nonzero status,
     // returns 1 immediately — the simplified fatal-only contract this node
     // uses for every runtime call (see qbe_emitter.h's file comment on the
-    // gap this leaves for S6). `topHeight` is set via rt_set_top before the
-    // call (Q1: every value must already live in its own stack slot before
-    // a call that can allocate or unwind). `stopAtFrameCount` is nullopt for
-    // the two wrappers whose C signature has no such trailing parameter
-    // (rt_op_print, rt_op_define_global — rt_capi.h): QBE's `call` performs
-    // no prototype check, so passing an extra argument a callee's own body
-    // never reads would go unnoticed here but is still undefined behavior
-    // against the real C signature — this must match rt_capi.h exactly, not
-    // "whatever happens to work" on one ABI.
-    void callSlowPath(const std::string& fnName, int topHeight,
-                      const std::vector<std::string>& extraArgs,
-                      std::optional<int> stopAtFrameCount) {
+    // gap this leaves for S6).
+    void callSlowPathTyped(const std::string& fnName, int topHeight,
+                           const std::vector<std::string>& typedArgs) {
         std::string topAddr = addr(topHeight);
         m_body << "\tcall $rt_set_top(l %rt, l " << topAddr << ")\n";
         std::string status = newTemp();
         m_body << "\t" << status << " =w call $" << fnName << "(l %rt";
-        for (const std::string& a : extraArgs) {
-            m_body << ", l " << a;
-        }
-        if (stopAtFrameCount.has_value()) {
-            m_body << ", w " << *stopAtFrameCount;
+        for (const std::string& a : typedArgs) {
+            m_body << ", " << a;
         }
         m_body << ")\n";
         std::string bad = newTemp();
@@ -208,6 +217,54 @@ class Emitter {
                << "\n";
         m_body << failLabel << "\n\tret 1\n";
         m_body << okLabel << "\n";
+    }
+
+    // `topHeight` is set via rt_set_top before the call (Q1: every value
+    // must already live in its own stack slot before a call that can
+    // allocate or unwind). `stopAtFrameCount` is nullopt for the two
+    // wrappers whose C signature has no such trailing parameter
+    // (rt_op_print, rt_op_define_global — rt_capi.h): QBE's `call` performs
+    // no prototype check, so passing an extra argument a callee's own body
+    // never reads would go unnoticed here but is still undefined behavior
+    // against the real C signature — this must match rt_capi.h exactly, not
+    // "whatever happens to work" on one ABI.
+    void callSlowPath(const std::string& fnName, int topHeight,
+                      const std::vector<std::string>& extraArgs,
+                      std::optional<int> stopAtFrameCount) {
+        std::vector<std::string> typedArgs;
+        typedArgs.reserve(extraArgs.size() + 1);
+        for (const std::string& a : extraArgs) {
+            typedArgs.push_back("l " + a);
+        }
+        if (stopAtFrameCount.has_value()) {
+            typedArgs.push_back("w " + std::to_string(*stopAtFrameCount));
+        }
+        callSlowPathTyped(fnName, topHeight, typedArgs);
+    }
+
+    // Emitted once, at the very top of every compiled function, before its
+    // first cfg block: checks this function's own analyzed max stack height
+    // (m_maxHeight) against STACK_MAX (Q3, notes/qbe-backend.md —
+    // Runtime::checkStackOverflow's own comment, runtime.h, explains why
+    // compiled code needs a check push() never gives it). QBE requires
+    // every block to end in an explicit terminator — no implicit
+    // fallthrough between labels — so this own prologue "block" needs its
+    // own label and an explicit jmp into the function's real entry block.
+    void emitStackCheck(const std::string& firstBlockLabel) {
+        m_body << "@" << m_symbol << "_entry\n";
+        std::string neededAddr = addr(m_maxHeight);
+        std::string status = newTemp();
+        m_body << "\t" << status << " =w call $rt_check_stack(l %rt, l "
+               << neededAddr << ", w 0)\n";
+        std::string bad = newTemp();
+        m_body << "\t" << bad << " =w cnew " << status << ", 0\n";
+        std::string failLabel = "@" + m_symbol + "_entry_fail";
+        std::string okLabel = "@" + m_symbol + "_entry_ok";
+        m_body << "\tjnz " << bad << ", " << failLabel << ", " << okLabel
+               << "\n";
+        m_body << failLabel << "\n\tret 1\n";
+        m_body << okLabel << "\n";
+        m_body << "\tjmp @" << firstBlockLabel << "\n";
     }
 
     // Binary numeric op with an inline plain-double fast path (Q5): `a OP
@@ -414,6 +471,99 @@ class Emitter {
         case Op::JUMP_IF_FALSE:
             break; // control transfer is emitted once, after the block's
                    // last instruction — see emitBlock's own terminator step.
+        case Op::CALL: {
+            // rt_call dispatches on the callee's kind exactly as VM::run()'s
+            // Op::CALL does (Runtime::opCall) — closure, native, bound
+            // method, class, enum ctor. On success, opCall() has already
+            // replaced [callee, args...] with the one result value directly
+            // on this same physical stack (the fused-stack model means
+            // there is nothing left for this emitter to load/store: the
+            // next instruction's own `addr(after.height - 1)` already
+            // points at it).
+            callSlowPathTyped("rt_call", before.height,
+                              {"w " + std::to_string(ins.byteOperand)});
+            break;
+        }
+        case Op::CLOSURE: {
+            Value fnConst = m_fn.function->chunk.getConstant(
+                static_cast<uint16_t>(ins.constantIndex));
+            if (!isFunction(fnConst)) {
+                throw std::runtime_error(
+                    "qbe_emitter: CLOSURE constant is not a function — "
+                    "decoder/compiler drift");
+            }
+            // base[0] is always the currently executing frame's own
+            // closure (notes/qbe-backend.md's calling convention) — the
+            // only way compiled code can reach its own function's constant
+            // pool (rt_capi.h's own file comment: compiled code has no
+            // constant pool of its own).
+            std::string ownClosureBits = loadl(addr(0));
+            std::string fnConstBits = newTemp();
+            m_body << "\t" << fnConstBits
+                   << " =l call $rt_constant_at(l %rt, "
+                      "l "
+                   << ownClosureBits << ", w " << ins.constantIndex << ")\n";
+            // Q1: set top to cover every existing local before the
+            // allocating rt_new_closure call. addr() itself emits an
+            // instruction as a side effect, so it must be computed as its
+            // own statement — never inlined into an ongoing m_body <<
+            // chain, which would interleave the two instructions' text.
+            std::string preClosureTop = addr(before.height);
+            m_body << "\tcall $rt_set_top(l %rt, l " << preClosureTop << ")\n";
+            std::string newClosureBits = newTemp();
+            m_body << "\t" << newClosureBits
+                   << " =l call $rt_new_closure(l %rt, l " << fnConstBits
+                   << ")\n";
+            storel(newClosureBits, addr(before.height));
+            // Root the new closure (Q1) before any upvalue-capturing call
+            // below can itself allocate an ObjUpvalue — mirrors vm.cpp's
+            // own CLOSURE case: push the closure, THEN capture upvalues.
+            std::string postClosureTop = addr(before.height + 1);
+            m_body << "\tcall $rt_set_top(l %rt, l " << postClosureTop << ")\n";
+            for (std::size_t i = 0; i < ins.upvalues.size(); i++) {
+                const ClosureUpvalue& uv = ins.upvalues[i];
+                if (uv.isLocal) {
+                    std::string localAddr = addr(uv.index);
+                    m_body << "\tcall $rt_capture_local_upvalue(l %rt, l "
+                           << newClosureBits << ", w " << i << ", l "
+                           << localAddr << ")\n";
+                } else {
+                    m_body << "\tcall $rt_forward_upvalue(l %rt, l "
+                           << newClosureBits << ", w " << i << ", l "
+                           << ownClosureBits << ", w "
+                           << static_cast<int>(uv.index) << ")\n";
+                }
+            }
+            break;
+        }
+        case Op::GET_UPVALUE: {
+            std::string ownClosureBits = loadl(addr(0));
+            std::string v = newTemp();
+            m_body << "\t" << v << " =l call $rt_get_upvalue(l %rt, l "
+                   << ownClosureBits << ", w " << ins.byteOperand << ")\n";
+            storel(v, addr(before.height));
+            break;
+        }
+        case Op::SET_UPVALUE: {
+            // Peek family (P2): leaves `v` on the stack — SET_UPVALUE is an
+            // assignment expression, same as SET_LOCAL/SET_GLOBAL.
+            std::string ownClosureBits = loadl(addr(0));
+            std::string v = loadl(addr(before.height - 1));
+            m_body << "\tcall $rt_set_upvalue(l %rt, l " << ownClosureBits
+                   << ", w " << ins.byteOperand << ", l " << v << ")\n";
+            break;
+        }
+        case Op::CLOSE_UPVALUE: {
+            // Mirrors vm.cpp: closeUpvalues(stackTop - 1); pop(). The pop is
+            // a no-op here, same as the plain POP case above — the fused
+            // stack has no locals/temporaries split to repair. addr() must
+            // be computed as its own statement (see CLOSURE's own comment
+            // above on why it cannot be inlined into an m_body << chain).
+            std::string closeAddr = addr(before.height - 1);
+            m_body << "\tcall $rt_close_upvalues(l %rt, l " << closeAddr
+                   << ")\n";
+            break;
+        }
         case Op::RETURN: {
             std::string topAddr = addr(before.height);
             m_body << "\tcall $rt_set_top(l %rt, l " << topAddr << ")\n";

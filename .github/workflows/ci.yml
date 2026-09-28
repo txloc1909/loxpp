@@ -1048,6 +1048,20 @@ jobs:
             loxpp-dev-qbe:latest \
             bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_probe loxrt -j\$(nproc) && tools/check_qbe_s3_straight_line.sh"
 
+      # Same release-preset reasoning as S3's own step. Builds `qbe_emit_program`
+      # (this node's own checkpoint driver — a whole-program emitter, unlike
+      # S3's single-function qbe_emit_probe, since CALL/CLOSURE make a real
+      # program more than one function) and round-trips probes 06, 08, the
+      # QBE-only V1/V3 adaptations, V2_shared, fib, and a deep-recursion probe
+      # (Q3's own measured C-stack-depth test) through the real toolchain.
+      - name: Check calls and closures (S4)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-qbe:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && tools/check_qbe_s4_calls_closures.sh"
+
   release-static:
     name: Static musl release build
     runs-on: ubuntu-latest

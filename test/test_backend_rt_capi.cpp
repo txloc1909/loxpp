@@ -347,6 +347,202 @@ TEST(RtStartup, AttachesMatchingDescsAndRejectsAMismatch) {
 // rt_op_print / rt_new_string / rt_call(native) — this node's own checkpoint
 // ===========================================================================
 
+// ===========================================================================
+// rt_startup's requireAllCompiled parameter (S4, #457, hazard R4 on #457)
+// ===========================================================================
+
+TEST(RtStartup, DefaultsToNotRequiringEveryFunctionCompiled) {
+    // Unchanged behavior for every existing caller (this file's own tests
+    // above, S2/S3's checkpoint harnesses): a program with an uncompiled
+    // nested function still starts up when requireAllCompiled is left at
+    // its default.
+    Runtime* rt = rt_startup("fun add(a, b) { return a + b; }", nullptr, 0);
+    ASSERT_NE(rt, nullptr);
+    rt_shutdown(rt);
+}
+
+TEST(RtStartup, RequireAllCompiledRejectsAnUncompiledNestedFunction) {
+    Runtime* rt = rt_startup("fun add(a, b) { return a + b; }", nullptr, 0,
+                             /*requireAllCompiled=*/true);
+    EXPECT_EQ(rt, nullptr);
+}
+
+TEST(RtStartup, RequireAllCompiledAcceptsAProgramWhereEveryFunctionHasCode) {
+    const char* source = "fun add(a, b) { return a + b; }";
+    MemoryManager mm;
+    ObjFunction* root = compile(source, &mm);
+    ASSERT_NE(root, nullptr);
+    DecodedFunction tree = decodeFunctionTree(root);
+    const DecodedFunction* addNode = findFirstNested(tree);
+    ASSERT_NE(addNode, nullptr);
+
+    // Every function in the tree needs a desc: the top-level script (root)
+    // as well as "add" — the same requirement a whole-program driver's own
+    // multi-function harness must satisfy.
+    RtFunctionDesc rootDesc{};
+    rootDesc.id = tree.id.c_str();
+    rootDesc.arity = root->arity;
+    rootDesc.chunkHash = hashChunkBytes(root->chunk);
+    rootDesc.code = reinterpret_cast<void*>(&fakeCompiledOk);
+
+    RtFunctionDesc addDesc{};
+    addDesc.id = "0.0";
+    addDesc.arity = addNode->function->arity;
+    addDesc.chunkHash = hashChunkBytes(addNode->function->chunk);
+    addDesc.code = reinterpret_cast<void*>(&fakeCompiledOk);
+
+    RtFunctionDesc descs[] = {rootDesc, addDesc};
+    Runtime* rt = rt_startup(source, descs, 2, /*requireAllCompiled=*/true);
+    ASSERT_NE(rt, nullptr);
+    rt_shutdown(rt);
+}
+
+// ===========================================================================
+// CLOSURE/upvalue wrappers (S4, #457) — no capture analysis: these reach
+// the VM's own existing captureUpvalue/closeUpvalues mechanism unchanged.
+// ===========================================================================
+
+TEST(RtCapiClosureWrappers, NewClosureAllocatesWithEveryUpvalueSlotNull) {
+    Runtime rt;
+    ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    fn->upvalueCount = 2;
+
+    Value closureVal = rt_new_closure(&rt, Value{static_cast<Obj*>(fn)});
+    ASSERT_TRUE(isClosure(closureVal));
+    ObjClosure* closure = asObjClosure(closureVal);
+    EXPECT_EQ(closure->function, fn);
+    ASSERT_EQ(closure->upvalues.size(), 2u);
+    EXPECT_EQ(closure->upvalues[0], nullptr);
+    EXPECT_EQ(closure->upvalues[1], nullptr);
+}
+
+TEST(RtCapiClosureWrappers, ConstantAtReadsFromTheClosuresOwnFunction) {
+    MemoryManager mm;
+    ObjFunction* root = compile("fun add(a, b) { return a + b; }", &mm);
+    ASSERT_NE(root, nullptr);
+    // Find the FUNCTION constant CLOSURE's own operand names — its index
+    // among root's pooled constants is a compiler detail, not something
+    // this test should hardcode.
+    const auto& pool = root->chunk.constants();
+    int functionConstantIndex = -1;
+    for (uint16_t i = 0; i < pool.size(); i++) {
+        if (isFunction(pool.at(i))) {
+            functionConstantIndex = static_cast<int>(i);
+            break;
+        }
+    }
+    ASSERT_GE(functionConstantIndex, 0)
+        << "compiler drift: no FUNCTION constant in root's own chunk";
+
+    Runtime rt;
+    // Reuse root's own chunk as the "currently executing" function for
+    // this test — rt_constant_at only reads through the closure passed to
+    // it, so any ObjFunction with the right constant pool works.
+    ObjClosure* closure = rt.memoryManager().create<ObjClosure>(root);
+
+    Value constant = rt_constant_at(&rt, Value{static_cast<Obj*>(closure)},
+                                    functionConstantIndex);
+    EXPECT_TRUE(isFunction(constant));
+}
+
+TEST(RtCapiClosureWrappers, CaptureLocalUpvalueStoresARealUpvalue) {
+    Runtime rt;
+    ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    fn->upvalueCount = 1;
+    ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    Value closureVal{static_cast<Obj*>(closure)};
+
+    rt.push(Value{7.0});
+    Value* localSlot = rt.top() - 1;
+    rt_capture_local_upvalue(&rt, closureVal, 0, localSlot);
+
+    ASSERT_NE(closure->upvalues[0], nullptr);
+    EXPECT_EQ(closure->upvalues[0]->location, localSlot);
+}
+
+TEST(RtCapiClosureWrappers, ForwardUpvalueCopiesThePointerNotTheValue) {
+    Runtime rt;
+    ObjFunction* parentFn = rt.memoryManager().create<ObjFunction>();
+    parentFn->upvalueCount = 1;
+    ObjClosure* parent = rt.memoryManager().create<ObjClosure>(parentFn);
+    Value parentVal{static_cast<Obj*>(parent)};
+
+    rt.push(Value{3.0});
+    ObjUpvalue* uv = rt.captureUpvalue(rt.top() - 1);
+    parent->upvalues[0] = uv;
+
+    ObjFunction* childFn = rt.memoryManager().create<ObjFunction>();
+    childFn->upvalueCount = 1;
+    ObjClosure* child = rt.memoryManager().create<ObjClosure>(childFn);
+    Value childVal{static_cast<Obj*>(child)};
+
+    rt_forward_upvalue(&rt, childVal, 0, parentVal, 0);
+
+    EXPECT_EQ(child->upvalues[0], uv);
+}
+
+TEST(RtCapiClosureWrappers, GetAndSetUpvalueRoundTripThroughTheSameCell) {
+    Runtime rt;
+    ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    fn->upvalueCount = 1;
+    ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    Value closureVal{static_cast<Obj*>(closure)};
+
+    rt.push(Value{1.0});
+    closure->upvalues[0] = rt.captureUpvalue(rt.top() - 1);
+
+    rt_set_upvalue(&rt, closureVal, 0, Value{9.0});
+    Value read = rt_get_upvalue(&rt, closureVal, 0);
+    ASSERT_TRUE(is<Number>(read));
+    EXPECT_EQ(as<Number>(read), 9.0);
+    // The write went through the open upvalue's own location — the local
+    // slot itself, not a private copy.
+    ASSERT_TRUE(is<Number>(*(rt.top() - 1)));
+    EXPECT_EQ(as<Number>(*(rt.top() - 1)), 9.0);
+}
+
+TEST(RtCapiClosureWrappers, CloseUpvaluesClosesEveryOpenCellAtOrAboveLast) {
+    Runtime rt;
+    ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    fn->upvalueCount = 1;
+    ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+
+    rt.push(Value{5.0});
+    Value* slot = rt.top() - 1;
+    ObjUpvalue* uv = rt.captureUpvalue(slot);
+    closure->upvalues[0] = uv;
+
+    rt_close_upvalues(&rt, slot);
+
+    EXPECT_EQ(uv->location, &uv->closed);
+    ASSERT_TRUE(is<Number>(uv->closed));
+    EXPECT_EQ(as<Number>(uv->closed), 5.0);
+}
+
+// ===========================================================================
+// rt_check_stack (S4, #457, Q3) — mirrors Runtime::call()'s own FRAMES_MAX
+// guard, but for the value stack: compiled code writes its own frame's
+// slots directly, bypassing push()'s own STACK_MAX check entirely.
+// ===========================================================================
+
+TEST(RtCheckStack, SucceedsWellWithinStackMax) {
+    Runtime rt;
+    Value* needed = rt.stackBase() + 8;
+    EXPECT_EQ(rt_check_stack(&rt, needed, 0),
+              static_cast<int>(Runtime::OpResult::OK));
+}
+
+TEST(RtCheckStack, FailsPastStackMaxWithNoHandlerActive) {
+    Runtime rt;
+    // Comfortably past STACK_MAX (loxpp::kStackMax) with no handler
+    // active: the same uncaught-fatal path push() would eventually surface
+    // through the dispatch loop's own m_stackOverflow flag, but reached
+    // directly here instead, since compiled code never sets that flag.
+    Value* needed = rt.stackBase() + loxpp::kStackMax + 1;
+    EXPECT_EQ(rt_check_stack(&rt, needed, 0),
+              static_cast<int>(Runtime::OpResult::Fatal));
+}
+
 TEST(RtCapiCheckpoint, PrintsAStringAndCallsAStdlibFunction) {
     Runtime* rt = rt_startup("", nullptr, 0);
     ASSERT_NE(rt, nullptr);
