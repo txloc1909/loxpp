@@ -212,6 +212,12 @@ PROBES = [
      CATCHABLE, "ConstructorArityError", '"Expected 0 arguments but got some."'),
     ("match with no matching arm", 'try { match 99 { case 1 => "one" }; } catch (e) { print e.kind; }',
      CATCHABLE, "MatchError", '"No matching arm in match expression."'),
+    ("operator method returned a non-Boolean",
+     "class C { __eq__(o) { return 42; } } try { C() == C(); } catch (e) { print e.kind; }",
+     CATCHABLE, "OperatorResultTypeError", '"Operator method must return a Boolean."'),
+    ("operator method returned a non-sequence",
+     "class C { __iter__() { return 42; } } try { for (var x in C()) {} } catch (e) { print e.kind; }",
+     CATCHABLE, "OperatorResultTypeError", '"Operator method must return a sequence."'),
 
     # --- fused pairs: same bootstrap kind, one catchable probe and one fatal probe ---
     ("call of a non-callable value (fused, catchable)", "try { 42(); } catch (e) { print e.kind; }",

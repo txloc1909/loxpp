@@ -161,6 +161,8 @@ EXPECTED_CALLS = [
     ('UndefinedVariableError', '"Undefined variable."', RECORDED),
     ('UndefinedVariableError', '"Undefined variable."', RECORDED),
     ('ArithmeticTypeError', '"Operand must be a number."', RECORDED),
+    ('OperatorResultTypeError', '"Operator method must return a Boolean."', JUDGED),
+    ('OperatorResultTypeError', '"Operator method must return a sequence."', JUDGED),
     ('ConcatenationTypeError', '"Operands must be two numbers, two strings, or a string and a number."', RECORDED),
     ('ArithmeticTypeError', '"Operands must be numbers."', RECORDED),
     ('ArithmeticTypeError', '"Operands must be numbers."', RECORDED),

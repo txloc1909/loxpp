@@ -257,8 +257,7 @@ CATCHABLE_ROWS = [
     ),
     # Operator overloading result validation (issue #472): an operator method
     # whose result must be a Boolean returned something else. CLR is excluded
-    # from the operator-overloading mission (#472); bootstrap's dispatch is a
-    # separately filed follow-up (#474).
+    # from the operator-overloading mission (#472).
     Row(
         "operator_result_type_error",
         "caught",
@@ -267,7 +266,6 @@ CATCHABLE_ROWS = [
         expected_kind="OperatorResultTypeError",
         skip={
             CLR: "CLR backend is excluded from operator overloading (#472)",
-            BOOTSTRAP: "bootstrap operator-overloading dispatch is deferred (#474)",
         },
     ),
 ]
