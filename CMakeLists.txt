@@ -321,6 +321,23 @@ if(LOXPP_CORE_PUBLIC_DEFINITIONS)
     target_compile_definitions(loxrt PUBLIC ${LOXPP_CORE_PUBLIC_DEFINITIONS})
 endif()
 
+# qbe_emit_probe: S3's own checkpoint driver (#456, tools/check_qbe_s3_
+# straight_line.sh). Compiles one Lox++ program and prints its QBE .ssa text
+# (backend/qbe_emitter.h) to stdout, and the RtFunctionDesc triple
+# (id/arity/chunkHash) the checkpoint's harness needs to attach it, to
+# stderr. Not wired into main.cpp's --target dispatch: that CLI plumbing is
+# a later node's job, once CALL/CLOSURE (S4) make --target qbe produce a
+# program worth shipping on its own.
+add_executable(qbe_emit_probe
+    tools/qbe_emit_probe.cpp
+    src/backend/qbe_emitter.cpp
+    $<TARGET_OBJECTS:loxpp_core>
+)
+target_include_directories(qbe_emit_probe PRIVATE ${PROJECT_SOURCE_DIR}/src)
+if(LOXPP_CORE_PUBLIC_DEFINITIONS)
+    target_compile_definitions(qbe_emit_probe PRIVATE ${LOXPP_CORE_PUBLIC_DEFINITIONS})
+endif()
+
 option(LOXPP_BUILD_TESTS "Build the GTest suite" ON)
 
 if(LOXPP_BUILD_TESTS)

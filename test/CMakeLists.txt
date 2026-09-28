@@ -41,6 +41,7 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/backend/jvm_emitter.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/clr_emitter.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/rt_capi.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/qbe_emitter.cpp
     ${PROJECT_SOURCE_DIR}/src/value.cpp
     ${PROJECT_SOURCE_DIR}/src/object.cpp
     ${PROJECT_SOURCE_DIR}/src/container_objects.cpp
