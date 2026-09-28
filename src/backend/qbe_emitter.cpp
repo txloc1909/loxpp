@@ -292,7 +292,7 @@ class Emitter {
     //              this frame's handlers are already closed by the time it
     //              runs, so any handler that resolves a deferred call's own
     //              throw belongs to an ancestor, never to this frame.
-    enum class Catchability { Fatal, Local, Propagate };
+    enum class Catchability : std::uint8_t { Fatal, Local, Propagate };
 
     // Runs a runtime call whose arguments (beyond `l %rt`) are already
     // typed (each entry is a full "l %x" / "w 5" token). `offset` is this
