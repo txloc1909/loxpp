@@ -198,6 +198,7 @@ happens to equal a dunder name never participates.
 | `c[k] = v` | `__index_set__(k, v)` | `c` |
 | `len(x)` | `__len__()` | `x` |
 | `for (var v in x)` | `__iter__()` | `x` |
+| `c[start:end]` | `__slice__(start, end)` | `c` |
 
 `a != b` is `==` then logical negation: it derives from `__eq__` and has no
 method of its own. `a <= b` is `!(a > b)` and `a >= b` is `!(a < b)`; each
@@ -215,7 +216,9 @@ value. `__index_set__` takes the index and the assigned value; its return
 value is ignored, and the assignment expression evaluates to the assigned
 value (as with the built-in List and Map forms). `__iter__` takes no argument
 and returns the sequence to iterate; the existing iterator then consumes that
-sequence, so `ITER_HAS_NEXT`/`ITER_NEXT` are unchanged.
+sequence, so `ITER_HAS_NEXT`/`ITER_NEXT` are unchanged. `__slice__` takes the
+start and end bounds and may return any value; a List or String uses the
+built-in slice below, including its bound validation, and never dispatches.
 
 `len` is a keyword, not a global: a program can no longer name a variable
 `len` or pass `len` as a first-class value. `len` on a List, String, or Map
@@ -1074,7 +1077,10 @@ Both `start` and `end` must be present; omitting either is a **parse error**.
 Evaluate `seq`, then `start`, then `end` (left-to-right).
 
 **Step 2 — Type-check `seq`.**  
-If `seq` is not a List or String, this is a **runtime error** ("Slice requires a List or String.").
+If `seq` is an Instance whose class defines `__slice__`, call it with `start`
+and `end` and use its result (see [Operator Overloading](#operator-overloading));
+the built-in behaviour below does not apply. Otherwise, if `seq` is not a List
+or String, this is a **runtime error** ("Slice requires a List or String.").
 
 **Step 3 — Validate `start`.**
 - If `start` is not a Number → runtime error ("Slice index must be a number.").
