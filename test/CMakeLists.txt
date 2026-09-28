@@ -257,6 +257,16 @@ if(LOXPP_PYTHON3)
     set_tests_properties(BootstrapMatchArmBreak PROPERTIES
         ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
+
+    # Issue #474: bootstrap's operator-overloading dispatch (dunder methods)
+    # must match native byte for byte. Same trace-noise constraint as
+    # BootstrapResolverErrorParity above.
+    add_test(NAME BootstrapOperatorOverload
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_operator_overload.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(BootstrapOperatorOverload PROPERTIES
+        ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
 endif()
 
 # The *_gc targets share their source with a non-_gc twin. They run under GC

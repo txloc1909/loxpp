@@ -120,6 +120,7 @@ REVIEWED_NON_TABLE_KINDS = {
 # JUDGED only after actually judging that specific site against the spec
 # table, never as part of an unrelated change.
 EXPECTED_CALLS = [
+    ('ArityError', '"Expected " + str(this.arity()) + " arguments but got " + str(len(args)) + "."', JUDGED),
     ('StackOverflowError', '"Stack overflow."', JUDGED),
     ('ReflectionArityError', '"Expected at least 2 arguments."', JUDGED),
     ('ReflectionFieldNameError', '"Field name must be a string."', JUDGED),
@@ -161,6 +162,8 @@ EXPECTED_CALLS = [
     ('UndefinedVariableError', '"Undefined variable."', RECORDED),
     ('UndefinedVariableError', '"Undefined variable."', RECORDED),
     ('ArithmeticTypeError', '"Operand must be a number."', RECORDED),
+    ('OperatorResultTypeError', '"Operator method must return a Boolean."', JUDGED),
+    ('OperatorResultTypeError', '"Operator method must return a sequence."', JUDGED),
     ('ConcatenationTypeError', '"Operands must be two numbers, two strings, or a string and a number."', RECORDED),
     ('ArithmeticTypeError', '"Operands must be numbers."', RECORDED),
     ('ArithmeticTypeError', '"Operands must be numbers."', RECORDED),

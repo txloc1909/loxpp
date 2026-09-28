@@ -1534,6 +1534,15 @@ class LoxFunction {
     }
 
     call(interp, args) {
+        // Native's own Runtime::call checks arity before it enters the frame,
+        // so a wrong-arity dunder dispatch (findDunder's call sites) raises
+        // the ordinary catchable ArityError instead of reading args[i] out
+        // of bounds below. The ordinary call sites (evalCall, deferred
+        // calls) check first and never reach this branch.
+        if (len(args) != this.arity()) {
+            interp.setError("ArityError", "Expected " + str(this.arity()) + " arguments but got " + str(len(args)) + ".", 0);
+            return nil;
+        }
         var callEnv = Environment(this.closure);
         var i = 0;
         while (i < len(this.params)) {
@@ -2429,6 +2438,12 @@ class Interpreter {
             if (fl < 0 or fl >= len(object.fields)) { this.fatalError("Enum field index " + str(fl) + " out of range."); return nil; }
             return object.fields[fl];
         }
+        var m = this.findDunder(object, "__index_get__");
+        if (m != nil) {
+            var r = m.bind(object).call(this, [index]);
+            if (this.throwFlag) return nil;
+            return r;
+        }
         this.setError("NotIndexableError", "Only lists, strings, and maps can be indexed.", line);
         return nil;
     }
@@ -2467,6 +2482,14 @@ class Interpreter {
         // (src/vm.cpp Op::SET_INDEX) -- so it needs its own kind, not that
         // one's.
         if (isLoxStr(object)) { this.setError("StringImmutableError", "Strings are immutable.", line); return nil; }
+        var m = this.findDunder(object, "__index_set__");
+        if (m != nil) {
+            var val = this.evalExpr(valueExpr, env);
+            if (this.throwFlag) return nil;
+            m.bind(object).call(this, [index, val]);
+            if (this.throwFlag) return nil;
+            return val; // assignment is an expression; its value is the assigned value
+        }
         this.setError("NotIndexableError", "Only lists and maps support index assignment.", line);
         return nil;
     }
@@ -2512,6 +2535,13 @@ class Interpreter {
     execForIn(varName, varLine, iterableExpr, body, env) {
         var iterable = this.evalExpr(iterableExpr, env);
         if (this.throwFlag) return;
+        // __iter__ returns the sequence to iterate; the loops below then
+        // consume it unchanged.
+        var m = this.findDunder(iterable, "__iter__");
+        if (m != nil) {
+            iterable = this.validateSequence(m.bind(iterable).call(this, []), varLine);
+            if (this.throwFlag) return;
+        }
         var tag = loxTag(iterable);
         // Native's own for-in guard is an always-fatal RAISE_ERROR site,
         // Op::GET_ITER (src/vm.cpp:1616-1623), a different opcode from
@@ -2861,12 +2891,38 @@ class Interpreter {
         if (this.throwFlag) return nil;
         if (op.lexeme == "!") return !this.isTruthy(right);
         if (op.lexeme == "-") {
-            if (!isLoxNum(right)) {
-                this.setError("ArithmeticTypeError", "Operand must be a number.", op.line);
-                return nil;
+            if (isLoxNum(right)) return -right;
+            var m = this.findDunder(right, "__neg__");
+            if (m != nil) {
+                var r = m.bind(right).call(this, []);
+                if (this.throwFlag) return nil;
+                return r;
             }
-            return -right;
+            this.setError("ArithmeticTypeError", "Operand must be a number.", op.line);
+            return nil;
         }
+        return nil;
+    }
+
+    // Operator-overloading dispatch (issue #472 / #474). Mirrors the native
+    // VM's rule: built-in branch first, then the dunder method on the
+    // receiver, then the same error as before. findDunder returns the method
+    // or nil. validateBool/validateSequence set the catchable
+    // OperatorResultTypeError when the method returned the wrong type.
+    findDunder(receiver, name) {
+        if (loxTag(receiver) != "instance") return nil;
+        return receiver.klass.findMethod(name);
+    }
+
+    validateBool(v, line) {
+        if (v == true or v == false) return v;
+        this.setError("OperatorResultTypeError", "Operator method must return a Boolean.", line);
+        return nil;
+    }
+
+    validateSequence(v, line) {
+        if (loxTag(v) == "list" or isLoxStr(v) or loxTag(v) == "map") return v;
+        this.setError("OperatorResultTypeError", "Operator method must return a sequence.", line);
         return nil;
     }
 
@@ -2880,46 +2936,125 @@ class Interpreter {
         if (opL == "+") {
             if (isLoxNum(left) and isLoxNum(right)) return left + right;
             if (isLoxStr(left) and isLoxStr(right)) return left + right;
+            var m = this.findDunder(left, "__add__");
+            if (m != nil) {
+                var r = m.bind(left).call(this, [right]);
+                if (this.throwFlag) return nil;
+                return r;
+            }
             this.setError("ConcatenationTypeError", "Operands must be two numbers, two strings, or a string and a number.", opLine);
             return nil;
         }
         if (opL == "-") {
-            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("ArithmeticTypeError", "Operands must be numbers.", opLine); return nil; }
-            return left - right;
+            if (isLoxNum(left) and isLoxNum(right)) return left - right;
+            var m = this.findDunder(left, "__sub__");
+            if (m != nil) {
+                var r = m.bind(left).call(this, [right]);
+                if (this.throwFlag) return nil;
+                return r;
+            }
+            this.setError("ArithmeticTypeError", "Operands must be numbers.", opLine);
+            return nil;
         }
         if (opL == "*") {
-            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("ArithmeticTypeError", "Operands must be numbers.", opLine); return nil; }
-            return left * right;
+            if (isLoxNum(left) and isLoxNum(right)) return left * right;
+            var m = this.findDunder(left, "__mul__");
+            if (m != nil) {
+                var r = m.bind(left).call(this, [right]);
+                if (this.throwFlag) return nil;
+                return r;
+            }
+            this.setError("ArithmeticTypeError", "Operands must be numbers.", opLine);
+            return nil;
         }
         if (opL == "/") {
-            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("ArithmeticTypeError", "Operands must be numbers.", opLine); return nil; }
-            return left / right;
-        }
-        if (opL == "<")  {
-            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("ComparisonTypeError", "Operands must be numbers.", opLine); return nil; }
-            return left < right;
-        }
-        if (opL == "<=") {
-            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("ComparisonTypeError", "Operands must be numbers.", opLine); return nil; }
-            return left <= right;
-        }
-        if (opL == ">")  {
-            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("ComparisonTypeError", "Operands must be numbers.", opLine); return nil; }
-            return left > right;
-        }
-        if (opL == ">=") {
-            if (!isLoxNum(left) or !isLoxNum(right)) { this.setError("ComparisonTypeError", "Operands must be numbers.", opLine); return nil; }
-            return left >= right;
-        }
-        if (opL == "==") return left == right;
-        if (opL == "!=") return left != right;
-        if (opL == "%") {
-            if (!isLoxNum(left) or !isLoxNum(right)) {
-                this.setError("ArithmeticTypeError", "Operands must be numbers.", opLine);
-                return nil;
+            if (isLoxNum(left) and isLoxNum(right)) return left / right;
+            var m = this.findDunder(left, "__div__");
+            if (m != nil) {
+                var r = m.bind(left).call(this, [right]);
+                if (this.throwFlag) return nil;
+                return r;
             }
-            // Floor-mod: result sign matches divisor.
-            return left - math.floor(left / right) * right;
+            this.setError("ArithmeticTypeError", "Operands must be numbers.", opLine);
+            return nil;
+        }
+        if (opL == "<") {
+            if (isLoxNum(left) and isLoxNum(right)) return left < right;
+            var m = this.findDunder(left, "__lt__");
+            if (m != nil) {
+                var b = this.validateBool(m.bind(left).call(this, [right]), opLine);
+                if (this.throwFlag) return nil;
+                return b;
+            }
+            this.setError("ComparisonTypeError", "Operands must be numbers.", opLine);
+            return nil;
+        }
+        // `<=` is `!(a > b)`: it dispatches __gt__ and negates.
+        if (opL == "<=") {
+            if (isLoxNum(left) and isLoxNum(right)) return left <= right;
+            var m = this.findDunder(left, "__gt__");
+            if (m != nil) {
+                var b = this.validateBool(m.bind(left).call(this, [right]), opLine);
+                if (this.throwFlag) return nil;
+                return !b;
+            }
+            this.setError("ComparisonTypeError", "Operands must be numbers.", opLine);
+            return nil;
+        }
+        if (opL == ">") {
+            if (isLoxNum(left) and isLoxNum(right)) return left > right;
+            var m = this.findDunder(left, "__gt__");
+            if (m != nil) {
+                var b = this.validateBool(m.bind(left).call(this, [right]), opLine);
+                if (this.throwFlag) return nil;
+                return b;
+            }
+            this.setError("ComparisonTypeError", "Operands must be numbers.", opLine);
+            return nil;
+        }
+        // `>=` is `!(a < b)`: it dispatches __lt__ and negates.
+        if (opL == ">=") {
+            if (isLoxNum(left) and isLoxNum(right)) return left >= right;
+            var m = this.findDunder(left, "__lt__");
+            if (m != nil) {
+                var b = this.validateBool(m.bind(left).call(this, [right]), opLine);
+                if (this.throwFlag) return nil;
+                return !b;
+            }
+            this.setError("ComparisonTypeError", "Operands must be numbers.", opLine);
+            return nil;
+        }
+        if (opL == "==") {
+            var m = this.findDunder(left, "__eq__");
+            if (m != nil) {
+                var b = this.validateBool(m.bind(left).call(this, [right]), opLine);
+                if (this.throwFlag) return nil;
+                return b;
+            }
+            return left == right;
+        }
+        if (opL == "!=") {
+            var m = this.findDunder(left, "__eq__");
+            if (m != nil) {
+                var b = this.validateBool(m.bind(left).call(this, [right]), opLine);
+                if (this.throwFlag) return nil;
+                return !b;
+            }
+            return left != right;
+        }
+        if (opL == "%") {
+            if (isLoxNum(left) and isLoxNum(right)) {
+                // Floor-mod: result sign matches divisor.
+                return left - math.floor(left / right) * right;
+            }
+            var m = this.findDunder(left, "__mod__");
+            if (m != nil) {
+                var r = m.bind(left).call(this, [right]);
+                if (this.throwFlag) return nil;
+                return r;
+            }
+            this.setError("ArithmeticTypeError", "Operands must be numbers.", opLine);
+            return nil;
         }
         // `in`'s own operand-type checks are always fatal on native
         // (src/vm.cpp Op::IN, RAISE_ERROR), a separate opcode from indexing
@@ -2944,6 +3079,12 @@ class Interpreter {
                     return nil;
                 }
                 return right.data.has(left);
+            }
+            var m = this.findDunder(right, "__contains__");
+            if (m != nil) {
+                var b = this.validateBool(m.bind(right).call(this, [left]), opLine);
+                if (this.throwFlag) return nil;
+                return b;
             }
             this.setError("InRightOperandTypeError", "Right operand of 'in' must be a List, String, or Map.", opLine);
             return nil;
@@ -2978,6 +3119,13 @@ class Interpreter {
             if (this.throwFlag) return nil;
             args.append(arg);
             i = i + 1;
+        }
+        // __call__ on an Instance, before the ordinary callable checks.
+        var m = this.findDunder(callee, "__call__");
+        if (m != nil) {
+            var r = m.bind(callee).call(this, args);
+            if (this.throwFlag) return nil;
+            return r;
         }
         // Check if the callee is callable. All non-callable checks are handled here.
         if (callee == nil or callee == true or callee == false or isLoxStr(callee) or isLoxNum(callee)) {
