@@ -64,3 +64,19 @@ print e1 == e2;
 
 print 1 + 2;
 print "x" + "y";
+
+class Range {
+  init(n) { this.n = n; }
+  __iter__() {
+    var out = [];
+    var i = 0;
+    while (i < this.n) { out.append(i); i = i + 1; }
+    return out;
+  }
+}
+var total = 0;
+for (var x in Range(3)) { total = total + x; }
+print total;
+
+class BadSeq { __iter__() { return 1; } }
+try { for (var y in BadSeq()) {} } catch (e) { print "caught " + e.kind; }

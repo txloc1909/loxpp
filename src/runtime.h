@@ -362,7 +362,7 @@ class Runtime {
     OpResult opInherit();
     OpResult opGetIndex(int stopAtFrameCount);
     OpResult opSetIndex(int stopAtFrameCount);
-    OpResult opGetIter();
+    OpResult opGetIter(int stopAtFrameCount);
     OpResult opIterHasNext();
     OpResult opIterNext();
 
@@ -488,6 +488,7 @@ class Runtime {
         IndexGet,
         IndexSet,
         Len,
+        Iter,
         Count,
     };
 
@@ -496,8 +497,10 @@ class Runtime {
     // OperatorResultTypeError.
     enum class ResultCheck : std::uint8_t {
         None,
-        Boolean, // __eq__ __lt__ __gt__ __contains__
-        Number,  // __len__
+        Boolean,  // __eq__ __lt__ __gt__ __contains__
+        Number,   // __len__
+        Sequence, // __iter__ — and Op::RETURN builds an iterator from the
+                  // result
     };
 
     // Interns the protocol names into m_protocolNames. Called once from
