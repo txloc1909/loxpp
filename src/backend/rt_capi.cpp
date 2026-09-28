@@ -182,8 +182,8 @@ int rt_op_print(Runtime* rt) noexcept {
     });
 }
 
-int rt_call(Runtime* rt, int argCount) noexcept {
-    return rtGuard(rt, [&] { return rt->opCall(argCount, 0); });
+int rt_call(Runtime* rt, int argCount, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opCall(argCount, stopAtFrameCount); });
 }
 
 int rt_op_invoke(Runtime* rt, ObjString* name, int argCount,
@@ -381,4 +381,63 @@ int rt_check_stack(Runtime* rt, Value* neededTop,
     return rtGuard(rt, [&] {
         return rt->checkStackOverflow(neededTop, stopAtFrameCount);
     });
+}
+
+void rt_push_handler(Runtime* rt, Value* checkpointTop) noexcept {
+    // catchIp is meaningful only to the interpreter's own dispatch loop
+    // (qbe_emitter.cpp's own file comment explains why compiled code never
+    // reads it back) — this frame's own chunk-begin is a harmless, always-
+    // valid placeholder.
+    rt->pushHandler(checkpointTop,
+                    rt->currentClosure()->function->chunk.cbegin());
+}
+
+int rt_pop_handler(Runtime* rt) noexcept {
+    return rtGuard(rt, [&] {
+        if (rt->handlerStackDepth() == 0) {
+            rt->runtimeError("BUG: POP_HANDLER with empty handler stack.");
+            return Runtime::OpResult::Fatal;
+        }
+        rt->popTopHandler();
+        return Runtime::OpResult::OK;
+    });
+}
+
+int rt_throw(Runtime* rt, Value thrownValue, int stopAtFrameCount) noexcept {
+    return rtGuard(
+        rt, [&] { return rt->handleThrowOp(thrownValue, stopAtFrameCount); });
+}
+
+int rt_op_defer_record(Runtime* rt, int argCount) noexcept {
+    return rtGuard(rt, [&] {
+        rt->opDeferRecord(argCount);
+        return Runtime::OpResult::OK;
+    });
+}
+
+int rt_run_defers(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] {
+        int frameIndex = rt->frameCount() - 1;
+        rt->popHandlersOwnedByCurrentFrame();
+        InterpretResult result =
+            rt->runPendingDefers(frameIndex, stopAtFrameCount);
+        if (result != InterpretResult::OK) {
+            // Hard error during a deferred call, already reported.
+            return Runtime::OpResult::Fatal;
+        }
+        if (rt->frameCount() != frameIndex + 1) {
+            // A deferred call's own throw propagated past this frame (or
+            // past a still-live caller) — this frame's own handlers are
+            // already gone (popHandlersOwnedByCurrentFrame above), so
+            // there is no local catch to attempt here; only propagate.
+            return (rt->frameCount() > stopAtFrameCount)
+                       ? Runtime::OpResult::Resumed
+                       : Runtime::OpResult::Stop;
+        }
+        return Runtime::OpResult::OK;
+    });
+}
+
+void rt_set_frame_offset(Runtime* rt, int offset) noexcept {
+    rt->setCurrentFrameOffset(offset);
 }

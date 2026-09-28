@@ -572,7 +572,11 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // fix lets it verify and run on JVM too), raising this to 200. Issue
     // #445 promotes catch_overflow.lox out of jvm-only/ (uncounted there)
     // once a live CLR run confirmed it matches native, raising this to 201.
-    ASSERT_EQ(files.size(), 201U);
+    // PR #486 adds defer_runs_on_normal_return.lox and
+    // defer_runs_before_caught_throw_propagates.lox (check_qbe_s6_errors.sh
+    // probes proving a deferred call's side effect is actually observable
+    // on an ordinary return and on a caught throw), raising this to 203.
+    ASSERT_EQ(files.size(), 203U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {

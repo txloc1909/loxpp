@@ -44,17 +44,30 @@ int fakeCompiledFatal(Runtime* rt, Value* base) {
     g_record->calls++;
     g_record->rt = rt;
     g_record->base = base;
-    // A real compiled function that fails reaches this contract the same
-    // way an interpreted RETURN's own error paths do: it reports through
-    // runtimeError() (which resets the whole Runtime) before returning
-    // nonzero. callCompiled relies on that — it does not reset anything
-    // itself on a nonzero return (see callCompiled's own comment).
+    // A real compiled function that fails uncaught reaches this contract
+    // the same way an interpreted RETURN's own error paths do: it reports
+    // through runtimeError() (which resets the whole Runtime) before
+    // returning kRtFatal (rt_abi.h's three-way status — S6, #459).
+    // callCompiled relies on that — it does not reset anything itself on a
+    // kRtFatal return (see callCompiled's own comment).
     rt->runtimeError("fake fatal error");
-    return 1;
+    return kRtFatal;
 }
 
 int fakeCompiledThrows(Runtime*, Value*) {
     throw 42; // a stray C++ exception, not a reported runtime error (R3)
+}
+
+int fakeCompiledThrowStatus(Runtime*, Value*) {
+    // Simulates a compiled callee whose own frame already unwound (S6,
+    // #459): a real compiled function returns kRtThrow only when the
+    // handler resolving its own fault is not its own frame — see
+    // qbe_emitter.cpp's local-catch-or-propagate codegen and rt_abi.h's own
+    // comment on RtCompiledFn. This fake body does none of that unwinding
+    // itself (there is no real handler stack in this test); it only proves
+    // callCompiled's own translation of kRtThrow back into OpResult, given
+    // whatever m_frameCount/stopAtFrameCount it is called with.
+    return kRtThrow;
 }
 
 ObjUpvalue* g_capturedUpvalue = nullptr;
@@ -93,9 +106,11 @@ const DecodedFunction* findFirstNested(const DecodedFunction& root) {
 TEST(RtCallCompiled, PushesFrameCallsCodeAndPopsOnSuccess) {
     Runtime rt;
     ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(fn));
     fn->arity = 2;
     fn->code = reinterpret_cast<void*>(&fakeCompiledOk);
     ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    rt.memoryManager().popTempRoot();
 
     FakeCallRecord record;
     g_record = &record;
@@ -119,9 +134,11 @@ TEST(RtCallCompiled, PushesFrameCallsCodeAndPopsOnSuccess) {
 TEST(RtCallCompiled, NonzeroReturnIsFatalAndLeavesRuntimeAlreadyReset) {
     Runtime rt;
     ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(fn));
     fn->arity = 0;
     fn->code = reinterpret_cast<void*>(&fakeCompiledFatal);
     ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    rt.memoryManager().popTempRoot();
 
     FakeCallRecord record;
     g_record = &record;
@@ -138,6 +155,44 @@ TEST(RtCallCompiled, NonzeroReturnIsFatalAndLeavesRuntimeAlreadyReset) {
     EXPECT_EQ(rt.frameCount(), 0);
 }
 
+// S6 (#459): kRtThrow's own translation back into OpResult, exactly the
+// way fromThrow() translates ThrowOutcome for every other call site —
+// Resumed when this invocation's own context is still live (m_frameCount >
+// stopAtFrameCount), Stop otherwise.
+TEST(RtCallCompiled, ThrowStatusAboveStopBoundaryReportsResumed) {
+    Runtime rt;
+    ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(fn));
+    fn->arity = 0;
+    fn->code = reinterpret_cast<void*>(&fakeCompiledThrowStatus);
+    ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    rt.memoryManager().popTempRoot();
+
+    rt.push(Value{static_cast<Obj*>(closure)});
+    // stopAtFrameCount=0: after call() pushes this call's own frame,
+    // m_frameCount is 1, strictly above the boundary.
+    int status = rt_call(&rt, 0, /*stopAtFrameCount=*/0);
+
+    EXPECT_EQ(status, static_cast<int>(Runtime::OpResult::Resumed));
+}
+
+TEST(RtCallCompiled, ThrowStatusAtOrBelowStopBoundaryReportsStop) {
+    Runtime rt;
+    ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(fn));
+    fn->arity = 0;
+    fn->code = reinterpret_cast<void*>(&fakeCompiledThrowStatus);
+    ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    rt.memoryManager().popTempRoot();
+
+    rt.push(Value{static_cast<Obj*>(closure)});
+    // stopAtFrameCount=1: m_frameCount after the push is also 1, at (not
+    // above) the boundary.
+    int status = rt_call(&rt, 0, /*stopAtFrameCount=*/1);
+
+    EXPECT_EQ(status, static_cast<int>(Runtime::OpResult::Stop));
+}
+
 // R1 (blocking, PR #473 review round 1): callCompiled skipped
 // closeUpvalues(frame->slots) before popping the frame, unlike Op::RETURN
 // (vm.cpp). A nested closure capturing one of a compiled function's own
@@ -146,9 +201,11 @@ TEST(RtCallCompiled, NonzeroReturnIsFatalAndLeavesRuntimeAlreadyReset) {
 TEST(RtCallCompiled, ClosesUpvaluesCapturedOverItsOwnFrameOnReturn) {
     Runtime rt;
     ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(fn));
     fn->arity = 0;
     fn->code = reinterpret_cast<void*>(&fakeCompiledCapturesOwnLocal);
     ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    rt.memoryManager().popTempRoot();
 
     rt.push(Value{static_cast<Obj*>(closure)});
     g_capturedUpvalue = nullptr;
@@ -172,9 +229,11 @@ TEST(RtCallCompiled, ClosesUpvaluesCapturedOverItsOwnFrameOnReturn) {
 TEST(RtCallCompiled, ReturnConventionLeavesExactlyOneValueAtFrameBase) {
     Runtime rt;
     ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(fn));
     fn->arity = 0;
     fn->code = reinterpret_cast<void*>(&fakeCompiledReturnsComputedValue);
     ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    rt.memoryManager().popTempRoot();
 
     Value* base = rt.top();
     rt.push(Value{static_cast<Obj*>(closure)});
@@ -197,9 +256,11 @@ TEST(RtCallCompiled, ReturnConventionLeavesExactlyOneValueAtFrameBase) {
 TEST(RtCallCompiled, ExceptionDuringCallLeavesFrameCountConsistent) {
     Runtime rt;
     ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(fn));
     fn->arity = 0;
     fn->code = reinterpret_cast<void*>(&fakeCompiledThrows);
     ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    rt.memoryManager().popTempRoot();
 
     rt.push(Value{static_cast<Obj*>(closure)});
 
@@ -217,9 +278,11 @@ TEST(RtCallCompiled, ExceptionDuringCallLeavesFrameCountConsistent) {
 TEST(RtCallCompiled, ArityMismatchNeverInvokesCode) {
     Runtime rt;
     ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(fn));
     fn->arity = 2;
     fn->code = reinterpret_cast<void*>(&fakeCompiledOk);
     ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    rt.memoryManager().popTempRoot();
 
     FakeCallRecord record;
     g_record = &record;
@@ -407,9 +470,11 @@ TEST(RtStartup, RequireAllCompiledAcceptsAProgramWhereEveryFunctionHasCode) {
 TEST(RtCapiClosureWrappers, NewClosureAllocatesWithEveryUpvalueSlotNull) {
     Runtime rt;
     ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(fn));
     fn->upvalueCount = 2;
 
     Value closureVal = rt_new_closure(&rt, Value{static_cast<Obj*>(fn)});
+    rt.memoryManager().popTempRoot();
     ASSERT_TRUE(isClosure(closureVal));
     ObjClosure* closure = asObjClosure(closureVal);
     EXPECT_EQ(closure->function, fn);
@@ -450,8 +515,18 @@ TEST(RtCapiClosureWrappers, ConstantAtReadsFromTheClosuresOwnFunction) {
 TEST(RtCapiClosureWrappers, CaptureLocalUpvalueStoresARealUpvalue) {
     Runtime rt;
     ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(fn));
     fn->upvalueCount = 1;
     ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    // Transfer the root from fn to closure (no allocation in between, so
+    // this is safe): closure itself is never pushed onto rt's own value
+    // stack in this test, so it needs its own explicit root for the rest
+    // of the test body, not just across its own construction — the same
+    // is true of the three sibling tests below. Left un-popped: harmless,
+    // this Runtime (and its MemoryManager) is destroyed at the end of the
+    // test either way.
+    rt.memoryManager().popTempRoot();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(closure));
     Value closureVal{static_cast<Obj*>(closure)};
 
     rt.push(Value{7.0});
@@ -465,8 +540,11 @@ TEST(RtCapiClosureWrappers, CaptureLocalUpvalueStoresARealUpvalue) {
 TEST(RtCapiClosureWrappers, ForwardUpvalueCopiesThePointerNotTheValue) {
     Runtime rt;
     ObjFunction* parentFn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(parentFn));
     parentFn->upvalueCount = 1;
     ObjClosure* parent = rt.memoryManager().create<ObjClosure>(parentFn);
+    rt.memoryManager().popTempRoot();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(parent));
     Value parentVal{static_cast<Obj*>(parent)};
 
     rt.push(Value{3.0});
@@ -474,8 +552,11 @@ TEST(RtCapiClosureWrappers, ForwardUpvalueCopiesThePointerNotTheValue) {
     parent->upvalues[0] = uv;
 
     ObjFunction* childFn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(childFn));
     childFn->upvalueCount = 1;
     ObjClosure* child = rt.memoryManager().create<ObjClosure>(childFn);
+    rt.memoryManager().popTempRoot();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(child));
     Value childVal{static_cast<Obj*>(child)};
 
     rt_forward_upvalue(&rt, childVal, 0, parentVal, 0);
@@ -486,8 +567,11 @@ TEST(RtCapiClosureWrappers, ForwardUpvalueCopiesThePointerNotTheValue) {
 TEST(RtCapiClosureWrappers, GetAndSetUpvalueRoundTripThroughTheSameCell) {
     Runtime rt;
     ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(fn));
     fn->upvalueCount = 1;
     ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    rt.memoryManager().popTempRoot();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(closure));
     Value closureVal{static_cast<Obj*>(closure)};
 
     rt.push(Value{1.0});
@@ -506,8 +590,11 @@ TEST(RtCapiClosureWrappers, GetAndSetUpvalueRoundTripThroughTheSameCell) {
 TEST(RtCapiClosureWrappers, CloseUpvaluesClosesEveryOpenCellAtOrAboveLast) {
     Runtime rt;
     ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(fn));
     fn->upvalueCount = 1;
     ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    rt.memoryManager().popTempRoot();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(closure));
 
     rt.push(Value{5.0});
     Value* slot = rt.top() - 1;
@@ -612,8 +699,10 @@ int fakeCompiledDeferTarget(Runtime* rt, Value*) {
 // exist for runPendingDefers(0, ...) to be a valid call.
 ObjClosure* pushInterpretedOuterFrame(Runtime& rt) {
     ObjFunction* outerFn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(outerFn));
     outerFn->arity = 0;
     ObjClosure* outer = rt.memoryManager().create<ObjClosure>(outerFn);
+    rt.memoryManager().popTempRoot();
     rt.push(Value{static_cast<Obj*>(outer)});
     EXPECT_EQ(rt.call(outer, 0), Runtime::ThrowOutcome::Pushed);
     return outer;
@@ -627,10 +716,17 @@ TEST(RunPendingDefers, ClosureBranchRunsAttachedCompiledCodeNotANoop) {
     ASSERT_EQ(rt.frameCount(), 1);
 
     ObjFunction* deferredFn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(deferredFn));
     deferredFn->arity = 0;
     deferredFn->code = reinterpret_cast<void*>(&fakeCompiledDeferTarget);
     ObjClosure* deferredClosure =
         rt.memoryManager().create<ObjClosure>(deferredFn);
+    // Keep deferredClosure itself rooted through recordDefer's own
+    // allocation below (no allocation between this pop/push pair, so
+    // transferring the root here is safe) — it is never on rt's own value
+    // stack in this test.
+    rt.memoryManager().popTempRoot();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(deferredClosure));
 
     FakeCallRecord record;
     g_record = &record;
@@ -654,11 +750,19 @@ TEST(RunPendingDefers, BoundMethodBranchRunsAttachedCompiledCodeNotANoop) {
     ASSERT_EQ(rt.frameCount(), 1);
 
     ObjFunction* methodFn = rt.memoryManager().create<ObjFunction>();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(methodFn));
     methodFn->arity = 0;
     methodFn->code = reinterpret_cast<void*>(&fakeCompiledDeferTarget);
     ObjClosure* method = rt.memoryManager().create<ObjClosure>(methodFn);
+    // Keep method rooted through create<ObjBoundMethod> below, then
+    // transfer to bound through recordDefer's own allocation — neither
+    // object is ever on rt's own value stack in this test.
+    rt.memoryManager().popTempRoot();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(method));
     ObjBoundMethod* bound = rt.memoryManager().create<ObjBoundMethod>(
         Value{1.0} /* dummy receiver */, method);
+    rt.memoryManager().popTempRoot();
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(bound));
 
     FakeCallRecord record;
     g_record = &record;

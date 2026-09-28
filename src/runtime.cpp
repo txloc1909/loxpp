@@ -156,13 +156,23 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
     CallFrame* frame = &m_frames[m_frameCount - 1];
     auto code = reinterpret_cast<RtCompiledFn>(closure->function->code);
     int status = code(this, frame->slots);
-    if (status != 0) {
-        // Nonzero means the compiled callee already reported a fatal error
-        // through runtimeError() (rt_abi.h's own contract on RtCompiledFn),
-        // which already called resetStack() and zeroed m_frameCount for the
-        // whole Runtime. There is no frame left here for this call to close
-        // out — doing so would double-decrement an already-reset count.
+    if (status == kRtFatal) {
+        // The compiled callee already reported a fatal error through
+        // runtimeError() (rt_abi.h's own contract on RtCompiledFn), which
+        // already called resetStack() and zeroed m_frameCount for the whole
+        // Runtime. There is no frame left here for this call to close out —
+        // doing so would double-decrement an already-reset count.
         return OpResult::Fatal;
+    }
+    if (status == kRtThrow) {
+        // The callee's own frame is already gone (see rt_abi.h's own
+        // comment on kRtThrow) — nothing here to close/collapse. Translate
+        // compiled code's own three-way status back into the OpResult/
+        // stopAtFrameCount convention the rest of Runtime already
+        // understands, exactly the way fromThrow() does for every other
+        // call site.
+        return (m_frameCount > stopAtFrameCount) ? OpResult::Resumed
+                                                 : OpResult::Stop;
     }
     // The C-ABI return convention for a compiled function, mirroring
     // Op::RETURN (vm.cpp) exactly: before returning 0, the callee leaves
@@ -1303,6 +1313,23 @@ void Runtime::opDefineMethod(ObjString* name) {
     ObjClass* klass = asObjClass(as<Obj*>(peek(1))); // class below
     klass->methods.set(name, method);
     pop(); // pop closure; leave class on stack for next method
+}
+
+void Runtime::opDeferRecord(int argCount) {
+    // Mirrors vm.cpp's own Op::DEFER_RECORD body exactly (moved here so the
+    // QBE backend's rt_op_defer_record, backend/rt_capi.h, reaches it with
+    // no duplication — Layer 1, notes/qbe-backend.md).
+    Value callee = stackTop[-(argCount + 1)];
+    ObjDeferredCall* deferred =
+        m_mm.create<ObjDeferredCall>(callee, VmAllocator<Value>{&m_mm});
+    m_mm.pushTempRoot(deferred);
+    for (int i = argCount - 1; i >= 0; i--) {
+        deferred->args.push_back(stackTop[-(i + 1)]);
+    }
+    m_mm.popTempRoot();
+    stackTop -= argCount + 1;
+    m_deferLists[m_frameCount - 1].push_back(
+        Value{static_cast<Obj*>(deferred)});
 }
 
 Runtime::OpResult Runtime::opBuildList(int count) {

@@ -26,6 +26,21 @@ struct HandlerDepthAnalysis {
     // False for an instruction no path from function entry reaches.
     // before/after are meaningless there.
     std::vector<bool> reached;
+
+    // Index (into the SAME instruction list) of the innermost PUSH_HANDLER
+    // whose protected region contains this instruction, aligned with
+    // `before` (the state immediately BEFORE the instruction runs); -1 when
+    // no handler is open. Threaded through the SAME CFG-driven worklist as
+    // `before`/`after`, not a plain byte-order bracket scan: a catch
+    // block's own bytes sit BETWEEN its PUSH_HANDLER and POP_HANDLER in
+    // byte order ("POP_HANDLER belongs only to the normal-completion path"
+    // — compiler.cpp), at a LOWER active-handler depth than the protected
+    // region around it (THROW already removed the record before jumping
+    // there) — a pure byte-order reading gets this wrong. A backend (S6,
+    // #459) uses this to know, statically, which compiled catch block a
+    // fallible op at this offset must branch to when the runtime reports
+    // the fault resolved at this function's own frame.
+    std::vector<int> activeHandler;
 };
 
 // Analyzes one function's own chunk. Does not recurse into nested
