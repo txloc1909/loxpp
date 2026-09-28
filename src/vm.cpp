@@ -705,35 +705,20 @@ InterpretResult VM::run(int stopAtFrameCount) {
             // catchOffset is relative to the current IP, just like JUMP.
             // ip points to the first byte after the PUSH_HANDLER instruction.
             Chunk::const_iterator catchIp = ip + catchOffset;
-            m_rt.m_handlerStack.push_back(
-                HandlerRecord{m_rt.m_frameCount, m_rt.stackTop, catchIp});
+            m_rt.pushHandler(m_rt.stackTop, catchIp);
             break;
         }
         case Op::POP_HANDLER: {
-            if (m_rt.m_handlerStack.empty()) {
+            if (m_rt.handlerStackDepth() == 0) {
                 RAISE_ERROR("BUG: POP_HANDLER with empty handler stack.");
                 return InterpretResult::RUNTIME_ERROR;
             }
-            m_rt.m_handlerStack.pop_back();
+            m_rt.popTopHandler();
             break;
         }
         case Op::DEFER_RECORD: {
             uint8_t argc = readByte();
-            // Pop callee and arguments from stack. Create an ObjDeferredCall
-            // object that captures them, and store it on the defer list.
-            Value callee = m_rt.stackTop[-(argc + 1)];
-            ObjDeferredCall* deferred = m_rt.m_mm.create<ObjDeferredCall>(
-                callee, VmAllocator<Value>{&m_rt.m_mm});
-            m_rt.m_mm.pushTempRoot(deferred);
-            for (int i = argc - 1; i >= 0; i--) {
-                deferred->args.push_back(m_rt.stackTop[-(i + 1)]);
-            }
-            m_rt.m_mm.popTempRoot();
-            // Pop arguments and callee from stack.
-            m_rt.stackTop -= argc + 1;
-            // Add to defer list for the current frame.
-            m_rt.m_deferLists[m_rt.m_frameCount - 1].push_back(
-                Value{static_cast<Obj*>(deferred)});
+            m_rt.opDeferRecord(argc);
             break;
         }
         case Op::RUN_DEFERS: {

@@ -322,6 +322,52 @@ class Runtime {
     void runtimeError(const char* format, ...);
     void markRoots();
 
+    // Pushes a handler record for a PUSH_HANDLER at the current frame depth
+    // — the interpreted case (vm.cpp) and compiled code's own rt_push_handler
+    // (backend/rt_capi.h) both call this, decoding catchOffset their own way
+    // first (an interpreter reads it from the bytecode stream; compiled code
+    // already knows it statically — see qbe_emitter.cpp). `checkpointTop` is
+    // the stack pointer AT PUSH_HANDLER time (the interpreted case's own
+    // `m_rt.stackTop`; compiled code's own `base + 8*height`, the fused-
+    // stack model's matching memory address for the same height —
+    // notes/qbe-backend.md's central design choice). `catchIp` is
+    // meaningful only to the interpreter's own dispatch loop (it resumes
+    // there directly); compiled code never reads a HandlerRecord's own
+    // catchIp back — see qbe_emitter.cpp's own comment on why it derives
+    // its catch target from handler_depth's static analysis instead.
+    void pushHandler(Value* checkpointTop, Chunk::const_iterator catchIp) {
+        m_handlerStack.push_back(
+            HandlerRecord{m_frameCount, checkpointTop, catchIp});
+    }
+
+    // POP_HANDLER's own body (vm.cpp, backend/rt_capi.h's rt_pop_handler):
+    // pops the innermost handler record. Callers must check
+    // handlerStackDepth() first — an empty stack here is a BUG (a
+    // compiler/decoder invariant violation), reported by the caller, not
+    // by this method.
+    void popTopHandler() { m_handlerStack.pop_back(); }
+
+    // DEFER_RECORD's own body (vm.cpp/backend/rt_capi.h): pops [callee,
+    // arg0, ..., argCount-1] and records them as a pending deferred call on
+    // the current frame's own defer list. No catchable error path — the
+    // one way this can fail is a stray allocation failure, the same as
+    // opClass/opDefineMethod above.
+    void opDeferRecord(int argCount);
+
+    // Sets the CURRENT (topmost) frame's own bytecode-offset bookkeeping
+    // to `offset` — Q4 (notes/qbe-backend.md): a compiled frame's own `ip`
+    // is set once, at call time (Runtime::call), and never advances the way
+    // the interpreter's own dispatch loop keeps it current. Without this, a
+    // stack trace built from a compiled frame always reports that
+    // function's very first line (Chunk::getLine's own fallback on a
+    // negative/stale offset), never the real fault site. The QBE emitter
+    // calls this (via rt_set_frame_offset, backend/rt_capi.h) once before
+    // every fallible op, with that op's own static bytecode offset.
+    void setCurrentFrameOffset(int offset) {
+        CallFrame& frame = m_frames[m_frameCount - 1];
+        frame.ip = frame.closure->function->chunk.cbegin() + offset;
+    }
+
     // Helper for handling a thrown error: searches handler stack LIFO, unwinds
     // frames if found, and updates m_frames/m_frameCount. See ThrowOutcome
     // above for the three possible results and what each obligates the
@@ -532,11 +578,18 @@ class Runtime {
     // same GC-visible bookkeeping), then invokes the attached code directly
     // instead of leaving the frame for VM::run() to interpret. The compiled
     // callee's own bytecode offset, defer list, and open upvalues are its
-    // own business; this only owns the frame's entry and exit. A nonzero
-    // return from the compiled code means it already reported a fatal
-    // error the same way a failing native call does — there is no
-    // catchable-throw status yet; that needs the handler-aware unwind this
-    // call does not attempt.
+    // own business; this only owns the frame's entry and exit.
+    //
+    // S6 (#459): the compiled callee's own return value is now a real
+    // three-way status (kRtOk/kRtThrow/kRtFatal — backend/rt_abi.h).
+    // kRtFatal collapses straight to OpResult::Fatal, same as before.
+    // kRtThrow means the callee's own CallFrame is already gone (unwound by
+    // handleThrow as part of resolving whichever fault propagated out of
+    // it) — this translates that back into the OpResult/stopAtFrameCount
+    // convention the rest of Runtime already understands, exactly the way
+    // fromThrow() does for every other call site: Resumed when this
+    // invocation's own context (m_frameCount > stopAtFrameCount) is still
+    // live, Stop otherwise.
     OpResult callCompiled(ObjClosure* closure, int argCount,
                           int stopAtFrameCount);
 

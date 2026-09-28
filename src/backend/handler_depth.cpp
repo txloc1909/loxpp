@@ -179,6 +179,35 @@ analyzeHandlerDepthIns(const std::vector<DecodedInstruction>& ins,
             setBefore(succ, after, worklist);
         }
     }
+
+    // Second pass: activeHandler, a purely lexical property (see the
+    // struct's own comment in handler_depth.h) computed by a plain
+    // byte-order bracket scan — independent of the CFG-driven worklist
+    // above, which exists to validate `before` across every reaching edge,
+    // not to derive this. Cross-checked against `before` below as a cheap
+    // consistency guard: any disagreement means a PUSH_HANDLER/POP_HANDLER
+    // pair is not actually byte-order-nested the way this pass assumes,
+    // which the "Structural LIFO pairing" check above should already have
+    // caught — this is defense in depth, not the primary guarantee.
+    out.activeHandler.assign(ins.size(), -1);
+    {
+        std::vector<int> stack;
+        for (size_t i = 0; i < ins.size(); i++) {
+            out.activeHandler[i] = stack.empty() ? -1 : stack.back();
+            if (out.reached[i] &&
+                static_cast<int>(stack.size()) != out.before[i]) {
+                throw std::runtime_error(
+                    "handler_depth: lexical bracket depth disagrees with "
+                    "CFG-derived depth at offset " +
+                    std::to_string(ins[i].offset) + " in " + functionId);
+            }
+            if (ins[i].op == Op::PUSH_HANDLER) {
+                stack.push_back(static_cast<int>(i));
+            } else if (ins[i].op == Op::POP_HANDLER) {
+                stack.pop_back(); // non-empty: validated by the earlier pass
+            }
+        }
+    }
     return out;
 }
 

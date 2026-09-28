@@ -44,17 +44,30 @@ int fakeCompiledFatal(Runtime* rt, Value* base) {
     g_record->calls++;
     g_record->rt = rt;
     g_record->base = base;
-    // A real compiled function that fails reaches this contract the same
-    // way an interpreted RETURN's own error paths do: it reports through
-    // runtimeError() (which resets the whole Runtime) before returning
-    // nonzero. callCompiled relies on that — it does not reset anything
-    // itself on a nonzero return (see callCompiled's own comment).
+    // A real compiled function that fails uncaught reaches this contract
+    // the same way an interpreted RETURN's own error paths do: it reports
+    // through runtimeError() (which resets the whole Runtime) before
+    // returning kRtFatal (rt_abi.h's three-way status — S6, #459).
+    // callCompiled relies on that — it does not reset anything itself on a
+    // kRtFatal return (see callCompiled's own comment).
     rt->runtimeError("fake fatal error");
-    return 1;
+    return kRtFatal;
 }
 
 int fakeCompiledThrows(Runtime*, Value*) {
     throw 42; // a stray C++ exception, not a reported runtime error (R3)
+}
+
+int fakeCompiledThrowStatus(Runtime*, Value*) {
+    // Simulates a compiled callee whose own frame already unwound (S6,
+    // #459): a real compiled function returns kRtThrow only when the
+    // handler resolving its own fault is not its own frame — see
+    // qbe_emitter.cpp's local-catch-or-propagate codegen and rt_abi.h's own
+    // comment on RtCompiledFn. This fake body does none of that unwinding
+    // itself (there is no real handler stack in this test); it only proves
+    // callCompiled's own translation of kRtThrow back into OpResult, given
+    // whatever m_frameCount/stopAtFrameCount it is called with.
+    return kRtThrow;
 }
 
 ObjUpvalue* g_capturedUpvalue = nullptr;
@@ -136,6 +149,40 @@ TEST(RtCallCompiled, NonzeroReturnIsFatalAndLeavesRuntimeAlreadyReset) {
     // callCompiled must not touch m_frameCount again on this path — doing
     // so would double-decrement a count that is already 0.
     EXPECT_EQ(rt.frameCount(), 0);
+}
+
+// S6 (#459): kRtThrow's own translation back into OpResult, exactly the
+// way fromThrow() translates ThrowOutcome for every other call site —
+// Resumed when this invocation's own context is still live (m_frameCount >
+// stopAtFrameCount), Stop otherwise.
+TEST(RtCallCompiled, ThrowStatusAboveStopBoundaryReportsResumed) {
+    Runtime rt;
+    ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    fn->arity = 0;
+    fn->code = reinterpret_cast<void*>(&fakeCompiledThrowStatus);
+    ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+
+    rt.push(Value{static_cast<Obj*>(closure)});
+    // stopAtFrameCount=0: after call() pushes this call's own frame,
+    // m_frameCount is 1, strictly above the boundary.
+    int status = rt_call(&rt, 0, /*stopAtFrameCount=*/0);
+
+    EXPECT_EQ(status, static_cast<int>(Runtime::OpResult::Resumed));
+}
+
+TEST(RtCallCompiled, ThrowStatusAtOrBelowStopBoundaryReportsStop) {
+    Runtime rt;
+    ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    fn->arity = 0;
+    fn->code = reinterpret_cast<void*>(&fakeCompiledThrowStatus);
+    ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+
+    rt.push(Value{static_cast<Obj*>(closure)});
+    // stopAtFrameCount=1: m_frameCount after the push is also 1, at (not
+    // above) the boundary.
+    int status = rt_call(&rt, 0, /*stopAtFrameCount=*/1);
+
+    EXPECT_EQ(status, static_cast<int>(Runtime::OpResult::Stop));
 }
 
 // R1 (blocking, PR #473 review round 1): callCompiled skipped

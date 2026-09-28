@@ -119,7 +119,17 @@ int rt_op_print(Runtime* rt) noexcept;
 // class, enum constructor). When the callee is a closure whose code is
 // already attached, this pushes the CallFrame and calls straight into that
 // code instead of leaving the frame for an interpreter to run.
-int rt_call(Runtime* rt, int argCount) noexcept;
+//
+// `stopAtFrameCount` (S6, #459) defaults to 0 so every existing caller
+// outside compiled code (this node's own unit tests, each checkpoint
+// harness's top-level `rt_call(rt, 0)`) keeps compiling unchanged — a
+// top-level call from C++ has no ambient compiled frame, so 0 is the right
+// boundary. A compiled function's own CALL lowering (qbe_emitter.cpp)
+// always passes its own per-function boundary explicitly (its own frame
+// depth minus one) so the returned status's Resumed/Stop distinction tells
+// it whether the throw resolved at ITS OWN frame or somewhere else — see
+// rt_abi.h's own comment on RtCompiledFn's three-way contract.
+int rt_call(Runtime* rt, int argCount, int stopAtFrameCount = 0) noexcept;
 
 // One wrapper per Runtime::op*() method (runtime.h) — the rest of the
 // polymorphic-dispatch opcodes CALL's own family does not cover.
@@ -247,6 +257,52 @@ void rt_close_upvalues(Runtime* rt, Value* last) noexcept;
 // catchable convention every other rt_op_* wrapper here does.
 int rt_check_stack(Runtime* rt, Value* neededTop,
                    int stopAtFrameCount) noexcept;
+
+// --- S6 (#459): status protocol, try/catch, defer, stack overflow --------
+
+// PUSH_HANDLER's own body (Runtime::pushHandler, runtime.h). `checkpointTop`
+// is `base + 8*height` at the height PUSH_HANDLER's own static analysis
+// gives it (the fused-stack model's own memory address for that height —
+// notes/qbe-backend.md's central design choice), the same value the
+// interpreted case's `m_rt.stackTop` holds at PUSH_HANDLER time. No error
+// path (a bare vector push_back) — void, like rt_close_upvalues.
+void rt_push_handler(Runtime* rt, Value* checkpointTop) noexcept;
+
+// POP_HANDLER's own body (vm.cpp): pops the current handler record. An
+// empty handler stack here is a BUG (vm.cpp's own RAISE_ERROR), reported
+// fatally — no catchable-throw path, matching rt_op_define_method's shape.
+int rt_pop_handler(Runtime* rt) noexcept;
+
+// THROW's own body: pops the value to raise (the emitter passes it in
+// directly, already loaded — chunk.h documents THROW as "pops the value to
+// raise"), then searches for a handler exactly as a runtime fault does
+// (Runtime::handleThrowOp). Never returns success (Op::THROW is terminal —
+// chunk.h: "control never falls through past THROW"); the emitter's own
+// codegen treats any status here as either a local catch or a propagate,
+// the same as every other fallible op — see qbe_emitter.cpp.
+int rt_throw(Runtime* rt, Value thrownValue, int stopAtFrameCount) noexcept;
+
+// DEFER_RECORD's own body (Runtime::opDeferRecord, runtime.h). No
+// catchable error path, matching rt_op_class/rt_op_define_method's shape.
+int rt_op_defer_record(Runtime* rt, int argCount) noexcept;
+
+// RUN_DEFERS's own body: pops this frame's own already-lexically-closed
+// handler records (Runtime::popHandlersOwnedByCurrentFrame — vm.cpp's own
+// comment on Op::RUN_DEFERS explains why: the compiler emits this only
+// immediately before RETURN, so any try/catch this frame itself opened is
+// already closed by the time it runs), then drains the frame's pending
+// defers (Runtime::runPendingDefers). A deferred call's own throw can only
+// be caught by an ANCESTOR frame now — never this one, since this frame's
+// own handlers are already gone — so a nonzero status here is always a
+// propagate, never a local-catch opportunity (qbe_emitter.cpp's own
+// Catchability::Propagate).
+int rt_run_defers(Runtime* rt, int stopAtFrameCount) noexcept;
+
+// Q4 (notes/qbe-backend.md): Runtime::setCurrentFrameOffset. The QBE
+// emitter calls this once before every fallible op, with that op's own
+// static bytecode offset, so a stack trace built from a compiled frame
+// reports the real fault site instead of that function's first line.
+void rt_set_frame_offset(Runtime* rt, int offset) noexcept;
 
 } // extern "C"
 
