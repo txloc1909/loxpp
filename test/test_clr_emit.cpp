@@ -1736,6 +1736,9 @@ TEST(EmitProgram, ReturnOfAFoldedLocalLoadsInsteadOfAssumingATemp) {
     DecodedFunction child;
     child.id = "0.0";
     child.function = mm.create<ObjFunction>();
+    // Root child before root's allocation: under LOXPP_STRESS_GC the next
+    // create collects an ObjFunction held only here, and emitProgram reads it.
+    mm.pushTempRoot(child.function);
     child.function->arity = 0;
     child.instructions = {nil, ret};
 
@@ -1812,6 +1815,9 @@ TEST(EmitProgram, ReturnWithMoreThanTheReturnValueOnTheStackThrows) {
     DecodedFunction child;
     child.id = "0.0";
     child.function = mm.create<ObjFunction>();
+    // Root child before root's allocation: under LOXPP_STRESS_GC the next
+    // create collects an ObjFunction held only here, and emitProgram reads it.
+    mm.pushTempRoot(child.function);
     child.instructions = {nil0, nil1, ret};
 
     FunctionStackAnalysis childAnalysis;
@@ -1869,6 +1875,9 @@ TEST(EmitProgram, MismatchedNestedChildCountThrowsInsteadOfReadingOutOfRange) {
     DecodedFunction child;
     child.id = "0.0";
     child.function = mm.create<ObjFunction>();
+    // Root child before root's allocation: under LOXPP_STRESS_GC the next
+    // create collects an ObjFunction held only here, and emitProgram reads it.
+    mm.pushTempRoot(child.function);
 
     DecodedFunction root;
     root.id = "0";
