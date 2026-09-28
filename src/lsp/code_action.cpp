@@ -59,6 +59,11 @@ const MatchExpr* matchInExpr(const Expr* e, std::size_t at,
         best = matchInExpr(u->operand.get(), at, best);
         break;
     }
+    case ExprKind::Len: {
+        const auto* l = static_cast<const tooling::LenExpr*>(e);
+        best = matchInExpr(l->argument.get(), at, best);
+        break;
+    }
     case ExprKind::Binary: {
         const auto* b = static_cast<const BinaryExpr*>(e);
         best = matchInExpr(b->left.get(), at, best);
@@ -277,6 +282,11 @@ const BinaryExpr* plusInExpr(const Expr* e, std::size_t at,
     case ExprKind::Unary: {
         const auto* u = static_cast<const tooling::UnaryExpr*>(e);
         best = plusInExpr(u->operand.get(), at, best);
+        break;
+    }
+    case ExprKind::Len: {
+        const auto* l = static_cast<const tooling::LenExpr*>(e);
+        best = plusInExpr(l->argument.get(), at, best);
         break;
     }
     case ExprKind::Logical: {

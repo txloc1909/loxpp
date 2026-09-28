@@ -28,26 +28,8 @@ static Value strNative(int /*argCount*/, Value* args) {
     return Value{static_cast<Obj*>(obj)};
 }
 
-static Value lenNative(int /*argCount*/, Value* args) {
-    if (isList(args[0])) {
-        auto* list = asObjList(as<Obj*>(args[0]));
-        return from<Number>(static_cast<double>(list->elements.size()));
-    }
-    if (isString(args[0])) {
-        auto* s = asObjString(as<Obj*>(args[0]));
-        return from<Number>(static_cast<double>(s->chars.size()));
-    }
-    if (isMap(args[0])) {
-        auto* map = asObjMap(as<Obj*>(args[0]));
-        return from<Number>(static_cast<double>(map->map.count()));
-    }
-    nativeRuntimeError("len() argument must be a list, string, or map.");
-    return from<Nil>(Nil{});
-}
-
 void registerGlobals(StdlibRegistrar& reg) {
     reg.defineGlobal("clock", clockNative, 0);
     reg.defineGlobal("input", inputNative, 0);
     reg.defineGlobal("str", strNative, 1);
-    reg.defineGlobal("len", lenNative, 1);
 }

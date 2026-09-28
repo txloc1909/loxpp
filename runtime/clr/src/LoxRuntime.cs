@@ -125,19 +125,6 @@ public static class LoxRuntime {
         globals.Define("clock", new LoxNative("clock", 0, args => PosixInterop.ProcessCpuTimeSeconds()));
         globals.Define("input", new LoxNative("input", 0, args => ReadByteLine(s_stdin)));
         globals.Define("str", new LoxNative("str", 1, args => LoxOps.Stringify(args[0])));
-        globals.Define("len", new LoxNative("len", 1, args => {
-            object v = args[0];
-            if (v is LoxList list) {
-                return (double)list.Elements.Count;
-            }
-            if (v is string s) {
-                return (double)s.Length;
-            }
-            if (v is LoxMap map) {
-                return (double)map.Size();
-            }
-            throw new LoxError("len() argument must be a list, string, or map.");
-        }));
         globals.Define("open", new LoxNative("open", 2, args => {
             if (args[0] is not string path || args[1] is not string mode) {
                 throw new LoxError("open() requires string path and mode.");

@@ -56,6 +56,7 @@ enum class TokenType : std::uint8_t {
     FOR,
     IF,
     IN,
+    LEN,
     NIL,
     OR,
     PRINT,

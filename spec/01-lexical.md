@@ -113,6 +113,7 @@ names:
 | `fun` | Function declaration |
 | `if` | Conditional |
 | `in` | Sequence membership test; for-in loop variable binding |
+| `len` | Length operator; dispatches to `__len__` on an Instance (see §04-semantics) |
 | `match` | Match expression (see §02-syntax) |
 | `nil` | Nil literal |
 | `or` | Logical disjunction |

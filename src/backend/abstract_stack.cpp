@@ -214,6 +214,7 @@ StackEffect stackEffect(const DecodedInstruction& ins) {
     // Pop 1, push 1: value replaced in place.
     case Op::NEGATE:
     case Op::NOT:
+    case Op::LEN:
     case Op::GET_TAG:
     case Op::IS_SEQ:
     case Op::INSTANCEOF:

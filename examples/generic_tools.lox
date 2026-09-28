@@ -61,13 +61,13 @@ p2.y = 99;
 print "sameFields(p1, p2) after mutation = " + str(sameFields(p1, p2));
 
 // A name-to-handler registry, resolved at runtime instead of an if/else
-// chain per command. Handlers here are native functions (str, len) and a
+// chain per command. Handlers here are native functions (str, type) and a
 // bound native method (a Map's `has`) — all valid callMethod() targets.
 class Formatters {}
 
 var formatters = Formatters();
 formatters.text = str;
-formatters.count = len;
+formatters.count = type;
 
 var seen = {"alice": true};
 formatters.seen = seen.has;
@@ -81,7 +81,7 @@ fun format(kind, value) {
 
 // CHECK: format("text", 42) = 42
 print "format(\"text\", 42) = " + str(format("text", 42));
-// CHECK: format("count", [1, 2, 3]) = 3
+// CHECK: format("count", [1, 2, 3]) = List
 print "format(\"count\", [1, 2, 3]) = " + str(format("count", [1, 2, 3]));
 // CHECK: format("seen", "alice") = true
 print "format(\"seen\", \"alice\") = " + str(format("seen", "alice"));

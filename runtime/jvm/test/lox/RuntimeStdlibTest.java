@@ -15,9 +15,9 @@ public final class RuntimeStdlibTest {
         check(call(globals, "clock") instanceof Double, "clock() returns a number");
         checkEquals("42", call(globals, "str", 42.0), "str(42)");
         checkEquals("true", call(globals, "str", true), "str(true)");
-        checkEquals(3.0, call(globals, "len", listOf(1.0, 2.0, 3.0)), "len(list)");
-        checkEquals(5.0, call(globals, "len", "hello"), "len(string)");
-        checkThrows(() -> call(globals, "len", true), LoxError.class, "len() rejects a non-sequence");
+        checkEquals(3.0, LoxOps.len(listOf(1.0, 2.0, 3.0)), "len(list)");
+        checkEquals(5.0, LoxOps.len("hello"), "len(string)");
+        checkThrows(() -> LoxOps.len(true), LoxError.class, "len() rejects a non-sequence");
 
         Object math = globals.get("math");
         check(math instanceof LoxInstance, "math is an instance");

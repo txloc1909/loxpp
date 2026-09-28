@@ -176,7 +176,7 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
     Value result = pop();
     closeUpvalues(frame->slots);
     popHandlersOwnedByCurrentFrame();
-    m_frameBoolCheck[m_frameCount - 1] = false;
+    m_frameResultCheck[m_frameCount - 1] = ResultCheck::None;
     m_frameResultOverrideSet[m_frameCount - 1] = false;
     m_frameCount--;
     stackTop = frame->slots;
@@ -360,7 +360,7 @@ Runtime::ThrowOutcome Runtime::handleThrow(Value thrownValue,
     while (m_frameCount > targetFrameCount) {
         int unwoundFrameIndex = m_frameCount - 1;
         closeUpvalues(m_frames[unwoundFrameIndex].slots);
-        m_frameBoolCheck[unwoundFrameIndex] = false;
+        m_frameResultCheck[unwoundFrameIndex] = ResultCheck::None;
         m_frameResultOverrideSet[unwoundFrameIndex] = false;
         // Reclaim this frame's own window before running its defers, not
         // only at the end of the whole unwind (step 3 below). A deferred
@@ -580,15 +580,15 @@ void Runtime::resetStack() {
     for (auto& deferList : m_deferLists) {
         deferList.clear();
     }
-    m_frameBoolCheck.fill(false);
+    m_frameResultCheck.fill(ResultCheck::None);
     m_frameResultOverrideSet.fill(false);
 }
 
 void Runtime::initProtocolNames() {
     const char* names[] = {
-        "__add__",  "__sub__",       "__mul__",      "__div__", "__mod__",
-        "__neg__",  "__lt__",        "__gt__",       "__eq__",  "__contains__",
-        "__call__", "__index_get__", "__index_set__"};
+        "__add__",  "__sub__",       "__mul__",       "__div__", "__mod__",
+        "__neg__",  "__lt__",        "__gt__",        "__eq__",  "__contains__",
+        "__call__", "__index_get__", "__index_set__", "__len__"};
     for (std::size_t i = 0; i < m_protocolNames.size(); i++) {
         m_protocolNames[i] = m_mm.makeString(names[i]);
     }
@@ -607,7 +607,7 @@ Runtime::tryBinaryMethod(Protocol proto, int stopAtFrameCount) {
         return std::nullopt;
     }
     return dispatchMethod(asObjClosure(as<Obj*>(method)), 1, stopAtFrameCount,
-                          false);
+                          ResultCheck::None);
 }
 
 std::optional<Runtime::OpResult>
@@ -623,19 +623,20 @@ Runtime::tryBinaryMethodBool(Protocol proto, int stopAtFrameCount) {
         return std::nullopt;
     }
     return dispatchMethod(asObjClosure(as<Obj*>(method)), 1, stopAtFrameCount,
-                          true);
+                          ResultCheck::Boolean);
 }
 
 Runtime::OpResult Runtime::dispatchMethod(ObjClosure* method, int argCount,
-                                          int stopAtFrameCount, bool checkBool,
+                                          int stopAtFrameCount,
+                                          ResultCheck check,
                                           const Value* resultOverride) {
     ThrowOutcome outcome = call(method, argCount, stopAtFrameCount);
     if (outcome != ThrowOutcome::Pushed) {
         return fromThrow(outcome);
     }
     int idx = m_frameCount - 1;
-    if (checkBool) {
-        m_frameBoolCheck[idx] = true;
+    if (check != ResultCheck::None) {
+        m_frameResultCheck[idx] = check;
     }
     if (resultOverride != nullptr) {
         m_frameResultOverride[idx] = *resultOverride;
@@ -716,7 +717,7 @@ Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
             // The receiver already sits at stackTop[-argCount-1], which
             // becomes slot 0 of the new frame.
             return dispatchMethod(asObjClosure(as<Obj*>(method)), argCount,
-                                  stopAtFrameCount, false);
+                                  stopAtFrameCount, ResultCheck::None);
         }
     }
     return fromThrow(raiseThrowableError(
@@ -1066,7 +1067,7 @@ Runtime::OpResult Runtime::opGetIndex(int stopAtFrameCount) {
             push(collectionVal);
             push(indexVal);
             return dispatchMethod(asObjClosure(as<Obj*>(method)), 1,
-                                  stopAtFrameCount, false);
+                                  stopAtFrameCount, ResultCheck::None);
         }
     }
     return fromThrow(raiseThrowableError(
@@ -1117,7 +1118,7 @@ Runtime::OpResult Runtime::opSetIndex(int stopAtFrameCount) {
             push(indexVal);
             push(val);
             return dispatchMethod(asObjClosure(as<Obj*>(method)), 2,
-                                  stopAtFrameCount, false, &val);
+                                  stopAtFrameCount, ResultCheck::None, &val);
         }
     }
     if (!isList(listVal)) {
@@ -1317,7 +1318,7 @@ Runtime::OpResult Runtime::opNegate(int stopAtFrameCount) {
                 m_protocolNames[static_cast<std::size_t>(Protocol::Neg)],
                 method)) {
             return dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
-                                  stopAtFrameCount, false);
+                                  stopAtFrameCount, ResultCheck::None);
         }
     }
     return fromThrow(raiseThrowableError(
@@ -1407,9 +1408,42 @@ Runtime::OpResult Runtime::opIn(int stopAtFrameCount) {
             stackTop[-2] = seq;
             stackTop[-1] = elem;
             return dispatchMethod(asObjClosure(as<Obj*>(method)), 1,
-                                  stopAtFrameCount, true);
+                                  stopAtFrameCount, ResultCheck::Boolean);
         }
     }
     runtimeError("Right operand of 'in' must be a list, string, or map.");
+    return OpResult::Fatal;
+}
+
+Runtime::OpResult Runtime::opLen(int stopAtFrameCount) {
+    // `len(x)` (Op::LEN): pop the operand, push its length. The built-in
+    // List/String/Map fast path first, then `__len__` on an Instance.
+    Value operand = peek(0);
+    if (isList(operand)) {
+        auto* list = asObjList(as<Obj*>(operand));
+        stackTop[-1] = from<Number>(static_cast<double>(list->elements.size()));
+        return OpResult::OK;
+    }
+    if (isString(operand)) {
+        auto* s = asObjString(as<Obj*>(operand));
+        stackTop[-1] = from<Number>(static_cast<double>(s->chars.size()));
+        return OpResult::OK;
+    }
+    if (isMap(operand)) {
+        auto* map = asObjMap(as<Obj*>(operand));
+        stackTop[-1] = from<Number>(static_cast<double>(map->map.count()));
+        return OpResult::OK;
+    }
+    if (isInstance(operand)) {
+        ObjInstance* instance = asObjInstance(as<Obj*>(operand));
+        Value method;
+        if (instance->klass->methods.get(
+                m_protocolNames[static_cast<std::size_t>(Protocol::Len)],
+                method)) {
+            return dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
+                                  stopAtFrameCount, ResultCheck::Number);
+        }
+    }
+    runtimeError("len() argument must be a list, string, or map.");
     return OpResult::Fatal;
 }

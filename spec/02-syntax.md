@@ -92,6 +92,7 @@ term           ::= factor ( ( "-" | "+" ) factor )* ;
 factor         ::= unary ( ( "/" | "*" | "%" ) unary )* ;
 
 unary          ::= ( "!" | "-" ) unary
+                 | "len" "(" expression ")"
                  | call ;
 
 call             ::= primary ( "(" arguments? ")" | "." IDENTIFIER | "[" subscriptOrSlice "]" )* ;

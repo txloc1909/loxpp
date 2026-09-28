@@ -831,6 +831,13 @@ void emitNegate(Emitter& e) {
              0);
 }
 
+// LEN is NOT/NEGATE's one-operand twin; the only difference is the callee.
+void emitLen(Emitter& e) {
+    e.b.emit("invokestatic lox/LoxOps/len(Ljava/lang/Object;)Ljava/lang/"
+             "Object;",
+             0);
+}
+
 // An earlier design added `reorderFoldedLeftOperand` here, one private
 // spill-reload per two-operand op, to fold a LEFT-folded operand back in.
 // The redesign deletes it: normalizeFoldedOperands now does the same
@@ -2414,6 +2421,9 @@ void emitBody(Emitter& e, bool isScript,
             break;
         case Op::NEGATE:
             emitNegate(e);
+            break;
+        case Op::LEN:
+            emitLen(e);
             break;
         case Op::ADD:
             emitAdd(e);

@@ -196,6 +196,7 @@ happens to equal a dunder name never participates.
 | `f()` on an Instance | `__call__(...)` | `f` |
 | `c[k]` | `__index_get__(k)` | `c` |
 | `c[k] = v` | `__index_set__(k, v)` | `c` |
+| `len(x)` | `__len__()` | `x` |
 
 `a != b` is `==` then logical negation: it derives from `__eq__` and has no
 method of its own. `a <= b` is `!(a > b)` and `a >= b` is `!(a < b)`; each
@@ -203,14 +204,20 @@ dispatches `__gt__` / `__lt__` and negates the result, with no `__le__` /
 `__ge__` method.
 
 The result of `__eq__`, `__lt__`, `__gt__`, and `__contains__` must be a
-Boolean. Any other result raises a catchable `OperatorResultTypeError` (see
-[Runtime Errors](#runtime-errors)). The result of every other method in the
-table above is unconstrained.
+Boolean, and the result of `__len__` must be a Number. Any other result raises
+a catchable `OperatorResultTypeError` (see [Runtime
+Errors](#runtime-errors)). The result of every other method in the table above
+is unconstrained.
 
 `__index_get__` takes the index as its single argument and may return any
 value. `__index_set__` takes the index and the assigned value; its return
 value is ignored, and the assignment expression evaluates to the assigned
 value (as with the built-in List and Map forms).
+
+`len` is a keyword, not a global: a program can no longer name a variable
+`len` or pass `len` as a first-class value. `len` on a List, String, or Map
+still returns the built-in length; on an Instance it dispatches `__len__`; on
+any other value it raises the same error the `len` global raised before.
 
 Internal equality — `in` against a List, `list.remove`, and map-key equality —
 always uses identity equality and never consults `__eq__`.

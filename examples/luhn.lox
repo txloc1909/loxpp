@@ -9,12 +9,12 @@
 //
 // Demonstrates: %, list indexing, arithmetic, functions.
 
-fun luhn(digits, len) {
+fun luhn(digits, n) {
     var sum = 0;
     var i = 0;
-    while (i < len) {
+    while (i < n) {
         // Position from the right: len - 1 - i  (0-based)
-        var posFromRight = len - 1 - i;
+        var posFromRight = n - 1 - i;
         var d = digits[i];
         if (posFromRight % 2 == 1) {   // even position (1-based) = double
             d = d * 2;
@@ -26,8 +26,8 @@ fun luhn(digits, len) {
     return sum % 10 == 0;
 }
 
-fun check(label, digits, len) {
-    if (luhn(digits, len)) {
+fun check(label, digits, n) {
+    if (luhn(digits, n)) {
         print label + ": VALID";
     } else {
         print label + ": INVALID";

@@ -714,6 +714,10 @@ void emitNegate(Emitter& e) {
     e.b.emit("call object [LoxRuntime]Lox.LoxOps::Negate(object)", 1, 0);
 }
 
+void emitLen(Emitter& e) {
+    e.b.emit("call object [LoxRuntime]Lox.LoxOps::Len(object)", 1, 0);
+}
+
 void emitBinaryOp(Emitter& e, const char* method) {
     e.b.emit(std::string("call object [LoxRuntime]Lox.LoxOps::") + method +
                  "(object, object)",
@@ -1800,6 +1804,9 @@ void emitBody(Emitter& e, bool isFunction,
             break;
         case Op::NEGATE:
             emitNegate(e);
+            break;
+        case Op::LEN:
+            emitLen(e);
             break;
         case Op::ADD:
             emitBinaryOp(e, "Add");
