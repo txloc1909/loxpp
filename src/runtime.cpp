@@ -1459,3 +1459,24 @@ Runtime::OpResult Runtime::opLen(int stopAtFrameCount) {
     runtimeError("len() argument must be a list, string, or map.");
     return OpResult::Fatal;
 }
+
+Runtime::OpResult Runtime::opGetGlobal(ObjString* name, int stopAtFrameCount) {
+    Value value;
+    if (!m_globals.get(name, value)) {
+        return fromThrow(raiseThrowableError(
+            "UndefinedVariableError", "Undefined variable.", stopAtFrameCount));
+    }
+    push(value);
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::opSetGlobal(ObjString* name, int stopAtFrameCount) {
+    // set() returns true if the key is *new*; an existing key is valid. An
+    // entirely new key means the variable was never declared.
+    if (m_globals.set(name, peek(0))) {
+        m_globals.del(name); // undo the spurious insertion
+        return fromThrow(raiseThrowableError(
+            "UndefinedVariableError", "Undefined variable.", stopAtFrameCount));
+    }
+    return OpResult::OK;
+}

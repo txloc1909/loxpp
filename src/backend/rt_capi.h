@@ -120,6 +120,36 @@ int rt_op_get_iter(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_iter_has_next(Runtime* rt) noexcept;
 int rt_op_iter_next(Runtime* rt) noexcept;
 
+// One wrapper per Runtime::op*() arithmetic/comparison helper (runtime.h,
+// moved out of vm.cpp by the operator-overloading mission's T1 node). Each
+// is the slow path only: the emitter (backend/qbe_emitter.h) inlines the
+// plain double-double fast path itself (Q5, notes/qbe-backend.md) and
+// calls these only once that fast path has already failed — the same
+// division of labor VM::run()'s own inline fast path/dispatchOp split
+// uses. No rt_op_in: IN is S5's opcode, not S3's (notes/qbe-backend.md,
+// "Staged plan").
+int rt_op_add(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_subtract(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_multiply(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_divide(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_modulo(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_negate(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_less(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_greater(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_equal(Runtime* rt, int stopAtFrameCount) noexcept;
+
+// One wrapper per Runtime's global-variable helper (runtime.h). `name` must
+// already be interned (rt_new_string/MemoryManager::makeString dedupe by
+// content, so a compiled name literal reaches the same ObjString* the
+// startup recompile's own DEFINE_GLOBAL used) — the emitter is responsible
+// for interning it before calling these, exactly the way it is responsible
+// for setting rt_set_top() first (Q1).
+int rt_op_define_global(Runtime* rt, ObjString* name) noexcept;
+int rt_op_get_global(Runtime* rt, ObjString* name,
+                     int stopAtFrameCount) noexcept;
+int rt_op_set_global(Runtime* rt, ObjString* name,
+                     int stopAtFrameCount) noexcept;
+
 } // extern "C"
 
 #if defined(__clang__) || defined(__GNUC__)

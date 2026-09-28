@@ -380,31 +380,22 @@ InterpretResult VM::run(int stopAtFrameCount) {
         }
         case Op::DEFINE_GLOBAL: {
             ObjString* name = asObjString(readConstant());
-            m_rt.m_globals.set(name, m_rt.peek(0));
-            m_rt.pop();
+            m_rt.opDefineGlobal(name);
             break;
         }
         case Op::GET_GLOBAL: {
             ObjString* name = asObjString(readConstant());
-            Value value;
-            if (!m_rt.m_globals.get(name, value)) {
-                CATCHABLE_OR_RETURN(tryCatchableError("UndefinedVariableError",
-                                                      "Undefined variable."));
-                break;
+            if (auto ret = dispatchOp(
+                    [&] { return m_rt.opGetGlobal(name, stopAtFrameCount); })) {
+                return *ret;
             }
-            m_rt.push(value);
             break;
         }
         case Op::SET_GLOBAL: {
             ObjString* name = asObjString(readConstant());
-            // set() returns true if the key is *new*; an existing key is
-            // valid. An entirely new key means the variable was never
-            // declared.
-            if (m_rt.m_globals.set(name, m_rt.peek(0))) {
-                m_rt.m_globals.del(name); // undo the spurious insertion
-                CATCHABLE_OR_RETURN(tryCatchableError("UndefinedVariableError",
-                                                      "Undefined variable."));
-                break;
+            if (auto ret = dispatchOp(
+                    [&] { return m_rt.opSetGlobal(name, stopAtFrameCount); })) {
+                return *ret;
             }
             break;
         }
