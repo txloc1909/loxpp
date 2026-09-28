@@ -204,3 +204,56 @@ int rt_op_iter_has_next(Runtime* rt) noexcept {
 int rt_op_iter_next(Runtime* rt) noexcept {
     return rtGuard(rt, [&] { return rt->opIterNext(); });
 }
+
+int rt_op_add(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opAdd(stopAtFrameCount); });
+}
+
+int rt_op_subtract(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opSubtract(stopAtFrameCount); });
+}
+
+int rt_op_multiply(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opMultiply(stopAtFrameCount); });
+}
+
+int rt_op_divide(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opDivide(stopAtFrameCount); });
+}
+
+int rt_op_modulo(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opModulo(stopAtFrameCount); });
+}
+
+int rt_op_negate(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opNegate(stopAtFrameCount); });
+}
+
+int rt_op_less(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opLess(stopAtFrameCount); });
+}
+
+int rt_op_greater(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opGreater(stopAtFrameCount); });
+}
+
+int rt_op_equal(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opEqual(stopAtFrameCount); });
+}
+
+int rt_op_define_global(Runtime* rt, ObjString* name) noexcept {
+    return rtGuard(rt, [&] {
+        rt->opDefineGlobal(name);
+        return Runtime::OpResult::OK;
+    });
+}
+
+int rt_op_get_global(Runtime* rt, ObjString* name,
+                     int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opGetGlobal(name, stopAtFrameCount); });
+}
+
+int rt_op_set_global(Runtime* rt, ObjString* name,
+                     int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opSetGlobal(name, stopAtFrameCount); });
+}
