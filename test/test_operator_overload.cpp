@@ -307,3 +307,35 @@ TEST(OperatorOverload, IterMissingMethodRaisesSameError) {
     ASSERT_EQ(h.run("class V {} for (var x in V()) {}"),
               InterpretResult::RUNTIME_ERROR);
 }
+
+// ---------------------------------------------------------------------------
+// slice dispatch (__slice__)
+// ---------------------------------------------------------------------------
+
+TEST(OperatorOverload, SliceDispatch) {
+    VMTestHarness h;
+    std::string src = "class V { init() { this.x = 100; }"
+                      "  __slice__(s, e) { return this.x + s + e; }"
+                      "}"
+                      "var v = V();"
+                      "var r = v[1:2];";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "103");
+}
+
+// The built-in fast path still wins for List and String slices.
+TEST(OperatorOverload, SliceBuiltinUnchanged) {
+    VMTestHarness h;
+    std::string src = "var l = [10, 20, 30, 40][1:3];"
+                      "var s = \"hello\"[1:3];";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("l"), "[20, 30]");
+    EXPECT_EQ(h.getGlobalStr("s"), "el");
+}
+
+TEST(OperatorOverload, SliceMissingMethodRaisesSameError) {
+    VMTestHarness h;
+    // The legacy slice error is fatal, not catchable.
+    ASSERT_EQ(h.run("class V {} var x = V()[0:1];"),
+              InterpretResult::RUNTIME_ERROR);
+}

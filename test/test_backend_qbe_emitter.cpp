@@ -366,7 +366,7 @@ TEST(QbeEmitter, SuperInvokeLowersToRtOpSuperInvoke) {
 TEST(QbeEmitter, SliceAndInLowerToTheirRtOpWrappers) {
     std::string ssa =
         emitScriptFrom("var s = \"hi\"; print s[0:1]; print 1 in [1];");
-    EXPECT_NE(ssa.find("call $rt_op_slice(l %rt)"), std::string::npos);
+    EXPECT_NE(ssa.find("call $rt_op_slice(l %rt,"), std::string::npos);
     EXPECT_NE(ssa.find("call $rt_op_in(l %rt,"), std::string::npos);
 }
 

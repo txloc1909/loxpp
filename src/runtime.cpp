@@ -627,9 +627,10 @@ void Runtime::resetStack() {
 
 void Runtime::initProtocolNames() {
     const char* names[] = {
-        "__add__",  "__sub__",       "__mul__",       "__div__", "__mod__",
-        "__neg__",  "__lt__",        "__gt__",        "__eq__",  "__contains__",
-        "__call__", "__index_get__", "__index_set__", "__len__", "__iter__"};
+        "__add__",       "__sub__",      "__mul__",  "__div__",
+        "__mod__",       "__neg__",      "__lt__",   "__gt__",
+        "__eq__",        "__contains__", "__call__", "__index_get__",
+        "__index_set__", "__len__",      "__iter__", "__slice__"};
     for (std::size_t i = 0; i < m_protocolNames.size(); i++) {
         m_protocolNames[i] = m_mm.makeString(names[i]);
     }
@@ -1370,13 +1371,26 @@ Runtime::OpResult Runtime::opBuildMap(int count, int stopAtFrameCount) {
     return OpResult::OK;
 }
 
-Runtime::OpResult Runtime::opSlice() {
+Runtime::OpResult Runtime::opSlice(int stopAtFrameCount) {
     // Stack (bottom -> top): seq, start, end
     Value endVal = peek(0);
     Value startVal = peek(1);
     Value seqVal = peek(2);
 
     if (!isList(seqVal) && !isString(seqVal)) {
+        if (isInstance(seqVal)) {
+            ObjInstance* instance = asObjInstance(as<Obj*>(seqVal));
+            Value method;
+            if (instance->klass->methods.get(
+                    m_protocolNames[static_cast<std::size_t>(Protocol::Slice)],
+                    method)) {
+                // The stack is already [seq, start, end]: the receiver sits
+                // at stackTop[-3] and the two arguments at [-2], [-1], the
+                // exact layout dispatchMethod expects for argCount 2.
+                return dispatchMethod(asObjClosure(as<Obj*>(method)), 2,
+                                      stopAtFrameCount, ResultCheck::None);
+            }
+        }
         runtimeError("Slice requires a List or String.");
         return OpResult::Fatal;
     }

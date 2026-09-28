@@ -422,7 +422,7 @@ class Runtime {
     void opDefineMethod(ObjString* name);
     OpResult opBuildList(int count);
     OpResult opBuildMap(int count, int stopAtFrameCount);
-    OpResult opSlice();
+    OpResult opSlice(int stopAtFrameCount);
     OpResult opGetTag();
     OpResult opMatchError(int stopAtFrameCount);
 
@@ -629,6 +629,7 @@ class Runtime {
         IndexSet,
         Len,
         Iter,
+        Slice,
         Count,
     };
 
