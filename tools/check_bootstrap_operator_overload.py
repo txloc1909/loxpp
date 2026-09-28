@@ -5,7 +5,8 @@ native's (issue #474).
 
 The bootstrap interpreter now dispatches the same dunder methods the native
 VM and JVM do (__add__ __sub__ __mul__ __div__ __mod__ __neg__ __lt__ __gt__
-__eq__ __contains__ __call__ __index_get__ __index_set__ __iter__ __len__).
+__eq__ __contains__ __call__ __index_get__ __index_set__ __iter__ __len__
+__slice__).
 This runs a small corpus of programs that exercise each method through both
 consumers and asserts byte-identical stdout.
 
@@ -108,6 +109,16 @@ CASES = [
         "print t[10];\n"
         "print (t[\"k\"] = 7);\n"
         "print t[0];\n",
+    ),
+    Case(
+        "slice",
+        "class S {\n"
+        "  init(n) { this.n = n; }\n"
+        "  __slice__(start, end) { return this.n + start + end; }\n"
+        "}\n"
+        "print S(100)[1:2];\n"
+        "print [10, 20, 30, 40][1:3];\n"
+        "print \"hello\"[1:3];\n",
     ),
     Case(
         "iter",
