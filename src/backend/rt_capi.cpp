@@ -233,6 +233,52 @@ int rt_op_iter_next(Runtime* rt) noexcept {
     return rtGuard(rt, [&] { return rt->opIterNext(); });
 }
 
+int rt_op_class(Runtime* rt, ObjString* name) noexcept {
+    return rtGuard(rt, [&] {
+        rt->opClass(name);
+        return Runtime::OpResult::OK;
+    });
+}
+
+int rt_op_set_property(Runtime* rt, ObjString* name) noexcept {
+    return rtGuard(rt, [&] { return rt->opSetProperty(name); });
+}
+
+int rt_op_define_method(Runtime* rt, ObjString* name) noexcept {
+    return rtGuard(rt, [&] {
+        rt->opDefineMethod(name);
+        return Runtime::OpResult::OK;
+    });
+}
+
+int rt_op_build_list(Runtime* rt, int count) noexcept {
+    return rtGuard(rt, [&] { return rt->opBuildList(count); });
+}
+
+int rt_op_build_map(Runtime* rt, int count, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opBuildMap(count, stopAtFrameCount); });
+}
+
+int rt_op_slice(Runtime* rt) noexcept {
+    return rtGuard(rt, [&] { return rt->opSlice(); });
+}
+
+int rt_op_get_tag(Runtime* rt) noexcept {
+    return rtGuard(rt, [&] { return rt->opGetTag(); });
+}
+
+int rt_op_match_error(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opMatchError(stopAtFrameCount); });
+}
+
+int rt_op_in(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opIn(stopAtFrameCount); });
+}
+
+int rt_op_len(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opLen(stopAtFrameCount); });
+}
+
 int rt_op_add(Runtime* rt, int stopAtFrameCount) noexcept {
     return rtGuard(rt, [&] { return rt->opAdd(stopAtFrameCount); });
 }
@@ -284,6 +330,10 @@ int rt_op_get_global(Runtime* rt, ObjString* name,
 int rt_op_set_global(Runtime* rt, ObjString* name,
                      int stopAtFrameCount) noexcept {
     return rtGuard(rt, [&] { return rt->opSetGlobal(name, stopAtFrameCount); });
+}
+
+Value rt_current_closure(Runtime* rt) noexcept {
+    return Value{static_cast<Obj*>(rt->currentClosure())};
 }
 
 Value rt_constant_at(Runtime*, Value closure, int constantIndex) noexcept {
