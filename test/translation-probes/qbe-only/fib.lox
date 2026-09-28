@@ -1,0 +1,7 @@
+// fib.lox — S4's own checkpoint (#457): naive recursive Fibonacci, CALL and
+// RETURN's own recursive round-trip with no closures involved.
+fun fib(n) {
+  if (n < 2) return n;
+  return fib(n - 1) + fib(n - 2);
+}
+print fib(20);
