@@ -588,7 +588,7 @@ void Runtime::initProtocolNames() {
     const char* names[] = {
         "__add__",  "__sub__",       "__mul__",       "__div__", "__mod__",
         "__neg__",  "__lt__",        "__gt__",        "__eq__",  "__contains__",
-        "__call__", "__index_get__", "__index_set__", "__len__"};
+        "__call__", "__index_get__", "__index_set__", "__len__", "__iter__"};
     for (std::size_t i = 0; i < m_protocolNames.size(); i++) {
         m_protocolNames[i] = m_mm.makeString(names[i]);
     }
@@ -1138,9 +1138,21 @@ Runtime::OpResult Runtime::opSetIndex(int stopAtFrameCount) {
     return OpResult::OK;
 }
 
-Runtime::OpResult Runtime::opGetIter() {
+Runtime::OpResult Runtime::opGetIter(int stopAtFrameCount) {
     // peek(0) keeps iterable on stack as GC root during create<>().
     Value iterable = peek(0);
+    if (isInstance(iterable)) {
+        ObjInstance* instance = asObjInstance(as<Obj*>(iterable));
+        Value method;
+        if (instance->klass->methods.get(
+                m_protocolNames[static_cast<std::size_t>(Protocol::Iter)],
+                method)) {
+            // Receiver is the iterable. The method's result must be a
+            // List/String/Map; Op::RETURN builds the iterator from it.
+            return dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
+                                  stopAtFrameCount, ResultCheck::Sequence);
+        }
+    }
     if (!isList(iterable) && !isString(iterable) && !isMap(iterable)) {
         runtimeError("Value is not iterable (expected list, string, or map).");
         return OpResult::Fatal;

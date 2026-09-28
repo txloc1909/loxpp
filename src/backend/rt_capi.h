@@ -116,7 +116,7 @@ int rt_op_super_invoke(Runtime* rt, ObjString* name, int argCount,
 int rt_op_inherit(Runtime* rt) noexcept;
 int rt_op_get_index(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_set_index(Runtime* rt, int stopAtFrameCount) noexcept;
-int rt_op_get_iter(Runtime* rt) noexcept;
+int rt_op_get_iter(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_iter_has_next(Runtime* rt) noexcept;
 int rt_op_iter_next(Runtime* rt) noexcept;
 

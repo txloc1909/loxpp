@@ -616,6 +616,16 @@ InterpretResult VM::run(int stopAtFrameCount) {
             // Discard the callee's stack window and push return value.
             m_rt.stackTop = frame->slots;
             m_rt.push(overrideSet ? overrideVal : result);
+            // __iter__: the method returns the sequence to iterate; replace it
+            // with the iterator. `result` is rooted on the stack during the
+            // create<>().
+            if (check == Runtime::ResultCheck::Sequence &&
+                (isList(result) || isString(result) || isMap(result))) {
+                Obj* obj = as<Obj*>(result);
+                ObjIterator* it = m_rt.m_mm.create<ObjIterator>(
+                    result, 0, isObjMap(obj) ? asObjMap(obj)->version : -1);
+                m_rt.stackTop[-1] = Value{static_cast<Obj*>(it)};
+            }
             FrameSync::loadTop(m_rt.m_frames, m_rt.m_frameCount, frame, ip,
                                chunk);
             if (check == Runtime::ResultCheck::Boolean && !is<bool>(result)) {
@@ -631,6 +641,13 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 CATCHABLE_OR_RETURN(
                     tryCatchableError("OperatorResultTypeError",
                                       "Operator method must return a Number."));
+                break;
+            }
+            if (check == Runtime::ResultCheck::Sequence &&
+                !(isList(result) || isString(result) || isMap(result))) {
+                CATCHABLE_OR_RETURN(tryCatchableError(
+                    "OperatorResultTypeError",
+                    "Operator method must return a sequence."));
                 break;
             }
             if (m_rt.m_frameCount <= stopAtFrameCount) {
@@ -794,7 +811,8 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::GET_ITER: {
-            if (auto ret = dispatchOp([&] { return m_rt.opGetIter(); })) {
+            if (auto ret = dispatchOp(
+                    [&] { return m_rt.opGetIter(stopAtFrameCount); })) {
                 return *ret;
             }
             break;

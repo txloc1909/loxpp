@@ -600,6 +600,16 @@ public final class LoxOps {
     }
 
     public static LoxIterator getIter(Object iterable) {
+        LoxClosure dunder = findDunder(iterable, "__iter__");
+        if (dunder != null) {
+            Object result = dunder.callAsSelf(iterable, new Object[0]);
+            if (!(result instanceof LoxList) && !(result instanceof String) &&
+                !(result instanceof LoxMap)) {
+                throw makeError("OperatorResultTypeError",
+                                "Operator method must return a sequence.");
+            }
+            return new LoxIterator(result);
+        }
         if (!(iterable instanceof LoxList) && !(iterable instanceof String) &&
             !(iterable instanceof LoxMap)) {
             throw new LoxError(

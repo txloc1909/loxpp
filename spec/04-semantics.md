@@ -197,6 +197,7 @@ happens to equal a dunder name never participates.
 | `c[k]` | `__index_get__(k)` | `c` |
 | `c[k] = v` | `__index_set__(k, v)` | `c` |
 | `len(x)` | `__len__()` | `x` |
+| `for (var v in x)` | `__iter__()` | `x` |
 
 `a != b` is `==` then logical negation: it derives from `__eq__` and has no
 method of its own. `a <= b` is `!(a > b)` and `a >= b` is `!(a < b)`; each
@@ -204,15 +205,17 @@ dispatches `__gt__` / `__lt__` and negates the result, with no `__le__` /
 `__ge__` method.
 
 The result of `__eq__`, `__lt__`, `__gt__`, and `__contains__` must be a
-Boolean, and the result of `__len__` must be a Number. Any other result raises
-a catchable `OperatorResultTypeError` (see [Runtime
-Errors](#runtime-errors)). The result of every other method in the table above
-is unconstrained.
+Boolean, the result of `__len__` must be a Number, and the result of
+`__iter__` must be a List, String, or Map. Any other result raises a catchable
+`OperatorResultTypeError` (see [Runtime Errors](#runtime-errors)). The result
+of every other method in the table above is unconstrained.
 
 `__index_get__` takes the index as its single argument and may return any
 value. `__index_set__` takes the index and the assigned value; its return
 value is ignored, and the assignment expression evaluates to the assigned
-value (as with the built-in List and Map forms).
+value (as with the built-in List and Map forms). `__iter__` takes no argument
+and returns the sequence to iterate; the existing iterator then consumes that
+sequence, so `ITER_HAS_NEXT`/`ITER_NEXT` are unchanged.
 
 `len` is a keyword, not a global: a program can no longer name a variable
 `len` or pass `len` as a first-class value. `len` on a List, String, or Map

@@ -193,8 +193,8 @@ int rt_op_set_index(Runtime* rt, int stopAtFrameCount) noexcept {
     return rtGuard(rt, [&] { return rt->opSetIndex(stopAtFrameCount); });
 }
 
-int rt_op_get_iter(Runtime* rt) noexcept {
-    return rtGuard(rt, [&] { return rt->opGetIter(); });
+int rt_op_get_iter(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opGetIter(stopAtFrameCount); });
 }
 
 int rt_op_iter_has_next(Runtime* rt) noexcept {

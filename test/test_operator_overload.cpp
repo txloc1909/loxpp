@@ -272,3 +272,38 @@ TEST(OperatorOverload, LenMissingMethodRaisesSameError) {
     ASSERT_EQ(h.run("class V {} var x = len(V());"),
               InterpretResult::RUNTIME_ERROR);
 }
+
+// ---------------------------------------------------------------------------
+// for-in dispatch (__iter__)
+// ---------------------------------------------------------------------------
+
+TEST(OperatorOverload, IterDispatch) {
+    VMTestHarness h;
+    std::string src =
+        "class R { init(n) { this.n = n; }"
+        "  __iter__() { var o = []; var i = 0;"
+        "               while (i < this.n) { o.append(i); i = i + 1; }"
+        "               return o; }"
+        "}"
+        "var sum = 0;"
+        "for (var x in R(4)) { sum = sum + x; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("sum"), "6");
+}
+
+TEST(OperatorOverload, NonSequenceIterResultRaises) {
+    VMTestHarness h;
+    std::string src =
+        "class V { __iter__() { return 42; } }"
+        "var kind;"
+        "try { for (var x in V()) {} } catch (e) { kind = e.kind; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "OperatorResultTypeError");
+}
+
+TEST(OperatorOverload, IterMissingMethodRaisesSameError) {
+    VMTestHarness h;
+    // The legacy "not iterable" error is fatal, not catchable.
+    ASSERT_EQ(h.run("class V {} for (var x in V()) {}"),
+              InterpretResult::RUNTIME_ERROR);
+}
