@@ -29,9 +29,9 @@ public static class RuntimeStdlibTest {
         CheckClockIsProcessorTime(t, globals);
         t.CheckEquals("42", Call(globals, "str", 42.0), "str(42)");
         t.CheckEquals("true", Call(globals, "str", true), "str(true)");
-        t.CheckEquals(3.0, Call(globals, "len", ListOf(1.0, 2.0, 3.0)), "len(list)");
-        t.CheckEquals(5.0, Call(globals, "len", "hello"), "len(string)");
-        t.CheckThrows(() => Call(globals, "len", true), typeof(LoxError), "len() rejects a non-sequence");
+        t.CheckEquals(3.0, LoxOps.Len(ListOf(1.0, 2.0, 3.0)), "len(list)");
+        t.CheckEquals(5.0, LoxOps.Len("hello"), "len(string)");
+        t.CheckThrows(() => LoxOps.Len(true), typeof(LoxError), "len() rejects a non-sequence");
 
         object math = globals.Get("math");
         t.Check(math is LoxInstance, "math is an instance");

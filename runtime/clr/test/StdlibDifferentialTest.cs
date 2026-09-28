@@ -193,22 +193,22 @@ public static class StdlibDifferentialTest {
         // params-array/null-literal ambiguity), not to one nil argument.
         lines.Add(("str(nil)", Call(globals, "str", new object[] { null })));
         lines.Add(("str(\"hello\")", Call(globals, "str", "hello")));
-        lines.Add(("len(\"hello\")", Call(globals, "len", "hello")));
-        lines.Add(("len(\"\")", Call(globals, "len", "")));
+        lines.Add(("len(\"hello\")", LoxOps.Len("hello")));
+        lines.Add(("len(\"\")", LoxOps.Len("")));
 
         var list = new LoxList();
         list.Elements.Add(1.0);
         list.Elements.Add(2.0);
         list.Elements.Add(3.0);
         lines.Add(("str([1, 2, 3])", Call(globals, "str", list)));
-        lines.Add(("len([1, 2, 3])", Call(globals, "len", list)));
-        lines.Add(("len([])", Call(globals, "len", new LoxList())));
+        lines.Add(("len([1, 2, 3])", LoxOps.Len(list)));
+        lines.Add(("len([])", LoxOps.Len(new LoxList())));
 
         var singleKeyMap = new LoxMap();
         singleKeyMap.Put("a", 1.0);
         lines.Add(("str({\"a\": 1})", Call(globals, "str", singleKeyMap)));
-        lines.Add(("len({\"a\": 1})", Call(globals, "len", singleKeyMap)));
-        lines.Add(("len({})", Call(globals, "len", new LoxMap())));
+        lines.Add(("len({\"a\": 1})", LoxOps.Len(singleKeyMap)));
+        lines.Add(("len({})", LoxOps.Len(new LoxMap())));
     }
 
     private static void RunBatch(TestSupport t, string nativeBin, List<(string Script, object Expected)> lines) {
