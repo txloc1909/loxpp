@@ -2,8 +2,12 @@
 #
 # Round-trips the S4 node's checkpoint (issue #457): probes 06 and 08, the
 # QBE-only V1/V3 adaptations (no BUILD_LIST/GET_INDEX/SET_INDEX — S5's job),
-# V2_shared, fib, and a deep-recursion probe (Q3's own measured test) must
-# be byte-identical to native (stdout + exit status).
+# V2_shared, fib, and two deep-recursion probes (Q3's own measured test)
+# must be byte-identical to native (stdout + exit status).
+# deep_recursion.lox trips Runtime::call's pre-existing FRAMES_MAX guard;
+# deep_recursion_wide.lox keeps 20 locals live per frame, so it trips the
+# new per-function STACK_MAX check (emitStackCheck, qbe_emitter.cpp)
+# before FRAMES_MAX can fire (found in review, PR #481).
 #
 # Unlike S3's checkpoint (one function per probe, one fixed harness symbol),
 # an S4 probe compiles a WHOLE program: the top-level script plus every
@@ -53,13 +57,37 @@ probes=(
     V2_shared
     qbe-only/fib
     qbe-only/deep_recursion
+    qbe-only/deep_recursion_wide
 )
+
+# deep_recursion.lox trips Runtime::call's pre-existing FRAMES_MAX guard;
+# deep_recursion_wide.lox is built to trip STACK_MAX first instead. Both
+# report "Stack overflow." on stderr and exit 70 (loxpp's one generic
+# status for every uncaught runtime error — confirmed against native: a
+# plain "not a callable value" TypeError exits 70 too), so a stdout+exit
+# comparison alone cannot tell a real overflow from any other error the
+# corrupted stack could produce below (found in review, PR #481, R1) — a
+# regression in STACK_MAX's own check could corrupt the stack silently and
+# still land on exit 70 with empty stdout, matching native by accident.
+# These probes get one more check: the actual "Stack overflow." diagnostic
+# text, on both sides.
+overflow_diagnostic_probes=(deep_recursion deep_recursion_wide)
+
+requires_overflow_diagnostic() {
+    local candidate="$1" probe
+    for probe in "${overflow_diagnostic_probes[@]}"; do
+        if [ "$candidate" = "$probe" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cd "$work"
 
-echo "== S4 checkpoint: calls and closures (probes 06, 08, V1/V2/V3, fib, deep recursion) =="
+echo "== S4 checkpoint: calls and closures (probes 06, 08, V1/V2/V3, fib, deep recursion x2) =="
 
 failures=0
 for p in "${probes[@]}"; do
@@ -128,13 +156,27 @@ for p in "${probes[@]}"; do
         continue
     fi
 
-    qbe_out="$(./"${name}_bin" "$src")" || qbe_status=$?
+    qbe_out="$(./"${name}_bin" "$src" 2>"$name.qbe_stderr")" || qbe_status=$?
     qbe_status="${qbe_status:-0}"
-    native_out="$("$loxpp_bin" "$src")" || native_status=$?
+    native_out="$("$loxpp_bin" "$src" 2>"$name.native_stderr")" || native_status=$?
     native_status="${native_status:-0}"
 
     if [ "$qbe_out" = "$native_out" ] && [ "$qbe_status" = "$native_status" ]; then
-        printf '  ok    %s\n' "$name"
+        diagnostic_ok=1
+        if requires_overflow_diagnostic "$name"; then
+            if ! grep -q "Stack overflow\." "$name.qbe_stderr" ||
+               ! grep -q "Stack overflow\." "$name.native_stderr"; then
+                diagnostic_ok=0
+            fi
+        fi
+        if [ "$diagnostic_ok" -eq 1 ]; then
+            printf '  ok    %s\n' "$name"
+        else
+            printf '  FAIL  %s (stdout+exit matched, but the "Stack overflow." diagnostic did not)\n' "$name"
+            printf '          qbe    stderr: %s\n' "$(head -1 "$name.qbe_stderr")"
+            printf '          native stderr: %s\n' "$(head -1 "$name.native_stderr")"
+            failures=$((failures + 1))
+        fi
     else
         printf '  FAIL  %s\n' "$name"
         printf '          qbe    (exit %s): %s\n' "$qbe_status" "$qbe_out"

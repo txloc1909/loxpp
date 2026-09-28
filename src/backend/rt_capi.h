@@ -59,10 +59,11 @@ struct RtFunctionDesc {
 // mismatch, writes a diagnostic to stderr and returns nullptr. The caller
 // owns the returned Runtime and must release it with rt_shutdown().
 //
-// `requireAllCompiled` (S4, #457, hazard R4 on issue #457 — found reviewing
-// S2's PR #473): when true, rt_startup additionally walks the WHOLE
-// rebuilt function tree and fails (with a diagnostic naming the missing
-// function's id) unless every function in it got code attached. Calling an
+// `requireAllCompiled` (S4, #457, hazard found reviewing S2's PR #473 —
+// tagged R4 on that PR's inline review comments): when true, rt_startup
+// additionally walks the WHOLE rebuilt function tree and fails (with a
+// diagnostic naming the missing function's id) unless every function in
+// it got code attached. Calling an
 // interpreted-fallback closure (function->code == nullptr) from compiled
 // code pushes a CallFrame nobody ever interprets — VM::run()'s dispatch
 // loop, opCall()'s only consumer that can drain it, never runs in a
