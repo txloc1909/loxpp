@@ -1033,6 +1033,21 @@ jobs:
             loxpp-dev-qbe:latest \
             bash -c "cmake --preset release && cmake --build build --target loxrt -j\$(nproc) && tools/check_qbe_libloxrt.sh"
 
+      # release preset again, same reason as S2's own step: native's stdout
+      # must not carry LOXPP_DEBUG_PRINT_CODE's bytecode trace, or every
+      # probe "diverges" from the QBE-compiled binary even when nothing is
+      # wrong. Builds the native `loxpp` binary (the diff's other side) and
+      # `qbe_emit_probe` (this node's own checkpoint driver) alongside
+      # `loxrt`, then round-trips probes 01-05 and 15 through the real
+      # toolchain.
+      - name: Check straight-line code and jumps (S3)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-qbe:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_probe loxrt -j\$(nproc) && tools/check_qbe_s3_straight_line.sh"
+
   release-static:
     name: Static musl release build
     runs-on: ubuntu-latest
