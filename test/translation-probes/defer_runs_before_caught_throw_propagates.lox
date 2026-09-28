@@ -1,0 +1,19 @@
+// Proves a deferred call still RUNS when its own function exits by a
+// `throw` instead of a `return`: `f`'s pending deferred call
+// (`note("deferred")`) must run before the `Boom` fault propagates to the
+// caller's `catch` (spec/04-semantics.md, `defer` Statement step 4, and
+// `throw` Statement step 5's "every pending deferred call on the unwind
+// path has already run"). stdout must show "deferred" before "caught",
+// proving the deferred call's side effect is visible on this path too, not
+// only on an ordinary return (see defer_runs_on_normal_return.lox).
+class Boom {}
+fun note(s) { print s; }
+fun f() {
+  defer note("deferred");
+  throw Boom();
+}
+try {
+  f();
+} catch (e) {
+  print "caught";
+}

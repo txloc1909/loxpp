@@ -1,0 +1,14 @@
+// Proves a deferred call actually RUNS: `f`'s own `defer note("deferred")`
+// must execute before `f` is "fully exited" (spec/04-semantics.md, `defer`
+// Statement step 4), with its side effect (the print) observable even
+// though `f` exits by an ordinary `return`, not a fault. The deferred
+// call's own return value must not change `f`'s already-computed return
+// value (same spec step): stdout must show "deferred" before "1", proving
+// both that the deferred call ran at all and that it ran at the right
+// point relative to the return.
+fun note(s) { print s; }
+fun f() {
+  defer note("deferred");
+  return 1;
+}
+print f();

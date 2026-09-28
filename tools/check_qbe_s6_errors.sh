@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 #
 # Round-trips the S6 node's checkpoint (issue #459): try/catch, throw,
-# defer, stack overflow — fourteen probes covering the status protocol
-# (Q2), catchable and fatal stack overflow (Q3), the unwind guard's own
-# edge cases (a spoofed "kind" field, a throw on normal return, a throw
-# that replaces an unrelated fault — all while a real StackOverflowError
-# unwinds elsewhere), the two fatal fast paths that must skip pending
-# defers entirely, a return leaking out of a still-open try, and a throw
-# ending a try body's own local bindings. Same whole-program driver as
-# S4/S5's own checkpoint scripts — see check_qbe_s5_rest_of_language.sh's
-# own file comment for why.
+# defer, stack overflow. Covers the status protocol (Q2), catchable and
+# fatal stack overflow (Q3), the unwind guard's own edge cases (a spoofed
+# "kind" field, a throw on normal return, a throw that replaces an
+# unrelated fault — all while a real StackOverflowError unwinds
+# elsewhere), the two fatal fast paths that must skip pending defers
+# entirely, a return leaking out of a still-open try, a throw ending a
+# try body's own local bindings, and — the two probes every other one
+# here leaves untested — a deferred call's side effect actually becoming
+# observable on an ordinary successful return and on a caught throw.
+# Every probe above the fatal/skip-path ones still passes with
+# RUN_DEFERS wired to a no-op (none of them observes a deferred call
+# that is expected to run and print), which is why the last two exist:
+# each asserts non-empty stdout produced only by the deferred call
+# itself. Same whole-program driver as S4/S5's own checkpoint scripts —
+# see check_qbe_s5_rest_of_language.sh's own file comment for why.
 #
 # Build with the release preset first (AGENTS.md): the debug preset leaves
 # LOXPP_DEBUG_PRINT_CODE/LOXPP_DEBUG_TRACE_EXECUTION on by default, so
@@ -59,6 +65,8 @@ probes=(
     "58_defer_overflow_fatal_fast_path:58_defer_overflow_fatal_fast_path"
     "59_return_out_of_try_leak:59_return_out_of_try_leak"
     "60_throw_ends_try_binding:60_throw_ends_try_binding"
+    "defer_runs_on_normal_return:defer_runs_on_normal_return"
+    "defer_runs_before_caught_throw_propagates:defer_runs_before_caught_throw_propagates"
 )
 
 work="$(mktemp -d)"
