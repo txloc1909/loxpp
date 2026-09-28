@@ -385,6 +385,21 @@ class Runtime {
     OpResult opIn(int stopAtFrameCount);
     OpResult opLen(int stopAtFrameCount);
 
+    // Global-variable access, moved out of VM::run() the same way (Layer 1)
+    // so compiled code (the QBE backend) can reach it: compiled code has no
+    // constant pool of its own to look a name up in, so DEFINE_GLOBAL/
+    // GET_GLOBAL/SET_GLOBAL become callable helpers exactly like opAdd..opIn
+    // above. defineGlobal never fails (the opcode has no error path in
+    // VM::run() either); the get/set helpers raise the same catchable
+    // UndefinedVariableError, through the same raiseThrowableError/
+    // stopAtFrameCount convention.
+    void opDefineGlobal(ObjString* name) {
+        m_globals.set(name, peek(0));
+        pop();
+    }
+    OpResult opGetGlobal(ObjString* name, int stopAtFrameCount);
+    OpResult opSetGlobal(ObjString* name, int stopAtFrameCount);
+
     // Op::THROW's own op*()-shaped entry point: handleThrow() collapsed
     // through fromThrow() (private below) into the same OpResult contract
     // every other op*() call site uses, so Op::THROW can go through
