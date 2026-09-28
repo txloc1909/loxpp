@@ -133,6 +133,21 @@ CASES = [
         "print a in [b];\n"
         "print a == b;\n",
     ),
+    # A dunder declared with the wrong parameter count must raise the ordinary
+    # catchable ArityError, not run the method and read args out of bounds.
+    Case(
+        "dunder_arity",
+        "class C { __call__(a, b) { return a + b; } }\n"
+        "try { C()(1); } catch (e) { print e.kind; }\n"
+        "class V { __add__(a, b) { return a + b; } }\n"
+        "try { V() + V(); } catch (e) { print e.kind; }\n"
+        "class U { __lt__() { return true; } }\n"
+        "try { U() < U(); } catch (e) { print e.kind; }\n"
+        "class W { __neg__(x) { return x; } }\n"
+        "try { -W(); } catch (e) { print e.kind; }\n"
+        "class X { __call__(a) { return a; } }\n"
+        "try { X()(1, 2, 3); } catch (e) { print e.kind; }\n",
+    ),
 ]
 
 

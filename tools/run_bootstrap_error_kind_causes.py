@@ -218,6 +218,10 @@ PROBES = [
     ("operator method returned a non-sequence",
      "class C { __iter__() { return 42; } } try { for (var x in C()) {} } catch (e) { print e.kind; }",
      CATCHABLE, "OperatorResultTypeError", '"Operator method must return a sequence."'),
+    ("operator method declared the wrong arity",
+     "class C { __call__(a, b) { return a + b; } } try { C()(1); } catch (e) { print e.kind; }",
+     CATCHABLE, "ArityError",
+     '"Expected " + str(this.arity()) + " arguments but got " + str(len(args)) + "."'),
 
     # --- fused pairs: same bootstrap kind, one catchable probe and one fatal probe ---
     ("call of a non-callable value (fused, catchable)", "try { 42(); } catch (e) { print e.kind; }",

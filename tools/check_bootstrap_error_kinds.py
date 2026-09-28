@@ -120,6 +120,7 @@ REVIEWED_NON_TABLE_KINDS = {
 # JUDGED only after actually judging that specific site against the spec
 # table, never as part of an unrelated change.
 EXPECTED_CALLS = [
+    ('ArityError', '"Expected " + str(this.arity()) + " arguments but got " + str(len(args)) + "."', JUDGED),
     ('StackOverflowError', '"Stack overflow."', JUDGED),
     ('ReflectionArityError', '"Expected at least 2 arguments."', JUDGED),
     ('ReflectionFieldNameError', '"Field name must be a string."', JUDGED),

@@ -1534,6 +1534,15 @@ class LoxFunction {
     }
 
     call(interp, args) {
+        // Native's own Runtime::call checks arity before it enters the frame,
+        // so a wrong-arity dunder dispatch (findDunder's call sites) raises
+        // the ordinary catchable ArityError instead of reading args[i] out
+        // of bounds below. The ordinary call sites (evalCall, deferred
+        // calls) check first and never reach this branch.
+        if (len(args) != this.arity()) {
+            interp.setError("ArityError", "Expected " + str(this.arity()) + " arguments but got " + str(len(args)) + ".", 0);
+            return nil;
+        }
         var callEnv = Environment(this.closure);
         var i = 0;
         while (i < len(this.params)) {
