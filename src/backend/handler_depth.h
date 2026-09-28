@@ -30,18 +30,15 @@ struct HandlerDepthAnalysis {
     // Index (into the SAME instruction list) of the innermost PUSH_HANDLER
     // whose protected region contains this instruction, aligned with
     // `before` (the state immediately BEFORE the instruction runs); -1 when
-    // no handler is open. Unlike `before`/`after`, this is a purely lexical
-    // property of an instruction's own byte position: PUSH_HANDLER/
-    // POP_HANDLER always form a byte-order-nested bracket (the compiler
-    // emits a try's protected region and catch body as one contiguous run
-    // of bytes, however deeply try/catch nests — a `break`/`continue`/
-    // `return` that exits a try early either emits its own matching
-    // POP_HANDLER(s) first (break/continue — compiler.cpp) or the runtime
-    // cleans up unconditionally at frame exit (return — Runtime::
-    // popHandlersOwnedByCurrentFrame), so this never needs to look past a
-    // jump to know what is "open" at a given byte position). A backend
-    // (S6, #459) uses this to know, statically, which compiled catch block
-    // a fallible op at this offset must branch to when the runtime reports
+    // no handler is open. Threaded through the SAME CFG-driven worklist as
+    // `before`/`after`, not a plain byte-order bracket scan: a catch
+    // block's own bytes sit BETWEEN its PUSH_HANDLER and POP_HANDLER in
+    // byte order ("POP_HANDLER belongs only to the normal-completion path"
+    // — compiler.cpp), at a LOWER active-handler depth than the protected
+    // region around it (THROW already removed the record before jumping
+    // there) — a pure byte-order reading gets this wrong. A backend (S6,
+    // #459) uses this to know, statically, which compiled catch block a
+    // fallible op at this offset must branch to when the runtime reports
     // the fault resolved at this function's own frame.
     std::vector<int> activeHandler;
 };

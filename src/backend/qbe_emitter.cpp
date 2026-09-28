@@ -2,8 +2,10 @@
 
 #include "cfg.h"
 #include "exec_objects.h" // ObjFunction (chunk/arity), for CONSTANT/global-name lookups
-#include "native_pops.h" // opName(Op), for error messages
+#include "handler_depth.h" // activeHandler (S6, #459)
+#include "native_pops.h"   // opName(Op), for error messages
 #include "object.h"
+#include "rt_abi.h" // kRtOk/kRtThrow/kRtFatal (S6, #459)
 #include "value.h"
 
 #include <algorithm>
@@ -32,6 +34,14 @@ using detail::VAL_FALSE;
 using detail::VAL_NIL;
 using detail::VAL_TRUE;
 
+// Wire values of Runtime::OpResult (runtime.h) — a rt_op_*/rt_call wrapper's
+// own raw status, distinct from the compiled function's own kRtOk/kRtThrow/
+// kRtFatal (rt_abi.h). This file emits only .ssa text, never links against
+// Runtime itself, so these are plain literals rather than an include — kept
+// in one place, next to their only two uses, rather than repeated inline.
+constexpr int kOpResultResumed = 1;
+constexpr int kOpResultFatal = 3;
+
 [[noreturn]] void unsupported(Op op) {
     throw std::runtime_error(
         "qbe_emitter: opcode not supported by this node (S3 straight-line "
@@ -49,11 +59,14 @@ class Emitter {
   public:
     Emitter(const DecodedFunction& fn, const FunctionStackAnalysis& analysis,
             std::string qbeSymbol)
-        : m_fn(fn), m_symbol(std::move(qbeSymbol)) {
+        : m_fn(fn), m_symbol(std::move(qbeSymbol)),
+          m_handlerDepth(analyzeHandlerDepth(fn)) {
         for (std::size_t i = 0; i < fn.instructions.size(); i++) {
             m_stateAt.emplace(fn.instructions[i].offset,
                               std::pair{analysis.before[i], analysis.after[i]});
             m_reachedAt.emplace(fn.instructions[i].offset, analysis.reached[i]);
+            m_activeHandlerAt.emplace(fn.instructions[i].offset,
+                                      m_handlerDepth.activeHandler[i]);
             // Q3 (notes/qbe-backend.md): the high-water mark over every
             // REACHED instruction's raw height (locals and temporaries
             // together — StackState::height, not operandDepth()) is this
@@ -70,16 +83,19 @@ class Emitter {
 
     std::string run() {
         Cfg cfg = buildCfg(m_fn.instructions);
-        if (!cfg.handlerEntries.empty()) {
-            throw std::runtime_error(
-                "qbe_emitter: PUSH_HANDLER not supported by this node (S3/S4 "
-                "straight-line code, jumps, calls and closures) — see S6, "
-                "#459");
-        }
         if (cfg.blocks.empty()) {
             throw std::runtime_error(
                 "qbe_emitter: function with no basic blocks — "
                 "decoder/compiler drift");
+        }
+        // S6 (#459): maps a PUSH_HANDLER's own bytecode offset to its catch
+        // block's cfg label — m_activeHandlerAt (constructor, above) names
+        // the PUSH_HANDLER instruction active at a given offset by ITS OWN
+        // offset (via m_fn.instructions' own layout, handler_depth.h); this
+        // resolves that to the compiled label a local catch must jump to.
+        for (const HandlerEntry& he : cfg.handlerEntries) {
+            m_pushOffsetToCatchLabel[he.pushHandlerOffset] =
+                cfg.blocks[static_cast<std::size_t>(he.catchBlock)].label;
         }
 
         m_body << "export function w $" << m_symbol << "(l %rt, l %base) {\n";
@@ -97,13 +113,27 @@ class Emitter {
   private:
     const DecodedFunction& m_fn;
     std::string m_symbol;
+    HandlerDepthAnalysis m_handlerDepth;
     std::unordered_map<int, std::pair<StackState, StackState>> m_stateAt;
     std::unordered_map<int, bool> m_reachedAt;
+    // Offset -> index (into m_fn.instructions) of the innermost active
+    // PUSH_HANDLER at that offset, -1 when none (S6, #459).
+    std::unordered_map<int, int> m_activeHandlerAt;
+    // A PUSH_HANDLER's own offset -> its catch block's cfg label, built once
+    // cfg is available (run(), above).
+    std::unordered_map<int, std::string> m_pushOffsetToCatchLabel;
     std::ostringstream m_data;
     std::ostringstream m_body;
     int m_tempCounter{0};
     int m_dataCounter{0};
     int m_maxHeight{0};
+    // This function's own frame depth minus one, computed once in the
+    // prologue (emitStackCheck) — every fallible call this function makes
+    // passes this as its own stopAtFrameCount, so OpResult::Resumed from
+    // that call means exactly "resolved at MY OWN frame" (rt_abi.h's own
+    // comment on RtCompiledFn explains why). Empty until emitStackCheck
+    // runs; every other emission happens after it (run()'s own order).
+    std::string m_stopTemp;
 
     std::string newTemp() { return "%t" + std::to_string(m_tempCounter++); }
 
@@ -240,54 +270,143 @@ class Emitter {
         return t;
     }
 
-    // Runs a runtime call whose arguments (beyond `l %rt`) are already typed
-    // (each entry is a full "l %x" / "w 5" token) and, on a nonzero status,
-    // returns 1 immediately — the simplified fatal-only contract this node
-    // uses for every runtime call (see qbe_emitter.h's file comment on the
-    // gap this leaves for S6).
+    // How a runtime call's nonzero status is handled (S6, #459, Q2):
+    //   Fatal:     the wrapper's own C signature has no stopAtFrameCount
+    //              parameter (rt_capi.h) — its OWN implementation only ever
+    //              calls runtimeError() directly, never raiseThrowableError
+    //              (verified against runtime.cpp for every such wrapper),
+    //              so any nonzero status is unconditionally fatal. Simple
+    //              2-way: 0 continues, nonzero propagates kRtFatal.
+    //   Local:     the wrapper takes stopAtFrameCount, and this call site
+    //              sits inside a try whose catch block IS a legal resume
+    //              target here (an ordinary fallible op). 3-way: 0
+    //              continues; kRtFatal(2) propagates as kRtFatal;
+    //              OpResult::Resumed(1) — which, since this call was passed
+    //              m_stopTemp (this function's own frame depth minus one —
+    //              see m_stopTemp's own comment), means exactly "resolved
+    //              at MY OWN frame" — jumps to the statically active catch
+    //              block (m_activeHandlerAt); OpResult::Stop(2) propagates
+    //              as kRtThrow.
+    //   Propagate: like Local, but NEVER attempts a local jump even on
+    //              Resumed — RUN_DEFERS' own case (its own comment):
+    //              this frame's handlers are already closed by the time it
+    //              runs, so any handler that resolves a deferred call's own
+    //              throw belongs to an ancestor, never to this frame.
+    enum class Catchability { Fatal, Local, Propagate };
+
+    // Runs a runtime call whose arguments (beyond `l %rt`) are already
+    // typed (each entry is a full "l %x" / "w 5" token). `offset` is this
+    // instruction's own static bytecode offset — stored into the frame
+    // before the call (Q4: rt_set_frame_offset) so a stack trace built from
+    // a fault inside this call reports the real line, not this function's
+    // first one.
     void callSlowPathTyped(const std::string& fnName, int topHeight,
-                           const std::vector<std::string>& typedArgs) {
+                           const std::vector<std::string>& typedArgs,
+                           int offset, Catchability catchability) {
         std::string topAddr = addr(topHeight);
         m_body << "\tcall $rt_set_top(l %rt, l " << topAddr << ")\n";
+        m_body << "\tcall $rt_set_frame_offset(l %rt, w " << offset << ")\n";
         std::string status = newTemp();
         m_body << "\t" << status << " =w call $" << fnName << "(l %rt";
         for (const std::string& a : typedArgs) {
             m_body << ", " << a;
         }
         m_body << ")\n";
-        std::string bad = newTemp();
-        m_body << "\t" << bad << " =w cnew " << status << ", 0\n";
-        std::string failLabel =
-            "@" + m_symbol + "_fail" + std::to_string(m_tempCounter);
         std::string okLabel =
             "@" + m_symbol + "_ok" + std::to_string(m_tempCounter);
-        m_body << "\tjnz " << bad << ", " << failLabel << ", " << okLabel
+        std::string badLabel =
+            "@" + m_symbol + "_bad" + std::to_string(m_tempCounter);
+        std::string bad = newTemp();
+        m_body << "\t" << bad << " =w cnew " << status << ", 0\n";
+        m_body << "\tjnz " << bad << ", " << badLabel << ", " << okLabel
                << "\n";
-        m_body << failLabel << "\n\tret 1\n";
+        m_body << badLabel << "\n";
+        if (catchability == Catchability::Fatal) {
+            m_body << "\tret " << kRtFatal << "\n";
+            m_body << okLabel << "\n";
+            return;
+        }
+        std::string isFatal = newTemp();
+        m_body << "\t" << isFatal << " =w ceqw " << status << ", "
+               << kOpResultFatal << "\n";
+        std::string fatalLabel =
+            "@" + m_symbol + "_fatal" + std::to_string(m_tempCounter);
+        std::string resolvedLabel =
+            "@" + m_symbol + "_resolved" + std::to_string(m_tempCounter);
+        m_body << "\tjnz " << isFatal << ", " << fatalLabel << ", "
+               << resolvedLabel << "\n";
+        m_body << fatalLabel << "\n\tret " << kRtFatal << "\n";
+        m_body << resolvedLabel << "\n";
+        // OpResult::Resumed(1) here means the throw resolved at exactly
+        // this function's own frame (m_stopTemp is this frame's own depth
+        // minus one — see its own comment); OpResult::Stop(2) means it
+        // resolved somewhere else. Only Local ever attempts the jump, and
+        // only when handler_depth found a statically active handler here —
+        // Resumed with no active handler, or under Propagate, is treated
+        // exactly like Stop: propagate kRtThrow.
+        std::optional<std::string> localCatchLabel =
+            catchability == Catchability::Local ? activeCatchLabelAt(offset)
+                                                : std::nullopt;
+        if (!localCatchLabel.has_value()) {
+            m_body << "\tret " << kRtThrow << "\n";
+            m_body << okLabel << "\n";
+            return;
+        }
+        std::string isResumed = newTemp();
+        m_body << "\t" << isResumed << " =w ceqw " << status << ", "
+               << kOpResultResumed << "\n";
+        std::string localLabel =
+            "@" + m_symbol + "_local" + std::to_string(m_tempCounter);
+        std::string propagateLabel =
+            "@" + m_symbol + "_propagate" + std::to_string(m_tempCounter);
+        m_body << "\tjnz " << isResumed << ", " << localLabel << ", "
+               << propagateLabel << "\n";
+        m_body << propagateLabel << "\n\tret " << kRtThrow << "\n";
+        m_body << localLabel << "\n\tjmp " << *localCatchLabel << "\n";
         m_body << okLabel << "\n";
+    }
+
+    // The compiled catch label a fallible op at `offset` must jump to when
+    // its own runtime call reports the fault resolved at THIS function's
+    // own frame — the statically active PUSH_HANDLER at `offset`
+    // (m_activeHandlerAt, handler_depth.h), resolved to its own catch
+    // block's label (m_pushOffsetToCatchLabel, built in run()). nullopt
+    // when no handler is statically active at `offset`.
+    std::optional<std::string> activeCatchLabelAt(int offset) const {
+        auto it = m_activeHandlerAt.find(offset);
+        if (it == m_activeHandlerAt.end() || it->second < 0) {
+            return std::nullopt;
+        }
+        int pushOffset =
+            m_fn.instructions[static_cast<std::size_t>(it->second)].offset;
+        auto labelIt = m_pushOffsetToCatchLabel.find(pushOffset);
+        if (labelIt == m_pushOffsetToCatchLabel.end()) {
+            return std::nullopt;
+        }
+        return labelIt->second;
     }
 
     // `topHeight` is set via rt_set_top before the call (Q1: every value
     // must already live in its own stack slot before a call that can
-    // allocate or unwind). `stopAtFrameCount` is nullopt for the two
-    // wrappers whose C signature has no such trailing parameter
-    // (rt_op_print, rt_op_define_global — rt_capi.h): QBE's `call` performs
-    // no prototype check, so passing an extra argument a callee's own body
-    // never reads would go unnoticed here but is still undefined behavior
-    // against the real C signature — this must match rt_capi.h exactly, not
-    // "whatever happens to work" on one ABI.
+    // allocate or unwind). `stopAtFrameCount` is nullopt for the wrappers
+    // whose C signature has no such trailing parameter (rt_capi.h): QBE's
+    // `call` performs no prototype check, so passing an extra argument a
+    // callee's own body never reads would go unnoticed here but is still
+    // undefined behavior against the real C signature — this must match
+    // rt_capi.h exactly, not "whatever happens to work" on one ABI.
     void callSlowPath(const std::string& fnName, int topHeight,
                       const std::vector<std::string>& extraArgs,
-                      std::optional<int> stopAtFrameCount) {
+                      std::optional<std::string> stopAtFrameCount, int offset,
+                      Catchability catchability) {
         std::vector<std::string> typedArgs;
         typedArgs.reserve(extraArgs.size() + 1);
         for (const std::string& a : extraArgs) {
             typedArgs.push_back("l " + a);
         }
         if (stopAtFrameCount.has_value()) {
-            typedArgs.push_back("w " + std::to_string(*stopAtFrameCount));
+            typedArgs.push_back("w " + *stopAtFrameCount);
         }
-        callSlowPathTyped(fnName, topHeight, typedArgs);
+        callSlowPathTyped(fnName, topHeight, typedArgs, offset, catchability);
     }
 
     // Emitted once, at the very top of every compiled function, before its
@@ -310,8 +429,23 @@ class Emitter {
         std::string okLabel = "@" + m_symbol + "_entry_ok";
         m_body << "\tjnz " << bad << ", " << failLabel << ", " << okLabel
                << "\n";
-        m_body << failLabel << "\n\tret 1\n";
+        // Stack overflow at function entry: no ambient handler context of
+        // this function's own to check (its own PUSH_HANDLERs have not run
+        // yet) — always fatal here, matching rt_check_stack's own "w 0"
+        // stopAtFrameCount above (Q3's own hard-ceiling/reserve split
+        // already decides catchable vs. fatal inside Runtime; a nonzero
+        // status this early can only be the fatal one).
+        m_body << failLabel << "\n\tret " << kRtFatal << "\n";
         m_body << okLabel << "\n";
+        // S6 (#459): this function's own frame depth minus one — every
+        // fallible call this function makes below passes this same value
+        // as its own stopAtFrameCount, so OpResult::Resumed from that call
+        // means exactly "resolved at my own frame" (see m_stopTemp's own
+        // comment and callSlowPathTyped's Catchability doc).
+        std::string myDepth = newTemp();
+        m_body << "\t" << myDepth << " =w call $rt_frame_count(l %rt)\n";
+        m_stopTemp = newTemp();
+        m_body << "\t" << m_stopTemp << " =w sub " << myDepth << ", 1\n";
         m_body << "\tjmp @" << firstBlockLabel << "\n";
     }
 
@@ -322,7 +456,7 @@ class Emitter {
     // (including its non-number cases: string concatenation for ADD,
     // operator-overload dispatch for the rest).
     void emitBinaryArith(const std::string& fastOp, const std::string& slowFn,
-                         int heightIn, int stopAtFrameCount) {
+                         int heightIn, int offset) {
         std::string aAddr = addr(heightIn - 2);
         std::string bAddr = addr(heightIn - 1);
         std::string aBits = loadl(aAddr);
@@ -340,7 +474,8 @@ class Emitter {
         m_body << "\tjnz " << both << ", " << fastLabel << ", " << slowLabel
                << "\n";
         m_body << slowLabel << "\n";
-        callSlowPath(slowFn, heightIn, {}, stopAtFrameCount);
+        callSlowPath(slowFn, heightIn, {}, m_stopTemp, offset,
+                     Catchability::Local);
         m_body << "\tjmp " << doneLabel << "\n";
         m_body << fastLabel << "\n";
         std::string aD = newTemp();
@@ -361,7 +496,7 @@ class Emitter {
     // fast path's result is a Boolean Value, not a raw double — bits =
     // VAL_FALSE + (0|1), since VAL_TRUE == VAL_FALSE + 1 (value.h).
     void emitBinaryCompare(const std::string& qbeCmp, const std::string& slowFn,
-                           int heightIn, int stopAtFrameCount) {
+                           int heightIn, int offset) {
         std::string aAddr = addr(heightIn - 2);
         std::string bAddr = addr(heightIn - 1);
         std::string aBits = loadl(aAddr);
@@ -379,7 +514,8 @@ class Emitter {
         m_body << "\tjnz " << both << ", " << fastLabel << ", " << slowLabel
                << "\n";
         m_body << slowLabel << "\n";
-        callSlowPath(slowFn, heightIn, {}, stopAtFrameCount);
+        callSlowPath(slowFn, heightIn, {}, m_stopTemp, offset,
+                     Catchability::Local);
         m_body << "\tjmp " << doneLabel << "\n";
         m_body << fastLabel << "\n";
         std::string aD = newTemp();
@@ -444,46 +580,45 @@ class Emitter {
         case Op::DEFINE_GLOBAL: {
             std::string name = internedNamePtr(nameConstant(ins.constantIndex));
             callSlowPath("rt_op_define_global", before.height, {name},
-                         std::nullopt); // rt_op_define_global has no
-                                        // stopAtFrameCount parameter
+                         std::nullopt, ins.offset, Catchability::Fatal);
             break;
         }
         case Op::GET_GLOBAL: {
             std::string name = internedNamePtr(nameConstant(ins.constantIndex));
-            callSlowPath("rt_op_get_global", before.height, {name},
-                         /*stopAtFrameCount=*/0);
+            callSlowPath("rt_op_get_global", before.height, {name}, m_stopTemp,
+                         ins.offset, Catchability::Local);
             break;
         }
         case Op::SET_GLOBAL: {
             std::string name = internedNamePtr(nameConstant(ins.constantIndex));
-            callSlowPath("rt_op_set_global", before.height, {name},
-                         /*stopAtFrameCount=*/0);
+            callSlowPath("rt_op_set_global", before.height, {name}, m_stopTemp,
+                         ins.offset, Catchability::Local);
             break;
         }
         case Op::PRINT:
-            callSlowPath("rt_op_print", before.height, {},
-                         std::nullopt); // rt_op_print has no
-                                        // stopAtFrameCount parameter
+            callSlowPath("rt_op_print", before.height, {}, std::nullopt,
+                         ins.offset, Catchability::Fatal);
             break;
         case Op::ADD:
             // The slow path (rt_op_add) also covers string concatenation —
             // the fast path here only ever fires once both operands already
             // passed isNumberCheck, so it can never misfire on two strings.
-            emitBinaryArith("add", "rt_op_add", before.height, 0);
+            emitBinaryArith("add", "rt_op_add", before.height, ins.offset);
             break;
         case Op::SUBTRACT:
-            emitBinaryArith("sub", "rt_op_subtract", before.height, 0);
+            emitBinaryArith("sub", "rt_op_subtract", before.height, ins.offset);
             break;
         case Op::MULTIPLY:
-            emitBinaryArith("mul", "rt_op_multiply", before.height, 0);
+            emitBinaryArith("mul", "rt_op_multiply", before.height, ins.offset);
             break;
         case Op::DIVIDE:
-            emitBinaryArith("div", "rt_op_divide", before.height, 0);
+            emitBinaryArith("div", "rt_op_divide", before.height, ins.offset);
             break;
         case Op::MODULO:
             // No inline fast path: MODULO's floor-division number case is
             // not a plain double-double op (Q5) — always the slow path.
-            callSlowPath("rt_op_modulo", before.height, {}, 0);
+            callSlowPath("rt_op_modulo", before.height, {}, m_stopTemp,
+                         ins.offset, Catchability::Local);
             break;
         case Op::NEGATE: {
             std::string aAddr = addr(before.height - 1);
@@ -498,7 +633,8 @@ class Emitter {
             m_body << "\tjnz " << aNum << ", " << fastLabel << ", " << slowLabel
                    << "\n";
             m_body << slowLabel << "\n";
-            callSlowPath("rt_op_negate", before.height, {}, 0);
+            callSlowPath("rt_op_negate", before.height, {}, m_stopTemp,
+                         ins.offset, Catchability::Local);
             m_body << "\tjmp " << doneLabel << "\n";
             m_body << fastLabel << "\n";
             std::string aD = newTemp();
@@ -513,13 +649,14 @@ class Emitter {
             break;
         }
         case Op::LESS:
-            emitBinaryCompare("cltd", "rt_op_less", before.height, 0);
+            emitBinaryCompare("cltd", "rt_op_less", before.height, ins.offset);
             break;
         case Op::GREATER:
-            emitBinaryCompare("cgtd", "rt_op_greater", before.height, 0);
+            emitBinaryCompare("cgtd", "rt_op_greater", before.height,
+                              ins.offset);
             break;
         case Op::EQUAL:
-            emitBinaryCompare("ceqd", "rt_op_equal", before.height, 0);
+            emitBinaryCompare("ceqd", "rt_op_equal", before.height, ins.offset);
             break;
         case Op::JUMP:
         case Op::LOOP:
@@ -540,8 +677,10 @@ class Emitter {
             // there is nothing left for this emitter to load/store: the
             // next instruction's own `addr(after.height - 1)` already
             // points at it).
-            callSlowPathTyped("rt_call", before.height,
-                              {"w " + std::to_string(ins.byteOperand)});
+            callSlowPathTyped(
+                "rt_call", before.height,
+                {"w " + std::to_string(ins.byteOperand), "w " + m_stopTemp},
+                ins.offset, Catchability::Local);
             break;
         }
         case Op::CLOSURE: {
@@ -627,7 +766,7 @@ class Emitter {
         case Op::RETURN: {
             std::string topAddr = addr(before.height);
             m_body << "\tcall $rt_set_top(l %rt, l " << topAddr << ")\n";
-            m_body << "\tret 0\n";
+            m_body << "\tret " << kRtOk << "\n";
             break;
         }
         // --- S5 (#458): classes, methods, aggregates, iterators, slicing,
@@ -639,107 +778,158 @@ class Emitter {
         // it once rt_set_top (Q1) and the call have run.
         case Op::CLASS: {
             std::string name = constantStringPtr(ins.constantIndex);
-            callSlowPath("rt_op_class", before.height, {name}, std::nullopt);
+            callSlowPath("rt_op_class", before.height, {name}, std::nullopt,
+                         ins.offset, Catchability::Fatal);
             break;
         }
         case Op::GET_PROPERTY: {
             std::string name = constantStringPtr(ins.constantIndex);
             callSlowPath("rt_op_get_property", before.height, {name},
-                         /*stopAtFrameCount=*/0);
+                         m_stopTemp, ins.offset, Catchability::Local);
             break;
         }
         case Op::SET_PROPERTY: {
             std::string name = constantStringPtr(ins.constantIndex);
             callSlowPath("rt_op_set_property", before.height, {name},
-                         std::nullopt); // fatal-only, no stopAtFrameCount
+                         std::nullopt, ins.offset, Catchability::Fatal);
             break;
         }
         case Op::DEFINE_METHOD: {
             std::string name = constantStringPtr(ins.constantIndex);
             callSlowPath("rt_op_define_method", before.height, {name},
-                         std::nullopt);
+                         std::nullopt, ins.offset, Catchability::Fatal);
             break;
         }
         case Op::INVOKE: {
             std::string name = constantStringPtr(ins.constantIndex);
-            callSlowPathTyped(
-                "rt_op_invoke", before.height,
-                {"l " + name, "w " + std::to_string(ins.byteOperand), "w 0"});
+            callSlowPathTyped("rt_op_invoke", before.height,
+                              {"l " + name,
+                               "w " + std::to_string(ins.byteOperand),
+                               "w " + m_stopTemp},
+                              ins.offset, Catchability::Local);
             break;
         }
         case Op::INHERIT:
-            callSlowPath("rt_op_inherit", before.height, {},
-                         std::nullopt); // no stopAtFrameCount
+            callSlowPath("rt_op_inherit", before.height, {}, std::nullopt,
+                         ins.offset, Catchability::Fatal);
             break;
         case Op::GET_SUPER: {
             std::string name = constantStringPtr(ins.constantIndex);
-            callSlowPath("rt_op_get_super", before.height, {name},
-                         std::nullopt); // no stopAtFrameCount
+            callSlowPath("rt_op_get_super", before.height, {name}, std::nullopt,
+                         ins.offset, Catchability::Fatal);
             break;
         }
         case Op::SUPER_INVOKE: {
             std::string name = constantStringPtr(ins.constantIndex);
-            callSlowPathTyped(
-                "rt_op_super_invoke", before.height,
-                {"l " + name, "w " + std::to_string(ins.byteOperand), "w 0"});
+            callSlowPathTyped("rt_op_super_invoke", before.height,
+                              {"l " + name,
+                               "w " + std::to_string(ins.byteOperand),
+                               "w " + m_stopTemp},
+                              ins.offset, Catchability::Local);
             break;
         }
         case Op::BUILD_LIST:
             callSlowPathTyped("rt_op_build_list", before.height,
-                              {"w " + std::to_string(ins.byteOperand)});
+                              {"w " + std::to_string(ins.byteOperand)},
+                              ins.offset, Catchability::Fatal);
             break;
         case Op::BUILD_MAP:
-            callSlowPathTyped("rt_op_build_map", before.height,
-                              {"w " + std::to_string(ins.byteOperand), "w 0"});
+            callSlowPathTyped(
+                "rt_op_build_map", before.height,
+                {"w " + std::to_string(ins.byteOperand), "w " + m_stopTemp},
+                ins.offset, Catchability::Local);
             break;
         case Op::GET_INDEX:
-            callSlowPath("rt_op_get_index", before.height, {},
-                         /*stopAtFrameCount=*/0);
+            callSlowPath("rt_op_get_index", before.height, {}, m_stopTemp,
+                         ins.offset, Catchability::Local);
             break;
         case Op::SET_INDEX:
-            callSlowPath("rt_op_set_index", before.height, {},
-                         /*stopAtFrameCount=*/0);
+            callSlowPath("rt_op_set_index", before.height, {}, m_stopTemp,
+                         ins.offset, Catchability::Local);
             break;
         case Op::SLICE:
-            callSlowPath("rt_op_slice", before.height, {},
-                         std::nullopt); // fatal-only, no stopAtFrameCount
+            callSlowPath("rt_op_slice", before.height, {}, std::nullopt,
+                         ins.offset, Catchability::Fatal);
             break;
         case Op::IN:
-            callSlowPath("rt_op_in", before.height, {},
-                         /*stopAtFrameCount=*/0);
+            callSlowPath("rt_op_in", before.height, {}, m_stopTemp, ins.offset,
+                         Catchability::Local);
             break;
         case Op::LEN:
-            callSlowPath("rt_op_len", before.height, {},
-                         /*stopAtFrameCount=*/0);
+            callSlowPath("rt_op_len", before.height, {}, m_stopTemp, ins.offset,
+                         Catchability::Local);
             break;
         case Op::GET_ITER:
-            callSlowPath("rt_op_get_iter", before.height, {},
-                         /*stopAtFrameCount=*/0);
+            callSlowPath("rt_op_get_iter", before.height, {}, m_stopTemp,
+                         ins.offset, Catchability::Local);
             break;
         case Op::ITER_HAS_NEXT:
-            callSlowPath("rt_op_iter_has_next", before.height, {},
-                         std::nullopt); // no stopAtFrameCount
+            callSlowPath("rt_op_iter_has_next", before.height, {}, std::nullopt,
+                         ins.offset, Catchability::Fatal);
             break;
         case Op::ITER_NEXT:
-            callSlowPath("rt_op_iter_next", before.height, {},
-                         std::nullopt); // no stopAtFrameCount
+            callSlowPath("rt_op_iter_next", before.height, {}, std::nullopt,
+                         ins.offset, Catchability::Fatal);
             break;
         case Op::GET_TAG:
-            callSlowPath("rt_op_get_tag", before.height, {},
-                         std::nullopt); // fatal-only, no stopAtFrameCount
+            callSlowPath("rt_op_get_tag", before.height, {}, std::nullopt,
+                         ins.offset, Catchability::Fatal);
             break;
         case Op::MATCH_ERROR:
             // Always throws (there is no non-error stack effect for this
-            // opcode — see vm.cpp). This node supports no PUSH_HANDLER
-            // (qbe_emitter.h's file comment), so any raise here is Uncaught
-            // by construction; callSlowPathTyped's own generic fatal-only
-            // handling already `ret 1`s on that status. The unreachable
-            // "ok" fallthrough it also emits (mirrored so this call site
-            // matches every other wrapper's shape) still needs its own
-            // terminator, since MATCH_ERROR ends its own cfg block with no
-            // successor (S6, #459 owns real catchability here).
-            callSlowPathTyped("rt_op_match_error", before.height, {"w 0"});
-            m_body << "\tret 1\n";
+            // opcode — see vm.cpp) — genuinely catchable (spec's MatchError
+            // kind; check_fault_table.py's own match_error row). The
+            // unreachable "ok" fallthrough callSlowPathTyped still emits
+            // (mirrored so this call site matches every other wrapper's
+            // shape) still needs its own terminator, since MATCH_ERROR ends
+            // its own cfg block with no successor.
+            callSlowPathTyped("rt_op_match_error", before.height,
+                              {"w " + m_stopTemp}, ins.offset,
+                              Catchability::Local);
+            m_body << "\tret " << kRtFatal << "\n";
+            break;
+        // --- S6 (#459): status protocol, try/catch, defer.
+        case Op::PUSH_HANDLER: {
+            // No stack effect (chunk.h) — before.height == after.height.
+            // rt_push_handler cannot meaningfully fail (a bare vector
+            // push_back), so this skips the generic callSlowPath* status
+            // machinery entirely.
+            std::string checkpointAddr = addr(before.height);
+            m_body << "\tcall $rt_push_handler(l %rt, l " << checkpointAddr
+                   << ")\n";
+            break;
+        }
+        case Op::POP_HANDLER:
+            callSlowPathTyped("rt_pop_handler", before.height, {}, ins.offset,
+                              Catchability::Fatal);
+            break;
+        case Op::THROW: {
+            // Pops the value to raise (chunk.h) at before.height - 1.
+            std::string thrownAddr = addr(before.height - 1);
+            std::string thrownBits = loadl(thrownAddr);
+            callSlowPathTyped("rt_throw", before.height - 1,
+                              {"l " + thrownBits, "w " + m_stopTemp},
+                              ins.offset, Catchability::Local);
+            // rt_throw never returns success (Op::THROW is terminal —
+            // chunk.h: "control never falls through past THROW"); this is
+            // the same unreachable safety net MATCH_ERROR's own case uses.
+            m_body << "\tret " << kRtFatal << "\n";
+            break;
+        }
+        case Op::DEFER_RECORD:
+            callSlowPathTyped("rt_op_defer_record", before.height,
+                              {"w " + std::to_string(ins.byteOperand)},
+                              ins.offset, Catchability::Fatal);
+            break;
+        case Op::RUN_DEFERS:
+            // Never a local-catch opportunity: the compiler emits this only
+            // immediately before RETURN, after this frame's own try/catch
+            // regions have already lexically closed — any throw a deferred
+            // call raises here can only be caught by an ancestor (see
+            // rt_capi.h's own comment on rt_run_defers).
+            callSlowPathTyped("rt_run_defers", before.height,
+                              {"w " + m_stopTemp}, ins.offset,
+                              Catchability::Propagate);
             break;
         default:
             unsupported(ins.op);
@@ -780,7 +970,7 @@ class Emitter {
                    const Cfg& cfg) {
         m_body << "@" << block.label << "\n";
         if (!leaderReached(block)) {
-            m_body << "\tret 0\n";
+            m_body << "\tret " << kRtOk << "\n";
             return;
         }
         for (const DecodedInstruction& ins : block.instructions) {
@@ -792,20 +982,20 @@ class Emitter {
     void emitTerminator(const BasicBlock& block, std::size_t blockIndex,
                         const Cfg& cfg) {
         if (block.successors.empty()) {
-            // RETURN's own emitInstruction() already emitted `ret 0`;
-            // MATCH_ERROR's already emitted `ret 1` (it always throws, and
-            // this node supports no PUSH_HANDLER — see its own
-            // emitInstruction case). Anything else reaching here is a
-            // decoder/cfg-analysis mismatch this node cannot recover from
-            // (THROW is out of scope — S6, #459).
+            // RETURN's own emitInstruction() already emitted `ret kRtOk`;
+            // MATCH_ERROR's and THROW's each already emitted `ret kRtFatal`
+            // as an unreachable safety net (both always transfer control
+            // away via their own callSlowPathTyped's jmp/ret — S6, #459).
+            // Anything else reaching here is a decoder/cfg-analysis
+            // mismatch this node cannot recover from.
             Op lastOp = block.instructions.empty()
                             ? Op{}
                             : block.instructions.back().op;
-            if (lastOp != Op::RETURN && lastOp != Op::MATCH_ERROR) {
+            if (lastOp != Op::RETURN && lastOp != Op::MATCH_ERROR &&
+                lastOp != Op::THROW) {
                 throw std::runtime_error(
                     "qbe_emitter: terminal block with no cfg successor and "
-                    "no RETURN/MATCH_ERROR — an out-of-scope terminal "
-                    "opcode (THROW — see S6, #459)");
+                    "no RETURN/MATCH_ERROR/THROW — decoder/cfg drift");
             }
             return;
         }
@@ -900,7 +1090,7 @@ class Emitter {
             // No arm matched and no fallthrough exists (the table covers
             // every reachable tag) — unreachable in practice, but QBE still
             // requires an explicit terminator for this block.
-            m_body << "\tret 1\n";
+            m_body << "\tret " << kRtFatal << "\n";
         }
     }
 };

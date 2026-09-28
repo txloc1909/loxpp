@@ -129,14 +129,58 @@ analyzeHandlerDepthIns(const std::vector<DecodedInstruction>& ins,
         }
     }
 
-    auto setBefore = [&](int idx, int depth, std::vector<int>& worklist) {
+    // matchingPush[popIdx]: the PUSH_HANDLER a given POP_HANDLER closes,
+    // from the same structural LIFO pairing validated above. Unlike the
+    // depth count, identifying which record closes cannot come from a plain
+    // byte-order scan alone (a catch block's own bytes sit BETWEEN its own
+    // PUSH_HANDLER and POP_HANDLER — "POP_HANDLER belongs only to the
+    // normal-completion path", compiler.cpp — so a byte-order-only reading
+    // would wrongly see the catch body as still "inside" its own handler's
+    // region). This pairing only NAMES which push a pop closes; activeHandler
+    // itself is still derived below through the same CFG worklist `before`
+    // already uses, so a catch block's own lower depth is handled the same
+    // way `before`/`after` already handle it (maybeSeedCatch).
+    std::vector<int> matchingPush(ins.size(), -1);
+    {
+        std::vector<int> open;
+        for (size_t i = 0; i < ins.size(); i++) {
+            if (ins[i].op == Op::PUSH_HANDLER) {
+                open.push_back(static_cast<int>(i));
+            } else if (ins[i].op == Op::POP_HANDLER) {
+                matchingPush[i] = open.back();
+                open.pop_back();
+            }
+        }
+    }
+
+    // activeHandlerBefore[i]: the index of the innermost active PUSH_HANDLER
+    // immediately before instruction i runs, threaded through the SAME
+    // worklist as `before` (depth) — see HandlerDepthAnalysis::activeHandler
+    // in handler_depth.h for the full rationale. parentOf[p] (p a
+    // PUSH_HANDLER's own index) is the activeHandler in force right before p
+    // itself ran — i.e. the ENCLOSING handler p's own POP_HANDLER must
+    // restore control to. It is set at the same point `before[p]` becomes
+    // available (p's own processing step below), so by the time any
+    // POP_HANDLER matching p is processed, parentOf[p] is already resolved:
+    // that POP_HANDLER is only reachable via a path that already ran
+    // through p (matchingPush's own structural pairing), and p's own
+    // successors — the only way to reach it — are not visited until AFTER
+    // p's own processing step sets parentOf[p].
+    std::vector<int> activeHandlerBefore(ins.size(), -1);
+    std::vector<int> parentOf(ins.size(), -1);
+
+    auto setBefore = [&](int idx, int depth, int activeHandler,
+                         std::vector<int>& worklist) {
         // vector<bool> packs bits: its proxy reference has no plain
         // operator!, so compare against false instead.
         if (out.reached[static_cast<size_t>(idx)] == false) {
             out.reached[static_cast<size_t>(idx)] = true;
             out.before[static_cast<size_t>(idx)] = depth;
+            activeHandlerBefore[static_cast<size_t>(idx)] = activeHandler;
             worklist.push_back(idx);
-        } else if (out.before[static_cast<size_t>(idx)] != depth) {
+        } else if (out.before[static_cast<size_t>(idx)] != depth ||
+                   activeHandlerBefore[static_cast<size_t>(idx)] !=
+                       activeHandler) {
             throw std::runtime_error(
                 "handler_depth: merge disagreement at offset " +
                 std::to_string(ins[static_cast<size_t>(idx)].offset) + " in " +
@@ -145,19 +189,20 @@ analyzeHandlerDepthIns(const std::vector<DecodedInstruction>& ins,
     };
 
     std::vector<int> worklist;
-    setBefore(0, 0, worklist);
+    setBefore(0, 0, -1, worklist);
 
     // A catch entry is seeded from its own PUSH_HANDLER, not from generic
     // predecessors: THROW removes the record before it jumps, so the depth
-    // at catch entry equals the depth before the PUSH. Only a reached PUSH
-    // seeds its catch; a dead try seeds nothing. A second PUSH for one
-    // catch rechecks depth agreement through setBefore.
+    // (and active handler) at catch entry equals the state before the PUSH.
+    // Only a reached PUSH seeds its catch; a dead try seeds nothing. A
+    // second PUSH for one catch rechecks agreement through setBefore.
     auto maybeSeedCatch = [&](int pushIdx, std::vector<int>& wl) {
         int catchIdx = pushToCatch[static_cast<size_t>(pushIdx)];
         if (catchIdx < 0) {
             return;
         }
-        setBefore(catchIdx, out.before[static_cast<size_t>(pushIdx)], wl);
+        setBefore(catchIdx, out.before[static_cast<size_t>(pushIdx)],
+                  activeHandlerBefore[static_cast<size_t>(pushIdx)], wl);
     };
 
     while (!worklist.empty()) {
@@ -172,42 +217,20 @@ analyzeHandlerDepthIns(const std::vector<DecodedInstruction>& ins,
                                      functionId);
         }
         out.after[u] = after;
+        int afterActiveHandler = activeHandlerBefore[u];
         if (ins[u].op == Op::PUSH_HANDLER) {
+            parentOf[u] = activeHandlerBefore[u];
+            afterActiveHandler = idx;
             maybeSeedCatch(idx, worklist);
+        } else if (ins[u].op == Op::POP_HANDLER) {
+            afterActiveHandler = parentOf[static_cast<size_t>(matchingPush[u])];
         }
         for (int succ : successors[u]) {
-            setBefore(succ, after, worklist);
+            setBefore(succ, after, afterActiveHandler, worklist);
         }
     }
 
-    // Second pass: activeHandler, a purely lexical property (see the
-    // struct's own comment in handler_depth.h) computed by a plain
-    // byte-order bracket scan — independent of the CFG-driven worklist
-    // above, which exists to validate `before` across every reaching edge,
-    // not to derive this. Cross-checked against `before` below as a cheap
-    // consistency guard: any disagreement means a PUSH_HANDLER/POP_HANDLER
-    // pair is not actually byte-order-nested the way this pass assumes,
-    // which the "Structural LIFO pairing" check above should already have
-    // caught — this is defense in depth, not the primary guarantee.
-    out.activeHandler.assign(ins.size(), -1);
-    {
-        std::vector<int> stack;
-        for (size_t i = 0; i < ins.size(); i++) {
-            out.activeHandler[i] = stack.empty() ? -1 : stack.back();
-            if (out.reached[i] &&
-                static_cast<int>(stack.size()) != out.before[i]) {
-                throw std::runtime_error(
-                    "handler_depth: lexical bracket depth disagrees with "
-                    "CFG-derived depth at offset " +
-                    std::to_string(ins[i].offset) + " in " + functionId);
-            }
-            if (ins[i].op == Op::PUSH_HANDLER) {
-                stack.push_back(static_cast<int>(i));
-            } else if (ins[i].op == Op::POP_HANDLER) {
-                stack.pop_back(); // non-empty: validated by the earlier pass
-            }
-        }
-    }
+    out.activeHandler = std::move(activeHandlerBefore);
     return out;
 }
 

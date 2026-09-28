@@ -157,13 +157,45 @@ TEST(QbeEmitter, EmitsBuildListRatherThanThrowing) {
     EXPECT_NE(ssa.find("rt_op_build_list"), std::string::npos);
 }
 
-TEST(QbeEmitter, ThrowsOnPushHandler) {
-    // THROW/PUSH_HANDLER stay out of scope until S6 (#459) — the general
-    // "names the unsupported opcode" behavior EmitsBuildListRatherThan
-    // Throwing above no longer covers, now that S5 has closed the BUILD_LIST
-    // gap that test used to exercise it with.
-    EXPECT_THROW(emitScriptFrom("try { throw 1; } catch (e) { print e; }"),
-                 std::runtime_error);
+TEST(QbeEmitter, EmitsPushHandlerAndPopHandlerRatherThanThrowing) {
+    // S6 (#459): try/catch is now emitted, not rejected. rt_push_handler
+    // takes the checkpoint address only (no status check — it cannot
+    // meaningfully fail). The try body completes normally (no throw), so
+    // its normal-completion path — the one that actually reaches
+    // POP_HANDLER — is reachable; a try body that only ever throws would
+    // never fall through to it at all.
+    std::string ssa = emitScriptFrom("try { print 1; } catch (e) { print e; }");
+    EXPECT_NE(ssa.find("call $rt_push_handler(l %rt, l"), std::string::npos);
+    EXPECT_NE(ssa.find("call $rt_pop_handler(l %rt)"), std::string::npos);
+}
+
+TEST(QbeEmitter, ThrowLowersToRtThrowRatherThanThrowing) {
+    std::string ssa = emitScriptFrom("throw 1;");
+    EXPECT_NE(ssa.find("call $rt_throw(l %rt, l"), std::string::npos);
+}
+
+TEST(QbeEmitter, LocalCatchJumpsToStaticallyActiveCatchBlockOnResumed) {
+    // A fallible op inside a try's protected region must, on
+    // Runtime::OpResult::Resumed (wire value 1 — the same throw resolved at
+    // exactly this function's own frame), jump directly to the statically
+    // active catch block (handler_depth.h's activeHandler) rather than
+    // returning kRtThrow to propagate — proves the Catchability::Local path
+    // actually reaches a `jmp`, not just a `ret`.
+    std::string ssa =
+        emitScriptFrom("try { print 1 + \"a\"; } catch (e) { print e; }");
+    EXPECT_NE(ssa.find("ceqw"), std::string::npos)
+        << "must compare the raw status against OpResult::Resumed(1)";
+    EXPECT_NE(ssa.find("\tjmp @L_"), std::string::npos)
+        << "the local-catch path must jump to a real cfg block label";
+}
+
+TEST(QbeEmitter, DeferRecordAndRunDefersAreEmitted) {
+    // `g` (the second top-level function) is DecodedFunction::nested[1] —
+    // DEFER_RECORD/RUN_DEFERS live in ITS OWN chunk, not the top-level
+    // script's.
+    std::string ssa = emitNestedFrom("fun h() {} fun g() { defer h(); }", {1});
+    EXPECT_NE(ssa.find("call $rt_op_defer_record(l %rt, w"), std::string::npos);
+    EXPECT_NE(ssa.find("call $rt_run_defers(l %rt, w"), std::string::npos);
 }
 
 TEST(QbeEmitter, EmitsNonNumberConstantRatherThanThrowing) {
@@ -191,7 +223,11 @@ TEST(QbeEmitter, CallSetsTopAndPassesArgCountAsAWord) {
     std::string ssa =
         emitScriptFrom("fun add(a, b) { return a + b; } print add(1, 2);");
     EXPECT_NE(ssa.find("call $rt_set_top"), std::string::npos);
-    EXPECT_NE(ssa.find("call $rt_call(l %rt, w 2)"), std::string::npos);
+    // S6 (#459): rt_call also takes this function's own stopAtFrameCount
+    // temp (a runtime value, not a fixed literal — see qbe_emitter.h's own
+    // comment on the status protocol), so the exact call site is
+    // "call $rt_call(l %rt, w 2, w %<some temp>)", not a fixed string.
+    EXPECT_NE(ssa.find("call $rt_call(l %rt, w 2, w %"), std::string::npos);
 }
 
 TEST(QbeEmitter, ClosureReadsItsFunctionConstantThroughItsOwnClosure) {
