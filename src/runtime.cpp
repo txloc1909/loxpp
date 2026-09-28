@@ -215,6 +215,12 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
             "OperatorResultTypeError", "Operator method must return a Number.",
             stopAtFrameCount));
     }
+    if (check == ResultCheck::Sequence &&
+        !(isList(result) || isString(result) || isMap(result))) {
+        return fromThrow(raiseThrowableError(
+            "OperatorResultTypeError",
+            "Operator method must return a sequence.", stopAtFrameCount));
+    }
     return OpResult::OK;
 }
 
