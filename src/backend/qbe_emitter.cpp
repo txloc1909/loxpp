@@ -303,7 +303,7 @@ class Emitter {
             if (!is<Number>(v)) {
                 unsupported(ins.op); // only Number constants — S5 (#458)
             }
-            uint64_t bits = std::bit_cast<uint64_t>(as<Number>(v));
+            auto bits = std::bit_cast<uint64_t>(as<Number>(v));
             storel(std::to_string(bits), addr(before.height));
             break;
         }
@@ -425,7 +425,7 @@ class Emitter {
         }
     }
 
-    std::string nameConstant(int constantIndex) {
+    std::string nameConstant(int constantIndex) const {
         Value v = m_fn.function->chunk.getConstant(
             static_cast<uint16_t>(constantIndex));
         if (!isString(v)) {
