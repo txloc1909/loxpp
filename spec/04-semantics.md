@@ -194,6 +194,8 @@ happens to equal a dunder name never participates.
 | `a == b` | `__eq__(b)` | `a` |
 | `x in c` | `__contains__(x)` | `c` |
 | `f()` on an Instance | `__call__(...)` | `f` |
+| `c[k]` | `__index_get__(k)` | `c` |
+| `c[k] = v` | `__index_set__(k, v)` | `c` |
 
 `a != b` is `==` then logical negation: it derives from `__eq__` and has no
 method of its own. `a <= b` is `!(a > b)` and `a >= b` is `!(a < b)`; each
@@ -204,6 +206,11 @@ The result of `__eq__`, `__lt__`, `__gt__`, and `__contains__` must be a
 Boolean. Any other result raises a catchable `OperatorResultTypeError` (see
 [Runtime Errors](#runtime-errors)). The result of every other method in the
 table above is unconstrained.
+
+`__index_get__` takes the index as its single argument and may return any
+value. `__index_set__` takes the index and the assigned value; its return
+value is ignored, and the assignment expression evaluates to the assigned
+value (as with the built-in List and Map forms).
 
 Internal equality — `in` against a List, `list.remove`, and map-key equality —
 always uses identity equality and never consults `__eq__`.

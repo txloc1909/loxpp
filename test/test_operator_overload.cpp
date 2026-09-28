@@ -191,3 +191,46 @@ TEST(OperatorOverload, CallMethodThrowPropagates) {
     ASSERT_EQ(h.run(src), InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("caught"), "boom");
 }
+
+// ---------------------------------------------------------------------------
+// Index get/set dispatch (__index_get__ / __index_set__)
+// ---------------------------------------------------------------------------
+
+TEST(OperatorOverload, IndexGetDispatch) {
+    VMTestHarness h;
+    std::string src = "class V { init() { this.x = 5; }"
+                      "  __index_get__(k) { return this.x + k; }"
+                      "}"
+                      "var v = V();"
+                      "var r = v[10];";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "15");
+}
+
+// The assignment expression evaluates to the assigned value, not the
+// method's return.
+TEST(OperatorOverload, IndexSetDispatchAssignmentValue) {
+    VMTestHarness h;
+    std::string src = "class V { init() { this.x = 0; }"
+                      "  __index_get__(k) { return this.x; }"
+                      "  __index_set__(k, v) { this.x = v; return 12345; }"
+                      "}"
+                      "var v = V();"
+                      "var s = (v[\"a\"] = 7);"
+                      "var x = v[0];";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("s"), "7"); // assigned value, not 12345
+    EXPECT_EQ(h.getGlobalStr("x"), "7"); // __index_set__ stored 7
+}
+
+// A missing __index_get__/__index_set__ raises the same error as today.
+TEST(OperatorOverload, IndexMissingMethodRaisesSameError) {
+    VMTestHarness h;
+    std::string src = "class V {}"
+                      "var kind1; var kind2;"
+                      "try { var r = V()[0]; } catch (e) { kind1 = e.kind; }"
+                      "try { V()[0] = 1; } catch (e) { kind2 = e.kind; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind1"), "NotIndexableError");
+    EXPECT_EQ(h.getGlobalStr("kind2"), "NotIndexableError");
+}
