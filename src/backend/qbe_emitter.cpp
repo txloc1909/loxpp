@@ -362,7 +362,7 @@ class Emitter {
         m_body << "\tjnz " << isResumed << ", " << localLabel << ", "
                << propagateLabel << "\n";
         m_body << propagateLabel << "\n\tret " << kRtThrow << "\n";
-        m_body << localLabel << "\n\tjmp " << *localCatchLabel << "\n";
+        m_body << localLabel << "\n\tjmp @" << *localCatchLabel << "\n";
         m_body << okLabel << "\n";
     }
 

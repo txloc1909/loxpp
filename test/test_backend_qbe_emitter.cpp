@@ -180,13 +180,46 @@ TEST(QbeEmitter, LocalCatchJumpsToStaticallyActiveCatchBlockOnResumed) {
     // exactly this function's own frame), jump directly to the statically
     // active catch block (handler_depth.h's activeHandler) rather than
     // returning kRtThrow to propagate — proves the Catchability::Local path
-    // actually reaches a `jmp`, not just a `ret`.
+    // actually reaches a `jmp @<label>`, not just any `jmp`/`ret`
+    // anywhere in the function (a real bug this weaker check once missed:
+    // the local-catch jump target was emitted without its own leading '@',
+    // which every OTHER label reference in this file already has — `qbe`
+    // itself rejected it as "unknown keyword", caught only by
+    // tools/check_qbe_s6_errors.sh's real toolchain round-trip, not this
+    // unit test, until this assertion was tightened to require the '@'
+    // directly after the "_local" block's own label).
     std::string ssa =
         emitScriptFrom("try { print 1 + \"a\"; } catch (e) { print e; }");
     EXPECT_NE(ssa.find("ceqw"), std::string::npos)
         << "must compare the raw status against OpResult::Resumed(1)";
-    EXPECT_NE(ssa.find("\tjmp @L_"), std::string::npos)
-        << "the local-catch path must jump to a real cfg block label";
+    // Find the LABEL DEFINITION line itself (starts with '@' right after a
+    // newline), not the earlier "jnz ..., @..._local24, @..._propagate24"
+    // line that also contains the substring "_local" as a jump-target
+    // reference — a plain ssa.find("_local") lands there first and would
+    // silently check the wrong line.
+    std::size_t searchFrom = 0;
+    std::size_t labelLineStart = std::string::npos;
+    for (;;) {
+        std::size_t hit = ssa.find("_local", searchFrom);
+        ASSERT_NE(hit, std::string::npos)
+            << "must emit a dedicated local-catch block";
+        std::size_t lineStart = ssa.rfind('\n', hit);
+        lineStart = (lineStart == std::string::npos) ? 0 : lineStart + 1;
+        if (ssa[lineStart] == '@') {
+            labelLineStart = lineStart;
+            break;
+        }
+        searchFrom = hit + 1;
+    }
+    std::size_t lineEnd = ssa.find('\n', labelLineStart);
+    ASSERT_NE(lineEnd, std::string::npos);
+    std::size_t nextLineEnd = ssa.find('\n', lineEnd + 1);
+    std::string localBlockLine =
+        ssa.substr(lineEnd + 1, nextLineEnd - (lineEnd + 1));
+    EXPECT_NE(localBlockLine.find("jmp @L_"), std::string::npos)
+        << "the local-catch block's own body must jump to a real cfg block "
+           "label, with its own leading '@' — got: "
+        << localBlockLine;
 }
 
 TEST(QbeEmitter, DeferRecordAndRunDefersAreEmitted) {
