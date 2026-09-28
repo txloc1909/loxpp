@@ -19,6 +19,10 @@ static uint32_t fakeHash(const char* key, int length) {
 static ObjString* mkstr(MemoryManager& mm, const std::string& s) {
     ObjString* obj = mm.makeString(s);
     obj->hash = fakeHash(s.c_str(), static_cast<int>(s.size()));
+    // The intern table is not a GC root (MemoryManager::removeWhiteStrings),
+    // so under LOXPP_STRESS_GC the next allocation would free a string held
+    // only by a C++ local. Root it for the rest of the test.
+    mm.pushTempRoot(obj);
     return obj;
 }
 
@@ -137,7 +141,7 @@ TEST_F(TableTest, SetNumberValue) {
 
 TEST_F(TableTest, SetObjPtrValue) {
     ObjString* key = str("objkey");
-    ObjString* valStr = mm.makeString("objval");
+    ObjString* valStr = str("objval");
     table.set(key, Value{static_cast<Obj*>(valStr)});
     Value out;
     EXPECT_TRUE(table.get(key, out));
