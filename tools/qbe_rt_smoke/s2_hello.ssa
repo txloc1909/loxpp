@@ -10,13 +10,18 @@
 # straight-line code's own checkpoint), prints a string, then calls the
 # "clock" stdlib native through rt_call — the same polymorphic dispatch a
 # real compiled CALL will use once one exists.
+#
+# Passes requireAllCompiled=false (the 4th arg) explicitly: rt_startup's
+# C++ default argument (rt_capi.h) applies only to C++ call sites, not to
+# a QBE-emitted call, which must supply every argument or leave the
+# corresponding register holding whatever value was already there.
 data $empty_source = { b 0 }
 data $clock_name = { b "clock", b 0 }
 data $greeting = { b "hello from qbe", b 0 }
 
 export function w $main() {
 @start
-	%rt =l call $rt_startup(l $empty_source, l 0, l 0)
+	%rt =l call $rt_startup(l $empty_source, l 0, l 0, w 0)
 	%rtnull =w ceql %rt, 0
 	jnz %rtnull, @fail, @havert
 @havert
