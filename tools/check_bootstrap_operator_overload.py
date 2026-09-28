@@ -5,9 +5,9 @@ native's (issue #474).
 
 The bootstrap interpreter now dispatches the same dunder methods the native
 VM and JVM do (__add__ __sub__ __mul__ __div__ __mod__ __neg__ __lt__ __gt__
-__eq__ __contains__ __call__ __index_get__ __index_set__ __iter__). This runs a
-small corpus of programs that exercise each method through both consumers and
-asserts byte-identical stdout.
+__eq__ __contains__ __call__ __index_get__ __index_set__ __iter__ __len__).
+This runs a small corpus of programs that exercise each method through both
+consumers and asserts byte-identical stdout.
 
 Native's stdout is the ground truth. A case whose native run fails (non-zero
 exit) is a corpus bug and is reported, not skipped.
@@ -123,6 +123,37 @@ CASES = [
         "var sum = 0;\n"
         "for (var x in R(4)) { sum = sum + x; }\n"
         "print sum;\n",
+    ),
+    Case(
+        "length",
+        "class L {\n"
+        "  init(n) { this.n = n; }\n"
+        "  __len__() { return this.n; }\n"
+        "}\n"
+        "print len([1, 2, 3]);\n"
+        "print len(\"hello\");\n"
+        "print len({\"a\": 1, \"b\": 2});\n"
+        "print len(L(7));\n"
+        "print len(\"ab\") + 1;\n"
+        "print -len([1]);\n",
+    ),
+    Case(
+        "length_inherited",
+        "class A { __len__() { return 4; } }\n"
+        "class B < A {}\n"
+        "print len(B());\n",
+    ),
+    Case(
+        "length_result_type",
+        "class L { __len__() { return \"no\"; } }\n"
+        "try { len(L()); } catch (e) { print e.kind; }\n",
+    ),
+    # A __len__ declared with a parameter must raise the ordinary catchable
+    # ArityError, not crash the run inside the dispatch.
+    Case(
+        "length_arity",
+        "class L { __len__(x) { return x; } }\n"
+        "try { len(L()); } catch (e) { print e.kind; }\n",
     ),
     # Internal equality (list membership) must stay identity, never __eq__.
     Case(

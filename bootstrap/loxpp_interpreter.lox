@@ -18,7 +18,7 @@ var LOX_KEYWORDS = {
     "print": "PRINT",   "return": "RETURN",   "super": "SUPER",
     "this": "THIS",     "true": "TRUE",       "var": "VAR",
     "while": "WHILE",   "break": "BREAK",     "continue": "CONTINUE",
-    "in": "IN",         "enum": "ENUM",       "match": "MATCH",       "case": "CASE",
+    "in": "IN",         "enum": "ENUM",       "len": "LEN",           "match": "MATCH",       "case": "CASE",
     "try": "TRY",       "catch": "CATCH",     "throw": "THROW",       "defer": "DEFER"
 };
 
@@ -90,6 +90,7 @@ enum Expr {
     Assign(id, name, line, value)
     Binary(op, left, right)
     Unary(op, right)
+    LenExpr(argument)
     Logical(op, left, right)
     Call(callee, paren_line, args)
     Get(object, name, line)
@@ -642,6 +643,7 @@ class Parser {
                 case Assign{id, name, line, value} => { this.parseError(equals, "Invalid assignment target."); expr }
                 case Binary{op, left, right} => { this.parseError(equals, "Invalid assignment target."); expr }
                 case Unary{op, right}        => { this.parseError(equals, "Invalid assignment target."); expr }
+                case LenExpr{argument}       => { this.parseError(equals, "Invalid assignment target."); expr }
                 case Logical{op, left, right}=> { this.parseError(equals, "Invalid assignment target."); expr }
                 case Call{callee, paren_line, args} => { this.parseError(equals, "Invalid assignment target."); expr }
                 case Set{object, name, line, value}=> { this.parseError(equals, "Invalid assignment target."); expr }
@@ -788,6 +790,13 @@ class Parser {
 
         if (this.matchT("THIS")) {
             return ThisExpr(this.allocId(), this.previous().line);
+        }
+
+        if (this.matchT("LEN")) {
+            this.expect("LEFT_PAREN", "Expect '(' after 'len'.");
+            var argument = this.expression();
+            this.expect("RIGHT_PAREN", "Expect ')' after argument.");
+            return LenExpr(argument);
         }
 
         if (this.matchT("IDENTIFIER")) {
@@ -1308,6 +1317,7 @@ class Resolver {
             case Assign{id, name, line, value} => { this.resolveExpr(value); this.resolveLocal(id, name) }
             case Binary{op, left, right}       => { this.resolveExpr(left);  this.resolveExpr(right) }
             case Unary{op, right}              => this.resolveExpr(right)
+            case LenExpr{argument}             => this.resolveExpr(argument)
             case Logical{op, left, right}      => { this.resolveExpr(left);  this.resolveExpr(right) }
             case Call{callee, paren_line, args} => this.resolveCall(callee, args)
             case Get{object, name, line}       => this.resolveExpr(object)
@@ -1880,27 +1890,12 @@ class LoxNative {
             this.name == "exit" or this.name == "sleep" or
             this.name == "exists" or this.name == "is_dir" or
             this.name == "is_file" or this.name == "stat") return 1;
-        return 1;   // str, len
+        return 1;   // str
     }
     call(interp, args) {
         if (this.name == "clock") return clock();
         if (this.name == "input") return input();
         if (this.name == "str")   return interp.stringify(args[0]);
-        if (this.name == "len") {
-            var v = args[0];
-            if (isLoxStr(v)) return len(v);
-            var vtag = loxTag(v);
-            if (vtag == "list") return len(v.elements);
-            if (vtag == "map")  return len(v.data);
-            // "LengthTypeError": len() is not an index operation, so this is
-            // not NotIndexableError's documented cause ("Index of
-            // non-List/non-Map", e.g. 42[0]). Native's own len()
-            // (src/stdlib/globals.cpp) reaches this same cause only through
-            // its always-fatal path, so there is no existing `.kind` here
-            // to collide with.
-            interp.setError("LengthTypeError", "len() argument must be a String, List, or Map.", 0);
-            return nil;
-        }
         if (this.name == "open") {
             var handle = open(args[0], args[1]);
             return InterpFile(handle);
@@ -2268,7 +2263,6 @@ class Interpreter {
         this.globals.define("clock", LoxNative("clock"));
         this.globals.define("input", LoxNative("input"));
         this.globals.define("str",   LoxNative("str"));
-        this.globals.define("len",   LoxNative("len"));
         this.globals.define("open",  LoxNative("open"));
         this.globals.define("args",  LoxNative("args"));
         this.globals.define("env",   LoxNative("env"));
@@ -2841,6 +2835,7 @@ class Interpreter {
             case Variable{id, name, line}       => this.evalVariable(id, name, line, env)
             case Assign{id, name, line, value}  => this.evalAssign(id, name, line, value, env)
             case Unary{op, right}               => this.evalUnary(op, right, env)
+            case LenExpr{argument}              => this.evalLen(argument, env)
             case Binary{op, left, right}        => this.evalBinary(op, left, right, env)
             case Logical{op, left, right}       => this.evalLogical(op, left, right, env)
             case Call{callee, paren_line, args} => this.evalCall(callee, paren_line, args, env)
@@ -2904,10 +2899,35 @@ class Interpreter {
         return nil;
     }
 
+    // `len(x)` is a keyword (Expr::LenExpr), not a global call. The built-in
+    // List/String/Map length comes first, then `__len__` on an Instance.
+    evalLen(argument, env) {
+        var v = this.evalExpr(argument, env);
+        if (this.throwFlag) return nil;
+        var vtag = loxTag(v);
+        if (vtag == "list") return len(v.elements);
+        if (isLoxStr(v))    return len(v);
+        if (vtag == "map")  return len(v.data);
+        var m = this.findDunder(v, "__len__");
+        if (m != nil) {
+            var r = m.bind(v).call(this, []);
+            if (this.throwFlag) return nil;
+            return this.validateNumber(r, 0);
+        }
+        // "LengthTypeError": len() is not an index operation, so this is
+        // not NotIndexableError's documented cause ("Index of
+        // non-List/non-Map", e.g. 42[0]). Native's own len()
+        // (src/runtime.cpp opLen) reaches this same cause only through its
+        // always-fatal path, so there is no existing `.kind` here
+        // to collide with.
+        this.setError("LengthTypeError", "len() argument must be a String, List, or Map.", 0);
+        return nil;
+    }
+
     // Operator-overloading dispatch (issue #472 / #474). Mirrors the native
     // VM's rule: built-in branch first, then the dunder method on the
     // receiver, then the same error as before. findDunder returns the method
-    // or nil. validateBool/validateSequence set the catchable
+    // or nil. validateBool/validateSequence/validateNumber set the catchable
     // OperatorResultTypeError when the method returned the wrong type.
     findDunder(receiver, name) {
         if (loxTag(receiver) != "instance") return nil;
@@ -2923,6 +2943,12 @@ class Interpreter {
     validateSequence(v, line) {
         if (loxTag(v) == "list" or isLoxStr(v) or loxTag(v) == "map") return v;
         this.setError("OperatorResultTypeError", "Operator method must return a sequence.", line);
+        return nil;
+    }
+
+    validateNumber(v, line) {
+        if (isLoxNum(v)) return v;
+        this.setError("OperatorResultTypeError", "Operator method must return a Number.", line);
         return nil;
     }
 
