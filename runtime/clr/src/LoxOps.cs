@@ -109,6 +109,25 @@ public static class LoxOps {
 
     public static object Negate(object a) => -CheckNumber(a);
 
+    /// <summary>
+    /// The LEN opcode's built-in length. The CLR backend is excluded from
+    /// operator overloading, so there is no __len__ dispatch here — an
+    /// Instance operand raises the same error as before (src/runtime.cpp's
+    /// opLen keeps the __len__ dispatch on native and JVM only).
+    /// </summary>
+    public static object Len(object v) {
+        if (v is LoxList list) {
+            return (double)list.Elements.Count;
+        }
+        if (v is string s) {
+            return (double)s.Length;
+        }
+        if (v is LoxMap map) {
+            return (double)map.Size();
+        }
+        throw new LoxError("len() argument must be a list, string, or map.");
+    }
+
     // ------------------------------------------------------------------
     // Comparisons
     // ------------------------------------------------------------------

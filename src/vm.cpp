@@ -345,6 +345,13 @@ InterpretResult VM::run(int stopAtFrameCount) {
             m_rt.push(from<bool>(!m_rt.pop()));
             break;
         }
+        case Op::LEN: {
+            if (auto ret =
+                    dispatchOp([&] { return m_rt.opLen(stopAtFrameCount); })) {
+                return *ret;
+            }
+            break;
+        }
         case Op::PRINT: {
             m_rt.m_stdlibCtx.clearError();
             std::string s = stringify(m_rt.pop());
@@ -586,8 +593,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
             // defers already had this done by RUN_DEFERS below, before its
             // defers ran; this is then a no-op.
             m_rt.popHandlersOwnedByCurrentFrame();
-            bool checkBool = m_rt.m_frameBoolCheck[m_rt.m_frameCount - 1];
-            m_rt.m_frameBoolCheck[m_rt.m_frameCount - 1] = false;
+            Runtime::ResultCheck check =
+                m_rt.m_frameResultCheck[m_rt.m_frameCount - 1];
+            m_rt.m_frameResultCheck[m_rt.m_frameCount - 1] =
+                Runtime::ResultCheck::None;
             bool overrideSet =
                 m_rt.m_frameResultOverrideSet[m_rt.m_frameCount - 1];
             Value overrideVal =
@@ -609,13 +618,19 @@ InterpretResult VM::run(int stopAtFrameCount) {
             m_rt.push(overrideSet ? overrideVal : result);
             FrameSync::loadTop(m_rt.m_frames, m_rt.m_frameCount, frame, ip,
                                chunk);
-            if (checkBool && !is<bool>(result)) {
+            if (check == Runtime::ResultCheck::Boolean && !is<bool>(result)) {
                 // An operator-overloading method returned a non-Boolean. The
                 // method frame is already gone, so this raises at the caller's
                 // operator site and any handler there (or above) can catch it.
                 CATCHABLE_OR_RETURN(tryCatchableError(
                     "OperatorResultTypeError",
                     "Operator method must return a Boolean."));
+                break;
+            }
+            if (check == Runtime::ResultCheck::Number && !is<Number>(result)) {
+                CATCHABLE_OR_RETURN(
+                    tryCatchableError("OperatorResultTypeError",
+                                      "Operator method must return a Number."));
                 break;
             }
             if (m_rt.m_frameCount <= stopAtFrameCount) {

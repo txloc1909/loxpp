@@ -25,6 +25,7 @@ enum class Op : Byte {
     DIVIDE,
     MODULO,
     NOT,
+    LEN, // pops one value, pushes its length (Number); dispatches __len__
     PRINT,
     POP,
     GET_LOCAL,
@@ -124,6 +125,7 @@ enum class Op : Byte {
     X(DIVIDE)                                                                  \
     X(MODULO)                                                                  \
     X(NOT)                                                                     \
+    X(LEN)                                                                     \
     X(PRINT)                                                                   \
     X(POP)                                                                     \
     X(GET_LOCAL)                                                               \

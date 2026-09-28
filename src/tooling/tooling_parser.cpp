@@ -1030,6 +1030,15 @@ class Parser {
             spanTo(*node, t.offset);
             return node;
         }
+        case TokenType::LEN: {
+            advance();
+            auto node = std::make_unique<LenExpr>();
+            consume(TokenType::LEFT_PAREN);
+            node->argument = expression();
+            consume(TokenType::RIGHT_PAREN);
+            spanTo(*node, t.offset);
+            return node;
+        }
         case TokenType::LEFT_PAREN: {
             advance();
             auto node = std::make_unique<GroupingExpr>();

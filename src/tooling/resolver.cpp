@@ -559,6 +559,9 @@ class Resolver {
         case ExprKind::Unary:
             visitExpr(static_cast<const UnaryExpr&>(*expr).operand.get());
             break;
+        case ExprKind::Len:
+            visitExpr(static_cast<const LenExpr&>(*expr).argument.get());
+            break;
         case ExprKind::Binary: {
             const auto& e = static_cast<const BinaryExpr&>(*expr);
             visitExpr(e.left.get());

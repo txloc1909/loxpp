@@ -39,6 +39,7 @@ DecodedInstruction decodeOne(const Chunk& chunk, int offset) {
     case Op::DIVIDE:
     case Op::MODULO:
     case Op::NOT:
+    case Op::LEN:
     case Op::PRINT:
     case Op::POP:
     case Op::RETURN:

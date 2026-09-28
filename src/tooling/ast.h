@@ -69,6 +69,7 @@ enum class ExprKind : std::uint8_t {
     Grouping,
     This,
     Super,
+    Len,
     Match,
 };
 
@@ -187,6 +188,13 @@ struct SuperExpr : Expr {
     std::string_view name; // the member after `super .`
     std::size_t name_offset = 0;
     std::size_t name_length = 0;
+};
+
+// `len(expr)` — a keyword special form, not a global call. The argument is
+// resolved; `len` itself is not a name and produces no symbol.
+struct LenExpr : Expr {
+    LenExpr() : Expr(ExprKind::Len) {}
+    ExprPtr argument;
 };
 
 // ---------------------------------------------------------------------------

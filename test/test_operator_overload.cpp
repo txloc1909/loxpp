@@ -222,7 +222,6 @@ TEST(OperatorOverload, IndexSetDispatchAssignmentValue) {
     EXPECT_EQ(h.getGlobalStr("s"), "7"); // assigned value, not 12345
     EXPECT_EQ(h.getGlobalStr("x"), "7"); // __index_set__ stored 7
 }
-
 // A missing __index_get__/__index_set__ raises the same error as today.
 TEST(OperatorOverload, IndexMissingMethodRaisesSameError) {
     VMTestHarness h;
@@ -233,4 +232,43 @@ TEST(OperatorOverload, IndexMissingMethodRaisesSameError) {
     ASSERT_EQ(h.run(src), InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("kind1"), "NotIndexableError");
     EXPECT_EQ(h.getGlobalStr("kind2"), "NotIndexableError");
+}
+
+// ---------------------------------------------------------------------------
+// len dispatch (__len__)
+// ---------------------------------------------------------------------------
+
+TEST(OperatorOverload, LenBuiltinUnchanged) {
+    VMTestHarness h;
+    std::string src = "var a = len([1, 2, 3]);"
+                      "var b = len(\"ab\");"
+                      "var c = len({1: 2, 3: 4});";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("a"), "3");
+    EXPECT_EQ(h.getGlobalStr("b"), "2");
+    EXPECT_EQ(h.getGlobalStr("c"), "2");
+}
+
+TEST(OperatorOverload, LenDispatch) {
+    VMTestHarness h;
+    std::string src = "class V { __len__() { return 7; } }"
+                      "var n = len(V());";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("n"), "7");
+}
+
+TEST(OperatorOverload, NonNumberLenResultRaises) {
+    VMTestHarness h;
+    std::string src = "class V { __len__() { return \"nope\"; } }"
+                      "var kind;"
+                      "try { var n = len(V()); } catch (e) { kind = e.kind; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "OperatorResultTypeError");
+}
+
+TEST(OperatorOverload, LenMissingMethodRaisesSameError) {
+    VMTestHarness h;
+    // The legacy `len` error is fatal, not catchable.
+    ASSERT_EQ(h.run("class V {} var x = len(V());"),
+              InterpretResult::RUNTIME_ERROR);
 }

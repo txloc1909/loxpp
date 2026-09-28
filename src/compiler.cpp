@@ -92,6 +92,13 @@ void Compiler::grouping() {
     m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after expression.");
 }
 
+void Compiler::lenExpr() {
+    m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after 'len'.");
+    expression();
+    m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after argument.");
+    emitByte(Op::LEN);
+}
+
 void Compiler::unary() {
     TokenType operatorType = m_parser->m_previous.type;
 
@@ -2303,6 +2310,7 @@ void Compiler::trackOperandStack(Op op) {
         break;
     case Op::NEGATE:
     case Op::NOT:
+    case Op::LEN:
     case Op::GET_TAG:
     case Op::IS_SEQ:
     case Op::INSTANCEOF:
@@ -2545,11 +2553,9 @@ Compiler::ListPatResult Compiler::compileListPattern(int subjectSlot,
     emitByte(Op::POP); // pop IS_SEQ true on hit path
 
     // ---- Length check: len(subject) vs fixedCount -------------------------
-    // Inline call: GET_GLOBAL "len"; GET_LOCAL subject; CALL 1
-    Token lenTok{TokenType::IDENTIFIER, "len", m_parser->m_previous.line};
-    emitConstantOp(Op::GET_GLOBAL, identifierConstant(lenTok));
+    // Inline: GET_LOCAL subject; LEN
     emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
-    emitBytes(Op::CALL, 1);
+    emitByte(Op::LEN);
     emitConstantOp(Op::CONSTANT,
                    makeConstant(Value{static_cast<double>(fixedCount)}));
     if (hasRest) {
@@ -2586,9 +2592,8 @@ Compiler::ListPatResult Compiler::compileListPattern(int subjectSlot,
                 emitConstantOp(
                     Op::CONSTANT,
                     makeConstant(Value{static_cast<double>(fixedCount)}));
-                emitConstantOp(Op::GET_GLOBAL, identifierConstant(lenTok));
                 emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
-                emitBytes(Op::CALL, 1);
+                emitByte(Op::LEN);
                 emitByte(Op::SLICE);
                 addLocal(elem.name);
                 markInitialized();

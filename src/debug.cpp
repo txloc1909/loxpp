@@ -146,6 +146,8 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return simpleInstruction("MODULO", offset, out, color);
     case Op::NOT:
         return simpleInstruction("NOT", offset, out, color);
+    case Op::LEN:
+        return simpleInstruction("LEN", offset, out, color);
     case Op::PRINT:
         return simpleInstruction("PRINT", offset, out, color);
     case Op::POP:

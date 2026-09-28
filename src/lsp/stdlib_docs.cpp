@@ -10,15 +10,13 @@ namespace {
 
 // Globals: src/stdlib/globals.cpp, file_api.cpp, os_api.cpp, reflect_api.cpp,
 // math_module.cpp. Descriptions condensed from spec/05-stdlib.md.
-constexpr std::array<StdlibEntry, 22> kGlobals = {{
+constexpr std::array<StdlibEntry, 21> kGlobals = {{
     {"clock", "clock() -> Number", 0,
      "Elapsed processor time in seconds. Use for measuring durations."},
     {"input", "input() -> String | Nil", 0,
      "Reads one line from standard input without the newline; nil at EOF."},
     {"str", "str(value) -> String", 1,
      "Converts any value to its canonical string form, as `print` shows it."},
-    {"len", "len(seq) -> Number", 1,
-     "Number of elements in a list, bytes in a string, or pairs in a map."},
     {"open", "open(path, mode) -> File", 2,
      "Opens a file in mode r, w, a, or r+. Returns a File."},
     {"args", "args() -> List[String]", 0,

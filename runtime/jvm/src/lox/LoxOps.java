@@ -60,6 +60,14 @@ public final class LoxOps {
         return (Boolean)result;
     }
 
+    private static double checkNumberResult(Object result) {
+        if (!(result instanceof Double)) {
+            throw makeError("OperatorResultTypeError",
+                            "Operator method must return a Number.");
+        }
+        return (Double)result;
+    }
+
     // ------------------------------------------------------------------
     // Handler liveness (issue #319)
     // ------------------------------------------------------------------
@@ -301,6 +309,27 @@ public final class LoxOps {
         }
         checkNumbersForComparison(a, b);
         throw new AssertionError("checkNumbersForComparison must throw");
+    }
+
+    /**
+     * The LEN opcode: List/String/Map built-in length, then __len__ on an
+     * Instance (which must return a Number). Mirrors src/runtime.cpp's opLen.
+     */
+    public static Object len(Object v) {
+        if (v instanceof LoxList) {
+            return (double)((LoxList)v).elements.size();
+        }
+        if (v instanceof String) {
+            return (double)((String)v).length();
+        }
+        if (v instanceof LoxMap) {
+            return (double)((LoxMap)v).size();
+        }
+        LoxClosure dunder = findDunder(v, "__len__");
+        if (dunder != null) {
+            return checkNumberResult(dunder.callAsSelf(v, new Object[0]));
+        }
+        throw new LoxError("len() argument must be a list, string, or map.");
     }
 
     // ------------------------------------------------------------------

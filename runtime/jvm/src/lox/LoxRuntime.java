@@ -150,21 +150,6 @@ public final class LoxRuntime {
         globals.define(
             "str", new LoxNative("str", 1, args -> LoxOps.stringify(args[0])));
         globals.define(
-            "len", new LoxNative("len", 1, args -> {
-                Object v = args[0];
-                if (v instanceof LoxList) {
-                    return (double)((LoxList)v).elements.size();
-                }
-                if (v instanceof String) {
-                    return (double)((String)v).length();
-                }
-                if (v instanceof LoxMap) {
-                    return (double)((LoxMap)v).size();
-                }
-                throw new LoxError(
-                    "len() argument must be a list, string, or map.");
-            }));
-        globals.define(
             "open", new LoxNative("open", 2, args -> {
                 if (!(args[0] instanceof String) ||
                     !(args[1] instanceof String)) {

@@ -716,12 +716,13 @@ TEST(LspSignatureHelp, TypingStatesKeepHelp) {
 
     // Nested calls: on the inner close the inner help shows; between the
     // closes the outer help shows; past both there is no call.
-    loxpp::tooling::DocumentModel n("print str(len(\"ab\"))");
+    loxpp::tooling::DocumentModel n("print str(type(1))");
     const std::string& t = n.text();
     const std::size_t inner = t.find("))");
     json innerHelp = loxpp::lsp::signatureHelpFor(n, inner);
     ASSERT_TRUE(innerHelp.is_object());
-    EXPECT_EQ(innerHelp.at("signatures")[0].at("label"), "len(seq) -> Number");
+    EXPECT_EQ(innerHelp.at("signatures")[0].at("label"),
+              "type(value) -> String");
     json outerHelp = loxpp::lsp::signatureHelpFor(n, inner + 1);
     ASSERT_TRUE(outerHelp.is_object());
     EXPECT_EQ(outerHelp.at("signatures")[0].at("label"),

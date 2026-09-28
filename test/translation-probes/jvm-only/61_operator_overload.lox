@@ -23,6 +23,9 @@ class Table {
   __index_set__(k, v) { this.cells = v; return 999; }
 }
 
+class Sized { __len__() { return 5; } }
+class BadLen { __len__() { return "nope"; } }
+
 var a = Vec(3);
 var b = Vec(4);
 print a + b;
@@ -47,6 +50,11 @@ var t = Table();
 print t[10];
 print (t["k"] = 7);
 print t[0];
+
+print len([1, 2, 3]);
+print len("ab");
+print len(Sized());
+try { var bad = len(BadLen()); } catch (e) { print "caught " + e.kind; }
 
 class AlwaysEq { __eq__(o) { return true; } }
 var e1 = AlwaysEq();

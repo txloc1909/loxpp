@@ -76,6 +76,7 @@ class Compiler {
     void grouping();
     void unary();
     void binary();
+    void lenExpr();
     void literal();
     void number();
     void string();

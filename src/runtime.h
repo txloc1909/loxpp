@@ -383,6 +383,7 @@ class Runtime {
     OpResult opGreater(int stopAtFrameCount);
     OpResult opEqual(int stopAtFrameCount);
     OpResult opIn(int stopAtFrameCount);
+    OpResult opLen(int stopAtFrameCount);
 
     // Op::THROW's own op*()-shaped entry point: handleThrow() collapsed
     // through fromThrow() (private below) into the same OpResult contract
@@ -486,7 +487,17 @@ class Runtime {
         Call,
         IndexGet,
         IndexSet,
+        Len,
         Count,
+    };
+
+    // The result-type contract Op::RETURN enforces for a dispatched operator
+    // method (see dispatchMethod). A violated contract raises the catchable
+    // OperatorResultTypeError.
+    enum class ResultCheck : std::uint8_t {
+        None,
+        Boolean, // __eq__ __lt__ __gt__ __contains__
+        Number,  // __len__
     };
 
     // Interns the protocol names into m_protocolNames. Called once from
@@ -511,16 +522,17 @@ class Runtime {
                                                 int stopAtFrameCount);
 
     // Calls `method` — a resolved ObjClosure whose receiver already sits at
-    // stackTop[-argCount-1] — and, when `checkBool`, marks the pushed frame so
-    // Op::RETURN validates its result as a Boolean. The method itself runs in
-    // the ordinary interpreter loop; the validation happens at RETURN, not
-    // here, so a throw from the method propagates normally with no re-entrant
-    // run() invocation to confuse it with a caught throw. When `resultOverride`
-    // is non-null, Op::RETURN discards the method's actual return and pushes
+    // stackTop[-argCount-1] — and, when `check` is not None, marks the pushed
+    // frame so Op::RETURN validates its result type and raises the catchable
+    // OperatorResultTypeError otherwise. The method itself runs in the
+    // ordinary interpreter loop; the validation happens at RETURN, not here,
+    // so a throw from the method propagates normally with no re-entrant run()
+    // invocation to confuse it with a caught throw. When `resultOverride` is
+    // non-null, Op::RETURN discards the method's actual return and pushes
     // `*resultOverride` instead (used by __index_set__, whose assignment value
     // is the assigned value, not the method's return).
     OpResult dispatchMethod(ObjClosure* method, int argCount,
-                            int stopAtFrameCount, bool checkBool,
+                            int stopAtFrameCount, ResultCheck check,
                             const Value* resultOverride = nullptr);
 
     // Sized FRAMES_MAX/STACK_MAX plus the reserve above, not just
@@ -593,17 +605,17 @@ class Runtime {
     std::array<std::vector<Value>, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
         m_deferLists;
 
-    // Parallel to m_frames[]: whether the frame's result must be a Boolean,
-    // checked by Op::RETURN (operator-overloading result validation). Set by
-    // dispatchMethod(), cleared by RETURN, callCompiled(), handleThrow()'s
-    // unwind loop, and resetStack(). Sized to match m_frames.
-    std::array<bool, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
-        m_frameBoolCheck{};
+    // Parallel to m_frames[]: the result-type contract Op::RETURN enforces
+    // for this frame's operator-overloading method (None for ordinary frames).
+    // Set by dispatchMethod(), cleared by RETURN, callCompiled(),
+    // handleThrow()'s unwind loop, and resetStack(). Sized to match m_frames.
+    std::array<ResultCheck, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
+        m_frameResultCheck{};
 
     // Parallel to m_frames[]: when m_frameResultOverrideSet[i] is true,
     // Op::RETURN pushes m_frameResultOverride[i] instead of the method's
     // actual return (__index_set__'s assignment value). Same set/clear sites
-    // as m_frameBoolCheck.
+    // as m_frameResultCheck.
     std::array<bool, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
         m_frameResultOverrideSet{};
     std::array<Value, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>

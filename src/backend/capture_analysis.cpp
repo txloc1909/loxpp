@@ -46,6 +46,7 @@ int frameHeightEffect(const DecodedInstruction& ins) {
     // transfer with no stack effect of its own (JUMP, LOOP).
     case Op::NEGATE:
     case Op::NOT:
+    case Op::LEN:
     case Op::SET_LOCAL:
     case Op::SET_GLOBAL:
     case Op::SET_UPVALUE:
