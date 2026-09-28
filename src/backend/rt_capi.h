@@ -159,6 +159,13 @@ int rt_op_slice(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_get_tag(Runtime* rt) noexcept;
 int rt_op_match_error(Runtime* rt, int stopAtFrameCount) noexcept;
 
+// NOT/IS_SEQ/INSTANCEOF (S7, #460): the last 3 opcodes with no owner in
+// the QBE emitter — no earlier node's own checkpoint happened to exercise
+// them. All 3 have no error path, matching rt_op_class's shape above.
+int rt_op_not(Runtime* rt) noexcept;
+int rt_op_is_seq(Runtime* rt) noexcept;
+int rt_op_instanceof(Runtime* rt, ObjString* className) noexcept;
+
 // rt_op_in/rt_op_len: the wrappers T1 (#465) and T3 (#467) left for this
 // node to add, since Runtime::opIn/opLen already existed but had no QBE-
 // callable entry point yet (issue #472's cross-mission coordination

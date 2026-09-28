@@ -1477,6 +1477,30 @@ Runtime::OpResult Runtime::opMatchError(int stopAtFrameCount) {
                                          stopAtFrameCount));
 }
 
+void Runtime::opNot() { push(Value{!pop()}); }
+
+void Runtime::opIsSeq() {
+    Value val = pop();
+    push(Value{isList(val) || isString(val)});
+}
+
+void Runtime::opInstanceof(ObjString* className) {
+    Value val = pop();
+    Value classVal;
+    bool result = false;
+    if (m_globals.get(className, classVal) && isClass(classVal)) {
+        ObjClass* target = asObjClass(as<Obj*>(classVal));
+        if (isInstance(val)) {
+            ObjClass* klass = asObjInstance(as<Obj*>(val))->klass;
+            const ObjClass* found = walkChain<ObjClass>(
+                klass, [target](const ObjClass* k) { return k == target; },
+                [](const ObjClass* k) { return k->superclass; });
+            result = found != nullptr;
+        }
+    }
+    push(Value{result});
+}
+
 // --- arithmetic / comparison / containment op*() helpers ------------------
 //
 // Each one owns its opcode's slow path: VM::run() inlines the double-double

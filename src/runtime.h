@@ -426,6 +426,14 @@ class Runtime {
     OpResult opGetTag();
     OpResult opMatchError(int stopAtFrameCount);
 
+    // NOT/IS_SEQ/INSTANCEOF (S7, #460): plain stack ops with no error path
+    // (matching opClass/opDefineMethod's shape above) — moved out of
+    // VM::run() last because none of S3-S6's own checkpoints happened to
+    // exercise them (#460's own hazard comment).
+    void opNot();
+    void opIsSeq();
+    void opInstanceof(ObjString* className);
+
     // Arithmetic / comparison / containment operators. Each one owns the
     // slow path of its opcode: the built-in number (and for ADD, string) fast
     // path is inlined in VM::run(), and these are called only once that fast

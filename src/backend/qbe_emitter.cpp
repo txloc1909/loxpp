@@ -878,6 +878,20 @@ class Emitter {
             callSlowPath("rt_op_get_tag", before.height, {}, std::nullopt,
                          ins.offset, Catchability::Fatal);
             break;
+        case Op::NOT:
+            callSlowPath("rt_op_not", before.height, {}, std::nullopt,
+                         ins.offset, Catchability::Fatal);
+            break;
+        case Op::IS_SEQ:
+            callSlowPath("rt_op_is_seq", before.height, {}, std::nullopt,
+                         ins.offset, Catchability::Fatal);
+            break;
+        case Op::INSTANCEOF: {
+            std::string name = constantStringPtr(ins.constantIndex);
+            callSlowPath("rt_op_instanceof", before.height, {name},
+                         std::nullopt, ins.offset, Catchability::Fatal);
+            break;
+        }
         case Op::MATCH_ERROR:
             // Always throws (there is no non-error stack effect for this
             // opcode — see vm.cpp) — genuinely catchable (spec's MatchError

@@ -267,6 +267,27 @@ int rt_op_get_tag(Runtime* rt) noexcept {
     return rtGuard(rt, [&] { return rt->opGetTag(); });
 }
 
+int rt_op_not(Runtime* rt) noexcept {
+    return rtGuard(rt, [&] {
+        rt->opNot();
+        return Runtime::OpResult::OK;
+    });
+}
+
+int rt_op_is_seq(Runtime* rt) noexcept {
+    return rtGuard(rt, [&] {
+        rt->opIsSeq();
+        return Runtime::OpResult::OK;
+    });
+}
+
+int rt_op_instanceof(Runtime* rt, ObjString* className) noexcept {
+    return rtGuard(rt, [&] {
+        rt->opInstanceof(className);
+        return Runtime::OpResult::OK;
+    });
+}
+
 int rt_op_match_error(Runtime* rt, int stopAtFrameCount) noexcept {
     return rtGuard(rt, [&] { return rt->opMatchError(stopAtFrameCount); });
 }
