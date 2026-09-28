@@ -13,6 +13,8 @@
 #include "compiler.h"
 #include "memory_manager.h"
 #include "exec_objects.h"
+#include "class_objects.h"
+#include "container_objects.h"
 
 #include <gtest/gtest.h>
 
@@ -564,4 +566,112 @@ TEST(RtCapiCheckpoint, PrintsAStringAndCallsAStdlibFunction) {
     EXPECT_TRUE(is<Number>(result));
 
     rt_shutdown(rt);
+}
+
+// ===========================================================================
+// runPendingDefers() — BoundMethod/Closure branches go through
+// invokeClosure(), not a bare call()
+// ===========================================================================
+//
+// QBE has no Op::DEFER_RECORD/Op::RUN_DEFERS lowering yet (S6, #459), so
+// these two branches are unreachable from a QBE-compiled callER today. But
+// their own callEE can still be QBE-compiled: rt_capi.h's own
+// "interpreted-fallback closure (function->code == nullptr)" split means an
+// interpreted function (still dispatched through VM::run(), the only place
+// that calls Op::RUN_DEFERS) can defer a call onto a sibling closure that
+// DID compile successfully. A bare call() on that closure would only push a
+// CallFrame and return — the same "pushed frame nobody runs" bug
+// invokeClosure() fixes at every other direct-call site in runtime.cpp —
+// so these tests attach real compiled code to the deferred callee and prove
+// runPendingDefers() actually runs it, not silently no-ops.
+
+// Grants this test file the same private access VM has (friend struct
+// VMTestAccess; in runtime.h) to build a deferred call the way
+// Op::DEFER_RECORD does (vm.cpp), without routing through a full VM.
+struct VMTestAccess {
+    static void recordDefer(Runtime& rt, int frameIndex, Value callee) {
+        ObjDeferredCall* deferred = rt.m_mm.create<ObjDeferredCall>(
+            callee, VmAllocator<Value>{&rt.m_mm});
+        rt.m_deferLists[frameIndex].push_back(
+            Value{static_cast<Obj*>(deferred)});
+    }
+};
+
+namespace {
+
+int fakeCompiledDeferTarget(Runtime* rt, Value*) {
+    g_record->calls++;
+    g_record->rt = rt;
+    rt->push(Value{}); // C-ABI return convention: nil.
+    return 0;
+}
+
+// Pushes an interpreted "outer" frame (function->code == nullptr) at
+// frameIndex 0 — the frame whose RUN_DEFERS drains the list under test.
+// Its own body never runs; only its CallFrame/defer-list slot needs to
+// exist for runPendingDefers(0, ...) to be a valid call.
+ObjClosure* pushInterpretedOuterFrame(Runtime& rt) {
+    ObjFunction* outerFn = rt.memoryManager().create<ObjFunction>();
+    outerFn->arity = 0;
+    ObjClosure* outer = rt.memoryManager().create<ObjClosure>(outerFn);
+    rt.push(Value{static_cast<Obj*>(outer)});
+    EXPECT_EQ(rt.call(outer, 0), Runtime::ThrowOutcome::Pushed);
+    return outer;
+}
+
+} // namespace
+
+TEST(RunPendingDefers, ClosureBranchRunsAttachedCompiledCodeNotANoop) {
+    Runtime rt;
+    pushInterpretedOuterFrame(rt);
+    ASSERT_EQ(rt.frameCount(), 1);
+
+    ObjFunction* deferredFn = rt.memoryManager().create<ObjFunction>();
+    deferredFn->arity = 0;
+    deferredFn->code = reinterpret_cast<void*>(&fakeCompiledDeferTarget);
+    ObjClosure* deferredClosure =
+        rt.memoryManager().create<ObjClosure>(deferredFn);
+
+    FakeCallRecord record;
+    g_record = &record;
+    VMTestAccess::recordDefer(rt, /*frameIndex=*/0,
+                              Value{static_cast<Obj*>(deferredClosure)});
+
+    InterpretResult result = rt.runPendingDefers(0, 0);
+
+    EXPECT_EQ(result, InterpretResult::OK);
+    EXPECT_EQ(record.calls, 1)
+        << "a bare call() on a compiled closure only pushes a CallFrame and "
+           "returns — nothing would ever run it, so the compiled body would "
+           "silently never execute";
+    EXPECT_EQ(rt.frameCount(), 1) << "the deferred call's own frame must be "
+                                     "pushed and popped, not leaked";
+}
+
+TEST(RunPendingDefers, BoundMethodBranchRunsAttachedCompiledCodeNotANoop) {
+    Runtime rt;
+    pushInterpretedOuterFrame(rt);
+    ASSERT_EQ(rt.frameCount(), 1);
+
+    ObjFunction* methodFn = rt.memoryManager().create<ObjFunction>();
+    methodFn->arity = 0;
+    methodFn->code = reinterpret_cast<void*>(&fakeCompiledDeferTarget);
+    ObjClosure* method = rt.memoryManager().create<ObjClosure>(methodFn);
+    ObjBoundMethod* bound = rt.memoryManager().create<ObjBoundMethod>(
+        Value{1.0} /* dummy receiver */, method);
+
+    FakeCallRecord record;
+    g_record = &record;
+    VMTestAccess::recordDefer(rt, /*frameIndex=*/0,
+                              Value{static_cast<Obj*>(bound)});
+
+    InterpretResult result = rt.runPendingDefers(0, 0);
+
+    EXPECT_EQ(result, InterpretResult::OK);
+    EXPECT_EQ(record.calls, 1)
+        << "a bare call() on a compiled bound method only pushes a "
+           "CallFrame and returns — nothing would ever run it, so the "
+           "compiled body would silently never execute";
+    EXPECT_EQ(rt.frameCount(), 1) << "the deferred call's own frame must be "
+                                     "pushed and popped, not leaked";
 }

@@ -262,41 +262,64 @@ InterpretResult Runtime::runPendingDefers(int frameIndex,
 
         // Handle various callable types (similar to Op::CALL dispatch).
         // For BoundMethod, replace the method on the stack with the receiver,
-        // then call the underlying method closure.
-        ThrowOutcome outcome;
+        // then call the underlying method closure. BoundMethod and Closure
+        // go through invokeClosure(), not a bare call(): the callee can be a
+        // compiled closure (function->code != nullptr, an interpreted
+        // fallback frame deferring into QBE-compiled code — rt_capi.h's own
+        // "interpreted-fallback closure" split), and a bare call() would
+        // push a CallFrame that nothing here would ever run, the same
+        // "pushed frame nobody runs" bug invokeClosure() fixes at every
+        // other direct-call site in this file.
+        OpResult callResult;
         if (isBoundMethod(calleeVal)) {
             ObjBoundMethod* bound = asObjBoundMethod(as<Obj*>(calleeVal));
             stackTop[-argCount - 1] = bound->receiver;
-            outcome = call(bound->method, argCount, stopAtFrameCount);
+            callResult =
+                invokeClosure(bound->method, argCount, stopAtFrameCount);
         } else if (isClosure(calleeVal)) {
             ObjClosure* closure = asObjClosure(as<Obj*>(calleeVal));
-            outcome = call(closure, argCount, stopAtFrameCount);
+            callResult = invokeClosure(closure, argCount, stopAtFrameCount);
         } else if (isNative(calleeVal)) {
             ObjNative* native = asObjNative(as<Obj*>(calleeVal));
-            outcome = callNative(native, argCount) ? ThrowOutcome::Pushed
-                                                   : ThrowOutcome::Uncaught;
+            callResult =
+                callNative(native, argCount) ? OpResult::OK : OpResult::Fatal;
         } else if (isBoundNative(calleeVal)) {
             ObjBoundNative* bound = asObjBoundNative(as<Obj*>(calleeVal));
-            outcome = callBoundNative(bound, argCount) ? ThrowOutcome::Pushed
-                                                       : ThrowOutcome::Uncaught;
+            callResult = callBoundNative(bound, argCount) ? OpResult::OK
+                                                          : OpResult::Fatal;
         } else {
             // Unexpected callable type in deferred call
             runtimeError("Deferred callable has unexpected type.");
             return InterpretResult::RUNTIME_ERROR;
         }
 
-        if (outcome == ThrowOutcome::Uncaught) {
+        if (callResult == OpResult::Fatal) {
             return InterpretResult::RUNTIME_ERROR;
         }
-        if (outcome != ThrowOutcome::Pushed) {
-            // The deferred call's own arity mismatch was caught instead of
-            // pushing a new frame. Any handler reachable here was pushed
-            // before frameIndex's own function was even called (a handler
-            // scoped inside that function's body is already popped by the
-            // time RUN_DEFERS runs), so frameIndex no longer exists — there
-            // is no new frame to run to completion. Per defer step 5's
-            // documented limitation, abandon any remaining sibling defers
-            // rather than still running them.
+        if (callResult == OpResult::OK) {
+            // A native call already ran, or invokeClosure() ran a compiled
+            // closure to completion internally (Runtime::callCompiled) and
+            // already popped its own frame — either way there is no pending
+            // frame here to run to completion. Move on to the next deferred
+            // call.
+            continue;
+        }
+        // callResult is Stop or Resumed. Resumed covers two different
+        // ThrowOutcomes (see OpResult's own doc comment): a frame genuinely
+        // pushed for this call (ThrowOutcome::Pushed), or this call's own
+        // arity/overflow fault caught by a handler elsewhere
+        // (ThrowOutcome::HandledContinue). call()'s arity/overflow check
+        // runs before any push, so only the first case can leave
+        // m_frameCount at frameIndex + 2; use that to tell them apart
+        // instead of threading ThrowOutcome itself through invokeClosure().
+        if (callResult == OpResult::Stop || m_frameCount != frameIndex + 2) {
+            // No frame was pushed for this call. Any handler reachable here
+            // was pushed before frameIndex's own function was even called (a
+            // handler scoped inside that function's body is already popped
+            // by the time RUN_DEFERS runs), so frameIndex no longer exists
+            // — there is no new frame to run to completion. Per defer step
+            // 5's documented limitation, abandon any remaining sibling
+            // defers rather than still running them.
             return InterpretResult::OK;
         }
         InterpretResult result = m_runLoop(frameIndex + 1);

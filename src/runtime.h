@@ -554,7 +554,7 @@ class Runtime {
     // leaves that same gap open, since compiled RETURN
     // (backend/qbe_emitter.cpp) does not consult m_frameResultCheck/
     // m_frameResultOverride the way Op::RETURN does — out of this node's
-    // scope, flagged on #460.
+    // scope, tracked as a hazard on #460 (S7 parity gate).
     OpResult invokeClosure(ObjClosure* closure, int argCount,
                            int stopAtFrameCount);
 
