@@ -155,7 +155,7 @@ int rt_op_set_property(Runtime* rt, ObjString* name) noexcept;
 int rt_op_define_method(Runtime* rt, ObjString* name) noexcept;
 int rt_op_build_list(Runtime* rt, int count) noexcept;
 int rt_op_build_map(Runtime* rt, int count, int stopAtFrameCount) noexcept;
-int rt_op_slice(Runtime* rt) noexcept;
+int rt_op_slice(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_get_tag(Runtime* rt) noexcept;
 int rt_op_match_error(Runtime* rt, int stopAtFrameCount) noexcept;
 

@@ -1,0 +1,6 @@
+// A slice on an Instance that does not define __slice__ stays a fatal slice
+// error. Native raises it through Op::SLICE's RAISE_ERROR site; the JVM
+// backend must raise a raw LoxError, not a catchable Error value. The live
+// catch below must not stop it, so both sides print nothing and exit non-zero.
+class V {}
+try { V()[0:1]; } catch (e) { print "caught"; }

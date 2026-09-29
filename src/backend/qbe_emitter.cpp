@@ -848,8 +848,11 @@ class Emitter {
                          ins.offset, Catchability::Local);
             break;
         case Op::SLICE:
-            callSlowPath("rt_op_slice", before.height, {}, std::nullopt,
-                         ins.offset, Catchability::Fatal);
+            // Like GET_INDEX/SET_INDEX: opSlice dispatches __slice__, so the
+            // wrapper can resolve a catchable throw at this frame and must
+            // receive this function's own stop depth.
+            callSlowPath("rt_op_slice", before.height, {}, m_stopTemp,
+                         ins.offset, Catchability::Local);
             break;
         case Op::IN:
             callSlowPath("rt_op_in", before.height, {}, m_stopTemp, ins.offset,

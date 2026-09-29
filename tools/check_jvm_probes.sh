@@ -254,6 +254,10 @@ error_probes=(
     "test/translation-probes/jvm-only/fault_set_index_string_fatal.lox"
     "test/translation-probes/jvm-only/fault_stringify_too_deep_print.lox"
     "test/translation-probes/jvm-only/fault_stringify_too_deep_in_try.lox"
+    # A slice on an Instance with no __slice__ is fatal on native. The JVM
+    # backend must raise a raw LoxError, not a catchable Error value, so a
+    # live catch does not stop it.
+    "test/translation-probes/jvm-only/fault_slice_non_sliceable_fatal.lox"
     # A `defer`red call holding a non-callable value, or a class
     # construction, must be fatal (native's own `runDefers`, src/vm.cpp
     # lines 245-261), not delivered to any catchBlock. Each probe puts the

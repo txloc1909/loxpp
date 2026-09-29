@@ -2501,7 +2501,16 @@ class Interpreter {
         var endV = this.evalExpr(endExpr, env);
         if (this.throwFlag) return nil;
         var tag = loxTag(object);
-        if (tag != "list" and !isLoxStr(object)) { this.setError("NotSliceableError", "Slice requires a List or String.", line); return nil; }
+        if (tag != "list" and !isLoxStr(object)) {
+            var m = this.findDunder(object, "__slice__");
+            if (m != nil) {
+                var r = m.bind(object).call(this, [startV, endV]);
+                if (this.throwFlag) return nil;
+                return r;
+            }
+            this.setError("NotSliceableError", "Slice requires a List or String.", line);
+            return nil;
+        }
         if (!isLoxNum(startV)) { this.setError("SliceIndexTypeError", "Slice index must be a number.", line); return nil; }
         if (math.floor(startV) != startV) { this.setError("SliceIndexNotIntegerError", "Slice index must be an integer.", line); return nil; }
         if (startV < 0) { this.setError("SliceIndexNegativeError", "Slice index must be non-negative.", line); return nil; }

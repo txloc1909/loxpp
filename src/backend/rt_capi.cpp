@@ -259,8 +259,8 @@ int rt_op_build_map(Runtime* rt, int count, int stopAtFrameCount) noexcept {
     return rtGuard(rt, [&] { return rt->opBuildMap(count, stopAtFrameCount); });
 }
 
-int rt_op_slice(Runtime* rt) noexcept {
-    return rtGuard(rt, [&] { return rt->opSlice(); });
+int rt_op_slice(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opSlice(stopAtFrameCount); });
 }
 
 int rt_op_get_tag(Runtime* rt) noexcept {

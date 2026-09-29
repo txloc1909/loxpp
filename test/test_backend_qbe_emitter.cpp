@@ -68,6 +68,35 @@ int countOccurrences(const std::string& haystack, const std::string& needle) {
     return count;
 }
 
+// Returns the first instruction line of the label DEFINITION whose name
+// contains `needle` (a definition starts with '@' at the start of a line),
+// or an empty string when there is no such definition. A plain
+// find(needle) is not enough: the same needle also appears as a jump-target
+// reference on the `jnz` line just before the definition, so that
+// reference must be skipped.
+std::string labelBlockBody(const std::string& ssa, const std::string& needle) {
+    std::size_t searchFrom = 0;
+    for (;;) {
+        std::size_t hit = ssa.find(needle, searchFrom);
+        if (hit == std::string::npos) {
+            return {};
+        }
+        std::size_t lineStart = ssa.rfind('\n', hit);
+        lineStart = (lineStart == std::string::npos) ? 0 : lineStart + 1;
+        if (ssa[lineStart] == '@') {
+            std::size_t lineEnd = ssa.find('\n', lineStart);
+            if (lineEnd == std::string::npos) {
+                return {};
+            }
+            std::size_t nextLineEnd = ssa.find('\n', lineEnd + 1);
+            std::size_t bodyEnd =
+                (nextLineEnd == std::string::npos) ? ssa.size() : nextLineEnd;
+            return ssa.substr(lineEnd + 1, bodyEnd - (lineEnd + 1));
+        }
+        searchFrom = hit + 1;
+    }
+}
+
 } // namespace
 
 TEST(QbeEmitter, EmitsOneExportedFunctionMatchingRtCompiledFnShape) {
@@ -192,30 +221,10 @@ TEST(QbeEmitter, LocalCatchJumpsToStaticallyActiveCatchBlockOnResumed) {
         emitScriptFrom("try { print 1 + \"a\"; } catch (e) { print e; }");
     EXPECT_NE(ssa.find("ceqw"), std::string::npos)
         << "must compare the raw status against OpResult::Resumed(1)";
-    // Find the LABEL DEFINITION line itself (starts with '@' right after a
-    // newline), not the earlier "jnz ..., @..._local24, @..._propagate24"
-    // line that also contains the substring "_local" as a jump-target
-    // reference — a plain ssa.find("_local") lands there first and would
-    // silently check the wrong line.
-    std::size_t searchFrom = 0;
-    std::size_t labelLineStart = std::string::npos;
-    for (;;) {
-        std::size_t hit = ssa.find("_local", searchFrom);
-        ASSERT_NE(hit, std::string::npos)
-            << "must emit a dedicated local-catch block";
-        std::size_t lineStart = ssa.rfind('\n', hit);
-        lineStart = (lineStart == std::string::npos) ? 0 : lineStart + 1;
-        if (ssa[lineStart] == '@') {
-            labelLineStart = lineStart;
-            break;
-        }
-        searchFrom = hit + 1;
-    }
-    std::size_t lineEnd = ssa.find('\n', labelLineStart);
-    ASSERT_NE(lineEnd, std::string::npos);
-    std::size_t nextLineEnd = ssa.find('\n', lineEnd + 1);
-    std::string localBlockLine =
-        ssa.substr(lineEnd + 1, nextLineEnd - (lineEnd + 1));
+    // labelBlockBody finds the LABEL DEFINITION line, not the preceding
+    // "jnz ..., @..._local24, @..._propagate24" jump-target reference that
+    // also contains the substring "_local".
+    std::string localBlockLine = labelBlockBody(ssa, "_local");
     EXPECT_NE(localBlockLine.find("jmp @L_"), std::string::npos)
         << "the local-catch block's own body must jump to a real cfg block "
            "label, with its own leading '@' — got: "
@@ -366,8 +375,25 @@ TEST(QbeEmitter, SuperInvokeLowersToRtOpSuperInvoke) {
 TEST(QbeEmitter, SliceAndInLowerToTheirRtOpWrappers) {
     std::string ssa =
         emitScriptFrom("var s = \"hi\"; print s[0:1]; print 1 in [1];");
-    EXPECT_NE(ssa.find("call $rt_op_slice(l %rt)"), std::string::npos);
+    EXPECT_NE(ssa.find("call $rt_op_slice(l %rt, w %"), std::string::npos);
     EXPECT_NE(ssa.find("call $rt_op_in(l %rt,"), std::string::npos);
+}
+
+TEST(QbeEmitter, SliceIsLocalCatchableNotFatal) {
+    // opSlice dispatches __slice__, so SLICE must be lowered as
+    // Catchability::Local with m_stopTemp, exactly like GET_INDEX/SET_INDEX.
+    // A throw from the method, or its own arity error, must route to a live
+    // catch block at this frame instead of returning kRtFatal. A revert to
+    // Catchability::Fatal would still pass the wrapper-only check above.
+    std::string ssa =
+        emitScriptFrom("try { var s = \"hi\"; print s[0:1]; } catch (e) {}");
+    EXPECT_NE(ssa.find("call $rt_op_slice(l %rt, w %"), std::string::npos)
+        << "the stop depth must be this frame's own m_stopTemp register";
+    std::string localBlockLine = labelBlockBody(ssa, "_local");
+    EXPECT_NE(localBlockLine.find("jmp @L_"), std::string::npos)
+        << "a slice inside a try must emit a local-catch block that jumps to "
+           "the catch label, proving Catchability::Local — got: "
+        << localBlockLine;
 }
 
 TEST(QbeEmitter, JumpTableLowersToACompareChain) {

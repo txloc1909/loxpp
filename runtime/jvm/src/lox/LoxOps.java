@@ -426,6 +426,10 @@ public final class LoxOps {
      */
     public static Object slice(Object seq, Object startVal, Object endVal) {
         if (!(seq instanceof LoxList) && !(seq instanceof String)) {
+            LoxClosure dunder = findDunder(seq, "__slice__");
+            if (dunder != null) {
+                return dunder.callAsSelf(seq, new Object[] {startVal, endVal});
+            }
             throw new LoxError("Slice requires a List or String.");
         }
         int start = sliceIndex(startVal);

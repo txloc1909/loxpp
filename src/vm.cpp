@@ -669,7 +669,8 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::SLICE: {
-            if (auto ret = dispatchOp([&] { return m_rt.opSlice(); })) {
+            if (auto ret = dispatchOp(
+                    [&] { return m_rt.opSlice(stopAtFrameCount); })) {
                 return *ret;
             }
             break;
