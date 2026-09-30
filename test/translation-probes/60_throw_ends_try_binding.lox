@@ -8,7 +8,7 @@
 //
 // Moved into this shared directory once issue #388's fix let the JVM side
 // verify and run this shape too (it was 55_throw_ends_try_binding.lox in a
-// per-target subdirectory). Runs identically on native and JVM now; wired
+// per-target subdirectory). Runs identically on native, JVM, and QBE now; wired
 // into tools/check_jvm_probes.sh.
 // Expected output:
 //

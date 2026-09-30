@@ -1,5 +1,5 @@
 // Regression test for issue #401: File.read/readline/readlines must handle NUL bytes.
-// All three backends (native, JVM, bootstrap) must return full binary content.
+// All four backends (native, JVM, QBE, bootstrap) must return full binary content.
 
 var path = "test/translation-probes/56_file_nul.bin";
 

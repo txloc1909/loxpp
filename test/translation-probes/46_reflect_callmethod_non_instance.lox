@@ -1,3 +1,3 @@
 // callMethod() is instance-only; a non-Instance receiver is a runtime
-// error on native and JVM alike.
+// error on every backend.
 callMethod(1, "x");

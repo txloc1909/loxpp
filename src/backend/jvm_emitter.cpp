@@ -2149,9 +2149,8 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
 }
 
 // `nativePops` (native_pops.h) states how many operand-stack cells
-// `src/vm.cpp` pops for one instruction, target-independent — the QBE
-// emitter reads the same table, so the fact lives there once rather than
-// once per backend.
+// `src/vm.cpp` pops for one instruction, target-independent, so the fact
+// lives there once rather than once per consumer.
 
 // The one place every `nativePops`-covered consumer gets its folded bottom
 // operand repaired, replacing what used to be one private

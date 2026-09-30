@@ -1,4 +1,4 @@
-// callMethod() v1 is capped to natives only, on both backends
+// callMethod() v1 is capped to natives only, on every backend
 // (notes/expressiveness-roadmap.md item 1). A method backed by a
 // user-defined closure is a runtime error even on the JVM, which has no
 // technical reason of its own to refuse it - parity with native wins.

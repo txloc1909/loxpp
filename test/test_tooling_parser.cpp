@@ -568,8 +568,8 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // test/translation-probes/60_throw_ends_try_binding.lox moves into this
     // directory (issue #388's own fix lets it verify and run on JVM too),
     // raising this to 200. Issue #445 promotes catch_overflow.lox out of
-    // jvm-only/ (uncounted there), raising this to 201. PR #486 adds
-    // defer_runs_on_normal_return.lox and
+    // jvm-only/ (uncounted there), raising this to 201. The S6 errors
+    // checkpoint adds defer_runs_on_normal_return.lox and
     // defer_runs_before_caught_throw_propagates.lox (check_qbe_s6_errors.sh
     // probes proving a deferred call's side effect is actually observable
     // on an ordinary return and on a caught throw), raising this to 203.

@@ -1,5 +1,5 @@
-// Regression test for a [Reviewer] round on PR #236: an if/else inside a
-// catch body places its own skip-target CFG label mid-handler. A pass that
+// Regression test: an if/else inside a catch body places its own
+// skip-target CFG label mid-handler. A pass that
 // took the first such label as the end of the catch region would truncate
 // the handler there and splice the rest of the catch body (plus the
 // if/else's own conditional branch) outside the `catch` block it was still

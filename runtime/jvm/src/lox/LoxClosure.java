@@ -29,7 +29,8 @@ public abstract class LoxClosure implements LoxCallable {
     // STACK_MAX (16384 value-stack slots, shared by every live frame) can
     // be reached by a frame with many locals well below 1024 calls deep.
     // A program that overflows only STACK_MAX on native still runs to
-    // completion here — a known, open gap, not a native defect.
+    // completion here — a known, open gap, not a native defect (a probe
+    // for it is tracked in issue #492).
     private static final int FRAMES_MAX = 1024;
 
     // Mirrors src/vm.h's STACK_OVERFLOW_FRAME_RESERVE. Spent only while a
