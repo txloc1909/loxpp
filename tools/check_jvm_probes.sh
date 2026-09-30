@@ -190,14 +190,14 @@ error_probes=(
     # Issue #268: a StackOverflowError raised by a deferred call while
     # another one is still unwinding is fatal on both sides, per
     # spec/04-semantics.md line 1120 (not delivered to any catchBlock).
-    # Promoted from jvm-only/ (issue #322) now that both backends match.
+    # Promoted from jvm-only/ (issue #322) now that the JVM backend matches.
     "test/translation-probes/defer_overflow_during_unwind.lox"
     # Issue #268: a plain instance whose "kind" field spoofs
     # "StackOverflowError", thrown and caught entirely inside a deferred
     # call, must not clear the unwind guard early — the real overflow still
     # in progress must stay fatal against a second one, per
     # spec/04-semantics.md line 1120.
-    # Promoted from jvm-only/ (issue #322) now that both backends match.
+    # Promoted from jvm-only/ (issue #322) now that the JVM backend matches.
     "test/translation-probes/defer_overflow_kind_spoof.lox"
     # Issue #268: a deferred call's throw on a NORMAL return (no fault
     # propagating out of the deferring frame at all) must not be handed the
@@ -205,14 +205,14 @@ error_probes=(
     # unwinds elsewhere in the program — the real overflow still in
     # progress must stay fatal against a second one, per
     # spec/04-semantics.md line 1120.
-    # Promoted from jvm-only/ (issue #322) now that both backends match.
+    # Promoted from jvm-only/ (issue #322) now that the JVM backend matches.
     "test/translation-probes/defer_throw_on_normal_return_during_unwind.lox"
     # Issue #268: a deferred call's throw that replaces a DIFFERENT,
     # unrelated fault (not the StackOverflowError unwinding elsewhere in
     # the program) must not be handed the unwind guard's identity — the
     # real overflow still in progress must stay fatal against a second one,
     # per spec/04-semantics.md line 1120.
-    # Promoted from jvm-only/ (issue #322) now that both backends match.
+    # Promoted from jvm-only/ (issue #322) now that the JVM backend matches.
     "test/translation-probes/defer_replaces_unrelated_fault_during_unwind.lox"
     # Every arm names a real constructor (so
     # checkEnumExhaustiveness accepts it as exhaustive) but every guard is

@@ -141,7 +141,7 @@ git branch -d <type>/<desc>
 > hand-diffing `build/loxpp` against `tools/loxpp_jvm.sh`).
 > The `debug` preset leaves `LOXPP_DEBUG_TRACE_EXECUTION`/
 > `LOXPP_DEBUG_PRINT_CODE` on by default, so native's stdout carries a full
-> per-instruction bytecode+stack trace the managed backends never produce —
+> per-instruction bytecode+stack trace the JVM backend never produces —
 > every comparison "diverges" even when nothing is actually wrong. CI's own
 > `managed-toolchains` job builds `release` for exactly this reason.
 
