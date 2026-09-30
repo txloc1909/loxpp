@@ -42,9 +42,9 @@
 # command and `set -e` (failure) or fall-through (success) carries its exit
 # status out, with the EXIT trap firing either way.
 #
-# LOXPP_QBE_BIN, QBE_EMIT_PROGRAM, LOX_RT_A, and QBE override the default
-# binary/tool locations, for a caller that built into a non-default
-# directory or wants a non-default `qbe` on PATH.
+# QBE_EMIT_PROGRAM, LOX_RT_A, and QBE override the default binary/tool
+# locations, for a caller that built into a non-default directory or wants a
+# non-default `qbe` on PATH.
 #
 # Build first, release preset (AGENTS.md's warning on the debug preset's
 # trace output applies here too):

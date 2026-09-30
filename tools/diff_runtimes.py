@@ -3,9 +3,9 @@
 Differential runner: native loxpp vs. another loxpp backend, stdout only.
 
 Runs each Lox++ program on the native binary and on a second runner
-(tools/loxpp_jvm.sh, tools/loxpp_clr.sh, or an equivalent), then compares
-stdout. It does not compare stderr and does not compare the exit
-code: differential scope is stdout only.
+(tools/loxpp_jvm.sh, tools/loxpp_clr.sh, tools/loxpp_qbe.sh, or an
+equivalent), then compares stdout. It does not compare stderr and does not
+compare the exit code: differential scope is stdout only.
 
 Four outcomes per program:
   MATCH        stdout is byte-identical on both runtimes.
@@ -16,7 +16,9 @@ Four outcomes per program:
                exclusion list (tools/jvm_excluded_examples.txt or
                tools/clr_excluded_examples.txt, one per backend). Map
                iteration order is unspecified (spec/03-types.md), so a
-               reordering alone is not a defect.
+               reordering alone is not a defect. QBE needs no exclusion
+               list: it reuses native's own Table, so its map iteration
+               order matches native by construction.
   DIVERGE      a real difference: content differs (not only order), or the
                program is not on the exclusion list. Exit code 1.
 
@@ -273,7 +275,7 @@ def main() -> None:
     parser.add_argument("native", help="path to the native loxpp binary")
     parser.add_argument(
         "other_runner",
-        help="path to tools/loxpp_jvm.sh, tools/loxpp_clr.sh, or an equivalent runner",
+        help="path to tools/loxpp_jvm.sh, tools/loxpp_clr.sh, tools/loxpp_qbe.sh, or an equivalent runner",
     )
     parser.add_argument(
         "paths", nargs="*", default=[], help="a .lox file, or a directory of .lox files"
