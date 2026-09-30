@@ -25,7 +25,7 @@ struct ObjFunction : public Obj {
     // rebuild verifies this ObjFunction still matches what the code was
     // generated against (id, arity, chunk-bytes hash). Null for every
     // function no --target qbe program has attached code to, which today is
-    // every function: the interpreter and the JVM/CLR backends never set
+    // every function: the interpreter and the JVM backend never set
     // it and never read it.
     void* code{nullptr};
 

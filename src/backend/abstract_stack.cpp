@@ -938,7 +938,7 @@ std::vector<std::pair<int, StackState>> handlerEntrySeeds(
 
 // The merge-consistency check, asserted for real: every reached
 // instruction with two or more reached predecessors must see the *same*
-// operand depth on every incoming edge — the invariant the JVM/CLR
+// operand depth on every incoming edge — the invariant the JVM
 // verifier enforces at every control-flow merge. Runs once, after pass 2
 // has fully converged, using each predecessor's own final `after` state
 // directly: recognition is declaring-push-timed now and
@@ -961,7 +961,7 @@ std::vector<std::pair<int, StackState>> handlerEntrySeeds(
 // pre-existing comment on runFixpoint's join described; raw state does not,
 // and this is a real, compiler-emitted difference, not an analysis gap — so
 // operand depth remains the invariant this analysis guarantees. It is what
-// the verifier actually enforces (JVM/CLR track slots and the operand stack
+// the verifier actually enforces (the JVM tracks slots and the operand stack
 // separately; two arms may legitimately leave a different number of slots
 // occupied at a merge, only the operand stack itself must match), and it is
 // what the emitter needs for `.limit stack`/`.maxstack`.
@@ -1023,7 +1023,7 @@ void validateMergeConsistency(const std::vector<DecodedInstruction>& ins,
                     std::to_string(ins[i].offset) +
                     ": incoming operand depths disagree (" +
                     std::to_string(*depth) + " vs " + std::to_string(d) +
-                    ") — the JVM/CLR verifier would reject this merge");
+                    ") — the JVM verifier would reject this merge");
             }
         }
     }
@@ -1263,8 +1263,7 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
         // local and reports operandDepth 0 for it. after.operandDepth()
         // alone can therefore undercount by exactly the number of slots just
         // recognized; add it back so the bound stays safe by construction.
-        // An undercount is a JVM VerifyError, and the CLR backend has no
-        // jasmin fallback to hide behind.
+        // An undercount is a JVM VerifyError.
         int depth = std::max(before.operandDepth(),
                              after.operandDepth() +
                                  static_cast<int>(declaredSlotsAt[i].size()));

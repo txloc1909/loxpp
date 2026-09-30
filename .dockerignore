@@ -7,6 +7,4 @@ build/
 .ccache/
 runtime/jvm/classes/
 runtime/jvm/test-classes/
-runtime/clr/**/bin/
-runtime/clr/**/obj/
 __pycache__/

@@ -58,8 +58,8 @@ if step "qbe" qbe -o hello.s hello.ssa; then
     if step "c++ (runtime lib)" c++ -std=c++17 -c hello_rt.cpp -o hello_rt.o \
         && step "ar (runtime lib)" ar rcs libhello_rt.a hello_rt.o; then
         # 3. cc assembles hello.s and links it against the static library,
-        #    the assemble+link half of the pattern jvm_run.sh/ilasm already
-        #    prove for the JVM/CLR backends.
+        #    the assemble+link half of the pattern jvm_run.sh already proves
+        #    for the JVM backend.
         if step "cc (assemble + link)" cc hello.s libhello_rt.a -lstdc++ -o hello; then
             hello_out="$(./hello 2>&1)" && hello_status=0 || hello_status=$?
             check "qbe -> cc -> run (exit code)" "0" "$hello_status"

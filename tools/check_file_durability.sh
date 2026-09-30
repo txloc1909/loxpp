@@ -13,15 +13,15 @@
 # still fails.
 #
 # The p6 shape ends in an uncaught throw and exits non-zero, differently on
-# each consumer (70 native, 1 JVM, 134 CLR, 70 bootstrap), so it cannot be
+# each consumer (70 native, 1 JVM, 70 bootstrap), so it cannot be
 # checked against one fixed exit code the way p5/p5b are. It is still checked
 # against "non-zero", not left with no status rule at all - an exit of 0
 # there means the run took the normal-exit path instead of the
 # uncaught-fault path this probe exists to cover, and every consumer today
 # gives a non-zero code for it, so this rule costs nothing. Skipping the
 # status check entirely and trusting file content alone is exactly the false
-# green tools/check_clr_probes.sh's corpus sweep is documented to give for a
-# run that never reaches exit 0. p5 and p5b, by contrast, both end without an
+# green a stdout-only differential sweep gives for a run that never reaches
+# exit 0. p5 and p5b, by contrast, both end without an
 # uncaught fault, so both are checked against exit 0 - a probe whose file
 # content happens to match by taking a *different* path than the one it
 # names (see p5b_exit_call below) must not be reported as an unqualified OK.
@@ -36,7 +36,7 @@
 #
 #   <runner>            runs one Lox++ program, invoked as
 #                       "<runner> program.lox", inheriting stdout/stderr.
-#                       build/loxpp, tools/loxpp_jvm.sh, tools/loxpp_clr.sh,
+#                       build/loxpp, tools/loxpp_jvm.sh,
 #                       and bootstrap/lox_wrapper.sh (export LANGUAGE=LOXPP
 #                       first) all match this interface.
 set -uo pipefail

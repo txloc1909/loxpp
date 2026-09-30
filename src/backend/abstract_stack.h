@@ -2,14 +2,16 @@
 
 // Abstract-stack reconstruction. clox
 // fuses named locals and expression temporaries into one operand stack; the
-// JVM and CLR keep them apart (a local-variable array vs. an operand stack).
-// This pass symbolically executes a chunk to recover, at every offset, which
+// JVM keeps them apart (a local-variable array vs. an operand stack), and
+// QBE keys each value's memory slot by its stack height. This pass
+// symbolically executes a chunk to recover, at every offset, which
 // stack positions are locals and which are temporaries — the fact the
 // compiler discards (notes/bytecode-translation-problems.md, P1).
 //
-// Target-independent: no JVM or CLR knowledge. Both backends need the same
-// numbers, and the CLR backend must hand-compute `.maxstack` from this where
-// jasmin would otherwise do it for the JVM.
+// Target-independent: no backend knowledge. Both backends need the same
+// numbers: the JVM emitter hand-computes `.maxstack` from this where jasmin
+// would otherwise do it, and the QBE emitter keys its frame layout off the
+// same height.
 
 #include "chunk_decoder.h"
 
@@ -20,7 +22,7 @@
 // What a POP instruction discards. Two byte-identical POPs can mean opposite
 // things (P1): TEMP ends an expression-statement result and must become a
 // real `pop`; LOCAL_RECLAIM ends a named local's scope and must be dropped —
-// a JVM/CLR local slot needs no pop to go out of scope.
+// a JVM local slot needs no pop to go out of scope.
 enum class PopKind : std::uint8_t { TEMP, LOCAL_RECLAIM };
 
 // The abstract stack immediately before or after an instruction runs.
@@ -33,7 +35,7 @@ struct StackState {
     int height{0};
     int localCount{0};
 
-    // What the JVM/CLR operand stack actually holds here, once locals move
+    // What the JVM operand stack actually holds here, once locals move
     // to slots and stop occupying stack cells.
     [[nodiscard]] int operandDepth() const { return height - localCount; }
 
@@ -139,7 +141,7 @@ struct FunctionStackAnalysis {
 // needed between them.
 //
 // Throws std::runtime_error if a control-flow merge disagrees on operand
-// depth (height minus local count) — the invariant the JVM/CLR verifier
+// depth (height minus local count) — the invariant the JVM verifier
 // enforces at every merge. Raw height and local count may legitimately
 // differ across incoming edges (e.g. two `match` arms that destructure a
 // different number of pattern fields); operand depth may not. A

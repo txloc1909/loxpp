@@ -6,9 +6,9 @@
 // slots a nested closure captures, the live range of each captured slot, and
 // which captured slots several closures share one cell for.
 //
-// This pass does not emit code and carries no JVM or CLR knowledge — the
-// JVM emitter's closure lowering (jvm_emitter.cpp) is the only consumer
-// today, on whichever target it runs. It reads only the SLOT SET this pass
+// This pass does not emit code and carries no target-specific knowledge —
+// the JVM emitter's closure lowering (jvm_emitter.cpp) is the only consumer
+// today. It reads only the SLOT SET this pass
 // reports (FunctionCaptureInfo::liveRangesBySlot's keys, via
 // jvm_emitter.cpp's capturedSlots) — a runtime `instanceof` check at every
 // CLOSURE/GET_LOCAL/SET_LOCAL of a captured slot replaces the per-range,

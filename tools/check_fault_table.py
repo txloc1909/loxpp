@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Mission #288 node #336: differential fault test across all four consumers.
+Mission #288 node #336: differential fault test across all three consumers.
 
 For every row of spec/04-semantics.md's Runtime Errors table (the catchable
 table) and its Fatal Runtime Errors table, plus the five Error-as-receiver
 reflection rows spec/03-types.md's Error section implies (fields/getField/
 hasField/setField/callMethod all reject an Error value), this script runs
-one small Lox++ program through all four consumers -- native (build/loxpp),
-JVM (tools/loxpp_jvm.sh), CLR (tools/loxpp_clr.sh), and the bootstrap
-interpreter (bootstrap/lox_wrapper.sh) -- and checks that they agree on:
+one small Lox++ program through all three consumers -- native (build/loxpp),
+JVM (tools/loxpp_jvm.sh), and the bootstrap interpreter
+(bootstrap/lox_wrapper.sh) -- and checks that they agree on:
 
   - whether the fault is CAUGHT (delivered to a catchBlock) or FATAL
     (halts the program, never reaching the catchBlock);
@@ -16,7 +16,7 @@ interpreter (bootstrap/lox_wrapper.sh) -- and checks that they agree on:
 
 A row's own disposition (catchable vs. fatal) is native's -- native defines
 the ground truth (spec/04-semantics.md). Every row is therefore run with
-the SAME program shape on all four consumers and classified by what its
+the SAME program shape on all three consumers and classified by what its
 stdout actually contains, not by which table the row came from: a
 consumer that disagrees with native's disposition shows up as an outcome
 mismatch, exactly like a kind or message mismatch would.
@@ -24,11 +24,11 @@ mismatch, exactly like a kind or message mismatch would.
 Two known outcomes are not run through this comparison at all: a row's
 `skip` set. A row is skipped for a consumer only when an earlier mission
 node's review already found and filed the exact divergence (see each row's
-own comment). Skipping a row does not weaken the check for the other three
+own comment). Skipping a row does not weaken the check for the other two
 consumers running that same row.
 
 Usage:
-    tools/check_fault_table.py [--native PATH] [--jvm PATH] [--clr PATH]
+    tools/check_fault_table.py [--native PATH] [--jvm PATH]
                                 [--bootstrap PATH] [--timeout SECONDS]
 
 Exits 0 when every non-skipped (row, consumer) pair matches native's
@@ -50,7 +50,6 @@ SPEC_PATH = REPO_ROOT / "spec" / "04-semantics.md"
 
 NATIVE = "native"
 JVM = "jvm"
-CLR = "clr"
 BOOTSTRAP = "bootstrap"
 
 # A row's program prints these markers (never "kind"/"message"/"type"/"str"
@@ -256,17 +255,13 @@ CATCHABLE_ROWS = [
         expected_kind="UndefinedPropertyError",
     ),
     # Operator overloading result validation (issue #472): an operator method
-    # whose result must be a Boolean returned something else. CLR is excluded
-    # from the operator-overloading mission (#472).
+    # whose result must be a Boolean returned something else.
     Row(
         "operator_result_type_error",
         "caught",
         "C() == C();",
         setup="class C { __eq__(o) { return 42; } }\n",
         expected_kind="OperatorResultTypeError",
-        skip={
-            CLR: "CLR backend is excluded from operator overloading (#472)",
-        },
     ),
 ]
 
@@ -298,24 +293,23 @@ FATAL_ROWS = [
         expected_message="Expected 0 arguments but got 1.",
     ),
     # A stdlib native's own error text is not enumerated by spec/04-semantics.md
-    # (see the Fatal Runtime Errors section's own note); native, JVM, and
-    # CLR each report a different OS/runtime-level reason for the same
-    # open() failure (native: "No such file or directory"; JVM's IOException
-    # repeats the path before its own parenthesized reason; CLR's own
-    # exception text is worded differently again) -- full message equality
-    # is not realistic across three different OS/runtime error-reporting
-    # conventions. Issue #374 decided this: assert the weaker, still-real
-    # property that every consumer's message names the failing path,
-    # instead of skipping the field outright. The bootstrap interpreter
-    # calls the same native open() bootstrap itself runs under, so its
-    # message matches native exactly -- no skip needed there at all.
+    # (see the Fatal Runtime Errors section's own note); native and the JVM
+    # each report a different OS/runtime-level reason for the same open()
+    # failure (native: "No such file or directory"; the JVM's IOException
+    # repeats the path before its own parenthesized reason) -- full message
+    # equality is not realistic across two different OS/runtime
+    # error-reporting conventions. Issue #374 decided this: assert the
+    # weaker, still-real property that every consumer's message names the
+    # failing path, instead of skipping the field outright. The bootstrap
+    # interpreter calls the same native open() bootstrap itself runs under,
+    # so its message matches native exactly -- no skip needed there at all.
     # Disposition (fatal on every consumer) is always checked regardless.
     Row(
         "stdlib_open_failure",
         "fatal",
         'open("/no/such/path", "r");',
-        skip_fields={JVM: {"message"}, CLR: {"message"}},
-        message_contains={JVM: "/no/such/path", CLR: "/no/such/path"},
+        skip_fields={JVM: {"message"}},
+        message_contains={JVM: "/no/such/path"},
         expected_message="open(): cannot open '/no/such/path': No such file or directory",
     ),
     # Issue #375: unlike an index read/write, a map/set literal, or `in`
@@ -580,11 +574,7 @@ FATAL_ROWS = [
         expected_message="Only instances have properties.",
     ),
     # A `defer`red call holding a non-callable value must be fatal (native's
-    # runDefers). The CLR backend fails to *compile* a variant of this shape
-    # that closes over a caught `e` inside a nested function (issue found
-    # during this node's own build; a plain local variable, not a capture,
-    # reaches the same runtime fault on every consumer without hitting that
-    # unrelated CLR emitter gap).
+    # runDefers).
     # Issue #351: bootstrap neither faults nor catches anything here -- the
     # non-callable deferred value is silently never invoked. That is a
     # third, distinct shape from the general by-design pattern the other
@@ -817,7 +807,7 @@ _BOOTSTRAP_FATAL_DEFAULT_SKIP = (
 for _row in FATAL_ROWS:
     if _row.name == "max_depth_exceeded":
         # Issue #325: bootstrap's stringify() guard now calls fatalError,
-        # matching native/JVM/CLR's fatal disposition, so it is exempt from
+        # matching native/JVM's fatal disposition, so it is exempt from
         # the blanket skip below.
         continue
     if _row.name == "property_set_non_instance":
@@ -833,7 +823,7 @@ for _row in FATAL_ROWS:
         continue
     if _row.name in ("map_has_invalid_key", "map_del_invalid_key"):
         # Issue #375: bootstrap's Map.has/Map.del now call fatalError with
-        # native's own combined message, matching native/JVM/CLR, so both
+        # native's own combined message, matching native/JVM, so both
         # rows are exempt from the blanket skip below.
         continue
     if _row.name == "defer_noncallable_value":
@@ -969,9 +959,9 @@ def load_spec_fatal_row_count() -> int:
 
 # Exit code every consumer uses for a compile-time (parse) error, distinct
 # from a run-time fault's own exit code, which differs by consumer (native
-# 70, JVM 1, CLR 134 via an unhandled .NET exception). A row whose program
-# never compiles proves nothing about the fault it names: classify() must
-# tell the two apart, not read "no marker on stdout" as "fatal".
+# 70, JVM 1). A row whose program never compiles proves nothing about the
+# fault it names: classify() must tell the two apart, not read "no marker
+# on stdout" as "fatal".
 COMPILE_ERROR_EXIT_CODE = 65
 
 
@@ -1083,8 +1073,7 @@ def compare(row: Row, native_result: RunResult, other: RunResult, consumer: str)
         # Fatal message text is compared as a substring, not equality: each
         # consumer wraps the same message in its own prefix/trailer (native
         # "[line N] in script", the JVM's "Exception in thread \"main\"
-        # lox.LoxError: ", the CLR's ".NET Unhandled exception. Lox.LoxError:
-        # " plus a stack trace).
+        # lox.LoxError: ").
         skip = row.skip_fields.get(consumer, set())
         if "message" not in skip:
             native_msg = native_result.message or ""
@@ -1124,7 +1113,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--native", default=str(REPO_ROOT / "build" / "loxpp"))
     parser.add_argument("--jvm", default=str(REPO_ROOT / "tools" / "loxpp_jvm.sh"))
-    parser.add_argument("--clr", default=str(REPO_ROOT / "tools" / "loxpp_clr.sh"))
     parser.add_argument("--bootstrap", default=str(REPO_ROOT / "bootstrap" / "lox_wrapper.sh"))
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument(
@@ -1135,7 +1123,6 @@ def main() -> None:
     commands = {
         NATIVE: ConsumerCommand(NATIVE, [args.native]),
         JVM: ConsumerCommand(JVM, [args.jvm]),
-        CLR: ConsumerCommand(CLR, [args.clr]),
         BOOTSTRAP: ConsumerCommand(BOOTSTRAP, [args.bootstrap]),
     }
 
@@ -1184,7 +1171,7 @@ def main() -> None:
 
     diverged = 0
     skipped_rows = 0
-    per_consumer_skips = {JVM: 0, CLR: 0, BOOTSTRAP: 0}
+    per_consumer_skips = {JVM: 0, BOOTSTRAP: 0}
     with tempfile.TemporaryDirectory(prefix="loxpp_fault_table_") as tmp:
         workdir = Path(tmp)
         for row in rows:
@@ -1221,7 +1208,7 @@ def main() -> None:
 
             row_ok = True
             row_notes = []
-            for consumer in (JVM, CLR, BOOTSTRAP):
+            for consumer in (JVM, BOOTSTRAP):
                 if consumer in row.skip:
                     row_notes.append(f"{consumer} SKIPPED ({row.skip[consumer]})")
                     per_consumer_skips[consumer] += 1

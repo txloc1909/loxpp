@@ -3,8 +3,8 @@
 // other runtime fault. A live handler must catch a real Error value (not
 // nil) with kind "StackOverflowError", the same as native.
 //
-// Promoted to shared directory (issue #322) now that both JVM (#268) and CLR
-// (#238) backends deliver catchable StackOverflowError.
+// Promoted to the shared directory (issue #322) now that the JVM backend
+// (#268) delivers a catchable StackOverflowError.
 fun f(n) { return f(n + 1); }
 try {
     f(0);

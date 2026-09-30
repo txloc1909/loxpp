@@ -26,7 +26,7 @@
 // Keeps clox's fused stack (notes/qbe-backend.md, "The central design
 // choice"): the abstract_stack height at an offset fixes that value's own
 // memory slot, `base + 8*height` — no local/temporary split, unlike the JVM
-// and CLR backends. One QBE block label per cfg.h leader (reusing
+// backend. One QBE block label per cfg.h leader (reusing
 // BasicBlock::label directly, so a block's label agrees with cfg's own).
 //
 // The status protocol (Q2): every compiled function's own return value

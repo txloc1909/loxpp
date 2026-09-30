@@ -70,7 +70,6 @@
         "LOXPP_DEBUG_TRACE_EXECUTION": "OFF",
         "LOXPP_DEBUG_LOG_GC": "OFF",
         "LOXPP_JVM_BACKEND": "OFF",
-        "LOXPP_CLR_BACKEND": "OFF",
         "LOXPP_LSP": "ON",
         "LOXPP_BUILD_TESTS": "OFF",
         "LOXPP_PROFILE": "OFF"

@@ -1,13 +1,10 @@
 // Issue #316: native holds Runtime::m_unwindingStackOverflow (src/runtime.cpp) for
 // the duration of one StackOverflowError's own unwind, so a SECOND
 // overflow that happens from a deferred call running during that unwind
-// is fatal, not delivered to the live handler below. Before this fix, the
-// CLR backend's frame-count ceiling (LoxClosure.CallAsSelf) had no such
-// guard and caught this cleanly instead -- the opposite of native.
+// is fatal, not delivered to the live handler below.
 //
-// This file lives outside the parent translation-probes directory, and
-// outside examples/, on purpose, matching 53_stack_overflow_catchable.lox's
-// own note: it is the reentrant twin of that probe, so it stays beside it.
+// This is the reentrant twin of 57_stack_overflow_catchable.lox, so it sits
+// beside it in the shared directory.
 fun deepcall(n) { if (n == 0) return 0; return deepcall(n - 1); }
 fun boom(n) { deepcall(500); }
 fun f(n) { defer boom(n); f(n + 1); }

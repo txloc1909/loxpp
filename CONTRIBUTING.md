@@ -16,7 +16,7 @@ isocline, the component manifest, the tag namespace), see [notes/distribution.md
 `tools/lsp_smoke.py build/loxpp-lsp` and `tools/check_nvim_plugin.sh`.
 
 **Dev environment:** the `Dockerfile` packages the full toolchain in two stages —
-`dev` for C++ work, `dev-managed` when touching the JVM or CLR backends. Build the one
+`dev` for C++ work, `dev-managed` when touching the JVM backend. Build the one
 you need:
 
 ```bash

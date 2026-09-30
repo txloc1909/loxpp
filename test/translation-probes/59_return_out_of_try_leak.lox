@@ -1,6 +1,6 @@
 // Issue #319 (reviewer round 2): a `return` out of a still-open try/catch
-// must not leak the managed backends' handler-liveness counter (CLR:
-// LoxOps.HandlerLive; JVM: LoxOps.isHandlerLive() — src/runtime.h's own
+// must not leak the JVM backend's handler-liveness counter
+// (LoxOps.isHandlerLive() — src/runtime.h's own
 // Runtime::m_handlerStack has no such leak, since it is frame-scoped and native
 // pops it explicitly on every frame exit, not just a `return` reached via
 // its own bytecode-level POP_HANDLER). pre()'s `return 1;` inside its own

@@ -169,10 +169,10 @@ static Value setFieldNative(int /*argc*/, Value* argv) {
 // (fields shadow methods), but is capped to natives-only: the VM has no
 // bounded re-entrant call path letting a native call back into the bytecode
 // interpreter for a closure-backed method (see notes/expressiveness-roadmap.md
-// item 1). This restriction is deliberately mirrored on the JVM and CLR
-// backends too — neither has this limitation, but must match native's
-// behavior for the differential test suite to stay green. Lift all three
-// together if that changes.
+// item 1). This restriction is deliberately mirrored on the JVM backend too
+// — it does not have this limitation, but must match native's behavior for
+// the differential test suite to stay green. Lift both together if that
+// changes.
 static Value callMethodNative(int argCount, Value* argv) {
     if (argCount < 2) {
         nativeRuntimeError("Expected at least 2 arguments.");

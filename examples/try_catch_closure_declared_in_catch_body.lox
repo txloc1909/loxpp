@@ -1,5 +1,5 @@
 // Issue #320: a closure declared inside a catch body used to crash the
-// CLR (and, identically, the JVM) emitter -- "CLOSURE captures local slot N
+// JVM emitter -- "CLOSURE captures local slot N
 // that capture analysis does not report" -- because capture_analysis.cpp's
 // dataflow pass never marked a catch block reachable (a catch block has no
 // ordinary predecessor edge; see capture_analysis.cpp's own comment on

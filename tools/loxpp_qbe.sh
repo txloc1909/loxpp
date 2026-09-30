@@ -6,7 +6,7 @@
 #
 # Usage: tools/loxpp_qbe.sh program.lox
 #
-# Unlike tools/loxpp_jvm.sh/loxpp_clr.sh, there is no `loxpp --target qbe`
+# Unlike tools/loxpp_jvm.sh, there is no `loxpp --target qbe`
 # front end yet (notes/qbe-backend.md's Staged plan never scheduled one — S2
 # through S6 all drive the pipeline through qbe_emit_program plus a
 # generated harness, the same shape this script automates). This script is

@@ -7,10 +7,6 @@
 // straight after it overflows again while the first overflow is still
 // unwinding, which spec/04-semantics.md line 1120 makes fatal — matching
 // native, which never lets a value's own contents reach this guard at all.
-//
-// Lives in jvm-only/ for the same reason catch_overflow.lox does: the CLR
-// backend does not yet deliver this fault with the correct catchability
-// (issue #238).
 class Fake { init() { this.kind = "StackOverflowError"; } }
 fun deepcall(n) { if (n == 0) return 0; return deepcall(n - 1); }
 fun boom(n) { try { throw Fake(); } catch (e) { } deepcall(500); }

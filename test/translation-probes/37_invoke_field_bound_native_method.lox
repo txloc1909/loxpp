@@ -4,10 +4,8 @@
 // an instance field and invoking it through the field name (`k.g()`) drives
 // the INVOKE opcode's field-shadow arm, not GET_PROPERTY followed by CALL.
 //
-// This file lives under clr-only/ because the JVM gates read
-// test/translation-probes/ non-recursively and their curated list does
-// not name this file, so a file in clr-only/ runs only against the CLR
-// backend.
+// Runs against every backend as part of the shared corpus: native, JVM,
+// and QBE all lower INVOKE onto this arm.
 var m = {"a": 1};
 class K {}
 var k = K();

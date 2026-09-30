@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the generated benchmarks on the native / JVM / CLR backends.
+"""Run the generated benchmarks on the native / JVM backends.
 
 Each program prints  HARNESS <batch> <us> <checksum>  lines (see generate.py).
 This runner launches every (program, backend) pair PROCS times, pinned to one
@@ -10,7 +10,7 @@ CPU, and reports:
   spread      (max-min)/median of those measured batches, a noise indicator
   wall_s      external wall-clock of the whole process (median launch)
   overhead_s  wall_s minus the program's own total measured+warmup time:
-              parse + (JVM/CLR) assemble + runtime startup + JIT warm-up
+              parse + JVM assemble + runtime startup + JIT warm-up
 
 Checksums from all backends that produced one must agree, or the row is
 flagged MISMATCH. A row with fewer than two successful backends has nothing
@@ -42,13 +42,12 @@ HARNESS_RE = re.compile(r"^HARNESS\s+(\d+)\s+([\d.eE+-]+)\s+(.*)$")
 BACKENDS = {
     "native": lambda prog: [str(ROOT / "build" / "loxpp"), prog],
     "jvm":    lambda prog: [str(ROOT / "tools" / "loxpp_jvm.sh"), prog],
-    "clr":    lambda prog: [str(ROOT / "tools" / "loxpp_clr.sh"), prog],
 }
 
-# clock() is process CPU time on native/clr, wall-clock on jvm (generate.py's
+# clock() is process CPU time on native, wall-clock on jvm (generate.py's
 # docstring; runtime/jvm/src/lox/LoxRuntime.java uses System.nanoTime). Every
 # steady_us in this file's output carries this per-backend unit.
-CLOCK_KIND = {"native": "cpu", "clr": "cpu", "jvm": "wall"}
+CLOCK_KIND = {"native": "cpu", "jvm": "wall"}
 
 PIN = ["taskset", "-c", "0"]
 
@@ -174,7 +173,7 @@ def _table(rows, backends):
     w = 20
     hdr = f"{'program':<{w}}" \
         + "".join(f"{b+' ms('+CLOCK_KIND[b]+')':>20}" for b in backends) \
-        + f"{'jvm/nat':>10}{'clr/nat':>10}  checksum"
+        + f"{'jvm/nat':>10}  checksum"
     print(hdr)
     print("-" * len(hdr))
     for e in rows:
@@ -188,7 +187,7 @@ def _table(rows, backends):
             else:
                 line += f"{'FAIL':>20}"
         nat = vals.get("native")
-        for b in ("jvm", "clr"):
+        for b in ("jvm",):
             if nat and b in vals and nat > 0:
                 line += f"{vals[b]/nat:>10.2f}"
             else:

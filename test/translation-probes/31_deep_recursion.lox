@@ -9,11 +9,10 @@
 // native fails.
 //
 // Lives directly in translation-probes/, not in a per-target subdirectory:
-// both the JVM backend (runtime/jvm/src/lox/LoxClosure.java) and the CLR
-// backend (runtime/clr/src/LoxClosure.cs) mirror this ceiling, so
-// tools/diff_runtimes.py's CI probes step, which walks this directory
-// comparing native against each managed backend, sees this program agree
-// with native (both fail with empty stdout) on both.
+// the JVM backend (runtime/jvm/src/lox/LoxClosure.java) mirrors this
+// ceiling, so tools/diff_runtimes.py's CI probes step, which walks this
+// directory comparing native against the JVM backend, sees this program
+// agree with native (both fail with empty stdout).
 fun down(n) {
     if (n == 0) return 0;
     return down(n - 1);

@@ -73,13 +73,11 @@ probes=(
     # and a nested match subject.
     "test/translation-probes/28_folded_match_operand_family.lox"
     # Reflection introspection: type()/fields()/methods()/getField()/
-    # hasField()/setField()/callMethod(), now supported on native, JVM, and
-    # CLR alike (src/stdlib/reflect_api.cpp, LoxRuntime.registerReflection).
+    # hasField()/setField()/callMethod(), now supported on native and JVM
+    # alike (src/stdlib/reflect_api.cpp, LoxRuntime.registerReflection).
     "test/translation-probes/40_reflection.lox"
     # Operator overloading (issue #472): dunder dispatch for arithmetic,
-    # comparison, equality, containment, and call. jvm-only: the CLR backend
-    # is excluded from operator overloading and is deleted after the QBE
-    # parity gate.
+    # comparison, equality, containment, and call.
     "test/translation-probes/jvm-only/61_operator_overload.lox"
     # Visibility after close() (spec/05-stdlib.md, File section): the
     # differential corpus sweep alone reports a false MATCH when a probe
@@ -144,8 +142,7 @@ probes=(
     "examples/try_catch_self_recursive_closure_in_loop.lox"
     "examples/try_catch_catch_binding_reuses_capture_cell.lox"
     # Issue #386's own probe (issue #388's fix let it verify and run on
-    # JVM too — moved out of clr-only/, see the probe's own header
-    # comment). Also wired into tools/check_clr_probes.sh.
+    # JVM too — see the probe's own header comment).
     "test/translation-probes/60_throw_ends_try_binding.lox"
     # Issue #253/#254: fault-classification fixes for JVM backend (catchable
     # error construction and Error instance property access).
@@ -154,8 +151,7 @@ probes=(
     "examples/try_catch_error_vs_ordinary_instance_catchability.lox"
     # Issue #268: LoxClosure's own frame-count ceiling delivers a catchable
     # StackOverflowError, matching native's kind, message, and post-catch
-    # continuation. Promoted out of jvm-only/ (issue #445) once a live CLR
-    # run confirmed this exact probe now matches native too.
+    # continuation. Promoted out of jvm-only/ (issue #445).
     "test/translation-probes/catch_overflow.lox"
     # Issue #268: pins the success side of the frame-count ceiling boundary
     # (31_deep_recursion.lox below pins the failure side). Catches a
@@ -194,14 +190,14 @@ error_probes=(
     # Issue #268: a StackOverflowError raised by a deferred call while
     # another one is still unwinding is fatal on both sides, per
     # spec/04-semantics.md line 1120 (not delivered to any catchBlock).
-    # Promoted from jvm-only/ (issue #322) now that both backends match.
+    # Promoted from jvm-only/ (issue #322) now that the JVM backend matches.
     "test/translation-probes/defer_overflow_during_unwind.lox"
     # Issue #268: a plain instance whose "kind" field spoofs
     # "StackOverflowError", thrown and caught entirely inside a deferred
     # call, must not clear the unwind guard early — the real overflow still
     # in progress must stay fatal against a second one, per
     # spec/04-semantics.md line 1120.
-    # Promoted from jvm-only/ (issue #322) now that both backends match.
+    # Promoted from jvm-only/ (issue #322) now that the JVM backend matches.
     "test/translation-probes/defer_overflow_kind_spoof.lox"
     # Issue #268: a deferred call's throw on a NORMAL return (no fault
     # propagating out of the deferring frame at all) must not be handed the
@@ -209,14 +205,14 @@ error_probes=(
     # unwinds elsewhere in the program — the real overflow still in
     # progress must stay fatal against a second one, per
     # spec/04-semantics.md line 1120.
-    # Promoted from jvm-only/ (issue #322) now that both backends match.
+    # Promoted from jvm-only/ (issue #322) now that the JVM backend matches.
     "test/translation-probes/defer_throw_on_normal_return_during_unwind.lox"
     # Issue #268: a deferred call's throw that replaces a DIFFERENT,
     # unrelated fault (not the StackOverflowError unwinding elsewhere in
     # the program) must not be handed the unwind guard's identity — the
     # real overflow still in progress must stay fatal against a second one,
     # per spec/04-semantics.md line 1120.
-    # Promoted from jvm-only/ (issue #322) now that both backends match.
+    # Promoted from jvm-only/ (issue #322) now that the JVM backend matches.
     "test/translation-probes/defer_replaces_unrelated_fault_during_unwind.lox"
     # Every arm names a real constructor (so
     # checkEnumExhaustiveness accepts it as exhaustive) but every guard is
@@ -401,9 +397,9 @@ done
 # --- JVM exclusion guard ---------------------------------------------------
 # Re-proves, on every run, that each tools/jvm_excluded_examples.txt entry's
 # JVM stdout is still a permutation of native stdout, not a stale byte-match
-# or a content change that the exclusion is silently hiding. tools/diff_runtimes.py
-# already does exactly this for tools/clr_excluded_examples.txt; --only-excluded
-# runs it over exactly the excluded programs, resolved under examples/.
+# or a content change that the exclusion is silently hiding.
+# tools/diff_runtimes.py's --only-excluded runs this guard over exactly the
+# excluded programs, resolved under examples/.
 excluded_list="$root/tools/jvm_excluded_examples.txt"
 if ! python3 "$root/tools/diff_runtimes.py" "$native_bin" \
         "$root/tools/loxpp_jvm.sh" --exclude "$excluded_list" \

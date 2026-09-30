@@ -1724,7 +1724,7 @@ class LoxClass {
 }
 
 // type() support: maps a bootstrap-interpreted value to the same type name
-// the native/JVM/CLR reflection natives report (spec/05-stdlib.md). Uses the
+// the native/JVM reflection natives report (spec/05-stdlib.md). Uses the
 // existing loxTag() helper, which already guards primitives (no .loxTag
 // field) before falling back to v.loxTag.
 fun reflectTypeName(v) {
@@ -1755,7 +1755,7 @@ fun reflectTypeName(v) {
     if (tag == "enum_ctor") return "EnumConstructor";
     if (tag == "enum_val") return "Enum";
     // spec/03-types.md's type() table gives "Error" for a caught Error
-    // value, and native/JVM/CLR already agree on it. Only this one case
+    // value, and native/JVM already agree on it. Only this one case
     // was missing here: tools/check_fault_table.py's REFLECT_ROWS bind a
     // caught Error to a local and check type(e) == "Error" as a guard
     // against a corpus bug that binds it to something else, and that guard
@@ -1799,8 +1799,8 @@ fun reflectMethodNames(klass) {
 // table in spec/04-semantics.md. Native reaches every cause in this
 // function (src/stdlib/reflect_api.cpp's callMethodNative) only through its
 // always-fatal path (nativeRuntimeError(), exit 70), never as a catchable
-// value. So none of these causes has an existing `.kind` on native, JVM, or
-// CLR to collide with, and these strings stay outside the documented,
+// value. So none of these causes has an existing `.kind` on native or the
+// JVM to collide with, and these strings stay outside the documented,
 // cross-backend `kind` set for that reason. Each still names one specific
 // cause and only that cause — do not reuse a table `kind` for one of them,
 // and do not reuse one of these for an unrelated cause either.
@@ -2110,8 +2110,7 @@ class InterpMapMethod {
                 // cause), native's Map.has/Map.del reach this through the
                 // stdlib-native error path, fatal with one combined
                 // message regardless of cause -- a pre-existing native-VM
-                // asymmetry (see runtime/clr/src/LoxOps.cs's
-                // CheckMapKeyForNativeMethod), not a bootstrap choice.
+                // asymmetry, not a bootstrap choice.
                 interp.fatalError(
                     "Map keys must be Bool, Number, Nil, or String. NaN is not allowed.");
                 return nil;

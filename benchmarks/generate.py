@@ -7,7 +7,7 @@ MEASURE batches of REPS calls each, printing one line per batch:
 
     HARNESS <batch-index> <microseconds> <checksum>
 
-clock() is process CPU time on the native and CLR backends and wall-clock on
+clock() is process CPU time on the native backend and wall-clock on
 the JVM backend (runtime/jvm/src/lox/LoxRuntime.java). On an unloaded machine
 the two agree for a single-threaded steady-state loop; the runner also records
 external wall-clock per process as a cross-check.

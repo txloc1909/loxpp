@@ -3,7 +3,7 @@
 Differential runner: native loxpp vs. another loxpp backend, stdout only.
 
 Runs each Lox++ program on the native binary and on a second runner
-(tools/loxpp_jvm.sh, tools/loxpp_clr.sh, tools/loxpp_qbe.sh, or an
+(tools/loxpp_jvm.sh, tools/loxpp_qbe.sh, or an
 equivalent), then compares stdout. It does not compare stderr and does not
 compare the exit code: differential scope is stdout only.
 
@@ -13,8 +13,7 @@ Four outcomes per program:
                on the exclusion list. The exclusion is no longer needed and
                must be removed. Exit code 1.
   PERMUTATION  stdout differs only in line order, and the program is on the
-               exclusion list (tools/jvm_excluded_examples.txt or
-               tools/clr_excluded_examples.txt, one per backend). Map
+               exclusion list (tools/jvm_excluded_examples.txt). Map
                iteration order is unspecified (spec/03-types.md), so a
                reordering alone is not a defect. QBE needs no exclusion
                list: it reuses native's own Table, so its map iteration
@@ -94,9 +93,8 @@ def _raise_native_stack_limit() -> None:
     that distinction needs its own check: RLIM_INFINITY is -1, which a bare
     numeric comparison treats as smaller than any finite floor, so an
     unguarded "raise toward the floor" would replace an unlimited soft
-    limit with the finite floor — a lowering. tools/check_clr_probes.sh's
-    run_native is this function's shell twin and follows the identical
-    rule. A host whose hard limit is already capped below the floor still
+    limit with the finite floor — a lowering. A host whose hard limit is
+    already capped below the floor still
     gets raised, but only up to that hard ceiling, not to the full floor;
     the child then fails only if the ceiling itself is too small for the
     depth being probed, not because the raise did nothing. The raise truly
@@ -275,7 +273,7 @@ def main() -> None:
     parser.add_argument("native", help="path to the native loxpp binary")
     parser.add_argument(
         "other_runner",
-        help="path to tools/loxpp_jvm.sh, tools/loxpp_clr.sh, tools/loxpp_qbe.sh, or an equivalent runner",
+        help="path to tools/loxpp_jvm.sh, tools/loxpp_qbe.sh, or an equivalent runner",
     )
     parser.add_argument(
         "paths", nargs="*", default=[], help="a .lox file, or a directory of .lox files"
@@ -284,7 +282,7 @@ def main() -> None:
         "--exclude",
         type=Path,
         default=None,
-        help="tools/jvm_excluded_examples.txt or tools/clr_excluded_examples.txt: permutation-only exclusions",
+        help="tools/jvm_excluded_examples.txt: permutation-only exclusions",
     )
     parser.add_argument(
         "--only-excluded",

@@ -14,7 +14,7 @@
 //
 // This deliberately keeps `match` as the sole `return` expression, not
 // sandwiched with another live operand (`return 1 + match ...;`), so the
-// example does not also exercise the JVM/CLR "deficit of two or more"
+// example does not also exercise the "deficit of two or more"
 // folded-operand gap tracked in notes/bytecode-translation-problems.md
 // (unowned, unrelated to this issue).
 fun onExit() {

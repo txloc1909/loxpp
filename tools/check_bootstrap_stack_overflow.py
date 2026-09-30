@@ -231,7 +231,7 @@ def check_state_restore_probes() -> list[str]:
 
     At a low ambient depth, stringify()'s OWN 100-level guard fires first.
     Since #325 that guard is fatal (fatalError -> exit(70)), matching
-    native/JVM/CLR, so a run it wins is a clean halt with no
+    native/JVM, so a run it wins is a clean halt with no
     __BOOTSTRAP_STATE__ line at all -- accepted the same way
     check_state_after_examples() accepts a fatal halt elsewhere in this
     file: exit 70/65, exactly one clean stderr line, no traceback. There is
@@ -300,10 +300,8 @@ def check_state_restore_probes() -> list[str]:
 
 
 # examples/bench_jump_table.lox is a 5,000,000-iteration microbenchmark;
-# interpreting it under the tree-walking bootstrap does not finish inside
-# any reasonable per-example timeout (tools/check_clr_probes.sh and
-# ci.yml's own CLR differential step exclude it by name for the same
-# reason -- see the comment above that step).
+# interpreting it under the tree-walking bootstrap does not finish inside any
+# reasonable per-example timeout.
 EXCLUDED_EXAMPLES = {"bench_jump_table.lox"}
 
 

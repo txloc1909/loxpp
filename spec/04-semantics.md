@@ -1318,10 +1318,9 @@ consumer.** `Op::PRINT` clears any pending stdlib error before it
 stringifies its operand, so the row above is not a stdlib-error path; it is
 the canonical-string depth guard in `stringifyObj` (`src/object.cpp`), which
 also fires the same way, with the same message, when `str()` calls into the
-same guard through a native call. Native, the JVM backend, and the CLR
-backend all halt the program on this fault, even inside a `try` statement —
-the JVM and CLR guards say so explicitly, in a comment, at their own
-matching depth check. There is no catchable-table row for this fault: an
+same guard through a native call. Native and the JVM backend both halt the
+program on this fault, even inside a `try` statement — the JVM guard says
+so explicitly, in a comment, at its own matching depth check. There is no catchable-table row for this fault: an
 earlier draft of this table gave it one (kind `MaxDepthExceededError`), the
 opposite disposition from every implementation; the bootstrap interpreter
 was the only consumer that followed that draft, and it now matches the
