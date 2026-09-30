@@ -145,7 +145,8 @@ Runtime::ThrowOutcome Runtime::call(ObjClosure* closure, int argCount,
 }
 
 Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
-                                        int stopAtFrameCount) {
+                                        int stopAtFrameCount, ResultCheck check,
+                                        const Value* resultOverride) {
     ThrowOutcome outcome = call(closure, argCount, stopAtFrameCount);
     if (outcome != ThrowOutcome::Pushed) {
         // call() already reported an arity mismatch or stack overflow (and,
@@ -182,7 +183,13 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
     // call then performs the same frame-exit RETURN performs: close any
     // upvalue a nested closure captured over this frame's own locals,
     // drop any handler this frame owns, collapse the callee's stack
-    // window, and push the return value back at the base of that window.
+    // window, and push the return value back at the base of that window —
+    // plus, when this call came from dispatchMethod() (`check` not None or
+    // `resultOverride` set), the same ResultCheck/override handling
+    // Op::RETURN performs (S7, #460): compiled RETURN itself never sees
+    // these fields (backend/qbe_emitter.cpp's own lowering has no access to
+    // Runtime's private state), so the caller of the compiled code — here —
+    // is where that contract must be enforced instead.
     Value result = pop();
     closeUpvalues(frame->slots);
     popHandlersOwnedByCurrentFrame();
@@ -190,7 +197,30 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
     m_frameResultOverrideSet[m_frameCount - 1] = false;
     m_frameCount--;
     stackTop = frame->slots;
-    push(result);
+    push(resultOverride != nullptr ? *resultOverride : result);
+    if (check == ResultCheck::Sequence &&
+        (isList(result) || isString(result) || isMap(result))) {
+        Obj* obj = as<Obj*>(result);
+        ObjIterator* it = m_mm.create<ObjIterator>(
+            result, 0, isObjMap(obj) ? asObjMap(obj)->version : -1);
+        stackTop[-1] = Value{static_cast<Obj*>(it)};
+    }
+    if (check == ResultCheck::Boolean && !is<bool>(result)) {
+        return fromThrow(raiseThrowableError(
+            "OperatorResultTypeError", "Operator method must return a Boolean.",
+            stopAtFrameCount));
+    }
+    if (check == ResultCheck::Number && !is<Number>(result)) {
+        return fromThrow(raiseThrowableError(
+            "OperatorResultTypeError", "Operator method must return a Number.",
+            stopAtFrameCount));
+    }
+    if (check == ResultCheck::Sequence &&
+        !(isList(result) || isString(result) || isMap(result))) {
+        return fromThrow(raiseThrowableError(
+            "OperatorResultTypeError",
+            "Operator method must return a sequence.", stopAtFrameCount));
+    }
     return OpResult::OK;
 }
 
@@ -672,6 +702,17 @@ Runtime::OpResult Runtime::dispatchMethod(ObjClosure* method, int argCount,
                                           int stopAtFrameCount,
                                           ResultCheck check,
                                           const Value* resultOverride) {
+    // S7 (#460): a compiled method makes the same branch invokeClosure()
+    // does — there is no VM::run() loop under the QBE backend to pick a
+    // bare call()'s pushed-but-not-run frame back up, so calling it
+    // directly the way call()+Resumed assumes leaves the frame dangling
+    // forever. callCompiled() takes the ResultCheck/resultOverride this
+    // dispatch needs and applies them itself once the compiled callee
+    // returns (runtime.h's own comment on callCompiled).
+    if (method->function->code != nullptr) {
+        return callCompiled(method, argCount, stopAtFrameCount, check,
+                            resultOverride);
+    }
     ThrowOutcome outcome = call(method, argCount, stopAtFrameCount);
     if (outcome != ThrowOutcome::Pushed) {
         return fromThrow(outcome);
@@ -1475,6 +1516,30 @@ Runtime::OpResult Runtime::opMatchError(int stopAtFrameCount) {
     return fromThrow(raiseThrowableError("MatchError",
                                          "No matching arm in match expression.",
                                          stopAtFrameCount));
+}
+
+void Runtime::opNot() { push(Value{!pop()}); }
+
+void Runtime::opIsSeq() {
+    Value val = pop();
+    push(Value{isList(val) || isString(val)});
+}
+
+void Runtime::opInstanceof(ObjString* className) {
+    Value val = pop();
+    Value classVal;
+    bool result = false;
+    if (m_globals.get(className, classVal) && isClass(classVal)) {
+        ObjClass* target = asObjClass(as<Obj*>(classVal));
+        if (isInstance(val)) {
+            ObjClass* klass = asObjInstance(as<Obj*>(val))->klass;
+            const ObjClass* found = walkChain<ObjClass>(
+                klass, [target](const ObjClass* k) { return k == target; },
+                [](const ObjClass* k) { return k->superclass; });
+            result = found != nullptr;
+        }
+    }
+    push(Value{result});
 }
 
 // --- arithmetic / comparison / containment op*() helpers ------------------

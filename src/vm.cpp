@@ -342,7 +342,7 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::NOT: {
-            m_rt.push(from<bool>(!m_rt.pop()));
+            m_rt.opNot();
             break;
         }
         case Op::LEN: {
@@ -443,27 +443,12 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::IS_SEQ: {
-            Value val = m_rt.pop();
-            m_rt.push(Value{isList(val) || isString(val)});
+            m_rt.opIsSeq();
             break;
         }
         case Op::INSTANCEOF: {
             ObjString* className = asObjString(readConstant());
-            Value val = m_rt.pop();
-            Value classVal;
-            bool result = false;
-            if (m_rt.m_globals.get(className, classVal) && isClass(classVal)) {
-                ObjClass* target = asObjClass(as<Obj*>(classVal));
-                if (isInstance(val)) {
-                    ObjClass* klass = asObjInstance(as<Obj*>(val))->klass;
-                    const ObjClass* found = walkChain<ObjClass>(
-                        klass,
-                        [target](const ObjClass* k) { return k == target; },
-                        [](const ObjClass* k) { return k->superclass; });
-                    result = found != nullptr;
-                }
-            }
-            m_rt.push(Value{result});
+            m_rt.opInstanceof(className);
             break;
         }
         case Op::CALL: {

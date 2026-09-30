@@ -426,6 +426,14 @@ class Runtime {
     OpResult opGetTag();
     OpResult opMatchError(int stopAtFrameCount);
 
+    // NOT/IS_SEQ/INSTANCEOF (S7, #460): plain stack ops with no error path
+    // (matching opClass/opDefineMethod's shape above) — moved out of
+    // VM::run() last because none of S3-S6's own checkpoints happened to
+    // exercise them (#460's own hazard comment).
+    void opNot();
+    void opIsSeq();
+    void opInstanceof(ObjString* className);
+
     // Arithmetic / comparison / containment operators. Each one owns the
     // slow path of its opcode: the built-in number (and for ADD, string) fast
     // path is inlined in VM::run(), and these are called only once that fast
@@ -590,8 +598,28 @@ class Runtime {
     // fromThrow() does for every other call site: Resumed when this
     // invocation's own context (m_frameCount > stopAtFrameCount) is still
     // live, Stop otherwise.
+    // The result-type contract Op::RETURN enforces for a dispatched operator
+    // method (see dispatchMethod). A violated contract raises the catchable
+    // OperatorResultTypeError. Declared here, ahead of callCompiled/
+    // dispatchMethod below, so both can use it in their own signatures.
+    enum class ResultCheck : std::uint8_t {
+        None,
+        Boolean,  // __eq__ __lt__ __gt__ __contains__
+        Number,   // __len__
+        Sequence, // __iter__ — and Op::RETURN builds an iterator from the
+                  // result
+    };
+
+    // `check`/`resultOverride` (S7, #460): when the callee is compiled,
+    // this method itself performs the frame-exit step Op::RETURN performs
+    // for an interpreted callee (vm.cpp) — compiled RETURN
+    // (backend/qbe_emitter.cpp) only leaves the return value on the stack
+    // and never sees these fields. Defaulted so invokeClosure's own call
+    // (below) is unaffected: a plain call is never checked or overridden.
     OpResult callCompiled(ObjClosure* closure, int argCount,
-                          int stopAtFrameCount);
+                          int stopAtFrameCount,
+                          ResultCheck check = ResultCheck::None,
+                          const Value* resultOverride = nullptr);
 
     // Dispatches to callCompiled() when `closure` already has attached code,
     // else falls back to call()+fromThrow() — the same branch opCall()'s
@@ -602,12 +630,9 @@ class Runtime {
     // pick a bare call()'s pushed-but-not-run frame back up (OpResult::
     // Resumed's own contract above: "reload frame/ip/chunk from the
     // current top before resuming dispatch") — nothing would ever run it
-    // (S5, #458). Not used by dispatchMethod(): a ResultCheck/
-    // resultOverride-bearing protocol dispatch onto a compiled callee still
-    // leaves that same gap open, since compiled RETURN
-    // (backend/qbe_emitter.cpp) does not consult m_frameResultCheck/
-    // m_frameResultOverride the way Op::RETURN does — out of this node's
-    // scope, tracked as a hazard on #460 (S7 parity gate).
+    // (S5, #458). dispatchMethod() (below) makes the identical branch for
+    // the operator-overloading protocol's own dispatch, passing its
+    // ResultCheck/resultOverride straight through to callCompiled().
     OpResult invokeClosure(ObjClosure* closure, int argCount,
                            int stopAtFrameCount);
 
@@ -631,17 +656,6 @@ class Runtime {
         Iter,
         Slice,
         Count,
-    };
-
-    // The result-type contract Op::RETURN enforces for a dispatched operator
-    // method (see dispatchMethod). A violated contract raises the catchable
-    // OperatorResultTypeError.
-    enum class ResultCheck : std::uint8_t {
-        None,
-        Boolean,  // __eq__ __lt__ __gt__ __contains__
-        Number,   // __len__
-        Sequence, // __iter__ — and Op::RETURN builds an iterator from the
-                  // result
     };
 
     // Interns the protocol names into m_protocolNames. Called once from
