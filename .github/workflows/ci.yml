@@ -1062,6 +1062,79 @@ jobs:
             loxpp-dev-qbe:latest \
             bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && tools/check_qbe_s4_calls_closures.sh"
 
+      # Same release-preset reasoning as S3/S4's own steps. Round-trips
+      # probes 09-14 and 16 (classes, super, for-in, lists/maps/index, enum
+      # match, slice/in) through the real toolchain.
+      - name: Check the rest of the language (S5)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-qbe:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && tools/check_qbe_s5_rest_of_language.sh"
+
+      # Same release-preset reasoning as S3-S5's own steps. Round-trips the
+      # status protocol, try/catch/throw/defer, and stack-overflow probes
+      # through the real toolchain.
+      - name: Check errors (S6)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-qbe:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && tools/check_qbe_s6_errors.sh"
+
+      # S7's own checkpoint (issue #460): every probe in
+      # test/translation-probes/ (the main directory, qbe-only/, and the
+      # operator-overloading probe QBE fully supports unlike CLR) must be
+      # byte-identical to native.
+      - name: Check QBE probes (S7)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-qbe:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && tools/check_qbe_probes.sh"
+
+      # S7's own full-corpus checkpoint: every example under examples/
+      # (non-recursive, matching the JVM/CLR CI steps' own directory walk)
+      # must be byte-identical between native and QBE. No exclusion file —
+      # the QBE backend reuses native's own Table unchanged, so there is no
+      # map-order permutation case to excuse (unlike JVM/CLR).
+      - name: QBE differential suite - full example corpus
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-qbe:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/diff_runtimes.py build/loxpp tools/loxpp_qbe.sh examples/"
+
+      # S7's Q8 hazard (notes/qbe-backend.md: "measure QBE's time and memory
+      # on bootstrap/loxpp_interpreter.lox early") — compiles the
+      # self-hosted interpreter itself (3,700+ lines of Lox++, one very
+      # large QBE function tree) with the QBE backend and runs the full
+      # example corpus through it, comparing against
+      # bootstrap/lox_wrapper.sh's own native-interpreted run.
+      # examples/bench_jump_table.lox is left out by name, not routed
+      # through an exclusion file: a 5,000,000-iteration microbenchmark
+      # with no CHECK directives, interpreted twice over (native once for
+      # the oracle, QBE once for the comparison), does not finish inside
+      # this step's own timeout on either side — measured, not a QBE
+      # defect, matching the CLR bootstrap step's own precedent for this
+      # same file.
+      - name: QBE differential suite - full example corpus through the self-hosted interpreter
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev-qbe:latest \
+            bash -c '
+              cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j$(nproc)
+              files=$(find examples -maxdepth 1 -name "*.lox" ! -name "bench_jump_table.lox" | sort)
+              python3 tools/diff_runtimes.py bootstrap/lox_wrapper.sh tools/loxpp_qbe_bootstrap.sh $files --timeout 60
+            '
+
   release-static:
     name: Static musl release build
     runs-on: ubuntu-latest
