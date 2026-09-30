@@ -6,10 +6,10 @@
 // the one unwind. The throws sit behind flags so the normal-path close
 // stays a live close (the capture corpus holds no dead closes).
 //
-// Moved out of clr-only/ (was 55_throw_ends_try_binding.lox there) once
-// issue #388's fix let the JVM side verify and run this shape too. Runs
-// identically on native, JVM, and CLR now; wired into both
-// tools/check_jvm_probes.sh and tools/check_clr_probes.sh.
+// Moved into this shared directory once issue #388's fix let the JVM side
+// verify and run this shape too (it was 55_throw_ends_try_binding.lox in a
+// per-target subdirectory). Runs identically on native and JVM now; wired
+// into tools/check_jvm_probes.sh.
 // Expected output:
 //
 // boom

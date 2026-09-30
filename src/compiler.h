@@ -211,8 +211,9 @@ class Compiler {
     // runtime, after that `defer` already ran) to emit RUN_DEFERS.
     // returnStatement()/emitReturn() gate RUN_DEFERS on this flag so a
     // defer-free function's chunk carries no RUN_DEFERS at all — needed so
-    // --target jvm/clr keeps working for ordinary functions, since neither
-    // emitter translates RUN_DEFERS yet (see notes/non-local-control-flow.md).
+    // --target jvm keeps working for ordinary functions, since the JVM
+    // emitter does not translate RUN_DEFERS yet (see
+    // notes/non-local-control-flow.md).
     bool m_hasDefer{false};
     // When true (only inside deferStatement()), prevent emitting INVOKE fusion
     // for method calls so they compile as GET_PROPERTY + CALL instead, allowing

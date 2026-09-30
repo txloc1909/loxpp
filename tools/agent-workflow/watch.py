@@ -6,7 +6,7 @@ PR opened/merged/closed, reviewer approval, plus a heartbeat so silence is
 never ambiguous. Everything else stays quiet.
 
 Set MISSION_BRANCH_FILTER to restrict PR tracking to this mission's branches
-(e.g. "clr"); empty means track every PR in the repo.
+(e.g. "qbe"); empty means track every PR in the repo.
 """
 
 import json

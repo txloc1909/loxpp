@@ -2,7 +2,7 @@
 
 // Target-independent bytecode decoder. It turns a Chunk's raw byte stream
 // into structured instructions, and walks the ObjFunction tree those chunks
-// belong to. It carries no JVM or CLR knowledge — both backends consume it.
+// belong to. It carries no JVM or QBE knowledge — both backends consume it.
 //
 // This is a decode pass only. It does not compute a CFG (cfg.h), an
 // abstract stack (abstract_stack.h), or a capture map (capture_analysis.h);

@@ -9,10 +9,6 @@
 // while the first overflow is still unwinding, which spec/04-semantics.md
 // line 1119 makes fatal — matching native, which never confuses an
 // unrelated throw with a replacement of the fault it is unwinding.
-//
-// Lives in jvm-only/ for the same reason catch_overflow.lox does: the CLR
-// backend does not yet deliver this fault with the correct catchability
-// (issue #238).
 class Fake {}
 fun t() { throw Fake(); }
 fun helper() { defer t(); }

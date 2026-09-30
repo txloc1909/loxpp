@@ -18,10 +18,10 @@ Usage:
 name, then a reason. Repeatable: pass --exclude more than once to skip names
 from more than one list at once (for example, the current backend's
 map-order list plus its own known-crash list — a name on either list is
-skipped). tools/jvm_excluded_examples.txt and tools/clr_excluded_examples.txt
-are two such files — the map-order-sensitive examples each managed backend
-legitimately reorders (spec leaves map iteration order unspecified). An
-excluded file is skipped, not run, and reported as SKIP with its reason.
+skipped). tools/jvm_excluded_examples.txt is one such file — the
+map-order-sensitive examples the JVM backend legitimately reorders (spec
+leaves map iteration order unspecified). An excluded file is skipped, not
+run, and reported as SKIP with its reason.
 
 <examples-dir> that resolves to zero .lox files — because it does not
 exist, or is empty — is an error (exit 2), not a silent zero-file pass:

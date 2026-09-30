@@ -360,8 +360,7 @@ public final class LoxOps {
      * kind-split one. vm.cpp's opcodes (BUILD_MAP, IN, GET_INDEX,
      * SET_INDEX) and its native map methods (has/del) are not symmetric
      * here — this is a pre-existing native-VM design, not a JVM-specific
-     * choice (see runtime/clr/src/LoxOps.cs's CheckMapKeyForNativeMethod,
-     * which mirrors the same asymmetry).
+     * choice.
      */
     static void checkMapKeyForNativeMethod(Object key) {
         if (key == null || key instanceof Boolean || key instanceof String) {

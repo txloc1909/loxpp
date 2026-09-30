@@ -1,6 +1,6 @@
 // Reflection introspection natives (src/stdlib/reflect_api.cpp /
-// LoxRuntime.{java,cs} registerReflection). A program using them must print
-// byte-identically on native, JVM, and CLR, or the differential suite
+// LoxRuntime.registerReflection). A program using them must print
+// byte-identically on native and JVM, or the differential suite
 // (tools/diff_runtimes.py) DIVERGEs. fields()/methods() are single-element
 // here so their unspecified iteration order cannot cause a false divergence.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# QBE twin of bootstrap/lox_wrapper.sh, matching tools/loxpp_jvm_bootstrap.sh
-# and tools/loxpp_clr_bootstrap.sh. Runs a Lox/Lox++ source file through the
+# QBE twin of bootstrap/lox_wrapper.sh, matching tools/loxpp_jvm_bootstrap.sh.
+# Runs a Lox/Lox++ source file through the
 # self-hosted interpreter, the same way lox_wrapper.sh does, but executes
 # the interpreter itself on the QBE backend (tools/loxpp_qbe.sh) instead of
 # the native build/loxpp binary — so a diff between this script and
@@ -13,7 +13,7 @@
 # LANGUAGE=LOX (default) uses lox_interpreter.lox — this backend does not
 # interpret plain Lox this way; only LANGUAGE=LOXPP compiles anything, since
 # lox_interpreter.lox is itself plain Lox++ source either way. The LOX case
-# is kept only so this script's usage matches its JVM/CLR twins exactly.
+# is kept only so this script's usage matches its JVM twin exactly.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -3,9 +3,8 @@
 // deferred call too, the same way any other fatal fault does — no `try`
 // statement is active anywhere in this program, so native never reaches
 // the catchable ArityError construction at all (src/runtime.cpp Runtime::call()).
-// Both managed backends must agree: empty stdout, no "defer-g". An
-// error_probes entry in tools/check_jvm_probes.sh and
-// tools/check_clr_probes.sh.
+// The JVM backend must agree: empty stdout, no "defer-g". An
+// error_probes entry in tools/check_jvm_probes.sh.
 fun note(s) { print s; }
 fun h(a) { return a; }
 fun g() { defer note("defer-g"); h(); }

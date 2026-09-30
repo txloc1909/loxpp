@@ -39,5 +39,5 @@ moved here unchanged except for stripping each file's ad-hoc timing footer —
 
 The reference C VM (`clox`) and the other-language AWFY entries
 (Python / Lua / Node) an earlier, native-only benchmark pass used are **not**
-part of this suite: its question is native VM vs JVM vs CLR back end, all
-three fed the same Lox++ source.
+part of this suite: its question is the native VM vs the JVM backend, both
+fed the same Lox++ source.

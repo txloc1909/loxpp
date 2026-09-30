@@ -565,7 +565,7 @@ jobs:
             bash -c "python3 tools/check_examples.py build/loxpp examples/"
 
   managed-toolchains:
-    name: Managed toolchains (JVM + CLR)
+    name: Managed toolchains (JVM)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -586,12 +586,12 @@ jobs:
             type=gha,scope=dev
           # mode=min, unlike the dev scope: this exports only the final image's
           # layers, not every intermediate step. Enough to keep the SourceForge
-          # and nuget.org fetches out of later runs without spending much of the
-          # repo's 10 GB cache budget, which is already ~65% used.
+          # fetch out of later runs without spending much of the repo's 10 GB
+          # cache budget, which is already ~65% used.
           cache-to: type=gha,mode=min,scope=dev-managed
 
-      # Only the `Build loxpp` step below is routed through this; the JVM/CLR
-      # runtime libraries are Java/C# and ccache does not apply to them.
+      # Only the `Build loxpp` step below is routed through this; the JVM
+      # runtime library is Java and ccache does not apply to it.
       # The release-preset compiles here match build-and-test's release job,
       # so fall back to that scope's key to seed a cold run.
       - name: Restore ccache
@@ -609,14 +609,14 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "tools/build_lox_rt.sh && tools/build_lox_rt_clr.sh && tools/check_managed_toolchains.sh"
+            bash -c "tools/build_lox_rt.sh && tools/check_managed_toolchains.sh"
 
       # continue-on-error: this step's own tests are independent of every
       # later step (it rebuilds its own classes from source and produces
-      # nothing any later step reads), but an unguarded failure here used to
-      # abort the whole job — silently skipping every CLR-specific step below
-      # since Node X4 (see the "Fail the job" step at the end, which is what
-      # actually turns a failure here into a red job).
+      # nothing any later step reads), but an unguarded failure here would
+      # abort the whole job and silently skip the steps after it (see the
+      # "Fail the job" step at the end, which is what actually turns a
+      # failure here into a red job).
       - name: Build and test the JVM runtime library
         id: jvm_lox_rt_test
         continue-on-error: true
@@ -648,16 +648,6 @@ jobs:
             loxpp-dev-managed:latest \
             ccache -s
 
-      # Needs build/loxpp (built above, release preset): its own %g parity
-      # test is differential against the native binary, not a fixed list.
-      - name: Build and test the CLR runtime library
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            loxpp-dev-managed:latest \
-            bash -c "tools/test_lox_rt_clr.sh"
-
       - name: Check JVM emission probes
         run: |
           docker run --rm \
@@ -666,22 +656,11 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "tools/check_jvm_probes.sh"
 
-      # Needs build/loxpp (LOXPP_CLR_BACKEND, default ON; built above) and
-      # runtime/clr/LoxRuntime.dll and runtime/clr/LoxHost.dll (both built
-      # above by tools/build_lox_rt_clr.sh).
-      - name: Check CLR emission probes
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            loxpp-dev-managed:latest \
-            bash -c "tools/check_clr_probes.sh"
-
       # Mission #288 node #336: for every row of spec/04-semantics.md's
       # Runtime Errors and Fatal Runtime Errors tables, checks that native,
-      # JVM, CLR, and the bootstrap interpreter agree on whether the fault
+      # JVM, and the bootstrap interpreter agree on whether the fault
       # is caught or halts the program, and (when caught) on kind, message,
-      # type(), and str(). Runs on all four consumers this job already has
+      # type(), and str(). Runs on all three consumers this job already has
       # a binary for.
       - name: Check fault table - differential
         run: |
@@ -710,17 +689,9 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "tools/check_file_durability.sh tools/loxpp_jvm.sh"
 
-      - name: Check file durability - CLR
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            loxpp-dev-managed:latest \
-            bash -c "tools/check_file_durability.sh tools/loxpp_clr.sh"
-
       # bootstrap/lox_wrapper.sh runs the self-hosted interpreter on the
       # native binary, so this needs no managed toolchain - it sits here
-      # anyway, beside the other three, so a regression on any consumer of
+      # anyway, beside the other two, so a regression on any consumer of
       # this guarantee fails in one place. The bootstrap interpreter
       # defines exit() like every other consumer, so its p5b_exit_call
       # probe runs unskipped.
@@ -765,10 +736,8 @@ jobs:
 
       # The parity gate. Every probe must be byte-identical on native and JVM
       # stdout (differential runner, not only the check_jvm_probes.sh diff
-      # loop above). Also reads translation-probes/jvm-only/ — the JVM twin
-      # of translation-probes/clr-only/ below: a probe the JVM backend is
-      # ready for but the CLR backend is not yet (issue #268's
-      # catch_overflow.lox, until #238 closes).
+      # loop above). Also reads translation-probes/jvm-only/, which holds a
+      # probe only the JVM backend can run today.
       - name: JVM differential suite - probes
         run: |
           docker run --rm \
@@ -848,139 +817,6 @@ jobs:
             -e LANGUAGE=LOXPP \
             loxpp-dev-managed:latest \
             bash -c "python3 tools/check_examples.py tools/loxpp_jvm_bootstrap.sh examples/ --exclude tools/jvm_excluded_examples.txt"
-
-      # CLR twin of the probes check: byte-identical on native and CLR stdout
-      # (differential runner, not only the check_clr_probes.sh diff loop
-      # above). Zero exclusions. Reads both test/translation-probes/ and
-      # its clr-only/ subdirectory — Path.glob("*.lox") does not recurse
-      # into subdirectories on its own, and the CLR-specific probes
-      # (deep-recursion frame ceiling, multi-slot fold repair) live there
-      # precisely because the JVM twin of this step must not run them.
-      - name: CLR differential suite - probes
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            loxpp-dev-managed:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_clr.sh test/translation-probes/ test/translation-probes/clr-only/"
-
-      # CLR twin of the examples check: the full example corpus on the CLR
-      # backend, zero failures. --exclude skips the
-      # map-iteration-order-sensitive examples
-      # (tools/clr_excluded_examples.txt) and the examples the CLR backend
-      # cannot run at all yet (tools/clr_crash_excluded_examples.txt); the
-      # native path below still runs every example, unchanged.
-      - name: CLR differential suite - examples
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            loxpp-dev-managed:latest \
-            bash -c "python3 tools/check_examples.py tools/loxpp_clr.sh examples/ --exclude tools/clr_excluded_examples.txt --exclude tools/clr_crash_excluded_examples.txt"
-
-      # Permutation guard for the CLR exclusion list itself. check_examples.py
-      # SKIPs an excluded name; it never runs it, so it cannot tell a real
-      # permutation from a content bug. This step runs diff_runtimes.py over
-      # exactly the names in tools/clr_excluded_examples.txt (read from the
-      # file, so a new entry is covered with no CI edit) and fails the gate
-      # if any one of them stops being a permutation of native stdout. It
-      # must not read tools/clr_crash_excluded_examples.txt: those entries
-      # are not permutations, they are programs the CLR side cannot finish
-      # at all, so this guard would always fail on them.
-      - name: CLR differential suite - excluded examples stay permutations
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            loxpp-dev-managed:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_clr.sh --exclude tools/clr_excluded_examples.txt --only-excluded examples/"
-
-      # Full-corpus differential, every example. check_examples.py only
-      # checks each example's own CHECK directives, so an example with none
-      # (examples/bench_jump_table.lox, examples/remove.lox) could print a
-      # wrong answer with CI green. This step compares full stdout for every
-      # example instead.
-      #
-      # tools/diff_runtimes.py's --exclude only excuses a map-order
-      # permutation (tools/clr_excluded_examples.txt); it has no "the other
-      # side cannot even finish" mode. So the examples named in
-      # tools/clr_crash_excluded_examples.txt are left out of the file list
-      # by name, the same way examples/bench_jump_table.lox is left out of
-      # the self-hosted-interpreter sweep further below for its own,
-      # different reason (a timeout, not a crash).
-      - name: CLR differential suite - full example corpus
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            loxpp-dev-managed:latest \
-            bash -c '
-              crash_excluded=$(awk "!/^[[:space:]]*#/ && NF {print \$1}" tools/clr_crash_excluded_examples.txt)
-              files=$(find examples -maxdepth 1 -name "*.lox" | sort)
-              for name in $crash_excluded; do
-                files=$(echo "$files" | grep -vxF "examples/$name")
-              done
-              python3 tools/diff_runtimes.py build/loxpp tools/loxpp_clr.sh $files --exclude tools/clr_excluded_examples.txt
-            '
-
-      # The self-hosted interpreter compiles, assembles, and runs on the CLR
-      # backend, and interprets a Lox++ program correctly. The CLR twin of the
-      # matching JVM step above. An emptiness guard catches the case where
-      # both wrappers fail silently with empty stdout, which a bare
-      # `diff <(a) <(b)` would report as a match.
-      - name: CLR differential suite - self-hosted interpreter on the CLR backend
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            -e LANGUAGE=LOXPP \
-            loxpp-dev-managed:latest \
-            bash -c '
-              native_out=$(bootstrap/lox_wrapper.sh examples/fibonacci.lox)
-              clr_out=$(tools/loxpp_clr_bootstrap.sh examples/fibonacci.lox)
-              if [ -z "$native_out" ] || [ -z "$clr_out" ]; then
-                echo "one or both wrappers gave empty stdout; a silent failure would look like a match"
-                exit 1
-              fi
-              diff <(printf "%s\n" "$native_out") <(printf "%s\n" "$clr_out")
-            '
-
-      # Every example, run through the self-hosted interpreter, with the
-      # interpreter itself running on the CLR backend. Zero failures, same
-      # exclusion list as the direct CLR path.
-      - name: CLR differential suite - examples through the self-hosted interpreter on the CLR backend
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            -e LANGUAGE=LOXPP \
-            loxpp-dev-managed:latest \
-            bash -c "python3 tools/check_examples.py tools/loxpp_clr_bootstrap.sh examples/ --exclude tools/clr_excluded_examples.txt"
-
-      # Closes, for the CLR path, a known limit the JVM gate above still
-      # carries: check_examples.py only checks each bootstrapped example's
-      # own CHECK directives, not its full stdout, so an example with none
-      # could print a wrong answer through the interpreter with this gate
-      # green. This step compares full stdout instead, native's own
-      # bootstrap wrapper as the oracle, for every example except
-      # examples/bench_jump_table.lox: a 5,000,000-iteration microbenchmark
-      # with no CHECK directives, and interpreting it twice over (native
-      # once for the oracle, CLR once for the comparison) does not finish
-      # inside this step's own timeout on either side — measured, not a CLR
-      # defect, so it is left out of the file list by name rather than
-      # routed through tools/clr_excluded_examples.txt, which excuses only
-      # a map-order permutation, never a timeout.
-      - name: CLR differential suite - full example corpus through the self-hosted interpreter
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            -e LANGUAGE=LOXPP \
-            loxpp-dev-managed:latest \
-            bash -c '
-              files=$(find examples -maxdepth 1 -name "*.lox" ! -name "bench_jump_table.lox" | sort)
-              python3 tools/diff_runtimes.py bootstrap/lox_wrapper.sh tools/loxpp_clr_bootstrap.sh $files --exclude tools/clr_excluded_examples.txt --timeout 60
-            '
 
       # The JVM lox-rt test step above is continue-on-error so its own
       # failure can't hide every step after it (see that step's comment).
@@ -1086,8 +922,8 @@ jobs:
 
       # S7's own checkpoint (issue #460): every probe in
       # test/translation-probes/ (the main directory, qbe-only/, and the
-      # operator-overloading probe QBE fully supports unlike CLR) must be
-      # byte-identical to native.
+      # operator-overloading probe in jvm-only/) must be byte-identical to
+      # native.
       - name: Check QBE probes (S7)
         run: |
           docker run --rm \
@@ -1097,10 +933,10 @@ jobs:
             bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && tools/check_qbe_probes.sh"
 
       # S7's own full-corpus checkpoint: every example under examples/
-      # (non-recursive, matching the JVM/CLR CI steps' own directory walk)
+      # (non-recursive, matching the JVM CI step's own directory walk)
       # must be byte-identical between native and QBE. No exclusion file —
       # the QBE backend reuses native's own Table unchanged, so there is no
-      # map-order permutation case to excuse (unlike JVM/CLR).
+      # map-order permutation case to excuse (unlike the JVM).
       - name: QBE differential suite - full example corpus
         run: |
           docker run --rm \
@@ -1120,8 +956,7 @@ jobs:
       # with no CHECK directives, interpreted twice over (native once for
       # the oracle, QBE once for the comparison), does not finish inside
       # this step's own timeout on either side — measured, not a QBE
-      # defect, matching the CLR bootstrap step's own precedent for this
-      # same file.
+      # defect.
       - name: QBE differential suite - full example corpus through the self-hosted interpreter
         run: |
           docker run --rm \

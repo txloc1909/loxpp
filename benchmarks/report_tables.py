@@ -29,22 +29,19 @@ def main() -> None:
         return r.get(key) if r.get("ok") else None
 
     print("### RESULTS_TABLE\n")
-    print("| benchmark | native ms | jvm ms | clr ms | jvm/nat | clr/nat | spread nat/jvm/clr |")
-    print("|---|--:|--:|--:|--:|--:|---|")
-    geo = {"jvm": [], "clr": []}
+    print("| benchmark | native ms | jvm ms | jvm/nat | spread nat/jvm |")
+    print("|---|--:|--:|--:|---|")
+    geo = {"jvm": []}
     for e in sorted(run, key=lambda e: e["program"]):
-        n = cell(e, "native"); j = cell(e, "jvm"); c = cell(e, "clr")
+        n = cell(e, "native"); j = cell(e, "jvm")
         jr = f"{j/n:.2f}" if (n and j) else "—"
-        cr = f"{c/n:.2f}" if (n and c) else "—"
         if n and j:
             geo["jvm"].append(j / n)
-        if n and c:
-            geo["clr"].append(c / n)
         sp = "/".join(
             f"{e['backends'].get(b, {}).get('spread', 0)*100:.0f}%"
-            for b in ("native", "jvm", "clr"))
+            for b in ("native", "jvm"))
         mark = "" if e["checksum_match"] else " ⚠"
-        print(f"| {e['program']}{mark} | {ms(n)} | {ms(j)} | {ms(c)} | {jr} | {cr} | {sp} |")
+        print(f"| {e['program']}{mark} | {ms(n)} | {ms(j)} | {jr} | {sp} |")
 
     def geomean(xs):
         p = 1.0
@@ -52,26 +49,25 @@ def main() -> None:
             p *= x
         return p ** (1 / len(xs)) if xs else float("nan")
 
-    print(f"\n_geomean: jvm {geomean(geo['jvm']):.2f}× native, "
-          f"clr {geomean(geo['clr']):.2f}× native "
+    print(f"\n_geomean: jvm {geomean(geo['jvm']):.2f}× native "
           f"(< 1 = faster than native)_\n")
 
     print("### PEAK_TABLE\n")
-    print("| benchmark | native | jvm | clr |")
-    print("|---|--:|--:|--:|")
+    print("| benchmark | native | jvm |")
+    print("|---|--:|--:|")
     for e in sorted(run, key=lambda e: e["program"]):
         print(f"| {e['program']} | {ms(cell(e,'native','min_us'))} "
-              f"| {ms(cell(e,'jvm','min_us'))} | {ms(cell(e,'clr','min_us'))} |")
+              f"| {ms(cell(e,'jvm','min_us'))} |")
 
     print("\n### OVERHEAD_TABLE\n")
-    print("| benchmark | native | jvm | clr |")
-    print("|---|--:|--:|--:|")
+    print("| benchmark | native | jvm |")
+    print("|---|--:|--:|")
     for e in sorted(run, key=lambda e: e["program"]):
         row = []
-        for b in ("native", "jvm", "clr"):
+        for b in ("native", "jvm"):
             r = e["backends"].get(b, {})
             row.append(f"{r['overhead_s']:.2f}s" if r.get("ok") else "—")
-        print(f"| {e['program']} | {row[0]} | {row[1]} | {row[2]} |")
+        print(f"| {e['program']} | {row[0]} | {row[1]} |")
 
     if prof:
         print("\n### OPCODE_TABLE\n")

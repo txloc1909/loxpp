@@ -500,7 +500,7 @@ a method backed by a user-defined function (declared with `fun` inside a
 `class` body, or a closure stored in a field), or a Class or Enum constructor
 value stored in a field — is a **runtime error**
 ("callMethod does not support user-defined methods yet."). This restriction
-applies identically across all execution targets (native, JVM, CLR).
+applies identically across all execution targets (native, JVM).
 
 ```lox
 class Foo {}

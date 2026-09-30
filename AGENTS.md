@@ -132,25 +132,13 @@ git branch -d <type>/<desc>
 > Backend work: run `tools/build_lox_rt.sh && tools/check_managed_toolchains.sh`
 > inside `dev-managed` before touching backend code. The check needs the JVM
 > runtime jar, so build it first on a fresh worktree. This confirms the JVM
-> and CLR toolchains are healthy, so any later failure points at generated
+> toolchain is healthy, so any later failure points at generated
 > bytecode rather than the image. Neither agent tag is `loxpp-dev` — that name
 > belongs to the human's off-limits distrobox container.
 >
-> CLR work needs one more build before running any example or probe:
-> `tools/build_lox_rt_clr.sh` compiles `runtime/clr/LoxRuntime.dll` and
-> `LoxHost.dll`, the project's own CLR runtime library. `check_managed_toolchains.sh`
-> does not build this file — it only proves ilasm and dotnet work, using
-> throwaway assemblies of its own — so a fresh worktree with no CLR runtime
-> library yet still passes that check. Running `tools/loxpp_clr.sh` or
-> `tools/diff_runtimes.py` against a missing `LoxRuntime.dll` fails fast with
-> a clear message on stderr and a non-zero exit, but prints nothing at all to
-> stdout: a check that reads only stdout, not stderr or the exit code, sees
-> this as "no output" and can mistake a missed build step for a backend
-> defect.
->
 > Build with the `release` preset, not the generic task loop's `debug` one,
 > before comparing output across backends (`tools/diff_runtimes.py`, or
-> hand-diffing `build/loxpp` against `tools/loxpp_jvm.sh`/`loxpp_clr.sh`).
+> hand-diffing `build/loxpp` against `tools/loxpp_jvm.sh`).
 > The `debug` preset leaves `LOXPP_DEBUG_TRACE_EXECUTION`/
 > `LOXPP_DEBUG_PRINT_CODE` on by default, so native's stdout carries a full
 > per-instruction bytecode+stack trace the managed backends never produce —

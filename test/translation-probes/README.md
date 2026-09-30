@@ -1,7 +1,7 @@
 # Translation probes
 
 Small Lox++ programs, each chosen so that its *bytecode* isolates one
-translation problem for the JVM/CLR backends. They are the empirical ground for
+translation problem for the JVM/QBE backends. They are the empirical ground for
 `notes/bytecode-translation-problems.md` — read that document alongside these.
 
 The `Vn_*` probes are **verification** programs: their runtime *output* (not
@@ -65,10 +65,10 @@ each has an off-the-shelf solution.
 | `28_folded_match_operand_family` | `normalizeFoldedOperands`'s own required coverage: the nine folded-operand shapes (`BUILD_LIST`, `BUILD_MAP`, `CALL`, `GET_PROPERTY`, `INVOKE`, `SET_PROPERTY`, `SET_INDEX`, `SLICE`, `IN`, each with a folded operand) plus one nested match subject; `RETURN` of a folded match is deliberately not repeated here (`checkReturnHeightZero` excludes probes by design) — `examples/or_pattern_demo.lox` already covers it | P8 |
 | `29_os_access` | the OS/world access natives (`args`, `env`, `exists`, `is_dir`, `is_file`, `stat`, `sleep`) must run byte-identically on both runtimes — the JVM runtime registers them too (`LoxRuntime`), and this probe guards against a future drift | none (parity gate) |
 | `30_bool_compare_and_string_literal` | every comparison spelling (`==`, `!=`, `>`, `>=`, `<`, `<=`, each lowering to EQUAL/GREATER/LESS optionally paired with NOT), a standalone `!`, `%`, the `true`/`false`/`nil` literals printed as values in their own right, and a string constant with a quote, a backslash, and a tab | P2 |
-| `31_deep_recursion` | native's own frame-count ceiling (`src/vm.h` `FRAMES_MAX`), reached through ordinary self-recursive `CALL`s; the JVM and CLR backends now mirror the same ceiling (issue #268), so both must fail identically here too | P5, P6 |
+| `31_deep_recursion` | native's own frame-count ceiling (`src/vm.h` `FRAMES_MAX`), reached through ordinary self-recursive `CALL`s; the JVM backend now mirrors the same ceiling (issue #268), so it must fail identically here too | P5, P6 |
 | `53_deep_recursion_boundary` | the success side of the boundary `31_deep_recursion` pins the failure side of: 1022 nested calls is the deepest depth every backend still accepts | P5, P6 |
-| `57_stack_overflow_catchable` | unbounded recursion overflows `LoxClosure`'s own frame-count ceiling; a live `try`/`catch` must catch a real `Error` value with kind `StackOverflowError`, matching native (spec/04-semantics.md) — promoted from clr-only (issue #322) | P6 |
-| `58_stack_overflow_reentrant_fatal` | a second `StackOverflowError` raised by a deferred call while the first is still unwinding is fatal, not delivered to any `catchBlock` (spec/04-semantics.md line 1120) — promoted from clr-only (issue #322), companion to `57_stack_overflow_catchable` | P5, P6 |
+| `57_stack_overflow_catchable` | unbounded recursion overflows `LoxClosure`'s own frame-count ceiling; a live `try`/`catch` must catch a real `Error` value with kind `StackOverflowError`, matching native (spec/04-semantics.md) — promoted into this directory (issue #322) | P6 |
+| `58_stack_overflow_reentrant_fatal` | a second `StackOverflowError` raised by a deferred call while the first is still unwinding is fatal, not delivered to any `catchBlock` (spec/04-semantics.md line 1120) — promoted into this directory (issue #322), companion to `57_stack_overflow_catchable` | P5, P6 |
 | `catch_overflow` | `LoxClosure`'s frame-count ceiling delivers a catchable `StackOverflowError`, matching native's kind, message, and post-catch continuation — promoted from jvm-only (issue #445) | P5, P6 |
 | `defer_overflow_during_unwind` | a `StackOverflowError` raised by a deferred call while another one is still unwinding is fatal on every backend, not delivered to any `catchBlock` (`spec/04-semantics.md` line 1120) — promoted from jvm-only (issue #322) | P5, P6 |
 | `jvm-only/defer_replaces_overflow` | a deferred call's own throw, uncaught within it, replaces a `StackOverflowError` still unwinding (`spec/04-semantics.md` defer Statement step 5); the unwind guard must still clear so a later, unrelated overflow is caught — JVM-only, see the note below the table | P5, P6 |
@@ -78,19 +78,18 @@ each has an off-the-shelf solution.
 | `32_string_nul` | a string literal holding an embedded NUL byte (`\0`): `print` must write every byte, including the text after the NUL, on native and on each managed backend (issue #129) | none (parity gate) |
 | `33_class_pattern_match_error` | a `match` whose arms are all class patterns raises a real, reachable `MATCH_ERROR` when no arm matches, through the same fused opcode as the enum case | P8 |
 | `34_match_consumed_result` | a `match` expression's result, once its own closing `POP` retires the synthetic subject local, is exposed as a named local's own value — `PRINT` and `DEFINE_GLOBAL` each need their own fold-aware read, the same way `RETURN` and `SET_GLOBAL` already do | P1, P2 |
-| `40_reflection` | the reflection introspection natives (`type`, `fields`, `methods`, `getField`, `setField`, `hasField`, `callMethod`) must run byte-identically on all three runtimes — native, JVM, and CLR alike (`src/stdlib/reflect_api.cpp`, `LoxRuntime.registerReflection`); fields/methods use single-element classes so their unspecified iteration order cannot cause a false divergence | none (parity gate) |
-| `41_reflect_getfield_non_instance` | `getField()` on a non-Instance receiver is a runtime error on every backend — an `error_probes` entry in `tools/check_jvm_probes.sh`/`check_clr_probes.sh` | none (error-parity gate) |
+| `37_invoke_field_bound_native_method` | a bound built-in method stored in an instance field and invoked through the field name drives `INVOKE`'s field-shadow arm, not `GET_PROPERTY` followed by `CALL` (spec/04-semantics.md) | P5, P6 |
+| `40_reflection` | the reflection introspection natives (`type`, `fields`, `methods`, `getField`, `setField`, `hasField`, `callMethod`) must run byte-identically on both runtimes — native and JVM alike (`src/stdlib/reflect_api.cpp`, `LoxRuntime.registerReflection`); fields/methods use single-element classes so their unspecified iteration order cannot cause a false divergence | none (parity gate) |
+| `41_reflect_getfield_non_instance` | `getField()` on a non-Instance receiver is a runtime error on every backend — an `error_probes` entry in `tools/check_jvm_probes.sh` | none (error-parity gate) |
 | `42_reflect_setfield_non_instance` | `setField()` on a non-Instance receiver is a runtime error on every backend — an `error_probes` entry | none (error-parity gate) |
 | `43_reflect_fields_non_instance` | `fields()` on a non-Instance argument is a runtime error on every backend — an `error_probes` entry | none (error-parity gate) |
 | `44_reflect_hasfield_non_instance` | `hasField()` on a non-Instance receiver is a runtime error on every backend — an `error_probes` entry | none (error-parity gate) |
 | `45_reflect_methods_non_instance` | `methods()` on a non-Class argument is a runtime error on every backend — an `error_probes` entry | none (error-parity gate) |
 | `46_reflect_callmethod_non_instance` | `callMethod()` on a non-Instance receiver is a runtime error on every backend — an `error_probes` entry | none (error-parity gate) |
-| `47_reflect_callmethod_closure_method` | `callMethod()`'s v1 natives-only restriction must reject a closure-backed method identically on all three backends, even though JVM/CLR have no technical need for the restriction themselves (`notes/expressiveness-roadmap.md` item 1) — an `error_probes` entry | none (error-parity gate) |
+| `47_reflect_callmethod_closure_method` | `callMethod()`'s v1 natives-only restriction must reject a closure-backed method identically on both backends, even though the JVM backend has no technical need for the restriction itself (`notes/expressiveness-roadmap.md` item 1) — an `error_probes` entry | none (error-parity gate) |
 | `48_file_visible_after_close` | a File's write-close-reopen cycle: once `close()` returns, a fresh `open()` on the same path sees everything the closed handle wrote (`spec/05-stdlib.md`, File section) — pins the after-close half of the visibility guarantee, not the buffered-before-close half, which is implementation-defined and allowed to differ | none (parity gate) |
 | `55_for_in_map_net_zero` | an erase plus an insert in one `for`-in body restores the net size, so a size check misses it — the structural version check must still fail on every backend, with empty stdout (issue #362) — an `error_probes` entry | none (error-parity gate) |
-| `jvm-only/61_operator_overload` | operator overloading (issue #472): every T1 dunder method (`__add__ __sub__ __mul__ __div__ __mod__ __neg__ __lt__ __gt__ __eq__ __contains__ __call__`), the Wave-2 methods (`__index_get__ __index_set__ __len__ __iter__`), and the deferred `__slice__` dispatch on an Instance; `!=`/`<=`/`>=` derive from `__eq__`/`__gt__`/`__lt__`, and the built-in List/String/Map/Number paths stay unchanged — jvm-only because the CLR backend is excluded from operator overloading | P6 |
-| `clr-only/35_folded_match_deficit_two_plus` | `normalizeFoldedOperands`'s own multi-slot repair with a fold deficit of two or more (`ADD`, `CALL`, `BUILD_LIST`, `BUILD_MAP`), plus two folded slots that are also captured-closure slots — CLR-only, see the note below the table | P8 |
-| `clr-only/known-divergence/52_fat_frame_stack_divergence` | a KNOWN, unclosed gap, not a checkpoint both sides must pass: a frame with enough locals overflows native's value-stack ceiling (`src/vm.h` `STACK_MAX`) well before its call chain nears the frame-count ceiling both native and CLR enforce; the CLR backend mirrors only the frame count, so it runs the same program to completion — CLR-only, see the note below the table | P5, P6 |
+| `jvm-only/61_operator_overload` | operator overloading (issue #472): every T1 dunder method (`__add__ __sub__ __mul__ __div__ __mod__ __neg__ __lt__ __gt__ __eq__ __contains__ __call__`), the Wave-2 methods (`__index_get__ __index_set__ __len__ __iter__`), and the deferred `__slice__` dispatch on an Instance; `!=`/`<=`/`>=` derive from `__eq__`/`__gt__`/`__lt__`, and the built-in List/String/Map/Number paths stay unchanged — named directly by both check scripts, see the note below the table | P6 |
 | `V1_fresh_cell` | body-local captured in a loop → **fresh cell/iter** → prints `0 1 2` | P4 |
 | `V2_shared` | mutable shared upvalue → prints `2` | P4 |
 | `V3_loopvar` | loop var captured directly → **one shared cell** → prints `3 3 3` | P4 |
@@ -98,48 +97,30 @@ each has an off-the-shelf solution.
 | `V5_self_recursive_closure` | a local `fun` captures its own slot (direct recursion) → prints `120` | P4 |
 | `V6_self_recursive_closure_in_loop` | self-recursive local `fun`, fresh cell per loop trip → prints `12` | P4 |
 
-`clr-only/35_folded_match_deficit_two_plus` is one of the probes not directly in
-this directory. `tools/diff_runtimes.py`'s CI probes step walks this
-directory's own files (non-recursively) and compares native against the
-JVM backend. `35_folded_match_deficit_two_plus` needs a fold deficit above
-one, which the JVM backend's own repair refuses outright, so every shape in
-it would abort at JVM emit time instead of matching.
-`53_stack_overflow_catchable` and `54_stack_overflow_reentrant_fatal` have been promoted
-into this directory as `57_stack_overflow_catchable` and `58_stack_overflow_reentrant_fatal`
-(issue #322) now that both backends have catchable stack overflow parity.
-`31_deep_recursion` used to sit beside them for the same reason; it moved directly into
-this directory once the JVM backend grew its own frame-count ceiling to match (issue #268).
+`jvm-only/61_operator_overload` and `jvm-only/defer_replaces_overflow` sit one
+level down because this directory's own files are walked non-recursively by
+`tools/diff_runtimes.py` (native against the JVM backend). The
+operator-overloading probe is named directly by `tools/check_jvm_probes.sh`
+and `tools/check_qbe_probes.sh`; `defer_replaces_overflow` is named by
+`tools/check_jvm_probes.sh` for the JVM checkpoint.
 
-`jvm-only/defer_replaces_overflow` sits one level down for the mirror-image
-reason: `tools/diff_runtimes.py`'s CI step for the CLR backend walks
-`clr-only/` too (comparing native against CLR), and this probe stays here
-because the CLR backend still crashes on it (`SIGABRT`, an unhandled
-`LoxError: Stack overflow.` propagating out of `LoxOps.RunDefers`/
-`LoxClosure.Call` — issue #446, a fresh repro superseding #417, closed
-2026-09-22 with no linked fix). `catch_overflow`
-used to sit beside it for the same #238 reason; that issue is closed and a
-live CLR run now confirms `catch_overflow` matches native, so it moved into
-this directory (issue #445). `tools/check_jvm_probes.sh` still runs
-`defer_replaces_overflow` by name for the JVM checkpoint.
+`53_stack_overflow_catchable` and `54_stack_overflow_reentrant_fatal` have
+been promoted into this directory as `57_stack_overflow_catchable` and
+`58_stack_overflow_reentrant_fatal` (issue #322) now that the JVM backend has
+catchable stack overflow parity. `31_deep_recursion` used to sit beside them
+for the same reason; it moved directly into this directory once the JVM
+backend grew its own frame-count ceiling to match (issue #268).
 
 `defer_overflow_during_unwind`, `defer_overflow_kind_spoof`,
 `defer_throw_on_normal_return_during_unwind`, and
 `defer_replaces_unrelated_fault_during_unwind` used to sit in `jvm-only/`
-too. They have been promoted into this directory (issue #322) now that
-both backends match on these stack-overflow unwind guard behaviors.
-
-`clr-only/known-divergence/52_fat_frame_stack_divergence` sits one level
-below that again. `tools/diff_runtimes.py`'s CI step for the CLR backend
-walks `clr-only/` too (comparing native against CLR, not JVM), and this
-probe's two sides disagree on both stdout content and exit status by
-design — the one case that walk's own empty-stdout special case does not
-excuse. A second directory level keeps it out of both walks while
-`tools/check_clr_probes.sh` still runs it by name.
+too. They have been promoted into this directory (issue #322) now that the
+JVM backend matches on these stack-overflow unwind guard behaviors.
 
 ## Are these problems solved in the literature?
 
 Each problem was mapped against compiler literature and real dynamic-language
-JVM/CLR backends. **None is research-open** — every one decomposes into named,
+JVM backends. **None is research-open** — every one decomposes into named,
 textbook techniques with abundant precedent. The difficulty concentrates in one
 place: no mainstream dynamic-language backend lowers from a clox-style *fused*
 stack bytecode (they all keep locals and temporaries distinct in their own IR),
@@ -180,7 +161,7 @@ which is exactly why **P1/P3/P4 are `SOLVED-WITH-ADAPTATION`** while
 - **Calling convention / switches:** Appel Ch. 6 (activation records); JVMS §3.10
   (switches), §6.5 (`invoke*`, `dup` family, `tableswitch`); JLS §14.14.2 (for-each
   desugaring).
-- **Precedents (dynamic language → JVM/CLR):** Jython, Rhino/Nashorn, JRuby,
+- **Precedents (dynamic language → JVM/.NET):** Jython, Rhino/Nashorn, JRuby,
   Clojure, Groovy, Kotlin, Scala; IronPython/IronRuby (DLR); GraalVM/Truffle.
 
 > Verdicts are a literature-mapping pass over P1–P8; the full problem statements,

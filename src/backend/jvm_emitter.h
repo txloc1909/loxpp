@@ -15,7 +15,7 @@
 // earlier per-opcode-shape enumerations of "which consumers need this fixed
 // up" kept being disproved by a three-line program, because nothing forced
 // such a list to cover every opcode. `native_pops.h`'s `nativePops`,
-// target-independent and shared with the CLR backend, is an exhaustive table
+// target-independent and shared with the QBE backend, is an exhaustive table
 // over `Op`, no `default` (clang's `-Wswitch` warns on a missing
 // enumerator; this project builds with neither `-Werror` nor `-Wall`, so a
 // missing row still compiles and throws only at run time) stating how many

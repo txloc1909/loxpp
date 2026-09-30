@@ -6,10 +6,6 @@
 // StackOverflowError unwinds; that ArityError, not a StackOverflowError,
 // is what the first `try` actually catches. The guard must still clear, so
 // the second, unrelated overflow later in the program is caught too.
-//
-// Lives in jvm-only/ for the same reason catch_overflow.lox does: the CLR
-// backend does not yet deliver this fault with the correct catchability
-// (issue #238).
 fun one(a) { return a; }
 fun boom() { one(); }
 fun f(n) { defer boom(); f(n + 1); }

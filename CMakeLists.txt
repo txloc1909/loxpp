@@ -94,8 +94,8 @@ include_directories(${PROJECT_SOURCE_DIR}/src)
 
 # The interpreter front-end and runtime, shared by the loxpp executable, the
 # loxpp-lsp binary, and the src/tooling analysers. main.cpp is the only
-# source that stays on the executable. jvm_emitter.cpp / clr_emitter.cpp are
-# added below, gated on their options.
+# source that stays on the executable. jvm_emitter.cpp is added below, gated
+# on its option.
 set(LOXPP_CORE_SOURCES
     src/chunk.cpp
     src/debug.cpp
@@ -156,19 +156,6 @@ if(LOXPP_JVM_BACKEND)
     # the LOXPP_TARGET_USAGE_LIST message.
     list(APPEND LOXPP_CORE_PUBLIC_DEFINITIONS LOXPP_JVM_BACKEND)
     list(APPEND LOXPP_CORE_SOURCES src/backend/jvm_emitter.cpp)
-endif()
-
-# The CLR code generator. Default ON so CI builds and checks it; OFF drops
-# --target clr from the CLI for a build that wants the native VM (and,
-# independently, the JVM backend) only.
-option(LOXPP_CLR_BACKEND
-    "Build the CLR backend code generator (--target clr)" ON)
-if(LOXPP_CLR_BACKEND)
-    target_sources(loxpp_core PRIVATE src/backend/clr_emitter.cpp)
-    # PUBLIC: main.cpp reads LOXPP_CLR_BACKEND for the --target dispatch and
-    # the LOXPP_TARGET_USAGE_LIST message.
-    list(APPEND LOXPP_CORE_PUBLIC_DEFINITIONS LOXPP_CLR_BACKEND)
-    list(APPEND LOXPP_CORE_SOURCES src/backend/clr_emitter.cpp)
 endif()
 
 # Debug output flags: default ON for Debug builds, OFF otherwise.
@@ -310,8 +297,8 @@ endif()
 # C interface (src/backend/rt_capi.cpp) compiled code calls through the C
 # ABI. Bundling loxpp_core's objects wholesale — rather than a trimmed
 # source list — keeps this one static library in sync with loxpp_core by
-# construction; it costs a few unused object files (e.g. vm.cpp, the JVM/CLR
-# emitters), which a release build is free to strip.
+# construction; it costs a few unused object files (e.g. vm.cpp, the JVM
+# emitter), which a release build is free to strip.
 add_library(loxrt STATIC
     src/backend/rt_capi.cpp
     $<TARGET_OBJECTS:loxpp_core>

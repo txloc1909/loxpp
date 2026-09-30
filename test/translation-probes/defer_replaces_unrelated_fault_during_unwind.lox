@@ -10,10 +10,6 @@
 // matching native, which distinguishes "replaces the fault I am unwinding"
 // from "replaces some other fault entirely" by tracking the exact fault
 // object, not merely whether some unwind happens to be in progress.
-//
-// Lives in jvm-only/ for the same reason catch_overflow.lox does: the CLR
-// backend does not yet deliver this fault with the correct catchability
-// (issue #238).
 class W {}
 class Y {}
 fun ty() { throw Y(); }

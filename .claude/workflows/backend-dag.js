@@ -8,16 +8,16 @@ export const meta = {
     // ids/titles so the progress-tree preview is accurate. A phase() call
     // for an id missing here still works; it just gets its own unlabeled
     // progress group instead of a named preview.
-    { title: 'C-RT', detail: 'C# runtime library, its tests, and the CLR link smoke test' },
-    { title: 'C-N4', detail: 'straight-line CIL emit, --target clr, and the run harness' },
-    { title: 'C-N5', detail: 'control flow, labels, and IL legality' },
-    { title: 'C-N6', detail: 'functions and calls' },
-    { title: 'C-N7', detail: 'closures and upvalues [BUG GATE]' },
-    { title: 'C-N8', detail: 'classes, methods, super, and the shared depth-0 authority' },
-    { title: 'C-N9', detail: 'aggregates, slices, membership, and iterators' },
-    { title: 'C-N10', detail: 'match and enum dispatch' },
-    { title: 'C-N11', detail: 'differential corpus gate, native vs JVM vs CLR' },
-    { title: 'C-N12', detail: 'self-hosted interpreter gate [MISSION GATE]' },
+    { title: 'N01', detail: 'runtime library, its tests, and the link smoke test' },
+    { title: 'N02', detail: 'straight-line emit and the run harness' },
+    { title: 'N03', detail: 'control flow and emit legality' },
+    { title: 'N04', detail: 'functions and calls' },
+    { title: 'N05', detail: 'closures and upvalues [BUG GATE]' },
+    { title: 'N06', detail: 'classes, methods, super, and the shared depth-0 authority' },
+    { title: 'N07', detail: 'aggregates, slices, membership, and iterators' },
+    { title: 'N08', detail: 'match and enum dispatch' },
+    { title: 'N09', detail: 'differential corpus gate' },
+    { title: 'N10', detail: 'self-hosted interpreter gate [MISSION GATE]' },
   ],
 }
 
@@ -55,7 +55,7 @@ const REPO = cfg.repo || '/var/home/loctran/personal/loxpp'
 const GH = cfg.githubRepo || 'txloc1909/loxpp'
 const NODES = cfg.nodes
 // Human-readable label for what makes an analysis node's knowledge "foreign"
-// — e.g. 'JVM', 'CLR' — used only in the reviewer's checklist wording.
+// — e.g. 'JVM', 'QBE' — used only in the reviewer's checklist wording.
 const TARGET_LABEL = cfg.targetLabel || 'target-specific'
 const DAG_DOC = cfg.dagDoc || (REPO + '/notes/backend-implementation-dag.md')
 const OPCODE_DOC = cfg.opcodeDoc || (REPO + '/notes/bytecode-translation-problems.md')

@@ -105,11 +105,9 @@ RUN git clone --branch master https://github.com/nvim-treesitter/nvim-treesitter
     && rm -rf /opt/nvim-plugins/*/.git
 
 # --- dev-managed ------------------------------------------------------------
-# Adds the JVM and CLR toolchains needed by the --target jvm / --target clr
-# backends. Kept out of `dev` so the C++-only jobs (lint, build matrix,
-# clang-tidy) don't pay to load ~1 GB of managed runtimes they never use.
-# The CLR half sits below the JVM half, so bumping .NET or ilasm leaves the JVM
-# layers cached. Layers invalidate downward, so the reverse does not hold.
+# Adds the JVM toolchain needed by the --target jvm backend. Kept out of `dev`
+# so the C++-only jobs (lint, build matrix, clang-tidy) don't pay to load a
+# managed runtime they never use.
 FROM dev AS dev-managed
 
 # OpenJDK 21 (LTS). Only the major version is pinned; patch releases track the
@@ -134,25 +132,6 @@ RUN curl -fsSL "https://downloads.sourceforge.net/project/jasmin/jasmin/jasmin-2
     && chmod +x /usr/local/bin/jasmin \
     && rm -rf /tmp/jasmin.zip /tmp/jasmin
 
-# Ubuntu 24.04 carries the .NET SDK in its own archive, so no Microsoft feed and
-# no third-party apt key to maintain.
-RUN apt-get update && apt-get install -y \
-    dotnet-sdk-8.0 \
-    && rm -rf /var/lib/apt/lists/*
-
-# ilasm assembles the .il text CIL the CLR backend emits. It is not part of the
-# .NET SDK on Linux — Microsoft ships it only inside a runtime-specific NuGet
-# package — so unpack the binary out of that. nuget.org will not let a published
-# version be replaced, but verify the digest anyway to match the jasmin fetch.
-RUN curl -fsSL "https://api.nuget.org/v3-flatcontainer/runtime.linux-x64.microsoft.netcore.ilasm/8.0.0/runtime.linux-x64.microsoft.netcore.ilasm.8.0.0.nupkg" \
-        -o /tmp/ilasm.nupkg \
-    && echo "e7c3c4a9a082a11c7e91ce74ba5dad83a8877f4ed85d5f8e1f2c9ea6c2cadee7  /tmp/ilasm.nupkg" \
-        | sha256sum -c - \
-    && unzip -q /tmp/ilasm.nupkg -d /tmp/ilasm \
-    && install -Dm755 /tmp/ilasm/runtimes/linux-x64/native/ilasm \
-        /usr/local/bin/ilasm \
-    && rm -rf /tmp/ilasm.nupkg /tmp/ilasm
-
 # --- dev-qbe -----------------------------------------------------------------
 # Adds the QBE compiler backend needed by the (future) --target qbe backend.
 # Kept out of `dev` so the C++-only jobs don't pay to build a second compiler
@@ -160,11 +139,11 @@ RUN curl -fsSL "https://api.nuget.org/v3-flatcontainer/runtime.linux-x64.microso
 FROM dev AS dev-qbe
 
 # QBE ships no binary releases; build from the pinned source tarball. Verify
-# the digest, matching the pattern the dev-managed stage uses for Jasmin and
-# ilasm. Record the pinned git commit in /opt/qbe/VERSION: `qbe` itself has
-# no `-v` flag, so this is the only place check_qbe_toolchain.sh can read the
-# exact version it is checking, the same record-the-baseline reason
-# check_managed_toolchains.sh prints javac/dotnet versions.
+# the digest, matching the pattern the dev-managed stage uses for Jasmin.
+# Record the pinned git commit in /opt/qbe/VERSION: `qbe` itself has no `-v`
+# flag, so this is the only place check_qbe_toolchain.sh can read the exact
+# version it is checking, the same record-the-baseline reason
+# check_managed_toolchains.sh prints the javac version.
 RUN curl -fsSL "https://c9x.me/compile/release/qbe-1.3.tar.xz" \
         -o /tmp/qbe.tar.xz \
     && echo "d587905d620dc5e1d2bfa7c2cc642b9b837aa89a3188c6e37b53d756cf66e320  /tmp/qbe.tar.xz" \

@@ -1,15 +1,14 @@
 # Lox++ backend benchmarks
 
-A self-timing benchmark suite that runs the **same `.lox` source** on all three
+A self-timing benchmark suite that runs the **same `.lox` source** on both
 Lox++ backends and reports the difference:
 
 | backend | path | how a program runs |
 |---|---|---|
 | `native` | `build/loxpp` | bytecode compiled in-process, run by the C++ `VM` |
 | `jvm`    | `tools/loxpp_jvm.sh` | `--target jvm` → Jasmin `.j` → `.class` → HotSpot |
-| `clr`    | `tools/loxpp_clr.sh` | `--target clr` → `ilasm` → `.dll` → .NET 8 (RyuJIT) |
 
-All three consume one source file, so any speed difference is the backend, not
+Both consume one source file, so any speed difference is the backend, not
 the program.
 
 ## Layout
@@ -39,10 +38,10 @@ _batch(b, reps)   calls b.benchmark() `reps` times, returns the last checksum
 
 `reps` is tuned per program (see `CONFIG` in `generate.py`) so one batch is
 80–200 ms on the native backend — long enough to time, short enough that CPU
-frequency drift over the run stays small. `warm` batches let the JVM and CLR
-JITs reach steady state before the first measured batch.
+frequency drift over the run stays small. `warm` batches let the JVM
+JIT reach steady state before the first measured batch.
 
-`clock()` is **process CPU time** on the native and CLR backends and
+`clock()` is **process CPU time** on the native backend and
 **wall-clock** on the JVM backend (`System.nanoTime`, see
 `runtime/jvm/src/lox/LoxRuntime.java`). For a single-threaded steady-state loop
 on an unloaded machine the two agree closely; `run.py` also records external
@@ -52,8 +51,8 @@ JIT threads only affect the warm-up batches, not the measured ones.
 ## Running
 
 ```bash
-# inside the dev-managed container, with build/, build-profile/,
-# runtime/jvm/lox-rt.jar and runtime/clr/LoxRuntime.dll all built:
+# inside the dev-managed container, with build/, build-profile/, and
+# runtime/jvm/lox-rt.jar all built:
 python3 benchmarks/generate.py
 python3 benchmarks/run.py --procs 5 --json benchmarks/results/run.json
 python3 benchmarks/profile.py --json benchmarks/results/profile.json
@@ -69,10 +68,9 @@ and reports the median of its measured batches plus a spread figure
 ```bash
 cmake --preset release && cmake --build build --target loxpp
 cmake -S . -B build-profile -DCMAKE_BUILD_TYPE=Release -DLOXPP_PROFILE=ON \
-      -DLOXPP_JVM_BACKEND=OFF -DLOXPP_CLR_BACKEND=OFF
+      -DLOXPP_JVM_BACKEND=OFF
 cmake --build build-profile --target loxpp
 tools/build_lox_rt.sh
-tools/build_lox_rt_clr.sh
 ```
 
 ## Excluded from `core/`

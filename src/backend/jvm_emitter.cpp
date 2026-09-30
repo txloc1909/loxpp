@@ -638,8 +638,7 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
 // target-independent: any backend that lowers this opcode family once CFG
 // merges exist shares this one authority instead of re-deriving its own.
 // What differs per backend is only the load this function performs once
-// the slot is known — `aload`/captured-cell test here, the CLR backend's
-// own load elsewhere.
+// the slot is known — `aload`/captured-cell test for the JVM.
 //
 // The captured-slot check applies to either estimate:
 // `capturedSlots` holds slot INDEXES, not live ranges (isCaptured's own
@@ -2150,9 +2149,8 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
 }
 
 // `nativePops` (native_pops.h) states how many operand-stack cells
-// `src/vm.cpp` pops for one instruction, target-independent — the CLR
-// backend reads the same table for its own fold repair (clr_emitter.cpp's
-// own `normalizeFoldedOperands`), so the fact lives there once rather than
+// `src/vm.cpp` pops for one instruction, target-independent — the QBE
+// emitter reads the same table, so the fact lives there once rather than
 // once per backend.
 
 // The one place every `nativePops`-covered consumer gets its folded bottom
@@ -2195,8 +2193,7 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
 // shape correctly; this function still throws rather than repairing it,
 // because that reservation was not carried into a second, matching load
 // here. `notes/bytecode-translation-problems.md`'s own GAP entry records
-// the measurement; the CLR backend's own fold repair (clr_emitter.cpp) does
-// not carry this ceiling.
+// the measurement.
 void normalizeFoldedOperands(Emitter& e, std::size_t i,
                              const DecodedInstruction& in) {
     std::optional<int> pops = nativePops(in.op, in);

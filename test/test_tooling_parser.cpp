@@ -535,17 +535,16 @@ std::size_t measureProgramDepth(const Program& prog) {
 TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     const std::vector<fs::path> files = corpusFiles();
     // examples/*.lox (116 - issue #328 adds no_trailing_newline.lox) +
-    // bootstrap/*.lox (2) + translation-probes/*.lox (59 - issue #268
-    // raised this by two, not one: 31_deep_recursion.lox moved out of
-    // clr-only/ into this directory, entering this non-recursive scan for
-    // the first time, and 53_deep_recursion_boundary.lox is new here too.
-    // 52 + 2 = 54. Issue #362 adds 55_for_in_map_net_zero.lox, raising this
-    // to 55. Issue #378 adds 56_file_read.lox, raising this to 56. Issue
-    // #329 adds 56_math_constants.lox, raising this to 57. Issue #401 adds
+    // bootstrap/*.lox (2) + translation-probes/*.lox (60 - issue #268
+    // raised this by two, not one: 31_deep_recursion.lox moved into this
+    // directory, entering this non-recursive scan for the first time, and
+    // 53_deep_recursion_boundary.lox is new here too. 52 + 2 = 54. Issue
+    // #362 adds 55_for_in_map_net_zero.lox, raising this to 55. Issue #378
+    // adds 56_file_read.lox, raising this to 56. Issue #329 adds
+    // 56_math_constants.lox, raising this to 57. Issue #401 adds
     // 56_file_nul.lox, raising this to 58. Issue #311 adds
-    // examples/defer_return_value.lox, raising this to 59. The issue #386
-    // probe lives in clr-only/, so it stays uncounted here. jvm-only/ and
-    // clr-only/ probes stay uncounted, since this scan is non-recursive.
+    // examples/defer_return_value.lox, raising this to 59. jvm-only/ probes
+    // stay uncounted, since this scan is non-recursive.
     // 116 + 2 + 59 = 177. Issue #319 adds examples/defer_uncatchable_fault.lox,
     // raising the total to 178, then
     // test/translation-probes/57_defer_arity_fatal_fast_path.lox and
@@ -559,24 +558,24 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // finding), raising this to 184. Issue #421 adds
     // examples/defer_sibling_runs_after_throw.lox, raising this to 185.
     // Issue #322 promotes 57_stack_overflow_catchable.lox and
-    // 58_stack_overflow_reentrant_fatal.lox from clr-only/ into this
-    // non-recursive scan, and adds four jvm-only defer/overflow-unwind
-    // regression probes at this directory's top level too, raising this
-    // to 191. Issue #320 adds
+    // 58_stack_overflow_reentrant_fatal.lox into this non-recursive scan,
+    // and adds four jvm-only defer/overflow-unwind regression probes at this
+    // directory's top level too, raising this to 191. Issue #320 adds
     // examples/try_catch_closure_declared_in_catch_body.lox, raising this
     // to 192. Issues #350/#388 add seven examples/try_catch_*.lox
     // regressions (see tools/check_jvm_probes.sh's matching entries),
     // raising this to 199, then
-    // test/translation-probes/60_throw_ends_try_binding.lox moves out of
-    // clr-only/ (uncounted there) into this directory (issue #388's own
-    // fix lets it verify and run on JVM too), raising this to 200. Issue
-    // #445 promotes catch_overflow.lox out of jvm-only/ (uncounted there)
-    // once a live CLR run confirmed it matches native, raising this to 201.
-    // PR #486 adds defer_runs_on_normal_return.lox and
+    // test/translation-probes/60_throw_ends_try_binding.lox moves into this
+    // directory (issue #388's own fix lets it verify and run on JVM too),
+    // raising this to 200. Issue #445 promotes catch_overflow.lox out of
+    // jvm-only/ (uncounted there), raising this to 201. PR #486 adds
+    // defer_runs_on_normal_return.lox and
     // defer_runs_before_caught_throw_propagates.lox (check_qbe_s6_errors.sh
     // probes proving a deferred call's side effect is actually observable
     // on an ordinary return and on a caught throw), raising this to 203.
-    ASSERT_EQ(files.size(), 203U);
+    // Issue #489 moves 37_invoke_field_bound_native_method.lox into this
+    // non-recursive scan, raising this to 204.
+    ASSERT_EQ(files.size(), 204U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {

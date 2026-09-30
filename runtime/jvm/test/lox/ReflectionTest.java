@@ -182,7 +182,7 @@ public final class ReflectionTest {
                 "callMethod() on a different bound map native queries ITS OWN map, not the other one");
 
         // A method resolved from the class (not a field) is closure-backed:
-        // v1 restriction, matches native and CLR.
+        // v1 restriction, matches native.
         checkThrows(() -> call(globals, "callMethod", instance, "greet"), LoxError.class,
                 "callMethod() rejects a resolved user-defined method");
 

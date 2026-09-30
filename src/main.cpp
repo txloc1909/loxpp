@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-#if defined(LOXPP_JVM_BACKEND) || defined(LOXPP_CLR_BACKEND)
+#ifdef LOXPP_JVM_BACKEND
 #include "backend/abstract_stack.h"
 #include "backend/chunk_decoder.h"
 #include "compiler.h"
@@ -29,10 +29,6 @@
 
 #ifdef LOXPP_JVM_BACKEND
 #include "backend/jvm_emitter.h"
-#endif
-
-#ifdef LOXPP_CLR_BACKEND
-#include "backend/clr_emitter.h"
 #endif
 
 #include <isocline.h>
@@ -241,72 +237,11 @@ static int runJvmTarget(const std::string& outDir, const std::string& path) {
 }
 #endif
 
-#ifdef LOXPP_CLR_BACKEND
-// Compiles `path` and writes <outDir>/LoxMain.il — the top-level script,
-// the whole reachable program (clr_emitter.h): the script's own class plus
-// one generated class per function or method. Does not assemble or run
-// anything — tools/loxpp_clr.sh chains ilasm and dotnet on top. Exit codes
-// mirror runJvmTarget's: 65 for a compile error, 70 for an opcode or
-// CLOSURE shape the emitter does not lower (see clr_emitter.h), 74 for a
-// file-system failure.
-static int runClrTarget(const std::string& outDir, const std::string& path) {
-    std::string source = readFile(path);
-
-    MemoryManager mm;
-    ObjFunction* script = compile(source, &mm);
-    if (script == nullptr) {
-        return 65;
-    }
-
-    std::string ilSource;
-    try {
-        DecodedFunction tree = decodeFunctionTree(script);
-        StackAnalysisTree analysis = analyzeStackTree(tree);
-        ilSource = clr::emitProgram(tree, analysis, "LoxMain");
-    } catch (const std::exception& e) {
-        std::fprintf(stderr, "loxpp --target clr: %s\n", e.what());
-        return 70;
-    }
-
-    std::error_code ec;
-    std::filesystem::create_directories(outDir, ec);
-    if (ec) {
-        std::fprintf(stderr,
-                     "loxpp --target clr: cannot create directory %s: %s\n",
-                     outDir.c_str(), ec.message().c_str());
-        return 74;
-    }
-
-    // Remove every stale *.il file first, same reason runJvmTarget clears
-    // *.j: tools/clr_run.sh assembles every *.il file it finds in outDir.
-    for (const std::filesystem::directory_entry& entry :
-         std::filesystem::directory_iterator(outDir, ec)) {
-        if (entry.path().extension() == ".il") {
-            std::filesystem::remove(entry.path(), ec);
-        }
-    }
-
-    std::string outPath = outDir + "/LoxMain.il";
-    std::ofstream out(outPath, std::ios::binary);
-    if (!out) {
-        std::fprintf(stderr, "loxpp --target clr: cannot write %s\n",
-                     outPath.c_str());
-        return 74;
-    }
-    out << ilSource;
-    return 0;
-}
-#endif
-
 // The set of `--target` values this build recognizes, in usage-message form.
 // Must list only backends this translation unit actually compiled in, so the
-// message never offers a target the two #ifdef dispatch arms below refuse.
-#if defined(LOXPP_JVM_BACKEND) && defined(LOXPP_CLR_BACKEND)
-#define LOXPP_TARGET_USAGE_LIST "{jvm,clr}"
-#elif defined(LOXPP_JVM_BACKEND)
+// message never offers a target the #ifdef dispatch arm below refuses.
+#ifdef LOXPP_JVM_BACKEND
 #define LOXPP_TARGET_USAGE_LIST "{jvm}"
-#elif defined(LOXPP_CLR_BACKEND)
-#define LOXPP_TARGET_USAGE_LIST "{clr}"
 #endif
 
 // --- loxpp upgrade -------------------------------------------------------
@@ -704,7 +639,7 @@ static std::optional<int> dispatchEarlyFlags(int argc, const char* argv[]) {
         return runUpgrade(argc, argv);
     }
 
-#if defined(LOXPP_JVM_BACKEND) || defined(LOXPP_CLR_BACKEND)
+#ifdef LOXPP_JVM_BACKEND
     if (flag == "--target") {
         std::string target;
         std::string outDir;
@@ -725,16 +660,9 @@ static std::optional<int> dispatchEarlyFlags(int argc, const char* argv[]) {
                          " --out-dir <dir> program.lox\n");
             return 64;
         }
-#ifdef LOXPP_JVM_BACKEND
         if (target == "jvm") {
             return runJvmTarget(outDir, scriptPath);
         }
-#endif
-#ifdef LOXPP_CLR_BACKEND
-        if (target == "clr") {
-            return runClrTarget(outDir, scriptPath);
-        }
-#endif
         std::fprintf(stderr, "Usage: loxpp --target " LOXPP_TARGET_USAGE_LIST
                              " --out-dir <dir> program.lox\n");
         return 64;

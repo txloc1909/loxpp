@@ -2032,8 +2032,8 @@ void Compiler::returnStatement() {
         // call exits", after the function has its result). Only then run
         // deferred calls, gated on m_hasDefer (set by parseFunction()'s
         // look-ahead: a defer-free function's chunk must carry no
-        // RUN_DEFERS at all, since neither the JVM nor the CLR emitter
-        // translates it yet).
+        // RUN_DEFERS at all, since the JVM emitter does not translate it
+        // yet).
         expression();
         m_parser->consume(TokenType::SEMICOLON,
                           "Expect ';' after return value.");
@@ -2203,8 +2203,8 @@ namespace {
 // This does not try to exclude a nested function's own `defer`: an
 // enclosing function emitting one harmless extra RUN_DEFERS changes nothing
 // once the nested function's own (real) RUN_DEFERS already makes the whole
-// program un-translatable to JVM/CLR — that limitation is shared, not
-// specific to whichever function's chunk RUN_DEFERS appears in.
+// program un-translatable to the JVM backend — that limitation is shared,
+// not specific to whichever function's chunk RUN_DEFERS appears in.
 bool bodyHasDefer(const char* bodyStart) {
     Scanner lookahead(bodyStart);
     int depth = 1;
