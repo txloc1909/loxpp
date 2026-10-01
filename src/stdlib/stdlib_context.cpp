@@ -5,6 +5,7 @@ static thread_local StdlibContext* t_activeCtx = nullptr;
 
 void setActiveContext(StdlibContext* ctx) { t_activeCtx = ctx; }
 MemoryManager* getActiveMM() { return t_activeCtx ? t_activeCtx->mm : nullptr; }
+Runtime* getActiveRuntime() { return t_activeCtx ? t_activeCtx->rt : nullptr; }
 
 const std::vector<std::string>& getActiveArgs() {
     static const std::vector<std::string> empty;
