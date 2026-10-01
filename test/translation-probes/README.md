@@ -90,6 +90,7 @@ each has an off-the-shelf solution.
 | `48_file_visible_after_close` | a File's write-close-reopen cycle: once `close()` returns, a fresh `open()` on the same path sees everything the closed handle wrote (`spec/05-stdlib.md`, File section) — pins the after-close half of the visibility guarantee, not the buffered-before-close half, which is implementation-defined and allowed to differ | none (parity gate) |
 | `55_for_in_map_net_zero` | an erase plus an insert in one `for`-in body restores the net size, so a size check misses it — the structural version check must still fail on every backend, with empty stdout (issue #362) — an `error_probes` entry | none (error-parity gate) |
 | `jvm-only/61_operator_overload` | operator overloading (issue #472): every T1 dunder method (`__add__ __sub__ __mul__ __div__ __mod__ __neg__ __lt__ __gt__ __eq__ __contains__ __call__`), the Wave-2 methods (`__index_get__ __index_set__ __len__ __iter__`), and the deferred `__slice__` dispatch on an Instance; `!=`/`<=`/`>=` derive from `__eq__`/`__gt__`/`__lt__`, and the built-in List/String/Map/Number paths stay unchanged — named directly by both check scripts, see the note below the table | P6 |
+| `jvm-only/known-divergence/52_fat_frame_stack_divergence` | native's value-stack ceiling only: a frame with 20 locals, recursed 900 deep, overflows `src/vm.h` `STACK_MAX` (16384 slots) while the call chain stays under `FRAMES_MAX` (1024); native fails, but the JVM backend mirrors only `FRAMES_MAX` (`runtime/jvm/src/lox/LoxClosure.java`) and runs it to completion — a known divergence, named directly by `tools/check_jvm_probes.sh` (issue #492), see the note below the table | P5, P6 |
 | `V1_fresh_cell` | body-local captured in a loop → **fresh cell/iter** → prints `0 1 2` | P4 |
 | `V2_shared` | mutable shared upvalue → prints `2` | P4 |
 | `V3_loopvar` | loop var captured directly → **one shared cell** → prints `3 3 3` | P4 |
@@ -103,6 +104,13 @@ level down because this directory's own files are walked non-recursively by
 operator-overloading probe is named directly by `tools/check_jvm_probes.sh`
 and `tools/check_qbe_probes.sh`; `defer_replaces_overflow` is named by
 `tools/check_jvm_probes.sh` for the JVM checkpoint.
+
+`jvm-only/known-divergence/52_fat_frame_stack_divergence` sits a second level
+down for the opposite reason: it records a divergence on purpose (native must
+fail, the JVM backend must succeed), so it must stay off every generic
+byte-for-byte walk. `tools/diff_runtimes.py` walks a directory non-recursively,
+so the CI step over `test/translation-probes/jvm-only/` never reaches it;
+`tools/check_jvm_probes.sh` names it directly instead.
 
 `53_stack_overflow_catchable` and `54_stack_overflow_reentrant_fatal` have
 been promoted into this directory as `57_stack_overflow_catchable` and

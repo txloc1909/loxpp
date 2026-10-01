@@ -8,6 +8,12 @@
 # stdout. They check that an error stays an error on the JVM backend too,
 # not only that a success stays a success.
 #
+# known_divergence_probes hold a third shape, on purpose: native must FAIL
+# and the JVM run must SUCCEED with the exact stdout recorded beside the
+# probe. They record a gap that is not yet closed (native's value-stack
+# ceiling, src/vm.h STACK_MAX, which the JVM backend does not mirror), so a
+# change in either direction is reported, not silently accepted.
+#
 # Every probe runs even after an earlier one fails: a failing JVM run (a
 # verifier rejection, say) is caught and recorded as this probe's own
 # failure, not left to `set -e` at top level, which would otherwise stop the
@@ -307,6 +313,19 @@ error_probes=(
     "test/translation-probes/59_return_out_of_try_leak.lox"
 )
 
+# Probes that stay wrong on purpose. Native has two separate ceilings:
+# src/vm.h STACK_MAX (16384 value-stack slots) and FRAMES_MAX (1024 calls).
+# The JVM backend mirrors only FRAMES_MAX (runtime/jvm/src/lox/LoxClosure.java),
+# so a frame heavy enough in locals overflows native's value stack well
+# before the call chain is near FRAMES_MAX, and the JVM backend has nothing
+# to reject it with. Each entry is "path:expected_stdout": native must FAIL
+# with the STACK_MAX report and the JVM run must SUCCEED with exactly that
+# stdout. This group notices the moment either side changes; it does not
+# make the two sides agree. See issue #492.
+known_divergence_probes=(
+    "test/translation-probes/jvm-only/known-divergence/52_fat_frame_stack_divergence.lox:210"
+)
+
 if [ ! -x "$native_bin" ]; then
     echo "check_jvm_probes.sh: no loxpp binary at $native_bin" >&2
     exit 1
@@ -394,6 +413,68 @@ for probe in "${error_probes[@]}"; do
     fi
 done
 
+# src/vm.h's FRAMES_MAX aliases loxpp::kFramesMax (src/vm_limits.h), so the
+# frame-count guard's own threshold is read from there. Used below to prove
+# a known_divergence_probes failure came from STACK_MAX, not FRAMES_MAX.
+frames_max="$(grep -oE 'FRAMES_MAX = [0-9]+' "$root/src/vm.h" | grep -oE '[0-9]+')"
+if [ -z "$frames_max" ]; then
+    frames_max="$(grep -oE 'kFramesMax = [0-9]+' "$root/src/vm_limits.h" | grep -oE '[0-9]+')"
+fi
+
+for entry in "${known_divergence_probes[@]}"; do
+    probe="${entry%%:*}"
+    expected_jvm_out="${entry#*:}"
+    "$native_bin" "$root/$probe" >"$native_out" 2>"$native_err"
+    native_status=$?
+    if [ "$native_status" -eq 0 ]; then
+        echo "check_jvm_probes.sh: FAIL $probe (native run succeeded -- the divergence this probe records may have closed on the native side; re-check and update this script and the probe header)" >&2
+        failed_probes+=("$probe")
+        continue
+    fi
+    # A non-zero exit alone does not say native failed the way this probe
+    # claims. Only its own "Stack overflow." report proves a controlled
+    # guard fired at all -- a crash (segfault, std::out_of_range, ...) also
+    # exits non-zero and prints no such line.
+    if ! grep -q "Stack overflow\." "$native_err"; then
+        echo "check_jvm_probes.sh: FAIL $probe (native run failed, but not with the expected Stack overflow. report -- the divergence this probe records may have changed shape)" >&2
+        cat "$native_err" >&2
+        failed_probes+=("$probe")
+        continue
+    fi
+    # src/vm.h's two guards print the identical "Stack overflow." line, so
+    # that check alone cannot tell which one fired. This probe exists only
+    # to record the STACK_MAX guard specifically (FRAMES_MAX's own overflow
+    # already has its own coverage in error_probes above), so also check the
+    # frame-trace depth: the value-stack guard must fire well short of
+    # FRAMES_MAX, or the frame-count guard fired instead and this probe no
+    # longer isolates the guard it claims to.
+    if [ -z "$frames_max" ]; then
+        echo "check_jvm_probes.sh: FAIL $probe (could not read FRAMES_MAX from src/vm.h or src/vm_limits.h)" >&2
+        failed_probes+=("$probe")
+        continue
+    fi
+    frame_lines="$(grep -c '^\[line ' "$native_err")"
+    if [ "$frame_lines" -ge $((frames_max * 9 / 10)) ]; then
+        echo "check_jvm_probes.sh: FAIL $probe (native failed at $frame_lines frames, within 10% of FRAMES_MAX=$frames_max -- looks like the frame-count guard fired, not STACK_MAX)" >&2
+        cat "$native_err" >&2
+        failed_probes+=("$probe")
+        continue
+    fi
+    if ! "$root/tools/loxpp_jvm.sh" "$root/$probe" >"$jvm_out" 2>"$jvm_err"; then
+        echo "check_jvm_probes.sh: FAIL $probe (JVM run failed -- the divergence this probe records may have closed on the JVM side; if so, move this probe to error_probes instead)" >&2
+        cat "$jvm_err" >&2
+        failed_probes+=("$probe")
+        continue
+    fi
+    actual_jvm_out="$(cat "$jvm_out")"
+    if [ "$actual_jvm_out" != "$expected_jvm_out" ]; then
+        echo "check_jvm_probes.sh: FAIL $probe (JVM stdout changed: expected '$expected_jvm_out', got '$actual_jvm_out')" >&2
+        failed_probes+=("$probe")
+        continue
+    fi
+    echo "check_jvm_probes.sh: OK $probe (known divergence unchanged: native fails via STACK_MAX, JVM prints $expected_jvm_out)"
+done
+
 # --- JVM exclusion guard ---------------------------------------------------
 # Re-proves, on every run, that each tools/jvm_excluded_examples.txt entry's
 # JVM stdout is still a permutation of native stdout, not a stale byte-match
@@ -418,4 +499,4 @@ if [ "${#failed_probes[@]}" -ne 0 ]; then
     exit 1
 fi
 
-echo "check_jvm_probes.sh: all $((${#probes[@]} + ${#error_probes[@]})) probes OK"
+echo "check_jvm_probes.sh: all $((${#probes[@]} + ${#error_probes[@]} + ${#known_divergence_probes[@]})) probes OK"
