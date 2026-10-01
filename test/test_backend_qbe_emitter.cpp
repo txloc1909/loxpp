@@ -471,10 +471,15 @@ TEST(QbeEmitter, CapturedParamIsNotPromoted) {
 TEST(QbeEmitter, PromotedLocalIsSpilledBeforeACall) {
     // Q1: an allocating call is a safe point. A promoted local live across
     // it must be written back to its stack slot first, or the GC could miss
-    // it. `f` calls `g` while its own promoted local `x` is live.
+    // it. `f` calls `g` while its own promoted local `x` is live, so a
+    // `storel %q` (the spill) must come BEFORE the call — a plain GET_LOCAL
+    // of `x` at the return would also store `%q`, but after it.
     std::string ssa = emitNestedFrom(
         "fun g() { return 1; } fun f() { var x = 1; g(); return x; }", {1});
-    EXPECT_NE(ssa.find("storel %q"), std::string::npos)
-        << "the promoted local must be spilled before the call";
-    EXPECT_NE(ssa.find("call $rt_call"), std::string::npos);
+    std::size_t spill = ssa.find("storel %q");
+    std::size_t call = ssa.find("call $rt_call");
+    ASSERT_NE(spill, std::string::npos) << "no promoted-local store at all";
+    ASSERT_NE(call, std::string::npos) << "no call to spill before";
+    EXPECT_LT(spill, call)
+        << "the promoted local must be spilled before the allocating call";
 }

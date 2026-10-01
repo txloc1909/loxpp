@@ -1,0 +1,21 @@
+// S8 (#461): a local a nested closure captures must stay in its stack slot
+// (the VM's captureUpvalue points into it), so it is never promoted. The
+// closure must still observe later writes, across a call that could run the
+// GC.
+fun alloc() {
+  return [1, 2, 3];
+}
+
+fun counter() {
+  var n = 0;
+  fun bump() {
+    n = n + 1;
+    return n;
+  }
+  bump();
+  alloc();
+  bump();
+  return bump();
+}
+
+print counter();
