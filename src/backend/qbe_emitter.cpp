@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -128,7 +129,7 @@ class Emitter {
     // the block being emitted. A slot absent from m_cur falls back to its
     // stack slot.
     std::optional<PromotionPlan> m_plan;
-    std::unordered_map<int, std::string> m_cur;
+    std::map<int, std::string> m_cur;
     std::unordered_map<int, std::pair<StackState, StackState>> m_stateAt;
     std::unordered_map<int, bool> m_reachedAt;
     // Offset -> index (into m_fn.instructions) of the innermost active
@@ -208,7 +209,9 @@ class Emitter {
     // register back to its stack cell before an allocating or unwinding
     // call. The GC scans stack..stackTop only, so a value held just in a QBE
     // SSA temp would otherwise be invisible at the safe point. m_cur holds
-    // only in-scope slots, so each store lands in that slot's own cell.
+    // only in-scope slots, so each store lands in that slot's own cell. It
+    // is ordered by slot so the emitted store order (and the .ssa) does not
+    // depend on a hash.
     void spillPromotedLocals() {
         for (const auto& [slot, value] : m_cur) {
             std::string a = addr(slot);
@@ -250,7 +253,9 @@ class Emitter {
             std::string a = addr(slot);
             loadlInto(name, a);
         }
-        m_cur = m_plan->entryValue[blockIndex];
+        for (const auto& [slot, name] : m_plan->entryValue[blockIndex]) {
+            m_cur[slot] = name;
+        }
     }
 
     // Applies the plan's own non-SET_LOCAL promotion events at `offset`: a
@@ -1149,7 +1154,8 @@ class Emitter {
         // (JUMP_TABLE is a terminator, so it is this block's last
         // instruction), fuse them: read the tag as a word directly instead
         // of materialising a boxed Number and converting it straight back.
-        bool fusedTag = block.instructions.size() >= 2 &&
+        bool fusedTag = m_options.fuseTagJumpTable &&
+                        block.instructions.size() >= 2 &&
                         block.instructions[block.instructions.size() - 2].op ==
                             Op::GET_TAG &&
                         block.instructions.back().op == Op::JUMP_TABLE;

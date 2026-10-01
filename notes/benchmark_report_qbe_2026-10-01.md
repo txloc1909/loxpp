@@ -40,11 +40,11 @@ native VM and the JVM backend. It is the S8 checkpoint.
   allocation). A register-pressure cap (promote only read-only slots above
   six candidates per function) removes that regression: capped 3.9 ms vs
   base 4.0 ms. The report keeps the cap.
-* **`GET_TAG;JUMP_TABLE` fusion is not measurable in time** on the
+* **`GET_TAG;JUMP_TABLE` fusion is a small but consistent win** on the
   5,000,000-iteration `examples/bench_jump_table.lox` microbenchmark (fused
-  1.562 s vs unfused 1.564 s, best of five). The instruction-count win is
-  real; it is simply too small for the surrounding call and arm body to
-  show here.
+  1.571 s vs unfused 1.578 s, best of five, every fused run below every
+  unfused run). The instruction-count win is real; it is small because the
+  surrounding call and arm body dominate.
 
 ---
 
@@ -130,16 +130,17 @@ With the cap, `mandelbrot` is 3.9 ms vs 4.0 ms and the corpus is as in
 `examples/bench_jump_table.lox` is 5,000,000 iterations of a dense 5-arm
 enum match. Best of five pinned runs, quiet host:
 
-| build | time |
-|---|--:|
-| fused (S8) | 1.562 s |
-| unfused (`QBE_NO_FUSE=1`) | 1.564 s |
+| build | best | all five runs |
+|---|--:|---|
+| fused (S8) | 1.571 s | 1.572, 1.573, 1.571, 1.576, 1.572 |
+| unfused (`QBE_NO_FUSE=1`) | 1.578 s | 1.578, 1.595, 1.585, 1.611, 1.616 |
 
-The fused `.ssa` replaces `rt_op_get_tag` (which stores a boxed Number at
-the tag cell) and the JUMP_TABLE's `loadl` / `d cast` / `dtosi` with one
-`rt_get_tag_word` call returning the tag as a word directly. That is four
-fewer instructions per dispatch, but 0.1% of a 5,000,000-iteration run:
-below the noise floor, and dominated by the surrounding call and arm body.
+Every fused run is below every unfused run, so the ~0.5% difference is
+consistent, not noise. The fused `.ssa` replaces `rt_op_get_tag` (which
+stores a boxed Number at the tag cell) and the JUMP_TABLE's `loadl` /
+`d cast` / `dtosi` with one `rt_get_tag_word` call returning the tag as a
+word directly: four fewer instructions per dispatch. The win is small
+because the arm body and the surrounding call dominate the loop.
 
 ---
 
@@ -169,8 +170,8 @@ function keeps the cheap part and drops the expensive part.
 
 ## 5. Conclusion
 
-* Ship the `GET_TAG;JUMP_TABLE` fusion: free, correctness-neutral, and the
-  right shape even if this microbenchmark cannot resolve it.
+* Ship the `GET_TAG;JUMP_TABLE` fusion: a small but consistent win on the
+  dispatch microbenchmark, and correctness-neutral.
 * Ship register promotion with the pressure cap. It is correctness-safe
   under `LOXPP_STRESS_GC=1` (the whole probe and example corpora pass), but
   on this corpus it is a **~2% net loss** and does not justify itself.

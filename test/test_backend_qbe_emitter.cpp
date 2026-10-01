@@ -117,30 +117,49 @@ TEST(QbeEmitter, ConstantEmbedsRawDoubleBitsAtItsOwnHeight) {
     EXPECT_NE(ssa.find("storel 4607182418800017408"), std::string::npos);
 }
 
-TEST(QbeEmitter, FunctionEndsInATerminator) {
+TEST(QbeEmitter, TerminatorBlocksEndInATerminator) {
     // QBE allows a block to fall through to the next one (it inserts the
     // edge), so not every `@label` needs its own terminator — the S8
-    // promotion work relies on that for its `_tail` blocks. The one hard
-    // requirement is that the function's own final block ends in a
-    // terminator.
+    // promotion work relies on that for the block before a `_tail` block.
+    // But a `_tail` block holds the cfg block's real branch (emitTerminator),
+    // and the function's own final block must end in a terminator.
     std::string ssa =
         emitScriptFrom("var i = 0; while (i < 3) { print i; i = i + 1; }");
     std::istringstream lines(ssa);
     std::string line;
-    std::string lastNonEmpty;
+    std::string currentLabel;
+    std::string bodyLastLine;
     int labelCount = 0;
+    auto isTerminator = [](const std::string& l) {
+        return l.find("jmp ") != std::string::npos ||
+               l.find("jnz ") != std::string::npos ||
+               l.find("ret ") != std::string::npos;
+    };
+    auto flush = [&]() {
+        if (currentLabel.size() > 5 &&
+            currentLabel.compare(currentLabel.size() - 5, 5, "_tail") == 0) {
+            EXPECT_TRUE(isTerminator(bodyLastLine))
+                << "_tail block " << currentLabel
+                << " has no terminator; last line: " << bodyLastLine;
+        }
+    };
+    std::string lastNonEmpty;
     while (std::getline(lines, line)) {
         if (line.empty() || line == "}") {
             continue;
         }
         if (line[0] == '@') {
+            flush();
+            currentLabel = line;
+            bodyLastLine.clear();
             labelCount++;
+            continue;
         }
+        bodyLastLine = line;
         lastNonEmpty = line;
     }
-    EXPECT_TRUE(lastNonEmpty.find("jmp ") != std::string::npos ||
-                lastNonEmpty.find("jnz ") != std::string::npos ||
-                lastNonEmpty.find("ret ") != std::string::npos)
+    flush();
+    EXPECT_TRUE(isTerminator(lastNonEmpty))
         << "final block has no terminator: " << lastNonEmpty;
     EXPECT_GT(labelCount, 1) << "a while loop must produce more than one block";
 }

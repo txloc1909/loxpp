@@ -225,12 +225,11 @@ PromotionPlan planPromotion(const DecodedFunction& fn,
     }
 
     // Register-pressure cap. Promoting a reassigned local adds a phi and
-    // lengthens its live range, which competed poorly with QBE's own
-    // register allocation in a function with many locals: the benchmark
-    // report (notes/benchmark_report_qbe_2026-10-01.md) measured mandelbrot
-    // about 50% slower with every candidate promoted, and neutral
-    // everywhere else. Above this count, keep only read-only slots (whose
-    // single definition needs no phi and whose stack cell never goes stale).
+    // lengthens its live range. In a function with many locals that loses
+    // to QBE's own register allocation, because QBE spills the extra live
+    // values anyway. Above this count, keep only read-only slots: a single
+    // dominating definition needs no phi, and a read-only slot's stack cell
+    // never goes stale.
     {
         int total = 0;
         for (bool c : plan.candidate) {

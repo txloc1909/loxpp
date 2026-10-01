@@ -23,6 +23,7 @@
 #include "cfg.h"
 #include "chunk_decoder.h"
 
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -59,8 +60,9 @@ struct PromotionPlan {
     std::vector<std::vector<PromoPhi>> phis;
 
     // Per cfg block index: catch-entry reloads, slot -> the SSA value name.
-    // The emitter loads each from its stack slot at the block's entry.
-    std::vector<std::unordered_map<int, std::string>> catchReload;
+    // The emitter loads each from its stack slot at the block's entry, in
+    // slot order so the emitted .ssa does not depend on a hash.
+    std::vector<std::map<int, std::string>> catchReload;
 
     // A declaring push (abstract_stack's InvisibleVarSite offset) -> the
     // (slot, value name) the emitter defines right after it.
