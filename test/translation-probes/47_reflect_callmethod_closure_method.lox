@@ -1,10 +1,18 @@
-// callMethod() v1 is capped to natives only, on every backend
-// (notes/expressiveness-roadmap.md item 1). A method backed by a
-// user-defined closure is a runtime error even on the JVM, which has no
-// technical reason of its own to refuse it - parity with native wins.
+// callMethod() on a closure-backed user method runs on every backend (issue
+// #496), through the host VM's re-entrant call path. `this` binds to the
+// receiver, forwarded args arrive in order, and a throw inside the method is
+// catchable. Prints byte-identically on native and JVM.
 class Greeter {
-    greet() { return "hi"; }
+    init(name) { this.name = name; }
+    greet(who) { return "hi " + who + " from " + this.name; }
+    boom() { throw "kaboom"; }
 }
-var g = Greeter();
-print "before";
-callMethod(g, "greet");
+var g = Greeter("G");
+print callMethod(g, "greet", "Bob");
+
+try {
+    callMethod(g, "boom");
+} catch (e) {
+    print "caught " + e;
+}
+print "done";

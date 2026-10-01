@@ -1787,10 +1787,11 @@ fun reflectMethodNames(klass) {
 
 // callMethod(instance, name, ...forwarded) mirrors
 // src/stdlib/reflect_api.cpp's resolution (fields shadow methods) and its
-// v1 natives-only restriction — reproduced here a fourth time, since this
-// interpreter is its own execution target, independent of the C++ VM that
-// runs it. See notes/expressiveness-roadmap.md item 1 for why the
-// restriction exists and why it applies identically everywhere.
+// behavior — reproduced here a fourth time, since this interpreter is its own
+// execution target, independent of the C++ VM that runs it. A native, a bound
+// native, or a closure-backed method runs; a Class or Enum constructor value
+// stays unsupported. See notes/expressiveness-roadmap.md item 1 and issue
+// #496 for why the closure case needs the host VM's re-entrant call path.
 //
 // "ReflectionFieldNameError", "ReflectionUndefinedMemberError",
 // "ReflectionUnsupportedError", "ReflectionArityError",
@@ -1807,9 +1808,8 @@ fun reflectMethodNames(klass) {
 //
 // "ReflectionNotCallableError" and "ReflectionNativeArityError" are
 // deliberately distinct from the table's "NotCallableError" and
-// "ArityError": callMethod supports natives only (see the comment above
-// this function), so it can never reach the general call/arity fault a
-// `.`/`()` call site reaches — reusing either table kind here would claim a
+// "ArityError": a non-callable field value is a different cause from a
+// general call/arity fault, so reusing either table kind here would claim a
 // catchability this path does not have.
 fun reflectCallMethod(interp, args) {
     var n = len(args);
@@ -1831,11 +1831,13 @@ fun reflectCallMethod(interp, args) {
         interp.setError("ReflectionFieldNameError", "Field name must be a string.", 0);
         return nil;
     }
-    var callee = nil;
-    var found  = false;
+    var callee  = nil;
+    var found   = false;
+    var viaField = false;
     if (instance.fields.has(name)) {
-        callee = instance.fields[name];
-        found  = true;
+        callee   = instance.fields[name];
+        found    = true;
+        viaField = true;
     } else {
         callee = instance.klass.findMethod(name);
         found  = callee != nil;
@@ -1844,21 +1846,29 @@ fun reflectCallMethod(interp, args) {
         interp.setError("ReflectionUndefinedMemberError", "Undefined property '" + name + "'.", 0);
         return nil;
     }
-    var tag = loxTag(callee);
-    if (tag == "function" or tag == "class" or tag == "enum_ctor") {
-        interp.setError("ReflectionUnsupportedError", "callMethod does not support user-defined methods yet.", 0);
-        return nil;
-    }
-    if (tag != "native" and tag != "mathfn" and tag != "mapmethod" and
-        tag != "filemethod" and tag != "listmethod") {
-        interp.setError("ReflectionNotCallableError", "callMethod requires a callable value.", 0);
-        return nil;
-    }
     var forwarded = [];
     var i = 2;
     while (i < n) {
         forwarded.append(args[i]);
         i = i + 1;
+    }
+    var tag = loxTag(callee);
+    if (tag == "class" or tag == "enum_ctor") {
+        interp.setError("ReflectionUnsupportedError", "callMethod does not support user-defined methods yet.", 0);
+        return nil;
+    }
+    if (tag == "function") {
+        // A method resolved from the class is unbound; bind `this` to the
+        // instance, exactly as instGet() does for an ordinary method call. A
+        // function value stored in a field is called as-is (native's Op::CALL
+        // of a field closure binds slot 0 to the closure, not the instance).
+        if (!viaField) callee = callee.bind(instance);
+        return callee.call(interp, forwarded);
+    }
+    if (tag != "native" and tag != "mathfn" and tag != "mapmethod" and
+        tag != "filemethod" and tag != "listmethod") {
+        interp.setError("ReflectionNotCallableError", "callMethod requires a callable value.", 0);
+        return nil;
     }
     if (callee.arity() != len(forwarded)) {
         interp.setError("ReflectionNativeArityError", "Expected " + str(callee.arity()) + " arguments but got " +

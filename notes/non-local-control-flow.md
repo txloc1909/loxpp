@@ -60,7 +60,8 @@ flow** only, and deliberately reuses `match` rather than inventing parallel
 typed-catch machinery.
 
 **Cross-backend precedent** — item 1's `callMethod` re-entrancy cap
-(roadmap lines 76-92) is the closest existing asymmetry case: native's
+(roadmap lines 76-92; since lifted, #496) was the closest existing asymmetry
+case at the time: native's
 `run()` loop can't call back into itself, so a capability trivial on
 JVM/CLR was capped on all three backends to avoid observable divergence
 under `tools/diff_runtimes.py`. Try/catch does **not** hit *that specific*

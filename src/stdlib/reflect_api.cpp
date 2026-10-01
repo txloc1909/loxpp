@@ -3,6 +3,7 @@
 #include "../class_objects.h"
 #include "../container_objects.h"
 #include "../exec_objects.h"
+#include "../runtime.h"
 #include "../value.h"
 #include "../vm_allocator.h"
 
@@ -166,13 +167,12 @@ static Value setFieldNative(int /*argc*/, Value* argv) {
 }
 
 // callMethod(inst, name, ...args) mirrors Op::INVOKE's resolution order
-// (fields shadow methods), but is capped to natives-only: the VM has no
-// bounded re-entrant call path letting a native call back into the bytecode
-// interpreter for a closure-backed method (see notes/expressiveness-roadmap.md
-// item 1). This restriction is deliberately mirrored on the JVM backend too
-// — it does not have this limitation, but must match native's behavior for
-// the differential test suite to stay green. Lift both together if that
-// changes.
+// (fields shadow methods). It calls a native, a bound native (such as a Map
+// or File method), or a closure-backed method — a user-defined method or a
+// closure/bound method stored in a field — through the Runtime's bounded
+// re-entrant call primitive (Runtime::invokeCallableFromNative;
+// notes/expressiveness-roadmap.md item 1). A Class or Enum constructor value
+// stays unsupported, and any other value is not callable at all.
 static Value callMethodNative(int argCount, Value* argv) {
     if (argCount < 2) {
         nativeRuntimeError("Expected at least 2 arguments.");
@@ -201,39 +201,55 @@ static Value callMethodNative(int argCount, Value* argv) {
     int forwardedCount = argCount - 2;
     Value* forwarded = argv + 2;
 
-    if (isNative(callee) || isBoundNative(callee)) {
-        ObjBoundNative* bn = isBoundNative(callee)
-                                 ? asObjBoundNative(as<Obj*>(callee))
-                                 : nullptr;
-        ObjNative* native =
-            bn != nullptr ? bn->native : asObjNative(as<Obj*>(callee));
-        if (native->arity != -1 && forwardedCount != native->arity) {
-            std::string msg = "Expected " + std::to_string(native->arity) +
-                              " arguments but got " +
-                              std::to_string(forwardedCount) + ".";
-            nativeRuntimeError(msg.c_str());
-            return from<Nil>(Nil{});
-        }
-        if (bn != nullptr) {
-            // The forwarded args' [-1] slot must hold the bound native's own
-            // receiver (e.g. the Map/File the method is bound to) — NOT
-            // callMethod's own `inst` argument. The "name" slot right before
-            // the forwarded args is no longer needed, so reuse it.
-            argv[1] = bn->receiver;
-        }
-        return native->function(forwardedCount, forwarded);
-    }
-    if (isClosure(callee) || isBoundMethod(callee) || isClass(callee) ||
-        isEnumCtor(callee)) {
-        // Class and enum-constructor values are callable via `()`, but
-        // callMethod supports natives only — same restriction as
-        // closures/bound methods, not the "not callable at all" case below.
+    // Class and enum-constructor values are callable via `()`, but callMethod
+    // does not support them; a non-callable value is a distinct error.
+    if (isClass(callee) || isEnumCtor(callee)) {
         nativeRuntimeError(
             "callMethod does not support user-defined methods yet.");
         return from<Nil>(Nil{});
     }
-    nativeRuntimeError("callMethod requires a callable value.");
-    return from<Nil>(Nil{});
+    if (!isNative(callee) && !isBoundNative(callee) && !isClosure(callee) &&
+        !isBoundMethod(callee)) {
+        nativeRuntimeError("callMethod requires a callable value.");
+        return from<Nil>(Nil{});
+    }
+
+    Runtime* rt = getActiveRuntime();
+    if (rt == nullptr) {
+        nativeRuntimeError("callMethod requires an active VM.");
+        return from<Nil>(Nil{});
+    }
+    Value result{Nil{}};
+    if (isClosure(callee) && !viaField) {
+        // A method resolved from the class: bind `this` to the receiver, the
+        // same as an ordinary `inst.name(...)` invocation. The receiver goes
+        // in slot 0 (below the forwarded args).
+        rt->push(argv[0]);
+        for (int i = 0; i < forwardedCount; i++) {
+            rt->push(forwarded[i]);
+        }
+        if (!rt->invokeMethodFromNative(asObjClosure(as<Obj*>(callee)),
+                                        forwardedCount, &result)) {
+            return from<Nil>(Nil{});
+        }
+        return result;
+    }
+    // A native, bound native, bound method, or a closure stored in a field:
+    // the callee value itself is slot 0, so opCall()'s own dispatch applies.
+    // Arrange the callee and forwarded args as opCall() expects (callee at
+    // stackTop[-argCount-1]); the primitive runs the call to completion and
+    // pops the result, restoring the stack.
+    rt->push(callee);
+    for (int i = 0; i < forwardedCount; i++) {
+        rt->push(forwarded[i]);
+    }
+    if (!rt->invokeCallableFromNative(forwardedCount, &result)) {
+        // A throw inside the called body was resolved outside this native, or
+        // was uncaught. callNative() propagates the recorded outcome; the
+        // placeholder return below is never pushed.
+        return from<Nil>(Nil{});
+    }
+    return result;
 }
 
 void registerReflectAPI(StdlibRegistrar& reg) {
