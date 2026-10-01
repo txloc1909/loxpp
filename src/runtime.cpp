@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 #include <string>
 
@@ -278,19 +279,33 @@ bool Runtime::runNestedLoop(int entry) {
     return m_runLoop(entry) == InterpretResult::OK;
 }
 
-Runtime::OpResult Runtime::runNativeReentrant(int entry, Value* frameSlots) {
+Runtime::OpResult Runtime::runReentrantFrame(int entry, Value* frameSlots,
+                                             int enclosingBoundary) {
+    // The enclosing frame's ip, before the nested run. A caught throw redirects
+    // it to a catch block; a normal return leaves it untouched. This is more
+    // reliable than comparing stack slots: a map key operation can push its
+    // keys at or below the handler checkpoint, so a caught throw need not
+    // change where stackTop lands.
+    bool haveCaller = entry >= 1;
+    decltype(m_frames[0].ip) callerIpBefore{};
+    if (haveCaller) {
+        callerIpBefore = m_frames[entry - 1].ip;
+    }
     if (!runNestedLoop(entry)) {
         return OpResult::Fatal;
     }
     // A handler below the enclosing run()'s own boundary caught the throw;
     // control belongs to a less-nested run().
-    if (m_frameCount <= m_nativeStopAtFrameCount) {
+    if (m_frameCount <= enclosingBoundary) {
         return OpResult::Stop;
     }
-    // A normal return leaves exactly one value at frameSlots[0]. Any other
-    // stack top means a handler inside the enclosing run() (but above the
-    // callee) caught the throw and redirected control to its catch block. The
-    // enclosing run must reload its frame/ip and continue, not take a result.
+    // A handler inside the enclosing run() caught the throw and redirected this
+    // frame to its catch block: the enclosing run must reload and continue, not
+    // take a result.
+    if (haveCaller && m_frames[entry - 1].ip != callerIpBefore) {
+        return OpResult::Resumed;
+    }
+    // A normal return leaves exactly one value at frameSlots[0].
     if (m_frameCount != entry || stackTop != frameSlots + 1) {
         return OpResult::Resumed;
     }
@@ -302,7 +317,7 @@ bool Runtime::invokeCallableFromNative(int argCount, Value* out) {
     Value* frameSlots = stackTop - argCount - 1;
     OpResult result = opCall(argCount, m_nativeStopAtFrameCount);
     if (result == OpResult::Resumed && m_frameCount == entry + 1) {
-        result = runNativeReentrant(entry, frameSlots);
+        result = runReentrantFrame(entry, frameSlots, m_nativeStopAtFrameCount);
     }
     if (result == OpResult::OK) {
         *out = pop();
@@ -321,7 +336,7 @@ bool Runtime::invokeMethodFromNative(ObjClosure* method, int argCount,
     OpResult result = dispatchMethod(method, argCount, m_nativeStopAtFrameCount,
                                      ResultCheck::None);
     if (result == OpResult::Resumed && m_frameCount == entry + 1) {
-        result = runNativeReentrant(entry, frameSlots);
+        result = runReentrantFrame(entry, frameSlots, m_nativeStopAtFrameCount);
     }
     if (result == OpResult::OK) {
         *out = pop();
@@ -734,11 +749,12 @@ void Runtime::resetStack() {
 }
 
 void Runtime::initProtocolNames() {
-    const char* names[] = {
-        "__add__",       "__sub__",      "__mul__",  "__div__",
-        "__mod__",       "__neg__",      "__lt__",   "__gt__",
-        "__eq__",        "__contains__", "__call__", "__index_get__",
-        "__index_set__", "__len__",      "__iter__", "__slice__"};
+    const char* names[] = {"__add__",       "__sub__",  "__mul__",
+                           "__div__",       "__mod__",  "__neg__",
+                           "__lt__",        "__gt__",   "__eq__",
+                           "__contains__",  "__call__", "__index_get__",
+                           "__index_set__", "__len__",  "__iter__",
+                           "__slice__",     "__hash__"};
     for (std::size_t i = 0; i < m_protocolNames.size(); i++) {
         m_protocolNames[i] = m_mm.makeString(names[i]);
     }
@@ -1096,20 +1112,37 @@ Runtime::OpResult Runtime::opInherit() {
     return OpResult::OK;
 }
 
+bool Runtime::mapKeyValid(const Value& v) const {
+    if (!isInstance(v)) {
+        return isValidMapKey(v);
+    }
+    // An Instance key needs both methods: __hash__ places it, and __eq__
+    // resolves a collision (the class defines equality for it).
+    ObjInstance* inst = asObjInstance(as<Obj*>(v));
+    Value ignored;
+    return inst->klass->methods.get(
+               m_protocolNames[static_cast<std::size_t>(Protocol::Hash)],
+               ignored) &&
+           inst->klass->methods.get(
+               m_protocolNames[static_cast<std::size_t>(Protocol::Eq)],
+               ignored);
+}
+
 std::optional<Runtime::MapKeyError> Runtime::mapKeyError(Value indexVal) {
-    // isValidMapKey() (value.h) is the single source of truth for the rule
-    // itself — used here and by map.has()/map.del() (stdlib/map_api.cpp).
-    // Once it says no, is<Number> alone tells which of its two rejection
-    // reasons applies: a rejected Number is always NaN, and a rejected Obj*
-    // is always non-string — those are the only two ways it says no.
-    if (isValidMapKey(indexVal)) {
+    // mapKeyValid() covers the pure scalar/string rule (isValidMapKey,
+    // value.cpp) plus the Instance-defining-both rule. Once it says no,
+    // is<Number> alone tells which of the two rejection reasons applies: a
+    // rejected Number is always NaN, and a rejected Obj* is always a non-key
+    // object — those are the only two ways it says no.
+    if (mapKeyValid(indexVal)) {
         return std::nullopt;
     }
     if (is<Number>(indexVal)) {
         return MapKeyError{"NaNKeyError", "NaN cannot be used as a map key."};
     }
     return MapKeyError{"InvalidMapKeyError",
-                       "Map keys must be Bool, Number, Nil, or String."};
+                       "Map keys must be Bool, Number, Nil, String, or an "
+                       "object with __hash__ and __eq__."};
 }
 
 std::optional<Runtime::OpResult> Runtime::checkMapKey(Value indexVal,
@@ -1119,6 +1152,218 @@ std::optional<Runtime::OpResult> Runtime::checkMapKey(Value indexVal,
             raiseThrowableError(err->kind, err->message, stopAtFrameCount));
     }
     return std::nullopt;
+}
+
+std::optional<uint32_t> Runtime::hashMapKey(const Value& key,
+                                            int stopAtFrameCount) {
+    if (!isInstance(key)) {
+        return hashValue(key);
+    }
+    ObjInstance* inst = asObjInstance(as<Obj*>(key));
+    Value method;
+    if (!inst->klass->methods.get(
+            m_protocolNames[static_cast<std::size_t>(Protocol::Hash)],
+            method)) {
+        // mapKeyValid() rejects this before a hash is asked for; keep a
+        // defensive path so a missed check is a clean error, not a crash.
+        m_mapKeyStatus = fromThrow(raiseThrowableError(
+            "InvalidMapKeyError",
+            "Map keys must be Bool, Number, Nil, String, or an object with "
+            "__hash__ and __eq__.",
+            stopAtFrameCount));
+        return std::nullopt;
+    }
+    push(key);
+    Value* frameSlots = stackTop - 1;
+    int entry = m_frameCount;
+    OpResult r = dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
+                                stopAtFrameCount, ResultCheck::Number);
+    if (r == OpResult::Resumed && m_frameCount == entry + 1) {
+        r = runReentrantFrame(entry, frameSlots, stopAtFrameCount);
+    }
+    if (r != OpResult::OK) {
+        m_mapKeyStatus = r;
+        return std::nullopt;
+    }
+    Number n = as<Number>(pop());
+    if (std::isnan(n)) {
+        m_mapKeyStatus = fromThrow(raiseThrowableError(
+            "NaNKeyError", "NaN cannot be used as a map key.",
+            stopAtFrameCount));
+        return std::nullopt;
+    }
+    // Fold the Number to a bucket hash the same way hashValue() does, so two
+    // equal __hash__ results (including +0.0 and -0.0) share a bucket.
+    if (n == 0.0) {
+        n = 0.0;
+    }
+    uint64_t bits;
+    std::memcpy(&bits, &n, sizeof bits);
+    return static_cast<uint32_t>(bits ^ (bits >> 32));
+}
+
+bool Runtime::mapKeyEq(const Value& stored, const Value& lookup,
+                       int stopAtFrameCount) {
+    // Only the stored key's class can define key equality. Lox++ has no
+    // reflected operator method, so a lookup-only __eq__ never runs.
+    if (isInstance(stored)) {
+        ObjInstance* inst = asObjInstance(as<Obj*>(stored));
+        Value method;
+        if (inst->klass->methods.get(
+                m_protocolNames[static_cast<std::size_t>(Protocol::Eq)],
+                method)) {
+            push(stored);
+            push(lookup);
+            Value* frameSlots = stackTop - 2;
+            int entry = m_frameCount;
+            OpResult r = dispatchMethod(asObjClosure(as<Obj*>(method)), 1,
+                                        stopAtFrameCount, ResultCheck::Boolean);
+            if (r == OpResult::Resumed && m_frameCount == entry + 1) {
+                r = runReentrantFrame(entry, frameSlots, stopAtFrameCount);
+            }
+            if (r != OpResult::OK) {
+                m_mapKeyStatus = r;
+                return false;
+            }
+            return as<bool>(pop());
+        }
+    }
+    return stored == lookup;
+}
+
+Runtime::OpResult Runtime::mapGetKey(ObjMap* map, const Value& key, bool& found,
+                                     Value& out, int stopAtFrameCount) {
+    if (auto err = checkMapKey(key, stopAtFrameCount)) {
+        return *err;
+    }
+    found = false;
+    map->keyOpDepth += 1;
+    // Root the map and the lookup key before any __hash__/__eq__ can allocate.
+    m_mm.pushTempRoot(map);
+    if (is<Obj*>(key)) {
+        m_mm.pushTempRoot(as<Obj*>(key));
+    }
+    m_mapKeyStatus = OpResult::OK;
+    std::optional<uint32_t> hash = hashMapKey(key, stopAtFrameCount);
+    OpResult result = OpResult::OK;
+    if (!hash) {
+        result = m_mapKeyStatus;
+    } else {
+        ObjMap::KeyEq eq = [this, stopAtFrameCount](const Value& s,
+                                                    const Value& l) {
+            return mapKeyEq(s, l, stopAtFrameCount);
+        };
+        found = map->mapGetHashed(key, *hash, eq, out);
+        result = m_mapKeyStatus;
+    }
+    if (is<Obj*>(key)) {
+        m_mm.popTempRoot();
+    }
+    m_mm.popTempRoot();
+    map->keyOpDepth -= 1;
+    return result;
+}
+
+Runtime::OpResult Runtime::mapSetKey(ObjMap* map, const Value& key,
+                                     const Value& value, int stopAtFrameCount) {
+    // A write to a map that is already inside a key operation is forbidden:
+    // the probe holds raw bucket pointers that a reentrant grow would
+    // invalidate.
+    if (map->keyOpDepth > 0) {
+        return fromThrow(raiseThrowableError(
+            "MapChangedError", "Map changed during key hashing or equality.",
+            stopAtFrameCount));
+    }
+    if (auto err = checkMapKey(key, stopAtFrameCount)) {
+        return *err;
+    }
+    map->keyOpDepth += 1;
+    m_mm.pushTempRoot(map);
+    if (is<Obj*>(key)) {
+        m_mm.pushTempRoot(as<Obj*>(key));
+    }
+    if (is<Obj*>(value)) {
+        m_mm.pushTempRoot(as<Obj*>(value));
+    }
+    m_mapKeyStatus = OpResult::OK;
+    std::optional<uint32_t> hash = hashMapKey(key, stopAtFrameCount);
+    OpResult result = OpResult::OK;
+    if (!hash) {
+        result = m_mapKeyStatus;
+    } else {
+        ObjMap::KeyEq eq = [this, stopAtFrameCount](const Value& s,
+                                                    const Value& l) {
+            return mapKeyEq(s, l, stopAtFrameCount);
+        };
+        map->mapSetHashed(key, value, *hash, eq);
+        result = m_mapKeyStatus;
+    }
+    if (is<Obj*>(value)) {
+        m_mm.popTempRoot();
+    }
+    if (is<Obj*>(key)) {
+        m_mm.popTempRoot();
+    }
+    m_mm.popTempRoot();
+    map->keyOpDepth -= 1;
+    return result;
+}
+
+Runtime::OpResult Runtime::mapDelKey(ObjMap* map, const Value& key,
+                                     int stopAtFrameCount) {
+    if (map->keyOpDepth > 0) {
+        return fromThrow(raiseThrowableError(
+            "MapChangedError", "Map changed during key hashing or equality.",
+            stopAtFrameCount));
+    }
+    if (auto err = checkMapKey(key, stopAtFrameCount)) {
+        return *err;
+    }
+    map->keyOpDepth += 1;
+    m_mm.pushTempRoot(map);
+    if (is<Obj*>(key)) {
+        m_mm.pushTempRoot(as<Obj*>(key));
+    }
+    m_mapKeyStatus = OpResult::OK;
+    std::optional<uint32_t> hash = hashMapKey(key, stopAtFrameCount);
+    OpResult result = OpResult::OK;
+    if (!hash) {
+        result = m_mapKeyStatus;
+    } else {
+        ObjMap::KeyEq eq = [this, stopAtFrameCount](const Value& s,
+                                                    const Value& l) {
+            return mapKeyEq(s, l, stopAtFrameCount);
+        };
+        map->mapDelHashed(key, *hash, eq);
+        result = m_mapKeyStatus;
+    }
+    if (is<Obj*>(key)) {
+        m_mm.popTempRoot();
+    }
+    m_mm.popTempRoot();
+    map->keyOpDepth -= 1;
+    return result;
+}
+
+bool Runtime::mapHasFromNative(ObjMap* map, const Value& key, bool* out) {
+    Value ignored;
+    bool found = false;
+    OpResult r = mapGetKey(map, key, found, ignored, m_nativeStopAtFrameCount);
+    if (r != OpResult::OK) {
+        m_reentrantOutcome = r;
+        return false;
+    }
+    *out = found;
+    return true;
+}
+
+bool Runtime::mapDelFromNative(ObjMap* map, const Value& key) {
+    OpResult r = mapDelKey(map, key, m_nativeStopAtFrameCount);
+    if (r != OpResult::OK) {
+        m_reentrantOutcome = r;
+        return false;
+    }
+    return true;
 }
 
 std::optional<Runtime::OpResult>
@@ -1173,12 +1418,14 @@ Runtime::OpResult Runtime::opGetIndex(int stopAtFrameCount) {
         return OpResult::OK;
     }
     if (isMap(collectionVal)) {
-        if (auto err = checkMapKey(indexVal, stopAtFrameCount)) {
-            return *err;
-        }
         auto* map = asObjMap(as<Obj*>(collectionVal));
         Value result{Nil{}}; // default nil — returned when key absent
-        map->mapGet(indexVal, result);
+        bool found = false;
+        if (OpResult r =
+                mapGetKey(map, indexVal, found, result, stopAtFrameCount);
+            r != OpResult::OK) {
+            return r;
+        }
         push(result);
         return OpResult::OK;
     }
@@ -1236,23 +1483,13 @@ Runtime::OpResult Runtime::opSetIndex(int stopAtFrameCount) {
         return OpResult::Fatal;
     }
     if (isMap(listVal)) {
-        if (auto err = checkMapKey(indexVal, stopAtFrameCount)) {
-            return *err;
-        }
         auto* map = asObjMap(as<Obj*>(listVal));
-        // Root the map: it was popped and may be a temporary; mapSet can
-        // grow the bucket array which triggers GC.
-        m_mm.pushTempRoot(map);
-        // Root val if it's an object: it was popped off the stack before
-        // mapSet, so the GC won't find it through the stack.
-        if (is<Obj*>(val)) {
-            m_mm.pushTempRoot(as<Obj*>(val));
+        // mapSetKey roots the map, key, and value for the duration, and
+        // hashes the key (which may dispatch __hash__).
+        if (OpResult r = mapSetKey(map, indexVal, val, stopAtFrameCount);
+            r != OpResult::OK) {
+            return r;
         }
-        map->mapSet(indexVal, val);
-        if (is<Obj*>(val)) {
-            m_mm.popTempRoot();
-        }
-        m_mm.popTempRoot();
         push(val);
         return OpResult::OK;
     }
@@ -1468,15 +1705,16 @@ Runtime::OpResult Runtime::opBuildMap(int count, int stopAtFrameCount) {
         }
     }
     ObjMap* map = m_mm.create<ObjMap>(m_mapClass, VmAllocator<MapEntry>{&m_mm});
-    // Values are still on the stack -> GC-rooted; map is temp-rooted so it
-    // survives any GC triggered by mapSet's grow.
-    m_mm.pushTempRoot(map);
+    // Values are still on the stack -> GC-rooted; mapSetKey temp-roots the
+    // map, key, and value, and hashes the key (which may dispatch __hash__).
     for (int i = 0; i < count; i++) {
         Value key = peek(2 * (count - 1 - i) + 1);
         Value val = peek(2 * (count - 1 - i));
-        map->mapSet(key, val);
+        if (OpResult r = mapSetKey(map, key, val, stopAtFrameCount);
+            r != OpResult::OK) {
+            return r;
+        }
     }
-    m_mm.popTempRoot();
     for (int i = 0; i < 2 * count; i++) {
         pop();
     }
@@ -1766,14 +2004,16 @@ Runtime::OpResult Runtime::opIn(int stopAtFrameCount) {
         return OpResult::OK;
     }
     if (isMap(seq)) {
-        if (auto err = checkMapKey(elem, stopAtFrameCount)) {
-            return *err;
-        }
         auto* map = asObjMap(as<Obj*>(seq));
         Value dummy{Nil{}};
+        bool found = false;
+        if (OpResult r = mapGetKey(map, elem, found, dummy, stopAtFrameCount);
+            r != OpResult::OK) {
+            return r;
+        }
         pop();
         pop();
-        push(from<bool>(map->mapGet(elem, dummy)));
+        push(from<bool>(found));
         return OpResult::OK;
     }
     if (isInstance(seq)) {

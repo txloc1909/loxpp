@@ -7,6 +7,7 @@
 #include "vm_allocator.h"
 
 #include <cstdio>
+#include <functional>
 
 struct ObjList : public Obj {
     VmVector<Value> elements;
@@ -89,6 +90,10 @@ enum class MapSlot : uint8_t { EMPTY, OCCUPIED, TOMBSTONE };
 struct MapEntry {
     Value key{Nil{}};
     Value value{Nil{}};
+    // The key's hash, computed once when the entry is inserted. CoreHashMap's
+    // grow() rehashes every live entry from this field, so it must never call
+    // back into the VM (a user __hash__ needs a running interpreter).
+    uint32_t hash{0};
     MapSlot state{MapSlot::EMPTY};
 };
 
@@ -104,6 +109,8 @@ struct MapPolicy {
     }
     static uint32_t
     hashOf(const MapEntry& e); // defined in container_objects.cpp
+    // Identity match, used by grow() and the scalar/string-only insert path.
+    // The VM path passes its own equality callback to CoreHashMap instead.
     static bool keyMatch(const MapEntry& slot, const MapEntry& needle) {
         return slot.key == needle.key;
     }
@@ -116,15 +123,33 @@ struct ObjMap : public Obj {
     // real erase only. Overwrites and misses leave it alone. Plain int packs
     // with CoreHashMap's own counts; wrap needs 2B changes in one loop.
     int version{0};
+    // Non-zero while a key operation (hash + probe) runs on this map. A
+    // mapSet/mapDel then raises MapChangedError, so a user __hash__/__eq__
+    // cannot reallocate the bucket array under an in-progress probe.
+    int keyOpDepth{0};
+
+    // Key equality callback for the VM path: (storedKey, lookupKey) -> equal.
+    // It may dispatch a user __eq__, so it can fail; the Runtime wrapper that
+    // supplies it records the failure and checks it after the map call.
+    using KeyEq = std::function<bool(const Value&, const Value&)>;
 
     ObjMap(ObjClass* k, VmAllocator<MapEntry> alloc)
         : Obj(ObjType::MAP), klass(k), map(alloc) {}
 
+    // Scalar/string path: identity equality, hash computed with hashValue().
     // Returns true if key was newly inserted (false = update).
     bool mapSet(const Value& key, const Value& value);
     bool mapGet(const Value& key, Value& out) const;
     // Returns true if key was found and removed.
     bool mapDel(const Value& key);
+
+    // VM path: the caller supplies the precomputed hash and the equality
+    // callback, so an Instance key can dispatch __hash__/__eq__.
+    bool mapSetHashed(const Value& key, const Value& value, uint32_t hash,
+                      const KeyEq& eq);
+    bool mapGetHashed(const Value& key, uint32_t hash, const KeyEq& eq,
+                      Value& out) const;
+    bool mapDelHashed(const Value& key, uint32_t hash, const KeyEq& eq);
 };
 
 inline bool isObjMap(Obj* o) { return isObjType(o, ObjType::MAP); }

@@ -1929,7 +1929,7 @@ class LoxNative {
             var result = InterpMap();
             var ks = h.keys();
             var i = 0;
-            while (i < len(ks)) { result.data[ks[i]] = h[ks[i]]; i = i + 1; }
+            while (i < len(ks)) { interp.mapSet(result, ks[i], h[ks[i]]); i = i + 1; }
             return result;
         }
         if (this.name == "type") return reflectTypeName(args[0]);
@@ -2092,6 +2092,13 @@ class InterpListMethod {
 class InterpMap {
     init() {
         this.data   = {};
+        // Instance keys: a list of [key, value], because their equality is the
+        // interpreted class's __eq__, which the host map cannot call. Kept
+        // apart from `data` (scalar/string keys); the two cannot collide.
+        this.instances = [];
+        // Non-zero while a key operation runs; a set/del then raises
+        // MapChangedError, so a user __hash__/__eq__ cannot mutate the map.
+        this.keyOpDepth = 0;
         // Structural version for the for-in fail-fast check. evalIndexSet
         // and del bump it on a real insert or erase only. It lives in this
         // wrapper, not in the native map in data, which interpreted code
@@ -2122,44 +2129,41 @@ class InterpMapMethod {
                 // message regardless of cause -- a pre-existing native-VM
                 // asymmetry, not a bootstrap choice.
                 interp.fatalError(
-                    "Map keys must be Bool, Number, Nil, or String. NaN is not allowed.");
+                    "Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__. NaN is not allowed.");
                 return nil;
             }
-            return this.map.data.has(args[0]);
+            return interp.mapHas(this.map, args[0]);
         }
         if (this.name == "del") {
             if (!interp.isValidMapKey(args[0])) {
                 interp.fatalError(
-                    "Map keys must be Bool, Number, Nil, or String. NaN is not allowed.");
+                    "Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__. NaN is not allowed.");
                 return nil;
             }
             // Count only a real erase: a miss leaves iteration valid.
-            if (this.map.data.has(args[0])) {
-                this.map.data.del(args[0]);
-                this.map.version = this.map.version + 1;
-            }
+            interp.mapDel(this.map, args[0]);
             return nil;
         }
         if (this.name == "keys") {
             var result = InterpList([]);
-            var ks = this.map.data.keys();
+            var ks = interp.mapKeys(this.map);
             var i = 0;
             while (i < len(ks)) { result.elements.append(ks[i]); i = i + 1; }
             return result;
         }
         if (this.name == "values") {
             var result = InterpList([]);
-            var ks = this.map.data.keys();
+            var ks = interp.mapKeys(this.map);
             var i = 0;
-            while (i < len(ks)) { result.elements.append(this.map.data[ks[i]]); i = i + 1; }
+            while (i < len(ks)) { result.elements.append(interp.mapGet(this.map, ks[i])); i = i + 1; }
             return result;
         }
         if (this.name == "entries") {
             var result = InterpList([]);
-            var ks = this.map.data.keys();
+            var ks = interp.mapKeys(this.map);
             var i = 0;
             while (i < len(ks)) {
-                var pair = InterpList([ks[i], this.map.data[ks[i]]]);
+                var pair = InterpList([ks[i], interp.mapGet(this.map, ks[i])]);
                 result.elements.append(pair);
                 i = i + 1;
             }
@@ -2307,7 +2311,7 @@ class Interpreter {
         if (this.isNaNKey(key)) {
             this.setError("NaNKeyError", "NaN cannot be used as a map key.", line);
         } else {
-            this.setError("InvalidMapKeyError", "Map keys must be Bool, Number, Nil, or String.", line);
+            this.setError("InvalidMapKeyError", "Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__.", line);
         }
     }
 
@@ -2320,7 +2324,150 @@ class Interpreter {
         if (v == nil or v == true or v == false) return true;
         if (isLoxStr(v)) return true;
         if (isLoxNum(v)) return v == v;
-        return false;
+        return this.instanceMapKeyValid(v);
+    }
+
+    // An Instance is a valid key only when its class defines both __hash__ and
+    // __eq__: __hash__ places it, __eq__ resolves a collision.
+    instanceMapKeyValid(v) {
+        if (loxTag(v) != "instance") return false;
+        return this.findDunder(v, "__hash__") != nil and
+               this.findDunder(v, "__eq__") != nil;
+    }
+
+    // Calls an Instance key's __hash__ and validates its Number result. Sets
+    // the interpreter's error and returns false on failure. The caller holds
+    // the map's lock, so a __hash__ that writes the map raises MapChangedError.
+    runKeyHash(key) {
+        var hash = this.findDunder(key, "__hash__");
+        var r = hash.bind(key).call(this, []);
+        if (this.throwFlag) return false;
+        if (!isLoxNum(r)) {
+            this.setError("OperatorResultTypeError", "Operator method must return a Number.", 0);
+            return false;
+        }
+        if (r != r) {
+            this.setError("NaNKeyError", "NaN cannot be used as a map key.", 0);
+            return false;
+        }
+        return true;
+    }
+
+    // Key equality: the stored key's __eq__, or the host value equality when
+    // the stored key is not an Instance. Sets the error and returns false on a
+    // bad result.
+    keyEquals(stored, lookup) {
+        var m = this.findDunder(stored, "__eq__");
+        if (m != nil) {
+            var b = m.bind(stored).call(this, [lookup]);
+            if (this.throwFlag) return false;
+            if (b != true and b != false) {
+                this.setError("OperatorResultTypeError", "Operator method must return a Boolean.", 0);
+                return false;
+            }
+            return b;
+        }
+        return stored == lookup;
+    }
+
+    // Index of an Instance key in a map's instance list, or -1.
+    mapFindInstance(map, key) {
+        var i = 0;
+        while (i < len(map.instances)) {
+            if (this.keyEquals(map.instances[i][0], key)) return i;
+            if (this.throwFlag) return -1;
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    mapSize(map) { return len(map.data) + len(map.instances); }
+
+    mapKeys(map) {
+        var ks = [];
+        var sc = map.data.keys();
+        var i = 0;
+        while (i < len(sc)) { ks.append(sc[i]); i = i + 1; }
+        i = 0;
+        while (i < len(map.instances)) { ks.append(map.instances[i][0]); i = i + 1; }
+        return ks;
+    }
+
+    mapGet(map, key) {
+        map.keyOpDepth = map.keyOpDepth + 1;
+        if (this.instanceMapKeyValid(key)) {
+            if (!this.runKeyHash(key)) { map.keyOpDepth = map.keyOpDepth - 1; return nil; }
+            var i = this.mapFindInstance(map, key);
+            var val = nil;
+            if (!this.throwFlag and i >= 0) val = map.instances[i][1];
+            map.keyOpDepth = map.keyOpDepth - 1;
+            return val;
+        }
+        var val2 = nil;
+        if (map.data.has(key)) val2 = map.data[key];
+        map.keyOpDepth = map.keyOpDepth - 1;
+        return val2;
+    }
+
+    mapHas(map, key) {
+        map.keyOpDepth = map.keyOpDepth + 1;
+        if (this.instanceMapKeyValid(key)) {
+            if (!this.runKeyHash(key)) { map.keyOpDepth = map.keyOpDepth - 1; return false; }
+            var i = this.mapFindInstance(map, key);
+            map.keyOpDepth = map.keyOpDepth - 1;
+            return i >= 0;
+        }
+        var found = map.data.has(key);
+        map.keyOpDepth = map.keyOpDepth - 1;
+        return found;
+    }
+
+    mapSet(map, key, val) {
+        if (map.keyOpDepth > 0) {
+            this.setError("MapChangedError", "Map changed during key hashing or equality.", 0);
+            return false;
+        }
+        map.keyOpDepth = map.keyOpDepth + 1;
+        if (this.instanceMapKeyValid(key)) {
+            if (!this.runKeyHash(key)) { map.keyOpDepth = map.keyOpDepth - 1; return false; }
+            var i = this.mapFindInstance(map, key);
+            if (this.throwFlag) { map.keyOpDepth = map.keyOpDepth - 1; return false; }
+            if (i < 0) {
+                map.instances.append([key, val]);
+                map.version = map.version + 1;
+            } else {
+                map.instances[i] = [key, val];
+            }
+            map.keyOpDepth = map.keyOpDepth - 1;
+            return true;
+        }
+        if (!map.data.has(key)) map.version = map.version + 1;
+        map.data[key] = val;
+        map.keyOpDepth = map.keyOpDepth - 1;
+        return true;
+    }
+
+    mapDel(map, key) {
+        if (map.keyOpDepth > 0) {
+            this.setError("MapChangedError", "Map changed during key hashing or equality.", 0);
+            return;
+        }
+        map.keyOpDepth = map.keyOpDepth + 1;
+        if (this.instanceMapKeyValid(key)) {
+            if (!this.runKeyHash(key)) { map.keyOpDepth = map.keyOpDepth - 1; return; }
+            var i = this.mapFindInstance(map, key);
+            if (!this.throwFlag and i >= 0) {
+                map.instances.remove(map.instances[i]);
+                map.version = map.version + 1;
+            }
+            map.keyOpDepth = map.keyOpDepth - 1;
+            return;
+        }
+        if (map.data.has(key)) {
+            map.data.del(key);
+            map.version = map.version + 1;
+        }
+        map.keyOpDepth = map.keyOpDepth - 1;
     }
 
     isNaNKey(v) {
@@ -2341,11 +2488,11 @@ class Interpreter {
 
     stringifyMap(map) {
         var s = "{";
-        var ks = map.data.keys();
+        var ks = this.mapKeys(map);
         var i = 0;
         while (i < len(ks)) {
             if (i > 0) s = s + ", ";
-            s = s + this.stringify(ks[i]) + ": " + this.stringify(map.data[ks[i]]);
+            s = s + this.stringify(ks[i]) + ": " + this.stringify(this.mapGet(map, ks[i]));
             i = i + 1;
         }
         return s + "}";
@@ -2396,7 +2543,7 @@ class Interpreter {
                 this.setInvalidMapKeyError(k, 0);
                 return nil;
             }
-            result.data[k] = v;
+            this.mapSet(result, k, v);
             i = i + 1;
         }
         return result;
@@ -2413,8 +2560,7 @@ class Interpreter {
                 this.setInvalidMapKeyError(index, line);
                 return nil;
             }
-            if (object.data.has(index)) return object.data[index];
-            return nil;
+            return this.mapGet(object, index);
         }
         if (tag == "list") {
             if (!isLoxNum(index)) { this.setError("IndexTypeError", "List index must be a number.", line); return nil; }
@@ -2466,8 +2612,8 @@ class Interpreter {
             if (this.throwFlag) return nil;
             // Count only a new key: an overwrite leaves iteration valid,
             // while a paired erase plus insert must still trip the check.
-            if (!object.data.has(index)) object.version = object.version + 1;
-            object.data[index] = val;
+            this.mapSet(object, index, val);
+            if (this.throwFlag) return nil;
             return val;
         }
         if (tag == "list") {
@@ -2566,7 +2712,7 @@ class Interpreter {
         var loopEnv = Environment(env);
         loopEnv.define(varName, nil);
         if (tag == "map") {
-            var ks = iterable.data.keys();
+            var ks = this.mapKeys(iterable);
             // Snapshot the structural version, not the size: a paired
             // erase plus insert restores the net size but still bumps it.
             var expectedVersion = iterable.version;
@@ -2925,7 +3071,7 @@ class Interpreter {
         var vtag = loxTag(v);
         if (vtag == "list") return len(v.elements);
         if (isLoxStr(v))    return len(v);
-        if (vtag == "map")  return len(v.data);
+        if (vtag == "map")  return this.mapSize(v);
         var m = this.findDunder(v, "__len__");
         if (m != nil) {
             var r = m.bind(v).call(this, []);
@@ -3122,7 +3268,7 @@ class Interpreter {
                     this.setInvalidMapKeyError(left, opLine);
                     return nil;
                 }
-                return right.data.has(left);
+                return this.mapHas(right, left);
             }
             var m = this.findDunder(right, "__contains__");
             if (m != nil) {

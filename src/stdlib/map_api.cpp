@@ -1,6 +1,7 @@
 #include "map_api.h"
 #include "stdlib_context.h"
 #include "../container_objects.h"
+#include "../runtime.h"
 #include "../vm_allocator.h"
 #include "../value.h"
 
@@ -11,25 +12,39 @@ static ObjClass* s_mapClass = nullptr;
 // args[-1] = the ObjMap receiver
 static ObjMap* checkMap(Value* args) { return asObjMap(as<Obj*>(args[-1])); }
 
+// Map.has/Map.del keep the v1 fatal, single-message disposition for an invalid
+// key (unlike an index read/write, a map literal, or `in`, which raise a
+// catchable kind-split error). A key the VM rejects is fatal here.
+static const char* kInvalidKeyMessage =
+    "Map keys must be Bool, Number, Nil, String, or an object with __hash__ "
+    "and __eq__. NaN is not allowed.";
+
 static Value mapHasNative(int /*argc*/, Value* args) {
-    if (!isValidMapKey(args[0])) {
-        nativeRuntimeError("Map keys must be Bool, Number, Nil, or String. NaN "
-                           "is not allowed.");
+    Runtime* rt = getActiveRuntime();
+    if (rt == nullptr || !rt->mapKeyValid(args[0])) {
+        nativeRuntimeError(kInvalidKeyMessage);
         return from<Nil>(Nil{});
     }
     ObjMap* map = checkMap(args);
-    Value dummy;
-    return from<bool>(map->mapGet(args[0], dummy));
+    bool found = false;
+    if (!rt->mapHasFromNative(map, args[0], &found)) {
+        // A throw inside the key's __hash__/__eq__. callNative() propagates
+        // the recorded outcome; this placeholder is not pushed.
+        return from<Nil>(Nil{});
+    }
+    return from<bool>(found);
 }
 
 static Value mapDelNative(int /*argc*/, Value* args) {
-    if (!isValidMapKey(args[0])) {
-        nativeRuntimeError("Map keys must be Bool, Number, Nil, or String. NaN "
-                           "is not allowed.");
+    Runtime* rt = getActiveRuntime();
+    if (rt == nullptr || !rt->mapKeyValid(args[0])) {
+        nativeRuntimeError(kInvalidKeyMessage);
         return from<Nil>(Nil{});
     }
     ObjMap* map = checkMap(args);
-    map->mapDel(args[0]);
+    if (!rt->mapDelFromNative(map, args[0])) {
+        return from<Nil>(Nil{});
+    }
     return from<Nil>(Nil{});
 }
 

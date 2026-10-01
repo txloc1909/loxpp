@@ -350,7 +350,39 @@ public final class LoxOps {
             }
             return;
         }
-        throw makeError("InvalidMapKeyError", "Map keys must be Bool, Number, Nil, or String.");
+        if (key instanceof LoxInstance && isInstanceMapKey((LoxInstance)key)) {
+            return;
+        }
+        throw makeError("InvalidMapKeyError",
+                        "Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__.");
+    }
+
+    /** True when `key` is an Instance whose class defines both __hash__ and __eq__. */
+    static boolean isInstanceMapKey(LoxInstance key) {
+        return findDunder(key, "__hash__") != null
+            && findDunder(key, "__eq__") != null;
+    }
+
+    /** Key equality for a Map: the stored key's __eq__ (or identity fallback). */
+    static boolean keyEquals(Object stored, Object lookup) {
+        return equal(stored, lookup);
+    }
+
+    /**
+     * Calls an Instance key's __hash__ and validates its Number result. The
+     * caller (LoxMap) holds the map lock, so a __hash__ that writes the map
+     * raises MapChangedError.
+     */
+    static void checkUserHash(Object key) {
+        LoxClosure hash = findDunder(key, "__hash__");
+        Object result = hash.callAsSelf(key, new Object[0]);
+        if (!(result instanceof Double)) {
+            throw makeError("OperatorResultTypeError",
+                            "Operator method must return a Number.");
+        }
+        if (Double.isNaN((Double)result)) {
+            throw makeError("NaNKeyError", "NaN cannot be used as a map key.");
+        }
     }
 
     /**
@@ -369,8 +401,11 @@ public final class LoxOps {
         if (key instanceof Double && !Double.isNaN((Double)key)) {
             return;
         }
+        if (key instanceof LoxInstance && isInstanceMapKey((LoxInstance)key)) {
+            return;
+        }
         throw new LoxError(
-            "Map keys must be Bool, Number, Nil, or String. NaN is not allowed.");
+            "Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__. NaN is not allowed.");
     }
 
     /**

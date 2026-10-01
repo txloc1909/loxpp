@@ -190,7 +190,11 @@ PROBES = [
     ("NaN used as map key", "try { var m = {}; m[0/0] = 1; } catch (e) { print e.kind; }",
      CATCHABLE, "NaNKeyError", '"NaN cannot be used as a map key."'),
     ("object used as map key", "try { var m = {}; m[[1, 2]] = 1; } catch (e) { print e.kind; }",
-     CATCHABLE, "InvalidMapKeyError", '"Map keys must be Bool, Number, Nil, or String."'),
+     CATCHABLE, "InvalidMapKeyError", '"Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__."'),
+    ("map written during key hashing",
+     'var m = {}; class K { __hash__() { m[1] = 1; return 1; } __eq__(o) { return true; } } '
+     'try { m[K()] = 1; } catch (e) { print e.kind; }',
+     CATCHABLE, "MapChangedError", '"Map changed during key hashing or equality."'),
     ("undefined global variable", "try { print undeclared; } catch (e) { print e.kind; }",
      CATCHABLE, "UndefinedVariableError", '"Undefined variable."'),
     ("unary arithmetic on non-Number", 'try { -"a"; } catch (e) { print e.kind; }',

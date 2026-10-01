@@ -324,7 +324,7 @@ FATAL_ROWS = [
         "fatal",
         "m.has([1, 2]);",
         setup="var m = {};\n",
-        expected_message="Map keys must be Bool, Number, Nil, or String. NaN is not allowed.",
+        expected_message="Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__. NaN is not allowed.",
     ),
     # Regression armor: map_has_invalid_key's own spec row ("Map.has(key)
     # or Map.del(key)") covers both natives with one Example; this row
@@ -334,7 +334,7 @@ FATAL_ROWS = [
         "fatal",
         "m.del(0.0/0.0);",
         setup="var m = {};\n",
-        expected_message="Map keys must be Bool, Number, Nil, or String. NaN is not allowed.",
+        expected_message="Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__. NaN is not allowed.",
     ),
     Row(
         "undefined_property_on_file",

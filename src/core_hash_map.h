@@ -85,14 +85,20 @@ class CoreHashMap {
     // Insert or update entry e. Returns true if e's key was newly inserted.
     // May grow (and re-allocate via Alloc) when the load factor is exceeded.
     bool set(const Entry& e) {
+        return set(e, [&](const Entry& s) { return Policy::keyMatch(s, e); });
+    }
+
+    // Insert or update entry e with an explicit key-equality predicate. The
+    // VM map path uses this so an Instance key can dispatch user __eq__.
+    template <typename KeyMatch>
+    bool set(const Entry& e, KeyMatch match) {
         int cap = static_cast<int>(m_buckets.size());
         if (m_count + m_dead + 1 > static_cast<int>(cap * MAX_LOAD)) {
             grow();
             cap = static_cast<int>(m_buckets.size());
         }
         Entry* slot =
-            findSlotIn(m_buckets.data(), cap, Policy::hashOf(e),
-                       [&](const Entry& s) { return Policy::keyMatch(s, e); });
+            findSlotIn(m_buckets.data(), cap, Policy::hashOf(e), match);
         const bool wasEmpty = Policy::isEmpty(*slot);
         const bool wasTombstone = !wasEmpty && Policy::isTombstone(*slot);
         if (wasEmpty || wasTombstone) {

@@ -16,9 +16,12 @@ import java.util.Map;
  * 2026-08-14); the order-sensitive examples are excluded from the JVM
  * differential test path for that reason (see tools/jvm_excluded_examples.txt).
  *
- * Key validity (nil/bool/number-not-NaN/string only) is enforced by callers
- * (LoxOps), matching vm.cpp: the check happens at each opcode site, not
- * inside ObjMap itself.
+ * Key validity is enforced by callers (LoxOps), matching vm.cpp. Scalar and
+ * String keys go in a LinkedHashMap, which already gives the right
+ * value/identity equality. An Instance key goes in a separate list, because
+ * its equality is the class's own {@code __eq__} (Java's {@code Object.equals}
+ * is identity for LoxInstance) — see spec/03-types.md's Map section. The two
+ * structures cannot collide: a scalar/string key never equals an Instance key.
  */
 public final class LoxMap {
     // Keyed by the numerically-normalized key, so -0.0 and 0.0 land in the
@@ -38,6 +41,8 @@ public final class LoxMap {
     }
 
     private final Map<Object, Slot> entries = new LinkedHashMap<>();
+    // Instance keys, searched with the class's __eq__ (stored key on the left).
+    private final List<Slot> instanceEntries = new ArrayList<>();
 
     // Structural version, bumped on a real insert or a real erase only.
     // A repeat write of one key and a remove of a missing key leave it
@@ -45,9 +50,28 @@ public final class LoxMap {
     // plus insert that restores the net size still trips the check.
     private int version;
 
+    // Non-zero while a key operation runs. put/remove then raise
+    // MapChangedError, so a user __hash__/__eq__ cannot mutate this map
+    // during a lookup.
+    private int keyOpDepth;
+
     /** Structural version for the for-in fail-fast check. */
     int version() {
         return version;
+    }
+
+    private static boolean isInstanceKey(Object key) {
+        return key instanceof LoxInstance
+            && LoxOps.isInstanceMapKey((LoxInstance) key);
+    }
+
+    private int findInstance(Object key) {
+        for (int i = 0; i < instanceEntries.size(); i++) {
+            if (LoxOps.keyEquals(instanceEntries.get(i).displayKey, key)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     // -0.0 and 0.0 must hash and look up identically, matching IEEE 754
@@ -63,39 +87,100 @@ public final class LoxMap {
     }
 
     public void put(Object key, Object value) {
-        Object normalized = normalizeKey(key);
-        // Count only a new key: an overwrite leaves iteration valid, while
-        // a paired erase plus insert must still trip the iterator check.
-        if (!entries.containsKey(normalized)) {
-            version++;
+        if (keyOpDepth > 0) {
+            throw LoxOps.makeError("MapChangedError",
+                                   "Map changed during key hashing or equality.");
         }
-        entries.put(normalized, new Slot(key, value));
+        keyOpDepth++;
+        try {
+            if (isInstanceKey(key)) {
+                LoxOps.checkUserHash(key);
+                int i = findInstance(key);
+                if (i < 0) {
+                    instanceEntries.add(new Slot(key, value));
+                    version++;
+                } else {
+                    instanceEntries.set(i, new Slot(key, value));
+                }
+                return;
+            }
+            Object normalized = normalizeKey(key);
+            // Count only a new key: an overwrite leaves iteration valid, while
+            // a paired erase plus insert must still trip the iterator check.
+            if (!entries.containsKey(normalized)) {
+                version++;
+            }
+            entries.put(normalized, new Slot(key, value));
+        } finally {
+            keyOpDepth--;
+        }
     }
 
     public Object get(Object key) {
-        Slot slot = entries.get(normalizeKey(key));
-        return (slot == null) ? null : slot.value;
+        keyOpDepth++;
+        try {
+            if (isInstanceKey(key)) {
+                LoxOps.checkUserHash(key);
+                int i = findInstance(key);
+                return (i < 0) ? null : instanceEntries.get(i).value;
+            }
+            Slot slot = entries.get(normalizeKey(key));
+            return (slot == null) ? null : slot.value;
+        } finally {
+            keyOpDepth--;
+        }
     }
 
     public boolean has(Object key) {
-        return entries.containsKey(normalizeKey(key));
+        keyOpDepth++;
+        try {
+            if (isInstanceKey(key)) {
+                LoxOps.checkUserHash(key);
+                return findInstance(key) >= 0;
+            }
+            return entries.containsKey(normalizeKey(key));
+        } finally {
+            keyOpDepth--;
+        }
     }
 
     public void remove(Object key) {
-        // Count only a real erase: a miss leaves iteration valid.
-        if (entries.remove(normalizeKey(key)) != null) {
-            version++;
+        if (keyOpDepth > 0) {
+            throw LoxOps.makeError("MapChangedError",
+                                   "Map changed during key hashing or equality.");
+        }
+        keyOpDepth++;
+        try {
+            if (isInstanceKey(key)) {
+                LoxOps.checkUserHash(key);
+                int i = findInstance(key);
+                if (i >= 0) {
+                    instanceEntries.remove(i);
+                    version++;
+                }
+                return;
+            }
+            // Count only a real erase: a miss leaves iteration valid.
+            if (entries.remove(normalizeKey(key)) != null) {
+                version++;
+            }
+        } finally {
+            keyOpDepth--;
         }
     }
 
     public int size() {
-        return entries.size();
+        return entries.size() + instanceEntries.size();
     }
 
     /** Insertion order, each entry's key exactly as the caller last wrote it. */
     public List<Map.Entry<Object, Object>> entrySet() {
-        List<Map.Entry<Object, Object>> result = new ArrayList<>(entries.size());
+        List<Map.Entry<Object, Object>> result =
+            new ArrayList<>(entries.size() + instanceEntries.size());
         for (Slot slot : entries.values()) {
+            result.add(new AbstractMap.SimpleImmutableEntry<>(slot.displayKey, slot.value));
+        }
+        for (Slot slot : instanceEntries) {
             result.add(new AbstractMap.SimpleImmutableEntry<>(slot.displayKey, slot.value));
         }
         return result;

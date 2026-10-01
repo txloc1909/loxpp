@@ -96,12 +96,15 @@ missing: sockets and subprocess** — the medium-cost tail of this bucket. The
 
 **3. Non-local control flow (`try`/`catch`/`throw`/`defer`). DONE** (#223, all three backends; `src/vm.cpp`, `src/backend/jvm_emitter.cpp`, `runtime/clr/src/LoxRuntime.cs`, `spec/04-semantics.md`). Handler stack + frame unwinding. Closes expressiveness roadmap item 3: runtime faults are now catchable via `try`/`catch`, non-local escape works without threading `Result` through every return, and `defer` provides cleanup-on-unwind (also fixes the `container_objects.h` file-handle leak TODO). See `notes/non-local-control-flow.md` for the design record and tracking issue `#223` for the implementation breakdown.
 
-**4. Extensible protocols / operator overloading.** Today `for-in`, `[]`, `==`,
-`len`, `()`, and map-key hashing are hardwired to built-in List/String/Map, so
-user types are second-class — you can't make a tree iterable, a matrix
-indexable, or key a map by an object. Make these opcodes dispatch to user
-methods (`__iter__`/`__index__`/`__eq__`/`__hash__`/`__call__`). Subsumes the
-`hash()`-protocol open question in `language-extension.md`.
+**4. Extensible protocols / operator overloading. DONE** (#472). `for-in`,
+`[]`, `==`, `len`, `()`, and map-key hashing now dispatch to user methods
+(`__iter__`/`__index_get__`/`__index_set__`/`__eq__`/`__hash__`/`__call__`),
+so user types are first-class. Map keys through `__hash__`/`__eq__` landed in
+#469: a valid Instance key defines both methods, the map hashes the key and
+resolves a collision with the stored key's `__eq__`, and a key method that
+writes its own map raises `MapChangedError`. The `hash()`-protocol open
+question in `language-extension.md` is closed. The one deferred piece is
+`__str__` (D2, #470) for a user canonical string form.
 
 **5. Coroutines / generators (single-core suspension).** Stackful suspend +
 `yield`. Lazy/infinite sequences, async I/O, cooperative scheduling, suspendable

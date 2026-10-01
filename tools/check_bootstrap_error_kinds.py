@@ -134,7 +134,12 @@ EXPECTED_CALLS = [
     ('EmptyListError', '"Cannot pop from an empty list."', RECORDED),
     ('ValueNotFoundError', '"Value not found in list."', JUDGED),
     ('NaNKeyError', '"NaN cannot be used as a map key."', RECORDED),
-    ('InvalidMapKeyError', '"Map keys must be Bool, Number, Nil, or String."', RECORDED),
+    ('InvalidMapKeyError', '"Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__."', RECORDED),
+    ('OperatorResultTypeError', '"Operator method must return a Number."', JUDGED),
+    ('NaNKeyError', '"NaN cannot be used as a map key."', RECORDED),
+    ('OperatorResultTypeError', '"Operator method must return a Boolean."', JUDGED),
+    ('MapChangedError', '"Map changed during key hashing or equality."', JUDGED),
+    ('MapChangedError', '"Map changed during key hashing or equality."', JUDGED),
     ('IndexTypeError', '"List index must be a number."', RECORDED),
     ('IndexNotIntegerError', '"List index must be an integer."', RECORDED),
     ('IndexOutOfBoundsError', '"List index out of bounds."', RECORDED),
@@ -202,7 +207,7 @@ EXPECTED_CALLS = [
 # review. See --report for the current judged/recorded split; this script
 # does not restate that split in prose here, to avoid a second hand-written
 # copy of a number the data already holds.
-EXPECTED_SPEC_TABLE_KIND_COUNT = 19
+EXPECTED_SPEC_TABLE_KIND_COUNT = 20
 
 
 def strip_string_literals(text: str) -> str:
