@@ -1854,7 +1854,7 @@ fun reflectCallMethod(interp, args) {
     }
     var tag = loxTag(callee);
     if (tag == "class" or tag == "enum_ctor") {
-        interp.setError("ReflectionUnsupportedError", "callMethod does not support user-defined methods yet.", 0);
+        interp.setError("ReflectionUnsupportedError", "callMethod does not support class or enum constructor values.", 0);
         return nil;
     }
     if (tag == "function") {

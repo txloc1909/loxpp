@@ -499,7 +499,7 @@ is called as-is (slot 0 is the function itself, as for a plain call).
 
 **Restriction:** a Class or Enum constructor value is callable via `()`, but
 `callMethod` does not support it — calling one raises a **runtime error**
-("callMethod does not support user-defined methods yet."). Any other
+("callMethod does not support class or enum constructor values."). Any other
 non-callable value raises a runtime error
 ("callMethod requires a callable value.").
 

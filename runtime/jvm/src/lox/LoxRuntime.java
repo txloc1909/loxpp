@@ -477,7 +477,7 @@ public final class LoxRuntime {
         Object[] forwarded = Arrays.copyOfRange(args, 2, args.length);
         if (callee instanceof LoxClass || callee instanceof LoxEnumCtor) {
             throw new LoxError(
-                "callMethod does not support user-defined methods yet.");
+                "callMethod does not support class or enum constructor values.");
         }
         if (callee instanceof LoxClosure) {
             LoxClosure closure = (LoxClosure) callee;

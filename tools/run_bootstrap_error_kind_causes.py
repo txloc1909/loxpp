@@ -119,7 +119,7 @@ PROBES = [
      FATAL, "ReflectionUndefinedMemberError", '"Undefined property \'" + name + "\'."'),
     ("callMethod() unsupported class value",
      'class Foo {} class Bar {} try { var f = Foo(); f.c = Bar; callMethod(f, "c"); } catch (e) { print e.kind; }',
-     FATAL, "ReflectionUnsupportedError", '"callMethod does not support user-defined methods yet."'),
+     FATAL, "ReflectionUnsupportedError", '"callMethod does not support class or enum constructor values."'),
     ("len() wrong argument type", 'try { len(42); } catch (e) { print e.kind; }',
      FATAL, "LengthTypeError", '"len() argument must be a String, List, or Map."'),
     ("callMethod() not-callable field",

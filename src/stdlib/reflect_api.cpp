@@ -205,7 +205,7 @@ static Value callMethodNative(int argCount, Value* argv) {
     // does not support them; a non-callable value is a distinct error.
     if (isClass(callee) || isEnumCtor(callee)) {
         nativeRuntimeError(
-            "callMethod does not support user-defined methods yet.");
+            "callMethod does not support class or enum constructor values.");
         return from<Nil>(Nil{});
     }
     if (!isNative(callee) && !isBoundNative(callee) && !isClosure(callee) &&
