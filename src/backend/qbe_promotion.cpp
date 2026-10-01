@@ -12,6 +12,10 @@ namespace qbe {
 
 namespace {
 
+// Above this many promotion candidates in one function, only read-only
+// slots are promoted (see the pressure cap in planPromotion).
+constexpr int kMaxPromotedSlots = 6;
+
 std::string paramName(int slot) { return "%qp" + std::to_string(slot); }
 std::string defName(int offset) { return "%q" + std::to_string(offset); }
 std::string phiName(int block, int slot) {
@@ -217,6 +221,34 @@ PromotionPlan planPromotion(const DecodedFunction& fn,
         if (slot > 0 && slot < before.localCount &&
             slot < static_cast<int>(plan.candidate.size())) {
             plan.candidate[static_cast<std::size_t>(slot)] = false;
+        }
+    }
+
+    // Register-pressure cap. Promoting a reassigned local adds a phi and
+    // lengthens its live range, which competed poorly with QBE's own
+    // register allocation in a function with many locals: the benchmark
+    // report (notes/benchmark_report_qbe_2026-10-01.md) measured mandelbrot
+    // about 50% slower with every candidate promoted, and neutral
+    // everywhere else. Above this count, keep only read-only slots (whose
+    // single definition needs no phi and whose stack cell never goes stale).
+    {
+        int total = 0;
+        for (bool c : plan.candidate) {
+            total += c ? 1 : 0;
+        }
+        if (total > kMaxPromotedSlots) {
+            std::vector<bool> isSet(plan.candidate.size(), false);
+            for (const DecodedInstruction& ins : fn.instructions) {
+                if (ins.op == Op::SET_LOCAL && ins.byteOperand >= 0 &&
+                    ins.byteOperand < static_cast<int>(isSet.size())) {
+                    isSet[static_cast<std::size_t>(ins.byteOperand)] = true;
+                }
+            }
+            for (std::size_t i = 0; i < plan.candidate.size(); i++) {
+                if (isSet[i]) {
+                    plan.candidate[i] = false;
+                }
+            }
         }
     }
 
