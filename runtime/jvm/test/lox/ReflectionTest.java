@@ -182,22 +182,33 @@ public final class ReflectionTest {
                 "callMethod() on a different bound map native queries ITS OWN map, not the other one");
 
         // A method resolved from the class (not a field) is closure-backed:
-        // v1 restriction, matches native.
-        checkThrows(() -> call(globals, "callMethod", instance, "greet"), LoxError.class,
-                "callMethod() rejects a resolved user-defined method");
+        // it runs, and `this` binds to the receiver (issue #496).
+        checkEquals("ran:greet", call(globals, "callMethod", instance, "greet"),
+                "callMethod() runs a resolved user-defined method");
 
-        // A field holding a closure is the same restriction.
+        LoxClosure selfClosure = new LoxClosure("self", 0, new Object[0][]) {
+            @Override
+            protected Object invoke(Object self, Object[] a) {
+                return self;
+            }
+        };
+        LoxOps.defineMethod(klass, "self", selfClosure);
+        check(call(globals, "callMethod", instance, "self") == instance,
+                "callMethod() binds `this` to the receiver for a class method");
+
+        // A field holding a closure runs too.
         LoxOps.setProperty(instance, "closureField", noopClosure("g", 0));
-        checkThrows(() -> call(globals, "callMethod", instance, "closureField"), LoxError.class,
-                "callMethod() rejects a field holding a closure");
+        checkEquals("ran:g", call(globals, "callMethod", instance, "closureField"),
+                "callMethod() runs a field holding a closure");
 
-        // A field holding a bound user-defined method, same restriction.
+        // A field holding a bound user-defined method runs against its own
+        // receiver.
         LoxClass other = new LoxClass("Other", null);
         LoxOps.defineMethod(other, "m", noopClosure("m", 0));
         Object otherInstance = other.call(new Object[0]);
         LoxOps.setProperty(instance, "boundMethodField", LoxOps.getProperty(otherInstance, "m"));
-        checkThrows(() -> call(globals, "callMethod", instance, "boundMethodField"), LoxError.class,
-                "callMethod() rejects a field holding a bound user-defined method");
+        checkEquals("ran:m", call(globals, "callMethod", instance, "boundMethodField"),
+                "callMethod() runs a field holding a bound user-defined method");
 
         // Field shadows method: a field with the same name as a method wins.
         LoxOps.setProperty(instance, "greet", globals.get("str"));
