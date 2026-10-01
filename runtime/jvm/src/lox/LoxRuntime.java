@@ -307,12 +307,11 @@ public final class LoxRuntime {
 
     // Mirrors src/stdlib/reflect_api.cpp: type/fields/methods/getField/
     // setField/hasField/callMethod, the introspection surface over
-    // LoxInstance's field table and LoxClass's method table. `callMethod` is
-    // capped to natives-only on every backend, including this one, even
-    // though a JVM closure call needs no re-entrant interpreter loop — see
-    // notes/expressiveness-roadmap.md item 1: lifting this only on JVM would
-    // let JVM print real output where native raises an error, which
-    // tools/diff_runtimes.py would catch as a divergence.
+    // LoxInstance's field table and LoxClass's method table. `callMethod` on
+    // a closure-backed method runs here (issue #496): a JVM closure call is
+    // an ordinary Java call, so no re-entrant interpreter loop is needed. The
+    // native backend gained that primitive in the same change, keeping
+    // tools/diff_runtimes.py green.
     private static void registerReflection(LoxGlobals globals) {
         globals.define("type",
                        new LoxNative("type", 1, args -> typeNameOf(args[0])));
@@ -441,14 +440,20 @@ public final class LoxRuntime {
     }
 
     // callMethod(inst, name, ...args) resolves exactly like LoxOps.invoke's
-    // instance branch (fields shadow methods), but only ever calls a native:
-    // a resolved LoxClosure/LoxBoundMethod is a deliberate v1 runtime error,
-    // matching native's restriction (see this method's caller for why). A
-    // resolved LoxNative — whether a plain global native stored in a field,
+    // instance branch (fields shadow methods). It calls a native, a bound
+    // native, or a closure-backed method (a user-defined method, or a
+    // closure/bound method stored in a field). A Class or Enum constructor
+    // value stays unsupported, and any other value is not callable. The
+    // native backend reaches the closure case through its re-entrant call
+    // primitive (issue #496); here a user method is just a Java call.
+    //
+    // A resolved LoxNative — whether a plain global native stored in a field,
     // or a bound Map/File native such as `someMap.has` stored in a field —
-    // already captures whatever receiver it needs as a Java closure, so,
-    // unlike native's ObjBoundNative, no receiver substitution is needed
-    // here before forwarding the trailing args.
+    // already captures whatever receiver it needs as a Java closure, so no
+    // receiver substitution is needed before forwarding the trailing args.
+    // For a method resolved from the class, `this` binds to the instance
+    // (callAsSelf); a closure stored in a field binds `this` to the closure,
+    // matching native's Op::CALL of a field closure.
     private static Object callMethod(Object[] args) {
         if (args.length < 2) {
             throw new LoxError("Expected at least 2 arguments.");
@@ -457,8 +462,9 @@ public final class LoxRuntime {
             requireInstance(args[0], "Only instances have methods.");
         String name = requireFieldName(args[1]);
 
+        boolean viaField = inst.fields.containsKey(name);
         Object callee;
-        if (inst.fields.containsKey(name)) {
+        if (viaField) {
             callee = inst.fields.get(name);
         } else {
             LoxClosure method = inst.klass.findMethod(name);
@@ -469,14 +475,22 @@ public final class LoxRuntime {
         }
 
         Object[] forwarded = Arrays.copyOfRange(args, 2, args.length);
-        if (callee instanceof LoxNative) {
-            return ((LoxNative)callee).call(forwarded);
-        }
-        if (callee instanceof LoxClosure || callee instanceof LoxBoundMethod) {
+        if (callee instanceof LoxClass || callee instanceof LoxEnumCtor) {
             throw new LoxError(
-                "callMethod does not support user-defined methods yet.");
+                "callMethod does not support class or enum constructor values.");
         }
-        throw new LoxError("Can only call functions, classes and enums.");
+        if (callee instanceof LoxClosure) {
+            LoxClosure closure = (LoxClosure) callee;
+            return viaField ? closure.call(forwarded)
+                            : closure.callAsSelf(inst, forwarded);
+        }
+        if (callee instanceof LoxBoundMethod) {
+            return ((LoxBoundMethod) callee).call(forwarded);
+        }
+        if (callee instanceof LoxNative) {
+            return ((LoxNative) callee).call(forwarded);
+        }
+        throw new LoxError("callMethod requires a callable value.");
     }
 
     private interface DoubleFn {

@@ -108,6 +108,7 @@ class Runtime {
         // VM::interpret() still sets on every call, since that points a
         // global/thread-local at whichever VM is currently active.
         m_stdlibCtx.mm = &m_mm;
+        m_stdlibCtx.rt = this;
     }
 
     // Set once by VM's constructor to `[this](int stop){ return run(stop); }`
@@ -266,10 +267,31 @@ class Runtime {
 
     ThrowOutcome call(ObjClosure* closure, int argCount,
                       int stopAtFrameCount = 0);
-    bool callNative(ObjNative* native, int argCount);
-    bool callBoundNative(ObjBoundNative* bn, int argCount);
+    OpResult callNative(ObjNative* native, int argCount, int stopAtFrameCount);
+    OpResult callBoundNative(ObjBoundNative* bn, int argCount,
+                             int stopAtFrameCount);
     bool bindMethod(ObjClass* klass, ObjString* name);
     void defineNatives();
+
+    // Synchronously invokes the callable whose callee and `argCount` arguments
+    // already sit at the top of the operand stack (callee at
+    // stackTop[-argCount-1]), running an interpreted callee to completion via
+    // a nested run(). On success, pops the result into *out, restores the
+    // stack top, and returns true. Returns false when the callee's throw was
+    // resolved outside this invocation or was uncaught; callNative() then
+    // propagates the recorded outcome instead of a result. This is the bounded
+    // re-entrant call path a native such as callMethod uses to reach a
+    // closure-backed method (notes/expressiveness-roadmap.md item 1).
+    bool invokeCallableFromNative(int argCount, Value* out);
+
+    // The method-invocation variant of invokeCallableFromNative: `method` has
+    // already been resolved from a class's method table, and `this` must be
+    // the receiver at stackTop[-argCount-1] — the caller pushes the receiver
+    // and the forwarded args before calling. Binds slot 0 to that receiver
+    // exactly as Op::INVOKE does, then runs the call to completion. On success
+    // pops the result into *out and returns true; otherwise records the
+    // outcome for callNative() and returns false.
+    bool invokeMethodFromNative(ObjClosure* method, int argCount, Value* out);
 
     // The two throwable checks a map key must pass (NaN key, non-string
     // object key) — kind/message pair, or nullopt when indexVal is valid.
@@ -411,6 +433,49 @@ class Runtime {
     OpResult opGetIter(int stopAtFrameCount);
     OpResult opIterHasNext();
     OpResult opIterNext();
+
+    // OpCall() plus a nested run() for whatever frame it pushes: the bounded
+    // re-entrant call path. `argCount` names a callee/arg window already at
+    // the top of the operand stack, exactly as opCall() expects.
+    // `throwBoundary` is the frame-count boundary a throw from the call is
+    // judged against (see ThrowOutcome). The run boundary — the frame count the
+    // nested run() stops at — is this call's own entry frame count. On OK the
+    // result replaces the callee+args window. On Stop, control passed to a
+    // handler outside the run boundary; propagate without touching the stack
+    // top. On Fatal an uncaught error was already reported and the VM stack was
+    // reset.
+    OpResult reentrantCall(int argCount, int throwBoundary);
+
+    // The native-facing half of the re-entrant path. A native ran a call that
+    // pushed exactly one frame (m_frameCount == entry + 1); `frameSlots` is
+    // that frame's slot 0 (captured as stackTop - argCount - 1 before the
+    // dispatch). Runs the frame to completion and classifies the exit:
+    //   OK      the callee returned normally; its result is the sole value at
+    //           frameSlots[0].
+    //   Resumed a throw was caught by a handler still inside the enclosing
+    //           run()'s range (m_nativeStopAtFrameCount) — control was
+    //           redirected (ip/frame changed), so the enclosing run must
+    //           reload and continue rather than treat this as a result.
+    //   Stop    a throw was caught outside the enclosing run's range; control
+    //           belongs to a less-nested run().
+    //   Fatal   an uncaught error was reported; the VM stack was reset.
+    // The Resumed-vs-OK decision uses frameSlots, not only m_frameCount: a
+    // normal return leaves exactly one value at frameSlots[0], while a caught
+    // throw truncates the stack to the handler's checkpoint (below frameSlots)
+    // and leaves m_frameCount at or below entry.
+    OpResult runNativeReentrant(int entry, Value* frameSlots);
+
+    // Runs to completion a single frame that a re-entrant dispatch just pushed
+    // (the dispatch returned Resumed with m_frameCount == entry + 1). `entry`
+    // is the frame count captured before the dispatch. Shared by every
+    // re-entrant call site — opCall-based and method-based alike — so the
+    // nested-run boundary and Stop/Fatal translation live in one place.
+    OpResult runPushedFrameToCompletion(int entry);
+
+    // Invokes the installed interpreter loop at `entry`, returning false if no
+    // loop is installed or the run ended in a fatal error. Shared by the two
+    // re-entrant exit classifiers above/below.
+    bool runNestedLoop(int entry);
 
     // Classes, methods, aggregates, slicing, and match dispatch (S5, #458),
     // moved out of VM::run() the same way as the op*() methods above so the
@@ -781,6 +846,17 @@ class Runtime {
 
     // See setInterpretLoop() above.
     std::function<InterpretResult(int)> m_runLoop;
+
+    // Set by invokeCallableFromNative() when a native's re-entrant call did
+    // not return a value (Stop/Fatal/Resumed). callNative() reads it after the
+    // native returns and propagates it instead of pushing the native's
+    // placeholder result. Reset to OK before each native call.
+    OpResult m_reentrantOutcome{OpResult::OK};
+
+    // The stopAtFrameCount of the run() invocation that called the native
+    // currently executing. Saved/restored around each callNative() so a native
+    // re-entering the VM judges a caught throw against the right boundary.
+    int m_nativeStopAtFrameCount{0};
 
 #ifdef LOXPP_PROFILE
     ProfilerData m_profilerData;

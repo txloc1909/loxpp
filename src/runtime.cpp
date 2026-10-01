@@ -232,6 +232,105 @@ Runtime::OpResult Runtime::invokeClosure(ObjClosure* closure, int argCount,
     return fromThrow(call(closure, argCount, stopAtFrameCount));
 }
 
+Runtime::OpResult Runtime::runPushedFrameToCompletion(int entry) {
+    if (!runNestedLoop(entry)) {
+        return OpResult::Fatal;
+    }
+    if (m_frameCount != entry) {
+        // The throw was resolved by a handler outside this call, so the nested
+        // run() stopped early and control belongs to an outer run()
+        // invocation. The stack top must not be touched.
+        return OpResult::Stop;
+    }
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::reentrantCall(int argCount, int throwBoundary) {
+    // The nested run() must stop once the frame this call pushes (if any) has
+    // returned — i.e. when m_frameCount falls back to this call's own entry
+    // depth. Captured before opCall() can push anything.
+    int entry = m_frameCount;
+    OpResult result = opCall(argCount, throwBoundary);
+    if (result != OpResult::Resumed) {
+        return result; // OK (value on stack), Stop, or Fatal
+    }
+    // Resumed means opCall() pushed a frame (ThrowOutcome::Pushed) or a throw
+    // was caught inside the current run() (HandledContinue). Only the former
+    // leaves a frame of ours to run; tell them apart by frame depth, exactly
+    // as runPendingDefers() does.
+    if (m_frameCount != entry + 1) {
+        return OpResult::Resumed;
+    }
+    return runPushedFrameToCompletion(entry);
+}
+
+bool Runtime::runNestedLoop(int entry) {
+    if (!m_runLoop) {
+        // No interpreter loop is installed: this Runtime is driven by compiled
+        // code (the QBE backend), where every callee has attached code and so
+        // takes the callCompiled() path instead of pushing an interpreted
+        // frame. Reaching here means an interpreted-fallback closure was pushed
+        // with nothing to run it — the same dangling-frame hazard
+        // rt_startup's requireAllCompiled guards against (backend/rt_capi.h).
+        runtimeError("Re-entrant call requires an interpreter loop.");
+        return false;
+    }
+    return m_runLoop(entry) == InterpretResult::OK;
+}
+
+Runtime::OpResult Runtime::runNativeReentrant(int entry, Value* frameSlots) {
+    if (!runNestedLoop(entry)) {
+        return OpResult::Fatal;
+    }
+    // A handler below the enclosing run()'s own boundary caught the throw;
+    // control belongs to a less-nested run().
+    if (m_frameCount <= m_nativeStopAtFrameCount) {
+        return OpResult::Stop;
+    }
+    // A normal return leaves exactly one value at frameSlots[0]. Any other
+    // stack top means a handler inside the enclosing run() (but above the
+    // callee) caught the throw and redirected control to its catch block. The
+    // enclosing run must reload its frame/ip and continue, not take a result.
+    if (m_frameCount != entry || stackTop != frameSlots + 1) {
+        return OpResult::Resumed;
+    }
+    return OpResult::OK;
+}
+
+bool Runtime::invokeCallableFromNative(int argCount, Value* out) {
+    int entry = m_frameCount;
+    Value* frameSlots = stackTop - argCount - 1;
+    OpResult result = opCall(argCount, m_nativeStopAtFrameCount);
+    if (result == OpResult::Resumed && m_frameCount == entry + 1) {
+        result = runNativeReentrant(entry, frameSlots);
+    }
+    if (result == OpResult::OK) {
+        *out = pop();
+        return true;
+    }
+    m_reentrantOutcome = result;
+    return false;
+}
+
+bool Runtime::invokeMethodFromNative(ObjClosure* method, int argCount,
+                                     Value* out) {
+    int entry = m_frameCount;
+    Value* frameSlots = stackTop - argCount - 1;
+    // The receiver already occupies stackTop[-argCount-1] (the caller pushed
+    // it), so dispatchMethod() binds slot 0 to `this` exactly as Op::INVOKE.
+    OpResult result = dispatchMethod(method, argCount, m_nativeStopAtFrameCount,
+                                     ResultCheck::None);
+    if (result == OpResult::Resumed && m_frameCount == entry + 1) {
+        result = runNativeReentrant(entry, frameSlots);
+    }
+    if (result == OpResult::OK) {
+        *out = pop();
+        return true;
+    }
+    m_reentrantOutcome = result;
+    return false;
+}
+
 ObjUpvalue* Runtime::captureUpvalue(Value* local) {
     ObjUpvalue* prev = nullptr;
     ObjUpvalue* cur = m_openUpvalues;
@@ -300,79 +399,38 @@ InterpretResult Runtime::runPendingDefers(int frameIndex,
         }
         int argCount = static_cast<int>(deferred->args.size());
 
-        // Handle various callable types (similar to Op::CALL dispatch).
-        // For BoundMethod, replace the method on the stack with the receiver,
-        // then call the underlying method closure. BoundMethod and Closure
-        // go through invokeClosure(), not a bare call(): the callee can be a
-        // compiled closure (function->code != nullptr, an interpreted
-        // fallback frame deferring into QBE-compiled code — rt_capi.h's own
-        // "interpreted-fallback closure" split), and a bare call() would
-        // push a CallFrame that nothing here would ever run, the same
-        // "pushed frame nobody runs" bug invokeClosure() fixes at every
-        // other direct-call site in this file.
-        OpResult callResult;
-        if (isBoundMethod(calleeVal)) {
-            ObjBoundMethod* bound = asObjBoundMethod(as<Obj*>(calleeVal));
-            stackTop[-argCount - 1] = bound->receiver;
-            callResult =
-                invokeClosure(bound->method, argCount, stopAtFrameCount);
-        } else if (isClosure(calleeVal)) {
-            ObjClosure* closure = asObjClosure(as<Obj*>(calleeVal));
-            callResult = invokeClosure(closure, argCount, stopAtFrameCount);
-        } else if (isNative(calleeVal)) {
-            ObjNative* native = asObjNative(as<Obj*>(calleeVal));
-            callResult =
-                callNative(native, argCount) ? OpResult::OK : OpResult::Fatal;
-        } else if (isBoundNative(calleeVal)) {
-            ObjBoundNative* bound = asObjBoundNative(as<Obj*>(calleeVal));
-            callResult = callBoundNative(bound, argCount) ? OpResult::OK
-                                                          : OpResult::Fatal;
-        } else {
-            // Unexpected callable type in deferred call
+        // Only these four callable kinds are legal as a deferred call. A
+        // class, enum constructor, instance, or non-callable value stays the
+        // fatal "unexpected type" it has always been, rather than falling
+        // through to reentrantCall()/opCall()'s wider dispatch
+        // (tools/check_fault_table.py pins this).
+        if (!isBoundMethod(calleeVal) && !isClosure(calleeVal) &&
+            !isNative(calleeVal) && !isBoundNative(calleeVal)) {
             runtimeError("Deferred callable has unexpected type.");
             return InterpretResult::RUNTIME_ERROR;
         }
 
+        // reentrantCall() runs the deferred call to completion — a nested
+        // run() stopping once m_frameCount returns to frameIndex + 1, the
+        // same boundary the old inline m_runLoop() used — and replaces the
+        // pushed callee+args with the result on OK. It shares one
+        // implementation with every other re-entrant call site; see its own
+        // definition. For BoundMethod it replaces the callee slot with the
+        // receiver, matching the old inline dispatch.
+        OpResult callResult = reentrantCall(argCount, stopAtFrameCount);
         if (callResult == OpResult::Fatal) {
             return InterpretResult::RUNTIME_ERROR;
         }
-        if (callResult == OpResult::OK) {
-            // A native call already ran, or invokeClosure() ran a compiled
-            // closure to completion internally (Runtime::callCompiled) and
-            // already popped its own frame — either way there is no pending
-            // frame here to run to completion. Move on to the next deferred
-            // call.
-            continue;
-        }
-        // callResult is Stop or Resumed. Resumed covers two different
-        // ThrowOutcomes (see OpResult's own doc comment): a frame genuinely
-        // pushed for this call (ThrowOutcome::Pushed), or this call's own
-        // arity/overflow fault caught by a handler elsewhere
-        // (ThrowOutcome::HandledContinue). call()'s arity/overflow check
-        // runs before any push, so only the first case can leave
-        // m_frameCount at frameIndex + 2; use that to tell them apart
-        // instead of threading ThrowOutcome itself through invokeClosure().
-        if (callResult == OpResult::Stop || m_frameCount != frameIndex + 2) {
-            // No frame was pushed for this call. Any handler reachable here
-            // was pushed before frameIndex's own function was even called (a
-            // handler scoped inside that function's body is already popped
-            // by the time RUN_DEFERS runs), so frameIndex no longer exists
-            // — there is no new frame to run to completion. Per defer step
-            // 5's documented limitation, abandon any remaining sibling
-            // defers rather than still running them.
-            return InterpretResult::OK;
-        }
-        InterpretResult result = m_runLoop(frameIndex + 1);
-        if (result != InterpretResult::OK) {
-            return result;
-        }
-        if (m_frameCount != frameIndex + 1) {
-            // The deferred call's own throw propagated past this frame (it
-            // no longer exists — an outer handler or program exit already
-            // took over dispatch). Abandon the rest of this list; the
+        if (callResult == OpResult::Stop || callResult == OpResult::Resumed) {
+            // The deferred call's own throw was either caught outside this
+            // frame, or resolved without pushing a frame of ours (an arity
+            // fault caught elsewhere). Either way frameIndex no longer
+            // exists — per defer step 5's documented limitation, abandon any
+            // remaining sibling defers rather than still running them; the
             // caller must notice m_frameCount changed and stop too.
             return InterpretResult::OK;
         }
+        // OK: the result is on the stack. Move on to the next deferred call.
     }
     return InterpretResult::OK;
 }
@@ -535,27 +593,47 @@ Runtime::ThrowOutcome Runtime::raiseThrowableError(const char* kind_str,
     return handleThrow(Value{static_cast<Obj*>(err_obj)}, stopAtFrameCount);
 }
 
-bool Runtime::callNative(ObjNative* native, int argCount) {
+Runtime::OpResult Runtime::callNative(ObjNative* native, int argCount,
+                                      int stopAtFrameCount) {
     if (native->arity != -1 && argCount != native->arity) {
         runtimeError("Expected %d arguments but got %d.", native->arity,
                      argCount);
-        return false;
+        return OpResult::Fatal;
     }
     m_stdlibCtx.clearError();
+    // A native may call back into the VM (callMethod -> a closure-backed
+    // method). That sets m_reentrantOutcome when the nested call does not
+    // return a value; save any outer value so nesting does not clobber it.
+    // m_nativeStopAtFrameCount must likewise name the enclosing run()'s own
+    // boundary for the duration of this native.
+    OpResult savedOutcome = m_reentrantOutcome;
+    m_reentrantOutcome = OpResult::OK;
+    int savedBoundary = m_nativeStopAtFrameCount;
+    m_nativeStopAtFrameCount = stopAtFrameCount;
     Value result = native->function(argCount, stackTop - argCount);
+    m_nativeStopAtFrameCount = savedBoundary;
+    OpResult outcome = m_reentrantOutcome;
+    m_reentrantOutcome = savedOutcome;
+    if (outcome != OpResult::OK) {
+        // Control left this invocation (a throw handled by an outer run(), an
+        // error caught inside this run(), or an uncaught fault that already
+        // reset the stack). Do not push the native's placeholder return value.
+        return outcome;
+    }
     if (m_stdlibCtx.nativeError) {
         runtimeError("%s", m_stdlibCtx.nativeErrorMsg.c_str());
-        return false;
+        return OpResult::Fatal;
     }
     stackTop -= argCount + 1; // pop args + callee
     push(result);
-    return true;
+    return OpResult::OK;
 }
 
-bool Runtime::callBoundNative(ObjBoundNative* bn, int argCount) {
+Runtime::OpResult Runtime::callBoundNative(ObjBoundNative* bn, int argCount,
+                                           int stopAtFrameCount) {
     ObjNative* fn = bn->native;             // read before the slot changes
     stackTop[-argCount - 1] = bn->receiver; // natives read args[-1]
-    return callNative(fn, argCount);
+    return callNative(fn, argCount, stopAtFrameCount);
 }
 
 bool Runtime::bindMethod(ObjClass* klass, ObjString* name) {
@@ -733,8 +811,7 @@ Runtime::OpResult Runtime::dispatchMethod(ObjClosure* method, int argCount,
 Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
     Value callee = peek(argCount);
     if (isNative(callee)) {
-        return callNative(asObjNative(callee), argCount) ? OpResult::OK
-                                                         : OpResult::Fatal;
+        return callNative(asObjNative(callee), argCount, stopAtFrameCount);
     }
     if (isClosure(callee)) {
         return invokeClosure(asObjClosure(callee), argCount, stopAtFrameCount);
@@ -747,7 +824,7 @@ Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
     }
     if (isBoundNative(callee)) {
         ObjBoundNative* bn = asObjBoundNative(as<Obj*>(callee));
-        return callBoundNative(bn, argCount) ? OpResult::OK : OpResult::Fatal;
+        return callBoundNative(bn, argCount, stopAtFrameCount);
     }
     if (isClass(callee)) {
         ObjClass* klass = asObjClass(as<Obj*>(callee));
@@ -818,14 +895,12 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
                                      stopAtFrameCount);
             }
             if (isNative(fieldVal)) {
-                return callNative(asObjNative(as<Obj*>(fieldVal)), argCount)
-                           ? OpResult::OK
-                           : OpResult::Fatal;
+                return callNative(asObjNative(as<Obj*>(fieldVal)), argCount,
+                                  stopAtFrameCount);
             }
             if (isBoundNative(fieldVal)) {
                 ObjBoundNative* bn = asObjBoundNative(as<Obj*>(fieldVal));
-                return callBoundNative(bn, argCount) ? OpResult::OK
-                                                     : OpResult::Fatal;
+                return callBoundNative(bn, argCount, stopAtFrameCount);
             }
             runtimeError("Can only call functions, classes and enums.");
             return OpResult::Fatal;
@@ -840,9 +915,8 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
         }
         Obj* methodObj = as<Obj*>(method);
         if (isObjNative(methodObj)) {
-            return callNative(asObjNative(methodObj), argCount)
-                       ? OpResult::OK
-                       : OpResult::Fatal;
+            return callNative(asObjNative(methodObj), argCount,
+                              stopAtFrameCount);
         }
         return invokeClosure(asObjClosure(methodObj), argCount,
                              stopAtFrameCount);
@@ -912,9 +986,8 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
             runtimeError("Undefined method '%s' on file.", name->chars.c_str());
             return OpResult::Fatal;
         }
-        return callNative(asObjNative(as<Obj*>(method)), argCount)
-                   ? OpResult::OK
-                   : OpResult::Fatal;
+        return callNative(asObjNative(as<Obj*>(method)), argCount,
+                          stopAtFrameCount);
     }
     if (isMap(receiver)) {
         Value method;
@@ -922,9 +995,8 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
             runtimeError("Undefined method '%s' on map.", name->chars.c_str());
             return OpResult::Fatal;
         }
-        return callNative(asObjNative(as<Obj*>(method)), argCount)
-                   ? OpResult::OK
-                   : OpResult::Fatal;
+        return callNative(asObjNative(as<Obj*>(method)), argCount,
+                          stopAtFrameCount);
     }
     return fromThrow(raiseThrowableError("InvalidReceiverError",
                                          "Method called on invalid receiver.",

@@ -7,8 +7,8 @@
 //      class's methods (fields()/methods() are hash-order; tests sort).
 //   3. getField()/hasField()/setField() — fields-only property access (no
 //      method fallback, unlike the `.` operator).
-//   4. callMethod()  — dynamic dispatch by name, capped to natives-only in
-//      v1 (see notes/expressiveness-roadmap.md item 1).
+//   4. callMethod()  — dynamic dispatch by name, including closure-backed
+//      user methods (notes/expressiveness-roadmap.md item 1, issue #496).
 
 #include "test_harness.h"
 #include "class_objects.h"
@@ -315,13 +315,30 @@ TEST(ReflectApi, CallMethod_BoundNativeFieldValue_ForwardsReceiverAndArgs) {
     EXPECT_EQ(as<bool>(h2.lastResult()), false);
 }
 
-TEST(ReflectApi, CallMethod_ClosureBackedMethod_RuntimeError) {
-    // The v1 restriction: this is exactly the check that must be shown
-    // failing correctly (AGENTS.md: "prove that a new check can fail").
+TEST(ReflectApi, CallMethod_ClosureBackedMethod_Runs) {
+    // A user-defined method now runs through the re-entrant call primitive
+    // (issue #496), on every backend.
     VMTestHarness h;
-    EXPECT_EQ(h.run("class Foo { greet() { return 1; } } var f = Foo(); "
-                    "callMethod(f, \"greet\");"),
-              InterpretResult::RUNTIME_ERROR);
+    ASSERT_EQ(h.run("class Foo { greet(n) { return n + 1; } } var f = Foo(); "
+                    "callMethod(f, \"greet\", 41);"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<Number>(h.lastResult()), 42);
+}
+
+TEST(ReflectApi, CallMethod_ClosureBackedMethod_BindsThis) {
+    VMTestHarness h;
+    ASSERT_EQ(
+        h.run("class Foo { init() { this.x = 7; } get() { return this.x; } } "
+              "var f = Foo(); callMethod(f, \"get\");"),
+        InterpretResult::OK);
+    EXPECT_EQ(as<Number>(h.lastResult()), 7);
+}
+
+TEST(ReflectApi, CallMethod_ClosureBackedMethod_ThrowIsCatchable) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("class Foo { boom() { throw \"bad\"; } } var f = Foo(); "
+                    "try { callMethod(f, \"boom\"); } catch (e) { print e; }"),
+              InterpretResult::OK);
 }
 
 TEST(ReflectApi, CallMethod_ClassFieldValue_RuntimeError) {

@@ -5,10 +5,9 @@
 // write class-agnostic code — the pitch from
 // notes/expressiveness-roadmap.md item 1 ("the entire metaprogramming
 // channel" for a language with no macros/templates/generics) — plus
-// callMethod() dispatching to native-backed values by a runtime-computed
-// name. callMethod() only supports native-backed callees for now (see the
-// same roadmap note); a name-to-handler registry built from native
-// functions, like formatters below, is squarely inside that limit.
+// callMethod() dispatching to a callable by a runtime-computed name. A
+// name-to-handler registry built from native functions, like formatters
+// below, is one use; a closure-backed method works too (issue #496).
 
 // Copies every field from src onto dst, without knowing src's class ahead
 // of time.

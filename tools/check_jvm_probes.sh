@@ -82,6 +82,10 @@ probes=(
     # hasField()/setField()/callMethod(), now supported on native and JVM
     # alike (src/stdlib/reflect_api.cpp, LoxRuntime.registerReflection).
     "test/translation-probes/40_reflection.lox"
+    # callMethod() on a closure-backed user method (issue #496): binds `this`,
+    # forwards args, and catches a throw inside the method — byte-identical
+    # stdout on native and JVM.
+    "test/translation-probes/47_reflect_callmethod_closure_method.lox"
     # Operator overloading (issue #472): dunder dispatch for arithmetic,
     # comparison, equality, containment, and call.
     "test/translation-probes/jvm-only/61_operator_overload.lox"
@@ -233,16 +237,15 @@ error_probes=(
     # comment.
     "test/translation-probes/27_jump_table_default_cross_enum.lox"
     # Reflection introspection guards: a non-Instance/non-Class argument to
-    # each accessor is a runtime error on every backend, and callMethod()
-    # v1 refuses a closure-backed method identically everywhere
-    # (notes/expressiveness-roadmap.md item 1).
+    # each accessor is a runtime error on every backend. callMethod() on a
+    # closure-backed method is no longer an error (issue #496); its success
+    # path is probe 47 in `probes` above.
     "test/translation-probes/41_reflect_getfield_non_instance.lox"
     "test/translation-probes/42_reflect_setfield_non_instance.lox"
     "test/translation-probes/43_reflect_fields_non_instance.lox"
     "test/translation-probes/44_reflect_hasfield_non_instance.lox"
     "test/translation-probes/45_reflect_methods_non_instance.lox"
     "test/translation-probes/46_reflect_callmethod_non_instance.lox"
-    "test/translation-probes/47_reflect_callmethod_closure_method.lox"
     # Mission #288 node #333: fault sites native routes through RAISE_ERROR
     # (fatal, never delivered to a catchBlock), which the JVM backend had
     # wired as catchable instead (over-catching) or left unguarded entirely

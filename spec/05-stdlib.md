@@ -493,14 +493,15 @@ if `instance`'s field table contains `name`, that value is called; otherwise
 the method named `name` on `instance`'s class (including inherited methods)
 is called.
 
-**Restriction (v1):** `callMethod` only supports calling a native function —
-a stdlib function, a bound native method (such as a Map or File method), or a
-value stored in a field that holds one of these. Calling anything else —
-a method backed by a user-defined function (declared with `fun` inside a
-`class` body, or a closure stored in a field), or a Class or Enum constructor
-value stored in a field — is a **runtime error**
-("callMethod does not support user-defined methods yet."). This restriction
-applies identically across all execution targets (native, JVM).
+A method resolved from the class binds `this` to `instance`, exactly as an
+ordinary `instance.name(...)` call does. A function value stored in a field
+is called as-is (slot 0 is the function itself, as for a plain call).
+
+**Restriction:** a Class or Enum constructor value is callable via `()`, but
+`callMethod` does not support it — calling one raises a **runtime error**
+("callMethod does not support class or enum constructor values."). Any other
+non-callable value raises a runtime error
+("callMethod requires a callable value.").
 
 ```lox
 class Foo {}
@@ -510,13 +511,15 @@ print callMethod(f, "describe", 42);   // "42"
 
 class Bar { greet() { return "hi"; } }
 var b = Bar();
-callMethod(b, "greet");   // runtime error: user-defined methods unsupported
+print callMethod(b, "greet");          // "hi"
 ```
 
 Runtime error ("Only instances have methods.") if `instance` is not an
 Instance. Runtime error ("Undefined property 'name'.") if `name` names
-neither a field nor a method. Runtime error if the resolved native is called
-with the wrong number of arguments, matching ordinary call-arity checking.
+neither a field nor a method. Runtime error if the resolved callable is
+called with the wrong number of arguments, matching ordinary call-arity
+checking. A `throw` inside the called body propagates as an ordinary throw:
+an enclosing `try` catches it.
 
 **Arity:** variadic (at least 2: `instance` and `name`)  
 **Returns:** the called method's result

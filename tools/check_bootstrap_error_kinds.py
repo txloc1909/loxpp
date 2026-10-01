@@ -125,7 +125,7 @@ EXPECTED_CALLS = [
     ('ReflectionArityError', '"Expected at least 2 arguments."', JUDGED),
     ('ReflectionFieldNameError', '"Field name must be a string."', JUDGED),
     ('ReflectionUndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
-    ('ReflectionUnsupportedError', '"callMethod does not support user-defined methods yet."', JUDGED),
+    ('ReflectionUnsupportedError', '"callMethod does not support class or enum constructor values."', JUDGED),
     ('ReflectionNotCallableError', '"callMethod requires a callable value."', JUDGED),
     ('ReflectionNativeArityError', '"Expected " + str(callee.arity()) + " arguments but got " +\n                         str(len(forwarded)) + "."', JUDGED),
     ('ReflectionFieldNameError', '"Field name must be a string."', JUDGED),
