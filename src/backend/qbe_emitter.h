@@ -68,21 +68,33 @@
 // ever is).
 
 #include "abstract_stack.h"
+#include "capture_analysis.h"
 #include "chunk_decoder.h"
 
 #include <string>
 
 namespace qbe {
 
+// S8 (#461) switches. Both default on; the benchmark runner turns
+// promotion off (QBE_NO_PROMOTE) to compare the baseline emitter against
+// register promotion in one build.
+struct EmitOptions {
+    bool promoteRegisters{true};
+    bool fuseTagJumpTable{true};
+};
+
 // Emits complete QBE textual IL (.ssa) for one function: `data` declarations
 // for any global-variable name it references, plus one
 // `export function w $<qbeSymbol>(l %rt, l %base) { ... }` matching
 // RtCompiledFn's signature (backend/rt_abi.h) exactly. `analysis` must come
-// from analyzeStack(fn) (or the matching node of analyzeStackTree(root)) —
-// this pass does not recompute it, so a caller driving several functions
-// from one tree computes each analysis once and reuses it.
+// from analyzeStack(fn) (or the matching node of analyzeStackTree(root)) and
+// `captures` from the matching analyzeCaptures entry — this pass does not
+// recompute either, so a caller driving several functions from one tree
+// computes each once and reuses it.
 std::string emitScript(const DecodedFunction& fn,
                        const FunctionStackAnalysis& analysis,
-                       const std::string& qbeSymbol);
+                       const FunctionCaptureInfo& captures,
+                       const std::string& qbeSymbol,
+                       const EmitOptions& options = {});
 
 } // namespace qbe
