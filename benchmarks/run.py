@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import statistics
 import subprocess
@@ -43,17 +44,24 @@ BACKENDS = {
     "native": lambda prog: [str(ROOT / "build" / "loxpp"), prog],
     "jvm":    lambda prog: [str(ROOT / "tools" / "loxpp_jvm.sh"), prog],
     # QBE compiles the program with qbe + cc at launch, then runs it (see
-    # tools/loxpp_qbe.sh).
+    # tools/loxpp_qbe.sh). qbe-base selects the pre-S8 emitter
+    # (QBE_NO_PROMOTE=1), so a single build measures register promotion's
+    # own effect against it.
     "qbe": lambda prog: [str(ROOT / "tools" / "loxpp_qbe.sh"), prog],
+    "qbe-base": lambda prog: ["env", "QBE_NO_PROMOTE=1",
+                              str(ROOT / "tools" / "loxpp_qbe.sh"), prog],
 }
 
 # clock() is process CPU time on native and QBE, wall-clock on jvm
 # (generate.py's docstring; runtime/jvm/src/lox/LoxRuntime.java uses
 # System.nanoTime). Every steady_us in this file's output carries this
 # per-backend unit.
-CLOCK_KIND = {"native": "cpu", "jvm": "wall", "qbe": "cpu"}
+CLOCK_KIND = {"native": "cpu", "jvm": "wall", "qbe": "cpu",
+              "qbe-base": "cpu"}
 
-PIN = ["taskset", "-c", "0"]
+# Every measured process is pinned to one CPU. BENCH_CPU overrides the
+# default, for a host where CPU 0 is shared with other work.
+PIN = ["taskset", "-c", os.environ.get("BENCH_CPU", "0")]
 
 
 def parse_harness(stdout: str):

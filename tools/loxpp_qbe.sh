@@ -85,11 +85,15 @@ trap 'rm -rf "$work"' EXIT
 
 program_abs="$(cd "$(dirname "$program")" && pwd)/$(basename "$program")"
 
-# S8 (#461): QBE_NO_PROMOTE=1 selects the pre-register-promotion emitter so
-# benchmarks/run.py can compare baseline against promotion in one build.
+# S8 (#461): QBE_NO_PROMOTE=1 and QBE_NO_FUSE=1 select the pre-S8 emitter so
+# benchmarks/run.py can compare a baseline against register promotion or the
+# GET_TAG;JUMP_TABLE fusion in one build.
 emit_flags=()
 if [ -n "${QBE_NO_PROMOTE:-}" ]; then
     emit_flags+=(--no-promote)
+fi
+if [ -n "${QBE_NO_FUSE:-}" ]; then
+    emit_flags+=(--no-fuse)
 fi
 
 if ! "$qbe_emit_program" "${emit_flags[@]}" "$program_abs" >"$work/prog.ssa" 2>"$work/prog.descs"; then
