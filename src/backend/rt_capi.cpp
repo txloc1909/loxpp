@@ -2,6 +2,7 @@
 #include "rt_abi.h"
 #include "chunk_decoder.h"
 #include "runtime.h"
+#include "container_objects.h"
 #include "exec_objects.h"
 
 #include <cstdio>
@@ -265,6 +266,17 @@ int rt_op_slice(Runtime* rt, int stopAtFrameCount) noexcept {
 
 int rt_op_get_tag(Runtime* rt) noexcept {
     return rtGuard(rt, [&] { return rt->opGetTag(); });
+}
+
+int rt_get_tag_word(Runtime* rt, Value* slot) noexcept {
+    return rtGuard(rt, [&] {
+        Value val = *slot;
+        if (!isEnumValue(val)) {
+            rt->runtimeError("GET_TAG: expected an enum value.");
+            return -1;
+        }
+        return static_cast<int>(asObjEnum(as<Obj*>(val))->ctor->tag);
+    });
 }
 
 int rt_op_not(Runtime* rt) noexcept {

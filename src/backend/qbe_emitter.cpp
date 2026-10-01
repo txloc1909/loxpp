@@ -122,6 +122,10 @@ class Emitter {
     // A PUSH_HANDLER's own offset -> its catch block's cfg label, built once
     // cfg is available (run(), above).
     std::unordered_map<int, std::string> m_pushOffsetToCatchLabel;
+    // S8 (#461): a JUMP_TABLE offset -> the word temp holding its own
+    // GET_TAG's tag, when the two were fused (emitBlock). Absent for a
+    // JUMP_TABLE whose tag came through the unfused rt_op_get_tag path.
+    std::unordered_map<int, std::string> m_fusedTagWordByJumpOffset;
     std::ostringstream m_data;
     std::ostringstream m_body;
     int m_tempCounter{0};
@@ -990,10 +994,63 @@ class Emitter {
             m_body << "\tret " << kRtOk << "\n";
             return;
         }
-        for (const DecodedInstruction& ins : block.instructions) {
-            emitInstruction(ins);
+        // S8 (#461), P8: a dense enum match compiles to GET_TAG immediately
+        // followed by JUMP_TABLE. When they are adjacent and end the block
+        // (JUMP_TABLE is a terminator, so it is this block's last
+        // instruction), fuse them: read the tag as a word directly instead
+        // of materialising a boxed Number and converting it straight back.
+        bool fusedTag = block.instructions.size() >= 2 &&
+                        block.instructions[block.instructions.size() - 2].op ==
+                            Op::GET_TAG &&
+                        block.instructions.back().op == Op::JUMP_TABLE;
+        std::size_t fusedIndex =
+            block.instructions.size() >= 2 ? block.instructions.size() - 2 : 0;
+        for (std::size_t i = 0; i < block.instructions.size(); i++) {
+            if (fusedTag && i == fusedIndex) {
+                emitFusedGetTagWord(block.instructions[i],
+                                    block.instructions.back().offset);
+                continue;
+            }
+            emitInstruction(block.instructions[i]);
         }
         emitTerminator(block, blockIndex, cfg);
+    }
+
+    // The fused GET_TAG half of a GET_TAG;JUMP_TABLE pair (S8, #461).
+    // `ins` is the GET_TAG; `jumpTableOffset` is the JUMP_TABLE that
+    // consumes its tag, so the terminator can find this word temp. The enum
+    // Value sits at the GET_TAG's own `before.height - 1` (GET_TAG has net
+    // zero stack effect) and is left untouched — this reads it in place, no
+    // rt_set_top and no safe point (the helper never allocates).
+    void emitFusedGetTagWord(const DecodedInstruction& ins,
+                             int jumpTableOffset) {
+        const auto& [before, after] = stateOf(ins.offset);
+        (void)after;
+        std::string topAddr = addr(before.height);
+        std::string slotAddr = addr(before.height - 1);
+        // Keep the frame offset current (Q4) so a non-enum subject's fatal
+        // stack trace names the match's own line, exactly as the unfused
+        // rt_op_get_tag call site does.
+        m_body << "\tcall $rt_set_top(l %rt, l " << topAddr << ")\n";
+        m_body << "\tcall $rt_set_frame_offset(l %rt, w " << ins.offset
+               << ")\n";
+        std::string tag = newTemp();
+        m_body << "\t" << tag << " =w call $rt_get_tag_word(l %rt, l "
+               << slotAddr << ")\n";
+        // -1 is the helper's non-enum sentinel (rt_capi.h); every real tag
+        // is a non-negative ObjEnumCtor::tag, so a signed less-than test
+        // catches it and mirrors opGetTag's own fatal error exactly.
+        std::string bad = newTemp();
+        m_body << "\t" << bad << " =w csltw " << tag << ", 0\n";
+        std::string fatalLabel =
+            "@" + m_symbol + "_tagfatal" + std::to_string(m_tempCounter);
+        std::string okLabel =
+            "@" + m_symbol + "_tagok" + std::to_string(m_tempCounter);
+        m_body << "\tjnz " << bad << ", " << fatalLabel << ", " << okLabel
+               << "\n";
+        m_body << fatalLabel << "\n\tret " << kRtFatal << "\n";
+        m_body << okLabel << "\n";
+        m_fusedTagWordByJumpOffset[jumpTableOffset] = tag;
     }
 
     void emitTerminator(const BasicBlock& block, std::size_t blockIndex,
@@ -1076,11 +1133,20 @@ class Emitter {
                 "own arm count plus an optional fallthrough — cfg/decoder "
                 "drift");
         }
-        std::string tagBits = loadl(addr(before.height - 1));
-        std::string tagD = newTemp();
-        m_body << "\t" << tagD << " =d cast " << tagBits << "\n";
-        std::string tagW = newTemp();
-        m_body << "\t" << tagW << " =w dtosi " << tagD << "\n";
+        // S8 (#461): a fused GET_TAG already produced the tag as a word
+        // (emitFusedGetTagWord); the unfused path lowers the Number GET_TAG
+        // pushed back to a word here.
+        std::string tagW;
+        auto fused = m_fusedTagWordByJumpOffset.find(jt.offset);
+        if (fused != m_fusedTagWordByJumpOffset.end()) {
+            tagW = fused->second;
+        } else {
+            std::string tagBits = loadl(addr(before.height - 1));
+            std::string tagD = newTemp();
+            m_body << "\t" << tagD << " =d cast " << tagBits << "\n";
+            tagW = newTemp();
+            m_body << "\t" << tagW << " =w dtosi " << tagD << "\n";
+        }
 
         std::optional<std::string> fallthroughLabel;
         if (block.successors.size() == jt.jumpTable.size() + 1) {

@@ -403,8 +403,35 @@ TEST(QbeEmitter, JumpTableLowersToACompareChain) {
     std::string ssa = emitScriptFrom(
         "enum E { A B } var e = A(); var n = match e { case A => 0 case B "
         "=> 1 }; print n;");
-    EXPECT_NE(ssa.find("call $rt_op_get_tag(l %rt)"), std::string::npos);
+    EXPECT_NE(ssa.find("call $rt_get_tag_word(l %rt, l"), std::string::npos);
     EXPECT_NE(ssa.find("ceqw"), std::string::npos);
     // No QBE switch/jump-table construct exists to accidentally emit.
     EXPECT_EQ(ssa.find("switch"), std::string::npos);
+}
+
+TEST(QbeEmitter, DenseMatchFusesGetTagIntoJumpTable) {
+    // S8 (#461), P8: a dense enum match's GET_TAG is immediately followed
+    // by JUMP_TABLE, so the pair lowers as one dispatch that reads the tag
+    // as a word (rt_get_tag_word) — no boxed Number, so no `d cast` +
+    // `dtosi` round trip back to a word at the branch.
+    std::string ssa = emitScriptFrom(
+        "enum E { A B C D } var e = C(); var n = match e { case A => 0 case "
+        "B => 1 case C => 2 case D => 3 }; print n;");
+    EXPECT_NE(ssa.find("call $rt_get_tag_word(l %rt, l"), std::string::npos);
+    EXPECT_NE(ssa.find("csltw"), std::string::npos);
+    EXPECT_EQ(ssa.find("call $rt_op_get_tag"), std::string::npos);
+    EXPECT_EQ(ssa.find("dtosi"), std::string::npos);
+}
+
+TEST(QbeEmitter, SparseMatchKeepsTheUnfusedGetTag) {
+    // A non-dense match (tags 0 and 3 with a catch-all) does not use
+    // JUMP_TABLE, so there is nothing to fuse: the sequential GET_TAG /
+    // CONSTANT / EQUAL chain still reads the boxed Number via
+    // rt_op_get_tag. Proves the fusion check cannot fire on a lone
+    // GET_TAG.
+    std::string ssa = emitScriptFrom(
+        "enum E { A B C D } var e = D(); var n = match e { case A => 1 case "
+        "D => 4 case _ => 0 }; print n;");
+    EXPECT_EQ(ssa.find("rt_get_tag_word"), std::string::npos);
+    EXPECT_NE(ssa.find("call $rt_op_get_tag"), std::string::npos);
 }

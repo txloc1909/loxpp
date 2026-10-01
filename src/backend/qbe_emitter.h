@@ -15,7 +15,11 @@
 // ITER_NEXT, GET_TAG/MATCH_ERROR, PUSH_HANDLER/POP_HANDLER/THROW/
 // DEFER_RECORD/RUN_DEFERS (#459), and RETURN's own C-ABI epilogue
 // (rt_abi.h — every compiled function needs this, regardless of how simple
-// its body is). Every compiled function's own prologue also checks its
+// its body is). A dense enum match's adjacent GET_TAG/JUMP_TABLE pair is
+// fused (S8, #461): the tag is read as a word directly through
+// rt_get_tag_word (rt_capi.h) instead of materialising a boxed Number and
+// converting it straight back for the branch. Every compiled function's own
+// prologue also checks its
 // analyzed max stack height against STACK_MAX (Q3: compiled code writes its
 // own frame's slots directly, bypassing push()'s own check entirely — see
 // Runtime::checkStackOverflow's comment, runtime.h). Any other opcode
