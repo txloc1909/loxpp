@@ -1,6 +1,11 @@
-// polar.lox — Cartesian ↔ polar coordinate conversion and unit circle table.
+// polar.lox — Cartesian ↔ polar coordinates, complex arithmetic, unit circle.
 //
-// Demonstrates: math.sin, math.cos, math.tan, math.atan2, math.hypot, math.pi
+// A complex number and a polar coordinate describe the same plane, so this
+// example pairs the two: a `Complex` class whose operators read like ordinary
+// arithmetic, next to the trig tables that convert to and from (r, theta).
+//
+// Demonstrates: operator overloading (__add__ __sub__ __mul__ __div__ __neg__
+//   __eq__), math.sin, math.cos, math.tan, math.atan2, math.hypot, math.pi
 
 fun toDegrees(radians) { return radians * 180 / math.pi; }
 
@@ -57,3 +62,98 @@ while (i < 4) {
 // CHECK:   30 deg:  sin=0.5  cos=0.866025  tan=0.57735
 // CHECK:   45 deg:  sin=0.707107  cos=0.707107  tan=1
 // CHECK:   60 deg:  sin=0.866025  cos=0.5  tan=1.73205
+
+// -----------------------------------------------------------------------
+// Complex numbers — the operators make them read as arithmetic.
+// -----------------------------------------------------------------------
+
+class Complex {
+    init(re, im) { this.re = re; this.im = im; }
+
+    __add__(o) { return Complex(this.re + o.re, this.im + o.im); }
+    __sub__(o) { return Complex(this.re - o.re, this.im - o.im); }
+    __mul__(o) {
+        return Complex(this.re * o.re - this.im * o.im,
+                       this.re * o.im + this.im * o.re);
+    }
+    __div__(o) {
+        var d = o.re * o.re + o.im * o.im;
+        return Complex((this.re * o.re + this.im * o.im) / d,
+                       (this.im * o.re - this.re * o.im) / d);
+    }
+    __neg__() { return Complex(-this.re, -this.im); }
+    __eq__(o) { return this.re == o.re and this.im == o.im; }
+
+    modulus()  { return math.hypot(this.re, this.im); }
+    argument() { return toDegrees(math.atan2(this.im, this.re)); }
+
+    show() {
+        var sign = "+";
+        var im = this.im;
+        if (im < 0) { sign = "-"; im = -im; }
+        return str(this.re) + sign + str(im) + "i";
+    }
+}
+
+var a = Complex(1, 2);
+var b = Complex(3, -1);
+
+print "";
+// CHECK: === Complex arithmetic ===
+print "=== Complex arithmetic ===";
+// CHECK: a + b = 4+1i
+print "a + b = " + (a + b).show();
+// CHECK: a - b = -2+3i
+print "a - b = " + (a - b).show();
+// CHECK: a * b = 5+5i
+print "a * b = " + (a * b).show();
+// CHECK: a / b = 0.1+0.7i
+print "a / b = " + (a / b).show();
+// CHECK: -a    = -1-2i
+print "-a    = " + (-a).show();
+// CHECK: a == Complex(1, 2): true
+print "a == Complex(1, 2): " + str(a == Complex(1, 2));
+// CHECK: a == b: false
+print "a == b: " + str(a == b);
+// CHECK: a != b: true
+print "a != b: " + str(a != b);
+
+// The same plane, seen in polar form.
+print "";
+// CHECK: === Complex as polar form ===
+print "=== Complex as polar form ===";
+// CHECK: a: modulus=2.23607 argument=63.4349 deg
+print "a: modulus=" + str(a.modulus()) + " argument=" + str(a.argument()) + " deg";
+// CHECK: b: modulus=3.16228 argument=-18.4349 deg
+print "b: modulus=" + str(b.modulus()) + " argument=" + str(b.argument()) + " deg";
+
+// Mandelbrot escape: z = z*z + c is ordinary arithmetic on Complex.
+print "";
+// CHECK: === Mandelbrot escape counts ===
+print "=== Mandelbrot escape counts ===";
+
+fun escape(c, limit) {
+    var z = Complex(0, 0);
+    var i = 0;
+    while (i < limit) {
+        if (z.re * z.re + z.im * z.im > 4) return i;
+        z = z * z + c;
+        i = i + 1;
+    }
+    return limit;
+}
+
+var cs = [
+    Complex(0, 0), Complex(1, 0), Complex(-1, 0),
+    Complex(0, 1), Complex(-0.5, 0.5)
+];
+var k = 0;
+while (k < len(cs)) {
+    print "  c=" + cs[k].show() + " count=" + str(escape(cs[k], 20));
+    k = k + 1;
+}
+// CHECK:   c=0+0i count=20
+// CHECK:   c=1+0i count=3
+// CHECK:   c=-1+0i count=20
+// CHECK:   c=0+1i count=20
+// CHECK:   c=-0.5+0.5i count=20

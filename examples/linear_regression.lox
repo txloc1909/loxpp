@@ -1,10 +1,14 @@
 // linear_regression.lox — Least-squares linear regression.
 //
 // fit(xs, ys, n) returns [slope, intercept] so the caller can immediately
-// destructure the two-value result without a wrapper class.
+// destructure the two-value result without a wrapper class. The final
+// section recomputes the same normal equations on a `Vec` whose operators
+// and indexing make the algebra read as vector math.
 //
 // Demonstrates: var [a, b] sequence destructuring as a lightweight
-//               multi-return alternative to class instances.
+//               multi-return alternative to class instances, and operator
+//               overloading (__add__ __sub__ __mul__ __index_get__
+//               __index_set__ __len__).
 
 fun fit(xs, ys, n) {
     // Accumulate sums for the normal equations.
@@ -107,3 +111,113 @@ var [m3, b3] = fit(xs3, ys3, 5);
 // CHECK: intercept = 5
 print "slope     = " + str(m3);
 print "intercept = " + str(b3);
+
+// -----------------------------------------------------------------------
+// Vector arithmetic — a Vec type whose operators and indexing carry the
+// normal equations directly, with no hand-written index loops in the caller.
+// -----------------------------------------------------------------------
+
+class Vec {
+    init(data) { this.data = data; }
+
+    __len__() { return len(this.data); }
+    __index_get__(i) { return this.data[i]; }
+    __index_set__(i, v) { this.data[i] = v; return v; }
+
+    __add__(o) {
+        var out = [];
+        var i = 0;
+        while (i < len(this.data)) {
+            out.append(this.data[i] + o.data[i]);
+            i = i + 1;
+        }
+        return Vec(out);
+    }
+    __sub__(o) {
+        var out = [];
+        var i = 0;
+        while (i < len(this.data)) {
+            out.append(this.data[i] - o.data[i]);
+            i = i + 1;
+        }
+        return Vec(out);
+    }
+    __mul__(s) {                 // scalar scale: v * 3
+        var out = [];
+        var i = 0;
+        while (i < len(this.data)) {
+            out.append(this.data[i] * s);
+            i = i + 1;
+        }
+        return Vec(out);
+    }
+
+    dot(o) {
+        var total = 0;
+        var i = 0;
+        while (i < len(this.data)) {
+            total = total + this.data[i] * o.data[i];
+            i = i + 1;
+        }
+        return total;
+    }
+    sum() {
+        var total = 0;
+        var i = 0;
+        while (i < len(this.data)) {
+            total = total + this.data[i];
+            i = i + 1;
+        }
+        return total;
+    }
+    show() {
+        var s = "[";
+        var i = 0;
+        while (i < len(this.data)) {
+            s = s + str(this.data[i]);
+            if (i < len(this.data) - 1) s = s + ", ";
+            i = i + 1;
+        }
+        return s + "]";
+    }
+}
+
+print "";
+// CHECK: === Vector arithmetic and regression ===
+print "=== Vector arithmetic and regression ===";
+
+var vx = Vec([1, 2, 3, 4, 5]);
+var vy = Vec([3, 5, 7, 9, 11]);
+
+// CHECK: vx      = [1, 2, 3, 4, 5]
+print "vx      = " + vx.show();
+// CHECK: vy      = [3, 5, 7, 9, 11]
+print "vy      = " + vy.show();
+// CHECK: vx + vy = [4, 7, 10, 13, 16]
+print "vx + vy = " + (vx + vy).show();
+// CHECK: vx - vy = [-2, -3, -4, -5, -6]
+print "vx - vy = " + (vx - vy).show();
+// CHECK: vx * 3  = [3, 6, 9, 12, 15]
+print "vx * 3  = " + (vx * 3).show();
+// CHECK: len(vx) = 5
+print "len(vx) = " + str(len(vx));
+// CHECK: vx[2]   = 3
+print "vx[2]   = " + str(vx[2]);
+
+// Normal equations on the vectors: slope = (n*dotXY - sumX*sumY) / (n*dotXX - sumX^2).
+var n = len(vx);
+var sumX = vx.sum();
+var sumY = vy.sum();
+var dotXY = vx.dot(vy);
+var dotXX = vx.dot(vx);
+var slope = (n * dotXY - sumX * sumY) / (n * dotXX - sumX * sumX);
+var intercept = (sumY - slope * sumX) / n;
+// CHECK: slope     = 2
+print "slope     = " + str(slope);
+// CHECK: intercept = 1
+print "intercept = " + str(intercept);
+
+var vm = Vec([1, 2, 3]);
+vm[0] = 9;
+// CHECK: vm[0] = 9 -> [9, 2, 3]
+print "vm[0] = 9 -> " + vm.show();

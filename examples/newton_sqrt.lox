@@ -1,6 +1,11 @@
 // newton_sqrt.lox — Newton's method (Heron's method) for square roots.
 //
-// Demonstrates: math.abs, math.sqrt (for verification)
+// The second half derives the derivative automatically. A `Dual` number
+// carries a value and its derivative, and its operators encode the chain
+// rule, so Newton's step x = x - f(x)/f'(x) needs no hand-written f'.
+//
+// Demonstrates: operator overloading for automatic differentiation
+//   (__add__ __sub__ __mul__ __div__ __neg__), math.abs, math.sqrt
 //
 // Newton's method for sqrt(n): starting from an initial guess x,
 // repeatedly apply x = (x + n/x) / 2 until |x^2 - n| < epsilon.
@@ -47,3 +52,63 @@ while (i < 5) {
 // CHECK:   sqrt(25):  newton=5  exact=5
 // CHECK:   sqrt(144):  newton=12  exact=12
 // CHECK:   sqrt(10000):  newton=100  exact=100
+
+// -----------------------------------------------------------------------
+// Dual numbers — automatic differentiation from the same operators.
+//
+// A Dual carries a value and its derivative. The arithmetic rules below are
+// the chain rule written directly, so f(x) and f'(x) fall out together from
+// expressions that read as plain arithmetic.
+// -----------------------------------------------------------------------
+
+class Dual {
+    init(v, d) { this.v = v; this.d = d; }
+
+    __add__(o) { return Dual(this.v + o.v, this.d + o.d); }
+    __sub__(o) { return Dual(this.v - o.v, this.d - o.d); }
+    __mul__(o) { return Dual(this.v * o.v, this.v * o.d + this.d * o.v); }
+    __div__(o) {
+        return Dual(this.v / o.v,
+                    (this.d * o.v - this.v * o.d) / (o.v * o.v));
+    }
+    __neg__() { return Dual(-this.v, -this.d); }
+}
+
+// CHECK: === Automatic differentiation ===
+print "";
+print "=== Automatic differentiation ===";
+
+var x = Dual(3, 1);            // seed: d/dx of x itself is 1
+var f = x * x - Dual(2, 0);    // f(x) = x^2 - 2
+// CHECK: f(3) = 7, f'(3) = 6
+print "f(3) = " + str(f.v) + ", f'(3) = " + str(f.d);
+
+var g = f * (x + Dual(1, 0));  // g(x) = (x^2 - 2)(x + 1)
+// CHECK: g(3) = 28, g'(3) = 31
+print "g(3) = " + str(g.v) + ", g'(3) = " + str(g.d);
+
+var h = (x * x) / x;           // h(x) = x^2 / x, so h' = 1
+// CHECK: h(3) = 3, h'(3) = 1
+print "h(3) = " + str(h.v) + ", h'(3) = " + str(h.d);
+
+// The Newton step uses the derivative from the same Dual.
+fun sqrtNewtonDual(n) {
+    var estimate = 1;
+    var eps = 0.000001;
+    while (true) {
+        var d = Dual(estimate, 1);
+        var f = d * d - Dual(n, 0);
+        var step = f.v / f.d;
+        if (math.abs(step) < eps) break;
+        estimate = estimate - step;
+    }
+    return estimate;
+}
+
+print "";
+// CHECK: === Newton with automatic derivatives ===
+print "=== Newton with automatic derivatives ===";
+// CHECK:   sqrt(2)   = 1.41421
+print "  sqrt(2)   = " + str(sqrtNewtonDual(2));
+// CHECK:   sqrt(144) = 12
+print "  sqrt(144) = " + str(sqrtNewtonDual(144));

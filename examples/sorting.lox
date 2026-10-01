@@ -1,9 +1,14 @@
 // sorting.lox — Bubble, insertion, and selection sort — all in-place.
 //
+// The algorithms only ever compare with `<` and `>`, so they sort any type
+// that overloads those. The second half sorts exact `Fraction` values with
+// the very same algorithm objects the first half sorts Numbers with.
+//
 // Each algorithm receives a fresh copy of the input so results are independent.
 // See merge_sort.lox for the divide-and-conquer variant.
 //
-// Demonstrates: list index assignment (lst[i] = v), len(), in-place swaps.
+// Demonstrates: list index assignment (lst[i] = v), len(), in-place swaps,
+//               comparison operator overloading (__lt__ __gt__ __eq__).
 
 fun makeCopy(src) { return src[0:len(src)]; }
 
@@ -106,3 +111,96 @@ var e3 = [3,1,4,1,5,9,2,6]; insertionSort(e3); printList(e3);
 // CHECK: []
 // CHECK: [1]
 // CHECK: [1, 1, 2, 3, 4, 5, 6, 9]
+
+// -----------------------------------------------------------------------
+// Comparable user types — a Fraction that overloads the comparison operators
+// sorts with the exact same bubble/insertion/selection code as Numbers.
+// -----------------------------------------------------------------------
+
+fun gcd(a, b) {
+    while (b != 0) {
+        var t = b;
+        b = a % b;
+        a = t;
+    }
+    return a;
+}
+
+fun absVal(x) { if (x < 0) return -x; return x; }
+
+class Fraction {
+    init(n, d) {
+        if (d < 0) { n = -n; d = -d; }
+        var g = gcd(absVal(n), d);
+        this.n = n / g;
+        this.d = d / g;
+    }
+
+    __lt__(o) { return this.n * o.d < o.n * this.d; }
+    __gt__(o) { return this.n * o.d > o.n * this.d; }
+    __eq__(o) { return this.n == o.n and this.d == o.d; }
+
+    show() {
+        if (this.d == 1) return str(this.n);
+        return str(this.n) + "/" + str(this.d);
+    }
+}
+
+fun printFractions(lst) {
+    var s = "[";
+    var i = 0;
+    while (i < len(lst)) {
+        s = s + lst[i].show();
+        if (i < len(lst) - 1) s = s + ", ";
+        i = i + 1;
+    }
+    print s + "]";
+}
+
+// CHECK: === Sorting comparable objects ===
+print "";
+print "=== Sorting comparable objects ===";
+
+var halves = [
+    Fraction(3, 4), Fraction(1, 2), Fraction(5, 6),
+    Fraction(1, 3), Fraction(2, 3)
+];
+
+print "Input:          ";
+printFractions(halves);
+// CHECK: Input:
+// CHECK: [3/4, 1/2, 5/6, 1/3, 2/3]
+
+var f1 = makeCopy(halves);
+bubbleSort(f1);
+print "Bubble sort:    ";
+printFractions(f1);
+// CHECK: Bubble sort:
+// CHECK: [1/3, 1/2, 2/3, 3/4, 5/6]
+
+var f2 = makeCopy(halves);
+insertionSort(f2);
+print "Insertion sort: ";
+printFractions(f2);
+// CHECK: Insertion sort:
+// CHECK: [1/3, 1/2, 2/3, 3/4, 5/6]
+
+var f3 = makeCopy(halves);
+selectionSort(f3);
+print "Selection sort: ";
+printFractions(f3);
+// CHECK: Selection sort:
+// CHECK: [1/3, 1/2, 2/3, 3/4, 5/6]
+
+// CHECK: 1/3 < 1/2: true
+print "1/3 < 1/2: " + str(Fraction(1, 3) < Fraction(1, 2));
+// CHECK: 3/4 > 2/3: true
+print "3/4 > 2/3: " + str(Fraction(3, 4) > Fraction(2, 3));
+// CHECK: 2/4 == 1/2: true
+print "2/4 == 1/2: " + str(Fraction(2, 4) == Fraction(1, 2));
+// CHECK: 1/3 != 1/2: true
+print "1/3 != 1/2: " + str(Fraction(1, 3) != Fraction(1, 2));
+// CHECK: 1/3 <= 1/2: true
+print "1/3 <= 1/2: " + str(Fraction(1, 3) <= Fraction(1, 2));
+// CHECK: 3/4 >= 2/3: true
+print "3/4 >= 2/3: " + str(Fraction(3, 4) >= Fraction(2, 3));
