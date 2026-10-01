@@ -1,7 +1,12 @@
 // sequences.lox — Sequence protocol: len, indexing, slicing, 'in', and for-in.
 //
-// Demonstrates: len() on List and String, string indexing, slice expressions,
-// 'in' membership expression, and for-in loops iterating over both List and String.
+// The first half shows the protocol on built-in List and String; the last
+// section defines a `Bank` whose methods implement the same protocol, so the
+// identical operators, slice syntax, and for-in work on a user type.
+//
+// Demonstrates: len(), indexing, index assignment, slice expressions, 'in',
+// for-in, and operator overloading (__index_get__ __index_set__ __slice__
+// __contains__ __iter__ __len__).
 
 // len() works on both List and String.
 // CHECK: 3
@@ -103,3 +108,67 @@ for (var i = 1; i <= 4; i = i + 1) {
 }
 // CHECK: 24
 print product;
+
+// -----------------------------------------------------------------------
+// A user-defined sequence — the same operators serve a custom type.
+// -----------------------------------------------------------------------
+
+class Bank {
+    init(data) { this.data = data; }
+
+    __len__() { return len(this.data); }
+    __index_get__(i) { return this.data[i]; }
+    __index_set__(i, v) { this.data[i] = v; return v; }
+
+    __contains__(v) {
+        var i = 0;
+        while (i < len(this.data)) {
+            if (this.data[i] == v) return true;
+            i = i + 1;
+        }
+        return false;
+    }
+    __slice__(start, end) {
+        var n = len(this.data);
+        if (start < 0) start = 0;
+        if (end > n) end = n;
+        if (start > end) start = end;
+        return Bank(this.data[start:end]);
+    }
+    __iter__() { return this.data[0:len(this.data)]; }
+
+    show() {
+        var s = "[";
+        var i = 0;
+        while (i < len(this.data)) {
+            s = s + str(this.data[i]);
+            if (i < len(this.data) - 1) s = s + ", ";
+            i = i + 1;
+        }
+        return s + "]";
+    }
+}
+
+print "";
+// CHECK: === User-defined sequence ===
+print "=== User-defined sequence ===";
+var bank = Bank([10, 20, 30, 40, 50]);
+// CHECK: bank        = [10, 20, 30, 40, 50]
+print "bank        = " + bank.show();
+// CHECK: len(bank)   = 5
+print "len(bank)   = " + str(len(bank));
+// CHECK: bank[1]     = 20
+print "bank[1]     = " + str(bank[1]);
+// CHECK: 30 in bank  = true
+print "30 in bank  = " + str(30 in bank);
+// CHECK: 31 in bank  = false
+print "31 in bank  = " + str(31 in bank);
+// CHECK: bank[1:4]   = [20, 30, 40]
+print "bank[1:4]   = " + bank[1:4].show();
+bank[0] = 99;
+// CHECK: bank[0] = 99 -> [99, 20, 30, 40, 50]
+print "bank[0] = 99 -> " + bank.show();
+var total = 0;
+for (var x in bank) total = total + x;
+// CHECK: sum(bank)   = 239
+print "sum(bank)   = " + str(total);

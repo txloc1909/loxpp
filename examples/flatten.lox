@@ -2,13 +2,29 @@
 //
 // In Lox++ there is no type-test for List vs scalar, so we use a wrapper
 // class to distinguish "a node that is itself a list" from a plain value.
+// The Node also implements the iteration protocol, so a for-in over any tree
+// yields its leaves in order.
 //
-// Demonstrates: append, len(), recursion, classes as tagged unions.
+// Demonstrates: append, len(), recursion, classes as tagged unions, and
+//               the iteration protocol (__iter__ __len__).
 
 class Node {
     init(value, isList) {
         this.value  = value;   // Number/String/bool/nil  OR  a List of Node
         this.isList = isList;
+    }
+
+    __iter__() { return flatten(this); }
+
+    __len__() {
+        if (!this.isList) return 1;
+        var total = 0;
+        var i = 0;
+        while (i < len(this.value)) {
+            total = total + len(this.value[i]);
+            i = i + 1;
+        }
+        return total;
     }
 }
 
@@ -66,3 +82,21 @@ printList(flatten(deep));     // [42]
 var mixed = branch([leaf(1), leaf("hi"), branch([leaf(true), leaf(nil)])]);
 printList(flatten(mixed));    // [1, hi, true, nil]
 // CHECK: [1, hi, true, nil]
+
+// -----------------------------------------------------------------------
+// The tree is itself iterable — for-in yields the leaves in order.
+// -----------------------------------------------------------------------
+
+// Iterating a Node walks its leaves.
+print "";
+// CHECK: iterate leaves:
+print "iterate leaves:";
+var collected = [];
+for (var x in nested) collected.append(x);
+printList(collected);
+// CHECK: [1, 2, 3, 4, 5, 6, 7]
+
+// CHECK: len(nested) = 7
+print "len(nested) = " + str(len(nested));
+// CHECK: len(deep) = 1
+print "len(deep) = " + str(len(deep));
