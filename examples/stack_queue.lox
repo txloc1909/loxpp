@@ -3,7 +3,11 @@
 // Stack: LIFO — append to push, pop to pop.
 // Queue: FIFO — two-stack trick for amortized O(1) dequeue.
 //
-// Demonstrates: classes encapsulating lists, append, pop, len().
+// The last section gives both classes the container protocols, so they also
+// work with len(), `in`, and for-in like built-in sequences.
+//
+// Demonstrates: classes encapsulating lists, append, pop, len(), and the
+//               container protocols (__len__ __contains__ __iter__).
 
 class Stack {
     init() { this.data = []; }
@@ -25,6 +29,17 @@ class Stack {
 
     isEmpty() { return len(this.data) == 0; }
     size()    { return len(this.data); }
+
+    __len__() { return len(this.data); }
+    __contains__(v) {
+        var i = 0;
+        while (i < len(this.data)) {
+            if (this.data[i] == v) return true;
+            i = i + 1;
+        }
+        return false;
+    }
+    __iter__() { return this.data[0:len(this.data)]; }
 }
 
 // Two-stack queue: inbox receives enqueues; dequeue transfers to outbox when needed.
@@ -51,6 +66,29 @@ class Queue {
 
     isEmpty() { return len(this.inbox) == 0 and len(this.outbox) == 0; }
     size()    { return len(this.inbox) + len(this.outbox); }
+
+    __len__() { return len(this.inbox) + len(this.outbox); }
+    __contains__(v) {
+        var i = 0;
+        while (i < len(this.inbox)) {
+            if (this.inbox[i] == v) return true;
+            i = i + 1;
+        }
+        i = 0;
+        while (i < len(this.outbox)) {
+            if (this.outbox[i] == v) return true;
+            i = i + 1;
+        }
+        return false;
+    }
+    __iter__() {
+        var out = [];
+        var i = len(this.outbox) - 1;      // outbox holds the front, reversed
+        while (i >= 0) { out.append(this.outbox[i]); i = i - 1; }
+        i = 0;
+        while (i < len(this.inbox)) { out.append(this.inbox[i]); i = i + 1; }
+        return out;
+    }
 }
 
 // CHECK: === Stack (LIFO) ===
@@ -120,3 +158,42 @@ print "balanced:   " + str(isBalanced(balanced, 6));
 // CHECK: balanced:   true
 print "unbalanced: " + str(isBalanced(unbalanced, 5));
 // CHECK: unbalanced: false
+
+// -----------------------------------------------------------------------
+// Protocol view — the same objects now work with len(), `in`, and for-in.
+// -----------------------------------------------------------------------
+
+// CHECK: === Protocol-enabled Stack and Queue ===
+print "";
+print "=== Protocol-enabled Stack and Queue ===";
+
+var ps = Stack();
+ps.push(10);
+ps.push(20);
+ps.push(30);
+// CHECK: len(stack)  = 3
+print "len(stack)  = " + str(len(ps));
+// CHECK: 20 in stack = true
+print "20 in stack = " + str(20 in ps);
+// CHECK: 99 in stack = false
+print "99 in stack = " + str(99 in ps);
+var stackSum = 0;
+for (var value in ps) stackSum = stackSum + value;
+// CHECK: sum(stack)  = 60
+print "sum(stack)  = " + str(stackSum);
+
+var pq = Queue();
+pq.enqueue("a");
+pq.enqueue("b");
+pq.enqueue("c");
+pq.dequeue();                 // "a" leaves, so the queue is "b", "c"
+// CHECK: len(queue)  = 2
+print "len(queue)  = " + str(len(pq));
+// CHECK: "b" in queue = true
+print "\"b\" in queue = " + str("b" in pq);
+// CHECK: "a" in queue = false
+print "\"a\" in queue = " + str("a" in pq);
+var order = "";
+for (var item in pq) order = order + item;
+// CHECK: fifo order = bc
+print "fifo order = " + order;

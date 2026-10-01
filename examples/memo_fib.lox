@@ -1,16 +1,31 @@
-// memo_fib.lox — Memoized Fibonacci using Map as a DP cache.
+// memo_fib.lox — Memoized Fibonacci as a callable cache object.
 //
-// Demonstrates: Map literal, has(), index get/set, len().
+// `Memoize` wraps a function and stores results in a Map. An Instance with
+// `__call__` is callable, so `fastFib(n)` reads exactly like a function call.
+//
+// Demonstrates: callable objects (__call__), Map as a DP cache, has(),
+//               index get/set, len().
 
-var cache = {};
+class Memoize {
+    init(fn) {
+        this.fn = fn;
+        this.cache = {};
+    }
 
-fun fib(n) {
-    if (n <= 1) return n;
-    if (cache.has(n)) return cache[n];
-    var result = fib(n - 1) + fib(n - 2);
-    cache[n] = result;
-    return result;
+    __call__(n) {
+        if (this.cache.has(n)) return this.cache[n];
+        var result = this.fn(n);
+        this.cache[n] = result;
+        return result;
+    }
 }
+
+fun slowFib(n) {
+    if (n <= 1) return n;
+    return fastFib(n - 1) + fastFib(n - 2);
+}
+
+var fastFib = Memoize(slowFib);
 
 fun fibNaive(n) {
     if (n <= 1) return n;
@@ -22,7 +37,7 @@ print "=== Memoized Fibonacci ===";
 
 var i = 0;
 while (i <= 10) {
-    print "fib(" + str(i) + ") = " + str(fib(i));
+    print "fib(" + str(i) + ") = " + str(fastFib(i));
     i = i + 1;
 }
 // CHECK: fib(0) = 0
@@ -39,13 +54,13 @@ while (i <= 10) {
 
 print "";
 // CHECK: fib(30) = 832040
-print "fib(30) = " + str(fib(30));
+print "fib(30) = " + str(fastFib(30));
 // CHECK: fib(35) = 9.22746e+06
-print "fib(35) = " + str(fib(35));
+print "fib(35) = " + str(fastFib(35));
 
-// Cache holds computed values for n = 2..35
-// CHECK: cache entries: 34
-print "cache entries: " + str(len(cache));
+// The cache is a field of the callable object, not a global.
+// CHECK: cache entries: 36
+print "cache entries: " + str(len(fastFib.cache));
 
 // Correctness: memoized matches naive for small n
 // CHECK: === Correctness check ===
@@ -54,7 +69,7 @@ print "=== Correctness check ===";
 var ok = true;
 var n = 0;
 while (n <= 15) {
-    if (fib(n) != fibNaive(n)) {
+    if (fastFib(n) != fibNaive(n)) {
         print "MISMATCH at n=" + str(n);
         ok = false;
     }

@@ -1,37 +1,36 @@
 // higher_order.lox — Higher-order filter, map, reduce using closures + dynamic lists.
 //
+// The combinators drive for-in, so they accept any iterable, not just a List.
+// An Instance with `__call__` is also callable, so objects work wherever a
+// function is expected.
+//
 // Note: Lox++ does not support anonymous function expressions yet, so
 // predicates and transforms are defined as named functions and passed
 // as first-class values.
 //
-// Demonstrates: functions as first-class values, append, len(), closures.
+// Demonstrates: functions as first-class values, closures, for-in over a
+//   user type, and the call protocol (__call__).
 
-fun filter(pred, lst) {
+fun filter(pred, seq) {
     var result = [];
-    var i = 0;
-    while (i < len(lst)) {
-        if (pred(lst[i])) result.append(lst[i]);
-        i = i + 1;
+    for (var x in seq) {
+        if (pred(x)) result.append(x);
     }
     return result;
 }
 
-fun map(fn, lst) {
+fun map(fn, seq) {
     var result = [];
-    var i = 0;
-    while (i < len(lst)) {
-        result.append(fn(lst[i]));
-        i = i + 1;
+    for (var x in seq) {
+        result.append(fn(x));
     }
     return result;
 }
 
-fun reduce(fn, lst, init) {
+fun reduce(fn, seq, init) {
     var acc = init;
-    var i = 0;
-    while (i < len(lst)) {
-        acc = fn(acc, lst[i]);
-        i = i + 1;
+    for (var x in seq) {
+        acc = fn(acc, x);
     }
     return acc;
 }
@@ -108,3 +107,78 @@ print "map(add100): ";
 printList(map(add100, [1, 2, 3, 4, 5]));
 // CHECK: map(add100):
 // CHECK: [101, 102, 103, 104, 105]
+
+// -----------------------------------------------------------------------
+// Generic over a user iterable — map/filter/reduce accept any for-in type.
+// -----------------------------------------------------------------------
+
+class Range {
+    init(start, end) { this.start = start; this.end = end; }
+
+    __len__() { return this.end - this.start; }
+    __iter__() {
+        var out = [];
+        var i = this.start;
+        while (i < this.end) {
+            out.append(i);
+            i = i + 1;
+        }
+        return out;
+    }
+}
+
+// CHECK: === Generic over a user iterable ===
+print "";
+print "=== Generic over a user iterable ===";
+var oneToSix = Range(1, 7);
+// CHECK: len(Range(1, 7)) = 6
+print "len(Range(1, 7)) = " + str(len(oneToSix));
+print "map(square, Range(1, 7)) =";
+printList(map(square, oneToSix));
+// CHECK: map(square, Range(1, 7)) =
+// CHECK: [1, 4, 9, 16, 25, 36]
+// CHECK: reduce(add, 0) over Range(1, 7) = 21
+print "reduce(add, 0) over Range(1, 7) = " + str(reduce(add, oneToSix, 0));
+
+// -----------------------------------------------------------------------
+// Callable objects — an Instance with __call__ is used wherever a function is.
+// -----------------------------------------------------------------------
+
+class Partial {
+    init(fn, a) { this.fn = fn; this.a = a; }
+    __call__(b) { return this.fn(this.a, b); }
+}
+
+class Compose {
+    init(f, g) { this.f = f; this.g = g; }
+    __call__(x) { return this.g(this.f(x)); }
+}
+
+class Threshold {
+    init(limit) { this.limit = limit; }
+    __call__(x) { return x > this.limit; }
+}
+
+class MaxAcc {
+    __call__(a, b) { if (a > b) return a; return b; }
+}
+
+fun inc(n) { return n + 1; }
+
+// CHECK: === Callable objects ===
+print "";
+print "=== Callable objects ===";
+print "map(Partial(add, 10)) =";
+printList(map(Partial(add, 10), [1, 2, 3, 4, 5]));
+// CHECK: map(Partial(add, 10)) =
+// CHECK: [11, 12, 13, 14, 15]
+print "map(Compose(square, inc)) =";
+printList(map(Compose(square, inc), [1, 2, 3, 4, 5]));
+// CHECK: map(Compose(square, inc)) =
+// CHECK: [2, 5, 10, 17, 26]
+print "filter(Threshold(5)) =";
+printList(filter(Threshold(5), nums));
+// CHECK: filter(Threshold(5)) =
+// CHECK: [6, 7, 8, 9, 10]
+// CHECK: reduce(MaxAcc(), 0) = 10
+print "reduce(MaxAcc(), 0) = " + str(reduce(MaxAcc(), nums, 0));
