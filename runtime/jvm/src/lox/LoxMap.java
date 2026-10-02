@@ -7,29 +7,19 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Nil keys are plain {@code null} — {@code java.util.HashMap} (and
- * LinkedHashMap) already accept a null key, so nil needs no sentinel.
- * LinkedHashMap keeps insertion order reproducible across runs. spec/03-
- * types.md leaves map iteration order unspecified; the native ObjMap gives
- * bucket order instead, so the two runtimes may print keys() in different
- * orders on the same program. That gap is not a defect (maintainer ruling,
- * 2026-08-14); the order-sensitive examples are excluded from the JVM
- * differential test path for that reason (see tools/jvm_excluded_examples.txt).
+ * Key validity is enforced by callers (LoxOps), matching vm.cpp.
  *
- * Key validity is enforced by callers (LoxOps), matching vm.cpp. Scalar and
- * String keys go in a LinkedHashMap, which already gives the right
- * value/identity equality. An Instance key goes in a separate list, because
- * its equality is the class's own {@code __eq__} (Java's {@code Object.equals}
- * is identity for LoxInstance) — see spec/03-types.md's Map section. The two
- * structures cannot collide: a scalar/string key never equals an Instance key.
+ * Entries live in a hash-bucketed table: one bucket per key hash, each bucket
+ * a list probed in insertion order. This matches the native ObjMap's own
+ * "find the bucket from the key's hash, then compare the stored key" probe,
+ * so an Instance key and a scalar key that share a bucket resolve the same way
+ * on both runtimes. Scalar and String keys use their own hash; an Instance key
+ * calls __hash__ (LoxOps.hashKey), and a collision is resolved with the stored
+ * key's __eq__ (LoxOps.keyEquals, stored key on the left). spec/03-types.md
+ * leaves map iteration order unspecified, so buckets need no set order beyond
+ * insertion order within one bucket.
  */
 public final class LoxMap {
-    // Keyed by the numerically-normalized key, so -0.0 and 0.0 land in the
-    // same slot (matching value.cpp's hashValue). Each Slot separately holds
-    // the exact key object the caller last wrote: CoreHashMap::set replaces
-    // the whole entry, key included, on a repeat write, not only the value,
-    // so a later write under -0.0 must still print as -0, even though it
-    // looks up the same slot as 0.0.
     private static final class Slot {
         final Object displayKey;
         final Object value;
@@ -40,9 +30,8 @@ public final class LoxMap {
         }
     }
 
-    private final Map<Object, Slot> entries = new LinkedHashMap<>();
-    // Instance keys, searched with the class's __eq__ (stored key on the left).
-    private final List<Slot> instanceEntries = new ArrayList<>();
+    private final Map<Integer, List<Slot>> buckets = new LinkedHashMap<>();
+    private int size;
 
     // Structural version, bumped on a real insert or a real erase only.
     // A repeat write of one key and a remove of a missing key leave it
@@ -60,30 +49,8 @@ public final class LoxMap {
         return version;
     }
 
-    private static boolean isInstanceKey(Object key) {
-        return key instanceof LoxInstance
-            && LoxOps.isInstanceMapKey((LoxInstance) key);
-    }
-
-    private int findInstance(Object key) {
-        for (int i = 0; i < instanceEntries.size(); i++) {
-            if (LoxOps.keyEquals(instanceEntries.get(i).displayKey, key)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    // -0.0 and 0.0 must hash and look up identically, matching IEEE 754
-    // numeric equality (value.cpp's hashValue canonicalizes the same way).
-    // java.lang.Double.equals/hashCode treat them as distinct, so lookups
-    // must normalize the key. This is a lookup-only concern: the Slot above
-    // still remembers the un-normalized key for display.
-    private static Object normalizeKey(Object key) {
-        if (key instanceof Double && (Double) key == 0.0) {
-            return 0.0;
-        }
-        return key;
+    private List<Slot> bucketFor(int hash) {
+        return buckets.computeIfAbsent(hash, k -> new ArrayList<>());
     }
 
     public void put(Object key, Object value) {
@@ -93,28 +60,16 @@ public final class LoxMap {
         }
         keyOpDepth++;
         try {
-            if (isInstanceKey(key)) {
-                LoxOps.checkUserHash(key);
+            List<Slot> bucket = bucketFor(LoxOps.hashKey(key));
+            for (int i = 0; i < bucket.size(); i++) {
+                if (LoxOps.keyEquals(bucket.get(i).displayKey, key)) {
+                    bucket.set(i, new Slot(key, value));
+                    return;
+                }
             }
-            // A stored Instance key may equal ANY lookup key, so probe the
-            // instance list for every insert, not only an Instance lookup.
-            int i = findInstance(key);
-            if (i >= 0) {
-                instanceEntries.set(i, new Slot(key, value));
-                return;
-            }
-            if (isInstanceKey(key)) {
-                instanceEntries.add(new Slot(key, value));
-                version++;
-                return;
-            }
-            Object normalized = normalizeKey(key);
-            // Count only a new key: an overwrite leaves iteration valid, while
-            // a paired erase plus insert must still trip the iterator check.
-            if (!entries.containsKey(normalized)) {
-                version++;
-            }
-            entries.put(normalized, new Slot(key, value));
+            bucket.add(new Slot(key, value));
+            size++;
+            version++;
         } finally {
             keyOpDepth--;
         }
@@ -123,18 +78,15 @@ public final class LoxMap {
     public Object get(Object key) {
         keyOpDepth++;
         try {
-            if (isInstanceKey(key)) {
-                LoxOps.checkUserHash(key);
+            List<Slot> bucket = buckets.get(LoxOps.hashKey(key));
+            if (bucket != null) {
+                for (Slot slot : bucket) {
+                    if (LoxOps.keyEquals(slot.displayKey, key)) {
+                        return slot.value;
+                    }
+                }
             }
-            int i = findInstance(key);
-            if (i >= 0) {
-                return instanceEntries.get(i).value;
-            }
-            if (isInstanceKey(key)) {
-                return null;
-            }
-            Slot slot = entries.get(normalizeKey(key));
-            return (slot == null) ? null : slot.value;
+            return null;
         } finally {
             keyOpDepth--;
         }
@@ -143,16 +95,15 @@ public final class LoxMap {
     public boolean has(Object key) {
         keyOpDepth++;
         try {
-            if (isInstanceKey(key)) {
-                LoxOps.checkUserHash(key);
+            List<Slot> bucket = buckets.get(LoxOps.hashKey(key));
+            if (bucket != null) {
+                for (Slot slot : bucket) {
+                    if (LoxOps.keyEquals(slot.displayKey, key)) {
+                        return true;
+                    }
+                }
             }
-            if (findInstance(key) >= 0) {
-                return true;
-            }
-            if (isInstanceKey(key)) {
-                return false;
-            }
-            return entries.containsKey(normalizeKey(key));
+            return false;
         } finally {
             keyOpDepth--;
         }
@@ -165,21 +116,20 @@ public final class LoxMap {
         }
         keyOpDepth++;
         try {
-            if (isInstanceKey(key)) {
-                LoxOps.checkUserHash(key);
-            }
-            int i = findInstance(key);
-            if (i >= 0) {
-                instanceEntries.remove(i);
-                version++;
-                return;
-            }
-            if (isInstanceKey(key)) {
-                return;
-            }
-            // Count only a real erase: a miss leaves iteration valid.
-            if (entries.remove(normalizeKey(key)) != null) {
-                version++;
+            int hash = LoxOps.hashKey(key);
+            List<Slot> bucket = buckets.get(hash);
+            if (bucket != null) {
+                for (int i = 0; i < bucket.size(); i++) {
+                    if (LoxOps.keyEquals(bucket.get(i).displayKey, key)) {
+                        bucket.remove(i);
+                        size--;
+                        version++;
+                        if (bucket.isEmpty()) {
+                            buckets.remove(hash);
+                        }
+                        return;
+                    }
+                }
             }
         } finally {
             keyOpDepth--;
@@ -187,18 +137,17 @@ public final class LoxMap {
     }
 
     public int size() {
-        return entries.size() + instanceEntries.size();
+        return size;
     }
 
-    /** Insertion order, each entry's key exactly as the caller last wrote it. */
+    /** Insertion order within each bucket, each key as the caller last wrote it. */
     public List<Map.Entry<Object, Object>> entrySet() {
-        List<Map.Entry<Object, Object>> result =
-            new ArrayList<>(entries.size() + instanceEntries.size());
-        for (Slot slot : entries.values()) {
-            result.add(new AbstractMap.SimpleImmutableEntry<>(slot.displayKey, slot.value));
-        }
-        for (Slot slot : instanceEntries) {
-            result.add(new AbstractMap.SimpleImmutableEntry<>(slot.displayKey, slot.value));
+        List<Map.Entry<Object, Object>> result = new ArrayList<>(size);
+        for (List<Slot> bucket : buckets.values()) {
+            for (Slot slot : bucket) {
+                result.add(new AbstractMap.SimpleImmutableEntry<>(
+                    slot.displayKey, slot.value));
+            }
         }
         return result;
     }

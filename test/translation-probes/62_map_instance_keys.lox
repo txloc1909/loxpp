@@ -57,3 +57,18 @@ class Sneaky {
     __eq__(o) { return true; }
 }
 try { locked[Sneaky()] = 9; } catch (e) { print e.kind; }
+
+// A scalar key and an equal Instance key that share a bucket resolve the same
+// way on every backend: the bucket is probed in insertion order, and the
+// first stored key that compares equal wins (native's own bucket probe).
+class Shared {
+    __hash__() { return 1; }
+    __eq__(o) { return true; }
+}
+var shared = {};
+shared[1] = "scalar";
+shared[Shared()] = "instance";
+shared.del(1);
+print shared[1];
+print shared[Shared()];
+print len(shared);

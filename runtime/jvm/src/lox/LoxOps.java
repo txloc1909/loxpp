@@ -369,13 +369,28 @@ public final class LoxOps {
     }
 
     /**
-     * Calls an Instance key's __hash__ and validates its Number result. The
-     * caller (LoxMap) holds the map lock, so a __hash__ that writes the map
-     * raises MapChangedError.
+     * The Map bucket index for a key, matching a valid map key. A scalar or
+     * String key uses its own hash; an Instance key calls __hash__ and folds
+     * the Number the same way the native runtime folds hashValue()'s Number.
+     * A non-Number or NaN __hash__ result raises the catchable error.
      */
-    static void checkUserHash(Object key) {
-        LoxClosure hash = findDunder(key, "__hash__");
-        Object result = hash.callAsSelf(key, new Object[0]);
+    static int hashKey(Object key) {
+        if (key == null) {
+            return 0;
+        }
+        if (key instanceof Boolean) {
+            return (Boolean)key ? 1231 : 1237;
+        }
+        if (key instanceof Double) {
+            return foldDouble((Double)key);
+        }
+        if (key instanceof String) {
+            return ((String)key).hashCode();
+        }
+        // Instance key; checkMapKey / checkMapKeyForNativeMethod already
+        // confirmed both methods exist.
+        Object result =
+            findDunder(key, "__hash__").callAsSelf(key, new Object[0]);
         if (!(result instanceof Double)) {
             throw makeError("OperatorResultTypeError",
                             "Operator method must return a Number.");
@@ -383,6 +398,17 @@ public final class LoxOps {
         if (Double.isNaN((Double)result)) {
             throw makeError("NaNKeyError", "NaN cannot be used as a map key.");
         }
+        return foldDouble((Double)result);
+    }
+
+    private static int foldDouble(double d) {
+        // Match value.cpp's hashValue number path: mix the 64-bit bits to
+        // 32 bits, with -0.0 canonicalized to +0.0.
+        if (d == 0.0) {
+            d = 0.0;
+        }
+        long bits = Double.doubleToLongBits(d);
+        return (int)(bits ^ (bits >>> 32));
     }
 
     /**

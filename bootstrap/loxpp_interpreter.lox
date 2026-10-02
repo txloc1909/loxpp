@@ -2091,18 +2091,17 @@ class InterpListMethod {
 
 class InterpMap {
     init() {
-        this.data   = {};
-        // Instance keys: a list of [key, value], because their equality is the
-        // interpreted class's __eq__, which the host map cannot call. Kept
-        // apart from `data` (scalar/string keys); the two cannot collide.
-        this.instances = [];
+        // One bucket per key hash, each a list of [key, value] probed in
+        // insertion order. This mirrors the native ObjMap's own probe, so a
+        // scalar key and an Instance key that share a bucket resolve the same
+        // way on both runtimes (see Interp.mapGet/mapSet).
+        this.buckets = {};
+        this.size = 0;
         // Non-zero while a key operation runs; a set/del then raises
         // MapChangedError, so a user __hash__/__eq__ cannot mutate the map.
         this.keyOpDepth = 0;
-        // Structural version for the for-in fail-fast check. evalIndexSet
-        // and del bump it on a real insert or erase only. It lives in this
-        // wrapper, not in the native map in data, which interpreted code
-        // cannot read a counter from.
+        // Structural version for the for-in fail-fast check. A real insert or
+        // erase bumps it; overwrites and misses leave it alone.
         this.version = 0;
         this.loxTag = "map";
     }
@@ -2335,22 +2334,33 @@ class Interpreter {
                this.findDunder(v, "__eq__") != nil;
     }
 
-    // Calls an Instance key's __hash__ and validates its Number result. Sets
-    // the interpreter's error and returns false on failure. The caller holds
-    // the map's lock, so a __hash__ that writes the map raises MapChangedError.
-    runKeyHash(key) {
+    // The Map bucket key for a valid map key. A scalar or String key uses its
+    // own value; an Instance key calls __hash__ and returns its Number. Sets
+    // the interpreter's error and returns nil on a bad __hash__ result. The
+    // caller holds the map's lock, so a __hash__ that writes the map raises
+    // MapChangedError.
+    mapHashKey(key) {
+        if (key == true) return 1231;
+        if (key == false) return 1237;
+        if (key == nil) return 0;
+        if (isLoxStr(key)) return key;
+        if (isLoxNum(key)) {
+            if (key == 0) return 0;
+            return key;
+        }
         var hash = this.findDunder(key, "__hash__");
         var r = hash.bind(key).call(this, []);
-        if (this.throwFlag) return false;
+        if (this.throwFlag) return nil;
         if (!isLoxNum(r)) {
             this.setError("OperatorResultTypeError", "Operator method must return a Number.", 0);
-            return false;
+            return nil;
         }
         if (r != r) {
             this.setError("NaNKeyError", "NaN cannot be used as a map key.", 0);
-            return false;
+            return nil;
         }
-        return true;
+        if (r == 0) return 0;
+        return r;
     }
 
     // Key equality: the stored key's __eq__, or the host value equality when
@@ -2370,47 +2380,38 @@ class Interpreter {
         return stored == lookup;
     }
 
-    // Index of an Instance key in a map's instance list, or -1.
-    mapFindInstance(map, key) {
-        var i = 0;
-        while (i < len(map.instances)) {
-            if (this.keyEquals(map.instances[i][0], key)) return i;
-            if (this.throwFlag) return -1;
-            i = i + 1;
-        }
-        return -1;
-    }
-
-    mapSize(map) { return len(map.data) + len(map.instances); }
+    mapSize(map) { return map.size; }
 
     mapKeys(map) {
         var ks = [];
-        var sc = map.data.keys();
+        var hs = map.buckets.keys();
         var i = 0;
-        while (i < len(sc)) { ks.append(sc[i]); i = i + 1; }
-        i = 0;
-        while (i < len(map.instances)) { ks.append(map.instances[i][0]); i = i + 1; }
+        while (i < len(hs)) {
+            var bucket = map.buckets[hs[i]];
+            var j = 0;
+            while (j < len(bucket)) { ks.append(bucket[j][0]); j = j + 1; }
+            i = i + 1;
+        }
         return ks;
     }
 
+    // The bucket for `hash`, probing it in insertion order and comparing the
+    // stored key with keyEquals (stored key on the left; CPython style). This
+    // is the same probe native's ObjMap uses, so a scalar key and an Instance
+    // key that share a bucket resolve the same way on both runtimes.
     mapGet(map, key) {
         map.keyOpDepth = map.keyOpDepth + 1;
-        var isInst = this.instanceMapKeyValid(key);
-        if (isInst) {
-            if (!this.runKeyHash(key)) { map.keyOpDepth = map.keyOpDepth - 1; return nil; }
-        }
-        // A stored Instance key may equal ANY lookup key, so probe the
-        // instance list for every lookup.
-        var i = this.mapFindInstance(map, key);
+        var h = this.mapHashKey(key);
+        if (this.throwFlag) { map.keyOpDepth = map.keyOpDepth - 1; return nil; }
         var val = nil;
-        if (this.throwFlag) {
-            map.keyOpDepth = map.keyOpDepth - 1;
-            return nil;
-        }
-        if (i >= 0) {
-            val = map.instances[i][1];
-        } else if (!isInst and map.data.has(key)) {
-            val = map.data[key];
+        if (map.buckets.has(h)) {
+            var bucket = map.buckets[h];
+            var i = 0;
+            while (i < len(bucket)) {
+                if (this.keyEquals(bucket[i][0], key)) { val = bucket[i][1]; break; }
+                if (this.throwFlag) break;
+                i = i + 1;
+            }
         }
         map.keyOpDepth = map.keyOpDepth - 1;
         return val;
@@ -2418,17 +2419,18 @@ class Interpreter {
 
     mapHas(map, key) {
         map.keyOpDepth = map.keyOpDepth + 1;
-        var isInst = this.instanceMapKeyValid(key);
-        if (isInst) {
-            if (!this.runKeyHash(key)) { map.keyOpDepth = map.keyOpDepth - 1; return false; }
+        var h = this.mapHashKey(key);
+        if (this.throwFlag) { map.keyOpDepth = map.keyOpDepth - 1; return false; }
+        var found = false;
+        if (map.buckets.has(h)) {
+            var bucket = map.buckets[h];
+            var i = 0;
+            while (i < len(bucket)) {
+                if (this.keyEquals(bucket[i][0], key)) { found = true; break; }
+                if (this.throwFlag) break;
+                i = i + 1;
+            }
         }
-        var i = this.mapFindInstance(map, key);
-        if (this.throwFlag) {
-            map.keyOpDepth = map.keyOpDepth - 1;
-            return false;
-        }
-        var found = i >= 0;
-        if (!found and !isInst) found = map.data.has(key);
         map.keyOpDepth = map.keyOpDepth - 1;
         return found;
     }
@@ -2439,21 +2441,24 @@ class Interpreter {
             return false;
         }
         map.keyOpDepth = map.keyOpDepth + 1;
-        var isInst = this.instanceMapKeyValid(key);
-        if (isInst) {
-            if (!this.runKeyHash(key)) { map.keyOpDepth = map.keyOpDepth - 1; return false; }
-        }
-        var i = this.mapFindInstance(map, key);
+        var h = this.mapHashKey(key);
         if (this.throwFlag) { map.keyOpDepth = map.keyOpDepth - 1; return false; }
-        if (i >= 0) {
-            map.instances[i] = [key, val];
-        } else if (isInst) {
-            map.instances.append([key, val]);
-            map.version = map.version + 1;
-        } else {
-            if (!map.data.has(key)) map.version = map.version + 1;
-            map.data[key] = val;
+        var bucket = [];
+        if (map.buckets.has(h)) bucket = map.buckets[h];
+        var i = 0;
+        while (i < len(bucket)) {
+            if (this.keyEquals(bucket[i][0], key)) {
+                bucket[i] = [key, val];
+                map.keyOpDepth = map.keyOpDepth - 1;
+                return true;
+            }
+            if (this.throwFlag) { map.keyOpDepth = map.keyOpDepth - 1; return false; }
+            i = i + 1;
         }
+        bucket.append([key, val]);
+        map.buckets[h] = bucket;
+        map.size = map.size + 1;
+        map.version = map.version + 1;
         map.keyOpDepth = map.keyOpDepth - 1;
         return true;
     }
@@ -2464,18 +2469,22 @@ class Interpreter {
             return;
         }
         map.keyOpDepth = map.keyOpDepth + 1;
-        var isInst = this.instanceMapKeyValid(key);
-        if (isInst) {
-            if (!this.runKeyHash(key)) { map.keyOpDepth = map.keyOpDepth - 1; return; }
-        }
-        var i = this.mapFindInstance(map, key);
+        var h = this.mapHashKey(key);
         if (this.throwFlag) { map.keyOpDepth = map.keyOpDepth - 1; return; }
-        if (i >= 0) {
-            map.instances.remove(map.instances[i]);
-            map.version = map.version + 1;
-        } else if (!isInst and map.data.has(key)) {
-            map.data.del(key);
-            map.version = map.version + 1;
+        if (map.buckets.has(h)) {
+            var bucket = map.buckets[h];
+            var i = 0;
+            while (i < len(bucket)) {
+                if (this.keyEquals(bucket[i][0], key)) {
+                    bucket.remove(bucket[i]);
+                    map.size = map.size - 1;
+                    map.version = map.version + 1;
+                    if (len(bucket) == 0) map.buckets.del(h);
+                    break;
+                }
+                if (this.throwFlag) break;
+                i = i + 1;
+            }
         }
         map.keyOpDepth = map.keyOpDepth - 1;
     }
