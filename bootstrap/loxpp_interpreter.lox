@@ -2560,7 +2560,17 @@ class Interpreter {
                     // defers already drained inside LoxFunction.call). Without
                     // the re-check, stringify()'s stop-dispatch guard returns
                     // the "..." placeholder and the inner fault is dropped.
+                    // A __str__ that re-throws the same (or a fresh) Instance
+                    // would loop forever, so bound it the way native's own
+                    // stringify depth guard does and report the same "..."
+                    // placeholder native reports for that case.
+                    var reportDepth = 0;
                     while (this.throwFlag) {
+                        if (reportDepth >= 200) {
+                            print "LOXERR70 ...";
+                            break;
+                        }
+                        reportDepth = reportDepth + 1;
                         var thrownVal = this.thrownValue;
                         this.throwFlag = false;
                         if (loxTag(thrownVal) == "error") {

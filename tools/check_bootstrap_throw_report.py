@@ -68,6 +68,11 @@ CASES = [
         "throw V();\n",
     ),
     Case(
+        "cyclic_str",
+        "class V { __str__() { throw this; } }\n"
+        "throw V();\n",
+    ),
+    Case(
         "number",
         "throw 42;\n",
     ),
