@@ -215,6 +215,7 @@ StackEffect stackEffect(const DecodedInstruction& ins) {
     case Op::NEGATE:
     case Op::NOT:
     case Op::LEN:
+    case Op::STR:
     case Op::GET_TAG:
     case Op::IS_SEQ:
     case Op::INSTANCEOF:

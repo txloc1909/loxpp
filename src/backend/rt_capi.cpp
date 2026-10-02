@@ -165,19 +165,14 @@ Value rt_get_global(Runtime* rt, const char* name) noexcept {
     return v.has_value() ? *v : Value{};
 }
 
-int rt_op_print(Runtime* rt) noexcept {
+int rt_op_print(Runtime* rt, int stopAtFrameCount) noexcept {
     return rtGuard(rt, [&] {
-        // Mirrors Op::PRINT's own body (vm.cpp): clear before stringify()
-        // (which can itself call back into stdlib code, e.g. a Map's own
-        // to-string), then check after.
-        rt->clearNativeError();
-        std::string s = stringify(rt->pop());
-        std::string errMsg;
-        if (rt->takeNativeError(&errMsg)) {
-            rt->runtimeError("%s", errMsg.c_str());
-            return Runtime::OpResult::Fatal;
+        Runtime::OpResult r = rt->opStr(stopAtFrameCount);
+        if (r != Runtime::OpResult::OK) {
+            return r;
         }
-        std::fwrite(s.data(), 1, s.size(), stdout);
+        ObjString* s = asObjString(rt->pop());
+        std::fwrite(s->chars.data(), 1, s->chars.size(), stdout);
         std::fputc('\n', stdout);
         return Runtime::OpResult::OK;
     });
@@ -310,6 +305,10 @@ int rt_op_in(Runtime* rt, int stopAtFrameCount) noexcept {
 
 int rt_op_len(Runtime* rt, int stopAtFrameCount) noexcept {
     return rtGuard(rt, [&] { return rt->opLen(stopAtFrameCount); });
+}
+
+int rt_op_str(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opStr(stopAtFrameCount); });
 }
 
 int rt_op_add(Runtime* rt, int stopAtFrameCount) noexcept {

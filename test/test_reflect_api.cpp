@@ -293,10 +293,10 @@ TEST(ReflectApi, SetField_NonStringName_RuntimeError) {
 
 TEST(ReflectApi, CallMethod_NativeFieldValue_ForwardsArgs) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("class Foo {} var f = Foo(); f.s = str; "
+    ASSERT_EQ(h.run("class Foo {} var f = Foo(); f.s = type; "
                     "callMethod(f, \"s\", 42);"),
               InterpretResult::OK);
-    EXPECT_EQ(asObjString(as<Obj*>(h.lastResult()))->chars, "42");
+    EXPECT_EQ(asObjString(as<Obj*>(h.lastResult()))->chars, "Number");
 }
 
 TEST(ReflectApi, CallMethod_BoundNativeFieldValue_ForwardsReceiverAndArgs) {
@@ -379,7 +379,7 @@ TEST(ReflectApi, CallMethod_UndefinedMethod_RuntimeError) {
 
 TEST(ReflectApi, CallMethod_WrongArityToResolvedNative_RuntimeError) {
     VMTestHarness h;
-    EXPECT_EQ(h.run("class Foo {} var f = Foo(); f.s = str; "
+    EXPECT_EQ(h.run("class Foo {} var f = Foo(); f.s = type; "
                     "callMethod(f, \"s\");"),
               InterpretResult::RUNTIME_ERROR);
 }

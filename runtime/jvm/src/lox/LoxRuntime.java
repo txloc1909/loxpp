@@ -148,8 +148,6 @@ public final class LoxRuntime {
                 }
             }));
         globals.define(
-            "str", new LoxNative("str", 1, args -> LoxOps.stringify(args[0])));
-        globals.define(
             "open", new LoxNative("open", 2, args -> {
                 if (!(args[0] instanceof String) ||
                     !(args[1] instanceof String)) {

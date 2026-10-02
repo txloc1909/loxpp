@@ -114,6 +114,7 @@ void renderInstruction(const Chunk& chunk, const DecodedInstruction& ins,
     case Op::MODULO:
     case Op::NOT:
     case Op::LEN:
+    case Op::STR:
     case Op::PRINT:
     case Op::POP:
     case Op::RETURN:

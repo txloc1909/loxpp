@@ -505,14 +505,14 @@ TEST_F(NativeTest, Str_ResultIsString) {
     EXPECT_TRUE(isString(h.lastResult()));
 }
 
-TEST_F(NativeTest, Str_WrongArity_TooFew_RuntimeError) {
+TEST_F(NativeTest, Str_WrongArity_TooFew_CompileError) {
     VMTestHarness h;
-    EXPECT_EQ(h.run("str();"), InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.run("str();"), InterpretResult::COMPILE_ERROR);
 }
 
-TEST_F(NativeTest, Str_WrongArity_TooMany_RuntimeError) {
+TEST_F(NativeTest, Str_WrongArity_TooMany_CompileError) {
     VMTestHarness h;
-    EXPECT_EQ(h.run("str(1, 2);"), InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.run("str(1, 2);"), InterpretResult::COMPILE_ERROR);
 }
 
 // ---------------------------------------------------------------------------
@@ -529,13 +529,13 @@ TEST_F(NativeTest, NativesAreGlobalVariables) {
     // Natives are just values stored in globals — they can be assigned to
     // local variables and called through them.
     VMTestHarness h;
-    ASSERT_EQ(h.run("var s = str; s(7);"), InterpretResult::OK);
-    EXPECT_EQ(stringify(h.lastResult()), "7");
+    ASSERT_EQ(h.run("var s = type; s(7);"), InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "Number");
 }
 
 TEST_F(NativeTest, StackCleanAfterNativeCall) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("str(1); str(2); str(3);"), InterpretResult::OK);
+    ASSERT_EQ(h.run("type(1); type(2); type(3);"), InterpretResult::OK);
     EXPECT_EQ(h.stackDepth(), 0);
 }
 

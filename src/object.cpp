@@ -2,6 +2,7 @@
 #include "objects.h"
 #include "table.h"
 #include "exec_objects.h"
+#include "runtime.h"
 
 #include <algorithm>
 #include <string>
@@ -53,6 +54,14 @@ std::string stringifyObj(Obj* obj) {
     }
     case ObjType::INSTANCE: {
         auto* inst = static_cast<ObjInstance*>(obj);
+        // Only a print/str stringify dispatches __str__ (the depth-guard
+        // flag). An internal stringify — the disassembler, the debug trace's
+        // stack dump, throw of a non-Error value — has no active Runtime or
+        // no canonical flag and keeps the default form.
+        if (Runtime* rt = getActiveRuntime();
+            rt != nullptr && rt->canonicalStringifyActive()) {
+            return rt->stringifyInstanceStr(inst);
+        }
         return std::string(inst->klass->name->chars.data(),
                            inst->klass->name->chars.size()) +
                " instance";

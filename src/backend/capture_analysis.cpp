@@ -47,6 +47,7 @@ int frameHeightEffect(const DecodedInstruction& ins) {
     case Op::NEGATE:
     case Op::NOT:
     case Op::LEN:
+    case Op::STR:
     case Op::SET_LOCAL:
     case Op::SET_GLOBAL:
     case Op::SET_UPVALUE:

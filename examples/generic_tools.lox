@@ -60,12 +60,15 @@ p2.y = 99;
 print "sameFields(p1, p2) after mutation = " + str(sameFields(p1, p2));
 
 // A name-to-handler registry, resolved at runtime instead of an if/else
-// chain per command. Handlers here are native functions (str, type) and a
-// bound native method (a Map's `has`) — all valid callMethod() targets.
+// chain per command. Handlers here are a user function, a native function
+// (type), and a bound native method (a Map's `has`) — all valid callMethod()
+// targets. `str` is a keyword now, not a first-class global, so wrap it.
 class Formatters {}
 
+fun toText(v) { return str(v); }
+
 var formatters = Formatters();
-formatters.text = str;
+formatters.text = toText;
 formatters.count = type;
 
 var seen = {"alice": true};

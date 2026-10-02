@@ -5,7 +5,7 @@
 // of the language, and errors: CONSTANT (Number, and any
 // other constant type via rt_constant_at)/NIL/TRUE/FALSE, POP, GET_LOCAL/
 // SET_LOCAL, DEFINE_GLOBAL/GET_GLOBAL/SET_GLOBAL, PRINT, ADD/SUBTRACT/
-// MULTIPLY/DIVIDE/MODULO/NEGATE/LESS/GREATER/EQUAL/IN/LEN, JUMP/
+// MULTIPLY/DIVIDE/MODULO/NEGATE/LESS/GREATER/EQUAL/IN/LEN/STR, JUMP/
 // JUMP_IF_FALSE/LOOP/JUMP_TABLE (lowered to a compare chain — P8, no QBE
 // switch or indirect jump), CALL, CLOSURE/GET_UPVALUE/SET_UPVALUE/
 // CLOSE_UPVALUE (no capture analysis — this backend relies on the VM's own

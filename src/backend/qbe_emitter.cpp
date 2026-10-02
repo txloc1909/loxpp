@@ -748,8 +748,11 @@ class Emitter {
             break;
         }
         case Op::PRINT:
-            callSlowPath("rt_op_print", before.height, {}, std::nullopt,
-                         ins.offset, Catchability::Fatal);
+            // print routes through opStr, which dispatches __str__ and can
+            // raise a catchable error, so this needs the enclosing frame's
+            // own stop depth and a local catch (like LEN below).
+            callSlowPath("rt_op_print", before.height, {}, m_stopTemp,
+                         ins.offset, Catchability::Local);
             break;
         case Op::ADD:
             // The slow path (rt_op_add) also covers string concatenation —
@@ -1016,6 +1019,10 @@ class Emitter {
             break;
         case Op::LEN:
             callSlowPath("rt_op_len", before.height, {}, m_stopTemp, ins.offset,
+                         Catchability::Local);
+            break;
+        case Op::STR:
+            callSlowPath("rt_op_str", before.height, {}, m_stopTemp, ins.offset,
                          Catchability::Local);
             break;
         case Op::GET_ITER:

@@ -451,7 +451,7 @@ fun go(e) {
 
 TEST(ToolingResolver, SymbolAtDistinguishesNothingUserSymbolAndStdlibGlobal) {
     const std::string src =
-        "fun f() {\n  var local = 1;\n  return str(local);\n}\n";
+        "fun f() {\n  var local = 1;\n  return type(local);\n}\n";
     DocumentModel model(src);
     EXPECT_TRUE(warningMessages(model).empty());
 
@@ -461,16 +461,16 @@ TEST(ToolingResolver, SymbolAtDistinguishesNothingUserSymbolAndStdlibGlobal) {
     EXPECT_TRUE(model.knownGlobalAt(nothing).empty());
 
     // (b) a user symbol: the `local` argument use.
-    const std::size_t userUse = offsetOf(src, "str(local)") + 4;
+    const std::size_t userUse = offsetOf(src, "type(local)") + 5;
     const Symbol* sym = model.symbolAt(userUse);
     ASSERT_NE(sym, nullptr);
     EXPECT_EQ(sym->name, "local");
     EXPECT_TRUE(model.knownGlobalAt(userUse).empty());
 
-    // (c) a stdlib global: the `str` callee.
-    const std::size_t stdUse = offsetOf(src, "str(local)");
+    // (c) a stdlib global: the `type` callee.
+    const std::size_t stdUse = offsetOf(src, "type(local)");
     EXPECT_EQ(model.symbolAt(stdUse), nullptr);
-    EXPECT_EQ(model.knownGlobalAt(stdUse), "str");
+    EXPECT_EQ(model.knownGlobalAt(stdUse), "type");
 }
 
 TEST(ToolingResolver, RedeclarationInSameScopeWarns) {

@@ -30,7 +30,7 @@ print hasField(a, "missing");
 setField(a, "age", 3);
 print a.age;
 
-a.describe = str;
+a.describe = type;
 print callMethod(a, "describe", 42);
 
 var m = {1: true};

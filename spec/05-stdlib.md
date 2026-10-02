@@ -55,8 +55,10 @@ if (line == nil) {
 
 ## `str(value) → String`
 
-Converts `value` to its canonical string representation (the same text that
-`print` would output) and returns it as a String value.
+`str` is a keyword operator, not a global function (see §01-lexical and
+§04-semantics). `str(value)` converts `value` to its canonical string
+representation (the same text that `print` would output) and returns it as a
+String value.
 
 ```lox
 print str(42);      // 42
@@ -71,9 +73,10 @@ print str(d);           // Dog instance
 ```
 
 For Class values, `str()` returns the class name. For Instance values, it
-returns `"ClassName instance"`. For BoundMethod and native function values, it
-returns `"<fn name>"` or `"<native fn>"` respectively, matching the canonical
-forms documented in §03-types.
+returns `"ClassName instance"`, or the value of the class's `__str__` method
+when it defines one. For BoundMethod and native function values, it returns
+`"<fn name>"` or `"<native fn>"` respectively, matching the canonical forms
+documented in §03-types.
 
 This is the only built-in mechanism for converting a non-String value to a
 String so that it can be concatenated with `+`.

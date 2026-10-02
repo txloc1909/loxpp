@@ -62,6 +62,7 @@ enum class TokenType : std::uint8_t {
     PRINT,
     RETURN,
     MATCH,
+    STR,
     SUPER,
     THIS,
     THROW,

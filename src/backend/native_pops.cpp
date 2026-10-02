@@ -35,6 +35,8 @@ std::string opName(Op op) {
         return "NOT";
     case Op::LEN:
         return "LEN";
+    case Op::STR:
+        return "STR";
     case Op::PRINT:
         return "PRINT";
     case Op::POP:
@@ -149,6 +151,7 @@ std::optional<int> nativePops(Op op, const DecodedInstruction& in) {
     case Op::NEGATE:
     case Op::NOT:
     case Op::LEN:
+    case Op::STR:
     case Op::PRINT:
     case Op::DEFINE_GLOBAL:
     case Op::GET_PROPERTY:
