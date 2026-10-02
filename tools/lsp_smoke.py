@@ -33,7 +33,7 @@ fun greet(name) {
 
 var who = "world";
 print greet(who);
-print str(123);
+print type(123);
 """
 
 BAD_SOURCE = "print 1 +;\n"
@@ -290,15 +290,15 @@ def main():
                   % start)
 
         # -- hover on a stdlib name ----------------------------------
-        hl, hc = line_char(CLEAN_SOURCE, "str(123)")
+        hl, hc = line_char(CLEAN_SOURCE, "type(123)")
         hover = client.request("textDocument/hover", {
             "textDocument": {"uri": CLEAN_URI},
             "position": {"line": hl, "character": hc + 1}})
         hover_text = ""
         if hover and isinstance(hover.get("contents"), dict):
             hover_text = hover["contents"].get("value", "")
-        check("str(value)" in hover_text,
-              "hover on 'str' shows its signature (got %r)" % hover_text[:60])
+        check("type(value)" in hover_text,
+              "hover on 'type' shows its signature (got %r)" % hover_text[:60])
 
         # -- document symbols --------------------------------------
         symbols = client.request("textDocument/documentSymbol", {
@@ -380,7 +380,7 @@ def main():
 
         # A position with no '+' and no diagnostics offers nothing, and an
         # unrelated `only` filter suppresses even the '+' wraps.
-        sl2, sc2 = line_char(CLEAN_SOURCE, "str(123)")
+        sl2, sc2 = line_char(CLEAN_SOURCE, "type(123)")
         no_plus = client.request("textDocument/codeAction", {
             "textDocument": {"uri": CLEAN_URI},
             "range": {"start": {"line": sl2, "character": sc2 + 1},
@@ -419,13 +419,13 @@ def main():
               % (edits,))
 
         # -- rename: null on stdlib names, error on bad names ----
-        sl, sc = line_char(CLEAN_SOURCE, "str(123)")
+        sl, sc = line_char(CLEAN_SOURCE, "type(123)")
         rename_stdlib = client.request("textDocument/rename", {
             "textDocument": {"uri": CLEAN_URI},
             "position": {"line": sl, "character": sc + 1},
             "newName": "person"})
         check(rename_stdlib is None,
-              "rename on stdlib 'str' returns null (got %s)"
+              "rename on stdlib 'type' returns null (got %s)"
               % (rename_stdlib,))
 
         bad_name_failed = False
@@ -529,25 +529,25 @@ def main():
               "(got %s)" % leaked)
 
         # -- signature help on a stdlib call -------------------------
-        sl, sc = line_char(CLEAN_SOURCE, "str(123)")
+        sl, sc = line_char(CLEAN_SOURCE, "type(123)")
         sig_help = client.request("textDocument/signatureHelp", {
             "textDocument": {"uri": CLEAN_URI},
-            "position": {"line": sl, "character": sc + 4}})
+            "position": {"line": sl, "character": sc + 5}})
         sig_label = ""
         if sig_help and sig_help.get("signatures"):
             sig_label = sig_help["signatures"][0].get("label", "")
-        check("str(value)" in sig_label,
-              "signatureHelp on 'str(' shows its signature (got %r)"
+        check("type(value)" in sig_label,
+              "signatureHelp on 'type(' shows its signature (got %r)"
               % sig_label[:60])
         if sig_help:
             check(sig_help.get("activeParameter") == 0,
                   "signatureHelp activeParameter is 0 in first arg")
 
         # -- signature help after a closed call returns null -------------
-        al, ac = line_char(CLEAN_SOURCE, "str(123)")
+        al, ac = line_char(CLEAN_SOURCE, "type(123)")
         after = client.request("textDocument/signatureHelp", {
             "textDocument": {"uri": CLEAN_URI},
-            "position": {"line": al, "character": ac + len("str(123)")}})
+            "position": {"line": al, "character": ac + len("type(123)")}})
         check(after is None,
               "signatureHelp after ')' returns null (got %r)" % (after,))
 

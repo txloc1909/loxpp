@@ -70,7 +70,7 @@ try { var bad = len(BadLen()); } catch (e) { print "caught " + e.kind; }
 
 class WithStr {
   init(n) { this.n = n; }
-  __str__() { return "S" + this.n; }
+  __str__() { return "S" + str(this.n); }
 }
 print WithStr(1);
 print str(WithStr(2));
