@@ -1,6 +1,6 @@
 [[component]]
 name    = "loxpp"
-targets = ["loxpp"]
+targets = ["loxpp", "loxrt"]
 shipped = true
 
 [[component]]
