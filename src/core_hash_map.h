@@ -82,17 +82,47 @@ class CoreHashMap {
         return slot;
     }
 
+    // Mutable variant of find(), so the VM map path can update a matched entry
+    // in place after a key-equality callback that may have failed: the caller
+    // must not insert when the callback set its failure flag.
+    template <typename KeyMatch>
+    Entry* findMutable(uint32_t hash, KeyMatch match) {
+        if (m_buckets.empty()) {
+            return nullptr;
+        }
+        int cap = static_cast<int>(m_buckets.size());
+        Entry* slot = findSlotIn(m_buckets.data(), cap, hash, match);
+        if (Policy::isEmpty(*slot) || Policy::isTombstone(*slot)) {
+            return nullptr;
+        }
+        return slot;
+    }
+
+    // Tombstone a specific live entry, from findMutable. Returns nothing; the
+    // caller owns the entry's identity.
+    void removeAt(Entry* slot) {
+        Policy::makeTombstone(*slot);
+        --m_count;
+        ++m_dead;
+    }
+
     // Insert or update entry e. Returns true if e's key was newly inserted.
     // May grow (and re-allocate via Alloc) when the load factor is exceeded.
     bool set(const Entry& e) {
+        return set(e, [&](const Entry& s) { return Policy::keyMatch(s, e); });
+    }
+
+    // Insert or update entry e with an explicit key-equality predicate. The
+    // VM map path uses this so an Instance key can dispatch user __eq__.
+    template <typename KeyMatch>
+    bool set(const Entry& e, KeyMatch match) {
         int cap = static_cast<int>(m_buckets.size());
         if (m_count + m_dead + 1 > static_cast<int>(cap * MAX_LOAD)) {
             grow();
             cap = static_cast<int>(m_buckets.size());
         }
         Entry* slot =
-            findSlotIn(m_buckets.data(), cap, Policy::hashOf(e),
-                       [&](const Entry& s) { return Policy::keyMatch(s, e); });
+            findSlotIn(m_buckets.data(), cap, Policy::hashOf(e), match);
         const bool wasEmpty = Policy::isEmpty(*slot);
         const bool wasTombstone = !wasEmpty && Policy::isTombstone(*slot);
         if (wasEmpty || wasTombstone) {

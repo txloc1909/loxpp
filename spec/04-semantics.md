@@ -206,10 +206,14 @@ dispatches `__gt__` / `__lt__` and negates the result, with no `__le__` /
 `__ge__` method.
 
 The result of `__eq__`, `__lt__`, `__gt__`, and `__contains__` must be a
-Boolean, the result of `__len__` must be a Number, and the result of
-`__iter__` must be a List, String, or Map. Any other result raises a catchable
-`OperatorResultTypeError` (see [Runtime Errors](#runtime-errors)). The result
-of every other method in the table above is unconstrained.
+Boolean, the result of `__len__` and `__hash__` must be a Number, and the
+result of `__iter__` must be a List, String, or Map. Any other result raises a
+catchable `OperatorResultTypeError` (see [Runtime Errors](#runtime-errors)). The
+result of every other method in the table above is unconstrained.
+
+`__hash__` has no operator expression of its own. A Map key that is an Instance
+uses it to place the key; see [Map Literal](#map-literal), [Index
+Get](#index-get), [Index Set](#index-set), and [`in`](#in-operator).
 
 `__index_get__` takes the index as its single argument and may return any
 value. `__index_set__` takes the index and the assigned value; its return
@@ -225,8 +229,18 @@ built-in slice below, including its bound validation, and never dispatches.
 still returns the built-in length; on an Instance it dispatches `__len__`; on
 any other value it raises the same error the `len` global raised before.
 
-Internal equality — `in` against a List, `list.remove`, and map-key equality —
-always uses identity equality and never consults `__eq__`.
+Internal equality — `in` against a List and `list.remove` — always uses
+identity equality and never consults `__eq__`.
+
+A Map whose key is an Instance dispatches to that key's class. The Map calls
+`__hash__` on the **lookup** key to find the bucket, then resolves a collision
+by calling `__eq__` on the **stored** key with the lookup key as its single
+argument: `storedKey.__eq__(lookupKey)`. Lox++ has no reflected operator
+methods, so the lookup key's own `__eq__` never runs for a collision. The two
+keys that compare equal must return the same `__hash__` (see [§03-types,
+Map](03-types.md#map)). A `__hash__` or `__eq__` call that writes to the same
+Map raises a catchable `MapChangedError`, so a key method cannot change the Map
+it is being looked up in.
 
 ### Logical Operators (Short-Circuit)
 
@@ -1006,8 +1020,9 @@ limit as function call arguments).
 
 1. Each key-value pair is evaluated left-to-right: key expression first, then
    value expression.
-2. Each key is validated — if it is NaN or an object type other than String,
-   this is a **runtime error** ("Map key must be a scalar (Nil, Bool, Number, or String).").
+2. Each key is validated — if it is NaN, or an object that is neither a String
+   nor an Instance whose class defines both `__hash__` and `__eq__`, this is a
+   **runtime error** (`NaNKeyError` or `InvalidMapKeyError`).
 3. A new Map is allocated and each pair is inserted in source order. If the
    same key appears more than once, the last value wins.
 4. The expression evaluates to the new Map.
@@ -1025,8 +1040,9 @@ collection[key]
 1. Evaluate `collection`.
 2. Evaluate `key`.
 3. If `collection` is a **Map**:
-   a. If `key` is an invalid map key type (NaN, or an object other than String),
-      this is a **runtime error**.
+   a. If `key` is an invalid map key type (NaN, or a non-String object that is
+      not an Instance defining both `__hash__` and `__eq__`), this is a
+      **runtime error**.
    b. If `key` is present in the map, the expression evaluates to its associated
       value.
    c. If `key` is absent, the expression evaluates to `nil`.
@@ -1242,12 +1258,14 @@ same text the implementation reports when the fault is left uncaught.
 | List or String index out of bounds | `[][0]` | `"IndexOutOfBoundsError"` |
 | `pop` on empty list | `[].pop()` | `"EmptyListError"` |
 | NaN used as map key | `m[0/0] = 1` | `"NaNKeyError"` |
-| Object (non-String) used as map key | `m[[1,2]] = 1` | `"InvalidMapKeyError"` |
+| Object without `__hash__`/`__eq__` used as map key | `m[[1,2]] = 1` | `"InvalidMapKeyError"` |
 | Method called on non-instance/non-list/non-map | `42.foo()` | `"InvalidReceiverError"` |
 | No arm matches in a `match` expression | `match 99 { case 1 => "one" }` | `"MatchError"` |
 | Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field | `"ConstructorArityError"` |
 | Undefined property on an `Error` value | `try { try { [][0]; } catch (e) { e.foo; } } catch (_) { }` | `"UndefinedPropertyError"` |
 | Operator method returned a non-Boolean | `class C { __eq__(o) { return 42; } } C() == C()` | `"OperatorResultTypeError"` |
+| Operator method returned a non-Number | `class C { __len__() { return "x"; } } len(C())` or `class C { __hash__() { return "x"; } __eq__(o) { return true; } }` used as a map key | `"OperatorResultTypeError"` |
+| A key's `__hash__` or `__eq__` writes to the Map it keys | `var m = {}; class K { __hash__() { m[1] = 1; return 1; } __eq__(o) { return true; } } m[K()] = 1;` | `"MapChangedError"` |
 
 **The two map-key rows above cover an index read or write, a map or set
 literal, and `in`.** `Map.has(key)` and `Map.del(key)` are stdlib native
@@ -1281,7 +1299,7 @@ every pending deferred call on the unwind path has already run.
 | A native function is called with an argument count other than its arity | `clock(1);` | `Expected 0 arguments but got 1.` |
 | A `defer`red call holds a value that is not a Closure, Native, BoundMethod, or BoundNative | `fun g() { var x = 42; defer x(); } g();` (the compiler checks only that `defer` is followed by a call expression — `defer 42;` fails to compile with `Expect a call expression after 'defer'.` — not that the callee is callable, so a variable holding a non-callable value reaches this check at run time) | `Deferred callable has unexpected type.` |
 | A stdlib native function reports its own error while running | `open("/no/such/path", "r");` | `open(): cannot open '/no/such/path': No such file or directory` |
-| `Map.has(key)` or `Map.del(key)` called with an invalid key | `var m = {}; m.has([1, 2]);` | `Map keys must be Bool, Number, Nil, or String. NaN is not allowed.` |
+| `Map.has(key)` or `Map.del(key)` called with an invalid key | `var m = {}; m.has([1, 2]);` | `Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__. NaN is not allowed.` |
 | Undefined property read on a File value | `var f = open("/tmp/f.txt", "w"); f.write("x"); var g = open("/tmp/f.txt", "r"); g.bogus;` (a missing path fails first with the stdlib-error row above) | `Undefined property 'bogus' on file.` |
 | Undefined property read on a Map value | `var m = {}; m.bogus;` | `Undefined property 'bogus' on map.` |
 | Property read on an Instance where the name is neither a field nor a method | `class C {} var c = C(); c.bogus;` | `Undefined property 'bogus'.` |

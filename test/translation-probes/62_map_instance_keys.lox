@@ -1,0 +1,91 @@
+// Map keys may be user objects (issue #469). A class is a valid key only if
+// it defines both __hash__ and __eq__. The map calls __hash__ to place the
+// key, and resolves a collision with the STORED key on the left:
+// storedKey.__eq__(lookupKey). Output is order-independent.
+class Point {
+    init(x, y) { this.x = x; this.y = y; }
+    __hash__() { return this.x * 31 + this.y; }
+    __eq__(other) {
+        if (type(other) != "Instance") return false;
+        return this.x == other.x and this.y == other.y;
+    }
+}
+
+var m = {};
+m[Point(1, 2)] = "a";
+print m[Point(1, 2)];
+print Point(1, 2) in m;
+print Point(3, 4) in m;
+
+m[Point(3, 4)] = "b";
+print m[Point(3, 4)];
+m.del(Point(1, 2));
+print Point(1, 2) in m;
+
+// Distinct instances that are not equal are distinct keys, and an absent key
+// reads as nil.
+m[Point(5, 6)] = "c";
+print m[Point(5, 6)];
+print m[Point(7, 8)];
+
+// The stored key's __eq__ must return a Boolean.
+class BadEq {
+    __hash__() { return 1; }
+    __eq__(o) { return 42; }
+}
+var bad = {};
+bad[BadEq()] = 1;
+try { bad[BadEq()] = 2; } catch (e) { print e.kind; }
+
+// __hash__ must return a Number.
+class BadHash {
+    __hash__() { return "x"; }
+    __eq__(o) { return true; }
+}
+try { bad[BadHash()] = 1; } catch (e) { print e.kind; }
+
+// A class that defines only __hash__ is not a valid key.
+class HashOnly {
+    __hash__() { return 1; }
+}
+try { bad[HashOnly()] = 1; } catch (e) { print e.kind; }
+
+// A key method that writes to the map it keys is an error.
+var locked = {};
+class Sneaky {
+    __hash__() { locked[1] = 1; return 1; }
+    __eq__(o) { return true; }
+}
+try { locked[Sneaky()] = 9; } catch (e) { print e.kind; }
+
+// A scalar key and an equal Instance key that share a bucket resolve the same
+// way on every backend: the bucket is probed in insertion order, and the
+// first stored key that compares equal wins (native's own bucket probe).
+class Shared {
+    __hash__() { return 1; }
+    __eq__(o) { return true; }
+}
+var shared = {};
+shared[1] = "scalar";
+shared[Shared()] = "instance";
+shared.del(1);
+print shared[1];
+print shared[Shared()];
+print len(shared);
+
+// Reading a stored Instance key (values(), entries(), or stringification) must
+// not re-run its __hash__: native and the JVM read the stored value from the
+// bucket. Count the calls.
+var hashCalls = 0;
+class Counted {
+    __hash__() { hashCalls = hashCalls + 1; return 1; }
+    __eq__(o) { return false; }
+}
+var counted = {};
+counted[Counted()] = 1;
+counted[Counted()] = 2;
+print hashCalls;
+var cv = counted.values();
+var ce = counted.entries();
+var cs = str(counted);
+print hashCalls;

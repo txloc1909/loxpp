@@ -293,6 +293,13 @@ class Runtime {
     // outcome for callNative() and returns false.
     bool invokeMethodFromNative(ObjClosure* method, int argCount, Value* out);
 
+    // Native-facing key operations for map.has / map.del. They run the key
+    // through mapGetKey / mapDelKey with the native's enclosing boundary, and
+    // on failure store the outcome in m_reentrantOutcome for callNative() to
+    // propagate (the native returns a placeholder). Return true on success.
+    bool mapHasFromNative(ObjMap* map, const Value& key, bool* out);
+    bool mapDelFromNative(ObjMap* map, const Value& key);
+
     // The two throwable checks a map key must pass (NaN key, non-string
     // object key) — kind/message pair, or nullopt when indexVal is valid.
     // Shared by every map-key check site: opGetIndex/opSetIndex below (via
@@ -304,13 +311,44 @@ class Runtime {
         const char* kind;
         const char* message;
     };
-    static std::optional<MapKeyError> mapKeyError(Value indexVal);
+    std::optional<MapKeyError> mapKeyError(Value indexVal);
 
     // Shared by opGetIndex's and opSetIndex's map branches — raises
     // mapKeyError() above through the op*() convention. Returns nullopt
     // when indexVal is a valid map key; otherwise the OpResult the caller
     // should return immediately.
     std::optional<OpResult> checkMapKey(Value indexVal, int stopAtFrameCount);
+
+    // True when `v` is a valid map key: nil, bool, a non-NaN number, a string,
+    // or an Instance whose class defines both __hash__ and __eq__. This is the
+    // VM-aware extension of isValidMapKey() (value.cpp), which covers only the
+    // scalar/string part.
+    bool mapKeyValid(const Value& v) const;
+
+    // A map key's bucket hash. A scalar/string key uses hashValue(); an
+    // Instance key calls __hash__ synchronously (ResultCheck::Number, so a
+    // non-Number result raises OperatorResultTypeError). A NaN result is
+    // rejected as NaNKeyError. Returns nullopt and records the outcome in
+    // m_mapKeyStatus on failure.
+    std::optional<uint32_t> hashMapKey(const Value& key, int stopAtFrameCount);
+
+    // The key-equality callback for the VM map path. `stored` is the key
+    // already in the map (the __eq__ receiver, CPython-style); `lookup` is the
+    // key the program supplied. A scalar/string pair uses operator==. On a VM
+    // failure this sets m_mapKeyStatus and returns false; the caller checks
+    // m_mapKeyStatus after the map call.
+    bool mapKeyEq(const Value& stored, const Value& lookup,
+                  int stopAtFrameCount);
+
+    // Map key operations. Each locks `map` across hashing and probing, so a
+    // user __hash__/__eq__ that writes to the same map raises MapChangedError.
+    // On success *found says whether the key is present. Returns the OpResult
+    // to propagate: OK, or Stop/Fatal from a throw inside __hash__/__eq__.
+    OpResult mapGetKey(ObjMap* map, const Value& key, bool& found, Value& out,
+                       int stopAtFrameCount);
+    OpResult mapSetKey(ObjMap* map, const Value& key, const Value& value,
+                       int stopAtFrameCount);
+    OpResult mapDelKey(ObjMap* map, const Value& key, int stopAtFrameCount);
 
     // Shared by opGetIndex's and opSetIndex's List/String branches — the
     // same three throwable checks (must be a number, must be an integer,
@@ -446,24 +484,25 @@ class Runtime {
     // reset.
     OpResult reentrantCall(int argCount, int throwBoundary);
 
-    // The native-facing half of the re-entrant path. A native ran a call that
-    // pushed exactly one frame (m_frameCount == entry + 1); `frameSlots` is
-    // that frame's slot 0 (captured as stackTop - argCount - 1 before the
-    // dispatch). Runs the frame to completion and classifies the exit:
+    // The exit classifier for a re-entrant dispatch. A dispatch just pushed
+    // exactly one frame (m_frameCount == entry + 1); `frameSlots` is that
+    // frame's slot 0 (captured as stackTop - argCount - 1 before the dispatch),
+    // and `enclosingBoundary` is the enclosing run()'s own stopAtFrameCount.
+    // Runs the frame to completion and classifies the exit:
     //   OK      the callee returned normally; its result is the sole value at
     //           frameSlots[0].
     //   Resumed a throw was caught by a handler still inside the enclosing
-    //           run()'s range (m_nativeStopAtFrameCount) — control was
-    //           redirected (ip/frame changed), so the enclosing run must
-    //           reload and continue rather than treat this as a result.
+    //           run()'s range — control was redirected (ip/frame changed), so
+    //           the enclosing run must reload and continue rather than treat
+    //           this as a result.
     //   Stop    a throw was caught outside the enclosing run's range; control
     //           belongs to a less-nested run().
     //   Fatal   an uncaught error was reported; the VM stack was reset.
     // The Resumed-vs-OK decision uses frameSlots, not only m_frameCount: a
     // normal return leaves exactly one value at frameSlots[0], while a caught
-    // throw truncates the stack to the handler's checkpoint (below frameSlots)
-    // and leaves m_frameCount at or below entry.
-    OpResult runNativeReentrant(int entry, Value* frameSlots);
+    // throw truncates the stack to the handler's checkpoint (below frameSlots).
+    OpResult runReentrantFrame(int entry, Value* frameSlots,
+                               int enclosingBoundary);
 
     // Runs to completion a single frame that a re-entrant dispatch just pushed
     // (the dispatch returned Resumed with m_frameCount == entry + 1). `entry`
@@ -720,6 +759,7 @@ class Runtime {
         Len,
         Iter,
         Slice,
+        Hash,
         Count,
     };
 
@@ -852,6 +892,11 @@ class Runtime {
     // native returns and propagates it instead of pushing the native's
     // placeholder result. Reset to OK before each native call.
     OpResult m_reentrantOutcome{OpResult::OK};
+
+    // Set by hashMapKey() or mapKeyEq() when a key operation's __hash__/__eq__
+    // fails: Stop/Fatal to propagate, or Resumed if a caught error continued
+    // inside the enclosing run(). Reset to OK before each map key operation.
+    OpResult m_mapKeyStatus{OpResult::OK};
 
     // The stopAtFrameCount of the run() invocation that called the native
     // currently executing. Saved/restored around each callNative() so a native

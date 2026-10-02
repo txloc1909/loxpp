@@ -86,6 +86,11 @@ probes=(
     # forwards args, and catches a throw inside the method — byte-identical
     # stdout on native and JVM.
     "test/translation-probes/47_reflect_callmethod_closure_method.lox"
+    # User-object map keys (issue #469): a class with __hash__/__eq__ keys a
+    # map, an equal-but-distinct key retrieves the same value, and __hash__,
+    # __eq__, and map-mutation-during-key errors are catchable. Positive
+    # parity on native, JVM, and the bootstrap.
+    "test/translation-probes/62_map_instance_keys.lox"
     # Operator overloading (issue #472): dunder dispatch for arithmetic,
     # comparison, equality, containment, and call.
     "test/translation-probes/jvm-only/61_operator_overload.lox"

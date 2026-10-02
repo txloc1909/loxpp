@@ -154,13 +154,20 @@ var m = {"a": 1, 2: "two", true: 3, nil: 4};
 var empty = {};
 ```
 
-**Valid key types**: Nil, Boolean, Number (not NaN), and String. Any other type
-as a key is a **runtime error**. NaN is explicitly rejected even though it is a
-Number, because `NaN != NaN` makes it impossible to reliably retrieve a value
-stored under it.
+**Valid key types**: Nil, Boolean, Number (not NaN), String, and an Instance
+whose class defines **both** `__hash__` and `__eq__` (see
+[§04-semantics, Operator Overloading](04-semantics.md#operator-overloading)).
+Any other type as a key is a **runtime error**. NaN is explicitly rejected even
+though it is a Number, because `NaN != NaN` makes it impossible to reliably
+retrieve a value stored under it.
 
 Keys are looked up by **value equality** (the same semantics as `==`): any two
-values that compare equal under `==` map to the same slot.
+values that compare equal under `==` map to the same slot. For an Instance key,
+the map calls `__hash__` to place the key, and resolves a collision with
+`__eq__` on the **stored** key against the lookup key. A class must keep
+`__hash__` consistent with `__eq__`: two keys that compare equal must return
+the same `__hash__`. A class that breaks this contract gives undefined lookup
+results.
 
 Values are accessed and mutated by key using `[]` notation:
 
@@ -284,9 +291,10 @@ Equality never produces a runtime error regardless of the types being compared,
 **except** that an Instance whose class defines `__eq__` dispatches to it (see
 [§04-semantics, Operator Overloading](04-semantics.md#operator-overloading)),
 and a `__eq__` that does not return a Boolean raises a catchable
-`OperatorResultTypeError`. Internal equality (`in` against a List,
-`list.remove`, and map-key equality) always uses identity equality and never
-consults `__eq__`.
+`OperatorResultTypeError`. Internal equality (`in` against a List and
+`list.remove`) always uses identity equality and never consults `__eq__`.
+Map-key equality is different: an Instance key dispatches `__eq__` (see the Map
+section above).
 
 ---
 

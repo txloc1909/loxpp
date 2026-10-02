@@ -574,8 +574,9 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // probes proving a deferred call's side effect is actually observable
     // on an ordinary return and on a caught throw), raising this to 203.
     // Issue #489 moves 37_invoke_field_bound_native_method.lox into this
-    // non-recursive scan, raising this to 204.
-    ASSERT_EQ(files.size(), 204U);
+    // non-recursive scan, raising this to 204. Issue #469 adds
+    // test/translation-probes/62_map_instance_keys.lox, raising this to 205.
+    ASSERT_EQ(files.size(), 205U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {

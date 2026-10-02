@@ -263,6 +263,25 @@ CATCHABLE_ROWS = [
         setup="class C { __eq__(o) { return 42; } }\n",
         expected_kind="OperatorResultTypeError",
     ),
+    # An operator method whose result must be a Number returned something else
+    # (issue #469; #472 added the Boolean case above).
+    Row(
+        "operator_result_type_error_number",
+        "caught",
+        "len(C());",
+        setup='class C { __len__() { return "x"; } }\n',
+        expected_kind="OperatorResultTypeError",
+    ),
+    # A key method that writes the map it keys (issue #469): the map is locked
+    # during hashing and probing, so the write is a catchable error.
+    Row(
+        "map_changed_during_key_op",
+        "caught",
+        "m[K()] = 1;",
+        setup="var m = {};\nclass K { __hash__() { m[1] = 1; return 1; } "
+              "__eq__(o) { return true; } }\n",
+        expected_kind="MapChangedError",
+    ),
 ]
 
 # --- Fatal Runtime Errors table (spec/04-semantics.md) --------------------
@@ -324,7 +343,7 @@ FATAL_ROWS = [
         "fatal",
         "m.has([1, 2]);",
         setup="var m = {};\n",
-        expected_message="Map keys must be Bool, Number, Nil, or String. NaN is not allowed.",
+        expected_message="Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__. NaN is not allowed.",
     ),
     # Regression armor: map_has_invalid_key's own spec row ("Map.has(key)
     # or Map.del(key)") covers both natives with one Example; this row
@@ -334,7 +353,7 @@ FATAL_ROWS = [
         "fatal",
         "m.del(0.0/0.0);",
         setup="var m = {};\n",
-        expected_message="Map keys must be Bool, Number, Nil, or String. NaN is not allowed.",
+        expected_message="Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__. NaN is not allowed.",
     ),
     Row(
         "undefined_property_on_file",

@@ -205,7 +205,8 @@ rule is in [Binding Identity](04-semantics.md#binding-identity).
 - Runtime error if `seq` is neither a List, String, nor Map.
 - Runtime error if `seq` is a String and `elem` is not a String.
 - Runtime error if `seq` is a Map and `elem` is an invalid map key type (NaN,
-  or an object other than String).
+  or a non-String object that is not an Instance defining both `__hash__` and
+  `__eq__`).
 
 `in` has comparison precedence (same level as `<`, `<=`, `>`, `>=`), so
 `a + b in c` parses as `(a + b) in c`.

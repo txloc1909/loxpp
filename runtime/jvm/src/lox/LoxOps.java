@@ -350,7 +350,65 @@ public final class LoxOps {
             }
             return;
         }
-        throw makeError("InvalidMapKeyError", "Map keys must be Bool, Number, Nil, or String.");
+        if (key instanceof LoxInstance && isInstanceMapKey((LoxInstance)key)) {
+            return;
+        }
+        throw makeError("InvalidMapKeyError",
+                        "Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__.");
+    }
+
+    /** True when `key` is an Instance whose class defines both __hash__ and __eq__. */
+    static boolean isInstanceMapKey(LoxInstance key) {
+        return findDunder(key, "__hash__") != null
+            && findDunder(key, "__eq__") != null;
+    }
+
+    /** Key equality for a Map: the stored key's __eq__ (or identity fallback). */
+    static boolean keyEquals(Object stored, Object lookup) {
+        return equal(stored, lookup);
+    }
+
+    /**
+     * The Map bucket index for a key, matching a valid map key. A scalar or
+     * String key uses its own hash; an Instance key calls __hash__ and folds
+     * the Number the same way the native runtime folds hashValue()'s Number.
+     * A non-Number or NaN __hash__ result raises the catchable error.
+     */
+    static int hashKey(Object key) {
+        if (key == null) {
+            return 0;
+        }
+        if (key instanceof Boolean) {
+            return (Boolean)key ? 1231 : 1237;
+        }
+        if (key instanceof Double) {
+            return foldDouble((Double)key);
+        }
+        if (key instanceof String) {
+            return ((String)key).hashCode();
+        }
+        // Instance key; checkMapKey / checkMapKeyForNativeMethod already
+        // confirmed both methods exist.
+        Object result =
+            findDunder(key, "__hash__").callAsSelf(key, new Object[0]);
+        if (!(result instanceof Double)) {
+            throw makeError("OperatorResultTypeError",
+                            "Operator method must return a Number.");
+        }
+        if (Double.isNaN((Double)result)) {
+            throw makeError("NaNKeyError", "NaN cannot be used as a map key.");
+        }
+        return foldDouble((Double)result);
+    }
+
+    private static int foldDouble(double d) {
+        // Match value.cpp's hashValue number path: mix the 64-bit bits to
+        // 32 bits, with -0.0 canonicalized to +0.0.
+        if (d == 0.0) {
+            d = 0.0;
+        }
+        long bits = Double.doubleToLongBits(d);
+        return (int)(bits ^ (bits >>> 32));
     }
 
     /**
@@ -369,8 +427,11 @@ public final class LoxOps {
         if (key instanceof Double && !Double.isNaN((Double)key)) {
             return;
         }
+        if (key instanceof LoxInstance && isInstanceMapKey((LoxInstance)key)) {
+            return;
+        }
         throw new LoxError(
-            "Map keys must be Bool, Number, Nil, or String. NaN is not allowed.");
+            "Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__. NaN is not allowed.");
     }
 
     /**
