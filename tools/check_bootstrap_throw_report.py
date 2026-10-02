@@ -58,6 +58,16 @@ CASES = [
         "throw V();\n",
     ),
     Case(
+        "instance_str_nonstring",
+        "class V { __str__() { return 42; } }\n"
+        "throw V();\n",
+    ),
+    Case(
+        "instance_str_throws",
+        "class V { __str__() { throw \"inner\"; } }\n"
+        "throw V();\n",
+    ),
+    Case(
         "number",
         "throw 42;\n",
     ),

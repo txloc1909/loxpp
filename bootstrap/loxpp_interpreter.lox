@@ -2553,19 +2553,25 @@ class Interpreter {
             if (this.returnFlag or this.throwFlag) {
                 if (this.throwFlag) {
                     this.runPendingDefers();
-                    var thrownVal = this.thrownValue;
-                    // Clear the throw flag before rendering the report, so
-                    // stringify() dispatches __str__ instead of its own
-                    // stop-dispatch guard returning the placeholder. Native's
-                    // handleThrow does the same (resets m_stringifyStatus
-                    // before its pre-unwind stringify). thrownVal still holds
-                    // the value to report, whether it is the original throw or
-                    // one a pending defer replaced it with.
-                    this.throwFlag = false;
-                    if (loxTag(thrownVal) == "error") {
-                        print "LOXERR70 " + thrownVal.message;
-                    } else {
-                        print "LOXERR70 " + this.stringify(thrownVal);
+                    // Report the uncaught throw, then any fault the report's
+                    // own __str__ raises, until none remains. Native's
+                    // handleThrow does the same: a __str__ that throws during
+                    // the report replaces the throw being reported (its own
+                    // defers already drained inside LoxFunction.call). Without
+                    // the re-check, stringify()'s stop-dispatch guard returns
+                    // the "..." placeholder and the inner fault is dropped.
+                    while (this.throwFlag) {
+                        var thrownVal = this.thrownValue;
+                        this.throwFlag = false;
+                        if (loxTag(thrownVal) == "error") {
+                            print "LOXERR70 " + thrownVal.message;
+                        } else {
+                            var msg = this.stringify(thrownVal);
+                            if (this.throwFlag) {
+                                continue;
+                            }
+                            print "LOXERR70 " + msg;
+                        }
                     }
                     this.thrownValue = nil;
                 }
