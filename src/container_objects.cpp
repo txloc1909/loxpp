@@ -56,20 +56,32 @@ bool ObjMap::mapGetHashed(const Value& key, uint32_t hash, const KeyEq& eq,
 }
 
 bool ObjMap::mapSetHashed(const Value& key, const Value& value, uint32_t hash,
-                          const KeyEq& eq) {
-    bool inserted = map.set(MapEntry{key, value, hash, MapSlot::OCCUPIED},
-                            [&](const MapEntry& s) { return eq(s.key, key); });
-    if (inserted) {
-        ++version;
+                          const KeyEq& eq, bool& eqFailed) {
+    // Find first: an __eq__ that fails must not be followed by an insert.
+    MapEntry* existing = map.findMutable(
+        hash, [&](const MapEntry& s) { return eq(s.key, key); });
+    if (eqFailed) {
+        return false;
     }
-    return inserted;
+    if (existing != nullptr) {
+        *existing = MapEntry{key, value, hash, MapSlot::OCCUPIED};
+        return false; // overwrite
+    }
+    // No equal key exists, so an identity match cannot miss it. No user code
+    // runs here, so the locked map cannot change between the find and the set.
+    map.set(MapEntry{key, value, hash, MapSlot::OCCUPIED});
+    ++version;
+    return true;
 }
 
-bool ObjMap::mapDelHashed(const Value& key, uint32_t hash, const KeyEq& eq) {
-    bool removed =
-        map.remove(hash, [&](const MapEntry& s) { return eq(s.key, key); });
-    if (removed) {
-        ++version;
+bool ObjMap::mapDelHashed(const Value& key, uint32_t hash, const KeyEq& eq,
+                          bool& eqFailed) {
+    MapEntry* existing = map.findMutable(
+        hash, [&](const MapEntry& s) { return eq(s.key, key); });
+    if (eqFailed || existing == nullptr) {
+        return false;
     }
-    return removed;
+    map.removeAt(existing);
+    ++version;
+    return true;
 }

@@ -2395,29 +2395,40 @@ class Interpreter {
 
     mapGet(map, key) {
         map.keyOpDepth = map.keyOpDepth + 1;
-        if (this.instanceMapKeyValid(key)) {
+        var isInst = this.instanceMapKeyValid(key);
+        if (isInst) {
             if (!this.runKeyHash(key)) { map.keyOpDepth = map.keyOpDepth - 1; return nil; }
-            var i = this.mapFindInstance(map, key);
-            var val = nil;
-            if (!this.throwFlag and i >= 0) val = map.instances[i][1];
-            map.keyOpDepth = map.keyOpDepth - 1;
-            return val;
         }
-        var val2 = nil;
-        if (map.data.has(key)) val2 = map.data[key];
+        // A stored Instance key may equal ANY lookup key, so probe the
+        // instance list for every lookup.
+        var i = this.mapFindInstance(map, key);
+        var val = nil;
+        if (this.throwFlag) {
+            map.keyOpDepth = map.keyOpDepth - 1;
+            return nil;
+        }
+        if (i >= 0) {
+            val = map.instances[i][1];
+        } else if (!isInst and map.data.has(key)) {
+            val = map.data[key];
+        }
         map.keyOpDepth = map.keyOpDepth - 1;
-        return val2;
+        return val;
     }
 
     mapHas(map, key) {
         map.keyOpDepth = map.keyOpDepth + 1;
-        if (this.instanceMapKeyValid(key)) {
+        var isInst = this.instanceMapKeyValid(key);
+        if (isInst) {
             if (!this.runKeyHash(key)) { map.keyOpDepth = map.keyOpDepth - 1; return false; }
-            var i = this.mapFindInstance(map, key);
-            map.keyOpDepth = map.keyOpDepth - 1;
-            return i >= 0;
         }
-        var found = map.data.has(key);
+        var i = this.mapFindInstance(map, key);
+        if (this.throwFlag) {
+            map.keyOpDepth = map.keyOpDepth - 1;
+            return false;
+        }
+        var found = i >= 0;
+        if (!found and !isInst) found = map.data.has(key);
         map.keyOpDepth = map.keyOpDepth - 1;
         return found;
     }
@@ -2428,21 +2439,21 @@ class Interpreter {
             return false;
         }
         map.keyOpDepth = map.keyOpDepth + 1;
-        if (this.instanceMapKeyValid(key)) {
+        var isInst = this.instanceMapKeyValid(key);
+        if (isInst) {
             if (!this.runKeyHash(key)) { map.keyOpDepth = map.keyOpDepth - 1; return false; }
-            var i = this.mapFindInstance(map, key);
-            if (this.throwFlag) { map.keyOpDepth = map.keyOpDepth - 1; return false; }
-            if (i < 0) {
-                map.instances.append([key, val]);
-                map.version = map.version + 1;
-            } else {
-                map.instances[i] = [key, val];
-            }
-            map.keyOpDepth = map.keyOpDepth - 1;
-            return true;
         }
-        if (!map.data.has(key)) map.version = map.version + 1;
-        map.data[key] = val;
+        var i = this.mapFindInstance(map, key);
+        if (this.throwFlag) { map.keyOpDepth = map.keyOpDepth - 1; return false; }
+        if (i >= 0) {
+            map.instances[i] = [key, val];
+        } else if (isInst) {
+            map.instances.append([key, val]);
+            map.version = map.version + 1;
+        } else {
+            if (!map.data.has(key)) map.version = map.version + 1;
+            map.data[key] = val;
+        }
         map.keyOpDepth = map.keyOpDepth - 1;
         return true;
     }
@@ -2453,17 +2464,16 @@ class Interpreter {
             return;
         }
         map.keyOpDepth = map.keyOpDepth + 1;
-        if (this.instanceMapKeyValid(key)) {
+        var isInst = this.instanceMapKeyValid(key);
+        if (isInst) {
             if (!this.runKeyHash(key)) { map.keyOpDepth = map.keyOpDepth - 1; return; }
-            var i = this.mapFindInstance(map, key);
-            if (!this.throwFlag and i >= 0) {
-                map.instances.remove(map.instances[i]);
-                map.version = map.version + 1;
-            }
-            map.keyOpDepth = map.keyOpDepth - 1;
-            return;
         }
-        if (map.data.has(key)) {
+        var i = this.mapFindInstance(map, key);
+        if (this.throwFlag) { map.keyOpDepth = map.keyOpDepth - 1; return; }
+        if (i >= 0) {
+            map.instances.remove(map.instances[i]);
+            map.version = map.version + 1;
+        } else if (!isInst and map.data.has(key)) {
             map.data.del(key);
             map.version = map.version + 1;
         }

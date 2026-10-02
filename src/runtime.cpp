@@ -1291,11 +1291,16 @@ Runtime::OpResult Runtime::mapSetKey(ObjMap* map, const Value& key,
     if (!hash) {
         result = m_mapKeyStatus;
     } else {
-        ObjMap::KeyEq eq = [this, stopAtFrameCount](const Value& s,
-                                                    const Value& l) {
-            return mapKeyEq(s, l, stopAtFrameCount);
+        bool eqFailed = false;
+        ObjMap::KeyEq eq = [this, stopAtFrameCount, &eqFailed](const Value& s,
+                                                               const Value& l) {
+            bool r = mapKeyEq(s, l, stopAtFrameCount);
+            if (m_mapKeyStatus != OpResult::OK) {
+                eqFailed = true;
+            }
+            return r;
         };
-        map->mapSetHashed(key, value, *hash, eq);
+        map->mapSetHashed(key, value, *hash, eq, eqFailed);
         result = m_mapKeyStatus;
     }
     if (is<Obj*>(value)) {
@@ -1330,11 +1335,16 @@ Runtime::OpResult Runtime::mapDelKey(ObjMap* map, const Value& key,
     if (!hash) {
         result = m_mapKeyStatus;
     } else {
-        ObjMap::KeyEq eq = [this, stopAtFrameCount](const Value& s,
-                                                    const Value& l) {
-            return mapKeyEq(s, l, stopAtFrameCount);
+        bool eqFailed = false;
+        ObjMap::KeyEq eq = [this, stopAtFrameCount, &eqFailed](const Value& s,
+                                                               const Value& l) {
+            bool r = mapKeyEq(s, l, stopAtFrameCount);
+            if (m_mapKeyStatus != OpResult::OK) {
+                eqFailed = true;
+            }
+            return r;
         };
-        map->mapDelHashed(key, *hash, eq);
+        map->mapDelHashed(key, *hash, eq, eqFailed);
         result = m_mapKeyStatus;
     }
     if (is<Obj*>(key)) {

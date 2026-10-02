@@ -144,12 +144,16 @@ struct ObjMap : public Obj {
     bool mapDel(const Value& key);
 
     // VM path: the caller supplies the precomputed hash and the equality
-    // callback, so an Instance key can dispatch __hash__/__eq__.
+    // callback, so an Instance key can dispatch __hash__/__eq__. `eqFailed` is
+    // set true by the callback when a user __eq__ produced an error; a set or
+    // del then leaves the map unchanged, so a failed key comparison cannot
+    // mutate the map.
     bool mapSetHashed(const Value& key, const Value& value, uint32_t hash,
-                      const KeyEq& eq);
+                      const KeyEq& eq, bool& eqFailed);
     bool mapGetHashed(const Value& key, uint32_t hash, const KeyEq& eq,
                       Value& out) const;
-    bool mapDelHashed(const Value& key, uint32_t hash, const KeyEq& eq);
+    bool mapDelHashed(const Value& key, uint32_t hash, const KeyEq& eq,
+                      bool& eqFailed);
 };
 
 inline bool isObjMap(Obj* o) { return isObjType(o, ObjType::MAP); }

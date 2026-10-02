@@ -95,13 +95,17 @@ public final class LoxMap {
         try {
             if (isInstanceKey(key)) {
                 LoxOps.checkUserHash(key);
-                int i = findInstance(key);
-                if (i < 0) {
-                    instanceEntries.add(new Slot(key, value));
-                    version++;
-                } else {
-                    instanceEntries.set(i, new Slot(key, value));
-                }
+            }
+            // A stored Instance key may equal ANY lookup key, so probe the
+            // instance list for every insert, not only an Instance lookup.
+            int i = findInstance(key);
+            if (i >= 0) {
+                instanceEntries.set(i, new Slot(key, value));
+                return;
+            }
+            if (isInstanceKey(key)) {
+                instanceEntries.add(new Slot(key, value));
+                version++;
                 return;
             }
             Object normalized = normalizeKey(key);
@@ -121,8 +125,13 @@ public final class LoxMap {
         try {
             if (isInstanceKey(key)) {
                 LoxOps.checkUserHash(key);
-                int i = findInstance(key);
-                return (i < 0) ? null : instanceEntries.get(i).value;
+            }
+            int i = findInstance(key);
+            if (i >= 0) {
+                return instanceEntries.get(i).value;
+            }
+            if (isInstanceKey(key)) {
+                return null;
             }
             Slot slot = entries.get(normalizeKey(key));
             return (slot == null) ? null : slot.value;
@@ -136,7 +145,12 @@ public final class LoxMap {
         try {
             if (isInstanceKey(key)) {
                 LoxOps.checkUserHash(key);
-                return findInstance(key) >= 0;
+            }
+            if (findInstance(key) >= 0) {
+                return true;
+            }
+            if (isInstanceKey(key)) {
+                return false;
             }
             return entries.containsKey(normalizeKey(key));
         } finally {
@@ -153,11 +167,14 @@ public final class LoxMap {
         try {
             if (isInstanceKey(key)) {
                 LoxOps.checkUserHash(key);
-                int i = findInstance(key);
-                if (i >= 0) {
-                    instanceEntries.remove(i);
-                    version++;
-                }
+            }
+            int i = findInstance(key);
+            if (i >= 0) {
+                instanceEntries.remove(i);
+                version++;
+                return;
+            }
+            if (isInstanceKey(key)) {
                 return;
             }
             // Count only a real erase: a miss leaves iteration valid.
