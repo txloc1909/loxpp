@@ -26,6 +26,7 @@ enum class Op : Byte {
     MODULO,
     NOT,
     LEN, // pops one value, pushes its length (Number); dispatches __len__
+    STR, // pops one value, pushes its canonical string; dispatches __str__
     PRINT,
     POP,
     GET_LOCAL,
@@ -126,6 +127,7 @@ enum class Op : Byte {
     X(MODULO)                                                                  \
     X(NOT)                                                                     \
     X(LEN)                                                                     \
+    X(STR)                                                                     \
     X(PRINT)                                                                   \
     X(POP)                                                                     \
     X(GET_LOCAL)                                                               \

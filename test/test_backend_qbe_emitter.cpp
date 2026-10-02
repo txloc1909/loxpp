@@ -419,6 +419,29 @@ TEST(QbeEmitter, SliceIsLocalCatchableNotFatal) {
         << localBlockLine;
 }
 
+TEST(QbeEmitter, StrAndPrintLowerToRtOpStr) {
+    // STR and PRINT both route through Runtime::opStr (which dispatches
+    // __str__), so both lower to the opStr wrapper with this frame's own
+    // stop depth.
+    std::string ssa = emitScriptFrom("var s = str(1); print s;");
+    EXPECT_NE(ssa.find("call $rt_op_str(l %rt, w %"), std::string::npos);
+    EXPECT_NE(ssa.find("call $rt_op_print(l %rt, w %"), std::string::npos);
+}
+
+TEST(QbeEmitter, PrintIsLocalCatchableNotFatal) {
+    // print routes through opStr, which can dispatch __str__ and throw, so
+    // PRINT must be Catchability::Local with m_stopTemp — a throw inside a
+    // printed value must route to a live catch block, not kRtFatal.
+    std::string ssa = emitScriptFrom("try { print 1; } catch (e) {}");
+    EXPECT_NE(ssa.find("call $rt_op_print(l %rt, w %"), std::string::npos)
+        << "the stop depth must be this frame's own m_stopTemp register";
+    std::string localBlockLine = labelBlockBody(ssa, "_local");
+    EXPECT_NE(localBlockLine.find("jmp @L_"), std::string::npos)
+        << "a print inside a try must emit a local-catch block that jumps to "
+           "the catch label, proving Catchability::Local — got: "
+        << localBlockLine;
+}
+
 TEST(QbeEmitter, JumpTableLowersToACompareChain) {
     // P8 (bytecode-translation-problems.md, hazard Q8): QBE has no switch
     // and no indirect jump — each arm becomes its own `ceqw`/`jnz` pair

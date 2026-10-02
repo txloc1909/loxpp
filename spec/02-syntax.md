@@ -93,6 +93,7 @@ factor         ::= unary ( ( "/" | "*" | "%" ) unary )* ;
 
 unary          ::= ( "!" | "-" ) unary
                  | "len" "(" expression ")"
+                 | "str" "(" expression ")"
                  | call ;
 
 call             ::= primary ( "(" arguments? ")" | "." IDENTIFIER | "[" subscriptOrSlice "]" )* ;

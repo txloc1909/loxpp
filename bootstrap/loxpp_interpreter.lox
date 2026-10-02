@@ -19,6 +19,7 @@ var LOX_KEYWORDS = {
     "this": "THIS",     "true": "TRUE",       "var": "VAR",
     "while": "WHILE",   "break": "BREAK",     "continue": "CONTINUE",
     "in": "IN",         "enum": "ENUM",       "len": "LEN",           "match": "MATCH",       "case": "CASE",
+    "str": "STR",
     "try": "TRY",       "catch": "CATCH",     "throw": "THROW",       "defer": "DEFER"
 };
 
@@ -91,6 +92,7 @@ enum Expr {
     Binary(op, left, right)
     Unary(op, right)
     LenExpr(argument)
+    StrExpr(argument)
     Logical(op, left, right)
     Call(callee, paren_line, args)
     Get(object, name, line)
@@ -644,6 +646,7 @@ class Parser {
                 case Binary{op, left, right} => { this.parseError(equals, "Invalid assignment target."); expr }
                 case Unary{op, right}        => { this.parseError(equals, "Invalid assignment target."); expr }
                 case LenExpr{argument}       => { this.parseError(equals, "Invalid assignment target."); expr }
+                case StrExpr{argument}       => { this.parseError(equals, "Invalid assignment target."); expr }
                 case Logical{op, left, right}=> { this.parseError(equals, "Invalid assignment target."); expr }
                 case Call{callee, paren_line, args} => { this.parseError(equals, "Invalid assignment target."); expr }
                 case Set{object, name, line, value}=> { this.parseError(equals, "Invalid assignment target."); expr }
@@ -797,6 +800,13 @@ class Parser {
             var argument = this.expression();
             this.expect("RIGHT_PAREN", "Expect ')' after argument.");
             return LenExpr(argument);
+        }
+
+        if (this.matchT("STR")) {
+            this.expect("LEFT_PAREN", "Expect '(' after 'str'.");
+            var argument = this.expression();
+            this.expect("RIGHT_PAREN", "Expect ')' after argument.");
+            return StrExpr(argument);
         }
 
         if (this.matchT("IDENTIFIER")) {
@@ -1318,6 +1328,7 @@ class Resolver {
             case Binary{op, left, right}       => { this.resolveExpr(left);  this.resolveExpr(right) }
             case Unary{op, right}              => this.resolveExpr(right)
             case LenExpr{argument}             => this.resolveExpr(argument)
+            case StrExpr{argument}             => this.resolveExpr(argument)
             case Logical{op, left, right}      => { this.resolveExpr(left);  this.resolveExpr(right) }
             case Call{callee, paren_line, args} => this.resolveCall(callee, args)
             case Get{object, name, line}       => this.resolveExpr(object)
@@ -1900,12 +1911,11 @@ class LoxNative {
             this.name == "exit" or this.name == "sleep" or
             this.name == "exists" or this.name == "is_dir" or
             this.name == "is_file" or this.name == "stat") return 1;
-        return 1;   // str
+        return 1;
     }
     call(interp, args) {
         if (this.name == "clock") return clock();
         if (this.name == "input") return input();
-        if (this.name == "str")   return interp.stringify(args[0]);
         if (this.name == "open") {
             var handle = open(args[0], args[1]);
             return InterpFile(handle);
@@ -2274,7 +2284,6 @@ class Interpreter {
         this.maxStringifyDepthSeen = 0;
         this.globals.define("clock", LoxNative("clock"));
         this.globals.define("input", LoxNative("input"));
-        this.globals.define("str",   LoxNative("str"));
         this.globals.define("open",  LoxNative("open"));
         this.globals.define("args",  LoxNative("args"));
         this.globals.define("env",   LoxNative("env"));
@@ -2544,12 +2553,36 @@ class Interpreter {
             if (this.returnFlag or this.throwFlag) {
                 if (this.throwFlag) {
                     this.runPendingDefers();
-                    if (loxTag(this.thrownValue) == "error") {
-                        print "LOXERR70 " + this.thrownValue.message;
-                    } else {
-                        print "LOXERR70 " + this.stringify(this.thrownValue);
+                    // Report the uncaught throw, then any fault the report's
+                    // own __str__ raises, until none remains. Native's
+                    // handleThrow does the same: a __str__ that throws during
+                    // the report replaces the throw being reported (its own
+                    // defers already drained inside LoxFunction.call). Without
+                    // the re-check, stringify()'s stop-dispatch guard returns
+                    // the "..." placeholder and the inner fault is dropped.
+                    // A __str__ that re-throws the same (or a fresh) Instance
+                    // would loop forever, so bound it the way native's own
+                    // stringify depth guard does and report the same "..."
+                    // placeholder native reports for that case.
+                    var reportDepth = 0;
+                    while (this.throwFlag) {
+                        if (reportDepth >= 200) {
+                            print "LOXERR70 ...";
+                            break;
+                        }
+                        reportDepth = reportDepth + 1;
+                        var thrownVal = this.thrownValue;
+                        this.throwFlag = false;
+                        if (loxTag(thrownVal) == "error") {
+                            print "LOXERR70 " + thrownVal.message;
+                        } else {
+                            var msg = this.stringify(thrownVal);
+                            if (this.throwFlag) {
+                                continue;
+                            }
+                            print "LOXERR70 " + msg;
+                        }
                     }
-                    this.throwFlag = false;
                     this.thrownValue = nil;
                 }
                 return;
@@ -3039,6 +3072,7 @@ class Interpreter {
             case Assign{id, name, line, value}  => this.evalAssign(id, name, line, value, env)
             case Unary{op, right}               => this.evalUnary(op, right, env)
             case LenExpr{argument}              => this.evalLen(argument, env)
+            case StrExpr{argument}              => this.evalStr(argument, env)
             case Binary{op, left, right}        => this.evalBinary(op, left, right, env)
             case Logical{op, left, right}       => this.evalLogical(op, left, right, env)
             case Call{callee, paren_line, args} => this.evalCall(callee, paren_line, args, env)
@@ -3127,6 +3161,15 @@ class Interpreter {
         return nil;
     }
 
+    // `str(x)` is a keyword (Expr::StrExpr), not a global call. The canonical
+    // form is stringify()'s own job; it dispatches __str__ on an Instance, so
+    // this only evaluates the argument and delegates.
+    evalStr(argument, env) {
+        var v = this.evalExpr(argument, env);
+        if (this.throwFlag) return nil;
+        return this.stringify(v);
+    }
+
     // Operator-overloading dispatch (issue #472 / #474). Mirrors the native
     // VM's rule: built-in branch first, then the dunder method on the
     // receiver, then the same error as before. findDunder returns the method
@@ -3152,6 +3195,12 @@ class Interpreter {
     validateNumber(v, line) {
         if (isLoxNum(v)) return v;
         this.setError("OperatorResultTypeError", "Operator method must return a Number.", line);
+        return nil;
+    }
+
+    validateString(v, line) {
+        if (isLoxStr(v)) return v;
+        this.setError("OperatorResultTypeError", "Operator method must return a String.", line);
         return nil;
     }
 
@@ -3543,6 +3592,32 @@ class Interpreter {
             // spec/03-types.md line 315: str() on an Error is "kind: message",
             // matching LoxError.toString() -- not val.message alone.
             result = val.toString();
+        } else if (vtag == "instance") {
+            // A canonical stringify dispatches __str__ on an Instance; the
+            // default form is "ClassName instance". Once a __str__ in this
+            // same stringify has thrown (throwFlag is set), stop dispatching
+            // further ones -- the same stop-dispatch guard native's own
+            // m_stringifyStatus enforces, so a later element's __str__ side
+            // effects do not run.
+            if (this.throwFlag) {
+                this.stringifyDepth = this.stringifyDepth - 1;
+                return "...";
+            }
+            var m = this.findDunder(val, "__str__");
+            if (m != nil) {
+                result = m.bind(val).call(this, []);
+                if (this.throwFlag) {
+                    this.stringifyDepth = this.stringifyDepth - 1;
+                    return "...";
+                }
+                result = this.validateString(result, 0);
+                if (this.throwFlag) {
+                    this.stringifyDepth = this.stringifyDepth - 1;
+                    return "...";
+                }
+            } else {
+                result = val.toString();
+            }
         } else {
             result = val.toString();
         }

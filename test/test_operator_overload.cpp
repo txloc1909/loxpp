@@ -342,3 +342,83 @@ TEST(OperatorOverload, SliceMissingMethodRaisesSameError) {
                     "var done = 1;"),
               InterpretResult::RUNTIME_ERROR);
 }
+
+// ---------------------------------------------------------------------------
+// str dispatch (__str__)
+// ---------------------------------------------------------------------------
+
+TEST(OperatorOverload, StrDispatch) {
+    VMTestHarness h;
+    std::string src = "class V { __str__() { return \"custom\"; } }"
+                      "class W {}"
+                      "var a = str(V());"
+                      "var b = str(W());";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("a"), "custom");
+    EXPECT_EQ(h.getGlobalStr("b"), "W instance");
+}
+
+TEST(OperatorOverload, StrDispatchNested) {
+    VMTestHarness h;
+    std::string src = "class V { __str__() { return \"v\"; } }"
+                      "var l = str([V(), 1]);"
+                      "var m = str({\"k\": V()});";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("l"), "[v, 1]");
+    EXPECT_EQ(h.getGlobalStr("m"), "{k: v}");
+}
+
+TEST(OperatorOverload, NonStringStrResultRaises) {
+    VMTestHarness h;
+    std::string src = "class V { __str__() { return 42; } }"
+                      "var kind;"
+                      "try { var s = str(V()); } catch (e) { kind = e.kind; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "OperatorResultTypeError");
+}
+
+TEST(OperatorOverload, PrintStrResult) {
+    VMTestHarness h;
+    // print routes through the same canonical stringify as str(); a thrown
+    // __str__ is catchable at the print site.
+    std::string src = "class V { __str__() { return 42; } }"
+                      "var kind;"
+                      "try { print V(); } catch (e) { kind = e.kind; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "OperatorResultTypeError");
+}
+
+TEST(OperatorOverload, RecursiveStrHitsDepthGuard) {
+    VMTestHarness h;
+    // A __str__ that calls str() on itself recurses until the canonical-string
+    // depth limit fires a fatal fault — not a C++ crash.
+    std::string src = "class V { __str__() { return str(this); } }"
+                      "print V();";
+    ASSERT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR);
+}
+
+// A __str__ that composes another str()/print whose __str__ throws a caught
+// error must not corrupt the outer stringify (the shared status must not leak
+// from the nested, caught dispatch into the outer one).
+TEST(OperatorOverload, NestedCaughtStrThrowDoesNotCorruptOuter) {
+    VMTestHarness h;
+    std::string src = "class W { __str__() { return 42; } }"
+                      "class V { __str__() { try { str(W()); } catch (e) {}"
+                      "                          return \"ok\"; } }"
+                      "var a = str(V());";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("a"), "ok");
+}
+
+// An uncaught throw of a non-Error Instance reports its canonical __str__ form,
+// matching the JVM and spec/04-semantics.md's "canonical string
+// representation".
+TEST(OperatorOverload, ThrownInstanceReportsStrResult) {
+    VMTestHarness h;
+    testing::internal::CaptureStderr();
+    InterpretResult r =
+        h.run("class V { __str__() { return \"CUSTOM\"; } } throw V();");
+    std::string err = testing::internal::GetCapturedStderr();
+    ASSERT_EQ(r, InterpretResult::RUNTIME_ERROR);
+    EXPECT_NE(err.find("CUSTOM"), std::string::npos);
+}

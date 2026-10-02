@@ -68,6 +68,14 @@ public final class LoxOps {
         return (Double)result;
     }
 
+    private static String checkStringResult(Object result) {
+        if (!(result instanceof String)) {
+            throw makeError("OperatorResultTypeError",
+                            "Operator method must return a String.");
+        }
+        return (String)result;
+    }
+
     // ------------------------------------------------------------------
     // Handler liveness (issue #319)
     // ------------------------------------------------------------------
@@ -1086,6 +1094,12 @@ public final class LoxOps {
         LoxRuntime.out.print('\n');
     }
 
+    // The STR opcode: canonical string form of v (the same text print shows),
+    // dispatching __str__ on a user Instance through stringify.
+    public static Object str(Object v) {
+        return stringify(v);
+    }
+
     // Matches src/object.h's kMaxStringifyDepth and src/object.cpp's
     // per-call DepthGuard: native counts nesting depth by incrementing on
     // every heap value it stringifies, not on nil/bool/number (which are
@@ -1144,6 +1158,10 @@ public final class LoxOps {
             if (inst.klass == LoxRuntime.ERROR_CLASS) {
                 return stringify(inst.fields.get("kind")) + ": "
                     + stringify(inst.fields.get("message"));
+            }
+            LoxClosure dunder = findDunder(v, "__str__");
+            if (dunder != null) {
+                return checkStringResult(dunder.callAsSelf(v, new Object[0]));
             }
             return inst.klass.name + " instance";
         }

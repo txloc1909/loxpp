@@ -64,6 +64,11 @@ const MatchExpr* matchInExpr(const Expr* e, std::size_t at,
         best = matchInExpr(l->argument.get(), at, best);
         break;
     }
+    case ExprKind::Str: {
+        const auto* l = static_cast<const tooling::StrExpr*>(e);
+        best = matchInExpr(l->argument.get(), at, best);
+        break;
+    }
     case ExprKind::Binary: {
         const auto* b = static_cast<const BinaryExpr*>(e);
         best = matchInExpr(b->left.get(), at, best);
@@ -289,6 +294,11 @@ const BinaryExpr* plusInExpr(const Expr* e, std::size_t at,
         best = plusInExpr(l->argument.get(), at, best);
         break;
     }
+    case ExprKind::Str: {
+        const auto* l = static_cast<const tooling::StrExpr*>(e);
+        best = plusInExpr(l->argument.get(), at, best);
+        break;
+    }
     case ExprKind::Logical: {
         const auto* l = static_cast<const tooling::LogicalExpr*>(e);
         best = plusInExpr(l->left.get(), at, best);
@@ -497,7 +507,13 @@ std::string lineIndent(const std::string& text, std::size_t offset) {
 }
 
 bool isStrCall(const Expr* e) {
-    if (e == nullptr || e->kind != ExprKind::Call) {
+    if (e == nullptr) {
+        return false;
+    }
+    if (e->kind == ExprKind::Str) {
+        return true;
+    }
+    if (e->kind != ExprKind::Call) {
         return false;
     }
     const auto* c = static_cast<const CallExpr*>(e);

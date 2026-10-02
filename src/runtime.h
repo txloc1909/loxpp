@@ -557,6 +557,25 @@ class Runtime {
     OpResult opIn(int stopAtFrameCount);
     OpResult opLen(int stopAtFrameCount);
 
+    // Op::STR/Op::PRINT's shared stringify: pops one value and pushes its
+    // canonical string (an ObjString), dispatching __str__ on an Instance.
+    OpResult opStr(int stopAtFrameCount);
+
+    // Canonical string form of an Instance: dispatches __str__ when the class
+    // defines it (the result must be a String, else the catchable
+    // OperatorResultTypeError), otherwise "ClassName instance". Called by
+    // stringifyObj's INSTANCE case (object.cpp) through getActiveRuntime().
+    // On a throw from __str__ it records the outcome in m_stringifyStatus and
+    // returns the depth-guard placeholder so opStr() can propagate it.
+    std::string stringifyInstanceStr(ObjInstance* instance);
+
+    // True while opStr() is producing a canonical string, so stringifyObj can
+    // tell a print/str stringify (dispatch __str__) from an internal one
+    // (default form). Read from object.cpp via getActiveRuntime().
+    [[nodiscard]] bool canonicalStringifyActive() const {
+        return m_stringifyCanonicalDepth > 0;
+    }
+
     // Global-variable access, moved out of VM::run() the same way (Layer 1)
     // so compiled code (the QBE backend) can reach it: compiled code has no
     // constant pool of its own to look a name up in, so DEFINE_GLOBAL/
@@ -712,6 +731,7 @@ class Runtime {
         Number,   // __len__
         Sequence, // __iter__ — and Op::RETURN builds an iterator from the
                   // result
+        String,   // __str__
     };
 
     // `check`/`resultOverride` (S7, #460): when the callee is compiled,
@@ -760,6 +780,7 @@ class Runtime {
         Iter,
         Slice,
         Hash,
+        Str,
         Count,
     };
 
@@ -902,6 +923,21 @@ class Runtime {
     // currently executing. Saved/restored around each callNative() so a native
     // re-entering the VM judges a caught throw against the right boundary.
     int m_nativeStopAtFrameCount{0};
+
+    // The enclosing run()'s boundary for the canonical stringify in progress,
+    // and the outcome of a __str__ dispatch inside it. stringifyObj
+    // (object.cpp) reaches __str__ through stringifyInstanceStr() below, so it
+    // never sees the boundary itself: opStr() (print/str) and handleThrow()
+    // (the report of an uncaught non-Error throw) both set it, and each
+    // saves/restores it around its own stringify.
+    int m_stringifyBoundary{0};
+    OpResult m_stringifyStatus{OpResult::OK};
+    // Non-zero while a canonical stringify is in progress (print/str, or the
+    // report of an uncaught non-Error throw): stringifyObj's INSTANCE case
+    // dispatches __str__ only then, so an internal stringify (the debug
+    // trace's stack dump, the disassembler) still renders the default form
+    // with no user-code side effect.
+    int m_stringifyCanonicalDepth{0};
 
 #ifdef LOXPP_PROFILE
     ProfilerData m_profilerData;

@@ -170,6 +170,7 @@ EXPECTED_CALLS = [
     ('OperatorResultTypeError', '"Operator method must return a Boolean."', JUDGED),
     ('OperatorResultTypeError', '"Operator method must return a sequence."', JUDGED),
     ('OperatorResultTypeError', '"Operator method must return a Number."', JUDGED),
+    ('OperatorResultTypeError', '"Operator method must return a String."', JUDGED),
     ('ConcatenationTypeError', '"Operands must be two numbers, two strings, or a string and a number."', RECORDED),
     ('ArithmeticTypeError', '"Operands must be numbers."', RECORDED),
     ('ArithmeticTypeError', '"Operands must be numbers."', RECORDED),

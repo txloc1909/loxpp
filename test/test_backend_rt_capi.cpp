@@ -639,7 +639,7 @@ TEST(RtCapiCheckpoint, PrintsAStringAndCallsAStdlibFunction) {
     Value greeting = rt_new_string(rt, "hello from qbe");
     rt_push(rt, greeting);
     testing::internal::CaptureStdout();
-    int printStatus = rt_op_print(rt);
+    int printStatus = rt_op_print(rt, 0);
     std::string printed = testing::internal::GetCapturedStdout();
     EXPECT_EQ(printStatus, static_cast<int>(Runtime::OpResult::OK));
     EXPECT_EQ(printed, "hello from qbe\n");

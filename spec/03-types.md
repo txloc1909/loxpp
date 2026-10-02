@@ -323,7 +323,7 @@ Every value has a canonical string form, produced by `print` and by the
 | Native function | `<native fn>` |
 | Bound built-in method | `<native fn>` |
 | Class | The class name (e.g. `Dog`) |
-| Instance | `ClassName instance` (e.g. `Dog instance`) |
+| Instance | `ClassName instance` (e.g. `Dog instance`), or the value of the class's `__str__` method when it defines one — see [§04-semantics](04-semantics.md) |
 | List | `[elem0, elem1, ...]` — each element in its canonical string form, comma-space separated, enclosed in `[` and `]`. An empty list is `[]`. |
 | Map | `{key0: value0, key1: value1, ...}` — each pair as `key: value` in canonical form, comma-space separated, enclosed in `{` and `}`. An empty map is `{}`. |
 | Error | `kind: message` — the value of the `kind` field, then `": "`, then the value of the `message` field. Note that an *uncaught* `throw` of an Error reports only `message`, not this form — see [§04-semantics, `throw` Statement](04-semantics.md#throw-statement). |

@@ -149,10 +149,11 @@ TEST_F(ScannerTest, LoxKeywordsComplete) {
     // lox_keywords() is the single source of truth for the keyword list
     // (see scanner.h). It must hold every keyword token, including `in`.
     const std::unordered_set<std::string> expected = {
-        "and",   "break", "case",  "catch", "class", "continue", "default",
-        "defer", "else",  "enum",  "false", "for",   "fun",      "if",
-        "in",    "len",   "match", "nil",   "or",    "print",    "return",
-        "super", "this",  "throw", "true",  "try",   "var",      "while"};
+        "and",     "break", "case",   "catch", "class", "continue",
+        "default", "defer", "else",   "enum",  "false", "for",
+        "fun",     "if",    "in",     "len",   "match", "nil",
+        "or",      "print", "return", "str",   "super", "this",
+        "throw",   "true",  "try",    "var",   "while"};
     std::unordered_set<std::string> actual;
     for (const char* const* kw = lox_keywords(); *kw != nullptr; ++kw) {
         actual.insert(*kw);

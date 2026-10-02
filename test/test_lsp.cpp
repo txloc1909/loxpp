@@ -615,12 +615,12 @@ TEST(LspCodeAction, StrWrapNeedsAPlus) {
 }
 
 TEST(LspSignatureHelp, StdlibGlobalTracksActiveParameter) {
-    loxpp::tooling::DocumentModel model("print str(1, 2);\n");
+    loxpp::tooling::DocumentModel model("print type(1, 2);\n");
     const std::string& text = model.text();
-    // Inside the first and second argument of str(.
-    json first = loxpp::lsp::signatureHelpFor(model, text.find("str(") + 4);
+    // Inside the first and second argument of type(.
+    json first = loxpp::lsp::signatureHelpFor(model, text.find("type(") + 5);
     ASSERT_TRUE(first.is_object());
-    EXPECT_EQ(first.at("signatures")[0].at("label"), "str(value) -> String");
+    EXPECT_EQ(first.at("signatures")[0].at("label"), "type(value) -> String");
     EXPECT_EQ(first.at("activeParameter"), 0);
     json second = loxpp::lsp::signatureHelpFor(model, text.find(", 2") + 1);
     EXPECT_EQ(second.at("activeParameter"), 0); // one param, clamp
@@ -673,11 +673,11 @@ TEST(LspSignatureHelp, UserFunctionAndNullCases) {
 
 TEST(LspSignatureHelp, UserDefinitionShadowsStdlib) {
     loxpp::tooling::DocumentModel model(
-        "fun str(x, y) { return x; }\nprint str(1, 2);\n");
+        "fun type(x, y) { return x; }\nprint type(1, 2);\n");
     const std::string& text = model.text();
-    json help = loxpp::lsp::signatureHelpFor(model, text.find("str(1,") + 6);
+    json help = loxpp::lsp::signatureHelpFor(model, text.find("type(1,") + 7);
     ASSERT_TRUE(help.is_object());
-    EXPECT_EQ(help.at("signatures")[0].at("label"), "fun str(x, y)");
+    EXPECT_EQ(help.at("signatures")[0].at("label"), "fun type(x, y)");
     EXPECT_EQ(help.at("activeParameter"), 1);
 }
 
@@ -703,10 +703,10 @@ TEST(LspSignatureHelp, MethodHeuristicAndLimits) {
 
 TEST(LspSignatureHelp, TypingStatesKeepHelp) {
     // An open string with no closing quote is still being typed.
-    loxpp::tooling::DocumentModel s("print str(\"abc");
+    loxpp::tooling::DocumentModel s("print type(\"abc");
     json shelp = loxpp::lsp::signatureHelpFor(s, s.text().size());
     ASSERT_TRUE(shelp.is_object());
-    EXPECT_EQ(shelp.at("signatures")[0].at("label"), "str(value) -> String");
+    EXPECT_EQ(shelp.at("signatures")[0].at("label"), "type(value) -> String");
 
     // A trailing comment to end of file keeps the call.
     loxpp::tooling::DocumentModel c("print math.pow(2, // foo");
@@ -716,7 +716,7 @@ TEST(LspSignatureHelp, TypingStatesKeepHelp) {
 
     // Nested calls: on the inner close the inner help shows; between the
     // closes the outer help shows; past both there is no call.
-    loxpp::tooling::DocumentModel n("print str(type(1))");
+    loxpp::tooling::DocumentModel n("print env(type(1))");
     const std::string& t = n.text();
     const std::size_t inner = t.find("))");
     json innerHelp = loxpp::lsp::signatureHelpFor(n, inner);
@@ -726,7 +726,7 @@ TEST(LspSignatureHelp, TypingStatesKeepHelp) {
     json outerHelp = loxpp::lsp::signatureHelpFor(n, inner + 1);
     ASSERT_TRUE(outerHelp.is_object());
     EXPECT_EQ(outerHelp.at("signatures")[0].at("label"),
-              "str(value) -> String");
+              "env(name) -> String | Nil");
     EXPECT_TRUE(loxpp::lsp::signatureHelpFor(n, inner + 2).is_null());
 }
 

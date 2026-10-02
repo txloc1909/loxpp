@@ -22,14 +22,7 @@ static Value inputNative(int /*argCount*/, Value* /*args*/) {
     return Value{static_cast<Obj*>(s)};
 }
 
-static Value strNative(int /*argCount*/, Value* args) {
-    std::string s = stringify(args[0]);
-    ObjString* obj = getActiveMM()->makeString(s);
-    return Value{static_cast<Obj*>(obj)};
-}
-
 void registerGlobals(StdlibRegistrar& reg) {
     reg.defineGlobal("clock", clockNative, 0);
     reg.defineGlobal("input", inputNative, 0);
-    reg.defineGlobal("str", strNative, 1);
 }

@@ -168,6 +168,36 @@ CASES = [
         "class L { __len__(x) { return x; } }\n"
         "try { len(L()); } catch (e) { print e.kind; }\n",
     ),
+    # print and str() render an Instance through __str__, including nested
+    # inside a List or Map; the default stays "ClassName instance".
+    Case(
+        "str",
+        "class S {\n"
+        "  init(n) { this.n = n; }\n"
+        "  __str__() { return \"S\" + str(this.n); }\n"
+        "}\n"
+        "class T {}\n"
+        "print S(1);\n"
+        "print str(S(2));\n"
+        "print [S(3), 9];\n"
+        "print {\"k\": S(4)};\n"
+        "print str(42);\n"
+        "print T();\n",
+    ),
+    Case(
+        "str_result_type",
+        "class Bad { __str__() { return 42; } }\n"
+        "try { var s = str(Bad()); } catch (e) { print e.kind; }\n"
+        "try { print Bad(); } catch (e) { print e.kind; }\n",
+    ),
+    # A __str__ that composes another str() whose __str__ throws a caught
+    # error must not corrupt the outer result.
+    Case(
+        "str_nested_caught",
+        "class W { __str__() { return 42; } }\n"
+        "class V { __str__() { try { str(W()); } catch (e) {} return \"ok\"; } }\n"
+        "print str(V());\n",
+    ),
     # Internal equality (list membership) must stay identity, never __eq__.
     Case(
         "identity_membership",

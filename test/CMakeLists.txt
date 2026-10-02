@@ -268,6 +268,18 @@ if(LOXPP_PYTHON3)
     set_tests_properties(BootstrapOperatorOverload PROPERTIES
         ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
+
+    # Issue #501: an uncaught throw of a non-Error value reports its canonical
+    # form (dispatching __str__ on an Instance) on both native and bootstrap.
+    # The report is on stderr, so this compares the first stderr line + exit
+    # code (native appends a stack trace the bootstrap does not). Same
+    # trace-noise constraint as BootstrapOperatorOverload above.
+    add_test(NAME BootstrapThrowReport
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_throw_report.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(BootstrapThrowReport PROPERTIES
+        ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
 endif()
 
 # The *_gc targets share their source with a non-_gc twin. They run under GC

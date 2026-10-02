@@ -352,16 +352,30 @@ InterpretResult VM::run(int stopAtFrameCount) {
             }
             break;
         }
-        case Op::PRINT: {
-            m_rt.m_stdlibCtx.clearError();
-            std::string s = stringify(m_rt.pop());
-            if (m_rt.m_stdlibCtx.nativeError) {
-                RAISE_ERROR("%s", m_rt.m_stdlibCtx.nativeErrorMsg.c_str());
-                return InterpretResult::RUNTIME_ERROR;
+        case Op::STR: {
+            if (auto ret =
+                    dispatchOp([&] { return m_rt.opStr(stopAtFrameCount); })) {
+                return *ret;
             }
-            std::fwrite(s.data(), 1, s.size(), stdout);
-            std::printf("\n");
             break;
+        }
+        case Op::PRINT: {
+            frame->ip = ip;
+            Runtime::OpResult result = m_rt.opStr(stopAtFrameCount);
+            if (result == Runtime::OpResult::OK) {
+                ObjString* s = asObjString(m_rt.pop());
+                std::fwrite(s->chars.data(), 1, s->chars.size(), stdout);
+                std::printf("\n");
+                break;
+            }
+            if (result == Runtime::OpResult::Resumed) {
+                FrameSync::loadTop(m_rt.m_frames, m_rt.m_frameCount, frame, ip,
+                                   chunk);
+                break;
+            }
+            return result == Runtime::OpResult::Stop
+                       ? InterpretResult::OK
+                       : InterpretResult::RUNTIME_ERROR;
         }
         case Op::POP: {
             m_rt.m_lastResult = m_rt.pop();
@@ -612,6 +626,12 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 CATCHABLE_OR_RETURN(tryCatchableError(
                     "OperatorResultTypeError",
                     "Operator method must return a sequence."));
+                break;
+            }
+            if (check == Runtime::ResultCheck::String && !isString(result)) {
+                CATCHABLE_OR_RETURN(
+                    tryCatchableError("OperatorResultTypeError",
+                                      "Operator method must return a String."));
                 break;
             }
             if (m_rt.m_frameCount <= stopAtFrameCount) {

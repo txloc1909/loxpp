@@ -99,6 +99,13 @@ void Compiler::lenExpr() {
     emitByte(Op::LEN);
 }
 
+void Compiler::strExpr() {
+    m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after 'str'.");
+    expression();
+    m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after argument.");
+    emitByte(Op::STR);
+}
+
 void Compiler::unary() {
     TokenType operatorType = m_parser->m_previous.type;
 
@@ -2311,6 +2318,7 @@ void Compiler::trackOperandStack(Op op) {
     case Op::NEGATE:
     case Op::NOT:
     case Op::LEN:
+    case Op::STR:
     case Op::GET_TAG:
     case Op::IS_SEQ:
     case Op::INSTANCEOF:

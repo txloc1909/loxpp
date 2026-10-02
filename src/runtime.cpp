@@ -222,6 +222,11 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
             "OperatorResultTypeError",
             "Operator method must return a sequence.", stopAtFrameCount));
     }
+    if (check == ResultCheck::String && !isString(result)) {
+        return fromThrow(raiseThrowableError(
+            "OperatorResultTypeError", "Operator method must return a String.",
+            stopAtFrameCount));
+    }
     return OpResult::OK;
 }
 
@@ -498,6 +503,30 @@ Runtime::ThrowOutcome Runtime::handleThrow(Value thrownValue,
         }
     }
 
+    // Step 1.5: With no handler and a non-Error value, render the canonical
+    // form now, while a frame is still live — __str__ needs one to run. Doing
+    // it after the unwind below would leave m_frameCount at 0 and nothing to
+    // run the method in.
+    std::string uncaughtThrownStr;
+    if (!foundHandler && !isError(thrownValue)) {
+        int savedBoundary = m_stringifyBoundary;
+        m_stringifyBoundary = stopAtFrameCount;
+        OpResult savedStatus = m_stringifyStatus;
+        m_stringifyStatus = OpResult::OK;
+        m_stringifyCanonicalDepth++;
+        uncaughtThrownStr = stringify(thrownValue);
+        m_stringifyCanonicalDepth--;
+        OpResult status = m_stringifyStatus;
+        m_stringifyBoundary = savedBoundary;
+        m_stringifyStatus = savedStatus;
+        if (status == OpResult::Fatal) {
+            // The __str__ dispatch itself threw uncaught: that fault already
+            // reported itself and unwound everything, so do not report this
+            // throw a second time.
+            return ThrowOutcome::Uncaught;
+        }
+    }
+
     // Step 2: Unwind frame-by-frame, draining defers, to either the
     // handler's frame (if found) or frame 0 (if not found).
     int targetFrameCount = foundHandler ? handlerToUse.frameCount : 0;
@@ -568,8 +597,9 @@ Runtime::ThrowOutcome Runtime::handleThrow(Value thrownValue,
         ObjError* err = asObjError(as<Obj*>(thrownValue));
         runtimeError("%s", err->message->chars.c_str());
     } else {
-        std::string thrownStr = stringify(thrownValue);
-        runtimeError("%s", thrownStr.c_str());
+        // The canonical form was computed before the unwind (step 1.5), while
+        // a frame was still live to run __str__.
+        runtimeError("%s", uncaughtThrownStr.c_str());
     }
     return ThrowOutcome::Uncaught;
 }
@@ -754,7 +784,7 @@ void Runtime::initProtocolNames() {
                            "__lt__",        "__gt__",   "__eq__",
                            "__contains__",  "__call__", "__index_get__",
                            "__index_set__", "__len__",  "__iter__",
-                           "__slice__",     "__hash__"};
+                           "__slice__",     "__hash__", "__str__"};
     for (std::size_t i = 0; i < m_protocolNames.size(); i++) {
         m_protocolNames[i] = m_mm.makeString(names[i]);
     }
@@ -2076,6 +2106,69 @@ Runtime::OpResult Runtime::opLen(int stopAtFrameCount) {
     }
     runtimeError("len() argument must be a list, string, or map.");
     return OpResult::Fatal;
+}
+
+Runtime::OpResult Runtime::opStr(int stopAtFrameCount) {
+    // The operand is peeked, not popped, so it stays a GC root while stringify
+    // runs (a __str__ dispatch can allocate and collect otherwise-unrooted
+    // values). It is replaced in place by the resulting ObjString.
+    Value operand = peek(0);
+    m_stdlibCtx.clearError();
+    // Save/restore the stringify state, not just the boundary: a __str__ may
+    // itself call str()/print (a nested opStr), and a failure caught inside
+    // that nested call must not leak back into THIS opStr's result.
+    int savedBoundary = m_stringifyBoundary;
+    m_stringifyBoundary = stopAtFrameCount;
+    OpResult savedStatus = m_stringifyStatus;
+    m_stringifyStatus = OpResult::OK;
+    m_stringifyCanonicalDepth++;
+    std::string s = stringify(operand);
+    m_stringifyCanonicalDepth--;
+    m_stringifyBoundary = savedBoundary;
+    if (m_stringifyStatus != OpResult::OK) {
+        OpResult status = m_stringifyStatus;
+        m_stringifyStatus = savedStatus;
+        return status;
+    }
+    m_stringifyStatus = savedStatus;
+    if (m_stdlibCtx.nativeError) {
+        runtimeError("%s", m_stdlibCtx.nativeErrorMsg.c_str());
+        return OpResult::Fatal;
+    }
+    ObjString* result = m_mm.makeString(s);
+    stackTop[-1] = Value{static_cast<Obj*>(result)};
+    return OpResult::OK;
+}
+
+std::string Runtime::stringifyInstanceStr(ObjInstance* instance) {
+    if (m_stringifyStatus != OpResult::OK) {
+        // A previous __str__ in this same stringify already threw (or was
+        // caught elsewhere); stop dispatching so the rest of the render is
+        // inert and the outcome already recorded propagates unchanged.
+        return "...";
+    }
+    Value method;
+    if (!instance->klass->methods.get(
+            m_protocolNames[static_cast<std::size_t>(Protocol::Str)], method)) {
+        return std::string(instance->klass->name->chars.data(),
+                           instance->klass->name->chars.size()) +
+               " instance";
+    }
+    push(Value{static_cast<Obj*>(instance)});
+    Value* frameSlots = stackTop - 1;
+    int entry = m_frameCount;
+    OpResult r = dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
+                                m_stringifyBoundary, ResultCheck::String);
+    if (r == OpResult::Resumed && m_frameCount == entry + 1) {
+        r = runReentrantFrame(entry, frameSlots, m_stringifyBoundary);
+    }
+    if (r != OpResult::OK) {
+        m_stringifyStatus = r;
+        return "...";
+    }
+    Value result = pop();
+    auto* s = asObjString(as<Obj*>(result));
+    return std::string(s->chars.data(), s->chars.size());
 }
 
 Runtime::OpResult Runtime::opGetGlobal(ObjString* name, int stopAtFrameCount) {

@@ -31,6 +31,8 @@ class Slicer {
 class Sized { __len__() { return 5; } }
 class BadLen { __len__() { return "nope"; } }
 
+class BadStr { __str__() { return 42; } }
+
 var a = Vec(3);
 var b = Vec(4);
 print a + b;
@@ -65,6 +67,19 @@ print len([1, 2, 3]);
 print len("ab");
 print len(Sized());
 try { var bad = len(BadLen()); } catch (e) { print "caught " + e.kind; }
+
+class WithStr {
+  init(n) { this.n = n; }
+  __str__() { return "S" + str(this.n); }
+}
+print WithStr(1);
+print str(WithStr(2));
+print [WithStr(3), 9];
+print {"k": WithStr(4)};
+print str(42);
+print str("hi");
+try { var badstr = str(BadStr()); } catch (e) { print "caught " + e.kind; }
+try { print BadStr(); } catch (e) { print "caught " + e.kind; }
 
 class AlwaysEq { __eq__(o) { return true; } }
 var e1 = AlwaysEq();

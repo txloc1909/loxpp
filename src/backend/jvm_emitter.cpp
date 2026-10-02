@@ -837,6 +837,12 @@ void emitLen(Emitter& e) {
              0);
 }
 
+void emitStr(Emitter& e) {
+    e.b.emit("invokestatic lox/LoxOps/str(Ljava/lang/Object;)Ljava/lang/"
+             "Object;",
+             0);
+}
+
 // An earlier design added `reorderFoldedLeftOperand` here, one private
 // spill-reload per two-operand op, to fold a LEFT-folded operand back in.
 // The redesign deletes it: normalizeFoldedOperands now does the same
@@ -2420,6 +2426,9 @@ void emitBody(Emitter& e, bool isScript,
             break;
         case Op::LEN:
             emitLen(e);
+            break;
+        case Op::STR:
+            emitStr(e);
             break;
         case Op::ADD:
             emitAdd(e);

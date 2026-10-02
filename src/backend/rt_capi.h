@@ -107,12 +107,11 @@ Value rt_new_string(Runtime* rt, const char* chars) noexcept;
 // compiled GET_GLOBAL op to do it through yet.
 Value rt_get_global(Runtime* rt, const char* name) noexcept;
 
-// PRINT's own stack effect (stringify the popped value, write it plus a
-// newline to stdout), reused here ahead of PRINT's own compiled lowering:
-// PRINT stays inline in VM::run() (see runtime.h's file comment on which
-// opcodes moved to Runtime's op*() methods) and this node's checkpoint
-// still needs to prove a string reaches stdout through the whole toolchain.
-int rt_op_print(Runtime* rt) noexcept;
+// PRINT's own stack effect (stringify the popped value — dispatching __str__ —
+// then write it plus a newline to stdout), routed through Runtime::opStr so
+// print and str() agree on the canonical form. Takes the enclosing run()'s
+// boundary because a __str__ dispatch can throw a catchable error.
+int rt_op_print(Runtime* rt, int stopAtFrameCount) noexcept;
 
 // The QBE-specific call path: dispatches on the callee's type exactly as
 // VM::run()'s Op::CALL does (native, closure, bound method, bound native,
@@ -182,6 +181,7 @@ int rt_op_instanceof(Runtime* rt, ObjString* className) noexcept;
 // comment on #462).
 int rt_op_in(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_len(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_str(Runtime* rt, int stopAtFrameCount) noexcept;
 
 // One wrapper per Runtime::op*() arithmetic/comparison helper (runtime.h,
 // moved out of vm.cpp by the operator-overloading mission's T1 node). Each

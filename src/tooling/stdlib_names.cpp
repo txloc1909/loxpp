@@ -7,17 +7,17 @@ namespace loxpp::tooling {
 
 namespace {
 
-// From src/stdlib/globals.cpp (clock input str), src/stdlib/file_api.cpp
+// From src/stdlib/globals.cpp (clock input), src/stdlib/file_api.cpp
 // (open), src/stdlib/os_api.cpp (args env exit time sleep exists is_dir
 // is_file stat), src/stdlib/reflect_api.cpp (type fields methods getField
 // setField hasField callMethod), src/stdlib/math_module.cpp (math).
-// `print` and `len` are statement/operator keywords, not globals, so they are
-// not listed.
-constexpr std::array<std::string_view, 21> kGlobals = {
-    "clock",    "input",      "str",    "open",    "args",     "env",
-    "exit",     "time",       "sleep",  "exists",  "is_dir",   "is_file",
-    "stat",     "type",       "fields", "methods", "getField", "setField",
-    "hasField", "callMethod", "math",
+// `print`, `len`, and `str` are statement/operator keywords, not globals, so
+// they are not listed.
+constexpr std::array<std::string_view, 20> kGlobals = {
+    "clock",    "input",    "open",     "args",       "env",
+    "exit",     "time",     "sleep",    "exists",     "is_dir",
+    "is_file",  "stat",     "type",     "fields",     "methods",
+    "getField", "setField", "hasField", "callMethod", "math",
 };
 
 // From src/math.cpp: kMathFunctions and kMathConstants.

@@ -44,7 +44,7 @@ public final class ReflectionTest {
 
         LoxClosure fn = noopClosure("f", 0);
         checkEquals("Function", call(globals, "type", fn), "type(closure) is Function");
-        checkEquals("Function", call(globals, "type", globals.get("str")), "type(plain native) is Function");
+        checkEquals("Function", call(globals, "type", globals.get("type")), "type(plain native) is Function");
 
         LoxClass klass = new LoxClass("Foo", null);
         LoxOps.defineMethod(klass, "greet", noopClosure("greet", 0));
@@ -157,8 +157,8 @@ public final class ReflectionTest {
         Object instance = klass.call(new Object[0]);
 
         // A plain native stored in a field.
-        LoxOps.setProperty(instance, "describe", globals.get("str"));
-        checkEquals("42", call(globals, "callMethod", instance, "describe", 42.0),
+        LoxOps.setProperty(instance, "describe", globals.get("type"));
+        checkEquals("Number", call(globals, "callMethod", instance, "describe", 42.0),
                 "callMethod() calls a plain native stored in a field");
 
         // A native with a real arity, to prove args forward in order.
@@ -211,8 +211,8 @@ public final class ReflectionTest {
                 "callMethod() runs a field holding a bound user-defined method");
 
         // Field shadows method: a field with the same name as a method wins.
-        LoxOps.setProperty(instance, "greet", globals.get("str"));
-        checkEquals("1", call(globals, "callMethod", instance, "greet", 1.0),
+        LoxOps.setProperty(instance, "greet", globals.get("type"));
+        checkEquals("Number", call(globals, "callMethod", instance, "greet", 1.0),
                 "callMethod() resolves a shadowing field before the class method");
 
         checkThrows(() -> call(globals, "callMethod", instance, "nonexistent"), LoxError.class,

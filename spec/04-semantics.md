@@ -199,6 +199,7 @@ happens to equal a dunder name never participates.
 | `len(x)` | `__len__()` | `x` |
 | `for (var v in x)` | `__iter__()` | `x` |
 | `c[start:end]` | `__slice__(start, end)` | `c` |
+| `str(x)` / `print x` | `__str__()` | `x` |
 
 `a != b` is `==` then logical negation: it derives from `__eq__` and has no
 method of its own. `a <= b` is `!(a > b)` and `a >= b` is `!(a < b)`; each
@@ -206,9 +207,10 @@ dispatches `__gt__` / `__lt__` and negates the result, with no `__le__` /
 `__ge__` method.
 
 The result of `__eq__`, `__lt__`, `__gt__`, and `__contains__` must be a
-Boolean, the result of `__len__` and `__hash__` must be a Number, and the
-result of `__iter__` must be a List, String, or Map. Any other result raises a
-catchable `OperatorResultTypeError` (see [Runtime Errors](#runtime-errors)). The
+Boolean, the result of `__len__` and `__hash__` must be a Number, the
+result of `__iter__` must be a List, String, or Map, and the result of
+`__str__` must be a String. Any other result raises a catchable
+`OperatorResultTypeError` (see [Runtime Errors](#runtime-errors)). The
 result of every other method in the table above is unconstrained.
 
 `__hash__` has no operator expression of its own. A Map key that is an Instance
@@ -228,6 +230,14 @@ built-in slice below, including its bound validation, and never dispatches.
 `len` or pass `len` as a first-class value. `len` on a List, String, or Map
 still returns the built-in length; on an Instance it dispatches `__len__`; on
 any other value it raises the same error the `len` global raised before.
+
+`str` is likewise a keyword, not a global. `str(x)` and `print x` produce the
+same canonical string form. `__str__` redefines an Instance's canonical form
+everywhere it is rendered — directly, or nested inside a List, Map, or Enum
+value. An Instance without `__str__` renders as `ClassName instance`, as
+before. A `__str__` that calls back into `str` or `print` recurses; the
+implementation's canonical-string depth limit (200 heap levels) bounds it and
+raises the same `Value nesting is too deep.` fault as any other deep nesting.
 
 Internal equality — `in` against a List and `list.remove` — always uses
 identity equality and never consults `__eq__`.
