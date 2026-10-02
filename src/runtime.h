@@ -927,14 +927,16 @@ class Runtime {
     // The enclosing run()'s boundary for the canonical stringify in progress,
     // and the outcome of a __str__ dispatch inside it. stringifyObj
     // (object.cpp) reaches __str__ through stringifyInstanceStr() below, so it
-    // never sees the boundary itself: opStr() sets it, and throw of a
-    // non-Error value (handleThrow) leaves it at 0 (the outermost run).
+    // never sees the boundary itself: opStr() (print/str) and handleThrow()
+    // (the report of an uncaught non-Error throw) both set it, and each
+    // saves/restores it around its own stringify.
     int m_stringifyBoundary{0};
     OpResult m_stringifyStatus{OpResult::OK};
-    // Non-zero while opStr() is stringifying (print/str): stringifyObj's
-    // INSTANCE case dispatches __str__ only then, so an internal stringify
-    // (the debug trace's stack dump, the disassembler, throw of a non-Error
-    // value) still renders the default form with no user-code side effect.
+    // Non-zero while a canonical stringify is in progress (print/str, or the
+    // report of an uncaught non-Error throw): stringifyObj's INSTANCE case
+    // dispatches __str__ only then, so an internal stringify (the debug
+    // trace's stack dump, the disassembler) still renders the default form
+    // with no user-code side effect.
     int m_stringifyCanonicalDepth{0};
 
 #ifdef LOXPP_PROFILE
