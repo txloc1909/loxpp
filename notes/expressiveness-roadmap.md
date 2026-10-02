@@ -103,7 +103,7 @@ so user types are first-class. Map keys through `__hash__`/`__eq__` landed in
 #469: a valid Instance key defines both methods, the map hashes the key and
 resolves a collision with the stored key's `__eq__`, and a key method that
 writes its own map raises `MapChangedError`. The `hash()`-protocol open
-question in `language-extension.md` is closed. The one deferred piece is
+question is closed. The one deferred piece is
 `__str__` (D2, #470) for a user canonical string form.
 
 **5. Coroutines / generators (single-core suspension).** Stackful suspend +
