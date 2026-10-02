@@ -958,6 +958,31 @@ jobs:
             loxpp-dev-qbe:latest \
             bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/diff_runtimes.py build/loxpp tools/loxpp_qbe.sh examples/"
 
+      # The --target qbe front end (#503): compile one example to a standalone
+      # executable, move it away from its source, and run it there. The
+      # corpus diff above could pass without this, because it never leaves the
+      # source file behind; this fails unless the generated harness embeds the
+      # source and its own ABI layout matches libloxrt.a's.
+      - name: --target qbe front end - standalone binary
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-qbe:latest \
+            bash -c '
+              set -e
+              cmake --preset release && cmake --build build --target loxpp loxrt -j$(nproc)
+              build/loxpp --target qbe -o /tmp/standalone examples/fibonacci.lox
+              cp /tmp/standalone /tmp/relocated
+              native=$(build/loxpp examples/fibonacci.lox)
+              moved=$(cd /tmp && ./relocated)
+              if [ "$native" != "$moved" ]; then
+                echo "standalone output differs from native" >&2
+                exit 1
+              fi
+              echo "OK: standalone binary runs without its source file"
+            '
+
       # S7's Q8 hazard (notes/qbe-backend.md: "measure QBE's time and memory
       # on bootstrap/loxpp_interpreter.lox early") — compiles the
       # self-hosted interpreter itself (3,700+ lines of Lox++, one very

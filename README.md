@@ -174,6 +174,20 @@ docker run --rm -v "$PWD:/work" -w /work ghcr.io/txloc1909/loxpp script.lox
 `ghcr.io/txloc1909/loxpp:latest` tracks the newest stable release; pin a
 specific version with `ghcr.io/txloc1909/loxpp:vX.Y.Z`.
 
+### Compile to a native executable
+
+The QBE backend compiles a program to a standalone native executable:
+
+```bash
+loxpp --target qbe -o myprogram script.lox
+./myprogram
+```
+
+The executable embeds the program source, so it does not need `script.lox` at
+run time. Compiling needs `qbe` and a C++ compiler on the `PATH`, and the
+release tarball ships `libloxrt.a` beside the `loxpp` binary. Set `LOX_RT_A`,
+`QBE`, or `CXX` to point at other copies or tools.
+
 ---
 
 ## Language tour

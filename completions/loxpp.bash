@@ -9,7 +9,7 @@ _loxpp_completion() {
 
     # Complete flags
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--version --help --check --format" -- "$cur"))
+        COMPREPLY=($(compgen -W "--version --help --check --format --target --out-dir -o" -- "$cur"))
         return 0
     fi
 

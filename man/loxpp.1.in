@@ -10,6 +10,11 @@ loxpp \- a fast, simple programming language interpreter
 [\fB\-\-format\fR {text|json}] \fIpath\fR
 .br
 .B loxpp
+.B \-\-target qbe
+.B \-o
+\fIout\fR \fIpath\fR
+.br
+.B loxpp
 .B \-\-version
 .br
 .B loxpp
@@ -40,6 +45,12 @@ Human\-readable error output (default).
 .B \-\-format json
 Structured JSON output suitable for editor integration.
 .RE
+.TP
+.B loxpp \-\-target qbe \-o \fIout\fR \fIpath\fR
+Compiles \fIpath\fR to a standalone native executable at \fIout\fR with the QBE
+backend. The executable embeds the program source, so it does not need the
+source file at run time. This needs \fBqbe\fR and a C++ compiler on the PATH,
+and \fBlibloxrt.a\fR beside the loxpp binary or named by \fBLOX_RT_A\fR.
 .TP
 .B loxpp \-\-version
 Prints the loxpp version and bundled library information.
@@ -77,5 +88,14 @@ Directory for cache files. Defaults to
 .TP
 .B HOME
 User home directory (used to find the cache directory if XDG_CACHE_HOME is unset).
+.TP
+.B QBE
+Path to the \fBqbe\fR compiler used by \fB\-\-target qbe\fR. Defaults to \fBqbe\fR on the PATH.
+.TP
+.B CXX
+C++ compiler used to link a \fB\-\-target qbe\fR executable. Defaults to \fBc++\fR, then \fBcc\fR.
+.TP
+.B LOX_RT_A
+Path to \fBlibloxrt.a\fR used by \fB\-\-target qbe\fR. Defaults to the file beside the loxpp binary.
 .SH AUTHOR
 The Lox++ project: https://github.com/txloc1909/loxpp

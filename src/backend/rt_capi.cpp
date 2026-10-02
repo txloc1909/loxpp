@@ -16,6 +16,22 @@ static_assert(sizeof(Value) == 8,
               "libloxrt requires LOXPP_NAN_TAGGING: --target qbe passes "
               "Value across the C ABI as a single 8-byte word");
 
+// The self-contained harness loxpp --target qbe generates
+// (backend/qbe_frontend.cpp) declares its own RtFunctionDesc by layout,
+// without including this header, so the release tarball need not ship the
+// src/ include tree. These assertions pin the layout that harness must
+// match; the qbe-toolchain CI step compiles and runs a generated harness to
+// prove the two actually agree.
+static_assert(sizeof(RtFunctionDesc) == 4 * sizeof(void*),
+              "RtFunctionDesc layout must match the generated harness");
+static_assert(offsetof(RtFunctionDesc, id) == 0, "RtFunctionDesc.id offset");
+static_assert(offsetof(RtFunctionDesc, arity) == sizeof(void*),
+              "RtFunctionDesc.arity offset");
+static_assert(offsetof(RtFunctionDesc, chunkHash) == 2 * sizeof(void*),
+              "RtFunctionDesc.chunkHash offset");
+static_assert(offsetof(RtFunctionDesc, code) == 3 * sizeof(void*),
+              "RtFunctionDesc.code offset");
+
 namespace {
 
 // Every wrapper below funnels a stray C++ exception through this, turning

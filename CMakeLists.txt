@@ -266,6 +266,25 @@ target_include_directories(loxpp_isocline PRIVATE third_party/isocline/include)
 target_include_directories(loxpp PRIVATE third_party/isocline/include)
 target_link_libraries(loxpp PRIVATE loxpp_isocline)
 
+# The QBE code generator and its --target qbe front end. Default ON so the
+# shipped binary can compile to a native executable; OFF drops --target qbe
+# and the emitter for a build that wants the native VM only. The emitter is
+# compiled into the loxpp executable, not loxpp_core, so the standalone
+# qbe_emit_probe/qbe_emit_program checkpoint tools keep their own copies
+# without a duplicate-symbol clash when linking loxpp_core's objects.
+option(LOXPP_QBE_BACKEND
+    "Build the QBE code generator and --target qbe front end" ON)
+if(LOXPP_QBE_BACKEND)
+    target_sources(loxpp PRIVATE
+        src/backend/qbe_emitter.cpp
+        src/backend/qbe_promotion.cpp
+        src/backend/qbe_frontend.cpp
+    )
+    # PRIVATE: only main.cpp reads LOXPP_QBE_BACKEND, for its --target
+    # dispatch and the LOXPP_TARGET_USAGE_LIST message.
+    target_compile_definitions(loxpp PRIVATE LOXPP_QBE_BACKEND)
+endif()
+
 # The loxpp-lsp language server. A second binary in the same build. It links
 # loxpp_core (Scanner + analyze()) and the src/tooling analysers, and vendors
 # nlohmann/json from third_party/. Default ON so CI builds it; OFF drops it
