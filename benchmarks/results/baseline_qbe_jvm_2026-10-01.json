@@ -1,0 +1,650 @@
+[
+  {
+    "program": "binary_trees",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "2047",
+        "steady_us": 7164.055,
+        "min_us": 6902.35,
+        "spread": 0.14589642318491414,
+        "wall_s": 0.7024606550112367,
+        "overhead_s": 0.6125754050112366,
+        "all_median_us": [
+          7164.1,
+          7457.9,
+          7327.2
+        ],
+        "batches_us": [
+          7105.1,
+          9382.0,
+          7760.8,
+          7221.5,
+          7947.6,
+          6902.4,
+          7440.4,
+          7658.2,
+          7115.5,
+          7212.6,
+          7113.9,
+          7025.4
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "bounce",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "1331",
+        "steady_us": 8936.645,
+        "min_us": 8739.76,
+        "spread": 0.10095958830187389,
+        "wall_s": 0.78573324799072,
+        "overhead_s": 0.6732686179907199,
+        "all_median_us": [
+          8936.6,
+          9371.1,
+          9177.9
+        ],
+        "batches_us": [
+          9609.2,
+          12271.8,
+          9395.5,
+          8575.7,
+          8951.8,
+          9670.0,
+          8898.9,
+          9471.5,
+          8771.9,
+          8921.5,
+          9159.0,
+          8767.8
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "fannkuch",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "16",
+        "steady_us": 1113.77,
+        "min_us": 791.358,
+        "spread": 0.5551684818229975,
+        "wall_s": 0.41975434200139716,
+        "overhead_s": 0.39382399200139717,
+        "all_median_us": [
+          3913.4,
+          1949.0,
+          1113.8
+        ],
+        "batches_us": [
+          4157.6,
+          4259.8,
+          6797.4,
+          1140.9,
+          1072.4,
+          1088.1,
+          1121.8,
+          1133.4,
+          1263.1,
+          1099.5,
+          1105.8,
+          1690.7
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "fasta",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "1000",
+        "steady_us": 3695.76,
+        "min_us": 3522.66,
+        "spread": 0.1446224863086347,
+        "wall_s": 0.49148300295928493,
+        "overhead_s": 0.44605006295928495,
+        "all_median_us": [
+          3711.9,
+          3695.8,
+          3780.5
+        ],
+        "batches_us": [
+          4213.0,
+          3779.8,
+          3639.1,
+          3586.4,
+          4088.1,
+          3647.0,
+          3597.5,
+          3578.8,
+          3891.5,
+          4100.9,
+          3744.6,
+          3566.4
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "fib",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "317811",
+        "steady_us": 6246.344999999999,
+        "min_us": 5945.81,
+        "spread": 0.11666022289835094,
+        "wall_s": 0.4891288210055791,
+        "overhead_s": 0.4142522810055791,
+        "all_median_us": [
+          7321.8,
+          8043.0,
+          6246.3
+        ],
+        "batches_us": [
+          5324.1,
+          7203.1,
+          6337.5,
+          5899.3,
+          6385.0,
+          6322.5,
+          6119.7,
+          6172.3,
+          5945.8,
+          6279.1,
+          6213.6,
+          6674.5
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "json",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "153",
+        "steady_us": 9493.645,
+        "min_us": 8913.87,
+        "spread": 0.46432429272423803,
+        "wall_s": 1.121193717001006,
+        "overhead_s": 1.0020525270010059,
+        "all_median_us": [
+          9596.6,
+          9493.6,
+          9497.3
+        ],
+        "batches_us": [
+          9644.8,
+          9496.5,
+          10035.3,
+          9079.8,
+          8913.9,
+          9841.8,
+          11515.0,
+          13322.0,
+          9145.5,
+          10040.9,
+          9103.1,
+          9002.6
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "k_nucleotide",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "2997",
+        "steady_us": 4448.615,
+        "min_us": 4042.52,
+        "spread": 0.49452694827491256,
+        "wall_s": 0.5029586459859274,
+        "overhead_s": 0.44702721598592743,
+        "all_median_us": [
+          4501.6,
+          4448.6,
+          4542.4
+        ],
+        "batches_us": [
+          4227.2,
+          5060.1,
+          4278.3,
+          4693.8,
+          4229.3,
+          4961.9,
+          4275.3,
+          4621.9,
+          5010.6,
+          6302.1,
+          4102.1,
+          4169.1
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "list",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "10",
+        "steady_us": 5980.23,
+        "min_us": 5803.16,
+        "spread": 0.4169237638017269,
+        "wall_s": 0.5175492609851062,
+        "overhead_s": 0.4430031809851062,
+        "all_median_us": [
+          5982.0,
+          5980.2,
+          6017.9
+        ],
+        "batches_us": [
+          5960.9,
+          6081.6,
+          6013.5,
+          6026.4,
+          5864.7,
+          8314.8,
+          6547.9,
+          5821.5,
+          5999.1,
+          5955.4,
+          5975.5,
+          5985.0
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "mandelbrot",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "5739",
+        "steady_us": 2568.71,
+        "min_us": 2411.26,
+        "spread": 0.2670289756336839,
+        "wall_s": 0.3454608070314862,
+        "overhead_s": 0.3123616070314862,
+        "all_median_us": [
+          2568.7,
+          2686.1,
+          2742.9
+        ],
+        "batches_us": [
+          3342.5,
+          2581.4,
+          2910.9,
+          2504.9,
+          2506.8,
+          3040.2,
+          2471.8,
+          3157.8,
+          2569.7,
+          2557.1,
+          2888.3,
+          2567.8
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "nbody",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "-0.169088",
+        "steady_us": 23264.6,
+        "min_us": 22383.9,
+        "spread": 0.07256948324922842,
+        "wall_s": 1.2810484599904157,
+        "overhead_s": 0.9972592599904158,
+        "all_median_us": [
+          23264.6,
+          24003.7,
+          23597.0
+        ],
+        "batches_us": [
+          23721.7,
+          25516.1,
+          22979.6,
+          25207.8,
+          23759.1,
+          23228.6,
+          22942.4,
+          22383.9,
+          23914.3,
+          24072.2,
+          23300.6,
+          22762.9
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "permute",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "8660",
+        "steady_us": 8485.064999999999,
+        "min_us": 8063.83,
+        "spread": 0.1000133764443762,
+        "wall_s": 0.5975061539793387,
+        "overhead_s": 0.4929078639793387,
+        "all_median_us": [
+          8498.3,
+          8485.1,
+          8486.0
+        ],
+        "batches_us": [
+          8546.8,
+          8382.0,
+          8936.9,
+          10729.2,
+          8063.8,
+          8912.5,
+          8236.1,
+          8470.6,
+          8683.4,
+          8499.5,
+          8244.1,
+          8893.3
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "queens",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "true",
+        "steady_us": 7808.32,
+        "min_us": 7600.18,
+        "spread": 0.06105922912995375,
+        "wall_s": 0.6707859090529382,
+        "overhead_s": 0.5750814290529382,
+        "all_median_us": [
+          7892.8,
+          8088.4,
+          7808.3
+        ],
+        "batches_us": [
+          7509.9,
+          9905.0,
+          8010.1,
+          7511.5,
+          7765.1,
+          8004.6,
+          7851.5,
+          8112.8,
+          7718.5,
+          7708.3,
+          7971.1,
+          7636.0
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "reverse_complement",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "1000",
+        "steady_us": 3175.94,
+        "min_us": 3003.79,
+        "spread": 0.2663620849260376,
+        "wall_s": 0.44264682702487335,
+        "overhead_s": 0.40319885702487335,
+        "all_median_us": [
+          3175.9,
+          3328.8,
+          3326.6
+        ],
+        "batches_us": [
+          3525.0,
+          3098.2,
+          3495.8,
+          3082.8,
+          3409.0,
+          3060.2,
+          3126.0,
+          3138.0,
+          3906.2,
+          3213.9,
+          3105.7,
+          3287.2
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "richards",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "false",
+        "steady_us": 20577.15,
+        "min_us": 20180.4,
+        "spread": 0.04048665631537888,
+        "wall_s": 1.901773493969813,
+        "overhead_s": 1.653625193969813,
+        "all_median_us": [
+          20577.2,
+          20770.2,
+          20792.0
+        ],
+        "batches_us": [
+          21237.3,
+          20919.5,
+          20638.4,
+          20166.4,
+          20187.0,
+          20421.3,
+          21020.1,
+          21015.2,
+          20544.9,
+          20483.6,
+          20905.2,
+          20609.4
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "sieve",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "669",
+        "steady_us": 3149.8,
+        "min_us": 2977.33,
+        "spread": 0.1708267191567719,
+        "wall_s": 0.34879307699156925,
+        "overhead_s": 0.30723538699156927,
+        "all_median_us": [
+          3149.8,
+          3365.9,
+          3200.4
+        ],
+        "batches_us": [
+          2997.8,
+          3619.0,
+          5675.2,
+          3490.0,
+          3000.7,
+          3498.2,
+          3084.9,
+          3399.6,
+          3156.0,
+          2977.3,
+          3515.4,
+          3143.6
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "spectral_norm",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "1.27422",
+        "steady_us": 5012.685,
+        "min_us": 4704.81,
+        "spread": 0.1264472034448604,
+        "wall_s": 0.5649876599782147,
+        "overhead_s": 0.5010046899782147,
+        "all_median_us": [
+          5304.0,
+          5012.7,
+          5071.4
+        ],
+        "batches_us": [
+          5776.7,
+          7881.6,
+          5166.8,
+          4989.3,
+          5058.9,
+          5363.2,
+          5048.6,
+          4858.7,
+          4976.8,
+          4838.3,
+          5294.6,
+          4729.4
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "storage",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "5461",
+        "steady_us": 2887.75,
+        "min_us": 2709.26,
+        "spread": 0.5345234178858972,
+        "wall_s": 0.4166085930191912,
+        "overhead_s": 0.3786368430191912,
+        "all_median_us": [
+          4022.4,
+          2887.8,
+          4237.5
+        ],
+        "batches_us": [
+          2950.6,
+          2906.5,
+          3077.1,
+          3598.6,
+          2709.3,
+          2758.3,
+          4252.8,
+          3322.7,
+          2879.9,
+          2838.5,
+          3781.8,
+          2895.6
+        ]
+      }
+    },
+    "checksum_match": null
+  },
+  {
+    "program": "towers",
+    "backends": {
+      "jvm": {
+        "backend": "jvm",
+        "ok": true,
+        "clock_kind": "wall",
+        "checksum": "8191",
+        "steady_us": 9585.095000000001,
+        "min_us": 9421.63,
+        "spread": 0.082938145109673,
+        "wall_s": 0.7904462839942425,
+        "overhead_s": 0.6734214739942426,
+        "all_median_us": [
+          9585.1,
+          9870.1,
+          9859.9
+        ],
+        "batches_us": [
+          10386.4,
+          9724.6,
+          9934.8,
+          9324.5,
+          10216.6,
+          9554.6,
+          9853.6,
+          9530.7,
+          9996.5,
+          9615.5,
+          9421.6,
+          9465.3
+        ]
+      }
+    },
+    "checksum_match": null
+  }
+]

@@ -15,7 +15,11 @@
 // ITER_NEXT, GET_TAG/MATCH_ERROR, PUSH_HANDLER/POP_HANDLER/THROW/
 // DEFER_RECORD/RUN_DEFERS (#459), and RETURN's own C-ABI epilogue
 // (rt_abi.h — every compiled function needs this, regardless of how simple
-// its body is). Every compiled function's own prologue also checks its
+// its body is). A dense enum match's adjacent GET_TAG/JUMP_TABLE pair is
+// fused (S8, #461): the tag is read as a word directly through
+// rt_get_tag_word (rt_capi.h) instead of materialising a boxed Number and
+// converting it straight back for the branch. Every compiled function's own
+// prologue also checks its
 // analyzed max stack height against STACK_MAX (Q3: compiled code writes its
 // own frame's slots directly, bypassing push()'s own check entirely — see
 // Runtime::checkStackOverflow's comment, runtime.h). Any other opcode
@@ -64,21 +68,33 @@
 // ever is).
 
 #include "abstract_stack.h"
+#include "capture_analysis.h"
 #include "chunk_decoder.h"
 
 #include <string>
 
 namespace qbe {
 
+// S8 (#461) switches. Both default on; the benchmark runner turns
+// promotion off (QBE_NO_PROMOTE) to compare the baseline emitter against
+// register promotion in one build.
+struct EmitOptions {
+    bool promoteRegisters{true};
+    bool fuseTagJumpTable{true};
+};
+
 // Emits complete QBE textual IL (.ssa) for one function: `data` declarations
 // for any global-variable name it references, plus one
 // `export function w $<qbeSymbol>(l %rt, l %base) { ... }` matching
 // RtCompiledFn's signature (backend/rt_abi.h) exactly. `analysis` must come
-// from analyzeStack(fn) (or the matching node of analyzeStackTree(root)) —
-// this pass does not recompute it, so a caller driving several functions
-// from one tree computes each analysis once and reuses it.
+// from analyzeStack(fn) (or the matching node of analyzeStackTree(root)) and
+// `captures` from the matching analyzeCaptures entry — this pass does not
+// recompute either, so a caller driving several functions from one tree
+// computes each once and reuses it.
 std::string emitScript(const DecodedFunction& fn,
                        const FunctionStackAnalysis& analysis,
-                       const std::string& qbeSymbol);
+                       const FunctionCaptureInfo& captures,
+                       const std::string& qbeSymbol,
+                       const EmitOptions& options = {});
 
 } // namespace qbe

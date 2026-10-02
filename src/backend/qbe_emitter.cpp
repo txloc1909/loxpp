@@ -5,11 +5,13 @@
 #include "handler_depth.h" // activeHandler (S6, #459)
 #include "native_pops.h"   // opName(Op), for error messages
 #include "object.h"
-#include "rt_abi.h" // kRtOk/kRtThrow/kRtFatal (S6, #459)
+#include "qbe_promotion.h" // register promotion + safe points (S8, #461)
+#include "rt_abi.h"        // kRtOk/kRtThrow/kRtFatal (S6, #459)
 #include "value.h"
 
 #include <algorithm>
 #include <bit>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -58,8 +60,10 @@ constexpr int kOpResultFatal = 3;
 class Emitter {
   public:
     Emitter(const DecodedFunction& fn, const FunctionStackAnalysis& analysis,
+            const FunctionCaptureInfo& captures, const EmitOptions& options,
             std::string qbeSymbol)
-        : m_fn(fn), m_symbol(std::move(qbeSymbol)),
+        : m_fn(fn), m_analysis(analysis), m_captures(captures),
+          m_options(options), m_symbol(std::move(qbeSymbol)),
           m_handlerDepth(analyzeHandlerDepth(fn)) {
         for (std::size_t i = 0; i < fn.instructions.size(); i++) {
             m_stateAt.emplace(fn.instructions[i].offset,
@@ -97,6 +101,9 @@ class Emitter {
             m_pushOffsetToCatchLabel[he.pushHandlerOffset] =
                 cfg.blocks[static_cast<std::size_t>(he.catchBlock)].label;
         }
+        if (m_options.promoteRegisters) {
+            m_plan = planPromotion(m_fn, m_analysis, m_captures, cfg);
+        }
 
         m_body << "export function w $" << m_symbol << "(l %rt, l %base) {\n";
         emitStackCheck(cfg.blocks.front().label);
@@ -112,8 +119,17 @@ class Emitter {
 
   private:
     const DecodedFunction& m_fn;
+    const FunctionStackAnalysis& m_analysis;
+    const FunctionCaptureInfo& m_captures;
+    EmitOptions m_options;
     std::string m_symbol;
     HandlerDepthAnalysis m_handlerDepth;
+    // S8 (#461): the promotion plan (null when register promotion is off) and
+    // the SSA value currently held in a register for each promoted slot, in
+    // the block being emitted. A slot absent from m_cur falls back to its
+    // stack slot.
+    std::optional<PromotionPlan> m_plan;
+    std::map<int, std::string> m_cur;
     std::unordered_map<int, std::pair<StackState, StackState>> m_stateAt;
     std::unordered_map<int, bool> m_reachedAt;
     // Offset -> index (into m_fn.instructions) of the innermost active
@@ -122,6 +138,10 @@ class Emitter {
     // A PUSH_HANDLER's own offset -> its catch block's cfg label, built once
     // cfg is available (run(), above).
     std::unordered_map<int, std::string> m_pushOffsetToCatchLabel;
+    // S8 (#461): a JUMP_TABLE offset -> the word temp holding its own
+    // GET_TAG's tag, when the two were fused (emitBlock). Absent for a
+    // JUMP_TABLE whose tag came through the unfused rt_op_get_tag path.
+    std::unordered_map<int, std::string> m_fusedTagWordByJumpOffset;
     std::ostringstream m_data;
     std::ostringstream m_body;
     int m_tempCounter{0};
@@ -172,6 +192,93 @@ class Emitter {
         m_body << "\tstorel " << value << ", " << address << "\n";
     }
 
+    // S8 (#461): is `slot` one the promotion plan may keep in a register?
+    bool isPromoted(int slot) const {
+        return m_plan.has_value() && slot > 0 &&
+               slot < static_cast<int>(m_plan->candidate.size()) &&
+               m_plan->candidate[static_cast<std::size_t>(slot)];
+    }
+
+    // A load whose destination is a plan-chosen SSA name rather than a fresh
+    // `%t` temp, so the name the plan reports is the one this code defines.
+    void loadlInto(const std::string& dest, const std::string& address) {
+        m_body << "\t" << dest << " =l loadl " << address << "\n";
+    }
+
+    // Q1 (notes/qbe-backend.md): write every promoted slot currently in a
+    // register back to its stack cell before an allocating or unwinding
+    // call. The GC scans stack..stackTop only, so a value held just in a QBE
+    // SSA temp would otherwise be invisible at the safe point. m_cur holds
+    // only in-scope slots, so each store lands in that slot's own cell. It
+    // is ordered by slot so the emitted store order (and the .ssa) does not
+    // depend on a hash.
+    void spillPromotedLocals() {
+        for (const auto& [slot, value] : m_cur) {
+            std::string a = addr(slot);
+            storel(value, a);
+        }
+    }
+
+    // Emits this block's promotion entry (S8, #461): the SSA phis at a merge
+    // (QBE requires phis first, before any other instruction), then the
+    // catch-entry reloads and entry-block parameter loads, then seeds m_cur
+    // from the plan. A block the plan carries no entry for starts empty and
+    // falls back to the stack slots.
+    void emitPromotionEntry(std::size_t blockIndex, const Cfg& cfg) {
+        m_cur.clear();
+        if (!m_plan.has_value()) {
+            return;
+        }
+        for (const PromoPhi& phi : m_plan->phis[blockIndex]) {
+            m_body << "\t" << phi.name << " =l phi";
+            for (std::size_t i = 0; i < phi.args.size(); i++) {
+                const auto& [pred, value] = phi.args[i];
+                if (i > 0) {
+                    m_body << ",";
+                }
+                // The predecessor's own branch is emitted in its `_tail`
+                // block (emitTerminator), which is the QBE block a phi must
+                // name — a cfg label alone can end mid-block. The emitter's
+                // prologue is block 0's other predecessor (kProloguePred).
+                std::string label =
+                    pred == kProloguePred
+                        ? m_symbol + "_entry_ok"
+                        : cfg.blocks[static_cast<std::size_t>(pred)].label +
+                              "_tail";
+                m_body << " @" << label << " " << value;
+            }
+            m_body << "\n";
+        }
+        for (const auto& [slot, name] : m_plan->catchReload[blockIndex]) {
+            std::string a = addr(slot);
+            loadlInto(name, a);
+        }
+        for (const auto& [slot, name] : m_plan->entryValue[blockIndex]) {
+            m_cur[slot] = name;
+        }
+    }
+
+    // Applies the plan's own non-SET_LOCAL promotion events at `offset`: a
+    // declaring push (invisible var) defines the slot's register value right
+    // after its stack store; a POP that reclaims the slot drops it. Mirrors
+    // qbe_promotion.cpp's advance() exactly.
+    void applyPromotionEvents(int offset) {
+        if (!m_plan.has_value()) {
+            return;
+        }
+        auto d = m_plan->declareAt.find(offset);
+        if (d != m_plan->declareAt.end()) {
+            int slot = d->second.first;
+            std::string a = addr(slot);
+            loadlInto(d->second.second, a);
+            m_cur[slot] = d->second.second;
+        }
+        auto r = m_plan->reclaimAt.find(offset);
+        if (r != m_plan->reclaimAt.end()) {
+            m_cur.erase(r->second);
+        }
+    }
+
     // Interns `name`'s literal text as a `data` C-string and returns a
     // fresh temp holding the ObjString* the interned Value carries — never
     // the raw Value bits, since a caller of an op*_global wrapper needs an
@@ -182,6 +289,9 @@ class Emitter {
     // SET_GLOBAL used — this emitter never sees, and does not need, the
     // pointer value itself.
     std::string internedNamePtr(const std::string& text) {
+        // rt_new_string allocates (makeString), so this is a safe point: a
+        // promoted local live across it must be visible to the GC.
+        spillPromotedLocals();
         std::string sym =
             "$" + m_symbol + "_name" + std::to_string(m_dataCounter++);
         m_data << "data " << sym << " = { b \"" << escapeForQbeData(text)
@@ -303,6 +413,9 @@ class Emitter {
     void callSlowPathTyped(const std::string& fnName, int topHeight,
                            const std::vector<std::string>& typedArgs,
                            int offset, Catchability catchability) {
+        // Every op*()/rt_* call can allocate or unwind, so spill promoted
+        // locals first (S8, #461).
+        spillPromotedLocals();
         std::string topAddr = addr(topHeight);
         m_body << "\tcall $rt_set_top(l %rt, l " << topAddr << ")\n";
         m_body << "\tcall $rt_set_frame_offset(l %rt, w " << offset << ")\n";
@@ -446,7 +559,24 @@ class Emitter {
         m_body << "\t" << myDepth << " =w call $rt_frame_count(l %rt)\n";
         m_stopTemp = newTemp();
         m_body << "\t" << m_stopTemp << " =w sub " << myDepth << ", 1\n";
+        // S8 (#461): promoted parameters are loaded here, in the block that
+        // jumps to block 0, so a phi at block 0 (a loop that jumps back to
+        // it) can name them as the prologue predecessor's values.
+        if (m_plan.has_value()) {
+            for (int s = 1; s <= m_fn.function->arity; s++) {
+                if (isPromoted(s)) {
+                    std::string a = addr(s);
+                    loadlInto(paramValueName(s), a);
+                }
+            }
+        }
         m_body << "\tjmp @" << firstBlockLabel << "\n";
+    }
+
+    // The SSA value name the promotion plan gives parameter `slot` (matching
+    // qbe_promotion.cpp's paramName).
+    static std::string paramValueName(int slot) {
+        return "%qp" + std::to_string(slot);
     }
 
     // Binary numeric op with an inline plain-double fast path (Q5): `a OP
@@ -568,11 +698,33 @@ class Emitter {
             break; // fused stack: the slot is simply abandoned (no locals/
                    // temporaries split to repair — see qbe_emitter.h).
         case Op::GET_LOCAL: {
-            std::string v = loadl(addr(ins.byteOperand));
+            // S8 (#461): a promoted slot already holds its value in m_cur —
+            // skip the load. The result still goes to its temporary cell, so
+            // every consumer that reads memory keeps working.
+            std::string v;
+            auto cur = m_cur.find(ins.byteOperand);
+            if (isPromoted(ins.byteOperand) && cur != m_cur.end()) {
+                v = cur->second;
+            } else {
+                v = loadl(addr(ins.byteOperand));
+            }
             storel(v, addr(before.height));
             break;
         }
         case Op::SET_LOCAL: {
+            // S8 (#461): the target slot's register value becomes the operand
+            // at height - 1 (always in memory, since only local slots are
+            // promoted). No store to the slot here; a later safe point spills
+            // it, and the plan's own dataflow carries it across blocks.
+            if (m_plan.has_value()) {
+                auto it = m_plan->setLocalAt.find(ins.offset);
+                if (it != m_plan->setLocalAt.end()) {
+                    std::string a = addr(before.height - 1);
+                    loadlInto(it->second.second, a);
+                    m_cur[it->second.first] = it->second.second;
+                    break;
+                }
+            }
             std::string v = loadl(addr(before.height - 1));
             storel(v, addr(ins.byteOperand));
             break;
@@ -691,6 +843,10 @@ class Emitter {
                     "qbe_emitter: CLOSURE constant is not a function — "
                     "decoder/compiler drift");
             }
+            // S8 (#461): rt_new_closure and rt_capture_local_upvalue both
+            // allocate, so a promoted local live across this instruction
+            // must be in its stack slot for the GC.
+            spillPromotedLocals();
             // ownClosureBits() (never addr(0) — S5, #458: base[0] is the
             // receiver, not the closure, inside a method's own frame) is
             // the only way compiled code can reach its own function's
@@ -990,10 +1146,69 @@ class Emitter {
             m_body << "\tret " << kRtOk << "\n";
             return;
         }
-        for (const DecodedInstruction& ins : block.instructions) {
-            emitInstruction(ins);
+        // S8 (#461): phis first (a QBE requirement), then the block's
+        // promotion entry. Must run before any instruction or spill.
+        emitPromotionEntry(blockIndex, cfg);
+        // S8 (#461), P8: a dense enum match compiles to GET_TAG immediately
+        // followed by JUMP_TABLE. When they are adjacent and end the block
+        // (JUMP_TABLE is a terminator, so it is this block's last
+        // instruction), fuse them: read the tag as a word directly instead
+        // of materialising a boxed Number and converting it straight back.
+        bool fusedTag = m_options.fuseTagJumpTable &&
+                        block.instructions.size() >= 2 &&
+                        block.instructions[block.instructions.size() - 2].op ==
+                            Op::GET_TAG &&
+                        block.instructions.back().op == Op::JUMP_TABLE;
+        std::size_t fusedIndex =
+            block.instructions.size() >= 2 ? block.instructions.size() - 2 : 0;
+        for (std::size_t i = 0; i < block.instructions.size(); i++) {
+            if (fusedTag && i == fusedIndex) {
+                emitFusedGetTagWord(block.instructions[i],
+                                    block.instructions.back().offset);
+                applyPromotionEvents(block.instructions[i].offset);
+                continue;
+            }
+            emitInstruction(block.instructions[i]);
+            applyPromotionEvents(block.instructions[i].offset);
         }
         emitTerminator(block, blockIndex, cfg);
+    }
+
+    // The fused GET_TAG half of a GET_TAG;JUMP_TABLE pair (S8, #461).
+    // `ins` is the GET_TAG; `jumpTableOffset` is the JUMP_TABLE that
+    // consumes its tag, so the terminator can find this word temp. The enum
+    // Value sits at the GET_TAG's own `before.height - 1` (GET_TAG has net
+    // zero stack effect) and is left untouched — this reads it in place, no
+    // rt_set_top and no safe point (the helper never allocates).
+    void emitFusedGetTagWord(const DecodedInstruction& ins,
+                             int jumpTableOffset) {
+        const auto& [before, after] = stateOf(ins.offset);
+        (void)after;
+        std::string topAddr = addr(before.height);
+        std::string slotAddr = addr(before.height - 1);
+        // Keep the frame offset current (Q4) so a non-enum subject's fatal
+        // stack trace names the match's own line, exactly as the unfused
+        // rt_op_get_tag call site does.
+        m_body << "\tcall $rt_set_top(l %rt, l " << topAddr << ")\n";
+        m_body << "\tcall $rt_set_frame_offset(l %rt, w " << ins.offset
+               << ")\n";
+        std::string tag = newTemp();
+        m_body << "\t" << tag << " =w call $rt_get_tag_word(l %rt, l "
+               << slotAddr << ")\n";
+        // -1 is the helper's non-enum sentinel (rt_capi.h); every real tag
+        // is a non-negative ObjEnumCtor::tag, so a signed less-than test
+        // catches it and mirrors opGetTag's own fatal error exactly.
+        std::string bad = newTemp();
+        m_body << "\t" << bad << " =w csltw " << tag << ", 0\n";
+        std::string fatalLabel =
+            "@" + m_symbol + "_tagfatal" + std::to_string(m_tempCounter);
+        std::string okLabel =
+            "@" + m_symbol + "_tagok" + std::to_string(m_tempCounter);
+        m_body << "\tjnz " << bad << ", " << fatalLabel << ", " << okLabel
+               << "\n";
+        m_body << fatalLabel << "\n\tret " << kRtFatal << "\n";
+        m_body << okLabel << "\n";
+        m_fusedTagWordByJumpOffset[jumpTableOffset] = tag;
     }
 
     void emitTerminator(const BasicBlock& block, std::size_t blockIndex,
@@ -1016,6 +1231,12 @@ class Emitter {
             }
             return;
         }
+        // S8 (#461): a cfg block can expand to several QBE blocks (its
+        // fast/slow paths, a call's status handling). A phi at a successor
+        // must name the QBE block that actually emits the branch, so every
+        // non-terminal cfg block gets a stable `_tail` block that holds its
+        // terminator — the last emitted path falls through into it.
+        m_body << "@" << block.label << "_tail\n";
         if (block.instructions.back().op == Op::JUMP_TABLE) {
             emitJumpTableTerminator(block, cfg);
             return;
@@ -1076,11 +1297,20 @@ class Emitter {
                 "own arm count plus an optional fallthrough — cfg/decoder "
                 "drift");
         }
-        std::string tagBits = loadl(addr(before.height - 1));
-        std::string tagD = newTemp();
-        m_body << "\t" << tagD << " =d cast " << tagBits << "\n";
-        std::string tagW = newTemp();
-        m_body << "\t" << tagW << " =w dtosi " << tagD << "\n";
+        // S8 (#461): a fused GET_TAG already produced the tag as a word
+        // (emitFusedGetTagWord); the unfused path lowers the Number GET_TAG
+        // pushed back to a word here.
+        std::string tagW;
+        auto fused = m_fusedTagWordByJumpOffset.find(jt.offset);
+        if (fused != m_fusedTagWordByJumpOffset.end()) {
+            tagW = fused->second;
+        } else {
+            std::string tagBits = loadl(addr(before.height - 1));
+            std::string tagD = newTemp();
+            m_body << "\t" << tagD << " =d cast " << tagBits << "\n";
+            tagW = newTemp();
+            m_body << "\t" << tagW << " =w dtosi " << tagD << "\n";
+        }
 
         std::optional<std::string> fallthroughLabel;
         if (block.successors.size() == jt.jumpTable.size() + 1) {
@@ -1116,8 +1346,10 @@ class Emitter {
 
 std::string emitScript(const DecodedFunction& fn,
                        const FunctionStackAnalysis& analysis,
-                       const std::string& qbeSymbol) {
-    Emitter emitter(fn, analysis, qbeSymbol);
+                       const FunctionCaptureInfo& captures,
+                       const std::string& qbeSymbol,
+                       const EmitOptions& options) {
+    Emitter emitter(fn, analysis, captures, options, qbeSymbol);
     return emitter.run();
 }
 

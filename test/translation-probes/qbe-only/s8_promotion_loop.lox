@@ -1,0 +1,17 @@
+// S8 (#461): a non-captured loop counter and accumulator are promoted into
+// QBE registers and carried across the back-edge by a phi. The loop must
+// still return the same result as native, under LOXPP_STRESS_GC=1 too.
+fun sumSquares(n) {
+  var total = 0;
+  var i = 0;
+  while (i < n) {
+    total = total + i * i;
+    i = i + 1;
+  }
+  return total;
+}
+
+print sumSquares(0);
+print sumSquares(1);
+print sumSquares(10);
+print sumSquares(1000);

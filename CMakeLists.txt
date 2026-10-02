@@ -318,6 +318,7 @@ endif()
 add_executable(qbe_emit_probe
     tools/qbe_emit_probe.cpp
     src/backend/qbe_emitter.cpp
+    src/backend/qbe_promotion.cpp
     $<TARGET_OBJECTS:loxpp_core>
 )
 target_include_directories(qbe_emit_probe PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -333,6 +334,7 @@ endif()
 add_executable(qbe_emit_program
     tools/qbe_emit_program.cpp
     src/backend/qbe_emitter.cpp
+    src/backend/qbe_promotion.cpp
     $<TARGET_OBJECTS:loxpp_core>
 )
 target_include_directories(qbe_emit_program PRIVATE ${PROJECT_SOURCE_DIR}/src)

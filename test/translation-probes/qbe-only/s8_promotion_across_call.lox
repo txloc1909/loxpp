@@ -1,0 +1,27 @@
+// S8 (#461): a promoted local is assigned a fresh list each iteration, so
+// its stack cell goes stale while the register holds the only reference.
+// The allocating calls must spill it back to its slot first, or a
+// LOXPP_STRESS_GC=1 collection frees the list and later allocations reuse
+// its memory, so the reads below go wrong.
+fun alloc() {
+  return [1, 2, 3];
+}
+
+fun rotate(n) {
+  var box = [0, 0];
+  var i = 0;
+  while (i < n) {
+    box = [i, i + 1];
+    var j = 0;
+    while (j < 40) {
+      alloc();
+      j = j + 1;
+    }
+    i = i + 1;
+  }
+  return box[0] + box[1];
+}
+
+print rotate(0);
+print rotate(1);
+print rotate(50);

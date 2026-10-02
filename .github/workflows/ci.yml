@@ -932,6 +932,19 @@ jobs:
             loxpp-dev-qbe:latest \
             bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && tools/check_qbe_probes.sh"
 
+      # S8's own checkpoint (issue #461): register promotion narrows what the
+      # GC can see on the QBE backend's fused stack, so this runs the whole
+      # probe corpus and the examples/ corpus under LOXPP_STRESS_GC=1, where
+      # every allocation collects. A promoted local that a safe point failed
+      # to spill is freed while still live and the run diverges.
+      - name: Check register promotion under stress GC (S8)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-qbe:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && tools/check_qbe_s8_promotion.sh"
+
       # S7's own full-corpus checkpoint: every example under examples/
       # (non-recursive, matching the JVM CI step's own directory walk)
       # must be byte-identical between native and QBE. No exclusion file —

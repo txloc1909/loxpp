@@ -85,7 +85,18 @@ trap 'rm -rf "$work"' EXIT
 
 program_abs="$(cd "$(dirname "$program")" && pwd)/$(basename "$program")"
 
-if ! "$qbe_emit_program" "$program_abs" >"$work/prog.ssa" 2>"$work/prog.descs"; then
+# S8 (#461): QBE_NO_PROMOTE=1 and QBE_NO_FUSE=1 select the pre-S8 emitter so
+# benchmarks/run.py can compare a baseline against register promotion or the
+# GET_TAG;JUMP_TABLE fusion in one build.
+emit_flags=()
+if [ -n "${QBE_NO_PROMOTE:-}" ]; then
+    emit_flags+=(--no-promote)
+fi
+if [ -n "${QBE_NO_FUSE:-}" ]; then
+    emit_flags+=(--no-fuse)
+fi
+
+if ! "$qbe_emit_program" "${emit_flags[@]}" "$program_abs" >"$work/prog.ssa" 2>"$work/prog.descs"; then
     echo "loxpp_qbe.sh: qbe_emit_program failed on $program" >&2
     cat "$work/prog.descs" >&2
     exit 1

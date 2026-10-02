@@ -9,6 +9,7 @@
 // (tools/check_qbe_s3_straight_line.sh), not to be a general --target qbe
 // front-end — that CLI wiring is a later node's job.
 
+#include "backend/capture_analysis.h"
 #include "backend/chunk_decoder.h"
 #include "backend/qbe_emitter.h"
 #include "compiler.h"
@@ -52,7 +53,9 @@ int main(int argc, char** argv) {
 
     try {
         FunctionStackAnalysis analysis = analyzeStack(tree);
-        std::string ssa = qbe::emitScript(tree, analysis, argv[2]);
+        FunctionCaptureInfo captures =
+            analyzeCaptures(tree).functions.at(tree.id);
+        std::string ssa = qbe::emitScript(tree, analysis, captures, argv[2]);
         std::fputs(ssa.c_str(), stdout);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "qbe_emit_probe: %s\n", e.what());

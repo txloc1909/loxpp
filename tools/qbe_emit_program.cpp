@@ -21,6 +21,7 @@
 // since DecodedFunction::id already is (chunk_decoder.h).
 
 #include "backend/abstract_stack.h"
+#include "backend/capture_analysis.h"
 #include "backend/chunk_decoder.h"
 #include "backend/qbe_emitter.h"
 #include "compiler.h"
@@ -46,30 +47,52 @@ std::string qbeSymbolFor(const std::string& id) {
 }
 
 void emitTree(const DecodedFunction& node,
-              const StackAnalysisTree& analysisNode, std::FILE* out,
-              std::FILE* err) {
+              const StackAnalysisTree& analysisNode,
+              const CaptureAnalysis& captures, const qbe::EmitOptions& options,
+              std::FILE* out, std::FILE* err) {
     std::string symbol = qbeSymbolFor(node.id);
-    std::string ssa = qbe::emitScript(node, analysisNode.self, symbol);
+    std::string ssa =
+        qbe::emitScript(node, analysisNode.self, captures.functions.at(node.id),
+                        symbol, options);
     std::fputs(ssa.c_str(), out);
     std::fprintf(
         err, "%s %d %llu %s\n", node.id.c_str(), node.function->arity,
         static_cast<unsigned long long>(hashChunkBytes(node.function->chunk)),
         symbol.c_str());
     for (std::size_t i = 0; i < node.nested.size(); i++) {
-        emitTree(node.nested[i], analysisNode.nested[i], out, err);
+        emitTree(node.nested[i], analysisNode.nested[i], captures, options, out,
+                 err);
     }
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::fprintf(stderr, "usage: qbe_emit_program program.lox\n");
+    qbe::EmitOptions options;
+    const char* program = nullptr;
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "--no-promote") {
+            options.promoteRegisters = false;
+        } else if (arg == "--no-fuse") {
+            options.fuseTagJumpTable = false;
+        } else if (program == nullptr) {
+            program = argv[i];
+        } else {
+            std::fprintf(stderr, "qbe_emit_program: unexpected argument %s\n",
+                         argv[i]);
+            return 64;
+        }
+    }
+    if (program == nullptr) {
+        std::fprintf(stderr,
+                     "usage: qbe_emit_program [--no-promote] [--no-fuse] "
+                     "program.lox\n");
         return 64;
     }
-    std::ifstream file(argv[1]);
+    std::ifstream file(program);
     if (!file) {
-        std::fprintf(stderr, "qbe_emit_program: cannot read %s\n", argv[1]);
+        std::fprintf(stderr, "qbe_emit_program: cannot read %s\n", program);
         return 74;
     }
     std::stringstream ss;
@@ -85,7 +108,8 @@ int main(int argc, char** argv) {
     DecodedFunction tree = decodeFunctionTree(script);
     try {
         StackAnalysisTree analysis = analyzeStackTree(tree);
-        emitTree(tree, analysis, stdout, stderr);
+        CaptureAnalysis captures = analyzeCaptures(tree);
+        emitTree(tree, analysis, captures, options, stdout, stderr);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "qbe_emit_program: %s\n", e.what());
         return 70;

@@ -157,6 +157,16 @@ int rt_op_build_list(Runtime* rt, int count) noexcept;
 int rt_op_build_map(Runtime* rt, int count, int stopAtFrameCount) noexcept;
 int rt_op_slice(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_get_tag(Runtime* rt) noexcept;
+// S8 (#461), P8 (bytecode-translation-problems.md): GET_TAG;JUMP_TABLE
+// fusion. Reads the enum Value at *slot and returns its constructor tag as
+// a word, WITHOUT touching the operand stack — unlike rt_op_get_tag above,
+// which replaces the top with a boxed Number. A dense enum match lowers the
+// pair as one dispatch, so the Number (and the JUMP_TABLE's own `d cast` +
+// `dtosi` back to a word) never needs to exist. Returns -1 after
+// runtimeError() when *slot is not an enum, the same fatal error
+// Runtime::opGetTag raises; every real enum tag is a non-negative
+// ObjEnumCtor::tag.
+int rt_get_tag_word(Runtime* rt, Value* slot) noexcept;
 int rt_op_match_error(Runtime* rt, int stopAtFrameCount) noexcept;
 
 // NOT/IS_SEQ/INSTANCEOF (S7, #460): the last 3 opcodes with no owner in

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import statistics
 import subprocess
@@ -42,14 +43,25 @@ HARNESS_RE = re.compile(r"^HARNESS\s+(\d+)\s+([\d.eE+-]+)\s+(.*)$")
 BACKENDS = {
     "native": lambda prog: [str(ROOT / "build" / "loxpp"), prog],
     "jvm":    lambda prog: [str(ROOT / "tools" / "loxpp_jvm.sh"), prog],
+    # QBE compiles the program with qbe + cc at launch, then runs it (see
+    # tools/loxpp_qbe.sh). qbe-base selects the pre-S8 emitter
+    # (QBE_NO_PROMOTE=1), so a single build measures register promotion's
+    # own effect against it.
+    "qbe": lambda prog: [str(ROOT / "tools" / "loxpp_qbe.sh"), prog],
+    "qbe-base": lambda prog: ["env", "QBE_NO_PROMOTE=1",
+                              str(ROOT / "tools" / "loxpp_qbe.sh"), prog],
 }
 
-# clock() is process CPU time on native, wall-clock on jvm (generate.py's
-# docstring; runtime/jvm/src/lox/LoxRuntime.java uses System.nanoTime). Every
-# steady_us in this file's output carries this per-backend unit.
-CLOCK_KIND = {"native": "cpu", "jvm": "wall"}
+# clock() is process CPU time on native and QBE, wall-clock on jvm
+# (generate.py's docstring; runtime/jvm/src/lox/LoxRuntime.java uses
+# System.nanoTime). Every steady_us in this file's output carries this
+# per-backend unit.
+CLOCK_KIND = {"native": "cpu", "jvm": "wall", "qbe": "cpu",
+              "qbe-base": "cpu"}
 
-PIN = ["taskset", "-c", "0"]
+# Every measured process is pinned to one CPU. BENCH_CPU overrides the
+# default, for a host where CPU 0 is shared with other work.
+PIN = ["taskset", "-c", os.environ.get("BENCH_CPU", "0")]
 
 
 def parse_harness(stdout: str):
@@ -171,9 +183,11 @@ def main() -> None:
 
 def _table(rows, backends):
     w = 20
+    ratios = [b for b in backends if b != "native"]
     hdr = f"{'program':<{w}}" \
         + "".join(f"{b+' ms('+CLOCK_KIND[b]+')':>20}" for b in backends) \
-        + f"{'jvm/nat':>10}  checksum"
+        + "".join(f"{b+'/nat':>10}" for b in ratios) \
+        + "  checksum"
     print(hdr)
     print("-" * len(hdr))
     for e in rows:
@@ -187,7 +201,7 @@ def _table(rows, backends):
             else:
                 line += f"{'FAIL':>20}"
         nat = vals.get("native")
-        for b in ("jvm",):
+        for b in ratios:
             if nat and b in vals and nat > 0:
                 line += f"{vals[b]/nat:>10.2f}"
             else:

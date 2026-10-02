@@ -11,6 +11,7 @@
 // throws, naming itself, rather than silently emitting nothing.
 
 #include "backend/abstract_stack.h"
+#include "backend/capture_analysis.h"
 #include "backend/chunk_decoder.h"
 #include "backend/qbe_emitter.h"
 #include "compiler.h"
@@ -33,7 +34,8 @@ std::string emitScriptFrom(const std::string& source) {
     }
     DecodedFunction tree = decodeFunctionTree(script);
     FunctionStackAnalysis analysis = analyzeStack(tree);
-    return qbe::emitScript(tree, analysis, "lox_fn_0");
+    FunctionCaptureInfo captures = analyzeCaptures(tree).functions.at(tree.id);
+    return qbe::emitScript(tree, analysis, captures, "lox_fn_0");
 }
 
 // Emits one function nested inside the compiled program, found by walking
@@ -55,7 +57,9 @@ std::string emitNestedFrom(const std::string& source,
         node = &node->nested.at(static_cast<std::size_t>(idx));
     }
     FunctionStackAnalysis analysis = analyzeStack(*node);
-    return qbe::emitScript(*node, analysis, "lox_fn_nested");
+    CaptureAnalysis allCaptures = analyzeCaptures(tree);
+    return qbe::emitScript(*node, analysis, allCaptures.functions.at(node->id),
+                           "lox_fn_nested");
 }
 
 int countOccurrences(const std::string& haystack, const std::string& needle) {
@@ -113,31 +117,50 @@ TEST(QbeEmitter, ConstantEmbedsRawDoubleBitsAtItsOwnHeight) {
     EXPECT_NE(ssa.find("storel 4607182418800017408"), std::string::npos);
 }
 
-TEST(QbeEmitter, EveryBlockEndsInATerminator) {
-    // A block with no jmp/jnz/ret is invalid QBE input — every `@label`
-    // line must be followed, before the next `@label` or the closing `}`,
-    // by one of the three terminator forms.
+TEST(QbeEmitter, TerminatorBlocksEndInATerminator) {
+    // QBE allows a block to fall through to the next one (it inserts the
+    // edge), so not every `@label` needs its own terminator — the S8
+    // promotion work relies on that for the block before a `_tail` block.
+    // But a `_tail` block holds the cfg block's real branch (emitTerminator),
+    // and the function's own final block must end in a terminator.
     std::string ssa =
         emitScriptFrom("var i = 0; while (i < 3) { print i; i = i + 1; }");
     std::istringstream lines(ssa);
     std::string line;
-    bool sawTerminatorSinceLabel = true;
+    std::string currentLabel;
+    std::string bodyLastLine;
     int labelCount = 0;
+    auto isTerminator = [](const std::string& l) {
+        return l.find("jmp ") != std::string::npos ||
+               l.find("jnz ") != std::string::npos ||
+               l.find("ret ") != std::string::npos;
+    };
+    auto flush = [&]() {
+        if (currentLabel.size() > 5 &&
+            currentLabel.compare(currentLabel.size() - 5, 5, "_tail") == 0) {
+            EXPECT_TRUE(isTerminator(bodyLastLine))
+                << "_tail block " << currentLabel
+                << " has no terminator; last line: " << bodyLastLine;
+        }
+    };
+    std::string lastNonEmpty;
     while (std::getline(lines, line)) {
-        if (!line.empty() && line[0] == '@') {
-            EXPECT_TRUE(sawTerminatorSinceLabel)
-                << "block before '" << line << "' has no terminator";
-            sawTerminatorSinceLabel = false;
+        if (line.empty() || line == "}") {
+            continue;
+        }
+        if (line[0] == '@') {
+            flush();
+            currentLabel = line;
+            bodyLastLine.clear();
             labelCount++;
             continue;
         }
-        if (line.find("jmp ") != std::string::npos ||
-            line.find("jnz ") != std::string::npos ||
-            line.find("ret ") != std::string::npos) {
-            sawTerminatorSinceLabel = true;
-        }
+        bodyLastLine = line;
+        lastNonEmpty = line;
     }
-    EXPECT_TRUE(sawTerminatorSinceLabel) << "final block has no terminator";
+    flush();
+    EXPECT_TRUE(isTerminator(lastNonEmpty))
+        << "final block has no terminator: " << lastNonEmpty;
     EXPECT_GT(labelCount, 1) << "a while loop must produce more than one block";
 }
 
@@ -403,8 +426,79 @@ TEST(QbeEmitter, JumpTableLowersToACompareChain) {
     std::string ssa = emitScriptFrom(
         "enum E { A B } var e = A(); var n = match e { case A => 0 case B "
         "=> 1 }; print n;");
-    EXPECT_NE(ssa.find("call $rt_op_get_tag(l %rt)"), std::string::npos);
+    EXPECT_NE(ssa.find("call $rt_get_tag_word(l %rt, l"), std::string::npos);
     EXPECT_NE(ssa.find("ceqw"), std::string::npos);
     // No QBE switch/jump-table construct exists to accidentally emit.
     EXPECT_EQ(ssa.find("switch"), std::string::npos);
+}
+
+TEST(QbeEmitter, DenseMatchFusesGetTagIntoJumpTable) {
+    // S8 (#461), P8: a dense enum match's GET_TAG is immediately followed
+    // by JUMP_TABLE, so the pair lowers as one dispatch that reads the tag
+    // as a word (rt_get_tag_word) — no boxed Number, so no `d cast` +
+    // `dtosi` round trip back to a word at the branch.
+    std::string ssa = emitScriptFrom(
+        "enum E { A B C D } var e = C(); var n = match e { case A => 0 case "
+        "B => 1 case C => 2 case D => 3 }; print n;");
+    EXPECT_NE(ssa.find("call $rt_get_tag_word(l %rt, l"), std::string::npos);
+    EXPECT_NE(ssa.find("csltw"), std::string::npos);
+    EXPECT_EQ(ssa.find("call $rt_op_get_tag"), std::string::npos);
+    EXPECT_EQ(ssa.find("dtosi"), std::string::npos);
+}
+
+TEST(QbeEmitter, SparseMatchKeepsTheUnfusedGetTag) {
+    // A non-dense match (tags 0 and 3 with a catch-all) does not use
+    // JUMP_TABLE, so there is nothing to fuse: the sequential GET_TAG /
+    // CONSTANT / EQUAL chain still reads the boxed Number via
+    // rt_op_get_tag. Proves the fusion check cannot fire on a lone
+    // GET_TAG.
+    std::string ssa = emitScriptFrom(
+        "enum E { A B C D } var e = D(); var n = match e { case A => 1 case "
+        "D => 4 case _ => 0 }; print n;");
+    EXPECT_EQ(ssa.find("rt_get_tag_word"), std::string::npos);
+    EXPECT_NE(ssa.find("call $rt_op_get_tag"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------
+// S8 (#461): register promotion + safe points.
+// ---------------------------------------------------------------------
+
+TEST(QbeEmitter, LoopCounterIsPromotedWithAPhi) {
+    // A non-captured loop counter stays in a register across the back-edge:
+    // its value at the loop header comes from a QBE phi rather than a stack
+    // load, and the declaration/SET_LOCAL define plan-chosen `%q` values.
+    std::string ssa = emitNestedFrom(
+        "fun sum(n) { var i = 0; while (i < n) { i = i + 1; } return i; }",
+        {0});
+    EXPECT_NE(ssa.find("=l phi"), std::string::npos);
+    EXPECT_NE(ssa.find("%qp1"), std::string::npos);
+}
+
+TEST(QbeEmitter, CapturedParamIsNotPromoted) {
+    // A slot a nested closure captures must keep its stack slot — the VM's
+    // own captureUpvalue points into it, so promotion would break the
+    // upvalue and the GC. `p` is captured, so no `%qp1` (the parameter's
+    // register value) is ever defined, even though other locals still are.
+    std::string ssa = emitNestedFrom(
+        "fun outer(p) { fun inner() { return p; } return inner; }", {0});
+    EXPECT_NE(ssa.find("call $rt_capture_local_upvalue(l %rt, l"),
+              std::string::npos);
+    EXPECT_EQ(ssa.find("%qp1"), std::string::npos)
+        << "a captured parameter must keep its stack slot";
+}
+
+TEST(QbeEmitter, PromotedLocalIsSpilledBeforeACall) {
+    // Q1: an allocating call is a safe point. A promoted local live across
+    // it must be written back to its stack slot first, or the GC could miss
+    // it. `f` calls `g` while its own promoted local `x` is live, so a
+    // `storel %q` (the spill) must come BEFORE the call — a plain GET_LOCAL
+    // of `x` at the return would also store `%q`, but after it.
+    std::string ssa = emitNestedFrom(
+        "fun g() { return 1; } fun f() { var x = 1; g(); return x; }", {1});
+    std::size_t spill = ssa.find("storel %q");
+    std::size_t call = ssa.find("call $rt_call");
+    ASSERT_NE(spill, std::string::npos) << "no promoted-local store at all";
+    ASSERT_NE(call, std::string::npos) << "no call to spill before";
+    EXPECT_LT(spill, call)
+        << "the promoted local must be spilled before the allocating call";
 }
