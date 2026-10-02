@@ -2553,12 +2553,20 @@ class Interpreter {
             if (this.returnFlag or this.throwFlag) {
                 if (this.throwFlag) {
                     this.runPendingDefers();
-                    if (loxTag(this.thrownValue) == "error") {
-                        print "LOXERR70 " + this.thrownValue.message;
-                    } else {
-                        print "LOXERR70 " + this.stringify(this.thrownValue);
-                    }
+                    var thrownVal = this.thrownValue;
+                    // Clear the throw flag before rendering the report, so
+                    // stringify() dispatches __str__ instead of its own
+                    // stop-dispatch guard returning the placeholder. Native's
+                    // handleThrow does the same (resets m_stringifyStatus
+                    // before its pre-unwind stringify). thrownVal still holds
+                    // the value to report, whether it is the original throw or
+                    // one a pending defer replaced it with.
                     this.throwFlag = false;
+                    if (loxTag(thrownVal) == "error") {
+                        print "LOXERR70 " + thrownVal.message;
+                    } else {
+                        print "LOXERR70 " + this.stringify(thrownVal);
+                    }
                     this.thrownValue = nil;
                 }
                 return;
