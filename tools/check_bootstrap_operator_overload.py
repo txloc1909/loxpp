@@ -6,7 +6,8 @@ native's (issue #474).
 The bootstrap interpreter now dispatches the same dunder methods the native
 VM and JVM do (__add__ __sub__ __mul__ __div__ __mod__ __neg__ __lt__ __gt__
 __eq__ __contains__ __call__ __index_get__ __index_set__ __iter__ __len__
-__slice__).
+__slice__ __hash__ __str__), and supports callMethod on a closure-backed
+method (issue #496).
 This runs a small corpus of programs that exercise each method through both
 consumers and asserts byte-identical stdout.
 
@@ -221,6 +222,45 @@ CASES = [
         "try { -W(); } catch (e) { print e.kind; }\n"
         "class X { __call__(a) { return a; } }\n"
         "try { X()(1, 2, 3); } catch (e) { print e.kind; }\n",
+    ),
+    # An Instance Map key: __hash__ places the key and __eq__ resolves a
+    # collision. The two must stay consistent, and an update under an equal
+    # key must overwrite rather than add.
+    Case(
+        "map_instance_keys",
+        "class K {\n"
+        "  init(n) { this.n = n; }\n"
+        "  __hash__() { return this.n; }\n"
+        "  __eq__(o) { return this.n == o.n; }\n"
+        "}\n"
+        "var m = {};\n"
+        "m[K(1)] = \"one\";\n"
+        "m[K(2)] = \"two\";\n"
+        "m[K(1)] = \"ONE\";\n"
+        "print m[K(1)];\n"
+        "print m[K(2)];\n"
+        "print len(m);\n"
+        "print K(3) in m;\n"
+        "print K(1) in m;\n",
+    ),
+    # An Instance key with only one of __hash__/__eq__ is not a valid key.
+    Case(
+        "map_instance_key_incomplete",
+        "class H { __hash__() { return 1; } }\n"
+        "class E { __eq__(o) { return true; } }\n"
+        "var m = {};\n"
+        "try { m[H()] = 1; } catch (e) { print e.kind; }\n"
+        "try { m[E()] = 1; } catch (e) { print e.kind; }\n",
+    ),
+    # callMethod runs a closure-backed user method and returns its value
+    # (the re-entrant call path, issue #496).
+    Case(
+        "callmethod_closure",
+        "class C {\n"
+        "  init(x) { this.x = x; }\n"
+        "  add(y) { return this.x + y; }\n"
+        "}\n"
+        "print callMethod(C(10), \"add\", 5);\n",
     ),
 ]
 
