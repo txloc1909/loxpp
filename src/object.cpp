@@ -54,10 +54,11 @@ std::string stringifyObj(Obj* obj) {
     }
     case ObjType::INSTANCE: {
         auto* inst = static_cast<ObjInstance*>(obj);
-        // Only a print/str stringify dispatches __str__ (the depth-guard
-        // flag). An internal stringify — the disassembler, the debug trace's
-        // stack dump, throw of a non-Error value — has no active Runtime or
-        // no canonical flag and keeps the default form.
+        // Only a canonical stringify (print/str, or the report of a thrown
+        // non-Error value) dispatches __str__, signalled by the depth-guard
+        // flag. An internal stringify — the disassembler, the debug trace's
+        // stack dump — has no active Runtime or no canonical flag and keeps
+        // the default form.
         if (Runtime* rt = getActiveRuntime();
             rt != nullptr && rt->canonicalStringifyActive()) {
             return rt->stringifyInstanceStr(inst);

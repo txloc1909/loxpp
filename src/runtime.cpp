@@ -503,6 +503,30 @@ Runtime::ThrowOutcome Runtime::handleThrow(Value thrownValue,
         }
     }
 
+    // Step 1.5: With no handler and a non-Error value, render the canonical
+    // form now, while a frame is still live — __str__ needs one to run. Doing
+    // it after the unwind below would leave m_frameCount at 0 and nothing to
+    // run the method in.
+    std::string uncaughtThrownStr;
+    if (!foundHandler && !isError(thrownValue)) {
+        int savedBoundary = m_stringifyBoundary;
+        m_stringifyBoundary = stopAtFrameCount;
+        OpResult savedStatus = m_stringifyStatus;
+        m_stringifyStatus = OpResult::OK;
+        m_stringifyCanonicalDepth++;
+        uncaughtThrownStr = stringify(thrownValue);
+        m_stringifyCanonicalDepth--;
+        OpResult status = m_stringifyStatus;
+        m_stringifyBoundary = savedBoundary;
+        m_stringifyStatus = savedStatus;
+        if (status == OpResult::Fatal) {
+            // The __str__ dispatch itself threw uncaught: that fault already
+            // reported itself and unwound everything, so do not report this
+            // throw a second time.
+            return ThrowOutcome::Uncaught;
+        }
+    }
+
     // Step 2: Unwind frame-by-frame, draining defers, to either the
     // handler's frame (if found) or frame 0 (if not found).
     int targetFrameCount = foundHandler ? handlerToUse.frameCount : 0;
@@ -573,8 +597,9 @@ Runtime::ThrowOutcome Runtime::handleThrow(Value thrownValue,
         ObjError* err = asObjError(as<Obj*>(thrownValue));
         runtimeError("%s", err->message->chars.c_str());
     } else {
-        std::string thrownStr = stringify(thrownValue);
-        runtimeError("%s", thrownStr.c_str());
+        // The canonical form was computed before the unwind (step 1.5), while
+        // a frame was still live to run __str__.
+        runtimeError("%s", uncaughtThrownStr.c_str());
     }
     return ThrowOutcome::Uncaught;
 }
@@ -2089,16 +2114,23 @@ Runtime::OpResult Runtime::opStr(int stopAtFrameCount) {
     // values). It is replaced in place by the resulting ObjString.
     Value operand = peek(0);
     m_stdlibCtx.clearError();
+    // Save/restore the stringify state, not just the boundary: a __str__ may
+    // itself call str()/print (a nested opStr), and a failure caught inside
+    // that nested call must not leak back into THIS opStr's result.
     int savedBoundary = m_stringifyBoundary;
     m_stringifyBoundary = stopAtFrameCount;
+    OpResult savedStatus = m_stringifyStatus;
     m_stringifyStatus = OpResult::OK;
     m_stringifyCanonicalDepth++;
     std::string s = stringify(operand);
     m_stringifyCanonicalDepth--;
     m_stringifyBoundary = savedBoundary;
     if (m_stringifyStatus != OpResult::OK) {
-        return m_stringifyStatus;
+        OpResult status = m_stringifyStatus;
+        m_stringifyStatus = savedStatus;
+        return status;
     }
+    m_stringifyStatus = savedStatus;
     if (m_stdlibCtx.nativeError) {
         runtimeError("%s", m_stdlibCtx.nativeErrorMsg.c_str());
         return OpResult::Fatal;
