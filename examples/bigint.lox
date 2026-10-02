@@ -1,0 +1,352 @@
+// bigint.lox — Arbitrary-precision integers as a Lox++ value type.
+//
+// Lox++ has one Number type: an IEEE 754 double. Integers above 2^53 lose
+// precision, and there is no integer type. This example fills that gap as a
+// library, the way a user would: a BigInt stores base-1e7 limbs (little
+// endian) and overloads the arithmetic, comparison, and string operators, so
+// `a + b`, `a < b`, and `print a` read exactly like the built-in Number forms.
+//
+// Base 1e7 keeps every product and carry below 2^53, so no intermediate loses
+// precision. A BigInt is also a valid Map key: it defines both `__hash__` and
+// `__eq__`.
+//
+// Operands of `+`, `*`, and the comparisons may be a BigInt or a whole
+// Number. Lox++ has no reflected operators, so `2 + big` does not work;
+// write `big + 2`.
+//
+// Demonstrates: operator overloading (__add__ __sub__ __mul__ __neg__ __lt__
+//               __gt__ __eq__ __str__ __hash__), Number and instance map keys.
+
+var BASE = 10000000;
+
+// ---------- digit helpers ----------
+
+var DIGITS = "0123456789";
+
+fun digitValue(c) {
+    var i = 0;
+    while (i < 10) {
+        if (DIGITS[i] == c) return i;
+        i = i + 1;
+    }
+    return 0;
+}
+
+// A limb is 0..9999999. `str` switches to scientific notation above six
+// significant digits, so a limb is rendered digit by digit instead.
+fun limbToString(v) {
+    if (v == 0) return "0";
+    var s = "";
+    while (v > 0) {
+        s = DIGITS[v % 10] + s;
+        v = math.floor(v / 10);
+    }
+    return s;
+}
+
+fun pad7(n) {
+    var s = limbToString(n);
+    while (len(s) < 7) s = "0" + s;
+    return s;
+}
+
+// ---------- magnitude arithmetic (little-endian base-1e7 limb lists) ------
+
+// -1, 0, or 1. Both operands are normalized (no high zero limb).
+fun magCmp(a, b) {
+    if (len(a) != len(b)) {
+        if (len(a) < len(b)) return -1;
+        return 1;
+    }
+    var i = len(a) - 1;
+    while (i >= 0) {
+        if (a[i] < b[i]) return -1;
+        if (a[i] > b[i]) return 1;
+        i = i - 1;
+    }
+    return 0;
+}
+
+fun magAdd(a, b) {
+    var out = [];
+    var carry = 0;
+    var n = len(a);
+    if (len(b) > n) n = len(b);
+    var i = 0;
+    while (i < n) {
+        var s = carry;
+        if (i < len(a)) s = s + a[i];
+        if (i < len(b)) s = s + b[i];
+        out.append(s % BASE);
+        carry = math.floor(s / BASE);
+        i = i + 1;
+    }
+    if (carry > 0) out.append(carry);
+    return out;
+}
+
+// a - b, for |a| >= |b|.
+fun magSub(a, b) {
+    var out = [];
+    var borrow = 0;
+    var i = 0;
+    while (i < len(a)) {
+        var d = a[i] - borrow;
+        if (i < len(b)) d = d - b[i];
+        if (d < 0) {
+            d = d + BASE;
+            borrow = 1;
+        } else {
+            borrow = 0;
+        }
+        out.append(d);
+        i = i + 1;
+    }
+    while (len(out) > 0 and out[len(out) - 1] == 0) out.pop();
+    return out;
+}
+
+fun magMul(a, b) {
+    if (len(a) == 0 or len(b) == 0) return [];
+    var out = [];
+    var i = 0;
+    while (i < len(a) + len(b)) {
+        out.append(0);
+        i = i + 1;
+    }
+    i = 0;
+    while (i < len(a)) {
+        var carry = 0;
+        var j = 0;
+        while (j < len(b)) {
+            var cur = out[i + j] + a[i] * b[j] + carry;
+            out[i + j] = cur % BASE;
+            carry = math.floor(cur / BASE);
+            j = j + 1;
+        }
+        out[i + len(b)] = out[i + len(b)] + carry;
+        i = i + 1;
+    }
+    while (len(out) > 0 and out[len(out) - 1] == 0) out.pop();
+    return out;
+}
+
+// ---------- constructors ----------
+
+fun bigFromNumber(n) {
+    var neg = false;
+    if (n < 0) {
+        neg = true;
+        n = -n;
+    }
+    var limbs = [];
+    while (n > 0) {
+        limbs.append(n % BASE);
+        n = math.floor(n / BASE);
+    }
+    return BigInt(limbs, neg);
+}
+
+fun bigFromString(s) {
+    var neg = false;
+    var start = 0;
+    if (len(s) > 0 and s[0] == "-") {
+        neg = true;
+        start = 1;
+    }
+    var limbs = [];
+    var end = len(s);
+    while (end > start) {
+        var begin = end - 7;
+        if (begin < start) begin = start;
+        var chunk = s[begin:end];
+        var v = 0;
+        var k = 0;
+        while (k < len(chunk)) {
+            v = v * 10 + digitValue(chunk[k]);
+            k = k + 1;
+        }
+        limbs.append(v);
+        end = begin;
+    }
+    return BigInt(limbs, neg);
+}
+
+// A Number operand becomes a BigInt; anything else is assumed to be one.
+fun toBig(o) {
+    if (type(o) == "Number") return bigFromNumber(o);
+    return o;
+}
+
+// ---------- the value type ----------
+
+class BigInt {
+    init(mag, neg) {
+        while (len(mag) > 0 and mag[len(mag) - 1] == 0) mag.pop();
+        this.mag = mag;
+        // Zero is never negative.
+        this.neg = neg and len(mag) > 0;
+    }
+
+    __add__(o) {
+        var b = toBig(o);
+        if (this.neg == b.neg) return BigInt(magAdd(this.mag, b.mag), this.neg);
+        var c = magCmp(this.mag, b.mag);
+        if (c == 0) return BigInt([], false);
+        if (c > 0) return BigInt(magSub(this.mag, b.mag), this.neg);
+        return BigInt(magSub(b.mag, this.mag), b.neg);
+    }
+
+    __sub__(o) {
+        return this + (-toBig(o));
+    }
+
+    __mul__(o) {
+        var b = toBig(o);
+        return BigInt(magMul(this.mag, b.mag), this.neg != b.neg);
+    }
+
+    __neg__() {
+        return BigInt(this.mag[0:len(this.mag)], !this.neg);
+    }
+
+    __lt__(o) {
+        var b = toBig(o);
+        if (this.neg != b.neg) return this.neg;
+        var c = magCmp(this.mag, b.mag);
+        if (this.neg) return c > 0;
+        return c < 0;
+    }
+
+    __gt__(o) {
+        var b = toBig(o);
+        if (this.neg != b.neg) return b.neg;
+        var c = magCmp(this.mag, b.mag);
+        if (this.neg) return c < 0;
+        return c > 0;
+    }
+
+    __eq__(o) {
+        var b = toBig(o);
+        return this.neg == b.neg and magCmp(this.mag, b.mag) == 0;
+    }
+
+    __hash__() {
+        var h = 0;
+        var i = 0;
+        while (i < len(this.mag)) {
+            h = (h * 31 + this.mag[i]) % 1000000007;
+            i = i + 1;
+        }
+        if (this.neg) h = -h;
+        return h;
+    }
+
+    __str__() {
+        if (len(this.mag) == 0) return "0";
+        var s = limbToString(this.mag[len(this.mag) - 1]);
+        var i = len(this.mag) - 2;
+        while (i >= 0) {
+            s = s + pad7(this.mag[i]);
+            i = i - 1;
+        }
+        if (this.neg) return "-" + s;
+        return s;
+    }
+}
+
+// ---------- demo ----------
+
+fun bigFactorial(n) {
+    var r = bigFromNumber(1);
+    var i = 2;
+    while (i <= n) {
+        r = r * i;
+        i = i + 1;
+    }
+    return r;
+}
+
+fun bigPow(base, exp) {
+    var r = bigFromNumber(1);
+    var i = 0;
+    while (i < exp) {
+        r = r * base;
+        i = i + 1;
+    }
+    return r;
+}
+
+fun bigFib(n) {
+    var a = bigFromNumber(0);
+    var b = bigFromNumber(1);
+    var i = 0;
+    while (i < n) {
+        var t = a + b;
+        a = b;
+        b = t;
+        i = i + 1;
+    }
+    return a;
+}
+
+// CHECK: === BigInt ===
+print "=== BigInt ===";
+// CHECK: 0
+print bigFromNumber(0);
+// CHECK: 123456789
+print bigFromNumber(123456789);
+// CHECK: 123456789012345678901234567890
+print bigFromString("123456789012345678901234567890");
+// CHECK: -42
+print bigFromString("-42");
+
+// CHECK: 265252859812191058636308480000000
+print bigFactorial(30);
+// CHECK: 1267650600228229401496703205376
+print bigPow(bigFromNumber(2), 100);
+// CHECK: 354224848179261915075
+print bigFib(100);
+
+// CHECK: === Arithmetic ===
+print "";
+print "=== Arithmetic ===";
+// CHECK: -3
+print bigFromNumber(5) - bigFromNumber(8);
+// CHECK: 1999999999
+print bigFromNumber(1000000000) + bigFromNumber(999999999);
+// CHECK: 80779853376
+print bigFromNumber(123456) * bigFromNumber(654321);
+// CHECK: 1000000000000000
+print bigPow(bigFromNumber(10), 15);
+
+// CHECK: === Comparison ===
+print "";
+print "=== Comparison ===";
+// CHECK: false
+print bigFromNumber(10) < bigFromNumber(9);
+// CHECK: true
+print bigFromNumber(10) > bigFromNumber(9);
+// CHECK: true
+print bigFromNumber(10) <= bigFromNumber(10);
+// CHECK: true
+print bigFromString("99999999999999999999") > bigFromString("9999999999999999999");
+// CHECK: true
+print bigFromString("100") == bigFromNumber(100);
+
+// CHECK: === Map keys ===
+print "";
+print "=== Map keys ===";
+print "BigInt keys use __hash__ and __eq__.";
+var labels = {};
+labels[bigFromNumber(2)] = "two";
+labels[bigFromNumber(10)] = "ten";
+labels[bigPow(bigFromNumber(2), 100)] = "2^100";
+// CHECK: 3
+print len(labels);
+// CHECK: ten
+print labels[bigFromNumber(10)];
+// CHECK: two
+print labels[bigFromNumber(2)];
+// CHECK: 2^100
+print labels[bigPow(bigFromNumber(2), 100)];
