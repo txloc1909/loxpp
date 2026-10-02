@@ -72,3 +72,20 @@ shared.del(1);
 print shared[1];
 print shared[Shared()];
 print len(shared);
+
+// Reading a stored Instance key (values(), entries(), or stringification) must
+// not re-run its __hash__: native and the JVM read the stored value from the
+// bucket. Count the calls.
+var hashCalls = 0;
+class Counted {
+    __hash__() { hashCalls = hashCalls + 1; return 1; }
+    __eq__(o) { return false; }
+}
+var counted = {};
+counted[Counted()] = 1;
+counted[Counted()] = 2;
+print hashCalls;
+var cv = counted.values();
+var ce = counted.entries();
+var cs = str(counted);
+print hashCalls;

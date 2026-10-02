@@ -2152,17 +2152,17 @@ class InterpMapMethod {
         }
         if (this.name == "values") {
             var result = InterpList([]);
-            var ks = interp.mapKeys(this.map);
+            var es = interp.mapEntries(this.map);
             var i = 0;
-            while (i < len(ks)) { result.elements.append(interp.mapGet(this.map, ks[i])); i = i + 1; }
+            while (i < len(es)) { result.elements.append(es[i][1]); i = i + 1; }
             return result;
         }
         if (this.name == "entries") {
             var result = InterpList([]);
-            var ks = interp.mapKeys(this.map);
+            var es = interp.mapEntries(this.map);
             var i = 0;
-            while (i < len(ks)) {
-                var pair = InterpList([ks[i], interp.mapGet(this.map, ks[i])]);
+            while (i < len(es)) {
+                var pair = InterpList([es[i][0], es[i][1]]);
                 result.elements.append(pair);
                 i = i + 1;
             }
@@ -2395,6 +2395,26 @@ class Interpreter {
         return ks;
     }
 
+    // [key, value] pairs read straight from the buckets. values()/entries()
+    // and map stringification use this, never mapGet, so reading a stored
+    // Instance key never re-runs its __hash__ (native and the JVM read the
+    // stored value from the bucket without re-hashing).
+    mapEntries(map) {
+        var es = [];
+        var hs = map.buckets.keys();
+        var i = 0;
+        while (i < len(hs)) {
+            var bucket = map.buckets[hs[i]];
+            var j = 0;
+            while (j < len(bucket)) {
+                es.append([bucket[j][0], bucket[j][1]]);
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        return es;
+    }
+
     // The bucket for `hash`, probing it in insertion order and comparing the
     // stored key with keyEquals (stored key on the left; CPython style). This
     // is the same probe native's ObjMap uses, so a scalar key and an Instance
@@ -2507,11 +2527,11 @@ class Interpreter {
 
     stringifyMap(map) {
         var s = "{";
-        var ks = this.mapKeys(map);
+        var es = this.mapEntries(map);
         var i = 0;
-        while (i < len(ks)) {
+        while (i < len(es)) {
             if (i > 0) s = s + ", ";
-            s = s + this.stringify(ks[i]) + ": " + this.stringify(this.mapGet(map, ks[i]));
+            s = s + this.stringify(es[i][0]) + ": " + this.stringify(es[i][1]);
             i = i + 1;
         }
         return s + "}";
