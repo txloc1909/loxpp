@@ -442,8 +442,10 @@ standard error, and returns a Map with these keys:
 - `stderr`: everything the child wrote to standard error, as a String.
 
 Standard output and standard error are read at the same time, so a child that
-writes a large amount to both cannot deadlock. A failure to start the program
-is a runtime error. A non-zero exit status is not an error.
+writes a large amount to both cannot deadlock. `run` does not feed the child
+standard input; it closes the child's standard input at once, so a child that
+reads it sees an end-of-file. A failure to start the program is a runtime
+error. A non-zero exit status is not an error.
 
 **Arity:** 2  
 **Returns:** Map

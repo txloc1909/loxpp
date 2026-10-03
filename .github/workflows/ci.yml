@@ -726,6 +726,33 @@ jobs:
               diff <(printf "%s\n" "$native_out") <(printf "%s\n" "$strap_out")
             '
 
+      # The bootstrap interpreter's sockets and subprocess, added for issue
+      # #516, delegate to the host. This diffs the net/process probe between
+      # native and the bootstrap interpreter, with the same emptiness guard
+      # the OS-stdlib step above uses.
+      - name: Check bootstrap sockets and subprocess match native
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev-managed:latest \
+            bash -c '
+              native_out=$(build/loxpp test/translation-probes/64_net_process.lox)
+              native_status=$?
+              strap_out=$(bootstrap/lox_wrapper.sh test/translation-probes/64_net_process.lox)
+              strap_status=$?
+              if [ "$native_status" -ne "$strap_status" ]; then
+                echo "exit differs: native=$native_status bootstrap=$strap_status" >&2
+                exit 1
+              fi
+              if [ -z "$strap_out" ]; then
+                echo "bootstrap gave empty stdout; a silent failure would look like a match" >&2
+                exit 1
+              fi
+              diff <(printf "%s\n" "$native_out") <(printf "%s\n" "$strap_out")
+            '
+
       # The parity gate. Every probe must be byte-identical on native and JVM
       # stdout (differential runner, not only the check_jvm_probes.sh diff
       # loop above). Also reads translation-probes/jvm-only/, which holds a
