@@ -192,6 +192,14 @@ def main():
             "content-encoding" not in headers,
             repr(headers),
         )
+        status, headers, _ = request(
+            port, b"GET /echo/abc HTTP/1.1\r\nAccept-Encoding:\tgzip\r\n\r\n"
+        )
+        check(
+            "compression-01 HTAB around field value",
+            headers.get("content-encoding") == "gzip",
+            repr(headers),
+        )
 
         status, headers, body = request(
             port,
