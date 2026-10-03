@@ -292,7 +292,7 @@ set(LOXPP_GC_STRESS_TARGETS
 # names would otherwise collide.
 set(LOXPP_GTEST_TARGETS
     test_scanner test_parser_vm test_parser_bytecode test_table test_table_gc
-    test_allocator test_allocator_gc
+    test_allocator test_allocator_gc test_value
     test_local_variables test_control_flow test_vm_runtime test_print_nul test_file_nul
     test_os_api test_reflect_api test_reflect_api_gc test_closures
     test_stress_gc test_gc_regression test_inheritance test_list test_list_gc
