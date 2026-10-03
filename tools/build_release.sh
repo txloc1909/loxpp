@@ -105,21 +105,24 @@ done
 
 echo "All targets built successfully."
 
-# Strip and split .debug sidecars for each binary.
+# Strip and split .debug sidecars for each binary. A static library (loxrt)
+# has no executable to strip and no debug sidecar; it is copied as is.
 echo "Stripping binaries and splitting debug symbols..."
 for target in $BUILD_SET; do
   binary="$BUILD_DIR/$target"
-  if [ ! -f "$binary" ]; then
+  if [ -f "$binary" ]; then
+    # Split debug symbols.
+    objcopy --only-keep-debug "$binary" "$binary.debug"
+    objcopy --strip-all "$binary"
+    objcopy --add-gnu-debuglink="$binary.debug" "$binary"
+
+    echo "  $target: stripped, debug split to $target.debug"
+  elif [ -f "$BUILD_DIR/lib$target.a" ]; then
+    echo "  $target: static library, nothing to strip"
+  else
     echo "ERROR: components.toml names target $target which CMake did not build" >&2
     exit 1
   fi
-
-  # Split debug symbols.
-  objcopy --only-keep-debug "$binary" "$binary.debug"
-  objcopy --strip-all "$binary"
-  objcopy --add-gnu-debuglink="$binary.debug" "$binary"
-
-  echo "  $target: stripped, debug split to $target.debug"
 done
 
 # Smoke-test loxpp.
@@ -151,15 +154,23 @@ while IFS='|' read -r name shipped target_list; do
   mkdir -p "$DIST_DIR/$name"
   echo "Laying out $name component to $DIST_DIR/$name..."
 
-  # Copy the primary binary and its debug sidecar.
+  # Copy each target's artifact. An executable gets its .debug sidecar; a
+  # static library (loxrt) is copied without one. It stays beside the binary
+  # so loxpp --target qbe finds libloxrt.a next to itself.
   for target in $target_list; do
-    binary="$BUILD_DIR/$target"
-    debug="$binary.debug"
+    if [ -f "$BUILD_DIR/$target" ]; then
+      cp "$BUILD_DIR/$target" "$DIST_DIR/$name/"
+      cp "$BUILD_DIR/$target.debug" "$DIST_DIR/$name/"
 
-    cp "$binary" "$DIST_DIR/$name/"
-    cp "$debug" "$DIST_DIR/$name/"
+      echo "  installed $target and $target.debug"
+    elif [ -f "$BUILD_DIR/lib$target.a" ]; then
+      cp "$BUILD_DIR/lib$target.a" "$DIST_DIR/$name/"
 
-    echo "  installed $target and $target.debug"
+      echo "  installed lib$target.a"
+    else
+      echo "ERROR: no artifact for target $target" >&2
+      exit 1
+    fi
   done
 
   # Copy support files.
@@ -176,6 +187,19 @@ while IFS='|' read -r name shipped target_list; do
 
   echo "  added LICENSE, THIRD_PARTY.md, and third_party/isocline/LICENSE"
 done < <(parse_manifest)
+
+# loxpp --target qbe looks for libloxrt.a beside the loxpp binary
+# (backend/qbe_frontend.cpp). Fail the release if packaging dropped it,
+# rather than publish a tarball whose QBE front end cannot find its runtime.
+# The compile-link-run proof against that library lives in CI's qbe-toolchain
+# job (the `--target qbe front end - standalone binary` step): the
+# release-static image has no `qbe`, and this musl library does not link with
+# a glibc host toolchain, so the functional check cannot run here.
+if [ ! -s "$DIST_DIR/loxpp/libloxrt.a" ]; then
+  echo "ERROR: $DIST_DIR/loxpp/libloxrt.a is missing or empty" >&2
+  exit 1
+fi
+echo "  packaged libloxrt.a beside loxpp"
 
 echo ""
 echo "Release build complete. Artifacts in $DIST_DIR/."

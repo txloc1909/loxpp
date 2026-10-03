@@ -31,6 +31,10 @@
 #include "backend/jvm_emitter.h"
 #endif
 
+#ifdef LOXPP_QBE_BACKEND
+#include "backend/qbe_frontend.h"
+#endif
+
 #include <isocline.h>
 #include <cstdlib>
 #include <regex>
@@ -240,8 +244,12 @@ static int runJvmTarget(const std::string& outDir, const std::string& path) {
 // The set of `--target` values this build recognizes, in usage-message form.
 // Must list only backends this translation unit actually compiled in, so the
 // message never offers a target the #ifdef dispatch arm below refuses.
-#ifdef LOXPP_JVM_BACKEND
+#if defined(LOXPP_JVM_BACKEND) && defined(LOXPP_QBE_BACKEND)
+#define LOXPP_TARGET_USAGE_LIST "{jvm|qbe}"
+#elif defined(LOXPP_JVM_BACKEND)
 #define LOXPP_TARGET_USAGE_LIST "{jvm}"
+#elif defined(LOXPP_QBE_BACKEND)
+#define LOXPP_TARGET_USAGE_LIST "{qbe}"
 #endif
 
 // --- loxpp upgrade -------------------------------------------------------
@@ -596,6 +604,11 @@ static void printHelp() {
     std::printf("  loxpp --check [--format text|json] <file>\n");
     std::printf("                                         Check syntax "
                 "without running\n");
+#if defined(LOXPP_JVM_BACKEND) || defined(LOXPP_QBE_BACKEND)
+    std::printf("  loxpp --target " LOXPP_TARGET_USAGE_LIST
+                " ...                     Compile to another "
+                "backend\n");
+#endif
     std::printf("  loxpp upgrade [--check] [--version X.Y.Z]\n");
     std::printf("                                         Update loxpp to "
                 "the latest release\n");
@@ -639,32 +652,53 @@ static std::optional<int> dispatchEarlyFlags(int argc, const char* argv[]) {
         return runUpgrade(argc, argv);
     }
 
-#ifdef LOXPP_JVM_BACKEND
+#if defined(LOXPP_JVM_BACKEND) || defined(LOXPP_QBE_BACKEND)
     if (flag == "--target") {
         std::string target;
         std::string outDir;
+        std::string outFile;
         std::string scriptPath;
+        bool noPromote = false;
+        bool noFuse = false;
         for (int i = 1; i < argc; i++) {
             std::string arg = argv[i];
             if (arg == "--target" && i + 1 < argc) {
                 target = argv[++i];
             } else if (arg == "--out-dir" && i + 1 < argc) {
                 outDir = argv[++i];
+            } else if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
+                outFile = argv[++i];
+            } else if (arg == "--no-promote") {
+                noPromote = true;
+            } else if (arg == "--no-fuse") {
+                noFuse = true;
             } else {
                 scriptPath = arg;
             }
         }
-        if (outDir.empty() || scriptPath.empty()) {
-            std::fprintf(stderr,
-                         "Usage: loxpp --target " LOXPP_TARGET_USAGE_LIST
-                         " --out-dir <dir> program.lox\n");
-            return 64;
-        }
+#ifdef LOXPP_JVM_BACKEND
         if (target == "jvm") {
+            if (outDir.empty() || scriptPath.empty()) {
+                std::fprintf(stderr,
+                             "Usage: loxpp --target jvm --out-dir <dir> "
+                             "program.lox\n");
+                return 64;
+            }
             return runJvmTarget(outDir, scriptPath);
         }
-        std::fprintf(stderr, "Usage: loxpp --target " LOXPP_TARGET_USAGE_LIST
-                             " --out-dir <dir> program.lox\n");
+#endif
+#ifdef LOXPP_QBE_BACKEND
+        if (target == "qbe") {
+            if (outFile.empty() || scriptPath.empty()) {
+                std::fprintf(stderr, "Usage: loxpp --target qbe -o <exe> "
+                                     "program.lox\n");
+                return 64;
+            }
+            return runQbeTarget(outFile, scriptPath, noPromote, noFuse);
+        }
+#endif
+        std::fprintf(stderr,
+                     "Usage: loxpp --target " LOXPP_TARGET_USAGE_LIST " ...\n");
         return 64;
     }
 #endif

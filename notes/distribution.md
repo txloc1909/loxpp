@@ -94,7 +94,7 @@ truth for what gets built and what gets shipped:
 ```toml
 [[component]]
 name    = "loxpp"
-targets = ["loxpp"]
+targets = ["loxpp", "loxrt"]
 shipped = true
 
 [[component]]
@@ -109,6 +109,8 @@ The `release-static` build compiles and smoke-tests **every binary** the CMake
 tree produces:
 
 - `loxpp` — the interpreter (shipped)
+- `loxrt` — the QBE runtime static library, `libloxrt.a` (shipped in the
+  `loxpp` component)
 - `loxpp-lsp` — the language server (not shipped yet, but built and tested)
 
 This means a later mission that ships the LSP starts from a known-good state:
@@ -120,11 +122,19 @@ The packaging step iterates the manifest and packages only components with
 `shipped = true`. Today, that is only `loxpp`. The tarball contains:
 
 - `loxpp` — the stripped static binary
+- `libloxrt.a` — the QBE runtime library, placed beside the binary so
+  `loxpp --target qbe` finds it
 - `LICENSE` and `THIRD_PARTY.md` — licensing
 - `third_party/isocline/LICENSE` — vendor license
 - `loxpp.1` — manual page
 - Bash, Zsh, Fish completions
 - `examples/` — sample programs
+
+`libloxrt.a` is built in the same musl `release-static` stage as the `loxpp`
+binary. `loxpp --target qbe` links a compiled program against it, so
+producing a QBE executable needs a musl C++ toolchain that can link this
+static library. The `QBE`, `CXX`, and `LOX_RT_A` environment variables
+override the tool and library locations.
 
 ### Adding a component later
 

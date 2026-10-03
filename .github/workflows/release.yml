@@ -314,7 +314,7 @@ jobs:
             echo
             echo "| File | Purpose |"
             echo "|---|---|"
-            echo "| \`loxpp-${VERSION}-x86_64-linux.tar.gz\` | interpreter, licences, man page, completions, examples |"
+            echo "| \`loxpp-${VERSION}-x86_64-linux.tar.gz\` | interpreter, \`libloxrt.a\`, licences, man page, completions, examples |"
             echo "| \`loxpp-${VERSION}-x86_64-linux.debug.tar.gz\` | detached debug symbols |"
             echo "| \`loxpp-${VERSION}.spdx.json\` | SPDX SBOM |"
             echo "| \`SHA256SUMS\` | checksums for the files above |"

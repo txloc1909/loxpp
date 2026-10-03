@@ -1,9 +1,9 @@
 # QBE backend: design proposal
 
-**Status: proposal, not approved.** No issues or Project board exist yet. When
-the plan is approved, each stage in "Staged plan" below becomes one GitHub
-issue, per `AGENTS.md`'s "file it, don't list it". This note then stays as the
-design record.
+**Status: implemented.** The S0–S8 plan below shipped under mission #462, and
+the CLR backend was deleted at S7's parity gate (#489). The `--target qbe`
+front end and `libloxrt.a` release shipping landed later (#503, #504). The
+"Staged plan" section stays as the build-order record.
 
 ## Why
 

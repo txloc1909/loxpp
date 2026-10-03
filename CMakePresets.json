@@ -24,7 +24,8 @@
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
         "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
-        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined -fuse-ld=lld"
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined -fuse-ld=lld",
+        "LOXPP_NAN_TAGGING": "ON"
       }
     },
     {
@@ -36,6 +37,7 @@
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
         "CMAKE_EXE_LINKER_FLAGS": "-fuse-ld=lld",
+        "LOXPP_NAN_TAGGING": "ON",
         "LOXPP_DEBUG_PRINT_CODE": "OFF",
         "LOXPP_DEBUG_TRACE_EXECUTION": "OFF",
         "LOXPP_DEBUG_LOG_GC": "OFF"
@@ -46,7 +48,8 @@
       "inherits": "debug",
       "description": "Debug build with the portable std::variant Value",
       "cacheVariables": {
-        "LOXPP_NAN_TAGGING": "OFF"
+        "LOXPP_NAN_TAGGING": "OFF",
+        "LOXPP_QBE_BACKEND": "OFF"
       }
     },
     {
@@ -54,7 +57,8 @@
       "inherits": "release",
       "description": "Release build with the portable std::variant Value",
       "cacheVariables": {
-        "LOXPP_NAN_TAGGING": "OFF"
+        "LOXPP_NAN_TAGGING": "OFF",
+        "LOXPP_QBE_BACKEND": "OFF"
       }
     },
     {
@@ -66,6 +70,7 @@
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
         "CMAKE_EXE_LINKER_FLAGS": "-static -fuse-ld=lld",
+        "LOXPP_NAN_TAGGING": "ON",
         "LOXPP_DEBUG_PRINT_CODE": "OFF",
         "LOXPP_DEBUG_TRACE_EXECUTION": "OFF",
         "LOXPP_DEBUG_LOG_GC": "OFF",

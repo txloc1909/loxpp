@@ -33,6 +33,8 @@
 
 build/
 build-*/
+# Release staging output (tools/build_release.sh)
+/dist/
 .cache/
 .ccache/
 .vscode/
