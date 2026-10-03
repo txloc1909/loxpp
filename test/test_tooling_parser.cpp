@@ -580,8 +580,8 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // examples/json.lox, raising this to 207, then examples/set.lox, raising
     // this to 208. Issue #507 adds
     // test/translation-probes/63_ord_chr_string_order.lox, raising this to
-    // 209.
-    ASSERT_EQ(files.size(), 209U);
+    // 209, then examples/ord_chr.lox, raising this to 210.
+    ASSERT_EQ(files.size(), 210U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {

@@ -9,9 +9,9 @@
 // An object keeps its keys in insertion order, parallel to a Map for lookup,
 // so serialization is deterministic across backends.
 //
-// Out of scope, and why: `\uXXXX` needs `ord`/`chr`, which Lox++ lacks, so a
-// `\u` escape is a clean parse error; `\b` and `\f` need byte values that are
-// not writable as Lox++ string literals.
+// The `\uXXXX` escape is decoded to UTF-8 with ord()/chr(), including a
+// surrogate pair. `\b` and `\f` use chr() for byte values that cannot be
+// written as Lox++ string literals.
 //
 // Demonstrates: recursive __str__, deep __eq__, __index_get__, __len__,
 //               __contains__, __iter__, try/catch, recursive descent.
@@ -30,6 +30,29 @@ fun digitValue(c) {
         i = i + 1;
     }
     return 0;
+}
+
+fun hexDigitValue(c) {
+    if ("0" <= c and c <= "9") return ord(c) - ord("0");
+    if ("a" <= c and c <= "f") return ord(c) - ord("a") + 10;
+    if ("A" <= c and c <= "F") return ord(c) - ord("A") + 10;
+    return -1;
+}
+
+// Encode a Unicode code point as UTF-8 bytes, since a Lox++ String is a byte
+// sequence.
+fun utf8FromCodePoint(cp) {
+    if (cp < 128) return chr(cp);
+    if (cp < 2048) {
+        return chr(192 + math.floor(cp / 64)) + chr(128 + cp % 64);
+    }
+    if (cp < 65536) {
+        return chr(224 + math.floor(cp / 4096))
+            + chr(128 + math.floor(cp / 64) % 64) + chr(128 + cp % 64);
+    }
+    return chr(240 + math.floor(cp / 262144))
+        + chr(128 + math.floor(cp / 4096) % 64)
+        + chr(128 + math.floor(cp / 64) % 64) + chr(128 + cp % 64);
 }
 
 // ---------- JSON object with a deterministic key order ----------
@@ -315,8 +338,46 @@ class JsonParser {
             else if (e == "n") out = out + "\n";
             else if (e == "t") out = out + "\t";
             else if (e == "r") out = out + "\r";
+            else if (e == "b") out = out + chr(8);
+            else if (e == "f") out = out + chr(12);
+            else if (e == "u") out = out + this.readUnicodeEscape();
             else this.fail("unsupported escape \\" + e);
         }
+    }
+
+    // Read four hex digits and return their value. The caller has already
+    // consumed the "\u".
+    readHex4() {
+        var v = 0;
+        var i = 0;
+        while (i < 4) {
+            if (this.atEnd()) this.fail("unterminated \\u escape");
+            var h = hexDigitValue(this.next());
+            if (h < 0) this.fail("invalid \\u escape");
+            v = v * 16 + h;
+            i = i + 1;
+        }
+        return v;
+    }
+
+    // A "\uXXXX" escape, combining a surrogate pair into one code point.
+    // A lone surrogate is a parse error, as JSON requires.
+    readUnicodeEscape() {
+        var cp = this.readHex4();
+        if (cp >= 55296 and cp <= 56319) {
+            if (this.atEnd() or this.next() != "\\") {
+                this.fail("unpaired surrogate");
+            }
+            if (this.atEnd() or this.next() != "u") {
+                this.fail("unpaired surrogate");
+            }
+            var lo = this.readHex4();
+            if (lo < 56320 or lo > 57343) this.fail("unpaired surrogate");
+            cp = 65536 + (cp - 55296) * 1024 + (lo - 56320);
+        } else if (cp >= 56320 and cp <= 57343) {
+            this.fail("unpaired surrogate");
+        }
+        return utf8FromCodePoint(cp);
     }
 
     parseNumber() {
@@ -453,6 +514,28 @@ for (var k in parseJson("{\"x\":1,\"y\":2}")) keys = keys + k;
 // CHECK: xy
 print keys;
 
+// Unicode escapes decode to UTF-8 bytes: \u00e9 is two bytes, \u20ac is
+// three, and the surrogate pair \uD83D\uDE00 is four. \b and \f produce bytes
+// no Lox++ string literal can hold.
+// CHECK: "A"
+print parseJson("\"\\u0041\"");
+// CHECK: 2
+print len(parseJson("\"\\u00e9\""));
+// CHECK: 3
+print len(parseJson("\"\\u20ac\""));
+// CHECK: 4
+print len(parseJson("\"\\uD83D\\uDE00\""));
+// CHECK: 2
+print len(parseJson("\"\\b\\f\""));
+// The leading byte of the three-byte euro sign is 0xE2 = 226.
+var euro = parseJson("\"\\u20ac\"");
+var lead = "";
+for (var b in euro) {
+    if (lead == "") lead = b;
+}
+// CHECK: 226
+print ord(lead);
+
 // CHECK: === Errors ===
 print "";
 print "=== Errors ===";
@@ -463,9 +546,9 @@ try {
     print e;
 }
 try {
-    parseJson("\"\\u0041\"");
+    parseJson("\"\\uD83D\"");
 } catch (e) {
-    // CHECK: json error: unsupported escape \u
+    // CHECK: json error: unpaired surrogate
     print e;
 }
 try {

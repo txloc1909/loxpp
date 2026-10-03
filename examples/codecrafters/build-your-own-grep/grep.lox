@@ -13,8 +13,8 @@
 // has no isatty, so the shell wrapper owns TTY detection and recursive
 // directory expansion — Lox++ has no readdir).
 
-// ---------- character classes (relational ops are Number-only,
-// so classify via `in` against ordered alphabets) ----------
+// ---------- character classes (classified by `in` against ordered
+// alphabets, which also gives the range positions) ----------
 var DIGITS = "0123456789";
 var LOWER = "abcdefghijklmnopqrstuvwxyz";
 var UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -39,7 +39,7 @@ fun digitVal(c) {
     return 0;
 }
 
-// Expand one "a-z" range using the ordered alphabets (no ord() exists).
+// Expand one "a-z" range using the ordered alphabets.
 fun expandRange(a, b) {
     var n = 0;
     while (n < 3) {

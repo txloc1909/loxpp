@@ -6,35 +6,10 @@
 // string: "SELECT COUNT(*) FROM t", "SELECT a, b FROM t",
 // "SELECT a, b FROM t WHERE c = 'literal'".
 //
-// Lox++ has no bitwise operators and no ord()/chr(), but a SQLite file is
-// pure binary: varints, big-endian ints, and 256 distinct byte values, most
-// not writable as Lox++ string literals (only \" \\ \n \t \r \0 exist). The
-// wrapper points LOXPP_BYTE_TABLE at a committed 256-byte file holding bytes
-// 0x00..0xFF in order; ord()/chr() below are Lox++ lookup tables built from
-// it, the same trick your_grep.sh uses for the ESC byte.
-
-// ---------- byte table: ord()/chr() over all 256 byte values ----------
-
-var ORD = {};
-var CHR = [];
-
-fun loadByteTable() {
-    var path = env("LOXPP_BYTE_TABLE");
-    var f = open(path, "r");
-    var table = f.read();
-    f.close();
-    var i = 0;
-    while (i < 256) {
-        var c = table[i:i + 1];
-        ORD[c] = i;
-        CHR.append(c);
-        i = i + 1;
-    }
-}
-
-fun ord(c) {
-    return ORD[c];
-}
+// Lox++ has no bitwise operators, but a SQLite file is pure binary: varints,
+// big-endian ints, and 256 distinct byte values. ord()/chr() convert between
+// a one-byte String and its byte value, and Strings compare by byte, so the
+// reader needs no lookup table or hand-rolled comparison.
 
 // ---------- low-level byte / varint / signed-int decoding ----------
 
@@ -271,26 +246,6 @@ fun parseRecord(payload) {
 
 // ---------- index b-tree (page types 2 = interior, 10 = leaf) ----------
 
-// Relational operators are Number-only in Lox++ (spec/04-semantics.md
-// "Comparison"), so ordering two index-key Strings needs a manual
-// byte-by-byte compare. Returns <0, 0, >0 like C's strcmp.
-fun strCompare(a, b) {
-    var n = len(a);
-    if (len(b) < n) {
-        n = len(b);
-    }
-    var i = 0;
-    while (i < n) {
-        var ca = byteAt(a, i);
-        var cb = byteAt(b, i);
-        if (ca != cb) {
-            return ca - cb;
-        }
-        i = i + 1;
-    }
-    return len(a) - len(b);
-}
-
 // An index leaf cell is varint(payloadSize) + payload — no separate rowid
 // varint (unlike a table leaf cell): the record itself carries the
 // rowid as its last column.
@@ -325,10 +280,9 @@ fun walkIndex(pageNum, targetVal, out) {
         while (i < h["numCells"]) {
             var payload = indexLeafPayload(h["bytes"], h["offsets"][i]);
             var vals = parseRecord(payload);
-            var cmp = strCompare(vals[0], targetVal);
-            if (cmp == 0) {
+            if (vals[0] == targetVal) {
                 out.append(vals[len(vals) - 1]);
-            } else if (cmp > 0) {
+            } else if (vals[0] > targetVal) {
                 return;
             }
             i = i + 1;
@@ -339,11 +293,10 @@ fun walkIndex(pageNum, targetVal, out) {
     while (i < h["numCells"]) {
         var cell = indexInteriorCell(h["bytes"], h["offsets"][i]);
         var vals = parseRecord(cell[1]);
-        var cmp = strCompare(targetVal, vals[0]);
-        if (cmp < 0) {
+        if (targetVal < vals[0]) {
             walkIndex(cell[0], targetVal, out);
             return;
-        } else if (cmp == 0) {
+        } else if (targetVal == vals[0]) {
             walkIndex(cell[0], targetVal, out);
             out.append(vals[len(vals) - 1]);
         }
@@ -736,8 +689,6 @@ fun main() {
     var a = args();
     var dbPath = a[0];
     var command = a[1];
-
-    loadByteTable();
 
     var f = open(dbPath, "r");
     DB = f.read();
