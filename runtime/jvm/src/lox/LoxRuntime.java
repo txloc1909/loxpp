@@ -292,6 +292,55 @@ public final class LoxRuntime {
                 }
                 return map;
             }));
+
+        // Sockets and subprocess (expressiveness roadmap item 2). Mirrors
+        // src/stdlib/net_api.cpp and process_api.cpp.
+        globals.define(
+            "connect",
+            new LoxNative("connect", 2,
+                          args -> LoxSocket.connect(requireString(args[0]),
+                                                    requirePort(args[1], 1))));
+        globals.define(
+            "listen",
+            new LoxNative("listen", 2,
+                          args -> LoxServer.listen(requireString(args[0]),
+                                                   requirePort(args[1], 0))));
+        globals.define(
+            "spawn",
+            new LoxNative("spawn", 2,
+                          args -> LoxProcess.spawn(requireString(args[0]),
+                                                   requireStringList(args[1]))));
+        globals.define(
+            "run",
+            new LoxNative("run", 2,
+                          args -> LoxProcess.run(requireString(args[0]),
+                                                 requireStringList(args[1]))));
+    }
+
+    private static String requireString(Object v) {
+        if (!(v instanceof String)) {
+            throw new LoxError("Expected a string argument.");
+        }
+        return (String)v;
+    }
+
+    private static int requirePort(Object v, int minPort) {
+        if (!(v instanceof Double)) {
+            throw new LoxError("Port must be a number.");
+        }
+        double raw = (Double)v;
+        if (Double.isNaN(raw) || Double.isInfinite(raw) ||
+            raw != Math.floor(raw) || raw < minPort || raw > 65535) {
+            throw new LoxError("Port must be an integer in range.");
+        }
+        return (int)raw;
+    }
+
+    private static LoxList requireStringList(Object v) {
+        if (!(v instanceof LoxList)) {
+            throw new LoxError("args must be a list of strings.");
+        }
+        return (LoxList)v;
     }
 
     // `math` is a plain instance with native-function fields (not methods),
@@ -430,6 +479,15 @@ public final class LoxRuntime {
         }
         if (v instanceof LoxFile) {
             return "File";
+        }
+        if (v instanceof LoxSocket) {
+            return "Socket";
+        }
+        if (v instanceof LoxServer) {
+            return "Server";
+        }
+        if (v instanceof LoxProcess) {
+            return "Process";
         }
         if (v instanceof LoxIterator) {
             return "Iterator";
