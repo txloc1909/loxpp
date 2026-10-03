@@ -958,11 +958,12 @@ jobs:
             loxpp-dev-qbe:latest \
             bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/diff_runtimes.py build/loxpp tools/loxpp_qbe.sh examples/"
 
-      # The --target qbe front end (#503): compile one example to a standalone
-      # executable, move it away from its source, and run it there. The
-      # corpus diff above could pass without this, because it never leaves the
-      # source file behind; this fails unless the generated harness embeds the
-      # source and its own ABI layout matches libloxrt.a's.
+      # The --target qbe front end (#503): compile to a standalone executable,
+      # DELETE the source, and run the executable without it. Deleting the
+      # source is the point: an implementation that reads the .lox at run time
+      # by path passes a test that leaves the source in place. This also checks
+      # that args() reflects the executable own command line, not the empty
+      # list a harness that drops argc/argv would give.
       - name: --target qbe front end - standalone binary
         run: |
           docker run --rm \
@@ -972,15 +973,25 @@ jobs:
             bash -c '
               set -e
               cmake --preset release && cmake --build build --target loxpp loxrt -j$(nproc)
-              build/loxpp --target qbe -o /tmp/standalone examples/fibonacci.lox
-              cp /tmp/standalone /tmp/relocated
+              src=$(mktemp -d)
+              cp examples/fibonacci.lox "$src/prog.lox"
+              build/loxpp --target qbe -o /tmp/standalone "$src/prog.lox"
+              rm -rf "$src"
               native=$(build/loxpp examples/fibonacci.lox)
-              moved=$(cd /tmp && ./relocated)
+              moved=$(cd /tmp && ./standalone)
               if [ "$native" != "$moved" ]; then
                 echo "standalone output differs from native" >&2
                 exit 1
               fi
-              echo "OK: standalone binary runs without its source file"
+              printf "print args();" > /tmp/args.lox
+              build/loxpp --target qbe -o /tmp/argbin /tmp/args.lox
+              rm -f /tmp/args.lox
+              got=$(/tmp/argbin alpha beta)
+              if [ "$got" != "[alpha, beta]" ]; then
+                echo "args() mismatch: expected [alpha, beta], got $got" >&2
+                exit 1
+              fi
+              echo "OK: standalone binary embeds its source and exposes args()"
             '
 
       # S7's Q8 hazard (notes/qbe-backend.md: "measure QBE's time and memory
