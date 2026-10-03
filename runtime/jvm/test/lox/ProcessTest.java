@@ -79,6 +79,28 @@ public final class ProcessTest {
         check(stateMessage != null && stateMessage.contains("after wait()"),
               "process write checks the stream state before the argument type");
 
+        // read_bytes(n) / err_read_bytes(n): bounded child-pipe reads.
+        LoxProcess out = LoxProcess.spawn("/bin/sh", args("-c", "printf hello"));
+        checkEquals("he", out.readBytesArg(Double.valueOf(2)),
+                    "read_bytes(2) returns two bytes");
+        checkEquals("llo", out.readBytesArg(Double.valueOf(10)),
+                    "read_bytes(10) returns the remainder at EOF");
+        checkEquals("", out.readBytesArg(Double.valueOf(1)),
+                    "read_bytes(1) returns \"\" at EOF");
+        out.waitStatus();
+
+        LoxProcess err = LoxProcess.spawn(
+            "/bin/sh", args("-c", "printf boom 1>&2"));
+        checkEquals("bo", err.errReadBytesArg(Double.valueOf(2)),
+                    "err_read_bytes(2) returns two bytes");
+        checkEquals("om", err.errReadBytesArg(Double.valueOf(10)),
+                    "err_read_bytes(10) returns the remainder at EOF");
+        checkEquals("", err.errReadBytesArg(Double.valueOf(1)),
+                    "err_read_bytes(1) returns \"\" at EOF");
+        err.waitStatus();
+        checkThrows(() -> out.readBytesArg(Double.valueOf(-1)), LoxError.class,
+                    "a negative byte count is fatal");
+
         System.exit(TestSupport.finish("ProcessTest"));
     }
 }

@@ -93,6 +93,105 @@ TEST(NetProcessTest, SocketReadlines) {
     EXPECT_EQ(stringify(h.lastResult()), "[a, b]");
 }
 
+// read_bytes(n) blocks until n bytes or EOF. Three exact reads consume the
+// client's six bytes; the fourth sees EOF and returns "".
+TEST(NetProcessTest, SocketReadBytesExactThenEmptyAtEof) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "c.write(\"abcdef\"); "
+                    "c.close_write(); "
+                    "var s = l.accept(); "
+                    "var a = s.read_bytes(3); "
+                    "var b = s.read_bytes(3); "
+                    "var e = s.read_bytes(3); "
+                    "s.close(); "
+                    "c.close(); "
+                    "l.close(); "
+                    "(a == \"abc\") and (b == \"def\") and (e == \"\");"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
+// A count larger than the remaining bytes returns the remainder at EOF, never
+// nil and never a block past the close.
+TEST(NetProcessTest, SocketReadBytesShortAtEof) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "c.write(\"abc\"); "
+                    "c.close_write(); "
+                    "var s = l.accept(); "
+                    "var a = s.read_bytes(10); "
+                    "var e = s.read_bytes(1); "
+                    "s.close(); "
+                    "c.close(); "
+                    "l.close(); "
+                    "(a == \"abc\") and (e == \"\");"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
+// n == 0 returns immediately with "", even with no data waiting.
+TEST(NetProcessTest, SocketReadBytesZero) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "c.read_bytes(0) == \"\";"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
+TEST(NetProcessTest, SocketReadBytesBadCountFatal) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "c.read_bytes(-1);"),
+              InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "c.read_bytes(1.5);"),
+              InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "c.read_bytes(\"x\");"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(NetProcessTest, SocketReadBytesOnClosedFatal) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "c.close(); "
+                    "c.read_bytes(1);"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(NetProcessTest, ProcessReadBytes) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var p = spawn(\"/bin/sh\", [\"-c\", \"printf hello\"]); "
+                    "var a = p.read_bytes(2); "
+                    "var b = p.read_bytes(10); "
+                    "var e = p.read_bytes(1); "
+                    "p.wait(); "
+                    "(a == \"he\") and (b == \"llo\") and (e == \"\");"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
+TEST(NetProcessTest, ProcessErrReadBytes) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var p = spawn(\"/bin/sh\", "
+                    "[\"-c\", \"printf boom 1>&2\"]); "
+                    "var a = p.err_read_bytes(2); "
+                    "var b = p.err_read_bytes(10); "
+                    "var e = p.err_read_bytes(1); "
+                    "p.wait(); "
+                    "(a == \"bo\") and (b == \"om\") and (e == \"\");"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
 TEST(NetProcessTest, WriteAfterCloseWriteFatal) {
     VMTestHarness h;
     EXPECT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "

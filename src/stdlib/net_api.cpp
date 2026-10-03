@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <cmath>
+#include <climits>
 #include <cstdio>
 #include <cstring>
 #include <netdb.h>
@@ -46,6 +47,26 @@ static bool asPort(const Value& v, long minPort, int& out) {
         return false;
     }
     out = static_cast<int>(raw);
+    return true;
+}
+
+// Validate a byte-count argument. `n` must be a non-negative integer Number.
+static bool asByteCount(const Value& v, const char* method, size_t& out) {
+    if (!is<Number>(v)) {
+        std::string msg =
+            std::string(method) + "() byte count must be a number.";
+        nativeRuntimeError(msg.c_str());
+        return false;
+    }
+    double raw = as<Number>(v);
+    if (!std::isfinite(raw) || raw != std::floor(raw) || raw < 0 ||
+        raw > static_cast<double>(INT_MAX)) {
+        std::string msg = std::string(method) +
+                          "() byte count must be a non-negative integer.";
+        nativeRuntimeError(msg.c_str());
+        return false;
+    }
+    out = static_cast<size_t>(raw);
     return true;
 }
 
@@ -249,6 +270,19 @@ static Value socketReadNative(int /*argc*/, Value* args) {
     return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(buf)))};
 }
 
+static Value socketReadBytesNative(int /*argc*/, Value* args) {
+    ObjSocket* s = checkSocketRead(args, "read_bytes");
+    if (s == nullptr) {
+        return from<Nil>(Nil{});
+    }
+    size_t n = 0;
+    if (!asByteCount(args[0], "read_bytes", n)) {
+        return from<Nil>(Nil{});
+    }
+    std::string buf = readStreamBytes(s->handle, n);
+    return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(buf)))};
+}
+
 static Value socketReadlineNative(int /*argc*/, Value* args) {
     ObjSocket* s = checkSocketRead(args, "readline");
     if (s == nullptr) {
@@ -415,6 +449,7 @@ NetClasses registerNetAPI(StdlibRegistrar& reg) {
     ObjClass* socket = reg.makeClass("Socket");
     reg.mm().pushTempRoot(socket);
     reg.addMethod(socket, "read", socketReadNative, 0);
+    reg.addMethod(socket, "read_bytes", socketReadBytesNative, 1);
     reg.addMethod(socket, "readline", socketReadlineNative, 0);
     reg.addMethod(socket, "readlines", socketReadlinesNative, 0);
     reg.addMethod(socket, "write", socketWriteNative, 1);

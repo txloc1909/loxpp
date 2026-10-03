@@ -6,7 +6,9 @@
 #include "../value.h"
 
 #include <cerrno>
+#include <cmath>
 #include <csignal>
+#include <climits>
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
@@ -46,6 +48,26 @@ static bool asStringList(const Value& v, std::vector<std::string>& out) {
         auto* s = asObjString(as<Obj*>(e));
         out.emplace_back(s->chars.data(), s->chars.size());
     }
+    return true;
+}
+
+// Validate a byte-count argument. `n` must be a non-negative integer Number.
+static bool asByteCount(const Value& v, const char* method, size_t& out) {
+    if (!is<Number>(v)) {
+        std::string msg =
+            std::string(method) + "() byte count must be a number.";
+        nativeRuntimeError(msg.c_str());
+        return false;
+    }
+    double raw = as<Number>(v);
+    if (!std::isfinite(raw) || raw != std::floor(raw) || raw < 0 ||
+        raw > static_cast<double>(INT_MAX)) {
+        std::string msg = std::string(method) +
+                          "() byte count must be a non-negative integer.";
+        nativeRuntimeError(msg.c_str());
+        return false;
+    }
+    out = static_cast<size_t>(raw);
     return true;
 }
 
@@ -323,6 +345,22 @@ static Value processReadNative(int /*argc*/, Value* args) {
     return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(buf)))};
 }
 
+static Value processReadBytesNative(int /*argc*/, Value* args) {
+    ObjProcess* p = checkProcess(args, "read_bytes", false);
+    if (p == nullptr) {
+        return from<Nil>(Nil{});
+    }
+    size_t n = 0;
+    if (!asByteCount(args[0], "read_bytes", n)) {
+        return from<Nil>(Nil{});
+    }
+    if (p->out == nullptr) {
+        return Value{static_cast<Obj*>(getActiveMM()->makeString(""))};
+    }
+    std::string buf = readStreamBytes(p->out, n);
+    return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(buf)))};
+}
+
 static Value processReadlineNative(int /*argc*/, Value* args) {
     ObjProcess* p = checkProcess(args, "readline", false);
     if (p == nullptr || p->out == nullptr) {
@@ -404,6 +442,22 @@ static Value processReadErrNative(int /*argc*/, Value* args) {
     while ((got = std::fread(chunk, 1, sizeof(chunk), p->err)) > 0) {
         buf.append(chunk, got);
     }
+    return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(buf)))};
+}
+
+static Value processErrReadBytesNative(int /*argc*/, Value* args) {
+    ObjProcess* p = checkProcess(args, "err_read_bytes", false);
+    if (p == nullptr) {
+        return from<Nil>(Nil{});
+    }
+    size_t n = 0;
+    if (!asByteCount(args[0], "err_read_bytes", n)) {
+        return from<Nil>(Nil{});
+    }
+    if (p->err == nullptr) {
+        return Value{static_cast<Obj*>(getActiveMM()->makeString(""))};
+    }
+    std::string buf = readStreamBytes(p->err, n);
     return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(buf)))};
 }
 
@@ -506,9 +560,11 @@ ObjClass* registerProcessAPI(StdlibRegistrar& reg, ObjClass* mapClass) {
     ObjClass* klass = reg.makeClass("Process");
     reg.mm().pushTempRoot(klass);
     reg.addMethod(klass, "read", processReadNative, 0);
+    reg.addMethod(klass, "read_bytes", processReadBytesNative, 1);
     reg.addMethod(klass, "readline", processReadlineNative, 0);
     reg.addMethod(klass, "readlines", processReadlinesNative, 0);
     reg.addMethod(klass, "read_err", processReadErrNative, 0);
+    reg.addMethod(klass, "err_read_bytes", processErrReadBytesNative, 1);
     reg.addMethod(klass, "err_readline", processErrReadlineNative, 0);
     reg.addMethod(klass, "err_readlines", processErrReadlinesNative, 0);
     reg.addMethod(klass, "write", processWriteNative, 1);

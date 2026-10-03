@@ -98,6 +98,29 @@ public final class LoxProcess {
         return new String(buf.toByteArray(), LoxRuntime.CHARSET);
     }
 
+    /**
+     * Up to {@code n} bytes from a child pipe. Blocks until {@code n} bytes
+     * have arrived or the child hits EOF, then returns what was read; "" at
+     * EOF, matching native's readStreamBytes.
+     */
+    private static Object readBytes(InputStream in, int n, String method) {
+        try {
+            ByteArrayOutputStream buf = new ByteArrayOutputStream();
+            byte[] chunk = new byte[4096];
+            while (buf.size() < n) {
+                int want = Math.min(chunk.length, n - buf.size());
+                int got = in.read(chunk, 0, want);
+                if (got == -1) {
+                    break;
+                }
+                buf.write(chunk, 0, got);
+            }
+            return new String(buf.toByteArray(), LoxRuntime.CHARSET);
+        } catch (IOException e) {
+            throw new LoxError(method + "(): " + e.getMessage());
+        }
+    }
+
     private static Object readLine(InputStream in) {
         try {
             StringBuilder line = new StringBuilder();
@@ -143,6 +166,11 @@ public final class LoxProcess {
         }
     }
 
+    public Object readBytesArg(Object arg) {
+        return readBytes(stdout, LoxSocket.checkByteCountArg(arg, "read_bytes"),
+                         "read_bytes");
+    }
+
     public Object readline() {
         return readLine(stdout);
     }
@@ -157,6 +185,12 @@ public final class LoxProcess {
         } catch (IOException e) {
             throw new LoxError("read_err(): " + e.getMessage());
         }
+    }
+
+    public Object errReadBytesArg(Object arg) {
+        return readBytes(stderr,
+                         LoxSocket.checkByteCountArg(arg, "err_read_bytes"),
+                         "err_read_bytes");
     }
 
     public Object errReadline() {
@@ -244,12 +278,17 @@ public final class LoxProcess {
         switch (name) {
         case "read":
             return new LoxNative("read", 0, a -> read());
+        case "read_bytes":
+            return new LoxNative("read_bytes", 1, a -> readBytesArg(a[0]));
         case "readline":
             return new LoxNative("readline", 0, a -> readline());
         case "readlines":
             return new LoxNative("readlines", 0, a -> readlines());
         case "read_err":
             return new LoxNative("read_err", 0, a -> readErr());
+        case "err_read_bytes":
+            return new LoxNative("err_read_bytes", 1,
+                                 a -> errReadBytesArg(a[0]));
         case "err_readline":
             return new LoxNative("err_readline", 0, a -> errReadline());
         case "err_readlines":

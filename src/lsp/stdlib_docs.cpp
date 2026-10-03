@@ -107,7 +107,7 @@ constexpr std::array<StdlibEntry, 25> kMath = {{
 // (src/stdlib/file_api.cpp), and the Socket/Server/Process method names that
 // do not already appear here (src/stdlib/net_api.cpp, process_api.cpp).
 // Descriptions from spec/05-stdlib.md and spec/03-types.md.
-constexpr std::array<StdlibEntry, 21> kMethods = {{
+constexpr std::array<StdlibEntry, 23> kMethods = {{
     {"has", "map.has(key) -> Boolean", 1, "True when the map contains `key`."},
     {"del", "map.del(key) -> Boolean", 1,
      "Removes `key` from the map; true when it was present."},
@@ -121,6 +121,8 @@ constexpr std::array<StdlibEntry, 21> kMethods = {{
      "Reads the next line without its newline; nil at end of file."},
     {"readlines", "file.readlines() -> List[String]", 0,
      "Reads the rest of the file as a list of lines."},
+    {"read_bytes", "socket.read_bytes(n) -> String", 1,
+     "Reads up to `n` bytes, blocking until `n` arrive or the peer closes."},
     {"write", "file.write(text) -> Nil", 1,
      "Writes `text` to the file. No newline is added."},
     {"writeline", "file.writeline(text) -> Nil", 1,
@@ -137,6 +139,8 @@ constexpr std::array<StdlibEntry, 21> kMethods = {{
      "Closes a child process's standard input."},
     {"read_err", "process.read_err() -> String", 0,
      "Reads the child's standard error as one string."},
+    {"err_read_bytes", "process.err_read_bytes(n) -> String", 1,
+     "Reads up to `n` bytes of the child's standard error."},
     {"err_readline", "process.err_readline() -> String | Nil", 0,
      "Reads the child's next standard-error line; nil at EOF."},
     {"err_readlines", "process.err_readlines() -> List[String]", 0,

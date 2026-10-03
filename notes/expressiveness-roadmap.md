@@ -100,19 +100,20 @@ to the host. All I/O blocks the VM, exactly like `sleep`, because item 5's
 coroutines do not exist yet. The *unbounded* surface of the tail — crypto,
 databases, compression — remains the standing argument for item 6.
 
-Two residual gaps surfaced while building the CodeCrafters HTTP server example
+One residual gap surfaced while building the CodeCrafters HTTP server example
 (`examples/codecrafters/build-your-own-http-server`), so item 2 is *not* fully
 closed:
 
-- **No bounded socket read.** `read`/`readline`/`readlines` are line- or
-  EOF-delimited only; a `Content-Length` body is unreachable. This is a real
-  gap under the litmus test, because no bounded read can be composed from
-  existing primitives. Tracking: #518.
 - **No concurrency.** One `accept`/`readline` blocks the VM, so simultaneous
   keep-alive connections cannot be served without item 5. Tracking: #519.
 
-The HTTP server reaches 12 of the 14 public stages in pure Lox++; these two are
-the ones it cannot. The example also depends on one correctness fix to the
+The former bounded-read gap was closed by `read_bytes(n)` (#518), which blocks
+until `n` bytes arrive or the peer closes and is exposed on `Socket` and
+`Process` (stdout and stderr) on all three backends. A `Content-Length` body is
+now one call, so `base-08` is reachable.
+
+The HTTP server reaches 13 of the 14 public stages in pure Lox++; concurrency is
+the one it cannot. The example also depends on one correctness fix to the
 `socket` streams merged in #516: `readline()` followed by `write()` failed with
 `ESPIPE` because stdio's `r+` update mode wants a seek on the input→output
 transition. Opening socket streams unbuffered removes the seek and restores the
