@@ -134,6 +134,11 @@ fun magMul(a, b) {
 // ---------- constructors ----------
 
 fun bigFromNumber(n) {
+    // Whole, finite Numbers only: a fractional value would index a string
+    // with a non-integer below, and an infinite one never leaves the loop.
+    if (n != n or n == math.inf or n == -math.inf or n != math.floor(n)) {
+        throw "bigFromNumber: expected a whole Number";
+    }
     var neg = false;
     if (n < 0) {
         neg = true;
@@ -350,3 +355,12 @@ print labels[bigFromNumber(10)];
 print labels[bigFromNumber(2)];
 // CHECK: 2^100
 print labels[bigPow(bigFromNumber(2), 100)];
+
+// bigFromNumber accepts whole, finite Numbers only; anything else is a clear
+// error rather than a confusing failure deeper in the string builder.
+try {
+    bigFromNumber(1.5);
+} catch (e) {
+    // CHECK: bigFromNumber: expected a whole Number
+    print e;
+}
