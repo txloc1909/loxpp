@@ -2272,6 +2272,7 @@ class InterpSocketMethod {
     }
     call(interp, args) {
         if (this.name == "read")      return this.socket.handle.read();
+        if (this.name == "read_bytes") return this.socket.handle.read_bytes(args[0]);
         if (this.name == "readline")  return this.socket.handle.readline();
         if (this.name == "readlines") {
             var lines = this.socket.handle.readlines();
@@ -2328,7 +2329,7 @@ class InterpProcessMethod {
         this.loxTag  = "processmethod";
     }
     arity() {
-        if (this.name == "write" or this.name == "writeline") return 1;
+        if (this.name == "write" or this.name == "writeline" or this.name == "read_bytes" or this.name == "err_read_bytes") return 1;
         return 0;
     }
     wrapList(lines) {
@@ -2339,9 +2340,11 @@ class InterpProcessMethod {
     }
     call(interp, args) {
         if (this.name == "read")          return this.process.handle.read();
+        if (this.name == "read_bytes")    return this.process.handle.read_bytes(args[0]);
         if (this.name == "readline")      return this.process.handle.readline();
         if (this.name == "readlines")     return this.wrapList(this.process.handle.readlines());
         if (this.name == "read_err")      return this.process.handle.read_err();
+        if (this.name == "err_read_bytes") return this.process.handle.err_read_bytes(args[0]);
         if (this.name == "err_readline")  return this.process.handle.err_readline();
         if (this.name == "err_readlines") return this.wrapList(this.process.handle.err_readlines());
         if (this.name == "write")         { this.process.handle.write(args[0]); return nil; }
@@ -3701,7 +3704,7 @@ class Interpreter {
             return nil;
         }
         if (loxTag(object) == "socket") {
-            if (name == "read" or name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close_write" or name == "close") return InterpSocketMethod(name, object);
+            if (name == "read" or name == "read_bytes" or name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close_write" or name == "close") return InterpSocketMethod(name, object);
             this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }
@@ -3711,7 +3714,7 @@ class Interpreter {
             return nil;
         }
         if (loxTag(object) == "process") {
-            if (name == "read" or name == "readline" or name == "readlines" or name == "read_err" or name == "err_readline" or name == "err_readlines" or name == "write" or name == "writeline" or name == "close_stdin" or name == "wait" or name == "kill" or name == "pid") return InterpProcessMethod(name, object);
+            if (name == "read" or name == "read_bytes" or name == "readline" or name == "readlines" or name == "read_err" or name == "err_read_bytes" or name == "err_readline" or name == "err_readlines" or name == "write" or name == "writeline" or name == "close_stdin" or name == "wait" or name == "kill" or name == "pid") return InterpProcessMethod(name, object);
             this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }

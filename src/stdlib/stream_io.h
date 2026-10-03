@@ -52,3 +52,24 @@ inline bool writeStreamOrError(FILE* handle, const char* method,
     }
     return true;
 }
+
+// Reads up to `n` bytes from a stdio stream. Blocks until `n` bytes have been
+// read or the stream reaches end of file, then returns everything read. At end
+// of file with no byte remaining, returns "". The caller validates the stream
+// (still open, not reaped) before calling.
+inline std::string readStreamBytes(FILE* handle, size_t n) {
+    std::string out;
+    char chunk[4096];
+    while (out.size() < n) {
+        size_t want = n - out.size();
+        if (want > sizeof(chunk)) {
+            want = sizeof(chunk);
+        }
+        size_t got = std::fread(chunk, 1, want, handle);
+        if (got == 0) {
+            break;
+        }
+        out.append(chunk, got);
+    }
+    return out;
+}

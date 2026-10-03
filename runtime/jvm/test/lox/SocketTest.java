@@ -106,6 +106,41 @@ public final class SocketTest {
               "write checks the stream state before the argument type");
         ts.close();
 
+        // read_bytes(n): a bounded read over the loopback. Three exact reads
+        // consume six bytes; the fourth sees EOF and returns "".
+        LoxServer bs = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket bc = LoxSocket.connect("127.0.0.1", (int)bs.port());
+        bc.write("abcdef");
+        bc.closeWrite();
+        LoxSocket bpeer = (LoxSocket)bs.accept();
+        checkEquals("abc", bpeer.readBytesArg(Double.valueOf(3)),
+                    "read_bytes(3) returns three bytes");
+        checkEquals("def", bpeer.readBytesArg(Double.valueOf(3)),
+                    "read_bytes(3) returns the next three bytes");
+        checkEquals("", bpeer.readBytesArg(Double.valueOf(3)),
+                    "read_bytes(3) returns \"\" at EOF");
+        checkEquals("", bpeer.readBytesArg(Double.valueOf(0)),
+                    "read_bytes(0) returns \"\"");
+        checkEquals("", bpeer.readBytes(0),
+                    "readBytes is callable directly");
+        bpeer.close();
+        bc.close();
+        bs.close();
+
+        // A bad count is fatal, and the closed-stream check precedes it.
+        LoxServer is = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket ic = LoxSocket.connect("127.0.0.1", (int)is.port());
+        checkThrows(() -> ic.readBytesArg(Double.valueOf(-1)), LoxError.class,
+                    "read_bytes(-1) is fatal");
+        checkThrows(() -> ic.readBytesArg(Double.valueOf(1.5)), LoxError.class,
+                    "read_bytes(1.5) is fatal");
+        checkThrows(() -> ic.readBytesArg("x"), LoxError.class,
+                    "read_bytes(\"x\") is fatal");
+        ic.close();
+        checkThrows(() -> ic.readBytesArg(Double.valueOf(1)), LoxError.class,
+                    "read_bytes on a closed socket is fatal");
+        is.close();
+
         System.exit(TestSupport.finish("SocketTest"));
     }
 }

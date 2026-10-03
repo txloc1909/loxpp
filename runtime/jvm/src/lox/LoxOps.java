@@ -1143,6 +1143,9 @@ public final class LoxOps {
         case "read":
             requireArity(args, 0, "read");
             return socket.read();
+        case "read_bytes":
+            requireArity(args, 1, "read_bytes");
+            return socket.readBytesArg(args[0]);
         case "readline":
             requireArity(args, 0, "readline");
             return socket.readline();
@@ -1194,6 +1197,9 @@ public final class LoxOps {
         case "read":
             requireArity(args, 0, "read");
             return process.read();
+        case "read_bytes":
+            requireArity(args, 1, "read_bytes");
+            return process.readBytesArg(args[0]);
         case "readline":
             requireArity(args, 0, "readline");
             return process.readline();
@@ -1203,6 +1209,9 @@ public final class LoxOps {
         case "read_err":
             requireArity(args, 0, "read_err");
             return process.readErr();
+        case "err_read_bytes":
+            requireArity(args, 1, "err_read_bytes");
+            return process.errReadBytesArg(args[0]);
         case "err_readline":
             requireArity(args, 0, "err_readline");
             return process.errReadline();

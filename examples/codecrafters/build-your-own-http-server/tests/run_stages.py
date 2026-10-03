@@ -6,9 +6,9 @@
 # are marked "local:". It drives the real challenge entrypoint, your_http.sh,
 # over raw TCP so it can also decode the gzip body with Python's gzip module.
 #
-# The suite covers the twelve stages pure Lox++ can reach. base-08 (POST body)
-# and persistent-02 (concurrent keep-alive) are unreachable without a bounded
-# socket read and concurrency respectively; see ../README.md and ../tests/gaps.sh.
+# The suite covers the thirteen stages pure Lox++ can reach. persistent-02
+# (concurrent keep-alive) is unreachable without concurrency; see ../README.md
+# and ../tests/gaps.sh.
 #
 # Usage: tests/run_stages.py [your_http.sh]
 
@@ -175,6 +175,43 @@ def main():
         )
         status, _, _ = request(port, b"GET /files/nope HTTP/1.1\r\n\r\n")
         check("base-07 missing file 404", status == "HTTP/1.1 404 Not Found", status)
+
+        # base-08: POST /files/{filename} writes the Content-Length body.
+        status, _, _ = request(
+            port, b"POST /files/newfile HTTP/1.1\r\nContent-Length: 5\r\n\r\n12345"
+        )
+        check("base-08 post file 201", status == "HTTP/1.1 201 Created", status)
+        status, _, body = request(port, b"GET /files/newfile HTTP/1.1\r\n\r\n")
+        check("base-08 posted body persists", body == b"12345", repr(body))
+
+        payload = b"x" * 1000
+        status, _, _ = request(
+            port,
+            b"POST /files/big HTTP/1.1\r\nContent-Length: 1000\r\n\r\n" + payload,
+        )
+        check("base-08 large body 201", status == "HTTP/1.1 201 Created", status)
+        status, _, body = request(port, b"GET /files/big HTTP/1.1\r\n\r\n")
+        check(
+            "base-08 large body round-trip",
+            body == payload,
+            "len=%d" % len(body),
+        )
+
+        # The body must be consumed before the next request on the same
+        # keep-alive connection, or the leftover bytes desync the parser.
+        sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+        sock.settimeout(5)
+        sock.sendall(b"POST /files/keep HTTP/1.1\r\nContent-Length: 4\r\n\r\nbody")
+        first = parse_response(sock)
+        sock.sendall(b"GET /files/keep HTTP/1.1\r\n\r\n")
+        second = parse_response(sock)
+        sock.close()
+        check(
+            "base-08 body then keep-alive GET",
+            first[0].startswith("HTTP/1.1 201")
+            and second[2] == b"body",
+            "%r %r" % (first[0], second[2]),
+        )
 
         status, headers, body = request(
             port, b"GET /echo/abc HTTP/1.1\r\nAccept-Encoding: gzip\r\n\r\n"
