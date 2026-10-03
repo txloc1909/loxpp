@@ -335,7 +335,13 @@ class JsonParser {
             if (!isDigit(this.peek())) this.fail("expected exponent");
             while (isDigit(this.peek())) this.next();
         }
-        return numberFromLexeme(this.text[start:this.pos]);
+        var v = numberFromLexeme(this.text[start:this.pos]);
+        // JSON has no infinity or NaN. Reject a literal that overflows to
+        // one, so the serializer can never emit a non-JSON number.
+        if (v != v or v == math.inf or v == -math.inf) {
+            this.fail("number out of range");
+        }
+        return v;
     }
 }
 
@@ -466,5 +472,25 @@ try {
     parseJson("[1,2");
 } catch (e) {
     // CHECK: json error: expected ',' or ']'
+    print e;
+}
+// A literal that overflows a Number is rejected, so the serializer can never
+// emit a non-JSON number.
+try {
+    parseJson("1e999");
+} catch (e) {
+    // CHECK: json error: number out of range
+    print e;
+}
+try {
+    parseJson("0e999");
+} catch (e) {
+    // CHECK: json error: number out of range
+    print e;
+}
+try {
+    parseJson("-1e309");
+} catch (e) {
+    // CHECK: json error: number out of range
     print e;
 }
