@@ -442,7 +442,31 @@ fun portFromEnv() {
     return parseInt(p);
 }
 
+// Development probe: compress a file with the same gzip encoder the server
+// uses. A URL path cannot carry every byte value, so the tests need a file
+// entry point to reach the 9-bit literal codes (bytes 144-255). The server
+// starts when this flag is absent.
+fun runGzipProbe(a) {
+    var i = 0;
+    while (i + 2 < len(a)) {
+        if (a[i] == "--gzip-probe") {
+            var inFile = open(a[i + 1], "r");
+            var data = inFile.read();
+            inFile.close();
+            var outFile = open(a[i + 2], "w");
+            outFile.write(gzip(data));
+            outFile.close();
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
 fun main() {
+    if (runGzipProbe(args())) {
+        return;
+    }
     var directory = directoryFromArgs();
     var server = listen("0.0.0.0", portFromEnv());
     while (true) {

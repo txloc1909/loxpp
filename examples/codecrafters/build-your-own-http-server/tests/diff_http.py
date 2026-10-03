@@ -14,6 +14,7 @@ import http.client
 import os
 import random
 import struct
+import subprocess
 import sys
 import tempfile
 import zlib
@@ -34,6 +35,18 @@ def check(name, cond, detail=""):
     else:
         FAIL += 1
         print("  FAIL %s  %s" % (name, detail))
+
+
+def gzip_probe(prog, data):
+    """Run the server's file probe and return its gzip output."""
+    d = tempfile.mkdtemp(prefix="loxpp-gzip-probe-")
+    inp = os.path.join(d, "in.bin")
+    outp = os.path.join(d, "out.gz")
+    with open(inp, "wb") as f:
+        f.write(data)
+    subprocess.run([prog, "--gzip-probe", inp, outp], check=True, timeout=30)
+    with open(outp, "rb") as f:
+        return f.read()
 
 
 def main():
@@ -121,6 +134,39 @@ def main():
                 print("    %r: %s" % (s, "; ".join(problems)))
                 break
         check("gzip round-trip vs Python gzip/zlib (%d inputs)" % len(strings), gzip_ok)
+
+        # A URL path cannot carry every byte value, so the HTTP echo never
+        # reaches the 9-bit literal codes (bytes 144-255). Drive the same
+        # encoder through its file probe and cover all 256 values.
+        probe_inputs = [bytes(range(256)), bytes(range(255, -1, -1)), bytes(range(256)) * 8]
+        probe_inputs += [
+            bytes(rng.randrange(256) for _ in range(rng.randint(1, 512))) for _ in range(8)
+        ]
+        probe_ok = True
+        for raw in probe_inputs:
+            try:
+                got = gzip_probe(prog, raw)
+                problems = []
+                if gzip.decompress(got) != raw:
+                    problems.append("decompress mismatch")
+                if len(got) >= 8:
+                    crc, isize = struct.unpack("<II", got[-8:])
+                    if crc != zlib.crc32(raw):
+                        problems.append("trailer CRC32")
+                    if isize != (len(raw) & 0xFFFFFFFF):
+                        problems.append("trailer ISIZE")
+                else:
+                    problems.append("short stream")
+            except Exception as exc:  # noqa: BLE001
+                problems = ["probe failed: %s" % exc]
+            if problems:
+                probe_ok = False
+                print("    probe len=%d: %s" % (len(raw), "; ".join(problems)))
+                break
+        check(
+            "gzip high-byte literals via file probe (%d inputs)" % len(probe_inputs),
+            probe_ok,
+        )
 
         conn.close()
     finally:

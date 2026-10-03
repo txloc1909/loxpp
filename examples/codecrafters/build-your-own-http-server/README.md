@@ -86,6 +86,10 @@ shows:
 1f 8b 08 00 00 00 00 00 00 03 4b 4c 4a 06 00 c2 41 24 35 03 00 00 00
 ```
 
+A `--gzip-probe <in> <out>` mode compresses a file with the same encoder. A URL
+path cannot carry every byte value, so the tests use it to reach the 9-bit
+literal codes (bytes 144-255). The server starts when the flag is absent.
+
 ## Run
 
 ```sh
