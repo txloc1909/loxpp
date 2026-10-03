@@ -1,5 +1,6 @@
 #include "net_api.h"
 #include "stdlib_context.h"
+#include "stream_io.h"
 #include "../container_objects.h"
 #include "../vm_allocator.h"
 #include "../value.h"
@@ -314,8 +315,9 @@ static Value socketWriteNative(int /*argc*/, Value* args) {
         return from<Nil>(Nil{});
     }
     auto* str = asObjString(as<Obj*>(args[0]));
-    std::fwrite(str->chars.data(), 1, str->chars.size(), s->handle);
-    std::fflush(s->handle);
+    writeStreamOrError(s->handle, "write",
+                       std::string_view(str->chars.data(), str->chars.size()),
+                       false);
     return from<Nil>(Nil{});
 }
 
@@ -329,9 +331,9 @@ static Value socketWritelineNative(int /*argc*/, Value* args) {
         return from<Nil>(Nil{});
     }
     auto* str = asObjString(as<Obj*>(args[0]));
-    std::fwrite(str->chars.data(), 1, str->chars.size(), s->handle);
-    std::fputc('\n', s->handle);
-    std::fflush(s->handle);
+    writeStreamOrError(s->handle, "writeline",
+                       std::string_view(str->chars.data(), str->chars.size()),
+                       true);
     return from<Nil>(Nil{});
 }
 

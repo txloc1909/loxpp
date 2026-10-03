@@ -458,7 +458,8 @@ A Socket is returned by `connect`, or by `Server.accept()`. `type(s)` on a
 Socket returns `"Socket"`. A Socket is a bidirectional stream of bytes.
 
 Reading a closed Socket, or writing to a Socket after `close_write()` or
-`close()`, is a runtime error.
+`close()`, is a runtime error. A write that the peer has stopped reading also
+fails with a runtime error; it never ends the program by a signal.
 
 ### `s.read() -> String`
 
@@ -552,7 +553,9 @@ nothing.
 A Process is returned by `spawn`. `type(p)` on a Process returns `"Process"`.
 
 Reading a closed Process pipe, or writing to it after `close_stdin()` or after
-the process has been waited on, is a runtime error.
+the process has been waited on, is a runtime error. A write to a child that
+has stopped reading also fails with a runtime error; it never ends the program
+by a signal.
 
 A child's standard output and standard error are two separate streams. Reading
 only one of them while the child writes a large amount to the other can block

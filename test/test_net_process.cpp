@@ -80,6 +80,45 @@ TEST(NetProcessTest, WriteAfterCloseWriteFatal) {
               InterpretResult::RUNTIME_ERROR);
 }
 
+TEST(NetProcessTest, WriteToClosedPeerFatalNotSignal) {
+    // Two writes after the peer closes: the second must fail with a runtime
+    // error. Before the SIGPIPE fix the VM died with signal 13 (exit 141).
+    VMTestHarness h;
+    EXPECT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "var s = l.accept(); "
+                    "s.close(); "
+                    "c.write(\"x\"); "
+                    "c.write(\"y\");"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(NetProcessTest, CloseWriteIsIdempotentAndSafeAfterClose) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "var s = l.accept(); "
+                    "c.close_write(); "
+                    "c.close_write(); "
+                    "c.close(); "
+                    "c.close_write(); "
+                    "s.close(); "
+                    "l.close(); "
+                    "\"ok\";"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "ok");
+}
+
+TEST(NetProcessTest, WriteToExitedChildFatalNotSignal) {
+    // The child exits without reading stdin, so the pipe has no reader. The
+    // write must be a runtime error, not a SIGPIPE death.
+    VMTestHarness h;
+    EXPECT_EQ(h.run("var p = spawn(\"/bin/sh\", [\"-c\", \"exit 0\"]); "
+                    "sleep(0.2); "
+                    "p.write(\"x\");"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
 TEST(NetProcessTest, AcceptOnClosedServerFatal) {
     VMTestHarness h;
     EXPECT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "

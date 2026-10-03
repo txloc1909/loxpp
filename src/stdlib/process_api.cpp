@@ -1,5 +1,6 @@
 #include "process_api.h"
 #include "stdlib_context.h"
+#include "stream_io.h"
 #include "../container_objects.h"
 #include "../vm_allocator.h"
 #include "../value.h"
@@ -437,8 +438,9 @@ static Value processWriteNative(int /*argc*/, Value* args) {
         return from<Nil>(Nil{});
     }
     auto* str = asObjString(as<Obj*>(args[0]));
-    std::fwrite(str->chars.data(), 1, str->chars.size(), p->in);
-    std::fflush(p->in);
+    writeStreamOrError(p->in, "write",
+                       std::string_view(str->chars.data(), str->chars.size()),
+                       false);
     return from<Nil>(Nil{});
 }
 
@@ -452,9 +454,9 @@ static Value processWritelineNative(int /*argc*/, Value* args) {
         return from<Nil>(Nil{});
     }
     auto* str = asObjString(as<Obj*>(args[0]));
-    std::fwrite(str->chars.data(), 1, str->chars.size(), p->in);
-    std::fputc('\n', p->in);
-    std::fflush(p->in);
+    writeStreamOrError(p->in, "writeline",
+                       std::string_view(str->chars.data(), str->chars.size()),
+                       true);
     return from<Nil>(Nil{});
 }
 
