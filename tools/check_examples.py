@@ -59,10 +59,14 @@ def extract_checks(lox_file: Path) -> list[str]:
 
 def run_example(loxpp: str, lox_file: Path, input_file: Path) -> tuple[int, list[str]]:
     stdin_data = input_file.read_text(encoding="utf-8") if input_file.exists() else None
+    # stderr is not matched against anything, and a debug build's GC log can
+    # be gigabytes under LOXPP_STRESS_GC, so discard it instead of holding it
+    # in memory.
     result = subprocess.run(
         [loxpp, str(lox_file)],
         input=stdin_data,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
         text=True,
     )
     return result.returncode, result.stdout.splitlines()
