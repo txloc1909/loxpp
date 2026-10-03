@@ -84,7 +84,7 @@ Secondary factors, small next to the duplication:
 
 Replace the 41x `${FULL_SRCS}` copies with a small number of
 `add_library(... OBJECT ...)` (or `STATIC`) targets that carry the common
-include dirs, `LOXPP_NAN_TAGGING`, and warning flags:
+include dirs and warning flags:
 
 - `loxpp_testobj` — the 28 sources, default flags. ~30 plain targets link it.
 - `loxpp_testobj_gc` — same sources + `LOXPP_STRESS_GC`. 10 `_gc` targets.

@@ -160,8 +160,7 @@ bool isValidMapKey(const Value& v);
 // hashValue() (the table's uint32 string-key hash), this hashes Obj* by
 // pointer identity — matching operator== — so it is safe for any value,
 // including non-string objects. Used to dedup the compiler's constant pool.
-// Implemented via is<T>/as<T>, so it carries over to the NaN-tagged Value
-// representation unchanged.
+// Implemented on is<T>/as<T>, not on the underlying representation.
 struct ValueHash {
     size_t operator()(const Value& v) const;
 };
