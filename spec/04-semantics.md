@@ -288,13 +288,17 @@ obj.name
    wrapping the native function and `obj` as receiver. Each evaluation creates a new value, so
    two property-get reads of the same file's method never yield the same object. If not found, raise a runtime error
    ("Undefined property 'name' on file.").
-4. If `obj` is an `Error` ([§03-types](03-types.md#error)): if `name` is `message` or `kind`, return that
+4. If `obj` is a Socket, Server, or Process, look up `name` in that type's own class method table. If found,
+   return a new bound built-in method wrapping the native function and `obj` as receiver, again as a fresh value
+   on every read. If not found, this is a **runtime error** ("Undefined property 'name' on socket.",
+   "Undefined property 'name' on server.", or "Undefined property 'name' on process.", matching the type).
+5. If `obj` is an `Error` ([§03-types](03-types.md#error)): if `name` is `message` or `kind`, return that
    field's value (a String). Otherwise, this is a **runtime error** ("Undefined property 'name' on error.").
-5. If `obj` is not an Instance, this is a **runtime error** ("Only instances have properties.").
-6. If the instance's field table contains `name`, return that field value. Fields shadow methods.
-7. Otherwise, look up `name` in the instance's class method table. If found, return a BoundMethod
+6. If `obj` is not an Instance, this is a **runtime error** ("Only instances have properties.").
+7. If the instance's field table contains `name`, return that field value. Fields shadow methods.
+8. Otherwise, look up `name` in the instance's class method table. If found, return a BoundMethod
    wrapping the closure and `obj` as receiver.
-8. If neither step 6 nor 7 found `name`, this is a **runtime error** ("Undefined property 'name'.").
+9. If neither step 7 nor 8 found `name`, this is a **runtime error** ("Undefined property 'name'.").
 
 ### Property Set
 
@@ -1317,6 +1321,9 @@ every pending deferred call on the unwind path has already run.
 | A stdlib native function reports its own error while running | `open("/no/such/path", "r");` | `open(): cannot open '/no/such/path': No such file or directory` |
 | `Map.has(key)` or `Map.del(key)` called with an invalid key | `var m = {}; m.has([1, 2]);` | `Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__. NaN is not allowed.` |
 | Undefined property read on a File value | `var f = open("/tmp/f.txt", "w"); f.write("x"); var g = open("/tmp/f.txt", "r"); g.bogus;` (a missing path fails first with the stdlib-error row above) | `Undefined property 'bogus' on file.` |
+| Undefined property read on a Socket value | `var l = listen("127.0.0.1", 0); var s = connect("127.0.0.1", l.port()); s.bogus;` | `Undefined property 'bogus' on socket.` |
+| Undefined property read on a Server value | `var l = listen("127.0.0.1", 0); l.bogus;` | `Undefined property 'bogus' on server.` |
+| Undefined property read on a Process value | `var p = spawn("echo", []); p.bogus;` | `Undefined property 'bogus' on process.` |
 | Undefined property read on a Map value | `var m = {}; m.bogus;` | `Undefined property 'bogus' on map.` |
 | Property read on an Instance where the name is neither a field nor a method | `class C {} var c = C(); c.bogus;` | `Undefined property 'bogus'.` |
 | Property read on a value that is not an Instance, Map, File, or Error | `42.foo;` (see [§03-types, Error](03-types.md#error) and [Property Get](#property-get)) | `Only instances have properties.` |
@@ -1329,6 +1336,9 @@ every pending deferred call on the unwind path has already run.
 | `list.remove(value)` where `value` is not present | `[1, 2].remove(3);` | `Value not found in list.` |
 | Undefined method invoked on a List | `[].bogus();` | `Undefined method 'bogus' on list.` |
 | Undefined method invoked on a File | `var f = open("/tmp/f.txt", "w"); f.write("x"); var g = open("/tmp/f.txt", "r"); g.bogus();` (a missing path fails first with the stdlib-error row above) | `Undefined method 'bogus' on file.` |
+| Undefined method invoked on a Socket | `var l = listen("127.0.0.1", 0); var s = connect("127.0.0.1", l.port()); s.bogus();` | `Undefined method 'bogus' on socket.` |
+| Undefined method invoked on a Server | `var l = listen("127.0.0.1", 0); l.bogus();` | `Undefined method 'bogus' on server.` |
+| Undefined method invoked on a Process | `var p = spawn("echo", []); p.bogus();` | `Undefined method 'bogus' on process.` |
 | Undefined method invoked on a Map | `var m = {}; m.bogus();` | `Undefined method 'bogus' on map.` |
 | `class Sub < Super {}` where `Super` is not a Class | `var NotAClass = 1; class Sub < NotAClass {}` | `Superclass must be a class.` |
 | `super.method(...)` where `method` is not found on the superclass | `class A {} class B < A { m() { super.zzz(); } } B().m();` | `Undefined property 'zzz'.` |
