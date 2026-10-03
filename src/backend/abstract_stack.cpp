@@ -445,7 +445,7 @@ bool findDeclaringPushIndices(
     while (!frontier.empty()) {
         int cur = frontier.front();
         frontier.pop_front();
-        if (visited[cur] || !static_cast<bool>(reached[cur])) {
+        if (visited[cur] || !reached[cur]) {
             continue;
         }
         visited[cur] = true;
@@ -579,7 +579,7 @@ void walkForPersistence(int fromIndex, int slot,
     while (!frontier.empty()) {
         int cur = frontier.front();
         frontier.pop_front();
-        if (visited[cur] || !static_cast<bool>(reached[cur])) {
+        if (visited[cur] || !reached[cur]) {
             continue;
         }
         visited[cur] = true;
@@ -633,7 +633,7 @@ std::vector<HandlerEntryContract> buildHandlerEntryContracts(
     std::vector<HandlerEntryContract> entries;
     entries.reserve(cfg.handlerLinks.size());
     for (const auto& [pushIdx, catchIdx] : cfg.handlerLinks) {
-        if (!static_cast<bool>(reached[static_cast<size_t>(pushIdx)])) {
+        if (!reached[static_cast<size_t>(pushIdx)]) {
             continue; // dead try block — see handlerEntrySeeds
         }
         // A real compiled try statement always emits a matching POP_HANDLER
@@ -666,7 +666,7 @@ void findPersistentPopLocals(
     const std::unordered_map<int, int>& catchEntryToPushIdx,
     std::set<std::pair<int, int>>& sites) {
     for (size_t i = 0; i < ins.size(); i++) {
-        if (!static_cast<bool>(reached[i]) || ins[i].op != Op::POP) {
+        if (!reached[i] || ins[i].op != Op::POP) {
             continue;
         }
         int idx = static_cast<int>(i);
@@ -702,7 +702,7 @@ void backfillFromFrameTeardown(
     const std::unordered_map<int, int>& catchEntryToPushIdx,
     std::set<std::pair<int, int>>& sites) {
     for (size_t i = 0; i < ins.size(); i++) {
-        if (!static_cast<bool>(reached[i]) || ins[i].op != Op::RETURN) {
+        if (!reached[i] || ins[i].op != Op::RETURN) {
             continue;
         }
         int idx = static_cast<int>(i);
@@ -735,7 +735,7 @@ std::set<std::pair<int, int>> findInvisibleVarIndices(
     }
 
     for (size_t i = 0; i < ins.size(); i++) {
-        if (!static_cast<bool>(reached[i])) {
+        if (!reached[i]) {
             continue;
         }
         int idx = static_cast<int>(i);
@@ -891,7 +891,7 @@ runFixpoint(const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
                 existing.localCount = after.localCount;
                 changed = true;
             }
-            if (changed && !static_cast<bool>(queued[succ])) {
+            if (changed && !queued[succ]) {
                 worklist.push_back(succ);
                 queued[succ] = true;
             }
@@ -992,7 +992,7 @@ void validateMergeConsistency(const std::vector<DecodedInstruction>& ins,
                               const std::vector<bool>& isHandlerEntry,
                               const std::string& functionId) {
     for (size_t i = 0; i < ins.size(); i++) {
-        if (!static_cast<bool>(reached[i])) {
+        if (!reached[i]) {
             continue;
         }
         if (isHandlerEntry[i]) {
@@ -1009,7 +1009,7 @@ void validateMergeConsistency(const std::vector<DecodedInstruction>& ins,
         }
         std::optional<int> depth;
         for (int pred : cfg.predecessors[i]) {
-            if (!static_cast<bool>(reached[pred])) {
+            if (!reached[pred]) {
                 continue;
             }
             int d = after[pred].operandDepth();
@@ -1071,7 +1071,7 @@ void validateNoInvisibleVarGaps(
     const std::vector<std::vector<int>>& declaredSlotsAt,
     const std::string& functionId) {
     for (size_t i = 0; i < ins.size(); i++) {
-        if (!static_cast<bool>(reached[i]) || declaredSlotsAt[i].empty()) {
+        if (!reached[i] || declaredSlotsAt[i].empty()) {
             continue;
         }
         int localCount =
@@ -1203,7 +1203,7 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
     std::vector<StackState> heightBefore(n);
     std::vector<StackState> heightAfter(n);
     for (size_t i = 0; i < n; i++) {
-        if (!static_cast<bool>(reached[i])) {
+        if (!reached[i]) {
             continue;
         }
         heightBefore[i] = *heightState[i];
@@ -1230,7 +1230,7 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
     // against a stack-effect table or CFG-building bug; not itself the
     // merge-consistency check (see validateMergeConsistency below for that).
     for (size_t i = 0; i < n; i++) {
-        if (!static_cast<bool>(reached[i])) {
+        if (!reached[i]) {
             continue;
         }
         const StackState& s = *state[i];
@@ -1249,7 +1249,7 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
     result.before.resize(n);
     result.after.resize(n);
     for (size_t i = 0; i < n; i++) {
-        if (!static_cast<bool>(reached[i])) {
+        if (!reached[i]) {
             continue;
         }
         StackState before = *state[i];
