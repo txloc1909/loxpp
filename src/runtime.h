@@ -859,6 +859,9 @@ class Runtime {
     ObjClass* m_fileClass{nullptr};
     ObjClass* m_mapClass{nullptr};
     ObjClass* m_errorClass{nullptr};
+    ObjClass* m_socketClass{nullptr};
+    ObjClass* m_serverClass{nullptr};
+    ObjClass* m_processClass{nullptr};
 
     // Handler stack for try/catch — parallel to m_frames[].
     // m_handlerStack[i] records {frameCount, stackTop, catchIp} for the

@@ -52,6 +52,8 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/stdlib/math_module.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/os_api.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/reflect_api.cpp
+    ${PROJECT_SOURCE_DIR}/src/stdlib/net_api.cpp
+    ${PROJECT_SOURCE_DIR}/src/stdlib/process_api.cpp
 )
 
 add_library(loxpp_test_core OBJECT ${LOXPP_CORE_SRCS} test_harness.cpp)

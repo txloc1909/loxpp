@@ -76,6 +76,12 @@ std::string stringifyObj(Obj* obj) {
     }
     case ObjType::FILE:
         return "<file>";
+    case ObjType::SOCKET:
+        return "<socket>";
+    case ObjType::SERVER:
+        return "<server>";
+    case ObjType::PROCESS:
+        return "<process>";
     case ObjType::ITERATOR:
         return "<iterator>";
     case ObjType::LIST: {

@@ -49,6 +49,12 @@ static const char* objTypeName(ObjType type) {
         return "error";
     case ObjType::DEFERRED_CALL:
         return "deferred_call";
+    case ObjType::SOCKET:
+        return "socket";
+    case ObjType::SERVER:
+        return "server";
+    case ObjType::PROCESS:
+        return "process";
     }
     return "?";
 }
@@ -272,6 +278,15 @@ void MemoryManager::traceObject(Obj* obj) {
         }
         break;
     }
+    case ObjType::SOCKET:
+        markObject(static_cast<ObjSocket*>(obj)->klass);
+        break;
+    case ObjType::SERVER:
+        markObject(static_cast<ObjServer*>(obj)->klass);
+        break;
+    case ObjType::PROCESS:
+        markObject(static_cast<ObjProcess*>(obj)->klass);
+        break;
     }
 }
 
@@ -315,6 +330,12 @@ static std::size_t objAllocatedSize(Obj* obj) {
         return sizeof(ObjError);
     case ObjType::DEFERRED_CALL:
         return sizeof(ObjDeferredCall);
+    case ObjType::SOCKET:
+        return sizeof(ObjSocket);
+    case ObjType::SERVER:
+        return sizeof(ObjServer);
+    case ObjType::PROCESS:
+        return sizeof(ObjProcess);
     }
     return 0;
 }

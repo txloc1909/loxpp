@@ -13,6 +13,8 @@
 #include "stdlib/math_module.h"
 #include "stdlib/os_api.h"
 #include "stdlib/reflect_api.h"
+#include "stdlib/net_api.h"
+#include "stdlib/process_api.h"
 
 #include <cmath>
 #include <cstdarg>
@@ -704,6 +706,10 @@ void Runtime::defineNatives() {
     registerMath(reg);
     registerOSAPI(reg, m_mapClass);
     registerReflectAPI(reg);
+    NetClasses net = registerNetAPI(reg);
+    m_socketClass = net.socket;
+    m_serverClass = net.server;
+    m_processClass = registerProcessAPI(reg, m_mapClass);
 }
 
 void Runtime::runtimeError(const char* format, ...) {
@@ -1044,6 +1050,36 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
         return callNative(asObjNative(as<Obj*>(method)), argCount,
                           stopAtFrameCount);
     }
+    if (isSocket(receiver)) {
+        Value method;
+        if (!m_socketClass->methods.get(name, method)) {
+            runtimeError("Undefined method '%s' on socket.",
+                         name->chars.c_str());
+            return OpResult::Fatal;
+        }
+        return callNative(asObjNative(as<Obj*>(method)), argCount,
+                          stopAtFrameCount);
+    }
+    if (isServer(receiver)) {
+        Value method;
+        if (!m_serverClass->methods.get(name, method)) {
+            runtimeError("Undefined method '%s' on server.",
+                         name->chars.c_str());
+            return OpResult::Fatal;
+        }
+        return callNative(asObjNative(as<Obj*>(method)), argCount,
+                          stopAtFrameCount);
+    }
+    if (isProcess(receiver)) {
+        Value method;
+        if (!m_processClass->methods.get(name, method)) {
+            runtimeError("Undefined method '%s' on process.",
+                         name->chars.c_str());
+            return OpResult::Fatal;
+        }
+        return callNative(asObjNative(as<Obj*>(method)), argCount,
+                          stopAtFrameCount);
+    }
     return fromThrow(raiseThrowableError("InvalidReceiverError",
                                          "Method called on invalid receiver.",
                                          stopAtFrameCount));
@@ -1088,6 +1124,45 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
         ObjBoundNative* bound =
             m_mm.create<ObjBoundNative>(peek(0), asObjNative(as<Obj*>(method)));
         pop(); // map
+        push(Value{static_cast<Obj*>(bound)});
+        return OpResult::OK;
+    }
+    if (isSocket(peek(0))) {
+        Value method;
+        if (!m_socketClass->methods.get(name, method)) {
+            runtimeError("Undefined property '%s' on socket.",
+                         name->chars.c_str());
+            return OpResult::Fatal;
+        }
+        ObjBoundNative* bound =
+            m_mm.create<ObjBoundNative>(peek(0), asObjNative(as<Obj*>(method)));
+        pop(); // socket
+        push(Value{static_cast<Obj*>(bound)});
+        return OpResult::OK;
+    }
+    if (isServer(peek(0))) {
+        Value method;
+        if (!m_serverClass->methods.get(name, method)) {
+            runtimeError("Undefined property '%s' on server.",
+                         name->chars.c_str());
+            return OpResult::Fatal;
+        }
+        ObjBoundNative* bound =
+            m_mm.create<ObjBoundNative>(peek(0), asObjNative(as<Obj*>(method)));
+        pop(); // server
+        push(Value{static_cast<Obj*>(bound)});
+        return OpResult::OK;
+    }
+    if (isProcess(peek(0))) {
+        Value method;
+        if (!m_processClass->methods.get(name, method)) {
+            runtimeError("Undefined property '%s' on process.",
+                         name->chars.c_str());
+            return OpResult::Fatal;
+        }
+        ObjBoundNative* bound =
+            m_mm.create<ObjBoundNative>(peek(0), asObjNative(as<Obj*>(method)));
+        pop(); // process
         push(Value{static_cast<Obj*>(bound)});
         return OpResult::OK;
     }
