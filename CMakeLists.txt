@@ -266,14 +266,16 @@ target_include_directories(loxpp_isocline PRIVATE third_party/isocline/include)
 target_include_directories(loxpp PRIVATE third_party/isocline/include)
 target_link_libraries(loxpp PRIVATE loxpp_isocline)
 
-# The QBE code generator and its --target qbe front end. Default ON so the
-# shipped binary can compile to a native executable; OFF drops --target qbe
-# and the emitter for a build that wants the native VM only. The emitter is
-# compiled into the loxpp executable, not loxpp_core, so the standalone
-# qbe_emit_probe/qbe_emit_program checkpoint tools keep their own copies
-# without a duplicate-symbol clash when linking loxpp_core's objects.
+# The QBE code generator and its --target qbe front end. It defaults to
+# LOXPP_NAN_TAGGING because the emitter reads the NaN-tagged Value bit layout
+# directly (Q6, notes/qbe-backend.md); a std::variant build cannot compile
+# it. The emitter is compiled into the loxpp executable, not loxpp_core, so
+# the standalone qbe_emit_probe/qbe_emit_program checkpoint tools keep their
+# own copies without a duplicate-symbol clash when linking loxpp_core's
+# objects.
 option(LOXPP_QBE_BACKEND
-    "Build the QBE code generator and --target qbe front end" ON)
+    "Build the QBE code generator and --target qbe front end"
+    ${LOXPP_NAN_TAGGING})
 if(LOXPP_QBE_BACKEND)
     target_sources(loxpp PRIVATE
         src/backend/qbe_emitter.cpp

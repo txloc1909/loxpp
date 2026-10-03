@@ -46,7 +46,8 @@
       "inherits": "debug",
       "description": "Debug build with the portable std::variant Value",
       "cacheVariables": {
-        "LOXPP_NAN_TAGGING": "OFF"
+        "LOXPP_NAN_TAGGING": "OFF",
+        "LOXPP_QBE_BACKEND": "OFF"
       }
     },
     {
@@ -54,7 +55,8 @@
       "inherits": "release",
       "description": "Release build with the portable std::variant Value",
       "cacheVariables": {
-        "LOXPP_NAN_TAGGING": "OFF"
+        "LOXPP_NAN_TAGGING": "OFF",
+        "LOXPP_QBE_BACKEND": "OFF"
       }
     },
     {
