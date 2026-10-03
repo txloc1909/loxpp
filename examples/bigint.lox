@@ -11,11 +11,14 @@
 // `__eq__`.
 //
 // Operands of `+`, `*`, and the comparisons may be a BigInt or a whole
-// Number. Lox++ has no reflected operators, so `2 + big` does not work;
-// write `big + 2`.
+// Number, on either side: the reflected methods (`__radd__` and friends)
+// defer `2 + big` to the BigInt on the right when the Number built-in does
+// not apply.
 //
 // Demonstrates: operator overloading (__add__ __sub__ __mul__ __neg__ __lt__
-//               __gt__ __eq__ __str__ __hash__), Number and instance map keys.
+//               __gt__ __eq__ __str__ __hash__, with reflected __radd__
+//               __rsub__ __rmul__ __rlt__ __rgt__), Number and instance map
+//               keys, and reflected equality via __eq__.
 
 var BASE = 10000000;
 
@@ -211,6 +214,22 @@ class BigInt {
         return BigInt(magMul(this.mag, b.mag), this.neg != b.neg);
     }
 
+    // Reflected forms: the left operand is a Number, so the built-in branch
+    // does not apply and dispatch lands here with `o` the Number. Delegate to
+    // the ordinary method with the Number promoted, so the left operand ends
+    // up on the left as these operators require.
+    __radd__(o) {
+        return toBig(o) + this;
+    }
+
+    __rsub__(o) {
+        return toBig(o) - this;
+    }
+
+    __rmul__(o) {
+        return toBig(o) * this;
+    }
+
     __neg__() {
         return BigInt(this.mag[0:len(this.mag)], !this.neg);
     }
@@ -229,6 +248,16 @@ class BigInt {
         var c = magCmp(this.mag, b.mag);
         if (this.neg) return c < 0;
         return c > 0;
+    }
+
+    // Reflected comparisons: `2 < big` arrives as `big.__rlt__(2)` and must
+    // compute `2 < big`. Promote the Number and delegate to __lt__/__gt__.
+    __rlt__(o) {
+        return toBig(o) < this;
+    }
+
+    __rgt__(o) {
+        return toBig(o) > this;
     }
 
     __eq__(o) {
@@ -324,6 +353,13 @@ print bigFromNumber(1000000000) + bigFromNumber(999999999);
 print bigFromNumber(123456) * bigFromNumber(654321);
 // CHECK: 1000000000000000
 print bigPow(bigFromNumber(10), 15);
+// Reflected: a Number on the left defers to the BigInt on the right.
+// CHECK: 3
+print 2 + bigFromNumber(1);
+// CHECK: -7
+print 2 - bigFromNumber(9);
+// CHECK: 6
+print 2 * bigFromNumber(3);
 
 // CHECK: === Comparison ===
 print "";
@@ -338,6 +374,13 @@ print bigFromNumber(10) <= bigFromNumber(10);
 print bigFromString("99999999999999999999") > bigFromString("9999999999999999999");
 // CHECK: true
 print bigFromString("100") == bigFromNumber(100);
+// Reflected comparisons and equality: Number on the left.
+// CHECK: true
+print 1 < bigFromNumber(2);
+// CHECK: false
+print 1 > bigFromNumber(2);
+// CHECK: true
+print 1 == bigFromNumber(1);
 
 // CHECK: === Map keys ===
 print "";

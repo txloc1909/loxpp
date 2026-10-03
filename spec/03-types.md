@@ -169,13 +169,13 @@ Any other type as a key is a **runtime error**. NaN is explicitly rejected even
 though it is a Number, because `NaN != NaN` makes it impossible to reliably
 retrieve a value stored under it.
 
-Keys are looked up by **value equality** (the same semantics as `==`): any two
-values that compare equal under `==` map to the same slot. For an Instance key,
-the map calls `__hash__` to place the key, and resolves a collision with
-`__eq__` on the **stored** key against the lookup key. A class must keep
-`__hash__` consistent with `__eq__`: two keys that compare equal must return
-the same `__hash__`. A class that breaks this contract gives undefined lookup
-results.
+Keys are looked up by **value equality**: scalars and Strings compare by value,
+and an Instance key uses its own `__eq__`. For an Instance key, the map calls
+`__hash__` to place the key, and resolves a collision with `__eq__` on the
+**stored** key against the lookup key — never a reflected method. A class must
+keep `__hash__` consistent with `__eq__`: two keys that compare equal must
+return the same `__hash__`. A class that breaks this contract gives undefined
+lookup results.
 
 Values are accessed and mutated by key using `[]` notation:
 
@@ -297,13 +297,14 @@ The `==` and `!=` operators compare two values.
     equality: two values are equal only if they are the exact same object
 
 Equality never produces a runtime error regardless of the types being compared,
-**except** that an Instance whose class defines `__eq__` dispatches to it (see
-[§04-semantics, Operator Overloading](04-semantics.md#operator-overloading)),
+**except** that an Instance dispatches to its class's `__eq__` — the left
+operand's first, then the right operand's as the reflected method (see
+[§04-semantics, Operator Overloading](04-semantics.md#operator-overloading)) —
 and a `__eq__` that does not return a Boolean raises a catchable
 `OperatorResultTypeError`. Internal equality (`in` against a List and
 `list.remove`) always uses identity equality and never consults `__eq__`.
-Map-key equality is different: an Instance key dispatches `__eq__` (see the Map
-section above).
+Map-key equality is different and never uses a reflected method: an Instance
+key dispatches its own `__eq__` (see the Map section above).
 
 ---
 

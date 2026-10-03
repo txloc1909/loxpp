@@ -797,12 +797,14 @@ void Runtime::resetStack() {
 }
 
 void Runtime::initProtocolNames() {
-    const char* names[] = {"__add__",       "__sub__",  "__mul__",
-                           "__div__",       "__mod__",  "__neg__",
-                           "__lt__",        "__gt__",   "__eq__",
-                           "__contains__",  "__call__", "__index_get__",
-                           "__index_set__", "__len__",  "__iter__",
-                           "__slice__",     "__hash__", "__str__"};
+    const char* names[] = {
+        "__add__",      "__radd__", "__sub__",       "__rsub__",
+        "__mul__",      "__rmul__", "__div__",       "__rdiv__",
+        "__mod__",      "__rmod__", "__neg__",       "__lt__",
+        "__rlt__",      "__gt__",   "__rgt__",       "__eq__",
+        "__contains__", "__call__", "__index_get__", "__index_set__",
+        "__len__",      "__iter__", "__slice__",     "__hash__",
+        "__str__"};
     for (std::size_t i = 0; i < m_protocolNames.size(); i++) {
         m_protocolNames[i] = m_mm.makeString(names[i]);
     }
@@ -836,6 +838,47 @@ Runtime::tryBinaryMethodBool(Protocol proto, int stopAtFrameCount) {
             m_protocolNames[static_cast<std::size_t>(proto)], method)) {
         return std::nullopt;
     }
+    return dispatchMethod(asObjClosure(as<Obj*>(method)), 1, stopAtFrameCount,
+                          ResultCheck::Boolean);
+}
+
+std::optional<Runtime::OpResult>
+Runtime::tryReflectedBinaryMethod(Protocol proto, int stopAtFrameCount) {
+    Value right = peek(0);
+    if (!isInstance(right)) {
+        return std::nullopt;
+    }
+    ObjInstance* instance = asObjInstance(as<Obj*>(right));
+    Value method;
+    if (!instance->klass->methods.get(
+            m_protocolNames[static_cast<std::size_t>(proto)], method)) {
+        return std::nullopt;
+    }
+    // Swap so the right operand is the receiver (slot 0) and the left operand
+    // the argument (slot 1); both values stay on the stack, so the swap is
+    // GC-safe.
+    Value left = peek(1);
+    stackTop[-2] = right;
+    stackTop[-1] = left;
+    return dispatchMethod(asObjClosure(as<Obj*>(method)), 1, stopAtFrameCount,
+                          ResultCheck::None);
+}
+
+std::optional<Runtime::OpResult>
+Runtime::tryReflectedBinaryMethodBool(Protocol proto, int stopAtFrameCount) {
+    Value right = peek(0);
+    if (!isInstance(right)) {
+        return std::nullopt;
+    }
+    ObjInstance* instance = asObjInstance(as<Obj*>(right));
+    Value method;
+    if (!instance->klass->methods.get(
+            m_protocolNames[static_cast<std::size_t>(proto)], method)) {
+        return std::nullopt;
+    }
+    Value left = peek(1);
+    stackTop[-2] = right;
+    stackTop[-1] = left;
     return dispatchMethod(asObjClosure(as<Obj*>(method)), 1, stopAtFrameCount,
                           ResultCheck::Boolean);
 }
@@ -2002,6 +2045,9 @@ Runtime::OpResult Runtime::opAdd(int stopAtFrameCount) {
     if (auto r = tryBinaryMethod(Protocol::Add, stopAtFrameCount)) {
         return *r;
     }
+    if (auto r = tryReflectedBinaryMethod(Protocol::RAdd, stopAtFrameCount)) {
+        return *r;
+    }
     return fromThrow(raiseThrowableError(
         "ConcatenationTypeError",
         "Operands must be two numbers, two strings, or a string and a number.",
@@ -2012,6 +2058,9 @@ Runtime::OpResult Runtime::opSubtract(int stopAtFrameCount) {
     if (auto r = tryBinaryMethod(Protocol::Sub, stopAtFrameCount)) {
         return *r;
     }
+    if (auto r = tryReflectedBinaryMethod(Protocol::RSub, stopAtFrameCount)) {
+        return *r;
+    }
     return fromThrow(raiseThrowableError(
         "ArithmeticTypeError", "Operands must be numbers.", stopAtFrameCount));
 }
@@ -2020,12 +2069,18 @@ Runtime::OpResult Runtime::opMultiply(int stopAtFrameCount) {
     if (auto r = tryBinaryMethod(Protocol::Mul, stopAtFrameCount)) {
         return *r;
     }
+    if (auto r = tryReflectedBinaryMethod(Protocol::RMul, stopAtFrameCount)) {
+        return *r;
+    }
     return fromThrow(raiseThrowableError(
         "ArithmeticTypeError", "Operands must be numbers.", stopAtFrameCount));
 }
 
 Runtime::OpResult Runtime::opDivide(int stopAtFrameCount) {
     if (auto r = tryBinaryMethod(Protocol::Div, stopAtFrameCount)) {
+        return *r;
+    }
+    if (auto r = tryReflectedBinaryMethod(Protocol::RDiv, stopAtFrameCount)) {
         return *r;
     }
     return fromThrow(raiseThrowableError(
@@ -2048,6 +2103,9 @@ Runtime::OpResult Runtime::opModulo(int stopAtFrameCount) {
         return OpResult::OK;
     }
     if (auto r = tryBinaryMethod(Protocol::Mod, stopAtFrameCount)) {
+        return *r;
+    }
+    if (auto r = tryReflectedBinaryMethod(Protocol::RMod, stopAtFrameCount)) {
         return *r;
     }
     return fromThrow(raiseThrowableError(
@@ -2086,6 +2144,10 @@ Runtime::OpResult Runtime::opLess(int stopAtFrameCount) {
     if (auto r = tryBinaryMethodBool(Protocol::Lt, stopAtFrameCount)) {
         return *r;
     }
+    if (auto r =
+            tryReflectedBinaryMethodBool(Protocol::RLt, stopAtFrameCount)) {
+        return *r;
+    }
     return fromThrow(raiseThrowableError(
         "ComparisonTypeError", "Operands must be numbers.", stopAtFrameCount));
 }
@@ -2104,6 +2166,10 @@ Runtime::OpResult Runtime::opGreater(int stopAtFrameCount) {
     if (auto r = tryBinaryMethodBool(Protocol::Gt, stopAtFrameCount)) {
         return *r;
     }
+    if (auto r =
+            tryReflectedBinaryMethodBool(Protocol::RGt, stopAtFrameCount)) {
+        return *r;
+    }
     return fromThrow(raiseThrowableError(
         "ComparisonTypeError", "Operands must be numbers.", stopAtFrameCount));
 }
@@ -2112,6 +2178,9 @@ Runtime::OpResult Runtime::opEqual(int stopAtFrameCount) {
     Value b = peek(0);
     Value a = peek(1);
     if (auto r = tryBinaryMethodBool(Protocol::Eq, stopAtFrameCount)) {
+        return *r;
+    }
+    if (auto r = tryReflectedBinaryMethodBool(Protocol::Eq, stopAtFrameCount)) {
         return *r;
     }
     pop();

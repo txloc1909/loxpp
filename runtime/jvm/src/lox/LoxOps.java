@@ -166,6 +166,10 @@ public final class LoxOps {
         if (dunder != null) {
             return dunder.callAsSelf(a, new Object[] {b});
         }
+        dunder = findDunder(b, "__radd__");
+        if (dunder != null) {
+            return dunder.callAsSelf(b, new Object[] {a});
+        }
         throw makeError(
             "ConcatenationTypeError",
             "Operands must be two numbers, two strings, or a string and a number.");
@@ -179,6 +183,10 @@ public final class LoxOps {
         if (dunder != null) {
             return dunder.callAsSelf(a, new Object[] {b});
         }
+        dunder = findDunder(b, "__rsub__");
+        if (dunder != null) {
+            return dunder.callAsSelf(b, new Object[] {a});
+        }
         checkNumbers(a, b);
         throw new AssertionError("checkNumbers must throw");
     }
@@ -191,6 +199,10 @@ public final class LoxOps {
         if (dunder != null) {
             return dunder.callAsSelf(a, new Object[] {b});
         }
+        dunder = findDunder(b, "__rmul__");
+        if (dunder != null) {
+            return dunder.callAsSelf(b, new Object[] {a});
+        }
         checkNumbers(a, b);
         throw new AssertionError("checkNumbers must throw");
     }
@@ -202,6 +214,10 @@ public final class LoxOps {
         LoxClosure dunder = findDunder(a, "__div__");
         if (dunder != null) {
             return dunder.callAsSelf(a, new Object[] {b});
+        }
+        dunder = findDunder(b, "__rdiv__");
+        if (dunder != null) {
+            return dunder.callAsSelf(b, new Object[] {a});
         }
         checkNumbers(a, b);
         throw new AssertionError("checkNumbers must throw");
@@ -224,6 +240,10 @@ public final class LoxOps {
         LoxClosure dunder = findDunder(a, "__mod__");
         if (dunder != null) {
             return dunder.callAsSelf(a, new Object[] {b});
+        }
+        dunder = findDunder(b, "__rmod__");
+        if (dunder != null) {
+            return dunder.callAsSelf(b, new Object[] {a});
         }
         checkNumbers(a, b);
         throw new AssertionError("checkNumbers must throw");
@@ -261,6 +281,11 @@ public final class LoxOps {
         LoxClosure dunder = findDunder(a, "__eq__");
         if (dunder != null) {
             return checkBooleanResult(dunder.callAsSelf(a, new Object[] {b}));
+        }
+        // Reflected __eq__ on the right operand.
+        dunder = findDunder(b, "__eq__");
+        if (dunder != null) {
+            return checkBooleanResult(dunder.callAsSelf(b, new Object[] {a}));
         }
         return identityEqual(a, b);
     }
@@ -309,6 +334,10 @@ public final class LoxOps {
         if (dunder != null) {
             return checkBooleanResult(dunder.callAsSelf(a, new Object[] {b}));
         }
+        dunder = findDunder(b, "__rgt__");
+        if (dunder != null) {
+            return checkBooleanResult(dunder.callAsSelf(b, new Object[] {a}));
+        }
         checkNumbersForComparison(a, b);
         throw new AssertionError("checkNumbersForComparison must throw");
     }
@@ -323,6 +352,10 @@ public final class LoxOps {
         LoxClosure dunder = findDunder(a, "__lt__");
         if (dunder != null) {
             return checkBooleanResult(dunder.callAsSelf(a, new Object[] {b}));
+        }
+        dunder = findDunder(b, "__rlt__");
+        if (dunder != null) {
+            return checkBooleanResult(dunder.callAsSelf(b, new Object[] {a}));
         }
         checkNumbersForComparison(a, b);
         throw new AssertionError("checkNumbersForComparison must throw");
@@ -380,9 +413,18 @@ public final class LoxOps {
             && findDunder(key, "__eq__") != null;
     }
 
-    /** Key equality for a Map: the stored key's __eq__ (or identity fallback). */
+    /**
+     * Key equality for a Map: the stored key's __eq__ (or identity fallback).
+     * Unlike {@link #equal}, it never consults the lookup key's reflected
+     * __eq__: a map collision runs only the stored key's method, matching
+     * src/runtime.cpp's mapKeyEq and spec/04-semantics.md's Map rule.
+     */
     static boolean keyEquals(Object stored, Object lookup) {
-        return equal(stored, lookup);
+        LoxClosure dunder = findDunder(stored, "__eq__");
+        if (dunder != null) {
+            return checkBooleanResult(dunder.callAsSelf(stored, new Object[] {lookup}));
+        }
+        return identityEqual(stored, lookup);
     }
 
     /**

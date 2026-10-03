@@ -422,3 +422,120 @@ TEST(OperatorOverload, ThrownInstanceReportsStrResult) {
     ASSERT_EQ(r, InterpretResult::RUNTIME_ERROR);
     EXPECT_NE(err.find("CUSTOM"), std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// Reflected methods (issue #508): a built-in left operand defers to the right
+// operand's __r*__ method when the left has no method.
+// ---------------------------------------------------------------------------
+
+TEST(OperatorOverload, ReflectedArithmeticDispatch) {
+    VMTestHarness h;
+    std::string src = "class V { init(x) { this.x = x; }"
+                      "  __radd__(o) { return o + this.x; }"
+                      "  __rsub__(o) { return o - this.x; }"
+                      "  __rmul__(o) { return o * this.x; }"
+                      "  __rdiv__(o) { return o / this.x; }"
+                      "  __rmod__(o) { return o % this.x; }"
+                      "}"
+                      "var add = 10 + V(3);"
+                      "var sub = 10 - V(3);"
+                      "var mul = 10 * V(3);"
+                      "var div = 10 / V(4);"
+                      "var mod = 10 % V(3);";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("add"), "13");
+    EXPECT_EQ(h.getGlobalStr("sub"), "7");
+    EXPECT_EQ(h.getGlobalStr("mul"), "30");
+    EXPECT_EQ(h.getGlobalStr("div"), "2.5");
+    EXPECT_EQ(h.getGlobalStr("mod"), "1");
+}
+
+TEST(OperatorOverload, ReflectedComparisonDispatch) {
+    VMTestHarness h;
+    std::string src = "class V { init(x) { this.x = x; }"
+                      "  __rlt__(o) { return o < this.x; }"
+                      "  __rgt__(o) { return o > this.x; }"
+                      "}"
+                      "var lt = 2 < V(3);"
+                      "var gt = 2 > V(3);"
+                      "var le = 2 <= V(3);"
+                      "var ge = 2 >= V(3);"
+                      "var le_eq = 3 <= V(3);"
+                      "var ge_eq = 3 >= V(3);";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("lt"), "true");
+    EXPECT_EQ(h.getGlobalStr("gt"), "false");
+    EXPECT_EQ(h.getGlobalStr("le"), "true");    // !(2 > 3)
+    EXPECT_EQ(h.getGlobalStr("ge"), "false");   // !(2 < 3)
+    EXPECT_EQ(h.getGlobalStr("le_eq"), "true"); // !(3 > 3)
+    EXPECT_EQ(h.getGlobalStr("ge_eq"), "true"); // !(3 < 3)
+}
+
+TEST(OperatorOverload, ReflectedEqualityDispatch) {
+    VMTestHarness h;
+    std::string src = "class V { init(x) { this.x = x; }"
+                      "  __eq__(o) { return o == this.x; }"
+                      "}"
+                      "var eq = 2 == V(2);"
+                      "var ne = 2 == V(3);"
+                      "var nq = 2 != V(2);"
+                      "var nn = 2 != V(3);";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("eq"), "true");
+    EXPECT_EQ(h.getGlobalStr("ne"), "false");
+    EXPECT_EQ(h.getGlobalStr("nq"), "false"); // derives from reflected __eq__
+    EXPECT_EQ(h.getGlobalStr("nn"), "true");
+}
+
+// The left operand's own method wins over the right operand's reflected one.
+TEST(OperatorOverload, LeftMethodWinsOverReflected) {
+    VMTestHarness h;
+    std::string src = "class V { init(x) { this.x = x; }"
+                      "  __add__(o) { return \"L\"; }"
+                      "  __radd__(o) { return \"R\"; }"
+                      "}"
+                      "var both = V(1) + V(2);" // left __add__
+                      "var left = V(1) + 5;"    // left __add__
+                      "var right = 5 + V(1);";  // right __radd__
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("both"), "L");
+    EXPECT_EQ(h.getGlobalStr("left"), "L");
+    EXPECT_EQ(h.getGlobalStr("right"), "R");
+}
+
+// A built-in left operand with a right Instance that lacks the reflected
+// method falls back to the same error as before (equality never errors).
+TEST(OperatorOverload, ReflectedMissingMethodRaisesSameError) {
+    VMTestHarness h;
+    std::string src = "class V {}"
+                      "var kind1; var kind2;"
+                      "try { var r = 1 + V(); } catch (e) { kind1 = e.kind; }"
+                      "try { var r = 1 < V(); } catch (e) { kind2 = e.kind; }"
+                      "var eq = 1 == V();";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind1"), "ConcatenationTypeError");
+    EXPECT_EQ(h.getGlobalStr("kind2"), "ComparisonTypeError");
+    EXPECT_EQ(h.getGlobalStr("eq"), "false");
+}
+
+TEST(OperatorOverload, ReflectedNonBooleanResultRaises) {
+    VMTestHarness h;
+    std::string src =
+        "class V { __rlt__(o) { return 1; } __eq__(o) { return 42; } }"
+        "var kind1; var kind2;"
+        "try { var r = 1 < V(); } catch (e) { kind1 = e.kind; }"
+        "try { var r = 1 == V(); } catch (e) { kind2 = e.kind; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind1"), "OperatorResultTypeError");
+    EXPECT_EQ(h.getGlobalStr("kind2"), "OperatorResultTypeError");
+}
+
+// A field named like a reflected method never participates in dispatch.
+TEST(OperatorOverload, ReflectedFieldNamedLikeMethodDoesNotDispatch) {
+    VMTestHarness h;
+    std::string src = "class V { init() { this.__radd__ = 99; } }"
+                      "var kind;"
+                      "try { var r = 1 + V(); } catch (e) { kind = e.kind; }";
+    ASSERT_EQ(h.run(src), InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "ConcatenationTypeError");
+}

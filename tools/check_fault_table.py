@@ -263,6 +263,15 @@ CATCHABLE_ROWS = [
         setup="class C { __eq__(o) { return 42; } }\n",
         expected_kind="OperatorResultTypeError",
     ),
+    # Reflected operator result validation (issue #508): the right operand's
+    # reflected comparison method returned a non-Boolean.
+    Row(
+        "reflected_operator_result_type_error",
+        "caught",
+        "1 < C();",
+        setup="class C { __rlt__(o) { return 42; } }\n",
+        expected_kind="OperatorResultTypeError",
+    ),
     # An operator method whose result must be a Number returned something else
     # (issue #469; #472 added the Boolean case above).
     Row(
@@ -785,6 +794,9 @@ CATCHABLE_REGRESSION_ROWS = {
     # Issue #405: same cause, found while draining defers during an
     # already-in-flight throw instead of a normal return.
     "arity_error_deferred_call_during_throw",
+    # Issue #508: the right operand's reflected comparison method returned a
+    # non-Boolean, sharing operator_result_type_error's spec row.
+    "reflected_operator_result_type_error",
 }
 
 FATAL_REGRESSION_ROWS = {

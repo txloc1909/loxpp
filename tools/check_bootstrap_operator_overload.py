@@ -276,6 +276,59 @@ CASES = [
         "}\n"
         "print callMethod(C(10), \"add\", 5);\n",
     ),
+    # Reflected methods (issue #508): a built-in left operand defers to the
+    # right operand's __r*__ method, and to the right operand's __eq__ for
+    # equality. <= and >= derive from the reflected __rgt__/__rlt__.
+    Case(
+        "reflected_arithmetic",
+        "class R {\n"
+        "  init(x) { this.x = x; }\n"
+        "  __radd__(o) { return o + this.x; }\n"
+        "  __rsub__(o) { return o - this.x; }\n"
+        "  __rmul__(o) { return o * this.x; }\n"
+        "  __rdiv__(o) { return o / this.x; }\n"
+        "  __rmod__(o) { return o % this.x; }\n"
+        "}\n"
+        "print 10 + R(3);\n"
+        "print 10 - R(3);\n"
+        "print 10 * R(3);\n"
+        "print 10 / R(4);\n"
+        "print 10 % R(3);\n",
+    ),
+    Case(
+        "reflected_comparison_equality",
+        "class R {\n"
+        "  init(x) { this.x = x; }\n"
+        "  __rlt__(o) { return o < this.x; }\n"
+        "  __rgt__(o) { return o > this.x; }\n"
+        "  __eq__(o) { return o == this.x; }\n"
+        "}\n"
+        "print 2 < R(3);\n"
+        "print 2 > R(3);\n"
+        "print 2 <= R(3);\n"
+        "print 2 >= R(3);\n"
+        "print 2 == R(2);\n"
+        "print 2 != R(2);\n",
+    ),
+    # The left operand's own method wins over the right operand's reflected
+    # one.
+    Case(
+        "reflected_left_wins",
+        "class R {\n"
+        "  init(x) { this.x = x; }\n"
+        "  __add__(o) { return \"L\"; }\n"
+        "  __radd__(o) { return \"R\"; }\n"
+        "}\n"
+        "print R(1) + R(2);\n"
+        "print 5 + R(1);\n",
+    ),
+    # A reflected comparison that returns a non-Boolean raises the catchable
+    # OperatorResultTypeError.
+    Case(
+        "reflected_result_type",
+        "class R { __rlt__(o) { return 1; } }\n"
+        "try { var x = 1 < R(); } catch (e) { print e.kind; }\n",
+    ),
 ]
 
 
