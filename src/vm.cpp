@@ -187,6 +187,13 @@ InterpretResult VM::run(int stopAtFrameCount) {
 
 #ifdef LOXPP_DEBUG_TRACE_EXECUTION
         {
+            // The stack dump is an internal stringify, so it must not dispatch
+            // __str__ (object.cpp's INSTANCE case). While an outer print/str
+            // runs, the canonical depth is > 0; without this the dump would
+            // re-enter the user's own __str__ once per traced instruction and
+            // recurse, because the method's frame is still on this stack.
+            const int savedCanonicalDepth = m_rt.m_stringifyCanonicalDepth;
+            m_rt.m_stringifyCanonicalDepth = 0;
             int currentOffset = static_cast<int>(ip - chunk->cbegin());
             bool color = isatty(STDOUT_FILENO) != 0;
             std::printf("[line %d] ", chunk->getLine(currentOffset));
@@ -199,6 +206,7 @@ InterpretResult VM::run(int stopAtFrameCount) {
             std::printf("\n");
             disassembleInstruction(*chunk, m_rt.m_mm, currentOffset, std::cout,
                                    color);
+            m_rt.m_stringifyCanonicalDepth = savedCanonicalDepth;
         }
 #endif
 

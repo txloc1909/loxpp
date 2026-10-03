@@ -1,0 +1,496 @@
+// json.lox — A JSON parser and serializer with a user-defined value type.
+//
+// Lox++ has no JSON library. This example builds one in the language: a
+// recursive-descent parser turns text into Lists, Maps-free JObject values,
+// and scalars, and a `Json` wrapper makes the result a first-class value.
+//
+// `Json` overloads `str` (canonical JSON), `==` (deep, order-independent for
+// objects, as JSON requires), `[]` (path access), `len`, `in`, and `for-in`.
+// An object keeps its keys in insertion order, parallel to a Map for lookup,
+// so serialization is deterministic across backends.
+//
+// Out of scope, and why: `\uXXXX` needs `ord`/`chr`, which Lox++ lacks, so a
+// `\u` escape is a clean parse error; `\b` and `\f` need byte values that are
+// not writable as Lox++ string literals.
+//
+// Demonstrates: recursive __str__, deep __eq__, __index_get__, __len__,
+//               __contains__, __iter__, try/catch, recursive descent.
+
+var DIGITS = "0123456789";
+
+fun isDigit(c) {
+    if (c == "") return false;
+    return c in DIGITS;
+}
+
+fun digitValue(c) {
+    var i = 0;
+    while (i < 10) {
+        if (DIGITS[i] == c) return i;
+        i = i + 1;
+    }
+    return 0;
+}
+
+// ---------- JSON object with a deterministic key order ----------
+
+class JObject {
+    init() {
+        this.keys = [];
+        this.vals = {};
+    }
+
+    set(k, v) {
+        if (!this.vals.has(k)) this.keys.append(k);
+        this.vals[k] = v;
+    }
+}
+
+// ---------- serialization ----------
+
+fun quote(s) {
+    var out = "\"";
+    var i = 0;
+    while (i < len(s)) {
+        var c = s[i];
+        if (c == "\"") out = out + "\\\"";
+        else if (c == "\\") out = out + "\\\\";
+        else if (c == "\n") out = out + "\\n";
+        else if (c == "\t") out = out + "\\t";
+        else if (c == "\r") out = out + "\\r";
+        else out = out + c;
+        i = i + 1;
+    }
+    return out + "\"";
+}
+
+fun render(raw) {
+    if (raw == nil) return "null";
+    var t = type(raw);
+    if (t == "Boolean") {
+        if (raw) return "true";
+        return "false";
+    }
+    if (t == "Number") return str(raw);
+    if (t == "String") return quote(raw);
+    if (t == "List") {
+        var s = "[";
+        var i = 0;
+        while (i < len(raw)) {
+            if (i > 0) s = s + ",";
+            s = s + render(raw[i]);
+            i = i + 1;
+        }
+        return s + "]";
+    }
+    var o = raw;
+    var s = "{";
+    var i = 0;
+    while (i < len(o.keys)) {
+        if (i > 0) s = s + ",";
+        s = s + quote(o.keys[i]) + ":" + render(o.vals[o.keys[i]]);
+        i = i + 1;
+    }
+    return s + "}";
+}
+
+// ---------- deep equality (objects are unordered) ----------
+
+fun deepEqual(a, b) {
+    if (a == nil or b == nil) return a == nil and b == nil;
+    var t = type(a);
+    if (t != type(b)) return false;
+    if (t == "List") {
+        if (len(a) != len(b)) return false;
+        var i = 0;
+        while (i < len(a)) {
+            if (!deepEqual(a[i], b[i])) return false;
+            i = i + 1;
+        }
+        return true;
+    }
+    if (t == "Instance") {
+        if (len(a.keys) != len(b.keys)) return false;
+        var i = 0;
+        while (i < len(a.keys)) {
+            var k = a.keys[i];
+            if (!b.vals.has(k)) return false;
+            if (!deepEqual(a.vals[k], b.vals[k])) return false;
+            i = i + 1;
+        }
+        return true;
+    }
+    return a == b;
+}
+
+// ---------- number literal to Number ----------
+
+fun numberFromLexeme(s) {
+    var i = 0;
+    var neg = false;
+    if (s[0] == "-") {
+        neg = true;
+        i = 1;
+    }
+    var intPart = 0;
+    while (i < len(s) and isDigit(s[i])) {
+        intPart = intPart * 10 + digitValue(s[i]);
+        i = i + 1;
+    }
+    var frac = 0;
+    var scale = 1;
+    if (i < len(s) and s[i] == ".") {
+        i = i + 1;
+        while (i < len(s) and isDigit(s[i])) {
+            frac = frac * 10 + digitValue(s[i]);
+            scale = scale * 10;
+            i = i + 1;
+        }
+    }
+    var exp = 0;
+    if (i < len(s) and (s[i] == "e" or s[i] == "E")) {
+        i = i + 1;
+        var sign = 1;
+        if (i < len(s) and s[i] == "+") {
+            i = i + 1;
+        } else if (i < len(s) and s[i] == "-") {
+            sign = -1;
+            i = i + 1;
+        }
+        while (i < len(s) and isDigit(s[i])) {
+            exp = exp * 10 + digitValue(s[i]);
+            i = i + 1;
+        }
+        exp = exp * sign;
+    }
+    var v = intPart + frac / scale;
+    v = v * math.pow(10, exp);
+    if (neg) v = -v;
+    return v;
+}
+
+// ---------- the parser ----------
+
+class JsonParser {
+    init(text) {
+        this.text = text;
+        this.pos = 0;
+    }
+
+    parse() {
+        var v = this.parseValue();
+        this.skipWs();
+        if (this.pos != len(this.text)) this.fail("trailing data");
+        return Json(v);
+    }
+
+    fail(msg) {
+        throw "json error: " + msg;
+    }
+
+    atEnd() {
+        return this.pos >= len(this.text);
+    }
+
+    peek() {
+        if (this.atEnd()) return "";
+        return this.text[this.pos];
+    }
+
+    next() {
+        var c = this.text[this.pos];
+        this.pos = this.pos + 1;
+        return c;
+    }
+
+    skipWs() {
+        while (!this.atEnd()) {
+            var c = this.text[this.pos];
+            if (c == " " or c == "\n" or c == "\t" or c == "\r") {
+                this.pos = this.pos + 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    expectWord(w) {
+        var s = this.text[this.pos:this.pos + len(w)];
+        if (s != w) this.fail("bad literal");
+        this.pos = this.pos + len(w);
+    }
+
+    parseValue() {
+        this.skipWs();
+        if (this.atEnd()) this.fail("unexpected end");
+        var c = this.peek();
+        if (c == "{") return this.parseObject();
+        if (c == "[") return this.parseArray();
+        if (c == "\"") return this.parseString();
+        if (c == "t") {
+            this.expectWord("true");
+            return true;
+        }
+        if (c == "f") {
+            this.expectWord("false");
+            return false;
+        }
+        if (c == "n") {
+            this.expectWord("null");
+            return nil;
+        }
+        return this.parseNumber();
+    }
+
+    parseObject() {
+        this.next();
+        var obj = JObject();
+        this.skipWs();
+        if (this.peek() == "}") {
+            this.next();
+            return obj;
+        }
+        while (true) {
+            this.skipWs();
+            if (this.peek() != "\"") this.fail("expected key string");
+            var key = this.parseString();
+            this.skipWs();
+            if (this.peek() != ":") this.fail("expected ':'");
+            this.next();
+            obj.set(key, this.parseValue());
+            this.skipWs();
+            var c = this.peek();
+            if (c == ",") {
+                this.next();
+                continue;
+            }
+            if (c == "}") {
+                this.next();
+                return obj;
+            }
+            this.fail("expected ',' or '}'");
+        }
+    }
+
+    parseArray() {
+        this.next();
+        var arr = [];
+        this.skipWs();
+        if (this.peek() == "]") {
+            this.next();
+            return arr;
+        }
+        while (true) {
+            arr.append(this.parseValue());
+            this.skipWs();
+            var c = this.peek();
+            if (c == ",") {
+                this.next();
+                continue;
+            }
+            if (c == "]") {
+                this.next();
+                return arr;
+            }
+            this.fail("expected ',' or ']'");
+        }
+    }
+
+    parseString() {
+        this.next();
+        var out = "";
+        while (true) {
+            if (this.atEnd()) this.fail("unterminated string");
+            var c = this.next();
+            if (c == "\"") return out;
+            if (c != "\\") {
+                out = out + c;
+                continue;
+            }
+            if (this.atEnd()) this.fail("unterminated escape");
+            var e = this.next();
+            if (e == "\"") out = out + "\"";
+            else if (e == "\\") out = out + "\\";
+            else if (e == "/") out = out + "/";
+            else if (e == "n") out = out + "\n";
+            else if (e == "t") out = out + "\t";
+            else if (e == "r") out = out + "\r";
+            else this.fail("unsupported escape \\" + e);
+        }
+    }
+
+    parseNumber() {
+        var start = this.pos;
+        if (this.peek() == "-") this.next();
+        if (!isDigit(this.peek())) this.fail("expected number");
+        while (isDigit(this.peek())) this.next();
+        if (this.peek() == ".") {
+            this.next();
+            if (!isDigit(this.peek())) this.fail("expected digit");
+            while (isDigit(this.peek())) this.next();
+        }
+        if (this.peek() == "e" or this.peek() == "E") {
+            this.next();
+            if (this.peek() == "+" or this.peek() == "-") this.next();
+            if (!isDigit(this.peek())) this.fail("expected exponent");
+            while (isDigit(this.peek())) this.next();
+        }
+        var v = numberFromLexeme(this.text[start:this.pos]);
+        // JSON has no infinity or NaN. Reject a literal that overflows to
+        // one, so the serializer can never emit a non-JSON number.
+        if (v != v or v == math.inf or v == -math.inf) {
+            this.fail("number out of range");
+        }
+        return v;
+    }
+}
+
+fun parseJson(text) {
+    return JsonParser(text).parse();
+}
+
+// ---------- the value type ----------
+
+class Json {
+    init(raw) {
+        this.raw = raw;
+    }
+
+    __str__() {
+        return render(this.raw);
+    }
+
+    __eq__(o) {
+        if (type(o) != "Instance") return false;
+        // An object without a `raw` field is not a Json value; reading it
+        // raises, which is the only class-membership test Lox++ offers.
+        try {
+            return deepEqual(this.raw, o.raw);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    __index_get__(k) {
+        var r = this.raw;
+        if (type(r) == "Instance") return Json(r.vals[k]);
+        return Json(r[k]);
+    }
+
+    __len__() {
+        var t = type(this.raw);
+        if (t == "List" or t == "String") return len(this.raw);
+        if (t == "Instance") return len(this.raw.keys);
+        return 0;
+    }
+
+    __contains__(v) {
+        var r = this.raw;
+        if (type(r) == "Instance") return r.vals.has(v);
+        return v in r;
+    }
+
+    __iter__() {
+        var r = this.raw;
+        if (type(r) == "Instance") return r.keys[0:len(r.keys)];
+        return r[0:len(r)];
+    }
+}
+
+// ---------- demo ----------
+
+// CHECK: === JSON ===
+print "=== JSON ===";
+var text = "{\"name\":\"loxpp\",\"version\":2,\"tags\":[\"fast\",\"small\"],\"meta\":{\"stable\":true,\"score\":3.5}}";
+var doc = parseJson(text);
+// CHECK: {"name":"loxpp","version":2,"tags":["fast","small"],"meta":{"stable":true,"score":3.5}}
+print doc;
+
+// CHECK: === Path access ===
+print "";
+print "=== Path access ===";
+// CHECK: "loxpp"
+print doc["name"];
+// CHECK: 3.5
+print doc["meta"]["score"];
+// CHECK: "small"
+print doc["tags"][1];
+// CHECK: true
+print doc["meta"]["stable"];
+// CHECK: 4
+print len(doc);
+
+// CHECK: === Deep equality ===
+print "";
+print "=== Deep equality ===";
+// Object key order does not matter.
+// CHECK: true
+print parseJson("{\"a\":1,\"b\":2}") == parseJson("{\"b\":2,\"a\":1}");
+// CHECK: true
+print parseJson("[1,[2,3]]") == parseJson("[1,[2,3]]");
+// CHECK: false
+print parseJson("{\"a\":1}") == parseJson("{\"a\":2}");
+// CHECK: false
+print parseJson("1") == parseJson("\"1\"");
+
+// CHECK: === Values and iteration ===
+print "";
+print "=== Values and iteration ===";
+// CHECK: null
+print parseJson("null");
+// CHECK: [1,null,true]
+print parseJson("[1, null, true]");
+// CHECK: [-150,3,1.25]
+print parseJson("[-1.5e2, 3, 1.25]");
+// CHECK: "a\"b"
+print parseJson("\"a\\\"b\"");
+var sum = 0;
+for (var x in parseJson("[10,20,30]")) sum = sum + x;
+// CHECK: 60
+print sum;
+var keys = "";
+for (var k in parseJson("{\"x\":1,\"y\":2}")) keys = keys + k;
+// CHECK: xy
+print keys;
+
+// CHECK: === Errors ===
+print "";
+print "=== Errors ===";
+try {
+    parseJson("{bad}");
+} catch (e) {
+    // CHECK: json error: expected key string
+    print e;
+}
+try {
+    parseJson("\"\\u0041\"");
+} catch (e) {
+    // CHECK: json error: unsupported escape \u
+    print e;
+}
+try {
+    parseJson("[1,2");
+} catch (e) {
+    // CHECK: json error: expected ',' or ']'
+    print e;
+}
+// A literal that overflows a Number is rejected, so the serializer can never
+// emit a non-JSON number.
+try {
+    parseJson("1e999");
+} catch (e) {
+    // CHECK: json error: number out of range
+    print e;
+}
+try {
+    parseJson("0e999");
+} catch (e) {
+    // CHECK: json error: number out of range
+    print e;
+}
+try {
+    parseJson("-1e309");
+} catch (e) {
+    // CHECK: json error: number out of range
+    print e;
+}

@@ -1,0 +1,181 @@
+// set.lox — A Set type with operator-syntax algebra and user-defined keys.
+//
+// A set is a map with `true` values. The map does the membership work, so a
+// Set stores any valid Map key: Nil, Boolean, Number, String, or an instance
+// whose class defines both `__hash__` and `__eq__` (here, `Point`).
+//
+// Overloaded operators give the usual algebra: `a + b` union, `a * b`
+// intersection, `a - b` difference, `a == b` set equality, `x in a`
+// membership, `len(a)` size, and `for (x in a)` iteration.
+//
+// Two Lox++ rules shape this example and are worth knowing:
+//   - `in` against a List uses identity equality and never consults `__eq__`,
+//     so a Set cannot be List-backed. The demo prints that difference.
+//   - `__iter__` must return a List, String, or Map, so iteration is over a
+//     materialized key list, not a lazy stream.
+//
+// Demonstrates: __contains__, __len__, __iter__, __add__, __mul__, __sub__,
+//               __eq__, __str__, __hash__ on a user key.
+
+// Numeric keys are sorted so `print` is deterministic across backends.
+fun sortNums(xs) {
+    var i = 1;
+    while (i < len(xs)) {
+        var key = xs[i];
+        var j = i - 1;
+        while (j >= 0 and xs[j] > key) {
+            xs[j + 1] = xs[j];
+            j = j - 1;
+        }
+        xs[j + 1] = key;
+        i = i + 1;
+    }
+}
+
+class Set {
+    // `items` is any iterable: a List of elements, or another Set.
+    init(items) {
+        this.map = {};
+        for (var v in items) this.map[v] = true;
+    }
+
+    __len__() {
+        return len(this.map);
+    }
+
+    __contains__(v) {
+        return v in this.map;
+    }
+
+    __iter__() {
+        return this.map.keys();
+    }
+
+    __add__(o) {
+        var r = Set([]);
+        for (var k in this.map) r.map[k] = true;
+        for (var k in o.map) r.map[k] = true;
+        return r;
+    }
+
+    __mul__(o) {
+        var r = Set([]);
+        for (var k in this.map) {
+            if (k in o.map) r.map[k] = true;
+        }
+        return r;
+    }
+
+    __sub__(o) {
+        var r = Set([]);
+        for (var k in this.map) {
+            if (!(k in o.map)) r.map[k] = true;
+        }
+        return r;
+    }
+
+    __eq__(o) {
+        if (len(this.map) != len(o.map)) return false;
+        for (var k in this.map) {
+            if (!(k in o.map)) return false;
+        }
+        return true;
+    }
+
+    __str__() {
+        var xs = this.map.keys();
+        // sortNums orders Number keys. A non-Number key type has no total
+        // order in Lox++ (String has no `<`), so its keys keep map order.
+        try {
+            sortNums(xs);
+        } catch (e) {}
+        var s = "{";
+        var i = 0;
+        while (i < len(xs)) {
+            if (i > 0) s = s + ", ";
+            s = s + str(xs[i]);
+            i = i + 1;
+        }
+        return s + "}";
+    }
+}
+
+class Point {
+    init(x, y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    __hash__() {
+        return this.x * 1000003 + this.y;
+    }
+
+    __eq__(o) {
+        return this.x == o.x and this.y == o.y;
+    }
+
+    __str__() {
+        return "(" + str(this.x) + "," + str(this.y) + ")";
+    }
+}
+
+// ---------- demo ----------
+
+// CHECK: === Set algebra ===
+print "=== Set algebra ===";
+var s = Set([3, 1, 2, 2, 1]);
+// CHECK: 3
+print len(s);
+// CHECK: true
+print 2 in s;
+// CHECK: false
+print 9 in s;
+// CHECK: {1, 2, 3}
+print s;
+var total = 0;
+for (var n in s) total = total + n;
+// CHECK: 6
+print total;
+
+// CHECK: === Union, intersection, difference ===
+print "";
+print "=== Union, intersection, difference ===";
+var a = Set([1, 2, 3]);
+var b = Set([2, 3, 4]);
+// CHECK: 4
+print len(a + b);
+// CHECK: true
+print (a + b) == Set([1, 2, 3, 4]);
+// CHECK: {2, 3}
+print a * b;
+// CHECK: {1}
+print a - b;
+// CHECK: true
+print a == Set([3, 1, 2]);
+
+// CHECK: === User-defined keys ===
+print "";
+print "=== User-defined keys ===";
+var pts = Set([Point(1, 2), Point(1, 2), Point(3, 4)]);
+// CHECK: 2
+print len(pts);
+// CHECK: true
+print Point(1, 2) in pts;
+// CHECK: false
+print Point(9, 9) in pts;
+// CHECK: true
+print pts == Set([Point(3, 4), Point(1, 2)]);
+
+// The trap: `in` against a List uses identity, so it never finds an equal
+// but distinct Point. `in` against a Set (or Map) uses `__hash__`/`__eq__`.
+// CHECK: false
+print Point(1, 2) in [Point(1, 2)];
+// CHECK: true
+print Point(1, 2) in pts;
+
+// A non-Number key type has no total order, so __str__ must not raise on it.
+// The rendered length is order-independent, so it is deterministic.
+// CHECK: 6
+print len(str(Set(["b", "a"])));
+// CHECK: 13
+print len(str(Set([true, false])));
