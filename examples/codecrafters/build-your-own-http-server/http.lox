@@ -70,13 +70,18 @@ fun lower(s) {
     return out;
 }
 
+// An HTTP field value may carry SP or HTAB around it (RFC 9112).
+fun isFieldSpace(c) {
+    return c == " " or c == "\t";
+}
+
 fun trimSpaces(s) {
     var a = 0;
     var b = len(s);
-    while (a < b and s[a] == " ") {
+    while (a < b and isFieldSpace(s[a])) {
         a = a + 1;
     }
-    while (b > a and s[b - 1] == " ") {
+    while (b > a and isFieldSpace(s[b - 1])) {
         b = b - 1;
     }
     return s[a:b];
