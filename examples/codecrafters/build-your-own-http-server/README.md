@@ -2,10 +2,10 @@
 
 A complete implementation of the public
 [Build your own HTTP server](https://github.com/codecrafters-io/build-your-own-http-server)
-challenge in pure Lox++. No membership is needed: every test here is
-transcribed from the public `stage_descriptions/*.md` files, and a second
-battery diffs against Python's `http.client`/`gzip`/`zlib` as an independent
-oracle.
+challenge in pure Lox++. No membership is needed: the stage cases are
+transcribed from the public `stage_descriptions/*.md` files (a few local
+regression cases are marked `local:`), and a second battery diffs against
+Python's `http.client`/`gzip`/`zlib` as an independent oracle.
 
 The HTTP/1.1 parser, the router, and the `gzip` encoder (DEFLATE + CRC32) all
 run **inside the VM**. Lox++ has no bitwise operators, so the DEFLATE bit

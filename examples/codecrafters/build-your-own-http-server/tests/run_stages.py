@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # run_stages.py — public-source test oracle for the Lox++ HTTP server.
 #
-# Every case is transcribed from codecrafters-io/build-your-own-http-server
-# stage_descriptions/*.md (public, no membership needed). It drives the real
-# challenge entrypoint, your_http.sh, over raw TCP so it can also decode the
-# gzip body with Python's gzip module.
+# The stage cases are transcribed from codecrafters-io/build-your-own-http-server
+# stage_descriptions/*.md (public, no membership needed); local regression cases
+# are marked "local:". It drives the real challenge entrypoint, your_http.sh,
+# over raw TCP so it can also decode the gzip body with Python's gzip module.
 #
 # The suite covers the twelve stages pure Lox++ can reach. base-08 (POST body)
 # and persistent-02 (concurrent keep-alive) are unreachable without a bounded
@@ -192,11 +192,13 @@ def main():
             "content-encoding" not in headers,
             repr(headers),
         )
+        # Local regression case, not a stage. No public stage sends a tab, but
+        # an HTTP field value may carry HTAB and trimSpaces() must strip it.
         status, headers, _ = request(
             port, b"GET /echo/abc HTTP/1.1\r\nAccept-Encoding:\tgzip\r\n\r\n"
         )
         check(
-            "compression-01 HTAB around field value",
+            "local: HTAB around Accept-Encoding value",
             headers.get("content-encoding") == "gzip",
             repr(headers),
         )
