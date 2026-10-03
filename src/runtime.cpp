@@ -44,6 +44,9 @@ ObjClosure* Runtime::loadSource(const std::string& source,
     // class definitions left behind.
     m_fileClass = nullptr;
     m_mapClass = nullptr;
+    m_socketClass = nullptr;
+    m_serverClass = nullptr;
+    m_processClass = nullptr;
     ObjFunction* fn = compile(source, &m_mm, sink);
     if (fn == nullptr) {
         return nullptr;
@@ -764,6 +767,15 @@ void Runtime::markRoots() {
     }
     if (m_errorClass) {
         m_mm.markObject(m_errorClass);
+    }
+    if (m_socketClass) {
+        m_mm.markObject(m_socketClass);
+    }
+    if (m_serverClass) {
+        m_mm.markObject(m_serverClass);
+    }
+    if (m_processClass) {
+        m_mm.markObject(m_processClass);
     }
     for (ObjString* name : m_protocolNames) {
         if (name) {

@@ -396,6 +396,9 @@ static Value serverCloseNative(int /*argc*/, Value* args) {
 }
 
 NetClasses registerNetAPI(StdlibRegistrar& reg) {
+    // Both classes stay rooted until this function returns: creating the
+    // Server class allocates, and GC would otherwise collect Socket after its
+    // own root is gone. Runtime stores both pointers only after the return.
     ObjClass* socket = reg.makeClass("Socket");
     reg.mm().pushTempRoot(socket);
     reg.addMethod(socket, "read", socketReadNative, 0);
@@ -405,19 +408,19 @@ NetClasses registerNetAPI(StdlibRegistrar& reg) {
     reg.addMethod(socket, "writeline", socketWritelineNative, 1);
     reg.addMethod(socket, "close_write", socketCloseWriteNative, 0);
     reg.addMethod(socket, "close", socketCloseNative, 0);
-    reg.mm().popTempRoot(); // socket
 
     ObjClass* server = reg.makeClass("Server");
     reg.mm().pushTempRoot(server);
     reg.addMethod(server, "accept", serverAcceptNative, 0);
     reg.addMethod(server, "port", serverPortNative, 0);
     reg.addMethod(server, "close", serverCloseNative, 0);
-    reg.mm().popTempRoot(); // server
 
     reg.defineGlobal("connect", connectNative, 2);
     reg.defineGlobal("listen", listenNative, 2);
 
     s_socketClass = socket;
     s_serverClass = server;
+    reg.mm().popTempRoot(); // server
+    reg.mm().popTempRoot(); // socket
     return NetClasses{socket, server};
 }

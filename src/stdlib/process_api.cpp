@@ -515,11 +515,10 @@ ObjClass* registerProcessAPI(StdlibRegistrar& reg, ObjClass* mapClass) {
     reg.addMethod(klass, "wait", processWaitNative, 0);
     reg.addMethod(klass, "kill", processKillNative, 0);
     reg.addMethod(klass, "pid", processPidNative, 0);
-    reg.mm().popTempRoot(); // klass
-
-    reg.defineGlobal("spawn", spawnNative, 2);
-    reg.defineGlobal("run", runNative, 2);
 
     s_processClass = klass;
+    reg.defineGlobal("spawn", spawnNative, 2);
+    reg.defineGlobal("run", runNative, 2);
+    reg.mm().popTempRoot(); // klass
     return klass;
 }
