@@ -3362,6 +3362,12 @@ class Interpreter {
                 if (this.throwFlag) return nil;
                 return r;
             }
+            var rm = this.findDunder(right, "__radd__");
+            if (rm != nil) {
+                var r = rm.bind(right).call(this, [left]);
+                if (this.throwFlag) return nil;
+                return r;
+            }
             this.setError("ConcatenationTypeError", "Operands must be two numbers, two strings, or a string and a number.", opLine);
             return nil;
         }
@@ -3370,6 +3376,12 @@ class Interpreter {
             var m = this.findDunder(left, "__sub__");
             if (m != nil) {
                 var r = m.bind(left).call(this, [right]);
+                if (this.throwFlag) return nil;
+                return r;
+            }
+            var rm = this.findDunder(right, "__rsub__");
+            if (rm != nil) {
+                var r = rm.bind(right).call(this, [left]);
                 if (this.throwFlag) return nil;
                 return r;
             }
@@ -3384,6 +3396,12 @@ class Interpreter {
                 if (this.throwFlag) return nil;
                 return r;
             }
+            var rm = this.findDunder(right, "__rmul__");
+            if (rm != nil) {
+                var r = rm.bind(right).call(this, [left]);
+                if (this.throwFlag) return nil;
+                return r;
+            }
             this.setError("ArithmeticTypeError", "Operands must be numbers.", opLine);
             return nil;
         }
@@ -3392,6 +3410,12 @@ class Interpreter {
             var m = this.findDunder(left, "__div__");
             if (m != nil) {
                 var r = m.bind(left).call(this, [right]);
+                if (this.throwFlag) return nil;
+                return r;
+            }
+            var rm = this.findDunder(right, "__rdiv__");
+            if (rm != nil) {
+                var r = rm.bind(right).call(this, [left]);
                 if (this.throwFlag) return nil;
                 return r;
             }
@@ -3404,6 +3428,12 @@ class Interpreter {
             var m = this.findDunder(left, "__lt__");
             if (m != nil) {
                 var b = this.validateBool(m.bind(left).call(this, [right]), opLine);
+                if (this.throwFlag) return nil;
+                return b;
+            }
+            var rm = this.findDunder(right, "__rlt__");
+            if (rm != nil) {
+                var b = this.validateBool(rm.bind(right).call(this, [left]), opLine);
                 if (this.throwFlag) return nil;
                 return b;
             }
@@ -3420,6 +3450,12 @@ class Interpreter {
                 if (this.throwFlag) return nil;
                 return !b;
             }
+            var rm = this.findDunder(right, "__rgt__");
+            if (rm != nil) {
+                var b = this.validateBool(rm.bind(right).call(this, [left]), opLine);
+                if (this.throwFlag) return nil;
+                return !b;
+            }
             this.setError("ComparisonTypeError", "Operands must be numbers.", opLine);
             return nil;
         }
@@ -3429,6 +3465,12 @@ class Interpreter {
             var m = this.findDunder(left, "__gt__");
             if (m != nil) {
                 var b = this.validateBool(m.bind(left).call(this, [right]), opLine);
+                if (this.throwFlag) return nil;
+                return b;
+            }
+            var rm = this.findDunder(right, "__rgt__");
+            if (rm != nil) {
+                var b = this.validateBool(rm.bind(right).call(this, [left]), opLine);
                 if (this.throwFlag) return nil;
                 return b;
             }
@@ -3445,6 +3487,12 @@ class Interpreter {
                 if (this.throwFlag) return nil;
                 return !b;
             }
+            var rm = this.findDunder(right, "__rlt__");
+            if (rm != nil) {
+                var b = this.validateBool(rm.bind(right).call(this, [left]), opLine);
+                if (this.throwFlag) return nil;
+                return !b;
+            }
             this.setError("ComparisonTypeError", "Operands must be numbers.", opLine);
             return nil;
         }
@@ -3455,12 +3503,24 @@ class Interpreter {
                 if (this.throwFlag) return nil;
                 return b;
             }
+            var rm = this.findDunder(right, "__eq__");
+            if (rm != nil) {
+                var b = this.validateBool(rm.bind(right).call(this, [left]), opLine);
+                if (this.throwFlag) return nil;
+                return b;
+            }
             return left == right;
         }
         if (opL == "!=") {
             var m = this.findDunder(left, "__eq__");
             if (m != nil) {
                 var b = this.validateBool(m.bind(left).call(this, [right]), opLine);
+                if (this.throwFlag) return nil;
+                return !b;
+            }
+            var rm = this.findDunder(right, "__eq__");
+            if (rm != nil) {
+                var b = this.validateBool(rm.bind(right).call(this, [left]), opLine);
                 if (this.throwFlag) return nil;
                 return !b;
             }
@@ -3474,6 +3534,12 @@ class Interpreter {
             var m = this.findDunder(left, "__mod__");
             if (m != nil) {
                 var r = m.bind(left).call(this, [right]);
+                if (this.throwFlag) return nil;
+                return r;
+            }
+            var rm = this.findDunder(right, "__rmod__");
+            if (rm != nil) {
+                var r = rm.bind(right).call(this, [left]);
                 if (this.throwFlag) return nil;
                 return r;
             }

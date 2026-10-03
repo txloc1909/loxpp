@@ -173,16 +173,25 @@ above dispatch to. The dispatch order is fixed:
    the operands match the built-in types (Numbers for arithmetic; Numbers or
    Strings for comparison; Numbers, Strings, or the concatenation case for
    `+`; List, String, or Map for `in`).
-2. **Then the user method.** When the built-in branch does not apply, the
-   operator tries the method on its receiver — the left operand for the
-   arithmetic, comparison, and equality operators, the container (right
+2. **Then the user method on the receiver.** When the built-in branch does not
+   apply, the operator tries the method on its receiver — the left operand for
+   the arithmetic, comparison, and equality operators, the container (right
    operand) for `in`, and the called value for `()`. If the receiver is an
    Instance whose class defines the method, the method is called with the
-   other operand (or operands) as its argument(s). There are no reflected
-   (right-operand) methods.
-3. **Otherwise the same error as today.** A receiver that is not an Instance,
-   or an Instance whose class does not define the method, raises exactly the
-   error the operator raised before operator overloading existed.
+   other operand (or operands) as its argument(s).
+3. **Then the reflected method on the right operand** (arithmetic, comparison,
+   and equality only). When the receiver is not an Instance, or is an Instance
+   whose class does not define the method, and the right operand is an
+   Instance whose class defines the operator's reflected method, that method
+   is called with the left operand as its single argument. `a op b` calls
+   `b.__rop__(a)`; the reflected method computes the result of `a op b`. For
+   equality the reflected method is the right operand's ordinary `__eq__`.
+   `in`, `()`, `[]`, `len`, `for-in`, slices, and `str` have no reflected
+   form: their receiver is already the right operand or the only operand.
+4. **Otherwise the same error as today.** A receiver that is not an Instance,
+   or an Instance whose class does not define the method, and whose right
+   operand has no applicable reflected method, raises exactly the error the
+   operator raised before operator overloading existed.
 
 Method lookup reads the class **method table** only; a field whose name
 happens to equal a dunder name never participates.
@@ -207,17 +216,35 @@ happens to equal a dunder name never participates.
 | `c[start:end]` | `__slice__(start, end)` | `c` |
 | `str(x)` / `print x` | `__str__()` | `x` |
 
-`a != b` is `==` then logical negation: it derives from `__eq__` and has no
-method of its own. `a <= b` is `!(a > b)` and `a >= b` is `!(a < b)`; each
-dispatches `__gt__` / `__lt__` and negates the result, with no `__le__` /
-`__ge__` method.
+**Reflected methods.** These run only after the receiver's own method above
+declined (step 3 of the dispatch order). The right operand of the operator is
+the receiver; the left operand is the single argument. `b.__rsub__(a)`
+therefore computes `a - b`, and `b.__rlt__(a)` computes `a < b`.
+
+| Operator | Reflected method | Receiver | Argument |
+|---|---|---|---|
+| `a + b` | `__radd__` | `b` | `a` |
+| `a - b` | `__rsub__` | `b` | `a` |
+| `a * b` | `__rmul__` | `b` | `a` |
+| `a / b` | `__rdiv__` | `b` | `a` |
+| `a % b` | `__rmod__` | `b` | `a` |
+| `a < b` | `__rlt__` | `b` | `a` |
+| `a > b` | `__rgt__` | `b` | `a` |
+| `a == b` | `__eq__` | `b` | `a` |
+
+`a != b` is `==` then logical negation: it derives from `__eq__` (the left
+operand's, or the reflected one on the right) and has no method of its own.
+`a <= b` is `!(a > b)` and `a >= b` is `!(a < b)`; each dispatches `__gt__` /
+`__lt__` on the left, or the reflected `__rgt__` / `__rlt__` on the right, and
+negates the result, with no `__le__` / `__ge__` method.
 
 The result of `__eq__`, `__lt__`, `__gt__`, and `__contains__` must be a
-Boolean, the result of `__len__` and `__hash__` must be a Number, the
+Boolean, whether the method ran on the left operand or as the reflected method
+on the right. The result of `__len__` and `__hash__` must be a Number, the
 result of `__iter__` must be a List, String, or Map, and the result of
 `__str__` must be a String. Any other result raises a catchable
 `OperatorResultTypeError` (see [Runtime Errors](#runtime-errors)). The
-result of every other method in the table above is unconstrained.
+result of every other method in the tables above is unconstrained.
 
 `__hash__` has no operator expression of its own. A Map key that is an Instance
 uses it to place the key; see [Map Literal](#map-literal), [Index
@@ -251,12 +278,12 @@ identity equality and never consults `__eq__`.
 A Map whose key is an Instance dispatches to that key's class. The Map calls
 `__hash__` on the **lookup** key to find the bucket, then resolves a collision
 by calling `__eq__` on the **stored** key with the lookup key as its single
-argument: `storedKey.__eq__(lookupKey)`. Lox++ has no reflected operator
-methods, so the lookup key's own `__eq__` never runs for a collision. The two
-keys that compare equal must return the same `__hash__` (see [§03-types,
-Map](03-types.md#map)). A `__hash__` or `__eq__` call that writes to the same
-Map raises a catchable `MapChangedError`, so a key method cannot change the Map
-it is being looked up in.
+argument: `storedKey.__eq__(lookupKey)`. Map-key equality never uses a
+reflected method, so the lookup key's own `__eq__` never runs for a collision.
+The two keys that compare equal must return the same `__hash__` (see
+[§03-types, Map](03-types.md#map)). A `__hash__` or `__eq__` call that writes
+to the same Map raises a catchable `MapChangedError`, so a key method cannot
+change the Map it is being looked up in.
 
 ### Logical Operators (Short-Circuit)
 
@@ -1283,7 +1310,7 @@ same text the implementation reports when the fault is left uncaught.
 | No arm matches in a `match` expression | `match 99 { case 1 => "one" }` | `"MatchError"` |
 | Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field | `"ConstructorArityError"` |
 | Undefined property on an `Error` value | `try { try { [][0]; } catch (e) { e.foo; } } catch (_) { }` | `"UndefinedPropertyError"` |
-| Operator method returned a non-Boolean | `class C { __eq__(o) { return 42; } } C() == C()` | `"OperatorResultTypeError"` |
+| Operator method returned a non-Boolean | `class C { __eq__(o) { return 42; } } C() == C()`, or the reflected `class C { __rlt__(o) { return 42; } } 1 < C()` | `"OperatorResultTypeError"` |
 | Operator method returned a non-Number | `class C { __len__() { return "x"; } } len(C())` or `class C { __hash__() { return "x"; } __eq__(o) { return true; } }` used as a map key | `"OperatorResultTypeError"` |
 | A key's `__hash__` or `__eq__` writes to the Map it keys | `var m = {}; class K { __hash__() { m[1] = 1; return 1; } __eq__(o) { return true; } } m[K()] = 1;` | `"MapChangedError"` |
 

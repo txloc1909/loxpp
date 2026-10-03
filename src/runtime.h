@@ -764,13 +764,20 @@ class Runtime {
     // interned into m_protocolNames. `Count` is the array size.
     enum class Protocol : std::uint8_t {
         Add,
+        RAdd,
         Sub,
+        RSub,
         Mul,
+        RMul,
         Div,
+        RDiv,
         Mod,
+        RMod,
         Neg,
         Lt,
+        RLt,
         Gt,
+        RGt,
         Eq,
         Contains,
         Call,
@@ -804,6 +811,24 @@ class Runtime {
     // catchable OperatorResultTypeError otherwise.
     std::optional<OpResult> tryBinaryMethodBool(Protocol proto,
                                                 int stopAtFrameCount);
+
+    // The reflected form of tryBinaryMethod: dispatches `proto`'s method on
+    // the RIGHT operand (peek(0)), passing the LEFT operand (peek(1)) as the
+    // single argument. Called only after tryBinaryMethod declined — the left
+    // operand is not an Instance that defines the method. Used for `__radd__`
+    // and the other `__r*__` methods, and for the reflected `__eq__` (which
+    // reuses Protocol::Eq). The two stack slots are swapped so the right
+    // operand becomes the receiver (slot 0) and the left operand the argument
+    // (slot 1), exactly as opIn does for `__contains__`. Returns nullopt when
+    // the right operand is not an Instance that defines the method, in which
+    // case the caller falls through to the opcode's own error.
+    std::optional<OpResult> tryReflectedBinaryMethod(Protocol proto,
+                                                     int stopAtFrameCount);
+
+    // tryReflectedBinaryMethod plus Boolean-result validation (reflected
+    // comparison and equality).
+    std::optional<OpResult> tryReflectedBinaryMethodBool(Protocol proto,
+                                                         int stopAtFrameCount);
 
     // Calls `method` — a resolved ObjClosure whose receiver already sits at
     // stackTop[-argCount-1] — and, when `check` is not None, marks the pushed

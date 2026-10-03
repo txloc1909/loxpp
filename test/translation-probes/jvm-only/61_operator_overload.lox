@@ -105,3 +105,26 @@ print total;
 
 class BadSeq { __iter__() { return 1; } }
 try { for (var y in BadSeq()) {} } catch (e) { print "caught " + e.kind; }
+
+class Refl {
+  init(x) { this.x = x; }
+  __radd__(o) { return o + this.x; }
+  __rsub__(o) { return o - this.x; }
+  __rmul__(o) { return o * this.x; }
+  __rdiv__(o) { return o / this.x; }
+  __rmod__(o) { return o % this.x; }
+  __rlt__(o) { return o < this.x; }
+  __rgt__(o) { return o > this.x; }
+  __eq__(o) { return o == this.x; }
+}
+print 10 + Refl(3);
+print 10 - Refl(3);
+print 10 * Refl(3);
+print 10 / Refl(4);
+print 10 % Refl(3);
+print 2 < Refl(3);
+print 2 > Refl(3);
+print 2 <= Refl(3);
+print 2 >= Refl(3);
+print 2 == Refl(2);
+print 2 != Refl(2);
