@@ -205,18 +205,6 @@ endif()
 option(LOXPP_PROFILE
     "Enable runtime profiler: per-opcode counts, function timing, GC stats" OFF)
 
-# Value representation: NaN-tagged 8-byte word (default) vs portable
-# std::variant (16 bytes). Turn OFF for platforms where heap pointers may
-# exceed 48 bits or where the IEEE 754 bit-pattern assumptions do not hold.
-option(LOXPP_NAN_TAGGING
-    "Use NaN-tagged 8-byte Value instead of std::variant" ON)
-if(LOXPP_NAN_TAGGING)
-    # PUBLIC: LOXPP_NAN_TAGGING selects the Value layout in src/value.h, a
-    # header main.cpp pulls in transitively (vm.h). Every translation unit
-    # linked together must agree.
-    list(APPEND LOXPP_CORE_PUBLIC_DEFINITIONS LOXPP_NAN_TAGGING)
-endif()
-
 if(LOXPP_CORE_PUBLIC_DEFINITIONS)
     target_compile_definitions(loxpp_core PUBLIC ${LOXPP_CORE_PUBLIC_DEFINITIONS})
 endif()
@@ -266,26 +254,14 @@ target_include_directories(loxpp_isocline PRIVATE third_party/isocline/include)
 target_include_directories(loxpp PRIVATE third_party/isocline/include)
 target_link_libraries(loxpp PRIVATE loxpp_isocline)
 
-# The QBE code generator and its --target qbe front end. It defaults to
-# LOXPP_NAN_TAGGING because the emitter reads the NaN-tagged Value bit layout
-# directly (Q6, notes/qbe-backend.md); a std::variant build cannot compile
-# it. The emitter is compiled into the loxpp executable, not loxpp_core, so
-# the standalone qbe_emit_probe/qbe_emit_program checkpoint tools keep their
-# own copies without a duplicate-symbol clash when linking loxpp_core's
-# objects.
+# The QBE code generator and its --target qbe front end. The emitter reads the
+# NaN-tagged Value bit layout directly (Q6, notes/qbe-backend.md), and that
+# layout is now the only one. The emitter is compiled into the loxpp executable,
+# not loxpp_core, so the standalone qbe_emit_probe/qbe_emit_program checkpoint
+# tools keep their own copies without a duplicate-symbol clash when linking
+# loxpp_core's objects.
 option(LOXPP_QBE_BACKEND
-    "Build the QBE code generator and --target qbe front end"
-    ${LOXPP_NAN_TAGGING})
-# option() keeps a cached value, so a reused build directory reconfigured with
-# -DLOXPP_NAN_TAGGING=OFF would otherwise leave QBE ON and fail inside
-# qbe_emitter.cpp's static_assert. Turn it off for that build instead, and say
-# so: there is no valid build with both set.
-if(LOXPP_QBE_BACKEND AND NOT LOXPP_NAN_TAGGING)
-    message(WARNING
-        "LOXPP_QBE_BACKEND=ON requires LOXPP_NAN_TAGGING=ON (Q6, "
-        "notes/qbe-backend.md); disabling the QBE backend for this build.")
-    set(LOXPP_QBE_BACKEND OFF)
-endif()
+    "Build the QBE code generator and --target qbe front end" ON)
 if(LOXPP_QBE_BACKEND)
     target_sources(loxpp PRIVATE
         src/backend/qbe_emitter.cpp

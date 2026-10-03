@@ -262,9 +262,10 @@ else, including `MODULO`'s floor-division rule, to the shared helpers.
 Numbers are never boxed, so a hardware NaN keeps bit 50 clear, the same as
 native.
 
-**Q6: value layout depends on a build option.** `LOXPP_NAN_TAGGING` can be
-OFF (the `*-variant` presets use a 16-byte `std::variant`). `--target qbe`
-requires NaN tagging; `libloxrt` enforces it with a `static_assert`.
+**Q6: value layout is fixed.** `Value` is always an 8-byte NaN-tagged word. A
+heap pointer must fit the tag's 50 payload bits; the object allocator rejects
+any pointer that does not (`pointerFitsInValue`, `MemoryManager::create`).
+`libloxrt` enforces the 8-byte size with a `static_assert`.
 
 **Q7: toolchain on the user's machine.** Output needs `qbe`, an assembler and
 a linker, plus `libloxrt.a` built for musl for the static release. Ship

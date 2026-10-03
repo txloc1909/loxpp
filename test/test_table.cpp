@@ -117,7 +117,7 @@ TEST_F(TableTest, OverwriteUpdatesStoredValue) {
 
 TEST_F(TableTest, SetNilValue) {
     ObjString* key = str("nil_key");
-    table.set(key, Value{std::monostate{}});
+    table.set(key, Value{Nil{}});
     Value out;
     EXPECT_TRUE(table.get(key, out));
     EXPECT_TRUE(is<Nil>(out));
@@ -385,21 +385,21 @@ TEST_F(TableTest, FindStringInEmptyTableReturnsNull) {
 
 TEST_F(TableTest, FindStringAbsentReturnsNull) {
     ObjString* k = str("present");
-    table.set(k, Value{std::monostate{}});
+    table.set(k, Value{Nil{}});
     uint32_t h = fakeHash("absent", 6);
     EXPECT_EQ(table.findString("absent", 6, h), nullptr);
 }
 
 TEST_F(TableTest, FindStringPresentReturnsPointer) {
     ObjString* k = str("hello");
-    table.set(k, Value{std::monostate{}});
+    table.set(k, Value{Nil{}});
     uint32_t h = fakeHash("hello", 5);
     EXPECT_EQ(table.findString("hello", 5, h), k);
 }
 
 TEST_F(TableTest, FindStringHashCollisionDifferentContentReturnsNull) {
     auto [a, b] = collidingPair();
-    table.set(a, Value{std::monostate{}});
+    table.set(a, Value{Nil{}});
     EXPECT_EQ(table.findString(b->chars.c_str(),
                                static_cast<int>(b->chars.size()), b->hash),
               nullptr);
@@ -407,7 +407,7 @@ TEST_F(TableTest, FindStringHashCollisionDifferentContentReturnsNull) {
 
 TEST_F(TableTest, FindStringByRawCharsWithoutObjStringWrapper) {
     ObjString* k = str("lookup_me");
-    table.set(k, Value{std::monostate{}});
+    table.set(k, Value{Nil{}});
     const char* raw = "lookup_me";
     int len = static_cast<int>(k->chars.size());
     uint32_t h = fakeHash(raw, len);
@@ -430,7 +430,7 @@ class StringInternTest : public ::testing::Test {
         if (found)
             return found;
         ObjString* obj = mkstr(allocator_, s);
-        internTable.set(obj, Value{std::monostate{}});
+        internTable.set(obj, Value{Nil{}});
         return obj;
     }
 };

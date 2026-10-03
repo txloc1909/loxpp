@@ -1,9 +1,21 @@
 #include "value.h"
 
+#include <cinttypes>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
+
+void reportPointerOutOfRange(uintptr_t p) {
+    std::fprintf(stderr,
+                 "loxpp: object pointer 0x%" PRIxPTR
+                 " needs more than the %u bits NaN-boxing reserves for a heap "
+                 "pointer; this platform's user address space is wider than "
+                 "the Value representation supports\n",
+                 p, kPointerBits);
+    std::abort();
+}
 
 bool operator!(Value value) {
     if (is<bool>(value)) {

@@ -511,11 +511,6 @@ void advanceDataflow(
 // an empty seed would be wrong.
 struct DataflowResult {
     std::vector<OpenOrigins> entryState;
-    // uint8_t, not bool: std::vector<bool>'s proxy reference makes `!v[i]`
-    // ambiguous against this codebase's `operator!(Value)` (Value has an
-    // implicit bool constructor) when the std::variant Value build
-    // (LOXPP_NAN_TAGGING=OFF) is active. Plain bytes sidestep the proxy
-    // entirely.
     std::vector<uint8_t> reachable;
 };
 

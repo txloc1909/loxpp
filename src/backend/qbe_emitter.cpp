@@ -19,11 +19,10 @@
 
 namespace qbe {
 
-// Q6, notes/qbe-backend.md: --target qbe requires NaN tagging. Every bit
-// pattern this file bakes into a .ssa literal (QNAN, VAL_NIL, VAL_TRUE,
-// VAL_FALSE, OBJ_TAG) only means anything under that layout.
-static_assert(sizeof(Value) == 8, "qbe_emitter requires LOXPP_NAN_TAGGING (Q6, "
-                                  "notes/qbe-backend.md)");
+// Every bit pattern this file bakes into a .ssa literal (QNAN, VAL_NIL,
+// VAL_TRUE, VAL_FALSE, OBJ_TAG) is the NaN-boxed Value layout.
+static_assert(sizeof(Value) == 8, "qbe_emitter requires the 8-byte NaN-boxed "
+                                  "Value (notes/qbe-backend.md)");
 
 namespace {
 

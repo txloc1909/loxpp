@@ -11,12 +11,12 @@
 #include <string>
 #include <vector>
 
-// Q6: --target qbe requires NaN tagging. A Value must be a single 8-byte
-// word for every function above to be a valid C-ABI boundary — see
-// rt_capi.h's file comment.
+// A Value must be a single 8-byte word for every function above to be a valid
+// C-ABI boundary — see rt_capi.h's file comment. The Value is always
+// NaN-boxed, so this holds by construction.
 static_assert(sizeof(Value) == 8,
-              "libloxrt requires LOXPP_NAN_TAGGING: --target qbe passes "
-              "Value across the C ABI as a single 8-byte word");
+              "libloxrt passes Value across the C ABI as a single 8-byte word; "
+              "the NaN-boxed Value must stay 8 bytes");
 
 // The self-contained harness loxpp --target qbe generates
 // (backend/qbe_frontend.cpp) declares its own RtFunctionDesc by layout,

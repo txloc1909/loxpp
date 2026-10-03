@@ -12,8 +12,7 @@
 // a NaN-tagged Value is a single 8-byte word, so the C calling convention
 // passes and returns it exactly like a raw uint64_t/pointer — the same `l`
 // slot QBE already uses for the values compiled code keeps in its own stack
-// slots. This header is unusable, and libloxrt.a refuses to build, with
-// LOXPP_NAN_TAGGING off (Q6).
+// slots. The Value is always NaN-boxed, so this holds on every build.
 //
 // A hand-written QBE .ssa never includes this header — it has no C++
 // preprocessor — so it is not itself part of the ABI. It documents the ABI

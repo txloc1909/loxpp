@@ -2,15 +2,11 @@
 
 #include "object.h"
 
+#include <bit> // std::bit_cast, std::countr_zero
 #include <cstdint>
 #include <vector>
 
 using Number = double;
-
-#ifdef LOXPP_NAN_TAGGING
-
-#include <bit>     // std::bit_cast
-#include <variant> // std::monostate (Nil)
 
 // ---- NaN-boxing -----------------------------------------------------------
 // All Value types are packed into a single 8-byte word using quiet-NaN bit
@@ -27,23 +23,39 @@ inline constexpr uint64_t VAL_FALSE = QNAN | 0x02ULL;
 inline constexpr uint64_t VAL_TRUE = QNAN | 0x03ULL;
 } // namespace detail
 
-using Nil = std::monostate;
+// The OBJ_TAG pattern leaves this many low bits for an object pointer. Every
+// boxed Obj* must pass pointerFitsInValue() first; MemoryManager::create
+// enforces that. Supported targets sit well inside the limit: x86-64 4-level
+// paging and aarch64 48-bit VA keep user addresses below 2^48. Only opt-in
+// wide-VA layouts (aarch64 52-bit LVA, x86-64 5-level paging) can exceed it,
+// and no 8-byte box can then recover the pointer.
+inline constexpr unsigned kPointerBits =
+    static_cast<unsigned>(std::countr_zero(detail::OBJ_TAG));
+static_assert(kPointerBits > 0 && kPointerBits < 64,
+              "OBJ_TAG must leave 1..63 bits for an object pointer");
+constexpr bool pointerFitsInValue(uintptr_t p) {
+    return (p >> kPointerBits) == 0;
+}
+// Reports a pointer that does not fit and terminates. Defined in value.cpp.
+[[noreturn]] void reportPointerOutOfRange(uintptr_t p);
+
+struct Nil {};
 
 // NaN-tagged Value: all types encoded in one 8-byte word.
 //
 // The double and bool constructors are intentionally non-explicit: the
 // BINARY_OP macro in vm.cpp relies on `push(as<valueType>(a op b))`, where the
 // raw bool/double result of `a op b` must implicitly convert to a Value to bind
-// to as<T>(const Value&). The std::variant representation was likewise
-// implicitly constructible from bool/double. The Obj* constructor stays
-// explicit; every object call site already uses Value{static_cast<Obj*>(p)}.
+// to as<T>(const Value&), and Value's own truthiness does the same. The Obj*
+// constructor stays explicit; every object call site already uses
+// Value{static_cast<Obj*>(p)}.
 struct Value {
     uint64_t bits;
 
     Value() noexcept : bits(detail::VAL_NIL) {}
     Value(double d) noexcept : bits(std::bit_cast<uint64_t>(d)) {}
     Value(bool b) noexcept : bits(b ? detail::VAL_TRUE : detail::VAL_FALSE) {}
-    Value(std::monostate) noexcept : bits(detail::VAL_NIL) {}
+    Value(Nil) noexcept : bits(detail::VAL_NIL) {}
     explicit Value(Obj* p) noexcept
         : bits(detail::OBJ_TAG | reinterpret_cast<uint64_t>(p)) {}
 };
@@ -71,8 +83,8 @@ inline bool is<Obj*>(const Value& v) {
     return (v.bits & detail::OBJ_TAG) == detail::OBJ_TAG;
 }
 
-// as<T> performs no type check (unlike the throwing std::variant version);
-// every call site guards with the matching is<T> first.
+// as<T> performs no type check; every call site guards with the matching
+// is<T> first.
 template <typename T>
 T as(const Value& v);
 template <>
@@ -104,39 +116,12 @@ inline Value from<bool>(const bool& val) {
 }
 template <>
 inline Value from<Nil>(const Nil&) {
-    return Value{std::monostate{}};
+    return Value{Nil{}};
 }
 template <>
 inline Value from<Obj*>(Obj* const& val) {
     return Value{val};
 }
-
-#else // !LOXPP_NAN_TAGGING — portable std::variant representation
-
-#include <variant>
-
-using Nil = std::monostate;
-using Value = std::variant<bool, Number, Nil, Obj*>;
-
-template <typename T>
-bool is(const Value& value) {
-    return std::holds_alternative<T>(value);
-}
-
-template <typename T>
-T as(const Value& value) {
-    if (!is<T>(value)) {
-        throw std::bad_variant_access();
-    }
-    return std::get<T>(value);
-}
-
-template <typename T>
-Value from(const T& val) {
-    return Value(val);
-}
-
-#endif // LOXPP_NAN_TAGGING
 
 template <ObjType T>
 inline bool isValueOfType(const Value& v) {
