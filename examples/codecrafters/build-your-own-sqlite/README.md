@@ -4,36 +4,18 @@ A Lox++ implementation of the public
 [Build your own SQLite](https://github.com/codecrafters-io/build-your-own-sqlite)
 challenge's base stages (1-9: `.dbinfo`, `.tables`, `SELECT COUNT(*)`,
 single/multi-column `SELECT`, `WHERE` equality, multi-page table b-tree
-traversal, and an index-accelerated `WHERE`), in pure Lox++, plus a thin
-wrapper for the one thing Lox++ cannot do on its own.
+traversal, and an index-accelerated `WHERE`), in pure Lox++, with a thin
+entrypoint wrapper that resolves the `loxpp` binary.
 
 ## Layout
 
 | File | Role |
 |---|---|
 | `sqlite.lox` | Varint/record/b-tree parsing + a small SQL subset, pure Lox++ |
-| `bytetable.bin` | Committed 256-byte file (`0x00`..`0xFF` in order) — see below |
-| `your_sqlite.sh` | Challenge entrypoint: resolves `loxpp`, points `LOXPP_BYTE_TABLE` at `bytetable.bin` |
+| `your_sqlite.sh` | Challenge entrypoint: resolves `loxpp` and runs `sqlite.lox` |
 | `tests/gen_fixtures.py` | Regenerates the three test databases via Python's stdlib `sqlite3` |
 | `tests/run_stages.sh` | Cases transcribed from the public `stage_descriptions/base-*.md` files |
 | `tests/diff_sqlite.py` | Differential battery vs. Python's `sqlite3` as a second, independent oracle |
-
-## Why `bytetable.bin` exists
-
-Reading a SQLite file needs byte -> integer conversion for all 256 byte
-values (varints, big-endian page/cell fields). Lox++ has no bitwise
-operators and no `ord`/`chr`, and only six escapes exist in a string
-literal (`\" \\ \n \t \r \0`), so most byte values are not writable as
-Lox++ source at all.
-
-`bytetable.bin` holds bytes `0x00..0xFF` in file order. `sqlite.lox` opens
-it at startup and, for each index `i`, reads the one-byte slice at offset
-`i` to build `ORD` (byte-string -> Number) and `CHR` (Number -> byte-string)
-lookup tables — all 256 values, entirely in Lox++. The file is fully
-deterministic, so it is committed rather than generated per run; the
-wrapper only points `LOXPP_BYTE_TABLE` at it. This is the same trick
-`build-your-own-grep/your_grep.sh` uses to hand `sqlite.lox`'s sibling
-example the ESC byte.
 
 ## Index-accelerated `WHERE` (stage 9)
 
@@ -41,9 +23,8 @@ example the ESC byte.
 schema has one, instead of a full table scan:
 
 1. `walkIndex` descends the index b-tree (page types 2/10), pruning by
-   comparing the target value against each interior cell's key — a
-   String comparison, which needs a hand-rolled `strCompare` since Lox++'s
-   `<`/`>` operators are Number-only. It keeps scanning right past an
+   comparing the target value against each interior cell's key with the
+   built-in String order. It keeps scanning right past an
    equal key rather than stopping, because a non-unique index breaks ties
    by rowid, so a run of equal keys can span more than one cell or page.
 2. Each matching rowid is then fetched with `findRowByRowid`, a point

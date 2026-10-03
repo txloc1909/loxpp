@@ -19,6 +19,21 @@ public final class RuntimeStdlibTest {
         checkEquals(5.0, LoxOps.len("hello"), "len(string)");
         checkThrows(() -> LoxOps.len(true), LoxError.class, "len() rejects a non-sequence");
 
+        // ord()/chr() and String byte ordering (issue #507).
+        checkEquals(65.0, call(globals, "ord", "A"), "ord(\"A\")");
+        checkEquals("B", call(globals, "chr", 66.0), "chr(66)");
+        checkEquals(255.0, call(globals, "ord", call(globals, "chr", 255.0)),
+                "ord(chr(255)) round-trips");
+        checkThrows(() -> call(globals, "ord", ""), LoxError.class, "ord() rejects an empty string");
+        checkThrows(() -> call(globals, "ord", "ab"), LoxError.class, "ord() rejects two characters");
+        checkThrows(() -> call(globals, "chr", 256.0), LoxError.class, "chr() rejects 256");
+        checkThrows(() -> call(globals, "chr", 1.5), LoxError.class, "chr() rejects a fraction");
+        check(LoxOps.less("a", "b"), "less orders strings");
+        check(LoxOps.greater("b", "a"), "greater orders strings");
+        check(LoxOps.less("ab", "abc"), "a prefix orders before the longer string");
+        check(!LoxOps.less("b", "a"), "less is false when the left operand is larger");
+        check(LoxOps.greater("\u00ff", "\u0001"), "a high byte sorts after a low byte");
+
         Object math = globals.get("math");
         check(math instanceof LoxInstance, "math is an instance");
         checkEquals(4.0, callField((LoxInstance) math, "abs", -4.0), "math.abs(-4)");

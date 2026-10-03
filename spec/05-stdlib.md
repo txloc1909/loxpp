@@ -86,6 +86,43 @@ String so that it can be concatenated with `+`.
 
 ---
 
+## `ord(value) → Number`
+
+Returns the byte value of a one-byte String. `value` must be a String of
+exactly one byte; the result is that byte's numeric value, from 0 through 255.
+
+```lox
+print ord("A");     // 65
+print ord("\n");    // 10
+```
+
+A non-String argument, or a String whose length is not 1, is a runtime error.
+
+**Arity:** 1  
+**Returns:** Number
+
+---
+
+## `chr(value) → String`
+
+Returns the one-byte String whose byte value is `value`. `value` must be an
+integer Number from 0 through 255.
+
+```lox
+print chr(65);      // A
+print len(chr(0));  // 1
+```
+
+A non-Number argument, a fractional Number, or a Number outside 0 through 255
+is a runtime error. `chr` is the inverse of `ord` on every valid value:
+`ord(chr(n))` equals `n`, and `chr(ord(s))` equals `s` for every one-byte
+String `s`.
+
+**Arity:** 1  
+**Returns:** String
+
+---
+
 ## `math` — numeric functions and constants
 
 `math` is a global object bound at the start of every program. Its members are

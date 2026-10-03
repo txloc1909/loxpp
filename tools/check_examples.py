@@ -62,12 +62,19 @@ def run_example(loxpp: str, lox_file: Path, input_file: Path) -> tuple[int, list
     # stderr is not matched against anything, and a debug build's GC log can
     # be gigabytes under LOXPP_STRESS_GC, so discard it instead of holding it
     # in memory.
+    #
+    # A debug build also writes a raw per-instruction trace to stdout, and a
+    # program that builds a String byte by byte (chr(), string slicing) puts
+    # those raw bytes there too. Such output is not always valid UTF-8. CHECK
+    # text is ASCII, so decode invalid bytes as replacements and keep going;
+    # without this, one non-UTF-8 byte in trace output aborts the whole run.
     result = subprocess.run(
         [loxpp, str(lox_file)],
         input=stdin_data,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         text=True,
+        errors="replace",
     )
     return result.returncode, result.stdout.splitlines()
 

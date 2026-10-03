@@ -1,0 +1,51 @@
+// Byte conversion and String ordering.
+//
+// ord() and chr() convert between a one-byte String and its byte value
+// (0-255). The two are exact inverses, so a program can read, transform, and
+// rebuild byte strings without a lookup table.
+//
+// Strings order by their bytes, so `<` and `>` sort string keys and values
+// directly instead of hand-rolling a strcmp.
+
+// CHECK: 65
+print ord("A");
+// CHECK: B
+print chr(66);
+// CHECK: A
+print chr(ord("A"));
+
+// Rotate every letter of a word forward by one byte.
+fun caesarOne(s) {
+    var out = "";
+    for (var c in s) {
+        out = out + chr(ord(c) + 1);
+    }
+    return out;
+}
+// CHECK: ibsjt
+print caesarOne("haris");
+
+// Byte ordering is unsigned: 'Z' (90) sorts below 'a' (97), and a prefix
+// sorts below the longer string.
+// CHECK: true
+print "Z" < "a";
+// CHECK: true
+print "ab" < "abc";
+
+// Sort string keys with the built-in comparison.
+var keys = ["pear", "apple", "fig"];
+var i = 0;
+while (i < len(keys)) {
+    var j = i + 1;
+    while (j < len(keys)) {
+        if (keys[j] < keys[i]) {
+            var t = keys[i];
+            keys[i] = keys[j];
+            keys[j] = t;
+        }
+        j = j + 1;
+    }
+    i = i + 1;
+}
+// CHECK: [apple, fig, pear]
+print keys;

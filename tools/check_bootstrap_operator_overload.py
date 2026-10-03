@@ -87,6 +87,20 @@ CASES = [
         "print a <= b;\n"
         "print a >= b;\n",
     ),
+    # The built-in String branch of < and > and the ord()/chr() byte natives
+    # (issue #507). The bootstrap must reach the same host built-ins the
+    # native VM does for the interpreted program.
+    Case(
+        "string_order_ord_chr",
+        "print \"Z\" < \"a\";\n"
+        "print \"ab\" < \"abc\";\n"
+        "print \"abc\" <= \"abc\";\n"
+        "print \"b\" > \"a\";\n"
+        "print \"a\" >= \"b\";\n"
+        "print ord(\"A\");\n"
+        "print chr(66);\n"
+        "print ord(chr(255));\n",
+    ),
     Case(
         "contains_call",
         "class Box {\n"

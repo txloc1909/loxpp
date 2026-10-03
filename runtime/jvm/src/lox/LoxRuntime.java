@@ -155,6 +155,32 @@ public final class LoxRuntime {
                 }
                 return LoxFile.open((String)args[0], (String)args[1]);
             }));
+        // Mirrors src/stdlib/globals.cpp's ord()/chr(). ISO-8859-1 strings are
+        // one char per byte, so a one-char String's char value is its byte.
+        globals.define(
+            "ord", new LoxNative("ord", 1, args -> {
+                if (!(args[0] instanceof String)) {
+                    throw new LoxError("ord() argument must be a string.");
+                }
+                String s = (String)args[0];
+                if (s.length() != 1) {
+                    throw new LoxError(
+                        "ord() argument must be a one-character string.");
+                }
+                return (double)s.charAt(0);
+            }));
+        globals.define(
+            "chr", new LoxNative("chr", 1, args -> {
+                if (!(args[0] instanceof Double)) {
+                    throw new LoxError("chr() argument must be a number.");
+                }
+                double n = (Double)args[0];
+                if (n != Math.floor(n) || n < 0 || n > 255) {
+                    throw new LoxError(
+                        "chr() argument must be an integer from 0 to 255.");
+                }
+                return String.valueOf((char)(int)n);
+            }));
         registerOsAccess(globals);
     }
 

@@ -63,6 +63,14 @@ for (var c in s) {
 print reversed;      // olleh
 ```
 
+Two Strings order by their bytes. `a < b` compares the two Strings byte by
+byte from the first byte, using each byte's unsigned value (0 through 255);
+a String that is a prefix of the other is the smaller. See
+[§04-semantics Comparison](04-semantics.md#comparison).
+
+`ord(s)` returns the byte value of a one-byte String, and `chr(n)` returns the
+one-byte String for a byte value `n`. See [§05-stdlib](05-stdlib.md).
+
 ### Function
 
 A callable value that, when invoked with the correct number of arguments,

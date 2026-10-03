@@ -1984,6 +1984,18 @@ Runtime::OpResult Runtime::opNegate(int stopAtFrameCount) {
 }
 
 Runtime::OpResult Runtime::opLess(int stopAtFrameCount) {
+    Value b = peek(0);
+    Value a = peek(1);
+    if (isString(a) && isString(b)) {
+        // Bytewise lexicographic order; char_traits compares each char as an
+        // unsigned byte, matching the JVM backend's ISO-8859-1 char compare.
+        bool result = asObjString(as<Obj*>(a))
+                          ->chars.compare(asObjString(as<Obj*>(b))->chars) < 0;
+        pop();
+        pop();
+        push(from<bool>(result));
+        return OpResult::OK;
+    }
     if (auto r = tryBinaryMethodBool(Protocol::Lt, stopAtFrameCount)) {
         return *r;
     }
@@ -1992,6 +2004,16 @@ Runtime::OpResult Runtime::opLess(int stopAtFrameCount) {
 }
 
 Runtime::OpResult Runtime::opGreater(int stopAtFrameCount) {
+    Value b = peek(0);
+    Value a = peek(1);
+    if (isString(a) && isString(b)) {
+        bool result = asObjString(as<Obj*>(a))
+                          ->chars.compare(asObjString(as<Obj*>(b))->chars) > 0;
+        pop();
+        pop();
+        push(from<bool>(result));
+        return OpResult::OK;
+    }
     if (auto r = tryBinaryMethodBool(Protocol::Gt, stopAtFrameCount)) {
         return *r;
     }

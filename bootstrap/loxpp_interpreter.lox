@@ -1916,6 +1916,8 @@ class LoxNative {
     call(interp, args) {
         if (this.name == "clock") return clock();
         if (this.name == "input") return input();
+        if (this.name == "ord") return ord(args[0]);
+        if (this.name == "chr") return chr(args[0]);
         if (this.name == "open") {
             var handle = open(args[0], args[1]);
             return InterpFile(handle);
@@ -2284,6 +2286,8 @@ class Interpreter {
         this.maxStringifyDepthSeen = 0;
         this.globals.define("clock", LoxNative("clock"));
         this.globals.define("input", LoxNative("input"));
+        this.globals.define("ord",   LoxNative("ord"));
+        this.globals.define("chr",   LoxNative("chr"));
         this.globals.define("open",  LoxNative("open"));
         this.globals.define("args",  LoxNative("args"));
         this.globals.define("env",   LoxNative("env"));
@@ -3258,6 +3262,7 @@ class Interpreter {
         }
         if (opL == "<") {
             if (isLoxNum(left) and isLoxNum(right)) return left < right;
+            if (isLoxStr(left) and isLoxStr(right)) return left < right;
             var m = this.findDunder(left, "__lt__");
             if (m != nil) {
                 var b = this.validateBool(m.bind(left).call(this, [right]), opLine);
@@ -3270,6 +3275,7 @@ class Interpreter {
         // `<=` is `!(a > b)`: it dispatches __gt__ and negates.
         if (opL == "<=") {
             if (isLoxNum(left) and isLoxNum(right)) return left <= right;
+            if (isLoxStr(left) and isLoxStr(right)) return left <= right;
             var m = this.findDunder(left, "__gt__");
             if (m != nil) {
                 var b = this.validateBool(m.bind(left).call(this, [right]), opLine);
@@ -3281,6 +3287,7 @@ class Interpreter {
         }
         if (opL == ">") {
             if (isLoxNum(left) and isLoxNum(right)) return left > right;
+            if (isLoxStr(left) and isLoxStr(right)) return left > right;
             var m = this.findDunder(left, "__gt__");
             if (m != nil) {
                 var b = this.validateBool(m.bind(left).call(this, [right]), opLine);
@@ -3293,6 +3300,7 @@ class Interpreter {
         // `>=` is `!(a < b)`: it dispatches __lt__ and negates.
         if (opL == ">=") {
             if (isLoxNum(left) and isLoxNum(right)) return left >= right;
+            if (isLoxStr(left) and isLoxStr(right)) return left >= right;
             var m = this.findDunder(left, "__lt__");
             if (m != nil) {
                 var b = this.validateBool(m.bind(left).call(this, [right]), opLine);

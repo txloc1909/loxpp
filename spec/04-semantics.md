@@ -146,12 +146,18 @@ Modulo (`%`) is computed as `fmod(a, b)` adjusted so the result has the same sig
 
 | Expression | Requirement | Result |
 |---|---|---|
-| `a < b` | Both Numbers | Boolean |
-| `a <= b` | Both Numbers | Boolean |
-| `a > b` | Both Numbers | Boolean |
-| `a >= b` | Both Numbers | Boolean |
+| `a < b` | Both Numbers, **or** both Strings | Boolean |
+| `a <= b` | Both Numbers, **or** both Strings | Boolean |
+| `a > b` | Both Numbers, **or** both Strings | Boolean |
+| `a >= b` | Both Numbers, **or** both Strings | Boolean |
 
-Any violation is a **runtime error**.
+Two Numbers compare by numeric value. Two Strings compare as byte sequences:
+`<` and `>` compare byte by byte from the first byte, using each byte's
+unsigned value (0 through 255), and a String that is a prefix of the other is
+the smaller. So `"Z" < "a"` is true and `"ab" < "abc"` is true.
+
+Any violation is a **runtime error**. A comparison of a String with a Number,
+or any other mixed pair, is a runtime error.
 
 ### Equality
 
@@ -164,9 +170,9 @@ An Instance may define special methods ("dunder" methods) that the operators
 above dispatch to. The dispatch order is fixed:
 
 1. **Built-in branch first.** The operator's ordinary behaviour applies when
-   the operands match the built-in types (Numbers for arithmetic and
-   comparison; Numbers, Strings, or the concatenation case for `+`; List,
-   String, or Map for `in`).
+   the operands match the built-in types (Numbers for arithmetic; Numbers or
+   Strings for comparison; Numbers, Strings, or the concatenation case for
+   `+`; List, String, or Map for `in`).
 2. **Then the user method.** When the built-in branch does not apply, the
    operator tries the method on its receiver — the left operand for the
    arithmetic, comparison, and equality operators, the container (right

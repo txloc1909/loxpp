@@ -299,6 +299,12 @@ public final class LoxOps {
         if (a instanceof Double && b instanceof Double) {
             return (Double)a > (Double)b;
         }
+        if (a instanceof String && b instanceof String) {
+            // ISO-8859-1 strings are one char per byte, so compareTo's
+            // UTF-16 code-unit order is the byte order spec/04-semantics.md
+            // defines.
+            return ((String)a).compareTo((String)b) > 0;
+        }
         LoxClosure dunder = findDunder(a, "__gt__");
         if (dunder != null) {
             return checkBooleanResult(dunder.callAsSelf(a, new Object[] {b}));
@@ -310,6 +316,9 @@ public final class LoxOps {
     public static boolean less(Object a, Object b) {
         if (a instanceof Double && b instanceof Double) {
             return (Double)a < (Double)b;
+        }
+        if (a instanceof String && b instanceof String) {
+            return ((String)a).compareTo((String)b) < 0;
         }
         LoxClosure dunder = findDunder(a, "__lt__");
         if (dunder != null) {
