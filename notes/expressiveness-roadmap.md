@@ -44,7 +44,7 @@ All fully expressible today; none belong on the roadmap:
 | # | Gap | Complexity | Essentialness |
 |---|---|---|---|
 | 1 | Reflection — **introspection only (done)** | low | situational |
-| 2 | OS / world access — basics **(partially done)** | low | essential |
+| 2 | OS / world access — basics **(done)** | low | essential |
 | 3 | Non-local control flow (`try`/`catch`/`throw` + `defer`/`finally`) | low–medium | essential |
 | 4 | Extensible protocols / operator overloading | medium | essential |
 | 5 | Coroutines / generators (single-core suspension) | medium–high | high-value on-ramp |
@@ -88,11 +88,17 @@ a whole-program `--target qbe` build, so `callCompiled()` already returns
 synchronously. The `Runtime::reentrantCall` path asserts an interpreter loop
 is installed and is only reached on the interpreter.
 
-**2. OS / world access — basics. PARTIALLY DONE.** `args`, `env`, `exit`,
-`time`/`sleep`, FS metadata (`exists`, `is_dir`, `is_file`, `stat`) all live in
-`src/stdlib/os_api.cpp`; `clock` is in `src/stdlib/globals.cpp`. **Still
-missing: sockets and subprocess** — the medium-cost tail of this bucket. The
-*unbounded* surface of that tail is the standing argument for item 6.
+**2. OS / world access — basics. DONE** (#516, all three backends). `args`,
+`env`, `exit`, `time`/`sleep`, FS metadata (`exists`, `is_dir`, `is_file`,
+`stat`) live in `src/stdlib/os_api.cpp`; `clock` is in
+`src/stdlib/globals.cpp`. The medium-cost tail is closed: `connect`/`listen`
+(TCP client and server, `Socket`/`Server` values) in `src/stdlib/net_api.cpp`,
+and `spawn`/`run` (child processes with pipes, a `Process` value) in
+`src/stdlib/process_api.cpp`. The JVM runtime mirrors them (`LoxSocket`,
+`LoxServer`, `LoxProcess`) and the self-hosted bootstrap interpreter delegates
+to the host. All I/O blocks the VM, exactly like `sleep`, because item 5's
+coroutines do not exist yet. The *unbounded* surface of the tail — crypto,
+databases, compression — remains the standing argument for item 6.
 
 **3. Non-local control flow (`try`/`catch`/`throw`/`defer`). DONE** (#223, all three backends; `src/vm.cpp`, `src/backend/jvm_emitter.cpp`, `runtime/clr/src/LoxRuntime.cs`, `spec/04-semantics.md`). Handler stack + frame unwinding. Closes expressiveness roadmap item 3: runtime faults are now catchable via `try`/`catch`, non-local escape works without threading `Result` through every return, and `defer` provides cleanup-on-unwind (also fixes the `container_objects.h` file-handle leak TODO). See `notes/non-local-control-flow.md` for the design record and tracking issue `#223` for the implementation breakdown.
 
@@ -129,9 +135,9 @@ VM reentrancy, profiler rework. Design space already mapped in
   structures, the only metaprogramming channel a dynamic language has); defer
   `eval`. Earlier "concurrency needs reflection for serialization" claim is
   **retracted** — primitives + maps are a universal data representation.
-- **Build order is 1→7, but decide item 7's concurrency model first.** Item 1
-  (reflection) is done (#167); item 2 is partially done (basics landed;
-  sockets/subprocess still open); next up is item 3. Item 7 is the most
+- **Build order is 1→7, but decide item 7's concurrency model first.** Items 1
+  (reflection, #167) and 2 (OS/world access, #516) are done; next up is
+  item 3. Item 7 is the most
   architecturally invasive item and constrains item 5 (shared suspension
   machinery), item 6 (FFI thread-safety), the GC, and the profiler. Choosing it
   late means redoing them. Build last, choose first.
