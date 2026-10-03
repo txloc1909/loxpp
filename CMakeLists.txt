@@ -276,6 +276,16 @@ target_link_libraries(loxpp PRIVATE loxpp_isocline)
 option(LOXPP_QBE_BACKEND
     "Build the QBE code generator and --target qbe front end"
     ${LOXPP_NAN_TAGGING})
+# option() keeps a cached value, so a reused build directory reconfigured with
+# -DLOXPP_NAN_TAGGING=OFF would otherwise leave QBE ON and fail inside
+# qbe_emitter.cpp's static_assert. Turn it off for that build instead, and say
+# so: there is no valid build with both set.
+if(LOXPP_QBE_BACKEND AND NOT LOXPP_NAN_TAGGING)
+    message(WARNING
+        "LOXPP_QBE_BACKEND=ON requires LOXPP_NAN_TAGGING=ON (Q6, "
+        "notes/qbe-backend.md); disabling the QBE backend for this build.")
+    set(LOXPP_QBE_BACKEND OFF)
+endif()
 if(LOXPP_QBE_BACKEND)
     target_sources(loxpp PRIVATE
         src/backend/qbe_emitter.cpp
