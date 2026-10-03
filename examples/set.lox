@@ -84,7 +84,11 @@ class Set {
 
     __str__() {
         var xs = this.map.keys();
-        sortNums(xs);
+        // sortNums orders Number keys. A non-Number key type has no total
+        // order in Lox++ (String has no `<`), so its keys keep map order.
+        try {
+            sortNums(xs);
+        } catch (e) {}
         var s = "{";
         var i = 0;
         while (i < len(xs)) {
@@ -168,3 +172,10 @@ print pts == Set([Point(3, 4), Point(1, 2)]);
 print Point(1, 2) in [Point(1, 2)];
 // CHECK: true
 print Point(1, 2) in pts;
+
+// A non-Number key type has no total order, so __str__ must not raise on it.
+// The rendered length is order-independent, so it is deterministic.
+// CHECK: 6
+print len(str(Set(["b", "a"])));
+// CHECK: 13
+print len(str(Set([true, false])));
