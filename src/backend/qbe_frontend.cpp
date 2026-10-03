@@ -151,6 +151,7 @@ std::string buildHarness(const std::string& source,
     h << "};\n";
     h << "void* rt_startup(const char* source, const RtFunctionDesc* descs,\n";
     h << "                 std::size_t nDescs, bool requireAllCompiled);\n";
+    h << "void rt_set_args(void* rt, int argc, const char* const* argv);\n";
     h << "int rt_call(void* rt, int argCount, int stopAtFrameCount);\n";
     h << "void rt_shutdown(void* rt);\n";
     for (const CompiledFunction& f : fns) {
@@ -159,7 +160,7 @@ std::string buildHarness(const std::string& source,
     h << "}\n\n";
     h << "static const char kSource[] = R\"" << delim << "(" << source << ")"
       << delim << "\";\n\n";
-    h << "int main() {\n";
+    h << "int main(int argc, char** argv) {\n";
     h << "    RtFunctionDesc descs[] = {\n";
     for (const CompiledFunction& f : fns) {
         h << "        {\"" << f.id << "\", " << f.arity << ", "
@@ -173,6 +174,9 @@ std::string buildHarness(const std::string& source,
     h << "    if (rt == nullptr) {\n";
     h << "        return 65;\n";
     h << "    }\n";
+    // argv[0] is the executable's own name; args() sees the rest, exactly
+    // as `loxpp script.lox a b` exposes [a, b].
+    h << "    rt_set_args(rt, argc > 0 ? argc - 1 : 0, argv + 1);\n";
     h << "    int status = rt_call(rt, 0, 0);\n";
     h << "    rt_shutdown(rt);\n";
     h << "    return status == 0 ? 0 : 70;\n";

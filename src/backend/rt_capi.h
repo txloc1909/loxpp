@@ -93,6 +93,13 @@ void rt_set_top(Runtime* rt, Value* top) noexcept;
 Value* rt_stack_base(Runtime* rt) noexcept;
 int rt_frame_count(Runtime* rt) noexcept;
 
+// Sets the command-line arguments the program sees through args()
+// (spec/05-stdlib.md). The generated harness calls this once after
+// rt_startup() with argv + 1 and argc - 1, so a standalone binary's own
+// name is dropped and its remaining arguments match what `loxpp script.lox
+// alpha beta` exposes as [alpha, beta].
+void rt_set_args(Runtime* rt, int argc, const char* const* argv) noexcept;
+
 // Interns `chars` and returns it as a Value. Not one of the op*() wrappers
 // below — it exists so this node's own checkpoint can construct a string
 // to print without a compiled CONSTANT op (that lowering is straight-line

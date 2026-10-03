@@ -5,9 +5,11 @@
 #include "container_objects.h"
 #include "exec_objects.h"
 
+#include <cstddef>
 #include <cstdio>
 #include <exception>
 #include <string>
+#include <vector>
 
 // Q6: --target qbe requires NaN tagging. A Value must be a single 8-byte
 // word for every function above to be a valid C-ABI boundary — see
@@ -169,6 +171,15 @@ Value* rt_top(Runtime* rt) noexcept { return rt->top(); }
 void rt_set_top(Runtime* rt, Value* top) noexcept { rt->setTop(top); }
 Value* rt_stack_base(Runtime* rt) noexcept { return rt->stackBase(); }
 int rt_frame_count(Runtime* rt) noexcept { return rt->frameCount(); }
+
+void rt_set_args(Runtime* rt, int argc, const char* const* argv) noexcept {
+    std::vector<std::string> args;
+    args.reserve(static_cast<std::size_t>(argc));
+    for (int i = 0; i < argc; i++) {
+        args.emplace_back(argv[i]);
+    }
+    rt->setArgs(std::move(args));
+}
 
 Value rt_new_string(Runtime* rt, const char* chars) noexcept {
     ObjString* s =
