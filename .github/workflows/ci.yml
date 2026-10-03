@@ -556,6 +556,22 @@ jobs:
             loxpp-dev:latest \
             python3 examples/codecrafters/build-your-own-sqlite/tests/diff_sqlite.py
 
+      - name: Build your own HTTP server - transcribed stage suite
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            python3 examples/codecrafters/build-your-own-http-server/tests/run_stages.py
+
+      - name: Build your own HTTP server - differential vs Python http.client/gzip
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            python3 examples/codecrafters/build-your-own-http-server/tests/diff_http.py
+
   managed-toolchains:
     name: Managed toolchains (JVM)
     runs-on: ubuntu-latest

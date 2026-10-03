@@ -1,0 +1,450 @@
+// http.lox — Codecrafters "Build your own HTTP server" implemented in pure
+// Lox++.
+//
+//   your_http.sh [--directory <dir>]
+//
+// The server binds port 4221 (override with LOXPP_HTTP_PORT) and speaks
+// HTTP/1.1: request-line and header parsing, the `/`, `/echo/{str}`,
+// `/user-agent` and `/files/{filename}` endpoints, persistent connections,
+// `Connection: close`, and `gzip` content coding.
+//
+// Everything here is Lox++: the HTTP parser, the router, and the gzip encoder.
+// Lox++ has no bitwise operators, so the DEFLATE bit stream and CRC32 are
+// built with arithmetic (`/`, `%`, math.floor) over the 32-bit range. See the
+// README for the two stages this cannot reach and why.
+
+// ===========================================================================
+// Small string helpers (the stdlib has no split/trim/lower built in).
+// ===========================================================================
+
+fun indexOf(s, sub) {
+    var n = len(s) - len(sub);
+    var i = 0;
+    while (i <= n) {
+        if (s[i:i + len(sub)] == sub) {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fun startsWith(s, prefix) {
+    return len(s) >= len(prefix) and s[0:len(prefix)] == prefix;
+}
+
+fun split(s, sep) {
+    var parts = [];
+    var sl = len(sep);
+    if (sl == 0) {
+        parts.append(s);
+        return parts;
+    }
+    var start = 0;
+    var i = 0;
+    while (i <= len(s) - sl) {
+        if (s[i:i + sl] == sep) {
+            parts.append(s[start:i]);
+            i = i + sl;
+            start = i;
+        } else {
+            i = i + 1;
+        }
+    }
+    parts.append(s[start:len(s)]);
+    return parts;
+}
+
+fun lower(s) {
+    var out = "";
+    var i = 0;
+    while (i < len(s)) {
+        var c = ord(s[i]);
+        if (c >= 65 and c <= 90) {
+            out = out + chr(c + 32);
+        } else {
+            out = out + s[i];
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+fun trimSpaces(s) {
+    var a = 0;
+    var b = len(s);
+    while (a < b and s[a] == " ") {
+        a = a + 1;
+    }
+    while (b > a and s[b - 1] == " ") {
+        b = b - 1;
+    }
+    return s[a:b];
+}
+
+// readline() strips the '\n' but keeps the '\r', so every line this server
+// reads still carries its CRLF carriage return until trimCR removes it.
+fun trimCR(s) {
+    if (len(s) > 0 and s[len(s) - 1] == "\r") {
+        return s[0:len(s) - 1];
+    }
+    return s;
+}
+
+fun parseInt(s) {
+    var n = 0;
+    var i = 0;
+    while (i < len(s)) {
+        var c = ord(s[i]);
+        if (c >= 48 and c <= 57) {
+            n = n * 10 + (c - 48);
+        } else {
+            break;
+        }
+        i = i + 1;
+    }
+    return n;
+}
+
+fun joinPath(dir, name) {
+    if (len(dir) > 0 and dir[len(dir) - 1] == "/") {
+        return dir + name;
+    }
+    return dir + "/" + name;
+}
+
+// ===========================================================================
+// gzip (RFC 1952) over DEFLATE (RFC 1951), fixed Huffman, literals only.
+//
+// The bit writer packs bits LSB-first into bytes; Huffman codes are emitted
+// MSB-first, as the format requires. No LZ77, so the output can grow for tiny
+// inputs — valid, and exactly what the compression stage allows.
+// ===========================================================================
+
+var POW2 = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
+
+class BitWriter {
+    init() {
+        this.acc = 0;
+        this.n = 0;
+        this.out = "";
+    }
+    put(b) {
+        if (b == 1) {
+            this.acc = this.acc + POW2[this.n];
+        }
+        this.n = this.n + 1;
+        if (this.n == 8) {
+            this.flushByte();
+        }
+    }
+    flushByte() {
+        this.out = this.out + chr(this.acc);
+        this.acc = 0;
+        this.n = 0;
+    }
+    finish() {
+        if (this.n > 0) {
+            this.flushByte();
+        }
+        return this.out;
+    }
+}
+
+fun emitCode(w, code, bits) {
+    var i = bits - 1;
+    while (i >= 0) {
+        var bit = math.floor(code / POW2[i]) % 2;
+        w.put(bit);
+        i = i - 1;
+    }
+}
+
+// Fixed Huffman literal/length table (RFC 1951 §3.2.6):
+//   0-143   -> 8 bits, 0x30 + value
+//   144-255 -> 9 bits, 0x190 + (value - 144)
+fun emitLiteral(w, b) {
+    if (b < 144) {
+        emitCode(w, 48 + b, 8);
+    } else {
+        emitCode(w, 400 + (b - 144), 9);
+    }
+}
+
+fun deflateFixed(s) {
+    var w = BitWriter();
+    w.put(1); // BFINAL = 1
+    w.put(1); // BTYPE bit 0
+    w.put(0); // BTYPE bit 1  => 01, fixed Huffman
+    var i = 0;
+    while (i < len(s)) {
+        emitLiteral(w, ord(s[i]));
+        i = i + 1;
+    }
+    emitCode(w, 0, 7); // end-of-block, symbol 256
+    return w.finish();
+}
+
+// 32-bit XOR with no bitwise operators. Values stay below 2^32, exact in a
+// double, and `bit` peaks at 2^31 before the loop ends.
+fun bxor(a, b) {
+    var r = 0;
+    var bit = 1;
+    var i = 0;
+    while (i < 32) {
+        var ab = math.floor(a / bit) % 2;
+        var bb = math.floor(b / bit) % 2;
+        if (ab != bb) {
+            r = r + bit;
+        }
+        bit = bit * 2;
+        i = i + 1;
+    }
+    return r;
+}
+
+// Reflected CRC32 (polynomial 0xEDB88320), the gzip trailer checksum.
+fun crc32(s) {
+    var crc = 4294967295;
+    var i = 0;
+    while (i < len(s)) {
+        crc = bxor(crc, ord(s[i]));
+        var k = 0;
+        while (k < 8) {
+            if (crc % 2 == 1) {
+                crc = bxor(3988292384, math.floor(crc / 2));
+            } else {
+                crc = math.floor(crc / 2);
+            }
+            k = k + 1;
+        }
+        i = i + 1;
+    }
+    return bxor(crc, 4294967295);
+}
+
+fun le32(n) {
+    return chr(n % 256) + chr(math.floor(n / 256) % 256)
+        + chr(math.floor(n / 65536) % 256) + chr(math.floor(n / 16777216) % 256);
+}
+
+fun gzip(s) {
+    // 10-byte header: magic, CM=deflate, FLG=0, MTIME=0, XFL=0, OS=Unix.
+    var out = chr(31) + chr(139) + chr(8) + chr(0) + chr(0) + chr(0) + chr(0)
+        + chr(0) + chr(0) + chr(3);
+    out = out + deflateFixed(s);
+    out = out + le32(crc32(s));
+    out = out + le32(len(s));
+    return out;
+}
+
+// ===========================================================================
+// HTTP request parsing.
+// ===========================================================================
+
+// Returns [method, target, version].
+fun parseRequest(line) {
+    var i = indexOf(line, " ");
+    if (i < 0) {
+        return ["GET", "/", "HTTP/1.1"];
+    }
+    var method = line[0:i];
+    var rest = line[i + 1:len(line)];
+    var j = indexOf(rest, " ");
+    if (j < 0) {
+        return [method, rest, "HTTP/1.1"];
+    }
+    return [method, rest[0:j], rest[j + 1:len(rest)]];
+}
+
+// Reads header lines until the blank line; keys are lowercased so lookups are
+// case-insensitive, per RFC 9112.
+fun readHeaders(sock) {
+    var headers = {};
+    while (true) {
+        var line = sock.readline();
+        if (line == nil) {
+            break;
+        }
+        line = trimCR(line);
+        if (line == "") {
+            break;
+        }
+        var idx = indexOf(line, ":");
+        if (idx >= 0) {
+            headers[lower(line[0:idx])] = trimSpaces(line[idx + 1:len(line)]);
+        }
+    }
+    return headers;
+}
+
+fun header(headers, name) {
+    return headers[lower(name)];
+}
+
+fun acceptsGzip(headers) {
+    var ae = header(headers, "accept-encoding");
+    if (ae == nil) {
+        return false;
+    }
+    for (var tok in split(ae, ",")) {
+        if (lower(trimSpaces(tok)) == "gzip") {
+            return true;
+        }
+    }
+    return false;
+}
+
+fun hasBody(headers) {
+    var cl = header(headers, "content-length");
+    if (cl == nil) {
+        return false;
+    }
+    return parseInt(trimSpaces(cl)) > 0;
+}
+
+// ===========================================================================
+// Responses and route table.
+// ===========================================================================
+
+fun ok200() {
+    return "HTTP/1.1 200 OK\r\n\r\n";
+}
+
+fun notFound() {
+    return "HTTP/1.1 404 Not Found\r\n\r\n";
+}
+
+fun text200(body) {
+    return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: "
+        + str(len(body)) + "\r\n\r\n" + body;
+}
+
+fun gzip200(body) {
+    var gz = gzip(body);
+    return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: "
+        + str(len(gz)) + "\r\n\r\n" + gz;
+}
+
+fun file200(body) {
+    return "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: "
+        + str(len(body)) + "\r\n\r\n" + body;
+}
+
+fun route(method, target, headers, directory) {
+    if (startsWith(target, "/echo/")) {
+        var body = target[6:len(target)];
+        if (acceptsGzip(headers)) {
+            return gzip200(body);
+        }
+        return text200(body);
+    }
+    if (target == "/user-agent") {
+        var ua = header(headers, "user-agent");
+        if (ua == nil) {
+            ua = "";
+        }
+        return text200(ua);
+    }
+    if (startsWith(target, "/files/")) {
+        var path = joinPath(directory, target[7:len(target)]);
+        if (exists(path) and is_file(path)) {
+            var f = open(path, "r");
+            var body = f.read();
+            f.close();
+            return file200(body);
+        }
+        return notFound();
+    }
+    if (target == "/") {
+        return ok200();
+    }
+    return notFound();
+}
+
+// ===========================================================================
+// Connection handling.
+// ===========================================================================
+
+fun shouldClose(version, headers) {
+    var conn = header(headers, "connection");
+    if (conn != nil) {
+        var c = lower(trimSpaces(conn));
+        if (c == "close") {
+            return true;
+        }
+        if (c == "keep-alive") {
+            return false;
+        }
+    }
+    return version == "HTTP/1.0";
+}
+
+// Insert Connection: close before the header terminator, at the first CRLFCRLF.
+fun withClose(resp) {
+    var idx = indexOf(resp, "\r\n\r\n");
+    if (idx < 0) {
+        return resp;
+    }
+    return resp[0:idx + 2] + "Connection: close\r\n" + resp[idx + 2:len(resp)];
+}
+
+fun handleConnection(sock, directory) {
+    while (true) {
+        var line = sock.readline();
+        if (line == nil) {
+            return;
+        }
+        line = trimCR(line);
+        if (line == "") {
+            continue;
+        }
+        var req = parseRequest(line);
+        var method = req[0];
+        var target = req[1];
+        var version = req[2];
+        var headers = readHeaders(sock);
+        var resp = route(method, target, headers, directory);
+        // A request body cannot be read without a bounded socket read, so any
+        // request that carries one forces the connection closed: the unread
+        // bytes would otherwise be parsed as the next request. This is the
+        // one base stage (POST /files) pure Lox cannot serve.
+        if (shouldClose(version, headers) or hasBody(headers)) {
+            sock.write(withClose(resp));
+            return;
+        }
+        sock.write(resp);
+    }
+}
+
+fun directoryFromArgs() {
+    var a = args();
+    var i = 0;
+    while (i + 1 < len(a)) {
+        if (a[i] == "--directory") {
+            return a[i + 1];
+        }
+        i = i + 1;
+    }
+    return ".";
+}
+
+fun portFromEnv() {
+    var p = env("LOXPP_HTTP_PORT");
+    if (p == nil or p == "") {
+        return 4221;
+    }
+    return parseInt(p);
+}
+
+fun main() {
+    var directory = directoryFromArgs();
+    var server = listen("0.0.0.0", portFromEnv());
+    while (true) {
+        var conn = server.accept();
+        handleConnection(conn, directory);
+        conn.close();
+    }
+}
+
+main();
