@@ -134,6 +134,14 @@ local function start_treesitter_buffer(cfg)
   if cfg.fold then
     vim.wo[0][0].foldmethod = "expr"
     vim.wo[0][0].foldexpr = "v:lua.vim.treesitter.foldexpr()"
+    -- `foldmethod=expr` with the default foldlevel=0 closes every fold.
+    -- Keep the buffer open at load, while respecting a foldlevel the user
+    -- already chose (foldlevelstart > 0).
+    if vim.o.foldlevelstart > 0 then
+      vim.wo[0][0].foldlevel = vim.o.foldlevelstart
+    elseif vim.wo[0][0].foldlevel == 0 then
+      vim.wo[0][0].foldlevel = 99
+    end
   end
 end
 
