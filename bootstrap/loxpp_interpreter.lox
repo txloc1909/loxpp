@@ -1513,16 +1513,16 @@ class Environment {
         this.ancestor(distance).values[name] = value;
     }
 
-    envGet(name, line) {
-        if (this.values.has(name)) return this.values[name];
-        if (this.enclosing != nil)  return this.enclosing.envGet(name, line);
-        return nil;
+    __contains__(name) {
+        if (this.values.has(name)) return true;
+        if (this.enclosing != nil)  return this.enclosing.__contains__(name);
+        return false;
     }
 
-    envHas(name) {
-        if (this.values.has(name)) return true;
-        if (this.enclosing != nil)  return this.enclosing.envHas(name);
-        return false;
+    __index_get__(name) {
+        if (this.values.has(name)) return this.values[name];
+        if (this.enclosing != nil)  return this.enclosing.__index_get__(name);
+        return nil;
     }
 
     envAssign(name, value) {
@@ -3093,11 +3093,11 @@ class Interpreter {
         if (this.locals.has(id)) {
             return env.getAt(this.locals[id], name);
         }
-        if (!this.globals.envHas(name)) {
+        if (!(name in this.globals)) {
             this.setError("UndefinedVariableError", "Undefined variable.", line);
             return nil;
         }
-        return this.globals.envGet(name, 0);
+        return this.globals[name];
     }
 
     evalVariable(id, name, line, env) {
@@ -3779,7 +3779,7 @@ class Interpreter {
     }
 
     matchBind(name, subject, bindings) {
-        var ctorVal = this.globals.envGet(name, 0);
+        var ctorVal = this.globals[name];
         if (ctorVal != nil and loxTag(ctorVal) == "enum_ctor" and ctorVal.arity() == 0) {
             return loxTag(subject) == "enum_val" and subject.tag == name;
         }

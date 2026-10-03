@@ -432,6 +432,38 @@ jobs:
             loxpp-dev:latest \
             bash -c "ctest --test-dir build -R BootstrapResolverErrorParity --output-on-failure --no-tests=error"
 
+      # BootstrapOperatorOverload, BootstrapThrowReport, and
+      # BootstrapMatchArmBreak are registered in test/CMakeLists.txt but
+      # self-skip on debug (SKIP_RETURN_CODE 125), so they only run on the
+      # release leg, where the trace macros are off. --no-tests=error fails
+      # the step if a name stops being registered.
+      - name: Run bootstrap operator-overload differential
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "ctest --test-dir build -R BootstrapOperatorOverload --output-on-failure --no-tests=error"
+
+      - name: Run bootstrap uncaught-throw report check
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "ctest --test-dir build -R BootstrapThrowReport --output-on-failure --no-tests=error"
+
+      - name: Run bootstrap match-arm-break check
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "ctest --test-dir build -R BootstrapMatchArmBreak --output-on-failure --no-tests=error"
+
       - name: Run Lox interpreter test suite (craftinginterpreters)
         if: matrix.preset == 'release'
         run: |
