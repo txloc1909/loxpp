@@ -113,6 +113,11 @@ static Value connectNative(int /*argc*/, Value* argv) {
         nativeRuntimeError(msg.c_str());
         return from<Nil>(Nil{});
     }
+    // A socket is not seekable, so stdio's update-mode rule (input then
+    // output needs a file-positioning call) would make readline() followed
+    // by write() fail with ESPIPE. Unbuffered I/O writes straight through
+    // and never seeks, so the stream stays a true bidirectional byte stream.
+    std::setvbuf(fp, nullptr, _IONBF, 0);
 
     MemoryManager* mm = getActiveMM();
     ObjSocket* sock = mm->create<ObjSocket>(s_socketClass);
@@ -377,6 +382,9 @@ static Value serverAcceptNative(int /*argc*/, Value* args) {
         nativeRuntimeError("accept(): cannot open stream for connection.");
         return from<Nil>(Nil{});
     }
+    // See connectNative: unbuffered I/O keeps readline()/write() interleaving
+    // from needing a seek, which a socket cannot perform.
+    std::setvbuf(fp, nullptr, _IONBF, 0);
     MemoryManager* mm = getActiveMM();
     ObjSocket* sock = mm->create<ObjSocket>(s_socketClass);
     mm->pushTempRoot(sock);

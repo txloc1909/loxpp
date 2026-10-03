@@ -100,6 +100,24 @@ to the host. All I/O blocks the VM, exactly like `sleep`, because item 5's
 coroutines do not exist yet. The *unbounded* surface of the tail — crypto,
 databases, compression — remains the standing argument for item 6.
 
+Two residual gaps surfaced while building the CodeCrafters HTTP server example
+(`examples/codecrafters/build-your-own-http-server`), so item 2 is *not* fully
+closed:
+
+- **No bounded socket read.** `read`/`readline`/`readlines` are line- or
+  EOF-delimited only; a `Content-Length` body is unreachable. This is a real
+  gap under the litmus test, because no bounded read can be composed from
+  existing primitives. Tracking: #518.
+- **No concurrency.** One `accept`/`readline` blocks the VM, so simultaneous
+  keep-alive connections cannot be served without item 5. Tracking: #519.
+
+The HTTP server reaches 12 of the 14 public stages in pure Lox++; these two are
+the ones it cannot. The example also depends on one correctness fix to the
+`socket` streams merged in #516: `readline()` followed by `write()` failed with
+`ESPIPE` because stdio's `r+` update mode wants a seek on the input→output
+transition. Opening socket streams unbuffered removes the seek and restores the
+bidirectional byte stream `spec/05-stdlib.md` already specifies.
+
 **3. Non-local control flow (`try`/`catch`/`throw`/`defer`). DONE** (#223, all three backends; `src/vm.cpp`, `src/backend/jvm_emitter.cpp`, `runtime/clr/src/LoxRuntime.cs`, `spec/04-semantics.md`). Handler stack + frame unwinding. Closes expressiveness roadmap item 3: runtime faults are now catchable via `try`/`catch`, non-local escape works without threading `Result` through every return, and `defer` provides cleanup-on-unwind (also fixes the `container_objects.h` file-handle leak TODO). See `notes/non-local-control-flow.md` for the design record and tracking issue `#223` for the implementation breakdown.
 
 **4. Extensible protocols / operator overloading. DONE** (#472). `for-in`,

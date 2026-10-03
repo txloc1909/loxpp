@@ -50,6 +50,28 @@ TEST(NetProcessTest, SocketEchoRoundTrip) {
     EXPECT_EQ(as<bool>(h.lastResult()), true);
 }
 
+// readline() stops at '\n' without reaching EOF, so this pins the case the
+// echo round-trip above misses: a socket must accept a write after a
+// non-EOF read. The client sends a second line up front so the read-ahead
+// buffer still holds bytes when the server writes — stdio's r+ update mode
+// would then seek to switch direction and fail with ESPIPE on a socket.
+TEST(NetProcessTest, SocketReadlineThenWriteInterleaves) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "c.write(\"ping\\npong\\n\"); "
+                    "var s = l.accept(); "
+                    "var got = s.readline(); "
+                    "s.writeline(\"ok\"); "
+                    "var back = c.readline(); "
+                    "s.close(); "
+                    "c.close(); "
+                    "l.close(); "
+                    "(got == \"ping\") and (back == \"ok\");"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
 TEST(NetProcessTest, ServerPortIsEphemeralAndStable) {
     VMTestHarness h;
     ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
