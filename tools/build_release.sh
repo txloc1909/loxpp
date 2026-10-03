@@ -191,6 +191,10 @@ done < <(parse_manifest)
 # loxpp --target qbe looks for libloxrt.a beside the loxpp binary
 # (backend/qbe_frontend.cpp). Fail the release if packaging dropped it,
 # rather than publish a tarball whose QBE front end cannot find its runtime.
+# The compile-link-run proof against that library lives in CI's qbe-toolchain
+# job (the `--target qbe front end - standalone binary` step): the
+# release-static image has no `qbe`, and this musl library does not link with
+# a glibc host toolchain, so the functional check cannot run here.
 if [ ! -s "$DIST_DIR/loxpp/libloxrt.a" ]; then
   echo "ERROR: $DIST_DIR/loxpp/libloxrt.a is missing or empty" >&2
   exit 1
