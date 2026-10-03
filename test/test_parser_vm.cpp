@@ -155,6 +155,11 @@ TEST_F(ParserVMTest, OrdChr) {
 }
 
 TEST_F(ParserVMTest, RuntimeError_OrdChrBadArgs) {
+    // The natives must exist first. Without this control, every case below
+    // also passes when ord()/chr() are never registered, because an undefined
+    // global is itself a runtime error.
+    expect_num("ord(\"A\")", 65);
+    expect_str("chr(65)", "A");
     expect_runtime_error("ord(65)");
     expect_runtime_error("ord(\"\")");
     expect_runtime_error("ord(\"ab\")");
