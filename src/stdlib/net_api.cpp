@@ -63,7 +63,8 @@ static Value connectNative(int /*argc*/, Value* argv) {
         return from<Nil>(Nil{});
     }
 
-    struct addrinfo hints{};
+    struct addrinfo hints;
+    std::memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     char portStr[8];
@@ -131,7 +132,8 @@ static Value listenNative(int /*argc*/, Value* argv) {
         return from<Nil>(Nil{});
     }
 
-    struct addrinfo hints{};
+    struct addrinfo hints;
+    std::memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
@@ -176,7 +178,8 @@ static Value listenNative(int /*argc*/, Value* argv) {
     }
 
     // Report the port the OS chose when port 0 was requested.
-    struct sockaddr_storage addr{};
+    struct sockaddr_storage addr;
+    std::memset(&addr, 0, sizeof(addr));
     socklen_t addrLen = sizeof(addr);
     int boundPort = port;
     if (getsockname(fd, reinterpret_cast<struct sockaddr*>(&addr), &addrLen) ==
