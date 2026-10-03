@@ -10,7 +10,7 @@ namespace {
 
 // Globals: src/stdlib/globals.cpp, file_api.cpp, os_api.cpp, reflect_api.cpp,
 // math_module.cpp. Descriptions condensed from spec/05-stdlib.md.
-constexpr std::array<StdlibEntry, 22> kGlobals = {{
+constexpr std::array<StdlibEntry, 26> kGlobals = {{
     {"clock", "clock() -> Number", 0,
      "Elapsed processor time in seconds. Use for measuring durations."},
     {"input", "input() -> String | Nil", 0,
@@ -39,6 +39,14 @@ constexpr std::array<StdlibEntry, 22> kGlobals = {{
      "True when `path` exists and is a regular file."},
     {"stat", "stat(path) -> Map | Nil", 1,
      "A map of file metadata (is_dir, is_file, size, mtime), or nil."},
+    {"connect", "connect(host, port) -> Socket", 2,
+     "Opens a TCP connection and returns a connected Socket."},
+    {"listen", "listen(host, port) -> Server", 2,
+     "Binds a listening TCP socket; port 0 picks a free port."},
+    {"spawn", "spawn(program, args) -> Process", 2,
+     "Starts a child process with pipes; args is a List of Strings."},
+    {"run", "run(program, args) -> Map", 2,
+     "Runs a child to completion; returns status, stdout, and stderr."},
     {"type", "type(value) -> String", 1,
      "The language-level type name of `value`, such as \"Number\"."},
     {"fields", "fields(instance) -> List[String]", 1,
@@ -95,10 +103,11 @@ constexpr std::array<StdlibEntry, 25> kMath = {{
     {"nan", "math.nan", kArityConstant, "An IEEE 754 quiet NaN."},
 }};
 
-// Built-in methods on Map values (src/stdlib/map_api.cpp) and File values
-// (src/stdlib/file_api.cpp). Descriptions from spec/05-stdlib.md and
-// spec/03-types.md.
-constexpr std::array<StdlibEntry, 11> kMethods = {{
+// Built-in methods on Map values (src/stdlib/map_api.cpp), File values
+// (src/stdlib/file_api.cpp), and the Socket/Server/Process method names that
+// do not already appear here (src/stdlib/net_api.cpp, process_api.cpp).
+// Descriptions from spec/05-stdlib.md and spec/03-types.md.
+constexpr std::array<StdlibEntry, 21> kMethods = {{
     {"has", "map.has(key) -> Boolean", 1, "True when the map contains `key`."},
     {"del", "map.del(key) -> Boolean", 1,
      "Removes `key` from the map; true when it was present."},
@@ -118,6 +127,25 @@ constexpr std::array<StdlibEntry, 11> kMethods = {{
      "Writes `text` followed by one newline."},
     {"close", "file.close() -> Nil", 0,
      "Closes the file. A second call does nothing."},
+    {"accept", "server.accept() -> Socket", 0,
+     "Waits for the next connection and returns it as a Socket."},
+    {"port", "server.port() -> Number", 0,
+     "The local port the Server is bound to."},
+    {"close_write", "socket.close_write() -> Nil", 0,
+     "Half-closes a Socket, sending EOF while reads stay open."},
+    {"close_stdin", "process.close_stdin() -> Nil", 0,
+     "Closes a child process's standard input."},
+    {"read_err", "process.read_err() -> String", 0,
+     "Reads the child's standard error as one string."},
+    {"err_readline", "process.err_readline() -> String | Nil", 0,
+     "Reads the child's next standard-error line; nil at EOF."},
+    {"err_readlines", "process.err_readlines() -> List[String]", 0,
+     "Reads the child's remaining standard-error lines."},
+    {"wait", "process.wait() -> Number", 0,
+     "Waits for the child to exit; returns its status and reaps it."},
+    {"kill", "process.kill() -> Nil", 0,
+     "Terminates the child at once; call wait() to reap it."},
+    {"pid", "process.pid() -> Number", 0, "The child's process identifier."},
 }};
 
 const StdlibEntry* find(const auto& table, std::string_view name) {
