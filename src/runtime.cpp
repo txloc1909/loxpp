@@ -1364,8 +1364,8 @@ std::optional<uint32_t> Runtime::hashMapKey(const Value& key,
 
 bool Runtime::mapKeyEq(const Value& stored, const Value& lookup,
                        int stopAtFrameCount) {
-    // Only the stored key's class can define key equality. Lox++ has no
-    // reflected operator method, so a lookup-only __eq__ never runs.
+    // Only the stored key's class can define key equality. Map-key equality
+    // never uses a reflected method, so a lookup-only __eq__ never runs.
     if (isInstance(stored)) {
         ObjInstance* inst = asObjInstance(as<Obj*>(stored));
         Value method;
