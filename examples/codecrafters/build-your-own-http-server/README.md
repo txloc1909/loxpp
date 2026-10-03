@@ -20,7 +20,7 @@ stream and the CRC32 checksum are built with arithmetic (`/`, `%`,
 | `your_http.sh` | Challenge entrypoint: resolves `loxpp`, passes `--directory` through |
 | `tests/run_stages.py` | Transcribed stage cases and `local:` regression cases (raw TCP, decodes gzip with Python) |
 | `tests/diff_http.py` | Differential vs Python `http.client` + `gzip` + `zlib` |
-| `tests/gaps.sh` | Evidence for the two unreachable stages (not run in CI) |
+| `tests/gaps.sh` | Evidence for the one unreachable stage (not run in CI) |
 
 ## Stage coverage
 
@@ -33,7 +33,7 @@ stream and the CRC32 checksum are built with arithmetic (`/`, `%`,
 | base-05 `/user-agent` | pass |
 | base-06 concurrent connections | pass |
 | base-07 GET `/files/{filename}` | pass |
-| base-08 POST `/files/{filename}` | **blocked** — no bounded socket read |
+| base-08 POST `/files/{filename}` | pass |
 | compression-01 `Accept-Encoding` header | pass |
 | compression-02 multiple schemes | pass |
 | compression-03 `gzip` | pass |
@@ -41,21 +41,11 @@ stream and the CRC32 checksum are built with arithmetic (`/`, `%`,
 | persistent-02 concurrent keep-alive | **blocked** — no concurrency |
 | persistent-03 `Connection: close` | pass |
 
-Twelve of fourteen. The two that fail are genuine capability gaps, not
-libraries: each needs a primitive the language cannot compose from what it
-already exposes. `tests/gaps.sh` reproduces both.
+Thirteen of fourteen. The one that fails is a genuine capability gap, not a
+library: it needs a primitive the language cannot compose from what it already
+exposes. `tests/gaps.sh` reproduces it.
 
-### Gap 1 — base-08: no bounded socket read
-
-A `POST` body is framed by `Content-Length`, not by a newline. `Socket.read()`
-loops `fread` until EOF (`src/stdlib/net_api.cpp`), and `readline()`/
-`readlines()` block until a newline that a length-delimited body need not
-contain. There is no `recv(n)`, no `select`, and no way to hand the fd to a
-child, so a `Content-Length` body cannot be read from inside Lox++. The server
-therefore returns `404` for the POST and closes the connection (the unread
-body would otherwise be parsed as the next request).
-
-### Gap 2 — persistent-02: no concurrency
+### Gap — persistent-02: no concurrency
 
 Two keep-alive connections open at once need threads or an event loop. One
 `accept()`/`readline()` blocks the whole VM, so while connection A is open,
@@ -74,6 +64,14 @@ The fix opens socket streams unbuffered (`setvbuf(..., _IONBF, ...)`), which
 never needs to seek, keeping `Socket` the true bidirectional byte stream
 `spec/05-stdlib.md` already promised. `NetProcessTest.SocketReadlineThenWriteInterleaves`
 pins it.
+
+## Bounded reads
+
+`base-08` needs a `Content-Length` body, which no line- or EOF-delimited read
+can frame. `Socket.read_bytes(n)` (and `Process.read_bytes`/`err_read_bytes`)
+blocks until `n` bytes arrive or the peer closes, then returns what it read;
+at end of stream it returns `""`. The server reads the body with one call, so
+the bytes are consumed before the next request on a keep-alive connection.
 
 ## gzip
 
