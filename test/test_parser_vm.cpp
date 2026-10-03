@@ -143,6 +143,27 @@ TEST_F(ParserVMTest, StringConcatenation) {
     expect_str("\"foo\" + \"bar\" + \"baz\"", "foobarbaz");
 }
 
+TEST_F(ParserVMTest, OrdChr) {
+    expect_num("ord(\"A\")", 65);
+    expect_num("ord(\"\\n\")", 10);
+    expect_num("ord(\"\\0\")", 0);
+    expect_num("ord(chr(200))", 200);
+    expect_num("len(chr(255))", 1);
+    expect_str("chr(65)", "A");
+    expect_str("chr(ord(\"z\"))", "z");
+    expect_str("chr(0)", std::string(1, '\0'));
+}
+
+TEST_F(ParserVMTest, RuntimeError_OrdChrBadArgs) {
+    expect_runtime_error("ord(65)");
+    expect_runtime_error("ord(\"\")");
+    expect_runtime_error("ord(\"ab\")");
+    expect_runtime_error("chr(\"A\")");
+    expect_runtime_error("chr(1.5)");
+    expect_runtime_error("chr(-1)");
+    expect_runtime_error("chr(256)");
+}
+
 // ===========================================================================
 // Comparison operators  (<, <=, >, >=)
 // ===========================================================================
@@ -177,6 +198,24 @@ TEST_F(ParserVMTest, GreaterOrEqual) {
     expect_bool("1 >= 2", false);
     expect_bool("-0 >= 0", true); // -0 == 0
     expect_bool("0 >= -0", true);
+}
+
+TEST_F(ParserVMTest, StringOrdering) {
+    expect_bool("\"a\" < \"b\"", true);
+    expect_bool("\"b\" < \"a\"", false);
+    expect_bool("\"a\" < \"a\"", false);
+    expect_bool("\"\" < \"a\"", true);
+    expect_bool("\"ab\" < \"abc\"", true); // a prefix is smaller
+    expect_bool("\"abc\" < \"ab\"", false);
+    expect_bool("\"Z\" < \"a\"", true); // unsigned byte order
+    expect_bool("\"a\" <= \"a\"", true);
+    expect_bool("\"b\" <= \"a\"", false);
+    expect_bool("\"b\" > \"a\"", true);
+    expect_bool("\"a\" > \"b\"", false);
+    expect_bool("\"abc\" >= \"abc\"", true);
+    expect_bool("\"ab\" >= \"abc\"", false);
+    expect_bool("chr(255) > chr(1)", true); // high bit is unsigned
+    expect_bool("chr(0) < chr(1)", true);
 }
 
 // ===========================================================================

@@ -91,6 +91,9 @@ probes=(
     # __eq__, and map-mutation-during-key errors are catchable. Positive
     # parity on native, JVM, and the bootstrap.
     "test/translation-probes/62_map_instance_keys.lox"
+    # ord()/chr() byte conversion and String byte ordering (issue #507):
+    # byte-identical stdout on native and the JVM backend.
+    "test/translation-probes/63_ord_chr_string_order.lox"
     # Operator overloading (issue #472): dunder dispatch for arithmetic,
     # comparison, equality, containment, and call.
     "test/translation-probes/jvm-only/61_operator_overload.lox"

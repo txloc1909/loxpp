@@ -1,0 +1,21 @@
+// ord()/chr() byte conversion and String byte ordering (issue #507).
+print ord("A");
+print chr(66);
+print chr(ord("z"));
+print "Z" < "a";
+print "ab" < "abc";
+print "abc" <= "abc";
+print "b" > "a";
+print "a" >= "b";
+print ord(chr(0));
+print ord(chr(255));
+print len(chr(200));
+
+// A full 0..255 round trip proves ord() and chr() are exact inverses.
+var i = 0;
+var ok = true;
+while (i < 256) {
+    if (ord(chr(i)) != i) ok = false;
+    i = i + 1;
+}
+print ok;
