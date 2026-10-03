@@ -181,6 +181,22 @@ public final class LoxProcess {
         write(s + "\n");
     }
 
+    /**
+     * The INVOKE and bound-native entry points. The stream state is checked
+     * before the argument type, matching native's checkProcess-then-type
+     * order, so a non-String write to a closed or reaped process reports the
+     * same fatal error on every backend.
+     */
+    public void writeArg(Object arg) {
+        checkWritable("write");
+        write(LoxSocket.checkStringArg(arg, "write"));
+    }
+
+    public void writelineArg(Object arg) {
+        checkWritable("writeline");
+        writeline(LoxSocket.checkStringArg(arg, "writeline"));
+    }
+
     public void closeStdin() {
         if (stdin != null) {
             try {
@@ -240,12 +256,12 @@ public final class LoxProcess {
             return new LoxNative("err_readlines", 0, a -> errReadlines());
         case "write":
             return new LoxNative("write", 1, a -> {
-                write(LoxSocket.checkStringArg(a[0], "write"));
+                writeArg(a[0]);
                 return null;
             });
         case "writeline":
             return new LoxNative("writeline", 1, a -> {
-                writeline(LoxSocket.checkStringArg(a[0], "writeline"));
+                writelineArg(a[0]);
                 return null;
             });
         case "close_stdin":

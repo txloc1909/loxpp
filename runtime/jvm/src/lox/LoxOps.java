@@ -1109,11 +1109,11 @@ public final class LoxOps {
             return socket.readlines();
         case "write":
             requireArity(args, 1, "write");
-            socket.write(checkStringArg(args[0], "write"));
+            socket.writeArg(args[0]);
             return null;
         case "writeline":
             requireArity(args, 1, "writeline");
-            socket.writeline(checkStringArg(args[0], "writeline"));
+            socket.writelineArg(args[0]);
             return null;
         case "close_write":
             requireArity(args, 0, "close_write");
@@ -1169,11 +1169,11 @@ public final class LoxOps {
             return process.errReadlines();
         case "write":
             requireArity(args, 1, "write");
-            process.write(checkStringArg(args[0], "write"));
+            process.writeArg(args[0]);
             return null;
         case "writeline":
             requireArity(args, 1, "writeline");
-            process.writeline(checkStringArg(args[0], "writeline"));
+            process.writelineArg(args[0]);
             return null;
         case "close_stdin":
             requireArity(args, 0, "close_stdin");

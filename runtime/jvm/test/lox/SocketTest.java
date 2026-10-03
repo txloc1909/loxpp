@@ -65,6 +65,47 @@ public final class SocketTest {
         }
         checkEquals(1, launchError[0], "connect() to a refused port is fatal");
 
+        // close_write() is a no-op after close(), matching spec/05-stdlib.md.
+        LoxServer cs = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket cc = LoxSocket.connect("127.0.0.1", (int)cs.port());
+        cc.close();
+        cc.closeWrite();
+        cc.closeWrite();
+        check(true, "close_write() after close() does nothing");
+        cs.close();
+
+        // A write to a peer that closed its socket is a fatal error, never a
+        // JVM crash.
+        LoxServer ps = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket pc = LoxSocket.connect("127.0.0.1", (int)ps.port());
+        LoxSocket peerSocket = (LoxSocket)ps.accept();
+        peerSocket.close();
+        int[] peerWrite = {0};
+        try {
+            pc.write("x");
+            pc.write("y");
+        } catch (LoxError e) {
+            peerWrite[0] = 1;
+        }
+        checkEquals(1, peerWrite[0], "a write to a closed peer is a fatal error");
+        pc.close();
+        ps.close();
+
+        // The stream state is checked before the argument type, so the fatal
+        // message names the closed stream, matching native.
+        LoxServer ts = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket tc = LoxSocket.connect("127.0.0.1", (int)ts.port());
+        tc.close();
+        String stateMessage = null;
+        try {
+            tc.writeArg(Integer.valueOf(42));
+        } catch (LoxError e) {
+            stateMessage = e.getMessage();
+        }
+        check(stateMessage != null && stateMessage.contains("closed socket"),
+              "write checks the stream state before the argument type");
+        ts.close();
+
         System.exit(TestSupport.finish("SocketTest"));
     }
 }

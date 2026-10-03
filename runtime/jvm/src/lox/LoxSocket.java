@@ -96,17 +96,36 @@ public final class LoxSocket {
         write(s + "\n");
     }
 
-    /** Half-close: sends EOF to the peer, leaves the read side open. */
+    /**
+     * The INVOKE and bound-native entry points. The stream state is checked
+     * before the argument type, matching native's checkSocketWrite-then-type
+     * order, so a non-String write to a closed socket reports the same fatal
+     * error on every backend.
+     */
+    public void writeArg(Object arg) {
+        checkWritable("write");
+        write(checkStringArg(arg, "write"));
+    }
+
+    public void writelineArg(Object arg) {
+        checkWritable("writeline");
+        writeline(checkStringArg(arg, "writeline"));
+    }
+
+    /**
+     * Half-close: sends EOF to the peer, leaves the read side open. A second
+     * call, and a call on an already closed socket, do nothing.
+     */
     public void closeWrite() {
-        checkOpen("close_write");
-        if (!writeClosed) {
-            try {
-                socket.shutdownOutput();
-            } catch (IOException ignored) {
-                // Best effort, matching shutdown's own idempotence.
-            }
-            writeClosed = true;
+        if (socket == null || writeClosed) {
+            return;
         }
+        try {
+            socket.shutdownOutput();
+        } catch (IOException ignored) {
+            // Best effort, matching shutdown's own idempotence.
+        }
+        writeClosed = true;
     }
 
     public void close() {
@@ -152,12 +171,12 @@ public final class LoxSocket {
             return new LoxNative("readlines", 0, a -> readlines());
         case "write":
             return new LoxNative("write", 1, a -> {
-                write(checkStringArg(a[0], "write"));
+                writeArg(a[0]);
                 return null;
             });
         case "writeline":
             return new LoxNative("writeline", 1, a -> {
-                writeline(checkStringArg(a[0], "writeline"));
+                writelineArg(a[0]);
                 return null;
             });
         case "close_write":

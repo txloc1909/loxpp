@@ -49,6 +49,36 @@ public final class ProcessTest {
         checkThrows(() -> LoxProcess.spawn("/bin/echo", args((String)null)),
                     LoxError.class, "spawn() rejects a non-string argument");
 
+        // A write to a child that exited without reading its stdin is a fatal
+        // error, not a JVM crash.
+        LoxProcess dead = LoxProcess.spawn("/bin/sh", args("-c", "exit 0"));
+        try {
+            Thread.sleep(200);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        int[] deadWrite = {0};
+        try {
+            dead.write("x");
+            dead.write("y");
+        } catch (LoxError e) {
+            deadWrite[0] = 1;
+        }
+        checkEquals(1, deadWrite[0],
+                    "a write to an exited child is a fatal error");
+
+        // The stream state is checked before the argument type.
+        LoxProcess reaped = LoxProcess.spawn("/bin/true", empty);
+        reaped.waitStatus();
+        String stateMessage = null;
+        try {
+            reaped.writeArg(Integer.valueOf(1));
+        } catch (LoxError e) {
+            stateMessage = e.getMessage();
+        }
+        check(stateMessage != null && stateMessage.contains("after wait()"),
+              "process write checks the stream state before the argument type");
+
         System.exit(TestSupport.finish("ProcessTest"));
     }
 }
