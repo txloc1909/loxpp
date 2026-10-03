@@ -15,7 +15,7 @@ GCC rejects the parser's designated initializers):
 
 ```bash
 clang++ -std=c++20 -O0 -Wno-c99-designator -Isrc \
-  -DLOXPP_DEBUG_PRINT_CODE -DLOXPP_NAN_TAGGING \
+  -DLOXPP_DEBUG_PRINT_CODE \
   src/*.cpp src/stdlib/*.cpp -o /tmp/loxpp-dis
 ```
 

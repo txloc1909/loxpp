@@ -44,7 +44,7 @@ cd "$work"
 
 echo "== S3 checkpoint: straight-line code and jumps (probes 01-05, 15) =="
 
-c++ -std=c++17 -I "$root/src" -c "$harness_src" -o harness.o
+c++ -std=c++20 -I "$root/src" -c "$harness_src" -o harness.o
 
 failures=0
 for p in "${probes[@]}"; do

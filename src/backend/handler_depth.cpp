@@ -171,9 +171,7 @@ analyzeHandlerDepthIns(const std::vector<DecodedInstruction>& ins,
 
     auto setBefore = [&](int idx, int depth, int activeHandler,
                          std::vector<int>& worklist) {
-        // vector<bool> packs bits: its proxy reference has no plain
-        // operator!, so compare against false instead.
-        if (out.reached[static_cast<size_t>(idx)] == false) {
+        if (!out.reached[static_cast<size_t>(idx)]) {
             out.reached[static_cast<size_t>(idx)] = true;
             out.before[static_cast<size_t>(idx)] = depth;
             activeHandlerBefore[static_cast<size_t>(idx)] = activeHandler;

@@ -43,8 +43,7 @@ RUN cd /usr/src/gtest && \
 # cache at /ccache so a `-v <volume>:/ccache` mount persists it across the
 # ephemeral agent containers; the size is set here rather than with `ccache
 # -M` because a mounted CCACHE_DIR bypasses any baked ccache.conf. 10G covers
-# the object variants across the debug (ASan+UBSan), release, and *-variant
-# (LOXPP_NAN_TAGGING off) presets.
+# the object variants across the debug (ASan+UBSan) and release presets.
 ENV CCACHE_DIR=/ccache
 ENV CCACHE_MAXSIZE=10G
 

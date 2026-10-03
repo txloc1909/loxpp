@@ -141,7 +141,7 @@ for entry in "${probes[@]}"; do
         continue
     fi
 
-    if ! c++ -std=c++17 -I "$root/src" "$harness_cpp" "$name.s" "$libloxrt" \
+    if ! c++ -std=c++20 -I "$root/src" "$harness_cpp" "$name.s" "$libloxrt" \
              -lstdc++ -lm -o "${name}_bin" 2>"$name.cc_err"; then
         echo "  FAIL  $name (cc)"
         sed 's/^/          /' "$name.cc_err"

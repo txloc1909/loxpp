@@ -37,6 +37,12 @@ class MemoryManager : public VmAllocBase {
         }
         bytesAllocated += sizeof(T);
         T* p = new T(std::forward<Args>(args)...);
+        // Every boxed Obj* goes through here. A pointer the NaN tag cannot
+        // hold would be silently truncated by Value's constructor, so reject it
+        // before it can be stored anywhere (src/value.h: pointerFitsInValue).
+        if (!pointerFitsInValue(reinterpret_cast<uintptr_t>(p))) {
+            reportPointerOutOfRange(reinterpret_cast<uintptr_t>(p));
+        }
         allObjects.push_back(p);
         return p;
     }

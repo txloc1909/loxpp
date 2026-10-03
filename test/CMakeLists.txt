@@ -1,12 +1,6 @@
 find_package(GTest REQUIRED)
 include(GoogleTest)
 
-# Propagate the NaN-tagging selection (inherited from the top-level option) to
-# every object compiled in this directory.
-if(LOXPP_NAN_TAGGING)
-    add_compile_definitions(LOXPP_NAN_TAGGING)
-endif()
-
 # Every GTest binary needs the same 29 interpreter sources plus
 # test_harness.cpp. Listing them in each executable meant the 41 test targets
 # that use them compiled the set ~41 times over; the shared objects below
@@ -100,6 +94,7 @@ loxpp_add_test(test_table           test_table.cpp           CORE loxpp_test_cor
 loxpp_add_test(test_table_gc        test_table.cpp           CORE loxpp_test_core)
 loxpp_add_test(test_allocator       test_allocator.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_allocator_gc    test_allocator.cpp       CORE loxpp_test_core)
+loxpp_add_test(test_value           test_value.cpp           CORE loxpp_test_core)
 loxpp_add_test(test_local_variables test_local_variables.cpp CORE loxpp_test_core)
 loxpp_add_test(test_control_flow    test_control_flow.cpp    CORE loxpp_test_core)
 loxpp_add_test(test_vm_runtime      test_vm_runtime.cpp      CORE loxpp_test_core)
@@ -297,7 +292,7 @@ set(LOXPP_GC_STRESS_TARGETS
 # names would otherwise collide.
 set(LOXPP_GTEST_TARGETS
     test_scanner test_parser_vm test_parser_bytecode test_table test_table_gc
-    test_allocator test_allocator_gc
+    test_allocator test_allocator_gc test_value
     test_local_variables test_control_flow test_vm_runtime test_print_nul test_file_nul
     test_os_api test_reflect_api test_reflect_api_gc test_closures
     test_stress_gc test_gc_regression test_inheritance test_list test_list_gc
