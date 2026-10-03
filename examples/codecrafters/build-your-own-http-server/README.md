@@ -3,8 +3,8 @@
 A complete implementation of the public
 [Build your own HTTP server](https://github.com/codecrafters-io/build-your-own-http-server)
 challenge in pure Lox++. No membership is needed: the stage cases are
-transcribed from the public `stage_descriptions/*.md` files (a few local
-regression cases are marked `local:`), and a second battery diffs against
+transcribed from the public `stage_descriptions/*.md` files, and local
+regression cases are marked `local:`. A second battery diffs against
 Python's `http.client`/`gzip`/`zlib` as an independent oracle.
 
 The HTTP/1.1 parser, the router, and the `gzip` encoder (DEFLATE + CRC32) all
@@ -18,7 +18,7 @@ stream and the CRC32 checksum are built with arithmetic (`/`, `%`,
 |---|---|
 | `http.lox` | HTTP server, parser, router, gzip — all pure Lox++ |
 | `your_http.sh` | Challenge entrypoint: resolves `loxpp`, passes `--directory` through |
-| `tests/run_stages.py` | Transcribed stage cases (raw TCP, decodes gzip with Python) |
+| `tests/run_stages.py` | Transcribed stage cases and `local:` regression cases (raw TCP, decodes gzip with Python) |
 | `tests/diff_http.py` | Differential vs Python `http.client` + `gzip` + `zlib` |
 | `tests/gaps.sh` | Evidence for the two unreachable stages (not run in CI) |
 
