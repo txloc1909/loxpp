@@ -1,0 +1,11 @@
+// Run a child process and capture its output, then drive one interactively.
+var r = run("/bin/sh", ["-c", "printf out; printf err 1>&2; exit 3"]);
+print r["status"]; // CHECK: 3
+print r["stdout"]; // CHECK: out
+print r["stderr"]; // CHECK: err
+
+var p = spawn("/bin/cat", []);
+p.writeline("ping");
+p.close_stdin();
+print p.readline(); // CHECK: ping
+print p.wait(); // CHECK: 0

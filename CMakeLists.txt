@@ -128,6 +128,8 @@ set(LOXPP_CORE_SOURCES
     src/stdlib/math_module.cpp
     src/stdlib/os_api.cpp
     src/stdlib/reflect_api.cpp
+    src/stdlib/net_api.cpp
+    src/stdlib/process_api.cpp
 )
 
 add_library(loxpp_core OBJECT ${LOXPP_CORE_SOURCES})

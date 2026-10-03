@@ -94,6 +94,9 @@ probes=(
     # ord()/chr() byte conversion and String byte ordering (issue #507):
     # byte-identical stdout on native and the JVM backend.
     "test/translation-probes/63_ord_chr_string_order.lox"
+    # Sockets and subprocess (issue #516): a loopback TCP echo and a captured
+    # child process, byte-identical on native and the JVM backend.
+    "test/translation-probes/64_net_process.lox"
     # Operator overloading (issue #472): dunder dispatch for arithmetic,
     # comparison, equality, containment, and call.
     "test/translation-probes/jvm-only/61_operator_overload.lox"

@@ -37,6 +37,12 @@ static const char* typeNameOf(Obj* obj) {
         return "BoundMethod";
     case ObjType::FILE:
         return "File";
+    case ObjType::SOCKET:
+        return "Socket";
+    case ObjType::SERVER:
+        return "Server";
+    case ObjType::PROCESS:
+        return "Process";
     case ObjType::ITERATOR:
         return "Iterator";
     case ObjType::LIST:

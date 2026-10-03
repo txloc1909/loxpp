@@ -65,6 +65,74 @@ inline ObjFile* asObjFile(Obj* o) { return static_cast<ObjFile*>(o); }
 inline bool isFile(const Value& v) { return isValueOfType<ObjType::FILE>(v); }
 
 // ---------------------------------------------------------------------------
+// ObjSocket — a connected TCP stream (net_api.cpp)
+// ---------------------------------------------------------------------------
+// `handle` owns `fd`: fclose() closes it. `fd` is kept separately only so
+// close_write() can shutdown(SHUT_WR) the half-close without tearing down the
+// read direction. Do not rely on the destructor to close sockets; like
+// ObjFile, GC timing is non-deterministic. Call close() explicitly, or use
+// `defer s.close()`.
+struct ObjSocket : public Obj {
+    ObjClass* klass;       // shared Socket class; GC-tracked
+    int fd{-1};            // raw descriptor; -1 when closed
+    FILE* handle{nullptr}; // fdopen'd stream; null when closed
+    bool writeClosed{false};
+
+    explicit ObjSocket(ObjClass* k) : Obj(ObjType::SOCKET), klass(k) {}
+    ~ObjSocket() override;
+};
+
+inline bool isObjSocket(Obj* o) { return isObjType(o, ObjType::SOCKET); }
+inline ObjSocket* asObjSocket(Obj* o) { return static_cast<ObjSocket*>(o); }
+inline bool isSocket(const Value& v) {
+    return isValueOfType<ObjType::SOCKET>(v);
+}
+
+// ---------------------------------------------------------------------------
+// ObjServer — a bound, listening TCP socket (net_api.cpp)
+// ---------------------------------------------------------------------------
+struct ObjServer : public Obj {
+    ObjClass* klass; // shared Server class; GC-tracked
+    int fd{-1};      // listening descriptor; -1 when closed
+    int boundPort{0};
+
+    explicit ObjServer(ObjClass* k) : Obj(ObjType::SERVER), klass(k) {}
+    ~ObjServer() override;
+};
+
+inline bool isObjServer(Obj* o) { return isObjType(o, ObjType::SERVER); }
+inline ObjServer* asObjServer(Obj* o) { return static_cast<ObjServer*>(o); }
+inline bool isServer(const Value& v) {
+    return isValueOfType<ObjType::SERVER>(v);
+}
+
+// ---------------------------------------------------------------------------
+// ObjProcess — a child process with three pipe streams (process_api.cpp)
+// ---------------------------------------------------------------------------
+// `in` is the child's standard input (writable), `out` its standard output and
+// `err` its standard error (readable). A child should be reaped with wait();
+// the destructor only closes the pipes and reaps non-blockingly, so a child
+// left running is not killed and a status not yet collected is lost.
+struct ObjProcess : public Obj {
+    ObjClass* klass; // shared Process class; GC-tracked
+    long pid{-1};
+    FILE* in{nullptr};  // child stdin (parent writes)
+    FILE* out{nullptr}; // child stdout (parent reads)
+    FILE* err{nullptr}; // child stderr (parent reads)
+    bool reaped{false};
+    int status{-1}; // valid once reaped
+
+    explicit ObjProcess(ObjClass* k) : Obj(ObjType::PROCESS), klass(k) {}
+    ~ObjProcess() override;
+};
+
+inline bool isObjProcess(Obj* o) { return isObjType(o, ObjType::PROCESS); }
+inline ObjProcess* asObjProcess(Obj* o) { return static_cast<ObjProcess*>(o); }
+inline bool isProcess(const Value& v) {
+    return isValueOfType<ObjType::PROCESS>(v);
+}
+
+// ---------------------------------------------------------------------------
 // ObjError — error value caught by try/catch
 // ---------------------------------------------------------------------------
 struct ObjError : public Obj {

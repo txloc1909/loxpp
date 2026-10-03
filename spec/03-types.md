@@ -292,7 +292,8 @@ The `==` and `!=` operators compare two values.
   - Strings are equal when they contain the same sequence of characters
   - Functions are equal only when they are the same function object (identity
     equality)
-  - Classes, Instances, BoundMethods, Bound built-in methods, Lists, Maps, and Errors use identity
+  - Classes, Instances, BoundMethods, Bound built-in methods, Lists, Maps, Files,
+    Sockets, Servers, Processes, and Errors use identity
     equality: two values are equal only if they are the exact same object
 
 Equality never produces a runtime error regardless of the types being compared,
@@ -334,6 +335,10 @@ Every value has a canonical string form, produced by `print` and by the
 | Instance | `ClassName instance` (e.g. `Dog instance`), or the value of the class's `__str__` method when it defines one — see [§04-semantics](04-semantics.md) |
 | List | `[elem0, elem1, ...]` — each element in its canonical string form, comma-space separated, enclosed in `[` and `]`. An empty list is `[]`. |
 | Map | `{key0: value0, key1: value1, ...}` — each pair as `key: value` in canonical form, comma-space separated, enclosed in `{` and `}`. An empty map is `{}`. |
+| File | `<file>` |
+| Socket | `<socket>` |
+| Server | `<server>` |
+| Process | `<process>` |
 | Error | `kind: message` — the value of the `kind` field, then `": "`, then the value of the `message` field. Note that an *uncaught* `throw` of an Error reports only `message`, not this form — see [§04-semantics, `throw` Statement](04-semantics.md#throw-statement). |
 
 The nesting depth of a value that a canonical string form can hold is

@@ -789,6 +789,30 @@ public final class LoxOps {
             }
             return m;
         }
+        if (obj instanceof LoxSocket) {
+            LoxCallable m = ((LoxSocket)obj).getMethod(name);
+            if (m == null) {
+                throw new LoxError("Undefined property '" + name +
+                                        "' on socket.");
+            }
+            return m;
+        }
+        if (obj instanceof LoxServer) {
+            LoxCallable m = ((LoxServer)obj).getMethod(name);
+            if (m == null) {
+                throw new LoxError("Undefined property '" + name +
+                                        "' on server.");
+            }
+            return m;
+        }
+        if (obj instanceof LoxProcess) {
+            LoxCallable m = ((LoxProcess)obj).getMethod(name);
+            if (m == null) {
+                throw new LoxError("Undefined property '" + name +
+                                        "' on process.");
+            }
+            return m;
+        }
         if (!(obj instanceof LoxInstance)) {
             throw new LoxError("Only instances have properties.");
         }
@@ -938,6 +962,15 @@ public final class LoxOps {
         if (receiver instanceof LoxMap) {
             return invokeMapMethod((LoxMap)receiver, name, args);
         }
+        if (receiver instanceof LoxSocket) {
+            return invokeSocketMethod((LoxSocket)receiver, name, args);
+        }
+        if (receiver instanceof LoxServer) {
+            return invokeServerMethod((LoxServer)receiver, name, args);
+        }
+        if (receiver instanceof LoxProcess) {
+            return invokeProcessMethod((LoxProcess)receiver, name, args);
+        }
         throw makeError("InvalidReceiverError",
                         "Method called on invalid receiver.");
     }
@@ -1062,6 +1095,105 @@ public final class LoxOps {
         }
     }
 
+    private static Object invokeSocketMethod(LoxSocket socket, String name,
+                                              Object[] args) {
+        switch (name) {
+        case "read":
+            requireArity(args, 0, "read");
+            return socket.read();
+        case "readline":
+            requireArity(args, 0, "readline");
+            return socket.readline();
+        case "readlines":
+            requireArity(args, 0, "readlines");
+            return socket.readlines();
+        case "write":
+            requireArity(args, 1, "write");
+            socket.writeArg(args[0]);
+            return null;
+        case "writeline":
+            requireArity(args, 1, "writeline");
+            socket.writelineArg(args[0]);
+            return null;
+        case "close_write":
+            requireArity(args, 0, "close_write");
+            socket.closeWrite();
+            return null;
+        case "close":
+            requireArity(args, 0, "close");
+            socket.close();
+            return null;
+        default:
+            throw new LoxError("Undefined method '" + name + "' on socket.");
+        }
+    }
+
+    private static Object invokeServerMethod(LoxServer server, String name,
+                                             Object[] args) {
+        switch (name) {
+        case "accept":
+            requireArity(args, 0, "accept");
+            return server.accept();
+        case "port":
+            requireArity(args, 0, "port");
+            return server.port();
+        case "close":
+            requireArity(args, 0, "close");
+            server.close();
+            return null;
+        default:
+            throw new LoxError("Undefined method '" + name + "' on server.");
+        }
+    }
+
+    private static Object invokeProcessMethod(LoxProcess process, String name,
+                                              Object[] args) {
+        switch (name) {
+        case "read":
+            requireArity(args, 0, "read");
+            return process.read();
+        case "readline":
+            requireArity(args, 0, "readline");
+            return process.readline();
+        case "readlines":
+            requireArity(args, 0, "readlines");
+            return process.readlines();
+        case "read_err":
+            requireArity(args, 0, "read_err");
+            return process.readErr();
+        case "err_readline":
+            requireArity(args, 0, "err_readline");
+            return process.errReadline();
+        case "err_readlines":
+            requireArity(args, 0, "err_readlines");
+            return process.errReadlines();
+        case "write":
+            requireArity(args, 1, "write");
+            process.writeArg(args[0]);
+            return null;
+        case "writeline":
+            requireArity(args, 1, "writeline");
+            process.writelineArg(args[0]);
+            return null;
+        case "close_stdin":
+            requireArity(args, 0, "close_stdin");
+            process.closeStdin();
+            return null;
+        case "wait":
+            requireArity(args, 0, "wait");
+            return process.waitStatus();
+        case "kill":
+            requireArity(args, 0, "kill");
+            process.kill();
+            return null;
+        case "pid":
+            requireArity(args, 0, "pid");
+            return process.pid();
+        default:
+            throw new LoxError("Undefined method '" + name + "' on process.");
+        }
+    }
+
     private static void requireArity(Object[] args, int arity, String method) {
         if (args.length != arity) {
             throw new LoxError("'" + method + "' expects " + arity +
@@ -1176,6 +1308,15 @@ public final class LoxOps {
         }
         if (v instanceof LoxFile) {
             return "<file>";
+        }
+        if (v instanceof LoxSocket) {
+            return "<socket>";
+        }
+        if (v instanceof LoxServer) {
+            return "<server>";
+        }
+        if (v instanceof LoxProcess) {
+            return "<process>";
         }
         if (v instanceof LoxIterator) {
             return "<iterator>";

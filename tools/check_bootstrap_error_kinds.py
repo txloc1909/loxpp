@@ -190,6 +190,11 @@ EXPECTED_CALLS = [
     ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
     ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
     ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
+    # Issue #516: evalGet's socket, server and process property-read branches
+    # reuse the same non-table UndefinedMemberError text as list/map/file.
+    ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
+    ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
+    ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
     ('UndefinedPropertyError', '"Undefined property on error."', RECORDED),
     ('InvalidReceiverError', '"Method called on invalid receiver."', JUDGED),
     ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),

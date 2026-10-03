@@ -1,6 +1,56 @@
 #include "container_objects.h"
 #include "value.h"
 
+#include <cstdio>
+#include <sys/wait.h>
+#include <unistd.h>
+
+// Resource destructors. GC timing is non-deterministic, so these are a
+// safety net only: a program must close() a Socket/Server and wait() a
+// Process for deterministic cleanup. A child still running when its process
+// object is collected is not killed; it is reaped only if already exited.
+ObjSocket::~ObjSocket() {
+    if (handle != nullptr) {
+        std::fclose(handle); // closes fd too
+        handle = nullptr;
+        fd = -1;
+    } else if (fd >= 0) {
+        ::close(fd);
+        fd = -1;
+    }
+}
+
+ObjServer::~ObjServer() {
+    if (fd >= 0) {
+        ::close(fd);
+        fd = -1;
+    }
+}
+
+ObjProcess::~ObjProcess() {
+    if (in != nullptr) {
+        std::fclose(in);
+        in = nullptr;
+    }
+    if (out != nullptr) {
+        std::fclose(out);
+        out = nullptr;
+    }
+    if (err != nullptr) {
+        std::fclose(err);
+        err = nullptr;
+    }
+    if (!reaped && pid > 0) {
+        int st = 0;
+        pid_t r = ::waitpid(static_cast<pid_t>(pid), &st, WNOHANG);
+        if (r == static_cast<pid_t>(pid)) {
+            reaped = true;
+            status = WIFEXITED(st) ? WEXITSTATUS(st)
+                                   : (WIFSIGNALED(st) ? 128 + WTERMSIG(st) : 1);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ObjMap hash table implementation (delegates to CoreHashMap)
 // ---------------------------------------------------------------------------

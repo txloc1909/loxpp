@@ -1629,7 +1629,7 @@ class LoxFunction {
             var callee = defer_item[0];
             var defer_args = defer_item[1];
             var tag = loxTag(callee);
-            if (tag == "function" or tag == "class" or tag == "native" or tag == "mathfn" or tag == "listmethod" or tag == "mapmethod" or tag == "filemethod" or tag == "enum_ctor") {
+            if (tag == "function" or tag == "class" or tag == "native" or tag == "mathfn" or tag == "listmethod" or tag == "mapmethod" or tag == "filemethod" or tag == "socketmethod" or tag == "servermethod" or tag == "processmethod" or tag == "enum_ctor") {
                 if (callee.arity() == -1 or len(defer_args) == callee.arity()) {
                     var savedThrow = interp.throwFlag;
                     var savedValue = interp.thrownValue;
@@ -1755,7 +1755,7 @@ fun reflectTypeName(v) {
         return "Function";
     }
     if (tag == "native" or tag == "mathfn") return "Function";
-    if (tag == "mapmethod" or tag == "filemethod" or tag == "listmethod") {
+    if (tag == "mapmethod" or tag == "filemethod" or tag == "listmethod" or tag == "socketmethod" or tag == "servermethod" or tag == "processmethod") {
         return "BoundMethod";
     }
     if (tag == "class") return "Class";
@@ -1763,6 +1763,9 @@ fun reflectTypeName(v) {
     if (tag == "list") return "List";
     if (tag == "map") return "Map";
     if (tag == "file") return "File";
+    if (tag == "socket") return "Socket";
+    if (tag == "server") return "Server";
+    if (tag == "process") return "Process";
     if (tag == "enum_ctor") return "EnumConstructor";
     if (tag == "enum_val") return "Enum";
     // spec/03-types.md's type() table gives "Error" for a caught Error
@@ -1877,7 +1880,8 @@ fun reflectCallMethod(interp, args) {
         return callee.call(interp, forwarded);
     }
     if (tag != "native" and tag != "mathfn" and tag != "mapmethod" and
-        tag != "filemethod" and tag != "listmethod") {
+        tag != "filemethod" and tag != "listmethod" and tag != "socketmethod" and
+        tag != "servermethod" and tag != "processmethod") {
         interp.setError("ReflectionNotCallableError", "callMethod requires a callable value.", 0);
         return nil;
     }
@@ -1894,6 +1898,18 @@ fun reflectCallMethod(interp, args) {
 // method would call the argument list instead of the host native.
 fun hostArgsList() { return args(); }
 
+// Converts an interpreted List into a host List of host values, so a host
+// native such as spawn()/run() can read it. Interpreted Strings and Numbers
+// are already host values. A non-List passes through unchanged, so the host
+// native reports its own "args must be a list of strings." error.
+fun hostStringList(v) {
+    if (loxTag(v) != "list") return v;
+    var out = [];
+    var i = 0;
+    while (i < len(v.elements)) { out.append(v.elements[i]); i = i + 1; }
+    return out;
+}
+
 class LoxNative {
     init(name) {
         this.name   = name;
@@ -1903,6 +1919,8 @@ class LoxNative {
         if (this.name == "clock" or this.name == "input" or
             this.name == "args" or this.name == "time") return 0;
         if (this.name == "open") return 2;
+        if (this.name == "connect" or this.name == "listen" or
+            this.name == "spawn" or this.name == "run") return 2;
         if (this.name == "setField") return 3;
         if (this.name == "getField" or this.name == "hasField") return 2;
         if (this.name == "callMethod") return -1;
@@ -1921,6 +1939,19 @@ class LoxNative {
         if (this.name == "open") {
             var handle = open(args[0], args[1]);
             return InterpFile(handle);
+        }
+        if (this.name == "connect") return InterpSocket(connect(args[0], args[1]));
+        if (this.name == "listen")  return InterpServer(listen(args[0], args[1]));
+        if (this.name == "spawn") {
+            return InterpProcess(spawn(args[0], hostStringList(args[1])));
+        }
+        if (this.name == "run") {
+            var h = run(args[0], hostStringList(args[1]));
+            var result = InterpMap();
+            var ks = h.keys();
+            var i = 0;
+            while (i < len(ks)) { interp.mapSet(result, ks[i], h[ks[i]]); i = i + 1; }
+            return result;
         }
         // Each stdlib OS global below delegates to the host native of the
         // same name (args via hostArgsList, which dodges the parameter
@@ -2221,6 +2252,109 @@ class InterpFileMethod {
     toString() { return "<native fn>"; }
 }
 
+class InterpSocket {
+    init(handle) {
+        this.handle = handle;
+        this.loxTag = "socket";
+    }
+    toString() { return "<socket>"; }
+}
+
+class InterpSocketMethod {
+    init(name, socket) {
+        this.name   = name;
+        this.socket = socket;
+        this.loxTag = "socketmethod";
+    }
+    arity() {
+        if (this.name == "read" or this.name == "readline" or this.name == "readlines" or this.name == "close_write" or this.name == "close") return 0;
+        return 1;
+    }
+    call(interp, args) {
+        if (this.name == "read")      return this.socket.handle.read();
+        if (this.name == "readline")  return this.socket.handle.readline();
+        if (this.name == "readlines") {
+            var lines = this.socket.handle.readlines();
+            var result = InterpList([]);
+            var i = 0;
+            while (i < len(lines)) { result.elements.append(lines[i]); i = i + 1; }
+            return result;
+        }
+        if (this.name == "write")       { this.socket.handle.write(args[0]); return nil; }
+        if (this.name == "writeline")   { this.socket.handle.writeline(args[0]); return nil; }
+        if (this.name == "close_write") { this.socket.handle.close_write(); return nil; }
+        if (this.name == "close")       { this.socket.handle.close(); return nil; }
+        return nil;
+    }
+    toString() { return "<native fn>"; }
+}
+
+class InterpServer {
+    init(handle) {
+        this.handle = handle;
+        this.loxTag = "server";
+    }
+    toString() { return "<server>"; }
+}
+
+class InterpServerMethod {
+    init(name, server) {
+        this.name   = name;
+        this.server = server;
+        this.loxTag = "servermethod";
+    }
+    arity() { return 0; }
+    call(interp, args) {
+        if (this.name == "accept") return InterpSocket(this.server.handle.accept());
+        if (this.name == "port")   return this.server.handle.port();
+        if (this.name == "close")  { this.server.handle.close(); return nil; }
+        return nil;
+    }
+    toString() { return "<native fn>"; }
+}
+
+class InterpProcess {
+    init(handle) {
+        this.handle = handle;
+        this.loxTag = "process";
+    }
+    toString() { return "<process>"; }
+}
+
+class InterpProcessMethod {
+    init(name, process) {
+        this.name    = name;
+        this.process = process;
+        this.loxTag  = "processmethod";
+    }
+    arity() {
+        if (this.name == "write" or this.name == "writeline") return 1;
+        return 0;
+    }
+    wrapList(lines) {
+        var result = InterpList([]);
+        var i = 0;
+        while (i < len(lines)) { result.elements.append(lines[i]); i = i + 1; }
+        return result;
+    }
+    call(interp, args) {
+        if (this.name == "read")          return this.process.handle.read();
+        if (this.name == "readline")      return this.process.handle.readline();
+        if (this.name == "readlines")     return this.wrapList(this.process.handle.readlines());
+        if (this.name == "read_err")      return this.process.handle.read_err();
+        if (this.name == "err_readline")  return this.process.handle.err_readline();
+        if (this.name == "err_readlines") return this.wrapList(this.process.handle.err_readlines());
+        if (this.name == "write")         { this.process.handle.write(args[0]); return nil; }
+        if (this.name == "writeline")     { this.process.handle.writeline(args[0]); return nil; }
+        if (this.name == "close_stdin")   { this.process.handle.close_stdin(); return nil; }
+        if (this.name == "wait")          return this.process.handle.wait();
+        if (this.name == "kill")          { this.process.handle.kill(); return nil; }
+        if (this.name == "pid")           return this.process.handle.pid();
+        return nil;
+    }
+    toString() { return "<native fn>"; }
+}
+
 class LoxEnumCtor {
     init(enumName, tag, fields) {
         this.enumName = enumName;
@@ -2298,6 +2432,10 @@ class Interpreter {
         this.globals.define("is_dir",  LoxNative("is_dir"));
         this.globals.define("is_file", LoxNative("is_file"));
         this.globals.define("stat",    LoxNative("stat"));
+        this.globals.define("connect", LoxNative("connect"));
+        this.globals.define("listen",  LoxNative("listen"));
+        this.globals.define("spawn",   LoxNative("spawn"));
+        this.globals.define("run",     LoxNative("run"));
         this.globals.define("math",  InterpMath());
         this.globals.define("type",       LoxNative("type"));
         this.globals.define("fields",     LoxNative("fields"));
@@ -3040,7 +3178,7 @@ class Interpreter {
             var callee = defer_item[0];
             var args = defer_item[1];
             var tag = loxTag(callee);
-            if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "enum_ctor") {
+            if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "socketmethod" and tag != "servermethod" and tag != "processmethod" and tag != "enum_ctor") {
                 i = i - 1;
                 this.fatalError("Deferred callable has unexpected type.");
             }
@@ -3423,7 +3561,7 @@ class Interpreter {
         if (callee != nil and callee != true and callee != false and !isLoxStr(callee) and !isLoxNum(callee)) {
             tag = callee.loxTag;
         }
-        if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "enum_ctor") {
+        if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "socketmethod" and tag != "servermethod" and tag != "processmethod" and tag != "enum_ctor") {
             this.setError("NotCallableError", "Can only call functions, classes and enums.", paren_line);
             return nil;
         }
@@ -3437,7 +3575,7 @@ class Interpreter {
             this.fatalError("'" + callee.name + "' expects " + str(callee.arity()) + " " + noun + " but got " + str(len(args)) + ".");
             return nil;
         }
-        if ((tag == "native" or tag == "mathfn" or tag == "mapmethod" or tag == "filemethod") and callee.arity() != -1 and len(args) != callee.arity()) {
+        if ((tag == "native" or tag == "mathfn" or tag == "mapmethod" or tag == "filemethod" or tag == "socketmethod" or tag == "servermethod" or tag == "processmethod") and callee.arity() != -1 and len(args) != callee.arity()) {
             this.fatalError("Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".");
             return nil;
         }
@@ -3493,6 +3631,21 @@ class Interpreter {
         }
         if (loxTag(object) == "file") {
             if (name == "read" or name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close") return InterpFileMethod(name, object);
+            this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
+            return nil;
+        }
+        if (loxTag(object) == "socket") {
+            if (name == "read" or name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close_write" or name == "close") return InterpSocketMethod(name, object);
+            this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
+            return nil;
+        }
+        if (loxTag(object) == "server") {
+            if (name == "accept" or name == "port" or name == "close") return InterpServerMethod(name, object);
+            this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
+            return nil;
+        }
+        if (loxTag(object) == "process") {
+            if (name == "read" or name == "readline" or name == "readlines" or name == "read_err" or name == "err_readline" or name == "err_readlines" or name == "write" or name == "writeline" or name == "close_stdin" or name == "wait" or name == "kill" or name == "pid") return InterpProcessMethod(name, object);
             this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
             return nil;
         }

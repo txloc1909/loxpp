@@ -1,0 +1,13 @@
+// A loopback TCP echo. connect() completes through the listener's backlog,
+// so one program can be both the client and the server without threads.
+var server = listen("127.0.0.1", 0);
+var client = connect("127.0.0.1", server.port());
+client.writeline("hello socket");
+client.close_write();
+var peer = server.accept();
+print peer.read(); // CHECK: hello socket
+peer.write("goodbye");
+peer.close();
+print client.read(); // CHECK: goodbye
+client.close();
+server.close();

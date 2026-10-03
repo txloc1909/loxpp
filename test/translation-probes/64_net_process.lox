@@ -1,0 +1,24 @@
+// Sockets and subprocess (expressiveness roadmap item 2, issue #516). A
+// loopback TCP echo and a captured child process must print byte-identically
+// on every backend — native, JVM, and QBE. The client's connect() completes
+// through the listener's backlog, so one thread can be both client and
+// server. The child is /bin/sh so the captured stderr and non-zero status are
+// deterministic. Keep the trailing newline at end of file: the bootstrap
+// interpreter rejects a program whose last line lacks one (see issue #328).
+var l = listen("127.0.0.1", 0);
+print type(l);
+var c = connect("127.0.0.1", l.port());
+c.writeline("ping");
+c.close_write();
+var s = l.accept();
+print s.read();
+s.write("pong");
+s.close();
+print c.read();
+c.close();
+l.close();
+var r = run("/bin/sh", ["-c", "printf out; printf err 1>&2; exit 3"]);
+print type(r);
+print r["status"];
+print r["stdout"];
+print r["stderr"];

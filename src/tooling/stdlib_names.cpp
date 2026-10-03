@@ -9,15 +9,17 @@ namespace {
 
 // From src/stdlib/globals.cpp (clock input ord chr), src/stdlib/file_api.cpp
 // (open), src/stdlib/os_api.cpp (args env exit time sleep exists is_dir
-// is_file stat), src/stdlib/reflect_api.cpp (type fields methods getField
-// setField hasField callMethod), src/stdlib/math_module.cpp (math).
-// `print`, `len`, and `str` are statement/operator keywords, not globals, so
-// they are not listed.
-constexpr std::array<std::string_view, 22> kGlobals = {
-    "clock",    "input",    "ord",        "chr",    "open",    "args",
-    "env",      "exit",     "time",       "sleep",  "exists",  "is_dir",
-    "is_file",  "stat",     "type",       "fields", "methods", "getField",
-    "setField", "hasField", "callMethod", "math",
+// is_file stat), src/stdlib/net_api.cpp (connect listen), src/stdlib/
+// process_api.cpp (spawn run), src/stdlib/reflect_api.cpp (type fields
+// methods getField setField hasField callMethod), src/stdlib/math_module.cpp
+// (math). `print`, `len`, and `str` are statement/operator keywords, not
+// globals, so they are not listed.
+constexpr std::array<std::string_view, 26> kGlobals = {
+    "clock",      "input",  "ord",     "chr",      "open",     "args",
+    "env",        "exit",   "time",    "sleep",    "exists",   "is_dir",
+    "is_file",    "stat",   "connect", "listen",   "spawn",    "run",
+    "type",       "fields", "methods", "getField", "setField", "hasField",
+    "callMethod", "math",
 };
 
 // From src/math.cpp: kMathFunctions and kMathConstants.

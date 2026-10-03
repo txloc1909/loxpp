@@ -386,6 +386,231 @@ was called.
 
 ---
 
+## `connect(host, port) -> Socket`
+
+Opens a TCP connection to `host` at `port`, and returns a connected Socket.
+Both arguments are required. `host` must be a String — a host name or a
+numeric address. `port` must be an integer Number from 1 through 65535. Any
+other argument is a runtime error, as is a failure to resolve the name or to
+connect, which includes a refused connection.
+
+**Arity:** 2  
+**Returns:** Socket
+
+---
+
+## `listen(host, port) -> Server`
+
+Binds a listening TCP socket to `host` at `port`, and returns a Server. Both
+arguments are required. `host` must be a String naming a local address.
+`port` must be an integer Number from 0 through 65535; `0` asks the operating
+system to choose an unused port, which `Server.port()` then reports. Any other
+argument is a runtime error, as is a failure to bind or to listen.
+
+**Arity:** 2  
+**Returns:** Server
+
+---
+
+## `spawn(program, args) -> Process`
+
+Starts `program` as a child process, and returns a Process immediately, without
+waiting for it to finish. `program` must be a String. `args` must be a List of
+Strings; it holds only the arguments that follow the program name, not the
+program name itself.
+
+No shell runs between the program and the child. `program` is executed
+directly, and the operating system's own search path is used when it is not an
+absolute path.
+
+A failure to start the program is a runtime error. A child that starts and then
+exits with a non-zero status is not an error.
+
+**Arity:** 2  
+**Returns:** Process
+
+---
+
+## `run(program, args) -> Map`
+
+Runs `program` with `args` to completion, reads all of its standard output and
+standard error, and returns a Map with these keys:
+
+- `status`: the child's exit status as a Number; the same value `Process.wait`
+  returns.
+- `stdout`: everything the child wrote to standard output, as a String.
+- `stderr`: everything the child wrote to standard error, as a String.
+
+Standard output and standard error are read at the same time, so a child that
+writes a large amount to both cannot deadlock. `run` does not feed the child
+standard input; it closes the child's standard input at once, so a child that
+reads it sees an end-of-file. A failure to start the program is a runtime
+error. A non-zero exit status is not an error.
+
+**Arity:** 2  
+**Returns:** Map
+
+---
+
+## Socket methods
+
+A Socket is returned by `connect`, or by `Server.accept()`. `type(s)` on a
+Socket returns `"Socket"`. A Socket is a bidirectional stream of bytes.
+
+Reading a closed Socket, or writing to a Socket after `close_write()` or
+`close()`, is a runtime error. A write that the peer has stopped reading also
+fails with a runtime error; it never ends the program by a signal.
+
+### `s.read() -> String`
+
+Reads from the Socket until the peer closes its write direction, and returns
+everything read as one String.
+
+**Arity:** 0  
+**Returns:** String
+
+### `s.readline() -> String | Nil`
+
+Reads bytes up to and including the next newline, and returns them without the
+newline. Returns `nil` when the peer has closed and no bytes remain. A final
+line with no newline is returned as a line.
+
+**Arity:** 0  
+**Returns:** String on success, Nil at end of stream
+
+### `s.readlines() -> List[String]`
+
+Reads lines as `readline` does until the peer closes, and returns them as a
+List.
+
+**Arity:** 0  
+**Returns:** List of String
+
+### `s.write(text) -> Nil`
+
+Writes `text`. `text` must be a String.
+
+**Arity:** 1  
+**Returns:** Nil
+
+### `s.writeline(text) -> Nil`
+
+Writes `text` followed by one newline. `text` must be a String.
+
+**Arity:** 1  
+**Returns:** Nil
+
+### `s.close_write() -> Nil`
+
+Closes the Socket's write direction only, which sends an end-of-file to the
+peer. Reading stays possible. A second call, and a call after `close()`, do
+nothing.
+
+**Arity:** 0  
+**Returns:** Nil
+
+### `s.close() -> Nil`
+
+Closes the Socket in both directions. A second call does nothing.
+
+**Arity:** 0  
+**Returns:** Nil
+
+---
+
+## Server methods
+
+A Server is returned by `listen`. `type(s)` on a Server returns `"Server"`.
+
+### `s.accept() -> Socket`
+
+Waits for the next inbound connection, and returns it as a new Socket. Calling
+`accept()` on a closed Server is a runtime error.
+
+**Arity:** 0  
+**Returns:** Socket
+
+### `s.port() -> Number`
+
+The local port the Server is bound to. When `listen` was given port `0`, this
+reports the port the operating system chose.
+
+**Arity:** 0  
+**Returns:** Number
+
+### `s.close() -> Nil`
+
+Stops listening. A connection already accepted stays usable. A second call does
+nothing.
+
+**Arity:** 0  
+**Returns:** Nil
+
+---
+
+## Process methods
+
+A Process is returned by `spawn`. `type(p)` on a Process returns `"Process"`.
+
+Reading a closed Process pipe, or writing to it after `close_stdin()` or after
+the process has been waited on, is a runtime error. A write to a child that
+has stopped reading also fails with a runtime error; it never ends the program
+by a signal.
+
+A child's standard output and standard error are two separate streams. Reading
+only one of them while the child writes a large amount to the other can block
+the child. Read both, or use `run`.
+
+### `p.read() -> String`, `p.readline() -> String | Nil`, `p.readlines() -> List[String]`
+
+Read the child's standard output. These behave exactly like the Socket methods
+of the same name.
+
+### `p.read_err() -> String`, `p.err_readline() -> String | Nil`, `p.err_readlines() -> List[String]`
+
+Read the child's standard error. These behave exactly like the Socket methods
+of the same name.
+
+### `p.write(text) -> Nil`, `p.writeline(text) -> Nil`
+
+Write to the child's standard input. `text` must be a String.
+
+### `p.close_stdin() -> Nil`
+
+Closes the child's standard input, which sends it an end-of-file. A second call
+does nothing.
+
+**Arity:** 0  
+**Returns:** Nil
+
+### `p.wait() -> Number`
+
+Waits for the child to exit, and returns its exit status as a Number. The
+status is the child's exit code when it exited normally, or `128 + signal` when
+it was terminated by a signal. `wait()` blocks. A second call returns the same
+status at once. Every still-running child should be waited on, or it can stay a
+zombie until the program ends.
+
+**Arity:** 0  
+**Returns:** Number
+
+### `p.kill() -> Nil`
+
+Terminates the child at once. This does not wait; call `wait()` to reap the
+child and get its status.
+
+**Arity:** 0  
+**Returns:** Nil
+
+### `p.pid() -> Number`
+
+The child's process identifier.
+
+**Arity:** 0  
+**Returns:** Number
+
+---
+
 ## Map methods
 
 Map values respond to the built-in methods `has`, `del`, `keys`, `values`, and
@@ -411,6 +636,9 @@ Returns the language-level type name of `value` as a String.
 | List | `"List"` |
 | Map | `"Map"` |
 | File | `"File"` |
+| Socket | `"Socket"` |
+| Server | `"Server"` |
+| Process | `"Process"` |
 | Error (see §03-types) | `"Error"` |
 | Iterator | `"Iterator"` |
 | Enum constructor | `"EnumConstructor"` |

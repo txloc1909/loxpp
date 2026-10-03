@@ -363,6 +363,24 @@ FATAL_ROWS = [
         expected_message="Undefined property 'bogus' on file.",
     ),
     Row(
+        "undefined_property_on_socket",
+        "fatal",
+        'var l = listen("127.0.0.1", 0); var s = connect("127.0.0.1", l.port()); s.bogus;',
+        expected_message="Undefined property 'bogus' on socket.",
+    ),
+    Row(
+        "undefined_property_on_server",
+        "fatal",
+        'var l = listen("127.0.0.1", 0); l.bogus;',
+        expected_message="Undefined property 'bogus' on server.",
+    ),
+    Row(
+        "undefined_property_on_process",
+        "fatal",
+        'var p = spawn("echo", []); p.bogus;',
+        expected_message="Undefined property 'bogus' on process.",
+    ),
+    Row(
         "undefined_property_on_map",
         "fatal",
         "var m = {}; m.bogus;",
@@ -441,6 +459,24 @@ FATAL_ROWS = [
         'var f = open("__WORKDIR__/loxpp_fault_table_probe2.txt", "w"); f.write("x"); '
         'var g = open("__WORKDIR__/loxpp_fault_table_probe2.txt", "r"); g.bogus();',
         expected_message="Undefined method 'bogus' on file.",
+    ),
+    Row(
+        "undefined_method_on_socket",
+        "fatal",
+        'var l = listen("127.0.0.1", 0); var s = connect("127.0.0.1", l.port()); s.bogus();',
+        expected_message="Undefined method 'bogus' on socket.",
+    ),
+    Row(
+        "undefined_method_on_server",
+        "fatal",
+        'var l = listen("127.0.0.1", 0); l.bogus();',
+        expected_message="Undefined method 'bogus' on server.",
+    ),
+    Row(
+        "undefined_method_on_process",
+        "fatal",
+        'var p = spawn("echo", []); p.bogus();',
+        expected_message="Undefined method 'bogus' on process.",
     ),
     Row(
         "undefined_method_on_map",

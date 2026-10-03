@@ -52,6 +52,8 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/stdlib/math_module.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/os_api.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/reflect_api.cpp
+    ${PROJECT_SOURCE_DIR}/src/stdlib/net_api.cpp
+    ${PROJECT_SOURCE_DIR}/src/stdlib/process_api.cpp
 )
 
 add_library(loxpp_test_core OBJECT ${LOXPP_CORE_SRCS} test_harness.cpp)
@@ -101,6 +103,8 @@ loxpp_add_test(test_vm_runtime      test_vm_runtime.cpp      CORE loxpp_test_cor
 loxpp_add_test(test_print_nul       test_print_nul.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_file_nul        test_file_nul.cpp        CORE loxpp_test_core)
 loxpp_add_test(test_os_api          test_os_api.cpp          CORE loxpp_test_core)
+loxpp_add_test(test_net_process     test_net_process.cpp     CORE loxpp_test_core)
+loxpp_add_test(test_net_process_gc  test_net_process.cpp     CORE loxpp_test_core)
 loxpp_add_test(test_reflect_api     test_reflect_api.cpp     CORE loxpp_test_core)
 loxpp_add_test(test_reflect_api_gc  test_reflect_api.cpp     CORE loxpp_test_core)
 loxpp_add_test(test_closures        test_closures.cpp        CORE loxpp_test_core)
@@ -284,7 +288,7 @@ set(LOXPP_GC_STRESS_TARGETS
     test_reflect_api_gc test_stress_gc test_gc_regression test_list_gc
     test_map_gc test_enum_gc test_class_pattern_gc test_or_pattern_gc
     test_list_pattern_gc test_at_binding_gc test_handler_stack_leak_gc
-    test_table_gc test_allocator_gc)
+    test_table_gc test_allocator_gc test_net_process_gc)
 
 # Register each GTest case as its own CTest test so `ctest -j` parallelizes
 # within a binary, not just across binaries. The per-target prefix keeps names
@@ -294,7 +298,8 @@ set(LOXPP_GTEST_TARGETS
     test_scanner test_parser_vm test_parser_bytecode test_table test_table_gc
     test_allocator test_allocator_gc test_value
     test_local_variables test_control_flow test_vm_runtime test_print_nul test_file_nul
-    test_os_api test_reflect_api test_reflect_api_gc test_closures
+    test_os_api test_net_process test_net_process_gc
+    test_reflect_api test_reflect_api_gc test_closures
     test_stress_gc test_gc_regression test_inheritance test_list test_list_gc
     test_map test_map_gc test_var_destructure test_enum test_enum_gc
     test_class_pattern test_class_pattern_gc test_match_expr test_slice

@@ -24,6 +24,9 @@ enum class ObjType : uint8_t {
     BOUND_NATIVE,
     ERROR,
     DEFERRED_CALL,
+    SOCKET,
+    SERVER,
+    PROCESS,
 };
 
 inline uint32_t hashString(std::string_view s) {
