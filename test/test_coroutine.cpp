@@ -594,6 +594,30 @@ TEST_F(CoroutineTest, ResumeThatWouldOverflowFramesIsCatchable) {
     expect_string(h, "kind", "StackOverflowError");
 }
 
+// A coroutine resumed from inside a native callback may still yield: the
+// callback's C++ frame was below the resume point and keeps running. Only a
+// re-entrant run entered INSIDE the coroutine blocks a yield.
+TEST_F(CoroutineTest, CoroutineResumedFromNativeCallbackMayYield) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun g() {
+            yield 1;
+            return 2;
+        }
+        class C {
+            init() {}
+            m() {
+                var co = coroutine.create(g);
+                return co.resume();
+            }
+        }
+        var c = C();
+        var got = callMethod(c, "m");
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("got"), 1);
+}
+
 TEST_F(CoroutineTest, TypeAndStringify) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(

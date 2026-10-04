@@ -354,6 +354,11 @@ struct ObjCoroutine : public Obj {
     // window after the native returns, so the slice is truncated here, not to
     // activeStackBase (which is the slice's own base).
     Value* activeWindowTop{nullptr};
+    // m_reentrantRunDepth at the moment this coroutine was resumed. A yield
+    // is legal while the depth is unchanged (the C++ frames below the resume
+    // point keep running); it is illegal when a deeper re-entrant run was
+    // entered inside the coroutine (a native callback or a defer drain).
+    int resumeReentrantDepth{0};
 
     ObjCoroutine(ObjClass* k, Value fn)
         : Obj(ObjType::COROUTINE), klass(k), callee(fn) {}

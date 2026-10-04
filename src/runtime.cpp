@@ -441,6 +441,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
     }
     co->state = CoroutineState::RUNNING;
     m_currentCoroutine = co;
+    co->resumeReentrantDepth = m_reentrantRunDepth;
 
 #ifdef LOXPP_PROFILE
     ProfilerData* savedProfiler = m_activeProfiler;

@@ -787,11 +787,14 @@ InterpretResult VM::run(int stopAtFrameCount) {
                     "Cannot yield from outside a coroutine."));
                 break;
             }
-            if (m_rt.m_reentrantRunDepth > 0) {
+            if (m_rt.m_reentrantRunDepth >
+                m_rt.m_currentCoroutine->resumeReentrantDepth) {
                 // A native (or a __str__/__hash__/__eq__ method invoked by
-                // one) is on the C++ stack between this frame and the resume.
-                // Its continuation cannot be captured, so suspending here
-                // would silently drop the native's work.
+                // one, or a defer drain) was entered inside this coroutine
+                // since it was resumed. That C++ frame's continuation cannot
+                // be captured, so suspending here would silently drop its
+                // work. A C++ frame that was already below the resume point
+                // is fine: it keeps running while the coroutine is suspended.
                 CATCHABLE_OR_RETURN(tryCatchableError(
                     "YieldAcrossNativeError",
                     "Cannot yield across a native callback."));
