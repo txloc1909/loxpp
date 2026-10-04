@@ -579,9 +579,10 @@ the next element each time.
      version first (see Mutation during iteration below). Then the
      cursor, a bucket index, scans forward to the next occupied bucket
      within the capacity; if there is none, the loop exits.
-   - For a **Coroutine**: the coroutine is resumed. If it is dead (its
-     function has returned), the loop exits; otherwise the value it yielded
-     is the next element.
+   - For a **Coroutine**: if it is already dead, the loop exits, with no
+     resume attempt. Otherwise it is resumed; if the resume returns (the
+     function has finished), the loop exits, and otherwise the value it
+     yielded is the next element.
 4. Otherwise, the located element is bound to `x` and `body` executes.
    - For a **List**: `x` is bound to the element value.
    - For a **String**: `x` is bound to a single-character String.

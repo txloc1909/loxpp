@@ -686,6 +686,32 @@ TEST_F(CoroutineTest, ForInEmptyGeneratorRunsNoBody) {
     expect_string(h, "st", "dead");
 }
 
+// A coroutine that is already dead when the loop starts exits at once, with
+// no resume attempt: resuming a dead coroutine is an error, and for-in must
+// not raise it.
+TEST_F(CoroutineTest, ForInAlreadyDeadCoroutineRunsNoBody) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun once() {
+            yield 1;
+            return 2;
+        }
+        var co = coroutine.create(once);
+        var first = co.resume();
+        var second = co.resume();
+        var body = 0;
+        for (var x in co) {
+            body = body + 1;
+        }
+        var st = co.status();
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("first"), 1);
+    expect_num(*h.getGlobal("second"), 2);
+    expect_num(*h.getGlobal("body"), 0);
+    expect_string(h, "st", "dead");
+}
+
 // __iter__ may return a Coroutine; for-in resumes it exactly as it does a
 // Coroutine passed directly.
 TEST_F(CoroutineTest, ForInIterDunderReturnsCoroutine) {
