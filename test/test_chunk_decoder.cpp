@@ -16,6 +16,7 @@
 
 #include "backend/chunk_decoder.h"
 #include "compiler.h"
+#include "corpus.h"
 #include "debug.h"
 #include "exec_objects.h"
 #include "memory_manager.h"
@@ -26,44 +27,19 @@
 
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
 #include <map>
 #include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#ifndef LOXPP_PROJECT_SOURCE_DIR
-#error                                                                         \
-    "LOXPP_PROJECT_SOURCE_DIR must be defined by the build (see test/CMakeLists.txt)"
-#endif
-
 namespace {
 
 namespace fs = std::filesystem;
 
-fs::path projectRoot() { return fs::path(LOXPP_PROJECT_SOURCE_DIR); }
-
-std::string readFile(const fs::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        throw std::runtime_error("cannot open " + path.string());
-    }
-    std::ostringstream contents;
-    contents << in.rdbuf();
-    return contents.str();
-}
-
-std::vector<fs::path> listLoxFiles(const fs::path& dir) {
-    std::vector<fs::path> files;
-    for (const auto& entry : fs::directory_iterator(dir)) {
-        if (entry.path().extension() == ".lox") {
-            files.push_back(entry.path());
-        }
-    }
-    std::sort(files.begin(), files.end());
-    return files;
-}
+using loxpp_test::listLoxFiles;
+using loxpp_test::projectRoot;
+using loxpp_test::readFile;
 
 // LOXPP_FOR_EACH_OP (src/chunk.h) is the single source of truth for "every
 // Op enumerator", used by both `mnemonic` (below) and `allOps` — the

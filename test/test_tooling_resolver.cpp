@@ -1,12 +1,12 @@
-#include <algorithm>
 #include <filesystem>
-#include <fstream>
-#include <sstream>
+#include <iostream>
+#include <set>
 #include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include "corpus.h"
 #include "tooling/document_model.h"
 #include "tooling/resolver.h"
 #include "tooling/stdlib_names.h"
@@ -39,13 +39,6 @@ std::vector<std::string> warningMessages(const DocumentModel& model) {
         out.push_back(d.message);
     }
     return out;
-}
-
-std::string readFile(const fs::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    std::ostringstream buf;
-    buf << in.rdbuf();
-    return buf.str();
 }
 
 } // namespace
@@ -584,94 +577,50 @@ TEST(ToolingResolver, RebuildReplacesState) {
 }
 
 // ---------------------------------------------------------------------------
-// Corpus sweep: the resolver must not crash on any real program, and the
-// undefined-name warning must stay quiet on the curated examples.
+// Corpus sweep: the resolver must not crash on any real program, and its
+// warnings must match the known allowlist below.
 // ---------------------------------------------------------------------------
 
-TEST(ToolingResolverCorpus, NoCrashAndFewWarnings) {
-    const fs::path root = LOXPP_PROJECT_SOURCE_DIR;
-    std::vector<fs::path> files;
-    for (const char* dir :
-         {"examples", "bootstrap", "test/translation-probes"}) {
-        const fs::path base = root / dir;
-        if (!fs::is_directory(base)) {
-            continue;
-        }
-        for (const auto& entry : fs::directory_iterator(base)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".lox") {
-                files.push_back(entry.path());
-            }
-        }
-    }
-    ASSERT_GT(files.size(), 50u);
-    std::sort(files.begin(), files.end());
+// Filenames known to warn. Each entry is an understood, intentional warning:
+// a deliberate undefined-name trigger, or an unused local that the program
+// never reads (some bind the result of a throwing call, some declare a helper
+// the rest of the file does not use). A clean file that starts warning is not
+// in this set and fails the test; a new file that warns must be added here on
+// purpose.
+const std::set<std::string> kExpectedWarnedFiles = {
+    "06_shared_upvalue.lox",
+    "test_enum_arity_try.lox",
+    "test_error_kind_message.lox",
+    "test_invalid_map_key_try.lox",
+    "try_catch_class_constructor_arity.lox",
+    "try_catch_error_instance_properties_catchable.lox",
+    "try_catch_error_vs_ordinary_instance_catchability.lox",
+};
 
-    std::size_t totalWarnings = 0;
+TEST(ToolingResolverCorpus, NoCrashAndKnownWarnings) {
+    const std::vector<fs::path> files = loxpp_test::corpusFiles();
+    ASSERT_GT(files.size(), 50u);
+
+    std::set<std::string> warnedFiles;
     for (const fs::path& file : files) {
-        const std::string src = readFile(file);
+        const std::string src = loxpp_test::readFile(file);
         DocumentModel model(src);
         // Every offset in every warning must map inside the source.
         for (const Diagnostic& d : model.warnings()) {
             EXPECT_LE(d.offset, src.size()) << file.filename().string();
         }
-        const std::size_t n = model.warnings().size();
-        totalWarnings += n;
-        std::cerr << file.filename().string() << ": " << n << " warning(s)\n";
+        if (!model.warnings().empty()) {
+            warnedFiles.insert(file.filename().string());
+        }
+        std::cerr << file.filename().string() << ": " << model.warnings().size()
+                  << " warning(s)\n";
         for (const Diagnostic& d : model.warnings()) {
             std::cerr << "    " << d.line << ":" << d.column << " " << d.message
                       << "\n";
         }
     }
-    std::cerr << "corpus: " << files.size() << " files, " << totalWarnings
-              << " warnings\n";
-    // The curated corpus is clean Lox++; a handful of lint hits is the
-    // ceiling. Raised from 5 for the try/catch/defer examples added
-    // alongside the native VM's support for them (PR #232): the tooling
-    // resolver does not parse try/catch/throw/defer yet, so it reports a
-    // false "unknown name" for `catch (e)`'s own binding wherever a catch
-    // body uses it — tracked in issue #233 (src/tooling/, not the compiler
-    // or VM). Raised again, 10 -> 11, for defer_throw_outer_catch.lox (also
-    // PR #232), one more example with a `catch (e)` body hitting the same
-    // tracked gap. Raised again, 11 -> 19, for 6 JVM-backend regression
-    // examples added in PR #237 (round-3 review shapes (A)/(B), issue #240,
-    // and adversarial generalizations of both) — 8 more `catch (e)`/
-    // `catch (e2)`/`catch (e3)` bindings hitting the exact same tracked gap,
-    // none of them a new warning class. Raised again, 19 -> 23, for 2 more
-    // adversarial regressions (nested try/catch with a terminal outer catch;
-    // a local declared in a catch body immediately followed by a sibling
-    // try/catch) — 4 more bindings, same tracked gap. Raised to 29 for the
-    // test_error_kind_message.lox corpus example (6 undefined variable
-    // warnings). Raised again, 29 -> 36, for 5 bootstrap-interpreter
-    // regression examples added in PR #245 (test_empty_list_pop_try.lox,
-    // test_enum_arity_try.lox, test_invalid_map_key_try.lox,
-    // test_nan_key_try.lox, test_stringify_depth_guard.lox): 5 more
-    // `catch (e)` bindings hitting the same tracked #233 gap
-    // (test_stringify_depth_guard.lox's own `catch (e)` was rewritten in
-    // PR #245 to actually exercise the depth guard, replacing a version of
-    // the example that never triggered it and had no catch block), plus 2
-    // unused-local warnings for `r`/`m` in the examples that keep the
-    // caught value around. Raised again, 36 -> 52, after rebasing onto
-    // PR #246 (which added 13 more examples with 16 more catch-binding
-    // warnings) for a total of 149 corpus files.
-    // Raised again, 52 -> 67, for 6 more match-in-catch regression examples
-    // (15 more catch-bound identifiers hitting the same tracked gap) for a
-    // total of 155 corpus files.
-    // Raised again, 67 -> 71, for 1 more regression example covering a
-    // catch body whose own last statement is a bare rethrow (4 more
-    // catch-bound identifiers hitting the same tracked gap) for a total of
-    // 156 corpus files.
-    // Raised again, 71 -> 73, after rebasing onto the return-handler-stack-
-    // leak fix (which added 1 more example with two `catch (e)` bindings
-    // hitting the same tracked gap), for a total of 157 corpus files.
-    // Unchanged at 73 after rebasing onto the File after-close visibility
-    // probe (issue #251): it binds no `catch`, so it adds no warning, for a
-    // total of 158 corpus files. Raised to 82 for #253/#254 probes
-    // (try_catch_class_constructor_arity, try_catch_error_instance_properties_
-    // catchable, try_catch_error_vs_ordinary_instance_catchability), adding 9
-    // warnings across 165 corpus files. Dropped from 82 -> 8 after implementing
-    // try/catch/throw/defer support in the tooling resolver (issue #233): all
-    // 74 false "unknown name" warnings for catch-bound identifiers across the
-    // entire merged corpus (from PR #232 examples + PR #278's new probes) now
-    // resolve correctly; the remaining 8 warnings are unrelated.
-    EXPECT_LE(totalWarnings, 8u);
+    std::cerr << "corpus: " << files.size() << " files, " << warnedFiles.size()
+              << " with warnings\n";
+
+    EXPECT_EQ(warnedFiles, kExpectedWarnedFiles);
 }
