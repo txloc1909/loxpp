@@ -16,6 +16,9 @@
 #     QBE fully supports operator overloading (S7's own fix for the
 #     dispatchMethod()-onto-a-compiled-callee hazard on #460), so this probe
 #     belongs in the QBE gate.
+#   - test/coroutine-probes/: mission #523's coroutine corpus. QBE compiles
+#     YIELD natively (resume blocks, #530/#535), so every probe must match
+#     native byte for byte.
 #
 # No exclusion file: unlike the JVM (LinkedHashMap), the
 # QBE backend reuses native's own Table implementation unchanged (Layer 0,
@@ -53,6 +56,9 @@ run_diff "test/translation-probes/qbe-only/" \
 
 run_diff "jvm-only/61_operator_overload.lox (operator overloading, QBE-supported)" \
     "$root/test/translation-probes/jvm-only/61_operator_overload.lox"
+
+run_diff "test/coroutine-probes/ (native YIELD via resume blocks)" \
+    "$root/test/coroutine-probes/"
 
 echo
 if [ "$failures" -ne 0 ]; then

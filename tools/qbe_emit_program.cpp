@@ -46,6 +46,23 @@ std::string qbeSymbolFor(const std::string& id) {
     return sym;
 }
 
+// True when any function in the tree contains Op::YIELD (coroutine mode,
+// #530/#535). Mirrors qbe_frontend.cpp's own check so this checkpoint tool
+// compiles a coroutine program the same way `loxpp --target qbe` does.
+bool treeContainsYield(const DecodedFunction& node) {
+    for (const DecodedInstruction& ins : node.instructions) {
+        if (ins.op == Op::YIELD) {
+            return true;
+        }
+    }
+    for (const DecodedFunction& child : node.nested) {
+        if (treeContainsYield(child)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void emitTree(const DecodedFunction& node,
               const StackAnalysisTree& analysisNode,
               const CaptureAnalysis& captures, const qbe::EmitOptions& options,
@@ -107,6 +124,7 @@ int main(int argc, char** argv) {
 
     DecodedFunction tree = decodeFunctionTree(script);
     try {
+        options.coroutineMode = treeContainsYield(tree);
         StackAnalysisTree analysis = analyzeStackTree(tree);
         CaptureAnalysis captures = analyzeCaptures(tree);
         emitTree(tree, analysis, captures, options, stdout, stderr);

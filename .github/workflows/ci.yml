@@ -1002,7 +1002,8 @@ jobs:
       # S7's own checkpoint (issue #460): every probe in
       # test/translation-probes/ (the main directory, qbe-only/, and the
       # operator-overloading probe in jvm-only/) must be byte-identical to
-      # native.
+      # native. Mission #523's test/coroutine-probes/ corpus is part of the
+      # same gate now that QBE compiles YIELD natively (#530/#535).
       - name: Check QBE probes (S7)
         run: |
           docker run --rm \

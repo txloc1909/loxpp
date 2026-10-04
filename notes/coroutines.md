@@ -73,9 +73,12 @@ a collection is a process-global pause, not a coroutine's work.
 
 ## Backends
 
-- QBE: functions containing `YIELD` fall back to the interpreter loop (the
-  existing `invokeClosure` path). Compiling those functions to native code —
-  removing the fallback — is tracked separately (#535).
+- QBE: native (#530/#535). A program that contains any `YIELD` is compiled in
+  coroutine mode: every function becomes a resume-block state machine
+  (`CallFrame::compiledState`), and `Runtime::runCompiledFrames` drives the
+  frames, re-entering each at its saved point. The interpreter fallback was
+  dropped: a caller that does not itself contain `YIELD` must still suspend,
+  and dynamic dispatch makes the safe fallback set the whole program.
 - JVM: each coroutine is a JDK 21 virtual thread; `yield`/`resume` use an
   `Exchanger` handoff. No stack copying (shared-heap object model).
 - Bootstrap: one host coroutine per Lox++ coroutine, like its existing I/O
