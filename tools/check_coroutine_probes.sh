@@ -8,10 +8,11 @@
 #
 # This corpus pins the target semantics of the coroutine primitive before any
 # backend implements it: the probes use `yield`, `coroutine.create`,
-# `Coroutine.resume`/`status`, and for-in over a Coroutine. The all-red run
-# recorded in PR #536 is the "the check can fail" proof. The native primitive
-# (#526) makes every probe but the for-in one pass; the suspendable-iterator
-# node (#527) makes that one pass too and removes it from xfail.txt.
+# `Coroutine.resume`/`status`, and for-in over a Coroutine. The recorded
+# all-red run (every probe failed before the primitive existed) is the "the
+# check can fail" proof. The native primitive makes every probe but the
+# for-in one pass; the suspendable-iterator node makes that one pass too and
+# removes it from xfail.txt.
 #
 # test/coroutine-probes/xfail.txt lists probes expected to fail until a later
 # node lands. They are excluded from the passing run and asserted to still

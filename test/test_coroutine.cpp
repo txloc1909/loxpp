@@ -269,6 +269,74 @@ TEST_F(CoroutineTest, EscapingClosureKeepsSuspendedCoroutineAlive) {
     expect_num(*h.getGlobal("b"), 2);
 }
 
+// A suspension must not reorder the coroutine's live try/catch records. The
+// innermost handler has to win after a resume, exactly as it does without a
+// yield in between.
+TEST_F(CoroutineTest, NestedHandlersKeepTheirOrderAcrossYield) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun f() {
+            try {
+                try {
+                    yield 1;
+                    throw "boom";
+                } catch (e) {
+                    return "inner " + e;
+                }
+            } catch (e) {
+                return "outer " + e;
+            }
+        }
+        var co = coroutine.create(f);
+        var r1 = co.resume();
+        var r2 = co.resume();
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r1"), 1);
+    expect_string(h, "r2", "inner boom");
+}
+
+// A first resume whose function returns without yielding must leave the
+// resumer's operand stack exactly where it found it. Otherwise later locals,
+// loops, and for-in read the wrong slots.
+TEST_F(CoroutineTest, FirstResumeThatCompletesLeavesStackIntact) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun f() {
+            return 1;
+        }
+        var co = coroutine.create(f);
+        var r = co.resume();
+        var sum = 0;
+        for (var i = 0; i < 3; i = i + 1) {
+            sum = sum + i;
+        }
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r"), 1);
+    expect_num(*h.getGlobal("sum"), 3);
+}
+
+// The same invariant for a first resume that passes arguments: the resume
+// window is wider, so a wrong stack top would shift by more than one slot.
+TEST_F(CoroutineTest, FirstResumeWithArgsThatCompletesLeavesStackIntact) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun add(a, b) {
+            return a + b;
+        }
+        var co = coroutine.create(add);
+        var r = co.resume(2, 3);
+        var sum = 0;
+        for (var x in [10, 20, 30]) {
+            sum = sum + x;
+        }
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r"), 5);
+    expect_num(*h.getGlobal("sum"), 60);
+}
+
 TEST_F(CoroutineTest, TypeAndStringify) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(

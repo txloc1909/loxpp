@@ -444,7 +444,11 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
             f.slots = base + fs.slotOffset;
         }
         m_frameCount = entry + static_cast<int>(co->frames.size());
-        for (const CoroutineHandlerSnapshot& hs : co->handlers) {
+        // `co->handlers` is stored innermost-first (suspend pops the handler
+        // stack from the back). Push it back outermost-first so the innermost
+        // handler ends on top and handleThrow's LIFO search finds it first.
+        for (std::size_t i = co->handlers.size(); i-- > 0;) {
+            const CoroutineHandlerSnapshot& hs = co->handlers[i];
             m_handlerStack.push_back(HandlerRecord{
                 entry + hs.frameOffset, base + hs.stackOffset, hs.catchIp});
         }
@@ -520,7 +524,15 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
             outcome =
                 (m_frameCount <= boundary) ? OpResult::Stop : OpResult::Resumed;
         } else if (m_frameCount == entry && stackTop == base + 1) {
-            *out = pop();
+            // Normal return. The result sits at the coroutine's base slot.
+            // Restore the operand-stack top to the end of the resume native's
+            // own callee/args window so callNative's `stackTop -= argCount+1`
+            // lands exactly on that base slot and writes the result there.
+            // Popping the result here instead would leave stackTop at `base`,
+            // which for the first resume is `argCount+1` slots below the
+            // window end and shifts every later local.
+            *out = peek(0);
+            stackTop = co->activeWindowTop;
             co->state = CoroutineState::DEAD;
         } else {
             co->state = CoroutineState::DEAD;
