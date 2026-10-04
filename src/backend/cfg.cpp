@@ -21,6 +21,11 @@ namespace {
 // the protected code that follows, so it must not end its own block the way
 // a real branch does. Its catch-offset operand still needs a leader at its
 // target (see collectLeaderOffsets) — just not via this function.
+//
+// YIELD is likewise not a branch. It suspends and later resumes at the next
+// instruction, so it is non-terminal and needs no leader of its own; the
+// explicit case below states that contract rather than leaving it to the
+// default arm.
 bool isBranch(Op op) {
     switch (op) {
     case Op::JUMP:
@@ -31,6 +36,8 @@ bool isBranch(Op op) {
     case Op::MATCH_ERROR:
     case Op::THROW:
         return true;
+    case Op::YIELD:
+        return false;
     default:
         return false;
     }
@@ -185,6 +192,15 @@ void wireSuccessors(BasicBlock& block,
             addEdge(block, blockIndexOfOffset.at(arm.target),
                     EdgeKind::FORWARD_BRANCH, isHandlerEntryBlock);
         }
+        if (block.endOffset < chunkEnd) {
+            addEdge(block, blockIndexOfOffset.at(block.endOffset),
+                    EdgeKind::FALL_THROUGH, isHandlerEntryBlock);
+        }
+        break;
+    case Op::YIELD:
+        // Non-terminal, non-branching: resume continues at the instruction
+        // after YIELD, so the block gets the ordinary single fall-through
+        // successor and nothing else.
         if (block.endOffset < chunkEnd) {
             addEdge(block, blockIndexOfOffset.at(block.endOffset),
                     EdgeKind::FALL_THROUGH, isHandlerEntryBlock);

@@ -123,6 +123,8 @@ std::string opName(Op op) {
         return "DEFER_RECORD";
     case Op::RUN_DEFERS:
         return "RUN_DEFERS";
+    case Op::YIELD:
+        return "YIELD";
     }
     return "UNKNOWN_OP";
 }
@@ -162,6 +164,8 @@ std::optional<int> nativePops(Op op, const DecodedInstruction& in) {
     case Op::ITER_HAS_NEXT:
     case Op::ITER_NEXT:
     case Op::THROW: // reads the value to raise (chunk.h)
+    case Op::YIELD: // reads the yielded value; the resumed value is pushed
+                    // only on resume, so it is not a cell read here (chunk.h)
         return 1;
     // Two operands read.
     case Op::EQUAL:

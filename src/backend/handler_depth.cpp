@@ -13,12 +13,18 @@ int handlerEffect(Op op) {
         return 1;
     case Op::POP_HANDLER:
         return -1;
+    case Op::YIELD:
+        // Not a throw site: a suspension does not open or close a handler,
+        // so the innermost active record stays live across it (chunk.h).
+        return 0;
     default:
         return 0;
     }
 }
 
 bool isTerminal(Op op) {
+    // YIELD is deliberately absent: it is non-terminal. Control resumes at
+    // the instruction after it, so its block keeps its fall-through edge.
     return op == Op::RETURN || op == Op::THROW || op == Op::MATCH_ERROR;
 }
 
