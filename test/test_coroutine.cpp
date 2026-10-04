@@ -636,3 +636,19 @@ TEST_F(CoroutineTest, TypeAndStringify) {
     ASSERT_TRUE(is<bool>(*same));
     EXPECT_TRUE(as<bool>(*same));
 }
+
+// The grammar places `yieldExpr` at the assignment level, so `yield` cannot be
+// an operand of a higher-precedence operator.
+TEST_F(CoroutineTest, YieldIsRejectedAsOperand) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("fun f() { return 1 + yield 2; }"),
+              InterpretResult::COMPILE_ERROR);
+}
+
+// A yield expression is complete at the assignment level, so no infix operator
+// may follow it.
+TEST_F(CoroutineTest, InfixAfterYieldIsRejected) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("fun g() { return yield + 2; }"),
+              InterpretResult::COMPILE_ERROR);
+}

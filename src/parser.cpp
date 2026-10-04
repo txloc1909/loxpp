@@ -5,6 +5,10 @@
 #define T(token) static_cast<int>(TokenType::token)
 #define RULE(token, prefix, infix, prec)                                       \
     [T(token)] = {prefix, infix, Precedence::prec}
+// Like RULE, but marks the prefix rule terminal: no infix operator may follow
+// the complete expression it parses at its precedence level.
+#define RULE_TERMINAL(token, prefix, prec)                                     \
+    [T(token)] = {prefix, nullptr, Precedence::prec, true}
 
 // clang-format off
 static const ParseRule rules[] = {
@@ -61,13 +65,14 @@ static const ParseRule rules[] = {
     RULE(TRUE,           &Compiler::literal,  nullptr,           NONE),
     RULE(VAR,            nullptr,             nullptr,           NONE),
     RULE(WHILE,          nullptr,             nullptr,           NONE),
-    RULE(YIELD,          &Compiler::yieldExpr, nullptr,          NONE),
+    RULE_TERMINAL(YIELD, &Compiler::yieldExpr,                   NONE),
     RULE(EOF_,           nullptr,             nullptr,           NONE),
     RULE(ERROR,          nullptr,             nullptr,           NONE),
 };
 // clang-format on
 
 #undef RULE
+#undef RULE_TERMINAL
 #undef T
 
 Parser::Parser(const std::string& source) : m_scanner(source) {
@@ -83,19 +88,29 @@ const ParseRule* Parser::getRule(TokenType type) {
 
 void Parser::parsePrecedence(Precedence precedence, Compiler* compiler) {
     advance();
-    auto prefixRule = getRule(m_previous.type)->prefix;
+    const TokenType ruleType = m_previous.type;
+    auto prefixRule = getRule(ruleType)->prefix;
     if (prefixRule == nullptr) {
         errorAtCurrent("Expect expression.");
         return;
     }
 
-    m_canAssign = (precedence <= Precedence::ASSIGNMENT);
+    const bool atAssignmentLevel = (precedence <= Precedence::ASSIGNMENT);
+    m_canAssign = atAssignmentLevel;
+    m_atAssignmentLevel = atAssignmentLevel;
     (compiler->*prefixRule)();
 
-    while (precedence <= getRule(m_current.type)->precedence) {
-        advance();
-        auto infixRule = getRule(m_previous.type)->infix;
-        (compiler->*infixRule)();
+    // A terminal prefix rule (yield) is a complete expression at its level; its
+    // operand, if any, was already parsed by the rule. No infix operator may
+    // follow it. The assignment-target check below still runs, so a terminal
+    // expression used as an assignment target (`yield = 2`) keeps the same
+    // diagnostic as any other invalid target.
+    if (!getRule(ruleType)->terminal) {
+        while (precedence <= getRule(m_current.type)->precedence) {
+            advance();
+            auto infixRule = getRule(m_previous.type)->infix;
+            (compiler->*infixRule)();
+        }
     }
 
     if (m_canAssign && match(TokenType::EQUAL)) {
