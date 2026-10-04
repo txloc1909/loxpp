@@ -1,8 +1,8 @@
 // option_result.lox - an Option/Result library in user space.
 //
 // Option and Result are plain enums. The combinators unwrapOr, andThen, and
-// map are free functions, because enums take constructors only (enum methods
-// are a separate, later idea). Each combinator consumes its value with match.
+// map are free functions, because enums take constructors only, not methods
+// (enum methods: #557). Each combinator consumes its value with match.
 //
 // The last section dogfoods the library: a small program parses a list of
 // strings into positive numbers and sums the ones that parsed, with no
@@ -109,7 +109,7 @@ print "parse '0' -> " + describe(parsePositive("0"));
 fun resultToOption(r) {
     return match r {
         case Ok(value) => Some(value)
-        case Err(msg)  => None()
+        case Err(_)    => None()
     };
 }
 

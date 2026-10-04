@@ -97,10 +97,10 @@ var incThenSquarePipe = Pipe(inc, square);  // same result, read left to right
 // CHECK: pipe(inc, square)(3) = 16
 print "pipe(inc, square)(3) = " + str(incThenSquarePipe(3));
 
-// Combinators nest, because each result is itself callable.
-var plus1square_x2 = Pipe(Pipe(inc, square), inc);
+// Combinators nest, because each result is itself callable: inc(square(inc(x))).
+var incSquareInc = Pipe(Pipe(inc, square), inc);
 // CHECK: pipe(inc, square, inc)(3) = 17
-print "pipe(inc, square, inc)(3) = " + str(plus1square_x2(3));
+print "pipe(inc, square, inc)(3) = " + str(incSquareInc(3));
 
 // --- flip ---------------------------------------------------------------
 
@@ -122,7 +122,7 @@ print "curry(add)(2)(40) = " + str(curriedAdd(2)(40));
 
 // --- Dogfood: build one transform from several combinators --------------
 //
-// For a list of names, make a numbered greeting whose length we report, using
+// For a list of names, make a decorated greeting and report its length, using
 // only combinators to assemble the per-item transform.
 
 fun nameLength(s)  { return len(s); }
