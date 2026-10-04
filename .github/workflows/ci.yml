@@ -367,14 +367,12 @@ jobs:
             loxpp-dev:latest \
             bash -c "python3 tools/check_examples.py build/loxpp examples/"
 
-      # Mission #523 node #525: the coroutine probe corpus. Every probe FAILS
-      # until the `yield` primitive (#526) and suspendable for-in (#527) land,
-      # so this step is allow-failure for that red window only. The node that
-      # turns the corpus green removes continue-on-error. Release only: the
+      # Mission #523 node #525: the coroutine probe corpus. Node #526 landed
+      # the `yield` primitive and node #527 landed for-in over a Coroutine, so
+      # the corpus is green and this step is a normal gate. Release only: the
       # debug preset's instruction trace floods stdout (see AGENTS.md).
-      - name: Check coroutine probes (expected red until #526/#527)
+      - name: Check coroutine probes
         if: matrix.preset == 'release'
-        continue-on-error: true
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
