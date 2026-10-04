@@ -102,15 +102,15 @@ void Parser::parsePrecedence(Precedence precedence, Compiler* compiler) {
 
     // A terminal prefix rule (yield) is a complete expression at its level; its
     // operand, if any, was already parsed by the rule. No infix operator may
-    // follow it.
-    if (getRule(ruleType)->terminal) {
-        return;
-    }
-
-    while (precedence <= getRule(m_current.type)->precedence) {
-        advance();
-        auto infixRule = getRule(m_previous.type)->infix;
-        (compiler->*infixRule)();
+    // follow it. The assignment-target check below still runs, so a terminal
+    // expression used as an assignment target (`yield = 2`) keeps the same
+    // diagnostic as any other invalid target.
+    if (!getRule(ruleType)->terminal) {
+        while (precedence <= getRule(m_current.type)->precedence) {
+            advance();
+            auto infixRule = getRule(m_previous.type)->infix;
+            (compiler->*infixRule)();
+        }
     }
 
     if (m_canAssign && match(TokenType::EQUAL)) {

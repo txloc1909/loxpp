@@ -90,6 +90,11 @@ TEST(CheckDiagnostics, NoInfixOperatorAfterYield) {
     expectOne("yield + 2;\n", 1, 7, "Expect ';' after expression.");
 }
 
+TEST(CheckDiagnostics, YieldIsNotAnAssignmentTarget) {
+    // A bare yield is not an l-value. The message matches other bad targets.
+    expectOne("yield = 2;\n", 1, 7, "Invalid assignment target.");
+}
+
 TEST(CheckDiagnostics, YieldAtAssignmentLevelIsClean) {
     EXPECT_TRUE(analyze("var x = yield 1;\n"
                         "f(yield 2);\n"
