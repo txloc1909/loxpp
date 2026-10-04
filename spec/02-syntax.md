@@ -313,10 +313,15 @@ built-in `Error` type a caught runtime fault is delivered as.
 See `yieldExpr` in the main EBNF.
 
 `yield` is an expression, not a statement: `yield e` produces a value, so it
-may appear anywhere an expression may — as the right-hand side of an assignment
-(`var x = yield e`), as a call argument, or standing alone as an
-expression statement (`yield e;`). Its operand is a full `expression`; the
-operand may be omitted, in which case the value yielded is `nil`.
+may stand wherever a whole assignment-level expression is expected — as the
+right-hand side of an assignment (`var x = yield e`), as a call argument
+(`f(yield e)`), as the operand of `return` (`return yield e`), or standing
+alone as an expression statement (`yield e;`). Its operand is a full
+`expression`; the operand may be omitted, in which case the value yielded is
+`nil`.
 
-`yield` has assignment precedence (the same level as `=`), so `yield a + b`
-parses as `yield (a + b)` and `a = yield b` parses as `a = (yield b)`.
+`yield` sits at the assignment level, the lowest precedence. It forms a
+complete expression: it cannot be an operand of any operator, and no operator
+may follow it. Thus `yield a + b` parses as `yield (a + b)` and `a = yield b`
+parses as `a = (yield b)`, but `1 + yield 2`, `yield + 2`, and `-yield 1` are
+grammar errors.

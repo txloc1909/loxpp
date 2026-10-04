@@ -34,6 +34,11 @@ struct ParseRule {
     ParseFn prefix;
     ParseFn infix;
     Precedence precedence;
+    // A terminal prefix rule consumes a complete expression at its precedence
+    // level: no infix operator may follow it. `yield` is the only such rule.
+    // It sits at the assignment level (the lowest precedence) and cannot be an
+    // operand of any operator.
+    bool terminal{false};
 };
 
 struct Parser {
@@ -53,6 +58,12 @@ struct Parser {
     // the calling context (whether precedence <= ASSIGNMENT). Adding it to
     // ParseRule would conflate static rule metadata with dynamic call context.
     bool m_canAssign{false};
+
+    // True when parsePrecedence was entered at ASSIGNMENT precedence, the only
+    // level at which a `yield` expression is valid. Unlike m_canAssign, this
+    // records the precedence context itself, so a prefix rule can tell an
+    // assignment-level call from an operand-position call.
+    bool m_atAssignmentLevel{false};
 
     // When set, errorAt collects diagnostics here and prints nothing. Null (the
     // default) keeps the original stderr behaviour byte-for-byte. compile()

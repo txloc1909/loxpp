@@ -107,10 +107,17 @@ void Compiler::strExpr() {
 }
 
 void Compiler::yieldExpr() {
-    // `yield` has assignment precedence: its operand, when present, is a full
-    // expression. The operand may be omitted, in which case the value yielded
-    // is nil. A token with no prefix parselet (a terminator such as ';', ')',
-    // or '}') means the operand is absent.
+    // A prefix parselet runs at every operand position, but the grammar allows
+    // `yield` only at the assignment level. The parser records that context so
+    // the two cases can be told apart.
+    if (!m_parser->m_atAssignmentLevel) {
+        m_parser->error("Can't use 'yield' as an operand.");
+        return;
+    }
+    // `yield`'s operand, when present, is a full expression. The operand may be
+    // omitted, in which case the value yielded is nil. A token with no prefix
+    // parselet (a terminator such as ';', ')', or '}') means the operand is
+    // absent.
     const ParseRule* operandRule = Parser::getRule(m_parser->m_current.type);
     if (operandRule->prefix != nullptr) {
         expression();
