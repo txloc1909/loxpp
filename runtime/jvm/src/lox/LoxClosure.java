@@ -178,5 +178,42 @@ public abstract class LoxClosure implements LoxCallable {
         }
     }
 
+    // Package-private read/write for LoxCoroutine's suspend/resume snapshot.
+    // The frame budget is one program-wide counter, exactly as native's
+    // m_frameCount is: a resumed coroutine's frames sit above the resumer's,
+    // so the two are counted together. A coroutine hides its own frames while
+    // it is suspended (see LoxCoroutine's snapshot).
+    static int frameCountValue() { return s_frameCount; }
+
+    static void setFrameCountValue(int value) { s_frameCount = value; }
+
+    /**
+     * The resume-time budget check (src/runtime.cpp's resumeCoroutine).
+     * LoxCoroutine calls this, before it restores a suspended coroutine's
+     * frames, with the depth that restore would produce. A rejected resume
+     * throws the same catchable (or fatal) StackOverflowError a call would and
+     * leaves the coroutine suspended. The comparison is strict, like native's:
+     * only a restore past the ceiling is rejected.
+     */
+    static void checkResumeBudget(int frameCount) {
+        if (s_unwindingStackOverflow) {
+            if (frameCount > FRAMES_MAX + FRAMES_RESERVE) {
+                throw new LoxError("Stack overflow.");
+            }
+            return;
+        }
+        if (frameCount <= FRAMES_MAX) {
+            return;
+        }
+        if (!LoxOps.isHandlerLive()) {
+            throw new LoxError("Stack overflow.");
+        }
+        s_unwindingStackOverflow = true;
+        LoxError overflow =
+            LoxOps.makeError("StackOverflowError", "Stack overflow.");
+        s_overflowInFlight = overflow;
+        throw overflow;
+    }
+
     protected abstract Object invoke(Object self, Object[] args);
 }

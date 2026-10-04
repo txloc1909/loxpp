@@ -108,6 +108,7 @@ public final class LoxRuntime {
         registerGlobals(globals);
         registerMath(globals);
         registerReflection(globals);
+        registerCoroutine(globals);
         current = globals;
         return globals;
     }
@@ -430,6 +431,28 @@ public final class LoxRuntime {
                        new LoxNative("callMethod", -1, LoxRuntime::callMethod));
     }
 
+    // Mirrors src/stdlib/coroutine_api.cpp: a `coroutine` module instance
+    // whose single member is create. Like the native module, its own class
+    // carries no resume/status methods — those belong to a Coroutine value
+    // (LoxOps.invoke's coroutine branch), so `coroutine.status()` cannot
+    // reinterpret the module instance as a coroutine.
+    private static void registerCoroutine(LoxGlobals globals) {
+        LoxInstance module =
+            new LoxInstance(new LoxClass("CoroutineModule", null));
+        module.fields.put("create", new LoxNative("create", 1, args -> {
+            Object fn = args[0];
+            // spec/04-semantics.md: fn must be a Function or a BoundMethod.
+            // A bound native (e.g. someMap.has) is a LoxNative here, not a
+            // LoxBoundMethod, and is rejected exactly as native rejects
+            // ObjBoundNative.
+            if (!(fn instanceof LoxClosure) && !(fn instanceof LoxBoundMethod)) {
+                throw new LoxError("coroutine.create expects a function.");
+            }
+            return new LoxCoroutine(fn);
+        }));
+        globals.define("coroutine", module);
+    }
+
     // type(x)'s ladder groups values the same way LoxOps.stringify does:
     // a closure and a plain native are both "Function"; a user-defined bound
     // method and a bound Map/File native are both "BoundMethod" (see
@@ -491,6 +514,9 @@ public final class LoxRuntime {
         }
         if (v instanceof LoxIterator) {
             return "Iterator";
+        }
+        if (v instanceof LoxCoroutine) {
+            return "Coroutine";
         }
         if (v instanceof LoxEnumCtor) {
             return "EnumConstructor";
@@ -563,11 +589,23 @@ public final class LoxRuntime {
         }
         if (callee instanceof LoxClosure) {
             LoxClosure closure = (LoxClosure) callee;
-            return viaField ? closure.call(forwarded)
-                            : closure.callAsSelf(inst, forwarded);
+            // A reflection callback is a host frame: a yield inside it cannot
+            // be captured (mirrors native's invokeMethodFromNative).
+            LoxOps.enterCallback();
+            try {
+                return viaField ? closure.call(forwarded)
+                                : closure.callAsSelf(inst, forwarded);
+            } finally {
+                LoxOps.exitCallback();
+            }
         }
         if (callee instanceof LoxBoundMethod) {
-            return ((LoxBoundMethod) callee).call(forwarded);
+            LoxOps.enterCallback();
+            try {
+                return ((LoxBoundMethod) callee).call(forwarded);
+            } finally {
+                LoxOps.exitCallback();
+            }
         }
         if (callee instanceof LoxNative) {
             return ((LoxNative) callee).call(forwarded);

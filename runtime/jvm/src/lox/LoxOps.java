@@ -94,8 +94,13 @@ public final class LoxOps {
      * (exceptional exit — POP_HANDLER's own translation never runs on
      * that path, the same reason runDefers needed a second call site for
      * defer-using functions, see emitChunk's defer catch-all handler).
+     *
+     * <p>One program-wide counter, like native's m_handlerStack.size(). A
+     * resumed coroutine's handler records sit above the resumer's, so a
+     * coroutine sees the resumer's live handlers; it hides its own while
+     * suspended (see LoxCoroutine's snapshot).
      */
-    private static int handlerDepth;
+    private static int handlerDepth = 0;
 
     public static void enterHandler() { handlerDepth++; }
 
@@ -121,6 +126,67 @@ public final class LoxOps {
 
     public static void restoreHandlerDepth(Object depth) {
         handlerDepth = (Integer)depth;
+    }
+
+    // Package-private read/write for LoxCoroutine's suspend/resume snapshot.
+    static int handlerDepthValue() { return handlerDepth; }
+
+    static void setHandlerDepthValue(int depth) { handlerDepth = depth; }
+
+    // ------------------------------------------------------------------
+    // Coroutines (spec/04-semantics.md, §Coroutine)
+    // ------------------------------------------------------------------
+
+    /**
+     * Depth of host frames that call into Lox code — {@code __str__} from
+     * stringify, {@code __hash__}/{@code __eq__} from a map-key probe, a
+     * reflection callback, or a deferred-call drain. Mirrors src/runtime.h's
+     * Runtime::m_reentrantRunDepth: such a frame cannot be frozen into a
+     * coroutine snapshot, so a {@code yield} reached beneath one is a runtime
+     * error. Per-thread: a coroutine's own virtual thread starts at 0, so the
+     * callback depth of the resumer never leaks in.
+     */
+    private static final ThreadLocal<Integer> callbackDepth =
+        ThreadLocal.withInitial(() -> 0);
+
+    static void enterCallback() { callbackDepth.set(callbackDepth.get() + 1); }
+
+    static void exitCallback() { callbackDepth.set(callbackDepth.get() - 1); }
+
+    /**
+     * The YIELD opcode. Suspends the current coroutine, delivering
+     * {@code value}, and returns what the next resume sent.
+     */
+    public static Object yield(Object value) {
+        LoxCoroutine co = LoxCoroutine.currentOrNull();
+        if (co == null) {
+            throw makeError("YieldOutsideCoroutineError",
+                            "Cannot yield from outside a coroutine.");
+        }
+        if (callbackDepth.get() > 0) {
+            throw makeError("YieldAcrossNativeError",
+                            "Cannot yield across a native callback.");
+        }
+        return co.yieldValue(value);
+    }
+
+    /**
+     * Runs a method the runtime itself calls through to Lox code — {@code
+     * __str__} from stringify, {@code __hash__}/{@code __eq__} from a map-key
+     * probe — marking a host frame so a {@code yield} beneath it is rejected
+     * (see callbackDepth). An operator dunder that a bytecode opcode dispatches
+     * (ADD, EQUAL, IN, GET_ITER, CALL, ...) runs in the interpreter loop, not
+     * through here, and a yield there is legal, matching native's own
+     * Runtime::m_reentrantRunDepth.
+     */
+    private static Object invokeDunder(LoxClosure fn, Object self,
+                                       Object[] args) {
+        enterCallback();
+        try {
+            return fn.callAsSelf(self, args);
+        } finally {
+            exitCallback();
+        }
     }
 
     // ------------------------------------------------------------------
@@ -422,7 +488,10 @@ public final class LoxOps {
     static boolean keyEquals(Object stored, Object lookup) {
         LoxClosure dunder = findDunder(stored, "__eq__");
         if (dunder != null) {
-            return checkBooleanResult(dunder.callAsSelf(stored, new Object[] {lookup}));
+            // A map key comparison runs inside the VM's own probe, not a
+            // bytecode opcode: a yield beneath it cannot be captured.
+            return checkBooleanResult(
+                invokeDunder(dunder, stored, new Object[] {lookup}));
         }
         return identityEqual(stored, lookup);
     }
@@ -448,8 +517,8 @@ public final class LoxOps {
         }
         // Instance key; checkMapKey / checkMapKeyForNativeMethod already
         // confirmed both methods exist.
-        Object result =
-            findDunder(key, "__hash__").callAsSelf(key, new Object[0]);
+        Object result = invokeDunder(findDunder(key, "__hash__"), key,
+                                     new Object[0]);
         if (!(result instanceof Double)) {
             throw makeError("OperatorResultTypeError",
                             "Operator method must return a Number.");
@@ -727,14 +796,16 @@ public final class LoxOps {
         if (dunder != null) {
             Object result = dunder.callAsSelf(iterable, new Object[0]);
             if (!(result instanceof LoxList) && !(result instanceof String) &&
-                !(result instanceof LoxMap)) {
+                !(result instanceof LoxMap) &&
+                !(result instanceof LoxCoroutine)) {
                 throw makeError("OperatorResultTypeError",
                                 "Operator method must return a sequence.");
             }
             return new LoxIterator(result);
         }
         if (!(iterable instanceof LoxList) && !(iterable instanceof String) &&
-            !(iterable instanceof LoxMap)) {
+            !(iterable instanceof LoxMap) &&
+            !(iterable instanceof LoxCoroutine)) {
             throw new LoxError(
                 "Value is not iterable (expected list, string, map, or coroutine).");
         }
@@ -852,6 +923,14 @@ public final class LoxOps {
             if (m == null) {
                 throw new LoxError("Undefined property '" + name +
                                         "' on process.");
+            }
+            return m;
+        }
+        if (obj instanceof LoxCoroutine) {
+            LoxCallable m = ((LoxCoroutine)obj).getMethod(name);
+            if (m == null) {
+                throw new LoxError("Undefined property '" + name +
+                                        "' on coroutine.");
             }
             return m;
         }
@@ -1013,8 +1092,25 @@ public final class LoxOps {
         if (receiver instanceof LoxProcess) {
             return invokeProcessMethod((LoxProcess)receiver, name, args);
         }
+        if (receiver instanceof LoxCoroutine) {
+            return invokeCoroutineMethod((LoxCoroutine)receiver, name, args);
+        }
         throw makeError("InvalidReceiverError",
                         "Method called on invalid receiver.");
+    }
+
+    private static Object invokeCoroutineMethod(LoxCoroutine co, String name,
+                                                Object[] args) {
+        switch (name) {
+        case "resume":
+            return co.resume(args);
+        case "status":
+            requireArity(args, 0, "status");
+            return co.statusName();
+        default:
+            // Fatal on native (runtimeError): INVOKE's method-not-found case.
+            throw new LoxError("Undefined method '" + name + "' on coroutine.");
+        }
     }
 
     private static Object invokeListMethod(LoxList list, String name,
@@ -1353,7 +1449,10 @@ public final class LoxOps {
             }
             LoxClosure dunder = findDunder(v, "__str__");
             if (dunder != null) {
-                return checkStringResult(dunder.callAsSelf(v, new Object[0]));
+                // stringify runs in the runtime, not in a bytecode opcode: a
+                // yield beneath __str__ cannot be captured.
+                return checkStringResult(
+                    invokeDunder(dunder, v, new Object[0]));
             }
             return inst.klass.name + " instance";
         }
@@ -1368,6 +1467,9 @@ public final class LoxOps {
         }
         if (v instanceof LoxProcess) {
             return "<process>";
+        }
+        if (v instanceof LoxCoroutine) {
+            return "<coroutine>";
         }
         if (v instanceof LoxIterator) {
             return "<iterator>";
@@ -1553,7 +1655,15 @@ public final class LoxOps {
                 throw new LoxError("Deferred callable has unexpected type.");
             }
             try {
-                call(deferred.callable, deferred.args);
+                // A defer drain is a host frame: a yield inside a deferred
+                // call cannot be captured, matching native's own refusal
+                // (Runtime::runPushedFrameToCompletion).
+                enterCallback();
+                try {
+                    call(deferred.callable, deferred.args);
+                } finally {
+                    exitCallback();
+                }
             } catch (LoxError replacement) {
                 // spec/04-semantics.md defer Statement step 5: this
                 // deferred call's own throw, uncaught within it, replaces

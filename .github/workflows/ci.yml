@@ -696,6 +696,18 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "tools/check_jvm_probes.sh"
 
+      # Mission #523 node #529: the coroutine corpus on the JVM backend. The
+      # native gate for the same corpus is check_coroutine_probes.sh (the
+      # unmanaged job); this step proves every probe's stdout is byte-identical
+      # across native and the JVM backend.
+      - name: JVM differential suite - coroutine probes
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/coroutine-probes/"
+
       # Mission #288 node #336: for every row of spec/04-semantics.md's
       # Runtime Errors and Fatal Runtime Errors tables, checks that native,
       # JVM, and the bootstrap interpreter agree on whether the fault
