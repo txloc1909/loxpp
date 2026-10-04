@@ -373,6 +373,19 @@ jobs:
             loxpp-dev:latest \
             bash -c "python3 tools/check_examples.py build/loxpp examples/"
 
+      # The zlib example is pure Lox++, so the corpus above only checks its
+      # self-assertions. This drives its file probes against Python's zlib in
+      # both directions, so a real RFC 1950/1951 implementation is the oracle.
+      # Release only: the debug preset's instruction trace is not the point here.
+      - name: zlib example - differential vs Python zlib
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            python3 examples/zlib_tests/diff_zlib.py build/loxpp
+
       # Mission #523 node #525: the coroutine probe corpus. Node #526 landed
       # the `yield` primitive and node #527 landed for-in over a Coroutine, so
       # the corpus is green and this step is a normal gate. Release only: the

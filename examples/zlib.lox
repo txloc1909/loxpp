@@ -1,0 +1,676 @@
+// zlib.lox — zlib (RFC 1950) over DEFLATE (RFC 1951), in pure Lox++.
+//
+// Lox++ has no bitwise operators, so every bit operation here is arithmetic
+// (`math.floor`, `%`, `*`) over the 32-bit range, exactly as the gzip encoder
+// in examples/codecrafters/build-your-own-http-server/http.lox does.
+//
+// Decode (inflate) handles all three DEFLATE block types — stored, fixed
+// Huffman, and dynamic Huffman — plus LZ77 back-references, so it consumes
+// real zlib output from any compressor. Encode (deflate) is greedy LZ77 with
+// fixed Huffman, falling back to a stored block when that is smaller; the
+// result is a standard zlib stream that any zlib can inflate.
+//
+// Probe modes for the differential oracle (no args runs the demo):
+//   loxpp examples/zlib.lox --compress   <in> <out>
+//   loxpp examples/zlib.lox --decompress <in> <out>
+//
+// Demonstrates: byte-level string handling with ord/chr, binary formats,
+//               recursive-free bit I/O, and a canonical Huffman codec.
+
+var POW2 = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768];
+
+// RFC 1951 §3.2.5: length codes 257..285, and distance codes 0..29. Index i
+// is code 257+i for lengths, code i for distances.
+var LEN_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43,
+    51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+var LEN_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3,
+    4, 4, 4, 4, 5, 5, 5, 5, 0];
+var DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193,
+    257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
+var DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8,
+    9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+
+// RFC 1951 §3.2.7: the order code lengths are stored for the code-length
+// alphabet of a dynamic block.
+var CL_ORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+
+// ---------- byte helpers (no bitwise operators) ----------
+
+fun fromBytes(a) {
+    var s = "";
+    var i = 0;
+    while (i < len(a)) {
+        s = s + chr(a[i]);
+        i = i + 1;
+    }
+    return s;
+}
+
+fun bytesToHex(s) {
+    var HEX = "0123456789abcdef";
+    var out = "";
+    var i = 0;
+    while (i < len(s)) {
+        var b = ord(s[i]);
+        out = out + HEX[math.floor(b / 16)] + HEX[b % 16];
+        i = i + 1;
+    }
+    return out;
+}
+
+fun be32(n) {
+    return chr(math.floor(n / 16777216) % 256)
+        + chr(math.floor(n / 65536) % 256)
+        + chr(math.floor(n / 256) % 256) + chr(n % 256);
+}
+
+// Adler-32 (RFC 1950 §9): two sums modulo 65521, combined as (b << 16) | a.
+fun adler32(s) {
+    var a = 1;
+    var b = 0;
+    var i = 0;
+    while (i < len(s)) {
+        a = (a + ord(s[i])) % 65521;
+        b = (b + a) % 65521;
+        i = i + 1;
+    }
+    return b * 65536 + a;
+}
+
+// ---------- bit I/O ----------
+
+// Data bits and extra bits are packed LSB-first; Huffman codes are emitted
+// MSB-first (RFC 1951 §3.1.1).
+class BitWriter {
+    init() {
+        this.acc = 0;
+        this.n = 0;
+        this.out = "";
+    }
+    put(b) {
+        if (b == 1) this.acc = this.acc + POW2[this.n];
+        this.n = this.n + 1;
+        if (this.n == 8) this.flushByte();
+    }
+    flushByte() {
+        this.out = this.out + chr(this.acc);
+        this.acc = 0;
+        this.n = 0;
+    }
+    finish() {
+        if (this.n > 0) this.flushByte();
+        return this.out;
+    }
+}
+
+fun putBits(w, value, count) {
+    var i = 0;
+    while (i < count) {
+        w.put(math.floor(value / POW2[i]) % 2);
+        i = i + 1;
+    }
+}
+
+fun emitCode(w, code, bits) {
+    var i = bits - 1;
+    while (i >= 0) {
+        w.put(math.floor(code / POW2[i]) % 2);
+        i = i - 1;
+    }
+}
+
+class BitReader {
+    init(s) {
+        this.s = s;
+        this.pos = 0;
+        this.acc = 0;
+        this.n = 0;
+    }
+    readBit() {
+        if (this.n == 0) {
+            this.acc = ord(this.s[this.pos]);
+            this.pos = this.pos + 1;
+            this.n = 8;
+        }
+        var bit = this.acc % 2;
+        this.acc = math.floor(this.acc / 2);
+        this.n = this.n - 1;
+        return bit;
+    }
+    readBits(count) {
+        var v = 0;
+        var i = 0;
+        while (i < count) {
+            v = v + this.readBit() * POW2[i];
+            i = i + 1;
+        }
+        return v;
+    }
+    // Discard the rest of the current byte, then return the next whole byte.
+    // Used by stored blocks, which are byte-aligned.
+    readAlignedByte() {
+        this.n = 0;
+        var b = ord(this.s[this.pos]);
+        this.pos = this.pos + 1;
+        return b;
+    }
+}
+
+// ---------- canonical Huffman ----------
+
+// Builds a decoding table from per-symbol code lengths, returning
+// [count, firstCode, symbols, offset]. `symbols` is ordered by (length,
+// symbol); a code is found by its rank past firstCode[length].
+fun buildHuffman(lengths) {
+    var maxBits = 15;
+    var count = [];
+    var i = 0;
+    while (i <= maxBits) {
+        count.append(0);
+        i = i + 1;
+    }
+    i = 0;
+    while (i < len(lengths)) {
+        count[lengths[i]] = count[lengths[i]] + 1;
+        i = i + 1;
+    }
+    count[0] = 0;
+
+    var firstCode = [];
+    i = 0;
+    while (i <= maxBits) {
+        firstCode.append(0);
+        i = i + 1;
+    }
+    var b = 2;
+    while (b <= maxBits) {
+        firstCode[b] = (firstCode[b - 1] + count[b - 1]) * 2;
+        b = b + 1;
+    }
+
+    var offset = [];
+    i = 0;
+    while (i <= maxBits) {
+        offset.append(0);
+        i = i + 1;
+    }
+    b = 1;
+    while (b <= maxBits) {
+        offset[b] = offset[b - 1] + count[b - 1];
+        b = b + 1;
+    }
+
+    var symbols = [];
+    i = 0;
+    while (i < len(lengths)) {
+        symbols.append(0);
+        i = i + 1;
+    }
+    i = 0;
+    while (i < len(lengths)) {
+        var l = lengths[i];
+        if (l != 0) {
+            symbols[offset[l]] = i;
+            offset[l] = offset[l] + 1;
+        }
+        i = i + 1;
+    }
+    return [count, firstCode, symbols, offset];
+}
+
+fun huffmanDecode(br, t) {
+    var count = t[0];
+    var firstCode = t[1];
+    var symbols = t[2];
+    var offset = t[3];
+    var code = 0;
+    var l = 0;
+    while (true) {
+        code = code * 2 + br.readBit();
+        l = l + 1;
+        if (l <= 15 and count[l] > 0 and code >= firstCode[l]
+                and code < firstCode[l] + count[l]) {
+            return symbols[offset[l] - count[l] + (code - firstCode[l])];
+        }
+        if (l > 15) {
+            throw "bad Huffman code";
+        }
+    }
+}
+
+fun fixedLitTable() {
+    var lengths = [];
+    var i = 0;
+    while (i <= 287) {
+        if (i <= 143) {
+            lengths.append(8);
+        } else if (i <= 255) {
+            lengths.append(9);
+        } else if (i <= 279) {
+            lengths.append(7);
+        } else {
+            lengths.append(8);
+        }
+        i = i + 1;
+    }
+    return buildHuffman(lengths);
+}
+
+fun fixedDistTable() {
+    var lengths = [];
+    var i = 0;
+    while (i <= 31) {
+        lengths.append(5);
+        i = i + 1;
+    }
+    return buildHuffman(lengths);
+}
+
+// ---------- inflate ----------
+
+// Reads the literal/length and distance tables that head a dynamic block
+// (RFC 1951 §3.2.7), including the 16/17/18 run-length codes.
+fun readDynamicTables(br) {
+    var hlit = br.readBits(5) + 257;
+    var hdist = br.readBits(5) + 1;
+    var hclen = br.readBits(4) + 4;
+
+    var clLengths = [];
+    var i = 0;
+    while (i < 19) {
+        clLengths.append(0);
+        i = i + 1;
+    }
+    i = 0;
+    while (i < hclen) {
+        clLengths[CL_ORDER[i]] = br.readBits(3);
+        i = i + 1;
+    }
+    var clTable = buildHuffman(clLengths);
+
+    var lengths = [];
+    var total = hlit + hdist;
+    while (len(lengths) < total) {
+        var sym = huffmanDecode(br, clTable);
+        if (sym < 16) {
+            lengths.append(sym);
+        } else if (sym == 16) {
+            var prev = lengths[len(lengths) - 1];
+            var rep = 3 + br.readBits(2);
+            var k = 0;
+            while (k < rep) {
+                lengths.append(prev);
+                k = k + 1;
+            }
+        } else if (sym == 17) {
+            var rep = 3 + br.readBits(3);
+            var k = 0;
+            while (k < rep) {
+                lengths.append(0);
+                k = k + 1;
+            }
+        } else {
+            var rep = 11 + br.readBits(7);
+            var k = 0;
+            while (k < rep) {
+                lengths.append(0);
+                k = k + 1;
+            }
+        }
+    }
+    return [buildHuffman(lengths[0:hlit]), buildHuffman(lengths[hlit:total])];
+}
+
+fun inflateBlock(br, out, lit, dist) {
+    while (true) {
+        var sym = huffmanDecode(br, lit);
+        if (sym < 256) {
+            out = out + chr(sym);
+        } else if (sym == 256) {
+            return out;
+        } else {
+            var li = sym - 257;
+            var length = LEN_BASE[li] + br.readBits(LEN_EXTRA[li]);
+            var di = huffmanDecode(br, dist);
+            var distance = DIST_BASE[di] + br.readBits(DIST_EXTRA[di]);
+            // Copy from `out` one byte at a time so an overlapping match
+            // (distance < length) repeats the bytes it grows.
+            var start = len(out) - distance;
+            var k = 0;
+            while (k < length) {
+                out = out + out[start + k];
+                k = k + 1;
+            }
+        }
+    }
+}
+
+fun inflate(d) {
+    var br = BitReader(d);
+    var out = "";
+    var final = 0;
+    while (final == 0) {
+        final = br.readBit();
+        var btype = br.readBit() + br.readBit() * 2;
+        if (btype == 0) {
+            br.n = 0;
+            var lenL = br.readAlignedByte() + br.readAlignedByte() * 256;
+            br.readAlignedByte();
+            br.readAlignedByte();
+            var k = 0;
+            while (k < lenL) {
+                out = out + chr(br.readAlignedByte());
+                k = k + 1;
+            }
+        } else if (btype == 1) {
+            out = inflateBlock(br, out, fixedLitTable(), fixedDistTable());
+        } else if (btype == 2) {
+            var t = readDynamicTables(br);
+            out = inflateBlock(br, out, t[0], t[1]);
+        } else {
+            throw "invalid DEFLATE block type";
+        }
+    }
+    return out;
+}
+
+fun zlibDecompress(s) {
+    if (len(s) < 6) {
+        throw "not a zlib stream";
+    }
+    var cmf = ord(s[0]);
+    var flg = ord(s[1]);
+    if (cmf % 16 != 8) {
+        throw "unsupported zlib compression method";
+    }
+    if ((cmf * 256 + flg) % 31 != 0) {
+        throw "corrupt zlib header";
+    }
+    if (math.floor(flg / 32) % 2 == 1) {
+        throw "preset dictionaries are unsupported";
+    }
+    var out = inflate(s[2:len(s) - 4]);
+    var n = len(s);
+    var expected = ord(s[n - 4]) * 16777216 + ord(s[n - 3]) * 65536
+        + ord(s[n - 2]) * 256 + ord(s[n - 1]);
+    if (adler32(out) != expected) {
+        throw "zlib Adler-32 mismatch";
+    }
+    return out;
+}
+
+// ---------- deflate ----------
+
+fun insertChain(chain, s, pos) {
+    var key = s[pos:pos + 3];
+    if (chain.has(key)) {
+        chain[key].append(pos);
+    } else {
+        chain[key] = [pos];
+    }
+}
+
+// Greedy LZ77: at each position pick the longest match of length >= 3 within
+// 32768 bytes. A 3-byte-prefix hash chain bounds the search; the most recent
+// candidate is nearest, so a cap on candidates also caps the work.
+fun lz77Tokens(s) {
+    var n = len(s);
+    var pos = 0;
+    var tokens = [];
+    var chain = {};
+    while (pos < n) {
+        var bestLen = 0;
+        var bestDist = 0;
+        if (pos + 2 < n) {
+            var key = s[pos:pos + 3];
+            if (chain.has(key)) {
+                var cands = chain[key];
+                var ci = len(cands) - 1;
+                var tried = 0;
+                while (ci >= 0 and tried < 64) {
+                    var cand = cands[ci];
+                    var dist = pos - cand;
+                    if (dist > 32768) {
+                        ci = -1;
+                    } else {
+                        var l = 0;
+                        while (l < 258 and pos + l < n and s[cand + l] == s[pos + l]) {
+                            l = l + 1;
+                        }
+                        if (l > bestLen) {
+                            bestLen = l;
+                            bestDist = dist;
+                        }
+                        ci = ci - 1;
+                        tried = tried + 1;
+                    }
+                }
+            }
+        }
+        if (bestLen >= 3) {
+            tokens.append(["match", bestLen, bestDist]);
+            var k = 0;
+            while (k < bestLen and pos + k + 2 < n) {
+                insertChain(chain, s, pos + k);
+                k = k + 1;
+            }
+            pos = pos + bestLen;
+        } else {
+            tokens.append(["lit", ord(s[pos])]);
+            if (pos + 2 < n) {
+                insertChain(chain, s, pos);
+            }
+            pos = pos + 1;
+        }
+    }
+    return tokens;
+}
+
+fun emitFixedSymbol(w, sym) {
+    if (sym <= 143) {
+        emitCode(w, 48 + sym, 8);
+    } else if (sym <= 255) {
+        emitCode(w, 400 + (sym - 144), 9);
+    } else if (sym <= 279) {
+        emitCode(w, sym - 256, 7);
+    } else {
+        emitCode(w, 192 + (sym - 280), 8);
+    }
+}
+
+fun lengthCode(length) {
+    var i = 28;
+    while (i >= 0) {
+        if (LEN_BASE[i] <= length) return i;
+        i = i - 1;
+    }
+    return 0;
+}
+
+fun distanceCode(distance) {
+    var i = 29;
+    while (i >= 0) {
+        if (DIST_BASE[i] <= distance) return i;
+        i = i - 1;
+    }
+    return 0;
+}
+
+fun deflateFixed(s) {
+    var w = BitWriter();
+    w.put(1);
+    w.put(1);
+    w.put(0);
+    var tokens = lz77Tokens(s);
+    var i = 0;
+    while (i < len(tokens)) {
+        var t = tokens[i];
+        if (t[0] == "lit") {
+            emitFixedSymbol(w, t[1]);
+        } else {
+            var li = lengthCode(t[1]);
+            emitFixedSymbol(w, 257 + li);
+            if (LEN_EXTRA[li] > 0) {
+                putBits(w, t[1] - LEN_BASE[li], LEN_EXTRA[li]);
+            }
+            var di = distanceCode(t[2]);
+            emitCode(w, di, 5);
+            if (DIST_EXTRA[di] > 0) {
+                putBits(w, t[2] - DIST_BASE[di], DIST_EXTRA[di]);
+            }
+        }
+        i = i + 1;
+    }
+    emitCode(w, 0, 7);
+    return w.finish();
+}
+
+// One stored block. Valid only for inputs that fit a single 16-bit length.
+fun deflateStored(s) {
+    var n = len(s);
+    var out = chr(1);
+    out = out + chr(n % 256) + chr(math.floor(n / 256) % 256);
+    var inv = 65535 - n;
+    out = out + chr(inv % 256) + chr(math.floor(inv / 256) % 256);
+    return out + s;
+}
+
+fun deflate(s) {
+    var fixedOut = deflateFixed(s);
+    // A stored block carries one 16-bit length, so it is only an option up to
+    // 65535 bytes; longer incompressible input still gets the fixed block.
+    if (len(s) <= 65535) {
+        var storedOut = deflateStored(s);
+        if (len(storedOut) < len(fixedOut)) {
+            return storedOut;
+        }
+    }
+    return fixedOut;
+}
+
+fun zlibCompress(s) {
+    // 0x78 = CM 8 (deflate), CINFO 7 (32K window); 0x9C makes the 16-bit
+    // header a multiple of 31 with FLEVEL=2 and FDICT=0.
+    var out = chr(120) + chr(156);
+    out = out + deflate(s);
+    return out + be32(adler32(s));
+}
+
+// ---------- demo ----------
+
+fun checkDecode(name, compressed, expected) {
+    var out = zlibDecompress(compressed);
+    if (out == expected) {
+        print "  " + name + ": ok (" + str(len(out)) + " bytes)";
+    } else {
+        print "  " + name + ": MISMATCH";
+    }
+}
+
+fun roundTrip(name, s) {
+    var c = zlibCompress(s);
+    var out = zlibDecompress(c);
+    var status = "ok";
+    if (out != s) status = "MISMATCH";
+    print "  " + name + ": " + str(len(s)) + " -> " + str(len(c))
+        + " bytes " + status;
+}
+
+fun demo() {
+    print "=== zlib (RFC 1950) over DEFLATE (RFC 1951) ===";
+    print "";
+
+    print "Decoding streams produced by Python zlib.compress:";
+    checkDecode("fixed literals",
+        fromBytes([120, 156, 203, 72, 205, 201, 201, 7, 0, 6, 44, 2, 21]),
+        "hello");
+    checkDecode("fixed matches",
+        fromBytes([120, 156, 75, 76, 42, 74, 76, 78, 76, 73, 4, 82, 10, 137,
+            216, 217, 0, 238, 40, 13, 61]),
+        "abracadabra abracadabra abracadabra");
+    checkDecode("dynamic tables", fromBytes([
+        120, 218, 53, 142, 129, 9, 0, 64, 8, 2, 103, 85, 219, 127, 134, 207,
+        124, 131, 36, 50, 46, 1, 2, 131, 52, 233, 193, 2, 102, 69, 139, 173,
+        168, 214, 148, 144, 26, 65, 189, 215, 167, 156, 153, 102, 135, 195, 81, 62,
+        50, 113, 214, 225, 71, 212, 77, 128, 165, 111, 29, 171, 78, 159, 119, 37,
+        245, 189, 126, 178, 73, 250, 7, 246, 202, 76, 82]), fromBytes([
+        97, 97, 98, 97, 97, 100, 97, 97, 97, 100, 97, 97, 97, 98, 98, 97,
+        97, 97, 100, 98, 97, 97, 97, 97, 98, 97, 97, 97, 100, 97, 97, 98,
+        97, 100, 97, 97, 100, 97, 97, 97, 97, 97, 100, 97, 97, 97, 99, 100,
+        98, 97, 99, 99, 97, 97, 97, 97, 97, 97, 97, 100, 99, 97, 99, 97,
+        97, 97, 100, 98, 97, 97, 97, 99, 98, 97, 97, 100, 97, 97, 97, 99,
+        99, 97, 97, 97, 99, 97, 97, 97, 99, 97, 98, 97, 97, 99, 97, 97,
+        97, 99, 97, 97, 97, 97, 97, 98, 98, 99, 97, 97, 99, 98, 100, 97,
+        97, 98, 100, 97, 98, 97, 98, 97, 97, 97, 97, 97, 97, 97, 97, 99,
+        97, 97, 97, 97, 97, 98, 100, 97, 97, 97, 100, 97, 99, 100, 98, 98,
+        98, 98, 97, 99, 98, 97, 97, 97, 97, 99, 97, 97, 97, 97, 97, 97,
+        97, 100, 97, 97, 97, 97, 97, 98, 97, 97, 97, 97, 99, 97, 97, 99,
+        99, 99, 99, 97, 97, 97, 97, 97, 97, 99, 97, 100, 97, 97, 100, 97,
+        97, 100, 97, 100, 97, 97, 97, 100]));
+    checkDecode("stored block", fromBytes([
+        120, 1, 1, 20, 0, 235, 255, 26, 137, 44, 208, 136, 55, 19, 194, 170,
+        174, 26, 81, 69, 172, 170, 125, 83, 0, 223, 44, 87, 154, 8, 109]),
+        fromBytes([26, 137, 44, 208, 136, 55, 19, 194, 170, 174, 26, 81, 69,
+            172, 170, 125, 83, 0, 223, 44]));
+
+    print "";
+    print "Round-trip (our compressor -> our decompressor):";
+    roundTrip("empty", "");
+    roundTrip("hello", "hello");
+    roundTrip("matched", "the quick brown fox jumps over the lazy dog, "
+        + "the quick brown fox jumps over the lazy dog");
+    var all = "";
+    var i = 0;
+    while (i < 256) {
+        all = all + chr(i);
+        i = i + 1;
+    }
+    roundTrip("all 256 byte values", all);
+
+    print "";
+    print "Fixed-Huffman output is byte-identical to Python for 'hello':";
+    print "  " + bytesToHex(zlibCompress("hello"));
+}
+
+fun runProbe(a) {
+    if (len(a) >= 3 and a[0] == "--compress") {
+        var inf = open(a[1], "r");
+        var data = inf.read();
+        inf.close();
+        var outf = open(a[2], "w");
+        outf.write(zlibCompress(data));
+        outf.close();
+        return true;
+    }
+    if (len(a) >= 3 and a[0] == "--decompress") {
+        var inf = open(a[1], "r");
+        var data = inf.read();
+        inf.close();
+        var outf = open(a[2], "w");
+        outf.write(zlibDecompress(data));
+        outf.close();
+        return true;
+    }
+    return false;
+}
+
+fun main() {
+    if (runProbe(args())) return;
+    demo();
+}
+
+main();
+
+// CHECK: === zlib (RFC 1950) over DEFLATE (RFC 1951) ===
+// CHECK: Decoding streams produced by Python zlib.compress:
+// CHECK: fixed literals: ok (5 bytes)
+// CHECK: fixed matches: ok (35 bytes)
+// CHECK: dynamic tables: ok (200 bytes)
+// CHECK: stored block: ok (20 bytes)
+// CHECK: Round-trip (our compressor -> our decompressor):
+// CHECK: empty: 0 -> 8 bytes ok
+// CHECK: hello: 5 -> 13 bytes ok
+// CHECK: matched: 88 -> 54 bytes ok
+// CHECK: all 256 byte values: 256 -> 267 bytes ok
+// CHECK: Fixed-Huffman output is byte-identical to Python for 'hello':
+// CHECK: 789ccb48cdc9c90700062c0215
