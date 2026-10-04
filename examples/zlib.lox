@@ -355,8 +355,11 @@ fun inflate(d) {
         if (btype == 0) {
             br.n = 0;
             var lenL = br.readAlignedByte() + br.readAlignedByte() * 256;
-            br.readAlignedByte();
-            br.readAlignedByte();
+            var nlen = br.readAlignedByte() + br.readAlignedByte() * 256;
+            // RFC 1951 §3.2.4: NLEN is the one's complement of LEN.
+            if (nlen != 65535 - lenL) {
+                throw "corrupt stored block lengths";
+            }
             var k = 0;
             while (k < lenL) {
                 out = out + chr(br.readAlignedByte());
@@ -382,6 +385,10 @@ fun zlibDecompress(s) {
     var flg = ord(s[1]);
     if (cmf % 16 != 8) {
         throw "unsupported zlib compression method";
+    }
+    // RFC 1950 §2.2: CINFO above 7 asks for a window larger than 32 KiB.
+    if (math.floor(cmf / 16) > 7) {
+        throw "unsupported zlib window size";
     }
     if ((cmf * 256 + flg) % 31 != 0) {
         throw "corrupt zlib header";
