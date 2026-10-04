@@ -133,6 +133,13 @@ public final class LoxCoroutine {
             throw LoxOps.makeError("ArityError", "Expected 0 or 1 arguments.");
         }
 
+        // Native checks the restored frame budget before it marks the parent
+        // NORMAL or changes the coroutine state, so a rejected resume leaves
+        // the coroutine suspended (src/runtime.cpp's resumeCoroutine).
+        frameBase = LoxClosure.frameCountValue();
+        if (started) {
+            LoxClosure.checkResumeBudget(frameBase + frameOwn);
+        }
         LoxCoroutine parent = CURRENT.get();
         if (parent != null) {
             parent.state = State.NORMAL;
@@ -140,7 +147,6 @@ public final class LoxCoroutine {
         // Re-add this coroutine's suspended slice above the resumer's own
         // frame and handler counts before it runs. Both counters return to the
         // resumer's value when the coroutine suspends or dies.
-        frameBase = LoxClosure.frameCountValue();
         handlerBase = LoxOps.handlerDepthValue();
         LoxClosure.setFrameCountValue(frameBase + frameOwn);
         LoxOps.setHandlerDepthValue(handlerBase + handlerOwn);

@@ -20,6 +20,7 @@ public final class CoroutineTest {
         checkOperatorDunderYieldIsLegal();
         checkResumerHandlerVisibleInCoroutine();
         checkSuspendedCoroutineHidesHandlerAndFrames();
+        checkResumeBudgetCheck();
         checkIteration();
         checkValuePresentation();
 
@@ -223,6 +224,38 @@ public final class CoroutineTest {
                     "the resumed coroutine returns its result");
         check(sawOwnHandler[0],
               "the resumed coroutine still sees its own handler");
+    }
+
+    private static void checkResumeBudgetCheck() {
+        // Native checks whether restoring the coroutine's frames would exceed
+        // FRAMES_MAX before it runs them, and a rejected resume leaves the
+        // coroutine suspended. Force the resumer's own depth past the ceiling
+        // instead of building a thousand real frames.
+        LoxClosure body = new LoxClosure("g", 0, NO_UPVALUES) {
+            @Override
+            protected Object invoke(Object self, Object[] a) {
+                return LoxOps.yield(1.0);
+            }
+        };
+        LoxCoroutine co = new LoxCoroutine(body);
+        checkEquals(1.0, co.resume(NO_ARGS),
+                    "the coroutine yields once, so it is started");
+        int saved = LoxClosure.frameCountValue();
+        LoxClosure.setFrameCountValue(2000);
+        LoxOps.enterHandler();
+        LoxError err = null;
+        try {
+            co.resume(NO_ARGS);
+        } catch (LoxError e) {
+            err = e;
+        } finally {
+            LoxOps.exitHandler();
+            LoxClosure.setFrameCountValue(saved);
+        }
+        check(err != null && "StackOverflowError".equals(kindOf(err)),
+              "a resume past the frame ceiling raises StackOverflowError");
+        checkEquals("suspended", co.statusName(),
+                    "a rejected resume leaves the coroutine suspended");
     }
 
     private static void checkIteration() {
