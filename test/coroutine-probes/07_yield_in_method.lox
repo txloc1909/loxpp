@@ -1,0 +1,27 @@
+// A yield inside a class method suspends the method's own frame. A
+// BoundMethod is callable, so it can be a coroutine's function directly.
+// Mission #523 node #525; goes green with the native coroutine primitive
+// (#526).
+class Counter {
+    init(start) {
+        this.n = start;
+    }
+
+    next() {
+        var v = yield this.n;
+        this.n = v;
+        return this.n;
+    }
+}
+
+var co = coroutine.create(Counter(5).next);
+
+print co.resume();
+print co.status();
+print co.resume(9);
+print co.status();
+
+// CHECK: 5
+// CHECK: suspended
+// CHECK: 9
+// CHECK: dead

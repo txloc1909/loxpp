@@ -1,0 +1,40 @@
+// A yield inside try/catch suspends with the handler still live: resuming
+// continues inside the protected region, so a throw after the yield is caught
+// by the same handler. A throw that escapes the coroutine becomes dead and
+// propagates to the resumer, where it is catchable.
+// Mission #523 node #525; goes green with the native coroutine primitive
+// (#526).
+fun risky() {
+    try {
+        yield "before";
+        throw "kaboom";
+    } catch (e) {
+        return "caught " + e;
+    }
+}
+
+var co = coroutine.create(risky);
+print co.resume();
+print co.resume();
+print co.status();
+
+fun thrower() {
+    yield 1;
+    throw "escaped";
+}
+
+var c2 = coroutine.create(thrower);
+print c2.resume();
+try {
+    c2.resume();
+} catch (e) {
+    print "resumer caught " + e;
+}
+print c2.status();
+
+// CHECK: before
+// CHECK: caught kaboom
+// CHECK: dead
+// CHECK: 1
+// CHECK: resumer caught escaped
+// CHECK: dead

@@ -1,0 +1,24 @@
+// Resuming a coroutine whose function has already returned is a catchable
+// runtime error. status() reports "dead" before the bad resume.
+// Mission #523 node #525; goes green with the native coroutine primitive
+// (#526).
+fun f() {
+    return "done";
+}
+
+var co = coroutine.create(f);
+
+print co.status();
+print co.resume();
+print co.status();
+try {
+    co.resume();
+    print "unreachable";
+} catch (e) {
+    print e.kind;
+}
+
+// CHECK: suspended
+// CHECK: done
+// CHECK: dead
+// CHECK: DeadCoroutineError

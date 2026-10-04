@@ -1,0 +1,30 @@
+// A yield inside a function the coroutine calls suspends the whole
+// coroutine: the caller's frame stays live beneath the suspended callee.
+// Resume re-enters the callee's yield; when it returns, the caller continues.
+// Mission #523 node #525; goes green with the native coroutine primitive
+// (#526).
+fun inner() {
+    yield "from-inner";
+    return "inner-done";
+}
+
+fun outer() {
+    var v = inner();
+    print "outer saw " + v;
+    return "outer-done";
+}
+
+var co = coroutine.create(outer);
+
+print co.status();
+print co.resume();
+print co.status();
+print co.resume();
+print co.status();
+
+// CHECK: suspended
+// CHECK: from-inner
+// CHECK: suspended
+// CHECK: outer saw inner-done
+// CHECK: outer-done
+// CHECK: dead
