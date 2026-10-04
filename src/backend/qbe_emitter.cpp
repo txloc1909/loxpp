@@ -1029,7 +1029,7 @@ class Emitter {
                          ins.offset, Catchability::Local);
             break;
         case Op::ITER_HAS_NEXT:
-            callSlowPath("rt_op_iter_has_next", before.height, {}, std::nullopt,
+            callSlowPath("rt_op_iter_has_next", before.height, {}, m_stopTemp,
                          ins.offset, Catchability::Fatal);
             break;
         case Op::ITER_NEXT:

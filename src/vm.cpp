@@ -611,7 +611,8 @@ InterpretResult VM::run(int stopAtFrameCount) {
             // with the iterator. `result` is rooted on the stack during the
             // create<>().
             if (check == Runtime::ResultCheck::Sequence &&
-                (isList(result) || isString(result) || isMap(result))) {
+                (isList(result) || isString(result) || isMap(result) ||
+                 isCoroutine(result))) {
                 Obj* obj = as<Obj*>(result);
                 ObjIterator* it = m_rt.m_mm.create<ObjIterator>(
                     result, 0, isObjMap(obj) ? asObjMap(obj)->version : -1);
@@ -635,7 +636,8 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 break;
             }
             if (check == Runtime::ResultCheck::Sequence &&
-                !(isList(result) || isString(result) || isMap(result))) {
+                !(isList(result) || isString(result) || isMap(result) ||
+                  isCoroutine(result))) {
                 CATCHABLE_OR_RETURN(tryCatchableError(
                     "OperatorResultTypeError",
                     "Operator method must return a sequence."));
@@ -708,7 +710,8 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::ITER_HAS_NEXT: {
-            if (auto ret = dispatchOp([&] { return m_rt.opIterHasNext(); })) {
+            if (auto ret = dispatchOp(
+                    [&] { return m_rt.opIterHasNext(stopAtFrameCount); })) {
                 return *ret;
             }
             break;

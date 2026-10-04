@@ -151,7 +151,7 @@ PROBES = [
      "class A {} class B < A { m() { super.zzz(); } } try { B().m(); } catch (e) { print e.kind; }",
      FATAL, "UndefinedMemberError", '"Undefined property \'" + method + "\'."'),
     ("for-in on a non-iterable", "try { for (var x in 42) {} } catch (e) { print e.kind; }",
-     FATAL, "ForInNotIterableError", '"Value is not iterable (expected list, string, or map)."'),
+     FATAL, "ForInNotIterableError", '"Value is not iterable (expected list, string, map, or coroutine)."'),
     ("map size changed during for-in", "try { var m = {1: 1}; for (var k in m) { m[2] = 2; } } catch (e) { print e.kind; }",
      FATAL, "MapSizeChangedError", '"Map changed size during iteration."'),
     ("map net-zero change during for-in", "try { var m = {1: \"a\"}; for (var k in m) { m.del(1); m[2] = \"b\"; } } catch (e) { print e.kind; }",

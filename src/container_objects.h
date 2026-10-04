@@ -29,16 +29,23 @@ inline ObjList* asObjList(Obj* o) { return static_cast<ObjList*>(o); }
 inline bool isList(const Value& v) { return isValueOfType<ObjType::LIST>(v); }
 
 struct ObjIterator : public Obj {
-    Value collection; // ObjList*, ObjString*, or ObjMap* being iterated
-    int index;        // current cursor position
+    // ObjList*, ObjString*, ObjMap*, or ObjCoroutine* being iterated.
+    Value collection;
+    int index; // current cursor position
     // Map structural version recorded at GET_ITER; -1 unless collection is a
     // Map. Any insert or erase during map iteration is an error, even when a
     // paired erase and insert restore the net size.
     int expectedVersion;
+    // Coroutine mode only, and meaningful while hasCurrent is true: the value
+    // ITER_HAS_NEXT resumed out of the coroutine, cached for ITER_NEXT to
+    // push. The resume happens at has-next time because its outcome is what
+    // decides whether another element exists at all.
+    Value current;
+    bool hasCurrent{false};
 
     ObjIterator(Value coll, int idx = 0, int expected = -1)
         : Obj(ObjType::ITERATOR), collection(coll), index(idx),
-          expectedVersion(expected) {}
+          expectedVersion(expected), current{Nil{}} {}
 };
 
 inline bool isObjIterator(Obj* o) { return isObjType(o, ObjType::ITERATOR); }

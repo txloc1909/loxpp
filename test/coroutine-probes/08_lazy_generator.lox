@@ -1,0 +1,25 @@
+// A generator computes a value only when for-in asks for it. The log shows
+// that the body past a yield does not run until the next resume.
+// Mission #523 node #527.
+var log = "";
+
+fun lazy() {
+    log = log + "start;";
+    yield 10;
+    log = log + "mid;";
+    yield 20;
+    log = log + "end;";
+}
+
+for (var x in coroutine.create(lazy)) {
+    print x;
+    if (x == 10) {
+        print log;
+    }
+}
+print log;
+
+// CHECK: 10
+// CHECK: start;
+// CHECK: 20
+// CHECK: start;mid;end;

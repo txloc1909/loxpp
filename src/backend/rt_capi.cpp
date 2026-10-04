@@ -248,8 +248,8 @@ int rt_op_get_iter(Runtime* rt, int stopAtFrameCount) noexcept {
     return rtGuard(rt, [&] { return rt->opGetIter(stopAtFrameCount); });
 }
 
-int rt_op_iter_has_next(Runtime* rt) noexcept {
-    return rtGuard(rt, [&] { return rt->opIterHasNext(); });
+int rt_op_iter_has_next(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opIterHasNext(stopAtFrameCount); });
 }
 
 int rt_op_iter_next(Runtime* rt) noexcept {

@@ -234,9 +234,14 @@ void MemoryManager::traceObject(Obj* obj) {
     case ObjType::FILE:
         markObject(static_cast<ObjFile*>(obj)->klass);
         break;
-    case ObjType::ITERATOR:
-        markValue(static_cast<ObjIterator*>(obj)->collection);
+    case ObjType::ITERATOR: {
+        auto* it = static_cast<ObjIterator*>(obj);
+        markValue(it->collection);
+        if (it->hasCurrent) {
+            markValue(it->current);
+        }
         break;
+    }
     case ObjType::MAP: {
         auto* map = static_cast<ObjMap*>(obj);
         markObject(map->klass);

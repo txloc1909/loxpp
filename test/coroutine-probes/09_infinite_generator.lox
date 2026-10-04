@@ -1,0 +1,24 @@
+// An infinite generator is driven by for-in and stopped by break. Without
+// suspendable iteration the loop could not start, since the sequence is
+// unbounded.
+// Mission #523 node #527.
+fun naturals() {
+    var n = 0;
+    while (true) {
+        yield n;
+        n = n + 1;
+    }
+}
+
+var sum = 0;
+var count = 0;
+for (var n in coroutine.create(naturals)) {
+    sum = sum + n;
+    count = count + 1;
+    if (count == 5) {
+        break;
+    }
+}
+print sum;
+
+// CHECK: 10

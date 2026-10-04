@@ -618,6 +618,171 @@ TEST_F(CoroutineTest, CoroutineResumedFromNativeCallbackMayYield) {
     expect_num(*h.getGlobal("got"), 1);
 }
 
+// ---------------------------------------------------------------------------
+// for-in over a Coroutine (mission #523 node #527).
+// ---------------------------------------------------------------------------
+
+TEST_F(CoroutineTest, ForInDrainsGenerator) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun upto() {
+            yield 1;
+            yield 2;
+            yield 3;
+        }
+        var sum = 0;
+        for (var x in coroutine.create(upto)) {
+            sum = sum + x;
+        }
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("sum"), 6);
+}
+
+// An infinite generator is driven one element at a time and stopped by break;
+// the loop exits without resuming to completion.
+TEST_F(CoroutineTest, ForInInfiniteGeneratorBreaks) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun naturals() {
+            var n = 0;
+            while (true) {
+                yield n;
+                n = n + 1;
+            }
+        }
+        var last = -1;
+        var count = 0;
+        for (var n in coroutine.create(naturals)) {
+            last = n;
+            count = count + 1;
+            if (n == 4) {
+                break;
+            }
+        }
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("last"), 4);
+    expect_num(*h.getGlobal("count"), 5);
+}
+
+// A generator that returns before its first yield makes the loop body run
+// zero times, and the coroutine is dead afterwards.
+TEST_F(CoroutineTest, ForInEmptyGeneratorRunsNoBody) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun empty() {
+            return;
+        }
+        var co = coroutine.create(empty);
+        var body = 0;
+        for (var x in co) {
+            body = body + 1;
+        }
+        var st = co.status();
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("body"), 0);
+    expect_string(h, "st", "dead");
+}
+
+// A coroutine that is already dead when the loop starts exits at once, with
+// no resume attempt: resuming a dead coroutine is an error, and for-in must
+// not raise it.
+TEST_F(CoroutineTest, ForInAlreadyDeadCoroutineRunsNoBody) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun once() {
+            yield 1;
+            return 2;
+        }
+        var co = coroutine.create(once);
+        var first = co.resume();
+        var second = co.resume();
+        var body = 0;
+        for (var x in co) {
+            body = body + 1;
+        }
+        var st = co.status();
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("first"), 1);
+    expect_num(*h.getGlobal("second"), 2);
+    expect_num(*h.getGlobal("body"), 0);
+    expect_string(h, "st", "dead");
+}
+
+// __iter__ may return a Coroutine; for-in resumes it exactly as it does a
+// Coroutine passed directly.
+TEST_F(CoroutineTest, ForInIterDunderReturnsCoroutine) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        class R {
+            init(n) { this.n = n; }
+            __iter__() {
+                var self = this;
+                fun gen() {
+                    var i = 0;
+                    while (i < self.n) {
+                        yield i;
+                        i = i + 1;
+                    }
+                }
+                return coroutine.create(gen);
+            }
+        }
+        var sum = 0;
+        for (var x in R(4)) {
+            sum = sum + x;
+        }
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("sum"), 6);
+}
+
+// A throw from inside a generator propagates out of the resume, so a try
+// around the for-in catches it like any other throw.
+TEST_F(CoroutineTest, ForInGeneratorThrowIsCatchable) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun gen() {
+            yield 1;
+            throw "boom";
+        }
+        var got = "";
+        try {
+            for (var x in coroutine.create(gen)) {
+                got = got + str(x);
+            }
+        } catch (e) {
+            got = got + " caught " + e;
+        }
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "got", "1 caught boom");
+}
+
+// The yielded value is held only by the iterator between ITER_HAS_NEXT and
+// ITER_NEXT. Under LOXPP_STRESS_GC the iterator's cache must root it.
+TEST_F(CoroutineTest, ForInYieldedValueSurvivesGc) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun gen() {
+            var i = 0;
+            while (i < 5) {
+                yield "item" + str(i);
+                i = i + 1;
+            }
+        }
+        var joined = "";
+        for (var s in coroutine.create(gen)) {
+            joined = joined + s;
+        }
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "joined", "item0item1item2item3item4");
+}
+
 TEST_F(CoroutineTest, TypeAndStringify) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(

@@ -1,0 +1,23 @@
+// A coroutine that is already dead when the for-in starts exits the loop at
+// once. The loop does not resume it, because resuming a dead coroutine is an
+// error.
+// Mission #523 node #527.
+fun once() {
+    yield 1;
+    return 2;
+}
+
+var co = coroutine.create(once);
+print co.resume();
+print co.resume();
+print co.status();
+
+for (var x in co) {
+    print "unreachable";
+}
+print "end";
+
+// CHECK: 1
+// CHECK: 2
+// CHECK: dead
+// CHECK: end

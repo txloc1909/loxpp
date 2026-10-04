@@ -658,7 +658,7 @@ FATAL_ROWS = [
         "for_in_non_iterable",
         "fatal",
         "for (var x in 42) {}",
-        expected_message="Value is not iterable (expected list, string, or map).",
+        expected_message="Value is not iterable (expected list, string, map, or coroutine).",
     ),
     Row(
         "for_in_map_size_changed",

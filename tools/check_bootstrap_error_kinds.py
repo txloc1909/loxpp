@@ -159,7 +159,7 @@ EXPECTED_CALLS = [
     ('SliceIndexTypeError', '"Slice index must be a number."', JUDGED),
     ('SliceIndexNotIntegerError', '"Slice index must be an integer."', JUDGED),
     ('SliceIndexNegativeError', '"Slice index must be non-negative."', JUDGED),
-    ('ForInNotIterableError', '"Value is not iterable (expected list, string, or map)."', JUDGED),
+    ('ForInNotIterableError', '"Value is not iterable (expected list, string, map, or coroutine)."', JUDGED),
     ('MapSizeChangedError', '"Map changed size during iteration."', JUDGED),
     ('MapSizeChangedError', '"Map changed size during iteration."', JUDGED),
     ('InvalidSuperclassError', '"Superclass must be a class."', JUDGED),
