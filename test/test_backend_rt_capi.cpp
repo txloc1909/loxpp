@@ -779,3 +779,98 @@ TEST(RunPendingDefers, BoundMethodBranchRunsAttachedCompiledCodeNotANoop) {
     EXPECT_EQ(rt.frameCount(), 1) << "the deferred call's own frame must be "
                                      "pushed and popped, not leaked";
 }
+
+// ===========================================================================
+// Coroutine driver (backend/rt_abi.h kRtCall/kRtYield, QBE #530/#535)
+// ===========================================================================
+
+namespace {
+
+int g_driverCalleeCalls = 0;
+int g_driverCallerResumes = 0;
+double g_driverSeenFromCallee = -1.0;
+ObjClosure* g_driverCalleeClosure = nullptr;
+
+// Runs to completion and leaves its result on top (the kRtOk contract).
+int fakeDriverCallee(Runtime* rt, Value*) {
+    g_driverCalleeCalls++;
+    rt->push(Value{42.0});
+    return kRtOk;
+}
+
+// On its first entry, pushes a resumable call to fakeDriverCallee and returns
+// kRtCall — the shape a compiled function has when a call's callee may yield.
+// The driver runs the callee and re-enters this frame at state 1 with the
+// callee's result at the top.
+int fakeDriverCaller(Runtime* rt, Value*) {
+    if (rt->currentCompiledState() == 0) {
+        rt->setCurrentCompiledState(1);
+        rt->push(Value{static_cast<Obj*>(g_driverCalleeClosure)});
+        rt->call(g_driverCalleeClosure, 0);
+        return kRtCall;
+    }
+    g_driverCallerResumes++;
+    g_driverSeenFromCallee = as<Number>(rt->peek(0));
+    rt->push(Value{100.0});
+    return kRtOk;
+}
+
+int fakeDriverFatal(Runtime*, Value*) { return kRtFatal; }
+
+} // namespace
+
+TEST(RunCompiledFrames, RunsCalleeThenReentersCallerAtItsResumePoint) {
+    Runtime rt;
+    ObjFunction* calleeFn = rt.memoryManager().create<ObjFunction>();
+    calleeFn->arity = 0;
+    calleeFn->code = reinterpret_cast<void*>(&fakeDriverCallee);
+    ObjClosure* callee = rt.memoryManager().create<ObjClosure>(calleeFn);
+    // callee is reached only through a raw pointer during the driver run, so
+    // root it explicitly for the whole test.
+    rt.memoryManager().pushTempRoot(static_cast<Obj*>(callee));
+
+    ObjFunction* callerFn = rt.memoryManager().create<ObjFunction>();
+    callerFn->arity = 0;
+    callerFn->code = reinterpret_cast<void*>(&fakeDriverCaller);
+    ObjClosure* caller = rt.memoryManager().create<ObjClosure>(callerFn);
+
+    g_driverCalleeClosure = callee;
+    g_driverCalleeCalls = 0;
+    g_driverCallerResumes = 0;
+    g_driverSeenFromCallee = -1.0;
+
+    rt.push(Value{static_cast<Obj*>(caller)});
+    ASSERT_EQ(rt.call(caller, 0), Runtime::ThrowOutcome::Pushed);
+
+    bool ok = rt.runCompiledFrames(0);
+
+    EXPECT_TRUE(ok);
+    EXPECT_EQ(g_driverCalleeCalls, 1);
+    EXPECT_EQ(g_driverCallerResumes, 1)
+        << "the driver must re-enter the caller at its saved resume point, not"
+           " abandon it after the callee returns";
+    EXPECT_EQ(g_driverSeenFromCallee, 42.0)
+        << "the callee's result must be in the caller's result slot on resume";
+    EXPECT_EQ(rt.frameCount(), 0);
+    Value result = rt.pop();
+    ASSERT_TRUE(is<Number>(result));
+    EXPECT_EQ(as<Number>(result), 100.0);
+    rt.memoryManager().popTempRoot();
+}
+
+TEST(RunCompiledFrames, FatalStatusReturnsFalse) {
+    Runtime rt;
+    ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    fn->arity = 0;
+    fn->code = reinterpret_cast<void*>(&fakeDriverFatal);
+    ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    rt.push(Value{static_cast<Obj*>(closure)});
+    ASSERT_EQ(rt.call(closure, 0), Runtime::ThrowOutcome::Pushed);
+
+    EXPECT_FALSE(rt.runCompiledFrames(0));
+}
+
+TEST(RunCompiledFrames, EmptyRangeReturnsTrue) {
+    Runtime rt;
+    EXPECT_TRUE(rt.runCompiledFrames(0));
+}

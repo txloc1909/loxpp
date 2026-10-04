@@ -326,12 +326,18 @@ struct CoroutineFrameSnapshot {
     ObjClosure* closure;
     int ipOffset;   // offset into closure->function->chunk
     int slotOffset; // offset into the coroutine's stack slice
+    // Coroutine mode (QBE #530/#535): the compiled frame's own resume point,
+    // restored into CallFrame::compiledState. 0 for an interpreted frame.
+    int compiledState{0};
 };
 
 struct CoroutineHandlerSnapshot {
     int frameOffset; // frame index relative to the coroutine's base frame
     int stackOffset; // operand-stack index relative to the stack base
     Chunk::const_iterator catchIp;
+    // Coroutine mode: the compiled frame's catch resume point, restored into
+    // HandlerRecord::catchState. -1 for an interpreted handler.
+    int catchState{-1};
 };
 
 struct ObjCoroutine : public Obj {

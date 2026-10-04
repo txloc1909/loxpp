@@ -48,6 +48,22 @@ class Runtime;
 //                 (which already called resetStack()) — the whole Runtime
 //                 is reset. The caller must propagate kRtFatal immediately,
 //                 unconditionally, with no frame-state inspection.
+//   kRtCall (3):  coroutine mode only. A runtime op pushed a callable frame
+//                 instead of running it (Runtime::m_resumableMode). The
+//                 compiled function saved its own resume point in its
+//                 CallFrame and must return kRtCall unchanged. The
+//                 coroutine driver (Runtime::runCompiledFrames) invokes the
+//                 newly pushed frame, then re-enters this caller at its
+//                 saved resume point with the result.
+//   kRtYield (4): coroutine mode only. A YIELD suspended this coroutine.
+//                 The driver pops the yielded value and snapshots the stack
+//                 slice. It re-enters the frame at the resume point after
+//                 the YIELD when the coroutine resumes.
+//
+// kRtCall/kRtYield reach only the coroutine driver. Runtime::callCompiled
+// never receives them: it runs a frame with Runtime::m_resumableMode clear,
+// so no runtime op pushes a call instead of running it, and a YIELD under it
+// is illegal (a native-callback or deferred-call boundary).
 //
 // A caller OUTSIDE compiled code (Runtime::callCompiled) translates
 // kRtThrow back into the OpResult/stopAtFrameCount convention the rest of
@@ -56,5 +72,7 @@ class Runtime;
 inline constexpr int kRtOk = 0;
 inline constexpr int kRtThrow = 1;
 inline constexpr int kRtFatal = 2;
+inline constexpr int kRtCall = 3;
+inline constexpr int kRtYield = 4;
 
 using RtCompiledFn = int (*)(Runtime*, Value*);
