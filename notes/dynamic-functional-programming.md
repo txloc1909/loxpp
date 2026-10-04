@@ -66,3 +66,68 @@ The architecture decision is fine; the only thing that needed salvaging was the
 ambition's reference frame. Lox++ is a dynamically-typed scripting language
 whose enums + matching make tree-walking pleasant — by that standard the
 feature is a success, and dynamic FP is the lane with room left to run.
+
+## Roadmap & work items
+
+### Why the language drifted after this note
+
+Since this note, the language moved toward imperative and system features, not
+FP ergonomics. Two forces explain the drift:
+
+- **The capability litmus test.** `notes/expressiveness-roadmap.md` counts a
+  feature as a gap only if it cannot be bootstrapped from closures + lists +
+  maps + recursion + enums + `match`. Under that test every FP ergonomic
+  (`map`/`filter`/`reduce`, lambdas, `const`, `Result`/`Option`, modules) is a
+  "library, not a gap". The genuine gaps that clear the bar — reflection, OS
+  access, non-local control flow, operator overloading, coroutines, FFI,
+  parallelism — are all runtime and system capabilities. The test does not
+  reject FP; it never prioritises it.
+- **Multi-backend parity economics.** Every feature is emitted for native + JVM
+  + CLR + QBE and kept differential-green. High-level FP sugar has the worst
+  cost/benefit under that constraint (emission work multiplied across four
+  backends), while low-level native primitives are cheap to add uniformly.
+
+The note also closed rather than opened work: its salvage points (nested
+patterns, exhaustiveness-as-lint) were already done, and the follow-up commit
+removed the pattern-matching note with "no work item remaining". No FP work
+stream survived to pull the language.
+
+### The wedges, re-verdicted
+
+FP-as-library was the intended outcome all along ("combinators as plain library
+code"). Three things a library cannot cross, and their verdicts:
+
+- **TCO — the real blocker.** Recursion-heavy FP exhausts the VM frame budget
+  (`notes/bootstrap-stack-depth.md`). A library cannot add it. Tracked: #555.
+- **`__bool__` truthiness — optional ergonomic bridge.** Only `false` and `nil`
+  are falsy; `None()` is truthy. Clojure sidesteps this with `nil`, Elixir with
+  match-only consumption. Deferred: #556.
+- **Enum methods (`.map`/`.unwrapOr`) — ergonomic only.** Enums take
+  constructors only, so combinators are free functions today. Deferred: #557.
+
+### The strategy: library first, dogfood second
+
+Write FP features as user-space example programs, not as language or stdlib
+changes, then make a real program use them. Success is a program that *uses*
+the library, not a library that merely exists. Tracked: #554.
+
+### TCO design record
+
+Self-tail-call elimination in `src/compiler.cpp`. When `return <self-call>` has
+a callee that resolves to the function being compiled, emit the argument values,
+store them into the parameter slots (slots 1..arity), and `LOOP` back to the
+body start instead of `GET_*/CALL/RETURN`. The compiler produces the single
+shared bytecode chunk, so the native VM and the JVM, CLR, and QBE backends all
+get this for free.
+
+Bail-outs — do not transform when the function:
+
+- creates a closure or captures an upvalue (slot reuse would leak a later
+  iteration's value into an earlier iteration's closure),
+- contains `defer` or `try` (a loop must not re-run handlers or defers per
+  iteration),
+- has a shadowed or reassigned self-name.
+
+Spec change in the same PR: `spec/04-semantics.md` (Function Call, `return`,
+stack overflow) — a tail self-call no longer grows the stack, so deep tail
+recursion stops raising `StackOverflowError`. Tracked: #555.
