@@ -1,0 +1,39 @@
+// A yield runs no deferred call: the pending defer stays recorded and fires
+// only when the function returns. A coroutine abandoned before its function
+// returns never runs its deferred calls.
+// Mission #523 node #525; goes green with the native coroutine primitive
+// (#526).
+fun announce(name) {
+    print "cleanup " + name;
+}
+
+fun worker() {
+    defer announce("worker");
+    yield "tick";
+    print "resumed";
+    return "done";
+}
+
+var co = coroutine.create(worker);
+print co.resume();
+print "between";
+print co.resume();
+print co.status();
+
+fun abandoner() {
+    defer announce("abandoner");
+    yield "suspend";
+}
+
+var c2 = coroutine.create(abandoner);
+print c2.resume();
+print "abandoned";
+
+// CHECK: tick
+// CHECK: between
+// CHECK: resumed
+// CHECK: cleanup worker
+// CHECK: done
+// CHECK: dead
+// CHECK: suspend
+// CHECK: abandoned

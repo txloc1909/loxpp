@@ -36,6 +36,12 @@
 // binds `this` from underneath it — 2 cells read, 1 pushed back. Read
 // straight off `chunk.h`'s own per-opcode comments and confirmed against
 // every `vm.cpp` case body, including any helper the case calls.
+//
+// YIELD contract (coroutines mission, tracking #523; implemented in node
+// #528). YIELD (see chunk_decoder.h) reads 1 cell: the yielded value. The
+// received value is pushed back only on resume, so it is not a cell this
+// instruction reads. A folded named local used as `yield e`'s operand must be
+// materialized first, exactly as for RETURN/PRINT.
 #include "chunk_decoder.h"
 
 #include <optional>

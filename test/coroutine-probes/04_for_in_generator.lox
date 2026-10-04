@@ -1,0 +1,37 @@
+// for-in over a Coroutine resumes it once per iteration: the value it yields
+// is bound to the loop variable. A generator whose function returns ends the
+// loop. An infinite generator ends only via break.
+// Mission #523 node #525; goes green with the suspendable-iterator node
+// (#527).
+fun counter() {
+    var i = 0;
+    while (true) {
+        yield i;
+        i = i + 1;
+    }
+}
+
+for (var x in coroutine.create(counter)) {
+    print x;
+    if (x >= 3) {
+        break;
+    }
+}
+
+fun upto() {
+    yield 1;
+    yield 2;
+}
+
+for (var y in coroutine.create(upto)) {
+    print "y=" + y;
+}
+print "end";
+
+// CHECK: 0
+// CHECK: 1
+// CHECK: 2
+// CHECK: 3
+// CHECK: y=1
+// CHECK: y=2
+// CHECK: end

@@ -8,6 +8,13 @@
 // Target-independent: no VM knowledge beyond PUSH_HANDLER (+1) and
 // POP_HANDLER (-1). Both the native unittest suite and any backend can
 // consume the result.
+//
+// YIELD contract (coroutines mission, tracking #523; implemented in node
+// #528). YIELD (see chunk_decoder.h) has no effect on handler depth. It is a
+// fall-through, so before and after are equal and the innermost active handler
+// is unchanged: a YIELD inside a protected region leaves that record live
+// across a suspension. This pass is compile-time only; preserving the record
+// at run time is the VM's job.
 
 #include "chunk_decoder.h"
 

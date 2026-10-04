@@ -68,6 +68,12 @@
 // lets a test verify, independently of this pass's own bookkeeping, that
 // every resolved close's slot really is height-before minus one — the
 // definitional fact the whole design rests on.
+//
+// YIELD contract (coroutines mission, tracking #523; implemented in node
+// #528). YIELD (see chunk_decoder.h) has frameHeightEffect 0 (pop 1, push 1).
+// It opens and closes no upvalue and is a plain fall-through in the
+// open-upvalue dataflow, so a frame's live captures carry across a suspension
+// unchanged.
 
 #include "cfg.h"
 #include "chunk_decoder.h"
