@@ -1474,7 +1474,7 @@ every pending deferred call on the unwind path has already run.
 | `seq[start:end]` where `end` is negative | `[1, 2][0:-1];` | `Slice index must be non-negative.` |
 | `elem in seq` where `seq` is a String and `elem` is not a String | `1 in "abc";` | `Left operand of 'in' on a string must be a string.` |
 | `elem in seq` where `seq` is not a List, String, or Map | `1 in 42;` | `Right operand of 'in' must be a list, string, or map.` |
-| `for (var x in expr)` where `expr` is not a List, String, or Map | `for (var x in 42) {}` | `Value is not iterable (expected list, string, or map).` |
+| `for (var x in expr)` where `expr` is not a List, String, Map, or Coroutine | `for (var x in 42) {}` | `Value is not iterable (expected list, string, map, or coroutine).` |
 | Map size changed during `for`-in iteration | `var m = {1: 1}; for (var k in m) { m[2] = 2; }` | `Map changed size during iteration.` |
 
 **`print`'s depth-limit fault is fatal, with no `Error.kind`, on every

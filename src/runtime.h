@@ -488,8 +488,18 @@ class Runtime {
     OpResult opGetIndex(int stopAtFrameCount);
     OpResult opSetIndex(int stopAtFrameCount);
     OpResult opGetIter(int stopAtFrameCount);
-    OpResult opIterHasNext();
+    OpResult opIterHasNext(int stopAtFrameCount);
     OpResult opIterNext();
+
+    // Resumes a coroutine from ITER_HAS_NEXT. resumeCoroutine() is written for
+    // the native resume path: it reports its boundary through
+    // m_nativeStopAtFrameCount and its failure through m_reentrantOutcome. This
+    // wrapper saves both, nominates `stopAtFrameCount` as the boundary, and
+    // supplies the callee/argument window resumeCoroutine() expects at the top
+    // of the operand stack. Returns OK on a yield or a normal return; otherwise
+    // the OpResult to propagate (Stop, Resumed, or Fatal).
+    OpResult resumeCoroutineForIteration(ObjCoroutine* co, int stopAtFrameCount,
+                                         Value* out);
 
     // OpCall() plus a nested run() for whatever frame it pushes: the bounded
     // re-entrant call path. `argCount` names a callee/arg window already at

@@ -736,7 +736,7 @@ public final class LoxOps {
         if (!(iterable instanceof LoxList) && !(iterable instanceof String) &&
             !(iterable instanceof LoxMap)) {
             throw new LoxError(
-                "Value is not iterable (expected list, string, or map).");
+                "Value is not iterable (expected list, string, map, or coroutine).");
         }
         return new LoxIterator(iterable);
     }

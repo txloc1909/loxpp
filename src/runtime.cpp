@@ -211,7 +211,8 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
     stackTop = frame->slots;
     push(resultOverride != nullptr ? *resultOverride : result);
     if (check == ResultCheck::Sequence &&
-        (isList(result) || isString(result) || isMap(result))) {
+        (isList(result) || isString(result) || isMap(result) ||
+         isCoroutine(result))) {
         Obj* obj = as<Obj*>(result);
         ObjIterator* it = m_mm.create<ObjIterator>(
             result, 0, isObjMap(obj) ? asObjMap(obj)->version : -1);
@@ -228,7 +229,8 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
             stopAtFrameCount));
     }
     if (check == ResultCheck::Sequence &&
-        !(isList(result) || isString(result) || isMap(result))) {
+        !(isList(result) || isString(result) || isMap(result) ||
+          isCoroutine(result))) {
         return fromThrow(raiseThrowableError(
             "OperatorResultTypeError",
             "Operator method must return a sequence.", stopAtFrameCount));
@@ -2076,13 +2078,16 @@ Runtime::OpResult Runtime::opGetIter(int stopAtFrameCount) {
                 m_protocolNames[static_cast<std::size_t>(Protocol::Iter)],
                 method)) {
             // Receiver is the iterable. The method's result must be a
-            // List/String/Map; Op::RETURN builds the iterator from it.
+            // List/String/Map/Coroutine; Op::RETURN builds the iterator from
+            // it.
             return dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
                                   stopAtFrameCount, ResultCheck::Sequence);
         }
     }
-    if (!isList(iterable) && !isString(iterable) && !isMap(iterable)) {
-        runtimeError("Value is not iterable (expected list, string, or map).");
+    if (!isList(iterable) && !isString(iterable) && !isMap(iterable) &&
+        !isCoroutine(iterable)) {
+        runtimeError("Value is not iterable (expected list, string, map, or "
+                     "coroutine).");
         return OpResult::Fatal;
     }
     Obj* obj = as<Obj*>(iterable);
@@ -2100,7 +2105,40 @@ bool Runtime::mapIterationInvalidated(ObjMap* map, int expectedVersion) {
     return false;
 }
 
-Runtime::OpResult Runtime::opIterHasNext() {
+Runtime::OpResult Runtime::resumeCoroutineForIteration(ObjCoroutine* co,
+                                                       int stopAtFrameCount,
+                                                       Value* out) {
+    // resumeCoroutine() is written for the native resume path: its boundary is
+    // m_nativeStopAtFrameCount and its failure is reported through
+    // m_reentrantOutcome. Neither is set for an opcode. Save both, nominate
+    // this run as the boundary, and push the one slot resumeCoroutine() reads
+    // or uses as its base: for a first resume that slot is overwritten with the
+    // stored callee at stackTop[-1]; for a later resume it is the base the
+    // snapshot is rebuilt above. It is the coroutine's own call/argument
+    // window, discarded after the resume exactly as callNative discards a
+    // native's window.
+    OpResult savedOutcome = m_reentrantOutcome;
+    m_reentrantOutcome = OpResult::OK;
+    int savedBoundary = m_nativeStopAtFrameCount;
+    m_nativeStopAtFrameCount = stopAtFrameCount;
+
+    push(from<Nil>(Nil{}));
+    bool ok = resumeCoroutine(co, 0, out);
+    if (!ok) {
+        // A throw or resume-state fault already unwound the stack (or the
+        // handler rewound it), so the window slot is gone; do not pop it here.
+        OpResult outcome = m_reentrantOutcome;
+        m_nativeStopAtFrameCount = savedBoundary;
+        m_reentrantOutcome = savedOutcome;
+        return outcome;
+    }
+    pop(); // discard the resume window
+    m_nativeStopAtFrameCount = savedBoundary;
+    m_reentrantOutcome = savedOutcome;
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::opIterHasNext(int stopAtFrameCount) {
     Value top = pop();
     // Invariant: value must be an ObjIterator (guaranteed by GET_ITER).
     if (!isIterator(top)) {
@@ -2128,6 +2166,28 @@ Runtime::OpResult Runtime::opIterHasNext() {
             ++i;
         }
         has = i < map->map.capacity();
+    } else if (isCoroutine(it->collection)) {
+        // The resume is what decides whether an element exists: a coroutine
+        // that returns instead of yielding ends the loop. Cache the yielded
+        // value for ITER_NEXT to push, since the resume must not run twice.
+        ObjCoroutine* co = asObjCoroutine(it->collection);
+        if (co->state == CoroutineState::DEAD) {
+            has = false;
+        } else {
+            Value yielded;
+            OpResult outcome =
+                resumeCoroutineForIteration(co, stopAtFrameCount, &yielded);
+            if (outcome != OpResult::OK) {
+                return outcome;
+            }
+            if (co->state == CoroutineState::SUSPENDED) {
+                it->current = yielded;
+                it->hasCurrent = true;
+                has = true;
+            } else {
+                has = false;
+            }
+        }
     } else {
         runtimeError("BUG: ObjIterator::collection has unexpected type.");
         return OpResult::Fatal;
@@ -2167,6 +2227,14 @@ Runtime::OpResult Runtime::opIterNext() {
         // ITER_HAS_NEXT was true, so an occupied slot must exist.
         push(map->map.entryAt(it->index)->key);
         ++it->index;
+    } else if (isCoroutine(it->collection)) {
+        // ITER_HAS_NEXT resumed the coroutine and cached the value it yielded;
+        // no second resume happens here. Clear the cache so a value that
+        // escaped the loop body's last iteration is not retained.
+        Value v = it->current;
+        it->current = Value{Nil{}};
+        it->hasCurrent = false;
+        push(v);
     } else {
         runtimeError("BUG: ObjIterator::collection has unexpected type.");
         return OpResult::Fatal;
