@@ -49,6 +49,9 @@ ObjClosure* Runtime::loadSource(const std::string& source,
     m_serverClass = nullptr;
     m_processClass = nullptr;
     m_coroutineClass = nullptr;
+    // The last yield's value is a GC root; drop a prior program's before the
+    // new program compiles and can collect.
+    m_yieldedValue = Value{};
     ObjFunction* fn = compile(source, &m_mm, sink);
     if (fn == nullptr) {
         return nullptr;
@@ -247,7 +250,13 @@ Runtime::OpResult Runtime::invokeClosure(ObjClosure* closure, int argCount,
 }
 
 Runtime::OpResult Runtime::runPushedFrameToCompletion(int entry) {
-    if (!runNestedLoop(entry)) {
+    // This nested run is driven by a C++ caller (a deferred call drain) that
+    // resumes after it. A Lox frame here cannot be frozen into a snapshot, so
+    // a yield inside it must be rejected like one inside a native callback.
+    ++m_reentrantRunDepth;
+    bool loopOk = runNestedLoop(entry);
+    --m_reentrantRunDepth;
+    if (!loopOk) {
         return OpResult::Fatal;
     }
     if (m_frameCount != entry) {
@@ -1094,6 +1103,7 @@ void Runtime::resetStack() {
     stackTop = stack;
     m_frameCount = 0;
     m_currentCoroutine = nullptr;
+    m_yieldedValue = Value{};
     m_stackOverflow = false;
     m_handlerStack.clear();
     for (auto& deferList : m_deferLists) {

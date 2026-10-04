@@ -482,6 +482,85 @@ TEST_F(CoroutineTest, YieldInsideUserOperatorMethodResumes) {
     expect_num(*h.getGlobal("r2"), 9);
 }
 
+// The deferred-call drain also drives a nested run from a C++ caller, so a
+// yield inside a deferred call has the same native-boundary problem and must
+// be rejected the same way.
+TEST_F(CoroutineTest, YieldInsideDeferredCallIsCatchable) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun announce() {
+            yield 1;
+        }
+        fun worker() {
+            defer announce();
+            return "done";
+        }
+        var co = coroutine.create(worker);
+        var kind = "";
+        try {
+            co.resume();
+        } catch (e) {
+            kind = e.kind;
+        }
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "kind", "YieldAcrossNativeError");
+}
+
+// A defer that would yield is refused, not silently abandoned. The sibling
+// defer after it does not hide the refusal.
+TEST_F(CoroutineTest, YieldInDeferIsRefusedNotSkipped) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun a() {
+            yield "ay";
+        }
+        fun b() {
+        }
+        fun worker() {
+            defer b();
+            defer a();
+            return "done";
+        }
+        var co = coroutine.create(worker);
+        var kind = "";
+        try {
+            co.resume();
+        } catch (e) {
+            kind = e.kind;
+        }
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "kind", "YieldAcrossNativeError");
+}
+
+// A defer that would yield while a throw is unwinding is refused. The defer's
+// own fault wins over the in-progress throw, exactly as a defer that throws
+// does; the throw is not silently discarded.
+TEST_F(CoroutineTest, YieldInDeferDuringThrowUnwindIsRefused) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun cleanup() {
+            yield "y";
+        }
+        fun worker() {
+            defer cleanup();
+            throw "boom";
+        }
+        var co = coroutine.create(worker);
+        var kind = "";
+        try {
+            co.resume();
+        } catch (e) {
+            kind = e.kind;
+        }
+        var st = co.status();
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "kind", "YieldAcrossNativeError");
+    expect_string(h, "st", "dead");
+}
+
 TEST_F(CoroutineTest, TypeAndStringify) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
