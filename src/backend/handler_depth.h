@@ -9,9 +9,8 @@
 // POP_HANDLER (-1). Both the native unittest suite and any backend can
 // consume the result.
 //
-// YIELD contract (coroutines mission, tracking #523). The opcode landed with
-// the primitive in node #526; this pass's entry is still node #528. YIELD
-// (see chunk_decoder.h) has no effect on handler depth. It is a
+// YIELD contract (coroutines mission, tracking #523). YIELD (see
+// chunk_decoder.h) has no effect on handler depth. It is a
 // fall-through, so before and after are equal and the innermost active handler
 // is unchanged: a YIELD inside a protected region leaves that record live
 // across a suspension. This pass is compile-time only; preserving the record

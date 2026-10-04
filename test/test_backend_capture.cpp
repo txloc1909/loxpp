@@ -832,6 +832,18 @@ TEST(CaptureAnalysisTest, NoAssertionFailureOnBootstrapInterpreter) {
                             "loxpp_interpreter.lox");
 }
 
+// The coroutine probes are the corpus that emits YIELD; this exercises
+// YIELD's frameHeightEffect 0 and its plain fall-through in the open-upvalue
+// dataflow, including yields inside try and inside captured scopes.
+TEST(CaptureAnalysisTest, NoAssertionFailureOnCoroutineProbes) {
+    std::vector<fs::path> probes =
+        listLoxFiles(projectRoot() / "test" / "coroutine-probes");
+    ASSERT_FALSE(probes.empty()) << "no coroutine probes found";
+    for (const fs::path& probe : probes) {
+        checkNoAssertionFailure(probe);
+    }
+}
+
 // Regression. Native output is 0, 1, 2: `a` is declared inside an `if`
 // that is itself inside the loop body, and its only CLOSE_UPVALUE (the
 // if-block's own endScope) sits before the loop's back-edge, so it needs a

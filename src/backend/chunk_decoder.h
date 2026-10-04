@@ -8,14 +8,12 @@
 // abstract stack (abstract_stack.h), or a capture map (capture_analysis.h);
 // those passes consume the instructions decoded here.
 //
-// YIELD contract (coroutines mission, tracking #523). The opcode and its
-// decoder entry landed with the primitive in node #526; the pass-level
-// classification is node #528. Op::YIELD is a zero-operand opcode, decoded
-// exactly like PRINT/POP/RETURN (no operand fields set), and listed in
-// LOXPP_FOR_EACH_OP in chunk.h. It delivers the value on top of the operand
-// stack to the resumer and, on resume, pushes the value the resumer sent. It
-// is non-terminal: resume falls through to the next instruction, so cfg.h
-// gives it a FALL_THROUGH edge.
+// YIELD contract (coroutines mission, tracking #523). Op::YIELD is a
+// zero-operand opcode, decoded exactly like PRINT/POP/RETURN (no operand
+// fields set), and listed in LOXPP_FOR_EACH_OP in chunk.h. It delivers the
+// value on top of the operand stack to the resumer and, on resume, pushes the
+// value the resumer sent. It is non-terminal: resume falls through to the
+// next instruction, so cfg.h gives it a FALL_THROUGH edge.
 
 #include "chunk.h"
 

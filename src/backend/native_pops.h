@@ -37,9 +37,8 @@
 // straight off `chunk.h`'s own per-opcode comments and confirmed against
 // every `vm.cpp` case body, including any helper the case calls.
 //
-// YIELD contract (coroutines mission, tracking #523). The opcode landed with
-// the primitive in node #526; this pass's entry is still node #528. YIELD
-// (see chunk_decoder.h) reads 1 cell: the yielded value. The
+// YIELD contract (coroutines mission, tracking #523). YIELD (see
+// chunk_decoder.h) reads 1 cell: the yielded value. The
 // received value is pushed back only on resume, so it is not a cell this
 // instruction reads. A folded named local used as `yield e`'s operand must be
 // materialized first, exactly as for RETURN/PRINT.

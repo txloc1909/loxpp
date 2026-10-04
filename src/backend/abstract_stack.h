@@ -13,9 +13,7 @@
 // would otherwise do it, and the QBE emitter keys its frame layout off the
 // same height.
 //
-// YIELD contract (coroutines mission, tracking #523). The net-effect entry
-// landed with the primitive in node #526 so the shared build stays
-// warning-clean; the remaining pass work is node #528. YIELD (see
+// YIELD contract (coroutines mission, tracking #523). YIELD (see
 // chunk_decoder.h) has stack effect {pop 1, push 1}: it pops the yielded value
 // and, on resume, pushes the received value, so height and operand depth are
 // unchanged. It is not in peeksInsteadOfPops — its operand is consumed, not
