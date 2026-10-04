@@ -582,8 +582,9 @@ TEST(ToolingResolver, RebuildReplacesState) {
 // ---------------------------------------------------------------------------
 
 // Filenames known to warn. Each entry is an understood, intentional warning:
-// a deliberate undefined-name trigger, or an unused local whose initializer
-// throws before the binding is read. A clean file that starts warning is not
+// a deliberate undefined-name trigger, or an unused local that the program
+// never reads (some bind the result of a throwing call, some declare a helper
+// the rest of the file does not use). A clean file that starts warning is not
 // in this set and fails the test; a new file that warns must be added here on
 // purpose.
 const std::set<std::string> kExpectedWarnedFiles = {
