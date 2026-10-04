@@ -46,6 +46,36 @@ static const FunctionStats* findFunction(const ProfilerData& data,
     return nullptr;
 }
 
+// Sets an environment variable for the enclosing scope and restores its prior
+// value on exit, including on an ASSERT failure that returns early. The
+// MemoryManager reads LOXPP_STRESS_GC once per VM, so a leaked value would
+// change how every later test in this binary allocates.
+class ScopedEnvVar {
+  public:
+    ScopedEnvVar(const char* name, const char* value) : m_name(name) {
+        const char* prev = std::getenv(name);
+        m_hadPrev = prev != nullptr;
+        if (m_hadPrev)
+            m_prev = prev;
+        ::setenv(name, value, 1);
+    }
+
+    ~ScopedEnvVar() {
+        if (m_hadPrev)
+            ::setenv(m_name.c_str(), m_prev.c_str(), 1);
+        else
+            ::unsetenv(m_name.c_str());
+    }
+
+    ScopedEnvVar(const ScopedEnvVar&) = delete;
+    ScopedEnvVar& operator=(const ScopedEnvVar&) = delete;
+
+  private:
+    std::string m_name;
+    std::string m_prev;
+    bool m_hadPrev{false};
+};
+
 // ---------------------------------------------------------------------------
 // 1. fibRecursive(10) must record exactly 177 calls.
 //
@@ -264,31 +294,50 @@ TEST_F(ProfilerTest, CompletedCoroutineFunctionMergedIntoReport) {
 //    (issue #538). LOXPP_STRESS_GC forces the sweep within the program.
 // ---------------------------------------------------------------------------
 TEST_F(ProfilerTest, AbandonedCoroutineFunctionMergedOnSweep) {
-    const char* prevStress = std::getenv("LOXPP_STRESS_GC");
-    const std::string prevStressValue = prevStress ? prevStress : "";
-    ::setenv("LOXPP_STRESS_GC", "1", 1);
-    {
-        VM vm;
-        InterpretResult result = vm.interpret(R"(
-            fun gen() {
-                yield 1;
-            }
-            var co = coroutine.create(gen);
-            co.resume();
-            co = nil;
-            var i = 0;
-            while (i < 50) { var s = str(i); i = i + 1; }
-        )");
-        ASSERT_EQ(result, InterpretResult::OK);
+    ScopedEnvVar stressGC("LOXPP_STRESS_GC", "1");
+    VM vm;
+    InterpretResult result = vm.interpret(R"(
+        fun gen() {
+            yield 1;
+        }
+        var co = coroutine.create(gen);
+        co.resume();
+        co = nil;
+        var i = 0;
+        while (i < 50) { var s = str(i); i = i + 1; }
+    )");
+    ASSERT_EQ(result, InterpretResult::OK);
 
-        const ProfilerData& data = vm.profilerData();
-        EXPECT_NE(findFunction(data, "gen"), nullptr)
-            << "abandoned coroutine's function must survive its sweep";
-    }
-    if (prevStress)
-        ::setenv("LOXPP_STRESS_GC", prevStressValue.c_str(), 1);
-    else
-        ::unsetenv("LOXPP_STRESS_GC");
+    const ProfilerData& data = vm.profilerData();
+    EXPECT_NE(findFunction(data, "gen"), nullptr)
+        << "abandoned coroutine's function must survive its sweep";
+}
+
+// ---------------------------------------------------------------------------
+// 10. A coroutine suspended across a report must keep a usable profiler. The
+//     merge clears its tables but must not free or move the ProfilerData that
+//     its live scopes still point at, or the next resume reads freed memory
+//     (issue #538). Two interpret() calls are the REPL session shape.
+// ---------------------------------------------------------------------------
+TEST_F(ProfilerTest, ResumeAfterReportKeepsProfilerConsistent) {
+    VM vm;
+    ASSERT_EQ(vm.interpret(R"(
+        fun gen() {
+            yield 1;
+            yield 2;
+        }
+        var co = coroutine.create(gen);
+        co.resume();
+    )"),
+              InterpretResult::OK);
+    ASSERT_EQ(vm.interpret("co.resume();"), InterpretResult::OK);
+
+    const ProfilerData& data = vm.profilerData();
+    const FunctionStats* gen = findFunction(data, "gen");
+    ASSERT_NE(gen, nullptr)
+        << "a coroutine resumed after a report must still be profiled";
+    EXPECT_EQ(gen->callCount, 1u) << "one activation spans both resumes";
+    EXPECT_LE(gen->selfNs, gen->totalNs);
 }
 
 #else // LOXPP_PROFILE not defined
