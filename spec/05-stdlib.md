@@ -469,6 +469,16 @@ everything read as one String.
 **Arity:** 0  
 **Returns:** String
 
+### `s.read_bytes(n) -> String`
+
+Reads up to `n` bytes from the Socket. The call blocks until `n` bytes have
+arrived or the peer closes its write direction, then returns everything read as
+one String. At end of stream it returns the bytes that remain, or `""` when none
+do. `n` must be an integer in the range 0 to 2147483647.
+
+**Arity:** 1  
+**Returns:** String
+
 ### `s.readline() -> String | Nil`
 
 Reads bytes up to and including the next newline, and returns them without the
@@ -561,12 +571,12 @@ A child's standard output and standard error are two separate streams. Reading
 only one of them while the child writes a large amount to the other can block
 the child. Read both, or use `run`.
 
-### `p.read() -> String`, `p.readline() -> String | Nil`, `p.readlines() -> List[String]`
+### `p.read() -> String`, `p.read_bytes(n) -> String`, `p.readline() -> String | Nil`, `p.readlines() -> List[String]`
 
 Read the child's standard output. These behave exactly like the Socket methods
 of the same name.
 
-### `p.read_err() -> String`, `p.err_readline() -> String | Nil`, `p.err_readlines() -> List[String]`
+### `p.read_err() -> String`, `p.err_read_bytes(n) -> String`, `p.err_readline() -> String | Nil`, `p.err_readlines() -> List[String]`
 
 Read the child's standard error. These behave exactly like the Socket methods
 of the same name.

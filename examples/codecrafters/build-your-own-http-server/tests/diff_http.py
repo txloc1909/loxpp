@@ -103,6 +103,21 @@ def main():
             "%s len=%d want=%d" % (resp.status, len(body), len(want)),
         )
 
+        # POST /files writes a Content-Length body; http.client frames it.
+        post_data = bytes(rng.randrange(256) for _ in range(1024))
+        conn.request("POST", "/files/posted", body=post_data)
+        resp = conn.getresponse()
+        resp.read()
+        posted_status = resp.status
+        conn.request("GET", "/files/posted")
+        resp = conn.getresponse()
+        body = resp.read()
+        check(
+            "POST /files vs http.client",
+            posted_status == 201 and body == post_data,
+            "%s len=%d want=%d" % (posted_status, len(body), len(post_data)),
+        )
+
         # gzip: every body must decode with Python, and the trailer must carry
         # the true CRC32 and ISIZE of the uncompressed text.
         gzip_ok = True

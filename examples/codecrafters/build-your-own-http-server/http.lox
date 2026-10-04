@@ -11,7 +11,7 @@
 // Everything here is Lox++: the HTTP parser, the router, and the gzip encoder.
 // Lox++ has no bitwise operators, so the DEFLATE bit stream and CRC32 are
 // built with arithmetic (`/`, `%`, math.floor) over the 32-bit range. See the
-// README for the two stages this cannot reach and why.
+// README for the one stage this cannot reach and why.
 
 // ===========================================================================
 // Small string helpers (the stdlib has no split/trim/lower built in).
@@ -300,12 +300,12 @@ fun acceptsGzip(headers) {
     return false;
 }
 
-fun hasBody(headers) {
+fun contentLength(headers) {
     var cl = header(headers, "content-length");
     if (cl == nil) {
-        return false;
+        return 0;
     }
-    return parseInt(trimSpaces(cl)) > 0;
+    return parseInt(trimSpaces(cl));
 }
 
 // ===========================================================================
@@ -318,6 +318,14 @@ fun ok200() {
 
 fun notFound() {
     return "HTTP/1.1 404 Not Found\r\n\r\n";
+}
+
+fun created201() {
+    return "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n";
+}
+
+fun contentTooLarge() {
+    return "HTTP/1.1 413 Content Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 }
 
 fun text200(body) {
@@ -336,7 +344,7 @@ fun file200(body) {
         + str(len(body)) + "\r\n\r\n" + body;
 }
 
-fun route(method, target, headers, directory) {
+fun route(method, target, headers, reqBody, directory) {
     if (startsWith(target, "/echo/")) {
         var body = target[6:len(target)];
         if (acceptsGzip(headers)) {
@@ -353,11 +361,17 @@ fun route(method, target, headers, directory) {
     }
     if (startsWith(target, "/files/")) {
         var path = joinPath(directory, target[7:len(target)]);
+        if (method == "POST") {
+            var f = open(path, "w");
+            f.write(reqBody);
+            f.close();
+            return created201();
+        }
         if (exists(path) and is_file(path)) {
             var f = open(path, "r");
-            var body = f.read();
+            var stored = f.read();
             f.close();
-            return file200(body);
+            return file200(stored);
         }
         return notFound();
     }
@@ -409,12 +423,21 @@ fun handleConnection(sock, directory) {
         var target = req[1];
         var version = req[2];
         var headers = readHeaders(sock);
-        var resp = route(method, target, headers, directory);
-        // A request body cannot be read without a bounded socket read, so any
-        // request that carries one forces the connection closed: the unread
-        // bytes would otherwise be parsed as the next request. This is the
-        // one base stage (POST /files) pure Lox cannot serve.
-        if (shouldClose(version, headers) or hasBody(headers)) {
+        // A Content-Length body is framed by length, not by a newline, so it
+        // needs the bounded read. read_bytes(n) blocks until n bytes arrive or
+        // the peer closes. read_bytes accepts at most 2147483647, so a larger
+        // count from the client is rejected instead of stopping the server.
+        var n = contentLength(headers);
+        if (n > 2147483647) {
+            sock.write(contentTooLarge());
+            return;
+        }
+        var body = "";
+        if (n > 0) {
+            body = sock.read_bytes(n);
+        }
+        var resp = route(method, target, headers, body, directory);
+        if (shouldClose(version, headers)) {
             sock.write(withClose(resp));
             return;
         }

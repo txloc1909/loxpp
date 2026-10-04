@@ -52,6 +52,49 @@ public final class LoxSocket {
         }
     }
 
+    /**
+     * Up to {@code n} bytes. Blocks until {@code n} bytes have arrived or the
+     * peer closes, then returns what was read; "" at EOF, matching native's
+     * readStreamBytes.
+     */
+    public Object readBytes(int n) {
+        checkOpen("read_bytes");
+        return readBytesFrom(in, n, "read_bytes");
+    }
+
+    /**
+     * Up to {@code n} bytes from any stream. Blocks until {@code n} bytes have
+     * arrived or the stream reaches EOF, then returns what was read; "" at EOF.
+     * Shared with LoxProcess so the socket and process paths cannot drift.
+     */
+    static Object readBytesFrom(InputStream in, int n, String method) {
+        try {
+            ByteArrayOutputStream buf = new ByteArrayOutputStream();
+            byte[] chunk = new byte[4096];
+            while (buf.size() < n) {
+                int want = Math.min(chunk.length, n - buf.size());
+                int got = in.read(chunk, 0, want);
+                if (got == -1) {
+                    break;
+                }
+                buf.write(chunk, 0, got);
+            }
+            return new String(buf.toByteArray(), LoxRuntime.CHARSET);
+        } catch (IOException e) {
+            throw new LoxError(method + "(): " + e.getMessage());
+        }
+    }
+
+    /**
+     * The INVOKE and bound-native entry point. The stream state is checked
+     * before the byte count, matching native's checkSocketRead-then-asByteCount
+     * order, so a bad count on a closed socket reports the closed socket.
+     */
+    public Object readBytesArg(Object arg) {
+        checkOpen("read_bytes");
+        return readBytes(checkByteCountArg(arg, "read_bytes"));
+    }
+
     /** One line, newline stripped; null at EOF. A partial trailing line still counts. */
     public Object readline() {
         checkOpen("readline");
@@ -165,6 +208,8 @@ public final class LoxSocket {
         switch (name) {
         case "read":
             return new LoxNative("read", 0, a -> read());
+        case "read_bytes":
+            return new LoxNative("read_bytes", 1, a -> readBytesArg(a[0]));
         case "readline":
             return new LoxNative("readline", 0, a -> readline());
         case "readlines":
@@ -199,5 +244,23 @@ public final class LoxSocket {
             throw new LoxError("'" + method + "' argument must be a string.");
         }
         return (String)v;
+    }
+
+    /**
+     * A non-negative integer byte count, mirroring native net_api.cpp's
+     * asByteCount. Java has no separate integer type, so an integral Double in
+     * the int range is the accepted shape.
+     */
+    static int checkByteCountArg(Object v, String method) {
+        if (!(v instanceof Double)) {
+            throw new LoxError(method + "() byte count must be a number.");
+        }
+        double raw = (Double)v;
+        if (Double.isNaN(raw) || Double.isInfinite(raw) ||
+            raw != Math.floor(raw) || raw < 0 || raw > Integer.MAX_VALUE) {
+            throw new LoxError(method +
+                "() byte count must be an integer in range 0 to 2147483647.");
+        }
+        return (int)raw;
     }
 }

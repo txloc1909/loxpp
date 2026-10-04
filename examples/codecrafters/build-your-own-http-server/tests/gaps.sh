@@ -1,16 +1,14 @@
 #!/bin/bash
-# gaps.sh — evidence for the two Codecrafters HTTP stages pure Lox++ cannot
+# gaps.sh — evidence for the one Codecrafters HTTP stage pure Lox++ cannot
 # reach. This is deliberately NOT run in CI: it demonstrates a missing
 # capability, not a passing behaviour.
 #
-#   1. base-08 POST /files — a Content-Length body needs a bounded socket
-#      read. read() waits for EOF and readline() waits for '\n'; neither
-#      terminates on a length-delimited body, so the request body is
-#      unreachable from inside the language.
+#   persistent-02 — two simultaneous keep-alive connections need a
+#   concurrency primitive. One accept()/readline() blocks the whole VM, so
+#   while connection A is open, connection B is never accepted.
 #
-#   2. persistent-02 — two simultaneous keep-alive connections need a
-#      concurrency primitive. One accept()/readline() blocks the whole VM, so
-#      while connection A is open, connection B is never accepted.
+# base-08 (POST /files) was the second gap. read_bytes(n) closed it, and
+# run_stages.py now covers it as a passing stage.
 #
 # Usage: tests/gaps.sh [your_http.sh]
 set -u
@@ -34,23 +32,7 @@ if not up:
 
 rc = 0
 try:
-    # --- gap 1: POST body -------------------------------------------------
-    s = socket.create_connection(("127.0.0.1", port), timeout=5)
-    s.settimeout(5)
-    s.sendall(
-        b"POST /files/newfile HTTP/1.1\r\n"
-        b"Content-Type: application/octet-stream\r\n"
-        b"Content-Length: 5\r\n\r\n12345"
-    )
-    status, _, _ = parse_response(s)
-    s.close()
-    created = os.path.exists(os.path.join(directory, "newfile"))
-    print("gap 1 (base-08 POST body): response %r, file created: %s" % (status, created))
-    if status.startswith("HTTP/1.1 201") or created:
-        print("  UNEXPECTED: server served the POST body")
-        rc = 1
-
-    # --- gap 2: concurrent persistent connections -------------------------
+    # --- gap: concurrent persistent connections ---------------------------
     a = socket.create_connection(("127.0.0.1", port), timeout=5)
     a.settimeout(5)
     a.sendall(b"GET /echo/a HTTP/1.1\r\n\r\n")
@@ -61,11 +43,11 @@ try:
     t0 = time.time()
     try:
         b.recv(4096)
-        print("gap 2 (persistent-02): connection B was served")
+        print("persistent-02: connection B was served")
         rc = 1
     except socket.timeout:
         print(
-            "gap 2 (persistent-02): connection B got no response after %.0fs "
+            "persistent-02: connection B got no response after %.0fs "
             "while A stayed open" % (time.time() - t0)
         )
     a.close()
@@ -77,6 +59,6 @@ finally:
     except Exception:
         proc.kill()
 
-print("\ngaps reproduced" if rc == 0 else "\ngap assumptions did not hold")
+print("\ngap reproduced" if rc == 0 else "\ngap assumptions did not hold")
 sys.exit(rc)
 PY

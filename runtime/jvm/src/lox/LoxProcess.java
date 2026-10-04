@@ -143,6 +143,12 @@ public final class LoxProcess {
         }
     }
 
+    public Object readBytesArg(Object arg) {
+        return LoxSocket.readBytesFrom(
+            stdout, LoxSocket.checkByteCountArg(arg, "read_bytes"),
+            "read_bytes");
+    }
+
     public Object readline() {
         return readLine(stdout);
     }
@@ -157,6 +163,12 @@ public final class LoxProcess {
         } catch (IOException e) {
             throw new LoxError("read_err(): " + e.getMessage());
         }
+    }
+
+    public Object errReadBytesArg(Object arg) {
+        return LoxSocket.readBytesFrom(
+            stderr, LoxSocket.checkByteCountArg(arg, "err_read_bytes"),
+            "err_read_bytes");
     }
 
     public Object errReadline() {
@@ -244,12 +256,17 @@ public final class LoxProcess {
         switch (name) {
         case "read":
             return new LoxNative("read", 0, a -> read());
+        case "read_bytes":
+            return new LoxNative("read_bytes", 1, a -> readBytesArg(a[0]));
         case "readline":
             return new LoxNative("readline", 0, a -> readline());
         case "readlines":
             return new LoxNative("readlines", 0, a -> readlines());
         case "read_err":
             return new LoxNative("read_err", 0, a -> readErr());
+        case "err_read_bytes":
+            return new LoxNative("err_read_bytes", 1,
+                                 a -> errReadBytesArg(a[0]));
         case "err_readline":
             return new LoxNative("err_readline", 0, a -> errReadline());
         case "err_readlines":
