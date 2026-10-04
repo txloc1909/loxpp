@@ -1,0 +1,30 @@
+// __iter__ may return a coroutine. The loop then resumes it once per
+// iteration, so a user type gets a lazy iterator with no extra protocol.
+// Mission #523 node #527.
+class Range {
+    init(start, count) {
+        this.start = start;
+        this.count = count;
+    }
+
+    __iter__() {
+        var self = this;
+        fun gen() {
+            var i = 0;
+            while (i < self.count) {
+                yield self.start + i;
+                i = i + 1;
+            }
+        }
+        return coroutine.create(gen);
+    }
+}
+
+for (var x in Range(3, 4)) {
+    print x;
+}
+
+// CHECK: 3
+// CHECK: 4
+// CHECK: 5
+// CHECK: 6

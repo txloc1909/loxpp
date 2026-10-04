@@ -2,4 +2,6 @@
 # line is `<probe>.lox  <reason>`. check_coroutine_probes.sh excludes these
 # from the passing run and separately asserts each still fails; when one
 # starts passing, the gate fails and the fixing node deletes its line here.
-04_for_in_generator.lox  for-in over a Coroutine is node #527
+#
+# Empty since #527 (for-in over a Coroutine): every probe in this corpus now
+# passes on the native VM.
