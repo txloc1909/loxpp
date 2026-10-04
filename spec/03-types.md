@@ -8,7 +8,7 @@ types over its lifetime.
 
 ## Runtime Types
 
-There are eleven runtime types:
+There are twelve runtime types:
 
 ### Nil
 
@@ -250,6 +250,38 @@ Because `throw` accepts any value, an `Error` is not the only thing a
 delivers for a runtime fault. A `throw` written by a program can throw a
 String, a Number, an Instance of a user-defined class, or any other value.
 
+### Coroutine
+
+A value produced by `coroutine.create(fn)` (see §05-stdlib). A coroutine is
+a suspendable computation: its function runs until it yields or returns, and
+it can be paused and resumed by its resumer. A coroutine is always in one of
+four states, reported by its `status()` method:
+
+| State | Meaning |
+|---|---|
+| `"suspended"` | The coroutine has not started, or has yielded, and can be resumed. |
+| `"running"` | The coroutine is the one currently executing. |
+| `"normal"` | The coroutine resumed another coroutine and is waiting for that coroutine to yield or return. |
+| `"dead"` | The coroutine's function returned, or a throw from it propagated out to the resumer. |
+
+Coroutines use **identity equality**: two coroutine values are equal only if
+they are the exact same object.
+
+A coroutine is always **truthy**.
+
+A coroutine is **not** a sequence type: it does not support `len()`, `[]`,
+`in`, or slicing. A coroutine is not directly iterable either — but a
+`for-in` loop over a coroutine resumes it one element at a time (see
+[§04-semantics, `for`-in Statement](04-semantics.md#for-in-statement)), and
+a user type's `__iter__` may return a coroutine to the same effect.
+
+The canonical string form of a coroutine is `<coroutine>`.
+
+A coroutine is created with `coroutine.create(fn)`, where `fn` is a
+callable value. The call does not run `fn`; `resume` starts or continues the
+coroutine, and `status` reports its state. See §05-stdlib and
+[§04-semantics, Coroutines](04-semantics.md#coroutines) for the full rules.
+
 ---
 
 ## Sequence Protocol
@@ -258,6 +290,11 @@ String, a Number, an Instance of a user-defined class, or any other value.
 `len()`, `[]` access, membership testing with `in`, and `for-in` iteration.
 List and String use integer indexing; Map uses key-based access. String is
 immutable — index assignment (`s[i] = v`) is always a runtime error.
+
+A **Coroutine** is iterable by `for-in` (the loop resumes it one element at a
+time) even though it is not otherwise a sequence — it supports neither
+`len()`, `[]`, nor `in`. See [§04-semantics, `for`-in
+Statement](04-semantics.md#for-in-statement).
 
 Slice syntax (`seq[start:end]`) is supported on **List** and **String**; it produces a new value of the same type. Both bounds must be provided. Slicing is not supported on Map — a runtime error is raised. Slice expressions are read-only; they cannot appear as an assignment target.
 
@@ -293,7 +330,7 @@ The `==` and `!=` operators compare two values.
   - Functions are equal only when they are the same function object (identity
     equality)
   - Classes, Instances, BoundMethods, Bound built-in methods, Lists, Maps, Files,
-    Sockets, Servers, Processes, and Errors use identity
+    Sockets, Servers, Processes, Errors, and Coroutines use identity
     equality: two values are equal only if they are the exact same object
 
 Equality never produces a runtime error regardless of the types being compared,
@@ -341,6 +378,7 @@ Every value has a canonical string form, produced by `print` and by the
 | Server | `<server>` |
 | Process | `<process>` |
 | Error | `kind: message` — the value of the `kind` field, then `": "`, then the value of the `message` field. Note that an *uncaught* `throw` of an Error reports only `message`, not this form — see [§04-semantics, `throw` Statement](04-semantics.md#throw-statement). |
+| Coroutine | `<coroutine>` |
 
 The nesting depth of a value that a canonical string form can hold is
 implementation-defined. A value more deeply nested than that limit causes a
