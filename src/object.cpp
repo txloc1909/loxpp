@@ -82,6 +82,8 @@ std::string stringifyObj(Obj* obj) {
         return "<server>";
     case ObjType::PROCESS:
         return "<process>";
+    case ObjType::COROUTINE:
+        return "<coroutine>";
     case ObjType::ITERATOR:
         return "<iterator>";
     case ObjType::LIST: {

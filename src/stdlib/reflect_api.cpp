@@ -43,6 +43,8 @@ static const char* typeNameOf(Obj* obj) {
         return "Server";
     case ObjType::PROCESS:
         return "Process";
+    case ObjType::COROUTINE:
+        return "Coroutine";
     case ObjType::ITERATOR:
         return "Iterator";
     case ObjType::LIST:

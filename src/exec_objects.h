@@ -47,6 +47,10 @@ struct ObjUpvalue : public Obj {
         location; // points into stack while open; points to &closed when closed
     Value closed{Nil{}};
     ObjUpvalue* next{nullptr}; // intrusive linked list of open upvalues in VM
+    // While this upvalue's cell lives inside a suspended coroutine's stack
+    // snapshot, points at that coroutine so marking the upvalue (through an
+    // escaping closure) also keeps the snapshot alive. Null otherwise.
+    Obj* owner{nullptr};
 
     explicit ObjUpvalue(Value* slot) : Obj(ObjType::UPVALUE), location(slot) {}
 };

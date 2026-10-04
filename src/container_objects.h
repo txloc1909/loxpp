@@ -6,8 +6,16 @@
 #include "value.h"
 #include "vm_allocator.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <memory>
+#include <optional>
+#include <vector>
+
+#ifdef LOXPP_PROFILE
+#include "profiler.h"
+#endif
 
 struct ObjList : public Obj {
     VmVector<Value> elements;
@@ -284,4 +292,87 @@ inline ObjDeferredCall* asObjDeferredCall(Obj* o) {
 }
 inline bool isDeferredCall(const Value& v) {
     return isValueOfType<ObjType::DEFERRED_CALL>(v);
+}
+
+// ---------------------------------------------------------------------------
+// ObjCoroutine — a suspendable computation (spec/03-types.md, §Coroutine).
+// ---------------------------------------------------------------------------
+// A coroutine owns a frozen interpreter snapshot (copy-on-suspend): the
+// operand-stack slice, call frames, handler records, defer entries, open
+// upvalues, and result-check slots whose frames lie inside that slice. While
+// the coroutine runs, its state is live on the shared VM stack; a `yield`
+// copies it into these vectors and truncates the shared stack back, and a
+// `resume` copies it back out and rebases every pointer. A running coroutine
+// has an empty snapshot; a suspended one has its whole state here.
+//
+// Every pointer that would point into the shared VM stack is stored as an
+// offset from the coroutine's stack base, so a snapshot is pointer-independent
+// until resume rebases it.
+enum class CoroutineState : std::uint8_t {
+    SUSPENDED, // not started, or yielded; resumable
+    RUNNING,   // currently executing
+    NORMAL,    // resumed another coroutine and awaits its yield/return
+    DEAD,      // the function returned, or a throw left the coroutine
+};
+
+struct CoroutineFrameSnapshot {
+    ObjClosure* closure;
+    int ipOffset;   // offset into closure->function->chunk
+    int slotOffset; // offset into the coroutine's stack slice
+};
+
+struct CoroutineHandlerSnapshot {
+    int frameOffset; // frame index relative to the coroutine's base frame
+    int stackOffset; // operand-stack index relative to the stack base
+    Chunk::const_iterator catchIp;
+};
+
+struct ObjCoroutine : public Obj {
+    ObjClass* klass; // shared Coroutine class; GC-tracked
+    Value callee;    // Function or BoundMethod to run
+    CoroutineState state{CoroutineState::SUSPENDED};
+    bool started{false};
+
+    // Snapshot; meaningful only while suspended and started.
+    std::vector<Value> stack;
+    std::vector<CoroutineFrameSnapshot> frames;
+    std::vector<CoroutineHandlerSnapshot> handlers;
+    // One defer list per frame in the snapshot, in frame order.
+    std::vector<std::vector<Value>> defers;
+    std::vector<ObjUpvalue*> openUpvalues; // location offset given by the
+                                           // parallel vector below
+    std::vector<int> openUpvalueOffsets;
+    std::vector<std::uint8_t> resultChecks;
+    std::vector<std::uint8_t> resultOverrideSet;
+    std::vector<Value> resultOverrides;
+
+    // Set on resume, used by suspend to find this coroutine's slice.
+    int activeFrameBase{0};
+    Value* activeStackBase{nullptr};
+    // The operand-stack top to restore on suspend: the end of the resume
+    // native's own callee/args window sit below it. callNative consumes that
+    // window after the native returns, so the slice is truncated here, not to
+    // activeStackBase (which is the slice's own base).
+    Value* activeWindowTop{nullptr};
+
+    ObjCoroutine(ObjClass* k, Value fn)
+        : Obj(ObjType::COROUTINE), klass(k), callee(fn) {}
+
+#ifdef LOXPP_PROFILE
+    // Per-coroutine profiler state. The root coroutine uses Runtime's inline
+    // ProfilerData instead; a coroutine allocates its own on first resume.
+    std::unique_ptr<ProfilerData> profiler;
+    std::vector<std::optional<ProfileFunctionScope>> profilerScopes;
+#endif
+};
+
+inline bool isObjCoroutine(Obj* o) { return isObjType(o, ObjType::COROUTINE); }
+inline ObjCoroutine* asObjCoroutine(Obj* o) {
+    return static_cast<ObjCoroutine*>(o);
+}
+inline ObjCoroutine* asObjCoroutine(const Value& v) {
+    return static_cast<ObjCoroutine*>(as<Obj*>(v));
+}
+inline bool isCoroutine(const Value& v) {
+    return isValueOfType<ObjType::COROUTINE>(v);
 }
