@@ -763,6 +763,23 @@ class Emitter {
         m_body << doneLabel << "\n";
     }
 
+    // YIELD's own lowering in coroutine mode. The abstract stack gives YIELD
+    // {pop 1, push 1}, so the yielded value is at beforeHeight - 1:
+    // callSlowPathTyped sets the top to beforeHeight, then rt_yield runs the
+    // legality checks. On OK the frame returns kRtYield and the driver pops
+    // the value and suspends; any other status is a caught/propagated/fatal
+    // fault, handled exactly like every other fallible op.
+    void emitYield(const DecodedInstruction& ins, int beforeHeight) {
+        if (!m_options.coroutineMode) {
+            throw std::runtime_error(
+                "qbe_emitter: YIELD reached a non-coroutine emit — "
+                "front end/coroutine-mode drift");
+        }
+        callSlowPathTyped("rt_yield", beforeHeight, {"w " + m_stopTemp},
+                          ins.offset, Catchability::Local);
+        m_body << "\tret " << kRtYield << "\n";
+    }
+
     void emitInstruction(const DecodedInstruction& ins) {
         const auto& [before, after] = stateOf(ins.offset);
         // Coroutine mode: record this op's resume point before the op runs.
@@ -1226,21 +1243,9 @@ class Emitter {
                               {"w " + m_stopTemp}, ins.offset,
                               Catchability::Propagate);
             break;
-        case Op::YIELD: {
-            if (!m_options.coroutineMode) {
-                throw std::runtime_error(
-                    "qbe_emitter: YIELD reached a non-coroutine emit — "
-                    "front end/coroutine-mode drift");
-            }
-            // Leave the yielded value on top of this frame's window (the
-            // abstract stack gives YIELD {pop 1, push 1}, so the operand is
-            // at before.height - 1). rt_yield runs the same legality checks
-            // as vm.cpp; on OK the driver pops the value and suspends.
-            callSlowPathTyped("rt_yield", before.height, {"w " + m_stopTemp},
-                              ins.offset, Catchability::Local);
-            m_body << "\tret " << kRtYield << "\n";
+        case Op::YIELD:
+            emitYield(ins, before.height);
             break;
-        }
         default:
             unsupported(ins.op);
         }

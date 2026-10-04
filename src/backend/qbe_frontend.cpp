@@ -8,6 +8,7 @@
 #include "exec_objects.h"
 #include "memory_manager.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -49,17 +50,15 @@ std::string qbeSymbolFor(const std::string& id) {
 // and calls are dynamic (a caller's frame must suspend too) — see
 // notes/coroutines.md and issue #530/#535.
 bool treeContainsYield(const DecodedFunction& node) {
-    for (const DecodedInstruction& ins : node.instructions) {
-        if (ins.op == Op::YIELD) {
-            return true;
-        }
+    if (std::ranges::any_of(node.instructions,
+                            [](const DecodedInstruction& ins) {
+                                return ins.op == Op::YIELD;
+                            })) {
+        return true;
     }
-    for (const DecodedFunction& child : node.nested) {
-        if (treeContainsYield(child)) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(node.nested, [](const DecodedFunction& child) {
+        return treeContainsYield(child);
+    });
 }
 
 void emitTree(const DecodedFunction& node,
