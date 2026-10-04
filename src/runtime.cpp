@@ -149,6 +149,14 @@ Runtime::ThrowOutcome Runtime::call(ObjClosure* closure, int argCount,
         int depth = m_frameCount - 1;
         ObjClosure* parent =
             (depth > 0) ? m_frames[depth - 1].closure : nullptr;
+        // A coroutine's entry frame sits above the resumer's frame, whose
+        // scope books time into a different profiler. Treating that frame as
+        // the parent would subtract the coroutine's time from the resumer's
+        // self time in the wrong table; a coroutine's own profile starts here.
+        if (parent != nullptr && m_profilerScopes[depth - 1].has_value() &&
+            m_profilerScopes[depth - 1]->data() != m_activeProfiler) {
+            parent = nullptr;
+        }
         m_profilerScopes[depth].emplace(*m_activeProfiler, closure, depth,
                                         parent);
     }

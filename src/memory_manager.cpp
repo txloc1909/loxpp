@@ -383,12 +383,37 @@ void MemoryManager::sweep() {
                     objTypeName((*it)->type));
 #endif
             bytesAllocated -= objAllocatedSize(*it);
+#ifdef LOXPP_PROFILE
+            // An abandoned coroutine is only reachable through its snapshot;
+            // sweep is the last chance to fold its profile into the report.
+            if (m_profilerData && (*it)->type == ObjType::COROUTINE) {
+                auto* co = static_cast<ObjCoroutine*>(*it);
+                if (co->profiler)
+                    m_profilerData->mergeFrom(*co->profiler);
+            }
+#endif
             delete *it;
             it = allObjects.erase(it);
         }
     }
     m_nextGC = bytesAllocated * GC_HEAP_GROW_FACTOR;
 }
+
+#ifdef LOXPP_PROFILE
+void MemoryManager::mergeCoroutineProfilers() {
+    if (!m_profilerData)
+        return;
+    for (Obj* obj : allObjects) {
+        if (obj->type != ObjType::COROUTINE)
+            continue;
+        auto* co = static_cast<ObjCoroutine*>(obj);
+        if (!co->profiler)
+            continue;
+        m_profilerData->mergeFrom(*co->profiler);
+        co->profiler->clearStats();
+    }
+}
+#endif
 
 void MemoryManager::collectGarbage() {
 #ifdef LOXPP_PROFILE
