@@ -79,6 +79,7 @@ each has an off-the-shelf solution.
 | `33_class_pattern_match_error` | a `match` whose arms are all class patterns raises a real, reachable `MATCH_ERROR` when no arm matches, through the same fused opcode as the enum case | P8 |
 | `34_match_consumed_result` | a `match` expression's result, once its own closing `POP` retires the synthetic subject local, is exposed as a named local's own value — `PRINT` and `DEFINE_GLOBAL` each need their own fold-aware read, the same way `RETURN` and `SET_GLOBAL` already do | P1, P2 |
 | `37_invoke_field_bound_native_method` | a bound built-in method stored in an instance field and invoked through the field name drives `INVOKE`'s field-shadow arm, not `GET_PROPERTY` followed by `CALL` (spec/04-semantics.md) | P5, P6 |
+| `38_bound_native_method_identity` | a Map or File method read through `GET_PROPERTY` (`m.has`) is a fresh per-read bound value — no two reads are the same object, the rule `spec/03-types.md` gives a user-class bound method | P5, P6 |
 | `40_reflection` | the reflection introspection natives (`type`, `fields`, `methods`, `getField`, `setField`, `hasField`, `callMethod`) must run byte-identically on every backend — native, JVM, and QBE alike (`src/stdlib/reflect_api.cpp`, `LoxRuntime.registerReflection`); fields/methods use single-element classes so their unspecified iteration order cannot cause a false divergence | none (parity gate) |
 | `41_reflect_getfield_non_instance` | `getField()` on a non-Instance receiver is a runtime error on every backend — an `error_probes` entry in `tools/check_jvm_probes.sh` | none (error-parity gate) |
 | `42_reflect_setfield_non_instance` | `setField()` on a non-Instance receiver is a runtime error on every backend — an `error_probes` entry | none (error-parity gate) |
@@ -99,6 +100,49 @@ each has an off-the-shelf solution.
 | `V4_mutate_through_upvalue` | `set` writes a shared cell, `get` reads it back → prints `7 9` | P4 |
 | `V5_self_recursive_closure` | a local `fun` captures its own slot (direct recursion) → prints `120` | P4 |
 | `V6_self_recursive_closure_in_loop` | self-recursive local `fun`, fresh cell per loop trip → prints `12` | P4 |
+| `48_try_catch_instance_undefined_property_fatal` | an undefined property read on an ordinary Instance is fatal, not caught, even with a live `try` (issue #253) | none (error-parity gate) |
+| `49_try_catch_map_undefined_property_fatal` | an undefined property read on a Map is fatal even with a live `try` (issue #253) | none (error-parity gate) |
+| `50_try_catch_non_instance_get_property_fatal` | `GET_PROPERTY` on a non-Instance receiver is fatal even with a live `try` (issue #253) | none (error-parity gate) |
+| `51_try_catch_non_instance_set_property_fatal` | `SET_PROPERTY` on a non-Instance receiver is fatal even with a live `try` (issue #253) | none (error-parity gate) |
+| `56_file_nul` | `File.read`/`readline`/`readlines` return the full binary content when it holds NUL bytes (issue #401) | none (parity gate) |
+| `56_file_read` | `File.read()` with arity 0 exists on every consumer, the bootstrap included (issue #378) | none (parity gate) |
+| `56_math_constants` | `math.inf` and `math.nan` are Numbers with the native values, not a native-fn value (issue #329) | none (parity gate) |
+| `57_defer_arity_fatal_fast_path` | the wrong-argument-count fatal fast path skips every pending `defer` when no `try` is live — empty stdout, no `defer-g` (issue #319) | none (error-parity gate) |
+| `58_defer_overflow_fatal_fast_path` | the call-stack-overflow fatal fast path skips every pending `defer` when no `try` is live — empty stdout (issue #319) | none (error-parity gate) |
+| `59_return_out_of_try_leak` | a `return` out of a still-open `try` must not leak the JVM handler-liveness counter, or a later unrelated arity fault looks catchable (issue #319) | none (error-parity gate) |
+| `60_throw_ends_try_binding` | a `throw` unwinds past try-body locals without `endScope`, so the unwinding side ends their bindings itself (issue #386) | P1, P4 |
+| `63_ord_chr_string_order` | `ord()`/`chr()` byte conversion and String byte ordering on every backend (issue #507) | none (parity gate) |
+| `defer_runs_before_caught_throw_propagates` | a deferred call runs when its own function exits by `throw`, before the fault propagates to the caller's `catch` (`spec/04-semantics.md`) | none (parity gate) |
+| `defer_runs_on_normal_return` | a deferred call runs at the right point on an ordinary `return`, and its return value does not change the already-computed result | none (parity gate) |
+| `jvm-only/fault_defer_class_construction_fatal` | a `defer`red class construction is fatal, not delivered to any `catchBlock` | none (error-parity gate) |
+| `jvm-only/fault_defer_noncallable_value_fatal` | a `defer`red non-callable value is fatal, not delivered to any `catchBlock` | none (error-parity gate) |
+| `jvm-only/fault_enum_index_range_fatal` | an enum payload read out of range is fatal, through `RAISE_ERROR`, not a catchable Error | none (error-parity gate) |
+| `jvm-only/fault_enum_index_type_fatal` | an enum payload read with a non-Number index is fatal | none (error-parity gate) |
+| `jvm-only/fault_invoke_field_not_callable_fatal` | `INVOKE` on a non-callable field is fatal | none (error-parity gate) |
+| `jvm-only/fault_invoke_method_not_found_fatal` | `INVOKE` of a missing method is fatal | none (error-parity gate) |
+| `jvm-only/fault_reflect_callmethod_on_error_fatal` | `callMethod` on a caught Error (a `LoxInstance` under the hood) is fatal | none (error-parity gate) |
+| `jvm-only/fault_reflect_fields_on_error_fatal` | `fields` on a caught Error is fatal | none (error-parity gate) |
+| `jvm-only/fault_reflect_getfield_on_error_fatal` | `getField` on a caught Error is fatal | none (error-parity gate) |
+| `jvm-only/fault_reflect_hasfield_on_error_fatal` | `hasField` on a caught Error is fatal | none (error-parity gate) |
+| `jvm-only/fault_reflect_setfield_on_error_fatal` | `setField` on a caught Error is fatal | none (error-parity gate) |
+| `jvm-only/fault_set_index_string_fatal` | `SET_INDEX` on a String is fatal | none (error-parity gate) |
+| `jvm-only/fault_set_property_on_error_fatal` | `SET_PROPERTY` on a caught Error is fatal | none (error-parity gate) |
+| `jvm-only/fault_slice_non_sliceable_fatal` | a slice on an Instance with no `__slice__` is fatal, a raw `LoxError`, not a catchable Error | none (error-parity gate) |
+| `jvm-only/fault_stringify_too_deep_in_try` | the stringify depth guard is fatal even inside a live `try` (the Fatal Runtime Errors section) | none (error-parity gate) |
+| `jvm-only/fault_stringify_too_deep_print` | a self-referential list printed 300 deep trips the stringify depth guard at `print` | none (error-parity gate) |
+| `jvm-only/try_catch_enum_ctor_arity_message` | an enum constructor called with the wrong arity is catchable; `kind` and `message` match native | none (parity gate) |
+| `jvm-only/try_catch_error_property_read_still_works` | a caught Error's `kind` and `message` fields stay readable through `GET_PROPERTY` | none (parity gate) |
+| `jvm-only/try_catch_invoke_on_error_invalid_receiver` | `INVOKE` on a caught Error with an invalid receiver is itself catchable, with the matching `kind`/`message` | none (parity gate) |
+| `jvm-only/try_catch_set_index_not_indexable` | `SET_INDEX` on a non-indexable value is catchable, with the matching `kind`/`message` | none (parity gate) |
+| `jvm-only/try_catch_undefined_variable_set_message` | assigning to an undefined variable is catchable, with the matching `kind`/`message` | none (parity gate) |
+| `qbe-only/deep_recursion` | every compiled Lox call is a real C call (`rt_call` → `Runtime::call` → the callee's own `call`), so QBE's C-stack depth must match native's frame-count ceiling for plain recursion | P5, P6 |
+| `qbe-only/deep_recursion_wide` | the per-function `STACK_MAX` check (`emitStackCheck`), not the pre-existing `FRAMES_MAX` guard: a wide frame overflows the value stack before the call chain is deep | P5, P6 |
+| `qbe-only/fib` | naive recursive Fibonacci: the `CALL`/`RETURN` round-trip with no closures | P5 |
+| `qbe-only/s8_promotion_across_call` | a promoted local reassigned a fresh list each iteration must spill to its slot before an allocating call, or `LOXPP_STRESS_GC=1` frees it (issue #461) | none (QBE-only gate) |
+| `qbe-only/s8_promotion_captured` | a local a nested closure captures stays in its stack slot, never promoted, and the closure observes later writes across a GC | none (QBE-only gate) |
+| `qbe-only/s8_promotion_loop` | a non-captured loop counter and accumulator carried across the back-edge by a phi give the same result under `LOXPP_STRESS_GC=1` | none (QBE-only gate) |
+| `qbe-only/V1_fresh_cell_no_lists` | the `V1_fresh_cell` hazard with no list opcodes (S4): a captured loop-body local needs a fresh cell per iteration, checked through globals instead of a list slot | P4 |
+| `qbe-only/V3_loopvar_no_lists` | the `V3_loopvar` hazard with no list opcodes (S4): a closure capturing the loop variable itself shares one open upvalue across every iteration | P4 |
 
 `jvm-only/61_operator_overload` and `jvm-only/defer_replaces_overflow` sit one
 level down because this directory's own files are walked non-recursively by

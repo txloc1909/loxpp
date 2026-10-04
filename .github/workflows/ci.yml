@@ -38,6 +38,12 @@ jobs:
       - name: Check install.sh syntax
         run: sh -n install.sh
 
+      # test/translation-probes/README.md is the index of the probe directory.
+      # This fails when a probe file has no row, so a new probe cannot land
+      # undocumented. Pure shell, so it needs no build.
+      - name: Check translation-probe index
+        run: tools/check_probe_index.sh
+
   tree-sitter:
     name: tree-sitter grammar
     runs-on: ubuntu-latest
