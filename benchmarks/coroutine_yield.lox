@@ -1,0 +1,31 @@
+// Per-yield overhead microbenchmark for the native coroutine primitive.
+//
+// Run: build/loxpp benchmarks/coroutine_yield.lox
+//
+// The coroutine yields `REPS` times. Each `resume()` is one yield/resume
+// round trip. The program prints the round-trip cost in nanoseconds, so a
+// change to the snapshot or the resume path shows up as a number, not a
+// guess. This is the measurement item 6 (concurrency) builds on.
+
+var REPS = 200000;
+
+fun bounce(n) {
+    var i = 0;
+    while (i < n) {
+        yield i;
+        i = i + 1;
+    }
+    return i;
+}
+
+var co = coroutine.create(bounce);
+var start = clock();
+co.resume(REPS); // first resume: run to the first yield
+var i = 1;
+while (i < REPS) {
+    co.resume();
+    i = i + 1;
+}
+co.resume(); // final resume: the function returns, the coroutine dies
+var elapsed = clock() - start;
+print elapsed / REPS * 1000000000.0;
