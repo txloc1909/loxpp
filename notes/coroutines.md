@@ -68,7 +68,8 @@ is cooperative on one OS thread.
 ## Backends
 
 - QBE: functions containing `YIELD` fall back to the interpreter loop (the
-  existing `invokeClosure` path). CPS compilation is a later optimization.
+  existing `invokeClosure` path). Compiling those functions to native code —
+  removing the fallback — is tracked separately (#535).
 - JVM: each coroutine is a JDK 21 virtual thread; `yield`/`resume` use an
   `Exchanger` handoff. No stack copying (shared-heap object model).
 - Bootstrap: one host coroutine per Lox++ coroutine, like its existing I/O
