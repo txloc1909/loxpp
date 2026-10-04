@@ -387,6 +387,18 @@ TEST(AbstractStackTest, RunsOverBootstrapInterpreterWithNoInconsistency) {
                              "loxpp_interpreter.lox");
 }
 
+// The coroutine probes are the corpus that emits YIELD; this runs them
+// through the full analysis, exercising YIELD's {pop 1, push 1} contract and
+// the invisible-var claim for `var x = yield e;`.
+TEST(AbstractStackTest, RunsOverEveryCoroutineProbeWithNoInconsistency) {
+    std::vector<fs::path> probes =
+        listLoxFiles(projectRoot() / "test" / "coroutine-probes");
+    ASSERT_FALSE(probes.empty()) << "no coroutine probes found";
+    for (const fs::path& probe : probes) {
+        checkFileNoInconsistency(probe);
+    }
+}
+
 // V1 is the sharpest probe for capture lifetimes (bytecode-translation-
 // problems.md P4): `snapshot` is captured *inside* the loop body, so its
 // declaring push and CLOSE_UPVALUE must both resolve to real slots, not be

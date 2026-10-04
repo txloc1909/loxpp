@@ -139,6 +139,7 @@ loxpp_add_test(test_backend_cfg     test_backend_cfg.cpp     CORE loxpp_test_cor
 loxpp_add_test(test_backend_abstract_stack test_backend_abstract_stack.cpp
                                                             CORE loxpp_test_core PROBE)
 loxpp_add_test(test_backend_capture test_backend_capture.cpp CORE loxpp_test_core PROBE)
+loxpp_add_test(test_backend_native_pops test_backend_native_pops.cpp CORE loxpp_test_core)
 loxpp_add_test(test_nonlocal_cfg    test_nonlocal_cfg.cpp    CORE loxpp_test_core PROBE)
 loxpp_add_test(test_handler_stack_leak    test_handler_stack_leak.cpp CORE loxpp_test_core)
 loxpp_add_test(test_handler_stack_leak_gc test_handler_stack_leak.cpp CORE loxpp_test_core)
@@ -313,6 +314,7 @@ set(LOXPP_GTEST_TARGETS
     test_chunk_decoder test_backend_cfg test_backend_abstract_stack
     test_backend_capture test_nonlocal_cfg test_handler_stack_leak
     test_handler_stack_leak_gc test_handler_depth_invariant test_jvm_emit
+    test_backend_native_pops
     test_stringify_depth_guard
     test_check_diagnostics test_tooling_parser test_tooling_resolver
     test_backend_rt_capi test_backend_qbe_emitter)

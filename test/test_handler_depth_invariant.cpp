@@ -296,3 +296,58 @@ TEST(HandlerDepthTest, RunsOverBootstrapInterpreterWithNoInconsistency) {
     checkFileNoInconsistency(projectRoot() / "bootstrap" /
                              "loxpp_interpreter.lox");
 }
+
+TEST(HandlerDepthTest, RunsOverEveryCoroutineProbeWithNoInconsistency) {
+    std::vector<fs::path> probes;
+    for (const auto& entry :
+         fs::directory_iterator(projectRoot() / "test" / "coroutine-probes")) {
+        if (entry.path().extension() == ".lox") {
+            probes.push_back(entry.path());
+        }
+    }
+    std::sort(probes.begin(), probes.end());
+    ASSERT_FALSE(probes.empty()) << "no coroutine probes found";
+    for (const fs::path& probe : probes) {
+        checkFileNoInconsistency(probe);
+    }
+}
+
+TEST(HandlerDepthTest, YieldInsideTryKeepsTheHandlerLive) {
+    MemoryManager mm;
+    DecodedFunction script = decodeSource(R"(
+        fun risky() {
+            try {
+                yield "before";
+                throw "kaboom";
+            } catch (e) {
+                return e;
+            }
+        }
+    )",
+                                          mm);
+    ASSERT_FALSE(script.nested.empty());
+    const DecodedFunction& risky = script.nested[0];
+    HandlerDepthAnalysis analysis = analyzeHandlerDepth(risky);
+
+    bool sawYield = false;
+    for (size_t i = 0; i < risky.instructions.size(); i++) {
+        if (risky.instructions[i].op != Op::YIELD) {
+            continue;
+        }
+        sawYield = true;
+        ASSERT_TRUE(analysis.reached[i]);
+        // Not a throw site: a suspension neither opens nor closes a handler,
+        // so depth is unchanged and the innermost record stays active.
+        EXPECT_EQ(analysis.before[i], analysis.after[i]);
+        EXPECT_GE(analysis.activeHandler[i], 0)
+            << "YIELD inside try must still see its handler active";
+        // Non-terminal: the instruction after YIELD (the POP that discards
+        // the statement's value) is reachable on the ordinary fall-through,
+        // at the same depth.
+        ASSERT_LT(i + 1, risky.instructions.size());
+        EXPECT_TRUE(analysis.reached[i + 1])
+            << "instruction after YIELD must be reachable";
+        EXPECT_EQ(analysis.before[i + 1], analysis.after[i]);
+    }
+    EXPECT_TRUE(sawYield) << "probe emitted no YIELD";
+}

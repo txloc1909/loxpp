@@ -360,3 +360,53 @@ TEST(BackendCfgTest, HoldsOverExamples) {
 TEST(BackendCfgTest, HoldsOverBootstrapInterpreter) {
     checkFile(projectRoot() / "bootstrap" / "loxpp_interpreter.lox");
 }
+
+TEST(BackendCfgTest, HoldsOverCoroutineProbes) {
+    std::vector<fs::path> probes =
+        listLoxFiles(projectRoot() / "test" / "coroutine-probes");
+    ASSERT_FALSE(probes.empty()) << "no coroutine probes found";
+    for (const fs::path& probe : probes) {
+        checkFile(probe);
+    }
+}
+
+TEST(BackendCfgTest, YieldEndsItsBlockWithOneFallThroughEdge) {
+    // A hand-built chunk shaped so YIELD is the last instruction of its own
+    // block: a forward JUMP skips over the YIELD to RETURN, and rule 3 of the
+    // leaders algorithm puts a leader on the byte right after the JUMP (the
+    // YIELD), so the YIELD owns the block [3, 4).
+    std::vector<DecodedInstruction> instructions;
+    DecodedInstruction jump;
+    jump.offset = 0;
+    jump.op = Op::JUMP;
+    jump.length = 3;
+    jump.jumpTarget = 4;
+    instructions.push_back(jump);
+
+    DecodedInstruction yield;
+    yield.offset = 3;
+    yield.op = Op::YIELD;
+    yield.length = 1;
+    instructions.push_back(yield);
+
+    DecodedInstruction ret;
+    ret.offset = 4;
+    ret.op = Op::RETURN;
+    ret.length = 1;
+    instructions.push_back(ret);
+
+    Cfg cfg = buildCfg(instructions);
+    ASSERT_EQ(cfg.blocks.size(), 3U);
+    const BasicBlock& yieldBlock = cfg.blocks[1];
+    ASSERT_EQ(yieldBlock.instructions.back().op, Op::YIELD);
+
+    // Non-terminal, non-branching: exactly one successor, the plain
+    // fall-through to the next instruction. A misclassification as terminal
+    // leaves it with none; as a branch it would gain a wrong-kind edge.
+    ASSERT_EQ(yieldBlock.successors.size(), 1U);
+    EXPECT_EQ(yieldBlock.successors[0].kind, EdgeKind::FALL_THROUGH);
+    EXPECT_EQ(
+        cfg.blocks[static_cast<size_t>(yieldBlock.successors[0].targetBlock)]
+            .leaderOffset,
+        yieldBlock.endOffset);
+}
