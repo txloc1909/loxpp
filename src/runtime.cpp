@@ -566,8 +566,13 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
     co->stack.assign(base, stackTop);
 
     co->handlers.clear();
+    // HandlerRecord::frameCount is the frame COUNT at push time, one more
+    // than the pushing frame's index. The coroutine's own frames start at
+    // index baseFrame, so their records are `frameCount > baseFrame`. A
+    // record with `frameCount == baseFrame` belongs to the resume caller's
+    // frame, which stays live and must not be captured.
     while (!m_handlerStack.empty() &&
-           m_handlerStack.back().frameCount >= baseFrame) {
+           m_handlerStack.back().frameCount > baseFrame) {
         HandlerRecord h = m_handlerStack.back();
         m_handlerStack.pop_back();
         co->handlers.push_back(CoroutineHandlerSnapshot{

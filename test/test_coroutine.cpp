@@ -337,6 +337,78 @@ TEST_F(CoroutineTest, FirstResumeWithArgsThatCompletesLeavesStackIntact) {
     expect_num(*h.getGlobal("sum"), 60);
 }
 
+// A handler in the resume caller's own frame must stay live across the
+// coroutine's yield. Suspend must not capture it into the snapshot.
+TEST_F(CoroutineTest, ResumerHandlerSurvivesYield) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun f() {
+            yield 1;
+        }
+        var co = coroutine.create(f);
+        var got = "";
+        try {
+            co.resume();
+            throw "after";
+        } catch (e) {
+            got = e;
+        }
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "got", "after");
+}
+
+// The wrong-handler shape: the coroutine's own later throw must reach the
+// innermost handler of the resumer, not an outer one.
+TEST_F(CoroutineTest, ResumerInnermostHandlerStillWins) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun f() {
+            yield 1;
+            throw "boom";
+        }
+        var co = coroutine.create(f);
+        var got = "";
+        try {
+            co.resume();
+            try {
+                co.resume();
+            } catch (e) {
+                got = "inner " + e;
+            }
+        } catch (e) {
+            got = "outer " + e;
+        }
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "got", "inner boom");
+}
+
+// The resumer is itself a coroutine: its handler must survive the inner
+// coroutine's yield, and its own throw must be caught by it.
+TEST_F(CoroutineTest, NestedResumerHandlerSurvivesInnerYield) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun inner() {
+            yield 1;
+        }
+        fun outer() {
+            var ic = coroutine.create(inner);
+            try {
+                ic.resume();
+                throw "after";
+            } catch (e) {
+                return "outer caught " + e;
+            }
+            return "no";
+        }
+        var co = coroutine.create(outer);
+        var r = co.resume();
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "r", "outer caught after");
+}
+
 TEST_F(CoroutineTest, TypeAndStringify) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
