@@ -80,6 +80,23 @@ TEST(CheckDiagnostics, PanicModeCollapsesToOneDiagnostic) {
     EXPECT_EQ(diags.size(), 1U);
 }
 
+TEST(CheckDiagnostics, YieldIsNotAnOperand) {
+    // `yield` sits at the assignment level. It cannot be the operand of `+`.
+    expectOne("1 + yield 2;\n", 1, 5, "Can't use 'yield' as an operand.");
+}
+
+TEST(CheckDiagnostics, NoInfixOperatorAfterYield) {
+    // A yield expression is complete; `+ 2` may not follow it.
+    expectOne("yield + 2;\n", 1, 7, "Expect ';' after expression.");
+}
+
+TEST(CheckDiagnostics, YieldAtAssignmentLevelIsClean) {
+    EXPECT_TRUE(analyze("var x = yield 1;\n"
+                        "f(yield 2);\n"
+                        "yield;\n")
+                    .empty());
+}
+
 TEST(CheckDiagnostics, JsonStringEscapesQuoteBackslashAndControl) {
     // No compiler message contains these bytes today, so exercise the escaper
     // that the --format json path uses on the message text directly.
