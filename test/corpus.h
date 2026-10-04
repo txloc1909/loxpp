@@ -39,7 +39,7 @@ inline std::vector<std::filesystem::path>
 listLoxFiles(const std::filesystem::path& dir) {
     std::vector<std::filesystem::path> files;
     for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-        if (entry.path().extension() == ".lox") {
+        if (entry.is_regular_file() && entry.path().extension() == ".lox") {
             files.push_back(entry.path());
         }
     }
@@ -63,11 +63,8 @@ inline std::vector<std::filesystem::path> corpusFiles() {
         if (!std::filesystem::is_directory(base)) {
             continue;
         }
-        for (const auto& entry : std::filesystem::directory_iterator(base)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".lox") {
-                files.push_back(entry.path());
-            }
-        }
+        const std::vector<std::filesystem::path> dirFiles = listLoxFiles(base);
+        files.insert(files.end(), dirFiles.begin(), dirFiles.end());
     }
     std::sort(files.begin(), files.end());
     return files;
