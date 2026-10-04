@@ -12,6 +12,14 @@
 // numbers: the JVM emitter hand-computes `.maxstack` from this where jasmin
 // would otherwise do it, and the QBE emitter keys its frame layout off the
 // same height.
+//
+// YIELD contract (coroutines mission, tracking #523; implemented in node
+// #528). YIELD (see chunk_decoder.h) has stack effect {pop 1, push 1}: it pops
+// the yielded value and, on resume, pushes the received value, so height and
+// operand depth are unchanged. It is not in peeksInsteadOfPops — its operand
+// is consumed, not left in place. The pushed cell is a temporary at the popped
+// cell's height, so `var x = yield e;` claims it through the ordinary
+// invisible-var mechanism, exactly like any other expression result.
 
 #include "chunk_decoder.h"
 

@@ -7,6 +7,14 @@
 // This is a decode pass only. It does not compute a CFG (cfg.h), an
 // abstract stack (abstract_stack.h), or a capture map (capture_analysis.h);
 // those passes consume the instructions decoded here.
+//
+// YIELD contract (coroutines mission, tracking #523; implemented in node
+// #528). Op::YIELD does not exist yet. When it lands it is a zero-operand
+// opcode, decoded exactly like PRINT/POP/RETURN (no operand fields set), and
+// added to LOXPP_FOR_EACH_OP in chunk.h and to opName in native_pops.cpp. It
+// delivers the value on top of the operand stack to the resumer and, on
+// resume, pushes the value the resumer sent. It is non-terminal: resume falls
+// through to the next instruction, so cfg.h gives it a FALL_THROUGH edge.
 
 #include "chunk.h"
 

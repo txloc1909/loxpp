@@ -8,6 +8,12 @@
 // This is a structural pass only. It does not reconstruct the operand stack
 // (abstract_stack.h) or capture upvalues (capture_analysis.h); those passes
 // consume the blocks built here.
+//
+// YIELD contract (coroutines mission, tracking #523; implemented in node
+// #528). YIELD (see chunk_decoder.h) is non-branching and non-terminal:
+// buildCfg's default case gives it a single FALL_THROUGH successor. It is
+// never a terminator, never a branch, and never a jump target, because resume
+// continues at the instruction after it.
 
 #include "backend/chunk_decoder.h"
 
