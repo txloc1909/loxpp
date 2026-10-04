@@ -213,6 +213,20 @@ def main():
             "%r %r" % (first[0], second[2]),
         )
 
+        # Local regression case: a Content-Length beyond read_bytes's range
+        # must get a response and leave the server alive, not stop the VM.
+        status, _, _ = request(
+            port,
+            b"POST /files/huge HTTP/1.1\r\nContent-Length: 9999999999\r\n\r\n",
+        )
+        check(
+            "local: oversized Content-Length rejected",
+            status == "HTTP/1.1 413 Content Too Large",
+            status,
+        )
+        status, _, _ = request(port, b"GET / HTTP/1.1\r\n\r\n")
+        check("local: server survives oversized Content-Length", status == "HTTP/1.1 200 OK", status)
+
         status, headers, body = request(
             port, b"GET /echo/abc HTTP/1.1\r\nAccept-Encoding: gzip\r\n\r\n"
         )

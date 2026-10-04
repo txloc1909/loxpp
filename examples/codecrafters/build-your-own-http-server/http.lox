@@ -324,6 +324,10 @@ fun created201() {
     return "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n";
 }
 
+fun contentTooLarge() {
+    return "HTTP/1.1 413 Content Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+}
+
 fun text200(body) {
     return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: "
         + str(len(body)) + "\r\n\r\n" + body;
@@ -421,9 +425,14 @@ fun handleConnection(sock, directory) {
         var headers = readHeaders(sock);
         // A Content-Length body is framed by length, not by a newline, so it
         // needs the bounded read. read_bytes(n) blocks until n bytes arrive or
-        // the peer closes.
-        var body = "";
+        // the peer closes. read_bytes accepts at most 2147483647, so a larger
+        // count from the client is rejected instead of stopping the server.
         var n = contentLength(headers);
+        if (n > 2147483647) {
+            sock.write(contentTooLarge());
+            return;
+        }
+        var body = "";
         if (n > 0) {
             body = sock.read_bytes(n);
         }
