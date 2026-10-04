@@ -2514,6 +2514,16 @@ void emitBody(Emitter& e, bool isScript,
         case Op::RUN_DEFERS:
             emitRunDefers(e);
             break;
+        // YIELD pops the yielded value and, on resume, pushes the value the
+        // resumer sent (chunk.h): LoxOps.yield's own Object return keeps the
+        // net effect zero, so this is a plain single call. The operand is
+        // consumed, not peeked, but it may still be a folded `match` result;
+        // normalizeFoldedOperands (above) materializes that before this runs.
+        case Op::YIELD:
+            e.b.emit("invokestatic "
+                     "lox/LoxOps/yield(Ljava/lang/Object;)Ljava/lang/Object;",
+                     0);
+            break;
         default:
             if (!emitSimpleOp(e, in.op)) {
                 notImplemented(in.op);

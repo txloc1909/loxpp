@@ -967,6 +967,32 @@ TEST(EmitScript, GetIterAfterAMergeStillLoadsTheRightSlot) {
     expectEveryJumpTargetIsLabeled(j);
 }
 
+TEST(EmitScript, YieldEmitsALoxOpsYieldCallWithZeroNetDepth) {
+    // The YIELD opcode (coroutines mission, tracking #523; JVM backend node
+    // #529) lowers to a single LoxOps.yield call. Its operand is the yielded
+    // value on top of the operand stack, and the resumed value is the call's
+    // own return, so the net stack effect is zero — no reload/store wrap of
+    // the kind GET_ITER needs. Before this node the emitter had no YIELD case
+    // and emitBody's default reached notImplemented, so this test fails
+    // without it.
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("var a = yield 1;", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j = jvm::emitScript(fn, analysis, "LoxMain");
+
+    EXPECT_NE(
+        j.find("invokestatic "
+               "lox/LoxOps/yield(Ljava/lang/Object;)Ljava/lang/Object;\n"),
+        std::string::npos)
+        << j;
+    // The yielded value is a double constant (pushed, boxed, then consumed by
+    // the call); no extra pop or dup surrounds the call.
+    EXPECT_EQ(j.find("    pop\n    invokestatic lox/LoxOps/yield"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
 TEST(EmitScript, IsSeqEmitsOneInvokestatic) {
     // IS_SEQ is a match sequence-pattern's own type check (compiler.cpp).
     // An unguarded catch-all arm keeps this snippet inside the earlier
