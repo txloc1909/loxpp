@@ -19,6 +19,11 @@ public final class LoxIterator {
     private final List<Object> mapKeys; // non-null only when collection is a LoxMap
     private final int expectedMapVersion; // -1 unless collection is a LoxMap
     private int index;
+    // Coroutine mode only: the value ITER_HAS_NEXT resumed out of the
+    // coroutine, cached for ITER_NEXT to push. The resume happens at has-next
+    // time because its outcome is what decides whether another element exists
+    // at all.
+    private Object current;
 
     public LoxIterator(Object collection) {
         this.collection = collection;
@@ -52,6 +57,23 @@ public final class LoxIterator {
             checkMapVersion();
             return index < mapKeys.size();
         }
+        // spec/04-semantics.md for-in, Coroutine row: an already-dead
+        // coroutine ends the loop with no resume attempt; otherwise the
+        // resume itself decides — a yield supplies the next element, a return
+        // (the function finished) ends the loop. The yielded value is cached
+        // because the resume must not run twice.
+        if (collection instanceof LoxCoroutine) {
+            LoxCoroutine co = (LoxCoroutine) collection;
+            if (co.state() == LoxCoroutine.State.DEAD) {
+                return false;
+            }
+            Object yielded = co.resume(new Object[0]);
+            if (co.state() == LoxCoroutine.State.SUSPENDED) {
+                current = yielded;
+                return true;
+            }
+            return false;
+        }
         throw new LoxError("BUG: LoxIterator holds an unexpected collection type.");
     }
 
@@ -70,6 +92,13 @@ public final class LoxIterator {
         if (mapKeys != null) {
             checkMapVersion();
             return mapKeys.get(index++);
+        }
+        // ITER_HAS_NEXT already resumed the coroutine and cached the yielded
+        // value; no second resume happens here.
+        if (collection instanceof LoxCoroutine) {
+            Object v = current;
+            current = null;
+            return v;
         }
         throw new LoxError("BUG: LoxIterator holds an unexpected collection type.");
     }

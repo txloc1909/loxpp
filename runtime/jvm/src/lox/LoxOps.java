@@ -94,14 +94,20 @@ public final class LoxOps {
      * (exceptional exit — POP_HANDLER's own translation never runs on
      * that path, the same reason runDefers needed a second call site for
      * defer-using functions, see emitChunk's defer catch-all handler).
+     *
+     * <p>Per-thread, not a static int: a coroutine runs on its own virtual
+     * thread and can suspend while a try/catch region is open. A shared
+     * counter would make the parked coroutine's open handler look live to the
+     * resumer and to any other coroutine.
      */
-    private static int handlerDepth;
+    private static final ThreadLocal<Integer> handlerDepth =
+        ThreadLocal.withInitial(() -> 0);
 
-    public static void enterHandler() { handlerDepth++; }
+    public static void enterHandler() { handlerDepth.set(handlerDepth.get() + 1); }
 
-    public static void exitHandler() { handlerDepth--; }
+    public static void exitHandler() { handlerDepth.set(handlerDepth.get() - 1); }
 
-    public static boolean isHandlerLive() { return handlerDepth > 0; }
+    public static boolean isHandlerLive() { return handlerDepth.get() > 0; }
 
     /**
      * Boxed (an {@code Integer}) so the generated program's own
@@ -117,10 +123,63 @@ public final class LoxOps {
      * leak regardless of how many regions were abandoned this way (issue
      * #319, reviewer round 2).
      */
-    public static Object getHandlerDepth() { return handlerDepth; }
+    public static Object getHandlerDepth() { return handlerDepth.get(); }
 
     public static void restoreHandlerDepth(Object depth) {
-        handlerDepth = (Integer)depth;
+        handlerDepth.set((Integer)depth);
+    }
+
+    // ------------------------------------------------------------------
+    // Coroutines (spec/04-semantics.md, §Coroutine)
+    // ------------------------------------------------------------------
+
+    /**
+     * Depth of runtime-initiated closure calls (a {@code __str__}/{@code
+     * __hash__}/{@code __eq__}/{@code __iter__}/{@code __call__}/operator
+     * dunder, a reflection callback, or a deferred-call drain) on this thread.
+     * Mirrors src/runtime.h's Runtime::m_reentrantRunDepth: such a host frame
+     * cannot be frozen into a coroutine snapshot, so a {@code yield} reached
+     * beneath one is a runtime error. Per-thread: a coroutine's own virtual
+     * thread starts at 0, so the callback depth of the resumer never leaks in.
+     */
+    private static final ThreadLocal<Integer> callbackDepth =
+        ThreadLocal.withInitial(() -> 0);
+
+    static void enterCallback() { callbackDepth.set(callbackDepth.get() + 1); }
+
+    static void exitCallback() { callbackDepth.set(callbackDepth.get() - 1); }
+
+    /**
+     * The YIELD opcode. Suspends the current coroutine, delivering
+     * {@code value}, and returns what the next resume sent.
+     */
+    public static Object yield(Object value) {
+        LoxCoroutine co = LoxCoroutine.currentOrNull();
+        if (co == null) {
+            throw makeError("YieldOutsideCoroutineError",
+                            "Cannot yield from outside a coroutine.");
+        }
+        if (callbackDepth.get() > 0) {
+            throw makeError("YieldAcrossNativeError",
+                            "Cannot yield across a native callback.");
+        }
+        return co.yieldValue(value);
+    }
+
+    /**
+     * Runs a dunder/operator method on behalf of a runtime helper, marking the
+     * host frame so a {@code yield} inside it is rejected (see callbackDepth).
+     * Every closure call the runtime — not generated call/INVOKE code — makes
+     * through to Lox code goes through here.
+     */
+    private static Object invokeDunder(LoxClosure fn, Object self,
+                                       Object[] args) {
+        enterCallback();
+        try {
+            return fn.callAsSelf(self, args);
+        } finally {
+            exitCallback();
+        }
     }
 
     // ------------------------------------------------------------------
@@ -164,11 +223,11 @@ public final class LoxOps {
         }
         LoxClosure dunder = findDunder(a, "__add__");
         if (dunder != null) {
-            return dunder.callAsSelf(a, new Object[] {b});
+            return invokeDunder(dunder, a, new Object[] {b});
         }
         dunder = findDunder(b, "__radd__");
         if (dunder != null) {
-            return dunder.callAsSelf(b, new Object[] {a});
+            return invokeDunder(dunder, b, new Object[] {a});
         }
         throw makeError(
             "ConcatenationTypeError",
@@ -181,11 +240,11 @@ public final class LoxOps {
         }
         LoxClosure dunder = findDunder(a, "__sub__");
         if (dunder != null) {
-            return dunder.callAsSelf(a, new Object[] {b});
+            return invokeDunder(dunder, a, new Object[] {b});
         }
         dunder = findDunder(b, "__rsub__");
         if (dunder != null) {
-            return dunder.callAsSelf(b, new Object[] {a});
+            return invokeDunder(dunder, b, new Object[] {a});
         }
         checkNumbers(a, b);
         throw new AssertionError("checkNumbers must throw");
@@ -197,11 +256,11 @@ public final class LoxOps {
         }
         LoxClosure dunder = findDunder(a, "__mul__");
         if (dunder != null) {
-            return dunder.callAsSelf(a, new Object[] {b});
+            return invokeDunder(dunder, a, new Object[] {b});
         }
         dunder = findDunder(b, "__rmul__");
         if (dunder != null) {
-            return dunder.callAsSelf(b, new Object[] {a});
+            return invokeDunder(dunder, b, new Object[] {a});
         }
         checkNumbers(a, b);
         throw new AssertionError("checkNumbers must throw");
@@ -213,11 +272,11 @@ public final class LoxOps {
         }
         LoxClosure dunder = findDunder(a, "__div__");
         if (dunder != null) {
-            return dunder.callAsSelf(a, new Object[] {b});
+            return invokeDunder(dunder, a, new Object[] {b});
         }
         dunder = findDunder(b, "__rdiv__");
         if (dunder != null) {
-            return dunder.callAsSelf(b, new Object[] {a});
+            return invokeDunder(dunder, b, new Object[] {a});
         }
         checkNumbers(a, b);
         throw new AssertionError("checkNumbers must throw");
@@ -239,11 +298,11 @@ public final class LoxOps {
         }
         LoxClosure dunder = findDunder(a, "__mod__");
         if (dunder != null) {
-            return dunder.callAsSelf(a, new Object[] {b});
+            return invokeDunder(dunder, a, new Object[] {b});
         }
         dunder = findDunder(b, "__rmod__");
         if (dunder != null) {
-            return dunder.callAsSelf(b, new Object[] {a});
+            return invokeDunder(dunder, b, new Object[] {a});
         }
         checkNumbers(a, b);
         throw new AssertionError("checkNumbers must throw");
@@ -255,7 +314,7 @@ public final class LoxOps {
         }
         LoxClosure dunder = findDunder(a, "__neg__");
         if (dunder != null) {
-            return dunder.callAsSelf(a, new Object[0]);
+            return invokeDunder(dunder, a, new Object[0]);
         }
         checkNumber(a);
         throw new AssertionError("checkNumber must throw");
@@ -280,12 +339,12 @@ public final class LoxOps {
         // Instance that defines it overrides identity equality.
         LoxClosure dunder = findDunder(a, "__eq__");
         if (dunder != null) {
-            return checkBooleanResult(dunder.callAsSelf(a, new Object[] {b}));
+            return checkBooleanResult(invokeDunder(dunder, a, new Object[] {b}));
         }
         // Reflected __eq__ on the right operand.
         dunder = findDunder(b, "__eq__");
         if (dunder != null) {
-            return checkBooleanResult(dunder.callAsSelf(b, new Object[] {a}));
+            return checkBooleanResult(invokeDunder(dunder, b, new Object[] {a}));
         }
         return identityEqual(a, b);
     }
@@ -332,11 +391,11 @@ public final class LoxOps {
         }
         LoxClosure dunder = findDunder(a, "__gt__");
         if (dunder != null) {
-            return checkBooleanResult(dunder.callAsSelf(a, new Object[] {b}));
+            return checkBooleanResult(invokeDunder(dunder, a, new Object[] {b}));
         }
         dunder = findDunder(b, "__rgt__");
         if (dunder != null) {
-            return checkBooleanResult(dunder.callAsSelf(b, new Object[] {a}));
+            return checkBooleanResult(invokeDunder(dunder, b, new Object[] {a}));
         }
         checkNumbersForComparison(a, b);
         throw new AssertionError("checkNumbersForComparison must throw");
@@ -351,11 +410,11 @@ public final class LoxOps {
         }
         LoxClosure dunder = findDunder(a, "__lt__");
         if (dunder != null) {
-            return checkBooleanResult(dunder.callAsSelf(a, new Object[] {b}));
+            return checkBooleanResult(invokeDunder(dunder, a, new Object[] {b}));
         }
         dunder = findDunder(b, "__rlt__");
         if (dunder != null) {
-            return checkBooleanResult(dunder.callAsSelf(b, new Object[] {a}));
+            return checkBooleanResult(invokeDunder(dunder, b, new Object[] {a}));
         }
         checkNumbersForComparison(a, b);
         throw new AssertionError("checkNumbersForComparison must throw");
@@ -377,7 +436,7 @@ public final class LoxOps {
         }
         LoxClosure dunder = findDunder(v, "__len__");
         if (dunder != null) {
-            return checkNumberResult(dunder.callAsSelf(v, new Object[0]));
+            return checkNumberResult(invokeDunder(dunder, v, new Object[0]));
         }
         throw new LoxError("len() argument must be a list, string, or map.");
     }
@@ -422,7 +481,7 @@ public final class LoxOps {
     static boolean keyEquals(Object stored, Object lookup) {
         LoxClosure dunder = findDunder(stored, "__eq__");
         if (dunder != null) {
-            return checkBooleanResult(dunder.callAsSelf(stored, new Object[] {lookup}));
+            return checkBooleanResult(invokeDunder(dunder, stored, new Object[] {lookup}));
         }
         return identityEqual(stored, lookup);
     }
@@ -449,7 +508,7 @@ public final class LoxOps {
         // Instance key; checkMapKey / checkMapKeyForNativeMethod already
         // confirmed both methods exist.
         Object result =
-            findDunder(key, "__hash__").callAsSelf(key, new Object[0]);
+            invokeDunder(findDunder(key, "__hash__"), key, new Object[0]);
         if (!(result instanceof Double)) {
             throw makeError("OperatorResultTypeError",
                             "Operator method must return a Number.");
@@ -519,7 +578,7 @@ public final class LoxOps {
         }
         LoxClosure dunder = findDunder(seq, "__contains__");
         if (dunder != null) {
-            return checkBooleanResult(dunder.callAsSelf(seq, new Object[] {elem}));
+            return checkBooleanResult(invokeDunder(dunder, seq, new Object[] {elem}));
         }
         throw new LoxError(
             "Right operand of 'in' must be a list, string, or map.");
@@ -547,7 +606,7 @@ public final class LoxOps {
         if (!(seq instanceof LoxList) && !(seq instanceof String)) {
             LoxClosure dunder = findDunder(seq, "__slice__");
             if (dunder != null) {
-                return dunder.callAsSelf(seq, new Object[] {startVal, endVal});
+                return invokeDunder(dunder, seq, new Object[] {startVal, endVal});
             }
             throw new LoxError("Slice requires a List or String.");
         }
@@ -687,7 +746,7 @@ public final class LoxOps {
         }
         LoxClosure dunder = findDunder(collection, "__index_get__");
         if (dunder != null) {
-            return dunder.callAsSelf(collection, new Object[] {index});
+            return invokeDunder(dunder, collection, new Object[] {index});
         }
         throw makeError("NotIndexableError",
                             "Only lists, strings, and maps can be indexed.");
@@ -709,7 +768,7 @@ public final class LoxOps {
         }
         LoxClosure dunder = findDunder(collection, "__index_set__");
         if (dunder != null) {
-            dunder.callAsSelf(collection, new Object[] {index, value});
+            invokeDunder(dunder, collection, new Object[] {index, value});
             return value; // assignment value, not the method's return
         }
         if (!(collection instanceof LoxList)) {
@@ -725,16 +784,18 @@ public final class LoxOps {
     public static LoxIterator getIter(Object iterable) {
         LoxClosure dunder = findDunder(iterable, "__iter__");
         if (dunder != null) {
-            Object result = dunder.callAsSelf(iterable, new Object[0]);
+            Object result = invokeDunder(dunder, iterable, new Object[0]);
             if (!(result instanceof LoxList) && !(result instanceof String) &&
-                !(result instanceof LoxMap)) {
+                !(result instanceof LoxMap) &&
+                !(result instanceof LoxCoroutine)) {
                 throw makeError("OperatorResultTypeError",
                                 "Operator method must return a sequence.");
             }
             return new LoxIterator(result);
         }
         if (!(iterable instanceof LoxList) && !(iterable instanceof String) &&
-            !(iterable instanceof LoxMap)) {
+            !(iterable instanceof LoxMap) &&
+            !(iterable instanceof LoxCoroutine)) {
             throw new LoxError(
                 "Value is not iterable (expected list, string, map, or coroutine).");
         }
@@ -855,6 +916,14 @@ public final class LoxOps {
             }
             return m;
         }
+        if (obj instanceof LoxCoroutine) {
+            LoxCallable m = ((LoxCoroutine)obj).getMethod(name);
+            if (m == null) {
+                throw new LoxError("Undefined property '" + name +
+                                        "' on coroutine.");
+            }
+            return m;
+        }
         if (!(obj instanceof LoxInstance)) {
             throw new LoxError("Only instances have properties.");
         }
@@ -949,7 +1018,7 @@ public final class LoxOps {
         }
         LoxClosure dunder = findDunder(callee, "__call__");
         if (dunder != null) {
-            return dunder.callAsSelf(callee, args);
+            return invokeDunder(dunder, callee, args);
         }
         throw makeError("NotCallableError",
                             "Can only call functions, classes and enums.");
@@ -1013,8 +1082,25 @@ public final class LoxOps {
         if (receiver instanceof LoxProcess) {
             return invokeProcessMethod((LoxProcess)receiver, name, args);
         }
+        if (receiver instanceof LoxCoroutine) {
+            return invokeCoroutineMethod((LoxCoroutine)receiver, name, args);
+        }
         throw makeError("InvalidReceiverError",
                         "Method called on invalid receiver.");
+    }
+
+    private static Object invokeCoroutineMethod(LoxCoroutine co, String name,
+                                                Object[] args) {
+        switch (name) {
+        case "resume":
+            return co.resume(args);
+        case "status":
+            requireArity(args, 0, "status");
+            return co.statusName();
+        default:
+            // Fatal on native (runtimeError): INVOKE's method-not-found case.
+            throw new LoxError("Undefined method '" + name + "' on coroutine.");
+        }
     }
 
     private static Object invokeListMethod(LoxList list, String name,
@@ -1353,7 +1439,7 @@ public final class LoxOps {
             }
             LoxClosure dunder = findDunder(v, "__str__");
             if (dunder != null) {
-                return checkStringResult(dunder.callAsSelf(v, new Object[0]));
+                return checkStringResult(invokeDunder(dunder, v, new Object[0]));
             }
             return inst.klass.name + " instance";
         }
@@ -1368,6 +1454,9 @@ public final class LoxOps {
         }
         if (v instanceof LoxProcess) {
             return "<process>";
+        }
+        if (v instanceof LoxCoroutine) {
+            return "<coroutine>";
         }
         if (v instanceof LoxIterator) {
             return "<iterator>";
@@ -1553,7 +1642,15 @@ public final class LoxOps {
                 throw new LoxError("Deferred callable has unexpected type.");
             }
             try {
-                call(deferred.callable, deferred.args);
+                // A defer drain is a host frame: a yield inside a deferred
+                // call cannot be captured, matching native's own refusal
+                // (Runtime::runPushedFrameToCompletion).
+                enterCallback();
+                try {
+                    call(deferred.callable, deferred.args);
+                } finally {
+                    exitCallback();
+                }
             } catch (LoxError replacement) {
                 // spec/04-semantics.md defer Statement step 5: this
                 // deferred call's own throw, uncaught within it, replaces

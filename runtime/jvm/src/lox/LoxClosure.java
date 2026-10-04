@@ -51,7 +51,14 @@ public abstract class LoxClosure implements LoxCallable {
     // and that frame is never popped until the whole program ends. A
     // counter starting at 0 here would let one more nested Lox call
     // succeed than FRAMES_MAX allows natively.
-    private static int s_frameCount = 1;
+    //
+    // Per-thread: each coroutine runs on its own virtual thread, and a
+    // suspended coroutine's frames stay live on that thread's stack (their
+    // `finally` decrements have not run). A shared counter would count a
+    // parked coroutine's frames against the root program's budget, and an
+    // abandoned one would inflate it forever.
+    private static final ThreadLocal<Integer> s_frameCount =
+        ThreadLocal.withInitial(() -> 1);
 
     // True for the dynamic extent between a StackOverflowError this class
     // raises and that same fault's resolution (delivered to a real
@@ -62,8 +69,11 @@ public abstract class LoxClosure implements LoxCallable {
     // a deferred call that itself recurses too deep while running during
     // the first overflow's own unwind — is not delivered to any catchBlock
     // (spec/04-semantics.md line 1120); it is fatal, matching native's own
-    // m_unwindingStackOverflow guard (src/vm.h).
-    private static boolean s_unwindingStackOverflow = false;
+    // m_unwindingStackOverflow guard (src/vm.h). Per-thread, like
+    // s_frameCount: an unwind in one coroutine must not make a later,
+    // unrelated overflow in another look re-entrant.
+    private static final ThreadLocal<Boolean> s_unwindingStackOverflow =
+        ThreadLocal.withInitial(() -> false);
 
     // The LoxError object whose delivery to getValue() ends the unwind
     // above. Starts as the StackOverflowError this class raises.
@@ -76,8 +86,10 @@ public abstract class LoxClosure implements LoxCallable {
     // delivered value's own kind field, is what must decide the unwind is
     // over: a plain Lox++ instance can carry a field named "kind" equal to
     // "StackOverflowError" with no connection to this guard at all, and a
-    // kind-string check would clear the guard on that alone.
-    private static LoxError s_overflowInFlight = null;
+    // kind-string check would clear the guard on that alone. Per-thread for
+    // the same reason as s_unwindingStackOverflow.
+    private static final ThreadLocal<LoxError> s_overflowInFlight =
+        ThreadLocal.withInitial(() -> null);
 
     public final String name; // null for the top-level script, per <script>
     public final int arity;
@@ -109,16 +121,16 @@ public abstract class LoxClosure implements LoxCallable {
             throw LoxOps.makeError("ArityError",
                     "Expected " + arity + " arguments but got " + args.length + ".");
         }
-        if (s_unwindingStackOverflow) {
+        if (s_unwindingStackOverflow.get()) {
             // Already unwinding one StackOverflowError: only the reserve
             // stands between here and fatal, and no further catchable
             // attempt is made (see s_unwindingStackOverflow's own comment).
-            if (s_frameCount >= FRAMES_MAX + FRAMES_RESERVE) {
+            if (s_frameCount.get() >= FRAMES_MAX + FRAMES_RESERVE) {
                 // A raw, valueless LoxError is uncatchable: LoxError.getValue()
                 // rethrows it instead of delivering it to any catchBlock.
                 throw new LoxError("Stack overflow.");
             }
-        } else if (s_frameCount >= FRAMES_MAX) {
+        } else if (s_frameCount.get() >= FRAMES_MAX) {
             if (!LoxOps.isHandlerLive()) {
                 // src/runtime.cpp Runtime::call() takes the same fatal fast path (no
                 // handler live anywhere in the program) for the first
@@ -129,17 +141,17 @@ public abstract class LoxClosure implements LoxCallable {
                 // overflow to be re-entrant with.
                 throw new LoxError("Stack overflow.");
             }
-            s_unwindingStackOverflow = true;
+            s_unwindingStackOverflow.set(true);
             LoxError overflow =
                     LoxOps.makeError("StackOverflowError", "Stack overflow.");
-            s_overflowInFlight = overflow;
+            s_overflowInFlight.set(overflow);
             throw overflow;
         }
-        s_frameCount++;
+        s_frameCount.set(s_frameCount.get() + 1);
         try {
             return invoke(self, args);
         } finally {
-            s_frameCount--;
+            s_frameCount.set(s_frameCount.get() - 1);
         }
     }
 
@@ -150,8 +162,8 @@ public abstract class LoxClosure implements LoxCallable {
     // this fault is still propagating, without a later, unrelated overflow
     // being mistaken for part of the same unwind.
     static void endStackOverflowUnwind() {
-        s_unwindingStackOverflow = false;
-        s_overflowInFlight = null;
+        s_unwindingStackOverflow.set(false);
+        s_overflowInFlight.set(null);
     }
 
     // Package-private: LoxError.getValue() calls this to decide whether IT
@@ -159,7 +171,7 @@ public abstract class LoxClosure implements LoxCallable {
     // s_overflowInFlight's own comment) — by identity, not by inspecting
     // the delivered value.
     static boolean isOverflowInFlight(LoxError error) {
-        return s_unwindingStackOverflow && error == s_overflowInFlight;
+        return s_unwindingStackOverflow.get() && error == s_overflowInFlight.get();
     }
 
     // Package-private: LoxOps.runDefers() calls this when a deferred call's
@@ -173,8 +185,8 @@ public abstract class LoxClosure implements LoxCallable {
     // handler knows which fault a defer list is being drained for, so it
     // is the one caller that can supply `replaced` correctly.
     static void replaceOverflowInFlight(LoxError replaced, LoxError replacement) {
-        if (s_unwindingStackOverflow && replaced == s_overflowInFlight) {
-            s_overflowInFlight = replacement;
+        if (s_unwindingStackOverflow.get() && replaced == s_overflowInFlight.get()) {
+            s_overflowInFlight.set(replacement);
         }
     }
 
