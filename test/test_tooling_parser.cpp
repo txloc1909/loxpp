@@ -582,8 +582,9 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // test/translation-probes/63_ord_chr_string_order.lox, raising this to
     // 209, then examples/ord_chr.lox, raising this to 210. Issue #516 adds
     // test/translation-probes/64_net_process.lox, examples/socket_echo.lox
-    // and examples/subprocess.lox, raising this to 213.
-    ASSERT_EQ(files.size(), 213U);
+    // and examples/subprocess.lox, raising this to 213. PR #546 adds
+    // examples/zlib.lox, raising this to 214.
+    ASSERT_EQ(files.size(), 214U);
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {
