@@ -106,6 +106,20 @@ void Compiler::strExpr() {
     emitByte(Op::STR);
 }
 
+void Compiler::yieldExpr() {
+    // `yield` has assignment precedence: its operand, when present, is a full
+    // expression. The operand may be omitted, in which case the value yielded
+    // is nil. A token with no prefix parselet (a terminator such as ';', ')',
+    // or '}') means the operand is absent.
+    const ParseRule* operandRule = Parser::getRule(m_parser->m_current.type);
+    if (operandRule->prefix != nullptr) {
+        expression();
+    } else {
+        emitByte(Op::NIL);
+    }
+    emitByte(Op::YIELD);
+}
+
 void Compiler::unary() {
     TokenType operatorType = m_parser->m_previous.type;
 
@@ -2372,6 +2386,7 @@ void Compiler::trackOperandStack(Op op) {
     case Op::PUSH_HANDLER:
     case Op::POP_HANDLER:
     case Op::RUN_DEFERS:
+    case Op::YIELD: // pops the yielded value, pushes the resumed value
         // These operate on separate stacks (handler stack, defer list),
         // not the value stack.
         break;

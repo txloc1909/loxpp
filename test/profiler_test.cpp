@@ -165,6 +165,41 @@ TEST_F(ProfilerTest, DeepRecursionPast64Frames) {
     EXPECT_EQ(stats->callCount, 201u) << "recurse(200) must record 201 calls";
 }
 
+// ---------------------------------------------------------------------------
+// 6. A coroutine that suspends and resumes repeatedly must not corrupt the
+//    per-coroutine profiler scope slice. Its functions are profiled under the
+//    coroutine's own ProfilerData, so the root report only needs to prove the
+//    shared scope array survives each hand-off (issue #526).
+// ---------------------------------------------------------------------------
+TEST_F(ProfilerTest, CoroutineSuspendResumeKeepsProfileConsistent) {
+    VM vm;
+    InterpretResult result = vm.interpret(R"(
+        fun gen() {
+            var i = 0;
+            while (i < 3) {
+                yield i;
+                i = i + 1;
+            }
+            return i;
+        }
+        var co = coroutine.create(gen);
+        co.resume();
+        co.resume();
+        co.resume();
+    )");
+    ASSERT_EQ(result, InterpretResult::OK);
+
+    const ProfilerData& data = vm.profilerData();
+    bool sawScript = false;
+    for (const auto& [fn, s] : data.funcTable) {
+        if (s.name == "<script>") {
+            sawScript = true;
+            EXPECT_LE(s.selfNs, s.totalNs);
+        }
+    }
+    EXPECT_TRUE(sawScript) << "root profiler must still profile the script";
+}
+
 #else // LOXPP_PROFILE not defined
 
 // Placeholder so the test binary compiles and reports a clear skip message.

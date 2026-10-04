@@ -78,6 +78,7 @@ class Compiler {
     void binary();
     void lenExpr();
     void strExpr();
+    void yieldExpr();
     void literal();
     void number();
     void string();

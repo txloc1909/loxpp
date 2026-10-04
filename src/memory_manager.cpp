@@ -55,6 +55,8 @@ static const char* objTypeName(ObjType type) {
         return "server";
     case ObjType::PROCESS:
         return "process";
+    case ObjType::COROUTINE:
+        return "coroutine";
     }
     return "?";
 }
@@ -176,6 +178,7 @@ void MemoryManager::traceObject(Obj* obj) {
         break;
     case ObjType::UPVALUE:
         markValue(static_cast<ObjUpvalue*>(obj)->closed);
+        markObject(static_cast<ObjUpvalue*>(obj)->owner);
         break;
     case ObjType::FUNCTION: {
         auto* fn = static_cast<ObjFunction*>(obj);
@@ -287,6 +290,29 @@ void MemoryManager::traceObject(Obj* obj) {
     case ObjType::PROCESS:
         markObject(static_cast<ObjProcess*>(obj)->klass);
         break;
+    case ObjType::COROUTINE: {
+        auto* co = static_cast<ObjCoroutine*>(obj);
+        markObject(co->klass);
+        markValue(co->callee);
+        for (const auto& v : co->stack) {
+            markValue(v);
+        }
+        for (const auto& frame : co->frames) {
+            markObject(frame.closure);
+        }
+        for (const auto& deferList : co->defers) {
+            for (const auto& v : deferList) {
+                markValue(v);
+            }
+        }
+        for (ObjUpvalue* uv : co->openUpvalues) {
+            markObject(uv);
+        }
+        for (const auto& v : co->resultOverrides) {
+            markValue(v);
+        }
+        break;
+    }
     }
 }
 
@@ -336,6 +362,8 @@ static std::size_t objAllocatedSize(Obj* obj) {
         return sizeof(ObjServer);
     case ObjType::PROCESS:
         return sizeof(ObjProcess);
+    case ObjType::COROUTINE:
+        return sizeof(ObjCoroutine);
     }
     return 0;
 }

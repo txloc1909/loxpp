@@ -6,9 +6,9 @@
 // (#526).
 fun gen() {
     var a = yield 1;
-    print "a=" + a;
+    print "a=" + str(a);
     var b = yield 2;
-    print "b=" + b;
+    print "b=" + str(b);
     return a + b;
 }
 

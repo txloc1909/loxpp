@@ -218,7 +218,7 @@ InterpretResult VM::run(int stopAtFrameCount) {
 
         Byte instruction = readByte();
 #ifdef LOXPP_PROFILE
-        m_rt.m_profilerData.opcodeTable[instruction].count++;
+        m_rt.m_activeProfiler->opcodeTable[instruction].count++;
 #endif
         switch (toOpcode(instruction)) {
         case Op::CONSTANT: {
@@ -779,6 +779,34 @@ InterpretResult VM::run(int stopAtFrameCount) {
             FrameSync::loadTop(m_rt.m_frames, m_rt.m_frameCount, frame, ip,
                                chunk);
             break;
+        }
+        case Op::YIELD: {
+            if (m_rt.m_currentCoroutine == nullptr) {
+                CATCHABLE_OR_RETURN(tryCatchableError(
+                    "YieldOutsideCoroutineError",
+                    "Cannot yield from outside a coroutine."));
+                break;
+            }
+            if (m_rt.m_reentrantRunDepth >
+                m_rt.m_currentCoroutine->resumeReentrantDepth) {
+                // A native (or a __str__/__hash__/__eq__ method invoked by
+                // one, or a defer drain) was entered inside this coroutine
+                // since it was resumed. That C++ frame's continuation cannot
+                // be captured, so suspending here would silently drop its
+                // work. A C++ frame that was already below the resume point
+                // is fine: it keeps running while the coroutine is suspended.
+                CATCHABLE_OR_RETURN(tryCatchableError(
+                    "YieldAcrossNativeError",
+                    "Cannot yield across a native callback."));
+                break;
+            }
+            // Flush the register-cached ip before the coroutine snapshot
+            // takes frame->ip, and exit this nested run so whoever resumed
+            // the coroutine gets the yielded value back.
+            frame->ip = ip;
+            Value yielded = m_rt.pop();
+            m_rt.suspendCurrentCoroutine(yielded);
+            return InterpretResult::OK;
         }
         case Op::THROW: {
             Value thrownValue = m_rt.pop();

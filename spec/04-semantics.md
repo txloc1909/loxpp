@@ -435,6 +435,13 @@ the main program or in any function it called without going through
 `resume` — is a **runtime error** (`YieldOutsideCoroutineError`; see
 [Runtime Errors](#runtime-errors)).
 
+A `yield` reached while a native callback is on the call chain — for example
+inside `__str__`, `__hash__`, or `__eq__` while `print` or a map operation
+called it — is a **runtime error** (`YieldAcrossNativeError`; see
+[Runtime Errors](#runtime-errors)). A native callback's own continuation is
+not part of the coroutine's stack and cannot be suspended, so such a yield
+cannot resume.
+
 ### match Expression
 
 ```
@@ -1345,7 +1352,7 @@ a `yield` runs no deferred call — a deferred call in a coroutine runs only
 when its function returns or a throw unwinds past the frame, exactly as in
 an ordinary function.
 
-The two `resume` faults and the `yield` fault are catchable: each is
+The two `resume` faults and the two `yield` faults are catchable: each is
 delivered to a `catch` block as an `Error` value, with the kinds listed in
 [Runtime Errors](#runtime-errors).
 
@@ -1398,6 +1405,7 @@ same text the implementation reports when the fault is left uncaught.
 | `resume` on a dead coroutine | `fun f() { return 1; } var co = coroutine.create(f); co.resume(); co.resume();` | `"DeadCoroutineError"` |
 | `resume` on a running coroutine (self-resume) | `fun f() { co.resume(); } var co = coroutine.create(f); co.resume();` | `"RunningCoroutineError"` |
 | `yield` outside a coroutine | `yield 1;` | `"YieldOutsideCoroutineError"` |
+| `yield` across a native callback | `class S { __str__() { yield 1; return "x"; } } fun f() { print S(); } var co = coroutine.create(f); co.resume();` | `"YieldAcrossNativeError"` |
 
 **The two map-key rows above cover an index read or write, a map or set
 literal, and `in`.** `Map.has(key)` and `Map.del(key)` are stdlib native

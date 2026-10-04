@@ -151,6 +151,58 @@ class ProfileFunctionScope {
     ~ProfileFunctionScope() {
         if (!m_data)
             return; // moved-from guard
+        // A paused scope (a coroutine suspended inside it) already booked its
+        // time up to the suspension; only its post-resume time remains.
+        if (!m_paused) {
+            addElapsed();
+        }
+    }
+
+    // Books the scope's time up to a coroutine suspension, so the suspended
+    // interval is not counted as execution time. rebase() resumes the timer.
+    void pause() {
+        if (!m_data || m_paused)
+            return;
+        addElapsed();
+        m_paused = true;
+    }
+
+    // Re-anchors a scope that a suspended coroutine carried across a resume.
+    // The coroutine may resume at a different absolute frame depth; the
+    // suspended interval was booked by pause() and must not count again.
+    void rebase(int depth) {
+        if (!m_data)
+            return;
+        m_depth = depth;
+        m_data->frameEnterNs[depth] = m_data->nowNs();
+        m_paused = false;
+    }
+
+    // Non-copyable; movable so std::optional can construct it.
+    ProfileFunctionScope(const ProfileFunctionScope&) = delete;
+    ProfileFunctionScope& operator=(const ProfileFunctionScope&) = delete;
+
+    ProfileFunctionScope(ProfileFunctionScope&& o) noexcept
+        : m_data(o.m_data), m_fn(o.m_fn), m_parentFn(o.m_parentFn),
+          m_depth(o.m_depth), m_paused(o.m_paused) {
+        o.m_data = nullptr; // mark moved-from so dtor is a no-op
+    }
+
+    ProfileFunctionScope& operator=(ProfileFunctionScope&& o) noexcept {
+        if (this == &o) {
+            return *this;
+        }
+        m_data = o.m_data;
+        m_fn = o.m_fn;
+        m_parentFn = o.m_parentFn;
+        m_depth = o.m_depth;
+        m_paused = o.m_paused;
+        o.m_data = nullptr; // mark moved-from so dtor is a no-op
+        return *this;
+    }
+
+  private:
+    void addElapsed() {
         int64_t elapsed = m_data->nowNs() - m_data->frameEnterNs[m_depth];
         FunctionStats& callee = m_data->funcTable[m_fn];
         callee.totalNs += elapsed;
@@ -160,21 +212,11 @@ class ProfileFunctionScope {
             m_data->funcTable[m_parentFn].selfNs -= elapsed;
     }
 
-    // Non-copyable; movable so std::optional can construct it.
-    ProfileFunctionScope(const ProfileFunctionScope&) = delete;
-    ProfileFunctionScope& operator=(const ProfileFunctionScope&) = delete;
-
-    ProfileFunctionScope(ProfileFunctionScope&& o) noexcept
-        : m_data(o.m_data), m_fn(o.m_fn), m_parentFn(o.m_parentFn),
-          m_depth(o.m_depth) {
-        o.m_data = nullptr; // mark moved-from so dtor is a no-op
-    }
-
-  private:
     ProfilerData* m_data; // pointer (not ref) to allow move
     ObjFunction* m_fn;
     ObjFunction* m_parentFn; // nullptr for top-level <script>
     int m_depth;
+    bool m_paused{false};
 };
 
 // ---------------------------------------------------------------------------

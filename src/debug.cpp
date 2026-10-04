@@ -240,6 +240,8 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return byteInstruction("DEFER_RECORD", chunk, offset, out, color);
     case Op::RUN_DEFERS:
         return simpleInstruction("RUN_DEFERS", offset, out, color);
+    case Op::YIELD:
+        return simpleInstruction("YIELD", offset, out, color);
     default:
         out << cc(color, kRed) << cc(color, kBold) << "UNKNOWN("
             << static_cast<unsigned>(chunk.at(offset)) << ")"

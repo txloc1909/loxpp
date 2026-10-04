@@ -133,6 +133,7 @@ void renderInstruction(const Chunk& chunk, const DecodedInstruction& ins,
     case Op::POP_HANDLER:
     case Op::THROW:
     case Op::RUN_DEFERS:
+    case Op::YIELD:
         out << mnemonic(ins.op) << '\n';
         return;
 
@@ -326,6 +327,14 @@ TEST(ChunkDecoderTest, MatchesOracleOnTranslationProbes) {
     for (const fs::path& probe : probes) {
         checkFile(probe);
     }
+    // The coroutine probes are the only corpus that emits YIELD, so the
+    // oracle/disassembler round-trip for that opcode lives here.
+    std::vector<fs::path> coroutineProbes =
+        listLoxFiles(projectRoot() / "test" / "coroutine-probes");
+    ASSERT_FALSE(coroutineProbes.empty()) << "no coroutine probes found";
+    for (const fs::path& probe : coroutineProbes) {
+        checkFile(probe);
+    }
 }
 
 TEST(ChunkDecoderTest, MatchesOracleOnExamples) {
@@ -370,6 +379,10 @@ TEST(ChunkDecoderTest, DecodesEveryOpcodeAtLeastOnce) {
 
     for (const fs::path& probe :
          listLoxFiles(projectRoot() / "test" / "translation-probes")) {
+        accumulateOpCounts(probe, counts);
+    }
+    for (const fs::path& probe :
+         listLoxFiles(projectRoot() / "test" / "coroutine-probes")) {
         accumulateOpCounts(probe, counts);
     }
     for (const fs::path& example : listLoxFiles(projectRoot() / "examples")) {

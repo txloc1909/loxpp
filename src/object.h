@@ -27,6 +27,7 @@ enum class ObjType : uint8_t {
     SOCKET,
     SERVER,
     PROCESS,
+    COROUTINE,
 };
 
 inline uint32_t hashString(std::string_view s) {

@@ -59,6 +59,7 @@ DecodedInstruction decodeOne(const Chunk& chunk, int offset) {
     case Op::POP_HANDLER:
     case Op::THROW:
     case Op::RUN_DEFERS:
+    case Op::YIELD:
         ins.length = 1;
         break;
 

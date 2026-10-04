@@ -63,10 +63,12 @@ int frameHeightEffect(const DecodedInstruction& ins) {
     case Op::IS_SEQ:
     // PUSH_HANDLER/POP_HANDLER touch the VM's separate handler stack, not
     // the operand stack this pass tracks (chunk.h). RUN_DEFERS leaves the
-    // operand stack unchanged (chunk.h).
+    // operand stack unchanged (chunk.h). YIELD pops the yielded value and
+    // pushes the resumed value (chunk.h).
     case Op::PUSH_HANDLER:
     case Op::POP_HANDLER:
     case Op::RUN_DEFERS:
+    case Op::YIELD:
         return 0;
 
     // Pop 2 (or 1), push 1: net -1. JUMP_TABLE pops only the tag integer,

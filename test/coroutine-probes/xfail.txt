@@ -1,0 +1,5 @@
+# Probes that are expected to FAIL until a later mission node lands. Each
+# line is `<probe>.lox  <reason>`. check_coroutine_probes.sh excludes these
+# from the passing run and separately asserts each still fails; when one
+# starts passing, the gate fails and the fixing node deletes its line here.
+04_for_in_generator.lox  for-in over a Coroutine is node #527

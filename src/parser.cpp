@@ -61,6 +61,7 @@ static const ParseRule rules[] = {
     RULE(TRUE,           &Compiler::literal,  nullptr,           NONE),
     RULE(VAR,            nullptr,             nullptr,           NONE),
     RULE(WHILE,          nullptr,             nullptr,           NONE),
+    RULE(YIELD,          &Compiler::yieldExpr, nullptr,          NONE),
     RULE(EOF_,           nullptr,             nullptr,           NONE),
     RULE(ERROR,          nullptr,             nullptr,           NONE),
 };

@@ -70,6 +70,7 @@ enum class TokenType : std::uint8_t {
     TRY,
     VAR,
     WHILE,
+    YIELD,
 
     // End of file.
     EOF_,
