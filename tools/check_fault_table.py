@@ -309,7 +309,7 @@ CATCHABLE_ROWS = [
         "co.resume();",
         setup="fun f() { return 1; }\nvar co = coroutine.create(f);\nco.resume();\n",
         expected_kind="DeadCoroutineError",
-        skip={NATIVE: _COROUTINE_SKIP, JVM: _COROUTINE_SKIP, BOOTSTRAP: _COROUTINE_SKIP},
+        skip={JVM: _COROUTINE_SKIP, BOOTSTRAP: _COROUTINE_SKIP},
     ),
     Row(
         "resume_running_coroutine",
@@ -317,14 +317,14 @@ CATCHABLE_ROWS = [
         "co.resume();",
         setup="fun f() { co.resume(); }\nvar co = coroutine.create(f);\n",
         expected_kind="RunningCoroutineError",
-        skip={NATIVE: _COROUTINE_SKIP, JVM: _COROUTINE_SKIP, BOOTSTRAP: _COROUTINE_SKIP},
+        skip={JVM: _COROUTINE_SKIP, BOOTSTRAP: _COROUTINE_SKIP},
     ),
     Row(
         "yield_outside_coroutine",
         "caught",
         "yield 1;",
         expected_kind="YieldOutsideCoroutineError",
-        skip={NATIVE: _COROUTINE_SKIP, JVM: _COROUTINE_SKIP, BOOTSTRAP: _COROUTINE_SKIP},
+        skip={JVM: _COROUTINE_SKIP, BOOTSTRAP: _COROUTINE_SKIP},
     ),
 ]
 

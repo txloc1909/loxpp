@@ -218,7 +218,7 @@ InterpretResult VM::run(int stopAtFrameCount) {
 
         Byte instruction = readByte();
 #ifdef LOXPP_PROFILE
-        m_rt.m_profilerData.opcodeTable[instruction].count++;
+        m_rt.m_activeProfiler->opcodeTable[instruction].count++;
 #endif
         switch (toOpcode(instruction)) {
         case Op::CONSTANT: {
@@ -779,6 +779,21 @@ InterpretResult VM::run(int stopAtFrameCount) {
             FrameSync::loadTop(m_rt.m_frames, m_rt.m_frameCount, frame, ip,
                                chunk);
             break;
+        }
+        case Op::YIELD: {
+            if (m_rt.m_currentCoroutine == nullptr) {
+                CATCHABLE_OR_RETURN(tryCatchableError(
+                    "YieldOutsideCoroutineError",
+                    "Cannot yield from outside a coroutine."));
+                break;
+            }
+            // Flush the register-cached ip before the coroutine snapshot
+            // takes frame->ip, and exit this nested run so whoever resumed
+            // the coroutine gets the yielded value back.
+            frame->ip = ip;
+            Value yielded = m_rt.pop();
+            m_rt.suspendCurrentCoroutine(yielded);
+            return InterpretResult::OK;
         }
         case Op::THROW: {
             Value thrownValue = m_rt.pop();

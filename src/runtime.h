@@ -53,6 +53,7 @@ enum class InterpretResult : std::uint8_t {
 };
 
 struct ObjMap;        // container_objects.h; only a pointer is needed here.
+struct ObjCoroutine;  // container_objects.h; only a pointer is needed here.
 class DiagnosticSink; // diagnostic.h; only a pointer is needed here.
 
 struct HandlerRecord {
@@ -292,6 +293,24 @@ class Runtime {
     // pops the result into *out and returns true; otherwise records the
     // outcome for callNative() and returns false.
     bool invokeMethodFromNative(ObjClosure* method, int argCount, Value* out);
+
+    // Resumes a suspended coroutine. On the first resume the coroutine's
+    // callee and `argCount` arguments sit at the top of the operand stack
+    // (callee at stackTop[-argCount-1]); on later resumes `argCount` is 0 or
+    // 1 and the single argument (or nil) becomes the pending yield's value.
+    // On success writes the value the coroutine next yields or returns to
+    // *out and returns true. On a throw that left the coroutine (dead) or a
+    // resume-state fault, records the outcome in m_reentrantOutcome and
+    // returns false, exactly as invokeCallableFromNative does.
+    bool resumeCoroutine(ObjCoroutine* co, int argCount, Value* out);
+
+    // Suspends m_currentCoroutine, copying its live interpreter state into the
+    // coroutine's snapshot. Called by Op::YIELD after the yielded value has
+    // been popped and frame->ip flushed.
+    void suspendCurrentCoroutine(Value yielded);
+
+    // Native-facing reach for the shared Coroutine class.
+    [[nodiscard]] ObjClass* coroutineClass() const { return m_coroutineClass; }
 
     // Native-facing key operations for map.has / map.del. They run the key
     // through mapGetKey / mapDelKey with the native's enclosing boundary, and
@@ -887,6 +906,16 @@ class Runtime {
     ObjClass* m_socketClass{nullptr};
     ObjClass* m_serverClass{nullptr};
     ObjClass* m_processClass{nullptr};
+    ObjClass* m_coroutineClass{nullptr};
+
+    // The coroutine currently executing, or nullptr for the root coroutine.
+    // A coroutine's live state sits on the shared stack while it runs; this
+    // pointer is what markRoots walks to keep the object and its callee alive.
+    ObjCoroutine* m_currentCoroutine{nullptr};
+    // The value Op::YIELD popped, handed back to whoever resumed the
+    // coroutine. Rooted in markRoots for the brief window before resume
+    // copies it out.
+    Value m_yieldedValue;
 
     // Handler stack for try/catch — parallel to m_frames[].
     // m_handlerStack[i] records {frameCount, stackTop, catchIp} for the
@@ -969,6 +998,11 @@ class Runtime {
 
 #ifdef LOXPP_PROFILE
     ProfilerData m_profilerData;
+    // The profiler the dispatch loop currently attributes work to: the root's
+    // inline m_profilerData, or a running coroutine's own ProfilerData.
+    // resumeCoroutine swaps this; suspendCurrentCoroutine and a normal return
+    // leave the coroutine's scope slice in the coroutine.
+    ProfilerData* m_activeProfiler{&m_profilerData};
     // Parallel to m_frames[]: active ProfileFunctionScope per call depth.
     // .emplace() at function entry; .reset() at Op::RETURN. Sized to match
     // m_frames (FRAMES_MAX plus the reserve; see its own comment).

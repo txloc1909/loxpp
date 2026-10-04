@@ -54,6 +54,7 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/stdlib/reflect_api.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/net_api.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/process_api.cpp
+    ${PROJECT_SOURCE_DIR}/src/stdlib/coroutine_api.cpp
 )
 
 add_library(loxpp_test_core OBJECT ${LOXPP_CORE_SRCS} test_harness.cpp)
@@ -123,6 +124,8 @@ loxpp_add_test(test_class_pattern_gc test_class_pattern.cpp   CORE loxpp_test_co
 loxpp_add_test(test_match_expr      test_match_expr.cpp      CORE loxpp_test_core)
 loxpp_add_test(test_slice          test_slice.cpp           CORE loxpp_test_core)
 loxpp_add_test(test_operator_overload test_operator_overload.cpp CORE loxpp_test_core)
+loxpp_add_test(test_coroutine       test_coroutine.cpp       CORE loxpp_test_core)
+loxpp_add_test(test_coroutine_gc    test_coroutine.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_or_pattern      test_or_pattern.cpp      CORE loxpp_test_core)
 loxpp_add_test(test_or_pattern_gc   test_or_pattern.cpp      CORE loxpp_test_core)
 loxpp_add_test(test_seq_destructure test_seq_destructure.cpp CORE loxpp_test_core)
@@ -288,7 +291,7 @@ set(LOXPP_GC_STRESS_TARGETS
     test_reflect_api_gc test_stress_gc test_gc_regression test_list_gc
     test_map_gc test_enum_gc test_class_pattern_gc test_or_pattern_gc
     test_list_pattern_gc test_at_binding_gc test_handler_stack_leak_gc
-    test_table_gc test_allocator_gc test_net_process_gc)
+    test_table_gc test_allocator_gc test_net_process_gc test_coroutine_gc)
 
 # Register each GTest case as its own CTest test so `ctest -j` parallelizes
 # within a binary, not just across binaries. The per-target prefix keeps names
@@ -306,6 +309,7 @@ set(LOXPP_GTEST_TARGETS
     test_operator_overload
     test_or_pattern test_or_pattern_gc test_seq_destructure test_list_pattern
     test_list_pattern_gc test_at_binding test_at_binding_gc test_profiler
+    test_coroutine test_coroutine_gc
     test_chunk_decoder test_backend_cfg test_backend_abstract_stack
     test_backend_capture test_nonlocal_cfg test_handler_stack_leak
     test_handler_stack_leak_gc test_handler_depth_invariant test_jvm_emit

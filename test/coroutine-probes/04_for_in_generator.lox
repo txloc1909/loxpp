@@ -24,7 +24,7 @@ fun upto() {
 }
 
 for (var y in coroutine.create(upto)) {
-    print "y=" + y;
+    print "y=" + str(y);
 }
 print "end";
 

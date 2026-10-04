@@ -160,6 +160,16 @@ class ProfileFunctionScope {
             m_data->funcTable[m_parentFn].selfNs -= elapsed;
     }
 
+    // Re-anchors a scope that a suspended coroutine carried across a resume.
+    // The coroutine may resume at a different absolute frame depth, and the
+    // suspended interval must not count as execution time.
+    void rebase(int depth) {
+        if (!m_data)
+            return;
+        m_depth = depth;
+        m_data->frameEnterNs[depth] = m_data->nowNs();
+    }
+
     // Non-copyable; movable so std::optional can construct it.
     ProfileFunctionScope(const ProfileFunctionScope&) = delete;
     ProfileFunctionScope& operator=(const ProfileFunctionScope&) = delete;
@@ -168,6 +178,18 @@ class ProfileFunctionScope {
         : m_data(o.m_data), m_fn(o.m_fn), m_parentFn(o.m_parentFn),
           m_depth(o.m_depth) {
         o.m_data = nullptr; // mark moved-from so dtor is a no-op
+    }
+
+    ProfileFunctionScope& operator=(ProfileFunctionScope&& o) noexcept {
+        if (this == &o) {
+            return *this;
+        }
+        m_data = o.m_data;
+        m_fn = o.m_fn;
+        m_parentFn = o.m_parentFn;
+        m_depth = o.m_depth;
+        o.m_data = nullptr; // mark moved-from so dtor is a no-op
+        return *this;
     }
 
   private:

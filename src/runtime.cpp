@@ -15,6 +15,7 @@
 #include "stdlib/reflect_api.h"
 #include "stdlib/net_api.h"
 #include "stdlib/process_api.h"
+#include "stdlib/coroutine_api.h"
 
 #include <cmath>
 #include <cstdarg>
@@ -144,7 +145,8 @@ Runtime::ThrowOutcome Runtime::call(ObjClosure* closure, int argCount,
         int depth = m_frameCount - 1;
         ObjClosure* parent =
             (depth > 0) ? m_frames[depth - 1].closure : nullptr;
-        m_profilerScopes[depth].emplace(m_profilerData, closure, depth, parent);
+        m_profilerScopes[depth].emplace(*m_activeProfiler, closure, depth,
+                                        parent);
     }
 #endif
     return ThrowOutcome::Pushed;
@@ -356,6 +358,273 @@ bool Runtime::invokeMethodFromNative(ObjClosure* method, int argCount,
     return false;
 }
 
+bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
+    if (co->state == CoroutineState::DEAD) {
+        m_reentrantOutcome = fromThrow(raiseThrowableError(
+            "DeadCoroutineError", "Cannot resume a dead coroutine.",
+            m_nativeStopAtFrameCount));
+        return false;
+    }
+    if (co->state == CoroutineState::RUNNING ||
+        co->state == CoroutineState::NORMAL) {
+        m_reentrantOutcome = fromThrow(raiseThrowableError(
+            "RunningCoroutineError", "Cannot resume a running coroutine.",
+            m_nativeStopAtFrameCount));
+        return false;
+    }
+
+    const int entry = m_frameCount;
+    const int boundary = m_nativeStopAtFrameCount;
+    Value* base = nullptr;
+    Value received;
+
+    if (co->started) {
+        if (argCount > 1) {
+            m_reentrantOutcome = fromThrow(raiseThrowableError(
+                "ArityError", "Expected 0 or 1 arguments.", boundary));
+            return false;
+        }
+        received = argCount == 1 ? peek(0) : from<Nil>(Nil{});
+        // The coroutine's slice is rebuilt above the resume call's own
+        // callee/args window; that window is discarded by callNative once
+        // this native returns, exactly like any other re-entrant call.
+        base = stackTop;
+    }
+
+    ObjCoroutine* parent = m_currentCoroutine;
+    if (parent != nullptr) {
+        parent->state = CoroutineState::NORMAL;
+    }
+    co->state = CoroutineState::RUNNING;
+    m_currentCoroutine = co;
+
+#ifdef LOXPP_PROFILE
+    ProfilerData* savedProfiler = m_activeProfiler;
+    if (co->profiler == nullptr) {
+        co->profiler = std::make_unique<ProfilerData>();
+    }
+    m_activeProfiler = co->profiler.get();
+#endif
+
+    OpResult outcome = OpResult::OK;
+    bool frameReady = false;
+    bool loopOk = true;
+
+    if (!co->started) {
+        // First resume: the callee/args window is already at the top. Put the
+        // stored callee where the receiver sat and dispatch it.
+        Value* calleeSlot = stackTop - argCount - 1;
+        calleeSlot[0] = co->callee;
+        base = calleeSlot;
+        co->activeFrameBase = entry;
+        co->activeStackBase = calleeSlot;
+        co->activeWindowTop = calleeSlot + argCount + 1;
+        co->started = true;
+        OpResult r = opCall(argCount, boundary);
+        if (r == OpResult::Resumed && m_frameCount == entry + 1) {
+            frameReady = true;
+        } else {
+            // No frame of ours was pushed: an arity fault caught inside this
+            // run, or an uncaught/fatal error. The coroutine never started.
+            co->started = false;
+            co->state = CoroutineState::SUSPENDED;
+            co->activeStackBase = nullptr;
+            co->activeWindowTop = nullptr;
+            outcome = r;
+        }
+    } else {
+        for (const Value& v : co->stack) {
+            push(v);
+        }
+        for (std::size_t i = 0; i < co->frames.size(); i++) {
+            const CoroutineFrameSnapshot& fs = co->frames[i];
+            CallFrame& f = m_frames[entry + static_cast<int>(i)];
+            f.closure = fs.closure;
+            f.ip = fs.closure->function->chunk.cbegin() + fs.ipOffset;
+            f.slots = base + fs.slotOffset;
+        }
+        m_frameCount = entry + static_cast<int>(co->frames.size());
+        for (const CoroutineHandlerSnapshot& hs : co->handlers) {
+            m_handlerStack.push_back(HandlerRecord{
+                entry + hs.frameOffset, base + hs.stackOffset, hs.catchIp});
+        }
+        for (std::size_t i = 0; i < co->defers.size(); i++) {
+            m_deferLists[entry + static_cast<int>(i)] = co->defers[i];
+        }
+        for (std::size_t i = 0; i < co->resultChecks.size(); i++) {
+            m_frameResultCheck[entry + static_cast<int>(i)] =
+                static_cast<ResultCheck>(co->resultChecks[i]);
+            m_frameResultOverrideSet[entry + static_cast<int>(i)] =
+                co->resultOverrideSet[i] != 0;
+            m_frameResultOverride[entry + static_cast<int>(i)] =
+                co->resultOverrides[i];
+        }
+        for (std::size_t i = 0; i < co->openUpvalues.size(); i++) {
+            ObjUpvalue* uv = co->openUpvalues[i];
+            uv->location = base + co->openUpvalueOffsets[i];
+            uv->owner = nullptr;
+            ObjUpvalue** pp = &m_openUpvalues;
+            while (*pp != nullptr && (*pp)->location > uv->location) {
+                pp = &(*pp)->next;
+            }
+            uv->next = *pp;
+            *pp = uv;
+        }
+#ifdef LOXPP_PROFILE
+        for (std::size_t i = 0; i < co->profilerScopes.size(); i++) {
+            int depth = entry + static_cast<int>(i);
+            m_profilerScopes[depth] = std::move(co->profilerScopes[i]);
+            if (m_profilerScopes[depth].has_value()) {
+                m_profilerScopes[depth]->rebase(depth);
+            }
+        }
+#endif
+        co->activeFrameBase = entry;
+        co->activeStackBase = base;
+        co->activeWindowTop = base;
+        push(received);
+        // The snapshot is now live on the shared stack. Clear it so a running
+        // coroutine has no stale state and markRoots does not double-mark it.
+        co->stack.clear();
+        co->frames.clear();
+        co->handlers.clear();
+        co->defers.clear();
+        co->openUpvalues.clear();
+        co->openUpvalueOffsets.clear();
+        co->resultChecks.clear();
+        co->resultOverrideSet.clear();
+        co->resultOverrides.clear();
+        frameReady = true;
+    }
+
+    if (frameReady) {
+        // A throw that a handler outside the coroutine catches rewrites the
+        // resumer's own ip to its catch block. A normal return and a yield
+        // leave it untouched, so this distinguishes "the coroutine died by a
+        // throw caught here" from "the coroutine returned", which otherwise
+        // can leave the same m_frameCount/stackTop shape.
+        CallFrame* callerFrame = (entry >= 1) ? &m_frames[entry - 1] : nullptr;
+        auto callerIpBefore = (callerFrame != nullptr)
+                                  ? callerFrame->ip
+                                  : Chunk::const_iterator{};
+        loopOk = runNestedLoop(entry);
+        bool callerRedirected =
+            callerFrame != nullptr && callerFrame->ip != callerIpBefore;
+        if (!loopOk) {
+            co->state = CoroutineState::DEAD;
+            outcome = OpResult::Fatal;
+        } else if (co->state == CoroutineState::SUSPENDED) {
+            *out = m_yieldedValue;
+        } else if (callerRedirected) {
+            co->state = CoroutineState::DEAD;
+            outcome =
+                (m_frameCount <= boundary) ? OpResult::Stop : OpResult::Resumed;
+        } else if (m_frameCount == entry && stackTop == base + 1) {
+            *out = pop();
+            co->state = CoroutineState::DEAD;
+        } else {
+            co->state = CoroutineState::DEAD;
+            outcome =
+                (m_frameCount <= boundary) ? OpResult::Stop : OpResult::Resumed;
+        }
+    }
+
+#ifdef LOXPP_PROFILE
+    m_activeProfiler = savedProfiler;
+#endif
+    m_currentCoroutine = parent;
+    if (parent != nullptr) {
+        parent->state = CoroutineState::RUNNING;
+    }
+    co->activeStackBase = nullptr;
+    co->activeWindowTop = nullptr;
+
+    if (outcome != OpResult::OK) {
+        m_reentrantOutcome = outcome;
+        return false;
+    }
+    return true;
+}
+
+void Runtime::suspendCurrentCoroutine(Value yielded) {
+    ObjCoroutine* co = m_currentCoroutine; // VM guarantees non-null
+    const int baseFrame = co->activeFrameBase;
+    Value* base = co->activeStackBase;
+
+    co->stack.assign(base, stackTop);
+
+    co->handlers.clear();
+    while (!m_handlerStack.empty() &&
+           m_handlerStack.back().frameCount >= baseFrame) {
+        HandlerRecord h = m_handlerStack.back();
+        m_handlerStack.pop_back();
+        co->handlers.push_back(CoroutineHandlerSnapshot{
+            h.frameCount - baseFrame, static_cast<int>(h.stackTop - base),
+            h.catchIp});
+    }
+
+    co->frames.clear();
+    co->frames.reserve(static_cast<std::size_t>(m_frameCount - baseFrame));
+    for (int i = baseFrame; i < m_frameCount; i++) {
+        const CallFrame& f = m_frames[i];
+        co->frames.push_back(CoroutineFrameSnapshot{
+            f.closure,
+            static_cast<int>(f.ip - f.closure->function->chunk.cbegin()),
+            static_cast<int>(f.slots - base)});
+    }
+
+    co->defers.clear();
+    for (int i = baseFrame; i < m_frameCount; i++) {
+        co->defers.push_back(std::move(m_deferLists[i]));
+        m_deferLists[i].clear();
+    }
+
+    co->resultChecks.clear();
+    co->resultOverrideSet.clear();
+    co->resultOverrides.clear();
+    for (int i = baseFrame; i < m_frameCount; i++) {
+        co->resultChecks.push_back(
+            static_cast<std::uint8_t>(m_frameResultCheck[i]));
+        co->resultOverrideSet.push_back(m_frameResultOverrideSet[i] ? 1 : 0);
+        co->resultOverrides.push_back(m_frameResultOverride[i]);
+        m_frameResultCheck[i] = ResultCheck::None;
+        m_frameResultOverrideSet[i] = false;
+    }
+
+    co->openUpvalues.clear();
+    co->openUpvalueOffsets.clear();
+    while (m_openUpvalues != nullptr && m_openUpvalues->location >= base) {
+        ObjUpvalue* uv = m_openUpvalues;
+        m_openUpvalues = uv->next;
+        uv->next = nullptr;
+        co->openUpvalueOffsets.push_back(static_cast<int>(uv->location - base));
+        co->openUpvalues.push_back(uv);
+        uv->owner = co;
+    }
+    // Point the open upvalues at the snapshot's own stable storage so a
+    // closure that escaped the coroutine still reads the captured cell. The
+    // buffer does not move again while the coroutine is suspended.
+    for (std::size_t i = 0; i < co->openUpvalues.size(); i++) {
+        co->openUpvalues[i]->location =
+            co->stack.data() + co->openUpvalueOffsets[i];
+    }
+
+#ifdef LOXPP_PROFILE
+    co->profilerScopes.clear();
+    co->profilerScopes.resize(
+        static_cast<std::size_t>(m_frameCount - baseFrame));
+    for (int i = baseFrame; i < m_frameCount; i++) {
+        co->profilerScopes[i - baseFrame] = std::move(m_profilerScopes[i]);
+        m_profilerScopes[i].reset();
+    }
+#endif
+
+    stackTop = co->activeWindowTop;
+    m_frameCount = baseFrame;
+    m_yieldedValue = yielded;
+    co->state = CoroutineState::SUSPENDED;
+}
+
 ObjUpvalue* Runtime::captureUpvalue(Value* local) {
     ObjUpvalue* prev = nullptr;
     ObjUpvalue* cur = m_openUpvalues;
@@ -381,6 +650,7 @@ void Runtime::closeUpvalues(Value* last) {
         ObjUpvalue* uv = m_openUpvalues;
         uv->closed = *uv->location;
         uv->location = &uv->closed;
+        uv->owner = nullptr;
         m_openUpvalues = uv->next;
     }
 }
@@ -713,6 +983,7 @@ void Runtime::defineNatives() {
     m_socketClass = net.socket;
     m_serverClass = net.server;
     m_processClass = registerProcessAPI(reg, m_mapClass);
+    m_coroutineClass = registerCoroutineAPI(reg);
 }
 
 void Runtime::runtimeError(const char* format, ...) {
@@ -777,6 +1048,13 @@ void Runtime::markRoots() {
     if (m_processClass) {
         m_mm.markObject(m_processClass);
     }
+    if (m_coroutineClass) {
+        m_mm.markObject(m_coroutineClass);
+    }
+    if (m_currentCoroutine != nullptr) {
+        m_mm.markObject(m_currentCoroutine);
+    }
+    m_mm.markValue(m_yieldedValue);
     for (ObjString* name : m_protocolNames) {
         if (name) {
             m_mm.markObject(name);
@@ -787,6 +1065,7 @@ void Runtime::markRoots() {
 void Runtime::resetStack() {
     stackTop = stack;
     m_frameCount = 0;
+    m_currentCoroutine = nullptr;
     m_stackOverflow = false;
     m_handlerStack.clear();
     for (auto& deferList : m_deferLists) {
@@ -1135,6 +1414,16 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
         return callNative(asObjNative(as<Obj*>(method)), argCount,
                           stopAtFrameCount);
     }
+    if (isCoroutine(receiver)) {
+        Value method;
+        if (!m_coroutineClass->methods.get(name, method)) {
+            runtimeError("Undefined method '%s' on coroutine.",
+                         name->chars.c_str());
+            return OpResult::Fatal;
+        }
+        return callNative(asObjNative(as<Obj*>(method)), argCount,
+                          stopAtFrameCount);
+    }
     return fromThrow(raiseThrowableError("InvalidReceiverError",
                                          "Method called on invalid receiver.",
                                          stopAtFrameCount));
@@ -1218,6 +1507,19 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
         ObjBoundNative* bound =
             m_mm.create<ObjBoundNative>(peek(0), asObjNative(as<Obj*>(method)));
         pop(); // process
+        push(Value{static_cast<Obj*>(bound)});
+        return OpResult::OK;
+    }
+    if (isCoroutine(peek(0))) {
+        Value method;
+        if (!m_coroutineClass->methods.get(name, method)) {
+            runtimeError("Undefined property '%s' on coroutine.",
+                         name->chars.c_str());
+            return OpResult::Fatal;
+        }
+        ObjBoundNative* bound =
+            m_mm.create<ObjBoundNative>(peek(0), asObjNative(as<Obj*>(method)));
+        pop(); // coroutine
         push(Value{static_cast<Obj*>(bound)});
         return OpResult::OK;
     }
