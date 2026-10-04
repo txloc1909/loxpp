@@ -9,6 +9,8 @@
 //   3. selfNs <= totalNs for every profiled function.
 //   4. GC stats are populated after an allocation-heavy program.
 //   5. Call chain deeper than 64 frames stays in bounds (issue #299).
+//   6. A coroutine's function and opcode counts reach the root report, while
+//      it is suspended, completed, or abandoned (issue #538).
 
 #include "test_harness.h"
 #include "vm.h"
@@ -17,6 +19,8 @@
 #ifdef LOXPP_PROFILE
 #include "chunk.h"
 #include "profiler.h"
+#include <cstdlib>
+#include <string>
 #endif
 
 class ProfilerTest : public ::testing::Test {};
@@ -31,6 +35,15 @@ class ProfilerTest : public ::testing::Test {};
 static const ProfilerData& runAndGetProfile(VM& vm, const std::string& source) {
     vm.interpret(source);
     return vm.profilerData();
+}
+
+static const FunctionStats* findFunction(const ProfilerData& data,
+                                         const std::string& name) {
+    for (const auto& [fn, stats] : data.funcTable) {
+        if (stats.name == name)
+            return &stats;
+    }
+    return nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +211,84 @@ TEST_F(ProfilerTest, CoroutineSuspendResumeKeepsProfileConsistent) {
         }
     }
     EXPECT_TRUE(sawScript) << "root profiler must still profile the script";
+}
+
+// ---------------------------------------------------------------------------
+// 7. A coroutine's function and opcode counts must reach the root report
+//    (issue #538). The coroutine is suspended when the program ends, so this
+//    exercises the report-time merge of a live coroutine.
+// ---------------------------------------------------------------------------
+TEST_F(ProfilerTest, SuspendedCoroutineFunctionMergedIntoReport) {
+    VM vm;
+    InterpretResult result = vm.interpret(R"(
+        fun gen() {
+            yield 1;
+        }
+        var co = coroutine.create(gen);
+        co.resume();
+    )");
+    ASSERT_EQ(result, InterpretResult::OK);
+
+    const ProfilerData& data = vm.profilerData();
+    const FunctionStats* gen = findFunction(data, "gen");
+    ASSERT_NE(gen, nullptr)
+        << "suspended coroutine's function must appear in the report";
+    EXPECT_EQ(gen->callCount, 1u);
+    EXPECT_GT(data.opcodeTable[static_cast<uint8_t>(Op::YIELD)].count, 0u)
+        << "YIELD runs only inside the coroutine and must be merged";
+}
+
+// ---------------------------------------------------------------------------
+// 8. A coroutine that runs to completion is dead but still referenced when the
+//    report prints, so its function must still be merged (issue #538).
+// ---------------------------------------------------------------------------
+TEST_F(ProfilerTest, CompletedCoroutineFunctionMergedIntoReport) {
+    VM vm;
+    InterpretResult result = vm.interpret(R"(
+        fun worker() { return 42; }
+        var co = coroutine.create(worker);
+        co.resume();
+    )");
+    ASSERT_EQ(result, InterpretResult::OK);
+
+    const ProfilerData& data = vm.profilerData();
+    const FunctionStats* worker = findFunction(data, "worker");
+    ASSERT_NE(worker, nullptr)
+        << "completed coroutine's function must appear in the report";
+    EXPECT_EQ(worker->callCount, 1u);
+}
+
+// ---------------------------------------------------------------------------
+// 9. An abandoned coroutine is collected by the sweeper, which must fold its
+//    profile into the root before the object (and its profiler) is freed
+//    (issue #538). LOXPP_STRESS_GC forces the sweep within the program.
+// ---------------------------------------------------------------------------
+TEST_F(ProfilerTest, AbandonedCoroutineFunctionMergedOnSweep) {
+    const char* prevStress = std::getenv("LOXPP_STRESS_GC");
+    const std::string prevStressValue = prevStress ? prevStress : "";
+    ::setenv("LOXPP_STRESS_GC", "1", 1);
+    {
+        VM vm;
+        InterpretResult result = vm.interpret(R"(
+            fun gen() {
+                yield 1;
+            }
+            var co = coroutine.create(gen);
+            co.resume();
+            co = nil;
+            var i = 0;
+            while (i < 50) { var s = str(i); i = i + 1; }
+        )");
+        ASSERT_EQ(result, InterpretResult::OK);
+
+        const ProfilerData& data = vm.profilerData();
+        EXPECT_NE(findFunction(data, "gen"), nullptr)
+            << "abandoned coroutine's function must survive its sweep";
+    }
+    if (prevStress)
+        ::setenv("LOXPP_STRESS_GC", prevStressValue.c_str(), 1);
+    else
+        ::unsetenv("LOXPP_STRESS_GC");
 }
 
 #else // LOXPP_PROFILE not defined

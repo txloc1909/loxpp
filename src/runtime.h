@@ -1007,8 +1007,9 @@ class Runtime {
     // The profiler the dispatch loop currently attributes work to: the root's
     // inline m_profilerData, or a running coroutine's own ProfilerData.
     // resumeCoroutine swaps this; suspendCurrentCoroutine and a normal return
-    // leave the coroutine's scope slice in the coroutine. The report reads
-    // only the root; merging the per-coroutine tables is issue #538.
+    // leave the coroutine's scope slice in the coroutine. Before the report
+    // prints, MemoryManager::mergeCoroutineProfilers() folds each live
+    // coroutine's tables into the root, and sweep() folds an abandoned one.
     ProfilerData* m_activeProfiler{&m_profilerData};
     // Parallel to m_frames[]: active ProfileFunctionScope per call depth.
     // .emplace() at function entry; .reset() at Op::RETURN. Sized to match

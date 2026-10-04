@@ -70,6 +70,18 @@ struct ProfilerData {
     }
 
     void report(std::FILE* out) const;
+
+    // Sums another profiler's opcode and function tables into this one. GC
+    // stats, frame timestamps, and program bounds are deliberately excluded:
+    // GC is a process-global event already recorded in the root, and the rest
+    // are per-interpret scratch.
+    void mergeFrom(const ProfilerData& other);
+
+    // Zeroes opcode counts and clears the function table while keeping this
+    // object's address stable, so ProfileFunctionScope objects a suspended
+    // coroutine still holds stay valid. Called after a coroutine's stats are
+    // merged, so a later report does not count them a second time.
+    void clearStats();
 };
 
 // opcodeName(Op) — declared in chunk.h, defined in chunk.cpp, generated from
@@ -178,6 +190,11 @@ class ProfileFunctionScope {
         m_paused = false;
     }
 
+    // The profiler this scope books time into. Used to tell a coroutine
+    // boundary: the frame above a coroutine's entry belongs to another
+    // profiler and must not parent it.
+    ProfilerData* data() const { return m_data; }
+
     // Non-copyable; movable so std::optional can construct it.
     ProfileFunctionScope(const ProfileFunctionScope&) = delete;
     ProfileFunctionScope& operator=(const ProfileFunctionScope&) = delete;
@@ -244,6 +261,31 @@ class ProfileProgramScope {
   private:
     ProfilerData& m_data;
 };
+
+// ---------------------------------------------------------------------------
+// ProfilerData::mergeFrom() / clearStats() implementations
+// ---------------------------------------------------------------------------
+
+inline void ProfilerData::mergeFrom(const ProfilerData& other) {
+    if (this == &other)
+        return;
+    for (std::size_t i = 0; i < opcodeTable.size(); ++i)
+        opcodeTable[i].count += other.opcodeTable[i].count;
+    for (const auto& [fn, src] : other.funcTable) {
+        FunctionStats& dst = funcTable[fn];
+        if (dst.name.empty())
+            dst.name = src.name;
+        dst.callCount += src.callCount;
+        dst.totalNs += src.totalNs;
+        dst.selfNs += src.selfNs;
+    }
+}
+
+inline void ProfilerData::clearStats() {
+    for (auto& op : opcodeTable)
+        op.count = 0;
+    funcTable.clear();
+}
 
 // ---------------------------------------------------------------------------
 // ProfilerData::report() implementation

@@ -65,6 +65,12 @@ LOXPP_PROFILE`. The root coroutine keeps the inline storage. Zero cost when
 profiling is off. `CLOCK_PROCESS_CPUTIME_ID` stays correct because suspension
 is cooperative on one OS thread.
 
+Before the report prints, `MemoryManager::mergeCoroutineProfilers()` folds
+each live coroutine's function and opcode tables into the root, then clears
+them so a later report does not count them again. `sweep()` does the same for
+an abandoned coroutine, whose profiler dies with it. GC stats stay in the root:
+a collection is a process-global pause, not a coroutine's work.
+
 ## Backends
 
 - QBE: functions containing `YIELD` fall back to the interpreter loop (the

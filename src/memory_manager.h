@@ -68,6 +68,10 @@ class MemoryManager : public VmAllocBase {
     void setCurrentCompiler(Compiler* c);
 #ifdef LOXPP_PROFILE
     void setProfilerData(ProfilerData* data) { m_profilerData = data; }
+    // Folds every live coroutine's profiler tables into the root profiler and
+    // clears them, so the report sees coroutine work but a later report does
+    // not count it again.
+    void mergeCoroutineProfilers();
 #endif
     void markObject(Obj* obj);
     void markValue(const Value& v);

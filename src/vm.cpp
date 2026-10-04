@@ -29,7 +29,12 @@ InterpretResult VM::interpret(const std::string& source) {
     m_rt.m_profilerData.opcodeTable[static_cast<uint8_t>(Op::CALL)].count++;
     ProfileProgramScope programScope(m_rt.m_profilerData);
 #endif
-    return run();
+    InterpretResult result = run();
+#ifdef LOXPP_PROFILE
+    // Fold every coroutine's tables into the root before the report prints.
+    m_rt.memoryManager().mergeCoroutineProfilers();
+#endif
+    return result;
 }
 
 InterpretResult VM::run(int stopAtFrameCount) {
