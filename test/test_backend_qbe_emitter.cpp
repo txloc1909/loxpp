@@ -583,3 +583,20 @@ TEST(QbeEmitter, YieldOutsideCoroutineModeThrows) {
     EXPECT_THROW(emitNestedWithOptions("fun gen() { yield 1; }", {0}, options),
                  std::runtime_error);
 }
+
+TEST(QbeEmitter, CoroutineModeGivesACompiledHandlerItsCatchResumeState) {
+    // A try inside a coroutine needs a catch resume state: handleThrow stores
+    // it so the driver can re-enter the frame at its catch block. The old
+    // lowering passed -1, which left a cross-frame throw uncatchable.
+    qbe::EmitOptions options;
+    options.coroutineMode = true;
+    std::string ssa = emitNestedWithOptions(
+        "fun g() { throw \"x\"; }\n"
+        "fun f() { try { g(); } catch (e) { return 1; } }",
+        {1}, options);
+    EXPECT_NE(ssa.find("call $rt_push_handler(l %rt, l"), std::string::npos);
+    EXPECT_EQ(ssa.find(", w -1)"), std::string::npos)
+        << "a compiled handler must carry its catch resume state";
+    EXPECT_NE(ssa.find("lox_fn_nested_catch"), std::string::npos)
+        << "the catch block needs its own resume label";
+}

@@ -45,6 +45,10 @@ constexpr int kOpResultFatal = 3;
 // Runtime::OpResult::Call (coroutine mode): the wrapper pushed a callable
 // frame for the driver instead of running it.
 constexpr int kOpResultCall = 4;
+// Coroutine mode's state ids for compiled catch blocks. An instruction
+// offset never reaches this base, so a catch state and a resume-point state
+// stay distinct even when a catch block starts at a resume-point offset.
+constexpr int kCatchStateBase = 0x40000000;
 
 [[noreturn]] void unsupported(Op op) {
     throw std::runtime_error(
@@ -144,6 +148,17 @@ class Emitter {
         for (const HandlerEntry& he : cfg.handlerEntries) {
             m_pushOffsetToCatchLabel[he.pushHandlerOffset] =
                 cfg.blocks[static_cast<std::size_t>(he.catchBlock)].label;
+            // Coroutine mode: a compiled handler needs a resume state for its
+            // catch block, so handleThrow can redirect the frame there and the
+            // prologue can re-enter it. The state id is in its own number
+            // space (kCatchStateBase) because a catch block can start at the
+            // same offset as a resume point.
+            if (m_options.coroutineMode) {
+                int state = kCatchStateBase + he.catchBlock;
+                m_pushOffsetToCatchState[he.pushHandlerOffset] = state;
+                m_catchStateByBlock[he.catchBlock] = state;
+                m_resumeStates.push_back(state);
+            }
         }
         if (m_options.promoteRegisters && !m_options.coroutineMode) {
             m_plan = planPromotion(m_fn, m_analysis, m_captures, cfg);
@@ -182,6 +197,12 @@ class Emitter {
     // A PUSH_HANDLER's own offset -> its catch block's cfg label, built once
     // cfg is available (run(), above).
     std::unordered_map<int, std::string> m_pushOffsetToCatchLabel;
+    // Coroutine mode: a PUSH_HANDLER's own offset -> its catch block's resume
+    // state (kCatchStateBase + block index), and a cfg block index -> that
+    // state. Built in run() once cfg is available; handleThrow stores the
+    // state in the frame so the prologue re-enters the catch block.
+    std::unordered_map<int, int> m_pushOffsetToCatchState;
+    std::unordered_map<std::size_t, int> m_catchStateByBlock;
     // S8 (#461): a JUMP_TABLE offset -> the word temp holding its own
     // GET_TAG's tag, when the two were fused (emitBlock). Absent for a
     // JUMP_TABLE whose tag came through the unfused rt_op_get_tag path.
@@ -205,10 +226,15 @@ class Emitter {
 
     std::string newTemp() { return "%t" + std::to_string(m_tempCounter++); }
 
-    // The QBE label a resume point's continuation is emitted at, and the
-    // state id rt_set_resume_state stores for it.
-    std::string resumeLabel(int offset) const {
-        return m_symbol + "_resume" + std::to_string(offset);
+    // The QBE label a resume state's continuation is emitted at. A resume
+    // point (a call or YIELD) uses its bytecode offset; a compiled catch block
+    // uses its own id space (kCatchStateBase + cfg block index).
+    std::string stateLabel(int state) const {
+        if (state >= kCatchStateBase) {
+            return m_symbol + "_catch" +
+                   std::to_string(state - kCatchStateBase);
+        }
+        return m_symbol + "_resume" + std::to_string(state);
     }
 
     const std::pair<StackState, StackState>& stateOf(int offset) const {
@@ -662,8 +688,8 @@ class Emitter {
             m_body << "\t" << hit << " =w ceqw " << state << ", " << id << "\n";
             std::string next =
                 "@" + m_symbol + "_resume_next" + std::to_string(i);
-            m_body << "\tjnz " << hit << ", @" << resumeLabel(id) << ", "
-                   << next << "\n";
+            m_body << "\tjnz " << hit << ", @" << stateLabel(id) << ", " << next
+                   << "\n";
             m_body << next << "\n";
         }
         // An unknown nonzero state is a contract violation (compiled code and
@@ -1207,8 +1233,19 @@ class Emitter {
             // push_back), so this skips the generic callSlowPath* status
             // machinery entirely.
             std::string checkpointAddr = addr(before.height);
+            // Coroutine mode: the handler carries its catch block's resume
+            // state, so handleThrow can redirect this compiled frame to the
+            // catch block. Outside coroutine mode the emitter's own local-catch
+            // jump uses the static label, and -1 says "no compiled state".
+            int catchState = -1;
+            if (m_options.coroutineMode) {
+                auto it = m_pushOffsetToCatchState.find(ins.offset);
+                if (it != m_pushOffsetToCatchState.end()) {
+                    catchState = it->second;
+                }
+            }
             m_body << "\tcall $rt_push_handler(l %rt, l " << checkpointAddr
-                   << ", w -1)\n";
+                   << ", w " << catchState << ")\n";
             break;
         }
         case Op::POP_HANDLER:
@@ -1254,7 +1291,7 @@ class Emitter {
         // window), and a resumed YIELD's received value already sits at the
         // yield's result slot.
         if (coroutinePoint) {
-            m_body << "@" << resumeLabel(ins.offset) << "\n";
+            m_body << "@" << stateLabel(ins.offset) << "\n";
         }
     }
 
@@ -1291,6 +1328,16 @@ class Emitter {
     void emitBlock(const BasicBlock& block, std::size_t blockIndex,
                    const Cfg& cfg) {
         m_body << "@" << block.label << "\n";
+        // Coroutine mode: a catch block is also a resume point. handleThrow
+        // stores its state, and the prologue re-enters the frame here with the
+        // thrown value already at the handler's checkpoint. Emit the label
+        // even for an unreached block, so the prologue's jnz target exists.
+        if (m_options.coroutineMode) {
+            auto it = m_catchStateByBlock.find(blockIndex);
+            if (it != m_catchStateByBlock.end()) {
+                m_body << "@" << stateLabel(it->second) << "\n";
+            }
+        }
         if (!leaderReached(block)) {
             m_body << "\tret " << kRtOk << "\n";
             return;

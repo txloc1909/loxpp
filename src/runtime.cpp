@@ -380,6 +380,13 @@ bool Runtime::runCompiledFrames(int base) {
     // (backend/rt_abi.h). A frame's own C frame does not survive a kRtCall or
     // a kRtYield: the driver re-enters it later from CallFrame::compiledState,
     // with all its live values restored to the same slots from the snapshot.
+    //
+    // m_resumableMode is set only around each frame's own code() call, and
+    // restored to the value this driver entry saw. A nested driver (a
+    // `for-in`/`resume` over another coroutine inside a coroutine) must not
+    // leave the mode clear: the enclosing frame is still on its own code()
+    // call and its next yield would otherwise fail as a native-callback yield.
+    bool savedResumable = m_resumableMode;
     for (;;) {
         if (m_frameCount <= base) {
             // The outermost frame returned (or a throw unwound below it).
@@ -398,7 +405,7 @@ bool Runtime::runCompiledFrames(int base) {
             reinterpret_cast<RtCompiledFn>(frame->closure->function->code);
         m_resumableMode = true;
         int status = code(this, frame->slots);
-        m_resumableMode = false;
+        m_resumableMode = savedResumable;
         switch (status) {
         case kRtCall:
             // A callable frame was pushed by the frame below. The driver must
