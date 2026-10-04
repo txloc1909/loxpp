@@ -474,7 +474,7 @@ everything read as one String.
 Reads up to `n` bytes from the Socket. The call blocks until `n` bytes have
 arrived or the peer closes its write direction, then returns everything read as
 one String. At end of stream it returns the bytes that remain, or `""` when none
-do. `n` must be a non-negative integer.
+do. `n` must be an integer in the range 0 to 2147483647.
 
 **Arity:** 1  
 **Returns:** String

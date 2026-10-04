@@ -62,8 +62,9 @@ static bool asByteCount(const Value& v, const char* method, size_t& out) {
     double raw = as<Number>(v);
     if (!std::isfinite(raw) || raw != std::floor(raw) || raw < 0 ||
         raw > static_cast<double>(INT_MAX)) {
-        std::string msg = std::string(method) +
-                          "() byte count must be a non-negative integer.";
+        std::string msg =
+            std::string(method) +
+            "() byte count must be an integer in range 0 to 2147483647.";
         nativeRuntimeError(msg.c_str());
         return false;
     }

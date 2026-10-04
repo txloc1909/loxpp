@@ -22,7 +22,7 @@ print type(r);
 print r["status"];
 print r["stdout"];
 print r["stderr"];
-// Bounded reads (issue #518): read_bytes(n) blocks until n bytes or EOF.
+// Bounded reads: read_bytes(n) blocks until n bytes or EOF.
 var l2 = listen("127.0.0.1", 0);
 var c2 = connect("127.0.0.1", l2.port());
 c2.write("abcdef");

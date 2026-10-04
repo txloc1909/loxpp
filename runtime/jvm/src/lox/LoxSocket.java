@@ -59,6 +59,15 @@ public final class LoxSocket {
      */
     public Object readBytes(int n) {
         checkOpen("read_bytes");
+        return readBytesFrom(in, n, "read_bytes");
+    }
+
+    /**
+     * Up to {@code n} bytes from any stream. Blocks until {@code n} bytes have
+     * arrived or the stream reaches EOF, then returns what was read; "" at EOF.
+     * Shared with LoxProcess so the socket and process paths cannot drift.
+     */
+    static Object readBytesFrom(InputStream in, int n, String method) {
         try {
             ByteArrayOutputStream buf = new ByteArrayOutputStream();
             byte[] chunk = new byte[4096];
@@ -72,7 +81,7 @@ public final class LoxSocket {
             }
             return new String(buf.toByteArray(), LoxRuntime.CHARSET);
         } catch (IOException e) {
-            throw new LoxError("read_bytes(): " + e.getMessage());
+            throw new LoxError(method + "(): " + e.getMessage());
         }
     }
 
@@ -249,8 +258,8 @@ public final class LoxSocket {
         double raw = (Double)v;
         if (Double.isNaN(raw) || Double.isInfinite(raw) ||
             raw != Math.floor(raw) || raw < 0 || raw > Integer.MAX_VALUE) {
-            throw new LoxError(
-                method + "() byte count must be a non-negative integer.");
+            throw new LoxError(method +
+                "() byte count must be an integer in range 0 to 2147483647.");
         }
         return (int)raw;
     }
