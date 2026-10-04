@@ -1,0 +1,161 @@
+// lazy_seq.lox - lazy and infinite sequences built from closures (thunks).
+//
+// A stream is a thunk: a zero-argument function. Forcing it (calling it)
+// returns either nil, for the empty stream, or a Cell holding one head value
+// and a tail, which is itself a stream. Nothing past the head is computed
+// until the tail is forced, so a stream can be infinite: naturals() never
+// ends, yet take() reads only as far as it is asked to.
+//
+// take, drop, map, and filter each return a new stream, so they chain and stay
+// lazy. toList forces a finite stream into a List.
+//
+// This uses closures only, not coroutines: the native and JVM backends have
+// coroutines, but the QBE backend and the bootstrap interpreter do not, and
+// every example must run on all of them. Closures run everywhere.
+
+class Cell {
+    // tail is a stream (a thunk), never a forced value.
+    init(head, tail) { this.head = head; this.tail = tail; }
+}
+
+// --- Source streams -----------------------------------------------------
+
+// The natural numbers from n upward - infinite.
+fun naturalsFrom(n) {
+    fun thunk() {
+        return Cell(n, naturalsFrom(n + 1));
+    }
+    return thunk;
+}
+
+fun naturals() {
+    return naturalsFrom(0);
+}
+
+// A finite stream over the elements of a List.
+fun fromList(xs) {
+    fun fromIndex(i) {
+        fun thunk() {
+            if (i >= len(xs)) return nil;
+            return Cell(xs[i], fromIndex(i + 1));
+        }
+        return thunk;
+    }
+    return fromIndex(0);
+}
+
+// --- Lazy transformers --------------------------------------------------
+//
+// Each returns a stream and forces its source only when that stream is forced,
+// so stacking them does no work until a consumer pulls values out.
+
+// take(s, k): the first k elements of s.
+fun take(s, k) {
+    fun thunk() {
+        if (k <= 0) return nil;
+        var cell = s();
+        if (cell == nil) return nil;
+        return Cell(cell.head, take(cell.tail, k - 1));
+    }
+    return thunk;
+}
+
+// drop(s, k): s with its first k elements skipped.
+fun drop(s, k) {
+    fun thunk() {
+        var cur = s;
+        var left = k;
+        while (left > 0) {
+            var cell = cur();
+            if (cell == nil) return nil;
+            cur = cell.tail;
+            left = left - 1;
+        }
+        return cur();
+    }
+    return thunk;
+}
+
+// map(s, f): s with f applied to every element.
+fun map(s, f) {
+    fun thunk() {
+        var cell = s();
+        if (cell == nil) return nil;
+        return Cell(f(cell.head), map(cell.tail, f));
+    }
+    return thunk;
+}
+
+// filter(s, pred): s with only the elements for which pred is true.
+fun filter(s, pred) {
+    fun thunk() {
+        var cur = s;
+        while (true) {
+            var cell = cur();
+            if (cell == nil) return nil;
+            if (pred(cell.head)) {
+                return Cell(cell.head, filter(cell.tail, pred));
+            }
+            cur = cell.tail;
+        }
+    }
+    return thunk;
+}
+
+// Force a finite stream into a List. Iterative, so a long stream does not cost
+// stack depth - only the per-cell forcing of the transformers above does.
+fun toList(s) {
+    var out = [];
+    var cur = s();
+    while (cur != nil) {
+        out.append(cur.head);
+        var tail = cur.tail;
+        cur = tail();
+    }
+    return out;
+}
+
+// --- Exercise the primitives -------------------------------------------
+
+// take over an infinite source - this cannot be done eagerly.
+// CHECK: take(naturals, 5) = [0, 1, 2, 3, 4]
+print "take(naturals, 5) = " + str(toList(take(naturals(), 5)));
+
+// drop then take - a window into the middle of an infinite sequence.
+// CHECK: take(drop(naturals, 3), 4) = [3, 4, 5, 6]
+print "take(drop(naturals, 3), 4) = " + str(toList(take(drop(naturals(), 3), 4)));
+
+// map over a finite stream.
+fun square(n) { return n * n; }
+// CHECK: map(square, [1, 2, 3, 4]) = [1, 4, 9, 16]
+print "map(square, [1, 2, 3, 4]) = " + str(toList(map(fromList([1, 2, 3, 4]), square)));
+
+// filter over an infinite stream, bounded by take.
+fun isEven(n) { return n % 2 == 0; }
+// CHECK: first 5 even naturals = [0, 2, 4, 6, 8]
+print "first 5 even naturals = " + str(toList(take(filter(naturals(), isEven), 5)));
+
+// --- Dogfood: a lazy pipeline over an infinite stream -------------------
+//
+// Sum of the squares of the first 5 odd numbers, built as one lazy chain and
+// forced only at the end. Nothing past the fifth odd square is ever computed,
+// even though the source is unbounded.
+
+fun isOdd(n) { return n % 2 != 0; }
+
+var pipeline = take(map(filter(naturals(), isOdd), square), 5);
+var terms = toList(pipeline);
+// CHECK: odd squares = [1, 9, 25, 49, 81]
+print "odd squares = " + str(terms);
+
+var total = 0;
+for (var t in terms) {
+    total = total + t;
+}
+// CHECK: sum of first 5 odd squares = 165
+print "sum of first 5 odd squares = " + str(total);
+
+// A stream value is re-forcible: forcing the same pipeline again recomputes
+// it from the start, so a lazy value can be consumed more than once.
+// CHECK: re-run odd squares = [1, 9, 25, 49, 81]
+print "re-run odd squares = " + str(toList(pipeline));
