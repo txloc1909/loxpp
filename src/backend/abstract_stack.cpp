@@ -222,6 +222,7 @@ StackEffect stackEffect(const DecodedInstruction& ins) {
     case Op::GET_PROPERTY:
     case Op::ITER_HAS_NEXT: // pop iterator copy, push bool
     case Op::ITER_NEXT:     // pop iterator copy, push element
+    case Op::YIELD:         // pop yielded value, push resumed value
         return {1, 1};
 
     // Peek family (P2): pop 0 — the assigned/tested value is left in place.

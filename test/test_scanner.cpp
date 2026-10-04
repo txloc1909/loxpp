@@ -153,7 +153,7 @@ TEST_F(ScannerTest, LoxKeywordsComplete) {
         "default", "defer", "else",   "enum",  "false", "for",
         "fun",     "if",    "in",     "len",   "match", "nil",
         "or",      "print", "return", "str",   "super", "this",
-        "throw",   "true",  "try",    "var",   "while"};
+        "throw",   "true",  "try",    "var",   "while", "yield"};
     std::unordered_set<std::string> actual;
     for (const char* const* kw = lox_keywords(); *kw != nullptr; ++kw) {
         actual.insert(*kw);

@@ -93,6 +93,8 @@ std::ostream& operator<<(std::ostream& os, const TokenType& type) {
         return os << "VAR";
     case TokenType::WHILE:
         return os << "WHILE";
+    case TokenType::YIELD:
+        return os << "YIELD";
     case TokenType::EOF_:
         return os << "EOF";
     default:

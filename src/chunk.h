@@ -103,6 +103,12 @@ enum class Op : Byte {
     // Runs all pending deferred calls for the current frame in LIFO order.
     // No operands. Stack: unchanged.
     RUN_DEFERS,
+    // Suspends the current coroutine. No operands. Pops the yielded value
+    // and delivers it to the resumer; on resume, the value the resumer sent
+    // is pushed in its place, so the operand depth is unchanged. Non-terminal:
+    // resume falls through to the next instruction (see
+    // src/backend/chunk_decoder.h).
+    YIELD,
 };
 // clang-format on
 
@@ -170,7 +176,8 @@ enum class Op : Byte {
     X(POP_HANDLER)                                                             \
     X(THROW)                                                                   \
     X(DEFER_RECORD)                                                            \
-    X(RUN_DEFERS)
+    X(RUN_DEFERS)                                                              \
+    X(YIELD)
 
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }
 
