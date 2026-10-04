@@ -44,6 +44,16 @@ public final class LoxCoroutine {
     private boolean started;
     private Object[] firstArgs;
 
+    // The frame budget and the handler-liveness count are one program-wide
+    // count each, like native's m_frameCount and m_handlerStack.size(): a
+    // resumed coroutine's frames and handler records sit above the resumer's.
+    // These hold the resumer's value and this coroutine's own contribution, so
+    // the coroutine can hide its slice while suspended and re-add it on resume.
+    private int frameBase;
+    private int frameOwn;
+    private int handlerBase;
+    private int handlerOwn;
+
     private final SynchronousQueue<Object> toCoroutine = new SynchronousQueue<>();
     private final SynchronousQueue<Object> fromCoroutine =
         new SynchronousQueue<>();
@@ -127,6 +137,13 @@ public final class LoxCoroutine {
         if (parent != null) {
             parent.state = State.NORMAL;
         }
+        // Re-add this coroutine's suspended slice above the resumer's own
+        // frame and handler counts before it runs. Both counters return to the
+        // resumer's value when the coroutine suspends or dies.
+        frameBase = LoxClosure.frameCountValue();
+        handlerBase = LoxOps.handlerDepthValue();
+        LoxClosure.setFrameCountValue(frameBase + frameOwn);
+        LoxOps.setHandlerDepthValue(handlerBase + handlerOwn);
         state = State.RUNNING;
         try {
             if (!started) {
@@ -187,6 +204,9 @@ public final class LoxCoroutine {
             msg = new Thrown(t);
         } finally {
             CURRENT.remove();
+            // Drop this coroutine's slice; the resumer sees its own counts.
+            LoxClosure.setFrameCountValue(frameBase);
+            LoxOps.setHandlerDepthValue(handlerBase);
         }
         try {
             fromCoroutine.put(msg);
@@ -203,6 +223,13 @@ public final class LoxCoroutine {
     Object yieldValue(Object value) {
         state = State.SUSPENDED;
         try {
+            // Hide this coroutine's own frames and open handlers so the
+            // resumer sees its own counts again (native removes the
+            // coroutine's slice on suspend).
+            frameOwn = LoxClosure.frameCountValue() - frameBase;
+            handlerOwn = LoxOps.handlerDepthValue() - handlerBase;
+            LoxClosure.setFrameCountValue(frameBase);
+            LoxOps.setHandlerDepthValue(handlerBase);
             fromCoroutine.put(new Yielded(value));
             Resumed input = (Resumed)toCoroutine.take();
             state = State.RUNNING;
