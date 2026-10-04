@@ -561,6 +561,39 @@ TEST_F(CoroutineTest, YieldInDeferDuringThrowUnwindIsRefused) {
     expect_string(h, "st", "dead");
 }
 
+// Resuming a deep coroutine from a deep call stack must not write past the
+// frame budget. The restore is checked first and raises a catchable
+// StackOverflowError; without the check this is an out-of-bounds write.
+TEST_F(CoroutineTest, ResumeThatWouldOverflowFramesIsCatchable) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun suspendDeep(n) {
+            if (n == 0) {
+                yield 1;
+                return;
+            }
+            suspendDeep(n - 1);
+        }
+        fun resumeDeep(c, n) {
+            if (n == 0) {
+                c.resume();
+                return;
+            }
+            resumeDeep(c, n - 1);
+        }
+        var co = coroutine.create(suspendDeep);
+        co.resume(1000);
+        var kind = "";
+        try {
+            resumeDeep(co, 100);
+        } catch (e) {
+            kind = e.kind;
+        }
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "kind", "StackOverflowError");
+}
+
 TEST_F(CoroutineTest, TypeAndStringify) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(

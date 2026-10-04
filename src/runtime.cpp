@@ -404,6 +404,35 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         // callee/args window; that window is discarded by callNative once
         // this native returns, exactly like any other re-entrant call.
         base = stackTop;
+        // Restoring a snapshot appends its frames and cells above the resume
+        // call's own depth. Check both budgets before any mutation, so a
+        // coroutine suspended near the limit and resumed from a deep stack
+        // raises a catchable StackOverflowError instead of writing past
+        // m_frames[]/stack[]. The ceilings mirror call()/checkStackOverflow().
+        const std::ptrdiff_t frameCeiling =
+            FRAMES_MAX +
+            (m_unwindingStackOverflow ? STACK_OVERFLOW_FRAME_RESERVE : 0);
+        const std::ptrdiff_t stackCeiling =
+            STACK_MAX +
+            (m_unwindingStackOverflow ? STACK_OVERFLOW_STACK_RESERVE : 0);
+        if (static_cast<std::ptrdiff_t>(entry) +
+                    static_cast<std::ptrdiff_t>(co->frames.size()) >
+                frameCeiling ||
+            static_cast<std::ptrdiff_t>(base - stack) +
+                    static_cast<std::ptrdiff_t>(co->stack.size()) + 1 >
+                stackCeiling) {
+            if (!m_handlerStack.empty() && !m_unwindingStackOverflow) {
+                m_unwindingStackOverflow = true;
+                ThrowOutcome outcome = raiseThrowableError(
+                    "StackOverflowError", "Stack overflow.", boundary);
+                m_unwindingStackOverflow = false;
+                m_reentrantOutcome = fromThrow(outcome);
+            } else {
+                runtimeError("Stack overflow.");
+                m_reentrantOutcome = OpResult::Fatal;
+            }
+            return false;
+        }
     }
 
     ObjCoroutine* parent = m_currentCoroutine;
