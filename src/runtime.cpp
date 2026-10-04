@@ -2422,6 +2422,29 @@ Runtime::OpResult Runtime::opIterNext() {
     return OpResult::OK;
 }
 
+Runtime::OpResult Runtime::yieldOp(int stopAtFrameCount) {
+    // Mirrors vm.cpp's interpreted Op::YIELD checks. The compiled frame
+    // returns kRtYield only when this returns OK; the driver then suspends it.
+    if (m_currentCoroutine == nullptr) {
+        return fromThrow(raiseThrowableError(
+            "YieldOutsideCoroutineError",
+            "Cannot yield from outside a coroutine.", stopAtFrameCount));
+    }
+    // m_resumableMode is true only while the coroutine driver runs this
+    // coroutine's own frames. A compiled frame reached any other way — run
+    // synchronously by callCompiled because a native, a __str__/__hash__/
+    // __eq__ dispatch, or a defer drain re-entered Lox — has m_resumableMode
+    // clear: its C frame cannot be frozen, so a yield here must fail like any
+    // native-callback yield. (The interpreted path keeps its own
+    // m_reentrantRunDepth check in vm.cpp; this flag is the compiled twin.)
+    if (!m_resumableMode) {
+        return fromThrow(raiseThrowableError(
+            "YieldAcrossNativeError", "Cannot yield across a native callback.",
+            stopAtFrameCount));
+    }
+    return OpResult::OK;
+}
+
 // --- classes, methods, aggregates, slicing, match dispatch (S5, #458) -----
 //
 // Moved out of VM::run() the same way as the property/index/iterator op*()

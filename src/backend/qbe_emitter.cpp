@@ -1075,7 +1075,7 @@ class Emitter {
             // machinery entirely.
             std::string checkpointAddr = addr(before.height);
             m_body << "\tcall $rt_push_handler(l %rt, l " << checkpointAddr
-                   << ")\n";
+                   << ", w -1)\n";
             break;
         }
         case Op::POP_HANDLER:

@@ -874,3 +874,15 @@ TEST(RunCompiledFrames, EmptyRangeReturnsTrue) {
     Runtime rt;
     EXPECT_TRUE(rt.runCompiledFrames(0));
 }
+
+TEST(RtYield, OutsideACoroutineIsFatalWithoutAHandler) {
+    Runtime* rt = rt_startup("", nullptr, 0);
+    ASSERT_NE(rt, nullptr);
+    testing::internal::CaptureStderr();
+    int status = rt_yield(rt, 0);
+    std::string err = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(status, static_cast<int>(Runtime::OpResult::Fatal));
+    EXPECT_NE(err.find("Cannot yield from outside a coroutine."),
+              std::string::npos);
+    rt_shutdown(rt);
+}
