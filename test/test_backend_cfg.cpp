@@ -12,6 +12,7 @@
 #include "backend/cfg.h"
 #include "backend/chunk_decoder.h"
 #include "compiler.h"
+#include "corpus.h"
 #include "exec_objects.h"
 #include "memory_manager.h"
 #include "object.h"
@@ -21,9 +22,7 @@
 
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
 #include <set>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -31,28 +30,9 @@ namespace {
 
 namespace fs = std::filesystem;
 
-fs::path projectRoot() { return fs::path(LOXPP_PROJECT_SOURCE_DIR); }
-
-std::string readFile(const fs::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        throw std::runtime_error("cannot open " + path.string());
-    }
-    std::ostringstream contents;
-    contents << in.rdbuf();
-    return contents.str();
-}
-
-std::vector<fs::path> listLoxFiles(const fs::path& dir) {
-    std::vector<fs::path> files;
-    for (const auto& entry : fs::directory_iterator(dir)) {
-        if (entry.path().extension() == ".lox") {
-            files.push_back(entry.path());
-        }
-    }
-    std::sort(files.begin(), files.end());
-    return files;
-}
+using loxpp_test::listLoxFiles;
+using loxpp_test::projectRoot;
+using loxpp_test::readFile;
 
 const BasicBlock& blockAt(const Cfg& cfg, int leaderOffset) {
     for (const BasicBlock& block : cfg.blocks) {

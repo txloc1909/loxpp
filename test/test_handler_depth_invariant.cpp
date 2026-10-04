@@ -9,41 +9,26 @@
 #include "backend/chunk_decoder.h"
 #include "backend/handler_depth.h"
 #include "compiler.h"
+#include "corpus.h"
 #include "memory_manager.h"
 #include "object.h"
 #include "test_harness.h"
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
-#ifndef LOXPP_PROJECT_SOURCE_DIR
-#error                                                                         \
-    "LOXPP_PROJECT_SOURCE_DIR must be defined by the build (see test/CMakeLists.txt)"
-#endif
-
 namespace {
 
 namespace fs = std::filesystem;
 
-fs::path projectRoot() { return fs::path(LOXPP_PROJECT_SOURCE_DIR); }
-
-std::string readFile(const fs::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        throw std::runtime_error("cannot open " + path.string());
-    }
-    std::ostringstream contents;
-    contents << in.rdbuf();
-    return contents.str();
-}
+using loxpp_test::listLoxFiles;
+using loxpp_test::projectRoot;
+using loxpp_test::readFile;
 
 DecodedFunction decodeSource(const std::string& source, MemoryManager& mm) {
     ObjFunction* script = compile(source, &mm);
@@ -263,14 +248,8 @@ TEST(HandlerDepthTest, OuterTrySurvivesInnerCatchBreak) {
 }
 
 TEST(HandlerDepthTest, RunsOverEveryProbeWithNoInconsistency) {
-    std::vector<fs::path> probes;
-    for (const auto& entry : fs::directory_iterator(projectRoot() / "test" /
-                                                    "translation-probes")) {
-        if (entry.path().extension() == ".lox") {
-            probes.push_back(entry.path());
-        }
-    }
-    std::sort(probes.begin(), probes.end());
+    std::vector<fs::path> probes =
+        listLoxFiles(projectRoot() / "test" / "translation-probes");
     ASSERT_FALSE(probes.empty()) << "no translation probes found";
     for (const fs::path& probe : probes) {
         checkFileNoInconsistency(probe);
@@ -278,14 +257,7 @@ TEST(HandlerDepthTest, RunsOverEveryProbeWithNoInconsistency) {
 }
 
 TEST(HandlerDepthTest, RunsOverEveryExampleWithNoInconsistency) {
-    std::vector<fs::path> examples;
-    for (const auto& entry :
-         fs::directory_iterator(projectRoot() / "examples")) {
-        if (entry.path().extension() == ".lox") {
-            examples.push_back(entry.path());
-        }
-    }
-    std::sort(examples.begin(), examples.end());
+    std::vector<fs::path> examples = listLoxFiles(projectRoot() / "examples");
     ASSERT_FALSE(examples.empty()) << "no example programs found";
     for (const fs::path& example : examples) {
         checkFileNoInconsistency(example);
@@ -298,14 +270,8 @@ TEST(HandlerDepthTest, RunsOverBootstrapInterpreterWithNoInconsistency) {
 }
 
 TEST(HandlerDepthTest, RunsOverEveryCoroutineProbeWithNoInconsistency) {
-    std::vector<fs::path> probes;
-    for (const auto& entry :
-         fs::directory_iterator(projectRoot() / "test" / "coroutine-probes")) {
-        if (entry.path().extension() == ".lox") {
-            probes.push_back(entry.path());
-        }
-    }
-    std::sort(probes.begin(), probes.end());
+    std::vector<fs::path> probes =
+        listLoxFiles(projectRoot() / "test" / "coroutine-probes");
     ASSERT_FALSE(probes.empty()) << "no coroutine probes found";
     for (const fs::path& probe : probes) {
         checkFileNoInconsistency(probe);

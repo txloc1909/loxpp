@@ -20,6 +20,7 @@
 #include "backend/abstract_stack.h"
 #include "backend/chunk_decoder.h"
 #include "compiler.h"
+#include "corpus.h"
 #include "memory_manager.h"
 #include "object.h"
 
@@ -27,44 +28,18 @@
 
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
-#ifndef LOXPP_PROJECT_SOURCE_DIR
-#error                                                                         \
-    "LOXPP_PROJECT_SOURCE_DIR must be defined by the build (see test/CMakeLists.txt)"
-#endif
-
 namespace {
 
 namespace fs = std::filesystem;
 
-fs::path projectRoot() { return fs::path(LOXPP_PROJECT_SOURCE_DIR); }
-
-std::string readFile(const fs::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        throw std::runtime_error("cannot open " + path.string());
-    }
-    std::ostringstream contents;
-    contents << in.rdbuf();
-    return contents.str();
-}
-
-std::vector<fs::path> listLoxFiles(const fs::path& dir) {
-    std::vector<fs::path> files;
-    for (const auto& entry : fs::directory_iterator(dir)) {
-        if (entry.path().extension() == ".lox") {
-            files.push_back(entry.path());
-        }
-    }
-    std::sort(files.begin(), files.end());
-    return files;
-}
+using loxpp_test::listLoxFiles;
+using loxpp_test::projectRoot;
+using loxpp_test::readFile;
 
 DecodedFunction decodeSource(const std::string& source, MemoryManager& mm) {
     ObjFunction* script = compile(source, &mm);

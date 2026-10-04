@@ -1,14 +1,13 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <sstream>
 #include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include "corpus.h"
 #include "tooling/ast.h"
 #include "tooling/tooling_parser.h"
 
@@ -18,33 +17,11 @@ namespace fs = std::filesystem;
 
 namespace {
 
-std::string readFile(const fs::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    std::ostringstream buf;
-    buf << in.rdbuf();
-    return buf.str();
-}
-
-const char* const kCorpusDirs[] = {"examples", "bootstrap",
-                                   "test/translation-probes"};
-
-std::vector<fs::path> corpusFiles() {
-    const fs::path root = LOXPP_PROJECT_SOURCE_DIR;
-    std::vector<fs::path> out;
-    for (const char* dir : kCorpusDirs) {
-        const fs::path base = root / dir;
-        if (!fs::is_directory(base)) {
-            continue;
-        }
-        for (const auto& entry : fs::directory_iterator(base)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".lox") {
-                out.push_back(entry.path());
-            }
-        }
-    }
-    std::sort(out.begin(), out.end());
-    return out;
-}
+using loxpp_test::corpusDirectories;
+using loxpp_test::corpusFiles;
+using loxpp_test::listLoxFiles;
+using loxpp_test::projectRoot;
+using loxpp_test::readFile;
 
 // A full span audit: every node of every kind -- Stmt, Expr, Pattern -- plus
 // every bare Name, Param, and sub-name span (`.name`, `super.name`, pattern
@@ -540,18 +517,11 @@ TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     // A wrong scan root or a renamed directory would quietly turn this sweep
     // into a no-op. Check each directory on its own: a single global lower
     // bound can hide one directory dropping out behind the others.
-    for (const char* dir : kCorpusDirs) {
-        const fs::path base = fs::path(LOXPP_PROJECT_SOURCE_DIR) / dir;
+    for (const std::string& dir : corpusDirectories()) {
+        const fs::path base = projectRoot() / dir;
         ASSERT_TRUE(fs::is_directory(base))
             << "missing corpus directory: " << base;
-        bool any = false;
-        for (const auto& entry : fs::directory_iterator(base)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".lox") {
-                any = true;
-                break;
-            }
-        }
-        EXPECT_TRUE(any) << "no .lox files in " << base;
+        EXPECT_FALSE(listLoxFiles(base).empty()) << "no .lox files in " << base;
     }
     ASSERT_FALSE(files.empty());
 
