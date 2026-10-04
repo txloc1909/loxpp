@@ -241,7 +241,7 @@ negates the result, with no `__le__` / `__ge__` method.
 The result of `__eq__`, `__lt__`, `__gt__`, and `__contains__` must be a
 Boolean, whether the method ran on the left operand or as the reflected method
 on the right. The result of `__len__` and `__hash__` must be a Number, the
-result of `__iter__` must be a List, String, or Map, and the result of
+result of `__iter__` must be a List, String, Map, or Coroutine, and the result of
 `__str__` must be a String. Any other result raises a catchable
 `OperatorResultTypeError` (see [Runtime Errors](#runtime-errors)). The
 result of every other method in the tables above is unconstrained.
@@ -254,8 +254,8 @@ Get](#index-get), [Index Set](#index-set), and [`in`](#in-operator).
 value. `__index_set__` takes the index and the assigned value; its return
 value is ignored, and the assignment expression evaluates to the assigned
 value (as with the built-in List and Map forms). `__iter__` takes no argument
-and returns the sequence to iterate; the existing iterator then consumes that
-sequence, so `ITER_HAS_NEXT`/`ITER_NEXT` are unchanged. `__slice__` takes the
+and returns the sequence or coroutine to iterate; the existing iterator then consumes that
+sequence (or resumes that coroutine), so `ITER_HAS_NEXT`/`ITER_NEXT` are unchanged. `__slice__` takes the
 start and end bounds and may return any value; a List or String uses the
 built-in slice below, including its bound validation, and never dispatches.
 
@@ -412,6 +412,29 @@ callee(arg1, arg2, ...)
 Functions may be called recursively. The depth limit is implementation-defined;
 exceeding it is a **runtime error**.
 
+### `yield` Expression
+
+```
+yield expr
+```
+
+Suspends the current coroutine and delivers `expr` to its resumer.
+
+1. Evaluate `expr` (or `nil` if the operand is omitted).
+2. Suspend the current coroutine. Every call frame currently on the
+   coroutine's stack stays in place: none of them exits, no scope ends, and
+   no deferred call runs.
+3. Control returns to whoever resumed the coroutine: the pending `resume`
+   call completes and evaluates to the yielded value.
+4. When the coroutine is resumed again, the `yield` expression evaluates to
+   the value that `resume` passed in (or `nil` if `resume` passed none), and
+   execution continues after the `yield`.
+
+A `yield` reached while the current context is not a coroutine — that is, in
+the main program or in any function it called without going through
+`resume` — is a **runtime error** (`YieldOutsideCoroutineError`; see
+[Runtime Errors](#runtime-errors)).
+
 ### match Expression
 
 ```
@@ -529,29 +552,36 @@ Where:
 for (var x in expr) body
 ```
 
-Iterates over the elements of a List or a String, or over the keys of a Map.
+Iterates over the elements of a List or a String, over the keys of a Map, or
+over the values a Coroutine yields.
 A List iterates in order. A String
 iterates its single-character substrings in order. A Map iterates over keys
-in unspecified order.
+in unspecified order. A Coroutine is resumed once per iteration, and yields
+the next element each time.
 
 1. Evaluate `expr` exactly once. The result must be a **List**, a **String**,
-   or a **Map**; any other value is a **runtime error**
-   ("Value is not iterable (expected list, string, or map).").
+   a **Map**, or a **Coroutine**; any other value is a **runtime error**.
 2. An internal **iterator** is created, holding a reference to the iterated
    value and a cursor starting at `0`. The iterator is not accessible to
    user code.
-   For a Map, the iterator also records the structural version.
+   For a Map, the iterator also records the structural version. For a
+   Coroutine, the iterator holds the coroutine itself and uses no cursor.
 3. Before each iteration, the next element is located:
    - For a **List** or **String**: if `cursor ≥ length`, the loop exits.
    - For a **Map**: the recorded version is compared to the current
      version first (see Mutation during iteration below). Then the
      cursor, a bucket index, scans forward to the next occupied bucket
      within the capacity; if there is none, the loop exits.
+   - For a **Coroutine**: the coroutine is resumed. If it is dead (its
+     function has returned), the loop exits; otherwise the value it yielded
+     is the next element.
 4. Otherwise, the located element is bound to `x` and `body` executes.
    - For a **List**: `x` is bound to the element value.
    - For a **String**: `x` is bound to a single-character String.
    - For a **Map**: `x` is bound to the next key.
+   - For a **Coroutine**: `x` is bound to the value the coroutine yielded.
 5. After the body, the cursor advances by one and the loop repeats from step 3.
+   For a Coroutine there is no cursor; the next iteration resumes it again.
 
 `x` is scoped to the loop statement; it is not accessible after the loop exits.
 One binding of `x` serves the whole execution of the loop, and each iteration
@@ -1269,6 +1299,58 @@ len(seq)
 
 ---
 
+## Coroutines
+
+A coroutine is a suspendable computation created with `coroutine.create(fn)`
+(§05-stdlib). It runs one function at a time, can pause at a `yield`, and can
+resume later — all on a single thread. See §03-types for the `Coroutine`
+type and its four states.
+
+### `coroutine.create`
+
+`coroutine.create(fn)` returns a new, suspended `Coroutine` value. `fn` must
+be callable; any other value is a runtime error. The call does not run `fn`.
+
+### `co.resume`
+
+`co.resume(...)` starts or continues the coroutine `co`.
+
+1. If `co` is dead, this is a **runtime error** (`DeadCoroutineError`).
+2. If `co` is running or normal, this is a **runtime error**
+   (`RunningCoroutineError`).
+3. On the **first** resume, `fn` is called with the resume's arguments,
+   exactly as an ordinary call, so the same arity check applies.
+4. On each **later** resume, the single argument (or `nil` if none) becomes
+   the value of the pending `yield` expression.
+5. `co` then runs until it yields, returns, or throws:
+   - If `co` yields `v`, `co` becomes suspended and the `resume` call
+     evaluates to `v`.
+   - If `fn` returns `v`, `co` becomes dead and the `resume` call evaluates
+     to `v`.
+   - If a throw propagates out of `fn`, `co` becomes dead and the throw
+     continues in the resumer's context, where it is catchable like any
+     other throw.
+
+### `co.status`
+
+`co.status()` returns a String naming the coroutine's current state:
+`"suspended"`, `"running"`, `"normal"`, or `"dead"`. See §03-types for what
+each state means.
+
+### Abandoned coroutines
+
+A coroutine that is never resumed to completion when the program ends is
+abandoned: its pending deferred calls do not run. This mirrors the fact that
+a `yield` runs no deferred call — a deferred call in a coroutine runs only
+when its function returns or a throw unwinds past the frame, exactly as in
+an ordinary function.
+
+The two `resume` faults and the `yield` fault are catchable: each is
+delivered to a `catch` block as an `Error` value, with the kinds listed in
+[Runtime Errors](#runtime-errors).
+
+---
+
 ## Runtime Errors
 
 A runtime error halts execution immediately and reports an error message —
@@ -1313,6 +1395,9 @@ same text the implementation reports when the fault is left uncaught.
 | Operator method returned a non-Boolean | `class C { __eq__(o) { return 42; } } C() == C()`, or the reflected `class C { __rlt__(o) { return 42; } } 1 < C()` | `"OperatorResultTypeError"` |
 | Operator method returned a non-Number | `class C { __len__() { return "x"; } } len(C())` or `class C { __hash__() { return "x"; } __eq__(o) { return true; } }` used as a map key | `"OperatorResultTypeError"` |
 | A key's `__hash__` or `__eq__` writes to the Map it keys | `var m = {}; class K { __hash__() { m[1] = 1; return 1; } __eq__(o) { return true; } } m[K()] = 1;` | `"MapChangedError"` |
+| `resume` on a dead coroutine | `fun f() { return 1; } var co = coroutine.create(f); co.resume(); co.resume();` | `"DeadCoroutineError"` |
+| `resume` on a running coroutine (self-resume) | `fun f() { co.resume(); } var co = coroutine.create(f); co.resume();` | `"RunningCoroutineError"` |
+| `yield` outside a coroutine | `yield 1;` | `"YieldOutsideCoroutineError"` |
 
 **The two map-key rows above cover an index read or write, a map or set
 literal, and `in`.** `Map.has(key)` and `Map.del(key)` are stdlib native

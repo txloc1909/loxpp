@@ -621,6 +621,56 @@ The child's process identifier.
 
 ---
 
+## `coroutine.create(fn) -> Coroutine`
+
+`coroutine` is a global object bound at the start of every program, like
+`math`. Its single member is `create`.
+
+`coroutine.create(fn)` returns a new suspended `Coroutine` value. `fn` must
+be callable (a Function or BoundMethod); any other value is a runtime error.
+The call does not run `fn`.
+
+`coroutine` behaves like any other global name: a local variable of the same
+name shadows it, and the global can be reassigned.
+
+**Arity:** 1  
+**Returns:** Coroutine
+
+---
+
+## Coroutine methods
+
+A Coroutine is returned by `coroutine.create`. `type(c)` on a Coroutine
+returns `"Coroutine"`. See §03-types for the type and its four states, and
+§04-semantics for the full rules.
+
+### `c.resume(...) -> Any`
+
+Starts or continues the coroutine `c`, and returns the value it next yields
+or returns. On the first resume, the arguments are passed to the coroutine's
+function, exactly as an ordinary call (the same arity check applies). On each
+later resume, the single argument (or `nil` if none) becomes the value of the
+pending `yield` expression.
+
+Resuming a dead coroutine is a runtime error (`DeadCoroutineError`);
+resuming a running or normal coroutine is a runtime error
+(`RunningCoroutineError`). A throw from inside the coroutine propagates to
+the resumer, where it is catchable like any other throw.
+
+**Arity:** variadic — the coroutine function's arity on the first call, 0 or
+1 afterward  
+**Returns:** the value the coroutine yields or returns
+
+### `c.status() -> String`
+
+Returns the coroutine's current state as a String: `"suspended"`,
+`"running"`, `"normal"`, or `"dead"`.
+
+**Arity:** 0  
+**Returns:** String
+
+---
+
 ## Map methods
 
 Map values respond to the built-in methods `has`, `del`, `keys`, `values`, and
@@ -650,6 +700,7 @@ Returns the language-level type name of `value` as a String.
 | Server | `"Server"` |
 | Process | `"Process"` |
 | Error (see §03-types) | `"Error"` |
+| Coroutine (see §03-types) | `"Coroutine"` |
 | Iterator | `"Iterator"` |
 | Enum constructor | `"EnumConstructor"` |
 | Enum value | `"Enum"` |

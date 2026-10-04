@@ -125,6 +125,10 @@ class Row:
 # a few reference a name the cell itself never declares (`m`, `list`) or are
 # prose, not code ("Unbounded recursion") -- `setup` below supplies exactly
 # what each such cell is missing, without changing the fault it exercises.
+# A skip value shared by the coroutine rows below (roadmap item 5): they
+# name faults no backend implements yet, so every consumer skips them until
+# the matching backend node lands. See the comment at the rows themselves.
+_COROUTINE_SKIP = "coroutines not implemented yet (tracking #523); the backend node removes this skip as it lands"
 CATCHABLE_ROWS = [
     Row("arithmetic_type_error", "caught", '"a" - 1;', expected_kind="ArithmeticTypeError"),
     Row("comparison_type_error", "caught", '"a" < 1;', expected_kind="ComparisonTypeError"),
@@ -290,6 +294,37 @@ CATCHABLE_ROWS = [
         setup="var m = {};\nclass K { __hash__() { m[1] = 1; return 1; } "
               "__eq__(o) { return true; } }\n",
         expected_kind="MapChangedError",
+    ),
+    # --- Coroutines (roadmap item 5, tracking #523) ---------------------
+    # The three coroutine protocol faults. Skipped on every consumer until
+    # the coroutine primitive lands: node 3 (native, #526), node 6 (JVM,
+    # #529), node 8 (bootstrap, #531). Each backend node removes its own
+    # consumer's skip as it merges, so these rows stay a differential gate
+    # for the mission rather than a spec-only placeholder. The `skip` value
+    # names the consumer, not the row: once all three backends land, the
+    # dict is empty and the row runs like any other catchable row.
+    Row(
+        "resume_dead_coroutine",
+        "caught",
+        "co.resume();",
+        setup="fun f() { return 1; }\nvar co = coroutine.create(f);\nco.resume();\n",
+        expected_kind="DeadCoroutineError",
+        skip={NATIVE: _COROUTINE_SKIP, JVM: _COROUTINE_SKIP, BOOTSTRAP: _COROUTINE_SKIP},
+    ),
+    Row(
+        "resume_running_coroutine",
+        "caught",
+        "co.resume();",
+        setup="fun f() { co.resume(); }\nvar co = coroutine.create(f);\n",
+        expected_kind="RunningCoroutineError",
+        skip={NATIVE: _COROUTINE_SKIP, JVM: _COROUTINE_SKIP, BOOTSTRAP: _COROUTINE_SKIP},
+    ),
+    Row(
+        "yield_outside_coroutine",
+        "caught",
+        "yield 1;",
+        expected_kind="YieldOutsideCoroutineError",
+        skip={NATIVE: _COROUTINE_SKIP, JVM: _COROUTINE_SKIP, BOOTSTRAP: _COROUTINE_SKIP},
     ),
 ]
 

@@ -77,6 +77,9 @@ block          ::= "{" declaration* "}" ;
 expression     ::= assignment ;
 
 assignment     ::= ( call "." IDENTIFIER | call "[" expression "]" | IDENTIFIER ) "=" assignment
+                 | yieldExpr ;
+
+yieldExpr      ::= "yield" expression?
                  | logicOr ;
 
 logicOr        ::= logicAnd ( "or" logicAnd )* ;
@@ -304,3 +307,18 @@ See `tryStmt` / `throwStmt` / `deferStmt` in the main EBNF.
 See [§04-semantics](04-semantics.md#try-statement) for the full evaluation
 rules of all three statements, and [§03-types](03-types.md#error) for the
 built-in `Error` type a caught runtime fault is delivered as.
+
+### `yield` expression
+
+See `yieldExpr` in the main EBNF.
+
+`yield` is a keyword, so a program can no longer name a variable `yield`
+(the same reservation `len` and `str` already carry). `yield` is an
+expression, not a statement: `yield e` produces a value, so it may appear
+anywhere an expression may — as the right-hand side of an assignment
+(`var x = yield e`), as a call argument, or standing alone as an
+expression statement (`yield e;`). Its operand is a full `expression`; the
+operand may be omitted, in which case the value yielded is `nil`.
+
+`yield` has assignment precedence (the same level as `=`), so `yield a + b`
+parses as `yield (a + b)` and `a = yield b` parses as `a = (yield b)`.

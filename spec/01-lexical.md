@@ -127,6 +127,7 @@ names:
 | `try` | Protected block with a `catch` handler (see §02-syntax) |
 | `var` | Variable declaration |
 | `while` | While loop |
+| `yield` | Suspends the current coroutine and delivers a value to its resumer (see §04-semantics) |
 
 Keywords are matched case-sensitively. `And` and `AND` are identifiers, not
 keywords.
