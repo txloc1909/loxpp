@@ -48,6 +48,7 @@ ObjClosure* Runtime::loadSource(const std::string& source,
     m_socketClass = nullptr;
     m_serverClass = nullptr;
     m_processClass = nullptr;
+    m_coroutineClass = nullptr;
     ObjFunction* fn = compile(source, &m_mm, sink);
     if (fn == nullptr) {
         return nullptr;
@@ -303,7 +304,12 @@ Runtime::OpResult Runtime::runReentrantFrame(int entry, Value* frameSlots,
     if (haveCaller) {
         callerIpBefore = m_frames[entry - 1].ip;
     }
-    if (!runNestedLoop(entry)) {
+    // This whole nested run happens inside a C++ caller that expects a
+    // result. A Lox frame here cannot be frozen into a coroutine snapshot.
+    ++m_reentrantRunDepth;
+    bool loopOk = runNestedLoop(entry);
+    --m_reentrantRunDepth;
+    if (!loopOk) {
         return OpResult::Fatal;
     }
     // A handler below the enclosing run()'s own boundary caught the throw;
@@ -631,6 +637,11 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
     co->profilerScopes.resize(
         static_cast<std::size_t>(m_frameCount - baseFrame));
     for (int i = baseFrame; i < m_frameCount; i++) {
+        if (m_profilerScopes[i].has_value()) {
+            // Book time up to the suspension; the coroutine's own wake-up
+            // rebases the scope and restarts the timer.
+            m_profilerScopes[i]->pause();
+        }
         co->profilerScopes[i - baseFrame] = std::move(m_profilerScopes[i]);
         m_profilerScopes[i].reset();
     }

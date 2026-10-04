@@ -787,6 +787,16 @@ InterpretResult VM::run(int stopAtFrameCount) {
                     "Cannot yield from outside a coroutine."));
                 break;
             }
+            if (m_rt.m_reentrantRunDepth > 0) {
+                // A native (or a __str__/__hash__/__eq__ method invoked by
+                // one) is on the C++ stack between this frame and the resume.
+                // Its continuation cannot be captured, so suspending here
+                // would silently drop the native's work.
+                CATCHABLE_OR_RETURN(tryCatchableError(
+                    "YieldAcrossNativeError",
+                    "Cannot yield across a native callback."));
+                break;
+            }
             // Flush the register-cached ip before the coroutine snapshot
             // takes frame->ip, and exit this nested run so whoever resumed
             // the coroutine gets the yielded value back.

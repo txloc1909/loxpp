@@ -326,6 +326,16 @@ CATCHABLE_ROWS = [
         expected_kind="YieldOutsideCoroutineError",
         skip={JVM: _COROUTINE_SKIP, BOOTSTRAP: _COROUTINE_SKIP},
     ),
+    Row(
+        "yield_across_native_callback",
+        "caught",
+        "co.resume();",
+        setup='class S { init() {} __str__() { yield 1; return "x"; } }\n'
+              'fun f() { print S(); return "done"; }\n'
+              "var co = coroutine.create(f);\n",
+        expected_kind="YieldAcrossNativeError",
+        skip={JVM: _COROUTINE_SKIP, BOOTSTRAP: _COROUTINE_SKIP},
+    ),
 ]
 
 # --- Fatal Runtime Errors table (spec/04-semantics.md) --------------------

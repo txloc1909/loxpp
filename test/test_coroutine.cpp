@@ -409,6 +409,79 @@ TEST_F(CoroutineTest, NestedResumerHandlerSurvivesInnerYield) {
     expect_string(h, "r", "outer caught after");
 }
 
+// A yield inside a native callback cannot be suspended: the native's own
+// continuation is not part of the coroutine's stack. It must be a catchable
+// error, not a silent loss of the native's work.
+TEST_F(CoroutineTest, YieldInsideStrIsCatchable) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        class S {
+            init() {}
+            __str__() { yield "s"; return "R"; }
+        }
+        fun driver() { print S(); return "done"; }
+        var co = coroutine.create(driver);
+        var kind = "";
+        try {
+            co.resume();
+        } catch (e) {
+            kind = e.kind;
+        }
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "kind", "YieldAcrossNativeError");
+}
+
+TEST_F(CoroutineTest, YieldInsideHashIsCatchable) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        class K {
+            init(v) { this.v = v; }
+            __hash__() { yield "h"; return 1; }
+            __eq__(o) { return this.v == o.v; }
+        }
+        fun driver() {
+            var m = {};
+            m[K(7)] = "seven";
+            return m[K(7)];
+        }
+        var co = coroutine.create(driver);
+        var kind = "";
+        try {
+            co.resume();
+        } catch (e) {
+            kind = e.kind;
+        }
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "kind", "YieldAcrossNativeError");
+}
+
+// A plain operator method runs inside the coroutine's own run, with no native
+// between the yield and the resume, so its yield is legal and resumes.
+TEST_F(CoroutineTest, YieldInsideUserOperatorMethodResumes) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        class A {
+            init(x) { this.x = x; }
+            __add__(o) {
+                var v = yield this.x;
+                return v;
+            }
+        }
+        fun f() {
+            var a = A(1);
+            return a + A(2);
+        }
+        var co = coroutine.create(f);
+        var r1 = co.resume();
+        var r2 = co.resume(9);
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r1"), 1);
+    expect_num(*h.getGlobal("r2"), 9);
+}
+
 TEST_F(CoroutineTest, TypeAndStringify) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(

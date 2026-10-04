@@ -981,6 +981,12 @@ class Runtime {
     // re-entering the VM judges a caught throw against the right boundary.
     int m_nativeStopAtFrameCount{0};
 
+    // Number of C++ re-entrant runs currently on the native stack — every
+    // runReentrantFrame() invocation. A Lox frame inside one of these cannot
+    // be captured by a coroutine snapshot: its C++ continuation would be
+    // lost. Op::YIELD raises YieldAcrossNativeError while this is nonzero.
+    int m_reentrantRunDepth{0};
+
     // The enclosing run()'s boundary for the canonical stringify in progress,
     // and the outcome of a __str__ dispatch inside it. stringifyObj
     // (object.cpp) reaches __str__ through stringifyInstanceStr() below, so it
@@ -1001,7 +1007,8 @@ class Runtime {
     // The profiler the dispatch loop currently attributes work to: the root's
     // inline m_profilerData, or a running coroutine's own ProfilerData.
     // resumeCoroutine swaps this; suspendCurrentCoroutine and a normal return
-    // leave the coroutine's scope slice in the coroutine.
+    // leave the coroutine's scope slice in the coroutine. The report reads
+    // only the root; merging the per-coroutine tables is issue #538.
     ProfilerData* m_activeProfiler{&m_profilerData};
     // Parallel to m_frames[]: active ProfileFunctionScope per call depth.
     // .emplace() at function entry; .reset() at Op::RETURN. Sized to match
