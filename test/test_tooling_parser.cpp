@@ -25,11 +25,13 @@ std::string readFile(const fs::path& path) {
     return buf.str();
 }
 
+const char* const kCorpusDirs[] = {"examples", "bootstrap",
+                                   "test/translation-probes"};
+
 std::vector<fs::path> corpusFiles() {
     const fs::path root = LOXPP_PROJECT_SOURCE_DIR;
     std::vector<fs::path> out;
-    for (const char* dir :
-         {"examples", "bootstrap", "test/translation-probes"}) {
+    for (const char* dir : kCorpusDirs) {
         const fs::path base = root / dir;
         if (!fs::is_directory(base)) {
             continue;
@@ -534,57 +536,24 @@ std::size_t measureProgramDepth(const Program& prog) {
 
 TEST(ToolingParserCorpus, ParsesEveryFileWithoutCrash) {
     const std::vector<fs::path> files = corpusFiles();
-    // examples/*.lox (116 - issue #328 adds no_trailing_newline.lox) +
-    // bootstrap/*.lox (2) + translation-probes/*.lox (60 - issue #268
-    // raised this by two, not one: 31_deep_recursion.lox moved into this
-    // directory, entering this non-recursive scan for the first time, and
-    // 53_deep_recursion_boundary.lox is new here too. 52 + 2 = 54. Issue
-    // #362 adds 55_for_in_map_net_zero.lox, raising this to 55. Issue #378
-    // adds 56_file_read.lox, raising this to 56. Issue #329 adds
-    // 56_math_constants.lox, raising this to 57. Issue #401 adds
-    // 56_file_nul.lox, raising this to 58. Issue #311 adds
-    // examples/defer_return_value.lox, raising this to 59. jvm-only/ probes
-    // stay uncounted, since this scan is non-recursive.
-    // 116 + 2 + 59 = 177. Issue #319 adds examples/defer_uncatchable_fault.lox,
-    // raising the total to 178, then
-    // test/translation-probes/57_defer_arity_fatal_fast_path.lox and
-    // 58_defer_overflow_fatal_fast_path.lox, raising this to 180. The
-    // reviewer round 2 fix adds
-    // test/translation-probes/59_return_out_of_try_leak.lox, raising this
-    // to 181. Issue #326 adds examples/defer_stack_overflow_count.lox,
-    // raising this to 182. Issue #420 adds
-    // examples/defer_match_subexpression.lox, raising this to 183, then
-    // examples/defer_method_call_with_arg_match.lox (round 2, reviewer
-    // finding), raising this to 184. Issue #421 adds
-    // examples/defer_sibling_runs_after_throw.lox, raising this to 185.
-    // Issue #322 promotes 57_stack_overflow_catchable.lox and
-    // 58_stack_overflow_reentrant_fatal.lox into this non-recursive scan,
-    // and adds four jvm-only defer/overflow-unwind regression probes at this
-    // directory's top level too, raising this to 191. Issue #320 adds
-    // examples/try_catch_closure_declared_in_catch_body.lox, raising this
-    // to 192. Issues #350/#388 add seven examples/try_catch_*.lox
-    // regressions (see tools/check_jvm_probes.sh's matching entries),
-    // raising this to 199, then
-    // test/translation-probes/60_throw_ends_try_binding.lox moves into this
-    // directory (issue #388's own fix lets it verify and run on JVM too),
-    // raising this to 200. Issue #445 promotes catch_overflow.lox out of
-    // jvm-only/ (uncounted there), raising this to 201. The S6 errors
-    // checkpoint adds defer_runs_on_normal_return.lox and
-    // defer_runs_before_caught_throw_propagates.lox (check_qbe_s6_errors.sh
-    // probes proving a deferred call's side effect is actually observable
-    // on an ordinary return and on a caught throw), raising this to 203.
-    // Issue #489 moves 37_invoke_field_bound_native_method.lox into this
-    // non-recursive scan, raising this to 204. Issue #469 adds
-    // test/translation-probes/62_map_instance_keys.lox, raising this to 205.
-    // Issue #505 adds examples/bigint.lox, raising this to 206, then
-    // examples/json.lox, raising this to 207, then examples/set.lox, raising
-    // this to 208. Issue #507 adds
-    // test/translation-probes/63_ord_chr_string_order.lox, raising this to
-    // 209, then examples/ord_chr.lox, raising this to 210. Issue #516 adds
-    // test/translation-probes/64_net_process.lox, examples/socket_echo.lox
-    // and examples/subprocess.lox, raising this to 213. PR #546 adds
-    // examples/zlib.lox, raising this to 214.
-    ASSERT_EQ(files.size(), 214U);
+
+    // A wrong scan root or a renamed directory would quietly turn this sweep
+    // into a no-op. Check each directory on its own: a single global lower
+    // bound can hide one directory dropping out behind the others.
+    for (const char* dir : kCorpusDirs) {
+        const fs::path base = fs::path(LOXPP_PROJECT_SOURCE_DIR) / dir;
+        ASSERT_TRUE(fs::is_directory(base))
+            << "missing corpus directory: " << base;
+        bool any = false;
+        for (const auto& entry : fs::directory_iterator(base)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".lox") {
+                any = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(any) << "no .lox files in " << base;
+    }
+    ASSERT_FALSE(files.empty());
 
     std::size_t totalNodes = 0;
     for (const auto& file : files) {
