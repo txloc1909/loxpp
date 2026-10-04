@@ -73,6 +73,9 @@ def make_inputs():
         ("prose", text),
         ("incompressible", rng.randbytes(3000)),
         ("nul and high bytes", b"\x00" * 100 + b"\xff\xfe" * 50),
+        # Over the 65535-byte single-stored-block limit. The encoder must not
+        # emit an oversized stored block here; Python still has to decode it.
+        ("over 64 KiB", rng.randbytes(66000)),
     ]
 
 
