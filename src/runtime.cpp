@@ -598,7 +598,22 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         co->activeStackBase = calleeSlot;
         co->activeWindowTop = calleeSlot + argCount + 1;
         co->started = true;
+        // A compiled entry (QBE coroutine mode) must be pushed, not run:
+        // opCall's own invokeClosure branches on m_resumableMode, and
+        // callCompiled would run the callee to completion instead of leaving
+        // it for the driver. An interpreted entry keeps the native path.
+        bool compiledCallee =
+            (isClosure(co->callee) &&
+             asObjClosure(as<Obj*>(co->callee))->function->code != nullptr) ||
+            (isBoundMethod(co->callee) &&
+             asObjBoundMethod(as<Obj*>(co->callee))->method->function->code !=
+                 nullptr);
+        bool savedResumable = m_resumableMode;
+        if (compiledCallee) {
+            m_resumableMode = true;
+        }
         OpResult r = opCall(argCount, boundary);
+        m_resumableMode = savedResumable;
         // Resumed (native VM: a pushed interpreted frame) or Call (coroutine
         // mode: a pushed compiled frame) both mean one frame of ours is ready
         // for the driver.

@@ -42,6 +42,26 @@ std::string qbeSymbolFor(const std::string& id) {
     return sym;
 }
 
+// True when any function in the tree contains Op::YIELD. A program with a
+// YIELD is compiled in coroutine mode: every function becomes a resumable
+// state machine (backend/qbe_emitter.h, EmitOptions::coroutineMode). The set
+// is the whole program because a function with no YIELD can still call one,
+// and calls are dynamic (a caller's frame must suspend too) — see
+// notes/coroutines.md and issue #530/#535.
+bool treeContainsYield(const DecodedFunction& node) {
+    for (const DecodedInstruction& ins : node.instructions) {
+        if (ins.op == Op::YIELD) {
+            return true;
+        }
+    }
+    for (const DecodedFunction& child : node.nested) {
+        if (treeContainsYield(child)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void emitTree(const DecodedFunction& node,
               const StackAnalysisTree& analysisNode,
               const CaptureAnalysis& captures, const qbe::EmitOptions& options,
@@ -221,6 +241,7 @@ int runQbeTarget(const std::string& exePath, const std::string& scriptPath,
     std::vector<CompiledFunction> fns;
     try {
         DecodedFunction tree = decodeFunctionTree(script);
+        options.coroutineMode = treeContainsYield(tree);
         StackAnalysisTree analysis = analyzeStackTree(tree);
         CaptureAnalysis captures = analyzeCaptures(tree);
         emitTree(tree, analysis, captures, options, ssa, fns);

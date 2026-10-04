@@ -42,12 +42,49 @@ using detail::VAL_TRUE;
 // in one place, next to their only two uses, rather than repeated inline.
 constexpr int kOpResultResumed = 1;
 constexpr int kOpResultFatal = 3;
+// Runtime::OpResult::Call (coroutine mode): the wrapper pushed a callable
+// frame for the driver instead of running it.
+constexpr int kOpResultCall = 4;
 
 [[noreturn]] void unsupported(Op op) {
     throw std::runtime_error(
         "qbe_emitter: opcode not supported by this node (S3 straight-line "
         "code and jumps, notes/qbe-backend.md): " +
         opName(op));
+}
+
+// Coroutine mode (QBE #530/#535): every opcode whose runtime path can push a
+// Lox callable frame — a closure, method, class init, instance __call__, or
+// an operator/iterator dunder — is a resume point. The runtime op then
+// returns OpResult::Call instead of running the callee, and this function
+// returns kRtCall to the driver. Ops that only run natives synchronously
+// (PRINT/STR: __str__ runs through stringify; ITER_HAS_NEXT: it drives a
+// nested coroutine; BUILD_MAP: __hash__/__eq__ run through hashMapKey;
+// RUN_DEFERS: reentrantCall) never return Call and are not resume points.
+bool isResumableCall(Op op) {
+    switch (op) {
+    case Op::CALL:
+    case Op::INVOKE:
+    case Op::SUPER_INVOKE:
+    case Op::GET_INDEX:
+    case Op::SET_INDEX:
+    case Op::SLICE:
+    case Op::ADD:
+    case Op::SUBTRACT:
+    case Op::MULTIPLY:
+    case Op::DIVIDE:
+    case Op::MODULO:
+    case Op::NEGATE:
+    case Op::LESS:
+    case Op::GREATER:
+    case Op::EQUAL:
+    case Op::IN:
+    case Op::LEN:
+    case Op::GET_ITER:
+        return true;
+    default:
+        return false;
+    }
 }
 
 // One function's own emission state: temp/data-symbol counters, the offset
@@ -81,6 +118,14 @@ class Emitter {
                 m_maxHeight = std::max({m_maxHeight, analysis.before[i].height,
                                         analysis.after[i].height});
             }
+            // Coroutine mode: pre-collect every resume point's offset so the
+            // prologue can dispatch on rt_resume_state before the body is
+            // emitted. The offset doubles as the state id.
+            if (options.coroutineMode &&
+                (isResumableCall(fn.instructions[i].op) ||
+                 fn.instructions[i].op == Op::YIELD)) {
+                m_resumeStates.push_back(fn.instructions[i].offset);
+            }
         }
     }
 
@@ -100,7 +145,7 @@ class Emitter {
             m_pushOffsetToCatchLabel[he.pushHandlerOffset] =
                 cfg.blocks[static_cast<std::size_t>(he.catchBlock)].label;
         }
-        if (m_options.promoteRegisters) {
+        if (m_options.promoteRegisters && !m_options.coroutineMode) {
             m_plan = planPromotion(m_fn, m_analysis, m_captures, cfg);
         }
 
@@ -153,8 +198,18 @@ class Emitter {
     // comment on RtCompiledFn explains why). Empty until emitStackCheck
     // runs; every other emission happens after it (run()'s own order).
     std::string m_stopTemp;
+    // Coroutine mode: every resume point's bytecode offset (the state id),
+    // in instruction order. Populated by the constructor; the prologue
+    // dispatches on rt_resume_state over this list.
+    std::vector<int> m_resumeStates;
 
     std::string newTemp() { return "%t" + std::to_string(m_tempCounter++); }
+
+    // The QBE label a resume point's continuation is emitted at, and the
+    // state id rt_set_resume_state stores for it.
+    std::string resumeLabel(int offset) const {
+        return m_symbol + "_resume" + std::to_string(offset);
+    }
 
     const std::pair<StackState, StackState>& stateOf(int offset) const {
         return m_stateAt.at(offset);
@@ -449,6 +504,22 @@ class Emitter {
                << resolvedLabel << "\n";
         m_body << fatalLabel << "\n\tret " << kRtFatal << "\n";
         m_body << resolvedLabel << "\n";
+        if (m_options.coroutineMode) {
+            // OpResult::Call: the runtime pushed a callable frame instead of
+            // running it. Return kRtCall to the driver, which runs it and
+            // re-enters this function at this op's resume label.
+            std::string isCall = newTemp();
+            m_body << "\t" << isCall << " =w ceqw " << status << ", "
+                   << kOpResultCall << "\n";
+            std::string callLabel =
+                "@" + m_symbol + "_call" + std::to_string(m_tempCounter);
+            std::string notCallLabel =
+                "@" + m_symbol + "_notcall" + std::to_string(m_tempCounter);
+            m_body << "\tjnz " << isCall << ", " << callLabel << ", "
+                   << notCallLabel << "\n";
+            m_body << callLabel << "\n\tret " << kRtCall << "\n";
+            m_body << notCallLabel << "\n";
+        }
         // OpResult::Resumed(1) here means the throw resolved at exactly
         // this function's own frame (m_stopTemp is this frame's own depth
         // minus one — see its own comment); OpResult::Stop(2) means it
@@ -569,7 +640,35 @@ class Emitter {
                 }
             }
         }
-        m_body << "\tjmp @" << firstBlockLabel << "\n";
+        if (!m_options.coroutineMode || m_resumeStates.empty()) {
+            m_body << "\tjmp @" << firstBlockLabel << "\n";
+            return;
+        }
+        // Coroutine mode: state 0 enters the function normally; any other
+        // state is a resume point, and control jumps to the block emitted
+        // after that call or YIELD. Every live value already sits in its
+        // stack slot (promotion is off), so jumping mid-function is safe.
+        std::string state = newTemp();
+        m_body << "\t" << state << " =w call $rt_resume_state(l %rt)\n";
+        std::string isEntry = newTemp();
+        m_body << "\t" << isEntry << " =w ceqw " << state << ", 0\n";
+        std::string dispatchLabel = "@" + m_symbol + "_resume_dispatch";
+        m_body << "\tjnz " << isEntry << ", @" << firstBlockLabel << ", "
+               << dispatchLabel << "\n";
+        m_body << dispatchLabel << "\n";
+        for (std::size_t i = 0; i < m_resumeStates.size(); i++) {
+            int id = m_resumeStates[i];
+            std::string hit = newTemp();
+            m_body << "\t" << hit << " =w ceqw " << state << ", " << id << "\n";
+            std::string next =
+                "@" + m_symbol + "_resume_next" + std::to_string(i);
+            m_body << "\tjnz " << hit << ", @" << resumeLabel(id) << ", "
+                   << next << "\n";
+            m_body << next << "\n";
+        }
+        // An unknown nonzero state is a contract violation (compiled code and
+        // Runtime::currentCompiledState drifted).
+        m_body << "\tret " << kRtFatal << "\n";
     }
 
     // The SSA value name the promotion plan gives parameter `slot` (matching
@@ -666,6 +765,18 @@ class Emitter {
 
     void emitInstruction(const DecodedInstruction& ins) {
         const auto& [before, after] = stateOf(ins.offset);
+        // Coroutine mode: record this op's resume point before the op runs.
+        // If it suspends (a YIELD, or a call the runtime leaves to the
+        // driver), the driver saves this state and re-enters here, at the
+        // label emitted after the op. The state also survives a completed op
+        // safely: only a resume point can suspend, and each resume point
+        // overwrites it before it can suspend.
+        bool coroutinePoint = m_options.coroutineMode &&
+                              (isResumableCall(ins.op) || ins.op == Op::YIELD);
+        if (coroutinePoint) {
+            m_body << "\tcall $rt_set_resume_state(l %rt, w " << ins.offset
+                   << ")\n";
+        }
         switch (ins.op) {
         case Op::CONSTANT: {
             Value v = m_fn.function->chunk.getConstant(
@@ -1029,8 +1140,13 @@ class Emitter {
                          ins.offset, Catchability::Local);
             break;
         case Op::ITER_HAS_NEXT:
+            // Local, not Fatal (#527): ITER_HAS_NEXT resumes a coroutine, and
+            // a throw from inside the resumed generator is catchable by a
+            // try around the for-in loop. m_stopTemp gives the check this
+            // frame's own boundary, so a caught fault jumps to the loop's
+            // catch block instead of going fatal.
             callSlowPath("rt_op_iter_has_next", before.height, {}, m_stopTemp,
-                         ins.offset, Catchability::Fatal);
+                         ins.offset, Catchability::Local);
             break;
         case Op::ITER_NEXT:
             callSlowPath("rt_op_iter_next", before.height, {}, std::nullopt,
@@ -1110,8 +1226,30 @@ class Emitter {
                               {"w " + m_stopTemp}, ins.offset,
                               Catchability::Propagate);
             break;
+        case Op::YIELD: {
+            if (!m_options.coroutineMode) {
+                throw std::runtime_error(
+                    "qbe_emitter: YIELD reached a non-coroutine emit — "
+                    "front end/coroutine-mode drift");
+            }
+            // Leave the yielded value on top of this frame's window (the
+            // abstract stack gives YIELD {pop 1, push 1}, so the operand is
+            // at before.height - 1). rt_yield runs the same legality checks
+            // as vm.cpp; on OK the driver pops the value and suspends.
+            callSlowPathTyped("rt_yield", before.height, {"w " + m_stopTemp},
+                              ins.offset, Catchability::Local);
+            m_body << "\tret " << kRtYield << "\n";
+            break;
+        }
         default:
             unsupported(ins.op);
+        }
+        // Coroutine mode: the continuation a resume jumps to. The result of a
+        // resumed call is already in place (the driver collapsed the callee
+        // window), and a resumed YIELD's received value already sits at the
+        // yield's result slot.
+        if (coroutinePoint) {
+            m_body << "@" << resumeLabel(ins.offset) << "\n";
         }
     }
 
