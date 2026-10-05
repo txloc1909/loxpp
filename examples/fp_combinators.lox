@@ -1,0 +1,152 @@
+// fp_combinators.lox - the classic function combinators, in user space.
+//
+// Lox++ has no anonymous function expression, so each combinator is a class
+// whose instances are callable through __call__. An instance built from a
+// combinator is a first-class value: it can be passed to, returned from, and
+// composed with any other callable, exactly like a plain function.
+//
+// Combinators: identity, constant, compose, pipe, flip, partial, curry.
+
+// A combinator's held function is copied to a local before it is called:
+// `var f = this.f; f(x)`, never `this.f(x)`. A combinator can hold another
+// combinator (an Instance with __call__), and the fused `this.f(x)` form does
+// not run __call__ for a field that holds a callable Instance (issue #560).
+// The local-variable call does, so the combinators nest.
+
+// identity(x) returns x unchanged.
+class Identity {
+    __call__(x) { return x; }
+}
+
+// constant(k) ignores its argument and always returns k.
+class Constant {
+    init(k) { this.k = k; }
+    __call__(x) { return this.k; }
+}
+
+// compose(f, g)(x) = f(g(x)) - g runs first, then f.
+class Compose {
+    init(f, g) { this.f = f; this.g = g; }
+    __call__(x) {
+        var f = this.f;
+        var g = this.g;
+        return f(g(x));
+    }
+}
+
+// pipe(f, g)(x) = g(f(x)) - left to right, the reading order of a pipeline.
+class Pipe {
+    init(f, g) { this.f = f; this.g = g; }
+    __call__(x) {
+        var f = this.f;
+        var g = this.g;
+        return g(f(x));
+    }
+}
+
+// flip(f)(a, b) = f(b, a) - swap the two arguments.
+class Flip {
+    init(f) { this.f = f; }
+    __call__(a, b) {
+        var f = this.f;
+        return f(b, a);
+    }
+}
+
+// partial(f, a)(b) = f(a, b) - fix the first argument of a two-arg function.
+class Partial {
+    init(f, a) { this.f = f; this.a = a; }
+    __call__(b) {
+        var f = this.f;
+        return f(this.a, b);
+    }
+}
+
+// curry(f) turns f(a, b) into a chain: curry(f)(a)(b) = f(a, b). The outer
+// call returns a Partial, which is itself callable.
+class Curry {
+    init(f) { this.f = f; }
+    __call__(a) { return Partial(this.f, a); }
+}
+
+// --- Plain functions to combine ----------------------------------------
+
+fun inc(n)        { return n + 1; }
+fun square(n)     { return n * n; }
+fun add(a, b)     { return a + b; }
+fun sub(a, b)     { return a - b; }
+fun greet(name)   { return "hello, " + name; }
+
+// --- identity and constant ---------------------------------------------
+
+var id = Identity();
+// CHECK: identity(99) = 99
+print "identity(99) = " + str(id(99));
+
+var always7 = Constant(7);
+// CHECK: constant(7)(123) = 7
+print "constant(7)(123) = " + str(always7(123));
+
+// --- compose and pipe ---------------------------------------------------
+
+var incThenSquare = Compose(square, inc);   // square(inc(x))
+// CHECK: compose(square, inc)(3) = 16
+print "compose(square, inc)(3) = " + str(incThenSquare(3));
+
+var incThenSquarePipe = Pipe(inc, square);  // same result, read left to right
+// CHECK: pipe(inc, square)(3) = 16
+print "pipe(inc, square)(3) = " + str(incThenSquarePipe(3));
+
+// Combinators nest, because each result is itself callable: inc(square(inc(x))).
+var incSquareInc = Pipe(Pipe(inc, square), inc);
+// CHECK: pipe(inc, square, inc)(3) = 17
+print "pipe(inc, square, inc)(3) = " + str(incSquareInc(3));
+
+// --- flip ---------------------------------------------------------------
+
+var backwards = Flip(sub);
+// CHECK: sub(10, 3) = 7
+print "sub(10, 3) = " + str(sub(10, 3));
+// CHECK: flip(sub)(10, 3) = -7
+print "flip(sub)(10, 3) = " + str(backwards(10, 3));
+
+// --- partial and curry --------------------------------------------------
+
+var add10 = Partial(add, 10);
+// CHECK: partial(add, 10)(5) = 15
+print "partial(add, 10)(5) = " + str(add10(5));
+
+var curriedAdd = Curry(add);
+// CHECK: curry(add)(2)(40) = 42
+print "curry(add)(2)(40) = " + str(curriedAdd(2)(40));
+
+// --- Dogfood: build one transform from several combinators --------------
+//
+// For a list of names, make a decorated greeting and report its length, using
+// only combinators to assemble the per-item transform.
+
+fun nameLength(s)  { return len(s); }
+fun announce(s)    { return "[" + s + "]"; }
+
+// transform = announce(greet(name)); measure = nameLength(transform(name))
+var decorate = Compose(announce, greet);
+var measure = Pipe(decorate, nameLength);
+
+var names = ["ada", "grace", "lin"];
+var out = [];
+for (var n in names) {
+    out.append(measure(n));
+}
+
+// decorate("ada") = "[hello, ada]" -> length 12, "grace" -> 14, "lin" -> 12
+// CHECK: decorate('ada') = [hello, ada]
+print "decorate('ada') = " + decorate("ada");
+// CHECK: lengths = [12, 14, 12]
+print "lengths = " + str(out);
+
+var sumLen = 0;
+for (var v in out) {
+    sumLen = add(sumLen, v);
+}
+// CHECK: total length = 38
+print "total length = " + str(sumLen);

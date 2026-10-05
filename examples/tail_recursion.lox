@@ -1,0 +1,70 @@
+// tail_recursion.lox - tail-recursive list and counting routines.
+//
+// count, sum, and foldl each recurse in tail position: the recursive call is
+// the whole of the returning expression, with an accumulator carrying the
+// result. A proper tail-call implementation would run these in constant stack
+// space for any size.
+//
+// Lox++ does not do tail-call elimination yet (issue #555), so each call still
+// uses one frame. The sizes here stay small, so the file runs today on every
+// backend, including the bootstrap interpreter, whose per-call frame cost is
+// the tightest. Once TCO lands, the same code works unchanged at any size.
+
+// count up from `i` to `n`, returning how many steps it took. The accumulator
+// is `acc`; the call to count is the entire return expression.
+fun count(i, n, acc) {
+    if (i >= n) return acc;
+    return count(i + 1, n, acc + 1);
+}
+
+// sum 1 + 2 + ... + n with a running total in `acc`.
+fun sum(n, acc) {
+    if (n == 0) return acc;
+    return sum(n - 1, acc + n);
+}
+
+// foldl(f, acc, xs, i): left fold over `xs`, starting at index `i`. Each step
+// folds one element into `acc` and tail-calls on the next index.
+fun foldl(f, acc, xs, i) {
+    if (i >= len(xs)) return acc;
+    return foldl(f, f(acc, xs[i]), xs, i + 1);
+}
+
+// --- count --------------------------------------------------------------
+
+// CHECK: count(0, 80) = 80
+print "count(0, 80) = " + str(count(0, 80, 0));
+
+// --- sum ----------------------------------------------------------------
+
+// CHECK: sum(1..80) = 3240
+print "sum(1..80) = " + str(sum(80, 0));
+
+// --- foldl, reused for several reductions -------------------------------
+
+fun add(a, b)   { return a + b; }
+fun mul(a, b)   { return a * b; }
+fun maxOf(a, b) { if (a > b) return a; return b; }
+
+var xs = [3, 1, 4, 1, 5, 9, 2, 6];
+
+// CHECK: foldl(add, 0) = 31
+print "foldl(add, 0) = " + str(foldl(add, 0, xs, 0));
+// CHECK: foldl(mul, 1) = 6480
+print "foldl(mul, 1) = " + str(foldl(mul, 1, xs, 0));
+// CHECK: foldl(max, 0) = 9
+print "foldl(max, 0) = " + str(foldl(maxOf, 0, xs, 0));
+
+// foldl also builds, not only reduces: concatenate the digits as a string.
+fun appendDigit(acc, d) { return acc + str(d); }
+// CHECK: foldl(appendDigit, '') = 31415926
+print "foldl(appendDigit, '') = " + foldl(appendDigit, "", xs, 0);
+
+// A deeper fold, still within every backend's frame budget, to show the
+// accumulator carries the whole result with no growth outside the recursion.
+var long = [];
+for (var i = 1; i <= 80; i = i + 1) {
+    long.append(i);
+}
+// CHECK: foldl(add) over 1..80 = 3240
+print "foldl(add) over 1..80 = " + str(foldl(add, 0, long, 0));

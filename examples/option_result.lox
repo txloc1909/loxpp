@@ -1,0 +1,133 @@
+// option_result.lox - an Option/Result library in user space.
+//
+// Option and Result are plain enums. The combinators unwrapOr, andThen, and
+// map are free functions, because enums take constructors only, not methods
+// (enum methods: #557). Each combinator consumes its value with match.
+//
+// The last section dogfoods the library: a small program parses a list of
+// strings into positive numbers and sums the ones that parsed, with no
+// exception and no sentinel value.
+
+enum Option { Some(v) None }
+enum Result { Ok(value) Err(msg) }
+
+// --- Option combinators -------------------------------------------------
+
+// Return the contained value, or a fallback when the Option is empty.
+fun unwrapOr(opt, fallback) {
+    return match opt {
+        case Some(v) => v
+        case None    => fallback
+    };
+}
+
+// Apply f to the contained value; f itself returns an Option. This is the
+// monadic bind, so chained lookups stop at the first None.
+fun andThen(opt, f) {
+    return match opt {
+        case Some(v) => f(v)
+        case None    => None()
+    };
+}
+
+// Apply f to the contained value and re-wrap it, leaving None untouched.
+fun map(opt, f) {
+    return match opt {
+        case Some(v) => Some(f(v))
+        case None    => None()
+    };
+}
+
+// --- Option combinators, exercised directly -----------------------------
+
+fun double(x) { return x * 2; }
+
+// Render an Option for printing. A match is used here through a function call,
+// not inline as `... + match {...}`: a match expression fed straight into `+`
+// is a known cross-backend gap (notes/bytecode-translation-problems.md), so
+// the result goes through a helper, which every backend compiles.
+fun showOpt(o) {
+    return match o {
+        case Some(v) => "Some(" + str(v) + ")"
+        case None    => "None"
+    };
+}
+
+// CHECK: unwrapOr(Some(7), 0) = 7
+print "unwrapOr(Some(7), 0) = " + str(unwrapOr(Some(7), 0));
+// CHECK: unwrapOr(None, 0) = 0
+print "unwrapOr(None, 0) = " + str(unwrapOr(None(), 0));
+
+// CHECK: map(double, Some(21)) = Some(42)
+print "map(double, Some(21)) = " + showOpt(map(Some(21), double));
+// CHECK: map(double, None) = None
+print "map(double, None) = " + showOpt(map(None(), double));
+
+// andThen short-circuits on None: halve only succeeds on an even number.
+fun halveEven(x) {
+    if (x % 2 == 0) return Some(x / 2);
+    return None();
+}
+
+// CHECK: andThen(Some(8), halveEven) = 4
+print "andThen(Some(8), halveEven) = " + str(unwrapOr(andThen(Some(8), halveEven), -1));
+// CHECK: andThen(Some(7), halveEven) = -1
+print "andThen(Some(7), halveEven) = " + str(unwrapOr(andThen(Some(7), halveEven), -1));
+
+// --- Result, and a bridge from Result to Option -------------------------
+
+// Parse a decimal String into a positive Number, or report why it failed.
+fun parsePositive(s) {
+    if (len(s) == 0) return Err("empty");
+    var n = 0;
+    for (var c in s) {
+        var code = ord(c);
+        if (code < ord("0") or code > ord("9")) return Err("not a digit: " + c);
+        n = n * 10 + (code - ord("0"));
+    }
+    if (n == 0) return Err("not positive");
+    return Ok(n);
+}
+
+fun describe(r) {
+    return match r {
+        case Ok(value) => "ok " + str(value)
+        case Err(msg)  => "err " + msg
+    };
+}
+
+// CHECK: parse '42' -> ok 42
+print "parse '42' -> " + describe(parsePositive("42"));
+// CHECK: parse '' -> err empty
+print "parse '' -> " + describe(parsePositive(""));
+// CHECK: parse '4x' -> err not a digit: x
+print "parse '4x' -> " + describe(parsePositive("4x"));
+// CHECK: parse '0' -> err not positive
+print "parse '0' -> " + describe(parsePositive("0"));
+
+// Drop the error detail: a successful Result becomes Some, a failure None.
+fun resultToOption(r) {
+    return match r {
+        case Ok(value) => Some(value)
+        case Err(_)    => None()
+    };
+}
+
+// --- Dogfood: sum the inputs that parse as positive numbers -------------
+
+var inputs = ["10", "oops", "20", "", "12"];
+var total = 0;
+var kept = 0;
+for (var raw in inputs) {
+    // map transforms the parsed Option through double, then unwrapOr supplies
+    // 0 for anything that did not parse - one pipeline, no branching here.
+    var parsed = resultToOption(parsePositive(raw));
+    var contribution = unwrapOr(map(parsed, double), 0);
+    total = total + contribution;
+    if (contribution > 0) kept = kept + 1;
+}
+
+// CHECK: kept 3 of 5 inputs
+print "kept " + str(kept) + " of " + str(len(inputs)) + " inputs";
+// CHECK: doubled total = 84
+print "doubled total = " + str(total);
