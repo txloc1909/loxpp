@@ -1921,7 +1921,11 @@ fun reflectCallMethod(interp, args) {
         // function value stored in a field is called as-is (native's Op::CALL
         // of a field closure binds slot 0 to the closure, not the instance).
         if (!viaField) callee = callee.bind(instance);
-        return callee.call(interp, forwarded);
+        // Native runs the target from C++ here, so a yield cannot cross it.
+        interp.nativeDepth = interp.nativeDepth + 1;
+        var result = callee.call(interp, forwarded);
+        interp.nativeDepth = interp.nativeDepth - 1;
+        return result;
     }
     if (tag != "native" and tag != "mathfn" and tag != "mapmethod" and
         tag != "filemethod" and tag != "listmethod" and tag != "socketmethod" and
