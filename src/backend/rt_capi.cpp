@@ -442,13 +442,15 @@ int rt_check_stack(Runtime* rt, Value* neededTop,
     });
 }
 
-void rt_push_handler(Runtime* rt, Value* checkpointTop) noexcept {
+void rt_push_handler(Runtime* rt, Value* checkpointTop,
+                     int catchState) noexcept {
     // catchIp is meaningful only to the interpreter's own dispatch loop
     // (qbe_emitter.cpp's own file comment explains why compiled code never
     // reads it back) — this frame's own chunk-begin is a harmless, always-
-    // valid placeholder.
+    // valid placeholder. `catchState` is coroutine mode's compiled catch
+    // resume point (-1 outside coroutine mode).
     rt->pushHandler(checkpointTop,
-                    rt->currentClosure()->function->chunk.cbegin());
+                    rt->currentClosure()->function->chunk.cbegin(), catchState);
 }
 
 int rt_pop_handler(Runtime* rt) noexcept {
@@ -499,4 +501,15 @@ int rt_run_defers(Runtime* rt, int stopAtFrameCount) noexcept {
 
 void rt_set_frame_offset(Runtime* rt, int offset) noexcept {
     rt->setCurrentFrameOffset(offset);
+}
+
+int rt_resume_state(Runtime* rt) noexcept { return rt->currentCompiledState(); }
+
+void rt_set_resume_state(Runtime* rt, int state) noexcept {
+    rt->setCurrentCompiledState(state);
+}
+
+int rt_yield(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(
+        rt, [&] { return static_cast<int>(rt->yieldOp(stopAtFrameCount)); });
 }

@@ -1,0 +1,33 @@
+// A throw from a function the coroutine calls is caught by the coroutine's
+// own try, which spans the call. The handler lives in an ancestor of the
+// yielding frame, so the driver must re-enter that ancestor at its catch
+// block. Mission #523 node 7 (#530/#535).
+fun inner() {
+    throw "boom";
+}
+
+fun middle() {
+    inner();
+    return "mid";
+}
+
+fun outer() {
+    try {
+        middle();
+        print "not reached";
+    } catch (e) {
+        print "caught " + e;
+    }
+    yield 1;
+    return "end";
+}
+
+var co = coroutine.create(outer);
+print co.resume();
+print co.resume();
+print co.status();
+
+// CHECK: caught boom
+// CHECK: 1
+// CHECK: end
+// CHECK: dead

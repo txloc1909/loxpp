@@ -144,6 +144,9 @@ Runtime::ThrowOutcome Runtime::call(ObjClosure* closure, int argCount,
     frame->closure = closure;
     frame->ip = fn->chunk.cbegin();
     frame->slots = stackTop - argCount - 1;
+    // Coroutine mode: a frame entering its own code starts at resume point 0.
+    // Reused slots would otherwise keep a stale point from a prior call.
+    frame->compiledState = 0;
 #ifdef LOXPP_PROFILE
     {
         int depth = m_frameCount - 1;
@@ -174,7 +177,18 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
         // ours was pushed, so there is nothing here to pop back off.
         return fromThrow(outcome);
     }
-    CallFrame* frame = &m_frames[m_frameCount - 1];
+    int frameIndex = m_frameCount - 1;
+    CallFrame* frame = &m_frames[frameIndex];
+    // Record the operator-result contract on the frame so
+    // finishCompiledFrameReturn() can apply it, exactly as the coroutine
+    // driver reads it for a resumable call.
+    if (check != ResultCheck::None) {
+        m_frameResultCheck[frameIndex] = check;
+    }
+    if (resultOverride != nullptr) {
+        m_frameResultOverride[frameIndex] = *resultOverride;
+        m_frameResultOverrideSet[frameIndex] = true;
+    }
     auto code = reinterpret_cast<RtCompiledFn>(closure->function->code);
     int status = code(this, frame->slots);
     if (status == kRtFatal) {
@@ -195,6 +209,15 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
         return (m_frameCount > stopAtFrameCount) ? OpResult::Resumed
                                                  : OpResult::Stop;
     }
+    if (status == kRtCall || status == kRtYield) {
+        // kRtCall/kRtYield are coroutine-mode statuses. callCompiled() runs
+        // with m_resumableMode clear, so no op pushes a call and a YIELD is
+        // illegal (it raises a native-callback/defer boundary error first).
+        // Reaching here means the compiled code and this contract drifted.
+        runtimeError("BUG: compiled function returned a coroutine status "
+                     "outside the coroutine driver.");
+        return OpResult::Fatal;
+    }
     // The C-ABI return convention for a compiled function, mirroring
     // Op::RETURN (vm.cpp) exactly: before returning 0, the callee leaves
     // its return value as the single value on top of the stack (the same
@@ -210,14 +233,23 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
     // these fields (backend/qbe_emitter.cpp's own lowering has no access to
     // Runtime's private state), so the caller of the compiled code — here —
     // is where that contract must be enforced instead.
+    return finishCompiledFrameReturn(frameIndex, stopAtFrameCount);
+}
+
+Runtime::OpResult Runtime::finishCompiledFrameReturn(int frameIndex,
+                                                     int stopAtFrameCount) {
+    CallFrame* frame = &m_frames[frameIndex];
+    ResultCheck check = m_frameResultCheck[frameIndex];
+    bool overrideSet = m_frameResultOverrideSet[frameIndex];
+    Value overrideValue = m_frameResultOverride[frameIndex];
     Value result = pop();
     closeUpvalues(frame->slots);
     popHandlersOwnedByCurrentFrame();
-    m_frameResultCheck[m_frameCount - 1] = ResultCheck::None;
-    m_frameResultOverrideSet[m_frameCount - 1] = false;
+    m_frameResultCheck[frameIndex] = ResultCheck::None;
+    m_frameResultOverrideSet[frameIndex] = false;
     m_frameCount--;
     stackTop = frame->slots;
-    push(resultOverride != nullptr ? *resultOverride : result);
+    push(overrideSet ? overrideValue : result);
     if (check == ResultCheck::Sequence &&
         (isList(result) || isString(result) || isMap(result) ||
          isCoroutine(result))) {
@@ -253,6 +285,17 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
 
 Runtime::OpResult Runtime::invokeClosure(ObjClosure* closure, int argCount,
                                          int stopAtFrameCount) {
+    if (m_resumableMode) {
+        // Coroutine mode: never run the callee here. Push its frame and tell
+        // the driver to run it, so a YIELD inside it can suspend this whole
+        // call chain. The push is call()'s own arity/overflow-checked path,
+        // identical to the non-coroutine interpreted branch below.
+        ThrowOutcome outcome = call(closure, argCount, stopAtFrameCount);
+        if (outcome == ThrowOutcome::Pushed) {
+            return OpResult::Call;
+        }
+        return fromThrow(outcome);
+    }
     if (closure->function->code != nullptr) {
         return callCompiled(closure, argCount, stopAtFrameCount);
     }
@@ -279,12 +322,20 @@ Runtime::OpResult Runtime::runPushedFrameToCompletion(int entry) {
 }
 
 Runtime::OpResult Runtime::reentrantCall(int argCount, int throwBoundary) {
+    // A re-entrant call (a deferred-call drain, a native's synchronous call
+    // back into Lox) must run to completion before its C++ caller resumes. It
+    // cannot be suspended through, so coroutine mode is cleared around it:
+    // opCall runs the callee directly, and a YIELD inside is rejected by the
+    // existing m_reentrantRunDepth check.
+    bool savedResumable = m_resumableMode;
+    m_resumableMode = false;
     // The nested run() must stop once the frame this call pushes (if any) has
     // returned — i.e. when m_frameCount falls back to this call's own entry
     // depth. Captured before opCall() can push anything.
     int entry = m_frameCount;
     OpResult result = opCall(argCount, throwBoundary);
     if (result != OpResult::Resumed) {
+        m_resumableMode = savedResumable;
         return result; // OK (value on stack), Stop, or Fatal
     }
     // Resumed means opCall() pushed a frame (ThrowOutcome::Pushed) or a throw
@@ -292,12 +343,24 @@ Runtime::OpResult Runtime::reentrantCall(int argCount, int throwBoundary) {
     // leaves a frame of ours to run; tell them apart by frame depth, exactly
     // as runPendingDefers() does.
     if (m_frameCount != entry + 1) {
+        m_resumableMode = savedResumable;
         return OpResult::Resumed;
     }
-    return runPushedFrameToCompletion(entry);
+    OpResult r = runPushedFrameToCompletion(entry);
+    m_resumableMode = savedResumable;
+    return r;
 }
 
 bool Runtime::runNestedLoop(int entry) {
+    // Coroutine mode (QBE #530/#535): a compiled frame is driven by
+    // runCompiledFrames(), not the interpreter loop. The frame at `entry` is
+    // the outermost frame to run (m_frameCount > entry, guaranteed by both
+    // callers). All frames from entry up are compiled in a --target qbe
+    // build.
+    if (entry < m_frameCount &&
+        m_frames[entry].closure->function->code != nullptr) {
+        return runCompiledFrames(entry);
+    }
     if (!m_runLoop) {
         // No interpreter loop is installed: this Runtime is driven by compiled
         // code (the QBE backend), where every callee has attached code and so
@@ -309,6 +372,73 @@ bool Runtime::runNestedLoop(int entry) {
         return false;
     }
     return m_runLoop(entry) == InterpretResult::OK;
+}
+
+bool Runtime::runCompiledFrames(int base) {
+    // The driver owns the coroutine's control state. Each frame's compiled
+    // code is invoked here, one frame at a time, and returns a status
+    // (backend/rt_abi.h). A frame's own C frame does not survive a kRtCall or
+    // a kRtYield: the driver re-enters it later from CallFrame::compiledState,
+    // with all its live values restored to the same slots from the snapshot.
+    //
+    // m_resumableMode is set only around each frame's own code() call, and
+    // restored to the value this driver entry saw. A nested driver (a
+    // `for-in`/`resume` over another coroutine inside a coroutine) must not
+    // leave the mode clear: the enclosing frame is still on its own code()
+    // call and its next yield would otherwise fail as a native-callback yield.
+    bool savedResumable = m_resumableMode;
+    for (;;) {
+        if (m_frameCount <= base) {
+            // The outermost frame returned (or a throw unwound below it).
+            return true;
+        }
+        int top = m_frameCount - 1;
+        CallFrame* frame = &m_frames[top];
+        if (frame->closure->function->code == nullptr) {
+            // A --target qbe build compiles every function (no fallback), so
+            // an interpreted frame here is a compiler/contract drift.
+            runtimeError(
+                "BUG: interpreted frame reached the coroutine driver.");
+            return false;
+        }
+        auto code =
+            reinterpret_cast<RtCompiledFn>(frame->closure->function->code);
+        m_resumableMode = true;
+        int status = code(this, frame->slots);
+        m_resumableMode = savedResumable;
+        switch (status) {
+        case kRtCall:
+            // A callable frame was pushed by the frame below. The driver must
+            // run it next; the caller saved its own resume point already.
+            continue;
+        case kRtYield: {
+            // The frame left the yielded value on top of its window.
+            Value yielded = pop();
+            suspendCurrentCoroutine(yielded);
+            return true;
+        }
+        case kRtThrow:
+            // handleThrow() already unwound to the catching frame and set its
+            // catch resume point. Loop to re-enter it there. If the catching
+            // frame is at or below `base`, an outer run() owns the throw: the
+            // loop's top check stops.
+            continue;
+        case kRtFatal:
+            return false;
+        case kRtOk:
+        default: {
+            // kRtOk (and, defensively, an unknown status) is the frame's
+            // normal return: collapse it and re-enter its caller. A failed
+            // operator-result check raises through handleThrow, which sets the
+            // catching frame's resume point; loop in that case too.
+            OpResult r = finishCompiledFrameReturn(top, top - 1);
+            if (r == OpResult::Fatal) {
+                return false;
+            }
+            continue;
+        }
+        }
+    }
 }
 
 Runtime::OpResult Runtime::runReentrantFrame(int entry, Value* frameSlots,
@@ -475,8 +605,27 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         co->activeStackBase = calleeSlot;
         co->activeWindowTop = calleeSlot + argCount + 1;
         co->started = true;
+        // A compiled entry (QBE coroutine mode) must be pushed, not run:
+        // opCall's own invokeClosure branches on m_resumableMode, and
+        // callCompiled would run the callee to completion instead of leaving
+        // it for the driver. An interpreted entry keeps the native path.
+        bool compiledCallee =
+            (isClosure(co->callee) &&
+             asObjClosure(as<Obj*>(co->callee))->function->code != nullptr) ||
+            (isBoundMethod(co->callee) &&
+             asObjBoundMethod(as<Obj*>(co->callee))->method->function->code !=
+                 nullptr);
+        bool savedResumable = m_resumableMode;
+        if (compiledCallee) {
+            m_resumableMode = true;
+        }
         OpResult r = opCall(argCount, boundary);
-        if (r == OpResult::Resumed && m_frameCount == entry + 1) {
+        m_resumableMode = savedResumable;
+        // Resumed (native VM: a pushed interpreted frame) or Call (coroutine
+        // mode: a pushed compiled frame) both mean one frame of ours is ready
+        // for the driver.
+        if ((r == OpResult::Resumed || r == OpResult::Call) &&
+            m_frameCount == entry + 1) {
             frameReady = true;
         } else {
             // No frame of ours was pushed: an arity fault caught inside this
@@ -497,6 +646,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
             f.closure = fs.closure;
             f.ip = fs.closure->function->chunk.cbegin() + fs.ipOffset;
             f.slots = base + fs.slotOffset;
+            f.compiledState = fs.compiledState;
         }
         m_frameCount = entry + static_cast<int>(co->frames.size());
         // `co->handlers` is stored innermost-first (suspend pops the handler
@@ -504,8 +654,9 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         // handler ends on top and handleThrow's LIFO search finds it first.
         for (std::size_t i = co->handlers.size(); i-- > 0;) {
             const CoroutineHandlerSnapshot& hs = co->handlers[i];
-            m_handlerStack.push_back(HandlerRecord{
-                entry + hs.frameOffset, base + hs.stackOffset, hs.catchIp});
+            m_handlerStack.push_back(HandlerRecord{entry + hs.frameOffset,
+                                                   base + hs.stackOffset,
+                                                   hs.catchIp, hs.catchState});
         }
         for (std::size_t i = 0; i < co->defers.size(); i++) {
             m_deferLists[entry + static_cast<int>(i)] = co->defers[i];
@@ -632,7 +783,7 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
         m_handlerStack.pop_back();
         co->handlers.push_back(CoroutineHandlerSnapshot{
             h.frameCount - baseFrame, static_cast<int>(h.stackTop - base),
-            h.catchIp});
+            h.catchIp, h.catchState});
     }
 
     co->frames.clear();
@@ -642,7 +793,7 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
         co->frames.push_back(CoroutineFrameSnapshot{
             f.closure,
             static_cast<int>(f.ip - f.closure->function->chunk.cbegin()),
-            static_cast<int>(f.slots - base)});
+            static_cast<int>(f.slots - base), f.compiledState});
     }
 
     co->defers.clear();
@@ -937,6 +1088,13 @@ Runtime::ThrowOutcome Runtime::handleThrow(Value thrownValue,
         push(thrownValue);
         // Set IP to catch block in the frame record directly.
         m_frames[m_frameCount - 1].ip = handlerToUse.catchIp;
+        // Coroutine mode: a compiled frame reads its own resume point, not
+        // ip. Redirect it to its statically known catch block so the driver
+        // re-enters there. An interpreted handler (catchState -1) keeps
+        // catchIp above.
+        if (handlerToUse.catchState >= 0) {
+            m_frames[m_frameCount - 1].compiledState = handlerToUse.catchState;
+        }
         // Pop this handler since we're handling the throw.
         m_handlerStack.erase(m_handlerStack.begin() + handlerIndex);
         return (m_frameCount <= stopAtFrameCount)
@@ -1007,7 +1165,14 @@ Runtime::OpResult Runtime::callNative(ObjNative* native, int argCount,
     m_reentrantOutcome = OpResult::OK;
     int savedBoundary = m_nativeStopAtFrameCount;
     m_nativeStopAtFrameCount = stopAtFrameCount;
+    // A native cannot be suspended through. Any Lox it re-enters runs
+    // non-resumably (callCompiled), so a YIELD there raises the existing
+    // native-callback error (Op::YIELD's own m_reentrantRunDepth check)
+    // instead of trying to drive a frame the native's C stack cannot expose.
+    bool savedResumable = m_resumableMode;
+    m_resumableMode = false;
     Value result = native->function(argCount, stackTop - argCount);
+    m_resumableMode = savedResumable;
     m_nativeStopAtFrameCount = savedBoundary;
     OpResult outcome = m_reentrantOutcome;
     m_reentrantOutcome = savedOutcome;
@@ -1251,6 +1416,25 @@ Runtime::OpResult Runtime::dispatchMethod(ObjClosure* method, int argCount,
     // forever. callCompiled() takes the ResultCheck/resultOverride this
     // dispatch needs and applies them itself once the compiled callee
     // returns (runtime.h's own comment on callCompiled).
+    //
+    // Coroutine mode: push the frame and hand it to the driver, recording
+    // the same ResultCheck/override on the frame so the driver applies them
+    // when the method returns.
+    if (m_resumableMode) {
+        ThrowOutcome outcome = call(method, argCount, stopAtFrameCount);
+        if (outcome != ThrowOutcome::Pushed) {
+            return fromThrow(outcome);
+        }
+        int idx = m_frameCount - 1;
+        if (check != ResultCheck::None) {
+            m_frameResultCheck[idx] = check;
+        }
+        if (resultOverride != nullptr) {
+            m_frameResultOverride[idx] = *resultOverride;
+            m_frameResultOverrideSet[idx] = true;
+        }
+        return OpResult::Call;
+    }
     if (method->function->code != nullptr) {
         return callCompiled(method, argCount, stopAtFrameCount, check,
                             resultOverride);
@@ -1716,11 +1900,17 @@ std::optional<uint32_t> Runtime::hashMapKey(const Value& key,
     push(key);
     Value* frameSlots = stackTop - 1;
     int entry = m_frameCount;
+    // __hash__ is a native-callback context (runReentrantFrame below): a
+    // yield inside it is illegal, and its result must be synchronous. Clear
+    // coroutine mode so dispatchMethod runs it directly, not as a driver call.
+    bool savedResumable = m_resumableMode;
+    m_resumableMode = false;
     OpResult r = dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
                                 stopAtFrameCount, ResultCheck::Number);
     if (r == OpResult::Resumed && m_frameCount == entry + 1) {
         r = runReentrantFrame(entry, frameSlots, stopAtFrameCount);
     }
+    m_resumableMode = savedResumable;
     if (r != OpResult::OK) {
         m_mapKeyStatus = r;
         return std::nullopt;
@@ -1756,11 +1946,15 @@ bool Runtime::mapKeyEq(const Value& stored, const Value& lookup,
             push(lookup);
             Value* frameSlots = stackTop - 2;
             int entry = m_frameCount;
+            // __eq__ for a map key: same native-callback context as __hash__.
+            bool savedResumable = m_resumableMode;
+            m_resumableMode = false;
             OpResult r = dispatchMethod(asObjClosure(as<Obj*>(method)), 1,
                                         stopAtFrameCount, ResultCheck::Boolean);
             if (r == OpResult::Resumed && m_frameCount == entry + 1) {
                 r = runReentrantFrame(entry, frameSlots, stopAtFrameCount);
             }
+            m_resumableMode = savedResumable;
             if (r != OpResult::OK) {
                 m_mapKeyStatus = r;
                 return false;
@@ -2246,6 +2440,29 @@ Runtime::OpResult Runtime::opIterNext() {
     } else {
         runtimeError("BUG: ObjIterator::collection has unexpected type.");
         return OpResult::Fatal;
+    }
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::yieldOp(int stopAtFrameCount) {
+    // Mirrors vm.cpp's interpreted Op::YIELD checks. The compiled frame
+    // returns kRtYield only when this returns OK; the driver then suspends it.
+    if (m_currentCoroutine == nullptr) {
+        return fromThrow(raiseThrowableError(
+            "YieldOutsideCoroutineError",
+            "Cannot yield from outside a coroutine.", stopAtFrameCount));
+    }
+    // m_resumableMode is true only while the coroutine driver runs this
+    // coroutine's own frames. A compiled frame reached any other way — run
+    // synchronously by callCompiled because a native, a __str__/__hash__/
+    // __eq__ dispatch, or a defer drain re-entered Lox — has m_resumableMode
+    // clear: its C frame cannot be frozen, so a yield here must fail like any
+    // native-callback yield. (The interpreted path keeps its own
+    // m_reentrantRunDepth check in vm.cpp; this flag is the compiled twin.)
+    if (!m_resumableMode) {
+        return fromThrow(raiseThrowableError(
+            "YieldAcrossNativeError", "Cannot yield across a native callback.",
+            stopAtFrameCount));
     }
     return OpResult::OK;
 }
@@ -2781,11 +2998,16 @@ std::string Runtime::stringifyInstanceStr(ObjInstance* instance) {
     push(Value{static_cast<Obj*>(instance)});
     Value* frameSlots = stackTop - 1;
     int entry = m_frameCount;
+    // __str__ is a native-callback context (runReentrantFrame below): a yield
+    // inside it is illegal, and its result must be synchronous.
+    bool savedResumable = m_resumableMode;
+    m_resumableMode = false;
     OpResult r = dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
                                 m_stringifyBoundary, ResultCheck::String);
     if (r == OpResult::Resumed && m_frameCount == entry + 1) {
         r = runReentrantFrame(entry, frameSlots, m_stringifyBoundary);
     }
+    m_resumableMode = savedResumable;
     if (r != OpResult::OK) {
         m_stringifyStatus = r;
         return "...";

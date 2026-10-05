@@ -158,6 +158,11 @@ InterpretResult VM::run(int stopAtFrameCount) {
             return InterpretResult::OK;
         case Runtime::OpResult::Fatal:
             return InterpretResult::RUNTIME_ERROR;
+        case Runtime::OpResult::Call:
+            // Coroutine mode only: a pushed compiled frame for the driver.
+            // The interpreter loop never sets m_resumableMode, so this is
+            // unreachable from here; treat it as a contract violation.
+            return InterpretResult::RUNTIME_ERROR;
         }
         return InterpretResult::RUNTIME_ERROR; // unreachable
     };

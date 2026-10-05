@@ -81,6 +81,13 @@ namespace qbe {
 struct EmitOptions {
     bool promoteRegisters{true};
     bool fuseTagJumpTable{true};
+    // Coroutine mode (QBE #530/#535): the whole program contains at least one
+    // YIELD, so every function is compiled as a resumable state machine. The
+    // front end sets this from the decoded tree (qbe_frontend.cpp). Promotion
+    // is off in this mode: a local must stay in its stack slot across a
+    // suspension. See rt_abi.h's kRtCall/kRtYield and Runtime::
+    // runCompiledFrames().
+    bool coroutineMode{false};
 };
 
 // Emits complete QBE textual IL (.ssa) for one function: `data` declarations

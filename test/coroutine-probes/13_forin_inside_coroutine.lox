@@ -1,0 +1,26 @@
+// A for-in over another coroutine, inside a coroutine. The nested resume runs
+// a second driver; when it returns, the enclosing frame must still be able to
+// yield. Mission #523 node 7 (#530/#535).
+fun inner() {
+    yield 1;
+    yield 2;
+}
+
+fun outer() {
+    for (var x in coroutine.create(inner)) {
+        print x;
+    }
+    yield 42;
+    return "end";
+}
+
+var co = coroutine.create(outer);
+print co.resume();
+print co.resume();
+print co.status();
+
+// CHECK: 1
+// CHECK: 2
+// CHECK: 42
+// CHECK: end
+// CHECK: dead

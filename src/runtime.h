@@ -60,12 +60,23 @@ struct HandlerRecord {
     int frameCount;                // number of frames at push time
     Value* stackTop;               // stack pointer at push time
     Chunk::const_iterator catchIp; // jump target for catch block
+    // Coroutine mode only: the compiled frame's resume state for its catch
+    // block. handleThrow sets the catching frame's CallFrame::compiledState
+    // to this instead of writing catchIp, which a compiled frame never reads.
+    // -1 when this record belongs to an interpreted frame.
+    int catchState{-1};
 };
 
 struct CallFrame {
     ObjClosure* closure;
     Chunk::const_iterator ip;
     Value* slots; // points into the VM stack at this frame's base slot
+    // Coroutine mode only (backend/rt_abi.h, kRtCall/kRtYield). The compiled
+    // frame's resume point, read by its prologue and saved on suspend. 0
+    // means "enter at the function's first block"; every other value names
+    // the block emitted after a fallible call or a YIELD. Always 0 for an
+    // interpreted frame.
+    int compiledState{0};
 };
 
 class Runtime {
@@ -177,7 +188,13 @@ class Runtime {
     //            frame/ip/chunk.
     //   Fatal:   uncaught error already reported via runtimeError(). Caller
     //            returns InterpretResult::RUNTIME_ERROR immediately.
-    enum class OpResult : std::uint8_t { OK, Resumed, Stop, Fatal };
+    //   Call:    coroutine mode only. The helper pushed a callable frame
+    //            instead of running it, because Runtime::m_resumableMode is
+    //            set (the compiled code is being driven by
+    //            runCompiledFrames()). Compiled code maps this to kRtCall
+    //            and returns it to the driver. Never produced while the
+    //            interpreter loop is dispatching.
+    enum class OpResult : std::uint8_t { OK, Resumed, Stop, Fatal, Call };
 
     // White-box seam for StackOverflowTest and VM's own interpreter loop.
     friend class VM;
@@ -414,9 +431,10 @@ class Runtime {
     // there directly); compiled code never reads a HandlerRecord's own
     // catchIp back — see qbe_emitter.cpp's own comment on why it derives
     // its catch target from handler_depth's static analysis instead.
-    void pushHandler(Value* checkpointTop, Chunk::const_iterator catchIp) {
+    void pushHandler(Value* checkpointTop, Chunk::const_iterator catchIp,
+                     int catchState = -1) {
         m_handlerStack.push_back(
-            HandlerRecord{m_frameCount, checkpointTop, catchIp});
+            HandlerRecord{m_frameCount, checkpointTop, catchIp, catchState});
     }
 
     // POP_HANDLER's own body (vm.cpp, backend/rt_capi.h's rt_pop_handler):
@@ -491,6 +509,15 @@ class Runtime {
     OpResult opIterHasNext(int stopAtFrameCount);
     OpResult opIterNext();
 
+    // YIELD's own body in coroutine mode. Runs the two legality checks
+    // vm.cpp's interpreted Op::YIELD runs — a yield outside a coroutine, and
+    // a yield across a native callback (a deeper m_reentrantRunDepth than
+    // the coroutine was resumed with). Returns OK when the yield is legal;
+    // the compiled frame then returns kRtYield and the driver suspends it.
+    // An illegal yield raises through handleThrow and returns its OpResult,
+    // exactly like any other fallible op.
+    OpResult yieldOp(int stopAtFrameCount);
+
     // Resumes a coroutine from ITER_HAS_NEXT. resumeCoroutine() is written for
     // the native resume path: it reports its boundary through
     // m_nativeStopAtFrameCount and its failure through m_reentrantOutcome. This
@@ -543,7 +570,40 @@ class Runtime {
     // Invokes the installed interpreter loop at `entry`, returning false if no
     // loop is installed or the run ended in a fatal error. Shared by the two
     // re-entrant exit classifiers above/below.
+    //
+    // Coroutine mode (backend/rt_abi.h, QBE #530/#535): when the frame at
+    // `entry` is compiled (function->code != nullptr), the compiled driver
+    // runCompiledFrames() drives it instead of the interpreter loop.
     bool runNestedLoop(int entry);
+
+    // Coroutine mode's driver loop. Runs compiled frames from the top of the
+    // stack down to `base` (exclusive), in one nested C invocation:
+    //
+    //   kRtCall  a frame was pushed (a callable frame the runtime did not
+    //            run); loop and run it.
+    //   kRtOk    the top frame returned; collapse its window, apply its own
+    //            result contract, and re-enter its caller at the caller's
+    //            saved resume point with the result. Stops when the caller is
+    //            `base`.
+    //   kRtThrow handleThrow() already unwound to the catching frame and set
+    //            its resume point; loop and re-enter it there. Stops when the
+    //            catching frame is at or below `base` (an outer boundary).
+    //   kRtYield the top frame suspended. Pops the yielded value and calls
+    //            suspendCurrentCoroutine(). Returns true.
+    //   kRtFatal return false.
+    //
+    // Returns false only on a fatal error (the Runtime already reset).
+    // Requires the frame at `base` (and every frame above it) to be compiled.
+    bool runCompiledFrames(int base);
+
+    // The current (topmost) frame's resume point in coroutine mode. Compiled
+    // code reads it in its prologue and writes it before a call or a YIELD.
+    int currentCompiledState() const {
+        return m_frames[m_frameCount - 1].compiledState;
+    }
+    void setCurrentCompiledState(int state) {
+        m_frames[m_frameCount - 1].compiledState = state;
+    }
 
     // Classes, methods, aggregates, slicing, and match dispatch (S5, #458),
     // moved out of VM::run() the same way as the op*() methods above so the
@@ -774,6 +834,17 @@ class Runtime {
                           ResultCheck check = ResultCheck::None,
                           const Value* resultOverride = nullptr);
 
+    // Collapses the compiled frame at `frameIndex` after its code returned
+    // kRtOk: pops the result, closes upvalues captured over the frame's own
+    // slots, drops the frame's own handlers, applies the frame's own
+    // ResultCheck/override (read from the per-frame arrays), then leaves the
+    // result at the frame's base. Shared by callCompiled() and the coroutine
+    // driver runCompiledFrames(). `stopAtFrameCount` is the enclosing run's
+    // boundary, used only by a failed result check's own fault. Returns OK on
+    // success; otherwise the OpResult to propagate (a failed check's own
+    // fromThrow() result).
+    OpResult finishCompiledFrameReturn(int frameIndex, int stopAtFrameCount);
+
     // Dispatches to callCompiled() when `closure` already has attached code,
     // else falls back to call()+fromThrow() — the same branch opCall()'s
     // closure case already makes inline (above). Every other site that runs
@@ -974,6 +1045,15 @@ class Runtime {
 
     // See setInterpretLoop() above.
     std::function<InterpretResult(int)> m_runLoop;
+
+    // Coroutine mode (QBE #530/#535). True only while runCompiledFrames()
+    // invokes a compiled frame's code. When set, the op*() helpers push a
+    // callable frame and return OpResult::Call instead of running it, so the
+    // driver owns the call. callNative() clears it (and restores it) around a
+    // native's own body, so Lox re-entered from a native runs non-resumably:
+    // a YIELD there is a native-callback error, exactly as native's own
+    // m_reentrantRunDepth check makes it.
+    bool m_resumableMode{false};
 
     // Set by invokeCallableFromNative() when a native's re-entrant call did
     // not return a value (Stop/Fatal/Resumed). callNative() reads it after the

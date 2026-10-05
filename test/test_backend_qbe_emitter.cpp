@@ -62,6 +62,25 @@ std::string emitNestedFrom(const std::string& source,
                            "lox_fn_nested");
 }
 
+std::string emitNestedWithOptions(const std::string& source,
+                                  const std::vector<int>& path,
+                                  const qbe::EmitOptions& options) {
+    MemoryManager mm;
+    ObjFunction* script = compile(source, &mm);
+    if (script == nullptr) {
+        throw std::runtime_error("compilation failed");
+    }
+    DecodedFunction tree = decodeFunctionTree(script);
+    const DecodedFunction* node = &tree;
+    for (int idx : path) {
+        node = &node->nested.at(static_cast<std::size_t>(idx));
+    }
+    FunctionStackAnalysis analysis = analyzeStack(*node);
+    CaptureAnalysis allCaptures = analyzeCaptures(tree);
+    return qbe::emitScript(*node, analysis, allCaptures.functions.at(node->id),
+                           "lox_fn_nested", options);
+}
+
 int countOccurrences(const std::string& haystack, const std::string& needle) {
     int count = 0;
     std::size_t pos = 0;
@@ -524,4 +543,60 @@ TEST(QbeEmitter, PromotedLocalIsSpilledBeforeACall) {
     ASSERT_NE(call, std::string::npos) << "no call to spill before";
     EXPECT_LT(spill, call)
         << "the promoted local must be spilled before the allocating call";
+}
+
+TEST(QbeEmitter, CoroutineModeEmitsResumeDispatchAndYield) {
+    // A YIELD-containing function compiled in coroutine mode: the prologue
+    // dispatches on the frame's resume point, the YIELD records its own
+    // resume point, and a legal yield returns kRtYield (4) to the driver.
+    qbe::EmitOptions options;
+    options.coroutineMode = true;
+    std::string ssa =
+        emitNestedWithOptions("fun gen() { yield 1; return 2; }", {0}, options);
+    EXPECT_NE(ssa.find("call $rt_resume_state(l %rt)"), std::string::npos)
+        << "the prologue must read the frame's resume point";
+    EXPECT_NE(ssa.find("call $rt_set_resume_state(l %rt, w"), std::string::npos)
+        << "the YIELD must record its own resume point";
+    EXPECT_NE(ssa.find("call $rt_yield(l %rt"), std::string::npos);
+    EXPECT_NE(ssa.find("\tret 4\n"), std::string::npos) // kRtYield
+        << "a legal yield returns kRtYield to the driver";
+    EXPECT_NE(ssa.find("lox_fn_nested_resume"), std::string::npos)
+        << "the resume continuation needs its own label";
+    EXPECT_EQ(ssa.find("%qp"), std::string::npos)
+        << "promotion must be off in coroutine mode";
+}
+
+TEST(QbeEmitter, CoroutineModeEmitsCallStatusHandling) {
+    // A resumable call must record its resume point and return kRtCall (3)
+    // when the runtime pushes the callee for the driver instead of running it.
+    qbe::EmitOptions options;
+    options.coroutineMode = true;
+    std::string ssa = emitNestedWithOptions(
+        "fun g() { return 1; } fun f() { return g(); }", {1}, options);
+    EXPECT_NE(ssa.find("call $rt_call(l %rt"), std::string::npos);
+    EXPECT_NE(ssa.find("\tret 3\n"), std::string::npos) // kRtCall
+        << "a resumable call must return kRtCall to the driver";
+}
+
+TEST(QbeEmitter, YieldOutsideCoroutineModeThrows) {
+    qbe::EmitOptions options; // coroutineMode defaults false
+    EXPECT_THROW(emitNestedWithOptions("fun gen() { yield 1; }", {0}, options),
+                 std::runtime_error);
+}
+
+TEST(QbeEmitter, CoroutineModeGivesACompiledHandlerItsCatchResumeState) {
+    // A try inside a coroutine needs a catch resume state: handleThrow stores
+    // it so the driver can re-enter the frame at its catch block. The old
+    // lowering passed -1, which left a cross-frame throw uncatchable.
+    qbe::EmitOptions options;
+    options.coroutineMode = true;
+    std::string ssa = emitNestedWithOptions(
+        "fun g() { throw \"x\"; }\n"
+        "fun f() { try { g(); } catch (e) { return 1; } }",
+        {1}, options);
+    EXPECT_NE(ssa.find("call $rt_push_handler(l %rt, l"), std::string::npos);
+    EXPECT_EQ(ssa.find(", w -1)"), std::string::npos)
+        << "a compiled handler must carry its catch resume state";
+    EXPECT_NE(ssa.find("lox_fn_nested_catch"), std::string::npos)
+        << "the catch block needs its own resume label";
 }

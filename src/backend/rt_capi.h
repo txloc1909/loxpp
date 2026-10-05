@@ -289,7 +289,14 @@ int rt_check_stack(Runtime* rt, Value* neededTop,
 // notes/qbe-backend.md's central design choice), the same value the
 // interpreted case's `m_rt.stackTop` holds at PUSH_HANDLER time. No error
 // path (a bare vector push_back) — void, like rt_close_upvalues.
-void rt_push_handler(Runtime* rt, Value* checkpointTop) noexcept;
+//
+// `catchState` is coroutine mode's compiled resume point for the catch block
+// (QBE #530/#535): handleThrow stores it in the frame so a throw caught here
+// resumes the frame at its catch block. Pass -1 outside coroutine mode (the
+// catch target then comes from the emitter's own static analysis, exactly as
+// before).
+void rt_push_handler(Runtime* rt, Value* checkpointTop,
+                     int catchState) noexcept;
 
 // POP_HANDLER's own body (vm.cpp): pops the current handler record. An
 // empty handler stack here is a BUG (vm.cpp's own RAISE_ERROR), reported
@@ -326,6 +333,22 @@ int rt_run_defers(Runtime* rt, int stopAtFrameCount) noexcept;
 // static bytecode offset, so a stack trace built from a compiled frame
 // reports the real fault site instead of that function's first line.
 void rt_set_frame_offset(Runtime* rt, int offset) noexcept;
+
+// --- coroutine mode (QBE #530/#535) --------------------------------------
+
+// The current (topmost) frame's compiled resume point. A coroutine-mode
+// function's prologue reads it to jump to the block after the call or YIELD
+// it suspended at; the emitted code writes it (rt_set_resume_state) before a
+// resumable call or a YIELD. Always 0 outside coroutine mode.
+int rt_resume_state(Runtime* rt) noexcept;
+void rt_set_resume_state(Runtime* rt, int state) noexcept;
+
+// YIELD's own legality check (Runtime::yieldOp, runtime.h). Returns 0 when
+// the yield is legal: the compiled frame leaves the yielded value on top of
+// its window and returns kRtYield (backend/rt_abi.h). An illegal yield
+// returns the same nonzero OpResult every other fallible op returns (a local
+// catch, a propagated throw, or a fatal error).
+int rt_yield(Runtime* rt, int stopAtFrameCount) noexcept;
 
 } // extern "C"
 
