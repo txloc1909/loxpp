@@ -275,6 +275,8 @@ json signatureHelpFor(const DocumentModel& model, std::size_t offset) {
         const StdlibEntry* e = nullptr;
         if (*call->receiver == "math") {
             e = mathMemberDoc(call->callee);
+        } else if (*call->receiver == "coroutine") {
+            e = coroutineMemberDoc(call->callee);
         } else {
             // Map and File method names are unique across the tables, so a
             // bare-name match applies whatever the receiver text is. This

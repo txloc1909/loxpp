@@ -10,7 +10,7 @@
 
 namespace loxpp::lsp {
 
-inline constexpr std::array<std::pair<std::string_view, std::string_view>, 28>
+inline constexpr std::array<std::pair<std::string_view, std::string_view>, 29>
     kKeywordDocs = {{
         {"and", "Logical conjunction. Evaluates the right side only when the "
                 "left side is truthy."},
@@ -52,6 +52,9 @@ inline constexpr std::array<std::pair<std::string_view, std::string_view>, 28>
         {"var", "Declares a variable. Also `var [a, b] = ...` and "
                 "`var {a, b} = ...` destructuring."},
         {"while", "Repeats its body while the condition is truthy."},
+        {"yield", "Suspends the current coroutine and delivers an optional "
+                  "value to its resumer. An expression whose value is what "
+                  "the next `resume` passes in."},
         {"_", "The `match` wildcard pattern: matches any value and binds "
               "nothing. An ordinary identifier elsewhere."},
     }};

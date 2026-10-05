@@ -110,7 +110,7 @@ constexpr std::array<StdlibEntry, 25> kMath = {{
 // (src/stdlib/file_api.cpp), and the Socket/Server/Process method names that
 // do not already appear here (src/stdlib/net_api.cpp, process_api.cpp).
 // Descriptions from spec/05-stdlib.md and spec/03-types.md.
-constexpr std::array<StdlibEntry, 23> kMethods = {{
+constexpr std::array<StdlibEntry, 25> kMethods = {{
     {"has", "map.has(key) -> Boolean", 1, "True when the map contains `key`."},
     {"del", "map.del(key) -> Boolean", 1,
      "Removes `key` from the map; true when it was present."},
@@ -153,6 +153,16 @@ constexpr std::array<StdlibEntry, 23> kMethods = {{
     {"kill", "process.kill() -> Nil", 0,
      "Terminates the child at once; call wait() to reap it."},
     {"pid", "process.pid() -> Number", 0, "The child's process identifier."},
+    {"resume", "co.resume(...args) -> Any", kArityVariadic,
+     "Runs the coroutine until it yields or returns; returns that value."},
+    {"status", "co.status() -> String", 0,
+     R"(One of "suspended", "running", "normal", or "dead".)"},
+}};
+
+// `coroutine.<name>`: src/stdlib/coroutine_api.cpp.
+constexpr std::array<StdlibEntry, 1> kCoroutine = {{
+    {"create", "coroutine.create(fn) -> Coroutine", 1,
+     "Makes a new suspended coroutine that runs `fn` when first resumed."},
 }};
 
 const StdlibEntry* find(const auto& table, std::string_view name) {
@@ -174,6 +184,10 @@ const StdlibEntry* mathMemberDoc(std::string_view name) {
     return find(kMath, name);
 }
 
+const StdlibEntry* coroutineMemberDoc(std::string_view name) {
+    return find(kCoroutine, name);
+}
+
 const StdlibEntry* methodDoc(std::string_view name) {
     return find(kMethods, name);
 }
@@ -185,6 +199,12 @@ const std::vector<StdlibEntry>& allGlobalDocs() {
 
 const std::vector<StdlibEntry>& allMathMemberDocs() {
     static const std::vector<StdlibEntry> v(kMath.begin(), kMath.end());
+    return v;
+}
+
+const std::vector<StdlibEntry>& allCoroutineMemberDocs() {
+    static const std::vector<StdlibEntry> v(kCoroutine.begin(),
+                                            kCoroutine.end());
     return v;
 }
 
