@@ -348,8 +348,10 @@ obj.method(arg1, arg2, ...)
 
 Semantically equivalent to looking up `obj.method` and calling the result, but the implementation
 fuses both steps into a single `INVOKE` super-instruction. Fields take priority over methods: if
-the instance's field table contains `method`, that value is called by the ordinary call rules (and must be callable): a function, a class, an enum constructor, a bound method, or an Instance whose class defines `__call__`. If the
-field value is not callable, that is a **runtime error**.
+the instance's field table contains `method`, that value is called. The call follows the ordinary
+call rules. The value can be a function, a class, an enum constructor, a bound method, or an
+Instance whose class defines `__call__`. If the field value is not callable, that is a
+**runtime error**.
 
 ### `this` Expression
 

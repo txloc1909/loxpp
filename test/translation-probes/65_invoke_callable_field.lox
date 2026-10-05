@@ -17,3 +17,9 @@ print h.c(7).get();
 var b = Box(5);
 var hb = Holder(b.get);
 print hb.c();
+
+class Twice < Inc {}
+print Holder(Twice()).c(41);
+
+enum E { A(n) }
+print Holder(A).c(3);

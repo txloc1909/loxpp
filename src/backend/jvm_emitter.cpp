@@ -1488,8 +1488,8 @@ void emitInstanceof(Emitter& e, const DecodedInstruction& in) {
 
 // INVOKE name argc (P5+P6): the fused "get property then call"
 // fast path — LoxOps.invoke keeps the field-before-method order (a field
-// holding a function is called, never treated as a method, matching
-// vm.cpp lines 518-533). argCount == 0 needs no reshuffle at all, same as
+// holding a callable is called, never treated as a method, matching
+// Runtime::opInvoke). argCount == 0 needs no reshuffle at all, same as
 // emitCall's own argCount == 0 path: the receiver is already the sole,
 // topmost value, so the name and the empty array build directly on top of
 // it. argCount >= 1 reuses the exact same scratch slots emitCall does
