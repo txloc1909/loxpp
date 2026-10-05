@@ -22,7 +22,7 @@ syntax keyword loxKeyword       and or in var
 syntax keyword loxKeyword       this super
 syntax keyword loxConditional   if else match case default try catch
 syntax keyword loxRepeat        for while
-syntax keyword loxStatement     return break continue throw defer
+syntax keyword loxStatement     return break continue throw defer yield
 " `print` is a statement keyword, not a builtin function.
 syntax keyword loxStatement     print
 

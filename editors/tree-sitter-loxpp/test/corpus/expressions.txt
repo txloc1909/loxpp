@@ -278,3 +278,48 @@ yield x + 1;
       (binary_expression
         (identifier)
         (number)))))
+
+================================================================================
+Yield in call argument and return operand
+================================================================================
+
+fun gen() {
+  f(yield 1);
+  return yield;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameters)
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (arguments
+            (yield_expression
+              (number)))))
+      (return_statement
+        (yield_expression)))))
+
+================================================================================
+Yield as assignment right-hand side and nested yield
+================================================================================
+
+a = yield b;
+yield yield 1;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (yield_expression
+        (identifier))))
+  (expression_statement
+    (yield_expression
+      (yield_expression
+        (number)))))

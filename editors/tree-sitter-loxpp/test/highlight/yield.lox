@@ -1,0 +1,8 @@
+fun gen() {
+//  ^ function
+  var got = yield 1;
+//          ^ keyword.coroutine
+  yield;
+//^ keyword.coroutine
+  return got;
+}

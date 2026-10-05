@@ -27,7 +27,7 @@ KEYWORDS = [
     "and", "break", "case", "catch", "class", "continue", "default",
     "defer", "else", "enum", "false", "for", "fun", "if", "in", "match",
     "nil", "or", "print", "return", "super", "this", "throw", "true",
-    "try", "var", "while",
+    "try", "var", "while", "yield",
 ]
 
 REQUIRED_RULES = [

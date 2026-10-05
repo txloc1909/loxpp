@@ -64,10 +64,22 @@ fun go(e) {
 }
 """
 
+CORO_SOURCE = """\
+fun gen() {
+    var got = yield 1;
+    return got;
+}
+var co = coroutine.create(gen);
+co.resume(7);
+print co.status();
+var c = coroutine.
+"""
+
 CLEAN_URI = "file:///smoke/clean.lox"
 BAD_URI = "file:///smoke/bad.lox"
 COMPLETION_URI = "file:///smoke/completion.lox"
 MATCH_URI = "file:///smoke/match.lox"
+CORO_URI = "file:///smoke/coroutine.lox"
 MATCH_FIXED_URI = "file:///smoke/match_fixed.lox"
 RENAME_MATCH_URI = "file:///smoke/rename_match.lox"
 
@@ -550,6 +562,61 @@ def main():
             "position": {"line": al, "character": ac + len("type(123)")}})
         check(after is None,
               "signatureHelp after ')' returns null (got %r)" % (after,))
+
+
+        # -- coroutines: yield docs, coroutine members, signature help ----
+        client.notify("textDocument/didOpen", {"textDocument": {
+            "uri": CORO_URI, "languageId": "lox", "version": 1,
+            "text": CORO_SOURCE}})
+        client.pump_until_diagnostics(CORO_URI)
+
+        def coro_hover(marker, delta=1):
+            hl2, hc2 = line_char(CORO_SOURCE, marker)
+            h = client.request("textDocument/hover", {
+                "textDocument": {"uri": CORO_URI},
+                "position": {"line": hl2, "character": hc2 + delta}})
+            if h and isinstance(h.get("contents"), dict):
+                return h["contents"].get("value", "")
+            return ""
+
+        yield_hover = coro_hover("yield 1")
+        check("yield" in yield_hover and "coroutine" in yield_hover.lower(),
+              "hover on 'yield' documents it (got %r)" % yield_hover[:60])
+        create_hover = coro_hover("create(gen)")
+        check("coroutine.create(fn)" in create_hover,
+              "hover on 'coroutine.create' shows its signature (got %r)"
+              % create_hover[:60])
+        status_hover = coro_hover("status()")
+        check("co.status()" in status_hover,
+              "hover on 'status' shows its signature (got %r)"
+              % status_hover[:60])
+
+        def coro_sig(marker):
+            gl, gc = line_char(CORO_SOURCE, marker)
+            r = client.request("textDocument/signatureHelp", {
+                "textDocument": {"uri": CORO_URI},
+                "position": {"line": gl, "character": gc + len(marker)}})
+            if r and r.get("signatures"):
+                return r["signatures"][0].get("label", "")
+            return ""
+
+        sig_create = coro_sig("coroutine.create(")
+        check("coroutine.create(fn)" in sig_create,
+              "signatureHelp inside 'coroutine.create(' (got %r)"
+              % sig_create[:60])
+        sig_resume = coro_sig("co.resume(")
+        check("resume(" in sig_resume,
+              "signatureHelp inside 'co.resume(' (got %r)" % sig_resume[:60])
+
+        ml2, mc2 = line_char(CORO_SOURCE, "coroutine.\n")
+        comp = client.request("textDocument/completion", {
+            "textDocument": {"uri": CORO_URI},
+            "position": {"line": ml2, "character": mc2 + len("coroutine.")}})
+        comp_items = comp.get("items") if isinstance(comp, dict) else comp
+        comp_labels = [i.get("label") for i in (comp_items or [])]
+        check(comp_labels == ["create"],
+              "completion after 'coroutine.' lists only create (got %s)"
+              % comp_labels[:5])
 
     finally:
         code = client.shutdown()

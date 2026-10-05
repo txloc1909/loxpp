@@ -150,7 +150,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>\b(?!if\b|else\b|for\b|while\b|return\b|print\b|catch\b|case\b|var\b|fun\b|class\b|enum\b|try\b|defer\b|throw\b|match\b|this\b|super\b|default\b|and\b|or\b|in\b|true\b|false\b|nil\b|break\b|continue\b)([a-zA-Z_]\w*)(?=\s*\()</string>
+					<string>\b(?!if\b|else\b|for\b|while\b|return\b|print\b|catch\b|case\b|var\b|fun\b|class\b|enum\b|try\b|defer\b|throw\b|yield\b|match\b|this\b|super\b|default\b|and\b|or\b|in\b|true\b|false\b|nil\b|break\b|continue\b)([a-zA-Z_]\w*)(?=\s*\()</string>
 				</dict>
 			</array>
 		</dict>
@@ -206,6 +206,12 @@
 					<string>\b(?:try|catch|throw|defer)\b</string>
 					<key>name</key>
 					<string>keyword.control.exception.lox</string>
+				</dict>
+				<dict>
+					<key>match</key>
+					<string>\b(?:yield)\b</string>
+					<key>name</key>
+					<string>keyword.control.yield.lox</string>
 				</dict>
 			</array>
 		</dict>

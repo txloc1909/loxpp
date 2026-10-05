@@ -33,13 +33,18 @@ struct StdlibEntry {
 // A `math.<name>` member (function or constant).
 [[nodiscard]] const StdlibEntry* mathMemberDoc(std::string_view name);
 
+// A `coroutine.<name>` member (`create`).
+[[nodiscard]] const StdlibEntry* coroutineMemberDoc(std::string_view name);
+
 // A built-in Map or File method (`keys`, `readline`, ...). Map and File method
-// names do not overlap each other, the math members, or the globals.
+// names do not overlap each other, the math members, or the globals. Includes
+// the Coroutine methods `resume` and `status`.
 [[nodiscard]] const StdlibEntry* methodDoc(std::string_view name);
 
 // Every entry, for completion lists.
 [[nodiscard]] const std::vector<StdlibEntry>& allGlobalDocs();
 [[nodiscard]] const std::vector<StdlibEntry>& allMathMemberDocs();
+[[nodiscard]] const std::vector<StdlibEntry>& allCoroutineMemberDocs();
 [[nodiscard]] const std::vector<StdlibEntry>& allMethodDocs();
 
 // Renders an entry as Markdown for a hover panel.
