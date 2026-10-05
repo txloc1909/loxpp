@@ -20,7 +20,8 @@ var LOX_KEYWORDS = {
     "while": "WHILE",   "break": "BREAK",     "continue": "CONTINUE",
     "in": "IN",         "enum": "ENUM",       "len": "LEN",           "match": "MATCH",       "case": "CASE",
     "str": "STR",
-    "try": "TRY",       "catch": "CATCH",     "throw": "THROW",       "defer": "DEFER"
+    "try": "TRY",       "catch": "CATCH",     "throw": "THROW",       "defer": "DEFER",
+    "yield": "YIELD"
 };
 
 var DIGIT_MAP = {
@@ -106,6 +107,7 @@ enum Expr {
     SliceExpr(object, start, end_, line)
     IndexSetExpr(object, index, line, value)
     MatchExpr(subject, arms)
+    YieldExpr(value, line)
 }
 
 // ClassDecl(name, super_id, super_name, methods) — super_id/super_name are nil
@@ -633,7 +635,32 @@ class Parser {
 
     expression() { return this.assignment(); }
 
+    // True when the next token can begin an expression, i.e. it has a prefix
+    // rule. `yield` uses this to tell an omitted operand from a present one.
+    startsExpression() {
+        var t = this.peek().type;
+        return t == "IDENTIFIER" or t == "STRING" or t == "NUMBER" or
+               t == "FALSE" or t == "TRUE" or t == "NIL" or t == "THIS" or
+               t == "SUPER" or t == "LEN" or t == "STR" or t == "MATCH" or
+               t == "YIELD" or t == "LEFT_PAREN" or t == "LEFT_BRACKET" or
+               t == "LEFT_BRACE" or t == "MINUS" or t == "BANG";
+    }
+
+    // `yield` is valid only here, at the assignment level, and is a complete
+    // expression: no operator may follow it. primary() rejects it everywhere
+    // else.
+    yieldExpression() {
+        var yieldTok = this.advance();
+        var val = nil;
+        if (this.startsExpression()) val = this.expression();
+        if (this.matchT("EQUAL")) {
+            this.parseError(this.previous(), "Invalid assignment target.");
+        }
+        return YieldExpr(val, yieldTok.line);
+    }
+
     assignment() {
+        if (this.check("YIELD")) return this.yieldExpression();
         var expr = this.logicOr();
         if (this.matchT("EQUAL")) {
             var equals = this.previous();
@@ -659,6 +686,7 @@ class Parser {
                 case SliceExpr{object, start, end_, line}     => { this.parseError(equals, "Invalid assignment target."); expr }
                 case IndexSetExpr{object, index, line, value} => { this.parseError(equals, "Invalid assignment target."); expr }
                 case MatchExpr{subject, arms}                 => { this.parseError(equals, "Invalid assignment target."); expr }
+                case YieldExpr{value, line}                   => { this.parseError(equals, "Invalid assignment target."); expr }
             };
         }
         return expr;
@@ -851,6 +879,11 @@ class Parser {
         }
 
         if (this.matchT("MATCH")) return this.matchExpression();
+
+        if (this.matchT("YIELD")) {
+            this.parseError(this.previous(), "Can't use 'yield' as an operand.");
+            return Literal(nil);
+        }
 
         this.parseError(this.peek(), "Expect expression.");
         return Literal(nil);
@@ -1342,7 +1375,12 @@ class Resolver {
             case SliceExpr{object, start, end_, line}      => { this.resolveExpr(object); this.resolveExpr(start); this.resolveExpr(end_) }
             case IndexSetExpr{object, index, line, value}  => { this.resolveExpr(object); this.resolveExpr(index); this.resolveExpr(value) }
             case MatchExpr{subject, arms}                  => this.resolveMatchExpr(subject, arms)
+            case YieldExpr{value, line}                    => this.resolveYield(value)
         };
+    }
+
+    resolveYield(value) {
+        if (value != nil) this.resolveExpr(value);
     }
 
     resolveVariable(id, name, line) {
@@ -1572,6 +1610,7 @@ class LoxFunction {
         }
         var savedDefers = interp.pendingDefers;
         var savedStringifyDepth = interp.stringifyDepth;
+        var savedNativeDepth = interp.nativeDepth;
         interp.pendingDefers = [];
         // This interpreter is itself a Lox++ program, run by the native VM,
         // so a deeply recursive TARGET program borrows native's own call-
@@ -1602,6 +1641,7 @@ class LoxFunction {
             // have set them already, but nothing enforces that as an
             // invariant of this file.
             interp.stringifyDepth = savedStringifyDepth;
+            interp.nativeDepth    = savedNativeDepth;
             interp.returnFlag     = false;
             interp.returnValue    = nil;
             interp.setError("StackOverflowError", "Stack overflow.", 0);
@@ -1629,13 +1669,15 @@ class LoxFunction {
             var callee = defer_item[0];
             var defer_args = defer_item[1];
             var tag = loxTag(callee);
-            if (tag == "function" or tag == "class" or tag == "native" or tag == "mathfn" or tag == "listmethod" or tag == "mapmethod" or tag == "filemethod" or tag == "socketmethod" or tag == "servermethod" or tag == "processmethod" or tag == "enum_ctor") {
+            if (tag == "function" or tag == "class" or tag == "native" or tag == "mathfn" or tag == "listmethod" or tag == "mapmethod" or tag == "filemethod" or tag == "socketmethod" or tag == "servermethod" or tag == "processmethod" or tag == "comethod" or tag == "enum_ctor") {
                 if (callee.arity() == -1 or len(defer_args) == callee.arity()) {
                     var savedThrow = interp.throwFlag;
                     var savedValue = interp.thrownValue;
                     interp.throwFlag = false;
                     interp.thrownValue = nil;
+                    interp.nativeDepth = interp.nativeDepth + 1;
                     callee.call(interp, defer_args);
+                    interp.nativeDepth = interp.nativeDepth - 1;
                     if (!interp.throwFlag) {
                         interp.throwFlag = savedThrow;
                         interp.thrownValue = savedValue;
@@ -1755,7 +1797,7 @@ fun reflectTypeName(v) {
         return "Function";
     }
     if (tag == "native" or tag == "mathfn") return "Function";
-    if (tag == "mapmethod" or tag == "filemethod" or tag == "listmethod" or tag == "socketmethod" or tag == "servermethod" or tag == "processmethod") {
+    if (tag == "mapmethod" or tag == "filemethod" or tag == "listmethod" or tag == "socketmethod" or tag == "servermethod" or tag == "processmethod" or tag == "comethod") {
         return "BoundMethod";
     }
     if (tag == "class") return "Class";
@@ -1766,6 +1808,8 @@ fun reflectTypeName(v) {
     if (tag == "socket") return "Socket";
     if (tag == "server") return "Server";
     if (tag == "process") return "Process";
+    if (tag == "coroutine") return "Coroutine";
+    if (tag == "comodule") return "Instance";
     if (tag == "enum_ctor") return "EnumConstructor";
     if (tag == "enum_val") return "Enum";
     // spec/03-types.md's type() table gives "Error" for a caught Error
@@ -1881,7 +1925,7 @@ fun reflectCallMethod(interp, args) {
     }
     if (tag != "native" and tag != "mathfn" and tag != "mapmethod" and
         tag != "filemethod" and tag != "listmethod" and tag != "socketmethod" and
-        tag != "servermethod" and tag != "processmethod") {
+        tag != "servermethod" and tag != "processmethod" and tag != "comethod") {
         interp.setError("ReflectionNotCallableError", "callMethod requires a callable value.", 0);
         return nil;
     }
@@ -2358,6 +2402,69 @@ class InterpProcessMethod {
     toString() { return "<native fn>"; }
 }
 
+// A Lox++ coroutine is one host coroutine. The host coroutine's body runs the
+// target function through the ordinary LoxFunction.call, so the target's
+// frames live on the host coroutine's own stack and a target `yield` is a
+// real host yield from inside that tree walk. `state` is tracked here rather
+// than read from the host: it must report "normal" for a coroutine waiting on
+// one it resumed, and the host's own status does not map onto that.
+class InterpCoroutine {
+    init(interp, fn) {
+        this.interp      = interp;
+        this.fn          = fn;
+        this.state       = "suspended";
+        this.started     = false;
+        // interp.nativeDepth when this coroutine was last resumed. A yield is
+        // legal only while the depth has not grown past it.
+        this.resumeDepth = 0;
+        this.loxTag      = "coroutine";
+        this.host        = coroutine.create(this.run);
+    }
+
+    // The host coroutine's function. The first host resume passes the target
+    // call's arguments as one list; this unpacks them into the ordinary call.
+    run(argList) {
+        return this.fn.call(this.interp, argList);
+    }
+
+    toString() { return "<coroutine>"; }
+}
+
+class InterpCoroutineMethod {
+    init(name, co) {
+        this.name   = name;
+        this.co     = co;
+        this.loxTag = "comethod";
+    }
+    arity() {
+        if (this.name == "status") return 0;
+        return -1;
+    }
+    call(interp, args) {
+        if (this.name == "status") return this.co.state;
+        return interp.resumeCoroutine(this.co, args);
+    }
+    toString() { return "<native fn>"; }
+}
+
+class InterpCoroutineCreate {
+    init() { this.loxTag = "native"; }
+    arity() { return 1; }
+    call(interp, args) {
+        var fn = args[0];
+        if (loxTag(fn) != "function") {
+            interp.fatalError("coroutine.create expects a function.");
+            return nil;
+        }
+        return InterpCoroutine(interp, fn);
+    }
+    toString() { return "<native fn>"; }
+}
+
+class InterpCoroutineModule {
+    init() { this.loxTag = "comodule"; }
+}
+
 class LoxEnumCtor {
     init(enumName, tag, fields) {
         this.enumName = enumName;
@@ -2415,6 +2522,13 @@ class Interpreter {
         this.thrownValue   = nil;
         this.pendingDefers = [];
         this.stringifyDepth = 0;
+        // The Lox++ coroutine now executing, or nil in the main program.
+        this.currentCo = nil;
+        // Depth of target code entered through a call native would make from
+        // C++ (__str__, __hash__/__eq__ during a map operation, a deferred
+        // call). A yield cannot cross such a frame on native, so it must not
+        // here.
+        this.nativeDepth = 0;
         // High-water mark of stringifyDepth, for tools/check_bootstrap_stack_overflow.py
         // only: it never decreases, so a probe can tell "the run actually
         // recursed into stringify() before the fault" from "stringifyDepth
@@ -2440,6 +2554,7 @@ class Interpreter {
         this.globals.define("spawn",   LoxNative("spawn"));
         this.globals.define("run",     LoxNative("run"));
         this.globals.define("math",  InterpMath());
+        this.globals.define("coroutine", InterpCoroutineModule());
         this.globals.define("type",       LoxNative("type"));
         this.globals.define("fields",     LoxNative("fields"));
         this.globals.define("methods",    LoxNative("methods"));
@@ -2503,7 +2618,9 @@ class Interpreter {
             return key;
         }
         var hash = this.findDunder(key, "__hash__");
+        this.nativeDepth = this.nativeDepth + 1;
         var r = hash.bind(key).call(this, []);
+        this.nativeDepth = this.nativeDepth - 1;
         if (this.throwFlag) return nil;
         if (!isLoxNum(r)) {
             this.setError("OperatorResultTypeError", "Operator method must return a Number.", 0);
@@ -2523,7 +2640,9 @@ class Interpreter {
     keyEquals(stored, lookup) {
         var m = this.findDunder(stored, "__eq__");
         if (m != nil) {
+            this.nativeDepth = this.nativeDepth + 1;
             var b = m.bind(stored).call(this, [lookup]);
+            this.nativeDepth = this.nativeDepth - 1;
             if (this.throwFlag) return false;
             if (b != true and b != false) {
                 this.setError("OperatorResultTypeError", "Operator method must return a Boolean.", 0);
@@ -2922,12 +3041,28 @@ class Interpreter {
         // Op::GET_ITER (src/vm.cpp:1616-1623), a different opcode from
         // GET_INDEX's catchable NotIndexableError -- this needs its own
         // kind, not that one's.
-        if (tag != "list" and !isLoxStr(iterable) and tag != "map") {
+        if (tag != "list" and !isLoxStr(iterable) and tag != "map" and tag != "coroutine") {
             this.setError("ForInNotIterableError", "Value is not iterable (expected list, string, map, or coroutine).", varLine);
             return;
         }
         var loopEnv = Environment(env);
         loopEnv.define(varName, nil);
+        if (tag == "coroutine") {
+            // The resume decides whether an element exists: a coroutine that
+            // returns instead of yielding ends the loop, and a dead one is
+            // never resumed.
+            while (iterable.state != "dead") {
+                var yielded = this.resumeCoroutine(iterable, []);
+                if (this.throwFlag) return;
+                if (iterable.state != "suspended") return;
+                loopEnv.define(varName, yielded);
+                this.execStmt(body, loopEnv);
+                if (this.returnFlag or this.throwFlag) return;
+                if (this.breakFlag) { this.breakFlag = false; return; }
+                if (this.continueFlag) { this.continueFlag = false; }
+            }
+            return;
+        }
         if (tag == "map") {
             var ks = this.mapKeys(iterable);
             // Snapshot the structural version, not the size: a paired
@@ -2978,6 +3113,89 @@ class Interpreter {
             if (this.breakFlag) { this.breakFlag = false; return; }
             if (this.continueFlag) { this.continueFlag = false; }
             i = i + 1;
+        }
+    }
+
+    evalYield(valueExpr, line, env) {
+        var v = nil;
+        if (valueExpr != nil) {
+            v = this.evalExpr(valueExpr, env);
+            if (this.throwFlag) return nil;
+        }
+        var co = this.currentCo;
+        if (co == nil) {
+            this.setError("YieldOutsideCoroutineError", "Cannot yield from outside a coroutine.", line);
+            return nil;
+        }
+        if (this.nativeDepth > co.resumeDepth) {
+            this.setError("YieldAcrossNativeError", "Cannot yield across a native callback.", line);
+            return nil;
+        }
+        // pendingDefers and stringifyDepth belong to the running call, not to
+        // the interpreter as a whole: the resumer overwrites them while this
+        // coroutine is suspended, so put this coroutine's own back on resume.
+        var savedDefers = this.pendingDefers;
+        var savedStringifyDepth = this.stringifyDepth;
+        var received = yield v;
+        this.pendingDefers = savedDefers;
+        this.stringifyDepth = savedStringifyDepth;
+        return received;
+    }
+
+    resumeCoroutine(co, args) {
+        if (co.state == "dead") {
+            this.setError("DeadCoroutineError", "Cannot resume a dead coroutine.", 0);
+            return nil;
+        }
+        if (co.state == "running" or co.state == "normal") {
+            this.setError("RunningCoroutineError", "Cannot resume a running coroutine.", 0);
+            return nil;
+        }
+        var received = nil;
+        if (co.started) {
+            if (len(args) > 1) {
+                this.setError("ArityError", "Expected 0 or 1 arguments.", 0);
+                return nil;
+            }
+            if (len(args) == 1) received = args[0];
+        } else if (len(args) != co.fn.arity()) {
+            // The coroutine stays suspended and unstarted, as on native.
+            this.setError("ArityError", "Expected " + str(co.fn.arity()) + " arguments but got " + str(len(args)) + ".", 0);
+            return nil;
+        }
+        var parent = this.currentCo;
+        if (parent != nil) parent.state = "normal";
+        co.state = "running";
+        this.currentCo = co;
+        co.resumeDepth = this.nativeDepth;
+        var savedDefers = this.pendingDefers;
+        var savedStringifyDepth = this.stringifyDepth;
+        var result = nil;
+        try {
+            if (co.started) {
+                result = co.host.resume(received);
+            } else {
+                co.started = true;
+                result = co.host.resume(args);
+            }
+        } catch (e) {
+            this.finishResume(co, parent, savedDefers, savedStringifyDepth);
+            throw e;
+        }
+        this.finishResume(co, parent, savedDefers, savedStringifyDepth);
+        if (this.throwFlag) return nil;
+        return result;
+    }
+
+    finishResume(co, parent, savedDefers, savedStringifyDepth) {
+        this.pendingDefers = savedDefers;
+        this.stringifyDepth = savedStringifyDepth;
+        this.currentCo = parent;
+        if (parent != nil) parent.state = "running";
+        if (co.host.status() == "dead") {
+            co.state = "dead";
+        } else {
+            co.state = "suspended";
         }
     }
 
@@ -3181,7 +3399,7 @@ class Interpreter {
             var callee = defer_item[0];
             var args = defer_item[1];
             var tag = loxTag(callee);
-            if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "socketmethod" and tag != "servermethod" and tag != "processmethod" and tag != "enum_ctor") {
+            if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "socketmethod" and tag != "servermethod" and tag != "processmethod" and tag != "comethod" and tag != "enum_ctor") {
                 i = i - 1;
                 this.fatalError("Deferred callable has unexpected type.");
             }
@@ -3199,7 +3417,9 @@ class Interpreter {
             var savedValue = this.thrownValue;
             this.throwFlag = false;
             this.thrownValue = nil;
+            this.nativeDepth = this.nativeDepth + 1;
             callee.call(this, args);
+            this.nativeDepth = this.nativeDepth - 1;
             if (!this.throwFlag) {
                 this.throwFlag = savedThrow;
                 this.thrownValue = savedValue;
@@ -3231,6 +3451,7 @@ class Interpreter {
             case SliceExpr{object, start, end_, line}      => this.evalSlice(object, start, end_, line, env)
             case IndexSetExpr{object, index, line, value}  => this.evalIndexSet(object, index, line, value, env)
             case MatchExpr{subject, arms}                  => this.evalMatchExpr(subject, arms, env)
+            case YieldExpr{value, line}                    => this.evalYield(value, line, env)
         };
     }
 
@@ -3332,7 +3553,7 @@ class Interpreter {
     }
 
     validateSequence(v, line) {
-        if (loxTag(v) == "list" or isLoxStr(v) or loxTag(v) == "map") return v;
+        if (loxTag(v) == "list" or isLoxStr(v) or loxTag(v) == "map" or loxTag(v) == "coroutine") return v;
         this.setError("OperatorResultTypeError", "Operator method must return a sequence.", line);
         return nil;
     }
@@ -3630,7 +3851,7 @@ class Interpreter {
         if (callee != nil and callee != true and callee != false and !isLoxStr(callee) and !isLoxNum(callee)) {
             tag = callee.loxTag;
         }
-        if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "socketmethod" and tag != "servermethod" and tag != "processmethod" and tag != "enum_ctor") {
+        if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "socketmethod" and tag != "servermethod" and tag != "processmethod" and tag != "comethod" and tag != "enum_ctor") {
             this.setError("NotCallableError", "Can only call functions, classes and enums.", paren_line);
             return nil;
         }
@@ -3644,7 +3865,7 @@ class Interpreter {
             this.fatalError("'" + callee.name + "' expects " + str(callee.arity()) + " " + noun + " but got " + str(len(args)) + ".");
             return nil;
         }
-        if ((tag == "native" or tag == "mathfn" or tag == "mapmethod" or tag == "filemethod" or tag == "socketmethod" or tag == "servermethod" or tag == "processmethod") and callee.arity() != -1 and len(args) != callee.arity()) {
+        if ((tag == "native" or tag == "mathfn" or tag == "mapmethod" or tag == "filemethod" or tag == "socketmethod" or tag == "servermethod" or tag == "processmethod" or tag == "comethod") and callee.arity() != -1 and len(args) != callee.arity()) {
             this.fatalError("Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".");
             return nil;
         }
@@ -3716,6 +3937,16 @@ class Interpreter {
         if (loxTag(object) == "process") {
             if (name == "read" or name == "read_bytes" or name == "readline" or name == "readlines" or name == "read_err" or name == "err_read_bytes" or name == "err_readline" or name == "err_readlines" or name == "write" or name == "writeline" or name == "close_stdin" or name == "wait" or name == "kill" or name == "pid") return InterpProcessMethod(name, object);
             this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
+            return nil;
+        }
+        if (loxTag(object) == "comodule") {
+            if (name == "create") return InterpCoroutineCreate();
+            this.fatalError("Undefined property '" + name + "'.");
+            return nil;
+        }
+        if (loxTag(object) == "coroutine") {
+            if (name == "resume" or name == "status") return InterpCoroutineMethod(name, object);
+            this.fatalError("Undefined property '" + name + "' on coroutine.");
             return nil;
         }
         if (loxTag(object) == "error") {
@@ -3835,7 +4066,9 @@ class Interpreter {
             }
             var m = this.findDunder(val, "__str__");
             if (m != nil) {
+                this.nativeDepth = this.nativeDepth + 1;
                 result = m.bind(val).call(this, []);
+                this.nativeDepth = this.nativeDepth - 1;
                 if (this.throwFlag) {
                     this.stringifyDepth = this.stringifyDepth - 1;
                     return "...";

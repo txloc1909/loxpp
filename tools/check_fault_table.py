@@ -310,7 +310,6 @@ CATCHABLE_ROWS = [
         "co.resume();",
         setup="fun f() { return 1; }\nvar co = coroutine.create(f);\nco.resume();\n",
         expected_kind="DeadCoroutineError",
-        skip={BOOTSTRAP: _COROUTINE_SKIP},
     ),
     Row(
         "resume_running_coroutine",
@@ -318,14 +317,12 @@ CATCHABLE_ROWS = [
         "co.resume();",
         setup="fun f() { co.resume(); }\nvar co = coroutine.create(f);\n",
         expected_kind="RunningCoroutineError",
-        skip={BOOTSTRAP: _COROUTINE_SKIP},
     ),
     Row(
         "yield_outside_coroutine",
         "caught",
         "yield 1;",
         expected_kind="YieldOutsideCoroutineError",
-        skip={BOOTSTRAP: _COROUTINE_SKIP},
     ),
     Row(
         "yield_across_native_callback",
@@ -335,7 +332,6 @@ CATCHABLE_ROWS = [
               'fun f() { print S(); return "done"; }\n'
               "var co = coroutine.create(f);\n",
         expected_kind="YieldAcrossNativeError",
-        skip={BOOTSTRAP: _COROUTINE_SKIP},
     ),
 ]
 
