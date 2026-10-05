@@ -87,7 +87,8 @@ a collection is a process-global pause, not a coroutine's work.
 ## Fault table
 
 Three new catchable rows, listed in `spec/04-semantics.md`, wired into
-`tools/check_fault_table.py` (checked on native, JVM, QBE, and bootstrap) and `tools/check_bootstrap_error_kinds.py`
+`tools/check_fault_table.py` (checked on native, JVM, and bootstrap; QBE
+coverage is in `tools/check_qbe_probes.sh`) and `tools/check_bootstrap_error_kinds.py`
 (`EXPECTED_SPEC_TABLE_KIND_COUNT` 20 -> 23).
 
 ## Examples and probes
