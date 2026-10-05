@@ -104,15 +104,17 @@ public final class ClassesTest {
         check(LoxOps.equal(a, a), "an enum value equals itself");
         checkThrows(() -> ok.call(new Object[0]), LoxError.class, "enum constructor arity is enforced");
 
-        // PR #97: a field-shadowed callee must be a closure or a
-        // native, exactly like vm.cpp lines 518-533 — a class value stored in
-        // a field is not callable here, even though LoxClass IS a LoxCallable.
+        // A class stored in a shadowing field is called like any callee,
+        // matching the ordinary call path.
         LoxClass box = new LoxClass("Box", null);
         LoxClass holder = new LoxClass("Holder", null);
         Object h = holder.call(new Object[0]);
         LoxOps.setProperty(h, "f", box);
+        check(LoxOps.invoke(h, "f", new Object[0]) instanceof LoxInstance,
+                "invoke() constructs a class stored in a shadowing field");
+        LoxOps.setProperty(h, "f", 1.0);
         checkThrows(() -> LoxOps.invoke(h, "f", new Object[0]), LoxError.class,
-                "invoke() rejects a class stored in a shadowing field");
+                "invoke() rejects a non-callable shadowing field");
 
         // PR #97: codegen-facing guards for INHERIT and GET_TAG.
         checkThrows(() -> LoxOps.inherit(1.0), LoxError.class, "inherit() rejects a non-class value");
