@@ -463,6 +463,23 @@ test('throw and defer scope as exception keywords', async () => {
   assert.deepStrictEqual(exceptionKeywords.map((t) => t.text), ['throw', 'defer']);
 });
 
+test('yield scopes as keyword.control.yield', async () => {
+  const g = await getGrammar();
+  const { tokens } = tokenize('var x = yield 1; yield;', g);
+  const yields = tokens.filter((t) => t.text === 'yield');
+  assert.strictEqual(yields.length, 2);
+  for (const t of yields) {
+    assert.ok(flat(t.scopes).includes('keyword.control.yield.lox'), 'yield must be a keyword');
+  }
+});
+
+test('yield is not scoped as a function call', async () => {
+  const g = await getGrammar();
+  const { tokens } = tokenize('yield(1);', g);
+  const t = tokens.find((x) => x.text === 'yield');
+  assert.ok(!flat(t.scopes).includes('entity.name.function.lox'), 'yield( must not be a call');
+});
+
 test('unterminated string spans lines until the next quote', async () => {
   const g = await getGrammar();
   const { tokens } = tokenize('var s = "oops\nvar after = 1;', g);
