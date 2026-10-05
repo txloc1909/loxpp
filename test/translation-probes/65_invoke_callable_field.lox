@@ -1,0 +1,19 @@
+class Inc { __call__(x) { return x + 1; } }
+class Wrap {
+  init(f) { this.f = f; }
+  __call__(x) { return this.f(x); }
+  run(x) { return this.f(x); }
+}
+class Box { init(v) { this.v = v; } get() { return this.v; } }
+class Holder { init(c) { this.c = c; } }
+
+var w = Wrap(Inc());
+print w(10);
+print Wrap(w).run(20);
+
+var h = Holder(Box);
+print h.c(7).get();
+
+var b = Box(5);
+var hb = Holder(b.get);
+print hb.c();

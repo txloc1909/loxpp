@@ -1550,6 +1550,19 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
                 ObjBoundNative* bn = asObjBoundNative(as<Obj*>(fieldVal));
                 return callBoundNative(bn, argCount, stopAtFrameCount);
             }
+            if (isBoundMethod(fieldVal) || isClass(fieldVal) ||
+                isEnumCtor(fieldVal)) {
+                return opCall(argCount, stopAtFrameCount);
+            }
+            Value dunderCall;
+            if (isInstance(fieldVal) &&
+                asObjInstance(as<Obj*>(fieldVal))
+                    ->klass->methods.get(
+                        m_protocolNames[static_cast<std::size_t>(
+                            Protocol::Call)],
+                        dunderCall)) {
+                return opCall(argCount, stopAtFrameCount);
+            }
             runtimeError("Can only call functions, classes and enums.");
             return OpResult::Fatal;
         }
