@@ -39,6 +39,8 @@
   "continue"
 ] @keyword.repeat
 
+"yield" @keyword.coroutine
+
 [
   "and"
   "or"
