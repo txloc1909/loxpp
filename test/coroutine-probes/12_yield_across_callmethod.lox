@@ -1,0 +1,49 @@
+// callMethod runs its target from native code, so a yield inside it cannot
+// suspend the coroutine. The yield raises YieldAcrossNativeError, which the
+// resumer can catch. This covers a class method and a callable field.
+class O {
+    init() {
+        this.f = fun_field;
+    }
+
+    m() {
+        yield 1;
+        return "m";
+    }
+}
+
+fun fun_field() {
+    yield 2;
+    return "f";
+}
+
+var o = O();
+
+fun viaMethod() {
+    return callMethod(o, "m");
+}
+
+fun viaField() {
+    return callMethod(o, "f");
+}
+
+var c1 = coroutine.create(viaMethod);
+try {
+    print c1.resume();
+} catch (e) {
+    print "caught " + e.kind;
+}
+print c1.status();
+
+var c2 = coroutine.create(viaField);
+try {
+    print c2.resume();
+} catch (e) {
+    print "caught " + e.kind;
+}
+print c2.status();
+
+// CHECK: caught YieldAcrossNativeError
+// CHECK: dead
+// CHECK: caught YieldAcrossNativeError
+// CHECK: dead

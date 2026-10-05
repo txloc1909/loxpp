@@ -125,11 +125,6 @@ class Row:
 # a few reference a name the cell itself never declares (`m`, `list`) or are
 # prose, not code ("Unbounded recursion") -- `setup` below supplies exactly
 # what each such cell is missing, without changing the fault it exercises.
-# A skip value for the coroutine rows below (roadmap item 5): the one
-# consumer that does not implement the coroutine primitive yet skips them.
-# Native (#526) and JVM (#529) no longer do; the bootstrap interpreter (#531)
-# still does. See the comment at the rows themselves.
-_COROUTINE_SKIP = "coroutines not implemented yet (tracking #523); the backend node removes this skip as it lands"
 CATCHABLE_ROWS = [
     Row("arithmetic_type_error", "caught", '"a" - 1;', expected_kind="ArithmeticTypeError"),
     Row("comparison_type_error", "caught", '"a" < 1;', expected_kind="ComparisonTypeError"),
@@ -297,20 +292,13 @@ CATCHABLE_ROWS = [
         expected_kind="MapChangedError",
     ),
     # --- Coroutines (roadmap item 5, tracking #523) ---------------------
-    # The coroutine protocol faults. Native (#526) and JVM (#529) run them;
-    # only the bootstrap interpreter (#531) still skips them. Each backend
-    # node removes its own consumer's skip as it merges, so these rows stay a
-    # differential gate for the mission rather than a spec-only placeholder.
-    # The `skip` value names the consumer, not the row: once all three
-    # backends land, the dict is empty and the row runs like any other
-    # catchable row.
+    # The coroutine protocol faults. Every consumer runs them.
     Row(
         "resume_dead_coroutine",
         "caught",
         "co.resume();",
         setup="fun f() { return 1; }\nvar co = coroutine.create(f);\nco.resume();\n",
         expected_kind="DeadCoroutineError",
-        skip={BOOTSTRAP: _COROUTINE_SKIP},
     ),
     Row(
         "resume_running_coroutine",
@@ -318,14 +306,12 @@ CATCHABLE_ROWS = [
         "co.resume();",
         setup="fun f() { co.resume(); }\nvar co = coroutine.create(f);\n",
         expected_kind="RunningCoroutineError",
-        skip={BOOTSTRAP: _COROUTINE_SKIP},
     ),
     Row(
         "yield_outside_coroutine",
         "caught",
         "yield 1;",
         expected_kind="YieldOutsideCoroutineError",
-        skip={BOOTSTRAP: _COROUTINE_SKIP},
     ),
     Row(
         "yield_across_native_callback",
@@ -335,7 +321,6 @@ CATCHABLE_ROWS = [
               'fun f() { print S(); return "done"; }\n'
               "var co = coroutine.create(f);\n",
         expected_kind="YieldAcrossNativeError",
-        skip={BOOTSTRAP: _COROUTINE_SKIP},
     ),
 ]
 

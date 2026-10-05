@@ -211,10 +211,18 @@ module.exports = grammar({
     // -------------------------------------------------------------------
     _expression: $ => choice(
       $.assignment_expression,
+      $.yield_expression,
       $.binary_expression,
       $.unary_expression,
       $._primary,
     ),
+
+    // spec/02-syntax.md: yieldExpr ::= "yield" expression? ;. The grammar is
+    // permissive: the compiler, not the parser, rejects an operator after it.
+    yield_expression: $ => prec.right(PREC.assign, seq(
+      "yield",
+      optional(field("value", $._expression)),
+    )),
 
     assignment_expression: $ => prec.right(PREC.assign, seq(
       field("left", choice($.identifier, $.field_expression, $.subscript_expression)),

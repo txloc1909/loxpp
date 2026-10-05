@@ -156,6 +156,29 @@ PROBES = [
      FATAL, "MapSizeChangedError", '"Map changed size during iteration."'),
     ("map net-zero change during for-in", "try { var m = {1: \"a\"}; for (var k in m) { m.del(1); m[2] = \"b\"; } } catch (e) { print e.kind; }",
      FATAL, "MapSizeChangedError", '"Map changed size during iteration."'),
+    ("yield outside a coroutine", "try { yield 1; } catch (e) { print e.kind; }",
+     CATCHABLE, "YieldOutsideCoroutineError", '"Cannot yield from outside a coroutine."'),
+    ("yield across a native callback",
+     'class S { init() {} __str__() { yield 1; return "x"; } } fun f() { print S(); } '
+     "var co = coroutine.create(f); try { co.resume(); } catch (e) { print e.kind; }",
+     CATCHABLE, "YieldAcrossNativeError", '"Cannot yield across a native callback."'),
+    ("resume a dead coroutine",
+     "fun f() { return 1; } var co = coroutine.create(f); co.resume(); "
+     "try { co.resume(); } catch (e) { print e.kind; }",
+     CATCHABLE, "DeadCoroutineError", '"Cannot resume a dead coroutine."'),
+    ("resume a running coroutine",
+     "var co; fun f() { try { co.resume(); } catch (e) { print e.kind; } } "
+     "co = coroutine.create(f); co.resume();",
+     CATCHABLE, "RunningCoroutineError", '"Cannot resume a running coroutine."'),
+    ("resume a started coroutine with two arguments",
+     "fun f() { yield 1; } var co = coroutine.create(f); co.resume(); "
+     "try { co.resume(1, 2); } catch (e) { print e.kind; }",
+     CATCHABLE, "ArityError", '"Expected 0 or 1 arguments."'),
+    ("first resume with the wrong argument count",
+     "fun f(a) { yield a; } var co = coroutine.create(f); "
+     "try { co.resume(); } catch (e) { print e.kind; }",
+     CATCHABLE, "ArityError",
+     '"Expected " + str(co.fn.arity()) + " arguments but got " + str(len(args)) + "."'),
     ("superclass is not a class",
      "var N = 1; fun f() { class Sub < N {} } try { f(); } catch (e) { print e.kind; }",
      FATAL, "InvalidSuperclassError", '"Superclass must be a class."'),

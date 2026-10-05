@@ -255,3 +255,26 @@ a + b = c;
     (identifier)
     (identifier)
     (identifier)))
+
+================================================================================
+Yield expression
+================================================================================
+
+var x = yield 1;
+yield;
+yield x + 1;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (yield_expression
+      (number)))
+  (expression_statement
+    (yield_expression))
+  (expression_statement
+    (yield_expression
+      (binary_expression
+        (identifier)
+        (number)))))
