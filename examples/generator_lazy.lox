@@ -1,6 +1,5 @@
 // A generator computes a value only when for-in asks for it. The log shows
 // that the body past a yield does not run until the next resume.
-// Mission #523 node #527.
 var log = "";
 
 fun lazy() {

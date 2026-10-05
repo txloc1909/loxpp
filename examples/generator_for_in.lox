@@ -1,8 +1,6 @@
 // for-in over a Coroutine resumes it once per iteration: the value it yields
 // is bound to the loop variable. A generator whose function returns ends the
 // loop. An infinite generator ends only via break.
-// Mission #523 node #525; goes green with the suspendable-iterator node
-// (#527).
 fun counter() {
     var i = 0;
     while (true) {

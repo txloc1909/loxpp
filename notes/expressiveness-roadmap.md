@@ -47,7 +47,7 @@ All fully expressible today; none belong on the roadmap:
 | 2 | OS / world access — basics **(done)** | low | essential |
 | 3 | Non-local control flow (`try`/`catch`/`throw` + `defer`/`finally`) | low–medium | essential |
 | 4 | Extensible protocols / operator overloading | medium | essential |
-| 5 | Coroutines / generators (single-core suspension) | medium–high | high-value on-ramp |
+| 5 | Coroutines / generators (single-core suspension) — **(done)** | medium–high | high-value on-ramp |
 | 6 | FFI / native extension ABI | high | highest leverage |
 | 7 | True parallelism (multi-core) | very high | the must-have |
 
@@ -131,7 +131,8 @@ writes its own map raises `MapChangedError`. The `hash()`-protocol open
 question is closed. The one deferred piece is
 `__str__` (D2, #470) for a user canonical string form.
 
-**5. Coroutines / generators (single-core suspension).** Stackful suspend +
+**5. Coroutines / generators (single-core suspension). DONE** (#523, all four
+backends; design record `notes/coroutines.md`). Stackful suspend +
 `yield`. Lazy/infinite sequences, async I/O, cooperative scheduling, suspendable
 custom iterators. No thread-safe GC required — the cheap on-ramp to "any
 concurrency" and a stepping stone to item 7, not throwaway work.

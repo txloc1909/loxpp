@@ -6,13 +6,10 @@
 # each program's // CHECK: directives (tools/check_examples.py's
 # FileCheck-style harness) against its actual stdout.
 #
-# This corpus pins the target semantics of the coroutine primitive before any
-# backend implements it: the probes use `yield`, `coroutine.create`,
-# `Coroutine.resume`/`status`, and for-in over a Coroutine. The recorded
-# all-red run (every probe failed before the primitive existed) is the "the
-# check can fail" proof. The native primitive makes every probe but the
-# for-in one pass; the suspendable-iterator node makes that one pass too and
-# removes it from xfail.txt.
+# This corpus pins the target semantics of the coroutine primitive: the probes
+# use `yield`, `coroutine.create`, `Coroutine.resume`/`status`, and for-in over
+# a Coroutine. The generator programs live in examples/ (checked by
+# check_examples.py); the probes here cover the corner cases.
 #
 # test/coroutine-probes/xfail.txt lists probes expected to fail until a later
 # node lands. They are excluded from the passing run and asserted to still

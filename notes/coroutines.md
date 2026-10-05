@@ -87,9 +87,21 @@ a collection is a process-global pause, not a coroutine's work.
 ## Fault table
 
 Three new catchable rows, listed in `spec/04-semantics.md`, wired into
-`tools/check_fault_table.py` (skipped on every consumer until the backend
-nodes land) and `tools/check_bootstrap_error_kinds.py`
+`tools/check_fault_table.py` (checked on native, JVM, and bootstrap; QBE
+coverage is in `tools/check_qbe_probes.sh`) and `tools/check_bootstrap_error_kinds.py`
 (`EXPECTED_SPEC_TABLE_KIND_COUNT` 20 -> 23).
+
+## Examples and probes
+
+The generator programs live in `examples/` and run on every backend through
+the example differential: `generator_for_in.lox`, `generator_lazy.lox`,
+`generator_infinite.lox`, and `iter_dunder_coroutine.lox`. They keep their
+`// CHECK:` directives.
+
+`test/coroutine-probes/` keeps the other probes. These pin corner cases of
+the primitive (yield across calls, yield in `try`, `defer` with `yield`,
+resume of a dead coroutine). `tools/check_coroutine_probes.sh` is the native
+gate for that directory.
 
 ## References
 
