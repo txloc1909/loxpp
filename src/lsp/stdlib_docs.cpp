@@ -10,7 +10,7 @@ namespace {
 
 // Globals: src/stdlib/globals.cpp, file_api.cpp, os_api.cpp, reflect_api.cpp,
 // math_module.cpp. Descriptions condensed from spec/05-stdlib.md.
-constexpr std::array<StdlibEntry, 26> kGlobals = {{
+constexpr std::array<StdlibEntry, 27> kGlobals = {{
     {"clock", "clock() -> Number", 0,
      "Elapsed processor time in seconds. Use for measuring durations."},
     {"input", "input() -> String | Nil", 0,
@@ -63,6 +63,9 @@ constexpr std::array<StdlibEntry, 26> kGlobals = {{
      "Calls native method or callable field `name` on `instance` with `args`."},
     {"math", "math", kArityConstant,
      "Global object of numeric functions and constants, reached with `.`."},
+    {"coroutine", "coroutine", kArityConstant,
+     "Global object whose `create(fn)` makes a suspended coroutine, reached "
+     "with `.`."},
 }};
 
 // `math.<name>`: src/math.cpp kMathFunctions and kMathConstants.
