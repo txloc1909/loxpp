@@ -1,7 +1,6 @@
 // An infinite generator is driven by for-in and stopped by break. Without
 // suspendable iteration the loop could not start, since the sequence is
 // unbounded.
-// Mission #523 node #527.
 fun naturals() {
     var n = 0;
     while (true) {

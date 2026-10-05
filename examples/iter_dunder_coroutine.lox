@@ -1,6 +1,5 @@
 // __iter__ may return a coroutine. The loop then resumes it once per
 // iteration, so a user type gets a lazy iterator with no extra protocol.
-// Mission #523 node #527.
 class Range {
     init(start, count) {
         this.start = start;
