@@ -4,6 +4,8 @@
 #include "table.h"
 #include "vm_allocator.h"
 
+#include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <string_view>
 #include <vector>
@@ -78,6 +80,8 @@ class MemoryManager : public VmAllocBase {
     void collectGarbage();
 
   private:
+    template <bool Traced>
+    void runCollection();
     void traceReferences();
     void traceObject(Obj* obj);
     void removeWhiteStrings();
@@ -100,6 +104,10 @@ class MemoryManager : public VmAllocBase {
     // When false, m_nextGC growth and the trigger point are exactly as they
     // are with no stress: this flag adds one branch and nothing else.
     bool m_stressGC{false};
+    // Open when LOXPP_GC_TRACE names a file, read once in the constructor.
+    // Null otherwise, and collectGarbage() then pays one test of this pointer
+    // per collection. The allocation paths never read it.
+    std::FILE* m_trace{nullptr};
     std::size_t m_nextGC{1024 * 1024};
     static constexpr int GC_HEAP_GROW_FACTOR = 2;
 };
