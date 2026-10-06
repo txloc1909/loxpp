@@ -2047,28 +2047,19 @@ void Compiler::subscript() {
 namespace {
 // Scans a function body (same contract as bodyHasDefer) and reports whether
 // a self tail call may reuse the parameter slots. Slot reuse is unsafe when
-// a closure could capture a parameter (a nested function or class), when a
-// handler or defer would re-run per iteration (`try`, `defer`), when calling
-// the function means building a coroutine (`yield`), or when the function
-// rebinds its own name (`name = ...`).
-bool bodyAllowsSelfTail(const char* bodyStart, std::string_view selfName) {
+// a closure could capture a parameter (a nested function or class) or when a
+// handler or defer would re-run per iteration (`try`, `defer`).
+bool bodyAllowsSelfTail(const char* bodyStart) {
     Scanner lookahead(bodyStart);
     int depth = 1;
-    bool prevIsSelf = false;
     for (;;) {
         Token t = lookahead.scanOneToken();
         switch (t.type) {
         case TokenType::DEFER:
         case TokenType::TRY:
-        case TokenType::YIELD:
         case TokenType::FUN:
         case TokenType::CLASS:
             return false;
-        case TokenType::EQUAL:
-            if (prevIsSelf) {
-                return false;
-            }
-            break;
         case TokenType::LEFT_BRACE:
             depth++;
             break;
@@ -2082,7 +2073,6 @@ bool bodyAllowsSelfTail(const char* bodyStart, std::string_view selfName) {
         default:
             break;
         }
-        prevIsSelf = t.type == TokenType::IDENTIFIER && t.lexeme == selfName;
     }
 }
 
@@ -2150,6 +2140,20 @@ bool Compiler::isSelfTailCall() const {
 void Compiler::selfTailCall() {
     const int arity = m_function->arity;
     const int heightBefore = m_stackHeight;
+
+    // The name is a global that any code may rebind, so check at run time
+    // that it still holds the running function (slot 0) before reusing the
+    // frame. Otherwise take the ordinary call, compiled from the same source.
+    Scanner savedScanner = m_parser->m_scanner;
+    Token savedCurrent = m_parser->m_current;
+    Token savedPrevious = m_parser->m_previous;
+    uint16_t nameConst = identifierConstant(m_parser->m_current);
+    emitConstantOp(Op::GET_GLOBAL, nameConst);
+    emitBytes(Op::GET_LOCAL, 0);
+    emitByte(Op::EQUAL);
+    int notSelf = emitJump(Op::JUMP_IF_FALSE);
+    emitByte(Op::POP);
+
     m_parser->consume(TokenType::IDENTIFIER, "Expect function name.");
     m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after function name.");
     for (int i = 0; i < arity; i++) {
@@ -2175,9 +2179,17 @@ void Compiler::selfTailCall() {
         emitByte(Op::POP);
     }
     emitLoop(m_bodyStart);
-    // Control never falls through, but later (dead) code in this block
-    // still compiles against the height the plain RETURN path leaves.
-    m_stackHeight = heightBefore;
+
+    // Ordinary call path: rewind and compile the same return statement.
+    m_parser->m_scanner = savedScanner;
+    m_parser->m_current = savedCurrent;
+    m_parser->m_previous = savedPrevious;
+    patchJump(notSelf);
+    m_stackHeight = heightBefore + 1; // the comparison result is still here
+    emitByte(Op::POP);
+    expression();
+    m_parser->consume(TokenType::SEMICOLON, "Expect ';' after return value.");
+    emitByte(Op::RETURN);
 }
 
 void Compiler::returnStatement() {
@@ -2420,8 +2432,7 @@ void Compiler::parseFunction(FunctionType /*type*/) {
     const char* bodyStart =
         m_parser->m_scanner.sourceBegin() + m_parser->m_current.offset;
     m_hasDefer = bodyHasDefer(bodyStart);
-    m_selfTailOk =
-        !m_selfName.empty() && bodyAllowsSelfTail(bodyStart, m_selfName);
+    m_selfTailOk = !m_selfName.empty() && bodyAllowsSelfTail(bodyStart);
     m_bodyStart = static_cast<int>(getCurrentChunk()->size());
     block();
     endCompiler();

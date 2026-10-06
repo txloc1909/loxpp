@@ -134,11 +134,11 @@ recursion stops raising `StackOverflowError`. Tracked: #555.
 
 As built, the first cut is narrower than the sketch above, so it stays easy to
 widen: only a function declared with `fun` at global scope qualifies, because
-its own name then resolves to a global and no upvalue is involved. The body
-scan also rejects `yield` (calling a generator builds a coroutine, so a loop
-would change the result) and any nested `fun` or `class`. Gaps left on
-purpose: nested and method self calls (resolve the name through slot 0 or an
-upvalue instead of a global), mutual recursion, and a global rebound from
-outside the function while it runs (the loop keeps running the original
-function). General tail calls would reuse the frame in the VM instead and do
-not conflict with this compile-time path.
+its own name then resolves to a global and no upvalue is involved. Because any
+code may rebind a global, the return site compares the global with the running
+function (slot 0) and takes the ordinary call when they differ; the call is
+compiled twice from the same source for this. The body scan rejects any nested
+`fun` or `class`, `try`, and `defer`. Gaps left on purpose: nested and method
+self calls (resolve the name through slot 0 or an upvalue instead of a
+global) and mutual recursion. General tail calls would reuse the frame in the
+VM instead and do not conflict with this compile-time path.

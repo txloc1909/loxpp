@@ -30,6 +30,7 @@ fun down(n) {
     var l = 11; var m = 12; var o = 13; var p = 14; var q = 15;
     var r = 16; var s = 17; var t = 18; var u = 19; var v = 20;
     if (n == 0) return a+b+c+d+e+g+h+i+j+k+l+m+o+p+q+r+s+t+u+v;
-    return down(n - 1);
+    down(n - 1);
+    return a+b+c+d+e+g+h+i+j+k+l+m+o+p+q+r+s+t+u+v;
 }
 print down(900);

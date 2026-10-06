@@ -1,6 +1,6 @@
 // test_tail_call.cpp — self tail-call elimination (spec/04-semantics.md,
-// "Tail calls"). A `return f(args);` inside global function `f` runs without
-// growing the call stack, except where a bail-out keeps the plain call.
+// "Self Tail Calls"). A `return f(args);` inside global function `f` runs
+// without growing the call stack, except where a bail-out keeps the plain call.
 
 #include "test_harness.h"
 #include <gtest/gtest.h>
@@ -113,8 +113,8 @@ TEST_F(TailCallTest, BailOutsKeepStackGrowth) {
         "fun f(n) { try { n = n; } catch (e) { } return f(n + 1); }",
         // defer in the body
         "fun noop() { } fun f(n) { defer noop(); return f(n + 1); }",
-        // the function rebinds its own name
-        "fun f(n) { var keep = f; f = keep; return f(n + 1); }",
+        // a class declaration in the body
+        "fun f(n) { class C { m() { return n; } } return f(n + 1); }",
     };
     for (const char* body : bodies) {
         VMTestHarness h;
@@ -136,4 +136,95 @@ TEST_F(TailCallTest, CallInsideLargerExpressionIsNotTail) {
     )"),
               InterpretResult::OK);
     EXPECT_EQ(h.getGlobalStr("kind"), "StackOverflowError");
+}
+
+// A function declared in a block is not a global, so it keeps the plain call.
+TEST_F(TailCallTest, BlockScopedFunctionKeepsStackGrowth) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var kind;
+        {
+            fun f(n) { return f(n + 1); }
+            try { f(0); } catch (e) { kind = e.kind; }
+        }
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "StackOverflowError");
+}
+
+// The global is rebound to a wrapper while the original runs: the tail call
+// must reach the wrapper, as an ordinary call would.
+TEST_F(TailCallTest, ReboundGlobalTakesTheOrdinaryCall) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var traces = 0;
+        fun count(n) {
+            if (n == 0) return "base";
+            return count(n - 1);
+        }
+        var orig = count;
+        fun count(n) {
+            traces = traces + 1;
+            return orig(n);
+        }
+        var result = count(3);
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("result"), "base");
+    EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("traces")), 4.0);
+}
+
+TEST_F(TailCallTest, GlobalSetToNilRaisesNotCallable) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun f(n) {
+            if (n == 0) return "f-base";
+            return f(n - 1);
+        }
+        var g = f;
+        f = nil;
+        var kind;
+        try { g(3); } catch (e) { kind = e.kind; }
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "NotCallableError");
+}
+
+// Only an assignment to the bare name matters; a property of the same name
+// and a closed inner-scope variable of the same name leave the call a self
+// tail call.
+TEST_F(TailCallTest, SameNameProperty_AndClosedInnerScope_StillTailCall) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        class Box {}
+        var box = Box();
+        fun f(n, total) {
+            box.f = n;
+            { var f = 1; total = total + f; }
+            if (n == 0) return total;
+            return f(n - 1, total);
+        }
+        var result = f(100000, 0);
+    )"),
+              InterpretResult::OK);
+    EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("result")), 100001.0);
+}
+
+// A coroutine body that suspends between self tail calls keeps working and
+// runs in constant call depth.
+TEST_F(TailCallTest, TailRecursiveCoroutineBody) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun gen(n) {
+            if (n == 0) return "done";
+            yield n;
+            return gen(n - 1);
+        }
+        var co = coroutine.create(gen);
+        var first = co.resume(100000);
+        var second = co.resume();
+    )"),
+              InterpretResult::OK);
+    EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("first")), 100000.0);
+    EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("second")), 99999.0);
 }

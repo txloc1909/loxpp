@@ -430,8 +430,10 @@ A call is a self tail call only when all of these hold:
 - The name is not shadowed at the `return` — no parameter or local variable
   of the same name is in scope there.
 - The function body contains none of: a nested `fun` or `class`
-  declaration, a `try` statement, a `defer` statement, a `yield`
-  expression, or an assignment to the function's own name.
+  declaration, a `try` statement, or a `defer` statement.
+- When the `return` executes, the function's name still holds the function
+  that is running. If the name was rebound to another value, the call is an
+  ordinary call of that value.
 
 When a self tail call executes, the arguments are evaluated left to right
 against the current parameter values, then become the new parameter values,
