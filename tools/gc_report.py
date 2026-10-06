@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarise a LOXPP_GC_TRACE file.
+"""Summarise a LOXPP_GC_TRACE file (JVM logs: tools/jvm_gc_log.py).
 
 Usage: gc_report.py [--json] [--mmu-windows MS,MS,...] TRACE [TRACE...]
 
@@ -46,6 +46,8 @@ alloc rate      bytes allocated between collections over wall. Allocation
                 bound.
 mark rate       marked objects over time in the mark+trace phases.
 sweep rate      objects visited by the sweep over time in the sweep phase.
+
+A figure the source cannot supply (the JVM log has no phases) prints as n/a.
 """
 
 import argparse
@@ -122,30 +124,52 @@ def rate(amount, ns):
 
 def summarise(path, mmu_ms):
     start, end, gcs = parse_trace(path)
+    return summarise_gcs(path, start, end, gcs, mmu_ms)
+
+
+def summarise_gcs(label, start, end, gcs, mmu_ms):
+    """Compute the report from collection records, whatever produced them.
+
+    A record needs t0, t4 (pause begin and end, ns), bytes_before,
+    bytes_after and cause. The phase timestamps t1..t3 and the counts
+    marked, objs_before, freed are optional: when a source does not have
+    them for every record, the figures that need them are None and render
+    as n/a. tools/jvm_gc_log.py builds records from a JVM -Xlog:gc log.
+    """
     wall = max(end - start, 1)
     pauses_ns = [g["t4"] - g["t0"] for g in gcs]
     sorted_p = sorted(pauses_ns)
     total_pause = sum(pauses_ns)
-    phase_ns = {
-        "mark": sum(g["t1"] - g["t0"] for g in gcs),
-        "trace": sum(g["t2"] - g["t1"] for g in gcs),
-        "strings": sum(g["t3"] - g["t2"] for g in gcs),
-        "sweep": sum(g["t4"] - g["t3"] for g in gcs),
-    }
+
+    def has(*keys):
+        return all(k in g for g in gcs for k in keys)
+
+    phase_ns = None
+    if has("t1", "t2", "t3"):
+        phase_ns = {
+            "mark": sum(g["t1"] - g["t0"] for g in gcs),
+            "trace": sum(g["t2"] - g["t1"] for g in gcs),
+            "strings": sum(g["t3"] - g["t2"] for g in gcs),
+            "sweep": sum(g["t4"] - g["t3"] for g in gcs),
+        }
     allocated = 0
     prev_after = 0
     for g in gcs:
         allocated += max(0, g["bytes_before"] - prev_after)
         prev_after = g["bytes_after"]
-    marked = sum(g["marked"] for g in gcs)
-    swept_visited = sum(g["objs_before"] for g in gcs)
-    freed = sum(g["freed"] for g in gcs)
     intervals = [(g["t0"], g["t4"]) for g in gcs]
     causes = {}
     for g in gcs:
         causes[g["cause"]] = causes.get(g["cause"], 0) + 1
+    mark_rate = sweep_rate = None
+    if phase_ns and has("marked"):
+        marked = sum(g["marked"] for g in gcs)
+        mark_rate = rate(marked, phase_ns["mark"] + phase_ns["trace"]) / 1e6
+    if phase_ns and has("objs_before"):
+        visited = sum(g["objs_before"] for g in gcs)
+        sweep_rate = rate(visited, phase_ns["sweep"]) / 1e6
     return {
-        "file": path,
+        "file": label,
         "collections": len(gcs),
         "causes": causes,
         "wall_ms": wall / 1e6,
@@ -154,19 +178,24 @@ def summarise(path, mmu_ms):
         "pause_p50_us": percentile(sorted_p, 50) / 1e3,
         "pause_p99_us": percentile(sorted_p, 99) / 1e3,
         "pause_max_us": (sorted_p[-1] if sorted_p else 0) / 1e3,
-        "phase_pct": {
+        "phase_pct": None
+        if phase_ns is None
+        else {
             k: (100.0 * v / total_pause if total_pause else 0.0)
             for k, v in phase_ns.items()
         },
         "mmu": {str(ms): mmu(start, end, intervals, ms * 1_000_000) for ms in mmu_ms},
         "alloc_mb_per_s": rate(allocated, wall) / 1e6,
-        "mark_mobj_per_s": rate(marked, phase_ns["mark"] + phase_ns["trace"]) / 1e6,
-        "sweep_mobj_per_s": rate(swept_visited, phase_ns["sweep"]) / 1e6,
-        "objects_freed": freed,
+        "mark_mobj_per_s": mark_rate,
+        "sweep_mobj_per_s": sweep_rate,
+        "objects_freed": sum(g["freed"] for g in gcs) if has("freed") else None,
     }
 
 
 def render(s):
+    def num(v, fmt):
+        return "n/a" if v is None else f"{v:{fmt}}"
+
     out = [f"== {s['file']}"]
     causes = ", ".join(f"{k}={v}" for k, v in sorted(s["causes"].items()))
     out.append(f"collections       {s['collections']}  ({causes or 'none'})")
@@ -177,18 +206,22 @@ def render(s):
         f"pause p50/p99/max {s['pause_p50_us']:.1f} / {s['pause_p99_us']:.1f}"
         f" / {s['pause_max_us']:.1f} us"
     )
-    out.append(
-        "phase share       "
-        + "  ".join(f"{k} {s['phase_pct'][k]:.1f}%" for k in PHASES)
-    )
+    if s["phase_pct"] is None:
+        out.append("phase share       n/a")
+    else:
+        out.append(
+            "phase share       "
+            + "  ".join(f"{k} {s['phase_pct'][k]:.1f}%" for k in PHASES)
+        )
     mm = "  ".join(
         f"{ms}ms:{'n/a' if v is None else f'{100 * v:.1f}%'}"
         for ms, v in s["mmu"].items()
     )
     out.append(f"MMU               {mm}")
     out.append(f"alloc rate        {s['alloc_mb_per_s']:.1f} MB/s")
-    out.append(f"mark rate         {s['mark_mobj_per_s']:.2f} Mobj/s")
-    out.append(f"sweep rate        {s['sweep_mobj_per_s']:.2f} Mobj/s")
+    out.append(f"mark rate         {num(s['mark_mobj_per_s'], '.2f')} Mobj/s")
+    out.append(f"sweep rate        {num(s['sweep_mobj_per_s'], '.2f')} Mobj/s")
+    out.extend(s.get("notes", []))
     return "\n".join(out)
 
 
