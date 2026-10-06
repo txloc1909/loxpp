@@ -117,6 +117,8 @@ class Compiler {
     void classDeclaration();
     void method();
     void returnStatement();
+    bool isSelfTailCall() const;
+    void selfTailCall();
 
     void and_();
     void or_();
@@ -217,6 +219,13 @@ class Compiler {
     // emitter does not translate RUN_DEFERS yet (see
     // notes/non-local-control-flow.md).
     bool m_hasDefer{false};
+    // Self-tail-call elimination state; see returnStatement(). m_selfName is
+    // set only for a function declared at global scope (so its own name
+    // resolves to a global), and m_selfTailOk only when the body scan in
+    // parseFunction() finds nothing that slot reuse could break.
+    std::string_view m_selfName;
+    bool m_selfTailOk{false};
+    int m_bodyStart{0};
     // When true (only inside deferStatement()), prevent emitting INVOKE fusion
     // for method calls so they compile as GET_PROPERTY + CALL instead, allowing
     // CALL to be patched to DEFER_RECORD without special INVOKE handling.

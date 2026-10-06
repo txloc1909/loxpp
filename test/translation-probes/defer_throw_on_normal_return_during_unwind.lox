@@ -12,7 +12,7 @@
 class Fake {}
 fun t() { throw Fake(); }
 fun helper() { defer t(); }
-fun deepcall(n) { if (n == 0) return 0; return deepcall(n - 1); }
+fun deepcall(n) { if (n == 0) return 0; return 1 + deepcall(n - 1); }
 fun boom(n) {
   try { helper(); } catch (e) { }
   deepcall(500);

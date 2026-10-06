@@ -190,7 +190,8 @@ TEST_F(ProfilerTest, DeepRecursionPast64Frames) {
     InterpretResult result = vm.interpret(R"(
         fun recurse(n) {
             if (n <= 0) return 0;
-            return recurse(n - 1);
+            recurse(n - 1);
+            return 0;
         }
         recurse(200);
     )");

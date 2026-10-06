@@ -10,6 +10,6 @@ fun one(a) { return a; }
 fun boom() { one(); }
 fun f(n) { defer boom(); f(n + 1); }
 try { f(0); } catch (e) { print "c1 " + e.kind; }
-fun g(n) { return g(n + 1); }
+fun g(n) { return 1 + g(n + 1); }
 try { g(0); } catch (e) { print "c2 " + e.kind; }
 print "after";

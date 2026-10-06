@@ -410,7 +410,39 @@ callee(arg1, arg2, ...)
    none).
 
 Functions may be called recursively. The depth limit is implementation-defined;
-exceeding it is a **runtime error**.
+exceeding it is a **runtime error**, except for the self tail calls described
+next, which do not count toward the depth.
+
+#### Self Tail Calls
+
+A `return` statement whose whole operand is a call of the enclosing function
+by its own name is a **self tail call**. It does not add to the call depth:
+a recursion made only of self tail calls runs in constant call depth, however
+many times it repeats, and never raises `StackOverflowError`.
+
+A call is a self tail call only when all of these hold:
+
+- The enclosing function is declared with `fun` at the top level of the
+  program, and the callee is that function's own name.
+- The call is the entire operand of `return`, as in `return f(a, b);`.
+  `return f(a) + 1;` and `return g(f(a));` are not self tail calls.
+- The number of arguments equals the function's arity.
+- The name is not shadowed at the `return` — no parameter or local variable
+  of the same name is in scope there.
+- The function body contains none of: a nested `fun` or `class`
+  declaration, a `try` statement, a `defer` statement, a `yield`
+  expression, or an assignment to the function's own name.
+
+When a self tail call executes, the arguments are evaluated left to right
+against the current parameter values, then become the new parameter values,
+and the body starts again. Every local variable of the finished iteration
+ends first. The result is the same as an ordinary call, except that the
+iteration does not appear as a separate frame in an error trace.
+
+A call that is not a self tail call is an ordinary call: it counts toward
+the depth limit, and unbounded recursion through it raises
+`StackOverflowError`. Mutual recursion and tail calls of other functions are
+ordinary calls.
 
 ### `yield` Expression
 
@@ -689,6 +721,10 @@ return expr ;     // returns the value of expr
 
 Exits the current function immediately, yielding the given value (or `nil`).
 A `return` at the top level (outside any function body) is a **static error**.
+
+A `return` that is a [self tail call](#self-tail-calls) exits the current
+function call by starting the next iteration of the same function in its
+place, with the same effect on the result.
 
 A function call may also exit early because of an in-flight `throw`,
 skipping any remaining statements in the body — see [`throw`
@@ -1388,7 +1424,7 @@ same text the implementation reports when the fault is left uncaught.
 | Call of a non-callable value | `42()` | `"NotCallableError"` |
 | Wrong argument count | `fun f(a) {} f(1, 2)` | `"ArityError"` |
 | Undefined global variable | `print undeclared;` | `"UndefinedVariableError"` |
-| Call stack overflow | Unbounded recursion | `"StackOverflowError"` |
+| Call stack overflow | Unbounded recursion that is not a [self tail call](#self-tail-calls) | `"StackOverflowError"` |
 | Index of non-List/non-Map | `42[0]` | `"NotIndexableError"` |
 | Non-Number List or String index | `list["a"]` | `"IndexTypeError"` |
 | Fractional List or String index | `list[1.5]` | `"IndexNotIntegerError"` |

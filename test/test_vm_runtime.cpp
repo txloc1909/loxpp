@@ -600,7 +600,7 @@ TEST_F(StackOverflowTest, DeepRecursionExceedsStackMax_RuntimeError) {
         "  var l = 11; var m = 12; var o = 13; var p = 14; var q = 15;"
         "  var r = 16; var s = 17; var t = 18; var u = 19; var v = 20;"
         "  if (n == 0) return a+b+c+d+e+g+h+i+j+k+l+m+o+p+q+r+s+t+u+v;"
-        "  return down(n - 1);"
+        "  down(n - 1); return a+b+c+d+e+g+h+i+j+k+l+m+o+p+q+r+s+t+u+v;"
         "}"
         "down(900);";
     EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR);
@@ -630,7 +630,7 @@ TEST_F(StackOverflowTest,
         "  var l = 11; var m = 12; var o = 13; var p = 14; var q = 15;"
         "  var r = 16; var s = 17; var t = 18; var u = 19; var v = 20;"
         "  if (n == 0) return a+b+c+d+e+g+h+i+j+k+l+m+o+p+q+r+s+t+u+v;"
-        "  return down(n - 1);"
+        "  down(n - 1); return a+b+c+d+e+g+h+i+j+k+l+m+o+p+q+r+s+t+u+v;"
         "}"
         "down(700);";
     ASSERT_EQ(h.run(src), InterpretResult::OK);
@@ -650,7 +650,7 @@ TEST_F(StackOverflowTest, SafeDepthRecursion_Succeeds) {
         "  var l = 11; var m = 12; var o = 13; var p = 14; var q = 15;"
         "  var r = 16; var s = 17; var t = 18; var u = 19; var v = 20;"
         "  if (n == 0) return a+b+c+d+e+g+h+i+j+k+l+m+o+p+q+r+s+t+u+v;"
-        "  return down(n - 1);"
+        "  down(n - 1); return a+b+c+d+e+g+h+i+j+k+l+m+o+p+q+r+s+t+u+v;"
         "}"
         "down(50);";
     ASSERT_EQ(h.run(src), InterpretResult::OK);
@@ -667,7 +667,7 @@ TEST_F(StackOverflowTest, RecursionPastOldFramesMaxCeiling_Succeeds) {
     VMTestHarness h;
     std::string src = "fun down(n) {"
                       "  if (n == 0) return 0;"
-                      "  return down(n - 1);"
+                      "  down(n - 1); return 0;"
                       "}"
                       "down(500);";
     ASSERT_EQ(h.run(src), InterpretResult::OK);
@@ -684,7 +684,7 @@ TEST_F(StackOverflowTest, DeepestFramesMaxRecursion_Succeeds) {
     VMTestHarness h;
     std::string src = "fun down(n) {"
                       "  if (n == 0) return 0;"
-                      "  return down(n - 1);"
+                      "  down(n - 1); return 0;"
                       "}"
                       "down(1022);";
     ASSERT_EQ(h.run(src), InterpretResult::OK);
@@ -696,7 +696,7 @@ TEST_F(StackOverflowTest, DeepRecursionExceedsFramesMax_RuntimeError) {
     VMTestHarness h;
     std::string src = "fun down(n) {"
                       "  if (n == 0) return 0;"
-                      "  return down(n - 1);"
+                      "  down(n - 1); return 0;"
                       "}"
                       "down(1023);";
     EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR);
@@ -717,7 +717,7 @@ TEST_F(StackOverflowTest, DeepRecursionExceedsFramesMax_RuntimeError) {
 // Error value, not fall through to the fatal path, on the frame-count guard.
 TEST_F(StackOverflowTest, CatchableFramesOverflow_CaughtWithCorrectKind) {
     VMTestHarness h;
-    std::string src = "fun f(n) { return f(n + 1); }"
+    std::string src = "fun f(n) { return 1 + f(n + 1); }"
                       "var kind; var msg;"
                       "try {"
                       "  f(0);"
@@ -746,7 +746,7 @@ TEST_F(StackOverflowTest,
         "  var l = 11; var m = 12; var o = 13; var p = 14; var q = 15;"
         "  var r = 16; var s = 17; var t = 18; var u = 19; var v = 20;"
         "  if (n == 0) return a+b+c+d+e+g+h+i+j+k+l+m+o+p+q+r+s+t+u+v;"
-        "  return down(n - 1);"
+        "  down(n - 1); return a+b+c+d+e+g+h+i+j+k+l+m+o+p+q+r+s+t+u+v;"
         "}"
         "var kind;"
         "try {"
@@ -771,13 +771,13 @@ TEST_F(StackOverflowTest,
        CatchableFramesOverflow_TryOpenedPastReserveThreshold) {
     VMTestHarness h;
     const int thresholdDepth = VM::FRAMES_MAX - 3;
-    std::string src = "fun boom(n) { return boom(n + 1); }"
+    std::string src = "fun boom(n) { return 1 + boom(n + 1); }"
                       "fun deep(n) {"
                       "  if (n == 0) {"
                       "    try { boom(0); } catch (e) { kind = e.kind; }"
                       "    return 0;"
                       "  }"
-                      "  return deep(n - 1);"
+                      "  deep(n - 1); return 0;"
                       "}"
                       "var kind;"
                       "deep(" +
@@ -832,7 +832,7 @@ TEST_F(StackOverflowTest, NoHandler_ReserveDoesNotShrinkUsableDepth) {
     std::string src =
         "fun down(n) {"
         "  if (n == 0) return 0;"
-        "  return down(n - 1);"
+        "  down(n - 1); return 0;"
         "}"
         "down(" +
         std::to_string(VM::FRAMES_MAX - VM::STACK_OVERFLOW_FRAME_RESERVE) +
@@ -962,7 +962,7 @@ TEST_F(StackOverflowTest, SecondOverflowDuringUnwindDoesNotHangOrCorrupt) {
     // unwind, which is what this test means to stress.
     std::string src = "fun deepcall(n) {"
                       "  if (n == 0) return 0;"
-                      "  return deepcall(n - 1);"
+                      "  deepcall(n - 1); return 0;"
                       "}"
                       "fun boom(n) { deepcall(500); }"
                       "fun f(n) {"
@@ -1070,7 +1070,7 @@ TEST_F(StackOverflowTest,
     VMTestHarness h;
     std::string src = "fun down(n) {"
                       "  if (n == 0) return 0;"
-                      "  return down(n - 1);"
+                      "  down(n - 1); return 0;"
                       "}"
                       "var ok = false; var caught;"
                       "try { down(1022); ok = true; }"
@@ -1105,7 +1105,7 @@ std::string fatFrameDownFn() {
            "  var l = 11; var m = 12; var o = 13; var p = 14; var q = 15;"
            "  var r = 16; var s = 17; var t = 18; var u = 19; var v = 20;"
            "  if (n == 0) return 0;"
-           "  return down(n - 1);"
+           "  down(n - 1); return 0;"
            "}";
 }
 } // namespace

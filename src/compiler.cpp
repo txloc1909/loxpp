@@ -1782,6 +1782,9 @@ void Compiler::funDeclaration() {
     // before any allocation that can trigger GC.
     Compiler inner(fn, m_parser, m_mm, FunctionType::FUNCTION, this);
     fn->name = m_mm->makeString(name.lexeme);
+    if (m_scopeDepth == 0) {
+        inner.m_selfName = name.lexeme;
+    }
     inner.parseFunction(FunctionType::FUNCTION);
 
     emitConstantOp(Op::CLOSURE, makeConstant(Value{static_cast<Obj*>(fn)}));
@@ -2041,6 +2044,142 @@ void Compiler::subscript() {
     }
 }
 
+namespace {
+// Scans a function body (same contract as bodyHasDefer) and reports whether
+// a self tail call may reuse the parameter slots. Slot reuse is unsafe when
+// a closure could capture a parameter (a nested function or class), when a
+// handler or defer would re-run per iteration (`try`, `defer`), when calling
+// the function means building a coroutine (`yield`), or when the function
+// rebinds its own name (`name = ...`).
+bool bodyAllowsSelfTail(const char* bodyStart, std::string_view selfName) {
+    Scanner lookahead(bodyStart);
+    int depth = 1;
+    bool prevIsSelf = false;
+    for (;;) {
+        Token t = lookahead.scanOneToken();
+        switch (t.type) {
+        case TokenType::DEFER:
+        case TokenType::TRY:
+        case TokenType::YIELD:
+        case TokenType::FUN:
+        case TokenType::CLASS:
+            return false;
+        case TokenType::EQUAL:
+            if (prevIsSelf) {
+                return false;
+            }
+            break;
+        case TokenType::LEFT_BRACE:
+            depth++;
+            break;
+        case TokenType::RIGHT_BRACE:
+            if (--depth == 0) {
+                return true;
+            }
+            break;
+        case TokenType::EOF_:
+            return false;
+        default:
+            break;
+        }
+        prevIsSelf = t.type == TokenType::IDENTIFIER && t.lexeme == selfName;
+    }
+}
+
+// True when the tokens from `afterName` (just past the callee identifier)
+// are `( args ) ;` with exactly `arity` arguments, i.e. the call is the whole
+// return expression.
+bool isWholeCallStatement(const char* afterName, int arity) {
+    Scanner lookahead(afterName);
+    if (lookahead.scanOneToken().type != TokenType::LEFT_PAREN) {
+        return false;
+    }
+    int depth = 1;
+    int commas = 0;
+    bool empty = true;
+    while (depth > 0) {
+        Token t = lookahead.scanOneToken();
+        switch (t.type) {
+        case TokenType::LEFT_PAREN:
+        case TokenType::LEFT_BRACKET:
+        case TokenType::LEFT_BRACE:
+            depth++;
+            break;
+        case TokenType::RIGHT_PAREN:
+        case TokenType::RIGHT_BRACKET:
+        case TokenType::RIGHT_BRACE:
+            depth--;
+            break;
+        case TokenType::COMMA:
+            if (depth == 1) {
+                commas++;
+            }
+            break;
+        case TokenType::EOF_:
+        case TokenType::ERROR:
+            return false;
+        default:
+            break;
+        }
+        if (depth > 0) {
+            empty = false;
+        }
+    }
+    int argc = empty ? 0 : commas + 1;
+    return argc == arity &&
+           lookahead.scanOneToken().type == TokenType::SEMICOLON;
+}
+} // namespace
+
+bool Compiler::isSelfTailCall() const {
+    if (!m_selfTailOk || m_type != FunctionType::FUNCTION ||
+        m_parser->m_current.type != TokenType::IDENTIFIER ||
+        m_parser->m_current.lexeme != m_selfName) {
+        return false;
+    }
+    // A parameter or local of the same name shadows the global.
+    if (resolveLocal(m_parser->m_current) != -1) {
+        return false;
+    }
+    const char* afterName = m_parser->m_scanner.sourceBegin() +
+                            m_parser->m_current.offset +
+                            m_parser->m_current.length;
+    return isWholeCallStatement(afterName, m_function->arity);
+}
+
+void Compiler::selfTailCall() {
+    const int arity = m_function->arity;
+    const int heightBefore = m_stackHeight;
+    m_parser->consume(TokenType::IDENTIFIER, "Expect function name.");
+    m_parser->consume(TokenType::LEFT_PAREN, "Expect '(' after function name.");
+    for (int i = 0; i < arity; i++) {
+        if (i > 0) {
+            m_parser->consume(TokenType::COMMA,
+                              "Expect ',' between arguments.");
+        }
+        expression();
+    }
+    m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after arguments.");
+    m_parser->consume(TokenType::SEMICOLON, "Expect ';' after return value.");
+
+    // Every argument reads the old parameter values before any slot is
+    // overwritten; store last-to-first as the arguments sit on the stack.
+    for (int i = arity; i >= 1; i--) {
+        emitBytes(Op::SET_LOCAL, static_cast<Byte>(i));
+        emitByte(Op::POP);
+    }
+    // Drop locals and temporaries above this frame's parameters so the
+    // stack height at the loop head matches function entry. Nothing here is
+    // captured: bodyAllowsSelfTail() rejects every closure-creating form.
+    for (int i = heightBefore - (arity + 1); i > 0; i--) {
+        emitByte(Op::POP);
+    }
+    emitLoop(m_bodyStart);
+    // Control never falls through, but later (dead) code in this block
+    // still compiles against the height the plain RETURN path leaves.
+    m_stackHeight = heightBefore;
+}
+
 void Compiler::returnStatement() {
     if (m_type == FunctionType::SCRIPT) {
         m_parser->error("Can't return from top-level code.");
@@ -2062,6 +2201,10 @@ void Compiler::returnStatement() {
         // look-ahead: a defer-free function's chunk must carry no
         // RUN_DEFERS at all, since the JVM emitter does not translate it
         // yet).
+        if (isSelfTailCall()) {
+            selfTailCall();
+            return;
+        }
         expression();
         m_parser->consume(TokenType::SEMICOLON,
                           "Expect ';' after return value.");
@@ -2277,6 +2420,9 @@ void Compiler::parseFunction(FunctionType /*type*/) {
     const char* bodyStart =
         m_parser->m_scanner.sourceBegin() + m_parser->m_current.offset;
     m_hasDefer = bodyHasDefer(bodyStart);
+    m_selfTailOk =
+        !m_selfName.empty() && bodyAllowsSelfTail(bodyStart, m_selfName);
+    m_bodyStart = static_cast<int>(getCurrentChunk()->size());
     block();
     endCompiler();
 }

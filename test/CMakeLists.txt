@@ -109,6 +109,7 @@ loxpp_add_test(test_net_process_gc  test_net_process.cpp     CORE loxpp_test_cor
 loxpp_add_test(test_reflect_api     test_reflect_api.cpp     CORE loxpp_test_core)
 loxpp_add_test(test_reflect_api_gc  test_reflect_api.cpp     CORE loxpp_test_core)
 loxpp_add_test(test_closures        test_closures.cpp        CORE loxpp_test_core)
+loxpp_add_test(test_tail_call       test_tail_call.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_stress_gc       test_stress_gc.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_gc_regression   test_gc_regression.cpp   CORE loxpp_test_core)
 loxpp_add_test(test_inheritance     test_inheritance.cpp     CORE loxpp_test_core)
@@ -303,7 +304,7 @@ set(LOXPP_GTEST_TARGETS
     test_allocator test_allocator_gc test_value
     test_local_variables test_control_flow test_vm_runtime test_print_nul test_file_nul
     test_os_api test_net_process test_net_process_gc
-    test_reflect_api test_reflect_api_gc test_closures
+    test_reflect_api test_reflect_api_gc test_closures test_tail_call
     test_stress_gc test_gc_regression test_inheritance test_list test_list_gc
     test_map test_map_gc test_var_destructure test_enum test_enum_gc
     test_class_pattern test_class_pattern_gc test_match_expr test_slice

@@ -4,7 +4,7 @@
 // (spec/04-semantics.md line 1120) — matching native's own
 // m_unwindingStackOverflow guard (src/vm.h). Both sides give empty stdout
 // and a non-zero exit; the JVM stderr names lox.LoxError.
-fun deepcall(n) { if (n == 0) return 0; return deepcall(n - 1); }
+fun deepcall(n) { if (n == 0) return 0; return 1 + deepcall(n - 1); }
 fun boom(n) { deepcall(500); }
 fun f(n) { defer boom(n); f(n + 1); }
 try { f(0); } catch (e) { print "caught " + e.kind; }
