@@ -466,7 +466,7 @@ void MemoryManager::collectGarbage() {
 template <bool Traced>
 void MemoryManager::runCollection() {
 #ifdef LOXPP_PROFILE
-    // ProfileGcScope destructor fires when collectGarbage() returns.
+    // ProfileGcScope destructor fires when runCollection() returns.
     // It reads bytesAllocated by const-ref; by then sweep has updated it.
     std::optional<ProfileGcScope> gcScope;
     if (m_profilerData)
@@ -507,8 +507,8 @@ void MemoryManager::runCollection() {
         t4 = monotonicNs();
         // Survivors are exactly the objects that were marked.
         std::size_t marked = allObjects.size();
-        // Flushed per line so a process that leaves through std::exit() (a
-        // runtime error) still leaves a complete trace.
+        // Flushed per line so a process that stops without stdio cleanup (a
+        // signal, abort(), _exit()) still leaves every collection so far.
         std::fprintf(m_trace,
                      "gc cause=%s t0=%llu t1=%llu t2=%llu t3=%llu t4=%llu "
                      "bytes_before=%zu bytes_after=%zu objs_before=%zu "
