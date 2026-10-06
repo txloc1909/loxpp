@@ -190,7 +190,7 @@ add_test(NAME TestMain COMMAND test_main)
 # covers, so a typo the static check's text comparison would not construct
 # (it only compares what is there, not what runs) still fails a test.
 # python3 is optional, not a build-wide requirement, so a host without it can
-# still configure and build the VM; these two tests are simply skipped.
+# still configure and build the VM; these python-driven tests are simply skipped.
 find_program(LOXPP_PYTHON3 python3)
 if(LOXPP_PYTHON3)
     # LOXPP_GC_TRACE must write a trace when set and nothing when unset. The

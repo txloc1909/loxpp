@@ -14,15 +14,18 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# Doubling a string allocates about 8 MB in a few hundred instructions, enough
+# to pass the first collection threshold. A debug build prints every executed
+# instruction, so the instruction count must stay small.
 PROGRAM = """
-var keep = nil;
-for (var i = 0; i < 60000; i = i + 1) {
-    var s = "item" + str(i);
-    keep = [s, i, keep];
-    if (i % 100 == 0) keep = nil;
+var s = "x";
+for (var i = 0; i < 22; i = i + 1) {
+    s = s + s;
 }
-print "done";
 """
+
+# Stress mode collects on every allocation, so this one must stay tiny.
+STRESS_PROGRAM = 'var a = "a" + "b";'
 
 FIELDS = (
     "cause t0 t1 t2 t3 t4 bytes_before bytes_after objs_before objs_after "
@@ -30,14 +33,19 @@ FIELDS = (
 ).split()
 
 
-def run(binary, workdir, env_extra, unset=()):
+def run(binary, workdir, env_extra, unset=(), program=PROGRAM):
     env = {k: v for k, v in os.environ.items() if k not in unset}
     env.update(env_extra)
     src = os.path.join(workdir, "prog.lox")
     with open(src, "w") as f:
-        f.write(PROGRAM)
+        f.write(program)
     return subprocess.run(
-        [binary, src], cwd=workdir, env=env, capture_output=True, text=True
+        [binary, src],
+        cwd=workdir,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
     )
 
 
@@ -46,7 +54,7 @@ def fail(msg):
     sys.exit(1)
 
 
-def check_records(path):
+def check_records(path, require_shrink=False):
     lines = [l.split() for l in open(path).read().splitlines() if l.strip()]
     if lines[0] != ["#", "loxpp-gc-trace", "v1"]:
         fail(f"bad header {lines[0]}")
@@ -58,6 +66,7 @@ def check_records(path):
     if lines[-1][0] != "end":
         fail("no end record after a normal exit")
     prev_t4 = 0
+    shrank = False
     for rec in gcs:
         kv = dict(x.split("=", 1) for x in rec[1:])
         if list(kv) != FIELDS:
@@ -65,11 +74,16 @@ def check_records(path):
         n = {k: int(v) for k, v in kv.items() if k != "cause"}
         if not (prev_t4 <= n["t0"] <= n["t1"] <= n["t2"] <= n["t3"] <= n["t4"]):
             fail(f"timestamps not monotonic: {kv}")
+        if n["bytes_after"] > n["bytes_before"]:
+            fail(f"bytes_after exceeds bytes_before: {kv}")
         if n["freed"] != n["objs_before"] - n["objs_after"]:
             fail(f"freed does not match object counts: {kv}")
         if n["marked"] != n["objs_after"]:
             fail(f"marked does not match survivors: {kv}")
+        shrank = shrank or n["bytes_after"] < n["bytes_before"]
         prev_t4 = n["t4"]
+    if require_shrink and not shrank:
+        fail("no collection freed any bytes")
     return gcs
 
 
@@ -91,16 +105,21 @@ def main():
 
         # Set: the file exists and holds well-formed records.
         r = run(binary, d, {"LOXPP_GC_TRACE": trace}, unset=("LOXPP_STRESS_GC",))
-        if r.returncode != 0 or "done" not in r.stdout:
+        if r.returncode != 0:
             fail(f"traced run failed: {r.returncode} {r.stderr}")
         if not os.path.exists(trace):
             fail("LOXPP_GC_TRACE set but no file written")
-        gcs = check_records(trace)
+        gcs = check_records(trace, require_shrink=True)
         if not all(g[1] == "cause=threshold" for g in gcs):
             fail("expected threshold cause without LOXPP_STRESS_GC")
 
         # Stress cause is reported as such.
-        run(binary, d, {"LOXPP_GC_TRACE": trace, "LOXPP_STRESS_GC": "1"})
+        run(
+            binary,
+            d,
+            {"LOXPP_GC_TRACE": trace, "LOXPP_STRESS_GC": "1"},
+            program=STRESS_PROGRAM,
+        )
         if not all(g[1] == "cause=stress" for g in check_records(trace)):
             fail("expected stress cause under LOXPP_STRESS_GC")
 
