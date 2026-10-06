@@ -29,6 +29,10 @@ comparable inside one file and meaningless across files or hosts.
                                  the process left through std::exit(), and
                                  the last t4 stands in for it then
 
+Each MemoryManager opens the file for writing and truncates it. A Lox program
+that starts a child loxpp inherits the variable, so the child truncates the
+parent's trace; unset the variable for the child, or give it its own path.
+
 Metric definitions
 ------------------
 wall            end (or last t4) minus start.
