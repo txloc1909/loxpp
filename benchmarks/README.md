@@ -177,8 +177,10 @@ differences in mind:
   JVM starts. Native wall starts when the memory manager is created.
 - **The collector depends on the cpu set.** With one cpu the JVM picks the
   Serial collector. The pinning in `run.py` and `gc_compare.py` gives one cpu,
-  so use `--jvm-opts=-XX:+UseG1GC` (or another collector flag) to compare with
-  a different collector. The collector name is in the report heading.
+  so use `--jvm-opts=-XX:+UseG1GC` or `-XX:+UseParallelGC` to compare with
+  another collector. Only Serial, Parallel, and G1 are supported: ZGC and
+  Shenandoah log pauses without heap sizes, and the parser rejects their logs
+  with an error. The collector name is in the report heading.
 - **A collection is not the same unit.** The native VM collects the whole heap
   at each pause. A JVM young pause collects only the young generation, so
   pause counts and sizes do not compare one to one. Compare overhead, MMU,

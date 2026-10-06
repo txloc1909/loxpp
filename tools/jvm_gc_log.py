@@ -28,6 +28,8 @@ Differences from the native report:
   * wall is JVM uptime at the last log line, from JVM start. Jasmin assembly
     before the JVM starts is not in it. The native wall starts when the
     memory manager is created.
+  * Only Serial, Parallel, and G1 are supported; a log from another collector
+    is rejected with an error, because its pause lines have no heap sizes.
   * The collector is chosen by the JVM. On a host or cpu set with fewer than
     two cpus it is Serial, not G1; the collector name is in the first line.
 """
@@ -45,13 +47,17 @@ PAUSE_RE = re.compile(
     r"^GC\(\d+\) Pause (\w+).*? (\d+)([KMG])->(\d+)([KMG])\(\d+[KMG]\) ([\d.]+)ms$"
 )
 CONCURRENT_RE = re.compile(r"^GC\(\d+\) Concurrent (Mark|Undo) Cycle ([\d.]+)ms$")
-COLLECTOR_RE = re.compile(r"^Using (.+)$")
+USING_RE = re.compile(r"^Using (.+)$")
+# The collectors whose pause lines carry heap sizes, which the report needs.
+# Others (ZGC, Shenandoah, Epsilon) log pauses without sizes, so a parse would
+# silently drop most of them.
+SUPPORTED = ("Serial", "Parallel", "G1")
 UNIT = {"K": 1 << 10, "M": 1 << 20, "G": 1 << 30}
 
 
 def parse_log(text):
     """Return (collector, start_ns, end_ns, gcs, concurrent) for a log."""
-    collector = None
+    collector = other = None
     last = None
     gcs = []
     concurrent = []
@@ -64,9 +70,12 @@ def parse_log(text):
         t = int(m.group(1))
         last = t
         body = m.group(2)
-        c = COLLECTOR_RE.match(body)
-        if c and collector is None:
-            collector = c.group(1)
+        c = USING_RE.match(body)
+        if c:
+            if c.group(1) in SUPPORTED:
+                collector = c.group(1)
+            elif collector is None and not c.group(1).startswith("legacy"):
+                other = c.group(1)
             continue
         p = PAUSE_RE.match(body)
         if p:
@@ -88,13 +97,21 @@ def parse_log(text):
             concurrent.append(float(k.group(2)))
     if last is None:
         raise ValueError("empty log")
-    return collector or "unknown", 0, last, gcs, concurrent
+    if collector is None:
+        raise ValueError(
+            f"unsupported or unknown collector ({other or 'no Using line'});"
+            f" supported: {', '.join(SUPPORTED)}"
+        )
+    return collector, 0, last, gcs, concurrent
 
 
 def summarise(path, mmu_ms):
     with open(path) as f:
         collector, start, end, gcs, concurrent = parse_log(f.read())
     s = gc_report.summarise_gcs(f"{path} [jvm {collector}]", start, end, gcs, mmu_ms)
+    if not gcs:
+        # No pause: the figures that need per-pause data are unknown, not 0.
+        s["phase_pct"] = s["mark_mobj_per_s"] = s["sweep_mobj_per_s"] = None
     s["notes"] = [
         f"concurrent        {len(concurrent)} cycles, {sum(concurrent):.2f} ms"
         " (not counted as pause)"

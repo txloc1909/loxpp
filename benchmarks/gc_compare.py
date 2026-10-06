@@ -92,6 +92,12 @@ def main() -> int:
 
     results, failed = [], False
     with tempfile.TemporaryDirectory() as tmp:
+        # The path goes into -Xlog:...:file=<path>:... inside a
+        # whitespace-split option, so ':' and whitespace would break it.
+        if any(c.isspace() or c == ":" for c in tmp):
+            print(f"temporary directory {tmp!r} has whitespace or ':'; "
+                  "set TMPDIR to a plain path", file=sys.stderr)
+            return 2
         for prog in progs:
             entry = {"program": prog.stem}
             for kind, fn in (("native", lambda: native_report(prog, Path(tmp), args.timeout, mmu_ms)),
