@@ -106,3 +106,60 @@ backends.
 into `CONFIG` — they are kept in `core/` for a later pass. `generate.py`
 fails loudly if a `core/*.lox` file with the harness shape is in neither
 `CONFIG` nor `EXCLUDED`.
+
+## Where the GC time goes
+
+Two tools answer two different questions. Use both.
+
+### GC trace: phases and pauses
+
+`LOXPP_GC_TRACE=<file>` makes the native VM write one line per collection, with
+a timestamp at each phase boundary, on any build. It adds no clock read and no
+counter to the mutator, so it does not skew the run. Unset, it costs one
+branch per collection and nothing on the allocation path.
+
+```bash
+cmake --preset release && cmake --build build --target loxpp
+python3 benchmarks/generate.py
+LOXPP_GC_TRACE=/tmp/storage.trace build/loxpp benchmarks/programs/storage.lox
+python3 tools/gc_report.py /tmp/storage.trace      # --json for scripts
+```
+
+The report gives GC overhead (% of wall time), p50/p99/max pause, the share of
+each phase, minimum mutator utilisation (MMU) for 1, 10, 100 and 1000 ms
+windows, allocation rate, and mark and sweep rates. The trace format and the
+metric definitions are in the header of `tools/gc_report.py`.
+
+Use the `release` preset. A `debug` build prints an instruction trace to stdout
+and runs much slower, so the shares are wrong.
+
+The trace cannot see the cost of `new`, `delete`, `malloc`, and `free`. They
+are inside the phases, but the trace does not name them. Use `perf` for that.
+
+### perf: costs the trace cannot see
+
+Build a release binary that keeps frame pointers, so `perf record -g` can walk
+the stack without DWARF:
+
+```bash
+cmake -S . -B build-perf -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CXX_FLAGS="-fno-omit-frame-pointer -g"
+cmake --build build-perf --target loxpp
+
+# Counters for the whole run: cycles, instructions, cache and branch misses.
+perf stat -e cycles,instructions,cache-misses,branch-misses \
+    build-perf/loxpp benchmarks/programs/storage.lox
+
+# Where the cycles go, with call stacks.
+perf record -g -o /tmp/perf.data build-perf/loxpp benchmarks/programs/storage.lox
+perf report -i /tmp/perf.data --no-children --stdio | head -60
+# Callers of one symbol, for example the allocator:
+perf report -i /tmp/perf.data --no-children --stdio -S _int_free -g caller
+```
+
+Look for `malloc`, `free`, `operator new`, `operator delete`,
+`MemoryManager::sweep`, and `std::vector::erase` in the `--no-children` list.
+Their total, set against the trace's sweep and trace phase shares, shows how
+much of a pause is allocator work and how much is the collector's own loops.
+`perf` can need `sysctl kernel.perf_event_paranoid=1` (or root) on the host. In
+a container, add `--cap-add=SYS_ADMIN` or `--privileged`.

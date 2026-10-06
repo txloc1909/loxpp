@@ -11,6 +11,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 
 #ifdef LOXPP_DEBUG_LOG_GC
 static const char* objTypeName(ObjType type) {
@@ -70,10 +71,42 @@ static bool readStressGCEnv() {
     return v != nullptr && v[0] != '\0';
 }
 
-MemoryManager::MemoryManager()
-    : m_strings(VmAllocator<Entry>{this}), m_stressGC(readStressGCEnv()) {}
+static uint64_t monotonicNs() {
+    timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL +
+           static_cast<uint64_t>(ts.tv_nsec);
+}
 
-MemoryManager::~MemoryManager() { collectAll(); }
+// Trace line formats are documented in tools/gc_report.py.
+static std::FILE* openTraceFile() {
+    const char* path = std::getenv("LOXPP_GC_TRACE");
+    if (path == nullptr || path[0] == '\0') {
+        return nullptr;
+    }
+    std::FILE* f = std::fopen(path, "w");
+    if (f == nullptr) {
+        std::fprintf(stderr, "LOXPP_GC_TRACE: cannot open '%s'\n", path);
+        return nullptr;
+    }
+    std::fprintf(f, "# loxpp-gc-trace v1\nstart t=%llu\n",
+                 static_cast<unsigned long long>(monotonicNs()));
+    std::fflush(f);
+    return f;
+}
+
+MemoryManager::MemoryManager()
+    : m_strings(VmAllocator<Entry>{this}), m_stressGC(readStressGCEnv()),
+      m_trace(openTraceFile()) {}
+
+MemoryManager::~MemoryManager() {
+    collectAll();
+    if (m_trace != nullptr) {
+        std::fprintf(m_trace, "end t=%llu\n",
+                     static_cast<unsigned long long>(monotonicNs()));
+        std::fclose(m_trace);
+    }
+}
 
 void* MemoryManager::rawAlloc(std::size_t bytes) {
     bytesAllocated += bytes;
@@ -421,8 +454,19 @@ void MemoryManager::mergeCoroutineProfilers() {
 #endif
 
 void MemoryManager::collectGarbage() {
+    // The traced instantiation holds every clock read and counter, so the
+    // untraced one carries none of them.
+    if (m_trace != nullptr) {
+        runCollection<true>();
+    } else {
+        runCollection<false>();
+    }
+}
+
+template <bool Traced>
+void MemoryManager::runCollection() {
 #ifdef LOXPP_PROFILE
-    // ProfileGcScope destructor fires when collectGarbage() returns.
+    // ProfileGcScope destructor fires when runCollection() returns.
     // It reads bytesAllocated by const-ref; by then sweep has updated it.
     std::optional<ProfileGcScope> gcScope;
     if (m_profilerData)
@@ -431,6 +475,13 @@ void MemoryManager::collectGarbage() {
 #ifdef LOXPP_DEBUG_LOG_GC
     fprintf(stderr, "[GC] begin -- %zu bytes allocated\n", bytesAllocated);
 #endif
+    uint64_t t0 = 0, t1 = 0, t2 = 0, t3 = 0, t4 = 0;
+    std::size_t bytesBefore = 0, objsBefore = 0;
+    if constexpr (Traced) {
+        bytesBefore = bytesAllocated;
+        objsBefore = allObjects.size();
+        t0 = monotonicNs();
+    }
     if (m_markRoots) {
         m_markRoots();
     }
@@ -440,9 +491,38 @@ void MemoryManager::collectGarbage() {
     for (auto* obj : m_tempRoots) {
         markObject(obj);
     }
+    if constexpr (Traced) {
+        t1 = monotonicNs();
+    }
     traceReferences();
+    if constexpr (Traced) {
+        t2 = monotonicNs();
+    }
     removeWhiteStrings();
+    if constexpr (Traced) {
+        t3 = monotonicNs();
+    }
     sweep();
+    if constexpr (Traced) {
+        t4 = monotonicNs();
+        // Survivors are exactly the objects that were marked.
+        std::size_t marked = allObjects.size();
+        // Flushed per line so a process that stops without stdio cleanup (a
+        // signal, abort(), _exit()) still leaves every collection so far.
+        std::fprintf(m_trace,
+                     "gc cause=%s t0=%llu t1=%llu t2=%llu t3=%llu t4=%llu "
+                     "bytes_before=%zu bytes_after=%zu objs_before=%zu "
+                     "objs_after=%zu marked=%zu freed=%zu\n",
+                     m_stressGC ? "stress" : "threshold",
+                     static_cast<unsigned long long>(t0),
+                     static_cast<unsigned long long>(t1),
+                     static_cast<unsigned long long>(t2),
+                     static_cast<unsigned long long>(t3),
+                     static_cast<unsigned long long>(t4), bytesBefore,
+                     bytesAllocated, objsBefore, marked, marked,
+                     objsBefore - marked);
+        std::fflush(m_trace);
+    }
 #ifdef LOXPP_DEBUG_LOG_GC
     fprintf(stderr, "[GC] end   -- %zu bytes allocated, next threshold %zu\n",
             bytesAllocated, m_nextGC);
