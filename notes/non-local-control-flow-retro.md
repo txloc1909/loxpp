@@ -215,10 +215,10 @@ backends had each independently under/over-ported.
    top. The full account is in `notes/coroutines-retro.md` (issue #564).
 
    Planning policy in `AGENTS.md` makes the trigger visible: a plan for a
-   node scoped by "only", "subset", "fallback" or "phase 1" must state the
-   set, the property, and why they are equal. A plan for a node that exists
-   mainly to remove an earlier node's fallback must name a class of programs
-   for which the earlier node is correct alone.
+   task scoped by "only", "subset", "fallback" or "phase 1" must state the
+   set, the property, and why they are equal. A plan for a task that exists
+   mainly to remove an earlier task's fallback must name a class of programs
+   for which the earlier task is correct alone.
 
    This rule cannot be made to fail on demand. A reviewer decides at plan
    review if the stated equality is plausible. Plan review is the point

@@ -51,7 +51,7 @@ bullet cannot, and nothing then answers "is this done yet."
 2. Wait for explicit approval before writing any code or opening a PR.
 3. If the plan changes, acknowledge the revision before proceeding.
 
-A plan for a node that limits its scope by "only", "subset", "fallback" or
+A plan for a task that limits its scope by "only", "subset", "fallback" or
 "phase 1" must also state:
 
 - the set of cases the node handles;
@@ -59,10 +59,9 @@ A plan for a node that limits its scope by "only", "subset", "fallback" or
 - why the set and the property are equal, including along the dynamic call
   graph.
 
-If a later node exists mainly to remove an earlier node's fallback, the plan
-must name a class of programs for which the earlier node is correct alone.
-Reviewers judge if the stated equality is plausible. See rule 6 in
-`notes/non-local-control-flow-retro.md`.
+If a known later task exists mainly to remove an earlier task's fallback, the
+plan must name a class of programs for which the earlier task is correct
+alone. Reviewers judge if the stated equality is plausible.
 
 > Trivial one-liners may skip this. When in doubt, plan first.
 
