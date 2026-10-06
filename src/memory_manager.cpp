@@ -407,6 +407,20 @@ static std::size_t objAllocatedSize(Obj* obj) {
 }
 
 void MemoryManager::sweep() {
+#ifdef LOXPP_PROFILE
+    // An abandoned coroutine is only reachable through its snapshot; sweep is
+    // the last chance to fold its profile into the report. The merge can
+    // allocate and throw, so it runs before the compaction changes anything.
+    if (m_profilerData) {
+        for (Obj* obj : allObjects) {
+            if (obj->marked || obj->type != ObjType::COROUTINE)
+                continue;
+            auto* co = static_cast<ObjCoroutine*>(obj);
+            if (co->profiler)
+                m_profilerData->mergeFrom(*co->profiler);
+        }
+    }
+#endif
     // Survivors are compacted in place with a write index: erasing each dead
     // object separately would shift the tail every time and make a sweep
     // quadratic in the heap size.
@@ -424,15 +438,6 @@ void MemoryManager::sweep() {
                     objTypeName(obj->type));
 #endif
             bytesAllocated -= objAllocatedSize(obj);
-#ifdef LOXPP_PROFILE
-            // An abandoned coroutine is only reachable through its snapshot;
-            // sweep is the last chance to fold its profile into the report.
-            if (m_profilerData && obj->type == ObjType::COROUTINE) {
-                auto* co = static_cast<ObjCoroutine*>(obj);
-                if (co->profiler)
-                    m_profilerData->mergeFrom(*co->profiler);
-            }
-#endif
             delete obj;
         }
     }
