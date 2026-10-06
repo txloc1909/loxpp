@@ -2144,13 +2144,16 @@ void Compiler::selfTailCall() {
     // The name is a global that any code may rebind, so check at run time
     // that it still holds the running function (slot 0) before reusing the
     // frame. Otherwise take the ordinary call, compiled from the same source.
+    // The check is list membership, not `==`: membership compares values
+    // directly, while `==` would call a user `__eq__` on a rebound value.
     Scanner savedScanner = m_parser->m_scanner;
     Token savedCurrent = m_parser->m_current;
     Token savedPrevious = m_parser->m_previous;
     uint16_t nameConst = identifierConstant(m_parser->m_current);
-    emitConstantOp(Op::GET_GLOBAL, nameConst);
     emitBytes(Op::GET_LOCAL, 0);
-    emitByte(Op::EQUAL);
+    emitConstantOp(Op::GET_GLOBAL, nameConst);
+    emitBytes(Op::BUILD_LIST, 1);
+    emitByte(Op::IN);
     int notSelf = emitJump(Op::JUMP_IF_FALSE);
     emitByte(Op::POP);
 

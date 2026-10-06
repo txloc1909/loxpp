@@ -228,3 +228,22 @@ TEST_F(TailCallTest, TailRecursiveCoroutineBody) {
     EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("first")), 100000.0);
     EXPECT_DOUBLE_EQ(as<Number>(*h.getGlobal("second")), 99999.0);
 }
+
+// The run-time check must not call user code: a rebound value whose `__eq__`
+// answers true or throws must not be consulted.
+TEST_F(TailCallTest, GuardDoesNotCallUserEq) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        class Liar { __eq__(o) { print "eq called"; return true; } }
+        fun f(n) {
+            if (n == 0) return "f-base";
+            return f(n - 1);
+        }
+        var g = f;
+        f = Liar();
+        var kind;
+        try { g(2); } catch (e) { kind = e.kind; }
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("kind"), "NotCallableError");
+}
