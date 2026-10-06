@@ -108,6 +108,6 @@ gate for that directory.
 - `notes/expressiveness-roadmap.md` item 5.
 - `notes/concurrency-model-decision.md` C1–C9.
 - `notes/concurrency-model-next-steps.md` items 2–5.
-- `notes/non-local-control-flow-retro.md` — the five process rules this
-  mission follows.
+- `notes/non-local-control-flow-retro.md` — the process rules this mission
+  follows (five at the time; rule 6 came from `notes/coroutines-retro.md`).
 - Tracking issue #523; node issue #524.
