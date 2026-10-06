@@ -97,6 +97,7 @@ probes=(
     # Sockets and subprocess (issue #516): a loopback TCP echo and a captured
     # child process, byte-identical on native and the JVM backend.
     "test/translation-probes/64_net_process.lox"
+    "test/translation-probes/65_invoke_callable_field.lox"
     # Operator overloading (issue #472): dunder dispatch for arithmetic,
     # comparison, equality, containment, and call.
     "test/translation-probes/jvm-only/61_operator_overload.lox"
