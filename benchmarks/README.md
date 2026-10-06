@@ -82,3 +82,25 @@ tools/build_lox_rt.sh
 into `CONFIG` — they are kept in `core/` for a later pass. `generate.py`
 fails loudly if a `core/*.lox` file with the harness shape is in neither
 `CONFIG` nor `EXCLUDED`.
+
+## GC pause latency
+
+`latency/gc_latency.lox` measures the pause a collection adds to a program.
+It keeps a graph of 50000 nodes live, runs 10000 small units of work (each
+allocates 100 short-lived objects and replaces one live node), and times each
+unit with `clock()`. A unit that includes a collection takes much longer than
+the others. The program sorts the unit times and prints one line:
+
+```
+LATENCY <units> <live-nodes> <p50-us> <p99-us> <max-us> <checksum>
+```
+
+```bash
+python3 benchmarks/run.py --latency [--backends native jvm qbe] [--procs 3]
+```
+
+`run.py --latency` runs every program in `latency/` and prints p50, p99, and
+max per backend. It reports the median of each statistic over the launches.
+The `clock` column has the same meaning as in the throughput table: process
+CPU time on native and QBE, wall-clock on JVM. Checksums must agree between
+backends.
