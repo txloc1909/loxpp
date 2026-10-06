@@ -175,6 +175,10 @@ def run_latency_pair(name: str, backend: str, procs: int, timeout: int):
     if not launches:
         return {"backend": backend, "ok": False,
                 "error": "; ".join(errors) or "no successful launches"}
+    if len({L["checksum"] for L in launches}) != 1:
+        return {"backend": backend, "ok": False,
+                "error": "launches disagree on checksum: "
+                + ", ".join(L["checksum"] for L in launches)}
     med = lambda k: statistics.median(L[k] for L in launches)
     result = {"backend": backend, "ok": True,
               "clock_kind": CLOCK_KIND[backend],
