@@ -64,6 +64,73 @@ def check_serial():
     check(close(s["gc_ms"], 88.21, 1e-3), f"serial gc ms {s['gc_ms']}")
 
 
+def check_star_log():
+    # -Xlog:gc* output, as gc_compare.py produces it: pause start lines, detail
+    # lines, and a Heap block at exit. Seven pauses end in sizes. Sizes are
+    # whole MB: 1M->1M, then six 2M->1M. Allocation is 1 + 6 = 7 MB over the
+    # 615830548 ns of uptime at the last line.
+    s = summary("jvm_gc_star_serial.log")
+    check(s["collections"] == 7, f"star collections {s['collections']}")
+    check(s["causes"] == {"young": 7}, f"star causes {s['causes']}")
+    want = 7 * 1048576 / 0.615830548 / 1e6
+    check(close(s["alloc_mb_per_s"], want), f"star alloc {s['alloc_mb_per_s']} vs {want}")
+    check(close(s["gc_ms"], 1.635 + 0.581 + 0.189 + 0.220 + 0.176 + 0.168 + 0.037, 1e-9),
+          f"star gc ms {s['gc_ms']}")
+
+
+K_LOG = """\
+[1000000ns] Using Serial
+[5000000ns] GC(0) Pause Young (Allocation Failure) 1536K->512K(5M) 2.000ms
+[9000000ns] GC(1) Pause Young (Allocation Failure) 2048K->1024K(5M) 1.000ms
+[20000000ns] Heap
+"""
+
+
+def check_kilobyte_sizes():
+    # Allocation is 1536K + (2048K - 512K) = 3072K = 3145728 bytes in 20 ms.
+    _, _, end, gcs, _ = jvm_gc_log.parse_log(K_LOG)
+    check([g["bytes_before"] for g in gcs] == [1536 * 1024, 2048 * 1024], f"K before {gcs}")
+    check([g["bytes_after"] for g in gcs] == [512 * 1024, 1024 * 1024], f"K after {gcs}")
+    with tempfile.NamedTemporaryFile("w", suffix=".log", delete=False) as t:
+        t.write(K_LOG)
+    try:
+        s = jvm_gc_log.summarise(t.name, [10])
+    finally:
+        os.unlink(t.name)
+    want = 3145728 / 0.020 / 1e6
+    check(close(s["alloc_mb_per_s"], want), f"K alloc {s['alloc_mb_per_s']} vs {want}")
+
+
+def check_unsupported_collectors():
+    zgc = (
+        "[2000000ns] Using legacy single-generation mode\n"
+        "[3000000ns] Using The Z Garbage Collector\n"
+        "[9000000ns] GC(0) Pause Mark Start 0.010ms\n"
+    )
+    for name, text in (("zgc", zgc), ("no Using line", "[1000000ns] Heap\n")):
+        try:
+            jvm_gc_log.parse_log(text)
+        except ValueError:
+            continue
+        check(False, f"parse_log accepted a {name} log")
+
+
+def check_no_pause_log():
+    with tempfile.NamedTemporaryFile("w", suffix=".log", delete=False) as t:
+        t.write("[1000000ns] Using G1\n[5000000ns] Heap\n")
+    try:
+        s = jvm_gc_log.summarise(t.name, [1])
+    finally:
+        os.unlink(t.name)
+    check(s["collections"] == 0, "no-pause log has collections")
+    check(
+        s["phase_pct"] is None
+        and s["mark_mobj_per_s"] is None
+        and s["sweep_mobj_per_s"] is None,
+        "no-pause log must print n/a for phases and rates",
+    )
+
+
 def check_rejects_bad_input():
     for bad in ("GC(0) Pause Young (Allocation Failure) 5M->1M(19M) 2.3ms\n", ""):
         try:
@@ -108,6 +175,10 @@ def check_shared_math():
 
 check_g1()
 check_serial()
+check_star_log()
+check_kilobyte_sizes()
+check_unsupported_collectors()
+check_no_pause_log()
 check_rejects_bad_input()
 check_shared_math()
 if failures:

@@ -1,0 +1,63 @@
+[3276570ns] CardTable entry size: 512
+[3321300ns] Using Serial
+[3391385ns] Version: 21.0.12+8-1-24.04-Ubuntu (release)
+[3394606ns] CPUs: 12 total, 12 available
+[3396942ns] Memory: 15660M
+[3398974ns] Large Page Support: Disabled
+[3400411ns] NUMA Support: Disabled
+[3401785ns] Compressed Oops: Enabled (32-bit)
+[3403157ns] Heap Min Capacity: 6M
+[3404474ns] Heap Initial Capacity: 6M
+[3405759ns] Heap Max Capacity: 6M
+[3406834ns] Pre-touch: Disabled
+[9204133ns] CDS archive(s) mapped at: [0x00007fe9b7000000-0x00007fe9b7c9c000-0x00007fe9b7c9c000), size 13221888, SharedBaseAddress: 0x00007fe9b7000000, ArchiveRelocationMode: 1.
+[9222428ns] Compressed class space mapped at: 0x00007fe9b8000000-0x00007fe9f8000000, reserved size: 1073741824
+[9342087ns] Narrow klass base: 0x00007fe9b7000000, Narrow klass shift: 0, Narrow klass range: 0x100000000
+[34483673ns] GC(0) Pause Young (Allocation Failure)
+[36084851ns] GC(0) DefNew: 832K(896K)->64K(896K) Eden: 832K(832K)->0K(832K) From: 0K(64K)->64K(64K)
+[36102450ns] GC(0) Tenured: 1073K(5184K)->1277K(5184K)
+[36105552ns] GC(0) Metaspace: 346K(512K)->346K(512K) NonClass: 299K(384K)->299K(384K) Class: 47K(128K)->47K(128K)
+[36119886ns] GC(0) Pause Young (Allocation Failure) 1M->1M(5M) 1.635ms
+[36126025ns] GC(0) User=0.00s Sys=0.00s Real=0.00s
+[46478559ns] GC(1) Pause Young (Allocation Failure)
+[47034656ns] GC(1) DefNew: 896K(896K)->19K(896K) Eden: 832K(832K)->0K(832K) From: 64K(64K)->19K(64K)
+[47047397ns] GC(1) Tenured: 1277K(5184K)->1340K(5184K)
+[47049342ns] GC(1) Metaspace: 553K(640K)->553K(640K) NonClass: 494K(512K)->494K(512K) Class: 59K(128K)->59K(128K)
+[47059335ns] GC(1) Pause Young (Allocation Failure) 2M->1M(5M) 0.581ms
+[47063819ns] GC(1) User=0.00s Sys=0.00s Real=0.00s
+[56172895ns] GC(2) Pause Young (Allocation Failure)
+[56349555ns] GC(2) DefNew: 851K(896K)->27K(896K) Eden: 832K(832K)->0K(832K) From: 19K(64K)->27K(64K)
+[56351982ns] GC(2) Tenured: 1340K(5184K)->1340K(5184K)
+[56353890ns] GC(2) Metaspace: 564K(704K)->564K(704K) NonClass: 505K(576K)->505K(576K) Class: 59K(128K)->59K(128K)
+[56360670ns] GC(2) Pause Young (Allocation Failure) 2M->1M(5M) 0.189ms
+[56362923ns] GC(2) User=0.00s Sys=0.00s Real=0.00s
+[59040476ns] GC(3) Pause Young (Allocation Failure)
+[59243962ns] GC(3) DefNew: 859K(896K)->27K(896K) Eden: 832K(832K)->0K(832K) From: 27K(64K)->27K(64K)
+[59247919ns] GC(3) Tenured: 1340K(5184K)->1340K(5184K)
+[59250469ns] GC(3) Metaspace: 567K(704K)->567K(704K) NonClass: 508K(576K)->508K(576K) Class: 59K(128K)->59K(128K)
+[59260161ns] GC(3) Pause Young (Allocation Failure) 2M->1M(5M) 0.220ms
+[59263706ns] GC(3) User=0.00s Sys=0.00s Real=0.00s
+[60400060ns] GC(4) Pause Young (Allocation Failure)
+[60562361ns] GC(4) DefNew: 859K(896K)->27K(896K) Eden: 832K(832K)->0K(832K) From: 27K(64K)->27K(64K)
+[60565622ns] GC(4) Tenured: 1340K(5184K)->1340K(5184K)
+[60567780ns] GC(4) Metaspace: 567K(704K)->567K(704K) NonClass: 508K(576K)->508K(576K) Class: 59K(128K)->59K(128K)
+[60576094ns] GC(4) Pause Young (Allocation Failure) 2M->1M(5M) 0.176ms
+[60579335ns] GC(4) User=0.00s Sys=0.00s Real=0.00s
+[61521803ns] GC(5) Pause Young (Allocation Failure)
+[61675548ns] GC(5) DefNew: 859K(896K)->27K(896K) Eden: 832K(832K)->0K(832K) From: 27K(64K)->27K(64K)
+[61680375ns] GC(5) Tenured: 1340K(5184K)->1340K(5184K)
+[61682574ns] GC(5) Metaspace: 567K(704K)->567K(704K) NonClass: 508K(576K)->508K(576K) Class: 59K(128K)->59K(128K)
+[61690637ns] GC(5) Pause Young (Allocation Failure) 2M->1M(5M) 0.168ms
+[61694033ns] GC(5) User=0.00s Sys=0.00s Real=0.00s
+[615009777ns] GC(1564) Metaspace: 737K(896K)->737K(896K) NonClass: 672K(768K)->672K(768K) Class: 65K(128K)->65K(128K)
+[615013704ns] GC(1564) Pause Young (Allocation Failure) 2M->1M(5M) 0.037ms
+[615015130ns] GC(1564) User=0.00s Sys=0.00s Real=0.00s
+[615808357ns] Heap
+[615821463ns]  def new generation   total 896K, used 454K [0x00000000ffa00000, 0x00000000ffaf0000, 0x00000000ffaf0000)
+[615823267ns]   eden space 832K,  54% used [0x00000000ffa00000, 0x00000000ffa70af0, 0x00000000ffad0000)
+[615824463ns]   from space 64K,   6% used [0x00000000ffae0000, 0x00000000ffae1020, 0x00000000ffaf0000)
+[615825479ns]   to   space 64K,   0% used [0x00000000ffad0000, 0x00000000ffad0000, 0x00000000ffae0000)
+[615827050ns]  tenured generation   total 5184K, used 1386K [0x00000000ffaf0000, 0x0000000100000000, 0x0000000100000000)
+[615828197ns]    the space 5184K,  26% used [0x00000000ffaf0000, 0x00000000ffc4ab40, 0x00000000ffc4ac00, 0x0000000100000000)
+[615829629ns]  Metaspace       used 740K, committed 896K, reserved 1114112K
+[615830548ns]   class space    used 65K, committed 128K, reserved 1048576K
