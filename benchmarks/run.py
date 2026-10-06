@@ -21,6 +21,12 @@ Usage:
   python3 benchmarks/run.py --only fib mandelbrot
   python3 benchmarks/run.py --backends native
   python3 benchmarks/run.py --procs 5 --json results/run.json
+  python3 benchmarks/run.py --latency            # GC pause benchmark only
+
+--latency runs the programs in latency/ instead of programs/. Each prints one
+  LATENCY <units> <live-nodes> <p50-us> <p99-us> <max-us> <checksum>  line.
+The runner reports, per backend, the median of each statistic over the
+launches (a single launch's max is one outlier by construction).
 """
 from __future__ import annotations
 
@@ -37,8 +43,13 @@ from pathlib import Path
 HERE = Path(__file__).parent
 ROOT = HERE.parent
 PROGRAMS = HERE / "programs"
+LATENCY = HERE / "latency"
 
 HARNESS_RE = re.compile(r"^HARNESS\s+(\d+)\s+([\d.eE+-]+)\s+(.*)$")
+
+LATENCY_RE = re.compile(
+    r"^LATENCY\s+(\d+)\s+(\d+)\s+([\d.eE+-]+)\s+([\d.eE+-]+)"
+    r"\s+([\d.eE+-]+)\s+(\S+)$")
 
 BACKENDS = {
     "native": lambda prog: [str(ROOT / "build" / "loxpp"), prog],
@@ -136,6 +147,92 @@ def run_pair(name: str, backend: str, procs: int, timeout: int):
     return result
 
 
+def run_latency_pair(name: str, backend: str, procs: int, timeout: int):
+    cmd = PIN + BACKENDS[backend](str(LATENCY / f"{name}.lox"))
+    launches, errors = [], []
+    for _ in range(procs):
+        try:
+            rc, out, serr, _wall = one_launch(cmd, timeout)
+        except subprocess.TimeoutExpired:
+            errors.append(f"timeout>{timeout}s")
+            continue
+        except OSError as e:
+            errors.append(f"launch failed: {e}")
+            continue
+        if rc != 0:
+            errors.append(f"exit {rc}: {serr.strip()[:200]}")
+            continue
+        m = next((LATENCY_RE.match(ln.strip()) for ln in out.splitlines()
+                  if LATENCY_RE.match(ln.strip())), None)
+        if not m:
+            errors.append(f"no LATENCY line; stderr={serr.strip()[:160]}")
+            continue
+        launches.append({"units": int(m.group(1)), "live": int(m.group(2)),
+                         "p50_us": float(m.group(3)),
+                         "p99_us": float(m.group(4)),
+                         "max_us": float(m.group(5)),
+                         "checksum": m.group(6)})
+    if not launches:
+        return {"backend": backend, "ok": False,
+                "error": "; ".join(errors) or "no successful launches"}
+    med = lambda k: statistics.median(L[k] for L in launches)
+    result = {"backend": backend, "ok": True,
+              "clock_kind": CLOCK_KIND[backend],
+              "units": launches[0]["units"], "live": launches[0]["live"],
+              "checksum": launches[0]["checksum"],
+              "p50_us": med("p50_us"), "p99_us": med("p99_us"),
+              "max_us": med("max_us"),
+              "all_max_us": [L["max_us"] for L in launches]}
+    if errors:
+        result["launch_failures"] = errors
+    return result
+
+
+def latency_main(args) -> None:
+    names = sorted(p.stem for p in LATENCY.glob("*.lox"))
+    if args.only:
+        names = [n for n in names if n in args.only]
+    rows = []
+    for name in names:
+        entry = {"program": name, "backends": {}}
+        for backend in args.backends:
+            print(f"  {name:20s} [{backend}] ...", end=" ", flush=True)
+            r = run_latency_pair(name, backend, args.procs, args.timeout)
+            entry["backends"][backend] = r
+            print("done" if r["ok"] else f"FAIL: {r['error']}")
+        sums = {b: r["checksum"] for b, r in entry["backends"].items()
+                if r["ok"]}
+        entry["checksum_match"] = None if len(sums) < 2 \
+            else len(set(sums.values())) == 1
+        if entry["checksum_match"] is False:
+            print(f"  !! {name}: checksum MISMATCH {sums}")
+        rows.append(entry)
+    print()
+    _latency_table(rows)
+    if args.json:
+        Path(args.json).write_text(json.dumps(rows, indent=2))
+        print(f"\nwrote {args.json}")
+
+
+def _latency_table(rows) -> None:
+    hdr = (f"{'program':<14}{'backend':<10}{'clock':<6}{'units':>7}"
+           f"{'live':>8}{'p50 us':>12}{'p99 us':>12}{'max us':>14}  checksum")
+    print(hdr)
+    print("-" * len(hdr))
+    for e in rows:
+        for b, r in e["backends"].items():
+            head = f"{e['program']:<14}{b:<10}"
+            if not r["ok"]:
+                print(head + "FAIL")
+                continue
+            print(f"{head}{r['clock_kind']:<6}{r['units']:>7}{r['live']:>8}"
+                  f"{r['p50_us']:>12.1f}{r['p99_us']:>12.1f}"
+                  f"{r['max_us']:>14.1f}  {r['checksum']}")
+        match = e["checksum_match"]
+        print(f"{'':<14}checksums: "
+              f"{'ok' if match else ('n/a' if match is None else 'MISMATCH')}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", nargs="+", help="subset of program names")
@@ -144,7 +241,11 @@ def main() -> None:
     ap.add_argument("--procs", type=int, default=3)
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--json", help="write full results here")
+    ap.add_argument("--latency", action="store_true",
+                    help="run the GC pause benchmarks in latency/")
     args = ap.parse_args()
+    if args.latency:
+        return latency_main(args)
 
     names = sorted(p.stem for p in PROGRAMS.glob("*.lox"))
     if args.only:
