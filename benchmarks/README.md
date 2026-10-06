@@ -19,6 +19,7 @@ benchmarks/
   generate.py      core/<name>.lox + a standard harness footer -> programs/
   programs/        the runnable, self-timing benchmarks
   programs/prof/   one-batch, no-warm-up variants for the profiler build
+  latency/         GC pause benchmarks, run by `run.py --latency`
   run.py           run programs/ on each backend, emit the comparison table
   profile.py       run programs/prof/ on the LOXPP_PROFILE build, collect
                    opcode / function / GC stats
@@ -72,6 +73,29 @@ cmake -S . -B build-profile -DCMAKE_BUILD_TYPE=Release -DLOXPP_PROFILE=ON \
 cmake --build build-profile --target loxpp
 tools/build_lox_rt.sh
 ```
+
+## GC pause latency
+
+`latency/gc_latency.lox` measures the pause a collection adds to a program.
+It keeps a graph of 50000 nodes live, runs 10000 small units of work (each
+allocates 100 short-lived objects and replaces one live node, which then
+becomes garbage), and times each unit with `clock()`. A unit that includes a
+collection takes much longer than the others. The program sorts the unit times and prints one line:
+
+```
+LATENCY <units> <live-nodes> <p50-us> <p99-us> <max-us> <checksum>
+```
+
+```bash
+python3 benchmarks/run.py --latency [--backends native jvm qbe] [--procs 3]
+```
+
+`run.py --latency` runs every program in `latency/` and prints p50, p99, and
+max per backend. It reports the median of each statistic over the launches.
+All launches of one backend must print the same checksum.
+The `clock` column has the same meaning as in the throughput table: process
+CPU time on native and QBE, wall-clock on JVM. Checksums must agree between
+backends.
 
 ## Excluded from `core/`
 
