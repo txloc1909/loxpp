@@ -193,6 +193,13 @@ add_test(NAME TestMain COMMAND test_main)
 # still configure and build the VM; these two tests are simply skipped.
 find_program(LOXPP_PYTHON3 python3)
 if(LOXPP_PYTHON3)
+    # LOXPP_GC_TRACE must write a trace when set and nothing when unset. The
+    # check drives the real loxpp binary and tools/gc_report.py end to end.
+    add_test(NAME GcTrace
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_trace.py
+                $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
     add_test(NAME BootstrapErrorKindAudit
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_error_kinds.py
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
