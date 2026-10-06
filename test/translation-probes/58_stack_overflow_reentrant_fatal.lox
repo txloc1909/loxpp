@@ -5,7 +5,7 @@
 //
 // This is the reentrant twin of 57_stack_overflow_catchable.lox, so it sits
 // beside it in the shared directory.
-fun deepcall(n) { if (n == 0) return 0; return deepcall(n - 1); }
+fun deepcall(n) { if (n == 0) return 0; return 1 + deepcall(n - 1); }
 fun boom(n) { deepcall(500); }
 fun f(n) { defer boom(n); f(n + 1); }
 try {

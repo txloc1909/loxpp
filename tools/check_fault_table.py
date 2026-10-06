@@ -163,7 +163,7 @@ CATCHABLE_ROWS = [
         "stack_overflow_error",
         "caught",
         "f();",
-        setup="fun f() { return f(); }\n",
+        setup="fun f() { return 1 + f(); }\n",
         expected_kind="StackOverflowError",
     ),
     Row("not_indexable_error", "caught", "42[0];", expected_kind="NotIndexableError"),

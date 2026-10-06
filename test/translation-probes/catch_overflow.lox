@@ -2,7 +2,7 @@
 // StackOverflowError to a real catchBlock — kind, message, and the "after"
 // line that only runs once the catch block completes normally
 // (spec/04-semantics.md's Runtime Errors table).
-fun f(n) { return f(n + 1); }
+fun f(n) { return 1 + f(n + 1); }
 try {
     f(0);
     print "no error";

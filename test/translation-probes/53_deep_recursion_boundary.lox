@@ -10,6 +10,7 @@
 // fail. Neither probe alone can see the other's mistake.
 fun down(n) {
     if (n == 0) return 0;
-    return down(n - 1);
+    down(n - 1);
+    return 0;
 }
 print down(1022);

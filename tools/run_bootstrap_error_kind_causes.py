@@ -186,7 +186,7 @@ PROBES = [
      FATAL, "InvalidDestructureReceiverError", '"Object destructuring requires an instance."'),
 
     # --- table kinds: every distinct pair needs >=1 "catchable" probe ---
-    ("stack overflow", 'fun rec(n) { return rec(n + 1); } try { rec(0); } catch (e) { print e.kind; }',
+    ("stack overflow", 'fun rec(n) { return 1 + rec(n + 1); } try { rec(0); } catch (e) { print e.kind; }',
      CATCHABLE, "StackOverflowError", '"Stack overflow."'),
     ("pop on empty list", "try { [].pop(); } catch (e) { print e.kind; }",
      CATCHABLE, "EmptyListError", '"Cannot pop from an empty list."'),

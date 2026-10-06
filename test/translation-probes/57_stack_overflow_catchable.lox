@@ -5,7 +5,7 @@
 //
 // Promoted to the shared directory (issue #322) now that the JVM backend
 // (#268) delivers a catchable StackOverflowError.
-fun f(n) { return f(n + 1); }
+fun f(n) { return 1 + f(n + 1); }
 try {
     f(0);
     print "no error";
