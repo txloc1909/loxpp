@@ -13,22 +13,15 @@ var ALLOCS_PER_UNIT = 100;
 class Node {
   init(id) {
     this.id = id;
-    this.next = nil;
     this.payload = [id, id + 1];
   }
 }
 
-// Churning slots of a long-lived array keeps old objects dying and new
-// ones being linked in, so a collector cannot treat the graph as frozen.
 fun buildGraph(n) {
   var slots = [];
-  var prev = nil;
   var i = 0;
   while (i < n) {
-    var node = Node(i);
-    node.next = prev;
-    prev = node;
-    slots.append(node);
+    slots.append(Node(i));
     i = i + 1;
   }
   return slots;
@@ -43,9 +36,11 @@ fun unit(slots, seq) {
     i = i + 1;
   }
   var slot = (seq * 7919) % LIVE_NODES;
-  var old = slots[slot];
+  // Only `slots` references a node, so the replaced node becomes garbage
+  // and the live set stays at LIVE_NODES. Old objects keep dying and new
+  // ones keep being stored into old storage, so a collector cannot treat
+  // the graph as frozen.
   var fresh = Node(seq);
-  fresh.next = old.next;
   slots[slot] = fresh;
   return sum + fresh.id;
 }
