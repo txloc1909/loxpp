@@ -21,6 +21,8 @@ benchmarks/
   programs/prof/   one-batch, no-warm-up variants for the profiler build
   latency/         GC pause benchmarks, run by `run.py --latency`
   run.py           run programs/ on each backend, emit the comparison table
+  gc_compare.py    native and JVM GC reports in one format (see "Where the GC
+                   time goes")
   profile.py       run programs/prof/ on the LOXPP_PROFILE build, collect
                    opcode / function / GC stats
   results/         *.json and *.txt output (git-ignored except a committed baseline)
@@ -135,6 +137,57 @@ and runs much slower, so the shares are wrong.
 
 The trace cannot see the cost of `new`, `delete`, `malloc`, and `free`. They
 are inside the phases, but the trace does not name them. Use `perf` for that.
+
+### The same report for the JVM backend
+
+One command prints the native report and the JVM report, in the same format,
+for the GC-bound programs (`storage`, `binary_trees`, `towers`, `json`):
+
+```bash
+python3 benchmarks/gc_compare.py                 # add --latency for latency/*.lox
+python3 benchmarks/gc_compare.py --only storage gc_latency --json /tmp/gc.json
+python3 benchmarks/gc_compare.py --jvm-opts=-XX:+UseG1GC
+```
+
+The native run uses `LOXPP_GC_TRACE`. The JVM run uses
+`LOXPP_JVM_OPTS="-Xlog:gc*:file=...:uptimenanos"` (`tools/jvm_run.sh` adds
+`LOXPP_JVM_OPTS` to the `java` command line), and `tools/jvm_gc_log.py`
+converts the log. Both then go through `gc_report.summarise_gcs`, so overhead,
+percentiles, MMU, and allocation rate come from one piece of code. To read a
+log you made yourself: `python3 tools/jvm_gc_log.py gc.log`. Use the `release`
+build, as above. Each process is pinned to one cpu, as in `run.py`.
+
+The two reports do not measure the same thing. Read the JVM report with these
+differences in mind:
+
+- **Pauses are stop-the-world pauses.** Each `Pause ...` line in the JVM log is
+  one collection (G1 young, remark, cleanup, and full; Serial and Parallel
+  young and full). A pause ends at the log timestamp and began its duration
+  earlier. G1 concurrent cycles run on other threads while the program runs,
+  so they are not in gc time, pauses, overhead, or MMU. A `concurrent` line
+  gives their count and total duration. The JVM can also stop threads for
+  other reasons (safepoints for the JIT, for example); those are not GC pauses
+  and are not here.
+- **No phase data.** The log has no mark, trace, or sweep timestamps and no
+  object counts, so `phase share`, `mark rate`, and `sweep rate` are `n/a`.
+- **The allocation rate is approximate.** The log rounds heap sizes to whole
+  MB or KB. The rate also includes what the JIT and class loader allocate.
+- **Wall time differs.** JVM wall is JVM uptime at the last log line. It
+  includes JVM start and JIT warm-up but not the Jasmin assembly before the
+  JVM starts. Native wall starts when the memory manager is created.
+- **The collector depends on the cpu set.** With one cpu the JVM picks the
+  Serial collector. The pinning in `run.py` and `gc_compare.py` gives one cpu,
+  so use `--jvm-opts=-XX:+UseG1GC` or `-XX:+UseParallelGC` to compare with
+  another collector. Only Serial, Parallel, and G1 are supported: ZGC and
+  Shenandoah log pauses without heap sizes, and the parser rejects their logs
+  with an error. The collector name is in the report heading.
+- **A collection is not the same unit.** The native VM collects the whole heap
+  at each pause. A JVM young pause collects only the young generation, so
+  pause counts and sizes do not compare one to one. Compare overhead, MMU,
+  and the tail of the pause distribution.
+
+`tools/check_jvm_gc_log.py` (ctest `JvmGcLog`) tests the parser on the logs in
+`tools/testdata/`.
 
 ### perf: costs the trace cannot see
 

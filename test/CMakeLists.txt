@@ -217,6 +217,12 @@ if(LOXPP_PYTHON3)
         ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
+    # tools/jvm_gc_log.py converts a JVM -Xlog:gc log into the gc_report.py
+    # format. The check parses checked-in logs, so it needs no JVM.
+    add_test(NAME JvmGcLog
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_jvm_gc_log.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
     add_test(NAME BootstrapErrorKindAudit
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_error_kinds.py
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})

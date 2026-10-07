@@ -24,6 +24,10 @@
 #
 # stdin, stdout, stderr, and the exit code all pass through to and from java
 # unchanged, because later nodes diff this output against build/loxpp.
+#
+# LOXPP_JVM_OPTS adds JVM flags, split on whitespace only (no glob expansion),
+# before -cp. Benchmarks
+# use it to pass -Xlog and collector choices.
 set -euo pipefail
 
 if [ "$#" -lt 3 ]; then
@@ -132,4 +136,5 @@ fi
 
 # exec, not a captured call: it replaces this script with java, so stdin,
 # stdout, stderr, and the exit code are java's own, not a copy.
-exec java -Xss"$stack_size" -cp "$rt_jar:$j_dir" "$main_class" "${program_args[@]}"
+read -ra jvm_opts <<< "${LOXPP_JVM_OPTS:-}"
+exec java ${jvm_opts[@]+"${jvm_opts[@]}"} -Xss"$stack_size" -cp "$rt_jar:$j_dir" "$main_class" "${program_args[@]}"
