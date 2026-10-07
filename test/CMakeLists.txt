@@ -200,6 +200,23 @@ if(LOXPP_PYTHON3)
                 $<TARGET_FILE:loxpp>
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
+    # A sweep must be linear in the heap size. The check keeps a large live
+    # set, churns garbage, and bounds the summed sweep-phase time from the GC
+    # trace. It skips on a build that traces execution, which prints too much
+    # to run the program quickly.
+    if(LOXPP_DEBUG_TRACE_EXECUTION OR LOXPP_DEBUG_PRINT_CODE)
+        set(LOXPP_SWEEP_TRACE_ENABLED 1)
+    else()
+        set(LOXPP_SWEEP_TRACE_ENABLED 0)
+    endif()
+    add_test(NAME GcSweepLinear
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_sweep_linear.py
+                $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(GcSweepLinear PROPERTIES
+        ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
     add_test(NAME BootstrapErrorKindAudit
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_error_kinds.py
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})

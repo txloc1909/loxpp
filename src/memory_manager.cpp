@@ -407,33 +407,41 @@ static std::size_t objAllocatedSize(Obj* obj) {
 }
 
 void MemoryManager::sweep() {
-    auto it = allObjects.begin();
-    while (it != allObjects.end()) {
-        if ((*it)->marked) {
-            (*it)->marked = false;
-            ++it;
+#ifdef LOXPP_PROFILE
+    // An abandoned coroutine is only reachable through its snapshot; sweep is
+    // the last chance to fold its profile into the report. The merge can
+    // allocate and throw, so it runs before the compaction changes anything.
+    if (m_profilerData) {
+        for (Obj* obj : allObjects) {
+            if (obj->marked || obj->type != ObjType::COROUTINE)
+                continue;
+            auto* co = static_cast<ObjCoroutine*>(obj);
+            if (co->profiler)
+                m_profilerData->mergeFrom(*co->profiler);
+        }
+    }
+#endif
+    // Survivors are compacted in place with a write index: erasing each dead
+    // object separately would shift the tail every time and make a sweep
+    // quadratic in the heap size.
+    std::size_t kept = 0;
+    for (Obj* obj : allObjects) {
+        if (obj->marked) {
+            obj->marked = false;
+            allObjects[kept++] = obj;
         } else {
 #ifdef LOXPP_DEBUG_LOG_GC
             // Use type-only log: stringifyObj dereferences fn->name which may
             // already be freed if the name ObjString appeared earlier in
             // allObjects.
-            fprintf(stderr, "[GC] free   %p (%s)\n", static_cast<void*>(*it),
-                    objTypeName((*it)->type));
+            fprintf(stderr, "[GC] free   %p (%s)\n", static_cast<void*>(obj),
+                    objTypeName(obj->type));
 #endif
-            bytesAllocated -= objAllocatedSize(*it);
-#ifdef LOXPP_PROFILE
-            // An abandoned coroutine is only reachable through its snapshot;
-            // sweep is the last chance to fold its profile into the report.
-            if (m_profilerData && (*it)->type == ObjType::COROUTINE) {
-                auto* co = static_cast<ObjCoroutine*>(*it);
-                if (co->profiler)
-                    m_profilerData->mergeFrom(*co->profiler);
-            }
-#endif
-            delete *it;
-            it = allObjects.erase(it);
+            bytesAllocated -= objAllocatedSize(obj);
+            delete obj;
         }
     }
+    allObjects.resize(kept);
     m_nextGC = bytesAllocated * GC_HEAP_GROW_FACTOR;
 }
 

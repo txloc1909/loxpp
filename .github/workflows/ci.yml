@@ -496,6 +496,17 @@ jobs:
             loxpp-dev:latest \
             bash -c "ctest --test-dir build -R BootstrapMatchArmBreak --output-on-failure --no-tests=error"
 
+      # GcSweepLinear self-skips on debug (SKIP_RETURN_CODE 125), so the release
+      # leg is the only place the sweep-time bound is checked.
+      - name: Run GC sweep linearity check
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "ctest --test-dir build -R GcSweepLinear --output-on-failure --no-tests=error"
+
       - name: Run Lox interpreter test suite (craftinginterpreters)
         if: matrix.preset == 'release'
         run: |
