@@ -9,6 +9,7 @@
 #include <optional>
 #endif
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -442,7 +443,7 @@ void MemoryManager::sweep() {
         }
     }
     allObjects.resize(kept);
-    m_nextGC = bytesAllocated * GC_HEAP_GROW_FACTOR;
+    m_nextGC = std::max(bytesAllocated * GC_HEAP_GROW_FACTOR, kMinHeap);
 }
 
 #ifdef LOXPP_PROFILE

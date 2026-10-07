@@ -108,6 +108,12 @@ class MemoryManager : public VmAllocBase {
     // Null otherwise, and collectGarbage() then pays one test of this pointer
     // per collection. The allocation paths never read it.
     std::FILE* m_trace{nullptr};
-    std::size_t m_nextGC{1024 * 1024};
+    // The threshold never drops below kMinHeap. Without a floor, a program
+    // with a small live heap and heavy allocation gets a threshold of a few
+    // kilobytes and collects thousands of times. Pause time follows the
+    // garbage swept, so a larger floor trades fewer collections for longer
+    // pauses; one megabyte already removes the excess collections.
+    static constexpr std::size_t kMinHeap = 1024 * 1024;
     static constexpr int GC_HEAP_GROW_FACTOR = 2;
+    std::size_t m_nextGC{kMinHeap};
 };
