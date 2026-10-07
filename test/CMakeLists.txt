@@ -223,6 +223,16 @@ if(LOXPP_PYTHON3)
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_jvm_gc_log.py
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
+    # A small live heap must not make the collector run too often. Like
+    # GcSweepLinear, the check skips on a build that traces execution.
+    add_test(NAME GcMinHeap
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_min_heap.py
+                $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(GcMinHeap PROPERTIES
+        ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
     add_test(NAME BootstrapErrorKindAudit
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_error_kinds.py
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
