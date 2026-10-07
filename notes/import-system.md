@@ -33,9 +33,10 @@ wall. This note records what that leaves on the table.
 These are the earlier hard problems the frame eliminates, and why:
 
 - **No `eval` wall.** Compile-time resolution needs no compiler call from a
-  running program and no general call back into the VM — the re-entrant
-  path that `concurrency-model-decision.md` C3 says does not exist. Dynamic/lazy import, hot-reload, and import-of-a-runtime-path
-  stay out of scope by construction.
+  running program. The VM has a bounded re-entrant call path
+  (`concurrency-model-decision.md` C3), but it only calls already-compiled
+  code; nothing can invoke the compiler at run time. Dynamic/lazy import,
+  hot-reload, and import-of-a-runtime-path stay out of scope by construction.
 - **No QBE separate-compilation/linker problem.** One whole-program artifact
   keeps the whole-program assumption native/QBE already rely on.
 - **No per-import runtime path search and no cwd-drift at run time.**

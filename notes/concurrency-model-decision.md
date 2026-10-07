@@ -50,12 +50,19 @@ arrays are all single-stack, fixed-capacity members of `VM`
 (`src/vm.h:215-284`). Multiple lightweight tasks sharing one VM require each
 array to become per-task.
 
-**C3 — `run()` has no bounded re-entrant call path.**
-`VM::run()` returns only at frame count 0 or on error; the `stopAtFrameCount`
-parameter is a narrow re-entrancy seam added only so `defer` thunks can run to
-completion (`src/vm.h:79-86`, `src/stdlib/reflect_api.cpp:168-175`). There is no
-general "call back into the interpreter and get a synchronous return value"
-path. Adding concurrency that re-enters the VM needs this path built first.
+**C3 — Re-entry into the interpreter is bounded and nested only.**
+A native can call back into the interpreter and get a synchronous result:
+`Runtime::reentrantCall`, `invokeCallableFromNative`, and
+`invokeMethodFromNative` (`src/runtime.h`) push the callee and run a nested
+`run(stopAtFrameCount)` to completion (#496; `callMethod` in
+`src/stdlib/reflect_api.cpp` uses it). Defer thunks and coroutine resume use
+the same seam. The re-entry is strictly LIFO on the one host stack: the nested
+run must finish before its native caller continues, and a `yield` across a
+native callback is a runtime error (`YieldAcrossNativeError`,
+`spec/04-semantics.md`; enforced by `m_reentrantRunDepth`). So a model that
+re-enters the VM from a native gets a working path, but one that needs to
+interleave or switch away from a native-called frame still needs new
+machinery.
 
 **C4 — `FrameSync` is the existing suspend/resume seam.**
 The register-cached `ip` is flushed into `frame->ip` on guard construction and
