@@ -1,7 +1,7 @@
 # Import system: design-space note (v0)
 
-**Status: proposal / design record, not approved.** No issue or Project board
-exists yet. This note maps the design space for an import system under a fixed
+**Status: the minimal viable shape below is approved as the frame, plus
+explicit exports. Node issues and a tracking issue follow.** This note maps the design space for an import system under a fixed
 set of constraints, per `AGENTS.md`'s planning policy, so the trade-offs are on
 the table before any code lands. It does **not** pick a final design; it bounds
 the space and names the residual hard edges.
@@ -179,6 +179,22 @@ above, and none reopen the `eval` wall.
 4. **Determinism of resolution.** Missing-module, ambiguous-resolution, and
    cycle errors are compile-time (good — caught before run), but their messages
    and exit behavior must be identical across all four backends (C5).
+
+## Decisions (2026-10-08)
+
+- The minimal viable shape is the frame for the first mission.
+- Exports are explicit: a top-level declaration marked `export` is visible to
+  importers. Unmarked names stay private to the module.
+- Explicit exports give an interface. They do not make a `may-suspend`
+  analysis sound: source inclusion shows the compiler every module, so the
+  analysis needs no summary. Residual edge 1 is a stack-ownership question
+  that `concurrency-model-decision.md` item 6 must answer. A generator-based
+  stdlib module must not ship before that answer.
+- Import resolution and FFI `.so` loading share one loadable-unit and
+  search-path design: the same runtimepath, the same anchoring rule, and the
+  same reserved stdlib namespace. The FFI mission starts from this design.
+- Combinator libraries (`Option`, `Result`) are modules whose functions are
+  chained with a pipe operator. See `dynamic-functional-programming.md`.
 
 ## Non-goals
 
