@@ -16,6 +16,24 @@ task status — see "Backlog and task tracking" below.
 
 ---
 
+## Backend roles
+
+The native VM is the product. The other backends exist to serve it, and each
+one owes conformance only for its role. Weigh every design by the native VM
+first.
+
+| Backend | Role | Shipped | Obligation |
+|---|---|---|---|
+| Native VM | The runtime users run. It must be simple, and fast for a dynamic language. | Yes | Implements the full spec. It is the reference for all other backends. |
+| JVM | A semantic oracle: a mature managed runtime that checks the meaning of Lox++ bytecode. Also a performance baseline to work toward. | No | Matches native where it serves as an oracle. It does not need features that exist only to give native code low-level access, such as FFI or a JIT. |
+| QBE | An experiment: the first lightweight path to an AOT binary, and tests along the AOT-to-JIT range. | No | Owes what the current experiment needs. A language change does not have to wait for QBE. |
+| Bootstrap interpreter | A capability test: a practical language can implement itself. It does not need to be fast. | No | Runs the language and matches native. |
+
+The JVM backend is never shipped: the JVM already has many languages. The CLR
+backend was removed because the JVM serves the same roles better.
+
+---
+
 ## Backlog and task tracking
 
 GitHub Issues are the backlog, and GitHub Projects the board for anything
@@ -63,14 +81,15 @@ these things:
    The consumers are the native VM, the JVM backend, the QBE backend, the
    bootstrap interpreter, and each tool that parses or lowers the construct
    (the resolver, the LSP, the tree-sitter grammar, the editor syntaxes).
+   For each backend, state what the change owes it under "Backend roles".
    A consumer found later, after CI turns red, means the plan was incomplete.
 2. **Use a table when the spec lists a set.** If the spec names a set that can
    be counted (fault kinds, opcodes, exit paths, suspend points), write it as
    a table and add a script that checks the table is complete. Build the table
    before any backend work starts.
-3. **Check each backend against the others at its own review.** The done
-   criterion of every backend node includes: its output matches every backend
-   that already merged. Do not defer this to a differential-test node at the
+3. **Check each backend against native at its own review.** The done
+   criterion of every backend node includes: its output matches the native VM
+   and every other backend that already merged, within that backend's role. Do not defer this to a differential-test node at the
    end.
 4. **Write a named bug class into the design note at once.** When a review
    names a structural bug class, record it as a constraint for all remaining
