@@ -85,10 +85,15 @@ FP ergonomics. Two forces explain the drift:
   access, non-local control flow, operator overloading, coroutines, FFI,
   parallelism — are all runtime and system capabilities. The test does not
   reject FP; it never prioritises it.
-- **Multi-backend parity economics.** Every feature is emitted for native + JVM
-  + CLR + QBE and kept differential-green. High-level FP sugar has the worst
-  cost/benefit under that constraint (emission work multiplied across four
-  backends), while low-level native primitives are cheap to add uniformly.
+- **Multi-backend parity economics.** Every feature was emitted for native +
+  JVM + CLR + QBE and kept differential-green. High-level FP sugar had the
+  worst cost/benefit under that constraint (emission work multiplied across
+  four backends), while low-level native primitives were cheap to add
+  uniformly. The premise was wrong. Under the backend roles in `AGENTS.md`, a
+  feature is owed by the native VM and the bootstrap interpreter. The JVM owes
+  it only as an oracle, and QBE only when an experiment needs it. A feature
+  that is a compiler rewrite, such as a pipe operator, costs the native
+  compiler and the bootstrap parser, not four emitters.
 
 The note also closed rather than opened work: its salvage points (nested
 patterns, exhaustiveness-as-lint) were already done, and the follow-up commit
