@@ -47,8 +47,11 @@ interpreter drive the feature list. Two demands already visible:
 ### 2. Adopt the dynamic-FP vocabulary; retire the typed imports
 - Result-by-convention via existing enums (`Ok`/`Err`, `Some`/`None`), matched
   by hand — Elixir's `{:ok, _}` / `{:error, _}` style.
-- Combinators as methods on enums (`.map`, `.unwrapOr`). Dynamic typing makes
-  these *cheaper*, not harder — no type params to thread.
+- Combinators as plain module functions, chained with a pipe operator
+  (`opt |> map(f) |> unwrapOr(0)` rewrites to `unwrapOr(map(opt, f), 0)`).
+  Dynamic typing makes these cheap, with no type params to thread. Enums stay
+  closed data and carry no methods: a method table is closed to users once
+  libraries exist, and a recursive method gets no tail-call elimination.
 - Match failure as a clean runtime error.
 - **Explicitly out of scope:** `?` operator, sound exhaustiveness,
   `Option`-everywhere. They are not "missing" — they belong to typed FP.
@@ -99,11 +102,14 @@ code"). Three things a library cannot cross, and their verdicts:
 
 - **TCO — the real blocker.** Recursion-heavy FP exhausts the VM frame budget
   (`notes/bootstrap-stack-depth.md`). A library cannot add it. Tracked: #555.
-- **`__bool__` truthiness — optional ergonomic bridge.** Only `false` and `nil`
-  are falsy; `None()` is truthy. Clojure sidesteps this with `nil`, Elixir with
-  match-only consumption. Deferred: #556.
-- **Enum methods (`.map`/`.unwrapOr`) — ergonomic only.** Enums take
-  constructors only, so combinators are free functions today. Deferred: #557.
+- **`__bool__` truthiness — decided against.** Only `false` and `nil` are
+  falsy; `None()` is truthy. Clojure sidesteps this with `nil`, Elixir with
+  match-only consumption, and Lox++ follows them: consume an `Option` with
+  `match`. A truthiness hook would run user code on every branch of every
+  backend. Closed: #556.
+- **Enum methods (`.map`/`.unwrapOr`) — decided against.** Enums take
+  constructors only. Combinators are module functions chained with a pipe
+  operator. Closed: #557.
 
 ### The strategy: library first, dogfood second
 
