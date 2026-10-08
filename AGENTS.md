@@ -51,6 +51,37 @@ bullet cannot, and nothing then answers "is this done yet."
 2. Wait for explicit approval before writing any code or opening a PR.
 3. If the plan changes, acknowledge the revision before proceeding.
 
+> Trivial one-liners may skip this. When in doubt, plan first.
+
+### Plans for a language change
+
+A language change touches the spec, the bytecode, or the standard library
+surface. Each such plan, for a mission or for a standalone issue, must do
+these things:
+
+1. **List every consumer first.** Write the list before you write the work.
+   The consumers are the native VM, the JVM backend, the QBE backend, the
+   bootstrap interpreter, and each tool that parses or lowers the construct
+   (the resolver, the LSP, the tree-sitter grammar, the editor syntaxes).
+   A consumer found later, after CI turns red, means the plan was incomplete.
+2. **Use a table when the spec lists a set.** If the spec names a set that can
+   be counted (fault kinds, opcodes, exit paths, suspend points), write it as
+   a table and add a script that checks the table is complete. Build the table
+   before any backend work starts.
+3. **Check each backend against the others at its own review.** The done
+   criterion of every backend node includes: its output matches every backend
+   that already merged. Do not defer this to a differential-test node at the
+   end.
+4. **Write a named bug class into the design note at once.** When a review
+   names a structural bug class, record it as a constraint for all remaining
+   work. Say which shared layer it belongs to (for example, an analysis pass).
+   Then check every other pass that uses the same data, not only every node.
+5. **Make the differential gate cover both phases.** The gate must compare
+   compile-time behavior (parser and resolver errors) and run-time behavior.
+   Run-time parity does not prove compile-time parity.
+
+### Plans that limit their scope
+
 A plan for a task that limits its scope by "only", "subset", "fallback" or
 "phase 1" must also state:
 
@@ -59,30 +90,31 @@ A plan for a task that limits its scope by "only", "subset", "fallback" or
 - why the set and the property are equal, including along the dynamic call
   graph.
 
+A syntactic selector is not the property you need. "The function contains
+`yield`" is not the same as "a frame can be live under a suspension", because
+a suspension passes up to every caller, and dynamic dispatch makes the set of
+callers the whole program. Test the plan against the hard probes for each
+backend on paper, not only against native output. Re-read the design
+constraints at each node, not only at the top of the mission.
+
 If a known later task exists mainly to remove an earlier task's fallback, the
 plan must name a class of programs for which the earlier task is correct
-alone. Reviewers judge if the stated equality is plausible.
+alone.
 
-A plan for a change to the language surface (spec, bytecode, or the standard
-library surface) must also follow rules 1 to 5 in
-`notes/non-local-control-flow-retro.md`. This applies to a standalone issue as
-well as to a mission. The plan must:
+No script can make this check fail. A reviewer judges at plan review if the
+stated equality is plausible. Plan review is the point where a violation
+becomes reachable.
 
-- list every consumer of the change before it lists the work;
-- use a table with a mechanical check when the spec lists a set of items;
-- make each backend check its output against the backends that already merged;
-- write each named bug class into the design note;
-- check compile-time behavior as well as run-time behavior.
+### Spec ahead of implementations
 
-A spec section may land on `main` before every consumer supports it only inside
-a mission. The mission tracking issue must name every consumer. The shared
-probes must land with the spec. Each consumer that does not yet pass a probe
-must list that probe in an expected-failure file, so the gate shows the gap and
-goes green with the last node. Spec text must not describe implementation
-status. Outside a mission, a language change covers all consumers in one PR, or
-it becomes a mission.
-
-> Trivial one-liners may skip this. When in doubt, plan first.
+When the spec and an implementation conflict, fix the implementation. A spec
+section may land on `main` before every consumer supports it only inside a
+mission. The mission tracking issue must name every consumer. The shared
+probes land with the spec. Each consumer that does not yet pass a probe lists
+that probe in an expected-failure file, so the gate shows the gap and turns
+green with the last node. Spec text does not describe implementation status.
+Outside a mission, a language change covers all consumers in one PR, or it
+becomes a mission.
 
 ---
 
