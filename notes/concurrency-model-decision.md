@@ -72,7 +72,12 @@ reloaded from the top of `m_frames` on destruction
 `yield` must "flush, save the frame/stack slice, and reload on resume" at this
 same seam. Whatever the model, stackful suspension reuses this.
 
-**C5 — Four targets and three independent surfaces.**
+**C5 — The native VM decides; the other backends conform by role.**
+The roles are in `AGENTS.md` ("Backend roles"). The native VM is the product
+and the reference. The JVM is a semantic oracle and is never shipped. QBE is an
+experiment. The bootstrap interpreter is a capability test that must match
+native. The facts below describe the implementations; the roles decide what
+each one owes a concurrency model.
 The language has four implementations today: the native C++ VM (`src/vm.cpp`),
 the QBE backend (`src/backend/qbe_emitter.cpp`, which reuses the native
 runtime), the JVM backend (`src/backend/jvm_emitter.cpp` + `runtime/jvm/`),
@@ -167,6 +172,20 @@ Two cautions against over-reading that result:
    Go's model scores poorly mostly because none of its prerequisites exist yet,
    not because channels are the wrong primitive for the language.
 
+**Backend roles change how criteria 2 and 5 read.** The table scored parity
+as if every backend were a product. Item 6 must re-score these criteria under
+the roles:
+
+- The native VM decides. A model is judged first by its cost and fit there.
+- Host-thread support on the JVM is not an advantage, because the JVM is not
+  shipped. The JVM implements the model only if it is to act as an oracle for
+  concurrency semantics.
+- The bootstrap interpreter must conform, so a model that it cannot express
+  still loses. A scheduler written in Lox++ on top of coroutines is not a cost
+  against a model: it is the capability test the bootstrap exists for.
+- QBE's real C frames (C9) constrain only the QBE experiment and a future JIT,
+  not the shipped product.
+
 The OS-threads model is the worst fit on the criteria Lox++ cares about — it
 contradicts the share-nothing stance, requires the hardest GC work, exposes the
 error-prone primitives the language has so far avoided, and is unimplementable
@@ -186,9 +205,9 @@ listed separately only where their code shapes differ.
 | Actor / isolated heap | One `VM` per task; scheduler copies messages | Same runtime as native; no QBE-specific work beyond the shared runtime | One runtime instance per task; copy via shared serialization | Feasible: tasks as interpreter instances in one Lox++ process |
 | OS threads | pthreads per task; thread-safe GC required | Same runtime as native; QBE frames complicate root scanning across task boundaries | `Thread` + shared heap; concurrent GC in the runtime | No host threads exist to expose |
 
-The differential-testing requirement (C5) is the sharpest edge: if one target
-exposes a primitive the others cannot, semantics diverge and
-`tools/diff_runtimes.py` fails. Native and QBE share one runtime, so they
+The differential-testing requirement (C5) is the sharpest edge, within each
+backend's role: if a backend that must conform cannot express a primitive,
+semantics diverge and `tools/diff_runtimes.py` fails. Native and QBE share one runtime, so they
 cannot diverge on runtime semantics — but the JVM and bootstrap can. Any
 concurrency surface must therefore be specified in `spec/` in
 implementation-neutral observable terms, with any exception recorded
