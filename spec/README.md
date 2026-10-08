@@ -25,6 +25,11 @@ here.
   unit of abstraction
 - **Fail loudly**: type errors and undefined behavior are detected at runtime
   and reported as errors, never silently ignored
+- **Expressive in the dynamic functional tradition**: pattern matching, closures,
+  immutable-by-convention data and sum types, with no static type system
+  required
+- **No high-level facility removes low-level control**: a programmer keeps
+  control over evaluation, mutation, resource release, suspension, and failure
 
 ---
 
