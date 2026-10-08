@@ -63,6 +63,25 @@ If a known later task exists mainly to remove an earlier task's fallback, the
 plan must name a class of programs for which the earlier task is correct
 alone. Reviewers judge if the stated equality is plausible.
 
+A plan for a change to the language surface (spec, bytecode, or the standard
+library surface) must also follow rules 1 to 5 in
+`notes/non-local-control-flow-retro.md`. This applies to a standalone issue as
+well as to a mission. The plan must:
+
+- list every consumer of the change before it lists the work;
+- use a table with a mechanical check when the spec lists a set of items;
+- make each backend check its output against the backends that already merged;
+- write each named bug class into the design note;
+- check compile-time behavior as well as run-time behavior.
+
+A spec section may land on `main` before every consumer supports it only inside
+a mission. The mission tracking issue must name every consumer. The shared
+probes must land with the spec. Each consumer that does not yet pass a probe
+must list that probe in an expected-failure file, so the gate shows the gap and
+goes green with the last node. Spec text must not describe implementation
+status. Outside a mission, a language change covers all consumers in one PR, or
+it becomes a mission.
+
 > Trivial one-liners may skip this. When in doubt, plan first.
 
 ---
