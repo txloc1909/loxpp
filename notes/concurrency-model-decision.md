@@ -37,11 +37,11 @@ These are the facts that make Lox++'s decision space narrower than a generic
 language's. Each is verifiable in the tree.
 
 **C1 — One non-thread-safe `MemoryManager` per VM.**
-`MemoryManager` (`src/memory_manager.h:18-94`) owns `allObjects`, the interned
+`MemoryManager` (`src/memory_manager.h`) owns `allObjects`, the interned
 string `Table m_strings`, a single `m_grayStack`, `m_tempRoots`, a bump counter
 `bytesAllocated`, and a `m_markRoots` callback. It is explicitly non-copyable and
 non-movable because `VmAllocator` stores a raw `this` pointer
-(`src/vm_allocator.h:26-46`). Any shared-heap model must build a concurrent or
+(`src/vm_allocator.h`). Any shared-heap model must build a concurrent or
 thread-safe collector; a per-task-heap model can reuse this class once per task.
 
 **C2 — `Runtime` state is sized for exactly one call stack.**
@@ -68,7 +68,7 @@ machinery.
 **C4 — `FrameSync` is the existing suspend/resume seam.**
 The register-cached `ip` is flushed into `frame->ip` on guard construction and
 reloaded from the top of `m_frames` on destruction
-(`src/vm.cpp:497-538`). `notes/benchmark_report_2026-08-26.md:391` records that
+(`FrameSync` in `src/vm.cpp`). `notes/benchmark_report_2026-08-26.md:391` records that
 `yield` must "flush, save the frame/stack slice, and reload on resume" at this
 same seam. Whatever the model, stackful suspension reuses this.
 
@@ -97,8 +97,8 @@ profiler is `#ifdef`-guarded, so it does not constrain data structures with
 `LOXPP_PROFILE=OFF`, but it forces the stack-ownership question early.
 
 **C7 — Values are references, not deep copies.**
-`Value` is a NaN-boxed `Obj*` (`src/value.h:40-93`); `ObjList`/`ObjMap` hold
-heap storage on the VM allocator (`src/container_objects.h:11-16,112-128`).
+`Value` is a NaN-boxed `Obj*` (`src/value.h`); `ObjList`/`ObjMap` hold
+heap storage on the VM allocator (`src/container_objects.h`).
 The roadmap's "share-nothing on maps + primitives" stance
 (`expressiveness-roadmap.md:37-40`) describes message *payloads*, but no deep
 copy, serialization, or immutable-value facility exists yet. Every
@@ -107,7 +107,7 @@ still needs a memory model.
 
 **C8 — No concurrent GC groundwork exists.**
 Collection is stop-the-world mark-sweep over `allObjects`
-(`src/memory_manager.h:70-74`). `notes/benchmark_report_2026-08-26.md:396`
+(`src/memory_manager.h`). `notes/benchmark_report_2026-08-26.md:396`
 records that GC item 11 (generational/incremental) must wait for this model
 go/no-go because the model sets the collector's shape.
 
