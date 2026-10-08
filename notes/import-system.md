@@ -18,8 +18,8 @@ wall. This note records what that leaves on the table.
 
 ## Settled constraints (the frame)
 
-1. Static single-binary distribution (`distribution.md`): one musl-static
-   binary (plus `libloxrt.a` beside it, used only by `--target qbe`),
+1. Single-binary distribution (`distribution.md`): one self-contained binary
+   (plus `libloxrt.a` beside it, used only by `--target qbe`),
    `loxpp upgrade` swaps the binary atomically.
 2. Every program is a single whole program. Imports are **compile-time
    composition**; the compiled artifact is one program, not separately-loaded

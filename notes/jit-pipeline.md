@@ -1,8 +1,8 @@
 # JIT pipeline: design proposal (v0)
 
 **Status: proposal, not approved. If built, it is an opt-in tier that needs the
-`--target qbe` toolchain on the user's machine. It is never on by default, so
-the single static binary keeps its promise.** No issue or Project board exists yet. This
+`--target qbe` toolchain on the user's machine. It ships only in the full
+package (`distribution.md`, "Two packages"), never in the simple one.** No issue or Project board exists yet. This
 note is a design sketch to reach alignment on approach before any code lands,
 per `AGENTS.md`'s planning policy. When approved, each stage below becomes one
 GitHub issue.

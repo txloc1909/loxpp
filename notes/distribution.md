@@ -1,10 +1,16 @@
 # Distribution design
 
-Lox++ ships as a single static binary for x86_64 Linux: download, verify,
-install, upgrade. This document records the design decisions that make that
-channel smooth.
+Lox++ ships as a single binary for x86_64 Linux: download, verify, install,
+upgrade. This document records the design decisions that make that channel
+smooth. The goal is simplicity and easy installation. The libc choice below
+serves that goal and is not a constraint on other decisions.
 
 ## Why static linking with musl
+
+musl was chosen because it was the easiest way to get one binary that runs
+on any x86_64 Linux. It is replaceable: a glibc build pinned to the latest
+Debian or Ubuntu LTS release serves the same goal. Change it when another
+need, such as loading native code, outweighs the benefits below.
 
 A statically linked binary needs no system libraries, no package manager, no
 distro-specific build. It works on any x86_64 Linux kernel. We chose musl libc
@@ -36,23 +42,23 @@ The product is the native VM (`AGENTS.md`, "Backend roles"). The JVM backend is
 never shipped. QBE is an experiment. Lox++ ships the native VM in two
 packages:
 
-1. **Static package** — this note's single musl binary plus source-only
-   libraries. It puts simplicity and easy installation first.
-2. **Dynamic package** — the native VM linked dynamically, plus
-   `libloxrt.{a,so}`, the JIT toolchain, and compiled libraries. It puts
-   performance and low-level capability first.
+1. **Simple package** — this note's single binary plus source-only libraries.
+   It puts simplicity and easy installation first.
+2. **Full package** — the native VM, plus `libloxrt.{a,so}`, the JIT
+   toolchain, and compiled libraries. It puts performance and low-level
+   capability first.
 
-The two packages differ only in whether the VM can load native code. A fully
-static musl binary cannot load a shared library at run time (`dlopen` always
-fails), so FFI, an in-process JIT, and native-compiled libraries are possible
-only in the dynamic package. A compiled library is a cache of its source,
-except a native extension. In the static package, an import of a native unit
-is a static error, so `--check` reports it before the program runs.
+The two packages differ only in whether the VM loads native code. This is a
+choice of priorities, not a limit of the libc: the simple package leaves out
+FFI, the JIT, and native-compiled libraries to stay small and easy to
+install. A compiled library is a cache of its source, except a native
+extension. In the simple package, an import of a native unit is a static
+error, so `--check` reports it before the program runs.
 
-The dynamic package does not exist yet. Today the static package also carries
+The full package does not exist yet. Today the simple package also carries
 `libloxrt.a` (see "Build-set" and "Ship-set" below) so that `--target qbe`
 works. Under the two-package model, `libloxrt.a` and `--target qbe` belong to
-the dynamic package.
+the full package.
 
 ## Why isocline, not GNU Readline
 
