@@ -29,8 +29,7 @@ first.
 | QBE | An experiment: the first lightweight path to an AOT binary, and tests along the AOT-to-JIT range. | No | Owes what the current experiment needs. A language change does not have to wait for QBE. |
 | Bootstrap interpreter | A capability test: a practical language can implement itself. It does not need to be fast. | No | Runs the language and matches native. |
 
-The JVM backend is never shipped: the JVM already has many languages. The CLR
-backend was removed because the JVM serves the same roles better.
+The JVM backend is never shipped: the JVM already has many languages.
 
 ---
 
