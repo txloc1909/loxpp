@@ -60,6 +60,47 @@ The full package does not exist yet. Today the simple package also carries
 works. Under the two-package model, `libloxrt.a` and `--target qbe` belong to
 the full package.
 
+## Go-style distribution
+
+The simple package follows the Go model: a user downloads one binary for a
+target triplet, and it runs. No installer, no runtime files beside it, no
+system packages. The stdlib ships inside the binary as embedded source
+(`import-system.md`, Axis 5a), the way Go uses `embed`.
+
+Go reaches this on Linux by not depending on libc: a pure Go binary calls the
+kernel directly, so it runs on any distro of any age. Calling C through cgo
+loses this property. The full package is the Lox++ equivalent of cgo: native
+code is the reason it exists, so it gives up the single-binary property.
+
+**The libc rule.** A binary built against glibc runs only where that glibc
+version or a newer one is installed. Pinning to the newest LTS therefore
+breaks "download and it runs" on older distros. The simple package must use
+one of these:
+
+- a static build, which is the closest match to Go's no-libc binary;
+- a glibc build against an old baseline, as portable Python wheels do.
+
+**Targets.** The only supported target is `x86_64-linux`. Windows is not a
+goal. The design keeps two later targets possible:
+
+| Target | What it needs |
+|---|---|
+| `x86_64-linux` | Supported. |
+| `aarch64-linux` | The same code built for a second architecture. |
+| `x86_64-darwin`, `aarch64-darwin` | macOS replacements for Linux-only calls, a build that links `libSystem` dynamically and the C++ runtime statically, and code signing with notarization. |
+
+To keep those targets cheap, new code follows these rules:
+
+- No architecture-specific code outside the QBE backend.
+- Linux-only calls stay behind one small platform boundary. Today these
+  are in `loxpp upgrade`: it reads `/proc/self/exe` and matches the asset
+  name `x86_64-linux` by a fixed pattern. `install.sh` also rejects every
+  architecture other than x86_64.
+- Asset names always carry the target (see "Asset naming" below), so a new
+  target adds assets and changes no URL.
+- Cross-compilation for a new target uses one cross toolchain (for example
+  `zig cc`) or a CI runner of that target, decided when the target is added.
+
 ## Why isocline, not GNU Readline
 
 The REPL needed line editing: history, completion, up-arrow navigation. GNU
