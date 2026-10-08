@@ -30,6 +30,30 @@ The `Dockerfile` reconciles both with separate stages:
 Both stages keep the same clang major version so a compiler bump moves them
 together.
 
+## Two packages, one native VM
+
+The product is the native VM (`AGENTS.md`, "Backend roles"). The JVM backend is
+never shipped. QBE is an experiment. Lox++ ships the native VM in two
+packages:
+
+1. **Static package** — this note's single musl binary plus source-only
+   libraries. It puts simplicity and easy installation first.
+2. **Dynamic package** — the native VM linked dynamically, plus
+   `libloxrt.{a,so}`, the JIT toolchain, and compiled libraries. It puts
+   performance and low-level capability first.
+
+The two packages differ only in whether the VM can load native code. A fully
+static musl binary cannot load a shared library at run time (`dlopen` always
+fails), so FFI, an in-process JIT, and native-compiled libraries are possible
+only in the dynamic package. A compiled library is a cache of its source,
+except a native extension. In the static package, an import of a native unit
+is a static error, so `--check` reports it before the program runs.
+
+The dynamic package does not exist yet. Today the static package also carries
+`libloxrt.a` (see "Build-set" and "Ship-set" below) so that `--target qbe`
+works. Under the two-package model, `libloxrt.a` and `--target qbe` belong to
+the dynamic package.
+
 ## Why isocline, not GNU Readline
 
 The REPL needed line editing: history, completion, up-arrow navigation. GNU
