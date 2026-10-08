@@ -44,10 +44,11 @@ non-movable because `VmAllocator` stores a raw `this` pointer
 (`src/vm_allocator.h:26-46`). Any shared-heap model must build a concurrent or
 thread-safe collector; a per-task-heap model can reuse this class once per task.
 
-**C2 — `VM` state is sized for exactly one call stack.**
+**C2 — `Runtime` state is sized for exactly one call stack.**
 `m_frames[]`, `stack[]`, `m_handlerStack`, `m_deferLists`, and the profiler
-arrays are all single-stack, fixed-capacity members of `VM`
-(`src/vm.h:215-284`). Multiple lightweight tasks sharing one VM require each
+arrays are all single-stack, fixed-capacity members of `Runtime`
+(`src/runtime.h`; the interpreter loop in `src/vm.cpp` reaches them through
+`m_rt`). Multiple lightweight tasks sharing one VM require each
 array to become per-task.
 
 **C3 — Re-entry into the interpreter is bounded and nested only.**
@@ -71,14 +72,13 @@ reloaded from the top of `m_frames` on destruction
 `yield` must "flush, save the frame/stack slice, and reload on resume" at this
 same seam. Whatever the model, stackful suspension reuses this.
 
-**C5 — Four targets, three independent surfaces, and the CLR slot is being
-replaced.**
+**C5 — Four targets and three independent surfaces.**
 The language has four implementations today: the native C++ VM (`src/vm.cpp`),
-the JVM backend (`src/backend/jvm_emitter.cpp` + `runtime/jvm/`), the CLR
-backend (`src/backend/clr_emitter.cpp` + `runtime/clr/`), and the self-hosted
-tree-walking interpreter (`bootstrap/loxpp_interpreter.lox`). The CLR backend
-is scheduled for deletion once the QBE backend passes its parity gate
-(`notes/qbe-backend.md:18-22,292`), leaving native, QBE, JVM, and bootstrap.
+the QBE backend (`src/backend/qbe_emitter.cpp`, which reuses the native
+runtime), the JVM backend (`src/backend/jvm_emitter.cpp` + `runtime/jvm/`),
+and the self-hosted tree-walking interpreter
+(`bootstrap/loxpp_interpreter.lox`). The CLR backend was deleted at the QBE
+parity gate (#489, #491).
 **QBE is not an independent implementation:** it reuses the native runtime
 (`notes/qbe-backend.md:34-44`), so native-vs-QBE output checks code generation,
 not runtime semantics; only the JVM checks runtime behavior independently. The
@@ -89,7 +89,7 @@ scope. The bootstrap runs on top of the VM and has no host-thread or
 host-scheduler access of its own.
 
 **C6 — The profiler is coupled to the single stack.**
-`m_profilerScopes[]` is parallel to `m_frames[]` (`src/vm.h:277-284`), and the
+`m_profilerScopes[]` is parallel to `m_frames[]` (both in `src/runtime.h`), and the
 clock is process-wide `CLOCK_PROCESS_CPUTIME_ID` (`src/profiler.h:66-70`). A
 fiber/task model forces these per-task; an isolated-task model gives each task
 its own `ProfilerData` (`notes/profiler-concurrency-notes.md:26-43`). The
@@ -176,7 +176,7 @@ which `tools/diff_runtimes.py` exists to prevent.
 
 ## Per-backend mapping
 
-The CLR column is omitted: it is retired at QBE parity gate S7
+The CLR column is omitted: the backend was deleted at QBE parity gate S7
 (`notes/qbe-backend.md:292`). QBE shares the native runtime, so the two are
 listed separately only where their code shapes differ.
 
@@ -250,7 +250,7 @@ explicitly rather than discovered in CI.
   (parallelism), and the share-nothing messaging stance.
 - `notes/benchmark_report_2026-08-26.md` §5 item 11 and "Dependencies on the
   expressiveness roadmap" — why GC waits for this decision.
-- `notes/qbe-backend.md` — the QBE backend that replaces CLR after parity gate
+- `notes/qbe-backend.md` — the QBE backend that replaced CLR at parity gate
   S7, its reuse of the native runtime, and its real-C-frame code shape.
 - `spec/README.md` — the implementation-independent contract every target must
   satisfy.
