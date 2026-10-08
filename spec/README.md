@@ -28,8 +28,19 @@ here.
 - **Expressive in the dynamic functional tradition**: pattern matching, closures,
   immutable-by-convention data and sum types, with no static type system
   required
-- **No high-level facility removes low-level control**: a programmer keeps
-  control over evaluation, mutation, resource release, suspension, and failure
+- **No high-level facility removes low-level control**: a high-level feature
+  must not take away a control the programmer has. The controls are:
+  - *evaluation order*: the order of evaluation is defined, not left open;
+  - *mutation*: state changes only where the program writes;
+  - *resource release*: `defer` releases a resource at a defined point, and
+    the program does not wait for a collector to do it;
+  - *suspension*: a program pays for suspension only where it uses it;
+  - *failure*: a fault is a value that the program can catch or let end the
+    program;
+  - *memory*: the program can observe and bound the memory it uses, and can
+    reach native code and raw bytes through an explicit interface;
+  - *cost*: a construct has a cost that the programmer can predict. No
+    construct runs user code or adds work at a site that does not name it.
 
 ---
 
