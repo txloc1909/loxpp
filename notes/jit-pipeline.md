@@ -1,6 +1,8 @@
 # JIT pipeline: design proposal (v0)
 
-**Status: proposal, not approved.** No issue or Project board exists yet. This
+**Status: proposal, not approved. If built, it is an opt-in tier that needs the
+`--target qbe` toolchain on the user's machine. It is never on by default, so
+the single static binary keeps its promise.** No issue or Project board exists yet. This
 note is a design sketch to reach alignment on approach before any code lands,
 per `AGENTS.md`'s planning policy. When approved, each stage below becomes one
 GitHub issue.
@@ -207,8 +209,10 @@ the set of possible callers the whole program (`coroutines-retro.md`).
 
 The AOT backend solves this with a whole-program switch: a program that
 contains any `YIELD` compiles in coroutine mode (`treeContainsYield` in
-`qbe_frontend.cpp`). v0 uses the same whole-program test and **disables the
-JIT for any program that contains `YIELD`**. The chunk tree is complete
+`qbe_frontend.cpp`). v0 would use the same whole-program test and **disable the
+JIT for any program that contains `YIELD`**. That rule is a stopgap. The
+concurrency go/no-go (item 6) decides how a compiled frame can suspend, and
+the JIT must adopt that answer, not freeze this rule. The chunk tree is complete
 before the program runs, so the test is one pass at startup.
 
 ### 5. Backend choice: QBE, not LLVM
