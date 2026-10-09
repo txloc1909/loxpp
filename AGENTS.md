@@ -14,6 +14,14 @@ and sketches future direction, and helps avoid conflicting designs. `notes/`
 is for brainstorming and design records only, never for tracking backlog or
 task status — see "Backlog and task tracking" below.
 
+`AGENTS.md` states the current rules only. It is complete without other
+files: it does not depend on `notes/` for a rule, and it does not record
+history. The history of a rule goes in commit messages and in `notes/`.
+
+Every Lox++ program is in this repository. A language change may break
+programs. When it does, update every affected program in the same PR. No
+deprecation period is needed.
+
 ---
 
 ## Backend roles
@@ -24,7 +32,7 @@ first.
 
 | Backend | Role | Shipped | Obligation |
 |---|---|---|---|
-| Native VM | The runtime users run. It must be simple, and fast for a dynamic language. | Yes | Implements the full spec. It is the reference for all other backends. |
+| Native VM | The runtime users run. It must be simple, and fast for a dynamic language. Performance work targets it first. | Yes | Implements the full spec. It is the reference for all other backends. |
 | JVM | A semantic oracle: a mature managed runtime that checks the meaning of Lox++ bytecode. Also a performance baseline to work toward. | No | Matches native where it serves as an oracle. It does not need features that exist only to give native code low-level access, such as FFI or a JIT. |
 | QBE | An experiment: the first lightweight path to an AOT binary, and tests along the AOT-to-JIT range. | No | Owes what the current experiment needs. A language change does not have to wait for QBE. |
 | Bootstrap interpreter | A capability test: a practical language can implement itself. It does not need to be fast. | No | Runs the language and matches native. |
