@@ -149,6 +149,20 @@ flagged must-have. Model choice (threads/actors/CSP), thread-safe/concurrent GC,
 VM reentrancy, profiler rework. Design space already mapped in
 `concurrency_in_bytecode_vms.md` and `profiler-concurrency-notes.md`.
 
+## Performance direction
+
+Expressiveness and performance are separate axes. This note orders the
+first. For the second, the native VM is the target (`AGENTS.md`, "Backend
+roles"): it must be fast for a dynamic language.
+
+- Interpreter wins come first: inline caches and object shapes
+  (`benchmark_report_2026-08-26.md` §5, items 5 and 9).
+- The long-term path is a real AOT compiler or a high-performance JIT for the
+  native VM.
+- QBE (`qbe-backend.md`) and the JIT proposal (`jit-pipeline.md`) are
+  experiments along that path, not the path itself.
+- The JVM backend is the performance baseline to work toward.
+
 ## Decisions reached
 
 - **Reflection stays, rescoped.** Keep introspection (cheap, exposes existing

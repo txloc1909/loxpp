@@ -47,8 +47,11 @@ interpreter drive the feature list. Two demands already visible:
 ### 2. Adopt the dynamic-FP vocabulary; retire the typed imports
 - Result-by-convention via existing enums (`Ok`/`Err`, `Some`/`None`), matched
   by hand — Elixir's `{:ok, _}` / `{:error, _}` style.
-- Combinators as methods on enums (`.map`, `.unwrapOr`). Dynamic typing makes
-  these *cheaper*, not harder — no type params to thread.
+- Combinators as plain module functions, chained with a pipe operator
+  (`opt |> map(f) |> unwrapOr(0)` rewrites to `unwrapOr(map(opt, f), 0)`).
+  Dynamic typing makes these cheap, with no type params to thread. Enums stay
+  closed data and carry no methods: a method table is closed to users once
+  libraries exist, and a recursive method gets no tail-call elimination.
 - Match failure as a clean runtime error.
 - **Explicitly out of scope:** `?` operator, sound exhaustiveness,
   `Option`-everywhere. They are not "missing" — they belong to typed FP.
@@ -82,10 +85,18 @@ FP ergonomics. Two forces explain the drift:
   access, non-local control flow, operator overloading, coroutines, FFI,
   parallelism — are all runtime and system capabilities. The test does not
   reject FP; it never prioritises it.
-- **Multi-backend parity economics.** Every feature is emitted for native + JVM
-  + CLR + QBE and kept differential-green. High-level FP sugar has the worst
-  cost/benefit under that constraint (emission work multiplied across four
-  backends), while low-level native primitives are cheap to add uniformly.
+- **Multi-backend parity economics.** Every feature was treated as owed by
+  every backend (native, JVM, CLR, QBE) and kept differential-green. High-level
+  FP sugar had the worst cost/benefit under that rule, because its emission
+  work was multiplied across four backends. Low-level native primitives were
+  cheap to add uniformly.
+
+The second force rested on a wrong premise: the backends are not equal
+products. Under the backend roles in `AGENTS.md`, a feature is owed by the
+native VM and the bootstrap interpreter. The JVM owes it only as a semantic
+oracle, and QBE only when an experiment needs it. A feature that is a compiler
+rewrite, such as a pipe operator, costs the native compiler and the bootstrap
+parser, not four emitters.
 
 The note also closed rather than opened work: its salvage points (nested
 patterns, exhaustiveness-as-lint) were already done, and the follow-up commit
@@ -99,11 +110,14 @@ code"). Three things a library cannot cross, and their verdicts:
 
 - **TCO — the real blocker.** Recursion-heavy FP exhausts the VM frame budget
   (`notes/bootstrap-stack-depth.md`). A library cannot add it. Tracked: #555.
-- **`__bool__` truthiness — optional ergonomic bridge.** Only `false` and `nil`
-  are falsy; `None()` is truthy. Clojure sidesteps this with `nil`, Elixir with
-  match-only consumption. Deferred: #556.
-- **Enum methods (`.map`/`.unwrapOr`) — ergonomic only.** Enums take
-  constructors only, so combinators are free functions today. Deferred: #557.
+- **`__bool__` truthiness — decided against.** Only `false` and `nil` are
+  falsy; `None()` is truthy. Clojure sidesteps this with `nil`, Elixir with
+  match-only consumption, and Lox++ follows them: consume an `Option` with
+  `match`. A truthiness hook would run user code on every branch of every
+  backend. Closed: #556.
+- **Enum methods (`.map`/`.unwrapOr`) — decided against.** Enums take
+  constructors only. Combinators are module functions chained with a pipe
+  operator. Closed: #557.
 
 ### The strategy: library first, dogfood second
 

@@ -37,17 +37,18 @@ These are the facts that make Lox++'s decision space narrower than a generic
 language's. Each is verifiable in the tree.
 
 **C1 — One non-thread-safe `MemoryManager` per VM.**
-`MemoryManager` (`src/memory_manager.h:18-94`) owns `allObjects`, the interned
+`MemoryManager` (`src/memory_manager.h`) owns `allObjects`, the interned
 string `Table m_strings`, a single `m_grayStack`, `m_tempRoots`, a bump counter
 `bytesAllocated`, and a `m_markRoots` callback. It is explicitly non-copyable and
 non-movable because `VmAllocator` stores a raw `this` pointer
-(`src/vm_allocator.h:26-46`). Any shared-heap model must build a concurrent or
+(`src/vm_allocator.h`). Any shared-heap model must build a concurrent or
 thread-safe collector; a per-task-heap model can reuse this class once per task.
 
-**C2 — `VM` state is sized for exactly one call stack.**
+**C2 — `Runtime` state is sized for exactly one call stack.**
 `m_frames[]`, `stack[]`, `m_handlerStack`, `m_deferLists`, and the profiler
-arrays are all single-stack, fixed-capacity members of `VM`
-(`src/vm.h:215-284`). Multiple lightweight tasks sharing one VM require each
+arrays are all single-stack, fixed-capacity members of `Runtime`
+(`src/runtime.h`; the interpreter loop in `src/vm.cpp` reaches them through
+`m_rt`). Multiple lightweight tasks sharing one VM require each
 array to become per-task.
 
 **C3 — Re-entry into the interpreter is bounded and nested only.**
@@ -67,18 +68,22 @@ machinery.
 **C4 — `FrameSync` is the existing suspend/resume seam.**
 The register-cached `ip` is flushed into `frame->ip` on guard construction and
 reloaded from the top of `m_frames` on destruction
-(`src/vm.cpp:497-538`). `notes/benchmark_report_2026-08-26.md:391` records that
+(`FrameSync` in `src/vm.cpp`). `notes/benchmark_report_2026-08-26.md:391` records that
 `yield` must "flush, save the frame/stack slice, and reload on resume" at this
 same seam. Whatever the model, stackful suspension reuses this.
 
-**C5 — Four targets, three independent surfaces, and the CLR slot is being
-replaced.**
+**C5 — The native VM decides; the other backends conform by role.**
+The roles are in `AGENTS.md` ("Backend roles"). The native VM is the product
+and the reference. The JVM is a semantic oracle and is never shipped. QBE is an
+experiment. The bootstrap interpreter is a capability test that must match
+native. The facts below describe the implementations; the roles decide what
+each one owes a concurrency model.
 The language has four implementations today: the native C++ VM (`src/vm.cpp`),
-the JVM backend (`src/backend/jvm_emitter.cpp` + `runtime/jvm/`), the CLR
-backend (`src/backend/clr_emitter.cpp` + `runtime/clr/`), and the self-hosted
-tree-walking interpreter (`bootstrap/loxpp_interpreter.lox`). The CLR backend
-is scheduled for deletion once the QBE backend passes its parity gate
-(`notes/qbe-backend.md:18-22,292`), leaving native, QBE, JVM, and bootstrap.
+the QBE backend (`src/backend/qbe_emitter.cpp`, which reuses the native
+runtime), the JVM backend (`src/backend/jvm_emitter.cpp` + `runtime/jvm/`),
+and the self-hosted tree-walking interpreter
+(`bootstrap/loxpp_interpreter.lox`). The CLR backend was deleted at the QBE
+parity gate (#489, #491).
 **QBE is not an independent implementation:** it reuses the native runtime
 (`notes/qbe-backend.md:34-44`), so native-vs-QBE output checks code generation,
 not runtime semantics; only the JVM checks runtime behavior independently. The
@@ -89,7 +94,7 @@ scope. The bootstrap runs on top of the VM and has no host-thread or
 host-scheduler access of its own.
 
 **C6 — The profiler is coupled to the single stack.**
-`m_profilerScopes[]` is parallel to `m_frames[]` (`src/vm.h:277-284`), and the
+`m_profilerScopes[]` is parallel to `m_frames[]` (both in `src/runtime.h`), and the
 clock is process-wide `CLOCK_PROCESS_CPUTIME_ID` (`src/profiler.h:66-70`). A
 fiber/task model forces these per-task; an isolated-task model gives each task
 its own `ProfilerData` (`notes/profiler-concurrency-notes.md:26-43`). The
@@ -97,8 +102,8 @@ profiler is `#ifdef`-guarded, so it does not constrain data structures with
 `LOXPP_PROFILE=OFF`, but it forces the stack-ownership question early.
 
 **C7 — Values are references, not deep copies.**
-`Value` is a NaN-boxed `Obj*` (`src/value.h:40-93`); `ObjList`/`ObjMap` hold
-heap storage on the VM allocator (`src/container_objects.h:11-16,112-128`).
+`Value` is a NaN-boxed `Obj*` (`src/value.h`); `ObjList`/`ObjMap` hold
+heap storage on the VM allocator (`src/container_objects.h`).
 The roadmap's "share-nothing on maps + primitives" stance
 (`expressiveness-roadmap.md:37-40`) describes message *payloads*, but no deep
 copy, serialization, or immutable-value facility exists yet. Every
@@ -107,7 +112,7 @@ still needs a memory model.
 
 **C8 — No concurrent GC groundwork exists.**
 Collection is stop-the-world mark-sweep over `allObjects`
-(`src/memory_manager.h:70-74`). `notes/benchmark_report_2026-08-26.md:396`
+(`src/memory_manager.h`). `notes/benchmark_report_2026-08-26.md:396`
 records that GC item 11 (generational/incremental) must wait for this model
 go/no-go because the model sets the collector's shape.
 
@@ -167,6 +172,20 @@ Two cautions against over-reading that result:
    Go's model scores poorly mostly because none of its prerequisites exist yet,
    not because channels are the wrong primitive for the language.
 
+**Backend roles change how criteria 2 and 5 read.** The table scored parity
+as if every backend were a product. Item 6 must re-score these criteria under
+the roles:
+
+- The native VM decides. A model is judged first by its cost and fit there.
+- Host-thread support on the JVM is not an advantage, because the JVM is not
+  shipped. The JVM implements the model only if it is to act as an oracle for
+  concurrency semantics.
+- The bootstrap interpreter must conform, so a model that it cannot express
+  still loses. A scheduler written in Lox++ on top of coroutines is not a cost
+  against a model: it is the capability test the bootstrap exists for.
+- QBE's real C frames (C9) constrain only the QBE experiment and a future JIT,
+  not the shipped product.
+
 The OS-threads model is the worst fit on the criteria Lox++ cares about — it
 contradicts the share-nothing stance, requires the hardest GC work, exposes the
 error-prone primitives the language has so far avoided, and is unimplementable
@@ -176,7 +195,7 @@ which `tools/diff_runtimes.py` exists to prevent.
 
 ## Per-backend mapping
 
-The CLR column is omitted: it is retired at QBE parity gate S7
+The CLR column is omitted: the backend was deleted at QBE parity gate S7
 (`notes/qbe-backend.md:292`). QBE shares the native runtime, so the two are
 listed separately only where their code shapes differ.
 
@@ -186,9 +205,9 @@ listed separately only where their code shapes differ.
 | Actor / isolated heap | One `VM` per task; scheduler copies messages | Same runtime as native; no QBE-specific work beyond the shared runtime | One runtime instance per task; copy via shared serialization | Feasible: tasks as interpreter instances in one Lox++ process |
 | OS threads | pthreads per task; thread-safe GC required | Same runtime as native; QBE frames complicate root scanning across task boundaries | `Thread` + shared heap; concurrent GC in the runtime | No host threads exist to expose |
 
-The differential-testing requirement (C5) is the sharpest edge: if one target
-exposes a primitive the others cannot, semantics diverge and
-`tools/diff_runtimes.py` fails. Native and QBE share one runtime, so they
+The differential-testing requirement (C5) is the sharpest edge, within each
+backend's role: if a backend that must conform cannot express a primitive,
+semantics diverge and `tools/diff_runtimes.py` fails. Native and QBE share one runtime, so they
 cannot diverge on runtime semantics — but the JVM and bootstrap can. Any
 concurrency surface must therefore be specified in `spec/` in
 implementation-neutral observable terms, with any exception recorded
@@ -250,7 +269,7 @@ explicitly rather than discovered in CI.
   (parallelism), and the share-nothing messaging stance.
 - `notes/benchmark_report_2026-08-26.md` §5 item 11 and "Dependencies on the
   expressiveness roadmap" — why GC waits for this decision.
-- `notes/qbe-backend.md` — the QBE backend that replaces CLR after parity gate
+- `notes/qbe-backend.md` — the QBE backend that replaced CLR at parity gate
   S7, its reuse of the native runtime, and its real-C-frame code shape.
 - `spec/README.md` — the implementation-independent contract every target must
   satisfy.

@@ -1,10 +1,16 @@
 # Distribution design
 
-Lox++ ships as a single static binary for x86_64 Linux: download, verify,
-install, upgrade. This document records the design decisions that make that
-channel smooth.
+Lox++ ships as a single binary for x86_64 Linux: download, verify, install,
+upgrade. This document records the design decisions that make that channel
+smooth. The goal is simplicity and easy installation. The libc choice below
+serves that goal and is not a constraint on other decisions.
 
 ## Why static linking with musl
+
+musl was chosen because it was the easiest way to get one binary that runs
+on any x86_64 Linux. It is replaceable: a glibc build pinned to the latest
+Debian or Ubuntu LTS release serves the same goal. Change it when another
+need, such as loading native code, outweighs the benefits below.
 
 A statically linked binary needs no system libraries, no package manager, no
 distro-specific build. It works on any x86_64 Linux kernel. We chose musl libc
@@ -29,6 +35,71 @@ The `Dockerfile` reconciles both with separate stages:
 
 Both stages keep the same clang major version so a compiler bump moves them
 together.
+
+## Two packages, one native VM
+
+The product is the native VM (`AGENTS.md`, "Backend roles"). The JVM backend is
+never shipped. QBE is an experiment. Lox++ ships the native VM in two
+packages:
+
+1. **Simple package** — this note's single binary plus source-only libraries.
+   It puts simplicity and easy installation first.
+2. **Full package** — the native VM, plus `libloxrt.{a,so}`, the JIT
+   toolchain, and compiled libraries. It puts performance and low-level
+   capability first.
+
+The two packages differ only in whether the VM loads native code. This is a
+choice of priorities, not a limit of the libc: the simple package leaves out
+FFI, the JIT, and native-compiled libraries to stay small and easy to
+install. A compiled library is a cache of its source, except a native
+extension. In the simple package, an import of a native unit is a static
+error, so `--check` reports it before the program runs.
+
+The full package does not exist yet. Today the simple package also carries
+`libloxrt.a` (see "Build-set" and "Ship-set" below) so that `--target qbe`
+works. Under the two-package model, `libloxrt.a` and `--target qbe` belong to
+the full package.
+
+## Go-style distribution
+
+The simple package follows the Go model: a user downloads one binary for a
+target triplet, and it runs. No installer, no runtime files beside it, no
+system packages. The stdlib ships inside the binary as embedded source
+(`import-system.md`, Axis 5a), the way Go uses `embed`.
+
+Go reaches this on Linux by not depending on libc: a pure Go binary calls the
+kernel directly, so it runs on any distro of any age. Calling C through cgo
+loses this property. The full package is the Lox++ equivalent of cgo: native
+code is the reason it exists, so it gives up the single-binary property.
+
+**The libc rule.** A binary built against glibc runs only where that glibc
+version or a newer one is installed. Pinning to the newest LTS therefore
+breaks "download and it runs" on older distros. The simple package must use
+one of these:
+
+- a static build, which is the closest match to Go's no-libc binary;
+- a glibc build against an old baseline, as portable Python wheels do.
+
+**Targets.** The only supported target is `x86_64-linux`. Windows is not a
+goal. The design keeps two later targets possible:
+
+| Target | What it needs |
+|---|---|
+| `x86_64-linux` | Supported. |
+| `aarch64-linux` | The same code built for a second architecture. |
+| `x86_64-darwin`, `aarch64-darwin` | macOS replacements for Linux-only calls, a build that links `libSystem` dynamically and the C++ runtime statically, and code signing with notarization. |
+
+To keep those targets cheap, new code follows these rules:
+
+- No architecture-specific code outside the QBE backend.
+- Linux-only calls stay behind one small platform boundary. Today these
+  are in `loxpp upgrade`: it reads `/proc/self/exe` and matches the asset
+  name `x86_64-linux` by a fixed pattern. `install.sh` also rejects every
+  architecture other than x86_64.
+- Asset names always carry the target (see "Asset naming" below), so a new
+  target adds assets and changes no URL.
+- Cross-compilation for a new target uses one cross toolchain (for example
+  `zig cc`) or a CI runner of that target, decided when the target is added.
 
 ## Why isocline, not GNU Readline
 
