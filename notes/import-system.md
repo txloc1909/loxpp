@@ -196,6 +196,53 @@ above, and none reopen the `eval` wall.
 - Combinator libraries (`Option`, `Result`) are modules whose functions are
   chained with a pipe operator. See `dynamic-functional-programming.md`.
 
+## Two kinds of stdlib
+
+The stdlib has two kinds of module:
+
+1. **Native builtins**, compiled into the native VM. These are the only kind
+   today: about thirty flat globals (`clock`, `stat`, `spawn`, `connect`,
+   `type`, and others) and two namespace objects (`math`, `coroutine`).
+2. **Lox++ modules**, written in Lox++ and bundled with the native VM as
+   embedded source (Axis 5a). None exist yet.
+
+Six rules keep the two kinds consistent.
+
+- **One namespace for both kinds.** `import X` finds `X` in the reserved
+  stdlib namespace, whether it is native or written in Lox++. A program
+  cannot tell which. A module can therefore move between the kinds with no
+  change to any program: a hot Lox++ module can become native, and a native
+  module can be rewritten in Lox++. The native VM registers native modules in
+  a module table, not only as globals.
+- **A small prelude.** Only a short core stays global with no import. The
+  proposed core is `clock`, `str`, `ord`, `chr`, `input`, `type`, and the
+  error and protocol basics. This list needs a decision. The other builtins
+  move into native modules, for example `os`, `fs`, `net`, `process`,
+  `reflect`, `math` and `coroutine`. This removes the flat-namespace problem
+  that forces names such as `mapResult`. No Lox++ module is in the prelude,
+  so a program compiles only the modules it imports.
+- **Hybrid modules.** A Lox++ module can sit on top of a small native core, as
+  Python's `json` sits on `_json`. Native modules whose names start with an
+  underscore are private: only stdlib modules can import them.
+- **A placement rule.** A function is native only if it cannot be written in
+  Lox++ (OS access, reflection, coroutines) or a measurement shows that it is
+  hot. Everything else is written in Lox++. This is the litmus test of
+  `expressiveness-roadmap.md` applied to the stdlib.
+- **Spec layout.** `spec/05-stdlib.md` has one section for the prelude and one
+  section per module. A Lox++ module is specified by its interface, the same
+  way as a native module. Its source is the implementation, not the spec.
+- **Bootstrap access to stdlib source.** The native compiler does source
+  inclusion, so the JVM and QBE backends receive stdlib modules inside the
+  composed bytecode. The bootstrap interpreter has its own frontend and cannot
+  read source embedded in the binary. An internal builtin returns an embedded
+  module's source text by name, in the same way that the bootstrap already
+  delegates I/O to its host.
+
+Lox++ modules live in one repository directory, and a build step embeds them
+in the binary. They have the same version as the binary, so `loxpp upgrade`
+updates both. The full package (`distribution.md`, "Two packages") may also
+carry a precompiled cache of them. The source stays the reference.
+
 ## Non-goals
 
 - Dynamic / runtime import, lazy import, hot-reload, `eval`. Those are the
