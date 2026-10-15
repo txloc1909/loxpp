@@ -19,16 +19,16 @@ item 6 has a complete question list, not a re-derived one.
 ## 1. Unit of isolation (the assumption)
 
 The actor model's unit is one task owning one `VM` and one `MemoryManager`
-(`src/memory_manager.h:18-94`). `MemoryManager` is reused as-is, with no
+(`src/memory_manager.h`). `MemoryManager` is reused as-is, with no
 concurrent collector (C1, C8 in the decision doc). Each task therefore owns one
 `ProfilerData`. This is the assumption every problem below is stated against.
 
 ## 2. Message copy / value story (C7)
 
 **Item 6 must answer:** how a message payload crosses from one task's heap to
-another. `Value` is a NaN-boxed `Obj*` (`src/value.h:40-93`); `ObjList` and
+another. `Value` is a NaN-boxed `Obj*` (`src/value.h`); `ObjList` and
 `ObjMap` hold heap storage on the VM allocator
-(`src/container_objects.h:11-16,112-128`). No deep-copy, serialization, or
+(`src/container_objects.h`). No deep-copy, serialization, or
 immutable-value facility exists. Open sub-questions:
 
 - Deep copy, immutability, or a serialization format over maps and primitives?
@@ -63,7 +63,7 @@ implementation-gated exception in `spec/`, not discover it in CI.
 ## 5. Coroutine cost (measured, not predicted)
 
 **Item 6 must answer:** the measured suspend/resume cost of item 5. Actor tasks
-need suspension at the same `FrameSync` seam (`src/vm.cpp:497-538`) as every
+need suspension at the same `FrameSync` seam (`src/vm.cpp`) as every
 other model. Per-yield overhead, stack-slice size, and what growable/segmented
 stacks add — all from the item 5 build — are the evidence item 6 exists to
 gather (`concurrency-model-decision.md:154-158,211-213`). Committing to the

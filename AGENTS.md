@@ -14,6 +14,31 @@ and sketches future direction, and helps avoid conflicting designs. `notes/`
 is for brainstorming and design records only, never for tracking backlog or
 task status — see "Backlog and task tracking" below.
 
+`AGENTS.md` states the current rules only. It is complete without other
+files: it does not depend on `notes/` for a rule, and it does not record
+history. The history of a rule goes in commit messages and in `notes/`.
+
+Every Lox++ program is in this repository. A language change may break
+programs. When it does, update every affected program in the same PR. No
+deprecation period is needed.
+
+---
+
+## Backend roles
+
+The native VM is the product. The other backends exist to serve it, and each
+one owes conformance only for its role. Weigh every design by the native VM
+first.
+
+| Backend | Role | Shipped | Obligation |
+|---|---|---|---|
+| Native VM | The runtime users run. It must be simple, and fast for a dynamic language. Performance work targets it first. | Yes | Implements the full spec. It is the reference for all other backends. |
+| JVM | A semantic oracle: a mature managed runtime that checks the meaning of Lox++ bytecode. Also a performance baseline to work toward. | No | Matches native where it serves as an oracle. It does not need features that exist only to give native code low-level access, such as FFI or a JIT. |
+| QBE | An experiment: the first lightweight path to an AOT binary, and tests along the AOT-to-JIT range. | No | Owes what the current experiment needs. A language change does not have to wait for QBE. |
+| Bootstrap interpreter | A capability test: a practical language can implement itself. It does not need to be fast. | No | Runs the language and matches native. |
+
+The JVM backend is never shipped: the JVM already has many languages.
+
 ---
 
 ## Backlog and task tracking
@@ -51,6 +76,38 @@ bullet cannot, and nothing then answers "is this done yet."
 2. Wait for explicit approval before writing any code or opening a PR.
 3. If the plan changes, acknowledge the revision before proceeding.
 
+> Trivial one-liners may skip this. When in doubt, plan first.
+
+### Plans for a language change
+
+A language change touches the spec, the bytecode, or the standard library
+surface. Each such plan, for a mission or for a standalone issue, must do
+these things:
+
+1. **List every consumer first.** Write the list before you write the work.
+   The consumers are the native VM, the JVM backend, the QBE backend, the
+   bootstrap interpreter, and each tool that parses or lowers the construct
+   (the resolver, the LSP, the tree-sitter grammar, the editor syntaxes).
+   For each backend, state what the change owes it under "Backend roles".
+   A consumer found later, after CI turns red, means the plan was incomplete.
+2. **Use a table when the spec lists a set.** If the spec names a set that can
+   be counted (fault kinds, opcodes, exit paths, suspend points), write it as
+   a table and add a script that checks the table is complete. Build the table
+   before any backend work starts.
+3. **Check each backend against native at its own review.** The done
+   criterion of every backend node includes: its output matches the native VM
+   and every other backend that already merged, within that backend's role. Do not defer this to a differential-test node at the
+   end.
+4. **Write a named bug class into the design note at once.** When a review
+   names a structural bug class, record it as a constraint for all remaining
+   work. Say which shared layer it belongs to (for example, an analysis pass).
+   Then check every other pass that uses the same data, not only every node.
+5. **Make the differential gate cover both phases.** The gate must compare
+   compile-time behavior (parser and resolver errors) and run-time behavior.
+   Run-time parity does not prove compile-time parity.
+
+### Plans that limit their scope
+
 A plan for a task that limits its scope by "only", "subset", "fallback" or
 "phase 1" must also state:
 
@@ -59,11 +116,31 @@ A plan for a task that limits its scope by "only", "subset", "fallback" or
 - why the set and the property are equal, including along the dynamic call
   graph.
 
+A syntactic selector is not the property you need. "The function contains
+`yield`" is not the same as "a frame can be live under a suspension", because
+a suspension passes up to every caller, and dynamic dispatch makes the set of
+callers the whole program. Test the plan against the hard probes for each
+backend on paper, not only against native output. Re-read the design
+constraints at each node, not only at the top of the mission.
+
 If a known later task exists mainly to remove an earlier task's fallback, the
 plan must name a class of programs for which the earlier task is correct
-alone. Reviewers judge if the stated equality is plausible.
+alone.
 
-> Trivial one-liners may skip this. When in doubt, plan first.
+No script can make this check fail. A reviewer judges at plan review if the
+stated equality is plausible. Plan review is the point where a violation
+becomes reachable.
+
+### Spec ahead of implementations
+
+When the spec and an implementation conflict, fix the implementation. A spec
+section may land on `main` before every consumer supports it only inside a
+mission. The mission tracking issue must name every consumer. The shared
+probes land with the spec. Each consumer that does not yet pass a probe lists
+that probe in an expected-failure file, so the gate shows the gap and turns
+green with the last node. Spec text does not describe implementation status.
+Outside a mission, a language change covers all consumers in one PR, or it
+becomes a mission.
 
 ---
 
