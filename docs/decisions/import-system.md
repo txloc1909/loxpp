@@ -37,7 +37,7 @@ These are the earlier hard problems the frame eliminates, and why:
 
 - **No `eval` wall.** Compile-time resolution needs no compiler call from a
   running program. The VM has a bounded re-entrant call path
-  (`docs/proposals/concurrency-model-decision.md` C3), but it only calls already-compiled
+  (`docs/decisions/concurrency-model-decision.md` C3), but it only calls already-compiled
   code; nothing can invoke the compiler at run time. Dynamic/lazy import,
   hot-reload, and import-of-a-runtime-path stay out of scope by construction.
 - **No QBE separate-compilation/linker problem.** One whole-program artifact
@@ -45,7 +45,7 @@ These are the earlier hard problems the frame eliminates, and why:
 - **No per-import runtime path search and no cwd-drift at run time.**
 - **Concurrency/actor tension mostly defused.** One whole-program artifact has
   no cross-task shared module singletons to reason about (see
-  `docs/proposals/actor-model-design.md`); revisit only if item 7 adopts per-task VMs.
+  `docs/records/actor-model-design.md`); revisit only if item 7 adopts per-task VMs.
 
 What remains is a small, bounded space: six axes.
 
@@ -191,7 +191,7 @@ above, and none reopen the `eval` wall.
 - Explicit exports give an interface. They do not make a `may-suspend`
   analysis sound: source inclusion shows the compiler every module, so the
   analysis needs no summary. Residual edge 1 is a stack-ownership question
-  that `docs/proposals/concurrency-model-decision.md` item 6 must answer. A generator-based
+  that `docs/decisions/concurrency-model-decision.md` item 6 must answer. A generator-based
   stdlib module must not ship before that answer.
 - Import resolution and FFI `.so` loading share one loadable-unit and
   search-path design: the same runtimepath, the same anchoring rule, and the
@@ -263,7 +263,7 @@ carry a precompiled cache of them. The source stays the reference.
 - `coroutines.md` — whole-program QBE coroutine mode (the taint in edge 1).
 - `docs/reference/bytecode-translation-problems.md` — the one-chunk shared pipeline all
   backends consume.
-- `docs/proposals/concurrency-model-decision.md`, `docs/proposals/actor-model-design.md` — per-task VM /
+- `docs/decisions/concurrency-model-decision.md`, `docs/records/actor-model-design.md` — per-task VM /
   share-nothing, for the eventual item-7 interaction.
 - `docs/process/multi-agent-playbook.md` ("scope a mission around every consumer") and
   `docs/records/coroutines-retro.md` (subset closure, issue #564) — the lessons any import

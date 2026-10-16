@@ -1,6 +1,7 @@
 # Concurrency Model: Next Steps
 
-**Status:** proposal. Item 6, the concurrency go/no-go, is not decided.
+**Status:** record. Completed. Items 1 to 5 shipped, and item 6 is decided in
+`docs/decisions/concurrency-model-decision.md` (2026-10-17). Frozen.
 
 ## Why this note
 
@@ -42,7 +43,7 @@ instead of upfront guesswork.
 ## Actionable items
 
 1. **Write a decision doc before touching code. DONE.**
-   `docs/proposals/concurrency-model-decision.md` scores CSP (Go) vs. actor/isolated-heap
+   `docs/decisions/concurrency-model-decision.md` scores CSP (Go) vs. actor/isolated-heap
    (BEAM) vs. OS-threads (JVM) against Lox++'s actual constraints: the
    share-nothing/copy-by-value stance already adopted, the single
    non-thread-safe `MemoryManager` per `VM`, and the implementation reality:

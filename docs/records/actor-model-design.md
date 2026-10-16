@@ -1,10 +1,9 @@
 # Actor Model: Design Record
 
-**Status:** proposal. It assumes the actor/isolated-heap model, which is not
-adopted. The model is not committed yet; `concurrency-model-next-steps.md` item 6 owns
-the go/no-go. This note records the *open problems* the actor commitment leaves
-unsolved, framed as the questions item 6 must answer. It is a companion to
-`concurrency-model-decision.md`, which scores the model and does the choosing.
+**Status:** record. Resolved by `docs/decisions/concurrency-model-decision.md`
+(2026-10-17), which answers each question below at worker granularity instead
+of the VM-per-task unit this note assumed. Kept as the question list the
+decision was tested against. It is frozen.
 
 ## Why this note
 
@@ -99,9 +98,9 @@ actor lead.
 
 ## References
 
-- `docs/proposals/concurrency-model-decision.md` — the scoring that produces this
+- `docs/decisions/concurrency-model-decision.md` — the scoring that produces this
   note's assumption; C1–C9 are defined there.
-- `docs/proposals/concurrency-model-next-steps.md` — item 6, the go/no-go gate this
+- `docs/records/concurrency-model-next-steps.md` — item 6, the go/no-go gate this
   note feeds.
 - `docs/reference/profiler-concurrency-notes.md` — profiler impact by model.
 - `docs/decisions/expressiveness-roadmap.md` — item 5 (coroutines), item 7

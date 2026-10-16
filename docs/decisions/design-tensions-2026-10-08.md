@@ -5,7 +5,7 @@
 Snapshot assessment, based on the notes changed since late September
 (`import-system.md`, `docs/proposals/jit-pipeline.md`, `docs/records/coroutines-retro.md`,
 `coroutines.md`, `dynamic-functional-programming.md`,
-`docs/proposals/concurrency-model-decision.md`, `docs/proposals/actor-model-design.md`,
+`docs/decisions/concurrency-model-decision.md`, `docs/records/actor-model-design.md`,
 `expressiveness-roadmap.md`) plus the discussion on #557 and #564.
 
 ## Current tensions
@@ -38,7 +38,7 @@ go/no-go, actor vs CSP) has no issue. Meanwhile:
   it.
 
 The stale C3 claim is fixed (`500764e`). C2 and C6 in
-`docs/proposals/concurrency-model-decision.md` still cite `src/vm.h` line ranges from before
+`docs/decisions/concurrency-model-decision.md` still cite `src/vm.h` line ranges from before
 the Runtime/VM split.
 
 ### T4 — Scoping work across 4 backends (narrowed)

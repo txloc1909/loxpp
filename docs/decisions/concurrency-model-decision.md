@@ -1,13 +1,14 @@
 # Concurrency Model Decision
 
-**Status:** proposal. Provisional scoring only; this doc does not pick the
-shipping model. The final go/no-go is `concurrency-model-next-steps.md` item 6, taken
-after coroutines ship and their real suspend/resume cost is known. This doc is
-the artifact item 6 revises.
+**Status:** accepted. The decision was taken on 2026-10-17 (#590) on the
+measurements in `docs/records/coroutine-cost-2026-10-17.md`,
+`docs/records/coroutine-cost-qbe-2026-10-17.md`, and
+`docs/records/message-copy-cost-2026-10-17.md`. The sections up to "Reading
+the matrix" are the analysis that led to it; "Decision" states it.
 
 ## Why this doc
 
-`concurrency-model-next-steps.md` item 1 asks for a decision record that scores
+`docs/records/concurrency-model-next-steps.md` item 1 asks for a decision record that scores
 the three candidate models — CSP (Go), actor/isolated-heap (BEAM), and OS
 threads (JVM) — against Lox++'s actual constraints, before any code is written.
 The point is to make the model choice deliberate, per the `AGENTS.md` planning
@@ -17,9 +18,9 @@ first."
 Two questions are separated here, because they have different answers:
 
 - **Which model?** Scored below.
-- **When to commit?** Not now. The ordering in `concurrency-model-next-steps.md`
-  stands: build item 5 (coroutines/generators) first, then decide at item 6 with
-  runtime evidence.
+- **When to commit?** After coroutines ship and their cost is measured. That
+  was item 6 of `docs/records/concurrency-model-next-steps.md`, and this
+  document now records its outcome.
 
 ## What "deciding" means for Lox++
 
@@ -213,62 +214,208 @@ concurrency surface must therefore be specified in `spec/` in
 implementation-neutral observable terms, with any exception recorded
 explicitly rather than discovered in CI.
 
-## Provisional recommendation
+## Decision (2026-10-17)
 
-1. **Build item 5 (coroutines/generators) first**, as `concurrency-model-next-steps.md`
-   already orders. It is the model-agnostic stepping stone: CSP goroutines,
-   actor tasks, and async I/O all need suspend/resume at the `FrameSync` seam
-   (C4), and it is useful standalone (lazy sequences, custom iterables) even if
-   item 7 never ships. Item 5's plan must now include QBE: a suspend point has
-   to be expressible in QBE-compiled code, not only in the interpreter loop
-   (C9).
-2. **Do not commit to a model in this doc.** The static scores favor actor, but
-   the source note's arguments against committing now — no measured suspension
-   cost, no GC groundwork, and cross-implementation divergence risk — all still
-   hold.
-3. **Revisit at item 6** with real data from item 5, then choose between a
-   Go-style scheduler and isolated per-task heaps.
-4. **Keep GC item 11, scheduler work, channels, and FFI thread-safety blocked**
-   until item 6 returns an explicit go/no-go (`concurrency-model-next-steps.md`
-   items 6-7; `docs/records/benchmark_report_2026-08-26.md:396`).
+**Go.** The model is **workers and tasks**: isolation at the OS-thread
+boundary, cheap cooperative tasks inside it.
 
-## What item 6 must produce
+- A **worker** is one OS thread that owns one `Runtime`, one `MemoryManager`,
+  one stack, one scheduler, and one mailbox. Workers share no mutable
+  state. A value crosses between workers only if it is a message, a
+  scalar, a string, or an enum value of messages, and then by reference.
+- A **task** is a coroutine on its worker's stack: copy-on-suspend, as built
+  (#523). Tasks on one worker share that worker's heap and switch only at
+  explicit points: `yield`, a send that blocks, a receive on an empty
+  mailbox, and the blocking calls the stdlib names. There is no preemption.
+- The **primitive** is spawn and send. `spawn` starts a task on the current
+  worker or on a new worker; `send` delivers a value to a mailbox; `receive`
+  takes the next one or suspends. Channels, actors, futures, and pools are
+  libraries over these three.
 
-- The measured cost of item 5's suspend/resume: per-yield overhead, stack-slice
-  size, and what growable/segmented stacks add to the single `CALL`-site depth
-  check (`docs/records/benchmark_report_2026-08-26.md:397`).
-- A decision on stack ownership (per-VM, per-task, or per-OS-thread) and heap
-  ownership (shared or isolated), as `docs/reference/profiler-concurrency-notes.md:63-70`
-  requires.
-- A cross-implementation feasibility check — native/QBE, JVM, and bootstrap —
-  with any implementation-gated exception named in `spec/` before
-  implementation. For QBE specifically: how a suspend point and GC root
-  accounting survive its one-real-C-frame-per-call code shape (C9).
-- A concrete message/value story for C7: deep copy, immutability, or a
-  serialization format over maps and primitives.
-- An explicit go/no-go, per `concurrency-model-next-steps.md` item 7.
+This is actor-style isolation at worker granularity and CSP-style cheap tasks
+inside a worker. It is the only candidate that reuses every mechanism that
+exists and builds nothing the measurements argue against.
+
+### Why this and not the two pure models
+
+The measurements settled the stack axis and the vision settled the heap axis.
+
+- **Not a VM per task.** An idle copy-on-suspend coroutine holds about 500
+  bytes; a `Runtime` with today's fixed arrays holds 165 KB. A model whose
+  unit of isolation is a whole VM costs 330 times more per idle task, or a
+  redesign of the stack arrays first. The actor column of the scoring assumed
+  that unit. Its isolation survives here, moved to the worker.
+- **Not a shared heap across threads.** A Go-style shared heap needs a
+  concurrent collector (C1, C8), the single largest piece of work in the
+  space, and it gives up the control `VISION.md` names under *mutation*: a
+  value another thread can change between two reads is a state change the
+  program did not write. One heap per worker keeps `MemoryManager` as it is
+  and keeps every write local.
+- **Not a growable stack, not preemption.** Copy-on-suspend costs about 60 ns
+  per switch plus 12 ns per live frame, on both backends. A movable stack
+  removes the per-frame cost and charges every call up to 6 ns, switch or
+  no switch. Break-even is about five live frames per switch. A model that
+  switches only at explicit points stays under that line in ordinary code
+  and charges nothing at a site that does not name a switch, which is the
+  *cost* control in `VISION.md`. Preemption would switch at arbitrary depth
+  and lose on both counts.
+
+### Stack and heap ownership
+
+| Question | Answer |
+|---|---|
+| Stack | One fixed stack per worker. A task owns a slice of it while running and a copied snapshot while suspended. |
+| Heap | One `MemoryManager` per worker, collected stop-the-world by that worker alone. Workers never see each other's objects. |
+| Threads | One OS thread per worker, 1:1. Tasks do not migrate between workers. The program decides how many workers exist. |
+| Time | `CLOCK_THREAD_CPUTIME_ID` per worker. The profiler keeps one `ProfilerData` per worker and reports per worker; a merged report is a tool over the per-worker ones. |
+
+### The message and value story (C7)
+
+**A send is constant time.** A message is a scalar, a string, or an enum
+value whose fields are all messages. It crosses by reference. Nothing is
+copied at a send. This is the *cost* control of `VISION.md` applied to the
+primitive: a send names one value and does one bounded thing with it.
+
+The alternative, deep copy on send, was measured
+(`docs/records/message-copy-cost-2026-10-17.md`): about 100 ns per object
+and 20 to 30 ns per map entry, rising by half past the cache, and 45 ns
+per live object at every collection the receiver runs while the message
+lives. That cost is linear in the reachable graph of the message, which the
+sender can predict only if it knows what it sends, and the receiver pays
+again at sites that never named the message. Copy is therefore not the
+primitive.
+
+**Why enum values, and no new primitive.** The language already has an
+immutable data shape. An enum value's fields are read by position or by
+pattern, and an assignment to one is a runtime error; a string is
+immutable; a scalar is a value. That is the shape the FP direction points
+at, sum types by convention, and at the worker boundary it becomes
+immutable by construction. No `freeze` builtin, no frozen flag on lists and
+maps, and no check on their mutating operations are needed.
+
+**The sendable bit.** Whether a value is a message is known at
+construction. A scalar and a string are messages. An enum value's bit is
+the conjunction of its fields' bits, computed when the constructor runs,
+from bits that are already known: constant per construction. A list, a
+map, an instance, a function, a closure, a class, a coroutine, and a handle
+are never messages. The check at a send reads one bit. A send of a value
+whose bit is clear raises `SendError` at the send site. There is no
+implicit copy and no implicit freeze.
+
+**Lists and maps.** A plain list or map is mutable, so it is not a message.
+A program that must send one converts it first, and the conversion is the
+linear work, named where it is written: a record with known fields becomes
+an enum value, `Record(id, name, x, y)`; a map with unknown keys becomes a
+persistent map, a tree of enum nodes with structural sharing, written as a
+library in the FP direction, which carries any keys and is a message because
+every node is an enum value. A deep copy of lists and maps is writable in
+Lox++ with recursion, lists, and maps, so by the capability test it is a
+library too; a native `copy` may join the stdlib later if a measurement
+says the library is too slow, and it changes no rule.
+
+**Lifetime across workers.** A message object lives in the heap that
+created it. When another worker receives it, the receiver registers it in
+its *foreign set* and increments a holder count on the object, atomically.
+Each worker contributes at most one to a count, so the count is bounded by
+the worker count and changes only at a receive and at a collection, never
+on the interpreter's hot path. The creating worker's collector treats an
+object with a count above zero as a root. The receiver's collector marks
+foreign objects in a side table of its own, never in the object header,
+because the header's mark bit belongs to the owner's collector; a foreign
+object the receiver's mark phase did not reach leaves its foreign set and
+the count drops. A message has no pointer to mutable state and no cycle
+can cross a worker boundary, so the count has no cycle problem.
+
+**Strings are interned on receive.** `==` on two strings is a pointer
+compare, and that is correct only because every string in a heap is
+interned. A received string is therefore not held as a second object with
+the same characters. The receiver probes its own intern table with the
+hash the object already carries: if the characters are present it keeps
+its local object and shares nothing; if not, it inserts the received object
+into its table as the interned one and counts it as foreign. The invariant
+holds inside each worker and `==` stays a pointer compare. *Constraint:* the
+probe must be sublinear in the table size. The table is open addressing
+with a bounded load factor, so the probe is expected constant; the hash is
+not keyed, so hostile input can lengthen a probe chain, and a keyed hash
+is the fix if that ever matters. A string of any length costs one probe
+to receive, not a copy.
+
+**What this costs the rest of the language.** One bit per enum value, set
+at construction. One error kind, `SendError`. A foreign set and a side
+mark table per worker. Nothing runs user code or adds work proportional to
+anything at a site that does not name it.
+
+### Scheduler
+
+Per worker, one run queue, first in first out, no priorities. A task runs
+until it suspends. A blocking call blocks its worker, every task on it, and
+nothing else; the stdlib says which calls block. Asynchronous I/O inside a
+worker is a later feature on this seam, not part of this decision.
+
+### Per backend, by role
+
+| Backend | What it owes | Feasibility |
+|---|---|---|
+| Native VM | The whole model. | Workers are `Runtime` instances on threads; tasks are the coroutines of #523; copy and mailbox are runtime code. No concurrent GC. |
+| QBE | Code generation only; it links the native runtime. | A program with tasks contains `yield`, so it compiles in coroutine mode and pays about 6 ns per call. Accepted for an experiment. The whole-program rule stays a stopgap (design-tensions T1). |
+| JVM | The model as a semantic oracle: observable output must match. | One runtime instance per worker on one Java thread, which means the static runtime state becomes per instance; tasks stay virtual threads; copy by the same rules. Host threads give it nothing extra, because it is not shipped. |
+| Bootstrap interpreter | Runs the language and matches native on observable output. | Tasks are host coroutines, as today. A worker is a host worker that runs a second interpreter over the same source, or, as the implementation-gated exception named in `spec/`, a coroutine on one thread. Parallel speed-up is not observable output, so the second form conforms. |
+
+### Re-score of criteria 2 and 5 under the backend roles
+
+| # | Criterion | Workers and tasks |
+|---|---|---|
+| 2 | Independent-surface parity | 4. Copy and mailbox are implementation-neutral spec surface. The JVM owes an oracle only. The bootstrap expresses tasks today and expresses workers with one named exception. |
+| 5 | Reuse of coroutine suspend and resume | 5. A task is the coroutine as built; nothing new on the suspend seam on any backend. |
+
+The weighted total under the roles is 455 of 500: criterion 1 keeps the
+actor column's 5, criteria 3, 6, 7, and 8 keep the actor column's 5, and
+criterion 4 scores 4, because the scheduler is a run queue and a mailbox per
+worker with no work stealing, no growable stacks, and no preemption.
+
+### What this unblocks and in which order
+
+1. The spec: workers, tasks, spawn, send, receive, `SendError`, the
+   sendable set as a table with a check script, and the list of blocking
+   calls.
+2. The native runtime: per-worker `Runtime` and `MemoryManager`, the
+   sendable bit on enum values, the foreign set and side mark table, intern
+   on receive, the mailbox, the run queue, `CLOCK_THREAD_CPUTIME_ID`.
+3. The bootstrap, then the JVM as oracle, then QBE parity, each diffed
+   against native at its own review.
+4. After the mission: GC item 11 per worker heap; FFI in the full package,
+   where a blocking foreign call blocks its worker and foreign code never
+   holds another worker's object; a per-worker netpoller for asynchronous
+   I/O; #519.
+
+This decision does not open the mission. The mission's tracking issue and
+node issues follow it, per `AGENTS.md`, "Missions".
 
 ## Non-goals
 
-- No GC redesign. The collector shape follows the model decision.
-- No scheduler, channel API, or thread primitive.
-- No FFI thread-safety work; `docs/decisions/expressiveness-roadmap.md:118-119` requires FFI to
-  be designed after the model.
-- No `spec/` change. This doc records reasoning only.
+- No GC redesign. One collector per worker is the collector that exists.
+- No preemption, no work stealing, no growable stack, no shared mutable
+  heap, no implicit copy, no freeze primitive. Each is a new decision if
+  ever wanted, and each must beat the numbers above.
+- No FFI thread-safety work here. FFI is designed on this model, after it.
+- No `spec/` change in this document.
 
 ## References
 
-- `docs/proposals/concurrency-model-next-steps.md` — the sequence this doc belongs to;
-  item 6 revisits it.
-- `docs/proposals/actor-model-design.md` — the open problems that remain once the actor
-  model is committed, framed as the questions item 6 must answer.
+- `docs/records/concurrency-model-next-steps.md` — the sequence this doc
+  belonged to; this decision completed it.
+- `docs/records/actor-model-design.md` — the open problems of a VM-per-task
+  actor model; this decision answers each at worker granularity.
 - `docs/reference/concurrency_in_bytecode_vms.md` — design space, literature, and GC
   options per model.
 - `docs/reference/profiler-concurrency-notes.md` — profiler impact by model.
 - `docs/decisions/expressiveness-roadmap.md` — item 5 (coroutines) and item 7
   (parallelism), and the share-nothing messaging stance.
 - `docs/records/benchmark_report_2026-08-26.md` §5 item 11 and "Dependencies on the
-  expressiveness roadmap" — why GC waits for this decision.
+  expressiveness roadmap" — why GC waited for this decision.
+- `docs/records/coroutine-cost-2026-10-17.md`,
+  `docs/records/coroutine-cost-qbe-2026-10-17.md`, and
+  `docs/records/message-copy-cost-2026-10-17.md` — the measurements.
 - `docs/decisions/qbe-backend.md` — the QBE backend that replaced CLR at parity gate
   S7, its reuse of the native runtime, and its real-C-frame code shape.
 - `spec/README.md` — the implementation-independent contract every target must

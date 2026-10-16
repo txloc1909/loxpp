@@ -211,7 +211,7 @@ backends had each independently under/over-ported.
    bounded. Dynamic dispatch seldom bounds it. Run the research-gate probes
    against the proposed design of each backend on paper, not only against
    native output. Apply the strategic constraint list (here C1–C9 in
-   `docs/proposals/concurrency-model-decision.md`) at each node, not only at mission
+   `docs/decisions/concurrency-model-decision.md`) at each node, not only at mission
    top. The full account is in `docs/records/coroutines-retro.md` (issue #564).
 
    Planning policy in `AGENTS.md` makes the trigger visible: a plan for a
