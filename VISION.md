@@ -81,7 +81,7 @@ first.
 | Native VM | The runtime users run. It must be simple, and fast for a dynamic language. Performance work targets it first. | Yes | Implements the full spec. It is the reference for all other backends. |
 | JVM | A semantic oracle: a mature managed runtime that checks the meaning of Lox++ bytecode. Also a performance baseline to work toward. | No | Matches native where it serves as an oracle. It does not need features that exist only to give native code low-level access, such as FFI or a JIT. |
 | QBE | An experiment: the first lightweight path to an AOT binary, and tests along the AOT-to-JIT range. | No | Owes what the current experiment needs. A language change does not have to wait for QBE. |
-| Bootstrap interpreter | A capability test: a practical language can implement itself. It does not need to be fast. | No | Runs the language and matches native. |
+| Bootstrap interpreter | A capability test: a practical language can implement itself. It is not expected to be fast today. Once the native VM has a solid JIT, the speed of the bootstrap interpreter becomes a meaningful benchmark of that JIT. | No | Runs the language and matches native. |
 
 The JVM backend is never shipped: the JVM already has many languages.
 
@@ -96,6 +96,8 @@ performance target: it must be fast for a dynamic language.
 - QBE and the JIT proposal are experiments along that path, not the path
   itself.
 - The JVM backend is the performance baseline to work toward.
+- The bootstrap interpreter is a benchmark for the JIT once that JIT exists.
+  Its speed is not a goal before then.
 
 ## Distribution
 
