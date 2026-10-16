@@ -8,7 +8,7 @@ types over its lifetime.
 
 ## Runtime Types
 
-There are twelve runtime types:
+There are thirteen runtime types:
 
 ### Nil
 
@@ -282,6 +282,36 @@ callable value. The call does not run `fn`; `resume` starts or continues the
 coroutine, and `status` reports its state. See §05-stdlib and
 [§04-semantics, Coroutines](04-semantics.md#coroutines) for the full rules.
 
+### Task
+
+A handle to a task, produced by `task.spawn`, `task.spawn_worker`, and
+`task.self` (see §05-stdlib). A task is a computation that runs on one
+worker and owns one mailbox. See [§04-semantics, Workers and
+Tasks](04-semantics.md#workers-and-tasks) for the full rules.
+
+A Task value is an identity, not a container. A program can do exactly
+three things with it: send to the task it names (`task.send`), compare it
+with `==`, and turn it into its canonical string form. Nothing else about
+the task is observable through the handle: not its state, not its worker,
+not the length of its mailbox. The one exception is that a send to a task
+that has ended raises `DeadTaskError`.
+
+Two Task values are equal when they name the same task. This holds for a
+handle that was made on another worker and received in a message: it is
+equal to every other handle of the same task.
+
+A Task is always **truthy**. It is not a sequence type and is not
+iterable. It is not a valid map key.
+
+The canonical string form of a Task is `<task>`.
+
+A Task value is a [message](#messages).
+
+**Workers are not values.** A worker is the unit that owns tasks, a heap of
+values, and a set of global variables (see [§04-semantics, Workers and
+Tasks](04-semantics.md#workers-and-tasks)). No value names a worker. A
+program reaches a worker only through a handle to one of its tasks.
+
 ---
 
 ## Sequence Protocol
@@ -297,6 +327,62 @@ time) even though it is not otherwise a sequence — it supports neither
 Statement](04-semantics.md#for-in-statement).
 
 Slice syntax (`seq[start:end]`) is supported on **List** and **String**; it produces a new value of the same type. Both bounds must be provided. Slicing is not supported on Map — a runtime error is raised. Slice expressions are read-only; they cannot appear as an assignment target.
+
+---
+
+## Messages
+
+A **message** is a value that can pass from one task to another, on the
+same worker or on a different one (see [§04-semantics, Workers and
+Tasks](04-semantics.md#workers-and-tasks)). The message rule:
+
+- A value of kind Nil, Boolean, Number, String, or Task is always a message.
+- A value of kind Enum is a message when each of its fields is a message.
+- A value of any other kind is never a message.
+
+The kind of a value is the name `type(value)` returns (§05-stdlib). The
+table below gives the rule for every kind:
+
+| Kind | Message | Reason |
+|---|---|---|
+| `Nil` | always | A scalar. |
+| `Boolean` | always | A scalar. |
+| `Number` | always | A scalar. |
+| `String` | always | Immutable. |
+| `Task` | always | An identity, not a container. |
+| `Enum` | when each field is a message | Its fields cannot change. |
+| `Function` | never | It can capture mutable bindings. |
+| `BoundMethod` | never | It holds an Instance. |
+| `Class` | never | Its methods are functions. |
+| `Instance` | never | Its fields can change. |
+| `List` | never | Its elements can change. |
+| `Map` | never | Its entries can change. |
+| `File` | never | It holds a resource of one worker. |
+| `Socket` | never | It holds a resource of one worker. |
+| `Server` | never | It holds a resource of one worker. |
+| `Process` | never | It holds a resource of one worker. |
+| `Error` | never | Not in the message rule; a program sends its `kind` and `message` fields instead. |
+| `Coroutine` | never | Its state can change. |
+| `Iterator` | never | Its position can change. |
+| `EnumConstructor` | never | Not in the message rule; a program sends a value it builds. |
+
+**The property is fixed when the value is made.** Whether a value is a
+message is decided when the value is constructed, and it never changes
+after that. No construct assigns a field of an enum value (an index
+assignment on one is a runtime error, and an enum value has no
+properties), so a field that was a message stays a message. No program can observe a value becoming a message, or
+stopping being one.
+
+**A send copies nothing.** A message passes by reference, on the same
+worker and between workers alike. An Enum value that a task receives is
+the value that was sent: it is `==` to the original, and a value that comes
+back to its sender is `==` to the value the sender holds. A String that a
+task receives is `==` to every String with the same characters, as every
+String is; nothing else about the identity of a String is observable.
+
+To send a List, a Map, or an Instance, a program converts it first, for
+example into an Enum value whose fields are messages. The conversion is
+ordinary code that the program writes where it pays for it.
 
 ---
 
@@ -332,6 +418,7 @@ The `==` and `!=` operators compare two values.
   - Classes, Instances, BoundMethods, Bound built-in methods, Lists, Maps, Files,
     Sockets, Servers, Processes, Errors, and Coroutines use identity
     equality: two values are equal only if they are the exact same object
+  - Tasks are equal when they name the same task (see [Task](#task))
 
 Equality never produces a runtime error regardless of the types being compared,
 **except** that an Instance dispatches to its class's `__eq__` — the left
@@ -379,6 +466,7 @@ Every value has a canonical string form, produced by `print` and by the
 | Process | `<process>` |
 | Error | `kind: message` — the value of the `kind` field, then `": "`, then the value of the `message` field. Note that an *uncaught* `throw` of an Error reports only `message`, not this form — see [§04-semantics, `throw` Statement](04-semantics.md#throw-statement). |
 | Coroutine | `<coroutine>` |
+| Task | `<task>` |
 
 The nesting depth of a value that a canonical string form can hold is
 implementation-defined. A value more deeply nested than that limit causes a
