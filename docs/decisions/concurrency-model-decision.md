@@ -330,6 +330,31 @@ object the receiver's mark phase did not reach leaves its foreign set and
 the count drops. A message has no pointer to mutable state and no cycle
 can cross a worker boundary, so the count has no cycle problem.
 
+**The owner traces from a held object.** A message may hold a message that a
+third worker owns: A sends an enum value E that A owns, whose field is F,
+which C owns and A received earlier. B then reaches F through E, but F's
+count was raised only for A. The count is therefore per root, and the
+owner's collector traces from every held root: A treats E as a root while B
+holds it, reaches F, and keeps F in its foreign set, so C keeps F for as
+long as B holds E. The chain holds by induction across any number of
+workers, and the send stays constant because no graph is walked at a send.
+
+**Retention across heaps is acyclic.** A message is immutable and is built
+after its fields, so a reference across heaps always points at an older
+object, and the hold graph across heaps has no cycle. A dead worker's heap
+releases every foreign hold except those reachable from its own held
+messages, so two dead heaps can never hold each other forever. This is the
+reason immutability was worth its cost: it makes the lifetime of a shared
+object end, in finite time, without a cycle collector across heaps.
+
+**A task handle is an identity.** A request carries the sender's handle, so
+a handle is a message. A task object owns a mailbox and a coroutine
+snapshot, which are mutable state of another thread, so a handle that
+crosses workers is an identity, the worker and the task number, and
+tracing stops at it. A send to a handle routes through the target worker's
+inbound queue. A send to a dead task, or to a task of a dead worker, raises
+`DeadTaskError` at the send site: a lost message is a fault, not a silence.
+
 **Strings are interned on receive.** `==` on two strings is a pointer
 compare, and that is correct only because every string in a heap is
 interned. A received string is therefore not held as a second object with
@@ -425,7 +450,8 @@ worker with no work stealing, no growable stacks, and no preemption.
 ### What this unblocks and in which order
 
 1. The spec: workers, tasks, spawn, send, receive, the unbounded mailbox
-   and its observable length, `SendError`, `DeadlockError`, the sendable
+   and its observable length, `SendError`, `DeadlockError`, `DeadTaskError`,
+   the task handle as an identity, the sendable
    set as a table with a check script, the suspend points as a table, and
    the list of blocking calls.
 2. The native runtime: per-worker `Runtime` and `MemoryManager`, the
