@@ -974,9 +974,9 @@ void Runtime::raiseFromNative(const char* kind, const char* msg) {
 }
 
 ObjTask* Runtime::spawnTask(Value fn) {
-    ObjCoroutine* co = m_mm.create<ObjCoroutine>(m_coroutineClass, fn);
+    auto* co = m_mm.create<ObjCoroutine>(m_coroutineClass, fn);
     m_mm.pushTempRoot(co);
-    ObjTask* task = m_mm.create<ObjTask>(co, m_taskEpoch);
+    auto* task = m_mm.create<ObjTask>(co, m_taskEpoch);
     m_mm.popTempRoot();
     m_runQueue.push_back(task);
     return task;
@@ -1101,8 +1101,8 @@ void Runtime::endTasks() {
 InterpretResult Runtime::runTasks(ObjClosure* script) {
     // The script closure stays rooted on the stack until the main task's
     // coroutine holds it.
-    ObjCoroutine* mainCo = m_mm.create<ObjCoroutine>(
-        m_coroutineClass, Value{static_cast<Obj*>(script)});
+    auto* mainCo = m_mm.create<ObjCoroutine>(m_coroutineClass,
+                                             Value{static_cast<Obj*>(script)});
     stackTop[-1] = Value{static_cast<Obj*>(mainCo)};
     if (m_mainTask == nullptr) {
         m_mainTask = m_mm.create<ObjTask>(mainCo, m_taskEpoch);
