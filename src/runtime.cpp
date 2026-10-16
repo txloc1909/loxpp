@@ -2782,7 +2782,11 @@ Runtime::OpResult Runtime::yieldOp(int stopAtFrameCount) {
         // every coroutine is a task switch (spec/04-semantics.md, yield
         // Expression), and with an empty run queue the task runs again at
         // once: callCompiled() re-enters the frame with nil as the value.
-        // Inside a native or a re-entrant run it is still an illegal yield.
+        // The yield raises only while a native runs, a re-entrant run is in
+        // progress, or print/str dispatches __str__. A compiled __hash__ or
+        // __eq__ that a map operation calls, and a compiled deferred call,
+        // raise none of these counters, so a yield there continues with nil
+        // (probes 87 to 89 on tools/probe_xfail_qbe.txt).
         if (m_nativeDepth > 0 || m_reentrantRunDepth > 0 ||
             m_stringifyCanonicalDepth > 0) {
             return fromThrow(raiseThrowableError(
