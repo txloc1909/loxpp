@@ -53,6 +53,9 @@ class VM {
     getGlobal(const std::string& name) const {
         return m_rt.getGlobal(name);
     }
+    [[nodiscard]] std::vector<std::string> globalNames() const {
+        return m_rt.globalNames();
+    }
 
     // Test-only trace of (chunk offset, handler depth) before each
     // dispatched instruction. Null unless a test arms it. No effect on

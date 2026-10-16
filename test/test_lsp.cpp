@@ -12,6 +12,8 @@
 #include "tooling/document_model.h"
 #include "tooling/stdlib_names.h"
 #include "analyze.h"
+#include "class_objects.h"
+#include "vm.h"
 
 #include <gtest/gtest.h>
 
@@ -372,6 +374,41 @@ TEST(LspStdlibDocs, EveryStdlibNameHasADoc) {
         ASSERT_NE(e, nullptr) << name;
         EXPECT_FALSE(loxpp::lsp::renderHover(*e).empty());
     }
+}
+
+// Every global object of the runtime (an Instance such as `math`,
+// `coroutine`, `task`) has a doc for each of its members, through the one
+// receiver lookup that completion, hover, and signature help all use. A new
+// global object, or a new member, with no doc fails here.
+TEST(LspStdlibDocs, EveryGlobalObjectMemberHasADoc) {
+    VM vm;
+    ASSERT_EQ(vm.interpret(""), InterpretResult::OK);
+    std::vector<std::string> objects;
+    for (const std::string& name : vm.globalNames()) {
+        auto value = vm.getGlobal(name);
+        ASSERT_TRUE(value.has_value()) << name;
+        if (!isInstance(*value)) {
+            continue;
+        }
+        objects.push_back(name);
+        ASSERT_NE(loxpp::lsp::receiverMemberDocs(name), nullptr) << name;
+        asObjInstance(as<Obj*>(*value))
+            ->fields.forEach([&name](ObjString* key, Value /*member*/) {
+                const std::string member(key->chars.data(), key->chars.size());
+                EXPECT_NE(loxpp::lsp::receiverMemberDoc(name, member), nullptr)
+                    << name << "." << member;
+            });
+    }
+    EXPECT_NE(std::ranges::find(objects, "task"), objects.end());
+}
+
+TEST(LspSignatureHelp, TaskMember) {
+    loxpp::tooling::DocumentModel model("task.send(task.self(), 1);\n");
+    const std::string& text = model.text();
+    json help = loxpp::lsp::signatureHelpFor(model, text.find(", 1") + 1);
+    ASSERT_TRUE(help.is_object());
+    EXPECT_EQ(help.at("signatures")[0].at("label"), "task.send(t, msg) -> Nil");
+    EXPECT_EQ(help.at("activeParameter"), 1);
 }
 
 // Applies zero-length SourceEdits (descending by offset) to a copy of text.

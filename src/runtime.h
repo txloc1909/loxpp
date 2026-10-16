@@ -754,6 +754,9 @@ class Runtime {
         return static_cast<int>(m_handlerStack.size());
     }
     [[nodiscard]] std::optional<Value> getGlobal(const std::string& name) const;
+    // The names of every global variable, the stdlib globals included. The
+    // tooling tests compare it with the resolver's own list of stdlib names.
+    [[nodiscard]] std::vector<std::string> globalNames() const;
     [[nodiscard]] Value lastResult() const { return m_lastResult; }
 
     // Compiled code needs the allocator directly to build strings, lists,

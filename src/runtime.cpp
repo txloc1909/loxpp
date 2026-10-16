@@ -38,6 +38,14 @@ std::optional<Value> Runtime::getGlobal(const std::string& name) const {
     return out;
 }
 
+std::vector<std::string> Runtime::globalNames() const {
+    std::vector<std::string> names;
+    m_globals.forEach([&names](ObjString* key, Value /*val*/) {
+        names.emplace_back(key->chars.data(), key->chars.size());
+    });
+    return names;
+}
+
 ObjClosure* Runtime::loadSource(const std::string& source,
                                 DiagnosticSink* sink) {
     // Guard against dangling class pointers from a prior loadSource() call

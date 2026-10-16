@@ -254,15 +254,11 @@ tooling::Position toToolingPos(const Position& p) {
 }
 
 void appendMemberCompletions(json& items, const std::string& receiver) {
-    // `math` and `coroutine` are the only receivers the resolver can identify
-    // by name. For any other `x.` the receiver type is unknown, so offer
-    // nothing rather than a guess that lists unrelated Map/File methods.
-    if (receiver == "math") {
-        for (const StdlibEntry& e : allMathMemberDocs()) {
-            items.push_back(stdlibItem(e, true));
-        }
-    } else if (receiver == "coroutine") {
-        for (const StdlibEntry& e : allCoroutineMemberDocs()) {
+    // The global objects are the only receivers the resolver can identify by
+    // name. For any other `x.` the receiver type is unknown, so offer nothing
+    // rather than a guess that lists unrelated Map/File methods.
+    if (const auto* docs = receiverMemberDocs(receiver)) {
+        for (const StdlibEntry& e : *docs) {
             items.push_back(stdlibItem(e, true));
         }
     }
@@ -524,12 +520,7 @@ json Server::onHover(const json& params) {
         const Range wr = spanToRange(model, Span{ws, wl});
 
         if (const auto recv = receiverBeforeDot(text, ws)) {
-            const StdlibEntry* e = nullptr;
-            if (*recv == "math") {
-                e = mathMemberDoc(word);
-            } else if (*recv == "coroutine") {
-                e = coroutineMemberDoc(word);
-            }
+            const StdlibEntry* e = receiverMemberDoc(*recv, word);
             if (e == nullptr) {
                 e = methodDoc(word); // Map / File method (names are unique)
             }
