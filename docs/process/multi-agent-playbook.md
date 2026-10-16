@@ -70,41 +70,63 @@ account:
 
 ## The loop
 
-The orchestrator runs the loop by hand, one node at a time, one agent call
-per role, strictly in sequence: start the implementer and wait; start the
-reviewer and wait; start a referee only when an escalation limit below
-fires; merge; start the next node. Every round is visible to the owner and
-can be stopped between two calls.
+The loop runs in one of two ways. Both read the same GitHub state and leave
+the same artifacts.
 
-`.claude/workflows/backend-dag.js` is the earlier automated form of this
-loop. It ran every stage in the background, where the owner could not see or
-steer a round, and it is retired (#586 removes it). The tools under
-`tools/agent-workflow/` stay in use: `plan_resume.py` derives each node's
-state and the stage order from GitHub, and `snapshot.sh`, `status.py`,
-`watch.py`, and `watch_pr.py` observe a run (see "Run-observation tools").
+**By hand, the default.** The orchestrator starts one agent per role, one
+node at a time, strictly in sequence: start the implementer and wait; start
+the reviewer and wait; start a referee only when an escalation limit below
+fires; merge; start the next node. It spends the fewest tokens and never
+runs two stages at once, so it stays inside rate limits. The orchestrator's
+prompt to each agent names the node issue and the documents to read: the
+decision in `docs/decisions/`, the spec sections, and the documents under
+`docs/reference/` the node depends on.
 
-Mission state lives in GitHub, never in a local directory a host can lose:
+**The harness, when the budget allows.** `.claude/workflows/backend-dag.js`
+runs the same loop unattended, with the nodes of one stage in parallel. Use
+it only when the owner says the token budget and the rate limits allow
+parallel stages. It is generic — no target (JVM, CLR, ...) is hardcoded into
+its control flow. A mission run supplies, via `args`:
 
-- **The tracking issue** sequences the mission's nodes (see "Node
-  specification structure" below). The stage order and the full
-  node-to-issue list live there.
-- **The brief is the tracking issue.** Every agent reads it with the full
-  `--json --template` issue form below, the same way a node reads its own
-  spec. The brief holds binding mission-wide rules: role assignments,
-  execution notes, and any correction to the tracking issue's own body (a
-  changed dependency, a redesigned node) posted as a later comment. It does
-  **not** hold per-node specifications — those are GitHub issue bodies, one
-  issue per node (see below). A committed local file for this (an earlier
-  design used `briefPath`, a `missions/<name>.md` file under the old notes
-  directory) is what #264 set out to remove: mission state belongs in
-  git-hosted, reviewable, permanent GitHub state, not in a file a host can
-  lose or that goes stale the moment the mission closes. Treat a missing or
-  unreadable brief (the `gh issue view` call itself failing) as a hard
-  failure, not as optional.
-- **Each node is one issue.** The orchestrator's prompt to an agent names
-  that issue and the documents the agent must read: the decision in
-  `docs/decisions/`, the spec sections, and the documents under
-  `docs/reference/` the node depends on.
+- `missionIssue` — the tracking issue number that sequences this mission's
+  nodes (see "Node specification structure" below). The stage order and the
+  full node-to-issue list live there, in git-hosted, reviewable, permanent
+  GitHub state — never in a local directory a host can lose.
+- The mission brief needs no argument of its own. Every agent reads it with
+  the full `--json --template` issue form below — the same
+  tracking issue `missionIssue` already names, read the same way a node
+  reads its own spec. The brief holds binding mission-wide rules: role
+  assignments, execution notes, and any correction to the tracking issue's
+  own body (a changed dependency, a redesigned node) posted as a later
+  comment. It does **not** hold per-node specifications — those are GitHub
+  issue bodies, one issue per node (see below). A committed local file for
+  this (an earlier design of this harness used `briefPath`, a
+  `missions/<name>.md` file under the old notes directory) is what #264 set
+  out to remove: mission state belongs in git-hosted, reviewable, permanent
+  GitHub state, not in a file a host can lose or that goes stale the moment
+  the mission closes.
+  Treat a missing or unreadable brief (the `gh issue view` call itself
+  failing) as a hard failure, not as optional.
+- `nodes` — a map of node id → `{ branch, title, issue }`. `issue` is the
+  node's own GitHub issue number; `id` is any mnemonic the mission wants for
+  logging (it does not have to match the issue number, though matching it is
+  the simplest choice for a new mission). This map is still authored by
+  whoever launches the run — `tools/agent-workflow/plan_resume.py
+  <mission-issue>` derives the dynamic `stages`/`resume` args from GitHub,
+  but `nodes` itself (branch names, titles) is not tracked anywhere in git or
+  GitHub, so merge it in by hand each time.
+- `stages` — an array of node-id groups; each group runs in parallel, groups
+  run in sequence. `plan_resume.py` derives this from the tracking issue.
+- `repo`, `githubRepo`, and the doc paths a node implementer/reviewer must
+  read (the decision, the spec sections, the reference documents).
+
+Before a new mission's first run, edit `meta.phases` in the script to name
+that mission's real nodes — it drives the progress-tree preview and must stay
+a literal, so it cannot be derived from `args.nodes` automatically.
+
+The hand-run loop reads the same tracking issue and the same node issues.
+`plan_resume.py` derives each node's state from GitHub for both ways, and
+the run-observation tools below serve both.
 
 Every agent reads its node specification with the full `--json --template`
 issue form — **never** the plain `gh issue view <issue>` and **never**
@@ -115,8 +137,9 @@ uses the plain form gets a spec with a silently missing hazard, the same
 failure mode a lost mission directory used to cause. The `--comments` form is
 worse without a terminal: it prints only the comment list and drops the body,
 so an issue with no comments reads as empty output with exit code 0. The
-orchestrator's prompt always gives the full command, and an agent whose
-issue-read call fails stops and reports it rather than continuing on a
+prompt to an agent, from the harness or from the orchestrator by hand,
+always gives the full command, and an agent whose issue-read call fails
+stops (`blocked_surprise` in the harness) rather than continuing on a
 partial read.
 
 Issue form (one call returns title, body, count, and each comment):
@@ -317,7 +340,7 @@ node as `merged` while its issue was still open. A literal match against
 fetched text is the only form of this check that cannot manufacture a false
 positive out of ranking.
 
-**This applies to a guard the orchestrator runs, not only to resume.** The
+**This applies to a guard the harness itself runs, not only to resume.** The
 CLR mission added a check that skips a review round when the branch tip has not
 moved, because a review against an unchanged commit can only repeat its own
 findings. The check learned the tip from the implementer's own reported value.
@@ -355,7 +378,7 @@ basename: there is no mission directory left to infer them from, and an
 inferred value that happens to be wrong fails exactly as silently as a
 missing one. Snapshots themselves stay on disk — they are a backup for a
 reboot or an interruption, never a source of truth, and nothing in the
-loop reads them back.
+harness reads them back.
 
 ## Diagnose a stall from three signals together
 
