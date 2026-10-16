@@ -39,9 +39,9 @@ item — file it as an issue. Never park it as a bullet list under `docs/proposa
 issue can be assigned, labeled, closed, and linked from a PR; a markdown
 bullet cannot, and nothing then answers "is this done yet."
 
-- **File it, don't list it.** When a PR, a design note, or a mission's
+- **File it, don't list it.** When a PR, a design document, or a mission's
   closing doc identifies future work, open one GitHub issue per discrete
-  item instead of adding or growing a bullet list in a note.
+  item instead of adding or growing a bullet list in a document.
 - **`docs/` stays for ideas and design records.** Brainstorm in
   `docs/proposals/`, and record the reasoning behind a decision in
   `docs/decisions/` — including *why* something was deferred. Once an idea
@@ -49,7 +49,7 @@ bullet cannot, and nothing then answers "is this done yet."
   issue back from the document if its reasoning still matters.
 - **GitHub Projects for multi-issue efforts.** When a body of work spans more
   than a few issues (a mission, a multi-stage feature), track it on a GitHub
-  Project board rather than a hand-maintained checklist in a note.
+  Project board rather than a hand-maintained checklist in a document.
 - **Labels carry status**, not `docs/` prose. Use the repo's existing labels
   (`bug`, `enhancement`, `documentation`, ...), plus any area-specific label
   the work needs.
@@ -60,9 +60,9 @@ bullet cannot, and nothing then answers "is this done yet."
 
 **Always plan before implementing.**
 
-1. Post a plan (approach, files affected, open questions) as an issue comment
-   or PR description. Open the issue first if the work doesn't already have
-   one.
+1. Post a plan (the goal in `VISION.md` it serves, approach, files affected,
+   open questions) as an issue comment or PR description. Open the issue first
+   if the work doesn't already have one.
 2. Wait for explicit approval before writing any code or opening a PR.
 3. If the plan changes, acknowledge the revision before proceeding.
 
@@ -89,10 +89,11 @@ these things:
    criterion of every backend node includes: its output matches the native VM
    and every other backend that already merged, within that backend's role. Do not defer this to a differential-test node at the
    end.
-4. **Write a named bug class into the design note at once.** When a review
-   names a structural bug class, record it as a constraint for all remaining
-   work. Say which shared layer it belongs to (for example, an analysis pass).
-   Then check every other pass that uses the same data, not only every node.
+4. **Write a named bug class into the decision at once.** When a review
+   names a structural bug class, record it in the decision under
+   `docs/decisions/` as a constraint for all remaining work. Say which
+   shared layer it belongs to (for example, an analysis pass). Then check
+   every other pass that uses the same data, not only every node.
 5. **Make the differential gate cover both phases.** The gate must compare
    compile-time behavior (parser and resolver errors) and run-time behavior.
    Run-time parity does not prove compile-time parity.
@@ -132,6 +133,21 @@ that probe in an expected-failure file, so the gate shows the gap and turns
 green with the last node. Spec text does not describe implementation status.
 Outside a mission, a language change covers all consumers in one PR, or it
 becomes a mission.
+
+### Missions
+
+A mission is a body of work that runs as a DAG of nodes, one PR per node.
+`docs/process/multi-agent-playbook.md` says how it runs. These rules bind it:
+
+- A mission starts from an accepted decision in `docs/decisions/`. A node
+  issue opens only against an accepted decision. A proposal starts nothing.
+- The tracking issue holds the DAG: the waves, and one line per node. No
+  document under `docs/` holds a node list.
+- A named bug class found during the mission goes into the decision at once
+  (rule 4 above).
+- A mission closes with one issue per follow-up, a "Shipped" section in the
+  decision, and a retrospective in `docs/records/`. A rule the retrospective
+  produces goes in this file. A design change it produces is a new proposal.
 
 ---
 

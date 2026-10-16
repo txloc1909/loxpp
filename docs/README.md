@@ -36,6 +36,9 @@ conflict, the decision changes, or the owner changes the vision.
   `Superseded by <path>` to its status line.
 - A backlog item, a follow-up, or a "do this later": a GitHub issue, never a
   document. See `AGENTS.md`, "Backlog and task tracking".
+- A mission's design takes the same path: a proposal until the owner approves
+  it, then a decision. A node issue opens only against a decision. See
+  `docs/process/multi-agent-playbook.md`, "Mission lifecycle".
 
 The repository has no `notes` directory. A document goes in one of the tiers
 above.
