@@ -1,5 +1,8 @@
 # Lox++ editor tooling — design note
 
+**Status:** accepted. Implemented; this is the durable record of the editor
+stack.
+
 This note records the editor-tooling stack that recent work built:
 the `loxpp --check` diagnostics CLI, the `loxpp-lsp` language server, the
 `tree-sitter-loxpp` grammar, the `loxpp.nvim` plugin, and the
@@ -371,7 +374,7 @@ In VS Code, use **Extensions: Install from VSIX...** to install that file.
 The VSIX is for local, manual installation only. There is no automatic
 download or Marketplace publishing path. CI verifies the package but does
 not upload or publish it. Test commands are in
-[TESTING.md](../TESTING.md#vs-code-extension).
+[TESTING.md](../../TESTING.md#vs-code-extension).
 
 ### Docker stages
 
@@ -463,7 +466,7 @@ issue, not a list here:
 - Semantic tokens, only if tree-sitter highlighting proves insufficient —
   https://github.com/txloc1909/loxpp/issues/215
 - Cross-file navigation and workspace symbols; waits on a module system
-  (`notes/expressiveness-roadmap.md`, not scheduled) —
+  (`docs/decisions/expressiveness-roadmap.md`, not scheduled) —
   https://github.com/txloc1909/loxpp/issues/216
 - Implemented: TextMate grammar in `editors/loxpp.tmbundle/`, with the
   VS Code grammar as the tested source —

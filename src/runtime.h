@@ -11,8 +11,8 @@
 // operands their opcode already decoded from the bytecode stream (a
 // constant-pool name, an argument count) — never ip/chunk. That keeps this
 // class usable by any caller that owns its own program counter, not only
-// VM::run()'s switch; see notes/qbe-backend.md for the design this shape
-// supports.
+// VM::run()'s switch; see docs/decisions/qbe-backend.md for the design this
+// shape supports.
 //
 // A slice of opcode bodies — the ones with the most runtime polymorphism:
 // CALL/INVOKE/SUPER_INVOKE dispatch, GET_PROPERTY/GET_SUPER, INHERIT,
@@ -222,8 +222,8 @@ class Runtime {
     // because the compiler could no longer inline them into VM::run()'s
     // loop. Keep the operand-stack primitives header-only so any TU that
     // includes runtime.h gets the same inlining that the single-file VM
-    // used to get for free — see notes/qbe-backend.md for why that matters
-    // to more than just vm.cpp.
+    // used to get for free — see docs/decisions/qbe-backend.md for why that
+    // matters to more than just vm.cpp.
     void push(Value value) {
         // Same threshold, STACK_MAX, whether or not a handler is active (see
         // STACK_OVERFLOW_STACK_RESERVE's own comment above): an open
@@ -251,8 +251,8 @@ class Runtime {
     // Compiled code (backend/rt_capi.cpp) writes its own stack slots
     // directly at base + 8h instead of going through push(), so it needs a
     // way to tell this Runtime where its own top now is before any call
-    // that can allocate or unwind — see notes/qbe-backend.md, hazard Q1.
-    // Neither accessor re-checks STACK_MAX: the compiled code that computed
+    // that can allocate or unwind — see docs/decisions/qbe-backend.md, hazard
+    // Q1. Neither accessor re-checks STACK_MAX: the compiled code that computed
     // `top` already knows its own height, the same way push()'s caller does
     // not re-check a height it already holds.
     [[nodiscard]] Value* top() const { return stackTop; }
@@ -299,7 +299,7 @@ class Runtime {
     // resolved outside this invocation or was uncaught; callNative() then
     // propagates the recorded outcome instead of a result. This is the bounded
     // re-entrant call path a native such as callMethod uses to reach a
-    // closure-backed method (notes/expressiveness-roadmap.md item 1).
+    // closure-backed method (docs/decisions/expressiveness-roadmap.md item 1).
     bool invokeCallableFromNative(int argCount, Value* out);
 
     // The method-invocation variant of invokeCallableFromNative: `method` has
@@ -426,7 +426,7 @@ class Runtime {
     // the stack pointer AT PUSH_HANDLER time (the interpreted case's own
     // `m_rt.stackTop`; compiled code's own `base + 8*height`, the fused-
     // stack model's matching memory address for the same height —
-    // notes/qbe-backend.md's central design choice). `catchIp` is
+    // docs/decisions/qbe-backend.md's central design choice). `catchIp` is
     // meaningful only to the interpreter's own dispatch loop (it resumes
     // there directly); compiled code never reads a HandlerRecord's own
     // catchIp back — see qbe_emitter.cpp's own comment on why it derives
@@ -452,9 +452,9 @@ class Runtime {
     void opDeferRecord(int argCount);
 
     // Sets the CURRENT (topmost) frame's own bytecode-offset bookkeeping
-    // to `offset` — Q4 (notes/qbe-backend.md): a compiled frame's own `ip`
-    // is set once, at call time (Runtime::call), and never advances the way
-    // the interpreter's own dispatch loop keeps it current. Without this, a
+    // to `offset` — Q4 (docs/decisions/qbe-backend.md): a compiled frame's own
+    // `ip` is set once, at call time (Runtime::call), and never advances the
+    // way the interpreter's own dispatch loop keeps it current. Without this, a
     // stack trace built from a compiled frame always reports that
     // function's very first line (Chunk::getLine's own fallback on a
     // negative/stale offset), never the real fault site. The QBE emitter
@@ -486,9 +486,10 @@ class Runtime {
     // ip/chunk. The interpreter loop decodes those operands (it has ip/
     // chunk), flushes the current frame's ip so a runtimeError() raised in
     // here reports the right line, and then calls straight through. Any
-    // other caller with its own program counter (see notes/qbe-backend.md)
-    // can do the same: decode the operand itself, store its own bytecode
-    // offset into the frame, and call the same function.
+    // other caller with its own program counter (see
+    // docs/decisions/qbe-backend.md) can do the same: decode the operand
+    // itself, store its own bytecode offset into the frame, and call the same
+    // function.
     //
     // Defined out-of-line (runtime.cpp), unlike push/pop/peek above: each
     // one is a full opcode body, not a one-line primitive the compiler
@@ -749,11 +750,11 @@ class Runtime {
         m_stdlibCtx.args = std::move(args);
     }
 
-    // Q1/Q3 (notes/qbe-backend.md): compiled code (backend/rt_capi.cpp)
-    // writes its own frame's local/temporary slots directly at base + 8h,
-    // bypassing push()'s own STACK_MAX check entirely. Without a check of
-    // its own, an unbounded compiled recursion would write straight past
-    // `stack[STACK_MAX + STACK_OVERFLOW_STACK_RESERVE]` — memory
+    // Q1/Q3 (docs/decisions/qbe-backend.md): compiled code
+    // (backend/rt_capi.cpp) writes its own frame's local/temporary slots
+    // directly at base + 8h, bypassing push()'s own STACK_MAX check entirely.
+    // Without a check of its own, an unbounded compiled recursion would write
+    // straight past `stack[STACK_MAX + STACK_OVERFLOW_STACK_RESERVE]` — memory
     // corruption, not a reported error. `neededTop` is the highest address
     // this call's own frame can ever reach (its own analyzed max stack
     // height, from the compiler emitting this check once at function

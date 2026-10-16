@@ -2,21 +2,28 @@
 
 ## Source of truth
 
+`VISION.md` states what Lox++ is for. Only the owner changes it. Every plan
+is tested against it. A plan that conflicts with the vision stops until the
+owner changes the vision or the plan changes.
+
 `spec/` is the canonical definition of Lox++ semantics. **When spec and
 implementation conflict, fix the implementation.** Always update `spec/` in the
 same PR as any language change.
 
-Decision priority: **spec** (`spec/`) > **implementation** (`src/`) > **design
-notes** (`notes/`)
+Decision priority: **vision** (`VISION.md`) > **spec** (`spec/`) >
+**implementation** (`src/`) > **accepted designs** (`docs/decisions/`) >
+**proposals** (`docs/proposals/`)
 
-Consult `notes/` when planning — it captures the *why* behind past decisions
-and sketches future direction, and helps avoid conflicting designs. `notes/`
-is for brainstorming and design records only, never for tracking backlog or
-task status — see "Backlog and task tracking" below.
+`docs/README.md` maps every document tier and says what each tier binds.
+Consult `docs/decisions/` when planning — it captures the *why* behind past
+decisions and helps avoid conflicting designs. `docs/proposals/` sketches
+future direction and binds nothing. No tier tracks backlog or task status —
+see "Backlog and task tracking" below.
 
-`AGENTS.md` states the current rules only. It is complete without other
-files: it does not depend on `notes/` for a rule, and it does not record
-history. The history of a rule goes in commit messages and in `notes/`.
+`AGENTS.md` states the current rules only. It depends on `VISION.md` for the
+intent its rules serve, and on no file under `docs/` for a rule. It does not
+record history. The history of a rule goes in commit messages and in
+`docs/records/`.
 
 Every Lox++ program is in this repository. A language change may break
 programs. When it does, update every affected program in the same PR. No
@@ -24,43 +31,26 @@ deprecation period is needed.
 
 ---
 
-## Backend roles
-
-The native VM is the product. The other backends exist to serve it, and each
-one owes conformance only for its role. Weigh every design by the native VM
-first.
-
-| Backend | Role | Shipped | Obligation |
-|---|---|---|---|
-| Native VM | The runtime users run. It must be simple, and fast for a dynamic language. Performance work targets it first. | Yes | Implements the full spec. It is the reference for all other backends. |
-| JVM | A semantic oracle: a mature managed runtime that checks the meaning of Lox++ bytecode. Also a performance baseline to work toward. | No | Matches native where it serves as an oracle. It does not need features that exist only to give native code low-level access, such as FFI or a JIT. |
-| QBE | An experiment: the first lightweight path to an AOT binary, and tests along the AOT-to-JIT range. | No | Owes what the current experiment needs. A language change does not have to wait for QBE. |
-| Bootstrap interpreter | A capability test: a practical language can implement itself. It does not need to be fast. | No | Runs the language and matches native. |
-
-The JVM backend is never shipped: the JVM already has many languages.
-
----
-
 ## Backlog and task tracking
 
 GitHub Issues are the backlog, and GitHub Projects the board for anything
 bigger than a handful of issues. A follow-up, a known gap, a "do this later"
-item — file it as an issue. Never park it as a bullet list in `notes/`: an
+item — file it as an issue. Never park it as a bullet list under `docs/proposals/`: an
 issue can be assigned, labeled, closed, and linked from a PR; a markdown
 bullet cannot, and nothing then answers "is this done yet."
 
 - **File it, don't list it.** When a PR, a design note, or a mission's
   closing doc identifies future work, open one GitHub issue per discrete
   item instead of adding or growing a bullet list in a note.
-- **`notes/` stays for ideas and design records.** Brainstorm there, and
-  record the reasoning behind a decision — including *why* something was
-  deferred. Once an idea becomes an actionable, schedulable item, it belongs
-  in an issue; link the issue back from the note if the note's reasoning
-  still matters.
+- **`docs/` stays for ideas and design records.** Brainstorm in
+  `docs/proposals/`, and record the reasoning behind a decision in
+  `docs/decisions/` — including *why* something was deferred. Once an idea
+  becomes an actionable, schedulable item, it belongs in an issue; link the
+  issue back from the document if its reasoning still matters.
 - **GitHub Projects for multi-issue efforts.** When a body of work spans more
   than a few issues (a mission, a multi-stage feature), track it on a GitHub
   Project board rather than a hand-maintained checklist in a note.
-- **Labels carry status**, not `notes/` prose. Use the repo's existing labels
+- **Labels carry status**, not `docs/` prose. Use the repo's existing labels
   (`bug`, `enhancement`, `documentation`, ...), plus any area-specific label
   the work needs.
 
@@ -88,7 +78,8 @@ these things:
    The consumers are the native VM, the JVM backend, the QBE backend, the
    bootstrap interpreter, and each tool that parses or lowers the construct
    (the resolver, the LSP, the tree-sitter grammar, the editor syntaxes).
-   For each backend, state what the change owes it under "Backend roles".
+   For each backend, state what the change owes it under the backend roles
+   in `VISION.md`.
    A consumer found later, after CI turns red, means the plan was incomplete.
 2. **Use a table when the spec lists a set.** If the spec names a set that can
    be counted (fault kinds, opcodes, exit paths, suspend points), write it as
@@ -276,7 +267,7 @@ to make sense, it is in the wrong place:
 
 **Releases:** to cut a release, tag `vX.Y.Z` on `main` and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 The `release.yml` workflow builds the static binary, signs and attests it, and publishes to GitHub
-Releases. See [RELEASING.md](RELEASING.md) for the full process and [notes/distribution.md](notes/distribution.md)
+Releases. See [RELEASING.md](RELEASING.md) for the full process and [docs/decisions/distribution.md](docs/decisions/distribution.md)
 for the architecture.
 
 ---
@@ -311,6 +302,6 @@ When more than one agent works a task under the same GitHub account, every
 public message (PR comment, review, commit trailer) is tagged with its
 author's role: `[Implementer]`, `[Reviewer]`, or `[Researcher]`.
 
-See `notes/multi-agent-playbook.md` for the full workflow these conventions
+See `docs/process/multi-agent-playbook.md` for the full workflow these conventions
 support (roles, escalation limits, node specification structure, referee
 format).

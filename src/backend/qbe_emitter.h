@@ -1,10 +1,10 @@
 #pragma once
 
-// QBE code generator (notes/qbe-backend.md — "Staged plan", and hazards
-// Q2-Q5/Q8/P8). Covers straight-line code, jumps, calls/closures, the rest
-// of the language, and errors: CONSTANT (Number, and any
-// other constant type via rt_constant_at)/NIL/TRUE/FALSE, POP, GET_LOCAL/
-// SET_LOCAL, DEFINE_GLOBAL/GET_GLOBAL/SET_GLOBAL, PRINT, ADD/SUBTRACT/
+// QBE code generator (docs/decisions/qbe-backend.md — "Staged plan", and
+// hazards Q2-Q5/Q8/P8). Covers straight-line code, jumps, calls/closures, the
+// rest of the language, and errors: CONSTANT (Number, and any other constant
+// type via rt_constant_at)/NIL/TRUE/FALSE, POP, GET_LOCAL/SET_LOCAL,
+// DEFINE_GLOBAL/GET_GLOBAL/SET_GLOBAL, PRINT, ADD/SUBTRACT/
 // MULTIPLY/DIVIDE/MODULO/NEGATE/LESS/GREATER/EQUAL/IN/LEN/STR, JUMP/
 // JUMP_IF_FALSE/LOOP/JUMP_TABLE (lowered to a compare chain — P8, no QBE
 // switch or indirect jump), CALL, CLOSURE/GET_UPVALUE/SET_UPVALUE/
@@ -27,7 +27,7 @@
 // plan, hazard filed on #460) throws std::runtime_error naming it, rather
 // than emitting silently wrong code.
 //
-// Keeps clox's fused stack (notes/qbe-backend.md, "The central design
+// Keeps clox's fused stack (docs/decisions/qbe-backend.md, "The central design
 // choice"): the abstract_stack height at an offset fixes that value's own
 // memory slot, `base + 8*height` — no local/temporary split, unlike the JVM
 // backend. One QBE block label per cfg.h leader (reusing

@@ -39,7 +39,7 @@ namespace {
 // Every wrapper below funnels a stray C++ exception through this, turning
 // it into RT_OP_FATAL instead of calling std::terminate — compiled code has
 // no unwinding tables to run a C++ exception through (Q2,
-// notes/qbe-backend.md).
+// docs/decisions/qbe-backend.md).
 //
 // Every OTHER path to OpResult::Fatal goes through Runtime::runtimeError(),
 // which calls resetStack() before returning, so a caller that observes

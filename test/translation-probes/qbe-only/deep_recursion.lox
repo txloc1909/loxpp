@@ -1,4 +1,4 @@
-// deep_recursion.lox — Q3's own measured test (notes/qbe-backend.md):
+// deep_recursion.lox — Q3's own measured test (docs/decisions/qbe-backend.md):
 // "1040 small frames fit easily in an 8 MB C stack, but ... needs a
 // measured test." Every Lox call compiled code makes is a real C call
 // (rt_call -> Runtime::call -> the compiled callee's own `call` back into

@@ -1,9 +1,11 @@
 # Lox++ design tensions — 2026-10-08
 
+**Status:** accepted. The resolutions were decided in #583 (2026-10-08).
+
 Snapshot assessment, based on the notes changed since late September
-(`import-system.md`, `jit-pipeline.md`, `coroutines-retro.md`,
+(`import-system.md`, `docs/proposals/jit-pipeline.md`, `docs/records/coroutines-retro.md`,
 `coroutines.md`, `dynamic-functional-programming.md`,
-`concurrency-model-decision.md`, `actor-model-design.md`,
+`docs/proposals/concurrency-model-decision.md`, `docs/proposals/actor-model-design.md`,
 `expressiveness-roadmap.md`) plus the discussion on #557 and #564.
 
 ## Current tensions
@@ -11,12 +13,12 @@ Snapshot assessment, based on the notes changed since late September
 ### T1 — Coroutines force all of QBE into a slow mode
 Any program that contains `yield` compiles entirely in QBE coroutine mode
 (promotion off, trampoline; `coroutines.md`). The per-function fallback was
-shown to be unsound (`coroutines-retro.md`). Two new designs are about to
+shown to be unsound (`docs/records/coroutines-retro.md`). Two new designs are about to
 repeat the whole-program rule:
 - **Import system:** a generator-based stdlib module would slow down every
   program that imports it (`import-system.md`, residual edge 1).
 - **JIT v0:** turns itself off for any program that contains `YIELD`
-  (`jit-pipeline.md` §4).
+  (`docs/proposals/jit-pipeline.md` §4).
 
 The way out the notes name: a `may-suspend` effect analysis, carried on
 explicit exports.
@@ -36,14 +38,14 @@ go/no-go, actor vs CSP) has no issue. Meanwhile:
   it.
 
 The stale C3 claim is fixed (`500764e`). C2 and C6 in
-`concurrency-model-decision.md` still cite `src/vm.h` line ranges from before
+`docs/proposals/concurrency-model-decision.md` still cite `src/vm.h` line ranges from before
 the Runtime/VM split.
 
 ### T4 — Scoping work across 4 backends (narrowed)
 Already covered:
 - Rule 6 (#564, adopted in #576, `AGENTS.md` planning policy) — whether a
   scoped subset ("only"/"subset"/"fallback"/"phase 1") is sound.
-- Retro rules 1/3/5 (`notes/non-local-control-flow-retro.md`) — list every
+- Retro rules 1/3/5 (`docs/records/non-local-control-flow-retro.md`) — list every
   consumer up front; each backend node diffs clean against merged backends;
   the gate covers compile-time as well as runtime.
 

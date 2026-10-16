@@ -217,7 +217,7 @@ class Compiler {
     // defer-free function's chunk carries no RUN_DEFERS at all — needed so
     // --target jvm keeps working for ordinary functions, since the JVM
     // emitter does not translate RUN_DEFERS yet (see
-    // notes/non-local-control-flow.md).
+    // docs/decisions/non-local-control-flow.md).
     bool m_hasDefer{false};
     // Self-tail-call elimination state; see returnStatement(). m_selfName is
     // set only for a function declared at global scope (so its own name

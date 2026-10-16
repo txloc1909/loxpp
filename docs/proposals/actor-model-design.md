@@ -1,7 +1,7 @@
 # Actor Model: Design Record
 
-**Status: design record. Assumes the actor/isolated-heap model is adopted.**
-The model is not committed yet; `concurrency-model-next-steps.md` item 6 owns
+**Status:** proposal. It assumes the actor/isolated-heap model, which is not
+adopted. The model is not committed yet; `concurrency-model-next-steps.md` item 6 owns
 the go/no-go. This note records the *open problems* the actor commitment leaves
 unsolved, framed as the questions item 6 must answer. It is a companion to
 `concurrency-model-decision.md`, which scores the model and does the choosing.
@@ -40,7 +40,7 @@ immutable-value facility exists. Open sub-questions:
   terms, so native/QBE, the JVM, and the bootstrap all match?
 
 The roadmap's "share-nothing on maps + primitives" stance
-(`expressiveness-roadmap.md:37-40`) describes *payloads*, not a copy facility.
+(`docs/decisions/expressiveness-roadmap.md:37-40`) describes *payloads*, not a copy facility.
 The facility is still to be built.
 
 ## 3. Scheduler
@@ -77,14 +77,14 @@ That decision drives:
 
 - `CLOCK_PROCESS_CPUTIME_ID` → `CLOCK_THREAD_CPUTIME_ID` (or a wall clock)
 - N separate profiler reports with no merged view
-  (`profiler-concurrency-notes.md:33-36`)
+  (`docs/reference/profiler-concurrency-notes.md:33-36`)
 - whether a blocking FFI call stalls one task or the whole scheduler
 
 ## 7. FFI thread-safety
 
 **Item 6 must answer:** how FFI fits the isolation model. FFI'd code escapes the
 GC, memory safety, and the concurrency model by design, so it must be designed
-*after* item 7's model is chosen (`expressiveness-roadmap.md:118-119`). The
+*after* item 7's model is chosen (`docs/decisions/expressiveness-roadmap.md:118-119`). The
 actor commitment does not answer how a task calling a blocking C function
 interacts with its own scheduler and heap.
 
@@ -92,18 +92,18 @@ interacts with its own scheduler and heap.
 
 A suspend point on QBE must be a status-return seam at frame granularity, not a
 mid-frame save: QBE compiles each Lox call to a real C frame and emits no
-unwinding tables (`qbe-backend.md:50-68,184-186`). QBE reuses the native
+unwinding tables (`docs/decisions/qbe-backend.md:50-68,184-186`). QBE reuses the native
 runtime, so it cannot diverge on scheduler or message-copy semantics; it proves
 codegen only. This is why C9 penalizes mid-frame suspension and reinforces the
 actor lead.
 
 ## References
 
-- `notes/concurrency-model-decision.md` — the scoring that produces this
+- `docs/proposals/concurrency-model-decision.md` — the scoring that produces this
   note's assumption; C1–C9 are defined there.
-- `notes/concurrency-model-next-steps.md` — item 6, the go/no-go gate this
+- `docs/proposals/concurrency-model-next-steps.md` — item 6, the go/no-go gate this
   note feeds.
-- `notes/profiler-concurrency-notes.md` — profiler impact by model.
-- `notes/expressiveness-roadmap.md` — item 5 (coroutines), item 7
+- `docs/reference/profiler-concurrency-notes.md` — profiler impact by model.
+- `docs/decisions/expressiveness-roadmap.md` — item 5 (coroutines), item 7
   (parallelism), the share-nothing stance, and FFI ordering.
-- `notes/qbe-backend.md` — the QBE code shape behind section 8.
+- `docs/decisions/qbe-backend.md` — the QBE code shape behind section 8.

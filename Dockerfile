@@ -134,7 +134,7 @@ RUN curl -fsSL "https://downloads.sourceforge.net/project/jasmin/jasmin/jasmin-2
 # --- dev-qbe -----------------------------------------------------------------
 # Adds the QBE compiler backend needed by the (future) --target qbe backend.
 # Kept out of `dev` so the C++-only jobs don't pay to build a second compiler
-# they never invoke. See notes/qbe-backend.md.
+# they never invoke. See docs/decisions/qbe-backend.md.
 FROM dev AS dev-qbe
 
 # QBE ships no binary releases; build from the pinned source tarball. Verify

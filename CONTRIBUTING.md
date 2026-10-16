@@ -5,11 +5,14 @@ presets, test and lint commands, branch/commit conventions, the full task loop, 
 configuration.
 
 To cut a release, see [RELEASING.md](RELEASING.md). For the distribution design (why static, why
-isocline, the component manifest, the tag namespace), see [notes/distribution.md](notes/distribution.md).
+isocline, the component manifest, the tag namespace), see [docs/decisions/distribution.md](docs/decisions/distribution.md).
 
 [TESTING.md](TESTING.md) covers how to write new GTest cases and use the VM test helpers.
 
-[notes/editor-tooling.md](notes/editor-tooling.md) covers the editor stack (`loxpp --check`,
+[docs/README.md](docs/README.md) maps the design documents: which tier binds, who changes it,
+and where a new document goes. [VISION.md](VISION.md) states what the language is for.
+
+[docs/decisions/editor-tooling.md](docs/decisions/editor-tooling.md) covers the editor stack (`loxpp --check`,
 `loxpp-lsp`, the tree-sitter grammar, the Neovim plugin). Build and test it in the
 `dev-editors` image: `cmake --build build --target loxpp loxpp-lsp`, then
 `cd editors/tree-sitter-loxpp && tree-sitter generate && tree-sitter test`, then

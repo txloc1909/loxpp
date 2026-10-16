@@ -197,7 +197,7 @@ def check_defer_count_matches_depth() -> list[str]:
 # Ambient call depths swept to find where native's own frame budget runs out
 # WHILE stringify() is mid-recursion over the nested list, instead of
 # stringify()'s own 100-level depth guard firing first (see
-# notes/bootstrap-stack-depth.md) -- or so deep that native's budget is
+# docs/reference/bootstrap-stack-depth.md) -- or so deep that native's budget is
 # already exhausted before stringify() ever starts. A single fixed depth
 # cannot tell those two apart from the restored-to-0 reading alone (both read
 # stringifyDepth=0 on exit), and which depths land inside stringify() shifts

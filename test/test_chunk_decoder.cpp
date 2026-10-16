@@ -1,11 +1,12 @@
 // test_chunk_decoder.cpp — decoder/chunk-walker round-trip tests.
 //
-// The checkpoint (see notes/backend-implementation-dag.md): re-disassemble
-// every chunk in the compiled ObjFunction tree with the new decoder, and
-// compare the result against disassembleChunk (src/debug.cpp) — the oracle —
-// string for string. `renderInstruction` below turns a DecodedInstruction
-// back into that exact text, independently of debug.cpp's own formatting
-// code, so a decoding bug shows up as a text mismatch against the oracle.
+// The checkpoint (see docs/records/backend-implementation-dag.md):
+// re-disassemble every chunk in the compiled ObjFunction tree with the new
+// decoder, and compare the result against disassembleChunk (src/debug.cpp) —
+// the oracle — string for string. `renderInstruction` below turns a
+// DecodedInstruction back into that exact text, independently of debug.cpp's
+// own formatting code, so a decoding bug shows up as a text mismatch against
+// the oracle.
 //
 // Corpora exercised:
 //   1. test/translation-probes/*.lox — the probes the DAG analysis is

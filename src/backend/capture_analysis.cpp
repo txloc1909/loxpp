@@ -20,9 +20,10 @@ namespace {
 // src/backend/abstract_stack.cpp computes as pushCount - popCount, but this
 // pass tracks only the scalar net delta, not the locals/temporaries split
 // the full abstract-stack analysis needs, so it is reimplemented here
-// rather than shared: the two are independent analyses (notes/backend-
-// implementation-dag.md), and the design note records that the full
-// analysis may fold into this walk later, not the other way round.
+// rather than shared: the two are independent analyses
+// (docs/records/backend-implementation-dag.md), and the design note records
+// that the full analysis may fold into this walk later, not the other way
+// round.
 // ---------------------------------------------------------------------------
 
 int frameHeightEffect(const DecodedInstruction& ins) {
@@ -688,7 +689,7 @@ void handleClosureCommit(const DecodedInstruction& in, OpenOrigins& state,
 //
 // A close whose slot `state` shows open on this exact path is a DYNAMIC
 // close: attribute it to that instance and erase it from `state`. The
-// emission contract (notes/jvm-emission-contract.md) guarantees this
+// emission contract (docs/reference/jvm-emission-contract.md) guarantees this
 // origin always has a recorded range, because a path-open slot was opened
 // by a CLOSURE on a path this pass proved reachable; a violation throws,
 // as decoder or compiler drift.
@@ -777,7 +778,7 @@ void handleCloseUpvalueCommit(
 //
 // `latestInstanceBySlot` still advances for an unreachable CLOSURE too
 // (handleClosureCommit), and that is correct, not merely tolerated: the
-// emission contract (notes/jvm-emission-contract.md) guarantees that
+// emission contract (docs/reference/jvm-emission-contract.md) guarantees that
 // cleanup emitted before a local's first capture uses POP, never
 // CLOSE_UPVALUE, so every CLOSE_UPVALUE — reachable or not — has at least
 // one program-order-earlier CLOSURE of its own incarnation, in the same

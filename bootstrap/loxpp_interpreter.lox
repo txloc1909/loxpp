@@ -1848,7 +1848,7 @@ fun reflectMethodNames(klass) {
 // behavior — reproduced here a fourth time, since this interpreter is its own
 // execution target, independent of the C++ VM that runs it. A native, a bound
 // native, or a closure-backed method runs; a Class or Enum constructor value
-// stays unsupported. See notes/expressiveness-roadmap.md item 1 and issue
+// stays unsupported. See docs/decisions/expressiveness-roadmap.md item 1 and issue
 // #496 for why the closure case needs the host VM's re-entrant call path.
 //
 // "ReflectionFieldNameError", "ReflectionUndefinedMemberError",
@@ -4040,7 +4040,7 @@ class Interpreter {
         // reliable up to an ambient call depth of about 134; past that,
         // native's own "Stack overflow." can win the race before this
         // counter ever reaches 100. 100 catches every ordinary call depth;
-        // it cannot catch every case. See notes/bootstrap-stack-depth.md.
+        // it cannot catch every case. See docs/reference/bootstrap-stack-depth.md.
         if (this.stringifyDepth > 100) {
             this.fatalError("Value nesting is too deep.");
             return "...";

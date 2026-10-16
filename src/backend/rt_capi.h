@@ -1,7 +1,7 @@
 #pragma once
 
 // The QBE backend's C interface to the runtime (Layer 3,
-// notes/qbe-backend.md). QBE only speaks the C calling convention, so
+// docs/decisions/qbe-backend.md). QBE only speaks the C calling convention, so
 // everything compiled code calls crosses this boundary: every function
 // below is `extern "C"` and `noexcept`, and turns any C++ exception it
 // meets into RT_OP_FATAL rather than letting it reach compiled code, which
@@ -192,11 +192,11 @@ int rt_op_str(Runtime* rt, int stopAtFrameCount) noexcept;
 // One wrapper per Runtime::op*() arithmetic/comparison helper (runtime.h,
 // moved out of vm.cpp by the operator-overloading mission's T1 node). Each
 // is the slow path only: the emitter (backend/qbe_emitter.h) inlines the
-// plain double-double fast path itself (Q5, notes/qbe-backend.md) and
+// plain double-double fast path itself (Q5, docs/decisions/qbe-backend.md) and
 // calls these only once that fast path has already failed — the same
 // division of labor VM::run()'s own inline fast path/dispatchOp split
-// uses. No rt_op_in: IN is S5's opcode, not S3's (notes/qbe-backend.md,
-// "Staged plan").
+// uses. No rt_op_in: IN is S5's opcode, not S3's
+// (docs/decisions/qbe-backend.md, "Staged plan").
 int rt_op_add(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_subtract(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_multiply(Runtime* rt, int stopAtFrameCount) noexcept;
@@ -220,8 +220,8 @@ int rt_op_set_global(Runtime* rt, ObjString* name,
                      int stopAtFrameCount) noexcept;
 
 // CALL/RETURN/CLOSURE/upvalues/CLOSE_UPVALUE (S4, #457). No capture
-// analysis at this stage (notes/qbe-backend.md, "Staged plan", row S4):
-// every one of these reaches the VM's own existing captureUpvalue/
+// analysis at this stage (docs/decisions/qbe-backend.md, "Staged plan", row
+// S4): every one of these reaches the VM's own existing captureUpvalue/
 // closeUpvalues mechanism unchanged, the same code path VM::run()'s
 // Op::CLOSURE/GET_UPVALUE/SET_UPVALUE/CLOSE_UPVALUE cases already use.
 
@@ -231,7 +231,7 @@ int rt_op_set_global(Runtime* rt, ObjString* name,
 // SUPER_INVOKE — S5, #458) has the receiver ("this") at base[0] instead,
 // so compiled code cannot reach its own closure by reading its stack
 // window the way CLOSURE/GET_UPVALUE/SET_UPVALUE/CONSTANT once assumed
-// (notes/qbe-backend.md, "The central design choice", was about the
+// (docs/decisions/qbe-backend.md, "The central design choice", was about the
 // window layout, not this). Every one of those reads its own closure via
 // this call now, not addr(0).
 Value rt_current_closure(Runtime* rt) noexcept;
@@ -274,7 +274,7 @@ void rt_set_upvalue(Runtime* rt, Value closure, int index, Value v) noexcept;
 // CLOSE_UPVALUE's own body (vm.cpp): rt->closeUpvalues(last).
 void rt_close_upvalues(Runtime* rt, Value* last) noexcept;
 
-// Q1/Q3 (notes/qbe-backend.md): see Runtime::checkStackOverflow's own
+// Q1/Q3 (docs/decisions/qbe-backend.md): see Runtime::checkStackOverflow's own
 // comment (runtime.h) for why compiled code needs this check at all.
 // Returns 0 on success; a nonzero return follows the same fatal-vs-
 // catchable convention every other rt_op_* wrapper here does.
@@ -286,7 +286,7 @@ int rt_check_stack(Runtime* rt, Value* neededTop,
 // PUSH_HANDLER's own body (Runtime::pushHandler, runtime.h). `checkpointTop`
 // is `base + 8*height` at the height PUSH_HANDLER's own static analysis
 // gives it (the fused-stack model's own memory address for that height —
-// notes/qbe-backend.md's central design choice), the same value the
+// docs/decisions/qbe-backend.md's central design choice), the same value the
 // interpreted case's `m_rt.stackTop` holds at PUSH_HANDLER time. No error
 // path (a bare vector push_back) — void, like rt_close_upvalues.
 //
@@ -328,7 +328,7 @@ int rt_op_defer_record(Runtime* rt, int argCount) noexcept;
 // Catchability::Propagate).
 int rt_run_defers(Runtime* rt, int stopAtFrameCount) noexcept;
 
-// Q4 (notes/qbe-backend.md): Runtime::setCurrentFrameOffset. The QBE
+// Q4 (docs/decisions/qbe-backend.md): Runtime::setCurrentFrameOffset. The QBE
 // emitter calls this once before every fallible op, with that op's own
 // static bytecode offset, so a stack trace built from a compiled frame
 // reports the real fault site instead of that function's first line.

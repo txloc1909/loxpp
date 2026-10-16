@@ -12,13 +12,13 @@ ever landed.
 
 This note records *why the original two-phase breakdown did not foresee that
 the fallback was unsound*. It is a planning retrospective, not a design
-record — the design lives in `notes/coroutines.md` and `notes/qbe-backend.md`.
+record — the design lives in `docs/decisions/coroutines.md` and `docs/decisions/qbe-backend.md`.
 Every claim cites a GitHub issue or PR number, or a file path in the tree at
 the time of writing; numbers are permanent and fixed at merge/close time.
 
 ## The unsoundness, stated precisely
 
-Node 7's scope (issue #530) and `notes/coroutines.md` ("Backends", as first
+Node 7's scope (issue #530) and `docs/decisions/coroutines.md` ("Backends", as first
 merged in #534) both named the fallback set the same way: *functions that
 contain `YIELD` run through the interpreter; everything else is compiled.*
 PR #559 rewrote that section to the whole-program coroutine mode that
@@ -51,7 +51,7 @@ rest is why it survived review.
 **2. The native-VM mental model was carried to QBE without re-checking the
 boundary.** In native the whole machine is the interpreter: `YIELD` exits the
 nested run and snapshots the entire stack slice, so caller frames come along
-for free regardless of which one yields (`notes/coroutines.md`, "Native VM": a
+for free regardless of which one yields (`docs/decisions/coroutines.md`, "Native VM": a
 coroutine "owns exactly the interpreter state whose frames lie inside its
 slice"). There is no "which functions need the interpreter?" question. QBE
 introduces a partition — some functions compiled, some interpreted — and the
@@ -60,7 +60,7 @@ reused native's "it's all interpreted anyway" intuition and hid QBE's one hard
 part.
 
 **3. The governing constraint was on record but never pulled down to node
-granularity.** `notes/concurrency-model-decision.md` C9 (lines 107–116) says
+granularity.** `docs/proposals/concurrency-model-decision.md` C9 (lines 107–116) says
 QBE's real-C-frame model is "hostile to mid-frame stackful suspension: suspend
 points [would need] to unwind out of every compiled frame… Any suspend/GC-root
 design must be proven on QBE, not only in the interpreter loop," and its
@@ -94,7 +94,7 @@ fallback cannot be extended — the follow-up issue described the same single
 problem from the other end.
 
 **6. The process rules the mission adopted did not target this failure mode.**
-`notes/coroutines.md` says the mission follows the five rules in
+`docs/decisions/coroutines.md` says the mission follows the five rules in
 `non-local-control-flow-retro.md`. All five are about coverage/consistency
 across already-identified consumers (enumerate every backend, mechanical spec
 tables, per-node differential Definition of Done, write named bug-classes into
@@ -125,7 +125,7 @@ Proposed as a sixth rule for the list in `non-local-control-flow-retro.md`
    not only against native output; a probe that passes on the native primitive
    proves nothing about a backend whose fallback boundary the probe crosses.
    Corollary: re-apply the strategic constraint list (here the C-list in
-   `notes/concurrency-model-decision.md`) at each node, not only at mission
+   `docs/proposals/concurrency-model-decision.md`) at each node, not only at mission
    top — C9 named this exact hazard and was not consulted when node 7 was
    scoped.
 
@@ -134,7 +134,7 @@ Proposed as a sixth rule for the list in `non-local-control-flow-retro.md`
 - Mission: #523. Nodes cited: #525 (probe corpus / research gate), #526
   (native primitive), #530 and #535 (the two QBE nodes), PR #559 (the single
   change that resolved both), #564 (the proposed rule 6).
-- Design records: `notes/coroutines.md` (coroutine design),
-  `notes/qbe-backend.md` (QBE backend; the real-C-frame model C9 cites),
-  `notes/concurrency-model-decision.md` (C9 and the item-5 implications).
-- Prior retro whose rule list this extends: `notes/non-local-control-flow-retro.md`.
+- Design records: `docs/decisions/coroutines.md` (coroutine design),
+  `docs/decisions/qbe-backend.md` (QBE backend; the real-C-frame model C9 cites),
+  `docs/proposals/concurrency-model-decision.md` (C9 and the item-5 implications).
+- Prior retro whose rule list this extends: `docs/records/non-local-control-flow-retro.md`.

@@ -2515,7 +2515,7 @@ void Runtime::opDefineMethod(ObjString* name) {
 void Runtime::opDeferRecord(int argCount) {
     // Mirrors vm.cpp's own Op::DEFER_RECORD body exactly (moved here so the
     // QBE backend's rt_op_defer_record, backend/rt_capi.h, reaches it with
-    // no duplication — Layer 1, notes/qbe-backend.md).
+    // no duplication — Layer 1, docs/decisions/qbe-backend.md).
     Value callee = stackTop[-(argCount + 1)];
     ObjDeferredCall* deferred =
         m_mm.create<ObjDeferredCall>(callee, VmAllocator<Value>{&m_mm});
@@ -2766,8 +2766,8 @@ Runtime::OpResult Runtime::opDivide(int stopAtFrameCount) {
 Runtime::OpResult Runtime::opModulo(int stopAtFrameCount) {
     // Unlike ADD/SUBTRACT/MULTIPLY/DIVIDE, MODULO's number case is not a plain
     // double-double computation — its floor-division sign correction means the
-    // QBE backend does not inline it (notes/qbe-backend.md Q5), so the full
-    // number case lives here rather than in VM::run().
+    // QBE backend does not inline it (docs/decisions/qbe-backend.md Q5), so the
+    // full number case lives here rather than in VM::run().
     if (is<Number>(peek(0)) && is<Number>(peek(1))) {
         Number b = as<Number>(pop());
         Number a = as<Number>(pop());

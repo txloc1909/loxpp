@@ -1,5 +1,5 @@
 // test_backend_qbe_emitter.cpp — QBE straight-line + jumps emitter (S3,
-// issue #456, notes/qbe-backend.md).
+// issue #456, docs/decisions/qbe-backend.md).
 //
 // Checkpoint: probes 01-05 and 15 must be byte-identical to native once
 // assembled and run through the real toolchain
@@ -221,9 +221,9 @@ TEST(QbeEmitter, ReturnSetsTopAndReturnsZero) {
 // emitter must say so rather than emit silently wrong code for it.
 
 TEST(QbeEmitter, EmitsBuildListRatherThanThrowing) {
-    // BUILD_LIST is S5's job (notes/qbe-backend.md, "Staged plan", #458) —
-    // out of scope for S4, but supported from here on: no throw, and the
-    // slow-path call this opcode lowers to actually appears.
+    // BUILD_LIST is S5's job (docs/decisions/qbe-backend.md, "Staged plan",
+    // #458) — out of scope for S4, but supported from here on: no throw, and
+    // the slow-path call this opcode lowers to actually appears.
     std::string ssa = emitScriptFrom("var x = [1];");
     EXPECT_NE(ssa.find("rt_op_build_list"), std::string::npos);
 }
@@ -296,8 +296,8 @@ TEST(QbeEmitter, EmitsNonNumberConstantRatherThanThrowing) {
 // ---------------------------------------------------------------------
 
 TEST(QbeEmitter, EveryFunctionHasAStackDepthPrologueCheck) {
-    // Q3, notes/qbe-backend.md: compiled code writes its own frame's slots
-    // directly, bypassing push()'s own STACK_MAX check — every compiled
+    // Q3, docs/decisions/qbe-backend.md: compiled code writes its own frame's
+    // slots directly, bypassing push()'s own STACK_MAX check — every compiled
     // function's own prologue must ask rt_check_stack instead.
     std::string ssa = emitScriptFrom("print 1;");
     EXPECT_NE(ssa.find("call $rt_check_stack(l %rt"), std::string::npos);

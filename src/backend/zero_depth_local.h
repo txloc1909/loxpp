@@ -3,7 +3,7 @@
 // The depth-0 named-local resolution rule, target-independent and shared by
 // every backend that lowers a P2 peek-family consumer (SET_LOCAL,
 // SET_GLOBAL, SET_UPVALUE, JUMP_IF_FALSE — see
-// notes/bytecode-translation-problems.md) once its own operand depth
+// docs/reference/bytecode-translation-problems.md) once its own operand depth
 // (abstract_stack.h) is zero: the value to consume is not a genuine
 // operand-stack temporary, because the shared abstract-stack analysis
 // already folded it into a named local (P2's eager invisible-var

@@ -261,7 +261,7 @@ if(LOXPP_PYTHON3)
 
     # A target program's deep recursion borrows the same native call-frame
     # budget bootstrap/loxpp_interpreter.lox's own execution uses (see
-    # notes/bootstrap-stack-depth.md, issue #248). This checks native's
+    # docs/reference/bootstrap-stack-depth.md, issue #248). This checks native's
     # catchable StackOverflowError (issue #267) reaches the target program
     # the same way any other runtime fault does -- caught with the spec's
     # kind/message, or a clean halt with no native traceback when

@@ -1077,7 +1077,7 @@ void emitSpillToArray(Emitter& e, int width, const char* buildSig) {
 }
 
 // BUILD_LIST (this file lowers this one aggregates opcode ahead of the rest
-// of that scope — see notes/backend-implementation-dag.md's build-order
+// of that scope — see docs/records/backend-implementation-dag.md's build-order
 // note). The closures/upvalues checkpoint cannot run to completion without
 // it: V1_fresh_cell.lox and V3_loopvar.lox — the two probes that prove or
 // disprove the fresh-cell-per-declaration model closures/upvalues support
@@ -1155,7 +1155,7 @@ void emitGetIndex(Emitter& e) {
 // trips: seed on the first, no-op on every one after, because nothing else
 // in this chunk ever turns a cell back into a raw value once created —
 // CLOSE_UPVALUE is a compile-time bookkeeping fact here (see
-// notes/jvm-emission-contract.md), not a JVM instruction (see the
+// docs/reference/jvm-emission-contract.md), not a JVM instruction (see the
 // CLOSE_UPVALUE case in emitBody) — and a fresh DECLARATION always
 // re-`astore`s the slot
 // directly (finishInstruction, emitSetLocal), never through this check, so
@@ -1258,12 +1258,12 @@ int findSelfCaptureLoxSlot(const Emitter& e, const DecodedInstruction& in) {
 // this pass no such order for free, so this seeds a fresh cell into the
 // slot BEFORE anything reads it — always a FRESH one, unconditionally,
 // since this offset IS the declaration, so whatever the slot currently
-// holds is a dead incarnation regardless (notes/jvm-emission-contract.md).
-// `anewarray`
-// default-initializes `[0]` to null; the real value lands there once the
-// closure exists, in storeClosureIntoSelfCell below. After this call the
-// array-build loop in emitClosure treats the slot exactly like any other
-// already-a-cell capture — no special case needed there.
+// holds is a dead incarnation regardless
+// (docs/reference/jvm-emission-contract.md). `anewarray` default-initializes
+// `[0]` to null; the real value lands there once the closure exists, in
+// storeClosureIntoSelfCell below. After this call the array-build loop in
+// emitClosure treats the slot exactly like any other already-a-cell capture —
+// no special case needed there.
 void seedSelfCaptureCell(Emitter& e, int selfJvmSlot) {
     e.b.emit("iconst_1", +1);
     e.b.emit("anewarray java/lang/Object", 0);
@@ -2197,8 +2197,8 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
 // result/subject slots (compiler.cpp), so `build/loxpp` itself answers this
 // shape correctly; this function still throws rather than repairing it,
 // because that reservation was not carried into a second, matching load
-// here. `notes/bytecode-translation-problems.md`'s own GAP entry records
-// the measurement.
+// here. `docs/reference/bytecode-translation-problems.md`'s own GAP entry
+// records the measurement.
 void normalizeFoldedOperands(Emitter& e, std::size_t i,
                              const DecodedInstruction& in) {
     std::optional<int> pops = nativePops(in.op, in);
@@ -2215,7 +2215,8 @@ void normalizeFoldedOperands(Emitter& e, std::size_t i,
             std::to_string(in.offset) + " needs " + std::to_string(deficit) +
             " operands compileMatchBody folded below its topmost genuine "
             "one; this backend does not repair a deficit above one (see "
-            "the GAP entry in notes/bytecode-translation-problems.md)");
+            "the GAP entry in "
+            "docs/reference/bytecode-translation-problems.md)");
     }
     int genuineCount = *pops - 1;
     if (genuineCount <= 1) {
@@ -2384,7 +2385,7 @@ void emitBody(Emitter& e, bool isScript,
             emitSetUpvalue(e, i, in, consumedFollowingPop);
             break;
         case Op::CLOSE_UPVALUE:
-            // A local reclaim (notes/jvm-emission-contract.md:
+            // A local reclaim (docs/reference/jvm-emission-contract.md:
             // endScope/emitLoopCleanup emit this exactly where a POP would
             // otherwise retire a
             // captured local) — nothing on the JVM operand stack to pop,

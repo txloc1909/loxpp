@@ -1,9 +1,9 @@
 #pragma once
 
 // The QBE backend's calling convention between compiled code and the
-// runtime (Layer 3, notes/qbe-backend.md). Kept in its own header, separate
-// from rt_capi.h, so runtime.cpp can name the type without pulling in the
-// rest of the C interface.
+// runtime (Layer 3, docs/decisions/qbe-backend.md). Kept in its own header,
+// separate from rt_capi.h, so runtime.cpp can name the type without pulling in
+// the rest of the C interface.
 
 #include "value.h"
 
@@ -13,8 +13,8 @@ class Runtime;
 // stack window (slot 0 = callee/receiver — the same convention
 // Runtime::call() already uses: `slots = stackTop - argc - 1`).
 //
-// S6 (#459, Q2, notes/qbe-backend.md) gives this a real three-way status
-// protocol, matching the design note's own wording ("every fallible call
+// S6 (#459, Q2, docs/decisions/qbe-backend.md) gives this a real three-way
+// status protocol, matching the design note's own wording ("every fallible call
 // returns OK, THROW, or FATAL"):
 //
 //   kRtOk (0):    success. Return convention (Runtime::callCompiled,

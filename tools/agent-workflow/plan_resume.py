@@ -10,7 +10,7 @@ reboot, or a session that ended mid-node.
   plan_resume.py <mission-issue> --json    machine state, written into every snapshot
 
 <mission-issue> is the tracking issue number that sequences this mission's
-nodes (see notes/multi-agent-playbook.md, "The harness" and "Node
+nodes (see docs/process/multi-agent-playbook.md, "The harness" and "Node
 specification structure"). It may also be given as the MISSION_ISSUE
 environment variable. The script reads the issue body directly from GitHub —
 it never reads a local mission directory or a plan.json, and it needs no git

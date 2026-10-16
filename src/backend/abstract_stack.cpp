@@ -183,8 +183,8 @@ LocalCfg buildCfg(const std::vector<DecodedInstruction>& ins) {
 //
 // Every entry here is grounded in a specific vm.cpp handler, not derived
 // from a naive opcode-to-instruction lookup table (see
-// notes/bytecode-translation-problems.md for why that framing is wrong).
-// Two shapes recur:
+// docs/reference/bytecode-translation-problems.md for why that framing is
+// wrong). Two shapes recur:
 //   - "shuffle": pop N, push 1 *new* cell (SET_PROPERTY, SET_INDEX, CALL,
 //     BUILD_LIST/MAP, ...) — assignment-as-expression (P2) or an
 //     aggregate result. The pushed cell is a temporary; nothing here
@@ -525,8 +525,8 @@ void chaseSlotsDownward(int originIdx, int topSlot,
 // a counter-example defeated): whether a POP discards a named local or a
 // compiler temporary cannot be read off the POP itself. `{ var a = 1; }`
 // and `1;` compile to byte-identical chunks with opposite source truth
-// (see notes/jvm-emission-contract.md), so no reference-driven rule can
-// recover it; this analysis needs a canonical rule instead. The rule is a
+// (see docs/reference/jvm-emission-contract.md), so no reference-driven rule
+// can recover it; this analysis needs a canonical rule instead. The rule is a
 // *persistence test*: walk
 // backward from the POP for the cell it discards, looking for a **cover
 // witness** — some instruction that later pushed a new value directly on

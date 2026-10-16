@@ -179,8 +179,8 @@ static Value setFieldNative(int /*argc*/, Value* argv) {
 // or File method), or a closure-backed method — a user-defined method or a
 // closure/bound method stored in a field — through the Runtime's bounded
 // re-entrant call primitive (Runtime::invokeCallableFromNative;
-// notes/expressiveness-roadmap.md item 1). A Class or Enum constructor value
-// stays unsupported, and any other value is not callable at all.
+// docs/decisions/expressiveness-roadmap.md item 1). A Class or Enum constructor
+// value stays unsupported, and any other value is not callable at all.
 static Value callMethodNative(int argCount, Value* argv) {
     if (argCount < 2) {
         nativeRuntimeError("Expected at least 2 arguments.");

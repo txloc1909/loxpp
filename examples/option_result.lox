@@ -44,7 +44,7 @@ fun double(x) { return x * 2; }
 
 // Render an Option for printing. A match is used here through a function call,
 // not inline as `... + match {...}`: a match expression fed straight into `+`
-// is a known cross-backend gap (notes/bytecode-translation-problems.md), so
+// is a known cross-backend gap (docs/reference/bytecode-translation-problems.md), so
 // the result goes through a helper, which every backend compiles.
 fun showOpt(o) {
     return match o {

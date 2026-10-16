@@ -1,6 +1,6 @@
 export const meta = {
   name: 'backend-dag',
-  description: 'Drive a DAG of backend implementation nodes to green, one PR per node, via implementer/reviewer/researcher agents. See notes/multi-agent-playbook.md.',
+  description: 'Drive a DAG of backend implementation nodes to green, one PR per node, via implementer/reviewer/researcher agents. See docs/process/multi-agent-playbook.md.',
   whenToUse: 'Building a new Lox++ compiler backend (or any DAG-shaped, node-by-node implementation effort) with a multi-agent implementer/reviewer/researcher loop.',
   phases: [
     // meta.phases must stay a literal, so it cannot be derived from
@@ -23,7 +23,7 @@ export const meta = {
 
 // ---------------------------------------------------------------------------
 // Mission configuration — supplied by the caller via `args`, not hardcoded.
-// See notes/multi-agent-playbook.md for what each of these means and for the
+// See docs/process/multi-agent-playbook.md for what each of these means and for the
 // node specification shape (a GitHub issue's body: Deliverable, Scope,
 // Checkpoint, Hazards) that issueViewCmd() must return. Never read an issue
 // or a PR with `--comments`: without a terminal that form drops the body.
@@ -57,8 +57,8 @@ const NODES = cfg.nodes
 // Human-readable label for what makes an analysis node's knowledge "foreign"
 // — e.g. 'JVM', 'QBE' — used only in the reviewer's checklist wording.
 const TARGET_LABEL = cfg.targetLabel || 'target-specific'
-const DAG_DOC = cfg.dagDoc || (REPO + '/notes/backend-implementation-dag.md')
-const OPCODE_DOC = cfg.opcodeDoc || (REPO + '/notes/bytecode-translation-problems.md')
+const DAG_DOC = cfg.dagDoc || (REPO + '/docs/records/backend-implementation-dag.md')
+const OPCODE_DOC = cfg.opcodeDoc || (REPO + '/docs/reference/bytecode-translation-problems.md')
 
 // Non-TTY-safe readers. `gh issue view --comments` and `gh pr view
 // --comments` print only the comment list when stdout is not a terminal, so
@@ -207,7 +207,7 @@ function common(id) {
     '  3. ' + DAG_DOC,
     '  4. ' + OPCODE_DOC + '  (authoritative opcode semantics)',
     '  5. ' + REPO + '/AGENTS.md',
-    '  6. ' + REPO + '/notes/multi-agent-playbook.md',
+    '  6. ' + REPO + '/docs/process/multi-agent-playbook.md',
     '',
     'If any of these is missing or unreadable, or either issue-read command itself',
     'fails (non-zero exit, empty output), STOP immediately and report status "blocked_surprise" with',

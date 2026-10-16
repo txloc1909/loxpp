@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the markdown table blocks for notes/benchmark_report_*.md from the
+"""Render the markdown table blocks for docs/records/benchmark_report_*.md from the
 run.py and profile.py JSON output.
 
   python3 benchmarks/report_tables.py results/run.json results/profile.json

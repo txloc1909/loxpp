@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Builds the JVM runtime library with plain javac + jar. The dev-managed image
-# has no maven and no gradle (see notes/backend-implementation-dag.md), so the
+# has no maven and no gradle (see docs/records/backend-implementation-dag.md), so the
 # build is two direct toolchain calls and nothing else.
 set -euo pipefail
 

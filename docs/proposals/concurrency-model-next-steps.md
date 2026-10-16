@@ -1,8 +1,10 @@
 # Concurrency Model: Next Steps
 
+**Status:** proposal. Item 6, the concurrency go/no-go, is not decided.
+
 ## Why this note
 
-`expressiveness-roadmap.md` flags true parallelism (item 7) as the only
+`docs/decisions/expressiveness-roadmap.md` flags true parallelism (item 7) as the only
 un-bootstrappable capability gap, and says its concurrency *model* must be
 decided before building toward it — late choice means redoing the GC, FFI
 thread-safety, and the profiler. This note pins down the sequence of actions
@@ -12,7 +14,7 @@ work-stealing scheduler) as one candidate among others for that decision.
 ## Summary of the trade-off
 
 **For adopting Go's model specifically:** it's the best-documented point in the
-design space already surveyed in `concurrency_in_bytecode_vms.md`; CSP channels
+design space already surveyed in `docs/reference/concurrency_in_bytecode_vms.md`; CSP channels
 extend the share-nothing/copy-by-value stance the roadmap already committed to;
 goroutines reuse the suspend/resume machinery item 5 (coroutines) requires
 anyway; M:N scheduling suits lightweight script-like tasks better than 1:1 OS
@@ -40,7 +42,7 @@ instead of upfront guesswork.
 ## Actionable items
 
 1. **Write a decision doc before touching code. DONE.**
-   `notes/concurrency-model-decision.md` scores CSP (Go) vs. actor/isolated-heap
+   `docs/proposals/concurrency-model-decision.md` scores CSP (Go) vs. actor/isolated-heap
    (BEAM) vs. OS-threads (JVM) against Lox++'s actual constraints: the
    share-nothing/copy-by-value stance already adopted, the single
    non-thread-safe `MemoryManager` per `VM`, and the implementation reality:
@@ -61,7 +63,7 @@ instead of upfront guesswork.
    bytecode references.
 
 4. **Fix or explicitly defer the profiler coupling** flagged in
-   `profiler-concurrency-notes.md` while coroutines land: decide now whether
+   `docs/reference/profiler-concurrency-notes.md` while coroutines land: decide now whether
    `m_frames[]`/`m_profilerScopes[]` become per-fiber, or track a follow-up —
    don't let them stay silently globally-indexed once multiple stacks exist.
 
@@ -79,6 +81,6 @@ instead of upfront guesswork.
    building on it before evidence exists is exactly the ordering the roadmap
    warns against.
 
-8. **Track the whole sequence as a mission**, per `multi-agent-playbook.md`
+8. **Track the whole sequence as a mission**, per `docs/process/multi-agent-playbook.md`
    conventions, rather than a single PR — it spans multiple decision points
    and at least one full feature before the concurrency model is finalized.

@@ -4,10 +4,10 @@
 // flow and verifier legality), P5 (functions and calls), P4b (closures and
 // upvalues), P4 (classes/methods/super), aggregates and for-in, and P8
 // (match/enum dispatch proper: GET_TAG, JUMP_TABLE, enum-ctor CONSTANT) — see
-// notes/bytecode-translation-problems.md for what each P-number means. Match/
-// enum dispatch carries its own residue: a `match` expression's result can
-// reach ANY consumer opcode as a value the native VM treats as already on the
-// operand stack, when the abstract-stack analysis (abstract_stack.cpp)
+// docs/reference/bytecode-translation-problems.md for what each P-number means.
+// Match/enum dispatch carries its own residue: a `match` expression's result
+// can reach ANY consumer opcode as a value the native VM treats as already on
+// the operand stack, when the abstract-stack analysis (abstract_stack.cpp)
 // instead folded it into a named local (compileMatchBody's own "fused local/
 // operand-stack model").
 //
@@ -39,13 +39,14 @@
 // sibling operand first, so native answers this shape correctly, but this
 // file's own repair was not extended to match it — `normalizeFoldedOperands`
 // throws a named error citing this file for that case instead of guessing.
-// `notes/bytecode-translation-problems.md`'s own GAP entry records the
+// `docs/reference/bytecode-translation-problems.md`'s own GAP entry records the
 // measurement.
 //
 // A separate, REACHABLE gap exists outside this file: `and`/`or` over a
 // folded `match` operand fails at analysis time, in abstract_stack.cpp,
 // before this pass ever runs — a deliberately deferred gap (see the GAP
-// entry in notes/bytecode-translation-problems.md for the full account).
+// entry in docs/reference/bytecode-translation-problems.md for the full
+// account).
 //
 // A third, REACHABLE gap exists inside this file. When a folded match result
 // is one operand of a consumer that itself sits at an `and`/`or` join label,
@@ -54,14 +55,14 @@
 // estimates for the join and refuses instead of guessing — even though
 // `deficit == 1` and `build/loxpp` answers the program correctly. `print
 // (match A() {case A => 1 case B => 2}) + (true and 5);` is one repro; see
-// the GAP entry in notes/bytecode-translation-problems.md for the rest. The
-// failure is loud, not silent, and no required gate reaches it. The real fix
-// is per-edge merge verification, a known residue from an earlier design
-// pass, still outside this file's scope.
+// the GAP entry in docs/reference/bytecode-translation-problems.md for the
+// rest. The failure is loud, not silent, and no required gate reaches it. The
+// real fix is per-edge merge verification, a known residue from an earlier
+// design pass, still outside this file's scope.
 //
 // This file also lowers BUILD_LIST/GET_INDEX/SET_INDEX ahead of the rest of
 // the aggregates/for-in scope they conceptually belong to
-// (notes/backend-implementation-dag.md), because the closures/upvalues
+// (docs/records/backend-implementation-dag.md), because the closures/upvalues
 // checkpoint (test/translation-probes/V1_fresh_cell.lox, V3_loopvar.lox)
 // cannot run to completion without them: both build a list of the closures
 // under test and read it back by index. The rest of that scope layers on

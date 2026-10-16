@@ -1,7 +1,7 @@
 # Concurrency Model Decision
 
-**Status: provisional scoring only. This doc does not pick the shipping
-model.** The final go/no-go is `concurrency-model-next-steps.md` item 6, taken
+**Status:** proposal. Provisional scoring only; this doc does not pick the
+shipping model. The final go/no-go is `concurrency-model-next-steps.md` item 6, taken
 after coroutines ship and their real suspend/resume cost is known. This doc is
 the artifact item 6 revises.
 
@@ -11,7 +11,7 @@ the artifact item 6 revises.
 the three candidate models — CSP (Go), actor/isolated-heap (BEAM), and OS
 threads (JVM) — against Lox++'s actual constraints, before any code is written.
 The point is to make the model choice deliberate, per the `AGENTS.md` planning
-policy and `expressiveness-roadmap.md`'s "build item 7 last, choose its model
+policy and `docs/decisions/expressiveness-roadmap.md`'s "build item 7 last, choose its model
 first."
 
 Two questions are separated here, because they have different answers:
@@ -68,12 +68,12 @@ machinery.
 **C4 — `FrameSync` is the existing suspend/resume seam.**
 The register-cached `ip` is flushed into `frame->ip` on guard construction and
 reloaded from the top of `m_frames` on destruction
-(`FrameSync` in `src/vm.cpp`). `notes/benchmark_report_2026-08-26.md:391` records that
+(`FrameSync` in `src/vm.cpp`). `docs/records/benchmark_report_2026-08-26.md:391` records that
 `yield` must "flush, save the frame/stack slice, and reload on resume" at this
 same seam. Whatever the model, stackful suspension reuses this.
 
 **C5 — The native VM decides; the other backends conform by role.**
-The roles are in `AGENTS.md` ("Backend roles"). The native VM is the product
+The roles are in `VISION.md` ("The backends"). The native VM is the product
 and the reference. The JVM is a semantic oracle and is never shipped. QBE is an
 experiment. The bootstrap interpreter is a capability test that must match
 native. The facts below describe the implementations; the roles decide what
@@ -85,7 +85,7 @@ and the self-hosted tree-walking interpreter
 (`bootstrap/loxpp_interpreter.lox`). The CLR backend was deleted at the QBE
 parity gate (#489, #491).
 **QBE is not an independent implementation:** it reuses the native runtime
-(`notes/qbe-backend.md:34-44`), so native-vs-QBE output checks code generation,
+(`docs/decisions/qbe-backend.md:34-44`), so native-vs-QBE output checks code generation,
 not runtime semantics; only the JVM checks runtime behavior independently. The
 three independent surfaces for any language feature are therefore native/QBE,
 the JVM, and the bootstrap. `tools/diff_runtimes.py` compares them, so any
@@ -97,7 +97,7 @@ host-scheduler access of its own.
 `m_profilerScopes[]` is parallel to `m_frames[]` (both in `src/runtime.h`), and the
 clock is process-wide `CLOCK_PROCESS_CPUTIME_ID` (`src/profiler.h:66-70`). A
 fiber/task model forces these per-task; an isolated-task model gives each task
-its own `ProfilerData` (`notes/profiler-concurrency-notes.md:26-43`). The
+its own `ProfilerData` (`docs/reference/profiler-concurrency-notes.md:26-43`). The
 profiler is `#ifdef`-guarded, so it does not constrain data structures with
 `LOXPP_PROFILE=OFF`, but it forces the stack-ownership question early.
 
@@ -105,21 +105,21 @@ profiler is `#ifdef`-guarded, so it does not constrain data structures with
 `Value` is a NaN-boxed `Obj*` (`src/value.h`); `ObjList`/`ObjMap` hold
 heap storage on the VM allocator (`src/container_objects.h`).
 The roadmap's "share-nothing on maps + primitives" stance
-(`expressiveness-roadmap.md:37-40`) describes message *payloads*, but no deep
+(`docs/decisions/expressiveness-roadmap.md:37-40`) describes message *payloads*, but no deep
 copy, serialization, or immutable-value facility exists yet. Every
 message-passing model needs one; a shared-memory model needs it for nothing but
 still needs a memory model.
 
 **C8 — No concurrent GC groundwork exists.**
 Collection is stop-the-world mark-sweep over `allObjects`
-(`src/memory_manager.h`). `notes/benchmark_report_2026-08-26.md:396`
+(`src/memory_manager.h`). `docs/records/benchmark_report_2026-08-26.md:396`
 records that GC item 11 (generational/incremental) must wait for this model
 go/no-go because the model sets the collector's shape.
 
 **C9 — QBE compiles each Lox call to a real C frame.**
 The QBE backend keeps clox's fused stack: a call passes a pointer to the callee's
 stack window, and each Lox call uses a real C frame, with overflow checked
-against `kFramesMax` on the C stack (`notes/qbe-backend.md:50-68,245-251`).
+against `kFramesMax` on the C stack (`docs/decisions/qbe-backend.md:50-68,245-251`).
 This is natural for a model whose unit is a whole task-owned stack, but hostile
 to mid-frame stackful suspension: `yield` and goroutine switches would need
 either a separate C stack per task or suspend points that unwind out of every
@@ -196,7 +196,7 @@ which `tools/diff_runtimes.py` exists to prevent.
 ## Per-backend mapping
 
 The CLR column is omitted: the backend was deleted at QBE parity gate S7
-(`notes/qbe-backend.md:292`). QBE shares the native runtime, so the two are
+(`docs/decisions/qbe-backend.md:292`). QBE shares the native runtime, so the two are
 listed separately only where their code shapes differ.
 
 | Model | Native C++ VM | QBE backend | JVM backend | Bootstrap interpreter |
@@ -230,15 +230,15 @@ explicitly rather than discovered in CI.
    Go-style scheduler and isolated per-task heaps.
 4. **Keep GC item 11, scheduler work, channels, and FFI thread-safety blocked**
    until item 6 returns an explicit go/no-go (`concurrency-model-next-steps.md`
-   items 6-7; `benchmark_report_2026-08-26.md:396`).
+   items 6-7; `docs/records/benchmark_report_2026-08-26.md:396`).
 
 ## What item 6 must produce
 
 - The measured cost of item 5's suspend/resume: per-yield overhead, stack-slice
   size, and what growable/segmented stacks add to the single `CALL`-site depth
-  check (`benchmark_report_2026-08-26.md:397`).
+  check (`docs/records/benchmark_report_2026-08-26.md:397`).
 - A decision on stack ownership (per-VM, per-task, or per-OS-thread) and heap
-  ownership (shared or isolated), as `profiler-concurrency-notes.md:63-70`
+  ownership (shared or isolated), as `docs/reference/profiler-concurrency-notes.md:63-70`
   requires.
 - A cross-implementation feasibility check — native/QBE, JVM, and bootstrap —
   with any implementation-gated exception named in `spec/` before
@@ -252,24 +252,24 @@ explicitly rather than discovered in CI.
 
 - No GC redesign. The collector shape follows the model decision.
 - No scheduler, channel API, or thread primitive.
-- No FFI thread-safety work; `expressiveness-roadmap.md:118-119` requires FFI to
+- No FFI thread-safety work; `docs/decisions/expressiveness-roadmap.md:118-119` requires FFI to
   be designed after the model.
 - No `spec/` change. This doc records reasoning only.
 
 ## References
 
-- `notes/concurrency-model-next-steps.md` — the sequence this doc belongs to;
+- `docs/proposals/concurrency-model-next-steps.md` — the sequence this doc belongs to;
   item 6 revisits it.
-- `notes/actor-model-design.md` — the open problems that remain once the actor
+- `docs/proposals/actor-model-design.md` — the open problems that remain once the actor
   model is committed, framed as the questions item 6 must answer.
-- `notes/concurrency_in_bytecode_vms.md` — design space, literature, and GC
+- `docs/reference/concurrency_in_bytecode_vms.md` — design space, literature, and GC
   options per model.
-- `notes/profiler-concurrency-notes.md` — profiler impact by model.
-- `notes/expressiveness-roadmap.md` — item 5 (coroutines) and item 7
+- `docs/reference/profiler-concurrency-notes.md` — profiler impact by model.
+- `docs/decisions/expressiveness-roadmap.md` — item 5 (coroutines) and item 7
   (parallelism), and the share-nothing messaging stance.
-- `notes/benchmark_report_2026-08-26.md` §5 item 11 and "Dependencies on the
+- `docs/records/benchmark_report_2026-08-26.md` §5 item 11 and "Dependencies on the
   expressiveness roadmap" — why GC waits for this decision.
-- `notes/qbe-backend.md` — the QBE backend that replaced CLR at parity gate
+- `docs/decisions/qbe-backend.md` — the QBE backend that replaced CLR at parity gate
   S7, its reuse of the native runtime, and its real-C-frame code shape.
 - `spec/README.md` — the implementation-independent contract every target must
   satisfy.

@@ -11,7 +11,7 @@
 // only a match arm reaches it). Each match below stays a discarded
 // statement: a *consumed* match (assigned, printed, returned) does not yet
 // emit at all, on any target, and that gap belongs to the match/enum dispatch
-// work (see notes/backend-implementation-dag.md).
+// work (see docs/records/backend-implementation-dag.md).
 
 var xs = [1, 2, 3];
 var a = xs[0];

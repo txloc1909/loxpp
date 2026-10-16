@@ -1,8 +1,10 @@
 # Coroutines / generators: design record
 
+**Status:** accepted. Implemented under mission #523.
+
 ## Why
 
-`notes/expressiveness-roadmap.md` item 5: single-core suspension (coroutines
+`docs/decisions/expressiveness-roadmap.md` item 5: single-core suspension (coroutines
 / generators). The primitive is stackful suspend + `yield`. Lazy and infinite
 sequences, async I/O, cooperative scheduling, and suspendable custom
 iterators all build on it. This note records the design decisions behind the
@@ -105,9 +107,9 @@ gate for that directory.
 
 ## References
 
-- `notes/expressiveness-roadmap.md` item 5.
-- `notes/concurrency-model-decision.md` C1–C9.
-- `notes/concurrency-model-next-steps.md` items 2–5.
-- `notes/non-local-control-flow-retro.md` — the process rules this mission
-  follows (five at the time; rule 6 came from `notes/coroutines-retro.md`).
+- `docs/decisions/expressiveness-roadmap.md` item 5.
+- `docs/proposals/concurrency-model-decision.md` C1–C9.
+- `docs/proposals/concurrency-model-next-steps.md` items 2–5.
+- `docs/records/non-local-control-flow-retro.md` — the process rules this mission
+  follows (five at the time; rule 6 came from `docs/records/coroutines-retro.md`).
 - Tracking issue #523; node issue #524.

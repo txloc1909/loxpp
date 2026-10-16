@@ -22,7 +22,7 @@ namespace qbe {
 // Every bit pattern this file bakes into a .ssa literal (QNAN, VAL_NIL,
 // VAL_TRUE, VAL_FALSE, OBJ_TAG) is the NaN-boxed Value layout.
 static_assert(sizeof(Value) == 8, "qbe_emitter requires the 8-byte NaN-boxed "
-                                  "Value (notes/qbe-backend.md)");
+                                  "Value (docs/decisions/qbe-backend.md)");
 
 namespace {
 
@@ -53,7 +53,7 @@ constexpr int kCatchStateBase = 0x40000000;
 [[noreturn]] void unsupported(Op op) {
     throw std::runtime_error(
         "qbe_emitter: opcode not supported by this node (S3 straight-line "
-        "code and jumps, notes/qbe-backend.md): " +
+        "code and jumps, docs/decisions/qbe-backend.md): " +
         opName(op));
 }
 
@@ -111,8 +111,8 @@ class Emitter {
             m_reachedAt.emplace(fn.instructions[i].offset, analysis.reached[i]);
             m_activeHandlerAt.emplace(fn.instructions[i].offset,
                                       m_handlerDepth.activeHandler[i]);
-            // Q3 (notes/qbe-backend.md): the high-water mark over every
-            // REACHED instruction's raw height (locals and temporaries
+            // Q3 (docs/decisions/qbe-backend.md): the high-water mark over
+            // every REACHED instruction's raw height (locals and temporaries
             // together — StackState::height, not operandDepth()) is this
             // function's own worst-case slot usage. Skipping unreached
             // instructions matches leaderReached()'s own treatment of the
@@ -255,7 +255,7 @@ class Emitter {
     }
 
     // Address of the stack cell at `height` (clox's fused-stack model,
-    // notes/qbe-backend.md's central design choice): base + 8*height.
+    // docs/decisions/qbe-backend.md's central design choice): base + 8*height.
     std::string addr(int height) {
         std::string t = newTemp();
         m_body << "\t" << t << " =l add %base, " << (height * 8) << "\n";
@@ -285,8 +285,8 @@ class Emitter {
         m_body << "\t" << dest << " =l loadl " << address << "\n";
     }
 
-    // Q1 (notes/qbe-backend.md): write every promoted slot currently in a
-    // register back to its stack cell before an allocating or unwinding
+    // Q1 (docs/decisions/qbe-backend.md): write every promoted slot currently
+    // in a register back to its stack cell before an allocating or unwinding
     // call. The GC scans stack..stackTop only, so a value held just in a QBE
     // SSA temp would otherwise be invisible at the safe point. m_cur holds
     // only in-scope slots, so each store lands in that slot's own cell. It
@@ -620,7 +620,7 @@ class Emitter {
 
     // Emitted once, at the very top of every compiled function, before its
     // first cfg block: checks this function's own analyzed max stack height
-    // (m_maxHeight) against STACK_MAX (Q3, notes/qbe-backend.md —
+    // (m_maxHeight) against STACK_MAX (Q3, docs/decisions/qbe-backend.md —
     // Runtime::checkStackOverflow's own comment, runtime.h, explains why
     // compiled code needs a check push() never gives it). QBE requires
     // every block to end in an explicit terminator — no implicit
@@ -1467,8 +1467,8 @@ class Emitter {
             "qbe_emitter: block with an unsupported branch shape");
     }
 
-    // P8 (bytecode-translation-problems.md, notes/qbe-backend.md hazard
-    // Q8/P8): QBE's only terminators are jmp/jnz/ret — no switch, no
+    // P8 (bytecode-translation-problems.md, docs/decisions/qbe-backend.md
+    // hazard Q8/P8): QBE's only terminators are jmp/jnz/ret — no switch, no
     // indirect jump. Lowers JUMP_TABLE to a compare chain: one `ceqw` +
     // `jnz` per arm, in `ins.jumpTable` order, falling through to the next
     // comparison on a miss and finally to the fallthrough/default block

@@ -3,9 +3,9 @@
 #include <string>
 
 // Compiles `scriptPath` with the QBE backend into a standalone native
-// executable at `exePath` (the pipeline in notes/qbe-backend.md): emit one
-// .ssa translation unit for the whole function tree, generate a harness that
-// embeds the source and the function descriptors, run `qbe`, then link the
+// executable at `exePath` (the pipeline in docs/decisions/qbe-backend.md): emit
+// one .ssa translation unit for the whole function tree, generate a harness
+// that embeds the source and the function descriptors, run `qbe`, then link the
 // result against libloxrt.a. The produced binary carries its own source, so
 // it does not need the .lox file at run time.
 //

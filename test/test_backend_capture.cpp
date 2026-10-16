@@ -1,6 +1,6 @@
 // test_backend_capture.cpp — capture-analysis tests.
 //
-// The checkpoint (see notes/backend-implementation-dag.md): the five
+// The checkpoint (see docs/records/backend-implementation-dag.md): the five
 // ground-truth probes must each get the exact live-range / sharing verdict
 // their disassembly settles, and the pass must not throw over the whole
 // probe/example/bootstrap corpus.

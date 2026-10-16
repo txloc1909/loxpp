@@ -120,5 +120,5 @@ DecodedFunction decodeFunctionTree(ObjFunction* root);
 // chunk it is generating code for, and embeds it next to that function's id
 // and arity; startup recomputes it over the freshly recompiled chunk and
 // the two must agree, or the embedded source and the compiled code have
-// drifted apart (notes/qbe-backend.md, "Startup").
+// drifted apart (docs/decisions/qbe-backend.md, "Startup").
 uint64_t hashChunkBytes(const Chunk& chunk);

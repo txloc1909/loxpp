@@ -1,6 +1,6 @@
 // qbe_emit_probe.cpp — S3's own checkpoint driver (#456,
-// notes/qbe-backend.md). Compiles one Lox++ source file, prints its QBE
-// .ssa text (backend/qbe_emitter.h) to stdout, and the RtFunctionDesc
+// docs/decisions/qbe-backend.md). Compiles one Lox++ source file, prints its
+// QBE .ssa text (backend/qbe_emitter.h) to stdout, and the RtFunctionDesc
 // triple (id, arity, chunkHash — backend/rt_capi.h) the checkpoint's
 // harness needs to attach the assembled code, as one space-separated line
 // on stderr. Rejects (exit 70) a program that declares any function or

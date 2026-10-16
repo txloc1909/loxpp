@@ -1,9 +1,9 @@
 #pragma once
 
 // How many operand-stack cells `src/vm.cpp` pops for one instruction —
-// target-independent (P1/P2, notes/bytecode-translation-problems.md): a fact
-// about the native VM's own bytecode semantics, not about any backend's own
-// lowering. Every backend that reconstructs a folded operand (the shared
+// target-independent (P1/P2, docs/reference/bytecode-translation-problems.md):
+// a fact about the native VM's own bytecode semantics, not about any backend's
+// own lowering. Every backend that reconstructs a folded operand (the shared
 // abstract-stack analysis, abstract_stack.h, can fold a value into a named
 // local instead of leaving it as a genuine operand-stack temporary) needs
 // this same count, so it lives here once rather than once per backend.
