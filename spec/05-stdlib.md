@@ -760,8 +760,8 @@ Returns the number of messages in the mailbox of the current task.
 
 ## Blocking calls
 
-A **blocking call** waits for something outside the program: a user, the
-network, another process, or time. It blocks the worker that makes it, every
+A **blocking call** waits for another party outside the program: a user
+at standard input, the network, another process, or time. It blocks the worker that makes it, every
 task on that worker, and nothing else (see [§04-semantics, Suspend
 Points](04-semantics.md#suspend-points)). Each blocking call is a suspend
 point of the task that makes it. The section of each blocking call says
@@ -793,7 +793,10 @@ point of the task that makes it. The section of each blocking call says
 | `Process.wait()` | the child to exit |
 
 Every other call in this chapter is not a blocking call and is not a
-suspend point, even when it takes time. `task.receive()` suspends its task
+suspend point, even when it takes time. This includes every File call, also
+on a path such as a FIFO or `/dev/stdin` where the operating system can make
+it wait: a program that reads such a path blocks its worker, but the call is
+not a suspend point. `task.receive()` suspends its task
 but does not block the worker, so it is not in this table.
 
 ---

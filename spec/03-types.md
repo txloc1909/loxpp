@@ -289,11 +289,12 @@ A handle to a task, produced by `task.spawn`, `task.spawn_worker`, and
 worker and owns one mailbox. See [§04-semantics, Workers and
 Tasks](04-semantics.md#workers-and-tasks) for the full rules.
 
-A Task value is an identity, not a container. A program can do exactly
-three things with it: send to the task it names (`task.send`), compare it
-with `==`, and turn it into its canonical string form. Nothing else about
-the task is observable through the handle: not its state, not its worker,
-not the length of its mailbox. The one exception is that a send to a task
+A Task value is an identity, not a container. A program can send to the
+task it names (`task.send`), compare the handle with `==`, and use the
+handle as any value: test its truthiness, read `type()`, and turn it into
+its canonical string form. Nothing else about the task is observable
+through the handle: not its state, not its worker, not the length of its
+mailbox. The one exception is that a send to a task
 that has ended raises `DeadTaskError`.
 
 Two Task values are equal when they name the same task. This holds for a
@@ -361,10 +362,10 @@ table below gives the rule for every kind:
 | `Socket` | never | It holds a resource of one worker. |
 | `Server` | never | It holds a resource of one worker. |
 | `Process` | never | It holds a resource of one worker. |
-| `Error` | never | Not in the message rule; a program sends its `kind` and `message` fields instead. |
+| `Error` | never | It is an object the runtime makes for one fault; a program sends its `kind` and `message` Strings instead. |
 | `Coroutine` | never | Its state can change. |
 | `Iterator` | never | Its position can change. |
-| `EnumConstructor` | never | Not in the message rule; a program sends a value it builds. |
+| `EnumConstructor` | never | Every worker has its own constructors from the same declaration; a program sends a value it builds. |
 
 **The property is fixed when the value is made.** Whether a value is a
 message is decided when the value is constructed, and it never changes

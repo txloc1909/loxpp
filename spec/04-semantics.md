@@ -1462,6 +1462,13 @@ returns the handle of that task. The caller continues at once.
    declaration that made `fn`, with `msg` as its one argument, exactly as an
    ordinary call.
 
+Steps 3 and 4 run in the new task. A fault while the new worker defines a
+declaration — for example a `class D < Base` where `Base` is a top-level
+`var`, so the name is undefined there — is a fault of that task. It occurs
+before the entry runs, and it ends the program as every uncaught fault of a
+task does (see [Ending](#ending)). `task.spawn_worker` has already returned
+in the caller.
+
 The two workers share nothing that can change. A write to a global variable
 on one worker is not visible on another.
 
