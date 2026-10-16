@@ -60,7 +60,7 @@ reused native's "it's all interpreted anyway" intuition and hid QBE's one hard
 part.
 
 **3. The governing constraint was on record but never pulled down to node
-granularity.** `docs/proposals/concurrency-model-decision.md` C9 (lines 107–116) says
+granularity.** `docs/decisions/concurrency-model-decision.md` C9 (lines 107–116) says
 QBE's real-C-frame model is "hostile to mid-frame stackful suspension: suspend
 points [would need] to unwind out of every compiled frame… Any suspend/GC-root
 design must be proven on QBE, not only in the interpreter loop," and its
@@ -125,7 +125,7 @@ Proposed as a sixth rule for the list in `non-local-control-flow-retro.md`
    not only against native output; a probe that passes on the native primitive
    proves nothing about a backend whose fallback boundary the probe crosses.
    Corollary: re-apply the strategic constraint list (here the C-list in
-   `docs/proposals/concurrency-model-decision.md`) at each node, not only at mission
+   `docs/decisions/concurrency-model-decision.md`) at each node, not only at mission
    top — C9 named this exact hazard and was not consulted when node 7 was
    scoped.
 
@@ -136,5 +136,5 @@ Proposed as a sixth rule for the list in `non-local-control-flow-retro.md`
   change that resolved both), #564 (the proposed rule 6).
 - Design records: `docs/decisions/coroutines.md` (coroutine design),
   `docs/decisions/qbe-backend.md` (QBE backend; the real-C-frame model C9 cites),
-  `docs/proposals/concurrency-model-decision.md` (C9 and the item-5 implications).
+  `docs/decisions/concurrency-model-decision.md` (C9 and the item-5 implications).
 - Prior retro whose rule list this extends: `docs/records/non-local-control-flow-retro.md`.
