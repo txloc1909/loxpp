@@ -194,6 +194,7 @@ release tarball ships `libloxrt.a` beside the `loxpp` binary. Set `LOX_RT_A`,
 
 | Resource | Contents |
 |---|---|
+| [`VISION.md`](VISION.md) | What the language is for, and the direction it develops in |
 | [`spec/`](spec/) | Full language specification — lexical rules, grammar, type system, semantics, stdlib |
 | [`examples/`](examples/) | 40+ runnable programs: algorithms, OOP, pattern matching, file I/O |
 | [`bootstrap/loxpp_interpreter.lox`](bootstrap/loxpp_interpreter.lox) | A complete Lox++ interpreter written in Lox++ itself |
@@ -263,7 +264,7 @@ definitions, and references. Navigation is limited to one file. Rename and
 formatting are not supported.
 
 Design, the `loxpp --check` contract, the LSP capability set, and the
-feature-parity table: [`notes/editor-tooling.md`](notes/editor-tooling.md).
+feature-parity table: [`docs/decisions/editor-tooling.md`](docs/decisions/editor-tooling.md).
 
 ---
 

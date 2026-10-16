@@ -1,5 +1,5 @@
 // test_backend_abstract_stack.cpp — abstract-stack reconstruction tests
-// (see notes/backend-implementation-dag.md).
+// (see docs/records/backend-implementation-dag.md).
 //
 // Checkpoint for this pass:
 //   1. 01_assign_local: the POP at offset 8 is TEMP; the POP at offset 12 is

@@ -1,6 +1,6 @@
 // test_backend_cfg.cpp — leaders-algorithm CFG recovery tests.
 //
-// The checkpoint (see notes/backend-implementation-dag.md):
+// The checkpoint (see docs/records/backend-implementation-dag.md):
 //   1. 05_for.lox's top-level chunk has exactly 2 back edges and 1
 //      unconditional forward skip, and its leaders are exactly {0, 3, 12, 16,
 //      28, 34}.

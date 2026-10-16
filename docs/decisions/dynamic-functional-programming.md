@@ -1,5 +1,8 @@
 # Dynamic Functional Programming — Direction
 
+**Status:** accepted. The direction was decided in #583 (2026-10-08). It
+closes #556 and #557.
+
 ## Why this note
 
 Enum + pattern matching were added to make the self-hosted interpreter
@@ -77,7 +80,7 @@ feature is a success, and dynamic FP is the lane with room left to run.
 Since this note, the language moved toward imperative and system features, not
 FP ergonomics. Two forces explain the drift:
 
-- **The capability litmus test.** `notes/expressiveness-roadmap.md` counts a
+- **The capability litmus test.** `docs/decisions/expressiveness-roadmap.md` counts a
   feature as a gap only if it cannot be bootstrapped from closures + lists +
   maps + recursion + enums + `match`. Under that test every FP ergonomic
   (`map`/`filter`/`reduce`, lambdas, `const`, `Result`/`Option`, modules) is a
@@ -92,7 +95,7 @@ FP ergonomics. Two forces explain the drift:
   cheap to add uniformly.
 
 The second force rested on a wrong premise: the backends are not equal
-products. Under the backend roles in `AGENTS.md`, a feature is owed by the
+products. Under the backend roles in `VISION.md`, a feature is owed by the
 native VM and the bootstrap interpreter. The JVM owes it only as a semantic
 oracle, and QBE only when an experiment needs it. A feature that is a compiler
 rewrite, such as a pipe operator, costs the native compiler and the bootstrap
@@ -109,7 +112,7 @@ FP-as-library was the intended outcome all along ("combinators as plain library
 code"). Three things a library cannot cross, and their verdicts:
 
 - **TCO — the real blocker.** Recursion-heavy FP exhausts the VM frame budget
-  (`notes/bootstrap-stack-depth.md`). A library cannot add it. Tracked: #555.
+  (`docs/reference/bootstrap-stack-depth.md`). A library cannot add it. Tracked: #555.
 - **`__bool__` truthiness — decided against.** Only `false` and `nil` are
   falsy; `None()` is truthy. Clojure sidesteps this with `nil`, Elixir with
   match-only consumption, and Lox++ follows them: consume an `Option` with

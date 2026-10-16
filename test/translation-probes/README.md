@@ -2,7 +2,7 @@
 
 Small Lox++ programs, each chosen so that its *bytecode* isolates one
 translation problem for the JVM/QBE backends. They are the empirical ground for
-`notes/bytecode-translation-problems.md` — read that document alongside these.
+`docs/reference/bytecode-translation-problems.md` — read that document alongside these.
 
 The `Vn_*` probes are **verification** programs: their runtime *output* (not
 just their bytecode) settles a semantic question the disassembly alone leaves
@@ -32,7 +32,7 @@ first *user* local is slot 1.
 ## Index
 
 The `Problem(s)` column maps each probe to the problem IDs in
-`../../notes/bytecode-translation-problems.md`; see the verdict table below for whether
+`../../docs/reference/bytecode-translation-problems.md`; see the verdict table below for whether
 each has an off-the-shelf solution.
 
 | Probe | Isolates | Problem(s) |
@@ -221,4 +221,4 @@ which is exactly why **P1/P3/P4 are `SOLVED-WITH-ADAPTATION`** while
 
 > Verdicts are a literature-mapping pass over P1–P8; the full problem statements,
 > evidence, and the implied backend pipeline are in
-> `../../notes/bytecode-translation-problems.md`.
+> `../../docs/reference/bytecode-translation-problems.md`.

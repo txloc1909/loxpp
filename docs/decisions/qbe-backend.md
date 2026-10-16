@@ -1,6 +1,6 @@
 # QBE backend: design proposal
 
-**Status: implemented.** The S0–S8 plan below shipped under mission #462, and
+**Status:** accepted. Implemented: the S0–S8 plan below shipped under mission #462, and
 the CLR backend was deleted at S7's parity gate (#489). The `--target qbe`
 front end and `libloxrt.a` release shipping landed later (#503, #504). The
 "Staged plan" section stays as the build-order record.
@@ -11,7 +11,7 @@ The CLR backend costs about as much to maintain as the JVM backend: a bigger
 emitter (`clr_emitter.cpp`), a bigger runtime (`runtime/clr`), 10 CI
 steps named for the CLR, and a list of CLR-only faults (#238, #316, #415–417, #426).
 It is also dominated on both axes users care about
-(`benchmark_report_2026-08-26.md`): the native VM starts about 25× faster,
+(`docs/records/benchmark_report_2026-08-26.md`): the native VM starts about 25× faster,
 and the JVM runs compute about 6× faster (geomean). Its best remaining
 argument is that it is a third implementation for differential testing.
 
@@ -50,7 +50,7 @@ backend helps find the bug faster; it does not decide which side is right.
 ## The central design choice: keep clox's fused stack
 
 The JVM and CLR backends must un-fuse the clox stack into a local-variable
-array and an operand stack (`bytecode-translation-problems.md`, P1), because
+array and an operand stack (`docs/reference/bytecode-translation-problems.md`, P1), because
 both VMs keep the two apart and verify the operand stack. QBE has no operand
 stack and no verifier. So the QBE backend keeps clox's model:
 
@@ -208,7 +208,7 @@ loxpp --target qbe prog.lox -o prog
 
 ## Translation problems compared with JVM/CLR
 
-P1–P8 refer to `bytecode-translation-problems.md`.
+P1–P8 refer to `docs/reference/bytecode-translation-problems.md`.
 
 | Problem | JVM/CLR | QBE |
 |---|---|---|
@@ -279,7 +279,7 @@ on `bootstrap/loxpp_interpreter.lox` early.
 ## Staged plan
 
 Each stage ends with a check that can be run, in the style of
-`backend-implementation-dag.md`.
+`docs/records/backend-implementation-dag.md`.
 
 | Stage | Deliverable | Checkpoint |
 |---|---|---|

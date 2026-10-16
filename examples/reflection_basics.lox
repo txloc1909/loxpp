@@ -4,7 +4,7 @@
 // Demonstrates: type(), fields(), methods(), getField(), setField(),
 // hasField(). fields()/methods() return their results in unspecified order,
 // so this example reports counts and specific known keys instead of
-// printing the raw lists (see notes/expressiveness-roadmap.md item 1 and
+// printing the raw lists (see docs/decisions/expressiveness-roadmap.md item 1 and
 // test/translation-probes/40_reflection.lox for the same convention).
 
 class Counter {

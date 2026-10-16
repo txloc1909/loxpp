@@ -660,7 +660,7 @@ public final class LoxOps {
 
     // BUILD_LIST's own helper (the JVM emitter lowers this one opcode
     // family ahead of the rest of the aggregates scope it belongs to:
-    // notes/backend-implementation-dag.md — V1_fresh_cell and V3_loopvar,
+    // docs/records/backend-implementation-dag.md — V1_fresh_cell and V3_loopvar,
     // the closures/upvalues checkpoint's own closure-correctness probes,
     // both build and index a list of the very closures under test, so that
     // checkpoint cannot run to completion without it). `elements` arrives in

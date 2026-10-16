@@ -3,7 +3,7 @@
 # Guards the bootstrap interpreter's remaining native call-frame budget.
 # bootstrap/loxpp_interpreter.lox runs on the native VM, so a target
 # program's recursion borrows native's own frames through the interpreter's
-# evaluator (see notes/bootstrap-stack-depth.md, issue #248). Any refactor
+# evaluator (see docs/reference/bootstrap-stack-depth.md, issue #248). Any refactor
 # of the interpreter that adds frames per evaluator cycle shrinks that
 # budget silently. This check keeps the margin.
 #

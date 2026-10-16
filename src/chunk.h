@@ -86,8 +86,8 @@ enum class Op : Byte {
     // catchOffset as an ordinary jump target: the catch entry's operand
     // depth is a *declared* contract (checkpoint depth + 1, for the thrown
     // value), not something discovered via predecessor agreement. See
-    // notes/non-local-control-flow.md and notes/bytecode-translation-
-    // problems.md.
+    // docs/decisions/non-local-control-flow.md and
+    // docs/reference/bytecode-translation-problems.md.
     PUSH_HANDLER,
     POP_HANDLER, // no operands — pops the current handler record
     // no operands — pops the value to raise, unwinds to the nearest

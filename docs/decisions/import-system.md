@@ -1,7 +1,10 @@
 # Import system: design-space note (v0)
 
-**Status: the minimal viable shape below is approved as the frame, plus
-explicit exports. Node issues and a tracking issue follow.** This note maps the design space for an import system under a fixed
+**Status:** accepted. The minimal viable shape below is approved as the
+frame, plus explicit exports (#583, 2026-10-08). Node issues and a tracking
+issue follow.
+
+This note maps the design space for an import system under a fixed
 set of constraints, per `AGENTS.md`'s planning policy, so the trade-offs are on
 the table before any code lands. It does **not** pick a final design; it bounds
 the space and names the residual hard edges.
@@ -34,7 +37,7 @@ These are the earlier hard problems the frame eliminates, and why:
 
 - **No `eval` wall.** Compile-time resolution needs no compiler call from a
   running program. The VM has a bounded re-entrant call path
-  (`concurrency-model-decision.md` C3), but it only calls already-compiled
+  (`docs/proposals/concurrency-model-decision.md` C3), but it only calls already-compiled
   code; nothing can invoke the compiler at run time. Dynamic/lazy import,
   hot-reload, and import-of-a-runtime-path stay out of scope by construction.
 - **No QBE separate-compilation/linker problem.** One whole-program artifact
@@ -42,7 +45,7 @@ These are the earlier hard problems the frame eliminates, and why:
 - **No per-import runtime path search and no cwd-drift at run time.**
 - **Concurrency/actor tension mostly defused.** One whole-program artifact has
   no cross-task shared module singletons to reason about (see
-  `actor-model-design.md`); revisit only if item 7 adopts per-task VMs.
+  `docs/proposals/actor-model-design.md`); revisit only if item 7 adopts per-task VMs.
 
 What remains is a small, bounded space: six axes.
 
@@ -169,7 +172,7 @@ above, and none reopen the `eval` wall.
    scanner/parser on more files —
    far easier than dynamic loading, but the sharpest per-backend lift and the
    one most likely to be under-scoped (the recurring bootstrap blind spot — see
-   `multi-agent-playbook.md`, "scope a mission around every consumer").
+   `docs/process/multi-agent-playbook.md`, "scope a mission around every consumer").
 3. **Bounded tooling tax.** New `import`/`export` syntax across `spec/`
    01/02/04/05, the tree-sitter grammar + queries, three editor syntaxes, a
    cross-file resolver, LSP cross-file go-to-definition + unresolved-import
@@ -188,7 +191,7 @@ above, and none reopen the `eval` wall.
 - Explicit exports give an interface. They do not make a `may-suspend`
   analysis sound: source inclusion shows the compiler every module, so the
   analysis needs no summary. Residual edge 1 is a stack-ownership question
-  that `concurrency-model-decision.md` item 6 must answer. A generator-based
+  that `docs/proposals/concurrency-model-decision.md` item 6 must answer. A generator-based
   stdlib module must not ship before that answer.
 - Import resolution and FFI `.so` loading share one loadable-unit and
   search-path design: the same runtimepath, the same anchoring rule, and the
@@ -258,10 +261,10 @@ carry a precompiled cache of them. The source stays the reference.
   `eval`, deferred.
 - `distribution.md` — single static binary; `libloxrt.a` / `loxrt` component.
 - `coroutines.md` — whole-program QBE coroutine mode (the taint in edge 1).
-- `bytecode-translation-problems.md` — the one-chunk shared pipeline all
+- `docs/reference/bytecode-translation-problems.md` — the one-chunk shared pipeline all
   backends consume.
-- `concurrency-model-decision.md`, `actor-model-design.md` — per-task VM /
+- `docs/proposals/concurrency-model-decision.md`, `docs/proposals/actor-model-design.md` — per-task VM /
   share-nothing, for the eventual item-7 interaction.
-- `multi-agent-playbook.md` ("scope a mission around every consumer") and
-  `coroutines-retro.md` (subset closure, issue #564) — the lessons any import
+- `docs/process/multi-agent-playbook.md` ("scope a mission around every consumer") and
+  `docs/records/coroutines-retro.md` (subset closure, issue #564) — the lessons any import
   mission must apply before scoping nodes.

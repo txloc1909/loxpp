@@ -9,7 +9,7 @@ third (#414, defer semantics), and a fourth wave of unrelated gaps
 parser) all followed before the feature actually stabilized, running
 through 2026-09-24. This note draws process lessons from that history, to
 apply to the next feature with the same shape — coroutines/generators,
-`notes/expressiveness-roadmap.md` item 5, which suspends/resumes across the
+`docs/decisions/expressiveness-roadmap.md` item 5, which suspends/resumes across the
 same shared-bytecode pipeline and will stress the same failure modes
 harder.
 
@@ -211,8 +211,8 @@ backends had each independently under/over-ported.
    bounded. Dynamic dispatch seldom bounds it. Run the research-gate probes
    against the proposed design of each backend on paper, not only against
    native output. Apply the strategic constraint list (here C1–C9 in
-   `notes/concurrency-model-decision.md`) at each node, not only at mission
-   top. The full account is in `notes/coroutines-retro.md` (issue #564).
+   `docs/proposals/concurrency-model-decision.md`) at each node, not only at mission
+   top. The full account is in `docs/records/coroutines-retro.md` (issue #564).
 
    Planning policy in `AGENTS.md` makes the trigger visible: a plan for a
    task scoped by "only", "subset", "fallback" or "phase 1" must state the
@@ -227,8 +227,8 @@ backends had each independently under/over-ported.
 ## Cross-reference
 
 Design doc (intent and the shared-bytecode risk analysis that gated #224):
-`notes/non-local-control-flow.md`. Bug-class detail for the shared JVM/CLR
-translation pipeline specifically: `notes/bytecode-translation-problems.md`.
+`docs/decisions/non-local-control-flow.md`. Bug-class detail for the shared JVM/CLR
+translation pipeline specifically: `docs/reference/bytecode-translation-problems.md`.
 Both are useful for *how* the fixes work; this note is about *why so many
 were needed* — for that, the issue/PR numbers above are the record, not
 these files' prose, which can and does get edited.

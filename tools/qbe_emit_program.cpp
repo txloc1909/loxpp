@@ -1,5 +1,5 @@
 // qbe_emit_program.cpp — S4's own checkpoint driver (#457,
-// notes/qbe-backend.md). Unlike S3's qbe_emit_probe (one function, no
+// docs/decisions/qbe-backend.md). Unlike S3's qbe_emit_probe (one function, no
 // CLOSURE/CALL allowed), this tool compiles a WHOLE Lox++ program — the
 // top-level script plus every function nested inside it, however deep —
 // because CLOSURE/CALL mean a real program is rarely just one function.

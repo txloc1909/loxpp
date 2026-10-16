@@ -12,7 +12,7 @@ so it does not need to be rebuilt from scratch.
 
 The CLR mission reused all four analysis modules the JVM mission built, without
 a change. It therefore paid none of the cost of the JVM mission's two most
-expensive nodes. Read `notes/jvm-emission-contract.md` before you plan a third
+expensive nodes. Read `docs/reference/jvm-emission-contract.md` before you plan a third
 target: the reuse point it names is why the second target skipped that cost
 entirely, even though it opened more PRs overall (`#125`–`#153`, 29 PRs, versus
 `#96`–`#116`'s 21).
@@ -57,9 +57,10 @@ via `args`:
   comment. It does **not** hold per-node specifications — those are GitHub
   issue bodies, one issue per node (see below). A committed local file for
   this (an earlier design of this harness used `briefPath`, a
-  `notes/missions/<name>.md` file) is what #264 set out to remove: mission
-  state belongs in git-hosted, reviewable, permanent GitHub state, not in a
-  file a host can lose or that goes stale the moment the mission closes.
+  `missions/<name>.md` file under the old notes directory) is what #264 set
+  out to remove: mission state belongs in git-hosted, reviewable, permanent
+  GitHub state, not in a file a host can lose or that goes stale the moment
+  the mission closes.
   Treat a missing or unreadable brief (the `gh issue view` call itself
   failing) as a hard failure, not as optional.
 - `nodes` — a map of node id → `{ branch, title, issue }`. `issue` is the
@@ -379,9 +380,10 @@ repository, and give a second one its own clone.
 
 ## A mission's backlog and follow-up work leaves as GitHub issues
 
-`notes/` is for brainstorming and design records only (see `AGENTS.md`'s
-"Backlog and task tracking"); a mission's own backlog lives in GitHub
-Issues, never in a bullet list inside a mission brief or design note.
+`docs/proposals/` is for brainstorming and `docs/decisions/` for design
+records (see `AGENTS.md`'s "Backlog and task tracking" and `docs/README.md`);
+a mission's own backlog lives in GitHub Issues, never in a bullet list
+inside a mission brief or design note.
 
 When an implementer or the orchestrator identifies work that is explicitly
 out of scope for the current DAG — a node descoped from the plan, a
@@ -398,12 +400,12 @@ per discrete item before closing the mission out:
   work still matters — the note keeps the *why*, the issue tracks the *when*
   and *by whom*.
 - **A follow-up mission with several deferred nodes gets a GitHub Project**,
-  not a new `notes/` DAG-plan-shaped list, so the items can be sequenced and
+  not a new DAG-plan-shaped list under `docs/`, so the items can be sequenced and
   tracked the same way an active mission tracks its own nodes through PR and
   review state (see "State comes from persistent storage" above).
 
 This mirrors the mission's own rule for live state: GitHub, not a
-hand-maintained file, is authoritative. A `notes/` design doc may still say
+hand-maintained file, is authoritative. A design record under `docs/` may still say
 *why* something was deferred; it must never be the place where "is this done
 yet" gets answered.
 

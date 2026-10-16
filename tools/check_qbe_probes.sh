@@ -22,7 +22,7 @@
 #
 # No exclusion file: unlike the JVM (LinkedHashMap), the
 # QBE backend reuses native's own Table implementation unchanged (Layer 0,
-# notes/qbe-backend.md), so map iteration order is identical to native by
+# docs/decisions/qbe-backend.md), so map iteration order is identical to native by
 # construction — a QBE/native diff has no permutation-only case to excuse.
 #
 # Requires build/loxpp, build/qbe_emit_program, and build/libloxrt.a already

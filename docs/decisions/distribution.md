@@ -1,5 +1,8 @@
 # Distribution design
 
+**Status:** accepted. The two-package model and the Go-style rules were
+decided in #583 (2026-10-08).
+
 Lox++ ships as a single binary for x86_64 Linux: download, verify, install,
 upgrade. This document records the design decisions that make that channel
 smooth. The goal is simplicity and easy installation. The libc choice below
@@ -38,7 +41,7 @@ together.
 
 ## Two packages, one native VM
 
-The product is the native VM (`AGENTS.md`, "Backend roles"). The JVM backend is
+The product is the native VM (`VISION.md`, "The backends"). The JVM backend is
 never shipped. QBE is an experiment. Lox++ ships the native VM in two
 packages:
 
@@ -382,5 +385,5 @@ linked issues.
 
 ---
 
-See [RELEASING.md](../RELEASING.md) for the release process and [README.md](../README.md)
+See [RELEASING.md](../../RELEASING.md) for the release process and [README.md](../README.md)
 for installation and upgrade instructions.

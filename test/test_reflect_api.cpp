@@ -8,7 +8,8 @@
 //   3. getField()/hasField()/setField() — fields-only property access (no
 //      method fallback, unlike the `.` operator).
 //   4. callMethod()  — dynamic dispatch by name, including closure-backed
-//      user methods (notes/expressiveness-roadmap.md item 1, issue #496).
+//      user methods (docs/decisions/expressiveness-roadmap.md item 1, issue
+//      #496).
 
 #include "test_harness.h"
 #include "class_objects.h"

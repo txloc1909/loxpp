@@ -1,7 +1,7 @@
 // test_jvm_emit.cpp — JVM straight-line + control-flow emitter
-// (see notes/backend-implementation-dag.md).
+// (see docs/records/backend-implementation-dag.md).
 //
-// Checkpoint (see notes/backend-implementation-dag.md):
+// Checkpoint (see docs/records/backend-implementation-dag.md):
 //   tools/loxpp_jvm.sh test/translation-probes/{01,02,03,04,05,15}_*.lox
 // must each print stdout identical to build/loxpp on the same file, and the
 // assembled class must pass `java -Xverify:all`. That full assemble-and-run
@@ -237,7 +237,7 @@ TEST(FormatDoubleBitsLiteral, IsABareDecimalIntegerNeverADecimalOrExponent) {
 // emits cleanly. BUILD_MAP was the shape before that (PR #113).
 //
 // Every real Op the compiler emits now has a handler (this is the last
-// backend-emission pass, per notes/backend-implementation-dag.md), so no
+// backend-emission pass, per docs/records/backend-implementation-dag.md), so no
 // source program compiles down to an opcode this pass still refuses. The one
 // shape that still refuses is JUMP_TABLE reached without an immediately
 // preceding GET_TAG: compiler.cpp's compileMatchBody has exactly one call
@@ -793,7 +793,8 @@ TEST(EmitScript, GetIndexAndSetIndexAreOneInvokestaticEach) {
 }
 
 // BUILD_MAP/SLICE/IN/GET_ITER/ITER_HAS_NEXT/ITER_NEXT/IS_SEQ (see
-// notes/backend-implementation-dag.md, "aggregates, indexing, iterators").
+// docs/records/backend-implementation-dag.md, "aggregates, indexing,
+// iterators").
 
 TEST(EmitScript, BuildMapOfZeroPairsBuildsDirectly) {
     MemoryManager mm;
@@ -1014,7 +1015,7 @@ TEST(EmitScript, IsSeqEmitsOneInvokestatic) {
     // enum tags or sequence patterns. Verified with a minimal repro outside
     // this pass's own opcodes: `var n = match 1 { case _ => 5 };` fails
     // identically. That is P8 (match/enum dispatch), a later pass's scope,
-    // not P7's; recorded in notes/backend-implementation-dag.md so it is
+    // not P7's; recorded in docs/records/backend-implementation-dag.md so it is
     // not rediscovered by collision. A match used as a bare, fully-discarded
     // statement does not reach that gap, which is all this opcode-shape test
     // needs.

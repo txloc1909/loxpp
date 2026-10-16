@@ -2,7 +2,7 @@
 // (a captured local declared INSIDE a loop body must get a fresh cell every
 // iteration, or all the closures alias and observe the last value), adapted
 // for the S4 checkpoint: BUILD_LIST/GET_INDEX/SET_INDEX are S5's job
-// (notes/qbe-backend.md, "Staged plan"), so this probe retains each
+// (docs/decisions/qbe-backend.md, "Staged plan"), so this probe retains each
 // closure through a global variable instead of a list slot. Same semantic
 // question, no list opcodes.
 var f0 = nil;

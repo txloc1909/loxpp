@@ -1,8 +1,10 @@
 # Non-local control flow: design record
 
+**Status:** accepted. Implemented under mission #223.
+
 ## Why
 
-`notes/expressiveness-roadmap.md` item 3 names non-local control flow as the
+`docs/decisions/expressiveness-roadmap.md` item 3 names non-local control flow as the
 next genuine capability gap (item 1 reflection and item 2 OS/world-access
 basics are already done/partially done). Today nothing in Lox++ can unwind:
 runtime faults (index OOB, calling `nil`, type errors) are unconditionally
@@ -40,7 +42,7 @@ re-throws it explicitly so `tools/check_clr_probes.sh` can grep stderr for
 the literal type name). `src/backend/jvm_emitter.cpp` and `clr_emitter.cpp`
 have no `try`/`catch` region scaffolding today; the only existing
 exception-producing emission is `MATCH_ERROR`, which does a hard `athrow`/
-`throw`, never caught. `notes/jvm-emission-contract.md`'s scope-exit rule
+`throw`, never caught. `docs/reference/jvm-emission-contract.md`'s scope-exit rule
 (every exit path gets its own copy of local cleanup, e.g. `CLOSE_UPVALUE`
 duplicated at each `break`/`continue`/`return`/match-arm site) is the
 pattern any new exit path (`throw`-unwind) must extend.
@@ -53,7 +55,7 @@ latter defined as "must halt execution and report the error" —
 precedent and the "Binding Identity" section already enumerates which
 constructs end scopes on exit — a throw-unwind path needs to join that list.
 No runtime error/exception value exists among the 10 runtime types in
-`spec/03-types.md` today. `notes/dynamic-functional-programming.md`'s
+`spec/03-types.md` today. `docs/decisions/dynamic-functional-programming.md`'s
 Result-by-convention (`enum Result { Ok(v) Err(msg) }` + exhaustive `match`)
 already solves error **values**; this design is scoped to error **control
 flow** only, and deliberately reuses `match` rather than inventing parallel
@@ -80,7 +82,7 @@ implement this independently" either — see the correction below.
   ranges to handler offsets; `finally` is compiled by **duplicating**
   cleanup code at each static exit — this is exactly the pattern Lox++'s
   compiler already uses for scope-exit `POP`/`CLOSE_UPVALUE` (per
-  `jvm-emission-contract.md`), so `defer` can reuse it for the
+  `docs/reference/jvm-emission-contract.md`), so `defer` can reuse it for the
   compile-time-enumerable exits (return, fall-through) and only needs new
   VM logic for the dynamic case (a throw unwinding through the frame).
 - **Java/JVM, CLR**: table-driven exception regions
@@ -107,7 +109,7 @@ native VM interprets that chunk directly (`vm.cpp`), while
 `jvm::emitProgram`/`clr::emitProgram` **translate that same chunk** into JVM
 class files / CLR IL through a shared pipeline
 (`src/backend/chunk_decoder.cpp` → `cfg.cpp` → `capture_analysis.cpp` →
-`abstract_stack.cpp` → emission). `notes/bytecode-translation-problems.md`
+`abstract_stack.cpp` → emission). `docs/reference/bytecode-translation-problems.md`
 documents, at length and empirically (probe programs, not hypotheses), how
 much hard-won correctness work went into that pipeline — and specifically
 into `abstract_stack.cpp`'s `validateMergeConsistency`
@@ -127,7 +129,7 @@ way a plain `JUMP` offset is, `cfg.buildCfg` will fold it into the generic
 predecessor list and `validateMergeConsistency` will try to reconcile depths
 that were never meant to agree by the existing rule, either rejecting
 legitimate programs or silently doing the wrong thing — exactly the class of
-bug `bytecode-translation-problems.md`'s "still open, unowned, REACHABLE"
+bug `docs/reference/bytecode-translation-problems.md`'s "still open, unowned, REACHABLE"
 residues (the `and`/`or`-fold merge disagreements) already show this
 subsystem is prone to.
 
@@ -155,7 +157,7 @@ machinery:
 Given how many rounds of genuinely subtle, silently-wrong-output bugs the
 *existing*, much simpler opcode set already produced in this exact
 subsystem (see the N10 GAP entry's history in
-`notes/bytecode-translation-problems.md`), this part of the work should
+`docs/reference/bytecode-translation-problems.md`), this part of the work should
 start with its own **probe-driven research node** — new programs under
 `test/translation-probes/` exercising: throw from inside a nested
 expression/loop within a protected region, throw crossing a function
@@ -251,4 +253,4 @@ breakdown.
 
 ## Shipped
 
-**Mission #223: non-local control flow (`try`/`catch`/`throw`/`defer`) — DONE.** All four Lox++ implementations (native VM, JVM backend, CLR backend, and the self-hosted bootstrap interpreter) implement `try`/`catch`/`throw`/`defer`, with cross-backend differential-test coverage (`tools/diff_runtimes.py`) proving they agree. The `ObjFile` file-handle leak is closed using `defer`. Closes `notes/expressiveness-roadmap.md` item 3. Seven PRs landed the work: #230–#232, #236–#237, #245–#246, plus a follow-up CLR fault-kind fix in #252. The mission's own day-to-day planning record was kept in a per-mission working directory outside the repository (`notes/multi-agent-playbook.md`'s "The harness": a mission run's `brief.md` and `nodes/*.md` live at a `missionDir` host path, not in git); that directory is gone now that the mission is closed. The PR list above and tracking issue `#223` are the durable record.
+**Mission #223: non-local control flow (`try`/`catch`/`throw`/`defer`) — DONE.** All four Lox++ implementations (native VM, JVM backend, CLR backend, and the self-hosted bootstrap interpreter) implement `try`/`catch`/`throw`/`defer`, with cross-backend differential-test coverage (`tools/diff_runtimes.py`) proving they agree. The `ObjFile` file-handle leak is closed using `defer`. Closes `docs/decisions/expressiveness-roadmap.md` item 3. Seven PRs landed the work: #230–#232, #236–#237, #245–#246, plus a follow-up CLR fault-kind fix in #252. The mission's own day-to-day planning record was kept in a per-mission working directory outside the repository (`docs/process/multi-agent-playbook.md`'s "The harness": a mission run's `brief.md` and `nodes/*.md` live at a `missionDir` host path, not in git); that directory is gone now that the mission is closed. The PR list above and tracking issue `#223` are the durable record.

@@ -1,5 +1,8 @@
 # Expressiveness Roadmap — What's Inexpressible Today
 
+**Status:** accepted. Items 1 to 5 are implemented. The performance direction
+was decided in #583 (2026-10-08).
+
 ## Why this note
 
 Recurring question: "what does Lox++ need to be useful for real programs?"
@@ -66,7 +69,7 @@ local serialization of class instances) — **not** a prerequisite for concurren
 (see the universal-data-representation point above).
 
 **Downstream note:** the native-VM optimisation items 5 (inline caches) and 9
-(slot-based fields / shapes) in `benchmark_report_2026-08-26.md` §5 must now be
+(slot-based fields / shapes) in `docs/records/benchmark_report_2026-08-26.md` §5 must now be
 built around this merged API — `getField`/`setField`/`hasField`/`fields`/
 `callMethod` read `ObjInstance::fields` directly, so item 9 rewrites them in
 its own PR, and item 5's property cache key must carry a shape identity
@@ -119,7 +122,7 @@ the one it cannot. The example also depends on one correctness fix to the
 transition. Opening socket streams unbuffered removes the seek and restores the
 bidirectional byte stream `spec/05-stdlib.md` already specifies.
 
-**3. Non-local control flow (`try`/`catch`/`throw`/`defer`). DONE** (#223, all three backends; `src/vm.cpp`, `src/backend/jvm_emitter.cpp`, `runtime/clr/src/LoxRuntime.cs`, `spec/04-semantics.md`). Handler stack + frame unwinding. Closes expressiveness roadmap item 3: runtime faults are now catchable via `try`/`catch`, non-local escape works without threading `Result` through every return, and `defer` provides cleanup-on-unwind (also fixes the `container_objects.h` file-handle leak TODO). See `notes/non-local-control-flow.md` for the design record and tracking issue `#223` for the implementation breakdown.
+**3. Non-local control flow (`try`/`catch`/`throw`/`defer`). DONE** (#223, all three backends; `src/vm.cpp`, `src/backend/jvm_emitter.cpp`, `runtime/clr/src/LoxRuntime.cs`, `spec/04-semantics.md`). Handler stack + frame unwinding. Closes expressiveness roadmap item 3: runtime faults are now catchable via `try`/`catch`, non-local escape works without threading `Result` through every return, and `defer` provides cleanup-on-unwind (also fixes the `container_objects.h` file-handle leak TODO). See `docs/decisions/non-local-control-flow.md` for the design record and tracking issue `#223` for the implementation breakdown.
 
 **4. Extensible protocols / operator overloading. DONE** (#472). `for-in`,
 `[]`, `==`, `len`, `()`, and map-key hashing now dispatch to user methods
@@ -132,7 +135,7 @@ question is closed. The one deferred piece is
 `__str__` (D2, #470) for a user canonical string form.
 
 **5. Coroutines / generators (single-core suspension). DONE** (#523, all four
-backends; design record `notes/coroutines.md`). Stackful suspend +
+backends; design record `docs/decisions/coroutines.md`). Stackful suspend +
 `yield`. Lazy/infinite sequences, async I/O, cooperative scheduling, suspendable
 custom iterators. No thread-safe GC required — the cheap on-ramp to "any
 concurrency" and a stepping stone to item 7, not throwaway work.
@@ -147,19 +150,19 @@ be designed **after** item 7's model is chosen.
 **7. True parallelism (multi-core).** The only un-bootstrappable item and the
 flagged must-have. Model choice (threads/actors/CSP), thread-safe/concurrent GC,
 VM reentrancy, profiler rework. Design space already mapped in
-`concurrency_in_bytecode_vms.md` and `profiler-concurrency-notes.md`.
+`docs/reference/concurrency_in_bytecode_vms.md` and `docs/reference/profiler-concurrency-notes.md`.
 
 ## Performance direction
 
 Expressiveness and performance are separate axes. This note orders the
-first. For the second, the native VM is the target (`AGENTS.md`, "Backend
-roles"): it must be fast for a dynamic language.
+first. For the second, the native VM is the target (`VISION.md`, "The
+backends"): it must be fast for a dynamic language.
 
 - Interpreter wins come first: inline caches and object shapes
-  (`benchmark_report_2026-08-26.md` §5, items 5 and 9).
+  (`docs/records/benchmark_report_2026-08-26.md` §5, items 5 and 9).
 - The long-term path is a real AOT compiler or a high-performance JIT for the
   native VM.
-- QBE (`qbe-backend.md`) and the JIT proposal (`jit-pipeline.md`) are
+- QBE (`qbe-backend.md`) and the JIT proposal (`docs/proposals/jit-pipeline.md`) are
   experiments along that path, not the path itself.
 - The JVM backend is the performance baseline to work toward.
 

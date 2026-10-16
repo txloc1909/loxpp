@@ -258,7 +258,7 @@ target_include_directories(loxpp PRIVATE third_party/isocline/include)
 target_link_libraries(loxpp PRIVATE loxpp_isocline)
 
 # The QBE code generator and its --target qbe front end. The emitter reads the
-# NaN-tagged Value bit layout directly (Q6, notes/qbe-backend.md), and that
+# NaN-tagged Value bit layout directly (Q6, docs/decisions/qbe-backend.md), and that
 # layout is now the only one. The emitter is compiled into the loxpp executable,
 # not loxpp_core, so the standalone qbe_emit_probe/qbe_emit_program checkpoint
 # tools keep their own copies without a duplicate-symbol clash when linking
@@ -302,7 +302,7 @@ endif()
 
 # libloxrt.a: the QBE backend's runtime library. A --target qbe program
 # links its generated code against this, not against loxpp_core directly —
-# see notes/qbe-backend.md, "Runtime reuse" Layer 3. It bundles the same
+# see docs/decisions/qbe-backend.md, "Runtime reuse" Layer 3. It bundles the same
 # object code as loxpp_core (the whole interpreter minus main.cpp) plus the
 # C interface (src/backend/rt_capi.cpp) compiled code calls through the C
 # ABI. Bundling loxpp_core's objects wholesale — rather than a trimmed

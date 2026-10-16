@@ -1,7 +1,7 @@
 #pragma once
 
 // Target-independent capture analysis (P4a in
-// notes/bytecode-translation-problems.md). It consumes the decoded
+// docs/reference/bytecode-translation-problems.md). It consumes the decoded
 // instruction tree from chunk_decoder.h and answers, per chunk: which local
 // slots a nested closure captures, the live range of each captured slot, and
 // which captured slots several closures share one cell for.
@@ -61,7 +61,7 @@
 // for a consumer.
 //
 // Frame height and the full abstract-stack analysis are independent
-// analyses (see notes/backend-implementation-dag.md), but
+// analyses (see docs/records/backend-implementation-dag.md), but
 // computeFrameHeights is exposed publicly, not kept file-private, for two
 // reasons: another pass that needs the live local set at an offset can
 // reuse it instead of re-deriving the same per-opcode effect table, and it
@@ -277,10 +277,10 @@ std::unordered_map<int, int> computeFrameHeights(const DecodedFunction& node);
 //      (FunctionCaptureInfo::staticallyDeadCloseOffsets).
 //
 // Throws std::runtime_error only for the two outcomes the emission contract
-// (notes/jvm-emission-contract.md) makes impossible for compiler-correct
-// input: a
-// REACHABLE close whose height-derived slot has no CLOSURE anywhere in
-// program order before it (no incarnation of that slot was ever named), or a
-// DYNAMIC close (the slot was path-open) whose origin has no recorded range.
-// Either signals decoder or compiler drift, not a normal program.
+// (docs/reference/jvm-emission-contract.md) makes impossible for
+// compiler-correct input: a REACHABLE close whose height-derived slot has no
+// CLOSURE anywhere in program order before it (no incarnation of that slot was
+// ever named), or a DYNAMIC close (the slot was path-open) whose origin has no
+// recorded range. Either signals decoder or compiler drift, not a normal
+// program.
 CaptureAnalysis analyzeCaptures(const DecodedFunction& root);

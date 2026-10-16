@@ -3,7 +3,7 @@
 //
 // Demonstrates: fields(), getField(), setField(), and hasField() used to
 // write class-agnostic code — the pitch from
-// notes/expressiveness-roadmap.md item 1 ("the entire metaprogramming
+// docs/decisions/expressiveness-roadmap.md item 1 ("the entire metaprogramming
 // channel" for a language with no macros/templates/generics) — plus
 // callMethod() dispatching to a callable by a runtime-computed name. A
 // name-to-handler registry built from native functions, like formatters

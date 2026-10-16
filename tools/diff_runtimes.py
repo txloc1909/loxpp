@@ -34,7 +34,7 @@ runtime are free to use different codes for the same kind of failure. Such
 a match prints as "MATCH (empty)"; a disagreement prints as DIVERGE.
 
 On a DIVERGE, this script prints a short diff excerpt and a best-effort guess
-at which opcode family (P1-P8, see notes/bytecode-translation-problems.md) is
+at which opcode family (P1-P8, see docs/reference/bytecode-translation-problems.md) is
 involved, from a syntax scan of the program. This is a hint, not a proof: a
 faithful answer needs a real bytecode disassembly, which needs a debug-preset
 build; a syntax scan needs no extra build and runs on every program, so it is

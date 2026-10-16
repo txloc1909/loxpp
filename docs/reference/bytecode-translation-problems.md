@@ -666,7 +666,7 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     **Disposition (round-3 referee ruling).** The round-2 implementer named
     N11 the owner; the referee ruled that call out of procedure — deciding
     which node owns a gap is a referee's call, not an implementer's, per
-    `notes/multi-agent-playbook.md`'s "Roles" (the researcher "either
+    `docs/process/multi-agent-playbook.md`'s "Roles" (the researcher "either
     unblocks the implementer or, as referee, hands down a binding ruling")
     — and resolved it on substance instead: this
     gap is **not assigned an owning node**. It does not block N10 — the

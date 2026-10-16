@@ -1,7 +1,7 @@
 // Test that stringify has a depth guard to prevent stack overflow.
 // This builds a moderately nested structure and verifies it can be stringified.
 // The bootstrap interpreter uses a lower depth limit (100) than native (200)
-// due to shared frame budgets; see notes/bootstrap-stack-depth.md for details.
+// due to shared frame budgets; see docs/reference/bootstrap-stack-depth.md for details.
 // CHECK: deep structure created
 // CHECK: successful
 

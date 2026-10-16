@@ -410,7 +410,7 @@ jobs:
             bash -c "python3 tools/check_examples.py bootstrap/lox_wrapper.sh examples/"
 
       # Issue #323: the bootstrap interpreter borrows the native VM's own
-      # call-frame budget (see notes/bootstrap-stack-depth.md), so any
+      # call-frame budget (see docs/reference/bootstrap-stack-depth.md), so any
       # refactor that adds frames per evaluator cycle shrinks how deep a
       # target program may recurse before it overflows. This guards the
       # margin two ways: the example corpus must survive 256 extra native
@@ -1096,7 +1096,7 @@ jobs:
               echo "OK: standalone binary embeds its source and exposes args()"
             '
 
-      # S7's Q8 hazard (notes/qbe-backend.md: "measure QBE's time and memory
+      # S7's Q8 hazard (docs/decisions/qbe-backend.md: "measure QBE's time and memory
       # on bootstrap/loxpp_interpreter.lox early") — compiles the
       # self-hosted interpreter itself (3,700+ lines of Lox++, one very
       # large QBE function tree) with the QBE backend and runs the full

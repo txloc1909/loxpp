@@ -6,7 +6,7 @@
 // QBE keys each value's memory slot by its stack height. This pass
 // symbolically executes a chunk to recover, at every offset, which
 // stack positions are locals and which are temporaries — the fact the
-// compiler discards (notes/bytecode-translation-problems.md, P1).
+// compiler discards (docs/reference/bytecode-translation-problems.md, P1).
 //
 // Target-independent: no backend knowledge. Both backends need the same
 // numbers: the JVM emitter hand-computes `.maxstack` from this where jasmin

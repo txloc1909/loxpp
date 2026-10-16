@@ -1,15 +1,15 @@
 # JIT pipeline: design proposal (v0)
 
-**Status: proposal, not approved. If built, it is an opt-in tier that needs the
+**Status:** proposal, not approved. If built, it is an opt-in tier that needs the
 `--target qbe` toolchain on the user's machine. It ships only in the full
-package (`distribution.md`, "Two packages"), never in the simple one.** No issue or Project board exists yet. This
+package (`docs/decisions/distribution.md`, "Two packages"), never in the simple one.** No issue or Project board exists yet. This
 note is a design sketch to reach alignment on approach before any code lands,
 per `AGENTS.md`'s planning policy. When approved, each stage below becomes one
 GitHub issue.
 
 ## Why
 
-`qbe-backend.md` records the AOT `--target qbe` backend (implemented under
+`docs/decisions/qbe-backend.md` records the AOT `--target qbe` backend (implemented under
 mission #462). Its prototype evidence shows a toy emitter beating native by
 about 3.6x on `fib(32)`, mostly by removing the interpreter's dispatch loop. A JIT is attractive because it could apply that
 same win to hot functions without a separate compile-and-link step the user
@@ -24,7 +24,7 @@ or on-stack replacement — see "Explicitly punted" below.
 
 ## Constraint from the concurrency model: no new thread touches the heap
 
-`notes/concurrency-model-next-steps.md` (item 7) says not to start GC
+`docs/proposals/concurrency-model-next-steps.md` (item 7) says not to start GC
 redesign or scheduler work before the concurrency model decision (item 6)
 produces a go/no-go. The GC (`memory_manager.h`) is one `MemoryManager`
 per `VM`, not thread-safe.
@@ -67,7 +67,7 @@ afterward to earn it back. So the question is "how many more calls does a
 function need ahead of it to make one blocking pause worth paying" — not a
 CPU-efficiency question, a wall-clock one.
 
-**Per-call savings.** `qbe-backend.md`'s prototype numbers for `fib(32)`:
+**Per-call savings.** `docs/decisions/qbe-backend.md`'s prototype numbers for `fib(32)`:
 native 0.62s, QBE 0.17s. Naive recursive `fib(32)` makes `2*Fib(33) - 1 =
 7,049,155` calls. That's ~88 ns/call native, ~24 ns/call compiled — savings
 of about **64 ns/call**. (This is the *dispatch-removal* number only — v0
@@ -75,7 +75,7 @@ has no type specialization, so don't expect more from real code than from
 this microbenchmark.)
 
 **Compile cost.** Not measured yet, so state the assumption plainly: QBE's
-own pass is sub-millisecond for one small function — `qbe-backend.md`'s
+own pass is sub-millisecond for one small function — `docs/decisions/qbe-backend.md`'s
 "Why" section already notes QBE is fast and takes plain-text IL. The dominant cost is
 `cc -shared`: process spawn plus invoking the system assembler and dynamic
 linker to produce a loadable `.so`. Tiny-input, no-preprocessing invocations
@@ -187,7 +187,7 @@ cache.
 
 ### 3. Runtime and GC surface stay as designed for the AOT backend
 
-- Same fused-stack layout as `qbe-backend.md`'s central design choice:
+- Same fused-stack layout as `docs/decisions/qbe-backend.md`'s central design choice:
   compiled and interpreted code share one value stack, so a function can
   flip from interpreted to compiled between calls with no stack translation.
 - `markRoots()` still scans `stack..stackTop` only; a compiled frame is
@@ -201,11 +201,11 @@ cache.
 
 Coroutines shipped (mission #523). In the native VM a coroutine owns the
 interpreter frames inside its stack slice and `yield` snapshots that slice
-(`coroutines.md`, "Native VM"). A JIT-compiled function is a real C frame,
+(`docs/decisions/coroutines.md`, "Native VM"). A JIT-compiled function is a real C frame,
 which cannot be frozen mid-call. Selecting "functions that contain `YIELD`"
 is not a sound way to keep them interpreted: a caller with no `YIELD` of
 its own still suspends when its callee yields, and dynamic dispatch makes
-the set of possible callers the whole program (`coroutines-retro.md`).
+the set of possible callers the whole program (`docs/records/coroutines-retro.md`).
 
 The AOT backend solves this with a whole-program switch: a program that
 contains any `YIELD` compiles in coroutine mode (`treeContainsYield` in

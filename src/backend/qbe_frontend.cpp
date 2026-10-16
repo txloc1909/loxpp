@@ -48,7 +48,7 @@ std::string qbeSymbolFor(const std::string& id) {
 // state machine (backend/qbe_emitter.h, EmitOptions::coroutineMode). The set
 // is the whole program because a function with no YIELD can still call one,
 // and calls are dynamic (a caller's frame must suspend too) — see
-// notes/coroutines.md and issue #530/#535.
+// docs/decisions/coroutines.md and issue #530/#535.
 bool treeContainsYield(const DecodedFunction& node) {
     if (std::ranges::any_of(node.instructions,
                             [](const DecodedInstruction& ins) {
