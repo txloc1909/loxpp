@@ -59,6 +59,8 @@ static const char* objTypeName(ObjType type) {
         return "process";
     case ObjType::COROUTINE:
         return "coroutine";
+    case ObjType::TASK:
+        return "task";
     }
     return "?";
 }
@@ -350,6 +352,22 @@ void MemoryManager::traceObject(Obj* obj) {
         for (const auto& v : co->resultOverrides) {
             markValue(v);
         }
+        if (co->waitingInner != nullptr) {
+            markObject(co->waitingInner);
+        }
+        if (co->waitingIterator != nullptr) {
+            markObject(co->waitingIterator);
+        }
+        break;
+    }
+    case ObjType::TASK: {
+        auto* task = static_cast<ObjTask*>(obj);
+        if (task->co != nullptr) {
+            markObject(task->co);
+        }
+        for (const auto& v : task->mailbox) {
+            markValue(v);
+        }
         break;
     }
     }
@@ -403,6 +421,8 @@ static std::size_t objAllocatedSize(Obj* obj) {
         return sizeof(ObjProcess);
     case ObjType::COROUTINE:
         return sizeof(ObjCoroutine);
+    case ObjType::TASK:
+        return sizeof(ObjTask);
     }
     return 0;
 }

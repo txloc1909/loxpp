@@ -135,18 +135,25 @@ TEST_F(CoroutineTest, ResumeRunningIsCatchable) {
     expect_string(h, "kind", "RunningCoroutineError");
 }
 
-TEST_F(CoroutineTest, YieldOutsideCoroutineIsCatchable) {
+// The main task is a coroutine too (spec/04-semantics.md, The main task), so
+// a yield outside every coroutine it resumed is a task switch, not a fault.
+// It evaluates to nil and the try around it catches nothing.
+TEST_F(CoroutineTest, YieldInTheMainTaskIsATaskSwitch) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
-        var kind = "";
+        var kind = "none";
+        var got = 1;
         try {
-            yield 1;
+            got = yield 1;
         } catch (e) {
             kind = e.kind;
         }
     )"),
               InterpretResult::OK);
-    expect_string(h, "kind", "YieldOutsideCoroutineError");
+    expect_string(h, "kind", "none");
+    auto got = h.getGlobal("got");
+    ASSERT_TRUE(got.has_value());
+    EXPECT_TRUE(is<Nil>(*got));
 }
 
 TEST_F(CoroutineTest, NestedResumeSeesNormalState) {

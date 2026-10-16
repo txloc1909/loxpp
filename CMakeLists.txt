@@ -131,6 +131,7 @@ set(LOXPP_CORE_SOURCES
     src/stdlib/net_api.cpp
     src/stdlib/process_api.cpp
     src/stdlib/coroutine_api.cpp
+    src/stdlib/task_api.cpp
 )
 
 add_library(loxpp_core OBJECT ${LOXPP_CORE_SOURCES})

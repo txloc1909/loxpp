@@ -16,7 +16,9 @@
 #include "stdlib/net_api.h"
 #include "stdlib/process_api.h"
 #include "stdlib/coroutine_api.h"
+#include "stdlib/task_api.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -583,6 +585,19 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
     m_currentCoroutine = co;
     co->resumeReentrantDepth = m_reentrantRunDepth;
 
+    // The resume is a clean link of the running task's chain when it comes
+    // from the parent's own loop: through a `resume` native (one native
+    // deeper) or from ITER_HAS_NEXT, the scheduler, or resumeWaitingInner (no
+    // native deeper). Any other native in between would hold a C++
+    // continuation that a task switch cannot keep.
+    const int savedCleanDepth = m_cleanNativeDepth;
+    const int linkNatives = m_nativeDepth - savedCleanDepth;
+    m_cleanNativeDepth =
+        (savedCleanDepth >= 0 && (linkNatives == 0 || linkNatives == 1) &&
+         m_reentrantRunDepth == m_cleanReentrantDepth)
+            ? m_nativeDepth
+            : -1;
+
 #ifdef LOXPP_PROFILE
     ProfilerData* savedProfiler = m_activeProfiler;
     if (co->profiler == nullptr) {
@@ -717,7 +732,15 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         auto callerIpBefore = (callerFrame != nullptr)
                                   ? callerFrame->ip
                                   : Chunk::const_iterator{};
-        loopOk = runNestedLoop(entry);
+        WakeResult wake = WakeResult::Run;
+        if (co->waitingInner != nullptr) {
+            wake = resumeWaitingInner(co, entry);
+        }
+        if (wake == WakeResult::Run) {
+            loopOk = runNestedLoop(entry);
+        } else if (wake == WakeResult::Fatal) {
+            loopOk = false;
+        }
         bool callerRedirected =
             callerFrame != nullptr && callerFrame->ip != callerIpBefore;
         if (!loopOk) {
@@ -750,6 +773,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
 #ifdef LOXPP_PROFILE
     m_activeProfiler = savedProfiler;
 #endif
+    m_cleanNativeDepth = savedCleanDepth;
     m_currentCoroutine = parent;
     if (parent != nullptr) {
         parent->state = CoroutineState::RUNNING;
@@ -851,6 +875,258 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
     m_frameCount = baseFrame;
     m_yieldedValue = yielded;
     co->state = CoroutineState::SUSPENDED;
+}
+
+// --- workers and tasks (spec/04-semantics.md, Workers and Tasks) ---------
+
+Runtime::WakeResult Runtime::resumeWaitingInner(ObjCoroutine* co, int entry) {
+    ObjCoroutine* inner = co->waitingInner;
+    ObjIterator* iter = co->waitingIterator;
+    co->waitingInner = nullptr;
+    co->waitingIterator = nullptr;
+    // The inner coroutine kept the status "running" (or "normal") while the
+    // task waited, so no other task could resume it. Its own resume below
+    // continues it.
+    inner->state = CoroutineState::SUSPENDED;
+
+    // The value this resume received sits on top of the stack. It becomes
+    // the inner resume's one argument, so it reaches the receive at the end
+    // of the chain. The boundary is this coroutine's own loop, exactly the
+    // boundary the original `resume` native or ITER_HAS_NEXT ran under.
+    OpResult savedOutcome = m_reentrantOutcome;
+    m_reentrantOutcome = OpResult::OK;
+    int savedBoundary = m_nativeStopAtFrameCount;
+    m_nativeStopAtFrameCount = entry;
+    Value result;
+    bool ok = resumeCoroutine(inner, 1, &result);
+    OpResult outcome = m_reentrantOutcome;
+    m_nativeStopAtFrameCount = savedBoundary;
+    m_reentrantOutcome = savedOutcome;
+
+    if (!ok) {
+        // As the original call would: Resumed means a handler in this
+        // coroutine's frames caught a throw that left the inner one.
+        switch (outcome) {
+        case OpResult::Resumed:
+            return WakeResult::Run;
+        case OpResult::Stop:
+            return WakeResult::Stop;
+        default:
+            return WakeResult::Fatal;
+        }
+    }
+    if (m_taskSwitchPending) {
+        pop(); // the argument
+        suspendForTaskSwitch(iter);
+        return WakeResult::Suspended;
+    }
+    if (iter == nullptr) {
+        // The `resume` native's result.
+        stackTop[-1] = result;
+        return WakeResult::Run;
+    }
+    // The rest of opIterHasNext.
+    pop();
+    if (inner->state == CoroutineState::SUSPENDED) {
+        iter->current = result;
+        iter->hasCurrent = true;
+        push(from<bool>(true));
+    } else {
+        push(from<bool>(false));
+    }
+    return WakeResult::Run;
+}
+
+void Runtime::suspendForTaskSwitch(ObjIterator* iter) {
+    ObjCoroutine* co = m_currentCoroutine;
+    ObjCoroutine* inner = m_taskSwitchInner;
+    co->waitingInner = inner;
+    co->waitingIterator = iter;
+    if (inner != nullptr) {
+        // spec/04-semantics.md, task.receive: a coroutine that holds a
+        // suspended receive keeps the status "running"; one that resumed it
+        // stays "normal".
+        inner->state = inner->waitingInner == nullptr ? CoroutineState::RUNNING
+                                                      : CoroutineState::NORMAL;
+    }
+    suspendCurrentCoroutine(from<Nil>(Nil{}));
+    m_taskSwitchInner = co;
+}
+
+bool Runtime::taskCanSuspend() const {
+    // The receive native itself is the one native above the chain.
+    return m_currentTask != nullptr && m_cleanNativeDepth >= 0 &&
+           m_nativeDepth == m_cleanNativeDepth + 1 &&
+           m_reentrantRunDepth == m_cleanReentrantDepth;
+}
+
+void Runtime::raiseFromNative(const char* kind, const char* msg) {
+    m_reentrantOutcome =
+        fromThrow(raiseThrowableError(kind, msg, m_nativeStopAtFrameCount));
+}
+
+ObjTask* Runtime::spawnTask(Value fn) {
+    ObjCoroutine* co = m_mm.create<ObjCoroutine>(m_coroutineClass, fn);
+    m_mm.pushTempRoot(co);
+    ObjTask* task = m_mm.create<ObjTask>(co, m_taskEpoch);
+    m_mm.popTempRoot();
+    m_runQueue.push_back(task);
+    return task;
+}
+
+bool Runtime::taskEnded(const ObjTask* task) const {
+    return task->state == TaskState::DEAD ||
+           (task != m_mainTask && task->epoch != m_taskEpoch);
+}
+
+void Runtime::deliverMessage(ObjTask* task, Value msg) {
+    task->mailbox.push_back(msg);
+    if (task->state == TaskState::WAITING) {
+        task->state = TaskState::READY;
+        m_runQueue.push_back(task);
+    }
+}
+
+bool Runtime::receiveFromNative(Value* out) {
+    ObjTask* task = m_currentTask;
+    if (!task->mailbox.empty()) {
+        *out = task->mailbox.front();
+        task->mailbox.pop_front();
+        return true;
+    }
+    if (!taskCanSuspend()) {
+        raiseFromNative("YieldAcrossNativeError",
+                        "Cannot receive across a native callback.");
+        return false;
+    }
+    m_taskSwitchPending = true;
+    m_taskSwitchInner = nullptr;
+    return false;
+}
+
+bool Runtime::resumeTask(ObjTask* task) {
+    ObjCoroutine* co = task->co;
+    task->state = TaskState::RUNNING;
+    m_currentTask = task;
+
+    // The resume window: for a first resume, the slot the stored callee goes
+    // into; later, the one value the pending suspend point evaluates to. A
+    // task that waits in receive gets the head of its mailbox, which the
+    // send that woke it put there; a `yield` gets nil.
+    int argCount = 0;
+    if (!co->started) {
+        push(from<Nil>(Nil{}));
+    } else {
+        Value received = from<Nil>(Nil{});
+        if (!task->mailbox.empty() && task->receiving) {
+            received = task->mailbox.front();
+            task->mailbox.pop_front();
+        }
+        task->receiving = false;
+        push(received);
+        argCount = 1;
+    }
+
+    OpResult savedOutcome = m_reentrantOutcome;
+    m_reentrantOutcome = OpResult::OK;
+    int savedBoundary = m_nativeStopAtFrameCount;
+    m_nativeStopAtFrameCount = m_frameCount;
+    m_cleanNativeDepth = m_nativeDepth;
+    m_cleanReentrantDepth = m_reentrantRunDepth;
+    Value out;
+    bool ok = resumeCoroutine(co, argCount, &out);
+    OpResult outcome = m_reentrantOutcome;
+    m_cleanNativeDepth = -1;
+    m_nativeStopAtFrameCount = savedBoundary;
+    m_reentrantOutcome = savedOutcome;
+    m_currentTask = nullptr;
+
+    if (!ok) {
+        task->state = TaskState::DEAD;
+        if (outcome != OpResult::Fatal) {
+            // No frame lies below a task, so no handler outside it can catch.
+            runtimeError("BUG: a task ended through a handler outside it.");
+        }
+        return false;
+    }
+    pop(); // the resume window
+    if (co->state == CoroutineState::DEAD) {
+        // spec/04-semantics.md, Ending: the return value and the messages
+        // still in the mailbox are discarded.
+        task->state = TaskState::DEAD;
+        task->mailbox.clear();
+        task->co = nullptr;
+        return true;
+    }
+    if (m_taskSwitchPending) {
+        m_taskSwitchPending = false;
+        m_taskSwitchInner = nullptr;
+        task->state = TaskState::WAITING;
+        task->receiving = true;
+        return true;
+    }
+    // A `yield` outside every coroutine the task resumed: the yielded value
+    // is discarded, and the task joins the back of the run queue.
+    task->state = TaskState::READY;
+    m_runQueue.push_back(task);
+    return true;
+}
+
+void Runtime::endTasks() {
+    // spec/04-semantics.md, Ending: every other task is abandoned, as an
+    // abandoned coroutine is. Its pending deferred calls do not run.
+    for (ObjTask* task : m_runQueue) {
+        if (task != m_mainTask) {
+            task->state = TaskState::DEAD;
+            task->co = nullptr;
+            task->mailbox.clear();
+        }
+    }
+    m_runQueue.clear();
+    m_currentTask = nullptr;
+    m_taskSwitchPending = false;
+    m_taskSwitchInner = nullptr;
+    m_cleanNativeDepth = -1;
+    ++m_taskEpoch;
+}
+
+InterpretResult Runtime::runTasks(ObjClosure* script) {
+    // The script closure stays rooted on the stack until the main task's
+    // coroutine holds it.
+    ObjCoroutine* mainCo = m_mm.create<ObjCoroutine>(
+        m_coroutineClass, Value{static_cast<Obj*>(script)});
+    stackTop[-1] = Value{static_cast<Obj*>(mainCo)};
+    if (m_mainTask == nullptr) {
+        m_mainTask = m_mm.create<ObjTask>(mainCo, m_taskEpoch);
+    }
+    m_mainTask->co = mainCo;
+    m_mainTask->state = TaskState::READY;
+    m_mainTask->receiving = false;
+    m_mainTask->epoch = m_taskEpoch;
+    pop();
+
+    m_runQueue.clear();
+    m_runQueue.push_back(m_mainTask);
+    InterpretResult result = InterpretResult::OK;
+    while (m_mainTask->state != TaskState::DEAD) {
+        if (m_runQueue.empty()) {
+            // One worker: only a task of this worker could send, and none can
+            // run, so the main task waits for ever.
+            runtimeError("Deadlock: every task waits in receive.");
+            result = InterpretResult::RUNTIME_ERROR;
+            break;
+        }
+        ObjTask* task = m_runQueue.front();
+        m_runQueue.pop_front();
+        if (!resumeTask(task)) {
+            result = InterpretResult::RUNTIME_ERROR;
+            break;
+        }
+    }
+    m_mainTask->state = TaskState::DEAD;
+    m_mainTask->co = nullptr;
+    endTasks();
+    return result;
 }
 
 ObjUpvalue* Runtime::captureUpvalue(Value* local) {
@@ -1171,7 +1447,9 @@ Runtime::OpResult Runtime::callNative(ObjNative* native, int argCount,
     // instead of trying to drive a frame the native's C stack cannot expose.
     bool savedResumable = m_resumableMode;
     m_resumableMode = false;
+    ++m_nativeDepth;
     Value result = native->function(argCount, stackTop - argCount);
+    --m_nativeDepth;
     m_resumableMode = savedResumable;
     m_nativeStopAtFrameCount = savedBoundary;
     OpResult outcome = m_reentrantOutcome;
@@ -1187,6 +1465,13 @@ Runtime::OpResult Runtime::callNative(ObjNative* native, int argCount,
         return OpResult::Fatal;
     }
     stackTop -= argCount + 1; // pop args + callee
+    if (m_taskSwitchPending) {
+        // task.receive found an empty mailbox (this native, or one inside the
+        // coroutine this `resume` native ran). The caller's frames wait here;
+        // the task's next resume supplies the result of this call.
+        suspendForTaskSwitch(nullptr);
+        return OpResult::Stop;
+    }
     push(result);
     return OpResult::OK;
 }
@@ -1226,6 +1511,7 @@ void Runtime::defineNatives() {
     m_serverClass = net.server;
     m_processClass = registerProcessAPI(reg, m_mapClass);
     m_coroutineClass = registerCoroutineAPI(reg);
+    registerTaskAPI(reg);
 }
 
 void Runtime::runtimeError(const char* format, ...) {
@@ -1297,6 +1583,18 @@ void Runtime::markRoots() {
         m_mm.markObject(m_currentCoroutine);
     }
     m_mm.markValue(m_yieldedValue);
+    if (m_mainTask != nullptr) {
+        m_mm.markObject(m_mainTask);
+    }
+    if (m_currentTask != nullptr) {
+        m_mm.markObject(m_currentTask);
+    }
+    for (ObjTask* task : m_runQueue) {
+        m_mm.markObject(task);
+    }
+    if (m_taskSwitchInner != nullptr) {
+        m_mm.markObject(m_taskSwitchInner);
+    }
     for (ObjString* name : m_protocolNames) {
         if (name) {
             m_mm.markObject(name);
@@ -1507,6 +1805,7 @@ Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
         for (int i = argCount - 1; i >= 0; i--) {
             enumVal->fields[static_cast<size_t>(i)] = pop();
         }
+        enumVal->sendable = std::ranges::all_of(enumVal->fields, isMessage);
         m_mm.popTempRoot();
         pop(); // pop the ObjEnumCtor from the callee slot
         push(Value{static_cast<Obj*>(enumVal)});
@@ -2394,6 +2693,12 @@ Runtime::OpResult Runtime::opIterHasNext(int stopAtFrameCount) {
                 resumeCoroutineForIteration(co, stopAtFrameCount, &yielded);
             if (outcome != OpResult::OK) {
                 return outcome;
+            }
+            if (m_taskSwitchPending) {
+                // The coroutine waits in a receive. This frame waits at this
+                // ITER_HAS_NEXT; resumeWaitingInner() finishes it later.
+                suspendForTaskSwitch(it);
+                return OpResult::Stop;
             }
             if (co->state == CoroutineState::SUSPENDED) {
                 it->current = yielded;
