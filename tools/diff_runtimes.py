@@ -25,6 +25,15 @@ A program on the exclusion list still reports DIVERGE if its stdout stops
 being a permutation of the native stdout — the exclusion list excuses a
 reordering, never a content change.
 
+--xfail <file> names the spec probes (tools/check_spec_probes.py) that the
+other runner does not pass yet: the backend's expected-failure list, such as
+tools/probe_xfail_jvm.txt. A listed program reports one of two outcomes:
+  XFAIL        the other runner's run does not pass the probe, or native's
+               does not. Not a divergence.
+  XPASS        both runs pass the probe: their stdout is its CHECK lines and
+               their exit status matches its STATUS line. Exit code 1: the
+               backend passes it now, so its line must be deleted.
+
 Two silent runs are not proof that both ran: a runner that crashes before
 writing anything looks identical, on stdout alone, to a program that
 legitimately prints nothing. So when both sides' stdout is empty, this
@@ -42,7 +51,7 @@ this script's default. State that trade-off, do not hide it.
 
 Usage:
     python3 tools/diff_runtimes.py <native-loxpp> <other-runner> <path>...
-        [--exclude <file>] [--timeout <seconds>]
+        [--exclude <file>] [--xfail <file>] [--timeout <seconds>]
     python3 tools/diff_runtimes.py <native-loxpp> <other-runner>
         --exclude <file> --only-excluded <dir>
 
@@ -68,6 +77,8 @@ import resource
 import subprocess
 import sys
 from pathlib import Path
+
+from check_spec_probes import parse_probe, parse_xfail_file, passes
 
 # native's own stringifyObj (src/object.cpp) recurses once per level of
 # list/map nesting with no depth guard, so a host whose ambient soft stack
@@ -285,6 +296,12 @@ def main() -> None:
         help="tools/jvm_excluded_examples.txt: permutation-only exclusions",
     )
     parser.add_argument(
+        "--xfail",
+        type=Path,
+        default=None,
+        help="the backend's expected-failure list of spec probes, e.g. tools/probe_xfail_jvm.txt",
+    )
+    parser.add_argument(
         "--only-excluded",
         metavar="DIR",
         default=None,
@@ -303,6 +320,7 @@ def main() -> None:
     args = parser.parse_args()
 
     excluded = parse_exclude_file(args.exclude) if args.exclude else {}
+    xfail = parse_xfail_file(args.xfail) if args.xfail else {}
 
     if args.only_excluded is not None:
         if not args.exclude:
@@ -322,7 +340,7 @@ def main() -> None:
         )
         sys.exit(2)
 
-    matched = permuted = diverged = staled = 0
+    matched = permuted = diverged = staled = xfailed = xpassed = 0
 
     for lox_file in programs:
         input_file = lox_file.with_suffix(".input")
@@ -334,8 +352,26 @@ def main() -> None:
                 [args.other_runner, str(lox_file)], input_file, args.timeout
             )
         except RunTimeout as exc:
+            if lox_file.name in xfail:
+                print(f"XFAIL       {lox_file}  (timeout: {exc}; {xfail[lox_file.name]})")
+                xfailed += 1
+                continue
             print(f"DIVERGE     {lox_file}  (timeout: {exc})")
             diverged += 1
+            continue
+
+        if lox_file.name in xfail:
+            probe = parse_probe(lox_file)
+            if (
+                probe is not None
+                and passes(probe, native_out, native_status)
+                and passes(probe, other_out, other_status)
+            ):
+                print(f"XPASS       {lox_file}  (both runs pass it now: delete its line from {args.xfail})")
+                xpassed += 1
+            else:
+                print(f"XFAIL       {lox_file}  ({xfail[lox_file.name]})")
+                xfailed += 1
             continue
 
         if native_out == other_out:
@@ -386,8 +422,11 @@ def main() -> None:
         diverged += 1
 
     print()
-    print(f"{matched} matched, {staled} stale, {permuted} permutation-excused, {diverged} diverged")
-    sys.exit(1 if (diverged or staled) else 0)
+    print(
+        f"{matched} matched, {staled} stale, {permuted} permutation-excused, {diverged} diverged, "
+        f"{xfailed} expected to fail, {xpassed} passing but listed as expected to fail"
+    )
+    sys.exit(1 if (diverged or staled or xpassed) else 0)
 
 
 if __name__ == "__main__":
