@@ -17,6 +17,10 @@ target: the reuse point it names is why the second target skipped that cost
 entirely, even though it opened more PRs overall (`#125`–`#153`, 29 PRs, versus
 `#96`–`#116`'s 21).
 
+Every binding referee ruling these missions produced, with the lesson each
+one taught, is in `docs/records/referee-rulings-2026-08-to-2026-09.md`. Read
+it before you referee: most stagnation loops repeat a shape it already names.
+
 This file describes the workflow. Engineering rules that apply outside a
 multi-agent run live in `AGENTS.md`, not here.
 
