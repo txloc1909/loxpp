@@ -466,17 +466,13 @@ Suspends the current coroutine and delivers `expr` to its resumer.
    the value that `resume` passed in (or `nil` if `resume` passed none), and
    execution continues after the `yield`.
 
-A `yield` reached while the current context is not a coroutine — that is, in
-the main task or in any function it called without going through
-`resume` — is a **runtime error** (`YieldOutsideCoroutineError`; see
-[Runtime Errors](#runtime-errors)).
-
-A task that `task.spawn` or `task.spawn_worker` made is a coroutine that its
-worker's scheduler resumes. A `yield` in such a task, outside every
-coroutine that the task resumed, suspends the task: the yielded value is
-discarded, the task joins the back of its worker's run queue, and the
-`yield` evaluates to `nil` when the task runs again. See [Workers and
-Tasks](#workers-and-tasks).
+Every task, the main task included, is a coroutine that its worker's
+scheduler resumes (see [Workers and Tasks](#workers-and-tasks)). So a
+`yield` always has a coroutine to suspend. A `yield` in a task, outside
+every coroutine that the task resumed, suspends the task: the yielded value
+is discarded, the task joins the back of its worker's run queue, and the
+`yield` evaluates to `nil` when the task runs again. This holds for a
+`yield` at the top level of the program, which the main task runs.
 
 A `yield` reached while a native callback is on the call chain — for example
 inside `__str__`, `__hash__`, or `__eq__` while `print` or a map operation
@@ -1400,7 +1396,7 @@ a `yield` runs no deferred call — a deferred call in a coroutine runs only
 when its function returns or a throw unwinds past the frame, exactly as in
 an ordinary function.
 
-The two `resume` faults and the two `yield` faults are catchable: each is
+The two `resume` faults and the `yield` fault are catchable: each is
 delivered to a `catch` block as an `Error` value, with the kinds listed in
 [Runtime Errors](#runtime-errors).
 
@@ -1425,9 +1421,10 @@ A program starts with one worker, the **main worker**, which runs one task,
 the **main task**. The main task runs the top-level code of the program. It
 has a mailbox and a handle, like every other task.
 
-The main task is not a coroutine. A `yield` that the main task reaches
-outside every coroutine it resumed is a `YieldOutsideCoroutineError`, as the
-[`yield` Expression](#yield-expression) states.
+Every task is a coroutine on its worker, and the main task is one too. A
+`yield` that the main task reaches outside every coroutine it resumed
+suspends the main task, as the [`yield` Expression](#yield-expression)
+states for every task.
 
 ### `task.spawn`
 
@@ -1545,7 +1542,7 @@ default set names a flag.
 
 | Point | Class | Condition | Default set | Fair mode |
 |---|---|---|---|---|
-| `yield` | yield | in a task that `task.spawn` or `task.spawn_worker` made, outside every coroutine that the task resumed | yes | — |
+| `yield` | yield | in any task, outside every coroutine that the task resumed | yes | — |
 | `task.receive()` | receive | the mailbox is empty | yes | — |
 | `input()` | blocking call | every call | yes | — |
 | `sleep(seconds)` | blocking call | every call | yes | — |
@@ -1589,7 +1586,8 @@ Each worker has one run queue of tasks that are ready to run. The queue is
 first in, first out, and it has no priorities.
 
 1. A new task that `task.spawn` makes joins the back of the run queue.
-2. A task that suspends at a `yield` joins the back of the run queue.
+2. A task that suspends at a `yield` joins the back of the run queue. The
+   main task follows the same rule.
 3. A task that suspends in `task.receive()` leaves the run queue. When a
    message arrives in its mailbox, it joins the back of the run queue.
 4. When the running task suspends or ends, the task at the head of the run
@@ -1729,7 +1727,6 @@ same text the implementation reports when the fault is left uncaught.
 | A key's `__hash__` or `__eq__` writes to the Map it keys | `var m = {}; class K { __hash__() { m[1] = 1; return 1; } __eq__(o) { return true; } } m[K()] = 1;` | `"MapChangedError"` |
 | `resume` on a dead coroutine | `fun f() { return 1; } var co = coroutine.create(f); co.resume(); co.resume();` | `"DeadCoroutineError"` |
 | `resume` on a running coroutine (self-resume) | `fun f() { co.resume(); } var co = coroutine.create(f); co.resume();` | `"RunningCoroutineError"` |
-| `yield` outside a coroutine | `yield 1;` | `"YieldOutsideCoroutineError"` |
 | `yield` across a native callback | `class S { __str__() { yield 1; return "x"; } } fun f() { print S(); } var co = coroutine.create(f); co.resume();` | `"YieldAcrossNativeError"` |
 
 **The two map-key rows above cover an index read or write, a map or set

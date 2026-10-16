@@ -1,9 +1,9 @@
 // In a spawned task, a yield outside every coroutine the task resumed
 // suspends the task: it joins the back of the run queue, the yielded value
 // is discarded, and the yield evaluates to nil. A yield inside a coroutine
-// that the task resumed still returns to that coroutine's resumer. In the
-// main task a yield stays a YieldOutsideCoroutineError
-// (spec/04-semantics.md, yield Expression and Scheduling).
+// that the task resumed still returns to that coroutine's resumer. The
+// main task follows the same rule, at the top level and in a function it
+// calls (spec/04-semantics.md, yield Expression and Scheduling).
 var main = task.self();
 
 fun ticker(name) {
@@ -38,11 +38,20 @@ task.spawn(nested);
 print task.receive();
 print task.receive();
 print task.receive();
-try {
-    yield 1;
-} catch (e) {
-    print e.kind;
+fun late() {
+    print "late task runs";
 }
+
+fun main_yields() {
+    var r = yield "from a function";
+    return r;
+}
+
+task.spawn(late);
+var v = yield "from the top level";
+print "main got " + str(v);
+task.spawn(late);
+print "main got " + str(main_yields());
 
 // STATUS: ok
 // CHECK: a 0
@@ -58,4 +67,7 @@ try {
 // CHECK: b got nil
 // CHECK: a
 // CHECK: b
-// CHECK: YieldOutsideCoroutineError
+// CHECK: late task runs
+// CHECK: main got nil
+// CHECK: late task runs
+// CHECK: main got nil
