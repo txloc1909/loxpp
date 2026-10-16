@@ -11,5 +11,6 @@ task.receive();
 print "main woke";
 
 // STATUS: error
+// EXIT: 3
 // CHECK: main waits
 // CHECK: task exits

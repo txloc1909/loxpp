@@ -7,8 +7,10 @@ A spec probe is a .lox file that carries one `// STATUS: ok` or
 expected stdout. The CHECK lines are the whole stdout the spec defines for
 the program, in order: a probe passes only when the stdout lines, with
 trailing white space removed, are exactly the CHECK lines, and when the exit
-status is zero for `ok` and non-zero for `error`. A .lox file with no STATUS
-line is not a spec probe and is not run here.
+status is zero for `ok` and non-zero for `error`. A probe whose spec rule
+defines the exact exit status, such as `exit(3)`, also carries
+`// EXIT: <code>`, and then the exit status must be exactly that code. A
+.lox file with no STATUS line is not a spec probe and is not run here.
 
 The expected-failure list holds one line per probe that the consumer does not
 pass yet: the file name, then a reason. Blank lines and lines that start with
@@ -44,6 +46,7 @@ from pathlib import Path
 
 STATUS_RE = re.compile(r"^\s*//\s*STATUS:\s*(ok|error)\s*$")
 CHECK_RE = re.compile(r"^\s*//\s*CHECK:\s?(.*)$")
+EXIT_RE = re.compile(r"^\s*//\s*EXIT:\s*(-?\d+)\s*$")
 
 
 @dataclass
@@ -51,13 +54,21 @@ class SpecProbe:
     path: Path
     status: str  # "ok" or "error"
     checks: list[str]
+    exit_code: int | None = None  # the exact exit status, when the probe names one
 
 
 def parse_probe(path: Path) -> SpecProbe | None:
     """Returns the probe's expectations, or None if it has no STATUS line."""
     status = None
+    exit_code = None
     checks: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
+        m = EXIT_RE.match(line)
+        if m:
+            if exit_code is not None:
+                raise ValueError(f"{path}: more than one EXIT line")
+            exit_code = int(m.group(1))
+            continue
         m = STATUS_RE.match(line)
         if m:
             if status is not None:
@@ -69,7 +80,9 @@ def parse_probe(path: Path) -> SpecProbe | None:
             checks.append(m.group(1).rstrip())
     if status is None:
         return None
-    return SpecProbe(path, status, checks)
+    if exit_code is not None and (exit_code == 0) != (status == "ok"):
+        raise ValueError(f"{path}: EXIT {exit_code} disagrees with STATUS {status}")
+    return SpecProbe(path, status, checks, exit_code)
 
 
 def stdout_lines(stdout: str) -> list[str]:
@@ -80,6 +93,8 @@ def passes(probe: SpecProbe, stdout: str, exit_code: int) -> bool:
     """True when one run's stdout and exit status are what the probe says."""
     if stdout_lines(stdout) != probe.checks:
         return False
+    if probe.exit_code is not None:
+        return exit_code == probe.exit_code
     return (exit_code == 0) == (probe.status == "ok")
 
 
@@ -163,7 +178,10 @@ def main() -> None:
                 print(f"      timeout after {args.timeout:.0f}s")
                 continue
             stdout, code = result
-            want = "zero" if probe.status == "ok" else "non-zero"
+            if probe.exit_code is not None:
+                want = str(probe.exit_code)
+            else:
+                want = "zero" if probe.status == "ok" else "non-zero"
             print(f"      exit code {code}, expected {want}")
             for line in difflib.unified_diff(
                 probe.checks, stdout_lines(stdout), "expected", "actual", lineterm=""

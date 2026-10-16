@@ -165,8 +165,9 @@ each has an off-the-shelf solution.
 The `66` to `82` probes are **spec probes** for the workers and tasks of
 `spec/04-semantics.md`. A spec probe carries a `// STATUS: ok` or
 `// STATUS: error` line and one `// CHECK:` line per line of the stdout the
-spec defines for it. `tools/check_spec_probes.py` runs every spec probe of
-this directory on one consumer and compares the whole stdout and the exit
+spec defines for it. A probe whose rule fixes the exact exit status also
+carries `// EXIT: <code>`. `tools/check_spec_probes.py` runs every spec probe
+of this directory on one consumer and compares the whole stdout and the exit
 status. Each consumer has an expected-failure list,
 `tools/probe_xfail_<consumer>.txt` (native, bootstrap, jvm, qbe), which
 `tools/check_spec_probes.py` and the `tools/diff_runtimes.py --xfail` walks
