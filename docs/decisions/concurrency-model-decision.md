@@ -447,6 +447,35 @@ actor column's 5, criteria 3, 6, 7, and 8 keep the actor column's 5, and
 criterion 4 scores 4, because the scheduler is a run queue and a mailbox per
 worker with no work stealing, no growable stacks, and no preemption.
 
+### What the model requires of an allocator or a collector
+
+A new allocator or collector is a separate decision. This section records
+what this model fixes for it and what it leaves free, so that the
+experiment starts from the constraints and not from a surprise.
+
+| The model requires | Why | What it rules out |
+|---|---|---|
+| One heap per worker, collected by its owner's thread, with no other thread mutating it | Workers share no mutable state | Nothing; this is the freedom below |
+| A held object, count above zero, never moves and is never freed | Another thread reads its fields at any time, including during the owner's collection | A copying or compacting collector that moves every object. A held object is pinned, or lives in a non-moving space |
+| Nothing a foreign reader reads is written by the collector | A reader sees fields, never the mark bit | A mark bit in the object header that a reader could see. A side bitmap removes the constraint |
+| A held object is a root, and the collector traces from it | A held message may hold a third worker's message | A collector that treats a root as a leaf |
+| A heap can outlive its thread as a dead heap and be freed as a whole | A worker may exit while another holds its messages | An allocator that cannot release a whole heap at once, or that must be freed by its creating thread |
+| The holder count is a field the owner's collector reads and other threads change atomically | The count moves at a send | A header layout with no room for one atomic word |
+
+| The model leaves free | What it means for an experiment |
+|---|---|
+| No concurrent collector and no write barrier for concurrency | The mutator of a heap is stopped while the heap is collected. A pause stops one worker, not the program. A barrier is needed only if the collector wants one, for a generational design |
+| A parallel collector | Several threads may collect one heap while its worker is stopped, and a worker may stop at a safe point for another worker's collector. The model forbids a second mutator, not a second collector |
+| The message bit is known before allocation | A constructor evaluates its fields first, so the allocation site knows whether the object is a message. A segregated non-moving space for messages and a moving space for everything else needs no extra pass |
+| A dead heap holds exactly the held messages | After the exit collection, the retained memory is bounded by what is held, whatever the allocator |
+
+A mark-region collector with side mark bitmaps fits every row: non-moving
+by default, pinning built into its evacuation, regions that free as a
+whole, and a bump allocator inside a region. That is a candidate, not a
+decision. `benchmarks/copy_bench.cpp` is the harness to extend to object
+headers once allocation can take an allocator, and the GC trace gives the
+pause and the live set per collection.
+
 ### What this unblocks and in which order
 
 1. The spec: workers, tasks, spawn, send, receive, the unbounded mailbox
