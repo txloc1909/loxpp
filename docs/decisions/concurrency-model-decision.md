@@ -220,16 +220,16 @@ explicitly rather than discovered in CI.
 boundary, cheap cooperative tasks inside it.
 
 - A **worker** is one OS thread that owns one `Runtime`, one `MemoryManager`,
-  one stack, one scheduler, and one mailbox. Workers share no mutable
+  one stack, one scheduler, and one inbound queue. Workers share no mutable
   state. A value crosses between workers only if it is a message, a
   scalar, a string, or an enum value of messages, and then by reference.
 - A **task** is a coroutine on its worker's stack: copy-on-suspend, as built
   (#523). Tasks on one worker share that worker's heap and switch only at
-  explicit points: `yield`, a send that blocks, a receive on an empty
-  mailbox, and the blocking calls the stdlib names. There is no preemption.
+  explicit points: `yield`, a receive on an empty mailbox, and the blocking
+  calls the stdlib names. A send never suspends. There is no preemption.
 - The **primitive** is spawn and send. `spawn` starts a task on the current
-  worker or on a new worker; `send` delivers a value to a mailbox; `receive`
-  takes the next one or suspends. Channels, actors, futures, and pools are
+  worker or on a new worker; `send` appends a value to a task's mailbox and
+  returns; `receive` takes the next one or suspends. Channels, actors, futures, and pools are
   libraries over these three.
 
 This is actor-style isolation at worker granularity and CSP-style cheap tasks
@@ -314,17 +314,46 @@ library too; a native `copy` may join the stdlib later if a measurement
 says the library is too slow, and it changes no rule.
 
 **Lifetime across workers.** A message object lives in the heap that
-created it. When another worker receives it, the receiver registers it in
-its *foreign set* and increments a holder count on the object, atomically.
-Each worker contributes at most one to a count, so the count is bounded by
-the worker count and changes only at a receive and at a collection, never
-on the interpreter's hot path. The creating worker's collector treats an
+created it. When a send crosses to another worker, the sender increments a
+holder count on the object, atomically, on behalf of the receiving worker,
+before the message enters that worker's inbound queue; the receiver
+registers the object in its *foreign set* when it drains the queue. The
+count moves at the send and not at the receive because the message sits in
+the inbound queue between the two, and the owner's collector must not free
+it there. Each worker contributes at most one to a count, so the count is
+bounded by the worker count and changes only at a send, at a drain, and at
+a collection, never on the interpreter's hot path. The creating worker's collector treats an
 object with a count above zero as a root. The receiver's collector marks
 foreign objects in a side table of its own, never in the object header,
 because the header's mark bit belongs to the owner's collector; a foreign
 object the receiver's mark phase did not reach leaves its foreign set and
 the count drops. A message has no pointer to mutable state and no cycle
 can cross a worker boundary, so the count has no cycle problem.
+
+**The owner traces from a held object.** A message may hold a message that a
+third worker owns: A sends an enum value E that A owns, whose field is F,
+which C owns and A received earlier. B then reaches F through E, but F's
+count was raised only for A. The count is therefore per root, and the
+owner's collector traces from every held root: A treats E as a root while B
+holds it, reaches F, and keeps F in its foreign set, so C keeps F for as
+long as B holds E. The chain holds by induction across any number of
+workers, and the send stays constant because no graph is walked at a send.
+
+**Retention across heaps is acyclic.** A message is immutable and is built
+after its fields, so a reference across heaps always points at an older
+object, and the hold graph across heaps has no cycle. A dead worker's heap
+releases every foreign hold except those reachable from its own held
+messages, so two dead heaps can never hold each other forever. This is the
+reason immutability was worth its cost: it makes the lifetime of a shared
+object end, in finite time, without a cycle collector across heaps.
+
+**A task handle is an identity.** A request carries the sender's handle, so
+a handle is a message. A task object owns a mailbox and a coroutine
+snapshot, which are mutable state of another thread, so a handle that
+crosses workers is an identity, the worker and the task number, and
+tracing stops at it. A send to a handle routes through the target worker's
+inbound queue. A send to a dead task, or to a task of a dead worker, raises
+`DeadTaskError` at the send site: a lost message is a fault, not a silence.
 
 **Strings are interned on receive.** `==` on two strings is a pointer
 compare, and that is correct only because every string in a heap is
@@ -345,12 +374,70 @@ at construction. One error kind, `SendError`. A foreign set and a side
 mark table per worker. Nothing runs user code or adds work proportional to
 anything at a site that does not name it.
 
+### Mailboxes
+
+**Each task owns one mailbox, and it is unbounded.** A mailbox is a
+first-in first-out queue of messages. `send(task, msg)` appends to it and
+returns; it never suspends and never fails for lack of room. `receive()`
+takes the head of the current task's mailbox or suspends the task until a
+message arrives. The length of a mailbox is observable, so a program can
+see a queue grow.
+
+The bounded form was weighed and rejected for the primitive. A send that
+suspends when a queue is full stops a task at a site that asked for no
+limit, which fails the *cost* control, and it puts the classic deadlock,
+two tasks each waiting to send into the other's full queue, into the
+primitive itself. With an unbounded mailbox the only wait a task can enter
+is its own `receive`.
+
+**Each worker owns one inbound queue.** It is the path a message takes from
+another thread: the sender takes the queue's lock, appends an envelope of
+target task and message, releases, and signals; the receiving worker drains
+the queue between tasks, in one swap under the lock, delivers each envelope
+to its task's mailbox, and wakes the tasks that were parked on `receive`. A
+send inside a worker goes straight to the target's mailbox with no lock. A
+mutex and a condition variable per inbound queue is the first form; a
+lock-free queue is an optimisation with a measurement, later.
+
+**The credit channel is required.** An unbounded mailbox moves the memory
+bound from the runtime to the program, and the *memory* control of
+`VISION.md` says the program must be able to bound what it uses. So the
+language ships the bound as a library, in Lox++, over the primitive: a
+channel with a capacity N, where the consumer grants N credits to the
+producer, the producer sends only while it holds a credit, and the consumer
+returns a credit after each message it takes. Under this protocol a
+producer with no credit parks on its own `receive`, never on anyone's
+queue, and the memory of the edge is bounded by N. The library is part of
+the mission, as its own node, and it is the recommended form for every
+edge where a producer can outrun its consumer. Until the import system
+lands, it ships as an example program the way `examples/option_result.lox`
+does; after it, as a stdlib module.
+
+**Deadlock is a diagnosed fault.** When every worker waits on its
+condition variable with at least one task parked on `receive` and nothing
+inbound anywhere, the program can never progress. The last worker to go
+idle detects this with one atomic count and ends the program with
+`DeadlockError`, naming the parked tasks. It costs nothing on the hot path.
+
 ### Scheduler
 
 Per worker, one run queue, first in first out, no priorities. A task runs
 until it suspends. A blocking call blocks its worker, every task on it, and
 nothing else; the stdlib says which calls block. Asynchronous I/O inside a
-worker is a later feature on this seam, not part of this decision.
+worker is the first follow-up on this seam, not part of this decision.
+
+**The suspend points are the default set, and a fair mode is reserved.** The
+spec's table of suspend points, `yield`, `receive` on an empty mailbox, and
+the blocking calls, is the set a program pays for by default. A task that
+computes without reaching one starves every other task on its worker, and
+a program cannot add a switch point inside a library it calls; the lever at
+launch is placement, a worker of its own. An opt-in fair mode per worker,
+which forces a switch at a loop back-edge or a call after a budget of
+work, is reserved: it pays only where it is enabled, it changes the meaning
+of no program that does not enable it, and QBE's coroutine mode already
+makes every function re-enterable. The spec must word the table so that
+such a mode adds points under a flag without a change of rule. The mode
+itself is a later decision with a measurement.
 
 ### Per backend, by role
 
@@ -373,20 +460,57 @@ actor column's 5, criteria 3, 6, 7, and 8 keep the actor column's 5, and
 criterion 4 scores 4, because the scheduler is a run queue and a mailbox per
 worker with no work stealing, no growable stacks, and no preemption.
 
+### What the model requires of an allocator or a collector
+
+A new allocator or collector is a separate decision. This section records
+what this model fixes for it and what it leaves free, so that the
+experiment starts from the constraints and not from a surprise.
+
+| The model requires | Why | What it rules out |
+|---|---|---|
+| One heap per worker, collected by its owner's thread, with no other thread mutating it | Workers share no mutable state | Nothing; this is the freedom below |
+| A held object, count above zero, never moves and is never freed | Another thread reads its fields at any time, including during the owner's collection | A copying or compacting collector that moves every object. A held object is pinned, or lives in a non-moving space |
+| Nothing a foreign reader reads is written by the collector | A reader sees fields, never the mark bit | A mark bit in the object header that a reader could see. A side bitmap removes the constraint |
+| A held object is a root, and the collector traces from it | A held message may hold a third worker's message | A collector that treats a root as a leaf |
+| A heap can outlive its thread as a dead heap and be freed as a whole | A worker may exit while another holds its messages | An allocator that cannot release a whole heap at once, or that must be freed by its creating thread |
+| The holder count is a field the owner's collector reads and other threads change atomically | The count moves at a send | A header layout with no room for one atomic word |
+
+| The model leaves free | What it means for an experiment |
+|---|---|
+| No concurrent collector and no write barrier for concurrency | The mutator of a heap is stopped while the heap is collected. A pause stops one worker, not the program. A barrier is needed only if the collector wants one, for a generational design |
+| A parallel collector | Several threads may collect one heap while its worker is stopped, and a worker may stop at a safe point for another worker's collector. The model forbids a second mutator, not a second collector |
+| The message bit is known before allocation | A constructor evaluates its fields first, so the allocation site knows whether the object is a message. A segregated non-moving space for messages and a moving space for everything else needs no extra pass |
+| A dead heap holds exactly the held messages | After the exit collection, the retained memory is bounded by what is held, whatever the allocator |
+
+A mark-region collector with side mark bitmaps fits every row: non-moving
+by default, pinning built into its evacuation, regions that free as a
+whole, and a bump allocator inside a region. That is a candidate, not a
+decision. `benchmarks/copy_bench.cpp` is the harness to extend to object
+headers once allocation can take an allocator, and the GC trace gives the
+pause and the live set per collection.
+
 ### What this unblocks and in which order
 
-1. The spec: workers, tasks, spawn, send, receive, `SendError`, the
-   sendable set as a table with a check script, and the list of blocking
-   calls.
+1. The spec: workers, tasks, spawn, send, receive, the unbounded mailbox
+   and its observable length, `SendError`, `DeadlockError`, `DeadTaskError`,
+   the task handle as an identity, the sendable
+   set as a table with a check script, the suspend points as a table, and
+   the list of blocking calls.
 2. The native runtime: per-worker `Runtime` and `MemoryManager`, the
    sendable bit on enum values, the foreign set and side mark table, intern
-   on receive, the mailbox, the run queue, `CLOCK_THREAD_CPUTIME_ID`.
-3. The bootstrap, then the JVM as oracle, then QBE parity, each diffed
+   on receive, the mailbox, the inbound queue, the run queue, the deadlock
+   detector, `CLOCK_THREAD_CPUTIME_ID`.
+3. The credit channel library in Lox++, with the rule that blocking waits
+   form a directed acyclic graph of ranks.
+4. The bootstrap, then the JVM as oracle, then QBE parity, each diffed
    against native at its own review.
-4. After the mission: GC item 11 per worker heap; FFI in the full package,
-   where a blocking foreign call blocks its worker and foreign code never
-   holds another worker's object; a per-worker netpoller for asynchronous
-   I/O; #519.
+5. After the mission, in this order: a per-worker netpoller for
+   asynchronous I/O first, because a blocking call blocks its worker and a
+   server with a thousand connections otherwise needs a thousand workers,
+   so the mission alone does not close #519; then #519; then GC item 11
+   per worker heap; then FFI in the full package, where a blocking foreign
+   call blocks its worker and foreign code never holds another worker's
+   object.
 
 This decision does not open the mission. The mission's tracking issue and
 node issues follow it, per `AGENTS.md`, "Missions".
@@ -395,7 +519,8 @@ node issues follow it, per `AGENTS.md`, "Missions".
 
 - No GC redesign. One collector per worker is the collector that exists.
 - No preemption, no work stealing, no growable stack, no shared mutable
-  heap, no implicit copy, no freeze primitive. Each is a new decision if
+  heap, no implicit copy, no freeze primitive, no bounded mailbox in the
+  primitive. Each is a new decision if
   ever wanted, and each must beat the numbers above.
 - No FFI thread-safety work here. FFI is designed on this model, after it.
 - No `spec/` change in this document.
