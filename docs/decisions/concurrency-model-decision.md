@@ -1,8 +1,9 @@
 # Concurrency Model Decision
 
 **Status:** accepted. The decision was taken on 2026-10-17 (#590) on the
-measurements in `docs/records/coroutine-cost-2026-10-17.md` and
-`docs/records/coroutine-cost-qbe-2026-10-17.md`. The sections up to "Reading
+measurements in `docs/records/coroutine-cost-2026-10-17.md`,
+`docs/records/coroutine-cost-qbe-2026-10-17.md`, and
+`docs/records/message-copy-cost-2026-10-17.md`. The sections up to "Reading
 the matrix" are the analysis that led to it; "Decision" states it.
 
 ## Why this doc
@@ -270,10 +271,32 @@ The measurements settled the stack axis and the vision settled the heap axis.
 ### The message and value story (C7)
 
 `send` copies. The copy is deep over the universal data representation:
-`nil`, Booleans, numbers, strings, lists, and maps. A cycle is copied once
-through an identity map, so a self-referring list arrives as a self-referring
-list. A copy is a new object: it is not `==` to its source and it is not the
-same map key.
+`nil`, Booleans, numbers, lists, and maps. A cycle is copied once through an
+identity map, so a self-referring list arrives as a self-referring list. A
+copy is a new object: it is not `==` to its source and it is not the same
+map key.
+
+**Strings cross by reference.** A string is immutable and interned, so the
+receiver can hold the sender's object. Measured, a shared string costs 5 ns
+against 130 to 205 ns for a copy with re-interning
+(`docs/records/message-copy-cost-2026-10-17.md`). The runtime keeps a string
+alive while another worker holds it, with a cross-worker count on the
+object; interning stays per worker, so two workers may hold two distinct
+strings with the same characters, and `==` on strings stays a character
+comparison across that line. The native node designs the count; the spec
+says only that a string's identity is not observable across workers.
+
+**What the copy costs.** About 2 ns per scalar, about 100 ns per object, and
+20 to 30 ns per map entry, rising by half once the heap outgrows the cache;
+the receiver pays about 45 ns per live object at each of its collections
+while the message lives. A faster allocator does not move these numbers:
+the storage behind `VmAllocator` is not where the time goes. Two
+implementation steps do, in this order, and neither changes the model:
+clone a map's bucket array instead of re-inserting its entries, which the
+record estimates at 50 ns per record in place of 190; and, with a
+region-aware heap, transfer a message's region instead of copying it, which
+makes the send free per item and belongs to the GC item that follows this
+decision.
 
 Any other value is not sendable: a function, a closure, a class, an
 instance, an enum value with fields that are not sendable, a coroutine, a
@@ -285,7 +308,10 @@ is now a rule, not a convention.
 A send between two tasks on the same worker copies too. The semantics of a
 program must not depend on where its tasks were placed. The cost is named at
 the `send` site and is proportional to the message, as the *cost* control
-requires.
+requires. This is the one rule the measurements make expensive for a
+pipeline of records inside a worker; the record above gives the number it
+was weighed against, and the bucket clone and the region transfer are the
+way its cost falls without a change of rule.
 
 ### Scheduler
 
@@ -352,8 +378,9 @@ node issues follow it, per `AGENTS.md`, "Missions".
   (parallelism), and the share-nothing messaging stance.
 - `docs/records/benchmark_report_2026-08-26.md` §5 item 11 and "Dependencies on the
   expressiveness roadmap" — why GC waited for this decision.
-- `docs/records/coroutine-cost-2026-10-17.md` and
-  `docs/records/coroutine-cost-qbe-2026-10-17.md` — the measurements.
+- `docs/records/coroutine-cost-2026-10-17.md`,
+  `docs/records/coroutine-cost-qbe-2026-10-17.md`, and
+  `docs/records/message-copy-cost-2026-10-17.md` — the measurements.
 - `docs/decisions/qbe-backend.md` — the QBE backend that replaced CLR at parity gate
   S7, its reuse of the native runtime, and its real-C-frame code shape.
 - `spec/README.md` — the implementation-independent contract every target must
