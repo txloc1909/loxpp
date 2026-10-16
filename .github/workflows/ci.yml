@@ -51,6 +51,16 @@ jobs:
       - name: Check document placement
         run: tools/check_docs_placement.py
 
+      # The countable sets of the concurrency model in spec/. Each script
+      # fails when its table loses a row or disagrees with the rule
+      # sentences the spec states for it. Pure Python, so it needs no build.
+      - name: Check concurrency spec tables
+        run: |
+          tools/check_sendable_table.py
+          tools/check_worker_error_kinds.py
+          tools/check_suspend_points.py
+          tools/check_blocking_calls.py
+
   tree-sitter:
     name: tree-sitter grammar
     runs-on: ubuntu-latest
