@@ -35,7 +35,7 @@ deprecation period is needed.
 
 GitHub Issues are the backlog, and GitHub Projects the board for anything
 bigger than a handful of issues. A follow-up, a known gap, a "do this later"
-item — file it as an issue. Never park it as a bullet list under `docs/`: an
+item — file it as an issue. Never park it as a bullet list under `docs/proposals/`: an
 issue can be assigned, labeled, closed, and linked from a PR; a markdown
 bullet cannot, and nothing then answers "is this done yet."
 
