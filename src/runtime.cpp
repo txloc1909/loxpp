@@ -534,16 +534,14 @@ bool Runtime::invokeMethodFromNative(ObjClosure* method, int argCount,
 
 bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
     if (co->state == CoroutineState::DEAD) {
-        m_reentrantOutcome = fromThrow(raiseThrowableError(
-            "DeadCoroutineError", "Cannot resume a dead coroutine.",
-            m_nativeStopAtFrameCount));
+        raiseFromNative("DeadCoroutineError",
+                        "Cannot resume a dead coroutine.");
         return false;
     }
     if (co->state == CoroutineState::RUNNING ||
         co->state == CoroutineState::NORMAL) {
-        m_reentrantOutcome = fromThrow(raiseThrowableError(
-            "RunningCoroutineError", "Cannot resume a running coroutine.",
-            m_nativeStopAtFrameCount));
+        raiseFromNative("RunningCoroutineError",
+                        "Cannot resume a running coroutine.");
         return false;
     }
 
@@ -554,8 +552,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
 
     if (co->started) {
         if (argCount > 1) {
-            m_reentrantOutcome = fromThrow(raiseThrowableError(
-                "ArityError", "Expected 0 or 1 arguments.", boundary));
+            raiseFromNative("ArityError", "Expected 0 or 1 arguments.");
             return false;
         }
         received = argCount == 1 ? peek(0) : from<Nil>(Nil{});
