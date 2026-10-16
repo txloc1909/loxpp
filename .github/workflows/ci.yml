@@ -416,6 +416,30 @@ jobs:
             loxpp-dev:latest \
             bash -c "tools/check_coroutine_probes.sh"
 
+      # The spec probes of test/translation-probes/ (the files with a STATUS
+      # line), against the stdout the spec defines. Each consumer has an
+      # expected-failure list, tools/probe_xfail_<consumer>.txt; a listed
+      # probe that passes fails the step. Release only: the debug preset's
+      # instruction trace floods stdout (see AGENTS.md).
+      - name: Check spec probes - native
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "python3 tools/check_spec_probes.py build/loxpp test/translation-probes/ --xfail tools/probe_xfail_native.txt"
+
+      - name: Check spec probes - bootstrap interpreter
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev:latest \
+            bash -c "python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/ --xfail tools/probe_xfail_bootstrap.txt"
+
       - name: Run examples through loxpp bootstrap interpreter
         if: matrix.preset == 'release'
         run: |
@@ -862,7 +886,19 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/ test/translation-probes/jvm-only/"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/ test/translation-probes/jvm-only/ --xfail tools/probe_xfail_jvm.txt"
+
+      # The spec probes of test/translation-probes/ (the files with a
+      # STATUS line) on the JVM backend, against the stdout the spec
+      # defines. tools/probe_xfail_jvm.txt lists the probes the backend does
+      # not pass yet; a listed probe that passes fails the step.
+      - name: Check spec probes - JVM
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/check_spec_probes.py tools/loxpp_jvm.sh test/translation-probes/ --xfail tools/probe_xfail_jvm.txt"
 
       # The full example corpus on the JVM backend, zero failures. --exclude
       # skips the map-iteration-order-sensitive examples
@@ -1050,6 +1086,18 @@ jobs:
             -w /workspace \
             loxpp-dev-qbe:latest \
             bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && tools/check_qbe_probes.sh"
+
+      # The spec probes of test/translation-probes/ (the files with a STATUS
+      # line) on the QBE backend, against the stdout the spec defines.
+      # tools/probe_xfail_qbe.txt lists the probes the backend does not pass
+      # yet; a listed probe that passes fails the step.
+      - name: Check spec probes - QBE
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-qbe:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/check_spec_probes.py tools/loxpp_qbe.sh test/translation-probes/ --xfail tools/probe_xfail_qbe.txt"
 
       # S8's own checkpoint (issue #461): register promotion narrows what the
       # GC can see on the QBE backend's fused stack, so this runs the whole

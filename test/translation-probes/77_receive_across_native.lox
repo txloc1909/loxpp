@@ -1,0 +1,24 @@
+// A task.receive() that would suspend while a native callback is on the
+// call chain raises YieldAcrossNativeError (spec/04-semantics.md,
+// task.receive). A receive that finds a message does not suspend, so it
+// works there.
+class Reader {
+    __str__() {
+        return "read " + str(task.receive());
+    }
+}
+
+var me = task.self();
+task.send(me, "one");
+print Reader();
+try {
+    print Reader();
+} catch (e) {
+    print e.kind;
+    print e.message;
+}
+
+// STATUS: ok
+// CHECK: read one
+// CHECK: YieldAcrossNativeError
+// CHECK: Cannot receive across a native callback.

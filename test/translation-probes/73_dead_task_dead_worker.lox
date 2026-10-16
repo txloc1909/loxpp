@@ -1,0 +1,26 @@
+// A send to a task whose worker has ended raises DeadTaskError
+// (spec/04-semantics.md, task.send). The end of a task on another worker
+// can race with a send, so the main task sends until a send raises; it
+// prints nothing inside the loop, so the output does not depend on the race.
+fun entry(main) {
+    task.send(main, "worker done");
+}
+
+var w = task.spawn_worker(entry, task.self());
+print task.receive();
+var kind = "none";
+var i = 0;
+while (kind == "none" and i < 100000) {
+    try {
+        task.send(w, i);
+    } catch (e) {
+        kind = e.kind;
+    }
+    if (kind == "none") sleep(0.001);
+    i = i + 1;
+}
+print kind;
+
+// STATUS: ok
+// CHECK: worker done
+// CHECK: DeadTaskError

@@ -20,6 +20,10 @@
 #     YIELD natively (resume blocks, #530/#535), so every probe must match
 #     native byte for byte.
 #
+# The spec probes that tools/probe_xfail_qbe.txt lists are expected to fail
+# on QBE (tools/diff_runtimes.py --xfail): they report XFAIL, and one that
+# starts to pass fails this gate until its line is deleted.
+#
 # No exclusion file: unlike the JVM (LinkedHashMap), the
 # QBE backend reuses native's own Table implementation unchanged (Layer 0,
 # docs/decisions/qbe-backend.md), so map iteration order is identical to native by
@@ -49,7 +53,8 @@ run_diff() {
 }
 
 run_diff "test/translation-probes/ (main directory)" \
-    "$root/test/translation-probes/"
+    "$root/test/translation-probes/" \
+    --xfail "$root/tools/probe_xfail_qbe.txt"
 
 run_diff "test/translation-probes/qbe-only/" \
     "$root/test/translation-probes/qbe-only/"

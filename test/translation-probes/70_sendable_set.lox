@@ -1,0 +1,96 @@
+// task.send accepts exactly the messages of spec/03-types.md, section
+// Messages: Nil, Boolean, Number, String, Task, and an Enum whose fields
+// are all messages. Every other kind raises SendError, also when the target
+// is on the same worker. No program can obtain an Iterator, so that kind
+// has no line here.
+enum Shape { Point(x, y) Tagged(label, inner) Empty }
+class C {
+    m() {}
+}
+fun f() {}
+
+var me = task.self();
+
+fun try_send(label, v) {
+    try {
+        task.send(me, v);
+        print label + ": sent";
+    } catch (e) {
+        print label + ": " + e.kind;
+    }
+}
+
+var caught;
+try {
+    [][0];
+} catch (e) {
+    caught = e;
+}
+var server = listen("127.0.0.1", 0);
+var socket = connect("127.0.0.1", server.port());
+var process = spawn("true", []);
+process.wait();
+
+try_send("Nil", nil);
+try_send("Boolean", true);
+try_send("Number", 1.5);
+try_send("String", "s");
+try_send("Task", me);
+try_send("Enum of messages", Tagged("t", Point(1, 2)));
+try_send("Enum with no fields", Empty());
+try_send("Enum with a List field", Point([1], 2));
+try_send("Enum with a nested List field", Tagged("t", Point(1, [2])));
+try_send("Function", f);
+try_send("BoundMethod", C().m);
+try_send("Class", C);
+try_send("Instance", C());
+try_send("List", []);
+try_send("Map", {});
+try_send("File", open("/dev/null", "r"));
+try_send("Socket", socket);
+try_send("Server", server);
+try_send("Process", process);
+try_send("Error", caught);
+try_send("Coroutine", coroutine.create(f));
+try_send("EnumConstructor", Point);
+print task.pending();
+
+try {
+    task.send(me, [1]);
+} catch (e) {
+    print e.message;
+}
+try {
+    task.send(me, Point([1], 2));
+} catch (e) {
+    print e.message;
+}
+print task.pending();
+
+// STATUS: ok
+// CHECK: Nil: sent
+// CHECK: Boolean: sent
+// CHECK: Number: sent
+// CHECK: String: sent
+// CHECK: Task: sent
+// CHECK: Enum of messages: sent
+// CHECK: Enum with no fields: sent
+// CHECK: Enum with a List field: SendError
+// CHECK: Enum with a nested List field: SendError
+// CHECK: Function: SendError
+// CHECK: BoundMethod: SendError
+// CHECK: Class: SendError
+// CHECK: Instance: SendError
+// CHECK: List: SendError
+// CHECK: Map: SendError
+// CHECK: File: SendError
+// CHECK: Socket: SendError
+// CHECK: Server: SendError
+// CHECK: Process: SendError
+// CHECK: Error: SendError
+// CHECK: Coroutine: SendError
+// CHECK: EnumConstructor: SendError
+// CHECK: 7
+// CHECK: Value of type List is not a message.
+// CHECK: Value of type Enum is not a message.
+// CHECK: 7

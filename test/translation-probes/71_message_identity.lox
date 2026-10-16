@@ -1,0 +1,32 @@
+// A send copies nothing (spec/03-types.md, Messages): a received Enum value
+// is == to the value that was sent, a Task handle that comes back in a
+// message is == to the handle of the same task, and a received String is ==
+// to every String with the same characters.
+enum Msg { Box(v) Reply(from, payload) }
+
+var main = task.self();
+var original = Box(Box("x"));
+
+fun echo() {
+    var m = task.receive();
+    task.send(m[0], Reply(task.self(), m[1]));
+}
+
+var e = task.spawn(echo);
+task.send(e, Reply(main, original));
+var back = task.receive();
+print back[1] == original;
+print back[1] == Box(Box("x"));
+print back[0] == e;
+print back[0] == main;
+print str(back[0]);
+task.send(main, "ab" + "c");
+print task.receive() == "abc";
+
+// STATUS: ok
+// CHECK: true
+// CHECK: false
+// CHECK: true
+// CHECK: false
+// CHECK: <task>
+// CHECK: true

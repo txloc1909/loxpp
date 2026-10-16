@@ -1,0 +1,22 @@
+# Spec probes in test/translation-probes/ that the native VM does not pass yet.
+# Read by tools/check_spec_probes.py (the Build & Test job).
+# Each line is `<probe>.lox  <reason>`. A listed probe must fail. When it
+# passes, the gate fails, and the node that made it pass deletes its line.
+
+66_task_spawn_order.lox  tasks on one worker: mission #595, node #597
+67_send_never_suspends.lox  tasks on one worker: mission #595, node #597
+68_mailbox_unbounded.lox  tasks on one worker: mission #595, node #597
+69_task_yield.lox  tasks on one worker: mission #595, node #597
+70_sendable_set.lox  tasks on one worker: mission #595, node #597
+71_message_identity.lox  tasks on one worker: mission #595, node #597
+72_dead_task_same_worker.lox  tasks on one worker: mission #595, node #597
+73_dead_task_dead_worker.lox  workers on threads: mission #595, node #598
+74_worker_isolation.lox  workers on threads: mission #595, node #598
+75_spawn_worker_send_error.lox  workers on threads: mission #595, node #598
+76_deadlock.lox  workers on threads: mission #595, node #598
+77_receive_across_native.lox  tasks on one worker: mission #595, node #597
+78_receive_in_coroutine.lox  tasks on one worker: mission #595, node #597
+79_uncaught_fault_in_task.lox  tasks on one worker: mission #595, node #597
+80_main_end_abandons.lox  tasks on one worker: mission #595, node #597
+81_exit_from_task.lox  tasks on one worker: mission #595, node #597
+82_send_order_across_workers.lox  workers on threads: mission #595, node #598

@@ -1,0 +1,45 @@
+// A receive inside a coroutine that a task resumed suspends the whole task
+// (spec/04-semantics.md, task.receive). The coroutine keeps the status
+// "running", so another task cannot resume it, and the receive returns
+// inside the coroutine when the task runs again.
+var main = task.self();
+var co;
+var t;
+
+fun body() {
+    print "coroutine waits";
+    var m = task.receive();
+    print "coroutine got " + m;
+    yield "yielded " + m;
+    return "returned";
+}
+
+fun owner() {
+    co = coroutine.create(body);
+    print co.resume();
+    print co.resume();
+    task.send(main, "owner done");
+}
+
+fun peeker() {
+    print co.status();
+    try {
+        co.resume();
+    } catch (e) {
+        print e.kind;
+    }
+    task.send(t, "go");
+}
+
+t = task.spawn(owner);
+task.spawn(peeker);
+print task.receive();
+
+// STATUS: ok
+// CHECK: coroutine waits
+// CHECK: running
+// CHECK: RunningCoroutineError
+// CHECK: coroutine got go
+// CHECK: yielded go
+// CHECK: returned
+// CHECK: owner done

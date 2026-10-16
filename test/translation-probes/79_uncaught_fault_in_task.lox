@@ -1,0 +1,27 @@
+// A throw that no try in its task catches ends the program, as an uncaught
+// runtime error does (spec/04-semantics.md, Ending). The deferred calls of
+// the task that threw run first. The try in the main task does not catch
+// it, and the main task does not continue.
+fun cleanup() {
+    print "task deferred call ran";
+}
+
+fun failing() {
+    defer cleanup();
+    print "task throws";
+    throw "boom";
+}
+
+task.spawn(failing);
+print "main waits";
+try {
+    task.receive();
+} catch (e) {
+    print "main caught it";
+}
+print "main continues";
+
+// STATUS: error
+// CHECK: main waits
+// CHECK: task throws
+// CHECK: task deferred call ran

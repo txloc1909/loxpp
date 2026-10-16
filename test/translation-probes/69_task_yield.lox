@@ -1,0 +1,61 @@
+// In a spawned task, a yield outside every coroutine the task resumed
+// suspends the task: it joins the back of the run queue, the yielded value
+// is discarded, and the yield evaluates to nil. A yield inside a coroutine
+// that the task resumed still returns to that coroutine's resumer. In the
+// main task a yield stays a YieldOutsideCoroutineError
+// (spec/04-semantics.md, yield Expression and Scheduling).
+var main = task.self();
+
+fun ticker(name) {
+    fun body() {
+        var i = 0;
+        while (i < 2) {
+            print name + " " + str(i);
+            var v = yield i;
+            print name + " got " + str(v);
+            i = i + 1;
+        }
+        task.send(main, name);
+    }
+    return body;
+}
+
+fun gen() {
+    yield "inner";
+    return "end";
+}
+
+fun nested() {
+    var co = coroutine.create(gen);
+    print "nested " + co.resume();
+    print "nested " + co.resume();
+    task.send(main, "nested");
+}
+
+task.spawn(ticker("a"));
+task.spawn(ticker("b"));
+task.spawn(nested);
+print task.receive();
+print task.receive();
+print task.receive();
+try {
+    yield 1;
+} catch (e) {
+    print e.kind;
+}
+
+// STATUS: ok
+// CHECK: a 0
+// CHECK: b 0
+// CHECK: nested inner
+// CHECK: nested end
+// CHECK: a got nil
+// CHECK: a 1
+// CHECK: b got nil
+// CHECK: b 1
+// CHECK: nested
+// CHECK: a got nil
+// CHECK: b got nil
+// CHECK: a
+// CHECK: b
+// CHECK: YieldOutsideCoroutineError

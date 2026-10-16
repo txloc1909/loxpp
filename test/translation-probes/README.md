@@ -91,6 +91,23 @@ each has an off-the-shelf solution.
 | `62_map_instance_keys` | user-object map keys (issue #469): a class defining both `__hash__` and `__eq__` keys a map, an equal-but-distinct key retrieves the same value, a non-Number `__hash__`, a non-Boolean `__eq__`, a missing-method key, and a key method that writes the map are each a catchable error, and a scalar key and an equal Instance key that share a bucket resolve the same way on every backend — a positive-parity `probes` entry | none (parity gate) |
 | `64_net_process` | sockets and subprocess (issue #516): a loopback TCP echo (`listen`/`connect`/`accept`, `close_write`, `read`) and a captured child (`run`) must print byte-identically on every backend — native, JVM, and QBE alike; `tools/check_jvm_probes.sh` names it directly, and the QBE gate walks the directory | none (parity gate) |
 | `65_invoke_callable_field` | `obj.field(args)` calls a field that holds a callable Instance (`__call__`), a class, or a bound method, like a plain call does (issue #560) — a positive-parity `probes` entry | none (parity gate) |
+| `66_task_spawn_order` | `task.spawn` does not run its function; the spawner runs until it suspends, and new tasks run in spawn order; a Task is `==` only to a handle of the same task — a spec probe | none (spec probe) |
+| `67_send_never_suspends` | `task.send` returns `nil` and never suspends the sender; `task.receive` is first in, first out and does not suspend while the mailbox holds a message; `task.pending` is the mailbox length — a spec probe | none (spec probe) |
+| `68_mailbox_unbounded` | a mailbox has no bound: a thousand sends to one task never fail, and `task.pending` shows the queue grow — a spec probe | none (spec probe) |
+| `69_task_yield` | a `yield` in a spawned task sends it to the back of the run queue and evaluates to `nil`; a `yield` in a coroutine the task resumed goes to its resumer; a `yield` in the main task stays `YieldOutsideCoroutineError` — a spec probe | none (spec probe) |
+| `70_sendable_set` | the sendable set of `spec/03-types.md` over every value kind a program can make: the messages are sent, every other kind raises `SendError`, on the same worker too, with the `SendError` message text — a spec probe | none (spec probe) |
+| `71_message_identity` | a send copies nothing: a received Enum value and a returned Task handle are `==` to the originals, and a received String is `==` by its characters — a spec probe | none (spec probe) |
+| `72_dead_task_same_worker` | a send to a task that has ended raises `DeadTaskError`, with its message text — a spec probe | none (spec probe) |
+| `73_dead_task_dead_worker` | a send to a task whose worker has ended raises `DeadTaskError`; the probe sends until it raises, because the end and the send can race — a spec probe | none (spec probe) |
+| `74_worker_isolation` | `task.spawn_worker` defines every top-level declaration on the new worker and runs no other statement, so a top-level `var` is undefined there; globals are per worker; an Enum from another worker matches its patterns and comes back `==` — a spec probe | none (spec probe) |
+| `75_spawn_worker_send_error` | `task.spawn_worker` with an argument that is not a message raises `SendError`, and no worker starts — a spec probe | none (spec probe) |
+| `76_deadlock` | the main task waits in `task.receive()` with no task able to run on any worker: the program ends with `DeadlockError`, which no `try` catches and which runs no deferred call — a spec probe | none (spec probe) |
+| `77_receive_across_native` | a `task.receive()` that would suspend inside a native callback raises `YieldAcrossNativeError`; one that finds a message works there — a spec probe | none (spec probe) |
+| `78_receive_in_coroutine` | a receive inside a coroutine suspends the whole task; the coroutine stays `"running"`, so another task's resume of it is `RunningCoroutineError` — a spec probe | none (spec probe) |
+| `79_uncaught_fault_in_task` | an uncaught throw in a spawned task ends the program after the task's own deferred calls run; the main task's `try` does not catch it — a spec probe | none (spec probe) |
+| `80_main_end_abandons` | the program ends when the main task ends: a task that has not run never runs, and a waiting task's deferred call does not run — a spec probe | none (spec probe) |
+| `81_exit_from_task` | `exit(code)` in a spawned task ends the program at once — a spec probe | none (spec probe) |
+| `82_send_order_across_workers` | messages from one worker to one task arrive in the order of the sends; a handle a worker sends of itself is `==` to the one `task.spawn_worker` returned — a spec probe | none (spec probe) |
 | `48_file_visible_after_close` | a File's write-close-reopen cycle: once `close()` returns, a fresh `open()` on the same path sees everything the closed handle wrote (`spec/05-stdlib.md`, File section) — pins the after-close half of the visibility guarantee, not the buffered-before-close half, which is implementation-defined and allowed to differ | none (parity gate) |
 | `55_for_in_map_net_zero` | an erase plus an insert in one `for`-in body restores the net size, so a size check misses it — the structural version check must still fail on every backend, with empty stdout (issue #362) — an `error_probes` entry | none (error-parity gate) |
 | `jvm-only/61_operator_overload` | operator overloading (issue #472): every T1 dunder method (`__add__ __sub__ __mul__ __div__ __mod__ __neg__ __lt__ __gt__ __eq__ __contains__ __call__`), the Wave-2 methods (`__index_get__ __index_set__ __len__ __iter__`), and the deferred `__slice__` dispatch on an Instance; `!=`/`<=`/`>=` derive from `__eq__`/`__gt__`/`__lt__`, and the built-in List/String/Map/Number paths stay unchanged. Also the reflected methods (issue #508): a built-in left operand defers to the right operand's `__radd__ __rsub__ __rmul__ __rdiv__ __rmod__ __rlt__ __rgt__` or `__eq__`, with `<=`/`>=` deriving from the reflected `__rgt__`/`__rlt__` — named directly by both check scripts, see the note below the table | P6 |
@@ -144,6 +161,17 @@ each has an off-the-shelf solution.
 | `qbe-only/s8_promotion_loop` | a non-captured loop counter and accumulator carried across the back-edge by a phi give the same result under `LOXPP_STRESS_GC=1` | none (QBE-only gate) |
 | `qbe-only/V1_fresh_cell_no_lists` | the `V1_fresh_cell` hazard with no list opcodes (S4): a captured loop-body local needs a fresh cell per iteration, checked through globals instead of a list slot | P4 |
 | `qbe-only/V3_loopvar_no_lists` | the `V3_loopvar` hazard with no list opcodes (S4): a closure capturing the loop variable itself shares one open upvalue across every iteration | P4 |
+
+The `66` to `82` probes are **spec probes** for the workers and tasks of
+`spec/04-semantics.md`. A spec probe carries a `// STATUS: ok` or
+`// STATUS: error` line and one `// CHECK:` line per line of the stdout the
+spec defines for it. `tools/check_spec_probes.py` runs every spec probe of
+this directory on one consumer and compares the whole stdout and the exit
+status. Each consumer has an expected-failure list,
+`tools/probe_xfail_<consumer>.txt` (native, bootstrap, jvm, qbe), which
+`tools/check_spec_probes.py` and the `tools/diff_runtimes.py --xfail` walks
+of this directory read: a listed probe must fail, and a listed probe that
+passes fails the gate until its line is deleted.
 
 `jvm-only/61_operator_overload` and `jvm-only/defer_replaces_overflow` sit one
 level down because this directory's own files are walked non-recursively by

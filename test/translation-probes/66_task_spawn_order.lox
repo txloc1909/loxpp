@@ -1,0 +1,34 @@
+// Workers and tasks (spec/04-semantics.md, task.spawn and Scheduling):
+// task.spawn does not run its function, the spawner keeps running until it
+// suspends, and new tasks run in the order of their spawns. A Task is a
+// value of type Task, equal only to a handle of the same task.
+var main = task.self();
+
+fun make(name) {
+    fun body() {
+        print name + " runs";
+        task.send(main, name);
+    }
+    return body;
+}
+
+var a = task.spawn(make("a"));
+var b = task.spawn(make("b"));
+print "spawned";
+print type(a);
+print a == b;
+print a == a;
+print task.receive();
+print task.receive();
+print "done";
+
+// STATUS: ok
+// CHECK: spawned
+// CHECK: Task
+// CHECK: false
+// CHECK: true
+// CHECK: a runs
+// CHECK: b runs
+// CHECK: a
+// CHECK: b
+// CHECK: done

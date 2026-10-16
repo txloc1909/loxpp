@@ -1,0 +1,67 @@
+// task.spawn_worker (spec/04-semantics.md): the new worker defines every
+// top-level fun, class, and enum declaration, also one that comes after the
+// spawn in the source, and runs no other top-level statement, so a
+// top-level var is undefined there. Global variables are per worker. The
+// entry gets the message as its argument. An enum value made on one worker
+// matches its constructor patterns on another, and comes back == to itself.
+enum Msg { Ask(from, n, payload) Answer(n, payload) }
+
+var counter = 10;
+
+class Doubler {
+    run(n) {
+        return n * 2;
+    }
+}
+
+fun read_counter() {
+    try {
+        return counter;
+    } catch (e) {
+        return e.kind;
+    }
+}
+
+fun shared_name() {}
+
+fun entry(m) {
+    var answer = match m {
+        case Ask(from, n, payload) => Answer(Doubler().run(n), payload)
+        case _ => nil
+    };
+    var from = m[0];
+    task.send(from, answer);
+    task.send(from, read_counter());
+    shared_name = "changed on the worker";
+    task.send(from, shared_name);
+    task.send(from, defined_after());
+}
+
+var payload = Answer(0, "p");
+var w = task.spawn_worker(entry, Ask(task.self(), 21, payload));
+print type(w);
+var answer = task.receive();
+print match answer {
+    case Answer(n, p) => n
+    case _ => "no match"
+};
+print answer[1] == payload;
+print task.receive();
+print task.receive();
+print task.receive();
+print type(shared_name);
+print read_counter();
+
+fun defined_after() {
+    return "defined after";
+}
+
+// STATUS: ok
+// CHECK: Task
+// CHECK: 42
+// CHECK: true
+// CHECK: UndefinedVariableError
+// CHECK: changed on the worker
+// CHECK: defined after
+// CHECK: Function
+// CHECK: 10

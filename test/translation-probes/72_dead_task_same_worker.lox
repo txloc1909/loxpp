@@ -1,0 +1,23 @@
+// A send to a task that has ended raises DeadTaskError
+// (spec/04-semantics.md, task.send and Worker and Task Faults). The task
+// below ends right after its send, before the main task runs again.
+var main = task.self();
+
+fun short() {
+    task.send(main, "bye");
+}
+
+var t = task.spawn(short);
+print task.receive();
+try {
+    task.send(t, 1);
+    print "sent";
+} catch (e) {
+    print e.kind;
+    print e.message;
+}
+
+// STATUS: ok
+// CHECK: bye
+// CHECK: DeadTaskError
+// CHECK: Cannot send to a task that has ended.
