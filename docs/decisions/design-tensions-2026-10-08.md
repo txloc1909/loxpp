@@ -5,7 +5,7 @@
 Snapshot assessment, based on the notes changed since late September
 (`import-system.md`, `docs/proposals/jit-pipeline.md`, `docs/records/coroutines-retro.md`,
 `coroutines.md`, `dynamic-functional-programming.md`,
-`docs/decisions/concurrency-model-decision.md`, `docs/proposals/actor-model-design.md`,
+`docs/decisions/concurrency-model-decision.md`, `docs/records/actor-model-design.md`,
 `expressiveness-roadmap.md`) plus the discussion on #557 and #564.
 
 ## Current tensions

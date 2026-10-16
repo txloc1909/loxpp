@@ -45,7 +45,7 @@ These are the earlier hard problems the frame eliminates, and why:
 - **No per-import runtime path search and no cwd-drift at run time.**
 - **Concurrency/actor tension mostly defused.** One whole-program artifact has
   no cross-task shared module singletons to reason about (see
-  `docs/proposals/actor-model-design.md`); revisit only if item 7 adopts per-task VMs.
+  `docs/records/actor-model-design.md`); revisit only if item 7 adopts per-task VMs.
 
 What remains is a small, bounded space: six axes.
 
@@ -263,7 +263,7 @@ carry a precompiled cache of them. The source stays the reference.
 - `coroutines.md` — whole-program QBE coroutine mode (the taint in edge 1).
 - `docs/reference/bytecode-translation-problems.md` — the one-chunk shared pipeline all
   backends consume.
-- `docs/decisions/concurrency-model-decision.md`, `docs/proposals/actor-model-design.md` — per-task VM /
+- `docs/decisions/concurrency-model-decision.md`, `docs/records/actor-model-design.md` — per-task VM /
   share-nothing, for the eventual item-7 interaction.
 - `docs/process/multi-agent-playbook.md` ("scope a mission around every consumer") and
   `docs/records/coroutines-retro.md` (subset closure, issue #564) — the lessons any import

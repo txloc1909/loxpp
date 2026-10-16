@@ -24,7 +24,7 @@ or on-stack replacement — see "Explicitly punted" below.
 
 ## Constraint from the concurrency model: no new thread touches the heap
 
-`docs/proposals/concurrency-model-next-steps.md` (item 7) says not to start GC
+`docs/records/concurrency-model-next-steps.md` (item 7) says not to start GC
 redesign or scheduler work before the concurrency model decision (item 6)
 produces a go/no-go. The GC (`memory_manager.h`) is one `MemoryManager`
 per `VM`, not thread-safe.

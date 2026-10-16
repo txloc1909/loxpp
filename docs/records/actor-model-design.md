@@ -100,7 +100,7 @@ actor lead.
 
 - `docs/decisions/concurrency-model-decision.md` — the scoring that produces this
   note's assumption; C1–C9 are defined there.
-- `docs/proposals/concurrency-model-next-steps.md` — item 6, the go/no-go gate this
+- `docs/records/concurrency-model-next-steps.md` — item 6, the go/no-go gate this
   note feeds.
 - `docs/reference/profiler-concurrency-notes.md` — profiler impact by model.
 - `docs/decisions/expressiveness-roadmap.md` — item 5 (coroutines), item 7
