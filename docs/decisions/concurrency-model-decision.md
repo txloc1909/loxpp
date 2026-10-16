@@ -221,8 +221,8 @@ boundary, cheap cooperative tasks inside it.
 
 - A **worker** is one OS thread that owns one `Runtime`, one `MemoryManager`,
   one stack, one scheduler, and one mailbox. Workers share no mutable
-  state. A value crosses between workers only if it is a scalar, a string,
-  or frozen, and then by reference.
+  state. A value crosses between workers only if it is a message, a
+  scalar, a string, or an enum value of messages, and then by reference.
 - A **task** is a coroutine on its worker's stack: copy-on-suspend, as built
   (#523). Tasks on one worker share that worker's heap and switch only at
   explicit points: `yield`, a send that blocks, a receive on an empty
@@ -271,10 +271,10 @@ The measurements settled the stack axis and the vision settled the heap axis.
 
 ### The message and value story (C7)
 
-**A send is constant time.** A message is a scalar, a string, or a frozen
-value, and it crosses by reference. Nothing is copied at a send. This is
-the *cost* control of `VISION.md` applied to the primitive: a send names
-one value and does one bounded thing with it.
+**A send is constant time.** A message is a scalar, a string, or an enum
+value whose fields are all messages. It crosses by reference. Nothing is
+copied at a send. This is the *cost* control of `VISION.md` applied to the
+primitive: a send names one value and does one bounded thing with it.
 
 The alternative, deep copy on send, was measured
 (`docs/records/message-copy-cost-2026-10-17.md`): about 100 ns per object
@@ -283,43 +283,48 @@ per live object at every collection the receiver runs while the message
 lives. That cost is linear in the reachable graph of the message, which the
 sender can predict only if it knows what it sends, and the receiver pays
 again at sites that never named the message. Copy is therefore not the
-primitive. It is an operation the program calls by name.
+primitive.
 
-**Frozen values.** `freeze(v)` makes the whole graph reachable from `v`
-immutable, in place, and returns it. It is linear in the graph, once, at a
-site that names it. A frozen list, map, or enum value never changes again;
-a mutating operation on one raises `FrozenError`. A scalar and a string are
-frozen by nature. `freeze` on a value that holds a function, a closure, a
-class, an instance, a coroutine, or a handle raises `FreezeError`: no code
-and no captured state becomes shareable.
+**Why enum values, and no new primitive.** The language already has an
+immutable data shape. An enum value's fields are read by position or by
+pattern, and an assignment to one is a runtime error; a string is
+immutable; a scalar is a value. That is the shape the FP direction points
+at, sum types by convention, and at the worker boundary it becomes
+immutable by construction. No `freeze` builtin, no frozen flag on lists and
+maps, and no check on their mutating operations are needed.
 
-**The sendable set.** A send accepts a scalar, a string, or a frozen value.
-Anything else raises `SendError` at the send site. There is no implicit
-copy and no implicit freeze. A program that wants to send mutable data
-writes `freeze` or `copy` and pays where it writes it. The same rule holds
-between two tasks on one worker, so a program's meaning never depends on
-where its tasks run, and no copy is paid there either.
+**The sendable bit.** Whether a value is a message is known at
+construction. A scalar and a string are messages. An enum value's bit is
+the conjunction of its fields' bits, computed when the constructor runs,
+from bits that are already known: constant per construction. A list, a
+map, an instance, a function, a closure, a class, a coroutine, and a handle
+are never messages. The check at a send reads one bit. A send of a value
+whose bit is clear raises `SendError` at the send site. There is no
+implicit copy and no implicit freeze.
 
-**Mutation after receive.** A receiver that wants to change a message
-writes `copy(v)`, which returns a fresh mutable deep copy on its own heap.
-That copy is the measured cost above, named at the `copy` site. Cloning a
-map's bucket array instead of re-inserting its entries brings a record
-from about 190 ns to an estimated 50 ns; it is implementation work, not a
-rule.
+**Lists and maps.** A plain list or map is mutable, so it is not a message.
+A program that must send one converts it first, and the conversion is the
+linear work, named where it is written: a record with known fields becomes
+an enum value, `Record(id, name, x, y)`; a map with unknown keys becomes a
+persistent map, a tree of enum nodes with structural sharing, written as a
+library in the FP direction, which carries any keys and is a message because
+every node is an enum value. A deep copy of lists and maps is writable in
+Lox++ with recursion, lists, and maps, so by the capability test it is a
+library too; a native `copy` may join the stdlib later if a measurement
+says the library is too slow, and it changes no rule.
 
-**Lifetime across workers.** A frozen object or a string lives in the heap
-that created it. When another worker receives it, the receiver registers
-it in its *foreign set* and increments a holder count on the object,
-atomically. Each worker contributes at most one to a count, so the count is
-bounded by the worker count and changes only at a receive and at a
-collection, never on the interpreter's hot path. The creating worker's
-collector treats an object with a count above zero as a root. The
-receiver's collector marks foreign objects in a side table of its own,
-never in the object header, because the header's mark bit belongs to the
-owner's collector; a foreign object the receiver's mark phase did not reach
-leaves its foreign set and the count drops. A frozen graph has no outgoing
-pointers to mutable state and no cycle can cross a worker boundary, so the
-count has no cycle problem.
+**Lifetime across workers.** A message object lives in the heap that
+created it. When another worker receives it, the receiver registers it in
+its *foreign set* and increments a holder count on the object, atomically.
+Each worker contributes at most one to a count, so the count is bounded by
+the worker count and changes only at a receive and at a collection, never
+on the interpreter's hot path. The creating worker's collector treats an
+object with a count above zero as a root. The receiver's collector marks
+foreign objects in a side table of its own, never in the object header,
+because the header's mark bit belongs to the owner's collector; a foreign
+object the receiver's mark phase did not reach leaves its foreign set and
+the count drops. A message has no pointer to mutable state and no cycle
+can cross a worker boundary, so the count has no cycle problem.
 
 **Strings are interned on receive.** `==` on two strings is a pointer
 compare, and that is correct only because every string in a heap is
@@ -335,13 +340,10 @@ not keyed, so hostile input can lengthen a probe chain, and a keyed hash
 is the fix if that ever matters. A string of any length costs one probe
 to receive, not a copy.
 
-**What this costs the rest of the language.** Every mutating operation on
-a list, a map, or an enum value checks one flag in the object header, a
-constant that joins the type check already there. `freeze` adds one
-builtin and one error kind; `copy` adds one builtin. The collector gains a
-foreign set and a side mark table per worker. None of these runs user
-code or adds work proportional to anything at a site that does not name
-it.
+**What this costs the rest of the language.** One bit per enum value, set
+at construction. One error kind, `SendError`. A foreign set and a side
+mark table per worker. Nothing runs user code or adds work proportional to
+anything at a site that does not name it.
 
 ### Scheduler
 
@@ -373,12 +375,12 @@ worker with no work stealing, no growable stacks, and no preemption.
 
 ### What this unblocks and in which order
 
-1. The spec: workers, tasks, spawn, send, receive, `freeze`, `copy`,
-   `SendError`, `FreezeError`, `FrozenError`, the sendable set as a table
-   with a check script, and the list of blocking calls.
-2. The native runtime: per-worker `Runtime` and `MemoryManager`, the frozen
-   flag and its checks, the foreign set and side mark table, intern on
-   receive, the mailbox, the run queue, `CLOCK_THREAD_CPUTIME_ID`.
+1. The spec: workers, tasks, spawn, send, receive, `SendError`, the
+   sendable set as a table with a check script, and the list of blocking
+   calls.
+2. The native runtime: per-worker `Runtime` and `MemoryManager`, the
+   sendable bit on enum values, the foreign set and side mark table, intern
+   on receive, the mailbox, the run queue, `CLOCK_THREAD_CPUTIME_ID`.
 3. The bootstrap, then the JVM as oracle, then QBE parity, each diffed
    against native at its own review.
 4. After the mission: GC item 11 per worker heap; FFI in the full package,
@@ -393,8 +395,8 @@ node issues follow it, per `AGENTS.md`, "Missions".
 
 - No GC redesign. One collector per worker is the collector that exists.
 - No preemption, no work stealing, no growable stack, no shared mutable
-  heap, no implicit copy. Each is a new decision if ever wanted, and each
-  must beat the numbers above.
+  heap, no implicit copy, no freeze primitive. Each is a new decision if
+  ever wanted, and each must beat the numbers above.
 - No FFI thread-safety work here. FFI is designed on this model, after it.
 - No `spec/` change in this document.
 
