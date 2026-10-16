@@ -75,7 +75,7 @@ from check_bootstrap_error_kinds import (  # noqa: E402
     DYNAMIC,
     EXPECTED_CALLS,
     SPEC_PATH,
-    load_spec_table_kinds,
+    audited_table_kinds,
 )
 
 CATCHABLE = "catchable"
@@ -334,7 +334,7 @@ def main() -> int:
         )
         return 125
 
-    spec_kinds = load_spec_table_kinds(SPEC_PATH.read_text(encoding="utf-8"))
+    spec_kinds = audited_table_kinds(SPEC_PATH.read_text(encoding="utf-8"))
     failures: list[str] = []
 
     # --- static rules: coverage + alias, before running a single program ---

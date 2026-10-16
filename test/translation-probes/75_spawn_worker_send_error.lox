@@ -1,0 +1,25 @@
+// task.spawn_worker checks its message: a value that is not a message
+// raises SendError, and no worker starts (spec/04-semantics.md,
+// task.spawn_worker).
+fun bad(m) {
+    print "bad entry ran";
+}
+
+fun good(main) {
+    task.send(main, "good entry ran");
+}
+
+try {
+    task.spawn_worker(bad, [1]);
+    print "spawned";
+} catch (e) {
+    print e.kind;
+    print e.message;
+}
+task.spawn_worker(good, task.self());
+print task.receive();
+
+// STATUS: ok
+// CHECK: SendError
+// CHECK: Value of type List is not a message.
+// CHECK: good entry ran

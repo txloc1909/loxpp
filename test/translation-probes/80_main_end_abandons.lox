@@ -1,0 +1,31 @@
+// The program ends when the main task ends (spec/04-semantics.md, Ending).
+// Every other task is then abandoned: a task that has not run does not
+// run, and a waiting task's pending deferred call does not run.
+var main = task.self();
+
+fun never() {
+    print "abandoned task ran";
+}
+
+fun print_deferred() {
+    print "deferred call ran";
+}
+
+fun parked() {
+    defer print_deferred();
+    task.receive();
+}
+
+fun waker() {
+    task.send(main, "go");
+}
+
+task.spawn(parked);
+task.spawn(waker);
+print task.receive();
+task.spawn(never);
+print "main ends";
+
+// STATUS: ok
+// CHECK: go
+// CHECK: main ends

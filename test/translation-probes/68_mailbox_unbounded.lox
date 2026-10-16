@@ -1,0 +1,20 @@
+// A mailbox has no bound: a send never fails for lack of room, and
+// task.pending shows the queue grow (spec/04-semantics.md, task.send).
+var me = task.self();
+var i = 0;
+while (i < 1000) {
+    task.send(me, i);
+    i = i + 1;
+}
+print task.pending();
+var sum = 0;
+while (task.pending() > 0) {
+    sum = sum + task.receive();
+}
+print sum;
+print task.pending();
+
+// STATUS: ok
+// CHECK: 1000
+// CHECK: 499500
+// CHECK: 0

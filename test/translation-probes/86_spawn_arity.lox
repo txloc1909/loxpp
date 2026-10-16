@@ -1,0 +1,25 @@
+// A spawned task calls its function with no arguments, exactly as an
+// ordinary call, so the arity check applies when the task first runs
+// (spec/04-semantics.md, task.spawn). The ArityError is uncaught in that
+// task, so it ends the program (Ending), and the main task does not wake.
+// A second task, spawned after the first, would send to the main task: if
+// the fault ended only its own task, the main task would wake, print more
+// lines, and end with exit status 0.
+fun needs(a) {
+    print "needs ran";
+}
+
+var main = task.self();
+
+fun rescuer() {
+    task.send(main, "rescued");
+}
+
+task.spawn(needs);
+task.spawn(rescuer);
+print "spawned";
+print task.receive();
+print "main woke";
+
+// STATUS: error
+// CHECK: spawned

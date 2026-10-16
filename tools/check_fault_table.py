@@ -308,12 +308,6 @@ CATCHABLE_ROWS = [
         expected_kind="RunningCoroutineError",
     ),
     Row(
-        "yield_outside_coroutine",
-        "caught",
-        "yield 1;",
-        expected_kind="YieldOutsideCoroutineError",
-    ),
-    Row(
         "yield_across_native_callback",
         "caught",
         "co.resume();",

@@ -1,0 +1,45 @@
+// task.send appends to the mailbox and returns nil; it never suspends the
+// sender. task.receive takes messages first in, first out, and does not
+// suspend while the mailbox holds one. task.pending is the length of the
+// mailbox of the current task (spec/04-semantics.md, task.send and
+// task.receive).
+var main = task.self();
+
+fun producer() {
+    print "producer starts";
+    task.send(main, 1);
+    print "after send 1";
+    task.send(main, 2);
+    print "after send 2";
+    task.send(main, 3);
+    print "producer ends";
+}
+
+print task.pending();
+task.spawn(producer);
+var first = task.receive();
+print "main resumes";
+print first;
+print task.pending();
+print task.receive();
+print task.receive();
+print task.pending();
+print task.send(main, "self");
+print task.pending();
+print task.receive();
+
+// STATUS: ok
+// CHECK: 0
+// CHECK: producer starts
+// CHECK: after send 1
+// CHECK: after send 2
+// CHECK: producer ends
+// CHECK: main resumes
+// CHECK: 1
+// CHECK: 2
+// CHECK: 2
+// CHECK: 3
+// CHECK: 0
+// CHECK: nil
+// CHECK: 1
+// CHECK: self

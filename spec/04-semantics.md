@@ -466,10 +466,13 @@ Suspends the current coroutine and delivers `expr` to its resumer.
    the value that `resume` passed in (or `nil` if `resume` passed none), and
    execution continues after the `yield`.
 
-A `yield` reached while the current context is not a coroutine — that is, in
-the main program or in any function it called without going through
-`resume` — is a **runtime error** (`YieldOutsideCoroutineError`; see
-[Runtime Errors](#runtime-errors)).
+Every task, the main task included, is a coroutine that its worker's
+scheduler resumes (see [Workers and Tasks](#workers-and-tasks)). So a
+`yield` always has a coroutine to suspend. A `yield` in a task, outside
+every coroutine that the task resumed, suspends the task: the yielded value
+is discarded, the task joins the back of its worker's run queue, and the
+`yield` evaluates to `nil` when the task runs again. This holds for a
+`yield` at the top level of the program, which the main task runs.
 
 A `yield` reached while a native callback is on the call chain — for example
 inside `__str__`, `__hash__`, or `__eq__` while `print` or a map operation
@@ -1393,9 +1396,292 @@ a `yield` runs no deferred call — a deferred call in a coroutine runs only
 when its function returns or a throw unwinds past the frame, exactly as in
 an ordinary function.
 
-The two `resume` faults and the two `yield` faults are catchable: each is
+The two `resume` faults and the `yield` fault are catchable: each is
 delivered to a `catch` block as an `Error` value, with the kinds listed in
 [Runtime Errors](#runtime-errors).
+
+---
+
+## Workers and Tasks
+
+A program runs as a set of **tasks** on a set of **workers**. A worker owns
+its tasks, its own global variables, and its own values. Workers share no
+mutable state: a value passes from one worker to another only as a
+[message](03-types.md#messages). A task is a computation on one worker. It
+owns one **mailbox**, a first-in first-out queue of messages. A task never
+moves to another worker.
+
+The primitive is spawn, send, and receive: the members of the global `task`
+object (§05-stdlib). Channels, pools, and other patterns are libraries over
+these.
+
+### The main task
+
+A program starts with one worker, the **main worker**, which runs one task,
+the **main task**. The main task runs the top-level code of the program. It
+has a mailbox and a handle, like every other task.
+
+Every task is a coroutine on its worker, and the main task is one too. A
+`yield` that the main task reaches outside every coroutine it resumed
+suspends the main task, as the [`yield` Expression](#yield-expression)
+states for every task.
+
+### `task.spawn`
+
+`task.spawn(fn)` makes a new task on the current worker and returns its
+handle (a Task value, §03-types).
+
+1. `fn` must be callable (a Function or BoundMethod); any other value is a
+   runtime error.
+2. The call does not run `fn`. The new task joins the back of the worker's
+   run queue, and the caller continues.
+3. When the new task first runs, it calls `fn` with no arguments, exactly as
+   an ordinary call, so the same arity check applies.
+
+The new task shares the global variables and the values of its worker with
+every other task on that worker. A closure that `fn` holds reaches the same
+bindings after the spawn as before it.
+
+### `task.spawn_worker`
+
+`task.spawn_worker(fn, msg)` makes a new worker with one new task, and
+returns the handle of that task. The caller continues at once.
+
+1. `fn` must be a function that a `fun` declaration at the top level of the
+   program made. Any other value is a runtime error.
+2. If `msg` is not a message, the call raises `SendError`, and no worker is
+   made.
+3. The new worker starts with its own global variables. It defines every
+   top-level `fun`, `class`, and `enum` declaration of the program, in
+   source order, as those declaration statements define them. No other
+   top-level statement runs on the new worker. A top-level `var`
+   declaration does not run there, so a read of its name on the new worker
+   is an undefined-variable read (`UndefinedVariableError`) until that
+   worker assigns it.
+4. The new task then calls the function of the same top-level `fun`
+   declaration that made `fn`, with `msg` as its one argument, exactly as an
+   ordinary call.
+
+Steps 3 and 4 run in the new task. A fault while the new worker defines a
+declaration — for example a `class D < Base` where `Base` is a top-level
+`var`, so the name is undefined there — is a fault of that task. It occurs
+before the entry runs, and it ends the program as every uncaught fault of a
+task does (see [Ending](#ending)). `task.spawn_worker` has already returned
+in the caller.
+
+The two workers share nothing that can change. A write to a global variable
+on one worker is not visible on another.
+
+An enum value that one worker made and another worker received matches the
+constructor patterns of its declaration on the receiving worker, exactly as
+a value made there does.
+
+### `task.send`
+
+`task.send(t, msg)` appends `msg` to the mailbox of the task `t`, and
+returns `nil`.
+
+1. `t` must be a Task; any other value is a runtime error.
+2. If `msg` is not a message, the call raises `SendError`. The check is the
+   same when `t` is on the current worker and when it is on another worker.
+3. If the task `t` has ended, the call raises `DeadTaskError`. This includes
+   a task whose worker has ended.
+4. Otherwise `msg` is appended to the mailbox of `t`. If `t` waits in
+   `task.receive()`, `t` becomes ready to run (see
+   [Scheduling](#scheduling)).
+
+A send never suspends the sender, and a send never fails for lack of room:
+a mailbox has no bound. The sender continues with its next step at once.
+
+**Order.** The messages that the tasks of one worker send to one target
+task arrive in the order of the sends. Messages from different workers to
+one target can arrive in any order relative to each other.
+
+**A send to another worker can race with the end of its target.** When the
+target task ends on another worker at the same time as the send, the send
+either raises `DeadTaskError` or appends the message to the mailbox, which
+the end of the task then discards. A send that starts after the target has
+ended always raises. A program that must know that a message arrived asks
+the receiver for a reply.
+
+### `task.receive`
+
+`task.receive()` removes the message at the head of the mailbox of the
+current task, and returns it.
+
+1. If the mailbox is not empty, the call returns the head at once. It does
+   not suspend.
+2. If the mailbox is empty, the current task suspends until a message
+   arrives. Then the call returns that message.
+3. If the mailbox is empty while a native callback is on the call chain —
+   for example inside `__str__` while `print` called it — the call raises
+   `YieldAcrossNativeError`, for the same reason a `yield` there does (see
+   [`yield` Expression](#yield-expression)).
+
+A receive suspends the whole task. Every call frame of the task stays in
+place, which includes the frames of a coroutine that the task resumed, and
+no deferred call runs. A coroutine that holds a suspended receive keeps the
+status `"running"`, so a resume of it from another task is a
+`RunningCoroutineError`. When the task runs again, the receive returns
+inside that coroutine.
+
+### `task.self` and `task.pending`
+
+`task.self()` returns the handle of the current task.
+
+`task.pending()` returns the number of messages in the mailbox of the
+current task. A task can read only the length of its own mailbox.
+
+### Suspend Points
+
+A task runs alone on its worker from one suspend point to the next: no
+other task on the same worker runs in between, so no other task can change a
+value that the task can see. A task switches to another task only at a
+suspend point. There is no preemption.
+
+The table below lists the suspend points. The `Default set` column says
+whether a point is in the default set, which applies to every worker. The
+`Fair mode` column is reserved. A later version can define an opt-in fair
+mode per worker, which adds points under a flag: such a row has `no` in the
+`Default set` column and names its flag in the `Fair mode` column, and it
+changes nothing for a worker that does not enable that flag. No row of the
+default set names a flag.
+
+| Point | Class | Condition | Default set | Fair mode |
+|---|---|---|---|---|
+| `yield` | yield | in any task, outside every coroutine that the task resumed | yes | — |
+| `task.receive()` | receive | the mailbox is empty | yes | — |
+| `input()` | blocking call | every call | yes | — |
+| `sleep(seconds)` | blocking call | every call | yes | — |
+| `connect(host, port)` | blocking call | every call | yes | — |
+| `run(program, args)` | blocking call | every call | yes | — |
+| `Socket.read()` | blocking call | every call | yes | — |
+| `Socket.read_bytes(n)` | blocking call | every call | yes | — |
+| `Socket.readline()` | blocking call | every call | yes | — |
+| `Socket.readlines()` | blocking call | every call | yes | — |
+| `Socket.write(text)` | blocking call | every call | yes | — |
+| `Socket.writeline(text)` | blocking call | every call | yes | — |
+| `Server.accept()` | blocking call | every call | yes | — |
+| `Process.read()` | blocking call | every call | yes | — |
+| `Process.read_bytes(n)` | blocking call | every call | yes | — |
+| `Process.readline()` | blocking call | every call | yes | — |
+| `Process.readlines()` | blocking call | every call | yes | — |
+| `Process.read_err()` | blocking call | every call | yes | — |
+| `Process.err_read_bytes(n)` | blocking call | every call | yes | — |
+| `Process.err_readline()` | blocking call | every call | yes | — |
+| `Process.err_readlines()` | blocking call | every call | yes | — |
+| `Process.write(text)` | blocking call | every call | yes | — |
+| `Process.writeline(text)` | blocking call | every call | yes | — |
+| `Process.wait()` | blocking call | every call | yes | — |
+
+The blocking-call rows are exactly the calls in the [Blocking
+calls](05-stdlib.md#blocking-calls) table of §05-stdlib. A send is never a
+suspend point, and a spawn is never one.
+
+**Blocking calls.** A blocking call blocks the worker that makes it: no task
+on that worker runs until the call returns. Tasks on other workers keep
+running. A blocking call is in the table so that a later version can let
+other tasks of the worker run while the call waits, with no change to the
+rule above.
+
+A task that computes without reaching a suspend point keeps every other task
+of its worker from running. A program gives such a task a worker of its own.
+
+### Scheduling
+
+Each worker has one run queue of tasks that are ready to run. The queue is
+first in, first out, and it has no priorities.
+
+1. A new task that `task.spawn` makes joins the back of the run queue.
+2. A task that suspends at a `yield` joins the back of the run queue. The
+   main task follows the same rule.
+3. A task that suspends in `task.receive()` leaves the run queue. When a
+   message arrives in its mailbox, it joins the back of the run queue.
+4. When the running task suspends or ends, the task at the head of the run
+   queue runs next.
+
+The order in which the tasks of one worker run is therefore defined. The
+order of steps on different workers is not, except where messages order
+them.
+
+### Ending
+
+A task ends when its function returns. The return value is discarded, and
+every message still in its mailbox is discarded. A worker other than the
+main worker ends when every task on it has ended.
+
+The program ends when the main task ends, at the end of the top-level code.
+Every other task on every worker is then abandoned, as an [abandoned
+coroutine](#abandoned-coroutines) is: its pending deferred calls do not
+run.
+
+A call of `exit(code)` in any task ends the program at once, with that exit
+code. A throw that no `try` statement in its task catches is uncaught: it
+ends the program as an uncaught runtime error does ([`throw`
+Statement](#throw-statement), step 5). The pending deferred calls of the
+task that threw run first, as step 5 says; every other task is abandoned. A
+fatal fault in any task ends the program.
+
+A `print` statement writes its whole line at once: lines that tasks on
+different workers print never mix inside one line.
+
+### Deadlock
+
+When the main task waits in `task.receive()`, no task on any worker is
+running or ready to run, no task is in a blocking call, and no message is on
+its way to a task, the program can never progress. It then ends with
+`DeadlockError`. The fault is fatal: no `try` statement catches it, and no
+pending deferred call runs. The report contains the message in the table
+below, and it can also list the tasks that wait.
+
+### Worker and Task Faults
+
+| Kind | Raised when | Catchable | Message |
+|---|---|---|---|
+| `SendError` | `task.send(t, msg)` or `task.spawn_worker(fn, msg)`, where `msg` is not a message | yes | `Value of type T is not a message.`, where `T` is `type(msg)` |
+| `DeadTaskError` | `task.send(t, msg)`, where the task `t` has ended, which includes a task whose worker has ended | yes | `Cannot send to a task that has ended.` |
+| `YieldAcrossNativeError` | `task.receive()` on an empty mailbox while a native callback is on the call chain | yes | `Cannot receive across a native callback.` |
+| `DeadlockError` | the main task waits in `task.receive()` and no task can run again | no | `Deadlock: every task waits in receive.` |
+
+A catchable fault in this table is delivered to a `catch` block as an
+`Error` value whose `kind` is the `Kind` column and whose `message` is the
+`Message` column. `YieldAcrossNativeError` is the kind that the [Runtime
+Errors](#runtime-errors) table gives a `yield` across a native callback; a
+receive uses the same kind with its own message. A fault that is not
+catchable has no `Error` value.
+
+### Implementation-Gated Exception: the Bootstrap Interpreter
+
+This specification allows one exception, and only for the bootstrap
+interpreter, the Lox++ interpreter that is written in Lox++. The bootstrap
+interpreter may run every worker on one host thread, with the tasks of all
+workers in one scheduler. Under that form, and only there:
+
+1. A task runs alone among the tasks of every worker from one suspend point
+   to the next, not only among the tasks of its own worker.
+2. A blocking call blocks every worker, not only its own.
+3. Workers do not run at the same time, so more workers do not make a
+   program faster.
+
+Every other rule of this section holds under that form with no change: each
+worker has its own global variables, a value passes between workers only as
+a message, each fault in the table above occurs in the same cases, and the
+order rules hold. A program whose progress needs two workers to run at the
+same time can behave differently under that form. Examples are a task that
+waits in a blocking call until a task on another worker acts, and a task
+that never reaches a suspend point while a task on another worker must run.
+
+No other implementation may use this exception.
+
+### Bounding a Mailbox (Non-Normative)
+
+This note is not part of the specification. A mailbox has no bound, so a
+producer that sends faster than its consumer receives makes the mailbox of
+the consumer grow without limit, and `task.pending()` shows that growth.
+The bound is a library over the primitive, not a rule of the primitive: a
+credit channel, in which the consumer gives the producer a fixed number of
+credits and the producer sends only while it holds one. Issue #604 tracks
+that library.
 
 ---
 
@@ -1414,6 +1700,9 @@ that is, by a deferred call that runs during that unwind — is not
 delivered to any `catchBlock`; it halts the program as an uncaught error.
 Every cause in the table below is catchable this way; see
 [Fatal Runtime Errors](#fatal-runtime-errors) for the faults that are not.
+
+The faults of workers and tasks have their own table, [Worker and Task
+Faults](#worker-and-task-faults).
 
 The table lists each cause, an example, and the `kind` field
 ([§03-types](03-types.md#error)) of the `Error` value delivered to
@@ -1445,7 +1734,6 @@ same text the implementation reports when the fault is left uncaught.
 | A key's `__hash__` or `__eq__` writes to the Map it keys | `var m = {}; class K { __hash__() { m[1] = 1; return 1; } __eq__(o) { return true; } } m[K()] = 1;` | `"MapChangedError"` |
 | `resume` on a dead coroutine | `fun f() { return 1; } var co = coroutine.create(f); co.resume(); co.resume();` | `"DeadCoroutineError"` |
 | `resume` on a running coroutine (self-resume) | `fun f() { co.resume(); } var co = coroutine.create(f); co.resume();` | `"RunningCoroutineError"` |
-| `yield` outside a coroutine | `yield 1;` | `"YieldOutsideCoroutineError"` |
 | `yield` across a native callback | `class S { __str__() { yield 1; return "x"; } } fun f() { print S(); } var co = coroutine.create(f); co.resume();` | `"YieldAcrossNativeError"` |
 
 **The two map-key rows above cover an index read or write, a map or set

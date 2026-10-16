@@ -6,8 +6,8 @@ every program. They behave like user-defined functions in all respects
 provided by the host environment.
 
 The standard library also provides the global `math` object (numeric functions
-and constants), the `open` function, and the methods on the File value it
-returns. These are described below. The built-in methods on Map values are
+and constants), the global `coroutine` and `task` objects, the `open`
+function, and the methods on the File value it returns. These are described below. The built-in methods on Map values are
 specified in §03-types and §04-semantics.
 
 ---
@@ -49,7 +49,8 @@ if (line == nil) {
 ```
 
 **Arity:** 0  
-**Returns:** String on success, Nil on EOF
+**Returns:** String on success, Nil on EOF  
+**Blocks:** yes
 
 ---
 
@@ -244,11 +245,13 @@ implementation may report whole seconds, milliseconds, or finer.
 
 ## `sleep(seconds) → Nil`
 
-Suspends the program for at least `seconds` seconds. `seconds` may be a
-fractional Number.
+Blocks the calling worker for at least `seconds` seconds. In a program
+with one worker, this suspends the program. `seconds` may be a fractional
+Number.
 
 **Arity:** 1  
-**Returns:** Nil
+**Returns:** Nil  
+**Blocks:** yes
 
 ---
 
@@ -395,7 +398,8 @@ other argument is a runtime error, as is a failure to resolve the name or to
 connect, which includes a refused connection.
 
 **Arity:** 2  
-**Returns:** Socket
+**Returns:** Socket  
+**Blocks:** yes
 
 ---
 
@@ -448,7 +452,8 @@ reads it sees an end-of-file. A failure to start the program is a runtime
 error. A non-zero exit status is not an error.
 
 **Arity:** 2  
-**Returns:** Map
+**Returns:** Map  
+**Blocks:** yes
 
 ---
 
@@ -467,7 +472,8 @@ Reads from the Socket until the peer closes its write direction, and returns
 everything read as one String.
 
 **Arity:** 0  
-**Returns:** String
+**Returns:** String  
+**Blocks:** yes
 
 ### `s.read_bytes(n) -> String`
 
@@ -477,7 +483,8 @@ one String. At end of stream it returns the bytes that remain, or `""` when none
 do. `n` must be an integer in the range 0 to 2147483647.
 
 **Arity:** 1  
-**Returns:** String
+**Returns:** String  
+**Blocks:** yes
 
 ### `s.readline() -> String | Nil`
 
@@ -486,7 +493,8 @@ newline. Returns `nil` when the peer has closed and no bytes remain. A final
 line with no newline is returned as a line.
 
 **Arity:** 0  
-**Returns:** String on success, Nil at end of stream
+**Returns:** String on success, Nil at end of stream  
+**Blocks:** yes
 
 ### `s.readlines() -> List[String]`
 
@@ -494,21 +502,24 @@ Reads lines as `readline` does until the peer closes, and returns them as a
 List.
 
 **Arity:** 0  
-**Returns:** List of String
+**Returns:** List of String  
+**Blocks:** yes
 
 ### `s.write(text) -> Nil`
 
 Writes `text`. `text` must be a String.
 
 **Arity:** 1  
-**Returns:** Nil
+**Returns:** Nil  
+**Blocks:** yes
 
 ### `s.writeline(text) -> Nil`
 
 Writes `text` followed by one newline. `text` must be a String.
 
 **Arity:** 1  
-**Returns:** Nil
+**Returns:** Nil  
+**Blocks:** yes
 
 ### `s.close_write() -> Nil`
 
@@ -538,7 +549,8 @@ Waits for the next inbound connection, and returns it as a new Socket. Calling
 `accept()` on a closed Server is a runtime error.
 
 **Arity:** 0  
-**Returns:** Socket
+**Returns:** Socket  
+**Blocks:** yes
 
 ### `s.port() -> Number`
 
@@ -576,14 +588,20 @@ the child. Read both, or use `run`.
 Read the child's standard output. These behave exactly like the Socket methods
 of the same name.
 
+**Blocks:** yes
+
 ### `p.read_err() -> String`, `p.err_read_bytes(n) -> String`, `p.err_readline() -> String | Nil`, `p.err_readlines() -> List[String]`
 
 Read the child's standard error. These behave exactly like the Socket methods
 of the same name.
 
+**Blocks:** yes
+
 ### `p.write(text) -> Nil`, `p.writeline(text) -> Nil`
 
 Write to the child's standard input. `text` must be a String.
+
+**Blocks:** yes
 
 ### `p.close_stdin() -> Nil`
 
@@ -602,7 +620,8 @@ status at once. Every still-running child should be waited on, or it can stay a
 zombie until the program ends.
 
 **Arity:** 0  
-**Returns:** Number
+**Returns:** Number  
+**Blocks:** yes
 
 ### `p.kill() -> Nil`
 
@@ -671,6 +690,117 @@ Returns the coroutine's current state as a String: `"suspended"`,
 
 ---
 
+## `task` — workers, tasks, and messages
+
+`task` is a global object bound at the start of every program, like `math`
+and `coroutine`. Its members are `spawn`, `spawn_worker`, `send`,
+`receive`, `self`, and `pending`. They are the primitive of the concurrency
+model; [§04-semantics, Workers and Tasks](04-semantics.md#workers-and-tasks)
+gives the full rules, and §03-types defines the Task value and the
+[messages](03-types.md#messages). `type(t)` on a Task returns `"Task"`.
+
+`task` behaves like any other global name: a local variable of the same
+name shadows it, and the global can be reassigned.
+
+### `task.spawn(fn) -> Task`
+
+Makes a new task on the current worker and returns its handle. `fn` must be
+callable (a Function or BoundMethod); any other value is a runtime error.
+The call does not run `fn`. When the new task first runs, it calls `fn` with
+no arguments.
+
+**Arity:** 1  
+**Returns:** Task
+
+### `task.spawn_worker(fn, msg) -> Task`
+
+Makes a new worker with one new task, and returns the handle of that task.
+`fn` must be a function that a top-level `fun` declaration made; any other
+value is a runtime error. If `msg` is not a message, the call raises
+`SendError`. The new task calls `fn` with `msg` as its one argument.
+
+**Arity:** 2  
+**Returns:** Task
+
+### `task.send(t, msg) -> Nil`
+
+Appends `msg` to the mailbox of the task `t`. `t` must be a Task; any other
+value is a runtime error. If `msg` is not a message, the call raises
+`SendError`. If the task `t` has ended, the call raises `DeadTaskError`. A
+send never suspends and never fails for lack of room.
+
+**Arity:** 2  
+**Returns:** Nil
+
+### `task.receive() -> Any`
+
+Removes and returns the message at the head of the mailbox of the current
+task. If the mailbox is empty, the current task suspends until a message
+arrives. A receive on an empty mailbox while a native callback is on the
+call chain raises `YieldAcrossNativeError`.
+
+**Arity:** 0  
+**Returns:** the message
+
+### `task.self() -> Task`
+
+Returns the handle of the current task.
+
+**Arity:** 0  
+**Returns:** Task
+
+### `task.pending() -> Number`
+
+Returns the number of messages in the mailbox of the current task.
+
+**Arity:** 0  
+**Returns:** Number
+
+---
+
+## Blocking calls
+
+A **blocking call** waits for another party outside the program: a user
+at standard input, the network, another process, or time. It blocks the worker that makes it, every
+task on that worker, and nothing else (see [§04-semantics, Suspend
+Points](04-semantics.md#suspend-points)). Each blocking call is a suspend
+point of the task that makes it. The section of each blocking call says
+`**Blocks:** yes`; the table below lists them all.
+
+| Call | Waits for |
+|---|---|
+| `input()` | a line on standard input |
+| `sleep(seconds)` | time |
+| `connect(host, port)` | the connection |
+| `run(program, args)` | the child to exit |
+| `Socket.read()` | the peer to close |
+| `Socket.read_bytes(n)` | the bytes, or the peer to close |
+| `Socket.readline()` | a line, or the peer to close |
+| `Socket.readlines()` | the peer to close |
+| `Socket.write(text)` | room in the connection |
+| `Socket.writeline(text)` | room in the connection |
+| `Server.accept()` | an inbound connection |
+| `Process.read()` | the child to close its standard output |
+| `Process.read_bytes(n)` | the bytes, or the end of the stream |
+| `Process.readline()` | a line, or the end of the stream |
+| `Process.readlines()` | the end of the stream |
+| `Process.read_err()` | the child to close its standard error |
+| `Process.err_read_bytes(n)` | the bytes, or the end of the stream |
+| `Process.err_readline()` | a line, or the end of the stream |
+| `Process.err_readlines()` | the end of the stream |
+| `Process.write(text)` | room in the pipe |
+| `Process.writeline(text)` | room in the pipe |
+| `Process.wait()` | the child to exit |
+
+Every other call in this chapter is not a blocking call and is not a
+suspend point, even when it takes time. This includes every File call, also
+on a path such as a FIFO or `/dev/stdin` where the operating system can make
+it wait: a program that reads such a path blocks its worker, but the call is
+not a suspend point. `task.receive()` suspends its task
+but does not block the worker, so it is not in this table.
+
+---
+
 ## Map methods
 
 Map values respond to the built-in methods `has`, `del`, `keys`, `values`, and
@@ -701,6 +831,7 @@ Returns the language-level type name of `value` as a String.
 | Process | `"Process"` |
 | Error (see §03-types) | `"Error"` |
 | Coroutine (see §03-types) | `"Coroutine"` |
+| Task (see §03-types) | `"Task"` |
 | Iterator | `"Iterator"` |
 | Enum constructor | `"EnumConstructor"` |
 | Enum value | `"Enum"` |

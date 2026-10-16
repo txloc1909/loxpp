@@ -62,6 +62,19 @@ DYNAMIC = "<dynamic>"
 JUDGED = "JUDGED"
 RECORDED = "RECORDED"
 
+# Kinds that spec/04-semantics.md's Runtime Errors table no longer has, but
+# that bootstrap/loxpp_interpreter.lox still raises at a call EXPECTED_CALLS
+# names. The audits here treat each one as a table kind, so the bootstrap's
+# existing call stays covered. An entry that the spec table has again, or that
+# no bootstrap call raises, fails main(): delete it then.
+#
+# YieldOutsideCoroutineError: every task, the main task included, is a
+# coroutine (spec/04-semantics.md, Workers and Tasks), so a yield always has
+# a coroutine to suspend and the fault has no cause.
+KINDS_THE_SPEC_REMOVED = {
+    "YieldOutsideCoroutineError",
+}
+
 # Non-table `kind` strings this file's audits have introduced so far, each
 # naming one cause the spec/04-semantics.md table does not document (see the
 # code comments at each site in bootstrap/loxpp_interpreter.lox for why).
@@ -219,7 +232,7 @@ EXPECTED_CALLS = [
 # review. See --report for the current judged/recorded split; this script
 # does not restate that split in prose here, to avoid a second hand-written
 # copy of a number the data already holds.
-EXPECTED_SPEC_TABLE_KIND_COUNT = 24
+EXPECTED_SPEC_TABLE_KIND_COUNT = 23
 
 
 def strip_string_literals(text: str) -> str:
@@ -325,6 +338,12 @@ def load_spec_table_kinds(spec_text: str) -> set[str]:
     return kinds
 
 
+def audited_table_kinds(spec_text: str) -> set[str]:
+    """The spec table's kinds plus KINDS_THE_SPEC_REMOVED: the set every
+    table/non-table decision of the audits uses."""
+    return load_spec_table_kinds(spec_text) | KINDS_THE_SPEC_REMOVED
+
+
 def effective_kind(call: dict) -> str:
     return call["kind_literal"] if call["kind_literal"] is not None else DYNAMIC
 
@@ -334,7 +353,9 @@ def main() -> int:
 
     text = INTERPRETER_PATH.read_text(encoding="utf-8")
     calls = find_set_error_calls(text)
-    spec_kinds = load_spec_table_kinds(SPEC_PATH.read_text(encoding="utf-8"))
+    spec_text = SPEC_PATH.read_text(encoding="utf-8")
+    table_kinds = load_spec_table_kinds(spec_text)
+    spec_kinds = audited_table_kinds(spec_text)
 
     if report_mode:
         judged = sum(1 for _, _, status in EXPECTED_CALLS if status == JUDGED)
@@ -405,10 +426,22 @@ def main() -> int:
             "Re-audit every bootstrap call using this kind against the new table row."
         )
 
-    if len(spec_kinds) != EXPECTED_SPEC_TABLE_KIND_COUNT:
+    for kind in sorted(KINDS_THE_SPEC_REMOVED & table_kinds):
+        failures.append(
+            f"{kind} is in KINDS_THE_SPEC_REMOVED, but spec/04-semantics.md's table "
+            "has it again. Delete it from KINDS_THE_SPEC_REMOVED."
+        )
+    raised = {kind for kind, _message, _status in EXPECTED_CALLS}
+    for kind in sorted(KINDS_THE_SPEC_REMOVED - raised):
+        failures.append(
+            f"{kind} is in KINDS_THE_SPEC_REMOVED, but no bootstrap call in "
+            "EXPECTED_CALLS raises it any more. Delete it from KINDS_THE_SPEC_REMOVED."
+        )
+
+    if len(table_kinds) != EXPECTED_SPEC_TABLE_KIND_COUNT:
         failures.append(
             f"spec/04-semantics.md's Runtime Errors table now yields "
-            f"{len(spec_kinds)} kind(s), not the {EXPECTED_SPEC_TABLE_KIND_COUNT} this "
+            f"{len(table_kinds)} kind(s), not the {EXPECTED_SPEC_TABLE_KIND_COUNT} this "
             "audit's EXPECTED_CALLS baseline was reviewed against. Re-run --report, "
             "re-audit every table-tagged call against the new table, and update "
             "EXPECTED_SPEC_TABLE_KIND_COUNT deliberately."

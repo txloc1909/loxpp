@@ -1,0 +1,22 @@
+// A blocking call blocks only the worker that makes it: tasks on other
+// workers keep running (spec/04-semantics.md, Suspend Points). A worker
+// waits for ever in Server.accept() on a port that no program connects to.
+// The main task, on another worker, keeps running, and the program ends
+// when the main task ends. An implementation that blocks every worker in a
+// blocking call never prints the second line and hits the timeout.
+fun acceptor(main) {
+    var server = listen("127.0.0.1", 0);
+    task.send(main, "listening");
+    server.accept();
+    task.send(main, "accepted");
+}
+
+task.spawn_worker(acceptor, task.self());
+print task.receive();
+sleep(0.2);
+print "main runs while the worker waits in accept";
+
+// STATUS: ok
+// TIMEOUT: 20
+// CHECK: listening
+// CHECK: main runs while the worker waits in accept

@@ -1,0 +1,16 @@
+// exit(code) in any task ends the program at once, with that exit code
+// (spec/04-semantics.md, Ending).
+fun quitter() {
+    print "task exits";
+    exit(3);
+}
+
+task.spawn(quitter);
+print "main waits";
+task.receive();
+print "main woke";
+
+// STATUS: error
+// EXIT: 3
+// CHECK: main waits
+// CHECK: task exits
