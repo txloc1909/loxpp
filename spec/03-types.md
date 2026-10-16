@@ -407,7 +407,7 @@ The `==` and `!=` operators compare two values.
 
 - Values of **different types** are **never equal**: `nil == false` → `false`,
   `0 == "0"` → `false`.
-- Values of the **same type** are compared by **value**:
+- Values of the **same type** are compared by the rule for that type:
   - `nil == nil` → `true`
   - Booleans are equal when both are `true` or both are `false`
   - Numbers are equal when they have the same numeric value (IEEE 754 equality;
@@ -419,6 +419,15 @@ The `==` and `!=` operators compare two values.
     Sockets, Servers, Processes, Errors, and Coroutines use identity
     equality: two values are equal only if they are the exact same object
   - Tasks are equal when they name the same task (see [Task](#task))
+  - Enum values use identity equality: an enum value is equal only to
+    itself. Two constructor calls make two different values, even with
+    equal fields and even for a constructor with no fields. With
+    `enum M { Box(v) None }`, `Box(1) == Box(1)` is `false` and `None() == None()` is `false`. An
+    enum value that passed to another worker in a message is the same
+    value, so it stays equal to itself on every worker (see
+    [Messages](#messages))
+  - Enum constructors use identity equality: a constructor is equal only
+    to itself, so `Box == Box` is `true` and `Box == None` is `false`
 
 Equality never produces a runtime error regardless of the types being compared,
 **except** that an Instance dispatches to its class's `__eq__` — the left
