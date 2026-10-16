@@ -1,0 +1,34 @@
+// The QBE coroutine-mode tax on a program that never suspends.
+//
+// Run: tools/loxpp_qbe.sh benchmarks/coroutine_mode_tax.lox
+//
+// Identical to benchmarks/coroutine_mode_floor.lox plus one function that
+// contains a `yield` and is never called. On the native VM the extra
+// function changes nothing. On the QBE backend any `YIELD` in the program
+// compiles the whole program in coroutine mode (docs/decisions/coroutines.md,
+// "Backends"): every function becomes a resume-block state machine driven by
+// the runtime, and register promotion is off. The difference between this
+// number and the floor's is what every call pays for that rule.
+
+fun step(i, limit) {
+    if (i < limit) return i + 1;
+    return i;
+}
+
+fun run(reps) {
+    var i = 0;
+    while (i < reps) {
+        i = step(i, reps);
+    }
+    return i;
+}
+
+fun neverCalled() {
+    yield 0;
+}
+
+var REPS = 200000;
+var start = clock();
+run(REPS);
+var elapsed = clock() - start;
+print elapsed / REPS * 1000000000.0;

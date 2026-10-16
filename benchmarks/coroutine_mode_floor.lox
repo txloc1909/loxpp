@@ -1,0 +1,28 @@
+// The floor for benchmarks/coroutine_mode_tax.lox: the same loop inside a
+// function with local state, and no `yield` anywhere in the program.
+//
+// Run: tools/loxpp_qbe.sh benchmarks/coroutine_mode_floor.lox
+//
+// The loop lives in a function on purpose. At top level every variable is a
+// global reached through the runtime on every backend, so register promotion
+// has nothing to promote and the coroutine-mode rule has nothing to turn
+// off. Inside a function the counter and the limit are local slots.
+
+fun step(i, limit) {
+    if (i < limit) return i + 1;
+    return i;
+}
+
+fun run(reps) {
+    var i = 0;
+    while (i < reps) {
+        i = step(i, reps);
+    }
+    return i;
+}
+
+var REPS = 200000;
+var start = clock();
+run(REPS);
+var elapsed = clock() - start;
+print elapsed / REPS * 1000000000.0;
