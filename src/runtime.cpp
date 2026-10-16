@@ -930,16 +930,14 @@ Runtime::WakeResult Runtime::resumeWaitingInner(ObjCoroutine* co, int entry) {
         }
     }
     if (m_taskSwitchPending) {
-        pop(); // the argument
+        pop();
         suspendForTaskSwitch(iter);
         return WakeResult::Suspended;
     }
     if (iter == nullptr) {
-        // The `resume` native's result.
         stackTop[-1] = result;
         return WakeResult::Run;
     }
-    // The rest of opIterHasNext.
     pop();
     if (inner->state == CoroutineState::SUSPENDED) {
         iter->current = result;

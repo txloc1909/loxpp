@@ -82,8 +82,8 @@ from check_bootstrap_error_kinds import (  # noqa: E402
 CATCHABLE = "catchable"
 FATAL = "fatal"
 # The kind is in KINDS_THE_SPEC_REMOVED: the spec gives the cause no fault, so
-# native must not print the kind, and bootstrap still catches it until the
-# node that changes the bootstrap removes the call.
+# native must not print the kind, while the bootstrap still catches it at the
+# call that EXPECTED_CALLS names.
 REMOVED = "removed"
 
 # A DYNAMIC EXPECTED_CALLS entry's real kind is chosen at run time; this maps
