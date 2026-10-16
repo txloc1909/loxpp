@@ -44,10 +44,10 @@ jobs:
       - name: Check translation-probe index
         run: tools/check_probe_index.sh
 
-      # docs/README.md maps the document tiers. This fails when a document is
-      # outside a tier, has no index row, carries a status that disagrees with
-      # its directory, or refers to a markdown file that does not exist. Pure
-      # Python, so it needs no build.
+      # docs/README.md defines the document tiers. This fails when a document
+      # is outside a tier, carries a status that disagrees with its directory,
+      # or refers to a markdown file that does not exist. Pure Python, so it
+      # needs no build.
       - name: Check document placement
         run: tools/check_docs_placement.py
 

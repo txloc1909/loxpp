@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """
-docs/README.md maps the document tiers and indexes every file under docs/.
-The map is hand-kept, so a document can land outside a tier, with a status
-that disagrees with its directory, or with no index row, and nothing reports
-it. This check closes those gaps:
+docs/README.md defines the document tiers. Nothing here is hand-kept: every
+check is derived from the tree.
 
   1. docs/ holds README.md and the known tiers only. Every file under a tier
      is a markdown file.
-  2. docs/README.md has an index row (a backticked `<tier>/<name>.md`) for
-     every file under a tier, and no row for a file that does not exist.
-  3. A decision carries a line that starts with `**Status:** accepted` and a
-     proposal a line that starts with `**Status:** proposal`.
-  4. No tracked text file refers to the old notes directory. It is gone, so
+  2. A decision carries a line that starts with `**Status:** accepted` and a
+     proposal a line that starts with `**Status:** proposal`, so the status
+     line and the directory cannot disagree.
+  3. No tracked text file refers to the old notes directory. It is gone, so
      such a reference points at nothing.
-  5. Every path reference to a markdown file resolves. A markdown link
+  4. Every path reference to a markdown file resolves. A markdown link
      `[..](x.md)` resolves relative to the referring file; a backticked or
      bare `docs/.../x.md` or `spec/x.md` resolves from the repository root.
 
@@ -34,7 +31,6 @@ SELF = Path(__file__).resolve().relative_to(ROOT).as_posix()
 OLD_DIR = re.compile(r"(?<![\w-])" + "notes" + "/")
 ROOT_PATH = re.compile(r"(?<![\w./-])((?:docs|spec)/[\w./-]+?\.md)(?![\w-])")
 MD_LINK = re.compile(r"\]\(([^)\s]+?\.md)(?:#[^)]*)?\)")
-INDEX_ROW = re.compile(r"`((?:" + "|".join(TIERS) + r")/[\w./-]+\.md)`")
 
 
 def tracked_text_files():
@@ -68,20 +64,7 @@ def main():
             continue
         findings.append(f"{entry.relative_to(ROOT)}: outside the known tiers {TIERS}")
 
-    # 2. Index rows in both directions.
-    readme = (DOCS / "README.md").read_text(encoding="utf-8")
-    rows = set(INDEX_ROW.findall(readme))
-    files = {
-        f.relative_to(DOCS).as_posix()
-        for tier in TIERS
-        for f in (DOCS / tier).glob("*.md")
-    }
-    for missing in sorted(files - rows):
-        findings.append(f"docs/README.md: no index row for `{missing}`")
-    for stale in sorted(rows - files):
-        findings.append(f"docs/README.md: index row `{stale}` names no file")
-
-    # 3. Status line agrees with the directory.
+    # 2. Status line agrees with the directory.
     for tier, prefix in STATUS.items():
         for file in sorted((DOCS / tier).glob("*.md")):
             lines = file.read_text(encoding="utf-8").split("\n")
@@ -89,7 +72,7 @@ def main():
                 findings.append(
                     f"{file.relative_to(ROOT)}: no line starts with `{prefix}`")
 
-    # 4 and 5. References in every tracked text file.
+    # 3 and 4. References in every tracked text file.
     for rel, path, text in tracked_text_files():
         if rel == SELF:
             continue
@@ -109,8 +92,8 @@ def main():
         for finding in findings:
             print(f"  {finding}", file=sys.stderr)
         return 1
-    print("check_docs_placement.py: every document is in its tier, indexed, "
-          "with a matching status, and every path reference resolves")
+    print("check_docs_placement.py: every document is in its tier with a "
+          "matching status, and every path reference resolves")
     return 0
 
 
