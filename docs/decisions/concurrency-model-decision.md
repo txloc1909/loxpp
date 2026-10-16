@@ -220,16 +220,16 @@ explicitly rather than discovered in CI.
 boundary, cheap cooperative tasks inside it.
 
 - A **worker** is one OS thread that owns one `Runtime`, one `MemoryManager`,
-  one stack, one scheduler, and one mailbox. Workers share no mutable
+  one stack, one scheduler, and one inbound queue. Workers share no mutable
   state. A value crosses between workers only if it is a message, a
   scalar, a string, or an enum value of messages, and then by reference.
 - A **task** is a coroutine on its worker's stack: copy-on-suspend, as built
   (#523). Tasks on one worker share that worker's heap and switch only at
-  explicit points: `yield`, a send that blocks, a receive on an empty
-  mailbox, and the blocking calls the stdlib names. There is no preemption.
+  explicit points: `yield`, a receive on an empty mailbox, and the blocking
+  calls the stdlib names. A send never suspends. There is no preemption.
 - The **primitive** is spawn and send. `spawn` starts a task on the current
-  worker or on a new worker; `send` delivers a value to a mailbox; `receive`
-  takes the next one or suspends. Channels, actors, futures, and pools are
+  worker or on a new worker; `send` appends a value to a task's mailbox and
+  returns; `receive` takes the next one or suspends. Channels, actors, futures, and pools are
   libraries over these three.
 
 This is actor-style isolation at worker granularity and CSP-style cheap tasks
@@ -314,11 +314,15 @@ library too; a native `copy` may join the stdlib later if a measurement
 says the library is too slow, and it changes no rule.
 
 **Lifetime across workers.** A message object lives in the heap that
-created it. When another worker receives it, the receiver registers it in
-its *foreign set* and increments a holder count on the object, atomically.
-Each worker contributes at most one to a count, so the count is bounded by
-the worker count and changes only at a receive and at a collection, never
-on the interpreter's hot path. The creating worker's collector treats an
+created it. When a send crosses to another worker, the sender increments a
+holder count on the object, atomically, on behalf of the receiving worker,
+before the message enters that worker's inbound queue; the receiver
+registers the object in its *foreign set* when it drains the queue. The
+count moves at the send and not at the receive because the message sits in
+the inbound queue between the two, and the owner's collector must not free
+it there. Each worker contributes at most one to a count, so the count is
+bounded by the worker count and changes only at a send, at a drain, and at
+a collection, never on the interpreter's hot path. The creating worker's collector treats an
 object with a count above zero as a root. The receiver's collector marks
 foreign objects in a side table of its own, never in the object header,
 because the header's mark bit belongs to the owner's collector; a foreign
@@ -344,6 +348,51 @@ to receive, not a copy.
 at construction. One error kind, `SendError`. A foreign set and a side
 mark table per worker. Nothing runs user code or adds work proportional to
 anything at a site that does not name it.
+
+### Mailboxes
+
+**Each task owns one mailbox, and it is unbounded.** A mailbox is a
+first-in first-out queue of messages. `send(task, msg)` appends to it and
+returns; it never suspends and never fails for lack of room. `receive()`
+takes the head of the current task's mailbox or suspends the task until a
+message arrives. The length of a mailbox is observable, so a program can
+see a queue grow.
+
+The bounded form was weighed and rejected for the primitive. A send that
+suspends when a queue is full stops a task at a site that asked for no
+limit, which fails the *cost* control, and it puts the classic deadlock,
+two tasks each waiting to send into the other's full queue, into the
+primitive itself. With an unbounded mailbox the only wait a task can enter
+is its own `receive`.
+
+**Each worker owns one inbound queue.** It is the path a message takes from
+another thread: the sender takes the queue's lock, appends an envelope of
+target task and message, releases, and signals; the receiving worker drains
+the queue between tasks, in one swap under the lock, delivers each envelope
+to its task's mailbox, and wakes the tasks that were parked on `receive`. A
+send inside a worker goes straight to the target's mailbox with no lock. A
+mutex and a condition variable per inbound queue is the first form; a
+lock-free queue is an optimisation with a measurement, later.
+
+**The credit channel is required.** An unbounded mailbox moves the memory
+bound from the runtime to the program, and the *memory* control of
+`VISION.md` says the program must be able to bound what it uses. So the
+language ships the bound as a library, in Lox++, over the primitive: a
+channel with a capacity N, where the consumer grants N credits to the
+producer, the producer sends only while it holds a credit, and the consumer
+returns a credit after each message it takes. Under this protocol a
+producer with no credit parks on its own `receive`, never on anyone's
+queue, and the memory of the edge is bounded by N. The library is part of
+the mission, as its own node, and it is the recommended form for every
+edge where a producer can outrun its consumer. Until the import system
+lands, it ships as an example program the way `examples/option_result.lox`
+does; after it, as a stdlib module.
+
+**Deadlock is a diagnosed fault.** When every worker waits on its
+condition variable with at least one task parked on `receive` and nothing
+inbound anywhere, the program can never progress. The last worker to go
+idle detects this with one atomic count and ends the program with
+`DeadlockError`, naming the parked tasks. It costs nothing on the hot path.
 
 ### Scheduler
 
@@ -375,15 +424,19 @@ worker with no work stealing, no growable stacks, and no preemption.
 
 ### What this unblocks and in which order
 
-1. The spec: workers, tasks, spawn, send, receive, `SendError`, the
-   sendable set as a table with a check script, and the list of blocking
-   calls.
+1. The spec: workers, tasks, spawn, send, receive, the unbounded mailbox
+   and its observable length, `SendError`, `DeadlockError`, the sendable
+   set as a table with a check script, the suspend points as a table, and
+   the list of blocking calls.
 2. The native runtime: per-worker `Runtime` and `MemoryManager`, the
    sendable bit on enum values, the foreign set and side mark table, intern
-   on receive, the mailbox, the run queue, `CLOCK_THREAD_CPUTIME_ID`.
-3. The bootstrap, then the JVM as oracle, then QBE parity, each diffed
+   on receive, the mailbox, the inbound queue, the run queue, the deadlock
+   detector, `CLOCK_THREAD_CPUTIME_ID`.
+3. The credit channel library in Lox++, with the rule that blocking waits
+   form a directed acyclic graph of ranks.
+4. The bootstrap, then the JVM as oracle, then QBE parity, each diffed
    against native at its own review.
-4. After the mission: GC item 11 per worker heap; FFI in the full package,
+5. After the mission: GC item 11 per worker heap; FFI in the full package,
    where a blocking foreign call blocks its worker and foreign code never
    holds another worker's object; a per-worker netpoller for asynchronous
    I/O; #519.
@@ -395,7 +448,8 @@ node issues follow it, per `AGENTS.md`, "Missions".
 
 - No GC redesign. One collector per worker is the collector that exists.
 - No preemption, no work stealing, no growable stack, no shared mutable
-  heap, no implicit copy, no freeze primitive. Each is a new decision if
+  heap, no implicit copy, no freeze primitive, no bounded mailbox in the
+  primitive. Each is a new decision if
   ever wanted, and each must beat the numbers above.
 - No FFI thread-safety work here. FFI is designed on this model, after it.
 - No `spec/` change in this document.
