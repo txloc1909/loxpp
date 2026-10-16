@@ -31,15 +31,6 @@ deprecation period is needed.
 
 ---
 
-## Backend roles
-
-`VISION.md`, "The backends", defines the role of each backend and what each
-one owes. The native VM is the product and the reference for all other
-backends. Weigh every design by the native VM first. The planning rules below
-refer to those roles.
-
----
-
 ## Backlog and task tracking
 
 GitHub Issues are the backlog, and GitHub Projects the board for anything
