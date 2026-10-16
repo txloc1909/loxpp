@@ -555,12 +555,12 @@ class Runtime {
     OpResult opIterHasNext(int stopAtFrameCount);
     OpResult opIterNext();
 
-    // YIELD's own body in coroutine mode. Runs the two legality checks
-    // vm.cpp's interpreted Op::YIELD runs — a yield outside a coroutine, and
-    // a yield across a native callback (a deeper m_reentrantRunDepth than
-    // the coroutine was resumed with). Returns OK when the yield is legal;
-    // the compiled frame then returns kRtYield and the driver suspends it.
-    // An illegal yield raises through handleThrow and returns its OpResult,
+    // YIELD's own body in coroutine mode: the legality check for a yield
+    // across a native callback. Returns OK when the yield is legal; the
+    // compiled frame then returns kRtYield, and the driver suspends the
+    // coroutine, or callCompiled() continues the frame with nil when no
+    // coroutine and no scheduler run (a task switch with no other task). An
+    // illegal yield raises through handleThrow and returns its OpResult,
     // exactly like any other fallible op.
     OpResult yieldOp(int stopAtFrameCount);
 

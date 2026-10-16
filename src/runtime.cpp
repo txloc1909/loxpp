@@ -201,6 +201,14 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
     }
     auto code = reinterpret_cast<RtCompiledFn>(closure->function->code);
     int status = code(this, frame->slots);
+    while (status == kRtYield && m_currentCoroutine == nullptr) {
+        // yieldOp() allowed a yield outside every coroutine with no scheduler:
+        // the task switch finds no other task, so this frame continues at its
+        // resume point, and the yield evaluates to nil.
+        pop();
+        push(from<Nil>(Nil{}));
+        status = code(this, frame->slots);
+    }
     if (status == kRtFatal) {
         // The compiled callee already reported a fatal error through
         // runtimeError() (rt_abi.h's own contract on RtCompiledFn), which
@@ -221,9 +229,10 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
     }
     if (status == kRtCall || status == kRtYield) {
         // kRtCall/kRtYield are coroutine-mode statuses. callCompiled() runs
-        // with m_resumableMode clear, so no op pushes a call and a YIELD is
-        // illegal (it raises a native-callback/defer boundary error first).
-        // Reaching here means the compiled code and this contract drifted.
+        // with m_resumableMode clear, so no op pushes a call, and a YIELD
+        // while a coroutine runs is illegal (it raises a native-callback/
+        // defer boundary error first). Reaching here means the compiled code
+        // and this contract drifted.
         runtimeError("BUG: compiled function returned a coroutine status "
                      "outside the coroutine driver.");
         return OpResult::Fatal;
@@ -2771,12 +2780,21 @@ Runtime::OpResult Runtime::opIterNext() {
 }
 
 Runtime::OpResult Runtime::yieldOp(int stopAtFrameCount) {
-    // Mirrors vm.cpp's interpreted Op::YIELD checks. The compiled frame
-    // returns kRtYield only when this returns OK; the driver then suspends it.
+    // The compiled frame returns kRtYield only when this returns OK.
     if (m_currentCoroutine == nullptr) {
-        return fromThrow(raiseThrowableError(
-            "YieldOutsideCoroutineError",
-            "Cannot yield from outside a coroutine.", stopAtFrameCount));
+        // No scheduler runs this program (the QBE entry, rt_startup), so it
+        // is one task with no coroutine and no other task. A yield outside
+        // every coroutine is a task switch (spec/04-semantics.md, yield
+        // Expression), and with an empty run queue the task runs again at
+        // once: callCompiled() re-enters the frame with nil as the value.
+        // Inside a native or a re-entrant run it is still an illegal yield.
+        if (m_nativeDepth > 0 || m_reentrantRunDepth > 0 ||
+            m_stringifyCanonicalDepth > 0) {
+            return fromThrow(raiseThrowableError(
+                "YieldAcrossNativeError",
+                "Cannot yield across a native callback.", stopAtFrameCount));
+        }
+        return OpResult::OK;
     }
     // m_resumableMode is true only while the coroutine driver runs this
     // coroutine's own frames. A compiled frame reached any other way — run

@@ -875,14 +875,62 @@ TEST(RunCompiledFrames, EmptyRangeReturnsTrue) {
     EXPECT_TRUE(rt.runCompiledFrames(0));
 }
 
-TEST(RtYield, OutsideACoroutineIsFatalWithoutAHandler) {
+// spec/04-semantics.md, yield Expression: a yield outside every coroutine of
+// the task is a task switch, not a fault. With no scheduler (rt_startup) the
+// task is alone, so the yield is legal and reports nothing.
+TEST(RtYield, OutsideEveryCoroutineIsATaskSwitch) {
     Runtime* rt = rt_startup("", nullptr, 0);
     ASSERT_NE(rt, nullptr);
     testing::internal::CaptureStderr();
     int status = rt_yield(rt, 0);
     std::string err = testing::internal::GetCapturedStderr();
-    EXPECT_EQ(status, static_cast<int>(Runtime::OpResult::Fatal));
-    EXPECT_NE(err.find("Cannot yield from outside a coroutine."),
-              std::string::npos);
+    EXPECT_EQ(status, static_cast<int>(Runtime::OpResult::OK));
+    EXPECT_EQ(err, "");
     rt_shutdown(rt);
+}
+
+namespace {
+
+int g_yielderEntries = 0;
+bool g_yielderSawNil = false;
+
+// A compiled frame that yields 7 at state 0, then at state 1 reads what the
+// yield evaluated to and returns it.
+int fakeYielder(Runtime* rt, Value*) {
+    g_yielderEntries++;
+    if (rt->currentCompiledState() == 0) {
+        rt->setCurrentCompiledState(1);
+        rt->push(Value{7.0});
+        if (rt_yield(rt, 0) != 0) {
+            return kRtFatal;
+        }
+        return kRtYield;
+    }
+    Value got = rt->pop();
+    g_yielderSawNil = is<Nil>(got);
+    rt->push(got);
+    return kRtOk;
+}
+
+} // namespace
+
+// The task switch with no other task: callCompiled() continues the frame at
+// its resume point at once, with nil as the value of the yield.
+TEST(RtYield, OutsideEveryCoroutineContinuesWithNil) {
+    Runtime rt;
+    ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    fn->arity = 0;
+    fn->code = reinterpret_cast<void*>(&fakeYielder);
+    ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    g_yielderEntries = 0;
+    g_yielderSawNil = false;
+
+    rt.push(Value{static_cast<Obj*>(closure)});
+    Runtime::OpResult r = rt.opCall(0, 0);
+
+    EXPECT_EQ(r, Runtime::OpResult::OK);
+    EXPECT_EQ(g_yielderEntries, 2);
+    EXPECT_TRUE(g_yielderSawNil);
+    EXPECT_EQ(rt.frameCount(), 0);
+    EXPECT_TRUE(is<Nil>(rt.pop()));
 }
