@@ -108,6 +108,7 @@ each has an off-the-shelf solution.
 | `80_main_end_abandons` | the program ends when the main task ends: a task that has not run never runs, and a waiting task's deferred call does not run — a spec probe | none (spec probe) |
 | `81_exit_from_task` | `exit(code)` in a spawned task ends the program at once — a spec probe | none (spec probe) |
 | `82_send_order_across_workers` | messages from one worker to one task arrive in the order of the sends; a handle a worker sends of itself is `==` to the one `task.spawn_worker` returned — a spec probe | none (spec probe) |
+| `83_blocking_call_blocks_one_worker` | a blocking call blocks only its own worker: one worker waits for ever in `Server.accept()`, and the main task on another worker keeps running and ends the program; an implementation that blocks every worker hangs and fails on the probe's `TIMEOUT` — a spec probe | none (spec probe) |
 | `48_file_visible_after_close` | a File's write-close-reopen cycle: once `close()` returns, a fresh `open()` on the same path sees everything the closed handle wrote (`spec/05-stdlib.md`, File section) — pins the after-close half of the visibility guarantee, not the buffered-before-close half, which is implementation-defined and allowed to differ | none (parity gate) |
 | `55_for_in_map_net_zero` | an erase plus an insert in one `for`-in body restores the net size, so a size check misses it — the structural version check must still fail on every backend, with empty stdout (issue #362) — an `error_probes` entry | none (error-parity gate) |
 | `jvm-only/61_operator_overload` | operator overloading (issue #472): every T1 dunder method (`__add__ __sub__ __mul__ __div__ __mod__ __neg__ __lt__ __gt__ __eq__ __contains__ __call__`), the Wave-2 methods (`__index_get__ __index_set__ __len__ __iter__`), and the deferred `__slice__` dispatch on an Instance; `!=`/`<=`/`>=` derive from `__eq__`/`__gt__`/`__lt__`, and the built-in List/String/Map/Number paths stay unchanged. Also the reflected methods (issue #508): a built-in left operand defers to the right operand's `__radd__ __rsub__ __rmul__ __rdiv__ __rmod__ __rlt__ __rgt__` or `__eq__`, with `<=`/`>=` deriving from the reflected `__rgt__`/`__rlt__` — named directly by both check scripts, see the note below the table | P6 |
@@ -162,17 +163,24 @@ each has an off-the-shelf solution.
 | `qbe-only/V1_fresh_cell_no_lists` | the `V1_fresh_cell` hazard with no list opcodes (S4): a captured loop-body local needs a fresh cell per iteration, checked through globals instead of a list slot | P4 |
 | `qbe-only/V3_loopvar_no_lists` | the `V3_loopvar` hazard with no list opcodes (S4): a closure capturing the loop variable itself shares one open upvalue across every iteration | P4 |
 
-The `66` to `82` probes are **spec probes** for the workers and tasks of
+The `66` to `83` probes are **spec probes** for the workers and tasks of
 `spec/04-semantics.md`. A spec probe carries a `// STATUS: ok` or
 `// STATUS: error` line and one `// CHECK:` line per line of the stdout the
 spec defines for it. A probe whose rule fixes the exact exit status also
-carries `// EXIT: <code>`. `tools/check_spec_probes.py` runs every spec probe
+carries `// EXIT: <code>`, and a probe that fails by hanging carries
+`// TIMEOUT: <seconds>`. `tools/check_spec_probes.py` runs every spec probe
 of this directory on one consumer and compares the whole stdout and the exit
 status. Each consumer has an expected-failure list,
 `tools/probe_xfail_<consumer>.txt` (native, bootstrap, jvm, qbe), which
 `tools/check_spec_probes.py` and the `tools/diff_runtimes.py --xfail` walks
 of this directory read: a listed probe must fail, and a listed probe that
 passes fails the gate until its line is deleted.
+
+One rule of the Workers and Tasks section has no spec probe: a `print`
+line from one worker never mixes with a line from another worker. Its
+output order depends on timing between threads, and the gate compares an
+exact stdout, so it needs a check that does not depend on order. Node N7
+of mission #595 (#602) owns that check.
 
 `jvm-only/61_operator_overload` and `jvm-only/defer_replaces_overflow` sit one
 level down because this directory's own files are walked non-recursively by

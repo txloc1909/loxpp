@@ -20,3 +20,4 @@
 80_main_end_abandons.lox  workers and tasks: mission #595, node #600
 81_exit_from_task.lox  workers and tasks: mission #595, node #600
 82_send_order_across_workers.lox  workers and tasks: mission #595, node #600
+83_blocking_call_blocks_one_worker.lox  workers and tasks: mission #595, node #600

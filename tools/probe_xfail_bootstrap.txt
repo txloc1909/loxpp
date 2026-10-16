@@ -20,3 +20,4 @@
 80_main_end_abandons.lox  workers and tasks: mission #595, node #599
 81_exit_from_task.lox  workers and tasks: mission #595, node #599
 82_send_order_across_workers.lox  workers and tasks: mission #595, node #599
+83_blocking_call_blocks_one_worker.lox  workers and tasks: mission #595, node #599; under the one-thread form of the implementation-gated exception (spec/04-semantics.md) a blocking call blocks every worker, so this probe stays listed

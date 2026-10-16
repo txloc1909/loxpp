@@ -610,6 +610,7 @@ const std::set<std::string> kExpectedWarnedFiles = {
     "80_main_end_abandons.lox",
     "81_exit_from_task.lox",
     "82_send_order_across_workers.lox",
+    "83_blocking_call_blocks_one_worker.lox",
     "test_enum_arity_try.lox",
     "test_error_kind_message.lox",
     "test_invalid_map_key_try.lox",

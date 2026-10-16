@@ -10,7 +10,9 @@ trailing white space removed, are exactly the CHECK lines, and when the exit
 status is zero for `ok` and non-zero for `error`. A probe whose spec rule
 defines the exact exit status, such as `exit(3)`, also carries
 `// EXIT: <code>`, and then the exit status must be exactly that code. A
-.lox file with no STATUS line is not a spec probe and is not run here.
+probe that fails by hanging can carry `// TIMEOUT: <seconds>`, which takes
+the place of --timeout for that probe; a run that times out fails. A .lox
+file with no STATUS line is not a spec probe and is not run here.
 
 The expected-failure list holds one line per probe that the consumer does not
 pass yet: the file name, then a reason. Blank lines and lines that start with
@@ -47,6 +49,7 @@ from pathlib import Path
 STATUS_RE = re.compile(r"^\s*//\s*STATUS:\s*(ok|error)\s*$")
 CHECK_RE = re.compile(r"^\s*//\s*CHECK:\s?(.*)$")
 EXIT_RE = re.compile(r"^\s*//\s*EXIT:\s*(-?\d+)\s*$")
+TIMEOUT_RE = re.compile(r"^\s*//\s*TIMEOUT:\s*(\d+(?:\.\d+)?)\s*$")
 
 
 @dataclass
@@ -55,14 +58,20 @@ class SpecProbe:
     status: str  # "ok" or "error"
     checks: list[str]
     exit_code: int | None = None  # the exact exit status, when the probe names one
+    timeout: float | None = None  # seconds, in place of --timeout
 
 
 def parse_probe(path: Path) -> SpecProbe | None:
     """Returns the probe's expectations, or None if it has no STATUS line."""
     status = None
     exit_code = None
+    timeout = None
     checks: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
+        m = TIMEOUT_RE.match(line)
+        if m:
+            timeout = float(m.group(1))
+            continue
         m = EXIT_RE.match(line)
         if m:
             if exit_code is not None:
@@ -82,7 +91,7 @@ def parse_probe(path: Path) -> SpecProbe | None:
         return None
     if exit_code is not None and (exit_code == 0) != (status == "ok"):
         raise ValueError(f"{path}: EXIT {exit_code} disagrees with STATUS {status}")
-    return SpecProbe(path, status, checks, exit_code)
+    return SpecProbe(path, status, checks, exit_code, timeout)
 
 
 def stdout_lines(stdout: str) -> list[str]:
@@ -159,7 +168,8 @@ def main() -> None:
     counts = {"PASS": 0, "FAIL": 0, "XFAIL": 0, "XPASS": 0}
     for probe in probes:
         name = probe.path.name
-        result = run(args.runner, probe, args.timeout)
+        timeout = probe.timeout if probe.timeout is not None else args.timeout
+        result = run(args.runner, probe, timeout)
         ok = result is not None and passes(probe, *result)
         listed = name in xfail
         if listed:
@@ -175,7 +185,7 @@ def main() -> None:
         print(f"{outcome:<6}{name}{note}")
         if outcome == "FAIL":
             if result is None:
-                print(f"      timeout after {args.timeout:.0f}s")
+                print(f"      timeout after {timeout:.0f}s")
                 continue
             stdout, code = result
             if probe.exit_code is not None:
