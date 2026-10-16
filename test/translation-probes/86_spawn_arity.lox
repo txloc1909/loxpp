@@ -1,0 +1,15 @@
+// A spawned task calls its function with no arguments, exactly as an
+// ordinary call, so the arity check applies when the task first runs
+// (spec/04-semantics.md, task.spawn). The ArityError is uncaught in that
+// task, so it ends the program (Ending), and the main task does not wake.
+fun needs(a) {
+    print "needs ran";
+}
+
+task.spawn(needs);
+print "spawned";
+task.receive();
+print "main woke";
+
+// STATUS: error
+// CHECK: spawned

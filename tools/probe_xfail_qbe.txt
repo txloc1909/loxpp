@@ -21,3 +21,6 @@
 81_exit_from_task.lox  workers and tasks: mission #595, node #601
 82_send_order_across_workers.lox  workers and tasks: mission #595, node #601
 83_blocking_call_blocks_one_worker.lox  workers and tasks: mission #595, node #601
+84_spawn_worker_entry_closure.lox  workers and tasks: mission #595, node #601
+85_task_value.lox  workers and tasks: mission #595, node #601
+86_spawn_arity.lox  workers and tasks: mission #595, node #601
