@@ -36,8 +36,8 @@ static Value taskSpawnNative(int /*argCount*/, Value* argv) {
     return taskValue(rt->spawnTask(fn));
 }
 
-// task.spawn_worker(fn, msg): a second worker makes a second heap, which is
-// outside the set of programs this runtime handles yet.
+// task.spawn_worker(fn, msg): this runtime is one worker with one heap. It
+// makes no second worker, so the call is a fatal error.
 static Value taskSpawnWorkerNative(int /*argCount*/, Value* /*argv*/) {
     nativeRuntimeError("task.spawn_worker is not implemented: workers on "
                        "threads are node N3 of mission #595 (#598).");
