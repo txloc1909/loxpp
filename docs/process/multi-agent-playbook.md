@@ -22,6 +22,36 @@ multi-agent run live in `AGENTS.md`, not here.
 
 ---
 
+## Mission lifecycle
+
+The rules are in `AGENTS.md`, "Missions". This is the sequence, with the
+place each artifact lives.
+
+1. **Vision gate.** The mission names the goal in `VISION.md` it serves. No
+   goal, no mission.
+2. **Proposal.** `docs/proposals/<feature>.md` with `**Status:** proposal`.
+   It holds the consumer list, a table per countable set, the scope property
+   of any node that limits its scope, and the residual hard edges. It binds
+   nothing, and no node issue may cite it.
+3. **Acceptance.** The pull request the owner approves moves the file to
+   `docs/decisions/` and sets `**Status:** accepted` with the date and the
+   PR. From that commit the design binds every node.
+4. **DAG.** One tracking issue (the waves, one line per node) and one issue
+   per node (deliverable, scope, checkpoint, hazards). A mission with more
+   than a few nodes gets a Project board. The decision's status line names
+   the tracking issue.
+5. **Spec node first.** The spec section and its shared probes land on
+   `main` before the consumers. Each consumer that does not pass yet lists
+   the probe in an expected-failure file under `tools/`.
+6. **Nodes.** One node, one branch, one PR, one merge, by the loop below. A
+   review that names a bug class writes it into the decision at once. A
+   hazard for a later node is a comment on that node's issue.
+7. **Closing.** One issue per follow-up. A "Shipped" section in the
+   decision, and the mission number on its status line. The retrospective
+   goes to `docs/records/<feature>-retro.md` and freezes. A rule from the
+   retrospective goes to `AGENTS.md`. A design change from it is a new
+   proposal.
+
 ## Roles
 
 Three roles, tagged per `AGENTS.md`'s multi-agent conventions
@@ -38,11 +68,25 @@ account:
   and either unblocks the implementer or, as referee, hands down a binding
   ruling.
 
-## The harness
+## The loop
 
-`.claude/workflows/backend-dag.js` runs this loop. It is generic — no target
-(JVM, CLR, ...) is hardcoded into its control flow. A mission run supplies,
-via `args`:
+The loop runs in one of two ways. Both read the same GitHub state and leave
+the same artifacts.
+
+**By hand, the default.** The orchestrator starts one agent per role, one
+node at a time, strictly in sequence: start the implementer and wait; start
+the reviewer and wait; start a referee only when an escalation limit below
+fires; merge; start the next node. It spends the fewest tokens and never
+runs two stages at once, so it stays inside rate limits. The orchestrator's
+prompt to each agent names the node issue and the documents to read: the
+decision in `docs/decisions/`, the spec sections, and the documents under
+`docs/reference/` the node depends on.
+
+**The harness, when the budget allows.** `.claude/workflows/backend-dag.js`
+runs the same loop unattended, with the nodes of one stage in parallel. Use
+it only when the owner says the token budget and the rate limits allow
+parallel stages. It is generic — no target (JVM, CLR, ...) is hardcoded into
+its control flow. A mission run supplies, via `args`:
 
 - `missionIssue` — the tracking issue number that sequences this mission's
   nodes (see "Node specification structure" below). The stage order and the
@@ -74,11 +118,15 @@ via `args`:
 - `stages` — an array of node-id groups; each group runs in parallel, groups
   run in sequence. `plan_resume.py` derives this from the tracking issue.
 - `repo`, `githubRepo`, and the doc paths a node implementer/reviewer must
-  read (the DAG plan doc, the target's opcode/semantics reference, ...).
+  read (the decision, the spec sections, the reference documents).
 
 Before a new mission's first run, edit `meta.phases` in the script to name
 that mission's real nodes — it drives the progress-tree preview and must stay
 a literal, so it cannot be derived from `args.nodes` automatically.
+
+The hand-run loop reads the same tracking issue and the same node issues.
+`plan_resume.py` derives each node's state from GitHub for both ways, and
+the run-observation tools below serve both.
 
 Every agent reads its node specification with the full `--json --template`
 issue form — **never** the plain `gh issue view <issue>` and **never**
@@ -88,10 +136,11 @@ lives only in a comment (see "Node specification structure"). An agent that
 uses the plain form gets a spec with a silently missing hazard, the same
 failure mode a lost mission directory used to cause. The `--comments` form is
 worse without a terminal: it prints only the comment list and drops the body,
-so an issue with no comments reads as empty output with exit code 0. The harness prompt
-always gives the full command, and an agent whose issue-read
-call fails stops with `blocked_surprise` rather than continuing on a partial
-read.
+so an issue with no comments reads as empty output with exit code 0. The
+prompt to an agent, from the harness or from the orchestrator by hand,
+always gives the full command, and an agent whose issue-read call fails
+stops (`blocked_surprise` in the harness) rather than continuing on a
+partial read.
 
 Issue form (one call returns title, body, count, and each comment):
 
@@ -205,7 +254,7 @@ node that finds a hazard for a node it blocks posts a **comment** on that
 later node's issue, never a body edit. A comment records who found the
 hazard and when; a body edit hides both. This is why every agent reads its
 node with the full `--json --template` issue form and never with
-the plain form (see "The harness" above) — a hazard that arrived after the
+the plain form (see "The loop" above) — a hazard that arrived after the
 issue was filed is invisible to the plain form, and the `--comments` form
 drops the body without a terminal.
 
@@ -383,7 +432,7 @@ repository, and give a second one its own clone.
 `docs/proposals/` is for brainstorming and `docs/decisions/` for design
 records (see `AGENTS.md`'s "Backlog and task tracking" and `docs/README.md`);
 a mission's own backlog lives in GitHub Issues, never in a bullet list
-inside a mission brief or design note.
+inside a mission brief or design document.
 
 When an implementer or the orchestrator identifies work that is explicitly
 out of scope for the current DAG — a node descoped from the plan, a
@@ -396,8 +445,8 @@ per discrete item before closing the mission out:
 - **Label it** with the repo's existing labels (`enhancement`, plus any area
   label the deferred work needs) so it is discoverable outside the mission's
   own history.
-- **Link it from the design note**, if the note's reasoning for deferring the
-  work still matters — the note keeps the *why*, the issue tracks the *when*
+- **Link it from the decision**, if its reasoning for deferring the
+  work still matters — the decision keeps the *why*, the issue tracks the *when*
   and *by whom*.
 - **A follow-up mission with several deferred nodes gets a GitHub Project**,
   not a new DAG-plan-shaped list under `docs/`, so the items can be sequenced and
@@ -415,7 +464,7 @@ A node specification states constraints, not mechanisms — say what must hold
 ("the topmost live local", "no bare `Object[]` in a Lox value slot"), not
 which specific function must implement it. An orchestrator's own commentary,
 however confidently worded, is not a ruling that overrides `spec/` or `src/`;
-if it conflicts with the source, the source wins and the note gets corrected.
+if it conflicts with the source, the source wins and the commentary gets corrected.
 
 **An orchestrator may rule, and must label the ruling as its own.** When a
 stagnation series does not trigger a referee, the orchestrator can state a
