@@ -1,0 +1,46 @@
+// Memory per suspended coroutine, for issue #590 (the concurrency go/no-go).
+//
+// Run: build/loxpp benchmarks/coroutine_footprint.lox N DEPTH
+//
+// Creates N coroutines and resumes each one once, so every coroutine sits
+// suspended at a yield DEPTH frames deep, with its stack slice, frames,
+// and defer lists copied into its snapshot. The program keeps them all
+// alive and prints N. The bytes per coroutine come from outside: the max
+// resident set of this run minus the run with N = 0, divided by N
+// (benchmarks/coroutine_cost.sh does that).
+//
+// `park` returns through a local on purpose: `return park(d - 1)` would be a
+// self tail call, and the compiler would reuse the frame instead of
+// stacking DEPTH frames under the yield.
+
+fun parseInt(s) {
+    var n = 0;
+    var i = 0;
+    while (i < len(s)) {
+        n = n * 10 + (ord(s[i]) - 48);
+        i = i + 1;
+    }
+    return n;
+}
+
+var N = parseInt(args()[0]);
+var DEPTH = parseInt(args()[1]);
+
+fun park(d) {
+    if (d > 1) {
+        var r = park(d - 1);
+        return r;
+    }
+    yield 0;
+    return 0;
+}
+
+var parked = [];
+var i = 0;
+while (i < N) {
+    var co = coroutine.create(park);
+    co.resume(DEPTH);
+    parked.append(co);
+    i = i + 1;
+}
+print len(parked);

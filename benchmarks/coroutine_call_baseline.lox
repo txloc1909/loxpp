@@ -1,0 +1,24 @@
+// The plain-call floor for benchmarks/coroutine_yield.lox.
+//
+// Run: build/loxpp benchmarks/coroutine_call_baseline.lox
+//
+// Same loop shape as the coroutine benchmark: the outer loop counts to REPS
+// and the callee does one compare and one add per step, the work `bounce`
+// does between two yields. The only difference is that the step is an
+// ordinary call and return, not a resume and yield. The per-yield cost of
+// the coroutine primitive is the difference between the two numbers.
+
+var REPS = 200000;
+
+fun step(i) {
+    if (i < REPS) return i + 1;
+    return i;
+}
+
+var start = clock();
+var i = 0;
+while (i < REPS) {
+    i = step(i);
+}
+var elapsed = clock() - start;
+print elapsed / REPS * 1000000000.0;

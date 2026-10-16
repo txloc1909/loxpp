@@ -1,0 +1,59 @@
+// Per-yield cost against suspension depth, for issue #590.
+//
+// Run: build/loxpp benchmarks/coroutine_yield_depth.lox DEPTH
+//
+// Like benchmarks/coroutine_yield.lox, but the yielding loop runs DEPTH
+// frames deep inside the coroutine. A yield copies the whole live slice
+// (every frame from the coroutine's base to the top) into the snapshot and
+// a resume copies it back, so this shows how the round trip grows with the
+// size of the slice. DEPTH 1 must reproduce coroutine_yield.lox.
+
+fun parseInt(s) {
+    var n = 0;
+    var i = 0;
+    while (i < len(s)) {
+        n = n * 10 + (ord(s[i]) - 48);
+        i = i + 1;
+    }
+    return n;
+}
+
+var REPS = 200000;
+var DEPTH = parseInt(args()[0]);
+
+fun bounce(n) {
+    var i = 0;
+    while (i < n) {
+        yield i;
+        i = i + 1;
+    }
+    return i;
+}
+
+// Returns through a local so the compiler does not turn the descent into a
+// self tail call and reuse one frame.
+fun descend(d, n) {
+    if (d > 1) {
+        var r = descend(d - 1, n);
+        return r;
+    }
+    var r = bounce(n);
+    return r;
+}
+
+fun run(n) {
+    var r = descend(DEPTH, n);
+    return r;
+}
+
+var co = coroutine.create(run);
+var start = clock();
+co.resume(REPS);
+var i = 1;
+while (i < REPS) {
+    co.resume();
+    i = i + 1;
+}
+co.resume();
+var elapsed = clock() - start;
+print elapsed / REPS * 1000000000.0;
