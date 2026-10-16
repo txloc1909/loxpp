@@ -424,7 +424,20 @@ idle detects this with one atomic count and ends the program with
 Per worker, one run queue, first in first out, no priorities. A task runs
 until it suspends. A blocking call blocks its worker, every task on it, and
 nothing else; the stdlib says which calls block. Asynchronous I/O inside a
-worker is a later feature on this seam, not part of this decision.
+worker is the first follow-up on this seam, not part of this decision.
+
+**The suspend points are the default set, and a fair mode is reserved.** The
+spec's table of suspend points, `yield`, `receive` on an empty mailbox, and
+the blocking calls, is the set a program pays for by default. A task that
+computes without reaching one starves every other task on its worker, and
+a program cannot add a switch point inside a library it calls; the lever at
+launch is placement, a worker of its own. An opt-in fair mode per worker,
+which forces a switch at a loop back-edge or a call after a budget of
+work, is reserved: it pays only where it is enabled, it changes the meaning
+of no program that does not enable it, and QBE's coroutine mode already
+makes every function re-enterable. The spec must word the table so that
+such a mode adds points under a flag without a change of rule. The mode
+itself is a later decision with a measurement.
 
 ### Per backend, by role
 
@@ -491,10 +504,13 @@ pause and the live set per collection.
    form a directed acyclic graph of ranks.
 4. The bootstrap, then the JVM as oracle, then QBE parity, each diffed
    against native at its own review.
-5. After the mission: GC item 11 per worker heap; FFI in the full package,
-   where a blocking foreign call blocks its worker and foreign code never
-   holds another worker's object; a per-worker netpoller for asynchronous
-   I/O; #519.
+5. After the mission, in this order: a per-worker netpoller for
+   asynchronous I/O first, because a blocking call blocks its worker and a
+   server with a thousand connections otherwise needs a thousand workers,
+   so the mission alone does not close #519; then #519; then GC item 11
+   per worker heap; then FFI in the full package, where a blocking foreign
+   call blocks its worker and foreign code never holds another worker's
+   object.
 
 This decision does not open the mission. The mission's tracking issue and
 node issues follow it, per `AGENTS.md`, "Missions".
