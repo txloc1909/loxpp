@@ -4,8 +4,14 @@ Differential runner: native loxpp vs. another loxpp backend, stdout only.
 
 Runs each Lox++ program on the native binary and on a second runner
 (tools/loxpp_jvm.sh, tools/loxpp_qbe.sh, or an
-equivalent), then compares stdout. It does not compare stderr and does not
-compare the exit code: differential scope is stdout only.
+equivalent), then compares stdout. It does not compare stderr in the ordinary
+comparison and compares the exit code only for the empty-stdout tie-break:
+differential scope is stdout only. The probe criteria that the --xfail
+account uses also include a probe's stderr lines.
+
+stderr is still captured for every run, because a spec probe can pin it with
+`// STDERR:` lines (see tools/check_spec_probes.py), and the --xfail account
+must agree with that probe's own pass rule.
 
 Four outcomes per program:
   MATCH        stdout is byte-identical on both runtimes.
@@ -30,9 +36,10 @@ other runner does not pass yet: the backend's expected-failure list, such as
 tools/probe_xfail_jvm.txt. A listed program reports one of two outcomes:
   XFAIL        the other runner's run does not pass the probe, or native's
                does not. Not a divergence.
-  XPASS        both runs pass the probe: their stdout is its CHECK lines and
-               their exit status matches its STATUS line. Exit code 1: the
-               backend passes it now, so its line must be deleted.
+  XPASS        both runs pass the probe: their stdout is its CHECK lines,
+               their stderr starts with its STDERR lines, and their exit
+               status matches its STATUS line. Exit code 1: the backend
+               passes it now, so its line must be deleted.
 
 --consumer <name> names the consumer the other runner is. A spec probe whose
 `// NOT-BINDING:` line names it (see tools/check_spec_probes.py) reports
@@ -220,13 +227,15 @@ class RunTimeout(Exception):
 
 def run_program(
     cmd: list[str], input_file: Path, timeout: float, *, raise_native_stack: bool = False
-) -> tuple[str, int]:
-    """Runs one program and returns (stdout, exit code).
+) -> tuple[str, str, int]:
+    """Runs one program and returns (stdout, stderr, exit code).
 
     The exit code is not part of the ordinary MATCH/PERMUTATION/DIVERGE
     comparison (differential scope is stdout only) — it exists only for the
     empty-stdout tie-break in main(), where stdout alone cannot tell a
-    legitimate silent success from a silent crash.
+    legitimate silent success from a silent crash. stderr is captured for the
+    spec-probe criteria of the --xfail account, which checks a probe's STDERR
+    lines as well as its stdout and exit status.
 
     raise_native_stack scopes _raise_native_stack_limit to this one child via
     preexec_fn — never this parent process, never the other runner's child.
@@ -243,7 +252,7 @@ def run_program(
         )
     except subprocess.TimeoutExpired as exc:
         raise RunTimeout(f"{cmd[0]} did not finish in {timeout:.0f}s") from exc
-    return result.stdout, result.returncode
+    return result.stdout, result.stderr, result.returncode
 
 
 def collect_programs(paths: list[str]) -> list[Path]:
@@ -361,10 +370,10 @@ def main() -> None:
                 continue
         input_file = lox_file.with_suffix(".input")
         try:
-            native_out, native_status = run_program(
+            native_out, native_err, native_status = run_program(
                 [args.native, str(lox_file)], input_file, args.timeout, raise_native_stack=True
             )
-            other_out, other_status = run_program(
+            other_out, other_err, other_status = run_program(
                 [args.other_runner, str(lox_file)], input_file, args.timeout
             )
         except RunTimeout as exc:
@@ -380,8 +389,8 @@ def main() -> None:
             probe = parse_probe(lox_file)
             if (
                 probe is not None
-                and passes(probe, native_out, native_status)
-                and passes(probe, other_out, other_status)
+                and passes(probe, native_out, native_err, native_status)
+                and passes(probe, other_out, other_err, other_status)
             ):
                 print(f"XPASS       {lox_file}  (both runs pass it now: delete its line from {args.xfail})")
                 xpassed += 1

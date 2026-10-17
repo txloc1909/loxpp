@@ -14,6 +14,12 @@ probe that fails by hanging can carry `// TIMEOUT: <seconds>`, which takes
 the place of --timeout for that probe; a run that times out fails. A .lox
 file with no STATUS line is not a spec probe and is not run here.
 
+A probe that pins stderr text carries one `// STDERR: <line>` directive per
+expected line. The STDERR lines must be the first lines of stderr, in order,
+with trailing white space removed; any later stderr line is not checked, so a
+report may append its own stack trace or the tasks that wait. A probe with no
+STDERR line does not check stderr.
+
 A probe whose CHECK lines a spec exception releases one consumer from carries
 `// NOT-BINDING: <consumer> <probe>`, for example
 `// NOT-BINDING: bootstrap bootstrap-only/one_thread_blocking_call.lox`. The
@@ -24,6 +30,8 @@ must exist and carry a STATUS line, and the consumer's own gate runs it. With
 EXEMPT. Without --consumer, or for another consumer, the line changes nothing.
 A NOT-BINDING probe is not a gap, so it must not also be on the
 expected-failure list.
+
+A probe passes when its stdout, its stderr prefix, and its exit status agree.
 
 The expected-failure list holds one line per probe that the consumer does not
 pass yet: the file name, then a reason. Blank lines and lines that start with
@@ -60,6 +68,7 @@ from pathlib import Path
 
 STATUS_RE = re.compile(r"^\s*//\s*STATUS:\s*(ok|error)\s*$")
 CHECK_RE = re.compile(r"^\s*//\s*CHECK:\s?(.*)$")
+STDERR_RE = re.compile(r"^\s*//\s*STDERR:\s?(.*)$")
 EXIT_RE = re.compile(r"^\s*//\s*EXIT:\s*(-?\d+)\s*$")
 TIMEOUT_RE = re.compile(r"^\s*//\s*TIMEOUT:\s*(\d+(?:\.\d+)?)\s*$")
 NOT_BINDING_RE = re.compile(r"^\s*//\s*NOT-BINDING:\s*(\S+)\s+(\S+)\s*$")
@@ -70,6 +79,7 @@ class SpecProbe:
     path: Path
     status: str  # "ok" or "error"
     checks: list[str]
+    stderr_checks: list[str]  # the expected first lines of stderr
     exit_code: int | None = None  # the exact exit status, when the probe names one
     timeout: float | None = None  # seconds, in place of --timeout
     # consumer -> the probe, by path from the probe directory, that holds the
@@ -83,6 +93,7 @@ def parse_probe(path: Path) -> SpecProbe | None:
     exit_code = None
     timeout = None
     checks: list[str] = []
+    stderr_checks: list[str] = []
     not_binding: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         m = NOT_BINDING_RE.match(line)
@@ -110,20 +121,32 @@ def parse_probe(path: Path) -> SpecProbe | None:
         m = CHECK_RE.match(line)
         if m:
             checks.append(m.group(1).rstrip())
+            continue
+        m = STDERR_RE.match(line)
+        if m:
+            stderr_checks.append(m.group(1).rstrip())
     if status is None:
         return None
     if exit_code is not None and (exit_code == 0) != (status == "ok"):
         raise ValueError(f"{path}: EXIT {exit_code} disagrees with STATUS {status}")
-    return SpecProbe(path, status, checks, exit_code, timeout, not_binding)
+    return SpecProbe(path, status, checks, stderr_checks, exit_code, timeout,
+                     not_binding)
 
 
 def stdout_lines(stdout: str) -> list[str]:
     return [line.rstrip() for line in stdout.splitlines()]
 
 
-def passes(probe: SpecProbe, stdout: str, exit_code: int) -> bool:
-    """True when one run's stdout and exit status are what the probe says."""
+def stderr_lines(stderr: str) -> list[str]:
+    return [line.rstrip() for line in stderr.splitlines()]
+
+
+def passes(probe: SpecProbe, stdout: str, stderr: str, exit_code: int) -> bool:
+    """True when one run's stdout, stderr prefix, and exit status match the probe."""
     if stdout_lines(stdout) != probe.checks:
+        return False
+    if (probe.stderr_checks and
+            stderr_lines(stderr)[:len(probe.stderr_checks)] != probe.stderr_checks):
         return False
     if probe.exit_code is not None:
         return exit_code == probe.exit_code
@@ -141,8 +164,8 @@ def parse_xfail_file(path: Path) -> dict[str, str]:
     return reasons
 
 
-def run(runner: str, probe: SpecProbe, timeout: float) -> tuple[str, int] | None:
-    """Runs one probe. Returns (stdout, exit code), or None on a timeout."""
+def run(runner: str, probe: SpecProbe, timeout: float) -> tuple[str, str, int] | None:
+    """Runs one probe. Returns (stdout, stderr, exit code), or None on a timeout."""
     input_file = probe.path.with_suffix(".input")
     stdin_data = input_file.read_text(encoding="utf-8") if input_file.exists() else ""
     try:
@@ -156,7 +179,7 @@ def run(runner: str, probe: SpecProbe, timeout: float) -> tuple[str, int] | None
         )
     except subprocess.TimeoutExpired:
         return None
-    return result.stdout, result.returncode
+    return result.stdout, result.stderr, result.returncode
 
 
 def main() -> None:
@@ -235,16 +258,30 @@ def main() -> None:
             if result is None:
                 print(f"      timeout after {timeout:.0f}s")
                 continue
-            stdout, code = result
+            stdout, stderr, code = result
             if probe.exit_code is not None:
                 want = str(probe.exit_code)
+                exit_ok = code == probe.exit_code
             else:
                 want = "zero" if probe.status == "ok" else "non-zero"
-            print(f"      exit code {code}, expected {want}")
-            for line in difflib.unified_diff(
-                probe.checks, stdout_lines(stdout), "expected", "actual", lineterm=""
-            ):
-                print(f"      {line}")
+                exit_ok = (code == 0) == (probe.status == "ok")
+            if not exit_ok:
+                print(f"      exit code {code}, expected {want}")
+            actual_stdout = stdout_lines(stdout)
+            if actual_stdout != probe.checks:
+                for line in difflib.unified_diff(
+                    probe.checks, actual_stdout, "expected stdout", "actual stdout",
+                    lineterm=""
+                ):
+                    print(f"      {line}")
+            actual_stderr = stderr_lines(stderr)
+            if (probe.stderr_checks and
+                    actual_stderr[:len(probe.stderr_checks)] != probe.stderr_checks):
+                for line in difflib.unified_diff(
+                    probe.stderr_checks, actual_stderr, "expected stderr prefix",
+                    "actual stderr", lineterm=""
+                ):
+                    print(f"      {line}")
 
     print()
     print(", ".join(f"{n} {k.lower()}" for k, n in counts.items()))
