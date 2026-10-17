@@ -324,10 +324,13 @@ the inbound queue between the two, and the owner's collector must not free
 it there. Each send raises the count by one, so while two envelopes with
 the same object are in a queue, one worker contributes two. The drain
 releases a duplicate, so after a drain each worker contributes at most one
-to a count. A count changes only at a send, at a drain, at a collection, at
-a worker exit, and at the free of a dead heap, never on the interpreter's
-hot path. The creating worker's collector treats an object with a count
-above zero as a root. The receiver's collector marks
+to a count. A count changes only at these events, never on the
+interpreter's hot path: a send across workers; a spawn, which raises one
+count on the new task handle for the spawning worker and one on the start
+message; a drain; the new worker's receipt of its start message; a
+collection; a worker exit; and the free of a dead heap. The creating
+worker's collector treats an object with a count above zero as a root. The
+receiver's collector marks
 foreign objects in a side table of its own, never in the object header,
 because the header's mark bit belongs to the owner's collector; a foreign
 object the receiver's mark phase did not reach leaves its foreign set and
@@ -516,9 +519,11 @@ is not in its foreign set yet, before it releases any count. Then the owner
 never sees the release of E without the raise of G. *Shared layer:* the
 hold table of the native `MemoryManager` (`hold`, `releaseHold`, and the
 held roots of a collection). Every path that changes a count goes through
-it: the send, the drain, the collection, the worker exit, and the free of a
-dead heap. The QBE backend links this runtime. The JVM and the bootstrap
-have one collector for all workers and keep no count.
+it: the send, the spawn (the hold on the new task handle and on the start
+message), the drain, the new worker's receipt of its start message, the
+collection, the worker exit, and the free of a dead heap. The QBE backend
+links this runtime. The JVM and the bootstrap have one collector for all
+workers and keep no count.
 
 **Strings of two heaps.** *Bug class:* intern on receive changes only the
 received value. A string in a field of a received enum value is not in the
