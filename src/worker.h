@@ -122,7 +122,8 @@ class WorkerGroup {
 
 // --- Ending the process -----------------------------------------------------
 
-// Flushes stdout and stderr and ends the process with `code`. Safe to call
-// from any worker, also from two at once: the first call ends the process,
-// and a later one waits for that end.
+// Flushes every stream and ends the process with `code`, with no exit
+// handlers and no static destructors. Safe to call from any worker, also
+// from two at once: the first call ends the process, and a later one waits
+// for that end.
 [[noreturn]] void endProcess(int code);

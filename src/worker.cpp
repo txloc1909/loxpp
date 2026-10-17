@@ -145,7 +145,8 @@ void endProcess(int code) {
             pause();
         }
     }
-    std::fflush(stdout);
-    std::fflush(stderr);
-    std::exit(code);
+    // _Exit, not exit: another worker may still run, and exit() would
+    // destroy static objects under it. Every stream is flushed first.
+    std::fflush(nullptr);
+    std::_Exit(code);
 }
