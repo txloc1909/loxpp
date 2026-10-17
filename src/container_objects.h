@@ -353,18 +353,20 @@ struct ObjCoroutine : public Obj {
     CoroutineState state{CoroutineState::SUSPENDED};
     bool started{false};
 
-    // Snapshot; meaningful only while suspended and started.
-    std::vector<Value> stack;
-    std::vector<CoroutineFrameSnapshot> frames;
-    std::vector<CoroutineHandlerSnapshot> handlers;
+    // Snapshot; meaningful only while suspended and started. Every vector is
+    // on the worker's heap: a large snapshot counts toward the collection
+    // threshold, so a suspended coroutine cannot grow the heap unseen.
+    VmVector<Value> stack;
+    VmVector<CoroutineFrameSnapshot> frames;
+    VmVector<CoroutineHandlerSnapshot> handlers;
     // One defer list per frame in the snapshot, in frame order.
-    std::vector<std::vector<Value>> defers;
-    std::vector<ObjUpvalue*> openUpvalues; // location offset given by the
-                                           // parallel vector below
-    std::vector<int> openUpvalueOffsets;
-    std::vector<std::uint8_t> resultChecks;
-    std::vector<std::uint8_t> resultOverrideSet;
-    std::vector<Value> resultOverrides;
+    VmVector<VmVector<Value>> defers;
+    VmVector<ObjUpvalue*> openUpvalues; // location offset given by the
+                                        // parallel vector below
+    VmVector<int> openUpvalueOffsets;
+    VmVector<std::uint8_t> resultChecks;
+    VmVector<std::uint8_t> resultOverrideSet;
+    VmVector<Value> resultOverrides;
 
     // Set on resume, used by suspend to find this coroutine's slice.
     int activeFrameBase{0};
@@ -392,8 +394,11 @@ struct ObjCoroutine : public Obj {
     ObjCoroutine* waitingInner{nullptr};
     ObjIterator* waitingIterator{nullptr};
 
-    ObjCoroutine(ObjClass* k, Value fn)
-        : Obj(ObjType::COROUTINE), klass(k), callee(fn) {}
+    ObjCoroutine(ObjClass* k, Value fn, VmAllocator<Value> alloc)
+        : Obj(ObjType::COROUTINE), klass(k), callee(fn), stack(alloc),
+          frames(alloc), handlers(alloc), defers(alloc), openUpvalues(alloc),
+          openUpvalueOffsets(alloc), resultChecks(alloc),
+          resultOverrideSet(alloc), resultOverrides(alloc) {}
 
 #ifdef LOXPP_PROFILE
     // Per-coroutine profiler state. The root coroutine uses Runtime's inline
@@ -437,7 +442,9 @@ struct ObjTask : public Obj {
     ObjCoroutine* co;
     // Unbounded by design: a send never waits for room. A bound is a library
     // over the primitive (spec/04-semantics.md, Bounding a Mailbox).
-    std::deque<Value> mailbox;
+    // On the worker's heap: a push can pass the collection threshold and
+    // collect, so the owner roots this task across it (deliverMessage).
+    std::deque<Value, VmAllocator<Value>> mailbox;
     TaskState state{TaskState::READY};
     // True while the task waits in task.receive(): its next resume hands it
     // the head of the mailbox as the value of that receive.
@@ -455,8 +462,8 @@ struct ObjTask : public Obj {
     // it (DeadTaskError).
     std::atomic<bool> ended{false};
 
-    ObjTask(ObjCoroutine* c, std::uint64_t e)
-        : Obj(ObjType::TASK), co(c), epoch(e) {}
+    ObjTask(ObjCoroutine* c, std::uint64_t e, VmAllocator<Value> alloc)
+        : Obj(ObjType::TASK), co(c), mailbox(alloc), epoch(e) {}
 };
 
 inline bool isObjTask(Obj* o) { return isObjType(o, ObjType::TASK); }

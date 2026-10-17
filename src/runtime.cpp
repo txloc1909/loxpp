@@ -705,7 +705,8 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
                                                    hs.catchIp, hs.catchState});
         }
         for (std::size_t i = 0; i < co->defers.size(); i++) {
-            m_deferLists[entry + static_cast<int>(i)] = co->defers[i];
+            auto& frameDefers = m_deferLists[entry + static_cast<int>(i)];
+            frameDefers.assign(co->defers[i].begin(), co->defers[i].end());
         }
         for (std::size_t i = 0; i < co->resultChecks.size(); i++) {
             m_frameResultCheck[entry + static_cast<int>(i)] =
@@ -824,6 +825,11 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
     const int baseFrame = co->activeFrameBase;
     Value* base = co->activeStackBase;
 
+    // The yielded value is off the stack already, and the snapshot growth
+    // below allocates on this heap, so it can collect. markRoots marks this
+    // field, which keeps the value alive until the resume copies it out.
+    m_yieldedValue = yielded;
+
     co->stack.assign(base, stackTop);
 
     co->handlers.clear();
@@ -853,7 +859,11 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
 
     co->defers.clear();
     for (int i = baseFrame; i < m_frameCount; i++) {
-        co->defers.push_back(std::move(m_deferLists[i]));
+        // The snapshot is on the heap; the live lists are not, so this copies
+        // into the snapshot's own allocator.
+        co->defers.push_back(VmVector<Value>(m_deferLists[i].begin(),
+                                             m_deferLists[i].end(),
+                                             co->defers.get_allocator()));
         m_deferLists[i].clear();
     }
 
@@ -871,6 +881,17 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
 
     co->openUpvalues.clear();
     co->openUpvalueOffsets.clear();
+    // An upvalue that no live closure holds is rooted only by the
+    // m_openUpvalues chain, and the loop below unlinks it before it stores it
+    // here. Reserve both vectors first, while every upvalue is still a root,
+    // so the loop itself cannot collect and free one mid-move.
+    std::size_t openCount = 0;
+    for (ObjUpvalue* uv = m_openUpvalues; uv != nullptr && uv->location >= base;
+         uv = uv->next) {
+        ++openCount;
+    }
+    co->openUpvalueOffsets.reserve(openCount);
+    co->openUpvalues.reserve(openCount);
     while (m_openUpvalues != nullptr && m_openUpvalues->location >= base) {
         ObjUpvalue* uv = m_openUpvalues;
         m_openUpvalues = uv->next;
@@ -904,7 +925,6 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
 
     stackTop = co->activeWindowTop;
     m_frameCount = baseFrame;
-    m_yieldedValue = yielded;
     co->state = CoroutineState::SUSPENDED;
 }
 
@@ -995,9 +1015,11 @@ void Runtime::raiseFromNative(const char* kind, const char* msg) {
 }
 
 ObjTask* Runtime::spawnTask(Value fn) {
-    auto* co = m_mm.create<ObjCoroutine>(m_coroutineClass, fn);
+    auto* co = m_mm.create<ObjCoroutine>(m_coroutineClass, fn,
+                                         VmAllocator<Value>{&m_mm});
     m_mm.pushTempRoot(co);
-    auto* task = m_mm.create<ObjTask>(co, m_taskEpoch);
+    auto* task =
+        m_mm.create<ObjTask>(co, m_taskEpoch, VmAllocator<Value>{&m_mm});
     m_mm.popTempRoot();
     task->serial = m_nextTaskSerial++;
     ++m_liveTasks;
@@ -1026,7 +1048,14 @@ void Runtime::markTaskDead(ObjTask* task) {
 }
 
 void Runtime::deliverMessage(ObjTask* task, Value msg) {
+    // The mailbox is heap storage of this worker, so a push can pass the
+    // collection threshold and collect. The target is reachable from this
+    // call's own roots (a send keeps its arguments on the VM stack, a drain
+    // keeps the envelope in the draining batch) and the message with it;
+    // root the target here as well, so the window is local to this function.
+    m_mm.pushTempRoot(task);
     task->mailbox.push_back(msg);
+    m_mm.popTempRoot();
     if (task->state == TaskState::WAITING) {
         task->state = TaskState::READY;
         m_waitingTasks.erase(task);
@@ -1318,10 +1347,12 @@ InterpretResult Runtime::runTasks(ObjClosure* script) {
     // The script closure stays rooted on the stack until the main task's
     // coroutine holds it.
     auto* mainCo = m_mm.create<ObjCoroutine>(m_coroutineClass,
-                                             Value{static_cast<Obj*>(script)});
+                                             Value{static_cast<Obj*>(script)},
+                                             VmAllocator<Value>{&m_mm});
     stackTop[-1] = Value{static_cast<Obj*>(mainCo)};
     if (m_mainTask == nullptr) {
-        m_mainTask = m_mm.create<ObjTask>(mainCo, m_taskEpoch);
+        m_mainTask = m_mm.create<ObjTask>(mainCo, m_taskEpoch,
+                                          VmAllocator<Value>{&m_mm});
         m_mainTask->serial = m_nextTaskSerial++;
     }
     m_mainTask->co = mainCo;
@@ -1397,7 +1428,7 @@ ObjTask* Runtime::spawnWorker(ObjClosure* entry, Value msg) {
         number = m_group->nextWorkerNumber++;
     }
     auto* heap = new MemoryManager(number);
-    auto* task = heap->create<ObjTask>(nullptr, 0);
+    auto* task = heap->create<ObjTask>(nullptr, 0, VmAllocator<Value>{heap});
     task->serial = 0;
     // One count for this worker, which keeps the handle in its foreign set,
     // and one for the message on its way to the new worker.
@@ -1474,7 +1505,8 @@ Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
     auto* entry = m_mm.create<ObjClosure>(entryFn);
     m_mm.pushTempRoot(entry);
     task->co = m_mm.create<ObjCoroutine>(m_coroutineClass,
-                                         Value{static_cast<Obj*>(entry)});
+                                         Value{static_cast<Obj*>(entry)},
+                                         VmAllocator<Value>{&m_mm});
     m_mm.popTempRoot();
     m_mm.popTempRoot();
     task->serial = m_nextTaskSerial++;

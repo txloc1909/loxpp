@@ -559,6 +559,7 @@ void MemoryManager::collectGarbage() {
     } else {
         runCollection<false>();
     }
+    ++m_collectionCount;
 }
 
 template <bool Traced>

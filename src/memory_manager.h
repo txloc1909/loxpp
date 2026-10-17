@@ -84,6 +84,11 @@ class MemoryManager : public VmAllocBase {
     void markObject(Obj* obj);
     void markValue(const Value& v);
     void collectGarbage();
+    // The number of completed collectGarbage() calls of this heap. Tests read
+    // it to prove that an allocation path reaches the threshold check.
+    [[nodiscard]] std::size_t collectionCount() const {
+        return m_collectionCount;
+    }
 
     // --- Workers (docs/decisions/concurrency-model-decision.md, "Lifetime
     // across workers") ---------------------------------------------------
@@ -187,6 +192,7 @@ class MemoryManager : public VmAllocBase {
     static constexpr std::size_t kMinHeap = 1024 * 1024;
     static constexpr int GC_HEAP_GROW_FACTOR = 2;
     std::size_t m_nextGC{kMinHeap};
+    std::size_t m_collectionCount{0};
 
     int m_workerNumber{0};
     std::uint16_t m_heapId{0};

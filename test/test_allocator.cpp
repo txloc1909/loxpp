@@ -1,6 +1,8 @@
+#include "container_objects.h"
 #include "memory_manager.h"
 #include "value.h"
 
+#include <cstdlib>
 #include <gtest/gtest.h>
 
 // The intern table is not a GC root (MemoryManager::removeWhiteStrings), so
@@ -120,4 +122,46 @@ TEST(MemoryManagerTest, BytesAllocated_CountsStructHeader) {
     MemoryManager mm;
     rootedString(mm, "any");
     EXPECT_GE(mm.bytesAllocated, sizeof(ObjString));
+}
+
+// A task mailbox and a coroutine snapshot are heap storage of their worker.
+// Both count toward the collection threshold, as an ObjList's elements do.
+TEST(MemoryManagerTest, MailboxBytesCountTowardHeap) {
+    MemoryManager mm;
+    auto* task = mm.create<ObjTask>(nullptr, 0, VmAllocator<Value>{&mm});
+    mm.pushTempRoot(task);
+    const std::size_t before = mm.bytesAllocated;
+    for (int i = 0; i < 1024; i++) {
+        task->mailbox.push_back(from<Number>(static_cast<Number>(i)));
+    }
+    EXPECT_GE(mm.bytesAllocated, before + 1024 * sizeof(Value));
+}
+
+TEST(MemoryManagerTest, CoroutineSnapshotBytesCountTowardHeap) {
+    MemoryManager mm;
+    auto* co = mm.create<ObjCoroutine>(nullptr, from<Nil>(Nil{}),
+                                       VmAllocator<Value>{&mm});
+    mm.pushTempRoot(co);
+    const std::size_t before = mm.bytesAllocated;
+    co->stack.assign(512, from<Nil>(Nil{}));
+    co->resultOverrides.assign(512, from<Nil>(Nil{}));
+    EXPECT_GE(mm.bytesAllocated, before + 1024 * sizeof(Value));
+}
+
+TEST(MemoryManagerTest, ALargeMailboxTriggersACollection) {
+    const char* stress = std::getenv("LOXPP_STRESS_GC");
+    if (stress != nullptr && stress[0] != '\0') {
+        // Every push collects, and every collection traces the whole mailbox,
+        // so this loop would be quadratic.
+        GTEST_SKIP() << "stress mode collects on every allocation";
+    }
+    MemoryManager mm;
+    auto* task = mm.create<ObjTask>(nullptr, 0, VmAllocator<Value>{&mm});
+    mm.pushTempRoot(task);
+    const std::size_t before = mm.collectionCount();
+    // More than one minimum heap (1 MiB) of messages.
+    for (std::size_t i = 0; i < 200000; i++) {
+        task->mailbox.push_back(from<Number>(static_cast<Number>(i)));
+    }
+    EXPECT_GT(mm.collectionCount(), before);
 }
