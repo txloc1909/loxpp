@@ -1,6 +1,7 @@
 #include "worker.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <unistd.h>
@@ -12,7 +13,7 @@ constexpr std::size_t kHeapIdCount = 1U << 16;
 // Never destroyed: a worker thread can still free a dead heap, and so free
 // its id, while the process runs its exit handlers.
 struct HeapRegistry {
-    std::atomic<MemoryManager*> heaps[kHeapIdCount]{};
+    std::array<std::atomic<MemoryManager*>, kHeapIdCount> heaps{};
     std::mutex mutex;
     std::vector<std::uint16_t> freeIds;
     std::uint32_t nextId{1};

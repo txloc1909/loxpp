@@ -544,6 +544,13 @@ void MemoryManager::mergeCoroutineProfilers() {
 }
 #endif
 
+const char* MemoryManager::collectionCause() const {
+    if (m_exitCollection) {
+        return "exit";
+    }
+    return m_stressGC ? "stress" : "threshold";
+}
+
 void MemoryManager::collectGarbage() {
     // The traced instantiation holds every clock read and counter, so the
     // untraced one carries none of them.
@@ -618,10 +625,7 @@ void MemoryManager::runCollection() {
                      "gc cause=%s t0=%llu t1=%llu t2=%llu t3=%llu t4=%llu "
                      "bytes_before=%zu bytes_after=%zu objs_before=%zu "
                      "objs_after=%zu marked=%zu freed=%zu\n",
-                     m_exitCollection ? "exit"
-                     : m_stressGC     ? "stress"
-                                      : "threshold",
-                     static_cast<unsigned long long>(t0),
+                     collectionCause(), static_cast<unsigned long long>(t0),
                      static_cast<unsigned long long>(t1),
                      static_cast<unsigned long long>(t2),
                      static_cast<unsigned long long>(t3),

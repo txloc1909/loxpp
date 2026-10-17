@@ -131,9 +131,6 @@ class MemoryManager : public VmAllocBase {
     // for this heap, to the foreign set; releases that count when the set
     // has it already.
     void adoptForeign(Obj* obj);
-    [[nodiscard]] bool inForeignSet(const Obj* obj) const {
-        return m_foreign.count(const_cast<Obj*>(obj)) != 0U;
-    }
 
     // The worker of this heap ended. Marks the inbox exited, releases every
     // message still in it, and runs one last collection whose only roots
@@ -158,6 +155,8 @@ class MemoryManager : public VmAllocBase {
     void adoptReachedForeign();
     void releaseUnreachedForeign();
     [[nodiscard]] bool isMarkedHere(const Obj* obj) const;
+    // The `cause` field of a GC trace record.
+    [[nodiscard]] const char* collectionCause() const;
 
     // Plain std::vector — using VmAllocator here would cause infinite recursion
     // inside rawAlloc when push_back triggers a reallocation.
