@@ -17,8 +17,8 @@ static Value coroutineCreateNative(int /*argCount*/, Value* argv) {
         return from<Nil>(Nil{});
     }
     Runtime* rt = getActiveRuntime();
-    ObjCoroutine* co =
-        rt->memoryManager().create<ObjCoroutine>(rt->coroutineClass(), fn);
+    ObjCoroutine* co = rt->memoryManager().create<ObjCoroutine>(
+        rt->coroutineClass(), fn, VmAllocator<Value>{&rt->memoryManager()});
     return Value{static_cast<Obj*>(co)};
 }
 

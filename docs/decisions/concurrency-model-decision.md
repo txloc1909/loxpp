@@ -395,6 +395,11 @@ takes the head of the current task's mailbox or suspends the task until a
 message arrives. The length of a mailbox is observable, so a program can
 see a queue grow.
 
+The mailbox's storage belongs to the heap of the worker that owns the task
+and counts toward that heap's collection trigger, as a list's storage does.
+This is accounting, not a rule of the primitive: the mailbox still has no
+bound.
+
 The bounded form was weighed and rejected for the primitive. A send that
 suspends when a queue is full stops a task at a site that asked for no
 limit, which fails the *cost* control, and it puts the classic deadlock,
