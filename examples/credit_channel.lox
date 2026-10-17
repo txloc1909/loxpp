@@ -8,8 +8,8 @@
 // outrun its consumer (spec/04-semantics.md, Bounding a Mailbox).
 //
 // The library text between the two marker lines is also in
-// test/translation-probes/89_credit_channel_bound.lox and
-// 90_credit_channel_deadlock.lox; tools/check_credit_channel_copies.py
+// test/translation-probes/90_credit_channel_bound.lox and
+// 91_credit_channel_deadlock.lox; tools/check_credit_channel_copies.py
 // fails when the copies differ.
 //
 // The last section uses the library for a real job: a producer on a second

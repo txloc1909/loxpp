@@ -222,7 +222,7 @@ TEST_F(TaskTest, DeadlockOnOneWorkerIsFatal) {
 TEST_F(TaskTest, CreditChannelDeadlockNamesProducerAndConsumer) {
     const std::string source = loxpp_test::readFile(
         loxpp_test::projectRoot() /
-        "test/translation-probes/90_credit_channel_deadlock.lox");
+        "test/translation-probes/91_credit_channel_deadlock.lox");
     VMTestHarness h;
     testing::internal::CaptureStderr();
     testing::internal::CaptureStdout();

@@ -22,8 +22,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = Path("examples/credit_channel.lox")
 COPIES = [
-    Path("test/translation-probes/89_credit_channel_bound.lox"),
-    Path("test/translation-probes/90_credit_channel_deadlock.lox"),
+    Path("test/translation-probes/90_credit_channel_bound.lox"),
+    Path("test/translation-probes/91_credit_channel_deadlock.lox"),
 ]
 BEGIN = "// --- credit channel library: begin"
 END = "// --- credit channel library: end"
