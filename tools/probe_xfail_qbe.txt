@@ -2,4 +2,3 @@
 # Read by tools/check_spec_probes.py, tools/check_qbe_probes.sh, and tools/check_qbe_s8_promotion.sh (the QBE job).
 # Each line is `<probe>.lox  <reason>`. A listed probe must fail. When it
 # passes, the gate fails, and the node that made it pass deletes its line.
-77_receive_across_native.lox  a receive in a compiled __str__ suspends the task: mission #595, node #601

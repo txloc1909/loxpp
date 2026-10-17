@@ -1286,7 +1286,9 @@ class Runtime {
     int m_nativeStopAtFrameCount{0};
 
     // Number of C++ re-entrant runs currently on the native stack — every
-    // runReentrantFrame() invocation. A Lox frame inside one of these cannot
+    // runReentrantFrame() and runPushedFrameToCompletion() invocation, and
+    // every compiled frame that callCompiled() runs to completion. A Lox
+    // frame inside one of these cannot
     // be captured by a coroutine snapshot: its C++ continuation would be
     // lost. Op::YIELD raises YieldAcrossNativeError while this is nonzero.
     int m_reentrantRunDepth{0};

@@ -543,6 +543,22 @@ interns first. `ValueHash` hashes by pointer and is correct only for the
 values of one heap, which is all that the compiler's constant pool holds.
 The JVM and the bootstrap compare strings by their characters already.
 
+**A Lox run on a C++ frame.** *Bug class:* a task switch is legal only when
+no C++ frame between the task's base and the suspend point holds a
+continuation. The runtime counts those frames (`m_nativeDepth` for a native,
+`m_reentrantRunDepth` for a nested run). A compiled callee that
+`Runtime::callCompiled` runs to completion is such a frame, but it was not
+counted. So a `task.receive()` in a compiled `__str__` that `print` called
+suspended the task and lost the continuation of `print`, where native raises
+`YieldAcrossNativeError` (probe 77). *Constraint:* every path that runs Lox
+code to completion on a C++ frame counts itself in `m_reentrantRunDepth`
+while the code runs. Only the coroutine driver (`runCompiledFrames`, from a
+resume) runs frames with no C++ continuation. *Shared layer:* the re-entrancy
+counters of the native `Runtime`, read by `taskCanSuspend` and by the
+clean-link test of `resumeCoroutine`; the paths that run Lox on a C++ frame
+are `runReentrantFrame`, `runPushedFrameToCompletion`, and `callCompiled`.
+The JVM and the bootstrap have no compiled C frame.
+
 **The QBE coroutine-mode rule.** *Bug class:* "the program contains
 `yield`" is a syntactic selector. A task suspends also in a
 `task.receive()` on an empty mailbox, which is a call of a native, so a

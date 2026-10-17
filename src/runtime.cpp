@@ -223,7 +223,13 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
         m_frameResultOverrideSet[frameIndex] = true;
     }
     auto code = reinterpret_cast<RtCompiledFn>(closure->function->code);
+    // The code runs to completion on this C++ frame, so it is a re-entrant
+    // run, as runReentrantFrame() is for an interpreted callee: a task
+    // switch inside it would lose this continuation (taskCanSuspend()). The
+    // coroutine driver never calls this; it runs frames with no C++ caller.
+    ++m_reentrantRunDepth;
     int status = code(this, frame->slots);
+    --m_reentrantRunDepth;
     if (status == kRtFatal) {
         // The compiled callee already reported a fatal error through
         // runtimeError() (rt_abi.h's own contract on RtCompiledFn), which
