@@ -67,13 +67,7 @@ RECORDED = "RECORDED"
 # names. The audits here treat each one as a table kind, so the bootstrap's
 # existing call stays covered. An entry that the spec table has again, or that
 # no bootstrap call raises, fails main(): delete it then.
-#
-# YieldOutsideCoroutineError: every task, the main task included, is a
-# coroutine (spec/04-semantics.md, Workers and Tasks), so a yield always has
-# a coroutine to suspend and the fault has no cause.
-KINDS_THE_SPEC_REMOVED = {
-    "YieldOutsideCoroutineError",
-}
+KINDS_THE_SPEC_REMOVED: set[str] = set()
 
 # Non-table `kind` strings this file's audits have introduced so far, each
 # naming one cause the spec/04-semantics.md table does not document (see the
@@ -146,6 +140,9 @@ EXPECTED_CALLS = [
     ('ReflectionFieldNameError', '"Field name must be a string."', JUDGED),
     ('EmptyListError', '"Cannot pop from an empty list."', RECORDED),
     ('ValueNotFoundError', '"Value not found in list."', JUDGED),
+    ('SendError', '"Value of type " + reflectTypeName(msg) + " is not a message."', JUDGED),
+    ('DeadTaskError', '"Cannot send to a task that has ended."', JUDGED),
+    ('YieldAcrossNativeError', '"Cannot receive across a native callback."', JUDGED),
     ('NaNKeyError', '"NaN cannot be used as a map key."', RECORDED),
     ('InvalidMapKeyError', '"Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__."', RECORDED),
     ('OperatorResultTypeError', '"Operator method must return a Number."', JUDGED),
@@ -175,7 +172,6 @@ EXPECTED_CALLS = [
     ('ForInNotIterableError', '"Value is not iterable (expected list, string, map, or coroutine)."', JUDGED),
     ('MapSizeChangedError', '"Map changed size during iteration."', JUDGED),
     ('MapSizeChangedError', '"Map changed size during iteration."', JUDGED),
-    ('YieldOutsideCoroutineError', '"Cannot yield from outside a coroutine."', JUDGED),
     ('YieldAcrossNativeError', '"Cannot yield across a native callback."', JUDGED),
     ('DeadCoroutineError', '"Cannot resume a dead coroutine."', JUDGED),
     ('RunningCoroutineError', '"Cannot resume a running coroutine."', JUDGED),
@@ -232,7 +228,7 @@ EXPECTED_CALLS = [
 # review. See --report for the current judged/recorded split; this script
 # does not restate that split in prose here, to avoid a second hand-written
 # copy of a number the data already holds.
-EXPECTED_SPEC_TABLE_KIND_COUNT = 23
+EXPECTED_SPEC_TABLE_KIND_COUNT = 25
 
 
 def strip_string_literals(text: str) -> str:
@@ -328,12 +324,22 @@ def find_set_error_calls(text: str) -> list[dict]:
 
 
 def load_spec_table_kinds(spec_text: str) -> set[str]:
-    """Extracts every `kind` string from spec/04-semantics.md's Runtime
-    Errors table -- the last column of each `| Cause | Example | kind |`
-    row -- rather than hardcoding the rows here, so this script and the
-    spec table cannot silently drift apart."""
+    """Extracts every catchable `kind` string from spec/04-semantics.md --
+    the last column of each `| Cause | Example | kind |` row of the Runtime
+    Errors table, and the `Kind` column of each row of the Worker and Task
+    Faults table whose `Catchable` column is `yes` -- rather than hardcoding
+    the rows here, so this script and the spec tables cannot silently drift
+    apart."""
     kinds = set()
     for m in re.finditer(r'\|\s*`"([A-Za-z]+)"`\s*\|', spec_text):
+        kinds.add(m.group(1))
+    section = re.search(r"^### Worker and Task Faults\n(.*?)(?=^#)", spec_text, re.M | re.S)
+    if section is None:
+        raise SystemExit(
+            "check_bootstrap_error_kinds.py: spec/04-semantics.md has no "
+            "'### Worker and Task Faults' section to read."
+        )
+    for m in re.finditer(r"^\|\s*`([A-Za-z]+)`\s*\|[^|\n]*\|\s*yes\s*\|", section.group(1), re.M):
         kinds.add(m.group(1))
     return kinds
 
