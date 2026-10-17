@@ -584,6 +584,40 @@ TEST(QbeEmitter, YieldOutsideCoroutineModeThrows) {
                  std::runtime_error);
 }
 
+namespace {
+
+bool needsCoroutineModeFor(const std::string& source) {
+    MemoryManager mm;
+    ObjFunction* script = compile(source, &mm);
+    if (script == nullptr) {
+        throw std::runtime_error("compilation failed");
+    }
+    return qbe::needsCoroutineMode(decodeFunctionTree(script));
+}
+
+} // namespace
+
+TEST(QbeEmitter, AProgramWithNoYieldAndNoTaskKeepsTheFastMode) {
+    EXPECT_FALSE(needsCoroutineModeFor("fun f(x) { return x + 1; } "
+                                       "print f(1);"));
+    // A local named `task` is not the global, so it reaches no task native.
+    EXPECT_FALSE(needsCoroutineModeFor("fun f() { var task = 1; "
+                                       "return task; } print f();"));
+}
+
+TEST(QbeEmitter, AYieldAnywhereNeedsCoroutineMode) {
+    EXPECT_TRUE(needsCoroutineModeFor("fun f() { fun g() { yield 1; } }"));
+}
+
+TEST(QbeEmitter, ANameOfTheTaskModuleNeedsCoroutineMode) {
+    // No `yield`: the main task suspends in task.receive(), so every frame
+    // below the receive must be able to suspend (probe 66).
+    EXPECT_TRUE(needsCoroutineModeFor("print task.receive();"));
+    // In a nested function, read through an alias.
+    EXPECT_TRUE(needsCoroutineModeFor("fun f() { var t = task; "
+                                      "return t.self(); } print f();"));
+}
+
 TEST(QbeEmitter, CoroutineModeGivesACompiledHandlerItsCatchResumeState) {
     // A try inside a coroutine needs a catch resume state: handleThrow stores
     // it so the driver can re-enter the frame at its catch block. The old

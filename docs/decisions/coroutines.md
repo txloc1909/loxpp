@@ -75,8 +75,10 @@ a collection is a process-global pause, not a coroutine's work.
 
 ## Backends
 
-- QBE: native (#530/#535). A program that contains any `YIELD` is compiled in
-  coroutine mode: every function becomes a resume-block state machine
+- QBE: native (#530/#535). A program that contains any `YIELD`, or that names
+  the `task` module (a `task.receive()` suspends too), is compiled in
+  coroutine mode (`qbe::needsCoroutineMode`): every function becomes a
+  resume-block state machine
   (`CallFrame::compiledState`), and `Runtime::runCompiledFrames` drives the
   frames, re-entering each at its saved point. The interpreter fallback was
   dropped: a caller that does not itself contain `YIELD` must still suspend,

@@ -208,8 +208,8 @@ its own still suspends when its callee yields, and dynamic dispatch makes
 the set of possible callers the whole program (`docs/records/coroutines-retro.md`).
 
 The AOT backend solves this with a whole-program switch: a program that
-contains any `YIELD` compiles in coroutine mode (`treeContainsYield` in
-`qbe_frontend.cpp`). v0 would use the same whole-program test and **disable the
+contains any `YIELD` compiles in coroutine mode (`qbe::needsCoroutineMode`,
+called from `qbe_frontend.cpp`). v0 would use the same whole-program test and **disable the
 JIT for any program that contains `YIELD`**. That rule is a stopgap. The
 concurrency go/no-go (item 6) decides how a compiled frame can suspend, and
 the JIT must adopt that answer, not freeze this rule. The chunk tree is complete

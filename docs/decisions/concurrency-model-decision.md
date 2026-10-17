@@ -543,6 +543,18 @@ interns first. `ValueHash` hashes by pointer and is correct only for the
 values of one heap, which is all that the compiler's constant pool holds.
 The JVM and the bootstrap compare strings by their characters already.
 
+**The QBE coroutine-mode rule.** *Bug class:* "the program contains
+`yield`" is a syntactic selector. A task suspends also in a
+`task.receive()` on an empty mailbox, which is a call of a native, so a
+program with tasks and no `yield` was compiled without resume points.
+*Constraint:* the rule is the property "a compiled frame can be live under a
+suspension": a `YIELD` anywhere, or any name of the global `task`, through
+which alone a program reaches the task natives. A program in coroutine mode
+runs its main task on the scheduler, as native does. *Shared layer:*
+`qbe::needsCoroutineMode` (`src/backend/qbe_emitter.h`), the one test that
+the front end and `tools/qbe_emit_program.cpp` call. A new suspend point in
+the spec's table must be added to it.
+
 ### What this unblocks and in which order
 
 1. The spec: workers, tasks, spawn, send, receive, the unbounded mailbox
