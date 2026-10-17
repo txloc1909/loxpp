@@ -15,8 +15,14 @@
 #include "exec_objects.h"
 #include "class_objects.h"
 #include "container_objects.h"
+#include "object.h"
+#include "vm.h"
 
 #include <gtest/gtest.h>
+
+#include <atomic>
+#include <deque>
+#include <string>
 
 namespace {
 
@@ -933,4 +939,185 @@ TEST(RtYield, OutsideEveryCoroutineContinuesWithNil) {
     EXPECT_TRUE(g_yielderSawNil);
     EXPECT_EQ(rt.frameCount(), 0);
     EXPECT_TRUE(is<Nil>(rt.pop()));
+}
+
+// spec/04-semantics.md, yield Expression: in the main task, a yield outside
+// every coroutine is a task switch. rt_run_tasks runs the compiled script as
+// the main task, so the driver suspends it, the scheduler finds no other
+// task and resumes it at once, and the yield evaluates to nil.
+TEST(RtRunTasks, ATopLevelYieldIsATaskSwitchThatGivesNil) {
+    Runtime* rt = rt_startup("", nullptr, 0);
+    ASSERT_NE(rt, nullptr);
+    asObjClosure(rt->stackBase()[0])->function->code =
+        reinterpret_cast<void*>(&fakeYielder);
+    g_yielderEntries = 0;
+    g_yielderSawNil = false;
+
+    testing::internal::CaptureStderr();
+    int status = rt_run_tasks(rt, nullptr, 0, nullptr);
+    std::string err = testing::internal::GetCapturedStderr();
+
+    EXPECT_EQ(status, 0) << err;
+    EXPECT_EQ(err, "");
+    EXPECT_EQ(g_yielderEntries, 2)
+        << "the scheduler must resume the main task once after its yield";
+    EXPECT_TRUE(g_yielderSawNil);
+    EXPECT_EQ(rt->frameCount(), 0);
+    rt_shutdown(rt);
+}
+
+TEST(RtRunTasks, NeedsAProgramFromRtStartup) {
+    Runtime rt;
+    testing::internal::CaptureStderr();
+    int status = rt_run_tasks(&rt, nullptr, 0, nullptr);
+    std::string err = testing::internal::GetCapturedStderr();
+    EXPECT_NE(status, 0);
+    EXPECT_NE(err.find("no program at stack slot 0"), std::string::npos);
+}
+
+namespace {
+
+// A program with nested functions, a class with a method, and a top-level
+// statement, so its declarations-only compile cuts the root's chunk.
+const char* kWorkerProgram = R"(
+fun entry(m) {
+    fun helper() { return m; }
+    return helper();
+}
+class Box {
+    get() { return 1; }
+}
+print entry(1);
+)";
+
+// The descriptor tables a --target qbe harness holds for kWorkerProgram:
+// every function of the full compile, and the root of the declarations-only
+// compile. Each gets a distinct fake code address. The deque keeps every
+// id string at a fixed address for the descriptors that point into it.
+struct WorkerTables {
+    MemoryManager mm;
+    ObjFunction* full{nullptr};
+    ObjFunction* declarations{nullptr};
+    std::deque<std::string> ids;
+    std::vector<RtFunctionDesc> descs;
+    RtFunctionDesc declarationsDesc{};
+    std::vector<char> codeBytes;
+
+    WorkerTables() {
+        full = compile(kWorkerProgram, &mm);
+        mm.pushTempRoot(full);
+        CompileOptions options;
+        options.declarationsOnly = true;
+        declarations = compile(kWorkerProgram, &mm, nullptr, options);
+        mm.pushTempRoot(declarations);
+        DecodedFunction tree = decodeFunctionTree(full);
+        codeBytes.resize(64);
+        addDescs(tree);
+        declarationsDesc = RtFunctionDesc{"0", declarations->arity,
+                                          hashChunkBytes(declarations->chunk),
+                                          &codeBytes.back()};
+    }
+    ~WorkerTables() {
+        mm.popTempRoot();
+        mm.popTempRoot();
+    }
+    void addDescs(const DecodedFunction& node) {
+        ids.push_back(node.id);
+        descs.push_back(RtFunctionDesc{ids.back().c_str(), node.function->arity,
+                                       hashChunkBytes(node.function->chunk),
+                                       &codeBytes[descs.size()]});
+        for (const DecodedFunction& child : node.nested) {
+            addDescs(child);
+        }
+    }
+};
+
+void expectCode(const DecodedFunction& node, const WorkerTables& t) {
+    if (node.id == "0") {
+        EXPECT_EQ(node.function->code, t.declarationsDesc.code)
+            << "the root must get the declarations-only code";
+    } else {
+        bool found = false;
+        for (const RtFunctionDesc& d : t.descs) {
+            if (node.id == d.id) {
+                EXPECT_EQ(node.function->code, d.code) << node.id;
+                found = true;
+            }
+        }
+        EXPECT_TRUE(found) << node.id;
+    }
+    for (const DecodedFunction& child : node.nested) {
+        expectCode(child, t);
+    }
+}
+
+} // namespace
+
+// A worker compiles the source again in declarations-only mode. Every nested
+// function keeps its id and its chunk, so the table of the full compile
+// covers it; the root takes the code of the declarations-only root.
+TEST(WorkerCode, TheAttacherCoversTheDeclarationsOnlyCompile) {
+    WorkerTables t;
+    ASSERT_NE(t.full, nullptr);
+    ASSERT_NE(t.declarations, nullptr);
+    ASSERT_NE(hashChunkBytes(t.full->chunk),
+              hashChunkBytes(t.declarations->chunk))
+        << "the program must have a top-level statement to cut";
+    auto attach = rt_declarations_attacher(t.descs.data(), t.descs.size(),
+                                           &t.declarationsDesc);
+    testing::internal::CaptureStderr();
+    bool ok = attach(t.declarations);
+    std::string err = testing::internal::GetCapturedStderr();
+    EXPECT_TRUE(ok) << err;
+    EXPECT_EQ(err, "");
+    expectCode(decodeFunctionTree(t.declarations), t);
+}
+
+TEST(WorkerCode, TheAttacherRejectsTheRootOfTheFullCompile) {
+    WorkerTables t;
+    // descs[0] is the root of the full compile: its chunk is not the one a
+    // worker compiles.
+    auto attach =
+        rt_declarations_attacher(t.descs.data(), t.descs.size(), &t.descs[0]);
+    testing::internal::CaptureStderr();
+    bool ok = attach(t.declarations);
+    std::string err = testing::internal::GetCapturedStderr();
+    EXPECT_FALSE(ok);
+    EXPECT_NE(err.find("chunk hash mismatch"), std::string::npos) << err;
+}
+
+TEST(WorkerCode, TheAttacherFailsWhenAFunctionHasNoCode) {
+    WorkerTables t;
+    // Leave the last nested function out of the table.
+    auto attach = rt_declarations_attacher(t.descs.data(), t.descs.size() - 1,
+                                           &t.declarationsDesc);
+    testing::internal::CaptureStderr();
+    bool ok = attach(t.declarations);
+    std::string err = testing::internal::GetCapturedStderr();
+    EXPECT_FALSE(ok);
+    EXPECT_NE(err.find("has no compiled"), std::string::npos) << err;
+}
+
+// spawnWorker gives the code attacher to each new worker, and a worker that
+// spawns a worker passes it on. Each worker calls it once, after its
+// declarations-only compile and before its first task runs, so both calls
+// are done when the reply reaches the main task.
+TEST(WorkerCode, EveryWorkerCallsTheAttacherOfItsSpawner) {
+    VM vm;
+    std::atomic<int> calls{0};
+    vm.runtime().setCodeAttacher([&calls](ObjFunction*) {
+        calls.fetch_add(1);
+        return true;
+    });
+    InterpretResult result = vm.interpret(R"(
+fun inner(m) { task.send(m, "inner"); }
+fun outer(m) { task.spawn_worker(inner, m); }
+task.spawn_worker(outer, task.self());
+var got = task.receive();
+)");
+    ASSERT_EQ(result, InterpretResult::OK);
+    auto got = vm.getGlobal("got");
+    ASSERT_TRUE(got.has_value());
+    EXPECT_EQ(stringify(*got), "inner");
+    EXPECT_EQ(calls.load(), 2);
 }

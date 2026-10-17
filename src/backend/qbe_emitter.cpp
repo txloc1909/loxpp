@@ -15,6 +15,7 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <unordered_map>
 
 namespace qbe {
@@ -1547,6 +1548,50 @@ std::string emitScript(const DecodedFunction& fn,
                        const EmitOptions& options) {
     Emitter emitter(fn, analysis, captures, options, qbeSymbol);
     return emitter.run();
+}
+
+namespace {
+
+bool namesGlobal(const DecodedFunction& fn, const DecodedInstruction& ins,
+                 std::string_view name) {
+    if (ins.op != Op::GET_GLOBAL && ins.op != Op::SET_GLOBAL &&
+        ins.op != Op::DEFINE_GLOBAL) {
+        return false;
+    }
+    Value v = fn.function->chunk.getConstant(
+        static_cast<uint16_t>(ins.constantIndex));
+    return isString(v) &&
+           std::string_view(asObjString(v)->chars.data(),
+                            asObjString(v)->chars.size()) == name;
+}
+
+template <typename Pred>
+bool anyInstruction(const DecodedFunction& node, const Pred& pred) {
+    if (std::ranges::any_of(
+            node.instructions,
+            [&](const DecodedInstruction& ins) { return pred(node, ins); })) {
+        return true;
+    }
+    return std::ranges::any_of(node.nested, [&](const DecodedFunction& child) {
+        return anyInstruction(child, pred);
+    });
+}
+
+} // namespace
+
+bool treeUsesTasks(const DecodedFunction& root) {
+    return anyInstruction(
+        root, [](const DecodedFunction& fn, const DecodedInstruction& ins) {
+            return namesGlobal(fn, ins, "task");
+        });
+}
+
+bool needsCoroutineMode(const DecodedFunction& root) {
+    return treeUsesTasks(root) ||
+           anyInstruction(
+               root, [](const DecodedFunction&, const DecodedInstruction& ins) {
+                   return ins.op == Op::YIELD;
+               });
 }
 
 } // namespace qbe

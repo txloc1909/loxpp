@@ -81,9 +81,10 @@ namespace qbe {
 struct EmitOptions {
     bool promoteRegisters{true};
     bool fuseTagJumpTable{true};
-    // Coroutine mode (QBE #530/#535): the whole program contains at least one
-    // YIELD, so every function is compiled as a resumable state machine. The
-    // front end sets this from the decoded tree (qbe_frontend.cpp). Promotion
+    // Coroutine mode (QBE #530/#535): a frame of the program can suspend
+    // (needsCoroutineMode below), so every function is compiled as a
+    // resumable state machine. The front end sets this from the decoded tree
+    // (qbe_frontend.cpp). Promotion
     // is off in this mode: a local must stay in its stack slot across a
     // suspension. See rt_abi.h's kRtCall/kRtYield and Runtime::
     // runCompiledFrames().
@@ -103,5 +104,18 @@ std::string emitScript(const DecodedFunction& fn,
                        const FunctionCaptureInfo& captures,
                        const std::string& qbeSymbol,
                        const EmitOptions& options = {});
+
+// True when a function of the program `root` names the global `task`. Only
+// that global reaches the task module (no native returns a global by name),
+// and a --target qbe program is one source, so a program for which this is
+// false never spawns a task or a worker and never receives.
+bool treeUsesTasks(const DecodedFunction& root);
+
+// The whole-program rule for EmitOptions::coroutineMode: a compiled frame can
+// be live under a suspension. A suspension is a YIELD or a task.receive() on
+// an empty mailbox, and every frame below it suspends with it. A function
+// with neither can still be such a frame, because calls are dynamic, so the
+// rule covers the whole program (docs/decisions/coroutines.md).
+bool needsCoroutineMode(const DecodedFunction& root);
 
 } // namespace qbe

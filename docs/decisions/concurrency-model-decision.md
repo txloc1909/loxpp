@@ -543,6 +543,42 @@ interns first. `ValueHash` hashes by pointer and is correct only for the
 values of one heap, which is all that the compiler's constant pool holds.
 The JVM and the bootstrap compare strings by their characters already.
 
+**A Lox run on a C++ frame.** *Bug class:* a task switch, and on QBE also
+a `yield` with no scheduler, is legal only when no C++ frame between the
+task's base and the suspend point waits for a result. The runtime counts
+those frames (`m_nativeDepth` for a native, `m_reentrantRunDepth` for a
+nested run). The interpreter counts a nested run in `runReentrantFrame`, but
+a compiled callee runs to completion inside `callCompiled` with no such run.
+So on QBE a `task.receive()` in a compiled `__str__` that `print` called
+suspended the task and lost the rest of `print` (probe 77), and a `yield` in
+a compiled `__hash__` or `__eq__` that a map operation called continued with
+`nil` (probes 87 and 88). Native raises `YieldAcrossNativeError` in each.
+*Constraint:* every site where a C++ caller needs the result of Lox code
+before it goes on counts itself as a re-entrant run while that code runs,
+whether the callee is interpreted or compiled. A native counts in
+`m_nativeDepth` and must not count again, because the receive native itself
+is one native deep. Only the coroutine driver (`runCompiledFrames`, from a
+resume) runs frames with no C++ continuation. *Shared layer:*
+`Runtime::SynchronousRun`, used by `reentrantCall` (deferred calls),
+`hashMapKey`, `mapKeyEq`, and `stringifyInstanceStr`; its readers are
+`taskCanSuspend`, the clean-link test of `resumeCoroutine`, `yieldOp`, and
+`Op::YIELD`. The JVM and the bootstrap have no compiled C frame.
+
+**The QBE coroutine-mode rule.** *Bug class:* "the program contains
+`yield`" is a syntactic selector. A task suspends also in a
+`task.receive()` on an empty mailbox, which is a call of a native, so a
+program with tasks and no `yield` was compiled without resume points.
+*Constraint:* the rule is the property "a compiled frame can be live under a
+suspension": a `YIELD` anywhere, or any name of the global `task`, through
+which alone a program reaches the task natives. A program that names `task`
+runs its main task on the scheduler, as native does. A program that does
+not has one task, so a `yield` outside every coroutine finds no other task
+and continues with `nil`, and its main task needs no driver. *Shared layer:*
+`qbe::needsCoroutineMode` and `qbe::treeUsesTasks`
+(`src/backend/qbe_emitter.h`), the one test that the front end and
+`tools/qbe_emit_program.cpp` call. A new suspend point in the spec's table
+must be added to it.
+
 ### What this unblocks and in which order
 
 1. The spec: workers, tasks, spawn, send, receive, the unbounded mailbox

@@ -24,6 +24,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 
 class Runtime;
 
@@ -78,6 +79,31 @@ Runtime* rt_startup(const char* source, const RtFunctionDesc* descs,
                     bool requireAllCompiled = false) noexcept;
 
 void rt_shutdown(Runtime* rt) noexcept;
+
+// Runs the program that rt_startup() left at stack slot 0 as the main task,
+// with the scheduler (Runtime::runTasks), until the main task ends. The QBE
+// front end calls this, in place of rt_call(), for every program that names
+// `task` (qbe::treeUsesTasks): there the main task is a coroutine, as on the
+// native VM, so it can switch to another task and the task natives work.
+// Such a program is also in coroutine mode (qbe::needsCoroutineMode), which
+// the driver needs.
+//
+// `declarations` is the compiled root of the program's declarations-only
+// compile, or nullptr when the program cannot spawn a worker. When it is
+// set, each worker attaches it to its own root, and `descs` (the table
+// given to rt_startup()) to every other function, so a worker runs compiled
+// code (Runtime::setCodeAttacher). `descs` and `declarations` must stay
+// valid and unchanged while any worker runs.
+//
+// Returns 0 when the main task ended normally; nonzero after an uncaught
+// fault or a deadlock, already reported on stderr.
+int rt_run_tasks(Runtime* rt, const RtFunctionDesc* descs, std::size_t nDescs,
+                 const RtFunctionDesc* declarations) noexcept;
+
+// Flushes every stream and ends the process with `code`, with no static
+// destructor: another worker can still run (endProcess, worker.h). The
+// native VM's own main() ends the same way.
+[[noreturn]] void rt_end_process(int code) noexcept;
 
 // Raw stack access. Compiled code writes its own slots directly at
 // base + 8h (base from a CallFrame's `slots`, or rt_stack_base() for the
@@ -363,3 +389,15 @@ int rt_yield(Runtime* rt, int stopAtFrameCount) noexcept;
 // after writing a diagnostic to stderr, on a missing id or any mismatch.
 bool rt_attach_code(const DecodedFunction& root,
                     const RtFunctionDesc& desc) noexcept;
+
+// Not part of the extern "C" ABI either: the code attacher that
+// rt_run_tasks() gives a Runtime for its workers (Runtime::CodeAttacher,
+// Runtime::setCodeAttacher).
+// Given the root of a declarations-only compile, it attaches `declarations`
+// to that root and each entry of `descs` other than the root "0" to the
+// function of the same id, with rt_attach_code()'s checks. It fails, after a
+// diagnostic on stderr, on a mismatch or when a function is left with no
+// code. Exposed for this node's own tests.
+std::function<bool(ObjFunction*)>
+rt_declarations_attacher(const RtFunctionDesc* descs, std::size_t nDescs,
+                         const RtFunctionDesc* declarations);

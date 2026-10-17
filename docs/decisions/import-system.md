@@ -157,7 +157,7 @@ above, and none reopen the `eval` wall.
 
 1. **The coroutine/QBE whole-program taint reaches the stdlib.** The obvious
    first Lox-level stdlib modules (lazy/infinite sequences) use `yield`. Under
-   whole-program QBE coroutine mode (`coroutines.md`, `treeContainsYield` →
+   whole-program QBE coroutine mode (`coroutines.md`, `qbe::needsCoroutineMode` →
    `coroutineMode`), any program importing a `yield`-using module compiles the
    **whole** program in coroutine mode (promotion off, trampoline). "Ship
    generator-based stdlib" and "QBE stays fast" are in tension; it argues for a

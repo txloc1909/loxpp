@@ -155,6 +155,18 @@ class Runtime {
         m_runLoop = std::move(loop);
     }
 
+    // Attaches compiled code to every function of a program that this
+    // Runtime compiled in declarations-only mode: the program of a worker
+    // (runWorker). Returns false after it reported why it could not. Set by
+    // the QBE entry (rt_run_tasks, backend/rt_capi.h); spawnWorker gives it
+    // to each new worker, so a worker runs compiled code as the main worker
+    // does. Unset, a worker interprets its program. It runs on the thread of
+    // each worker, so it must read only data that nothing writes.
+    using CodeAttacher = std::function<bool(ObjFunction* declarations)>;
+    void setCodeAttacher(CodeAttacher attach) {
+        m_attachCode = std::move(attach);
+    }
+
     // Outcome of a throw/catch dispatch (handleThrow/raiseThrowableError) or
     // of call() — the two used to be separate enums (CallOutcome/
     // ThrowOutcome) with identical Uncaught/HandledContinue-or-CaughtContinue/
@@ -386,8 +398,9 @@ class Runtime {
     // source of this Runtime made.
     [[nodiscard]] bool isTopLevelFunction(const Value& fn) const;
 
-    // The task that runs now, or nullptr when no scheduler runs (the QBE
-    // entry, rt_startup, does not start one).
+    // The task that runs now, or nullptr when no scheduler runs (a compiled
+    // program that never names `task`, which the QBE entry runs with
+    // rt_call).
     [[nodiscard]] ObjTask* currentTask() const { return m_currentTask; }
 
     // task.spawn: a new task that calls `fn` (a Function or BoundMethod) with
@@ -925,6 +938,36 @@ class Runtime {
     enum class WakeResult : std::uint8_t { Run, Suspended, Stop, Fatal };
     WakeResult resumeWaitingInner(ObjCoroutine* co, int entry);
 
+    // A C++ caller that needs the result of Lox code before it goes on: a
+    // deferred-call drain (reentrantCall), a map key's __hash__ or __eq__,
+    // a __str__. The code runs to completion on that C++ frame and cannot
+    // suspend. For its scope this clears coroutine mode, so a compiled callee
+    // runs in callCompiled() and not as a driver call, and counts one
+    // re-entrant run, so a yield or a receive inside raises
+    // YieldAcrossNativeError: the interpreter counts the same run in
+    // runReentrantFrame(), but callCompiled() runs a compiled callee with no
+    // such run. Every site that clears m_resumableMode for a synchronous
+    // result must use it; only callNative() does not, because m_nativeDepth
+    // counts a native, and the receive native itself must not count.
+    class SynchronousRun {
+      public:
+        explicit SynchronousRun(Runtime& rt)
+            : m_rt(rt), m_savedResumable(rt.m_resumableMode) {
+            m_rt.m_resumableMode = false;
+            ++m_rt.m_reentrantRunDepth;
+        }
+        ~SynchronousRun() {
+            --m_rt.m_reentrantRunDepth;
+            m_rt.m_resumableMode = m_savedResumable;
+        }
+        SynchronousRun(const SynchronousRun&) = delete;
+        SynchronousRun& operator=(const SynchronousRun&) = delete;
+
+      private:
+        Runtime& m_rt;
+        bool m_savedResumable;
+    };
+
     static OpResult fromThrow(ThrowOutcome outcome) {
         switch (outcome) {
         case ThrowOutcome::Uncaught:
@@ -1270,7 +1313,8 @@ class Runtime {
     int m_nativeStopAtFrameCount{0};
 
     // Number of C++ re-entrant runs currently on the native stack — every
-    // runReentrantFrame() invocation. A Lox frame inside one of these cannot
+    // runReentrantFrame() and runPushedFrameToCompletion() invocation, and
+    // every SynchronousRun. A Lox frame inside one of these cannot
     // be captured by a coroutine snapshot: its C++ continuation would be
     // lost. Op::YIELD raises YieldAcrossNativeError while this is nonzero.
     int m_reentrantRunDepth{0};
@@ -1289,6 +1333,9 @@ class Runtime {
     // trace's stack dump, the disassembler) still renders the default form
     // with no user-code side effect.
     int m_stringifyCanonicalDepth{0};
+
+    // See setCodeAttacher() above. Read once per worker start only.
+    CodeAttacher m_attachCode;
 
 #ifdef LOXPP_PROFILE
     ProfilerData m_profilerData;
