@@ -11,6 +11,7 @@
 //   5. Call chain deeper than 64 frames stays in bounds (issue #299).
 //   6. A coroutine's function and opcode counts reach the root report, while
 //      it is suspended, completed, or abandoned (issue #538).
+//   7. Each worker reports its own thread's CPU time.
 
 #include "test_harness.h"
 #include "vm.h"
@@ -20,6 +21,7 @@
 #include "chunk.h"
 #include "profiler.h"
 #include <cstdlib>
+#include <sstream>
 #include <string>
 #endif
 
@@ -339,6 +341,99 @@ TEST_F(ProfilerTest, ResumeAfterReportKeepsProfilerConsistent) {
         << "a coroutine resumed after a report must still be profiled";
     EXPECT_EQ(gen->callCount, 1u) << "one activation spans both resumes";
     EXPECT_LE(gen->selfNs, gen->totalNs);
+}
+
+// ---------------------------------------------------------------------------
+// 7. Each worker has its own ProfilerData and prints its own report, and the
+//    clock is the CPU time of the worker's thread. Worker 1 spins, worker 2
+//    sleeps at the same time: with a process-wide clock, worker 2's report
+//    would carry worker 1's CPU time. Worker 1 also suspends in a receive ten
+//    calls deep, a task switch, and its report still counts each call once.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// The report whose title names `worker`, from the start of its title to the
+// start of the next report.
+std::string reportOf(const std::string& err, int worker) {
+    std::string title =
+        "loxpp PROFILER REPORT (worker " + std::to_string(worker) + ")";
+    std::size_t at = err.find(title);
+    if (at == std::string::npos) {
+        return "";
+    }
+    std::size_t next = err.find("loxpp PROFILER REPORT", at + title.size());
+    return err.substr(at, next == std::string::npos ? std::string::npos
+                                                    : next - at);
+}
+
+double totalCpuMs(const std::string& report) {
+    const std::string label = "Total CPU time :";
+    std::size_t at = report.find(label);
+    if (at == std::string::npos) {
+        return -1;
+    }
+    return std::stod(report.substr(at + label.size()));
+}
+
+long callsOf(const std::string& report, const std::string& function) {
+    std::istringstream lines(report);
+    std::string line;
+    while (std::getline(lines, line)) {
+        std::istringstream words(line);
+        std::string name;
+        long calls = -1;
+        if (words >> name >> calls && name == function) {
+            return calls;
+        }
+    }
+    return -1;
+}
+
+} // namespace
+
+TEST_F(ProfilerTest, EachWorkerReportsItsOwnThreadCpuTime) {
+    VM vm;
+    testing::internal::CaptureStderr();
+    vm.interpret(R"(
+        fun deep(n, main) {
+            if (n == 0) {
+                task.send(main, "deep");
+                return task.receive();
+            }
+            var r = deep(n - 1, main);
+            return r;
+        }
+        fun spin(main) {
+            deep(10, main);
+            var x = 0;
+            for (var i = 0; i < 2000000; i = i + 1) x = x + i;
+            task.send(main, "spun");
+        }
+        fun rest(main) {
+            sleep(0.3);
+            task.send(main, "rested");
+        }
+        var spinner = task.spawn_worker(spin, task.self());
+        task.spawn_worker(rest, task.self());
+        task.receive();
+        task.send(spinner, "go");
+        task.receive();
+        task.receive();
+        // Each worker prints its report as it ends, after its last send.
+        sleep(0.3);
+    )");
+    std::string err = testing::internal::GetCapturedStderr();
+    std::string spinner = reportOf(err, 1);
+    std::string sleeper = reportOf(err, 2);
+    ASSERT_FALSE(spinner.empty()) << err;
+    ASSERT_FALSE(sleeper.empty()) << err;
+    EXPECT_NE(err.find("loxpp PROFILER REPORT\n"), std::string::npos)
+        << "the main worker's report";
+    EXPECT_GT(totalCpuMs(spinner), 20.0) << spinner;
+    EXPECT_LT(totalCpuMs(sleeper), 10.0) << sleeper;
+    EXPECT_EQ(callsOf(spinner, "deep"), 11) << spinner;
+    EXPECT_EQ(callsOf(sleeper, "deep"), -1) << sleeper;
 }
 
 #else // LOXPP_PROFILE not defined
