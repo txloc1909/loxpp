@@ -481,6 +481,13 @@ called it — is a **runtime error** (`YieldAcrossNativeError`; see
 not part of the coroutine's stack and cannot be suspended, so such a yield
 cannot resume.
 
+A `yield` reached while a deferred call runs — a call recorded by a
+[`defer`](#defer-statement) statement whose enclosing function call has
+exited — is a **runtime error** with the same kind. This holds also in a task
+outside every coroutine. A deferred call runs while the call it belongs to is
+mid-exit, and that exit has no resumption point, so the deferred call cannot
+suspend; it runs to completion, or raises.
+
 ### match Expression
 
 ```
@@ -850,6 +857,11 @@ defer callee ( arguments ) ;
    discarded. For `return expression;`, `expression` is evaluated before
    any pending deferred call runs, so a deferred call cannot change the
    value that `return` yields.
+   A deferred call cannot suspend. A `yield` in one — and a
+   `task.receive()` on an empty mailbox in one, by the [`task.receive`](#taskreceive)
+   rule — raises `YieldAcrossNativeError`, in a task and in
+   a coroutine alike. The drain continues with the remaining LIFO deferred
+   calls.
 5. If running a deferred call itself executes a `throw`, that new throw
    replaces whatever was already causing this function call to exit: a
    `return` value in progress is discarded, and an in-flight throw already
@@ -1514,9 +1526,9 @@ current task, and returns it.
 2. If the mailbox is empty, the current task suspends until a message
    arrives. Then the call returns that message.
 3. If the mailbox is empty while a native callback is on the call chain —
-   for example inside `__str__` while `print` called it — the call raises
-   `YieldAcrossNativeError`, for the same reason a `yield` there does (see
-   [`yield` Expression](#yield-expression)).
+   for example inside `__str__` while `print` called it — or while a
+   deferred call runs, the call raises `YieldAcrossNativeError`, for the
+   same reason a `yield` there does (see [`yield` Expression](#yield-expression)).
 
 A receive suspends the whole task. Every call frame of the task stays in
 place, which includes the frames of a coroutine that the task resumed, and
@@ -1640,7 +1652,7 @@ below, and it can also list the tasks that wait.
 |---|---|---|---|
 | `SendError` | `task.send(t, msg)` or `task.spawn_worker(fn, msg)`, where `msg` is not a message | yes | `Value of type T is not a message.`, where `T` is `type(msg)` |
 | `DeadTaskError` | `task.send(t, msg)`, where the task `t` has ended, which includes a task whose worker has ended | yes | `Cannot send to a task that has ended.` |
-| `YieldAcrossNativeError` | `task.receive()` on an empty mailbox while a native callback is on the call chain | yes | `Cannot receive across a native callback.` |
+| `YieldAcrossNativeError` | `task.receive()` on an empty mailbox while a native callback is on the call chain, or while a deferred call runs | yes | `Cannot receive across a native callback.` |
 | `DeadlockError` | the main task waits in `task.receive()` and no task can run again | no | `Deadlock: every task waits in receive.` |
 
 A catchable fault in this table is delivered to a `catch` block as an
@@ -1753,6 +1765,7 @@ same text the implementation reports when the fault is left uncaught.
 | `resume` on a dead coroutine | `fun f() { return 1; } var co = coroutine.create(f); co.resume(); co.resume();` | `"DeadCoroutineError"` |
 | `resume` on a running coroutine (self-resume) | `fun f() { co.resume(); } var co = coroutine.create(f); co.resume();` | `"RunningCoroutineError"` |
 | `yield` across a native callback | `class S { __str__() { yield 1; return "x"; } } fun f() { print S(); } var co = coroutine.create(f); co.resume();` | `"YieldAcrossNativeError"` |
+| `yield` in a deferred call | `fun note() { var v = yield 1; } fun g() { defer note(); } g();` | `"YieldAcrossNativeError"` |
 
 **The two map-key rows above cover an index read or write, a map or set
 literal, and `in`.** `Map.has(key)` and `Map.del(key)` are stdlib native
