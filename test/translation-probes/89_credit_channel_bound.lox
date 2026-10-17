@@ -1,0 +1,253 @@
+// A credit channel bounds the mailbox of its consumer (spec/04-semantics.md,
+// Bounding a Mailbox). The producer runs ahead of a slow consumer. With plain
+// sends, task.pending() of the consumer reaches the full count. Over the
+// channel of capacity N, the consumer's task.pending() never exceeds N plus
+// one control slot for its one peer, and the producer's never exceeds N.
+// The first two phases run on one worker, where the schedule is defined, so
+// they print exact values. The third phase puts the producer on a second
+// worker and prints only whether the bound held. The library text is the one
+// in examples/credit_channel.lox (tools/check_credit_channel_copies.py).
+
+// --- credit channel library: begin ---------------------------------------
+//
+// A channel with a capacity N from one producer task to one consumer task,
+// over task.send and task.receive. A mailbox has no bound, so this protocol
+// is what bounds the memory of the edge:
+//
+//   1. The consumer makes a Receiver. It sends Grant(N) to the producer.
+//   2. The producer sends Item(value) only while it holds a credit. With no
+//      credit it waits on its own task.receive() for one, never on the queue
+//      of another task.
+//   3. The consumer returns one Credit after each Item it takes.
+//   4. close() waits on the producer's own receive until every credit is
+//      back, then sends Closed. So the producer is alive for every Credit
+//      the consumer sends, and no send of the protocol raises DeadTaskError.
+//
+// Items not yet taken plus credits held is N at all times after the grant.
+// So the mailbox of the consumer holds at most N messages of the channel (it
+// gets Closed only when no item is outstanding), and the mailbox of the
+// producer holds at most N.
+//
+// A task that holds an end must not take other messages from its mailbox
+// while the channel is open: an end takes every message of the mailbox, and
+// a message that is not of the channel is an error.
+
+enum Chan { Grant(capacity) Item(value) Credit Closed }
+
+fun chanUnexpected(msg) {
+    throw "credit channel: unexpected message " + str(msg);
+}
+
+fun chanValue(item) {
+    var value = match item {
+        case Item(v) => v
+        case _ => chanUnexpected(item)
+    };
+    return value;
+}
+
+class Sender {
+    init(consumer) {
+        this.consumer = consumer;
+        this.capacity = nil;
+        this.credits = 0;
+    }
+
+    // Sends value to the consumer. Waits for a credit when it holds none.
+    send(value) {
+        while (this.credits == 0) {
+            this.takeControl();
+        }
+        task.send(this.consumer, Item(value));
+        this.credits = this.credits - 1;
+    }
+
+    // Waits until the consumer has taken every item, then ends the channel.
+    close() {
+        while (this.capacity == nil or this.credits < this.capacity) {
+            this.takeControl();
+        }
+        task.send(this.consumer, Closed());
+    }
+
+    takeControl() {
+        var msg = task.receive();
+        var gained = match msg {
+            case Grant(capacity) => this.granted(capacity)
+            case Credit => 1
+            case _ => chanUnexpected(msg)
+        };
+        this.credits = this.credits + gained;
+    }
+
+    granted(capacity) {
+        this.capacity = capacity;
+        return capacity;
+    }
+}
+
+class Receiver {
+    init(producer, capacity) {
+        if (capacity < 1) {
+            throw "credit channel: capacity must be at least 1";
+        }
+        this.producer = producer;
+        this.closed = false;
+        task.send(producer, Grant(capacity));
+    }
+
+    // Returns Item(value) for the next item, or Closed when the channel has
+    // ended. Waits when no item is in the mailbox.
+    receive() {
+        if (this.closed) {
+            return Closed();
+        }
+        var msg = task.receive();
+        var taken = match msg {
+            case Item(value) => this.took(msg)
+            case Closed => this.ended(msg)
+            case _ => chanUnexpected(msg)
+        };
+        return taken;
+    }
+
+    // Calls fn on each item value, in order, until the channel ends.
+    each(fn) {
+        var msg = this.receive();
+        while (!this.closed) {
+            fn(chanValue(msg));
+            msg = this.receive();
+        }
+    }
+
+    took(msg) {
+        task.send(this.producer, Credit());
+        return msg;
+    }
+
+    ended(msg) {
+        this.closed = true;
+        return msg;
+    }
+}
+
+// --- credit channel library: end -----------------------------------------
+
+// --- the probe -----------------------------------------------------------
+
+enum Job { Produce(consumer, count) }
+
+var N = 4;
+var COUNT = 20;
+var consumer = task.self();
+var producerMost = 0;
+
+// The consumer is slow: it lets every other task run twice per item.
+fun pause() {
+    yield;
+    yield;
+}
+
+fun flood() {
+    var i = 1;
+    while (i <= COUNT) {
+        task.send(consumer, i);
+        i = i + 1;
+    }
+}
+
+fun producer() {
+    var tx = Sender(consumer);
+    var i = 1;
+    while (i <= COUNT) {
+        if (task.pending() > producerMost) {
+            producerMost = task.pending();
+        }
+        tx.send(i);
+        i = i + 1;
+    }
+    tx.close();
+}
+
+fun farProducer(job) {
+    match job {
+        case Produce(to, count) => produceTo(to, count)
+    };
+}
+
+fun produceTo(to, count) {
+    var tx = Sender(to);
+    var i = 1;
+    while (i <= count) {
+        tx.send(i);
+        i = i + 1;
+    }
+    tx.close();
+}
+
+// Busy work in place of a pause: on its own worker the producer does not
+// need the consumer to suspend to run ahead.
+fun work() {
+    var k = 0;
+    while (k < 200) {
+        k = k + 1;
+    }
+}
+
+// Takes every item of rx. Returns [sum, most pending]. The sample is taken
+// before each receive, when the mailbox holds the most.
+fun consume(rx, slow) {
+    var sum = 0;
+    var most = 0;
+    var open = true;
+    while (open) {
+        if (task.pending() > most) {
+            most = task.pending();
+        }
+        var msg = rx.receive();
+        open = !rx.closed;
+        if (open) {
+            sum = sum + chanValue(msg);
+            slow();
+        }
+    }
+    return [sum, most];
+}
+
+// Phase 1: plain sends, no credits.
+task.spawn(flood);
+pause();
+print "plain sends: pending " + str(task.pending());
+var plainSum = 0;
+while (task.pending() > 0) {
+    plainSum = plainSum + task.receive();
+}
+print "plain sends: sum " + str(plainSum);
+
+// Phase 2: the channel, one worker.
+var rx = Receiver(task.spawn(producer), N);
+var result = consume(rx, pause);
+print "channel: sum " + str(result[0]);
+print "channel: consumer most pending " + str(result[1]);
+print "channel: consumer within N + 1 " + str(result[1] <= N + 1);
+print "channel: producer most pending " + str(producerMost);
+print "channel: producer within N " + str(producerMost <= N);
+
+// Phase 3: the channel, the producer on a second worker.
+var far = task.spawn_worker(farProducer, Produce(consumer, 200));
+var farResult = consume(Receiver(far, N), work);
+print "far channel: sum " + str(farResult[0]);
+print "far channel: consumer within N + 1 " + str(farResult[1] <= N + 1);
+print "after";
+
+// STATUS: ok
+// CHECK: plain sends: pending 20
+// CHECK: plain sends: sum 210
+// CHECK: channel: sum 210
+// CHECK: channel: consumer most pending 4
+// CHECK: channel: consumer within N + 1 true
+// CHECK: channel: producer most pending 1
+// CHECK: channel: producer within N true
+// CHECK: far channel: sum 20100
+// CHECK: far channel: consumer within N + 1 true
+// CHECK: after
