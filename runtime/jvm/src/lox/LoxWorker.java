@@ -26,6 +26,12 @@ import java.util.concurrent.locks.ReentrantLock;
  * deadlock check simple: it reads the state of every worker in one step.
  */
 final class LoxWorker {
+    // The JDK reads both properties once, when it starts the first virtual
+    // thread, so this block must run before that point. The generated
+    // LoxMain calls LoxRuntime.init(), which reads LoxWorker.MAIN, so this
+    // class initializes and runs the block before the script. The first
+    // virtual thread starts later, in switchTo or LoxCoroutine.resume.
+    //
     // The virtual-thread scheduler has one carrier for each processor by
     // default. A CPU-bound virtual task keeps its carrier, so a program with
     // more CPU-bound tasks than processors can stop a ready task on another
