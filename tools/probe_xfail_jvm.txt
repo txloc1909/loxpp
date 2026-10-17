@@ -2,27 +2,3 @@
 # Read by tools/check_spec_probes.py and tools/diff_runtimes.py --xfail (the managed-toolchains job).
 # Each line is `<probe>.lox  <reason>`. A listed probe must fail. When it
 # passes, the gate fails, and the node that made it pass deletes its line.
-
-66_task_spawn_order.lox  workers and tasks: mission #595, node #600
-67_send_never_suspends.lox  workers and tasks: mission #595, node #600
-68_mailbox_unbounded.lox  workers and tasks: mission #595, node #600
-69_task_yield.lox  workers and tasks: mission #595, node #600
-70_sendable_set.lox  workers and tasks: mission #595, node #600
-71_message_identity.lox  workers and tasks: mission #595, node #600
-72_dead_task_same_worker.lox  workers and tasks: mission #595, node #600
-73_dead_task_dead_worker.lox  workers and tasks: mission #595, node #600
-74_worker_isolation.lox  workers and tasks: mission #595, node #600
-75_spawn_worker_send_error.lox  workers and tasks: mission #595, node #600
-76_deadlock.lox  workers and tasks: mission #595, node #600
-77_receive_across_native.lox  workers and tasks: mission #595, node #600
-78_receive_in_coroutine.lox  workers and tasks: mission #595, node #600
-79_uncaught_fault_in_task.lox  workers and tasks: mission #595, node #600
-80_main_end_abandons.lox  workers and tasks: mission #595, node #600
-81_exit_from_task.lox  workers and tasks: mission #595, node #600
-82_send_order_across_workers.lox  workers and tasks: mission #595, node #600
-83_blocking_call_blocks_one_worker.lox  workers and tasks: mission #595, node #600
-84_spawn_worker_entry_closure.lox  workers and tasks: mission #595, node #600
-85_task_value.lox  workers and tasks: mission #595, node #600
-86_spawn_arity.lox  workers and tasks: mission #595, node #600
-87_yield_in_map_hash.lox  a yield outside every coroutine raises YieldOutsideCoroutineError: mission #595, node #600
-88_yield_in_map_eq.lox  a yield outside every coroutine raises YieldOutsideCoroutineError: mission #595, node #600

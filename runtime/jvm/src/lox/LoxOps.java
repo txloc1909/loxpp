@@ -95,18 +95,20 @@ public final class LoxOps {
      * that path, the same reason runDefers needed a second call site for
      * defer-using functions, see emitChunk's defer catch-all handler).
      *
-     * <p>One program-wide counter, like native's m_handlerStack.size(). A
-     * resumed coroutine's handler records sit above the resumer's, so a
-     * coroutine sees the resumer's live handlers; it hides its own while
-     * suspended (see LoxCoroutine's snapshot).
+     * <p>One counter per worker (LoxWorker.handlerDepth), like native's
+     * m_handlerStack.size() in its one Runtime per worker. A resumed
+     * coroutine's handler records sit above the resumer's, so a coroutine
+     * sees the resumer's live handlers; it hides its own while suspended
+     * (see LoxCoroutine's snapshot). Each task has its own count, which a
+     * task switch saves and puts back.
      */
-    private static int handlerDepth = 0;
+    public static void enterHandler() { LoxWorker.current().handlerDepth++; }
 
-    public static void enterHandler() { handlerDepth++; }
+    public static void exitHandler() { LoxWorker.current().handlerDepth--; }
 
-    public static void exitHandler() { handlerDepth--; }
-
-    public static boolean isHandlerLive() { return handlerDepth > 0; }
+    public static boolean isHandlerLive() {
+        return LoxWorker.current().handlerDepth > 0;
+    }
 
     /**
      * Boxed (an {@code Integer}) so the generated program's own
@@ -122,16 +124,20 @@ public final class LoxOps {
      * leak regardless of how many regions were abandoned this way (issue
      * #319, reviewer round 2).
      */
-    public static Object getHandlerDepth() { return handlerDepth; }
+    public static Object getHandlerDepth() {
+        return LoxWorker.current().handlerDepth;
+    }
 
     public static void restoreHandlerDepth(Object depth) {
-        handlerDepth = (Integer)depth;
+        LoxWorker.current().handlerDepth = (Integer)depth;
     }
 
     // Package-private read/write for LoxCoroutine's suspend/resume snapshot.
-    static int handlerDepthValue() { return handlerDepth; }
+    static int handlerDepthValue() { return LoxWorker.current().handlerDepth; }
 
-    static void setHandlerDepthValue(int depth) { handlerDepth = depth; }
+    static void setHandlerDepthValue(int depth) {
+        LoxWorker.current().handlerDepth = depth;
+    }
 
     // ------------------------------------------------------------------
     // Coroutines (spec/04-semantics.md, §Coroutine)
@@ -154,18 +160,35 @@ public final class LoxOps {
     static void exitCallback() { callbackDepth.set(callbackDepth.get() - 1); }
 
     /**
+     * The callback depth of the whole call chain of the current task: this
+     * thread's own, plus what each coroutine recorded of its resumer when it
+     * was resumed. A task switch suspends every frame of that chain, so it is
+     * legal only when this is 0 (spec/04-semantics.md, task.receive, step
+     * 3).
+     */
+    static int callbackDepthOfChain() {
+        int depth = callbackDepth.get();
+        LoxCoroutine co = LoxCoroutine.currentOrNull();
+        return co == null ? depth : depth + co.callbackBelow();
+    }
+
+    /**
      * The YIELD opcode. Suspends the current coroutine, delivering
-     * {@code value}, and returns what the next resume sent.
+     * {@code value}, and returns what the next resume sent. Outside every
+     * coroutine that the task resumed, the task itself is the coroutine
+     * (spec/04-semantics.md, yield Expression): it joins the back of its
+     * worker's run queue, the value is discarded, and the yield evaluates to
+     * nil.
      */
     public static Object yield(Object value) {
-        LoxCoroutine co = LoxCoroutine.currentOrNull();
-        if (co == null) {
-            throw makeError("YieldOutsideCoroutineError",
-                            "Cannot yield from outside a coroutine.");
-        }
         if (callbackDepth.get() > 0) {
             throw makeError("YieldAcrossNativeError",
                             "Cannot yield across a native callback.");
+        }
+        LoxCoroutine co = LoxCoroutine.currentOrNull();
+        if (co == null) {
+            LoxWorker.current().yieldTask();
+            return null;
         }
         return co.yieldValue(value);
     }
@@ -1372,9 +1395,16 @@ public final class LoxOps {
     // print / stringify
     // ------------------------------------------------------------------
 
+    // Lines that tasks on two workers print never mix inside one line
+    // (spec/04-semantics.md, Ending).
+    private static final Object PRINT_LOCK = new Object();
+
     public static void print(Object v) {
-        LoxRuntime.out.print(stringify(v));
-        LoxRuntime.out.print('\n');
+        String text = stringify(v);
+        synchronized (PRINT_LOCK) {
+            LoxRuntime.out.print(text);
+            LoxRuntime.out.print('\n');
+        }
     }
 
     // The STR opcode: canonical string form of v (the same text print shows),
@@ -1389,8 +1419,8 @@ public final class LoxOps {
     // not heap objects there and never reach the guard) — so the check
     // below runs after those three branches, to land on the same boundary
     // per value shape.
+    // The current depth is LoxWorker.stringifyDepth, one per worker.
     private static final int MAX_STRINGIFY_DEPTH = 200;
-    private static int s_stringifyDepth = 0;
 
     public static String stringify(Object v) {
         if (v == null) {
@@ -1402,17 +1432,18 @@ public final class LoxOps {
         if (v instanceof Double) {
             return formatNumber((Double)v);
         }
-        if (s_stringifyDepth == MAX_STRINGIFY_DEPTH) {
+        LoxWorker w = LoxWorker.current();
+        if (w.stringifyDepth == MAX_STRINGIFY_DEPTH) {
             // A raw, valueless LoxError is uncatchable, even inside a
             // try/catch (spec/04-semantics.md's Fatal Runtime Errors
             // section) — matching native's own fatal disposition here.
             throw new LoxError("Value nesting is too deep.");
         }
-        s_stringifyDepth++;
+        w.stringifyDepth++;
         try {
             return stringifyObj(v);
         } finally {
-            s_stringifyDepth--;
+            w.stringifyDepth--;
         }
     }
 
@@ -1465,6 +1496,9 @@ public final class LoxOps {
         }
         if (v instanceof LoxCoroutine) {
             return "<coroutine>";
+        }
+        if (v instanceof LoxTask) {
+            return "<task>";
         }
         if (v instanceof LoxIterator) {
             return "<iterator>";

@@ -52,7 +52,7 @@ public final class LoxError extends RuntimeException {
         if (LoxClosure.isOverflowInFlight(this)) {
             // This is the fault LoxClosure is watching for (the
             // StackOverflowError it raised, or whatever replaced it — see
-            // LoxClosure.s_overflowInFlight's own comment), and it is about
+            // the overflowInFlight comment in LoxClosure), and it is about
             // to reach a real catchBlock, so that unwind is over.
             LoxClosure.endStackOverflowUnwind();
         }

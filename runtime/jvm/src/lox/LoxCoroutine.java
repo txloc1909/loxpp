@@ -30,9 +30,9 @@ public final class LoxCoroutine {
         DEAD,      // the function returned, or a throw left the coroutine
     }
 
-    // The coroutine executing on this thread, if any. Backs `yield`'s
-    // outside-a-coroutine check and lets a nested resume mark its own resumer
-    // NORMAL. Plain ThreadLocal (not inheritable): a coroutine's virtual thread
+    // The coroutine executing on this thread, if any. Tells `yield` whether
+    // it suspends a coroutine or the task, and lets a nested resume mark its
+    // own resumer NORMAL. Plain ThreadLocal (not inheritable): a coroutine's virtual thread
     // sets its own value in run(); resuming another coroutine must not leak the
     // child's identity onto the resumer.
     private static final ThreadLocal<LoxCoroutine> CURRENT = new ThreadLocal<>();
@@ -40,12 +40,19 @@ public final class LoxCoroutine {
     static LoxCoroutine currentOrNull() { return CURRENT.get(); }
 
     private final Object callee; // LoxClosure or LoxBoundMethod (coroutine.create)
+    // A coroutine is not a message, so it runs only on the worker that made
+    // it; its thread binds to that worker.
+    private final LoxWorker worker = LoxWorker.current();
+    // The callback depth of the resumer's call chain at the last resume
+    // (LoxOps.callbackDepthOfChain): a native callback below the resume is
+    // on this coroutine's chain too.
+    private int callbackBelow;
     private volatile State state = State.SUSPENDED;
     private boolean started;
     private Object[] firstArgs;
 
-    // The frame budget and the handler-liveness count are one program-wide
-    // count each, like native's m_frameCount and m_handlerStack.size(): a
+    // The frame budget and the handler-liveness count are one count each per
+    // worker, like native's m_frameCount and m_handlerStack.size(): a
     // resumed coroutine's frames and handler records sit above the resumer's.
     // These hold the resumer's value and this coroutine's own contribution, so
     // the coroutine can hide its slice while suspended and re-add it on resume.
@@ -148,6 +155,7 @@ public final class LoxCoroutine {
         // frame and handler counts before it runs. Both counters return to the
         // resumer's value when the coroutine suspends or dies.
         handlerBase = LoxOps.handlerDepthValue();
+        callbackBelow = LoxOps.callbackDepthOfChain();
         LoxClosure.setFrameCountValue(frameBase + frameOwn);
         LoxOps.setHandlerDepthValue(handlerBase + handlerOwn);
         state = State.RUNNING;
@@ -198,7 +206,10 @@ public final class LoxCoroutine {
     // yield inside the call chain blocks on the queues instead of returning
     // here, so this method sees exactly one outcome: the function's result, or
     // whatever escaped it.
+    int callbackBelow() { return callbackBelow; }
+
     private void run() {
+        LoxWorker.bind(worker);
         CURRENT.set(this);
         Object msg;
         try {

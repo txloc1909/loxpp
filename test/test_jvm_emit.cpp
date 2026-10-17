@@ -1064,11 +1064,13 @@ TEST(EmitProgram, ZeroUpvalueClosureConstructsGeneratedClass) {
     EXPECT_NE(fn0.find(".method public <init>([[Ljava/lang/Object;)V\n"),
               std::string::npos)
         << fn0;
-    // <init>'s own literals: this function's compile-time name and arity.
+    // <init>'s own literals: this function's compile-time name and arity,
+    // and `true` for a function of a top-level fun declaration.
     EXPECT_NE(fn0.find("ldc \"add\"\n"), std::string::npos) << fn0;
-    EXPECT_NE(fn0.find("invokespecial "
+    EXPECT_NE(fn0.find("    iconst_1\n"
+                       "    invokespecial "
                        "lox/LoxClosure/<init>(Ljava/lang/String;I[[Ljava/"
-                       "lang/Object;)V\n"),
+                       "lang/Object;Z)V\n"),
               std::string::npos)
         << fn0;
     EXPECT_NE(fn0.find(".method protected invoke(Ljava/lang/Object;[Ljava/"
@@ -1094,6 +1096,110 @@ TEST(EmitProgram, ZeroUpvalueClosureConstructsGeneratedClass) {
     // RETURN's function role: areturn, not the script's void `return`.
     EXPECT_NE(fn0.find("areturn\n"), std::string::npos) << fn0;
     expectEveryJumpTargetIsLabeled(fn0);
+}
+
+// task.spawn_worker takes only a function of a top-level fun declaration
+// (spec/04-semantics.md); the constructor flag is how the runtime knows one.
+TEST(EmitProgram, OnlyATopLevelFunPassesTheTopLevelFlag) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript("fun outer() {\n"
+                                      "    fun inner() { return 1; }\n"
+                                      "    return inner;\n"
+                                      "}\n"
+                                      "class C { m() { return 2; } }\n",
+                                      mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    const std::string flagged =
+        "lox/LoxClosure/<init>(Ljava/lang/String;I[[Ljava/"
+        "lang/Object;Z)V\n";
+    int withFlag = 0;
+    for (const jvm::EmittedClass& cls : classes) {
+        if (cls.source.find(flagged) != std::string::npos) {
+            withFlag++;
+            EXPECT_NE(cls.source.find("ldc \"outer\"\n"), std::string::npos)
+                << cls.source;
+        }
+    }
+    // outer, inner, and the method m: only outer is top-level.
+    ASSERT_EQ(classes.size(), 4u);
+    EXPECT_EQ(withFlag, 1);
+}
+
+TEST(EmitDeclarations, KeepsOnlyTheDeclarationsAndReusesTheProgramClasses) {
+    const std::string source = "var x = 1;\n"
+                               "print \"top\";\n"
+                               "fun f() { fun g() { return x; } return g; }\n"
+                               "class C { m() { return 2; } }\n"
+                               "enum E { A }\n"
+                               "print f()();\n";
+    MemoryManager mm;
+    ObjFunction* program = compile(source, &mm);
+    ASSERT_NE(program, nullptr);
+    mm.pushTempRoot(program);
+    CompileOptions options;
+    options.declarationsOnly = true;
+    ObjFunction* declarations = compile(source, &mm, nullptr, options);
+    mm.popTempRoot();
+    ASSERT_NE(declarations, nullptr);
+
+    DecodedFunction programTree = decodeFunctionTree(program);
+    DecodedFunction declarationsTree = decodeFunctionTree(declarations);
+    StackAnalysisTree analysis = analyzeStackTree(declarationsTree);
+    jvm::EmittedClass cls = jvm::emitDeclarations(
+        declarationsTree, analysis, programTree, "LoxMain", "LoxDecls");
+    const std::string& j = cls.source;
+
+    EXPECT_EQ(cls.className, "LoxDecls");
+    EXPECT_NE(j.find(".class public LoxDecls\n"), std::string::npos) << j;
+    // The globals of the worker that runs it, never a fresh set.
+    EXPECT_NE(j.find("invokestatic lox/LoxRuntime/current()"),
+              std::string::npos)
+        << j;
+    EXPECT_EQ(j.find("LoxRuntime/init()"), std::string::npos) << j;
+    EXPECT_EQ(j.find("setProgramArgs"), std::string::npos) << j;
+    // No statement other than a declaration: no print, no `var x`.
+    EXPECT_EQ(j.find("LoxOps/print"), std::string::npos) << j;
+    EXPECT_EQ(j.find("ldc \"x\""), std::string::npos) << j;
+    // f's closure is the program's own first class; g stays inside it.
+    EXPECT_NE(j.find("new LoxFn$0\n"), std::string::npos) << j;
+    EXPECT_NE(j.find("ldc \"C\""), std::string::npos) << j;
+    EXPECT_NE(j.find("ldc \"E\""), std::string::npos) << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// Compiles `program` and `other` (two different sources) and asks
+// emitDeclarations to take `other` as the declarations of `program`.
+static void expectDeclarationsRefused(const std::string& program,
+                                      const std::string& other) {
+    MemoryManager mm;
+    ObjFunction* programFn = compile(program, &mm);
+    ASSERT_NE(programFn, nullptr);
+    mm.pushTempRoot(programFn);
+    ObjFunction* otherFn = compile(other, &mm);
+    mm.popTempRoot();
+    ASSERT_NE(otherFn, nullptr);
+    DecodedFunction programTree = decodeFunctionTree(programFn);
+    DecodedFunction otherTree = decodeFunctionTree(otherFn);
+    StackAnalysisTree analysis = analyzeStackTree(otherTree);
+    EXPECT_THROW(jvm::emitDeclarations(otherTree, analysis, programTree,
+                                       "LoxMain", "LoxDecls"),
+                 std::runtime_error);
+}
+
+TEST(EmitDeclarations, RefusesACompileWithOtherConstants) {
+    expectDeclarationsRefused("fun f() { return 1; }\n",
+                              "fun f() { return 2; }\n");
+}
+
+// The same constants in every chunk (no literal: `a` and `b` are locals), and
+// one opcode of a nested function that differs: only the hash of the
+// nested chunk tells the two compiles apart.
+TEST(EmitDeclarations, RefusesACompileWithOtherBytesInANestedFunction) {
+    expectDeclarationsRefused("fun f(a, b) { return a + b; }\n",
+                              "fun f(a, b) { return a - b; }\n");
 }
 
 TEST(EmitProgram, SiblingFunctionsGetSequentialClassNames) {
