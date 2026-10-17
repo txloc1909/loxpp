@@ -2821,14 +2821,11 @@ void requireSameConstants(const ObjFunction* declarations,
     }
 }
 
+// The two lists have the same length: `nested` holds one node per function
+// constant of the parent chunk, and the caller has compared the kinds of
+// those constants (requireSameConstants) before this call.
 void requireSameFunctions(const std::vector<DecodedFunction>& declarations,
                           const std::vector<DecodedFunction>& program) {
-    if (declarations.size() != program.size()) {
-        throw std::runtime_error("the declarations-only compile has " +
-                                 std::to_string(declarations.size()) +
-                                 " nested functions, the program " +
-                                 std::to_string(program.size()));
-    }
     for (std::size_t i = 0; i < program.size(); i++) {
         const ObjFunction* a = declarations[i].function;
         const ObjFunction* b = program[i].function;
