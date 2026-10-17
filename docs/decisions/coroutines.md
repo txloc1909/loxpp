@@ -21,11 +21,23 @@ re-enters. Symmetric transfer is out of scope.
   yield/resume channel carries one value. The coroutine function's own
   parameters are filled by the first `resume`'s arguments, exactly like an
   ordinary call.
-- Errors use the existing channel. `resume` on a dead coroutine, `resume` on
-  a running or normal coroutine, and `yield` outside a coroutine are
-  catchable runtime errors (`DeadCoroutineError`, `RunningCoroutineError`,
-  `YieldOutsideCoroutineError`). A throw inside a coroutine propagates to the
-  resumer, where it is catchable like any other throw.
+- Errors use the existing channel. `resume` on a dead coroutine and `resume`
+  on a running or normal coroutine are catchable runtime errors
+  (`DeadCoroutineError`, `RunningCoroutineError`). A throw inside a coroutine
+  propagates to the resumer, where it is catchable like any other throw.
+
+### Change record: a top-level `yield` is a task switch
+
+**Changed under mission #595.** This note first said that a `yield` outside
+every coroutine is a catchable runtime error, `YieldOutsideCoroutineError`.
+That rule fit the model where only `coroutine.create` made a coroutine. Mission
+#595 made every task, the main task included, a coroutine that its worker's
+scheduler resumes, so a `yield` always has a coroutine to suspend. A `yield`
+outside every coroutine that a task resumed is a switch point: it discards the
+yielded value, joins the back of the worker's run queue, and evaluates to
+`nil` when the task runs again. No exception is raised, and the error kind is
+gone. `spec/04-semantics.md` (`yield` Expression, The main task) states the
+rule; the referee ruling on #596 confirmed it.
 
 ## Surface
 
