@@ -24,3 +24,5 @@
 84_spawn_worker_entry_closure.lox  workers and tasks: mission #595, node #599
 85_task_value.lox  workers and tasks: mission #595, node #599
 86_spawn_arity.lox  workers and tasks: mission #595, node #599
+87_yield_in_map_hash.lox  a yield outside every coroutine raises YieldOutsideCoroutineError: mission #595, node #599
+88_yield_in_map_eq.lox  a yield outside every coroutine raises YieldOutsideCoroutineError: mission #595, node #599

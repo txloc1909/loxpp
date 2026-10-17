@@ -37,6 +37,7 @@
 
 #include <array>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <optional>
 #include <string>
@@ -54,6 +55,8 @@ enum class InterpretResult : std::uint8_t {
 
 struct ObjMap;        // container_objects.h; only a pointer is needed here.
 struct ObjCoroutine;  // container_objects.h; only a pointer is needed here.
+struct ObjTask;       // container_objects.h; only a pointer is needed here.
+struct ObjIterator;   // container_objects.h; only a pointer is needed here.
 class DiagnosticSink; // diagnostic.h; only a pointer is needed here.
 
 struct HandlerRecord {
@@ -329,6 +332,48 @@ class Runtime {
     // Native-facing reach for the shared Coroutine class.
     [[nodiscard]] ObjClass* coroutineClass() const { return m_coroutineClass; }
 
+    // --- Workers and tasks (spec/04-semantics.md, Workers and Tasks) -------
+    //
+    // This Runtime is one worker. Every task, the main task included, runs in
+    // its own coroutine, and the scheduler in runTasks() is the resumer of
+    // each one. The scheduler sits below every task: while a task runs, the
+    // stack, the frames, and m_handlerStack hold only that task's state, and
+    // every other task's state is in its coroutine's snapshot. So a throw
+    // that no `try` of the running task catches finds no handler, and ends
+    // the program after only that task's defers ran.
+
+    // Runs `script` as the main task, and every task it spawns, until the
+    // main task ends. Tasks still in the run queue then are abandoned.
+    // loadSource() left `script` at stack slot 0.
+    InterpretResult runTasks(ObjClosure* script);
+
+    // The task that runs now, or nullptr when no scheduler runs (the QBE
+    // entry, rt_startup, does not start one).
+    [[nodiscard]] ObjTask* currentTask() const { return m_currentTask; }
+
+    // task.spawn: a new task that calls `fn` (a Function or BoundMethod) with
+    // no arguments when it first runs. It joins the back of the run queue.
+    ObjTask* spawnTask(Value fn);
+
+    // True when `task` cannot receive a message again: its function
+    // returned, or the run of the program that made it ended.
+    [[nodiscard]] bool taskEnded(const ObjTask* task) const;
+
+    // task.send after its checks passed: appends `msg` to the mailbox of
+    // `task`. A task that waits in task.receive() joins the run queue.
+    void deliverMessage(ObjTask* task, Value msg);
+
+    // task.receive for the current task. Returns true with the head of the
+    // mailbox in *out when the mailbox has one. On an empty mailbox returns
+    // false after it either requested a task switch (m_taskSwitchPending;
+    // callNative suspends the task when the native returns) or raised
+    // YieldAcrossNativeError (outcome recorded for callNative).
+    bool receiveFromNative(Value* out);
+
+    // Raises a catchable fault from inside a native. The native then returns
+    // a placeholder, and callNative propagates the recorded outcome.
+    void raiseFromNative(const char* kind, const char* msg);
+
     // Native-facing key operations for map.has / map.del. They run the key
     // through mapGetKey / mapDelKey with the native's enclosing boundary, and
     // on failure store the outcome in m_reentrantOutcome for callNative() to
@@ -510,12 +555,12 @@ class Runtime {
     OpResult opIterHasNext(int stopAtFrameCount);
     OpResult opIterNext();
 
-    // YIELD's own body in coroutine mode. Runs the two legality checks
-    // vm.cpp's interpreted Op::YIELD runs — a yield outside a coroutine, and
-    // a yield across a native callback (a deeper m_reentrantRunDepth than
-    // the coroutine was resumed with). Returns OK when the yield is legal;
-    // the compiled frame then returns kRtYield and the driver suspends it.
-    // An illegal yield raises through handleThrow and returns its OpResult,
+    // YIELD's own body in coroutine mode: the legality check for a yield
+    // across a native callback. Returns OK when the yield is legal; the
+    // compiled frame then returns kRtYield, and the driver suspends the
+    // coroutine, or callCompiled() continues the frame with nil when no
+    // coroutine and no scheduler run (a task switch with no other task). An
+    // illegal yield raises through handleThrow and returns its OpResult,
     // exactly like any other fallible op.
     OpResult yieldOp(int stopAtFrameCount);
 
@@ -709,6 +754,9 @@ class Runtime {
         return static_cast<int>(m_handlerStack.size());
     }
     [[nodiscard]] std::optional<Value> getGlobal(const std::string& name) const;
+    // The names of every global variable, the stdlib globals included. The
+    // tooling tests compare it with the resolver's own list of stdlib names.
+    [[nodiscard]] std::vector<std::string> globalNames() const;
     [[nodiscard]] Value lastResult() const { return m_lastResult; }
 
     // Compiled code needs the allocator directly to build strings, lists,
@@ -780,6 +828,36 @@ class Runtime {
     }
 
   private:
+    // Resumes `task` from the scheduler, once. Returns false on a fatal error
+    // (already reported); the program then ends.
+    bool resumeTask(ObjTask* task);
+
+    // Abandons every task but the main task: the run of the program ended.
+    void endTasks();
+
+    // True when a receive on an empty mailbox can suspend the current task:
+    // every C++ frame between the task's base and the receive native is the
+    // resume of a coroutine the task resumed, so a suspension loses no C++
+    // continuation (see m_cleanNativeDepth).
+    [[nodiscard]] bool taskCanSuspend() const;
+
+    // One level of a task switch: suspends m_currentCoroutine, which waits at
+    // the call that resumed m_taskSwitchInner (nullptr for the level of the
+    // receive itself). `iter` is the iterator when that call is an
+    // ITER_HAS_NEXT. Then m_taskSwitchInner names this coroutine, for the
+    // next level out.
+    void suspendForTaskSwitch(ObjIterator* iter);
+
+    // The resume of a coroutine that waits in a task switch
+    // (ObjCoroutine::waitingInner). The value on top of the stack is the one
+    // the resume received; it goes on to the inner coroutine. Run: the
+    // restored frames continue with the inner result in place. Suspended: the
+    // inner coroutine waits again, so this one waits again too. Stop/Fatal:
+    // the inner resume left the outcome in *outcome, and the restored frames
+    // must not run.
+    enum class WakeResult : std::uint8_t { Run, Suspended, Stop, Fatal };
+    WakeResult resumeWaitingInner(ObjCoroutine* co, int entry);
+
     static OpResult fromThrow(ThrowOutcome outcome) {
         switch (outcome) {
         case ThrowOutcome::Uncaught:
@@ -998,6 +1076,32 @@ class Runtime {
     // coroutine. Rooted in markRoots for the brief window before resume
     // copies it out.
     Value m_yieldedValue;
+
+    // Workers and tasks (see runTasks()). m_mainTask lives as long as this
+    // Runtime, so its handle stays valid from one REPL line to the next.
+    ObjTask* m_mainTask{nullptr};
+    ObjTask* m_currentTask{nullptr};
+    std::deque<ObjTask*> m_runQueue;
+    // Counts the runs of runTasks(). A task whose epoch is older has ended.
+    std::uint64_t m_taskEpoch{0};
+    // Set by task.receive on an empty mailbox, and kept while each coroutine
+    // between the receive and the task's base suspends in turn (callNative
+    // after a `resume` native, opIterHasNext, resumeWaitingInner). The
+    // scheduler clears it when the task's own coroutine is suspended.
+    bool m_taskSwitchPending{false};
+    // The coroutine that suspended last in the task switch in progress.
+    ObjCoroutine* m_taskSwitchInner{nullptr};
+    // Number of natives running now (callNative), innermost included.
+    int m_nativeDepth{0};
+    // m_nativeDepth at which the frames of m_currentCoroutine run, while the
+    // chain from the running task's base to that coroutine is clean: each
+    // link is a `resume` native that its parent's loop called (one native
+    // deeper) or an ITER_HAS_NEXT (no native deeper), with no re-entrant run
+    // (m_reentrantRunDepth) in between. -1 when the chain is not clean or no
+    // task runs. resumeCoroutine() sets it for its own run and restores it.
+    int m_cleanNativeDepth{-1};
+    // m_reentrantRunDepth when the scheduler resumed the running task.
+    int m_cleanReentrantDepth{0};
 
     // Handler stack for try/catch — parallel to m_frames[].
     // m_handlerStack[i] records {frameCount, stackTop, catchIp} for the

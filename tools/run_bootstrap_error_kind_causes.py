@@ -74,12 +74,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_bootstrap_error_kinds import (  # noqa: E402
     DYNAMIC,
     EXPECTED_CALLS,
+    KINDS_THE_SPEC_REMOVED,
     SPEC_PATH,
     audited_table_kinds,
 )
 
 CATCHABLE = "catchable"
 FATAL = "fatal"
+# The kind is in KINDS_THE_SPEC_REMOVED: the spec gives the cause no fault, so
+# native must not print the kind, while the bootstrap still catches it at the
+# call that EXPECTED_CALLS names.
+REMOVED = "removed"
 
 # A DYNAMIC EXPECTED_CALLS entry's real kind is chosen at run time; this maps
 # each DYNAMIC message to every kind it can resolve to (see EXPECTED_CALLS's
@@ -157,7 +162,7 @@ PROBES = [
     ("map net-zero change during for-in", "try { var m = {1: \"a\"}; for (var k in m) { m.del(1); m[2] = \"b\"; } } catch (e) { print e.kind; }",
      FATAL, "MapSizeChangedError", '"Map changed size during iteration."'),
     ("yield outside a coroutine", "try { yield 1; } catch (e) { print e.kind; }",
-     CATCHABLE, "YieldOutsideCoroutineError", '"Cannot yield from outside a coroutine."'),
+     REMOVED, "YieldOutsideCoroutineError", '"Cannot yield from outside a coroutine."'),
     ("yield across a native callback",
      'class S { init() {} __str__() { yield 1; return "x"; } } fun f() { print S(); } '
      "var co = coroutine.create(f); try { co.resume(); } catch (e) { print e.kind; }",
@@ -359,7 +364,18 @@ def main() -> int:
             continue
         dispositions = {d for d, _n, _k in matches}
         is_table = target_kind in spec_kinds
-        if is_table:
+        if target_kind in KINDS_THE_SPEC_REMOVED:
+            if dispositions != {REMOVED}:
+                failures.append(
+                    f"({target_kind!r}, {message[:50]!r}) is in KINDS_THE_SPEC_REMOVED, so "
+                    f"its probes must all be 'removed', not {dispositions!r}."
+                )
+        elif REMOVED in dispositions:
+            failures.append(
+                f"({target_kind!r}, {message[:50]!r}) has a 'removed' probe, but "
+                f"{target_kind!r} is not in KINDS_THE_SPEC_REMOVED."
+            )
+        elif is_table:
             if CATCHABLE not in dispositions:
                 failures.append(
                     f"alias: {target_kind!r} is a spec/04-semantics.md table kind, but "
@@ -429,7 +445,13 @@ def main() -> int:
                     f"exit {boot_exit}, stdout {boot_out!r}"
                 )
 
-        if disposition == CATCHABLE:
+        if disposition == REMOVED:
+            if native_out == kind:
+                failures.append(
+                    f"{name}: {kind!r} is in KINDS_THE_SPEC_REMOVED, but native still "
+                    "raises it (stdout names the kind)"
+                )
+        elif disposition == CATCHABLE:
             if native_exit != 0 or native_out != kind:
                 failures.append(
                     f"{name}: declared 'catchable' with kind {kind!r}, but native gave "

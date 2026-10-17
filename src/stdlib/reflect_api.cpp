@@ -45,6 +45,8 @@ static const char* typeNameOf(Obj* obj) {
         return "Process";
     case ObjType::COROUTINE:
         return "Coroutine";
+    case ObjType::TASK:
+        return "Task";
     case ObjType::ITERATOR:
         return "Iterator";
     case ObjType::LIST:
@@ -64,19 +66,22 @@ static const char* typeNameOf(Obj* obj) {
     return "Unknown";
 }
 
-static Value typeNative(int /*argc*/, Value* argv) {
-    const Value& v = argv[0];
-    const char* name;
+const char* valueTypeName(const Value& v) {
     if (is<Nil>(v)) {
-        name = "Nil";
-    } else if (is<bool>(v)) {
-        name = "Boolean";
-    } else if (is<Number>(v)) {
-        name = "Number";
-    } else {
-        name = typeNameOf(as<Obj*>(v));
+        return "Nil";
     }
-    return Value{static_cast<Obj*>(getActiveMM()->makeString(name))};
+    if (is<bool>(v)) {
+        return "Boolean";
+    }
+    if (is<Number>(v)) {
+        return "Number";
+    }
+    return typeNameOf(as<Obj*>(v));
+}
+
+static Value typeNative(int /*argc*/, Value* argv) {
+    return Value{
+        static_cast<Obj*>(getActiveMM()->makeString(valueTypeName(argv[0])))};
 }
 
 // Re-interns the chars of a String value as a Table key. Safe regardless of

@@ -11,6 +11,7 @@
 #include "tooling/resolver.h"
 #include "tooling/stdlib_names.h"
 #include "tooling/symbol_table.h"
+#include "vm.h"
 
 using namespace loxpp::tooling;
 
@@ -490,6 +491,24 @@ TEST(ToolingResolver, StdlibGlobalIsKnown) {
     EXPECT_FALSE(isStdlibGlobal("print"));
 }
 
+// The resolver keeps its own list of stdlib names, apart from the runtime.
+// Every global that the runtime defines at the start of a program must be on
+// it, or the resolver warns "unknown name" on a correct program. Every name
+// on it must be a runtime global, or the resolver hides a real typo.
+TEST(ToolingResolver, StdlibNamesMatchTheRuntimeGlobals) {
+    VM vm;
+    ASSERT_EQ(vm.interpret(""), InterpretResult::OK);
+    std::set<std::string> runtime;
+    for (const std::string& name : vm.globalNames()) {
+        runtime.insert(name);
+    }
+    std::set<std::string> tooling;
+    for (std::string_view name : stdlibGlobals()) {
+        tooling.emplace(name);
+    }
+    EXPECT_EQ(tooling, runtime);
+}
+
 TEST(ToolingResolver, ReferencesAcrossScopes) {
     const std::string src = R"(fun counter() {
   var count = 0;
@@ -589,31 +608,6 @@ TEST(ToolingResolver, RebuildReplacesState) {
 // purpose.
 const std::set<std::string> kExpectedWarnedFiles = {
     "06_shared_upvalue.lox",
-    // The spec probes for workers and tasks. Their only warning is "unknown
-    // name 'task'": the global `task` is not in tooling/stdlib_names.cpp. A
-    // file stops warning when its global joins that list, and then it must
-    // leave this set.
-    "66_task_spawn_order.lox",
-    "67_send_never_suspends.lox",
-    "68_mailbox_unbounded.lox",
-    "69_task_yield.lox",
-    "70_sendable_set.lox",
-    "71_message_identity.lox",
-    "72_dead_task_same_worker.lox",
-    "73_dead_task_dead_worker.lox",
-    "74_worker_isolation.lox",
-    "75_spawn_worker_send_error.lox",
-    "76_deadlock.lox",
-    "77_receive_across_native.lox",
-    "78_receive_in_coroutine.lox",
-    "79_uncaught_fault_in_task.lox",
-    "80_main_end_abandons.lox",
-    "81_exit_from_task.lox",
-    "82_send_order_across_workers.lox",
-    "83_blocking_call_blocks_one_worker.lox",
-    "84_spawn_worker_entry_closure.lox",
-    "85_task_value.lox",
-    "86_spawn_arity.lox",
     "test_enum_arity_try.lox",
     "test_error_kind_message.lox",
     "test_invalid_map_key_try.lox",

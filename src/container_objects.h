@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -270,6 +271,11 @@ inline ObjEnumCtor* asObjEnumCtor(Obj* o) {
 struct ObjEnum : public Obj {
     ObjEnumCtor* ctor;
     VmVector<Value> fields;
+    // Whether this value is a message (spec/03-types.md, Messages): true when
+    // every field is a message. The constructor sets it once, after it fills
+    // the fields. No construct writes a field after that, so the bit stays
+    // valid for the value's whole life and a send reads only this bit.
+    bool sendable{true};
 
     ObjEnum(ObjEnumCtor* c, VmAllocator<Value> alloc)
         : Obj(ObjType::ENUM), ctor(c), fields(alloc) {}
@@ -373,6 +379,18 @@ struct ObjCoroutine : public Obj {
     // entered inside the coroutine (a native callback or a defer drain).
     int resumeReentrantDepth{0};
 
+    // A task switch at a receive suspends every coroutine that the task
+    // resumed, not only the innermost one (spec/04-semantics.md,
+    // task.receive). Each outer coroutine then waits at the call that resumed
+    // the next one, and the C++ continuation of that call is gone. These two
+    // fields rebuild it: the next resume of this coroutine first resumes
+    // waitingInner with the value it was given, then hands the result to the
+    // call in progress. With waitingIterator null, that call is a native
+    // `resume` and the result replaces its slot; otherwise it is an
+    // ITER_HAS_NEXT on that iterator. Null outside a task switch.
+    ObjCoroutine* waitingInner{nullptr};
+    ObjIterator* waitingIterator{nullptr};
+
     ObjCoroutine(ObjClass* k, Value fn)
         : Obj(ObjType::COROUTINE), klass(k), callee(fn) {}
 
@@ -393,4 +411,57 @@ inline ObjCoroutine* asObjCoroutine(const Value& v) {
 }
 inline bool isCoroutine(const Value& v) {
     return isValueOfType<ObjType::COROUTINE>(v);
+}
+
+// ---------------------------------------------------------------------------
+// ObjTask — a task on this worker (spec/03-types.md, §Task;
+// spec/04-semantics.md, Workers and Tasks).
+// ---------------------------------------------------------------------------
+// A task runs its function in its own coroutine. The worker's scheduler
+// (Runtime::runTasks) resumes that coroutine; a suspend point of the task is a
+// suspension of it. A Task value is the handle: identity equality, always a
+// message.
+enum class TaskState : std::uint8_t {
+    READY,   // in the run queue
+    RUNNING, // the scheduler resumed it and it has not suspended yet
+    WAITING, // suspended in task.receive() on an empty mailbox
+    DEAD,    // its function returned, or the program ended it
+};
+
+struct ObjTask : public Obj {
+    ObjCoroutine* co;
+    // Unbounded by design: a send never waits for room. A bound is a library
+    // over the primitive (spec/04-semantics.md, Bounding a Mailbox).
+    std::deque<Value> mailbox;
+    TaskState state{TaskState::READY};
+    // True while the task waits in task.receive(): its next resume hands it
+    // the head of the mailbox as the value of that receive.
+    bool receiving{false};
+    // The scheduler's run of the program this task belongs to. A task of an
+    // earlier run (an earlier REPL line) has ended with that run.
+    std::uint64_t epoch;
+
+    ObjTask(ObjCoroutine* c, std::uint64_t e)
+        : Obj(ObjType::TASK), co(c), epoch(e) {}
+};
+
+inline bool isObjTask(Obj* o) { return isObjType(o, ObjType::TASK); }
+inline ObjTask* asObjTask(Obj* o) { return static_cast<ObjTask*>(o); }
+inline bool isTask(const Value& v) { return isValueOfType<ObjType::TASK>(v); }
+
+// The message rule (spec/03-types.md, Messages). Nil, Boolean, Number,
+// String, and Task are always messages; an Enum value carries its bit; every
+// other kind is never one. Constant time: an Enum's bit was fixed when it was
+// constructed.
+inline bool isMessage(const Value& v) {
+    if (!isObj(v)) {
+        return true;
+    }
+    if (isString(v) || isTask(v)) {
+        return true;
+    }
+    if (isEnumValue(v)) {
+        return asObjEnum(as<Obj*>(v))->sendable;
+    }
+    return false;
 }

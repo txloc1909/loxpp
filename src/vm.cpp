@@ -19,17 +19,14 @@ InterpretResult VM::interpret(const std::string& source) {
     if (closure == nullptr) {
         return InterpretResult::COMPILE_ERROR;
     }
-    // No handler can be active yet (nothing has executed), so the only
-    // reachable outcome here is Pushed or Uncaught.
-    if (m_rt.call(closure, 0) == Runtime::ThrowOutcome::Uncaught) {
-        return InterpretResult::RUNTIME_ERROR;
-    }
 #ifdef LOXPP_PROFILE
     // Count the implicit script call so Op::CALL and Op::RETURN stay balanced.
     m_rt.m_profilerData.opcodeTable[static_cast<uint8_t>(Op::CALL)].count++;
     ProfileProgramScope programScope(m_rt.m_profilerData);
 #endif
-    InterpretResult result = run();
+    // The script is the main task (spec/04-semantics.md, The main task); the
+    // scheduler runs it and every task it spawns.
+    InterpretResult result = m_rt.runTasks(closure);
 #ifdef LOXPP_PROFILE
     // Fold every coroutine's tables into the root before the report prints.
     m_rt.memoryManager().mergeCoroutineProfilers();
@@ -605,6 +602,14 @@ InterpretResult VM::run(int stopAtFrameCount) {
 #endif
             m_rt.m_frameCount--;
             if (m_rt.m_frameCount == 0) {
+                if (m_rt.m_currentCoroutine != nullptr) {
+                    // The base frame of a task returned. Leave the result at
+                    // the frame's base slot, as every coroutine return does,
+                    // for resumeCoroutine to take.
+                    m_rt.stackTop = frame->slots;
+                    m_rt.push(overrideSet ? overrideVal : result);
+                    return InterpretResult::OK;
+                }
                 // Finished executing the top-level script.
                 m_rt.pop(); // remove the script ObjClosure from the stack
                 return InterpretResult::OK;
@@ -794,11 +799,13 @@ InterpretResult VM::run(int stopAtFrameCount) {
             break;
         }
         case Op::YIELD: {
+            // Every task runs in its own coroutine (Runtime::runTasks), so a
+            // yield always has one to suspend. A yield outside every
+            // coroutine the task resumed suspends the task's own coroutine,
+            // and the scheduler is its resumer.
             if (m_rt.m_currentCoroutine == nullptr) {
-                CATCHABLE_OR_RETURN(tryCatchableError(
-                    "YieldOutsideCoroutineError",
-                    "Cannot yield from outside a coroutine."));
-                break;
+                RAISE_ERROR("BUG: yield with no task running.");
+                return InterpretResult::RUNTIME_ERROR;
             }
             if (m_rt.m_reentrantRunDepth >
                 m_rt.m_currentCoroutine->resumeReentrantDepth) {

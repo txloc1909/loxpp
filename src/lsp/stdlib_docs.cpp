@@ -10,7 +10,7 @@ namespace {
 
 // Globals: src/stdlib/globals.cpp, file_api.cpp, os_api.cpp, reflect_api.cpp,
 // math_module.cpp. Descriptions condensed from spec/05-stdlib.md.
-constexpr std::array<StdlibEntry, 27> kGlobals = {{
+constexpr std::array<StdlibEntry, 28> kGlobals = {{
     {"clock", "clock() -> Number", 0,
      "Elapsed processor time in seconds. Use for measuring durations."},
     {"input", "input() -> String | Nil", 0,
@@ -65,6 +65,9 @@ constexpr std::array<StdlibEntry, 27> kGlobals = {{
      "Global object of numeric functions and constants, reached with `.`."},
     {"coroutine", "coroutine", kArityConstant,
      "Global object whose `create(fn)` makes a suspended coroutine, reached "
+     "with `.`."},
+    {"task", "task", kArityConstant,
+     "Global object of tasks and messages: spawn, send, receive, reached "
      "with `.`."},
 }};
 
@@ -165,6 +168,22 @@ constexpr std::array<StdlibEntry, 1> kCoroutine = {{
      "Makes a new suspended coroutine that runs `fn` when first resumed."},
 }};
 
+// `task.<name>`: src/stdlib/task_api.cpp. Descriptions condensed from
+// spec/05-stdlib.md, task.
+constexpr std::array<StdlibEntry, 6> kTask = {{
+    {"spawn", "task.spawn(fn) -> Task", 1,
+     "Makes a new task on this worker that calls `fn`; returns its handle."},
+    {"spawn_worker", "task.spawn_worker(fn, msg) -> Task", 2,
+     "Makes a new worker whose one task calls the top-level `fn` with `msg`."},
+    {"send", "task.send(t, msg) -> Nil", 2,
+     "Appends the message `msg` to the mailbox of task `t`. Never waits."},
+    {"receive", "task.receive() -> Any", 0,
+     "Takes the next message of this task; waits while the mailbox is empty."},
+    {"self", "task.self() -> Task", 0, "The handle of the current task."},
+    {"pending", "task.pending() -> Number", 0,
+     "The number of messages in the mailbox of the current task."},
+}};
+
 const StdlibEntry* find(const auto& table, std::string_view name) {
     for (const StdlibEntry& e : table) {
         if (e.name == name) {
@@ -190,6 +209,29 @@ const StdlibEntry* coroutineMemberDoc(std::string_view name) {
 
 const StdlibEntry* methodDoc(std::string_view name) {
     return find(kMethods, name);
+}
+
+const std::vector<StdlibEntry>* receiverMemberDocs(std::string_view receiver) {
+    if (receiver == "math") {
+        return &allMathMemberDocs();
+    }
+    if (receiver == "coroutine") {
+        return &allCoroutineMemberDocs();
+    }
+    if (receiver == "task") {
+        static const std::vector<StdlibEntry> v(kTask.begin(), kTask.end());
+        return &v;
+    }
+    return nullptr;
+}
+
+const StdlibEntry* receiverMemberDoc(std::string_view receiver,
+                                     std::string_view name) {
+    const std::vector<StdlibEntry>* docs = receiverMemberDocs(receiver);
+    if (docs == nullptr) {
+        return nullptr;
+    }
+    return find(*docs, name);
 }
 
 const std::vector<StdlibEntry>& allGlobalDocs() {

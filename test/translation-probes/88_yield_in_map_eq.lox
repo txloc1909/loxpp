@@ -1,0 +1,31 @@
+// A yield in __eq__ while a map operation calls it, here on a hash
+// collision, is a yield across a native callback (spec/04-semantics.md,
+// yield Expression): it raises the catchable YieldAcrossNativeError, also in
+// the main task outside every coroutine.
+class K {
+    init(n) {
+        this.n = n;
+    }
+    __hash__() {
+        return 1;
+    }
+    __eq__(other) {
+        var v = yield 1;
+        print "eq got " + str(v);
+        return this.n == other.n;
+    }
+}
+
+var m = {};
+m[K(1)] = "a";
+try {
+    m[K(2)] = "b";
+    print "set";
+} catch (e) {
+    print e.kind;
+}
+print "after";
+
+// STATUS: ok
+// CHECK: YieldAcrossNativeError
+// CHECK: after

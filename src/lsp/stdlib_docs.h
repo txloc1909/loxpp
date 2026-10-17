@@ -36,6 +36,17 @@ struct StdlibEntry {
 // A `coroutine.<name>` member (`create`).
 [[nodiscard]] const StdlibEntry* coroutineMemberDoc(std::string_view name);
 
+// The members of a global object that a receiver name reaches (`math`,
+// `coroutine`, `task`), or nullptr for any other receiver. Completion, hover,
+// and signature help all ask this one lookup, so a global object has docs in
+// all three or in none.
+[[nodiscard]] const std::vector<StdlibEntry>*
+receiverMemberDocs(std::string_view receiver);
+
+// One member of such a global object, or nullptr.
+[[nodiscard]] const StdlibEntry* receiverMemberDoc(std::string_view receiver,
+                                                   std::string_view name);
+
 // A built-in Map or File method (`keys`, `readline`, ...). Map and File method
 // names do not overlap each other, the math members, or the globals. Includes
 // the Coroutine methods `resume` and `status`.
