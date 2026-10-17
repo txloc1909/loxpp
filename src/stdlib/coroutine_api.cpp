@@ -12,7 +12,7 @@
 // runtime error. The call does not run fn.
 static Value coroutineCreateNative(int /*argCount*/, Value* argv) {
     Value fn = argv[0];
-    if (!isClosure(fn) && !isBoundMethod(fn)) {
+    if (!isCallableValue(fn)) {
         nativeRuntimeError("coroutine.create expects a function.");
         return from<Nil>(Nil{});
     }

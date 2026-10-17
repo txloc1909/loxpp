@@ -221,8 +221,7 @@ static Value callMethodNative(int argCount, Value* argv) {
             "callMethod does not support class or enum constructor values.");
         return from<Nil>(Nil{});
     }
-    if (!isNative(callee) && !isBoundNative(callee) && !isClosure(callee) &&
-        !isBoundMethod(callee)) {
+    if (!isCallableValue(callee)) {
         nativeRuntimeError("callMethod requires a callable value.");
         return from<Nil>(Nil{});
     }

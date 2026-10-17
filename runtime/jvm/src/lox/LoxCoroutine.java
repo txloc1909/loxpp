@@ -39,7 +39,7 @@ public final class LoxCoroutine {
 
     static LoxCoroutine currentOrNull() { return CURRENT.get(); }
 
-    private final Object callee; // LoxClosure or LoxBoundMethod (coroutine.create)
+    private final Object callee; // LoxClosure, LoxBoundMethod, or LoxNative (coroutine.create)
     // A coroutine is not a message, so it runs only on the worker that made
     // it; its thread binds to that worker.
     private final LoxWorker worker = LoxWorker.current();
@@ -259,7 +259,9 @@ public final class LoxCoroutine {
 
     private void checkFirstArity(Object[] args) {
         int arity = arityOf(callee);
-        if (args.length == arity) {
+        // A native with arity -1 is variadic (LoxNative.arity): any count is
+        // accepted, matching Runtime::callNative's `arity != -1` guard.
+        if (arity == -1 || args.length == arity) {
             return;
         }
         String message = "Expected " + arity + " arguments but got " +
@@ -278,6 +280,9 @@ public final class LoxCoroutine {
         }
         if (callee instanceof LoxBoundMethod) {
             return ((LoxBoundMethod)callee).method.arity;
+        }
+        if (callee instanceof LoxNative) {
+            return ((LoxNative)callee).arity;
         }
         return 0; // coroutine.create rejects every other callee kind
     }

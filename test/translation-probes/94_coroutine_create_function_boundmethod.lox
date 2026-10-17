@@ -1,0 +1,29 @@
+// coroutine.create accepts every Function and every BoundMethod, not only a
+// user closure (spec/05-stdlib.md, coroutine.create; issue #608). A native
+// function (clock) and a bound native method (m.keys) each make a valid
+// coroutine: the first resume calls them with the resume's arguments and the
+// resume returns their result. type() checks the result kind, so the exact
+// clock value (which is not reproducible) never appears in the output.
+fun closureEntry() {
+    return "closure-result";
+}
+
+var m = {"k": 1};
+
+var co1 = coroutine.create(clock);                                     // native Function
+print co1.status();
+print type(co1.resume());
+print co1.status();
+
+var co2 = coroutine.create(closureEntry);                              // user closure
+print co2.resume();
+
+var co3 = coroutine.create(m.keys);                                    // bound native method
+print type(co3.resume());
+
+// STATUS: ok
+// CHECK: suspended
+// CHECK: Number
+// CHECK: dead
+// CHECK: closure-result
+// CHECK: List

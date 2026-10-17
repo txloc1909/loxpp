@@ -31,7 +31,7 @@ static Value taskSpawnNative(int /*argCount*/, Value* argv) {
         return from<Nil>(Nil{});
     }
     Value fn = argv[0];
-    if (!isClosure(fn) && !isBoundMethod(fn)) {
+    if (!isCallableValue(fn)) {
         nativeRuntimeError("task.spawn expects a function.");
         return from<Nil>(Nil{});
     }
