@@ -12,18 +12,47 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * <p><b>Threads.</b> The main task runs on the thread that runs the
  * generated {@code main}. The first task of every other worker runs on a
- * platform thread of its own, so a task that computes without a suspend
- * point cannot hold back another worker by holding a carrier of the
- * virtual-thread pool. A task of {@code task.spawn} runs on a virtual
- * thread, as a coroutine does. Only one task of a worker runs at a time: a
- * task that suspends gives control to the head of the run queue directly
- * ({@link #switchTo}), and no scheduler thread exists.
+ * platform thread of its own. A task of {@code task.spawn} runs on a
+ * virtual thread, as a coroutine does. The default carrier pool has one
+ * carrier for each processor, and a CPU-bound virtual task keeps its
+ * carrier, so the pool is raised to the JDK maximum (see the static block
+ * below): a suspended task holds no carrier, and a task that computes does
+ * not stop the ready task of another worker. Only one task of a worker
+ * runs at a time: a task that suspends gives control to the head of the
+ * run queue directly ({@link #switchTo}), and no scheduler thread exists.
  *
  * <p><b>Lock.</b> {@link #LOCK} guards the run queues, the task states, the
  * mailboxes, and the idle counts of every worker. One lock keeps the
  * deadlock check simple: it reads the state of every worker in one step.
  */
 final class LoxWorker {
+    // The JDK reads both properties once, when it starts the first virtual
+    // thread, so this block must run before that point. The generated
+    // LoxMain calls LoxRuntime.init(), which reads LoxWorker.MAIN, so this
+    // class initializes and runs the block before the script. The first
+    // virtual thread starts later, in switchTo or LoxCoroutine.resume.
+    //
+    // The virtual-thread scheduler has one carrier for each processor by
+    // default. A CPU-bound virtual task keeps its carrier, so a program with
+    // more CPU-bound tasks than processors can stop a ready task on another
+    // worker (spec/04-semantics.md, Suspend Points). Raise the pool to the
+    // largest value a ForkJoinPool accepts. The pool creates a carrier only
+    // for a mounted task, so a suspended task still costs no host thread,
+    // and the value is a maximum, not a reservation. A caller can set either
+    // property to override the value.
+    static {
+        if (System.getProperty(
+                "jdk.virtualThreadScheduler.parallelism") == null) {
+            System.setProperty(
+                "jdk.virtualThreadScheduler.parallelism", "32767");
+        }
+        if (System.getProperty(
+                "jdk.virtualThreadScheduler.maxPoolSize") == null) {
+            System.setProperty(
+                "jdk.virtualThreadScheduler.maxPoolSize", "32767");
+        }
+    }
+
     static final ReentrantLock LOCK = new ReentrantLock();
 
     // Guarded by LOCK. A worker is live from its spawn until its last task

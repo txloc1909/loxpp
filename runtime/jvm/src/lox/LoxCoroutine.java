@@ -7,11 +7,13 @@ import java.util.concurrent.SynchronousQueue;
  * {@code coroutine.create(fn)}; runs one function at a time and can pause at a
  * {@code yield}.
  *
- * <p>The JVM backend has no stack-copying primitive, so a coroutine is a JDK
- * 21 virtual thread: the whole Lox call chain stays live on that thread's own
- * (heap-mounted) stack while the coroutine is suspended, and no frame has to be
- * frozen or rebased. Only the handoff between the resumer and the coroutine
- * crosses threads.
+ * <p>The JVM backend has no stack-copying primitive, so a coroutine is a
+ * virtual thread: the whole Lox call chain stays live on that thread's own
+ * (heap-mounted) stack while the coroutine is suspended, and no frame has
+ * to be frozen or rebased. The carrier pool of {@link LoxWorker} is raised
+ * from the processor count, so a CPU-bound coroutine does not stop a ready
+ * task on another worker (spec/04-semantics.md, Suspend Points). Only the
+ * handoff between the resumer and the coroutine crosses threads.
  *
  * <p><b>Handoff.</b> Two zero-capacity queues rendezvous each turn:
  * {@code toCoroutine} carries the resumer's next value into the coroutine, and

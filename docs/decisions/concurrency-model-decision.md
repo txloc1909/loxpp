@@ -462,7 +462,7 @@ itself is a later decision with a measurement.
 |---|---|---|
 | Native VM | The whole model. | Workers are `Runtime` instances on threads; tasks are the coroutines of #523; copy and mailbox are runtime code. No concurrent GC. |
 | QBE | Code generation only; it links the native runtime. | A program with tasks contains `yield`, so it compiles in coroutine mode and pays about 6 ns per call. Accepted for an experiment. The whole-program rule stays a stopgap (design-tensions T1). |
-| JVM | The model as a semantic oracle: observable output must match. | One runtime instance per worker on one Java thread, which means the static runtime state becomes per instance; tasks stay virtual threads; copy by the same rules. Host threads give it nothing extra, because it is not shipped. |
+| JVM | The model as a semantic oracle: observable output must match. | One runtime instance per worker, which means the static runtime state becomes per instance; tasks and coroutines stay virtual threads, and the runtime raises the carrier pool from the processor count to the largest value a `ForkJoinPool` accepts, so a suspended task costs no host thread and a computing task gets a carrier (the constraint under "Constraints from named bug classes"); copy by the same rules. Host threads give it nothing extra, because it is not shipped. |
 | Bootstrap interpreter | Runs the language and matches native on observable output. | Tasks are host coroutines, as today. A worker is a host worker that runs a second interpreter over the same source, or, as the implementation-gated exception named in `spec/`, a coroutine on one thread. Parallel speed-up is not observable output, so the second form conforms. |
 
 ### Re-score of criteria 2 and 5 under the backend roles
@@ -583,6 +583,21 @@ and continues with `nil`, and its main task needs no driver. *Shared layer:*
 (`src/backend/qbe_emitter.h`), the one test that the front end and
 `tools/qbe_emit_program.cpp` call. A new suspend point in the spec's table
 must be added to it.
+
+**A carrier per processor.** *Bug class:* a virtual thread that computes
+without reaching a suspend point keeps its carrier. The default carrier pool
+has one carrier for each processor, so a program with more CPU-bound virtual
+tasks than processors leaves the ready task of another worker without a
+carrier. That task does not run, though the spec says that a computing task
+stops only the tasks of its own worker. *Constraint:* on the JVM the carrier
+pool grows from the processor count to the largest value a `ForkJoinPool`
+accepts, through the two scheduler properties that `LoxWorker` sets, so a
+mounted task gets a carrier and a suspended task holds none. The pool cap is
+a host-thread limit: a program with more than 32767 tasks that compute at
+the same time needs more host threads than the JDK scheduler can make.
+*Shared layer:* the `LoxWorker` static initializer that sets the properties,
+and the two thread-creation sites, `LoxWorker.switchTo` and
+`LoxCoroutine.resume`.
 
 ### What this unblocks and in which order
 

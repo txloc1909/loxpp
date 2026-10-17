@@ -1,0 +1,51 @@
+// A coroutine that computes without reaching a suspend point stops only the
+// tasks of its own worker (spec/04-semantics.md, Suspend Points). This
+// program starts 64 workers and each worker resumes one coroutine that sends
+// once and then computes for ever. The main task must receive one message
+// from every worker. A backend that runs the coroutines on a carrier pool
+// with one carrier for each processor never starts the coroutines beyond the
+// processor count, so the main task waits for ever: the TIMEOUT below
+// catches that.
+//
+// The count is 64. That is more than the processor count of current CI
+// runners, so the probe fails before the fix there. On a machine with 64 or
+// more processors the probe passes before the fix too, and it cannot show
+// that defect. The code change does not depend on the processor count.
+//
+// The CHECK lines do not bind the bootstrap interpreter. It runs every
+// worker on one host thread under the implementation-gated exception of
+// spec/04-semantics.md, rule 1: "A task runs alone among the tasks of every
+// worker from one suspend point to the next, not only among the tasks of its
+// own worker." The probe on the NOT-BINDING line holds the bootstrap to that
+// rule in place of this one.
+// NOT-BINDING: bootstrap bootstrap-only/cpu_bound_work_blocks_all_workers.lox
+
+var main = task.self();
+
+fun entry(main) {
+    fun body() {
+        task.send(main, "ready");
+        var i = 0;
+        while (true) {
+            i = i + 1;
+        }
+    }
+    var co = coroutine.create(body);
+    co.resume();
+}
+
+var n = 0;
+while (n < 64) {
+    task.spawn_worker(entry, main);
+    n = n + 1;
+}
+n = 0;
+while (n < 64) {
+    task.receive();
+    n = n + 1;
+}
+print n;
+
+// STATUS: ok
+// TIMEOUT: 20
+// CHECK: 64
