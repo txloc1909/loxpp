@@ -903,7 +903,7 @@ public final class LoxOps {
             if (k == target) {
                 return true;
             }
-            k = k.superclass;
+            k = k.superclass();
         }
         return false;
     }
