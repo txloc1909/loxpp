@@ -165,34 +165,40 @@ Runtime* rt_startup(const char* source, const RtFunctionDesc* descs,
 
 void rt_shutdown(Runtime* rt) noexcept { delete rt; }
 
+Runtime::CodeAttacher
+rt_declarations_attacher(const RtFunctionDesc* descs, std::size_t nDescs,
+                         const RtFunctionDesc* declarations) {
+    // Runs on each worker's thread: it reads only the two tables, which
+    // nothing writes.
+    return [descs, nDescs, declarations](ObjFunction* script) {
+        try {
+            DecodedFunction tree = decodeFunctionTree(script);
+            // The declarations-only compile keeps every constant pool, so
+            // each nested function has the id and the chunk of the full
+            // compile. Only the root differs.
+            if (!rt_attach_code(tree, *declarations)) {
+                return false;
+            }
+            for (std::size_t i = 0; i < nDescs; i++) {
+                if (std::string(descs[i].id) != tree.id &&
+                    !rt_attach_code(tree, descs[i])) {
+                    return false;
+                }
+            }
+            return allFunctionsHaveCode(tree);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "rt_declarations_attacher: %s\n", e.what());
+            return false;
+        }
+    };
+}
+
 int rt_run_tasks(Runtime* rt, const RtFunctionDesc* descs, std::size_t nDescs,
                  const RtFunctionDesc* declarations) noexcept {
     try {
         if (declarations != nullptr) {
-            // Runs on each worker's thread: it reads only the two tables,
-            // which nothing writes.
             rt->setCodeAttacher(
-                [descs, nDescs, declarations](ObjFunction* script) {
-                    try {
-                        DecodedFunction tree = decodeFunctionTree(script);
-                        // The declarations-only compile keeps every constant
-                        // pool, so each nested function has the id and the
-                        // chunk of the full compile. Only the root differs.
-                        if (!rt_attach_code(tree, *declarations)) {
-                            return false;
-                        }
-                        for (std::size_t i = 0; i < nDescs; i++) {
-                            if (std::string(descs[i].id) != tree.id &&
-                                !rt_attach_code(tree, descs[i])) {
-                                return false;
-                            }
-                        }
-                        return allFunctionsHaveCode(tree);
-                    } catch (const std::exception& e) {
-                        std::fprintf(stderr, "rt_run_tasks: %s\n", e.what());
-                        return false;
-                    }
-                });
+                rt_declarations_attacher(descs, nDescs, declarations));
         }
         Value script = rt->stackBase()[0];
         if (rt->stackDepth() != 1 || !isClosure(script)) {

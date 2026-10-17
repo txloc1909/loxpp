@@ -24,6 +24,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 
 class Runtime;
 
@@ -387,3 +388,15 @@ int rt_yield(Runtime* rt, int stopAtFrameCount) noexcept;
 // after writing a diagnostic to stderr, on a missing id or any mismatch.
 bool rt_attach_code(const DecodedFunction& root,
                     const RtFunctionDesc& desc) noexcept;
+
+// Not part of the extern "C" ABI either: the code attacher that
+// rt_run_tasks() gives a Runtime for its workers (Runtime::CodeAttacher,
+// Runtime::setCodeAttacher).
+// Given the root of a declarations-only compile, it attaches `declarations`
+// to that root and each entry of `descs` other than the root "0" to the
+// function of the same id, with rt_attach_code()'s checks. It fails, after a
+// diagnostic on stderr, on a mismatch or when a function is left with no
+// code. Exposed for this node's own tests.
+std::function<bool(ObjFunction*)>
+rt_declarations_attacher(const RtFunctionDesc* descs, std::size_t nDescs,
+                         const RtFunctionDesc* declarations);
