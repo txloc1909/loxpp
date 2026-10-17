@@ -1,0 +1,24 @@
+// task.spawn accepts every Function and every BoundMethod, not only a
+// user closure (spec/04-semantics.md, task.spawn step 1; issue #608). A
+// native function (clock) and a bound native method (m.keys) are each a
+// valid entry: the spawned task calls them with no arguments and discards
+// the result. The closure entry sends to the main task, so the receive
+// below proves all three spawns were accepted (a rejected one would end the
+// program before the receive) and that the spawned tasks ran.
+var main = task.self();
+
+fun closureEntry() {
+    print "closure-ran";
+    task.send(main, "done");
+}
+
+var m = {"k": 1};
+
+task.spawn(clock);                                                     // native Function
+task.spawn(m.keys);                                                    // bound native method
+task.spawn(closureEntry);                                              // user closure
+print task.receive();
+
+// STATUS: ok
+// CHECK: closure-ran
+// CHECK: done
