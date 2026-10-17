@@ -1,0 +1,226 @@
+// credit_channel.lox - a bounded channel in user space, over the task primitive.
+//
+// A mailbox has no bound: task.send never waits and never fails for lack of
+// room (spec/04-semantics.md, task.send). A producer that runs faster than
+// its consumer makes the consumer's mailbox grow without limit. The credit
+// channel below is the bound, written in Lox++ over task.send and
+// task.receive. It is the form to use on every edge where a producer can
+// outrun its consumer (spec/04-semantics.md, Bounding a Mailbox).
+//
+// The library text between the two marker lines is also in
+// test/translation-probes/90_credit_channel_bound.lox and
+// 91_credit_channel_deadlock.lox; tools/check_credit_channel_copies.py
+// fails when the copies differ.
+//
+// The last section uses the library for a real job: a producer on a second
+// worker finds the primes below a limit and streams them over a channel of
+// capacity 8; the main task counts and sums them, and finds the largest gap.
+
+// --- credit channel library: begin ---------------------------------------
+//
+// A channel with a capacity N from one producer task to one consumer task,
+// over task.send and task.receive. A mailbox has no bound, so this protocol
+// is what bounds the memory of the edge:
+//
+//   1. The consumer makes a Receiver. It sends Grant(N) to the producer.
+//   2. The producer sends Item(value) only while it holds a credit. With no
+//      credit it waits on its own task.receive() for one, never on the queue
+//      of another task.
+//   3. The consumer returns one Credit after each Item it takes.
+//   4. close() waits on the producer's own receive until every credit is
+//      back, then sends Closed. So the producer is alive for every Credit
+//      the consumer sends, and no send of the protocol raises DeadTaskError.
+//
+// After the grant, the items the consumer has not taken, plus the credits
+// the producer has not taken, plus the credits it holds, is N at all times.
+// So the mailbox of the consumer holds at most N messages of the channel (it
+// gets Closed only when no item is outstanding), and the mailbox of the
+// producer holds at most N.
+//
+// A task that holds an end must not take other messages from its mailbox
+// while the channel is open: an end takes every message of the mailbox, and
+// a message that is not of the channel is an error.
+
+enum Chan { Grant(capacity) Item(value) Credit Closed }
+
+fun chanUnexpected(msg) {
+    throw "credit channel: unexpected message " + str(msg);
+}
+
+fun chanValue(item) {
+    var value = match item {
+        case Item(v) => v
+        case _ => chanUnexpected(item)
+    };
+    return value;
+}
+
+class Sender {
+    init(consumer) {
+        this.consumer = consumer;
+        this.capacity = nil;
+        this.credits = 0;
+    }
+
+    // Sends value to the consumer. Waits for a credit when it holds none.
+    send(value) {
+        while (this.credits == 0) {
+            this.takeControl();
+        }
+        task.send(this.consumer, Item(value));
+        this.credits = this.credits - 1;
+    }
+
+    // Waits until the consumer has taken every item, then ends the channel.
+    close() {
+        while (this.capacity == nil or this.credits < this.capacity) {
+            this.takeControl();
+        }
+        task.send(this.consumer, Closed());
+    }
+
+    takeControl() {
+        var msg = task.receive();
+        var gained = match msg {
+            case Grant(capacity) => this.granted(capacity)
+            case Credit => 1
+            case _ => chanUnexpected(msg)
+        };
+        this.credits = this.credits + gained;
+    }
+
+    granted(capacity) {
+        this.capacity = capacity;
+        return capacity;
+    }
+}
+
+class Receiver {
+    init(producer, capacity) {
+        if (capacity < 1) {
+            throw "credit channel: capacity must be at least 1";
+        }
+        this.producer = producer;
+        this.closed = false;
+        task.send(producer, Grant(capacity));
+    }
+
+    // Returns Item(value) for the next item, or Closed when the channel has
+    // ended. Waits when no item is in the mailbox.
+    receive() {
+        if (this.closed) {
+            return Closed();
+        }
+        var msg = task.receive();
+        var taken = match msg {
+            case Item(value) => this.took(msg)
+            case Closed => this.ended(msg)
+            case _ => chanUnexpected(msg)
+        };
+        return taken;
+    }
+
+    // Calls fn on each item value, in order, until the channel ends.
+    each(fn) {
+        var msg = this.receive();
+        while (!this.closed) {
+            fn(chanValue(msg));
+            msg = this.receive();
+        }
+    }
+
+    took(msg) {
+        task.send(this.producer, Credit());
+        return msg;
+    }
+
+    ended(msg) {
+        this.closed = true;
+        return msg;
+    }
+}
+
+// --- credit channel library: end -----------------------------------------
+
+// --- a producer-consumer job ---------------------------------------------
+
+enum Job { PrimesBelow(consumer, limit) }
+
+fun isPrime(n) {
+    if (n < 2) {
+        return false;
+    }
+    var d = 2;
+    while (d * d <= n) {
+        if (n % d == 0) {
+            return false;
+        }
+        d = d + 1;
+    }
+    return true;
+}
+
+fun producePrimes(consumer, limit) {
+    var tx = Sender(consumer);
+    var n = 2;
+    while (n < limit) {
+        if (isPrime(n)) {
+            tx.send(n);
+        }
+        n = n + 1;
+    }
+    tx.close();
+}
+
+// The entry of the producer's worker. It reads no top-level var: a new
+// worker does not run the top-level var declarations.
+fun primeWorker(job) {
+    match job {
+        case PrimesBelow(consumer, limit) => producePrimes(consumer, limit)
+    };
+}
+
+var CAPACITY = 8;
+var LIMIT = 2000;
+
+var count = 0;
+var sum = 0;
+var last = nil;
+var gap = 0;
+var gapAfter = nil;
+var twins = 0;
+var mostPending = 0;
+
+fun record(p) {
+    count = count + 1;
+    sum = sum + p;
+    if (last != nil) {
+        if (p - last > gap) {
+            gap = p - last;
+            gapAfter = last;
+        }
+        if (p - last == 2) {
+            twins = twins + 1;
+        }
+    }
+    last = p;
+    if (task.pending() > mostPending) {
+        mostPending = task.pending();
+    }
+}
+
+var producer = task.spawn_worker(primeWorker, PrimesBelow(task.self(), LIMIT));
+var rx = Receiver(producer, CAPACITY);
+rx.each(record);
+
+print "primes below " + str(LIMIT) + ": " + str(count);
+print "sum: " + str(sum);
+print "largest gap: " + str(gap) + " after " + str(gapAfter);
+print "twin pairs: " + str(twins);
+print "mailbox within capacity: " + str(mostPending <= CAPACITY);
+
+// CHECK: primes below 2000: 303
+// CHECK: sum: 277050
+// CHECK: largest gap: 34 after 1327
+// CHECK: twin pairs: 61
+// CHECK: mailbox within capacity: true

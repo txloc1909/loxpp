@@ -1,0 +1,180 @@
+// A producer with no credit waits on its own task.receive(), never on the
+// queue of another task (spec/04-semantics.md, Bounding a Mailbox). The
+// consumer grants N = 3 credits and then takes items with a plain
+// task.receive(), so it never returns a credit. The producer sends 3 items
+// and waits for a credit before the 4th. The consumer takes the 3 items and
+// waits for a 4th. No task can run again, so the program ends with
+// DeadlockError (spec/04-semantics.md, Deadlock), which no try catches: the
+// deadlock detector and the protocol agree. test/test_task.cpp checks that
+// the native report names both tasks. The library text is the one in
+// examples/credit_channel.lox (tools/check_credit_channel_copies.py).
+
+// --- credit channel library: begin ---------------------------------------
+//
+// A channel with a capacity N from one producer task to one consumer task,
+// over task.send and task.receive. A mailbox has no bound, so this protocol
+// is what bounds the memory of the edge:
+//
+//   1. The consumer makes a Receiver. It sends Grant(N) to the producer.
+//   2. The producer sends Item(value) only while it holds a credit. With no
+//      credit it waits on its own task.receive() for one, never on the queue
+//      of another task.
+//   3. The consumer returns one Credit after each Item it takes.
+//   4. close() waits on the producer's own receive until every credit is
+//      back, then sends Closed. So the producer is alive for every Credit
+//      the consumer sends, and no send of the protocol raises DeadTaskError.
+//
+// After the grant, the items the consumer has not taken, plus the credits
+// the producer has not taken, plus the credits it holds, is N at all times.
+// So the mailbox of the consumer holds at most N messages of the channel (it
+// gets Closed only when no item is outstanding), and the mailbox of the
+// producer holds at most N.
+//
+// A task that holds an end must not take other messages from its mailbox
+// while the channel is open: an end takes every message of the mailbox, and
+// a message that is not of the channel is an error.
+
+enum Chan { Grant(capacity) Item(value) Credit Closed }
+
+fun chanUnexpected(msg) {
+    throw "credit channel: unexpected message " + str(msg);
+}
+
+fun chanValue(item) {
+    var value = match item {
+        case Item(v) => v
+        case _ => chanUnexpected(item)
+    };
+    return value;
+}
+
+class Sender {
+    init(consumer) {
+        this.consumer = consumer;
+        this.capacity = nil;
+        this.credits = 0;
+    }
+
+    // Sends value to the consumer. Waits for a credit when it holds none.
+    send(value) {
+        while (this.credits == 0) {
+            this.takeControl();
+        }
+        task.send(this.consumer, Item(value));
+        this.credits = this.credits - 1;
+    }
+
+    // Waits until the consumer has taken every item, then ends the channel.
+    close() {
+        while (this.capacity == nil or this.credits < this.capacity) {
+            this.takeControl();
+        }
+        task.send(this.consumer, Closed());
+    }
+
+    takeControl() {
+        var msg = task.receive();
+        var gained = match msg {
+            case Grant(capacity) => this.granted(capacity)
+            case Credit => 1
+            case _ => chanUnexpected(msg)
+        };
+        this.credits = this.credits + gained;
+    }
+
+    granted(capacity) {
+        this.capacity = capacity;
+        return capacity;
+    }
+}
+
+class Receiver {
+    init(producer, capacity) {
+        if (capacity < 1) {
+            throw "credit channel: capacity must be at least 1";
+        }
+        this.producer = producer;
+        this.closed = false;
+        task.send(producer, Grant(capacity));
+    }
+
+    // Returns Item(value) for the next item, or Closed when the channel has
+    // ended. Waits when no item is in the mailbox.
+    receive() {
+        if (this.closed) {
+            return Closed();
+        }
+        var msg = task.receive();
+        var taken = match msg {
+            case Item(value) => this.took(msg)
+            case Closed => this.ended(msg)
+            case _ => chanUnexpected(msg)
+        };
+        return taken;
+    }
+
+    // Calls fn on each item value, in order, until the channel ends.
+    each(fn) {
+        var msg = this.receive();
+        while (!this.closed) {
+            fn(chanValue(msg));
+            msg = this.receive();
+        }
+    }
+
+    took(msg) {
+        task.send(this.producer, Credit());
+        return msg;
+    }
+
+    ended(msg) {
+        this.closed = true;
+        return msg;
+    }
+}
+
+// --- credit channel library: end -----------------------------------------
+
+// --- the probe -----------------------------------------------------------
+
+var consumer = task.self();
+
+fun producer() {
+    var tx = Sender(consumer);
+    var i = 1;
+    while (i <= 5) {
+        print "send " + str(i);
+        tx.send(i);
+        print "sent " + str(i);
+        i = i + 1;
+    }
+    print "producer closes";
+    tx.close();
+}
+
+// DeadlockError is fatal, so the catch block and the line after the try do
+// not run. Any catchable fault in its place, such as a wrong message that
+// chanValue rejects, prints a line that the CHECK lines do not allow.
+Receiver(task.spawn(producer), 3);
+try {
+    while (true) {
+        var msg = task.receive();
+        print "took " + str(chanValue(msg));
+    }
+} catch (e) {
+    print "caught a fault";
+    print e.kind;
+}
+print "after the try";
+
+// STATUS: error
+// CHECK: send 1
+// CHECK: sent 1
+// CHECK: send 2
+// CHECK: sent 2
+// CHECK: send 3
+// CHECK: sent 3
+// CHECK: send 4
+// CHECK: took 1
+// CHECK: took 2
+// CHECK: took 3

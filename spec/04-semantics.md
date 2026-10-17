@@ -1679,9 +1679,27 @@ This note is not part of the specification. A mailbox has no bound, so a
 producer that sends faster than its consumer receives makes the mailbox of
 the consumer grow without limit, and `task.pending()` shows that growth.
 The bound is a library over the primitive, not a rule of the primitive: a
-credit channel, in which the consumer gives the producer a fixed number of
-credits and the producer sends only while it holds one. Issue #604 tracks
-that library.
+credit channel, in which the consumer gives the producer a fixed number N of
+credits, the producer sends only while it holds one, and the consumer
+returns one credit after each message it takes. A producer with no credit
+waits in its own `task.receive()`, never on the queue of another task, and
+the mailbox of the consumer holds at most N messages of the channel.
+`examples/credit_channel.lox` is such a library. The credit channel is the
+recommended form for every edge where a producer can outrun its consumer.
+
+A program that uses credit channels stays free of deadlock when its
+blocking waits form a directed acyclic graph of ranks. Give each task a
+rank, and let each channel go from a task of a lower rank to a task of a
+higher rank. A producer then waits only for a credit from a consumer of a
+higher rank, and only while that consumer has at least one item that it
+has not taken. This is true when the producer waits to send an item, and
+when it waits to close the channel. The task of the highest rank waits for
+no credit. So, when every consumer takes each item it gets, some task can
+always run, from the highest rank down. A cycle of channels breaks this
+rule, and then two full channels can wait on each other. A task between two
+ranks holds two ends, so its mailbox gets the items of one channel and the
+credits of the other. The library in `examples/credit_channel.lox` lets a
+task hold one end only.
 
 ---
 
