@@ -82,10 +82,11 @@ void rt_shutdown(Runtime* rt) noexcept;
 
 // Runs the program that rt_startup() left at stack slot 0 as the main task,
 // with the scheduler (Runtime::runTasks), until the main task ends. The QBE
-// front end calls this, in place of rt_call(), for every program compiled
-// in coroutine mode (qbe::needsCoroutineMode): there the main task is a
-// coroutine, as on the native VM, so a yield outside every coroutine is a
-// task switch and the task natives work.
+// front end calls this, in place of rt_call(), for every program that names
+// `task` (qbe::treeUsesTasks): there the main task is a coroutine, as on the
+// native VM, so it can switch to another task and the task natives work.
+// Such a program is also in coroutine mode (qbe::needsCoroutineMode), which
+// the driver needs.
 //
 // `declarations` is the compiled root of the program's declarations-only
 // compile, or nullptr when the program cannot spawn a worker. When it is

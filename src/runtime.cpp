@@ -223,13 +223,15 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
         m_frameResultOverrideSet[frameIndex] = true;
     }
     auto code = reinterpret_cast<RtCompiledFn>(closure->function->code);
-    // The code runs to completion on this C++ frame, so it is a re-entrant
-    // run, as runReentrantFrame() is for an interpreted callee: a task
-    // switch inside it would lose this continuation (taskCanSuspend()). The
-    // coroutine driver never calls this; it runs frames with no C++ caller.
-    ++m_reentrantRunDepth;
     int status = code(this, frame->slots);
-    --m_reentrantRunDepth;
+    while (status == kRtYield && m_currentCoroutine == nullptr) {
+        // yieldOp() allowed a yield outside every coroutine with no scheduler:
+        // the task switch finds no other task, so this frame continues at its
+        // resume point, and the yield evaluates to nil.
+        pop();
+        push(from<Nil>(Nil{}));
+        status = code(this, frame->slots);
+    }
     if (status == kRtFatal) {
         // The compiled callee already reported a fatal error through
         // runtimeError() (rt_abi.h's own contract on RtCompiledFn), which
@@ -364,18 +366,15 @@ Runtime::OpResult Runtime::runPushedFrameToCompletion(int entry) {
 Runtime::OpResult Runtime::reentrantCall(int argCount, int throwBoundary) {
     // A re-entrant call (a deferred-call drain, a native's synchronous call
     // back into Lox) must run to completion before its C++ caller resumes. It
-    // cannot be suspended through, so coroutine mode is cleared around it:
-    // opCall runs the callee directly, and a YIELD inside is rejected by the
-    // existing m_reentrantRunDepth check.
-    bool savedResumable = m_resumableMode;
-    m_resumableMode = false;
+    // cannot be suspended through: opCall runs the callee directly, and a
+    // YIELD inside is rejected by the m_reentrantRunDepth check.
+    SynchronousRun run(*this);
     // The nested run() must stop once the frame this call pushes (if any) has
     // returned — i.e. when m_frameCount falls back to this call's own entry
     // depth. Captured before opCall() can push anything.
     int entry = m_frameCount;
     OpResult result = opCall(argCount, throwBoundary);
     if (result != OpResult::Resumed) {
-        m_resumableMode = savedResumable;
         return result; // OK (value on stack), Stop, or Fatal
     }
     // Resumed means opCall() pushed a frame (ThrowOutcome::Pushed) or a throw
@@ -383,12 +382,9 @@ Runtime::OpResult Runtime::reentrantCall(int argCount, int throwBoundary) {
     // leaves a frame of ours to run; tell them apart by frame depth, exactly
     // as runPendingDefers() does.
     if (m_frameCount != entry + 1) {
-        m_resumableMode = savedResumable;
         return OpResult::Resumed;
     }
-    OpResult r = runPushedFrameToCompletion(entry);
-    m_resumableMode = savedResumable;
-    return r;
+    return runPushedFrameToCompletion(entry);
 }
 
 bool Runtime::runNestedLoop(int entry) {
@@ -2608,17 +2604,18 @@ std::optional<uint32_t> Runtime::hashMapKey(const Value& key,
     push(key);
     Value* frameSlots = stackTop - 1;
     int entry = m_frameCount;
-    // __hash__ is a native-callback context (runReentrantFrame below): a
-    // yield inside it is illegal, and its result must be synchronous. Clear
-    // coroutine mode so dispatchMethod runs it directly, not as a driver call.
-    bool savedResumable = m_resumableMode;
-    m_resumableMode = false;
-    OpResult r = dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
-                                stopAtFrameCount, ResultCheck::Number);
-    if (r == OpResult::Resumed && m_frameCount == entry + 1) {
-        r = runReentrantFrame(entry, frameSlots, stopAtFrameCount);
+    // __hash__ is a native-callback context: a yield inside it is illegal,
+    // and its result must be synchronous, so dispatchMethod runs it directly,
+    // not as a driver call.
+    OpResult r = OpResult::OK;
+    {
+        SynchronousRun run(*this);
+        r = dispatchMethod(asObjClosure(as<Obj*>(method)), 0, stopAtFrameCount,
+                           ResultCheck::Number);
+        if (r == OpResult::Resumed && m_frameCount == entry + 1) {
+            r = runReentrantFrame(entry, frameSlots, stopAtFrameCount);
+        }
     }
-    m_resumableMode = savedResumable;
     if (r != OpResult::OK) {
         m_mapKeyStatus = r;
         return std::nullopt;
@@ -2655,14 +2652,15 @@ bool Runtime::mapKeyEq(const Value& stored, const Value& lookup,
             Value* frameSlots = stackTop - 2;
             int entry = m_frameCount;
             // __eq__ for a map key: same native-callback context as __hash__.
-            bool savedResumable = m_resumableMode;
-            m_resumableMode = false;
-            OpResult r = dispatchMethod(asObjClosure(as<Obj*>(method)), 1,
-                                        stopAtFrameCount, ResultCheck::Boolean);
-            if (r == OpResult::Resumed && m_frameCount == entry + 1) {
-                r = runReentrantFrame(entry, frameSlots, stopAtFrameCount);
+            OpResult r = OpResult::OK;
+            {
+                SynchronousRun run(*this);
+                r = dispatchMethod(asObjClosure(as<Obj*>(method)), 1,
+                                   stopAtFrameCount, ResultCheck::Boolean);
+                if (r == OpResult::Resumed && m_frameCount == entry + 1) {
+                    r = runReentrantFrame(entry, frameSlots, stopAtFrameCount);
+                }
             }
-            m_resumableMode = savedResumable;
             if (r != OpResult::OK) {
                 m_mapKeyStatus = r;
                 return false;
@@ -3161,10 +3159,21 @@ Runtime::OpResult Runtime::opIterNext() {
 Runtime::OpResult Runtime::yieldOp(int stopAtFrameCount) {
     // The compiled frame returns kRtYield only when this returns OK.
     if (m_currentCoroutine == nullptr) {
-        // Every task runs in its own coroutine (runTasks), so a yield always
-        // has one to suspend, as Op::YIELD requires in the interpreter.
-        runtimeError("BUG: yield with no task running.");
-        return OpResult::Fatal;
+        // No scheduler runs this program: the QBE entry runs a program that
+        // never names `task` with rt_call (qbe::treeUsesTasks), so it is one
+        // task and no other task can exist. A yield outside every coroutine
+        // is a task switch (spec/04-semantics.md, yield Expression), and with
+        // an empty run queue the task runs again at once: callCompiled()
+        // re-enters the frame with nil as the value. The yield raises while a
+        // native runs or a C++ caller waits for the result of Lox code (a
+        // SynchronousRun: a map key's __hash__ or __eq__, a __str__, a
+        // deferred call).
+        if (m_nativeDepth > 0 || m_reentrantRunDepth > 0) {
+            return fromThrow(raiseThrowableError(
+                "YieldAcrossNativeError",
+                "Cannot yield across a native callback.", stopAtFrameCount));
+        }
+        return OpResult::OK;
     }
     // m_resumableMode is true only while the coroutine driver runs this
     // coroutine's own frames. A compiled frame reached any other way — run
@@ -3712,16 +3721,17 @@ std::string Runtime::stringifyInstanceStr(ObjInstance* instance) {
     push(Value{static_cast<Obj*>(instance)});
     Value* frameSlots = stackTop - 1;
     int entry = m_frameCount;
-    // __str__ is a native-callback context (runReentrantFrame below): a yield
-    // inside it is illegal, and its result must be synchronous.
-    bool savedResumable = m_resumableMode;
-    m_resumableMode = false;
-    OpResult r = dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
-                                m_stringifyBoundary, ResultCheck::String);
-    if (r == OpResult::Resumed && m_frameCount == entry + 1) {
-        r = runReentrantFrame(entry, frameSlots, m_stringifyBoundary);
+    // __str__ is a native-callback context: a yield inside it is illegal,
+    // and its result must be synchronous.
+    OpResult r = OpResult::OK;
+    {
+        SynchronousRun run(*this);
+        r = dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
+                           m_stringifyBoundary, ResultCheck::String);
+        if (r == OpResult::Resumed && m_frameCount == entry + 1) {
+            r = runReentrantFrame(entry, frameSlots, m_stringifyBoundary);
+        }
     }
-    m_resumableMode = savedResumable;
     if (r != OpResult::OK) {
         m_stringifyStatus = r;
         return "...";

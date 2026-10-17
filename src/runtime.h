@@ -399,8 +399,8 @@ class Runtime {
     [[nodiscard]] bool isTopLevelFunction(const Value& fn) const;
 
     // The task that runs now, or nullptr when no scheduler runs (a compiled
-    // program with no yield and no task, which the QBE entry runs with
-    // rt_call, or a C API test).
+    // program that never names `task`, which the QBE entry runs with
+    // rt_call).
     [[nodiscard]] ObjTask* currentTask() const { return m_currentTask; }
 
     // task.spawn: a new task that calls `fn` (a Function or BoundMethod) with
@@ -616,11 +616,10 @@ class Runtime {
     // YIELD's own body in coroutine mode: the legality check for a yield
     // across a native callback. Returns OK when the yield is legal; the
     // compiled frame then returns kRtYield, and the driver suspends the
-    // coroutine. An illegal yield raises through handleThrow and returns its
-    // OpResult, exactly like any other fallible op. A yield with no task
-    // running is a fatal BUG, as in the interpreter: a compiled program that
-    // can yield runs every task, the main task included, in a coroutine
-    // (rt_run_tasks, backend/rt_capi.h).
+    // coroutine, or callCompiled() continues the frame with nil when no
+    // coroutine and no scheduler run (a task switch with no other task). An
+    // illegal yield raises through handleThrow and returns its OpResult,
+    // exactly like any other fallible op.
     OpResult yieldOp(int stopAtFrameCount);
 
     // Resumes a coroutine from ITER_HAS_NEXT. resumeCoroutine() is written for
@@ -938,6 +937,36 @@ class Runtime {
     // must not run.
     enum class WakeResult : std::uint8_t { Run, Suspended, Stop, Fatal };
     WakeResult resumeWaitingInner(ObjCoroutine* co, int entry);
+
+    // A C++ caller that needs the result of Lox code before it goes on: a
+    // deferred-call drain (reentrantCall), a map key's __hash__ or __eq__,
+    // a __str__. The code runs to completion on that C++ frame and cannot
+    // suspend. For its scope this clears coroutine mode, so a compiled callee
+    // runs in callCompiled() and not as a driver call, and counts one
+    // re-entrant run, so a yield or a receive inside raises
+    // YieldAcrossNativeError: the interpreter counts the same run in
+    // runReentrantFrame(), but callCompiled() runs a compiled callee with no
+    // such run. Every site that clears m_resumableMode for a synchronous
+    // result must use it; only callNative() does not, because m_nativeDepth
+    // counts a native, and the receive native itself must not count.
+    class SynchronousRun {
+      public:
+        explicit SynchronousRun(Runtime& rt)
+            : m_rt(rt), m_savedResumable(rt.m_resumableMode) {
+            m_rt.m_resumableMode = false;
+            ++m_rt.m_reentrantRunDepth;
+        }
+        ~SynchronousRun() {
+            --m_rt.m_reentrantRunDepth;
+            m_rt.m_resumableMode = m_savedResumable;
+        }
+        SynchronousRun(const SynchronousRun&) = delete;
+        SynchronousRun& operator=(const SynchronousRun&) = delete;
+
+      private:
+        Runtime& m_rt;
+        bool m_savedResumable;
+    };
 
     static OpResult fromThrow(ThrowOutcome outcome) {
         switch (outcome) {
@@ -1257,8 +1286,6 @@ class Runtime {
 
     // See setInterpretLoop() above.
     std::function<InterpretResult(int)> m_runLoop;
-    // See setCodeAttacher() above.
-    CodeAttacher m_attachCode;
 
     // Coroutine mode (QBE #530/#535). True only while runCompiledFrames()
     // invokes a compiled frame's code. When set, the op*() helpers push a
@@ -1287,8 +1314,7 @@ class Runtime {
 
     // Number of C++ re-entrant runs currently on the native stack — every
     // runReentrantFrame() and runPushedFrameToCompletion() invocation, and
-    // every compiled frame that callCompiled() runs to completion. A Lox
-    // frame inside one of these cannot
+    // every SynchronousRun. A Lox frame inside one of these cannot
     // be captured by a coroutine snapshot: its C++ continuation would be
     // lost. Op::YIELD raises YieldAcrossNativeError while this is nonzero.
     int m_reentrantRunDepth{0};
@@ -1307,6 +1333,9 @@ class Runtime {
     // trace's stack dump, the disassembler) still renders the default form
     // with no user-code side effect.
     int m_stringifyCanonicalDepth{0};
+
+    // See setCodeAttacher() above. Read once per worker start only.
+    CodeAttacher m_attachCode;
 
 #ifdef LOXPP_PROFILE
     ProfilerData m_profilerData;

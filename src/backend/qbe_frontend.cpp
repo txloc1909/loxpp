@@ -166,12 +166,12 @@ std::string rawDelimiter(const std::string& source) {
 // small ABI it uses, so a release tarball needs to ship libloxrt.a but not
 // the src/ include tree. rt_capi.cpp static_asserts the runtime side of that
 // layout; an end-to-end CI step compiles and runs the harness to prove it.
-// `tasks`: the program compiles in coroutine mode, so the main task runs on
-// the scheduler (rt_run_tasks). `declarations`: the compiled root of the
-// declarations-only compile, which a worker runs; only a program that names
-// `task` has one.
+// `declarations`: the compiled root of the declarations-only compile, which
+// a worker runs. Only a program that names `task` has one, and only that
+// program runs its main task on the scheduler (rt_run_tasks): any other
+// program has one task, so a task switch there finds no other task.
 std::string buildHarness(const std::string& source,
-                         const std::vector<CompiledFunction>& fns, bool tasks,
+                         const std::vector<CompiledFunction>& fns,
                          const std::optional<CompiledFunction>& declarations) {
     std::string delim = rawDelimiter(source);
     std::ostringstream h;
@@ -234,10 +234,10 @@ std::string buildHarness(const std::string& source,
     // argv[0] is the executable's own name; args() sees the rest, exactly
     // as `loxpp script.lox a b` exposes [a, b].
     h << "    rt_set_args(rt, argc > 0 ? argc - 1 : 0, argv + 1);\n";
-    if (tasks) {
+    if (declarations.has_value()) {
         h << "    int status = rt_run_tasks(rt, descs,\n";
         h << "                              sizeof(descs) / sizeof(descs[0]), "
-          << (declarations.has_value() ? "&declarations" : "nullptr") << ");\n";
+             "&declarations);\n";
         // As native's main(): a worker can still run, so no destructor runs.
         h << "    rt_end_process(status == 0 ? 0 : 70);\n";
     } else {
@@ -338,8 +338,7 @@ int runQbeTarget(const std::string& exePath, const std::string& scriptPath,
     std::string asmPath = work + "/prog.s";
     std::string harnessPath = work + "/harness.cpp";
     if (!writeFile(ssaPath, ssa) ||
-        !writeFile(harnessPath, buildHarness(source, fns, options.coroutineMode,
-                                             declarations))) {
+        !writeFile(harnessPath, buildHarness(source, fns, declarations))) {
         std::fprintf(stderr,
                      "loxpp --target qbe: cannot write files under %s\n",
                      work.c_str());

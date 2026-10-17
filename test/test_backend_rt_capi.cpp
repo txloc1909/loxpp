@@ -881,18 +881,17 @@ TEST(RunCompiledFrames, EmptyRangeReturnsTrue) {
     EXPECT_TRUE(rt.runCompiledFrames(0));
 }
 
-// Every task runs in a coroutine, so a yield always has one to suspend. A
-// yield with no task running means the program did not run on the scheduler
-// (rt_run_tasks): a BUG, as in the interpreter's Op::YIELD.
-TEST(RtYield, WithNoTaskRunningIsFatal) {
+// spec/04-semantics.md, yield Expression: a yield outside every coroutine of
+// the task is a task switch, not a fault. With no scheduler (rt_startup) the
+// task is alone, so the yield is legal and reports nothing.
+TEST(RtYield, OutsideEveryCoroutineIsATaskSwitch) {
     Runtime* rt = rt_startup("", nullptr, 0);
     ASSERT_NE(rt, nullptr);
     testing::internal::CaptureStderr();
     int status = rt_yield(rt, 0);
     std::string err = testing::internal::GetCapturedStderr();
-    EXPECT_EQ(status, static_cast<int>(Runtime::OpResult::Fatal));
-    EXPECT_NE(err.find("BUG: yield with no task running."), std::string::npos)
-        << err;
+    EXPECT_EQ(status, static_cast<int>(Runtime::OpResult::OK));
+    EXPECT_EQ(err, "");
     rt_shutdown(rt);
 }
 
@@ -920,6 +919,27 @@ int fakeYielder(Runtime* rt, Value*) {
 }
 
 } // namespace
+
+// The task switch with no other task: callCompiled() continues the frame at
+// its resume point at once, with nil as the value of the yield.
+TEST(RtYield, OutsideEveryCoroutineContinuesWithNil) {
+    Runtime rt;
+    ObjFunction* fn = rt.memoryManager().create<ObjFunction>();
+    fn->arity = 0;
+    fn->code = reinterpret_cast<void*>(&fakeYielder);
+    ObjClosure* closure = rt.memoryManager().create<ObjClosure>(fn);
+    g_yielderEntries = 0;
+    g_yielderSawNil = false;
+
+    rt.push(Value{static_cast<Obj*>(closure)});
+    Runtime::OpResult r = rt.opCall(0, 0);
+
+    EXPECT_EQ(r, Runtime::OpResult::OK);
+    EXPECT_EQ(g_yielderEntries, 2);
+    EXPECT_TRUE(g_yielderSawNil);
+    EXPECT_EQ(rt.frameCount(), 0);
+    EXPECT_TRUE(is<Nil>(rt.pop()));
+}
 
 // spec/04-semantics.md, yield Expression: in the main task, a yield outside
 // every coroutine is a task switch. rt_run_tasks runs the compiled script as
