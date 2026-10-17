@@ -316,6 +316,20 @@ CATCHABLE_ROWS = [
               "var co = coroutine.create(f);\n",
         expected_kind="YieldAcrossNativeError",
     ),
+    # A yield in a deferred call (spec/04-semantics.md, yield Expression): the
+    # drain raises, in the main task outside every coroutine too. JVM and
+    # bootstrap raise YieldOutsideCoroutineError for a yield outside every
+    # coroutine until the main task is a coroutine there (nodes #600 and #599).
+    Row(
+        "yield_in_deferred_call",
+        "caught",
+        "g();",
+        setup="fun note() { var v = yield 1; return v; }\n"
+              "fun g() { defer note(); print \"g body\"; }\n",
+        expected_kind="YieldAcrossNativeError",
+        skip={JVM: "yield in a deferred call outside every coroutine waits for #600",
+              BOOTSTRAP: "yield in a deferred call outside every coroutine waits for #599"},
+    ),
 ]
 
 # --- Fatal Runtime Errors table (spec/04-semantics.md) --------------------
