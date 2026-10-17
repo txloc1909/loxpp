@@ -1,0 +1,16 @@
+// The DeadlockError report carries the message of spec/04-semantics.md,
+// Worker and Task Faults, on stderr. The main task waits in task.receive()
+// and the one spawned task waits too, so no task can run again.
+//
+// Native also appends a stack trace and the tasks that wait, so the STDERR
+// line pins the first line only (tools/check_spec_probes.py compares the
+// expected stderr lines as a prefix).
+fun waiter() {
+    task.receive();
+}
+
+task.spawn(waiter);
+task.receive();
+
+// STATUS: error
+// STDERR: Deadlock: every task waits in receive.
