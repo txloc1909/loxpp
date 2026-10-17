@@ -25,7 +25,8 @@
 //      back, then sends Closed. So the producer is alive for every Credit
 //      the consumer sends, and no send of the protocol raises DeadTaskError.
 //
-// Items not yet taken plus credits held is N at all times after the grant.
+// After the grant, the items the consumer has not taken, plus the credits
+// the producer has not taken, plus the credits it holds, is N at all times.
 // So the mailbox of the consumer holds at most N messages of the channel (it
 // gets Closed only when no item is outstanding), and the mailbox of the
 // producer holds at most N.

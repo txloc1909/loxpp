@@ -61,9 +61,10 @@ jobs:
           tools/check_suspend_points.py
           tools/check_blocking_calls.py
 
-      # The credit channel library of examples/credit_channel.lox is also in
-      # each probe that tests it, until Lox++ has an import. This fails when
-      # a copy differs from the example. Pure Python, so it needs no build.
+      # Lox++ has no import, so the credit channel library of
+      # examples/credit_channel.lox is also in each probe that tests it. This
+      # fails when a copy differs from the example. Pure Python, so it needs
+      # no build.
       - name: Check credit channel copies
         run: tools/check_credit_channel_copies.py
 

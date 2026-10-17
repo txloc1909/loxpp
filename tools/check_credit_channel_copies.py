@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Checks that every copy of the credit channel library is the same text.
 
-Lox++ has no import yet, so the library of examples/credit_channel.lox is
-also in each probe that tests it. The library is the text from the line
+Lox++ has no import, so the library of examples/credit_channel.lox is also
+in each probe that tests it. The library is the text from the line
 `// --- credit channel library: begin` to the line
 `// --- credit channel library: end`, both included. This script fails when
 a file lacks either marker, has a marker more than once, or has a library
