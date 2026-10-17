@@ -34,6 +34,11 @@ tools/probe_xfail_jvm.txt. A listed program reports one of two outcomes:
                their exit status matches its STATUS line. Exit code 1: the
                backend passes it now, so its line must be deleted.
 
+--consumer <name> names the consumer the other runner is. A spec probe whose
+`// NOT-BINDING:` line names it (see tools/check_spec_probes.py) reports
+EXEMPT and is not run: a spec exception releases that consumer from the
+probe's output.
+
 Two silent runs are not proof that both ran: a runner that crashes before
 writing anything looks identical, on stdout alone, to a program that
 legitimately prints nothing. So when both sides' stdout is empty, this
@@ -51,7 +56,7 @@ this script's default. State that trade-off, do not hide it.
 
 Usage:
     python3 tools/diff_runtimes.py <native-loxpp> <other-runner> <path>...
-        [--exclude <file>] [--xfail <file>] [--timeout <seconds>]
+        [--exclude <file>] [--xfail <file>] [--consumer <name>] [--timeout <seconds>]
     python3 tools/diff_runtimes.py <native-loxpp> <other-runner>
         --exclude <file> --only-excluded <dir>
 
@@ -302,6 +307,11 @@ def main() -> None:
         help="the backend's expected-failure list of spec probes, e.g. tools/probe_xfail_jvm.txt",
     )
     parser.add_argument(
+        "--consumer",
+        default=None,
+        help="the consumer the other runner is, for the NOT-BINDING lines of spec probes",
+    )
+    parser.add_argument(
         "--only-excluded",
         metavar="DIR",
         default=None,
@@ -340,9 +350,15 @@ def main() -> None:
         )
         sys.exit(2)
 
-    matched = permuted = diverged = staled = xfailed = xpassed = 0
+    matched = permuted = diverged = staled = xfailed = xpassed = exempted = 0
 
     for lox_file in programs:
+        if args.consumer is not None:
+            probe = parse_probe(lox_file)
+            if probe is not None and args.consumer in probe.not_binding:
+                print(f"EXEMPT      {lox_file}  (does not bind {args.consumer})")
+                exempted += 1
+                continue
         input_file = lox_file.with_suffix(".input")
         try:
             native_out, native_status = run_program(
@@ -424,7 +440,8 @@ def main() -> None:
     print()
     print(
         f"{matched} matched, {staled} stale, {permuted} permutation-excused, {diverged} diverged, "
-        f"{xfailed} expected to fail, {xpassed} passing but listed as expected to fail"
+        f"{xfailed} expected to fail, {xpassed} passing but listed as expected to fail, "
+        f"{exempted} exempt"
     )
     sys.exit(1 if (diverged or staled or xpassed) else 0)
 

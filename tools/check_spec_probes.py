@@ -14,6 +14,17 @@ probe that fails by hanging can carry `// TIMEOUT: <seconds>`, which takes
 the place of --timeout for that probe; a run that times out fails. A .lox
 file with no STATUS line is not a spec probe and is not run here.
 
+A probe whose CHECK lines a spec exception releases one consumer from carries
+`// NOT-BINDING: <consumer> <probe>`, for example
+`// NOT-BINDING: bootstrap bootstrap-only/one_thread_blocking_call.lox`. The
+probe's header cites the exception. The second field is the spec probe, by
+path from <dir>, that holds that consumer to the exception in its place: it
+must exist and carry a STATUS line, and the consumer's own gate runs it. With
+--consumer <consumer>, this script does not run the probe and reports it as
+EXEMPT. Without --consumer, or for another consumer, the line changes nothing.
+A NOT-BINDING probe is not a gap, so it must not also be on the
+expected-failure list.
+
 The expected-failure list holds one line per probe that the consumer does not
 pass yet: the file name, then a reason. Blank lines and lines that start with
 '#' are comments. Outcomes:
@@ -23,6 +34,7 @@ pass yet: the file name, then a reason. Blank lines and lines that start with
   XFAIL  on the list, and the probe fails.
   XPASS  on the list, and the probe passes. Exit code 1: the consumer now
          passes it, so delete its line from the list.
+  EXEMPT a NOT-BINDING line names the --consumer. Not run.
 
 A listed name with no spec probe behind it is an error (exit 2), so a stale
 list cannot hide behind a rename.
@@ -50,6 +62,7 @@ STATUS_RE = re.compile(r"^\s*//\s*STATUS:\s*(ok|error)\s*$")
 CHECK_RE = re.compile(r"^\s*//\s*CHECK:\s?(.*)$")
 EXIT_RE = re.compile(r"^\s*//\s*EXIT:\s*(-?\d+)\s*$")
 TIMEOUT_RE = re.compile(r"^\s*//\s*TIMEOUT:\s*(\d+(?:\.\d+)?)\s*$")
+NOT_BINDING_RE = re.compile(r"^\s*//\s*NOT-BINDING:\s*(\S+)\s+(\S+)\s*$")
 
 
 @dataclass
@@ -59,6 +72,9 @@ class SpecProbe:
     checks: list[str]
     exit_code: int | None = None  # the exact exit status, when the probe names one
     timeout: float | None = None  # seconds, in place of --timeout
+    # consumer -> the probe, by path from the probe directory, that holds the
+    # consumer to the spec exception in place of this one
+    not_binding: dict[str, str] | None = None
 
 
 def parse_probe(path: Path) -> SpecProbe | None:
@@ -67,7 +83,14 @@ def parse_probe(path: Path) -> SpecProbe | None:
     exit_code = None
     timeout = None
     checks: list[str] = []
+    not_binding: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
+        m = NOT_BINDING_RE.match(line)
+        if m:
+            if m.group(1) in not_binding:
+                raise ValueError(f"{path}: more than one NOT-BINDING line for {m.group(1)}")
+            not_binding[m.group(1)] = m.group(2)
+            continue
         m = TIMEOUT_RE.match(line)
         if m:
             timeout = float(m.group(1))
@@ -91,7 +114,7 @@ def parse_probe(path: Path) -> SpecProbe | None:
         return None
     if exit_code is not None and (exit_code == 0) != (status == "ok"):
         raise ValueError(f"{path}: EXIT {exit_code} disagrees with STATUS {status}")
-    return SpecProbe(path, status, checks, exit_code, timeout)
+    return SpecProbe(path, status, checks, exit_code, timeout, not_binding)
 
 
 def stdout_lines(stdout: str) -> list[str]:
@@ -142,6 +165,8 @@ def main() -> None:
     parser.add_argument("dir", type=Path)
     parser.add_argument("--xfail", type=Path, default=None)
     parser.add_argument("--timeout", type=float, default=60.0)
+    parser.add_argument("--consumer", default=None,
+                        help="the consumer the runner is, for NOT-BINDING lines")
     args = parser.parse_args()
 
     if not args.dir.is_dir():
@@ -165,9 +190,32 @@ def main() -> None:
             print(f"error: {args.xfail} lists {name}, which is not a spec probe in {args.dir}", file=sys.stderr)
         sys.exit(2)
 
-    counts = {"PASS": 0, "FAIL": 0, "XFAIL": 0, "XPASS": 0}
+    exempt: dict[str, str] = {}
+    for probe in probes:
+        for consumer, replacement in probe.not_binding.items():
+            target = args.dir / replacement
+            replacement_probe = parse_probe(target) if target.is_file() else None
+            if replacement_probe is None:
+                print(f"error: {probe.path} names {replacement} on its NOT-BINDING line "
+                      f"for {consumer}, which is not a spec probe in {args.dir}", file=sys.stderr)
+                sys.exit(2)
+            if consumer == args.consumer:
+                exempt[probe.path.name] = replacement
+    both = sorted(set(exempt) & set(xfail))
+    if both:
+        for name in both:
+            print(f"error: {name} is NOT-BINDING for {args.consumer} and also on "
+                  f"{args.xfail}; a probe the spec does not bind is not a gap", file=sys.stderr)
+        sys.exit(2)
+
+    counts = {"PASS": 0, "FAIL": 0, "XFAIL": 0, "XPASS": 0, "EXEMPT": 0}
     for probe in probes:
         name = probe.path.name
+        if name in exempt:
+            counts["EXEMPT"] += 1
+            print(f"EXEMPT {name}  (does not bind {args.consumer}; "
+                  f"{exempt[name]} holds it to the exception)")
+            continue
         timeout = probe.timeout if probe.timeout is not None else args.timeout
         result = run(args.runner, probe, timeout)
         ok = result is not None and passes(probe, *result)

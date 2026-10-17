@@ -3,4 +3,3 @@
 # Each line is `<probe>.lox  <reason>`. A listed probe must fail. When it
 # passes, the gate fails, and the node that made it pass deletes its line.
 
-83_blocking_call_blocks_one_worker.lox  the spec allows this failure, so no node owns it: the bootstrap runs every worker on one host thread under the implementation-gated exception (spec/04-semantics.md, rule 2), so a blocking call blocks every worker

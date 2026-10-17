@@ -4,6 +4,13 @@
 // The main task, on another worker, keeps running, and the program ends
 // when the main task ends. An implementation that blocks every worker in a
 // blocking call never prints the second line and hits the timeout.
+//
+// The CHECK lines do not bind the bootstrap interpreter. It runs every
+// worker on one host thread under the implementation-gated exception of
+// spec/04-semantics.md, rule 2: "A blocking call blocks every worker, not
+// only its own." The probe on the NOT-BINDING line holds the bootstrap to
+// that rule in place of this one.
+// NOT-BINDING: bootstrap bootstrap-only/one_thread_blocking_call.lox
 fun acceptor(main) {
     var server = listen("127.0.0.1", 0);
     task.send(main, "listening");
