@@ -156,10 +156,12 @@ uint32_t hashValue(const Value& v);
 // Returns false for NaN numbers and non-string objects.
 bool isValidMapKey(const Value& v);
 
-// General-purpose hash for any Value, consistent with operator==. Unlike
-// hashValue() (the table's uint32 string-key hash), this hashes Obj* by
-// pointer identity — matching operator== — so it is safe for any value,
-// including non-string objects. Used to dedup the compiler's constant pool.
+// Hash for any Value of one heap, consistent with operator== on such values.
+// Unlike hashValue() (the table's uint32 string-key hash), this hashes Obj*
+// by pointer identity, so it is safe for any value, including non-string
+// objects. Two Strings of two heaps can be == and still hash apart, so the
+// values must all be of one heap, as in the compiler's constant pool, the
+// one user.
 // Implemented on is<T>/as<T>, not on the underlying representation.
 struct ValueHash {
     size_t operator()(const Value& v) const;

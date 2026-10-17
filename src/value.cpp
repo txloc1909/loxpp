@@ -126,8 +126,10 @@ size_t ValueHash::operator()(const Value& v) const {
         return 0U;
     }
     if (is<Obj*>(v)) {
-        // Pointer identity — matches operator==. Do NOT use hashValue(), which
-        // assumes Obj* is an interned ObjString and is UB for other objects.
+        // Pointer identity. It agrees with operator== only for objects of one
+        // heap: two Strings of two heaps can be == and hash apart. Do NOT use
+        // hashValue(), which assumes Obj* is an ObjString and is UB for other
+        // objects.
         return std::hash<const void*>{}(as<Obj*>(v));
     }
     Number n = as<Number>(v);
