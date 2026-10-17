@@ -4,10 +4,10 @@
 // task.receive(), so it never returns a credit. The producer sends 3 items
 // and waits for a credit before the 4th. The consumer takes the 3 items and
 // waits for a 4th. No task can run again, so the program ends with
-// DeadlockError (spec/04-semantics.md, Deadlock): the deadlock detector and
-// the protocol agree. test/test_task.cpp checks that the native report names
-// both tasks. The library text is the one in examples/credit_channel.lox
-// (tools/check_credit_channel_copies.py).
+// DeadlockError (spec/04-semantics.md, Deadlock), which no try catches: the
+// deadlock detector and the protocol agree. test/test_task.cpp checks that
+// the native report names both tasks. The library text is the one in
+// examples/credit_channel.lox (tools/check_credit_channel_copies.py).
 
 // --- credit channel library: begin ---------------------------------------
 //
@@ -151,11 +151,20 @@ fun producer() {
     tx.close();
 }
 
+// DeadlockError is fatal, so the catch block and the line after the try do
+// not run. Any catchable fault in its place, such as a wrong message that
+// chanValue rejects, prints a line that the CHECK lines do not allow.
 Receiver(task.spawn(producer), 3);
-while (true) {
-    var msg = task.receive();
-    print "took " + str(chanValue(msg));
+try {
+    while (true) {
+        var msg = task.receive();
+        print "took " + str(chanValue(msg));
+    }
+} catch (e) {
+    print "caught a fault";
+    print e.kind;
 }
+print "after the try";
 
 // STATUS: error
 // CHECK: send 1
