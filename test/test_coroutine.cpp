@@ -824,3 +824,26 @@ TEST_F(CoroutineTest, InfixAfterYieldIsRejected) {
     EXPECT_EQ(h.run("fun g() { return yield + 2; }"),
               InterpretResult::COMPILE_ERROR);
 }
+
+// The closure that captured a local can die before the coroutine suspends.
+// The upvalue then stays open, and the m_openUpvalues chain is its only root.
+// The snapshot move must not collect it; under LOXPP_STRESS_GC the offsets
+// push would, and the next write to uv->owner would be a use after free.
+TEST_F(CoroutineTest, SuspendsWithAnUpvalueWhoseClosureIsDead) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun gen() {
+            var x = "cell" + "!";
+            {
+                fun inner() { return x; }
+            }
+            yield;
+            return x;
+        }
+        var co = coroutine.create(gen);
+        co.resume();
+        var got = co.resume();
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "got", "cell!");
+}

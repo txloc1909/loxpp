@@ -881,6 +881,17 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
 
     co->openUpvalues.clear();
     co->openUpvalueOffsets.clear();
+    // An upvalue that no live closure holds is rooted only by the
+    // m_openUpvalues chain, and the loop below unlinks it before it stores it
+    // here. Reserve both vectors first, while every upvalue is still a root,
+    // so the loop itself cannot collect and free one mid-move.
+    std::size_t openCount = 0;
+    for (ObjUpvalue* uv = m_openUpvalues; uv != nullptr && uv->location >= base;
+         uv = uv->next) {
+        ++openCount;
+    }
+    co->openUpvalueOffsets.reserve(openCount);
+    co->openUpvalues.reserve(openCount);
     while (m_openUpvalues != nullptr && m_openUpvalues->location >= base) {
         ObjUpvalue* uv = m_openUpvalues;
         m_openUpvalues = uv->next;
