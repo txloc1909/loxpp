@@ -27,8 +27,11 @@ comparable inside one file and meaningless across files or hosts.
        marked          objects found reachable (equals objs_after)
        freed           objects swept (objs_before - objs_after)
     end t=<ns>                   the MemoryManager was destroyed; absent when
-                                 the process left through std::exit(), and
-                                 the last t4 stands in for it then
+                                 the process ended through _Exit() while the
+                                 heap still existed (an exit() call, an
+                                 uncaught fault, or a program end while the
+                                 heap's worker ran or a holder kept its dead
+                                 heap), and the last t4 stands in for it then
 
 The last gc record of a heap whose worker ended normally has cause=exit:
 the collection that worker ran as it ended, with the held messages as its
