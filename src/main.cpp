@@ -183,8 +183,9 @@ static void runFile(VM& vm, const std::string& path) {
 
 #ifdef LOXPP_JVM_BACKEND
 // Compiles `path` and writes one generated class per <outDir>/<name>.j:
-// LoxMain (the top-level script) plus one LoxFn$<n> per function or method
-// any chunk in the tree constructs. Does not assemble or run anything —
+// LoxMain (the top-level script), LoxDecls (its declarations only, which a
+// new worker runs), plus one LoxFn$<n> per function or method any chunk in
+// the tree constructs. Does not assemble or run anything —
 // tools/loxpp_jvm.sh chains jasmin and java on top, assembling every *.j
 // file in the directory together. Exit codes mirror runFile's: 65 for a
 // compile error, 70 for an opcode or CLOSURE shape the emitter does not
@@ -197,12 +198,29 @@ static int runJvmTarget(const std::string& outDir, const std::string& path) {
     if (script == nullptr) {
         return 65;
     }
+    // The second compile allocates; the first script must survive it.
+    mm.pushTempRoot(script);
+    // A new worker runs only the top-level declarations (LoxDecls), as
+    // native compiles a worker's program (Runtime::runWorker).
+    CompileOptions declarationsOnly;
+    declarationsOnly.declarationsOnly = true;
+    ObjFunction* declarations = compile(source, &mm, nullptr, declarationsOnly);
+    mm.popTempRoot();
+    if (declarations == nullptr) {
+        return 65;
+    }
 
     std::vector<jvm::EmittedClass> classes;
     try {
         DecodedFunction tree = decodeFunctionTree(script);
         StackAnalysisTree analysis = analyzeStackTree(tree);
         classes = jvm::emitProgram(tree, analysis, "LoxMain");
+        DecodedFunction declarationsTree = decodeFunctionTree(declarations);
+        StackAnalysisTree declarationsAnalysis =
+            analyzeStackTree(declarationsTree);
+        classes.push_back(jvm::emitDeclarations(declarationsTree,
+                                                declarationsAnalysis, tree,
+                                                "LoxMain", "LoxDecls"));
     } catch (const std::exception& e) {
         std::fprintf(stderr, "loxpp --target jvm: %s\n", e.what());
         return 70;

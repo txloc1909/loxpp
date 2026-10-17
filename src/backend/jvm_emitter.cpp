@@ -173,6 +173,11 @@ struct Emitter {
     // past this way. -1 when this chunk has no try/catch at all.
     int savedHandlerDepthSlot{-1};
 
+    // True for the script chunk of the declarations-only compile
+    // (emitDeclarations): its prologue reads the current worker's globals
+    // instead of making the program's.
+    bool declarations{false};
+
     // This pass's own forward walk, updated in offset order by
     // finishInstruction: the slot the most RECENTLY DECLARED invisible-var
     // site bound. -1 is a sentinel for "no site has run yet", not a real
@@ -1877,10 +1882,16 @@ void emitRunDefers(Emitter& e) {
 // function's compile-time name/arity as literals, so only the upvalues
 // array is a real parameter. The closure lowering fills that array with
 // real cells later; this shape does not change.
+//
+// A function of a top-level `fun` declaration (topLevelOrdinal set) passes
+// one more literal, `true`: the runtime's LoxClosure.topLevel, the one kind
+// of value task.spawn_worker takes as an entry (spec/04-semantics.md,
+// task.spawn_worker, step 1).
 std::string emitConstructorMethod(const DecodedFunction& fn) {
+    const bool topLevel = fn.function->topLevelOrdinal >= 0;
     std::ostringstream out;
     out << ".method public <init>([[Ljava/lang/Object;)V\n";
-    out << "    .limit stack 4\n";
+    out << "    .limit stack " << (topLevel ? 5 : 4) << "\n";
     out << "    .limit locals 2\n";
     out << "    aload 0\n";
     if (fn.function->name != nullptr) {
@@ -1892,8 +1903,16 @@ std::string emitConstructorMethod(const DecodedFunction& fn) {
     }
     out << "    " << pushIntInstruction(fn.function->arity) << "\n";
     out << "    aload 1\n";
-    out << "    invokespecial "
-           "lox/LoxClosure/<init>(Ljava/lang/String;I[[Ljava/lang/Object;)V\n";
+    if (topLevel) {
+        out << "    iconst_1\n";
+        out << "    invokespecial "
+               "lox/LoxClosure/<init>(Ljava/lang/String;I[[Ljava/lang/"
+               "Object;Z)V\n";
+    } else {
+        out << "    invokespecial "
+               "lox/LoxClosure/<init>(Ljava/lang/String;I[[Ljava/lang/"
+               "Object;)V\n";
+    }
     out << "    return\n";
     out << ".end method\n\n";
     return out.str();
@@ -2068,7 +2087,12 @@ Emitter buildEmitter(const DecodedFunction& fn,
 // argument prologue at all (frame slot 0 is the script's own never-read
 // callee, same as before functions/calls support existed).
 void emitPrologue(Emitter& e, const DecodedFunction& fn, bool isScript) {
-    if (isScript) {
+    if (isScript && e.declarations) {
+        // The declarations of a new worker run in the globals that worker
+        // already made (LoxRuntime.runDeclarations), not in fresh ones.
+        e.b.emit("invokestatic lox/LoxRuntime/current()Llox/LoxGlobals;", +1);
+        e.b.emit("astore " + std::to_string(e.globalsSlot), -1);
+    } else if (isScript) {
         // Forward main's argv (JVM slot 0 — see jvm_emitter.h's layout) so
         // the args() native answers the same way the native VM's does. Runs
         // before init() because the script body reads globals from slot 1.
@@ -2587,7 +2611,8 @@ std::string emitChunk(const DecodedFunction& fn,
                       const FunctionStackAnalysis& analysis,
                       const std::string& className, bool isScript,
                       const std::vector<std::string>& childClassNames,
-                      const FunctionCaptureInfo& captureInfo) {
+                      const FunctionCaptureInfo& captureInfo,
+                      bool declarations = false) {
     int maxLocalCount = computeMaxLocalCount(analysis);
     int maxSpillWidth = computeMaxSpillWidth(fn, analysis);
     int extraSpillSlots = maxSpillWidth > 0 ? maxSpillWidth + 1 : 0;
@@ -2614,6 +2639,7 @@ std::string emitChunk(const DecodedFunction& fn,
 
     Emitter e = buildEmitter(fn, analysis, isScript, maxLocalCount,
                              maxSpillWidth, captureInfo);
+    e.declarations = declarations;
 
     // If defer is used, shift slot assignments to make room for defer list
     // and temp argument storage for DEFER_RECORD
@@ -2761,6 +2787,62 @@ void emitAll(const DecodedFunction& fn, const StackAnalysisTree& node,
     }
 }
 
+// The declarations-only compile keeps every constant of the full compile, in
+// the same order (compile() drops a statement's code, not its constants), so
+// its nested functions are the program's, one for one. Checked here, chunk
+// by chunk and constant by constant, before emitDeclarations reuses the
+// program's class names. Each compile made its own objects, so an object
+// constant other than a string (a function, an enum constructor) is
+// compared by its kind only; a function's own chunk is checked through its
+// node in `nested`.
+bool sameConstant(const Value& a, const Value& b) {
+    if (is<Obj*>(a) && is<Obj*>(b) && !isString(a) && !isString(b)) {
+        return as<Obj*>(a)->type == as<Obj*>(b)->type;
+    }
+    if (is<Number>(a) && is<Number>(b)) {
+        return std::bit_cast<std::uint64_t>(as<Number>(a)) ==
+               std::bit_cast<std::uint64_t>(as<Number>(b));
+    }
+    return a == b;
+}
+
+void requireSameConstants(const ObjFunction* declarations,
+                          const ObjFunction* program, const std::string& id) {
+    const ValueArray& a = declarations->chunk.constants();
+    const ValueArray& b = program->chunk.constants();
+    bool same = a.size() == b.size();
+    for (std::uint16_t i = 0; same && i < b.size(); i++) {
+        same = sameConstant(a.at(i), b.at(i));
+    }
+    if (!same) {
+        throw std::runtime_error("the declarations-only compile differs "
+                                 "from the program in the constants of " +
+                                 id);
+    }
+}
+
+void requireSameFunctions(const std::vector<DecodedFunction>& declarations,
+                          const std::vector<DecodedFunction>& program) {
+    if (declarations.size() != program.size()) {
+        throw std::runtime_error("the declarations-only compile has " +
+                                 std::to_string(declarations.size()) +
+                                 " nested functions, the program " +
+                                 std::to_string(program.size()));
+    }
+    for (std::size_t i = 0; i < program.size(); i++) {
+        const ObjFunction* a = declarations[i].function;
+        const ObjFunction* b = program[i].function;
+        if (a->arity != b->arity || a->upvalueCount != b->upvalueCount ||
+            hashChunkBytes(a->chunk) != hashChunkBytes(b->chunk)) {
+            throw std::runtime_error("the declarations-only compile differs "
+                                     "from the program in function " +
+                                     program[i].id);
+        }
+        requireSameConstants(a, b, program[i].id);
+        requireSameFunctions(declarations[i].nested, program[i].nested);
+    }
+}
+
 } // namespace
 
 std::string escapeJasminString(const std::string& raw) {
@@ -2822,6 +2904,31 @@ std::vector<EmittedClass> emitProgram(const DecodedFunction& root,
     std::vector<EmittedClass> out;
     emitAll(root, tree, /*isRoot=*/true, names, captures, out);
     return out;
+}
+
+EmittedClass emitDeclarations(const DecodedFunction& declarationsRoot,
+                              const StackAnalysisTree& declarationsTree,
+                              const DecodedFunction& programRoot,
+                              const std::string& scriptClassName,
+                              const std::string& className) {
+    requireSameConstants(declarationsRoot.function, programRoot.function,
+                         programRoot.id);
+    requireSameFunctions(declarationsRoot.nested, programRoot.nested);
+    std::unordered_map<std::string, std::string> names;
+    int counter = 0;
+    assignClassNames(programRoot, /*isRoot=*/true, scriptClassName, counter,
+                     names);
+    std::vector<std::string> childClassNames;
+    childClassNames.reserve(programRoot.nested.size());
+    for (const DecodedFunction& child : programRoot.nested) {
+        childClassNames.push_back(names.at(child.id));
+    }
+    CaptureAnalysis captures = analyzeCaptures(declarationsRoot);
+    std::string source = emitChunk(
+        declarationsRoot, declarationsTree.self, className, /*isScript=*/true,
+        childClassNames, captures.functions.at(declarationsRoot.id),
+        /*declarations=*/true);
+    return EmittedClass{className, std::move(source)};
 }
 
 std::string emitScript(const DecodedFunction& fn,

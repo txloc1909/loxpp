@@ -84,7 +84,8 @@
 // JVM local-variable layout — one fixed mapping for both entry shapes,
 // differing only in how many JVM-only slots come before the Lox frame's own:
 //
-//   script (`main`):   slot 0 = String[] args, slot 1 = LoxGlobals.
+//   script (`main`, also LoxDecls's `main`, see emitDeclarations): slot 0 =
+//     String[] args, slot 1 = LoxGlobals.
 //   function (`invoke`): slot 0 = `this` (the LoxFn$<n> instance), slot 1 =
 //     `self` (the callee/receiver the Lox chunk's own frame slot 0 wants),
 //     slot 2 = Object[] args, slot 3 = LoxGlobals (from
@@ -164,6 +165,19 @@ std::vector<EmittedClass> emitProgram(const DecodedFunction& root,
 // chunk's own text) does not have to unpack emitProgram's vector. A CLOSURE
 // throws "not implemented" here, because a lone chunk has no class name to
 // give the target; drive emitProgram instead for a program that has one.
+// The class a new worker runs to define the program's top-level `fun`,
+// `class`, and `enum` declarations and nothing else (spec/04-semantics.md,
+// task.spawn_worker, step 3). `declarationsRoot` is the script of the same
+// source compiled with CompileOptions::declarationsOnly. Its closures name
+// the function classes emitProgram gave `programRoot`, so the two share
+// every LoxFn$<n>; a nested function that differs between the two compiles
+// throws std::runtime_error.
+EmittedClass emitDeclarations(const DecodedFunction& declarationsRoot,
+                              const StackAnalysisTree& declarationsTree,
+                              const DecodedFunction& programRoot,
+                              const std::string& scriptClassName,
+                              const std::string& className);
+
 std::string emitScript(const DecodedFunction& fn,
                        const FunctionStackAnalysis& analysis,
                        const std::string& className);

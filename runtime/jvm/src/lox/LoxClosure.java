@@ -83,10 +83,24 @@ public abstract class LoxClosure implements LoxCallable {
     public final int arity;
     public final Object[][] upvalues;
 
+    /**
+     * True for the function of a top-level fun declaration, the one kind of
+     * value task.spawn_worker takes as an entry (spec/04-semantics.md,
+     * task.spawn_worker, step 1). The emitter passes it for a function whose
+     * topLevelOrdinal is set.
+     */
+    public final boolean topLevel;
+
     protected LoxClosure(String name, int arity, Object[][] upvalues) {
+        this(name, arity, upvalues, false);
+    }
+
+    protected LoxClosure(String name, int arity, Object[][] upvalues,
+                         boolean topLevel) {
         this.name = name;
         this.arity = arity;
         this.upvalues = upvalues;
+        this.topLevel = topLevel;
     }
 
     @Override
