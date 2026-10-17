@@ -2786,7 +2786,7 @@ Runtime::OpResult Runtime::yieldOp(int stopAtFrameCount) {
         // progress, or print/str dispatches __str__. A compiled __hash__ or
         // __eq__ that a map operation calls, and a compiled deferred call,
         // raise none of these counters, so a yield there continues with nil
-        // (probes 87 to 89 on tools/probe_xfail_qbe.txt).
+        // (the map cases: probes 87 and 88 on tools/probe_xfail_qbe.txt).
         if (m_nativeDepth > 0 || m_reentrantRunDepth > 0 ||
             m_stringifyCanonicalDepth > 0) {
             return fromThrow(raiseThrowableError(
