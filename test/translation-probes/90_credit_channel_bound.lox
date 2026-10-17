@@ -1,8 +1,10 @@
 // A credit channel bounds the mailbox of its consumer (spec/04-semantics.md,
 // Bounding a Mailbox). The producer runs ahead of a slow consumer. With plain
 // sends, task.pending() of the consumer reaches the full count. Over the
-// channel of capacity N, the consumer's task.pending() never exceeds N plus
-// one control slot for its one peer, and the producer's never exceeds N.
+// channel of capacity N, the consumer's task.pending() never exceeds N, and
+// the producer's never exceeds N. Closed comes only when no item is
+// outstanding, so the consumer's bound is N, one less than N plus one
+// control slot per peer.
 // The first two phases run on one worker, where the schedule is defined, so
 // they print exact values. The third phase puts the producer on a second
 // worker and prints only whether the bound held. The library text is the one
@@ -229,7 +231,7 @@ var rx = Receiver(task.spawn(producer), N);
 var result = consume(rx, pause);
 print "channel: sum " + str(result[0]);
 print "channel: consumer most pending " + str(result[1]);
-print "channel: consumer within N + 1 " + str(result[1] <= N + 1);
+print "channel: consumer within N " + str(result[1] <= N);
 print "channel: producer most pending " + str(producerMost);
 print "channel: producer within N " + str(producerMost <= N);
 
@@ -237,7 +239,7 @@ print "channel: producer within N " + str(producerMost <= N);
 var far = task.spawn_worker(farProducer, Produce(consumer, 200));
 var farResult = consume(Receiver(far, N), work);
 print "far channel: sum " + str(farResult[0]);
-print "far channel: consumer within N + 1 " + str(farResult[1] <= N + 1);
+print "far channel: consumer within N " + str(farResult[1] <= N);
 print "after";
 
 // STATUS: ok
@@ -245,9 +247,9 @@ print "after";
 // CHECK: plain sends: sum 210
 // CHECK: channel: sum 210
 // CHECK: channel: consumer most pending 4
-// CHECK: channel: consumer within N + 1 true
+// CHECK: channel: consumer within N true
 // CHECK: channel: producer most pending 1
 // CHECK: channel: producer within N true
 // CHECK: far channel: sum 20100
-// CHECK: far channel: consumer within N + 1 true
+// CHECK: far channel: consumer within N true
 // CHECK: after
