@@ -155,6 +155,18 @@ class Runtime {
         m_runLoop = std::move(loop);
     }
 
+    // Attaches compiled code to every function of a program that this
+    // Runtime compiled in declarations-only mode: the program of a worker
+    // (runWorker). Returns false after it reported why it could not. Set by
+    // the QBE entry (rt_run_tasks, backend/rt_capi.h); spawnWorker gives it
+    // to each new worker, so a worker runs compiled code as the main worker
+    // does. Unset, a worker interprets its program. It runs on the thread of
+    // each worker, so it must read only data that nothing writes.
+    using CodeAttacher = std::function<bool(ObjFunction* declarations)>;
+    void setCodeAttacher(CodeAttacher attach) {
+        m_attachCode = std::move(attach);
+    }
+
     // Outcome of a throw/catch dispatch (handleThrow/raiseThrowableError) or
     // of call() — the two used to be separate enums (CallOutcome/
     // ThrowOutcome) with identical Uncaught/HandledContinue-or-CaughtContinue/
@@ -386,8 +398,9 @@ class Runtime {
     // source of this Runtime made.
     [[nodiscard]] bool isTopLevelFunction(const Value& fn) const;
 
-    // The task that runs now, or nullptr when no scheduler runs (the QBE
-    // entry, rt_startup, does not start one).
+    // The task that runs now, or nullptr when no scheduler runs (a compiled
+    // program with no yield and no task, which the QBE entry runs with
+    // rt_call, or a C API test).
     [[nodiscard]] ObjTask* currentTask() const { return m_currentTask; }
 
     // task.spawn: a new task that calls `fn` (a Function or BoundMethod) with
@@ -603,10 +616,11 @@ class Runtime {
     // YIELD's own body in coroutine mode: the legality check for a yield
     // across a native callback. Returns OK when the yield is legal; the
     // compiled frame then returns kRtYield, and the driver suspends the
-    // coroutine, or callCompiled() continues the frame with nil when no
-    // coroutine and no scheduler run (a task switch with no other task). An
-    // illegal yield raises through handleThrow and returns its OpResult,
-    // exactly like any other fallible op.
+    // coroutine. An illegal yield raises through handleThrow and returns its
+    // OpResult, exactly like any other fallible op. A yield with no task
+    // running is a fatal BUG, as in the interpreter: a compiled program that
+    // can yield runs every task, the main task included, in a coroutine
+    // (rt_run_tasks, backend/rt_capi.h).
     OpResult yieldOp(int stopAtFrameCount);
 
     // Resumes a coroutine from ITER_HAS_NEXT. resumeCoroutine() is written for
@@ -1243,6 +1257,8 @@ class Runtime {
 
     // See setInterpretLoop() above.
     std::function<InterpretResult(int)> m_runLoop;
+    // See setCodeAttacher() above.
+    CodeAttacher m_attachCode;
 
     // Coroutine mode (QBE #530/#535). True only while runCompiledFrames()
     // invokes a compiled frame's code. When set, the op*() helpers push a

@@ -79,6 +79,30 @@ Runtime* rt_startup(const char* source, const RtFunctionDesc* descs,
 
 void rt_shutdown(Runtime* rt) noexcept;
 
+// Runs the program that rt_startup() left at stack slot 0 as the main task,
+// with the scheduler (Runtime::runTasks), until the main task ends. The QBE
+// front end calls this, in place of rt_call(), for every program compiled
+// in coroutine mode (qbe::needsCoroutineMode): there the main task is a
+// coroutine, as on the native VM, so a yield outside every coroutine is a
+// task switch and the task natives work.
+//
+// `declarations` is the compiled root of the program's declarations-only
+// compile, or nullptr when the program cannot spawn a worker. When it is
+// set, each worker attaches it to its own root, and `descs` (the table
+// given to rt_startup()) to every other function, so a worker runs compiled
+// code (Runtime::setCodeAttacher). `descs` and `declarations` must stay
+// valid and unchanged while any worker runs.
+//
+// Returns 0 when the main task ended normally; nonzero after an uncaught
+// fault or a deadlock, already reported on stderr.
+int rt_run_tasks(Runtime* rt, const RtFunctionDesc* descs, std::size_t nDescs,
+                 const RtFunctionDesc* declarations) noexcept;
+
+// Flushes every stream and ends the process with `code`, with no static
+// destructor: another worker can still run (endProcess, worker.h). The
+// native VM's own main() ends the same way.
+[[noreturn]] void rt_end_process(int code) noexcept;
+
 // Raw stack access. Compiled code writes its own slots directly at
 // base + 8h (base from a CallFrame's `slots`, or rt_stack_base() for the
 // outermost call) rather than going through push()/pop() one value at a

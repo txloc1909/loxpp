@@ -224,14 +224,6 @@ Runtime::OpResult Runtime::callCompiled(ObjClosure* closure, int argCount,
     }
     auto code = reinterpret_cast<RtCompiledFn>(closure->function->code);
     int status = code(this, frame->slots);
-    while (status == kRtYield && m_currentCoroutine == nullptr) {
-        // yieldOp() allowed a yield outside every coroutine with no scheduler:
-        // the task switch finds no other task, so this frame continues at its
-        // resume point, and the yield evaluates to nil.
-        pop();
-        push(from<Nil>(Nil{}));
-        status = code(this, frame->slots);
-    }
     if (status == kRtFatal) {
         // The compiled callee already reported a fatal error through
         // runtimeError() (rt_abi.h's own contract on RtCompiledFn), which
@@ -1370,6 +1362,7 @@ struct WorkerStart {
     int ordinal;
     ObjTask* task;
     Value msg;
+    Runtime::CodeAttacher attachCode;
 };
 
 void workerMain(WorkerStart start) {
@@ -1380,6 +1373,7 @@ void workerMain(WorkerStart start) {
     auto vm = std::make_unique<VM>(start.heap);
     Runtime& rt = vm->runtime();
     rt.setArgs(std::move(start.args));
+    rt.setCodeAttacher(std::move(start.attachCode));
     InterpretResult result =
         rt.runWorker(start.group, std::move(start.sources), start.sourceId,
                      start.ordinal, start.task, start.msg);
@@ -1421,7 +1415,8 @@ ObjTask* Runtime::spawnWorker(ObjClosure* entry, Value msg) {
                       entry->function->sourceId,
                       entry->function->topLevelOrdinal,
                       task,
-                      msg};
+                      msg,
+                      m_attachCode};
     try {
         std::thread(workerMain, std::move(start)).detach();
     } catch (const std::system_error& e) {
@@ -1451,8 +1446,10 @@ Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
         return InterpretResult::RUNTIME_ERROR;
     }
     m_mm.pushTempRoot(script);
-    if (call(script, 0) == ThrowOutcome::Uncaught ||
-        m_runLoop(0) != InterpretResult::OK) {
+    if (m_attachCode && !m_attachCode(script->function)) {
+        return InterpretResult::RUNTIME_ERROR;
+    }
+    if (call(script, 0) == ThrowOutcome::Uncaught || !runNestedLoop(0)) {
         return InterpretResult::RUNTIME_ERROR;
     }
     ObjFunction* entryFn = nullptr;
@@ -3158,23 +3155,10 @@ Runtime::OpResult Runtime::opIterNext() {
 Runtime::OpResult Runtime::yieldOp(int stopAtFrameCount) {
     // The compiled frame returns kRtYield only when this returns OK.
     if (m_currentCoroutine == nullptr) {
-        // No scheduler runs this program (the QBE entry, rt_startup), so it
-        // is one task with no coroutine and no other task. A yield outside
-        // every coroutine is a task switch (spec/04-semantics.md, yield
-        // Expression), and with an empty run queue the task runs again at
-        // once: callCompiled() re-enters the frame with nil as the value.
-        // The yield raises only while a native runs, a re-entrant run is in
-        // progress, or print/str dispatches __str__. A compiled __hash__ or
-        // __eq__ that a map operation calls, and a compiled deferred call,
-        // raise none of these counters, so a yield there continues with nil
-        // (the map cases: probes 87 and 88 on tools/probe_xfail_qbe.txt).
-        if (m_nativeDepth > 0 || m_reentrantRunDepth > 0 ||
-            m_stringifyCanonicalDepth > 0) {
-            return fromThrow(raiseThrowableError(
-                "YieldAcrossNativeError",
-                "Cannot yield across a native callback.", stopAtFrameCount));
-        }
-        return OpResult::OK;
+        // Every task runs in its own coroutine (runTasks), so a yield always
+        // has one to suspend, as Op::YIELD requires in the interpreter.
+        runtimeError("BUG: yield with no task running.");
+        return OpResult::Fatal;
     }
     // m_resumableMode is true only while the coroutine driver runs this
     // coroutine's own frames. A compiled frame reached any other way — run
