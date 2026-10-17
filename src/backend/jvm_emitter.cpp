@@ -2789,9 +2789,11 @@ void emitAll(const DecodedFunction& fn, const StackAnalysisTree& node,
 
 // The declarations-only compile keeps every constant of the full compile, in
 // the same order (compile() drops a statement's code, not its constants), so
-// its nested functions are the program's, one for one. Checked here, chunk
-// by chunk and constant by constant, before emitDeclarations reuses the
-// program's class names. Each compile made its own objects, so an object
+// its nested functions are the program's, one for one. Checked here before
+// emitDeclarations reuses the program's class names: each constant of each
+// chunk, and the arity, the upvalue count, and the hash of the bytes
+// (hashChunkBytes, not the bytes themselves) of each nested chunk. Each
+// compile made its own objects, so an object
 // constant other than a string (a function, an enum constructor) is
 // compared by its kind only; a function's own chunk is checked through its
 // node in `nested`.

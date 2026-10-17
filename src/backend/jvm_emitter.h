@@ -170,8 +170,8 @@ std::vector<EmittedClass> emitProgram(const DecodedFunction& root,
 // task.spawn_worker, step 3). `declarationsRoot` is the script of the same
 // source compiled with CompileOptions::declarationsOnly. Its closures name
 // the function classes emitProgram gave `programRoot`, so the two share
-// every LoxFn$<n>; a nested function that differs between the two compiles
-// throws std::runtime_error.
+// every LoxFn$<n>; a constant, an arity, an upvalue count, or a chunk hash
+// that differs between the two compiles throws std::runtime_error.
 EmittedClass emitDeclarations(const DecodedFunction& declarationsRoot,
                               const StackAnalysisTree& declarationsTree,
                               const DecodedFunction& programRoot,
