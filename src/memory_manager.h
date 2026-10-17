@@ -84,8 +84,8 @@ class MemoryManager : public VmAllocBase {
     void markObject(Obj* obj);
     void markValue(const Value& v);
     void collectGarbage();
-    // The number of collections this heap has completed. Tests read it to
-    // prove that an allocation path reaches the threshold check.
+    // The number of completed collectGarbage() calls of this heap. Tests read
+    // it to prove that an allocation path reaches the threshold check.
     [[nodiscard]] std::size_t collectionCount() const {
         return m_collectionCount;
     }
