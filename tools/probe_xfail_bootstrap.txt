@@ -3,26 +3,4 @@
 # Each line is `<probe>.lox  <reason>`. A listed probe must fail. When it
 # passes, the gate fails, and the node that made it pass deletes its line.
 
-66_task_spawn_order.lox  workers and tasks: mission #595, node #599
-67_send_never_suspends.lox  workers and tasks: mission #595, node #599
-68_mailbox_unbounded.lox  workers and tasks: mission #595, node #599
-69_task_yield.lox  workers and tasks: mission #595, node #599
-70_sendable_set.lox  workers and tasks: mission #595, node #599
-71_message_identity.lox  workers and tasks: mission #595, node #599
-72_dead_task_same_worker.lox  workers and tasks: mission #595, node #599
-73_dead_task_dead_worker.lox  workers and tasks: mission #595, node #599
-74_worker_isolation.lox  workers and tasks: mission #595, node #599
-75_spawn_worker_send_error.lox  workers and tasks: mission #595, node #599
-76_deadlock.lox  workers and tasks: mission #595, node #599
-77_receive_across_native.lox  workers and tasks: mission #595, node #599
-78_receive_in_coroutine.lox  workers and tasks: mission #595, node #599
-79_uncaught_fault_in_task.lox  workers and tasks: mission #595, node #599
-80_main_end_abandons.lox  workers and tasks: mission #595, node #599
-81_exit_from_task.lox  workers and tasks: mission #595, node #599
-82_send_order_across_workers.lox  workers and tasks: mission #595, node #599
-83_blocking_call_blocks_one_worker.lox  workers and tasks: mission #595, node #599; under the one-thread form of the implementation-gated exception (spec/04-semantics.md) a blocking call blocks every worker, so this probe stays listed
-84_spawn_worker_entry_closure.lox  workers and tasks: mission #595, node #599
-85_task_value.lox  workers and tasks: mission #595, node #599
-86_spawn_arity.lox  workers and tasks: mission #595, node #599
-87_yield_in_map_hash.lox  a yield outside every coroutine raises YieldOutsideCoroutineError: mission #595, node #599
-88_yield_in_map_eq.lox  a yield outside every coroutine raises YieldOutsideCoroutineError: mission #595, node #599
+83_blocking_call_blocks_one_worker.lox  the spec allows this failure, so no node owns it: the bootstrap runs every worker on one host thread under the implementation-gated exception (spec/04-semantics.md, rule 2), so a blocking call blocks every worker

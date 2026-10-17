@@ -1,7 +1,8 @@
 // loxpp_interpreter.lox — Tree-walking interpreter for Lox++, written in Lox++.
 //
 // Covers full Lox++ spec: lists, maps, index/slice, for-in, in-operator,
-// file I/O, break/continue, %, math, builtins, enums, match, destructuring.
+// file I/O, break/continue, %, math, builtins, enums, match, destructuring,
+// coroutines, and tasks and workers.
 //
 // Pipeline: Scanner → Parser → Resolver → Interpreter
 //
@@ -1582,6 +1583,9 @@ class LoxFunction {
         this.closure       = closure;
         this.isInitializer = isInitializer;
         this.loxTag        = "function";
+        // True for a function that a top-level `fun` declaration made: the
+        // only kind of function task.spawn_worker takes.
+        this.topLevel      = false;
     }
 
     arity() { return len(this.params); }
@@ -1809,7 +1813,8 @@ fun reflectTypeName(v) {
     if (tag == "server") return "Server";
     if (tag == "process") return "Process";
     if (tag == "coroutine") return "Coroutine";
-    if (tag == "comodule") return "Instance";
+    if (tag == "comodule" or tag == "taskmodule") return "Instance";
+    if (tag == "task") return "Task";
     if (tag == "enum_ctor") return "EnumConstructor";
     if (tag == "enum_val") return "Enum";
     // spec/03-types.md's type() table gives "Error" for a caught Error
@@ -2469,6 +2474,85 @@ class InterpCoroutineModule {
     init() { this.loxTag = "comodule"; }
 }
 
+// Workers and tasks (spec/04-semantics.md) run under the implementation-gated
+// exception for this interpreter: every worker runs on the one host thread,
+// and the tasks of every worker share the host's one scheduler. A worker is
+// its own set of global variables. A Lox++ task is one host task, so the
+// host's run queue orders the tasks exactly as native's does.
+class InterpWorker {
+    init(globals) { this.globals = globals; }
+}
+
+// The mailbox is kept here, not in the host task's mailbox: an interpreted
+// value is a host Instance, which is not a host message. The host mailbox
+// carries only the wake-up of a task that waits in receive.
+class InterpTask {
+    init(interp, worker) {
+        this.interp    = interp;
+        this.worker    = worker;
+        this.mailbox   = [];
+        this.head      = 0;
+        this.waiting   = false;
+        this.dead      = false;
+        // The host task handle. The main task gets its handle when it first
+        // waits, so a program that never uses tasks never needs a host that
+        // runs tasks.
+        this.host      = nil;
+        this.fn        = nil;
+        // For the first task of a worker: the body of the top-level `fun`
+        // declaration to call, and the message of task.spawn_worker.
+        this.entryBody = nil;
+        this.startArg  = nil;
+        // The interpreter state of this task while another task runs.
+        this.savedDefers         = nil;
+        this.savedStringifyDepth = 0;
+        this.savedNativeDepth    = 0;
+        this.savedCo             = nil;
+        this.loxTag    = "task";
+    }
+
+    pending() { return len(this.mailbox) - this.head; }
+
+    take() {
+        var m = this.mailbox[this.head];
+        this.mailbox[this.head] = nil;
+        this.head = this.head + 1;
+        if (this.head == len(this.mailbox)) {
+            this.mailbox = [];
+            this.head = 0;
+        }
+        return m;
+    }
+
+    // The host task's function.
+    run() { this.interp.runTask(this); }
+
+    toString() { return "<task>"; }
+}
+
+class InterpTaskFn {
+    init(name) { this.name = name; this.loxTag = "native"; }
+    arity() {
+        if (this.name == "spawn") return 1;
+        if (this.name == "spawn_worker" or this.name == "send") return 2;
+        return 0;
+    }
+    call(interp, args) {
+        if (this.name == "spawn")        return interp.taskSpawn(args[0]);
+        if (this.name == "spawn_worker") return interp.taskSpawnWorker(args[0], args[1]);
+        if (this.name == "send")         return interp.taskSend(args[0], args[1]);
+        if (this.name == "receive")      return interp.taskReceive();
+        if (this.name == "self")         return interp.currentTask;
+        return interp.currentTask.pending();
+    }
+    toString() { return "<native fn>"; }
+}
+
+class InterpTaskModule {
+    init() { this.loxTag = "taskmodule"; }
+    toString() { return "TaskModule instance"; }
+}
+
 class LoxEnumCtor {
     init(enumName, tag, fields) {
         this.enumName = enumName;
@@ -2481,12 +2565,31 @@ class LoxEnumCtor {
     toString() { return "<enum ctor " + this.tag + ">"; }
 }
 
+// spec/03-types.md, Messages. An enum value's own bit is computed once, when
+// it is made: no construct assigns a field of an enum value, so it never
+// changes.
+fun isMessageValue(v) {
+    var tag = loxTag(v);
+    if (tag == "primitive" or tag == "string" or tag == "number" or tag == "task") return true;
+    if (tag == "enum_val") return v.sendable;
+    return false;
+}
+
 class LoxEnumValue {
     init(enumName, tag, fields) {
         this.enumName = enumName;
         this.tag      = tag;
         this.fields   = fields;
         this.loxTag   = "enum_val";
+        this.sendable = true;
+        var i = 0;
+        while (i < len(fields)) {
+            if (!isMessageValue(fields[i])) {
+                this.sendable = false;
+                break;
+            }
+            i = i + 1;
+        }
     }
     toString() {
         // spec/03-types.md's Canonical String Representation: an enum
@@ -2526,7 +2629,8 @@ class Interpreter {
         this.thrownValue   = nil;
         this.pendingDefers = [];
         this.stringifyDepth = 0;
-        // The Lox++ coroutine now executing, or nil in the main program.
+        // The Lox++ coroutine now executing, or nil outside every coroutine
+        // that the running task resumed.
         this.currentCo = nil;
         // Depth of target code entered through a call native would make from
         // C++ (__str__, __hash__/__eq__ during a map operation, a deferred
@@ -2539,33 +2643,234 @@ class Interpreter {
         // reads 0 because stringify() never started" -- both look the same
         // in the plain restore check below.
         this.maxStringifyDepthSeen = 0;
-        this.globals.define("clock", LoxNative("clock"));
-        this.globals.define("input", LoxNative("input"));
-        this.globals.define("ord",   LoxNative("ord"));
-        this.globals.define("chr",   LoxNative("chr"));
-        this.globals.define("open",  LoxNative("open"));
-        this.globals.define("args",  LoxNative("args"));
-        this.globals.define("env",   LoxNative("env"));
-        this.globals.define("exit",  LoxNative("exit"));
-        this.globals.define("time",  LoxNative("time"));
-        this.globals.define("sleep", LoxNative("sleep"));
-        this.globals.define("exists",  LoxNative("exists"));
-        this.globals.define("is_dir",  LoxNative("is_dir"));
-        this.globals.define("is_file", LoxNative("is_file"));
-        this.globals.define("stat",    LoxNative("stat"));
-        this.globals.define("connect", LoxNative("connect"));
-        this.globals.define("listen",  LoxNative("listen"));
-        this.globals.define("spawn",   LoxNative("spawn"));
-        this.globals.define("run",     LoxNative("run"));
-        this.globals.define("math",  InterpMath());
-        this.globals.define("coroutine", InterpCoroutineModule());
-        this.globals.define("type",       LoxNative("type"));
-        this.globals.define("fields",     LoxNative("fields"));
-        this.globals.define("methods",    LoxNative("methods"));
-        this.globals.define("getField",   LoxNative("getField"));
-        this.globals.define("setField",   LoxNative("setField"));
-        this.globals.define("hasField",   LoxNative("hasField"));
-        this.globals.define("callMethod", LoxNative("callMethod"));
+        this.defineStdlib(this.globals);
+        // The top-level statements of the program, which a new worker reads
+        // for its declarations.
+        this.programStmts = [];
+        // The running task, and the main task, which runs the top-level code.
+        this.mainTask    = InterpTask(this, InterpWorker(this.globals));
+        this.currentTask = this.mainTask;
+        // The tasks that are running or ready to run, on every worker. With
+        // one host thread, no task is in a blocking call while one runs, so
+        // the main task waiting with this at 0 is a deadlock.
+        this.readyTasks  = 1;
+    }
+
+    defineStdlib(env) {
+        env.define("clock", LoxNative("clock"));
+        env.define("input", LoxNative("input"));
+        env.define("ord",   LoxNative("ord"));
+        env.define("chr",   LoxNative("chr"));
+        env.define("open",  LoxNative("open"));
+        env.define("args",  LoxNative("args"));
+        env.define("env",   LoxNative("env"));
+        env.define("exit",  LoxNative("exit"));
+        env.define("time",  LoxNative("time"));
+        env.define("sleep", LoxNative("sleep"));
+        env.define("exists",  LoxNative("exists"));
+        env.define("is_dir",  LoxNative("is_dir"));
+        env.define("is_file", LoxNative("is_file"));
+        env.define("stat",    LoxNative("stat"));
+        env.define("connect", LoxNative("connect"));
+        env.define("listen",  LoxNative("listen"));
+        env.define("spawn",   LoxNative("spawn"));
+        env.define("run",     LoxNative("run"));
+        env.define("math",  InterpMath());
+        env.define("coroutine", InterpCoroutineModule());
+        env.define("task",      InterpTaskModule());
+        env.define("type",       LoxNative("type"));
+        env.define("fields",     LoxNative("fields"));
+        env.define("methods",    LoxNative("methods"));
+        env.define("getField",   LoxNative("getField"));
+        env.define("setField",   LoxNative("setField"));
+        env.define("hasField",   LoxNative("hasField"));
+        env.define("callMethod", LoxNative("callMethod"));
+    }
+
+    // --- tasks and workers (spec/04-semantics.md, Workers and Tasks) -------
+
+    // pendingDefers, stringifyDepth, nativeDepth, and currentCo belong to the
+    // running task. The flags (returnFlag, breakFlag, continueFlag,
+    // throwFlag) need no save: each is false at every suspend point.
+    parkTask(t) {
+        t.savedDefers         = this.pendingDefers;
+        t.savedStringifyDepth = this.stringifyDepth;
+        t.savedNativeDepth    = this.nativeDepth;
+        t.savedCo             = this.currentCo;
+    }
+
+    unparkTask(t) {
+        this.currentTask    = t;
+        this.globals        = t.worker.globals;
+        this.pendingDefers  = t.savedDefers;
+        this.stringifyDepth = t.savedStringifyDepth;
+        this.nativeDepth    = t.savedNativeDepth;
+        this.currentCo      = t.savedCo;
+    }
+
+    checkDeadlock() {
+        if (this.mainTask.waiting and this.readyTasks == 0) {
+            this.fatalError("Deadlock: every task waits in receive.");
+        }
+    }
+
+    // A yield in a task outside every coroutine it resumed: the task joins
+    // the back of the run queue. With no other task ready, the host would
+    // run this one again at once, so the host is not asked.
+    yieldTask() {
+        if (this.readyTasks <= 1) return;
+        var t = this.currentTask;
+        this.parkTask(t);
+        yield nil;
+        this.unparkTask(t);
+    }
+
+    setSendError(msg) {
+        this.setError("SendError", "Value of type " + reflectTypeName(msg) + " is not a message.", 0);
+    }
+
+    startTask(t) {
+        this.readyTasks = this.readyTasks + 1;
+        t.host = task.spawn(t.run);
+        return t;
+    }
+
+    taskSpawn(fn) {
+        if (loxTag(fn) != "function") {
+            this.fatalError("task.spawn expects a function.");
+            return nil;
+        }
+        var t = InterpTask(this, this.currentTask.worker);
+        t.fn = fn;
+        return this.startTask(t);
+    }
+
+    taskSpawnWorker(fn, msg) {
+        if (loxTag(fn) != "function" or !fn.topLevel) {
+            this.fatalError("task.spawn_worker expects a function that a top-level fun declaration made.");
+            return nil;
+        }
+        if (!isMessageValue(msg)) {
+            this.setSendError(msg);
+            return nil;
+        }
+        var globals = Environment(nil);
+        this.defineStdlib(globals);
+        var t = InterpTask(this, InterpWorker(globals));
+        t.entryBody = fn.body;
+        t.startArg  = msg;
+        return this.startTask(t);
+    }
+
+    taskSend(t, msg) {
+        if (loxTag(t) != "task") {
+            this.fatalError("task.send expects a task.");
+            return nil;
+        }
+        if (!isMessageValue(msg)) {
+            this.setSendError(msg);
+            return nil;
+        }
+        if (t.dead) {
+            this.setError("DeadTaskError", "Cannot send to a task that has ended.", 0);
+            return nil;
+        }
+        t.mailbox.append(msg);
+        if (t.waiting) {
+            t.waiting = false;
+            this.readyTasks = this.readyTasks + 1;
+            task.send(t.host, true);
+        }
+        return nil;
+    }
+
+    // A receive on an empty mailbox suspends the whole task. Inside a
+    // coroutine that the task resumed, the host receive suspends the host
+    // task with the host coroutine's frames in place, so the coroutine keeps
+    // the state "running".
+    taskReceive() {
+        var t = this.currentTask;
+        if (t.pending() > 0) return t.take();
+        if (this.nativeDepth > 0) {
+            this.setError("YieldAcrossNativeError", "Cannot receive across a native callback.", 0);
+            return nil;
+        }
+        if (t.host == nil) t.host = task.self();
+        t.waiting = true;
+        this.readyTasks = this.readyTasks - 1;
+        this.checkDeadlock();
+        this.parkTask(t);
+        task.receive();
+        this.unparkTask(t);
+        return t.take();
+    }
+
+    // The body of every host task but the main one.
+    runTask(t) {
+        this.currentTask    = t;
+        this.globals        = t.worker.globals;
+        this.pendingDefers  = [];
+        this.stringifyDepth = 0;
+        this.nativeDepth    = 0;
+        this.currentCo      = nil;
+        var fn = t.fn;
+        var args = [];
+        if (t.entryBody != nil) {
+            fn = this.defineWorkerDecls(t.entryBody);
+            args = [t.startArg];
+            t.startArg = nil;
+        }
+        if (!this.throwFlag) fn.call(this, args);
+        if (this.throwFlag) {
+            this.reportUncaught();
+            exit(70);
+        }
+        t.dead = true;
+        t.mailbox = [];
+        t.head = 0;
+        this.readyTasks = this.readyTasks - 1;
+        this.checkDeadlock();
+    }
+
+    // Defines, in the globals of a new worker, every top-level `fun`, `class`,
+    // and `enum` declaration in source order. Returns the function that the
+    // `fun` declaration with body `entryBody` made there.
+    defineWorkerDecls(entryBody) {
+        var entry = nil;
+        var i = 0;
+        while (i < len(this.programStmts)) {
+            var s = this.programStmts[i];
+            if (this.isWorkerDecl(s)) {
+                this.execStmt(s, this.globals);
+                if (this.throwFlag) return nil;
+                var name = this.funDeclName(s, entryBody);
+                if (name != nil) entry = this.globals.values[name];
+            }
+            i = i + 1;
+        }
+        return entry;
+    }
+
+    isWorkerDecl(s) {
+        return match s {
+            case FunDecl{name, line, params, body}                          => true
+            case ClassDecl{name, super_id, super_name, super_line, methods} => true
+            case EnumDecl{name, ctor_names, ctor_fields_list}               => true
+            case _                                                          => false
+        };
+    }
+
+    // The name a `fun` declaration with body `entryBody` defines, or nil.
+    funDeclName(s, entryBody) {
+        return match s {
+            case FunDecl{name, line, params, body} => this.nameIfSameBody(name, body, entryBody)
+            case _                                 => nil
+        };
+    }
+
+    nameIfSameBody(name, body, entryBody) {
+        if (body == entryBody) return name;
+        return nil;
     }
 
     setError(kind, msg, line) {
@@ -2815,48 +3120,51 @@ class Interpreter {
     }
 
     interpret(stmts) {
+        this.programStmts = stmts;
         var i = 0;
         while (i < len(stmts)) {
             this.execStmt(stmts[i], this.globals);
             if (this.returnFlag or this.throwFlag) {
                 if (this.throwFlag) {
                     this.runPendingDefers();
-                    // Report the uncaught throw, then any fault the report's
-                    // own __str__ raises, until none remains. Native's
-                    // handleThrow does the same: a __str__ that throws during
-                    // the report replaces the throw being reported (its own
-                    // defers already drained inside LoxFunction.call). Without
-                    // the re-check, stringify()'s stop-dispatch guard returns
-                    // the "..." placeholder and the inner fault is dropped.
-                    // A __str__ that re-throws the same (or a fresh) Instance
-                    // would loop forever, so bound it the way native's own
-                    // stringify depth guard does and report the same "..."
-                    // placeholder native reports for that case.
-                    var reportDepth = 0;
-                    while (this.throwFlag) {
-                        if (reportDepth >= 200) {
-                            print "LOXERR70 ...";
-                            break;
-                        }
-                        reportDepth = reportDepth + 1;
-                        var thrownVal = this.thrownValue;
-                        this.throwFlag = false;
-                        if (loxTag(thrownVal) == "error") {
-                            print "LOXERR70 " + thrownVal.message;
-                        } else {
-                            var msg = this.stringify(thrownVal);
-                            if (this.throwFlag) {
-                                continue;
-                            }
-                            print "LOXERR70 " + msg;
-                        }
-                    }
-                    this.thrownValue = nil;
+                    this.reportUncaught();
                 }
                 return;
             }
             i = i + 1;
         }
+    }
+
+    // Report the uncaught throw, then any fault the report's own __str__
+    // raises, until none remains. Native's handleThrow does the same: a
+    // __str__ that throws during the report replaces the throw being
+    // reported (its own defers already drained inside LoxFunction.call).
+    // Without the re-check, stringify()'s stop-dispatch guard returns the
+    // "..." placeholder and the inner fault is dropped. A __str__ that
+    // re-throws the same (or a fresh) Instance would loop forever, so bound
+    // it the way native's own stringify depth guard does and report the same
+    // "..." placeholder native reports for that case.
+    reportUncaught() {
+        var reportDepth = 0;
+        while (this.throwFlag) {
+            if (reportDepth >= 200) {
+                print "LOXERR70 ...";
+                break;
+            }
+            reportDepth = reportDepth + 1;
+            var thrownVal = this.thrownValue;
+            this.throwFlag = false;
+            if (loxTag(thrownVal) == "error") {
+                print "LOXERR70 " + thrownVal.message;
+            } else {
+                var msg = this.stringify(thrownVal);
+                if (this.throwFlag) {
+                    continue;
+                }
+                print "LOXERR70 " + msg;
+            }
+        }
+        this.thrownValue = nil;
     }
 
     evalList(elements, env) {
@@ -3126,13 +3434,17 @@ class Interpreter {
             v = this.evalExpr(valueExpr, env);
             if (this.throwFlag) return nil;
         }
+        // Outside every coroutine the running task resumed, the yield
+        // suspends the task itself, which started with nativeDepth 0.
         var co = this.currentCo;
-        if (co == nil) {
-            this.setError("YieldOutsideCoroutineError", "Cannot yield from outside a coroutine.", line);
+        var baseDepth = 0;
+        if (co != nil) baseDepth = co.resumeDepth;
+        if (this.nativeDepth > baseDepth) {
+            this.setError("YieldAcrossNativeError", "Cannot yield across a native callback.", line);
             return nil;
         }
-        if (this.nativeDepth > co.resumeDepth) {
-            this.setError("YieldAcrossNativeError", "Cannot yield across a native callback.", line);
+        if (co == nil) {
+            this.yieldTask();
             return nil;
         }
         // pendingDefers and stringifyDepth belong to the running call, not to
@@ -3259,6 +3571,8 @@ class Interpreter {
 
     execFun(name, params, body, env) {
         var fn = LoxFunction(name, params, body, env, false);
+        // Only a worker's globals environment has no enclosing one.
+        fn.topLevel = env.enclosing == nil;
         env.define(name, fn);
     }
 
@@ -3945,6 +4259,11 @@ class Interpreter {
         }
         if (loxTag(object) == "comodule") {
             if (name == "create") return InterpCoroutineCreate();
+            this.fatalError("Undefined property '" + name + "'.");
+            return nil;
+        }
+        if (loxTag(object) == "taskmodule") {
+            if (name == "spawn" or name == "spawn_worker" or name == "send" or name == "receive" or name == "self" or name == "pending") return InterpTaskFn(name);
             this.fatalError("Undefined property '" + name + "'.");
             return nil;
         }
