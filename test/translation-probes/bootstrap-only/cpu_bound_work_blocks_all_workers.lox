@@ -1,0 +1,32 @@
+// The bootstrap interpreter runs every worker on one host thread, under the
+// implementation-gated exception of spec/04-semantics.md, rule 1: "A task
+// runs alone among the tasks of every worker from one suspend point to the
+// next, not only among the tasks of its own worker." Probes
+// 95_cpu_bound_task_across_workers and
+// 96_cpu_bound_coroutine_across_workers do not bind the bootstrap, and this
+// probe holds it to the exception in their place.
+//
+// A worker sends "awake", then computes for one second with no suspend
+// point. Under the one-thread form the main task cannot run until the loop
+// ends, so its first receive returns only after the second. A conforming
+// implementation runs the worker on its own OS thread and returns from the
+// receive at once.
+fun worker(main) {
+    task.send(main, "awake");
+    var start = time();
+    while (time() - start < 1) {
+    }
+    task.send(main, "done");
+}
+
+var start = time();
+task.spawn_worker(worker, task.self());
+print task.receive();
+print time() - start >= 0.5;
+print task.receive();
+
+// STATUS: ok
+// TIMEOUT: 20
+// CHECK: awake
+// CHECK: true
+// CHECK: done
