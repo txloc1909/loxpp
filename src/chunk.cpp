@@ -25,6 +25,24 @@ void Chunk::write(Op op, int line) { write(static_cast<Byte>(op), line); }
 
 void Chunk::patch(int offset, Byte byte) { (*this)[offset] = byte; }
 
+void Chunk::truncate(std::size_t size) {
+    if (size >= this->size()) {
+        return;
+    }
+    std::size_t drop = this->size() - size;
+    resize(size);
+    while (drop > 0) {
+        auto& run = m_lines.back();
+        auto count = static_cast<std::size_t>(run.second);
+        if (count > drop) {
+            run.second -= static_cast<int>(drop);
+            break;
+        }
+        drop -= count;
+        m_lines.pop_back();
+    }
+}
+
 std::optional<uint16_t> Chunk::addConstant(Value value) {
     // Append-only: dedup is the compiler's job (Compiler::makeConstant keeps an
     // O(1) hash index), so this stays a plain bounded push.

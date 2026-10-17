@@ -197,6 +197,9 @@ class Chunk : std::vector<Byte> {
     void write(Byte byte, int line);
     void write(Op op, int line);
     void patch(int offset, Byte byte);
+    // Drops every byte from `size` on, and their line entries. Constants
+    // stay.
+    void truncate(std::size_t size);
     std::optional<uint16_t> addConstant(Value value);
     [[nodiscard]] Value getConstant(uint16_t idx) const;
     [[nodiscard]] const ValueArray& constants() const { return m_constants; }

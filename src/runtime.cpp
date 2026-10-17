@@ -1,4 +1,5 @@
 #include "runtime.h"
+#include "vm.h"
 #include "objects.h"
 #include "object.h"
 #include "utility.h"
@@ -24,7 +25,11 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <memory>
+#include <pthread.h>
 #include <string>
+#include <system_error>
+#include <thread>
 
 std::optional<Value> Runtime::getGlobal(const std::string& name) const {
     ObjString* key = m_mm.findString(name);
@@ -48,6 +53,11 @@ std::vector<std::string> Runtime::globalNames() const {
 
 ObjClosure* Runtime::loadSource(const std::string& source,
                                 DiagnosticSink* sink) {
+    return loadProgram(source, sink, false);
+}
+
+ObjClosure* Runtime::loadProgram(const std::string& source,
+                                 DiagnosticSink* sink, bool declarationsOnly) {
     // Guard against dangling class pointers from a prior loadSource() call
     // on this same Runtime (a REPL line, or a second rt_startup() on a
     // process that already ran one program). GC can fire inside compile(),
@@ -62,7 +72,20 @@ ObjClosure* Runtime::loadSource(const std::string& source,
     // The last yield's value is a GC root; drop a prior program's before the
     // new program compiles and can collect.
     m_yieldedValue = Value{};
-    ObjFunction* fn = compile(source, &m_mm, sink);
+    CompileOptions options;
+    options.declarationsOnly = declarationsOnly;
+    if (declarationsOnly) {
+        // A new worker compiles a source it already has, under its own id.
+        for (std::size_t i = 0; i < m_sources.size(); i++) {
+            if (*m_sources[i] == source) {
+                options.sourceId = static_cast<int>(i);
+            }
+        }
+    } else {
+        options.sourceId = static_cast<int>(m_sources.size());
+        m_sources.push_back(std::make_shared<const std::string>(source));
+    }
+    ObjFunction* fn = compile(source, &m_mm, sink, options);
     if (fn == nullptr) {
         return nullptr;
     }
@@ -982,21 +1005,55 @@ ObjTask* Runtime::spawnTask(Value fn) {
     m_mm.pushTempRoot(co);
     auto* task = m_mm.create<ObjTask>(co, m_taskEpoch);
     m_mm.popTempRoot();
+    task->serial = m_nextTaskSerial++;
+    ++m_liveTasks;
     m_runQueue.push_back(task);
     return task;
 }
 
 bool Runtime::taskEnded(const ObjTask* task) const {
+    if (task->heapId != m_mm.heapId()) {
+        return task->ended.load(std::memory_order_acquire);
+    }
     return task->state == TaskState::DEAD ||
            (task != m_mainTask && task->epoch != m_taskEpoch);
+}
+
+void Runtime::markTaskDead(ObjTask* task) {
+    if (task->state != TaskState::DEAD) {
+        --m_liveTasks;
+    }
+    task->state = TaskState::DEAD;
+    task->co = nullptr;
+    task->mailbox.clear();
+    task->startArg = Value{};
+    m_waitingTasks.erase(task);
+    task->ended.store(true, std::memory_order_release);
 }
 
 void Runtime::deliverMessage(ObjTask* task, Value msg) {
     task->mailbox.push_back(msg);
     if (task->state == TaskState::WAITING) {
         task->state = TaskState::READY;
+        m_waitingTasks.erase(task);
         m_runQueue.push_back(task);
     }
+}
+
+bool Runtime::sendMessage(ObjTask* task, Value msg) {
+    if (task->heapId == m_mm.heapId()) {
+        deliverMessage(task, msg);
+        return true;
+    }
+    // The count moves at the send, not at the drain: until the receiver
+    // drains the envelope, no heap reaches `msg`, and only this count keeps
+    // its owner's collector from freeing it.
+    MemoryManager::holdValue(msg);
+    if (!postEnvelope(heapOf(task)->inbox(), Envelope{task, msg})) {
+        MemoryManager::releaseValue(msg);
+        return false;
+    }
+    return true;
 }
 
 bool Runtime::receiveFromNative(Value* out) {
@@ -1022,12 +1079,19 @@ bool Runtime::resumeTask(ObjTask* task) {
     m_currentTask = task;
 
     // The resume window: for a first resume, the slot the stored callee goes
-    // into; later, the one value the pending suspend point evaluates to. A
-    // task that waits in receive gets the head of its mailbox, which the
-    // send that woke it put there; a `yield` gets nil.
+    // into, and the message of task.spawn_worker for a worker's first task;
+    // later, the one value the pending suspend point evaluates to. A task
+    // that waits in receive gets the head of its mailbox, which the send
+    // that woke it put there; a `yield` gets nil.
     int argCount = 0;
     if (!co->started) {
         push(from<Nil>(Nil{}));
+        if (task->hasStartArg) {
+            push(task->startArg);
+            task->hasStartArg = false;
+            task->startArg = Value{};
+            argCount = 1;
+        }
     } else {
         Value received = from<Nil>(Nil{});
         if (!task->mailbox.empty() && task->receiving) {
@@ -1054,7 +1118,7 @@ bool Runtime::resumeTask(ObjTask* task) {
     m_currentTask = nullptr;
 
     if (!ok) {
-        task->state = TaskState::DEAD;
+        markTaskDead(task);
         if (outcome != OpResult::Fatal) {
             // No frame lies below a task, so no handler outside it can catch.
             runtimeError("BUG: a task ended through a handler outside it.");
@@ -1065,9 +1129,7 @@ bool Runtime::resumeTask(ObjTask* task) {
     if (co->state == CoroutineState::DEAD) {
         // spec/04-semantics.md, Ending: the return value and the messages
         // still in the mailbox are discarded.
-        task->state = TaskState::DEAD;
-        task->mailbox.clear();
-        task->co = nullptr;
+        markTaskDead(task);
         return true;
     }
     if (m_taskSwitchPending) {
@@ -1075,6 +1137,7 @@ bool Runtime::resumeTask(ObjTask* task) {
         m_taskSwitchInner = nullptr;
         task->state = TaskState::WAITING;
         task->receiving = true;
+        m_waitingTasks.insert(task);
         return true;
     }
     // A `yield` outside every coroutine the task resumed: the yielded value
@@ -1087,14 +1150,16 @@ bool Runtime::resumeTask(ObjTask* task) {
 void Runtime::endTasks() {
     // spec/04-semantics.md, Ending: every other task is abandoned, as an
     // abandoned coroutine is. Its pending deferred calls do not run.
-    for (ObjTask* task : m_runQueue) {
-        if (task != m_mainTask) {
-            task->state = TaskState::DEAD;
-            task->co = nullptr;
-            task->mailbox.clear();
+    std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
+    left.insert(left.end(), m_waitingTasks.begin(), m_waitingTasks.end());
+    for (ObjTask* task : left) {
+        if (task != m_mainTask || !m_isMainWorker) {
+            markTaskDead(task);
         }
     }
     m_runQueue.clear();
+    m_waitingTasks.clear();
+    m_liveTasks = 0;
     m_currentTask = nullptr;
     m_taskSwitchPending = false;
     m_taskSwitchInner = nullptr;
@@ -1102,7 +1167,160 @@ void Runtime::endTasks() {
     ++m_taskEpoch;
 }
 
+void Runtime::drainInbox() {
+    Inbox& inbox = m_mm.inbox();
+    if (!inbox.nonEmpty.load(std::memory_order_acquire)) {
+        return;
+    }
+    // The batch is a root of this heap while it is delivered (MemoryManager::
+    // drainingBatch): a string insert into the intern table can collect.
+    std::vector<Envelope>& batch = m_mm.drainingBatch();
+    {
+        std::lock_guard<std::mutex> lock(inbox.mutex);
+        batch.swap(inbox.queue);
+        inbox.nonEmpty.store(false, std::memory_order_relaxed);
+    }
+    for (Envelope& env : batch) {
+        if (taskEnded(env.target)) {
+            // spec/04-semantics.md, task.send: a message that reaches a task
+            // after it ended is discarded with it.
+            Value dropped = env.msg;
+            env.msg = Value{};
+            MemoryManager::releaseValue(dropped);
+            continue;
+        }
+        // From here the receiver keeps the value that receiveMessage
+        // returns; the sender's object may be gone once its count dropped.
+        env.msg = m_mm.receiveMessage(env.msg);
+        deliverMessage(env.target, env.msg);
+    }
+    batch.clear();
+}
+
+Runtime::WaitResult Runtime::waitForWork() {
+    Inbox& inbox = m_mm.inbox();
+    std::unique_lock<std::mutex> lock(inbox.mutex);
+    if (!inbox.queue.empty()) {
+        return WaitResult::Work;
+    }
+    if (!m_isMainWorker && m_group->ended.load()) {
+        return WaitResult::Ended;
+    }
+    if (m_group->goIdle(inbox) && m_isMainWorker) {
+        inbox.idle = false;
+        return WaitResult::Deadlock;
+    }
+    // The thread sleeps here: an idle worker uses no CPU.
+    inbox.wake.wait(lock, [&] {
+        return !inbox.queue.empty() ||
+               (m_isMainWorker ? m_group->deadlock.load()
+                               : m_group->ended.load());
+    });
+    if (!inbox.queue.empty()) {
+        // The sender that appended took this worker out of idle.
+        return WaitResult::Work;
+    }
+    if (m_isMainWorker) {
+        inbox.idle = false;
+        return WaitResult::Deadlock;
+    }
+    return WaitResult::Ended;
+}
+
+void Runtime::describeWaitingTasks(std::vector<std::string>& out) const {
+    std::vector<ObjTask*> tasks(m_waitingTasks.begin(), m_waitingTasks.end());
+    std::sort(tasks.begin(), tasks.end(),
+              [](const ObjTask* a, const ObjTask* b) {
+                  return a->serial < b->serial;
+              });
+    for (const ObjTask* task : tasks) {
+        std::string name = "script";
+        if (task->co != nullptr) {
+            Value callee = task->co->callee;
+            ObjFunction* fn = nullptr;
+            if (isClosure(callee)) {
+                fn = asObjClosure(as<Obj*>(callee))->function;
+            } else if (isBoundMethod(callee)) {
+                fn = asObjBoundMethod(as<Obj*>(callee))->method->function;
+            }
+            if (fn != nullptr && fn->name != nullptr) {
+                name.assign(fn->name->chars.data(), fn->name->chars.size());
+            }
+        }
+        out.push_back("  task " + name + " on worker " +
+                      std::to_string(m_mm.workerNumber()) +
+                      " waits in receive");
+    }
+}
+
+void Runtime::reportDeadlock() {
+    // Every worker is idle: each one wrote its list of waiting tasks before
+    // it released its inbox lock to wait, and none runs again, so the list
+    // is read under that lock.
+    std::vector<std::string> lines;
+    describeWaitingTasks(lines);
+    {
+        std::lock_guard<std::mutex> groupLock(m_group->mutex);
+        for (Inbox* inbox : m_group->inboxes) {
+            if (inbox == &m_mm.inbox()) {
+                continue;
+            }
+            std::lock_guard<std::mutex> lock(inbox->mutex);
+            if (inbox->runtime != nullptr) {
+                inbox->runtime->describeWaitingTasks(lines);
+            }
+        }
+    }
+    flockfile(stderr);
+    runtimeError("Deadlock: every task waits in receive.");
+    for (const std::string& line : lines) {
+        std::fprintf(stderr, "%s\n", line.c_str());
+    }
+    funlockfile(stderr);
+}
+
+InterpretResult Runtime::schedule() {
+    for (;;) {
+        if (m_isMainWorker ? m_mainTask->state == TaskState::DEAD
+                           : m_liveTasks == 0) {
+            return InterpretResult::OK;
+        }
+        if (!m_isMainWorker && m_group->ended.load(std::memory_order_relaxed)) {
+            return InterpretResult::OK;
+        }
+        drainInbox();
+        if (m_runQueue.empty()) {
+            switch (waitForWork()) {
+            case WaitResult::Work:
+                continue;
+            case WaitResult::Deadlock:
+                reportDeadlock();
+                return InterpretResult::RUNTIME_ERROR;
+            case WaitResult::Ended:
+                return InterpretResult::OK;
+            }
+        }
+        ObjTask* task = m_runQueue.front();
+        m_runQueue.pop_front();
+        if (!resumeTask(task)) {
+            return InterpretResult::RUNTIME_ERROR;
+        }
+    }
+}
+
 InterpretResult Runtime::runTasks(ObjClosure* script) {
+    // One group per run: a worker of an earlier run (an earlier REPL line)
+    // keeps its own group, which that run's end already ended.
+    m_group = std::make_shared<WorkerGroup>();
+    Inbox& inbox = m_mm.inbox();
+    m_group->mainInbox = &inbox;
+    m_group->addWorker(&inbox);
+    {
+        std::lock_guard<std::mutex> lock(inbox.mutex);
+        inbox.group = m_group;
+        inbox.idle = false;
+    }
+
     // The script closure stays rooted on the stack until the main task's
     // coroutine holds it.
     auto* mainCo = m_mm.create<ObjCoroutine>(m_coroutineClass,
@@ -1110,35 +1328,192 @@ InterpretResult Runtime::runTasks(ObjClosure* script) {
     stackTop[-1] = Value{static_cast<Obj*>(mainCo)};
     if (m_mainTask == nullptr) {
         m_mainTask = m_mm.create<ObjTask>(mainCo, m_taskEpoch);
+        m_mainTask->serial = m_nextTaskSerial++;
     }
     m_mainTask->co = mainCo;
     m_mainTask->state = TaskState::READY;
     m_mainTask->receiving = false;
     m_mainTask->epoch = m_taskEpoch;
+    m_mainTask->ended.store(false, std::memory_order_relaxed);
     pop();
 
     m_runQueue.clear();
     m_runQueue.push_back(m_mainTask);
-    InterpretResult result = InterpretResult::OK;
-    while (m_mainTask->state != TaskState::DEAD) {
-        if (m_runQueue.empty()) {
-            // One worker: only a task of this worker could send, and none can
-            // run, so the main task waits for ever.
-            runtimeError("Deadlock: every task waits in receive.");
-            result = InterpretResult::RUNTIME_ERROR;
-            break;
-        }
-        ObjTask* task = m_runQueue.front();
-        m_runQueue.pop_front();
-        if (!resumeTask(task)) {
-            result = InterpretResult::RUNTIME_ERROR;
+    m_liveTasks = 1;
+    InterpretResult result = schedule();
+    m_mainTask->state = TaskState::DEAD;
+    m_mainTask->co = nullptr;
+    m_mainTask->ended.store(true, std::memory_order_release);
+    endTasks();
+    m_group->removeWorker(&inbox);
+    m_group->end();
+    return result;
+}
+
+bool Runtime::isTopLevelFunction(const Value& fn) const {
+    if (!isClosure(fn)) {
+        return false;
+    }
+    const ObjFunction* function = asObjClosure(as<Obj*>(fn))->function;
+    return function->topLevelOrdinal >= 0 && function->sourceId >= 0 &&
+           static_cast<std::size_t>(function->sourceId) < m_sources.size();
+}
+
+namespace {
+
+struct WorkerStart {
+    std::shared_ptr<WorkerGroup> group;
+    MemoryManager* heap;
+    std::vector<std::shared_ptr<const std::string>> sources;
+    std::vector<std::string> args;
+    int sourceId;
+    int ordinal;
+    ObjTask* task;
+    Value msg;
+};
+
+void workerMain(WorkerStart start) {
+    std::string name = "loxpp-w" + std::to_string(start.heap->workerNumber());
+    pthread_setname_np(pthread_self(), name.substr(0, 15).c_str());
+    Inbox& inbox = start.heap->inbox();
+    // Heap-allocated: a Runtime holds its fixed stack and frame arrays.
+    auto vm = std::make_unique<VM>(start.heap);
+    Runtime& rt = vm->runtime();
+    rt.setArgs(std::move(start.args));
+    InterpretResult result =
+        rt.runWorker(start.group, std::move(start.sources), start.sourceId,
+                     start.ordinal, start.task, start.msg);
+    if (result != InterpretResult::OK) {
+        // spec/04-semantics.md, Ending: an uncaught fault in any task ends
+        // the program. The report is already on stderr.
+        endProcess(70);
+    }
+    start.group->leave(inbox);
+    vm.reset();
+}
+
+} // namespace
+
+ObjTask* Runtime::spawnWorker(ObjClosure* entry, Value msg) {
+    int number = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_group->mutex);
+        number = m_group->nextWorkerNumber++;
+    }
+    auto* heap = new MemoryManager(number);
+    auto* task = heap->create<ObjTask>(nullptr, 0);
+    task->serial = 0;
+    // One count for this worker, which keeps the handle in its foreign set,
+    // and one for the message on its way to the new worker.
+    heap->hold(task);
+    m_mm.adoptForeign(task);
+    MemoryManager::holdValue(msg);
+    {
+        std::lock_guard<std::mutex> lock(heap->inbox().mutex);
+        heap->inbox().group = m_group;
+    }
+    m_group->busy.fetch_add(1);
+    m_group->addWorker(&heap->inbox());
+    WorkerStart start{m_group,
+                      heap,
+                      m_sources,
+                      m_stdlibCtx.args,
+                      entry->function->sourceId,
+                      entry->function->topLevelOrdinal,
+                      task,
+                      msg};
+    try {
+        std::thread(workerMain, std::move(start)).detach();
+    } catch (const std::system_error& e) {
+        std::fprintf(stderr, "Cannot start a worker: %s\n", e.what());
+        endProcess(70);
+    }
+    return task;
+}
+
+InterpretResult
+Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
+                   std::vector<std::shared_ptr<const std::string>> sources,
+                   int sourceId, int ordinal, ObjTask* task, Value msg) {
+    m_group = std::move(group);
+    m_isMainWorker = false;
+    m_sources = std::move(sources);
+    m_mainTask = task;
+    // The task is held for the worker that spawned this one, so it is a root
+    // here from the start. Its first resume passes it the message.
+    task->startArg = m_mm.receiveMessage(msg);
+    task->hasStartArg = true;
+
+    // spec/04-semantics.md, task.spawn_worker, step 3: every top-level fun,
+    // class, and enum declaration, in source order, and nothing else.
+    ObjClosure* script = loadProgram(*m_sources[sourceId], nullptr, true);
+    if (script == nullptr) {
+        return InterpretResult::RUNTIME_ERROR;
+    }
+    m_mm.pushTempRoot(script);
+    if (call(script, 0) == ThrowOutcome::Uncaught ||
+        m_runLoop(0) != InterpretResult::OK) {
+        return InterpretResult::RUNTIME_ERROR;
+    }
+    ObjFunction* entryFn = nullptr;
+    const ValueArray& constants = script->function->chunk.constants();
+    for (std::uint16_t i = 0; i < constants.size(); i++) {
+        Value c = constants.at(i);
+        if (isFunction(c) &&
+            static_cast<ObjFunction*>(as<Obj*>(c))->topLevelOrdinal ==
+                ordinal) {
+            entryFn = static_cast<ObjFunction*>(as<Obj*>(c));
             break;
         }
     }
-    m_mainTask->state = TaskState::DEAD;
-    m_mainTask->co = nullptr;
+    if (entryFn == nullptr) {
+        runtimeError("BUG: a worker found no entry function.");
+        return InterpretResult::RUNTIME_ERROR;
+    }
+    // A top-level function captures nothing, so a new closure over it is the
+    // one its declaration made.
+    auto* entry = m_mm.create<ObjClosure>(entryFn);
+    m_mm.pushTempRoot(entry);
+    task->co = m_mm.create<ObjCoroutine>(m_coroutineClass,
+                                         Value{static_cast<Obj*>(entry)});
+    m_mm.popTempRoot();
+    m_mm.popTempRoot();
+    task->serial = m_nextTaskSerial++;
+    task->state = TaskState::READY;
+    m_runQueue.push_back(task);
+    m_liveTasks = 1;
+
+#ifdef LOXPP_PROFILE
+    m_profilerData.worker = m_mm.workerNumber();
+    m_profilerData.opcodeTable[static_cast<uint8_t>(Op::CALL)].count++;
+    InterpretResult result;
+    {
+        ProfileProgramScope programScope(m_profilerData);
+        result = schedule();
+        m_mm.mergeCoroutineProfilers();
+    }
+#else
+    InterpretResult result = schedule();
+#endif
     endTasks();
     return result;
+}
+
+Runtime::~Runtime() {
+    // The inbox may still name this Runtime for a deadlock report.
+    {
+        std::lock_guard<std::mutex> lock(m_mm.inbox().mutex);
+        m_mm.inbox().runtime = nullptr;
+    }
+    std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
+    left.insert(left.end(), m_waitingTasks.begin(), m_waitingTasks.end());
+    if (m_mainTask != nullptr) {
+        left.push_back(m_mainTask);
+    }
+    for (ObjTask* task : left) {
+        task->ended.store(true, std::memory_order_release);
+    }
+    m_mm.retire();
 }
 
 ObjUpvalue* Runtime::captureUpvalue(Value* local) {
@@ -1527,6 +1902,8 @@ void Runtime::defineNatives() {
 }
 
 void Runtime::runtimeError(const char* format, ...) {
+    // One report, whole, also when another worker reports at the same time.
+    flockfile(stderr);
     va_list args;
     va_start(args, format);
     // NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized)
@@ -1548,6 +1925,7 @@ void Runtime::runtimeError(const char* format, ...) {
             std::fprintf(stderr, "%s()\n", fn->name->chars.c_str());
         }
     }
+    funlockfile(stderr);
 
     resetStack();
 }
@@ -1602,6 +1980,9 @@ void Runtime::markRoots() {
         m_mm.markObject(m_currentTask);
     }
     for (ObjTask* task : m_runQueue) {
+        m_mm.markObject(task);
+    }
+    for (ObjTask* task : m_waitingTasks) {
         m_mm.markObject(task);
     }
     if (m_taskSwitchInner != nullptr) {

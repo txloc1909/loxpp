@@ -2,10 +2,3 @@
 # Read by tools/check_spec_probes.py (the Build & Test job).
 # Each line is `<probe>.lox  <reason>`. A listed probe must fail. When it
 # passes, the gate fails, and the node that made it pass deletes its line.
-
-73_dead_task_dead_worker.lox  workers on threads: mission #595, node #598
-74_worker_isolation.lox  workers on threads: mission #595, node #598
-75_spawn_worker_send_error.lox  workers on threads: mission #595, node #598
-76_deadlock.lox  workers on threads: mission #595, node #598
-82_send_order_across_workers.lox  workers on threads: mission #595, node #598
-83_blocking_call_blocks_one_worker.lox  workers on threads: mission #595, node #598

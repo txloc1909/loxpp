@@ -29,6 +29,16 @@ struct ObjFunction : public Obj {
     // it and never read it.
     void* code{nullptr};
 
+    // The position of the top-level `fun` declaration that made this
+    // function, among the top-level `fun` declarations of its source, in
+    // source order; -1 for every other function. Two compiles of one source
+    // give the same ordinals, so a new worker finds "the function of the
+    // same declaration" by it (task.spawn_worker), also when two
+    // declarations share a name. `sourceId` names that source
+    // (Runtime::m_sources).
+    int topLevelOrdinal{-1};
+    int sourceId{0};
+
     ObjFunction() : Obj(ObjType::FUNCTION) {}
 };
 

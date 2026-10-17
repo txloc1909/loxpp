@@ -6,20 +6,22 @@
 The `std::optional<ProfileFunctionScope>` array is indexed by frame depth,
 which implicitly assumes one call stack. This is the tightest coupling.
 
-**2. Clock: `CLOCK_PROCESS_CPUTIME_ID`**
-This measures process-wide CPU time. With multiple threads running Lox code
-simultaneously, times from different threads accumulate into the same clock —
-you can't attribute time to a specific thread of execution.
+**2. Clock: `CLOCK_THREAD_CPUTIME_ID`**
+This measures the CPU time of the calling thread. Each worker is one OS
+thread (`docs/decisions/concurrency-model-decision.md`), so a worker's
+profile counts its own time and no other worker's. A worker that sleeps or
+waits in `task.receive()` adds no time.
 
-**3. GC stats via shared `MemoryManager`**
-`ProfileGcScope` reads `bytesAllocated` from `MemoryManager`, which will become
-a shared resource under any concurrent model with a shared heap. The
-`ProfilerData*` pointer stored in `MemoryManager` would have a single owner in
-a multi-VM world.
+**3. GC stats per heap**
+`ProfileGcScope` reads `bytesAllocated` from the `MemoryManager` of one
+worker. Each worker has its own heap and its own collector, so the stats need
+no lock.
 
-**4. `ProfilerData` owned by `VM`**
-One struct per VM instance. Whether this is a problem depends entirely on your
-concurrency model.
+**4. `ProfilerData` per worker**
+Each worker's `Runtime` owns one `ProfilerData`, and the worker prints its own
+report when it ends, titled `loxpp PROFILER REPORT (worker N)`; the main
+worker's report keeps the plain title. There is no merged report. A merged
+view is a tool over the per-worker reports.
 
 ---
 

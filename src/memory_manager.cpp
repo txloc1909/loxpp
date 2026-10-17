@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <string>
 
 #ifdef LOXPP_DEBUG_LOG_GC
 static const char* objTypeName(ObjType type) {
@@ -81,34 +82,66 @@ static uint64_t monotonicNs() {
            static_cast<uint64_t>(ts.tv_nsec);
 }
 
-// Trace line formats are documented in tools/gc_report.py.
-static std::FILE* openTraceFile() {
-    const char* path = std::getenv("LOXPP_GC_TRACE");
-    if (path == nullptr || path[0] == '\0') {
+// Trace line formats are documented in tools/gc_report.py. Worker N > 0
+// writes its own file, `<path>.w<N>`, so two heaps never share one.
+static std::FILE* openTraceFile(int workerNumber) {
+    const char* env = std::getenv("LOXPP_GC_TRACE");
+    if (env == nullptr || env[0] == '\0') {
         return nullptr;
     }
-    std::FILE* f = std::fopen(path, "w");
+    std::string path = env;
+    if (workerNumber > 0) {
+        path += ".w" + std::to_string(workerNumber);
+    }
+    std::FILE* f = std::fopen(path.c_str(), "w");
     if (f == nullptr) {
-        std::fprintf(stderr, "LOXPP_GC_TRACE: cannot open '%s'\n", path);
+        std::fprintf(stderr, "LOXPP_GC_TRACE: cannot open '%s'\n",
+                     path.c_str());
         return nullptr;
     }
-    std::fprintf(f, "# loxpp-gc-trace v1\nstart t=%llu\n",
+    std::fprintf(f, "# loxpp-gc-trace v2\nstart t=%llu\n",
                  static_cast<unsigned long long>(monotonicNs()));
     std::fflush(f);
     return f;
 }
 
-MemoryManager::MemoryManager()
+MemoryManager::MemoryManager(int workerNumber)
     : m_strings(VmAllocator<Entry>{this}), m_stressGC(readStressGCEnv()),
-      m_trace(openTraceFile()) {}
+      m_trace(openTraceFile(workerNumber)), m_workerNumber(workerNumber),
+      m_heapId(acquireHeapId(this)) {
+    m_inbox.workerNumber = workerNumber;
+}
 
 MemoryManager::~MemoryManager() {
     collectAll();
+    // A dead heap keeps the foreign objects its held messages reach until it
+    // is freed; a heap that never retired keeps every foreign object it
+    // held.
+    std::vector<Obj*> foreign;
+    foreign.reserve(m_foreign.size());
+    for (auto& entry : m_foreign) {
+        foreign.push_back(entry.first);
+    }
+    m_foreign.clear();
+    for (Obj* obj : foreign) {
+        heapOf(obj)->releaseHold(obj);
+    }
+    std::vector<Envelope> rest;
+    {
+        std::lock_guard<std::mutex> lock(m_inbox.mutex);
+        rest.swap(m_inbox.queue);
+    }
+    for (const Envelope& env : rest) {
+        if (isObj(env.msg) && as<Obj*>(env.msg)->heapId != m_heapId) {
+            releaseValue(env.msg);
+        }
+    }
     if (m_trace != nullptr) {
         std::fprintf(m_trace, "end t=%llu\n",
                      static_cast<unsigned long long>(monotonicNs()));
         std::fclose(m_trace);
     }
+    releaseHeapId(m_heapId);
 }
 
 void* MemoryManager::rawAlloc(std::size_t bytes) {
@@ -177,7 +210,24 @@ void MemoryManager::setMarkRootsCallback(std::function<void()> cb) {
 void MemoryManager::setCurrentCompiler(Compiler* c) { m_currentCompiler = c; }
 
 void MemoryManager::markObject(Obj* obj) {
-    if (obj == nullptr || obj->marked) {
+    if (obj == nullptr) {
+        return;
+    }
+    if (obj->heapId != m_heapId) {
+        // An object of another heap: mark it in the side table only, and do
+        // not trace it. Its owner traces it while this heap holds it.
+        if (obj->heapId == 0) {
+            return;
+        }
+        auto [it, inserted] = m_foreign.try_emplace(obj, true);
+        if (inserted) {
+            m_reachedForeign.push_back(obj);
+        } else {
+            it->second = true;
+        }
+        return;
+    }
+    if (obj->marked) {
         return;
     }
     obj->marked = true;
@@ -368,12 +418,24 @@ void MemoryManager::traceObject(Obj* obj) {
         for (const auto& v : task->mailbox) {
             markValue(v);
         }
+        markValue(task->startArg);
         break;
     }
     }
 }
 
-void MemoryManager::removeWhiteStrings() { m_strings.removeUnmarkedKeys(); }
+bool MemoryManager::isMarkedHere(const Obj* obj) const {
+    if (obj->heapId == m_heapId) {
+        return obj->marked;
+    }
+    auto it = m_foreign.find(const_cast<Obj*>(obj));
+    return it != m_foreign.end() && it->second;
+}
+
+void MemoryManager::removeWhiteStrings() {
+    m_strings.removeKeysIf(
+        [this](const ObjString* key) { return !isMarkedHere(key); });
+}
 
 // Returns the sizeof(T) used when the object was created via create<T>().
 // Must match the sizeof(T) added in create<T>().
@@ -482,6 +544,13 @@ void MemoryManager::mergeCoroutineProfilers() {
 }
 #endif
 
+const char* MemoryManager::collectionCause() const {
+    if (m_exitCollection) {
+        return "exit";
+    }
+    return m_stressGC ? "stress" : "threshold";
+}
+
 void MemoryManager::collectGarbage() {
     // The traced instantiation holds every clock read and counter, so the
     // untraced one carries none of them.
@@ -506,6 +575,10 @@ void MemoryManager::runCollection() {
 #endif
     uint64_t t0 = 0, t1 = 0, t2 = 0, t3 = 0, t4 = 0;
     std::size_t bytesBefore = 0, objsBefore = 0;
+    for (auto& entry : m_foreign) {
+        entry.second = false;
+    }
+    m_reachedForeign.clear();
     if constexpr (Traced) {
         bytesBefore = bytesAllocated;
         objsBefore = allObjects.size();
@@ -520,10 +593,19 @@ void MemoryManager::runCollection() {
     for (auto* obj : m_tempRoots) {
         markObject(obj);
     }
+    markHeldRoots();
+    markInboxTargets();
+    for (const Envelope& env : m_draining) {
+        markObject(env.target);
+        markValue(env.msg);
+    }
     if constexpr (Traced) {
         t1 = monotonicNs();
     }
     traceReferences();
+    // Raise before any release: a foreign object reached only now may be
+    // reachable only through one that the release below drops.
+    adoptReachedForeign();
     if constexpr (Traced) {
         t2 = monotonicNs();
     }
@@ -532,6 +614,7 @@ void MemoryManager::runCollection() {
         t3 = monotonicNs();
     }
     sweep();
+    releaseUnreachedForeign();
     if constexpr (Traced) {
         t4 = monotonicNs();
         // Survivors are exactly the objects that were marked.
@@ -542,8 +625,7 @@ void MemoryManager::runCollection() {
                      "gc cause=%s t0=%llu t1=%llu t2=%llu t3=%llu t4=%llu "
                      "bytes_before=%zu bytes_after=%zu objs_before=%zu "
                      "objs_after=%zu marked=%zu freed=%zu\n",
-                     m_stressGC ? "stress" : "threshold",
-                     static_cast<unsigned long long>(t0),
+                     collectionCause(), static_cast<unsigned long long>(t0),
                      static_cast<unsigned long long>(t1),
                      static_cast<unsigned long long>(t2),
                      static_cast<unsigned long long>(t3),
@@ -556,4 +638,167 @@ void MemoryManager::runCollection() {
     fprintf(stderr, "[GC] end   -- %zu bytes allocated, next threshold %zu\n",
             bytesAllocated, m_nextGC);
 #endif
+}
+
+// --- Workers --------------------------------------------------------------
+
+void MemoryManager::hold(const Obj* obj) {
+    std::lock_guard<std::mutex> lock(m_holdMutex);
+    ++m_holders[obj];
+    ++m_heldTotal;
+}
+
+void MemoryManager::releaseHold(const Obj* obj) {
+    bool freeNow = false;
+    {
+        std::lock_guard<std::mutex> lock(m_holdMutex);
+        auto it = m_holders.find(obj);
+        if (it == m_holders.end()) {
+            std::fprintf(stderr, "BUG: a release of an object with no hold.\n");
+            std::abort();
+        }
+        if (--it->second == 0) {
+            m_holders.erase(it);
+        }
+        --m_heldTotal;
+        freeNow = !m_ownerAlive && m_heldTotal == 0;
+    }
+    if (freeNow) {
+        delete this;
+    }
+}
+
+std::uint32_t MemoryManager::holderCount(const Obj* obj) {
+    std::lock_guard<std::mutex> lock(m_holdMutex);
+    auto it = m_holders.find(obj);
+    return it == m_holders.end() ? 0 : it->second;
+}
+
+void MemoryManager::holdValue(const Value& v) {
+    if (isObj(v) && as<Obj*>(v)->heapId != 0) {
+        Obj* obj = as<Obj*>(v);
+        heapOf(obj)->hold(obj);
+    }
+}
+
+void MemoryManager::releaseValue(const Value& v) {
+    if (isObj(v) && as<Obj*>(v)->heapId != 0) {
+        Obj* obj = as<Obj*>(v);
+        heapOf(obj)->releaseHold(obj);
+    }
+}
+
+void MemoryManager::markHeldRoots() {
+    std::lock_guard<std::mutex> lock(m_holdMutex);
+    for (const auto& entry : m_holders) {
+        markObject(const_cast<Obj*>(entry.first));
+    }
+}
+
+void MemoryManager::markInboxTargets() {
+    // A target stays alive while an envelope names it, also after its sender
+    // released its own hold on the handle. The held roots were read first:
+    // a release that this collection did not see in them came after the
+    // envelope was appended, so the envelope is here.
+    std::lock_guard<std::mutex> lock(m_inbox.mutex);
+    for (const Envelope& env : m_inbox.queue) {
+        markObject(env.target);
+    }
+}
+
+void MemoryManager::adoptReachedForeign() {
+    for (Obj* obj : m_reachedForeign) {
+        heapOf(obj)->hold(obj);
+    }
+    m_reachedForeign.clear();
+}
+
+void MemoryManager::releaseUnreachedForeign() {
+    std::vector<Obj*> dropped;
+    for (auto it = m_foreign.begin(); it != m_foreign.end();) {
+        if (it->second) {
+            ++it;
+        } else {
+            dropped.push_back(it->first);
+            it = m_foreign.erase(it);
+        }
+    }
+    for (Obj* obj : dropped) {
+        heapOf(obj)->releaseHold(obj);
+    }
+}
+
+void MemoryManager::adoptForeign(Obj* obj) {
+    auto [it, inserted] = m_foreign.try_emplace(obj, true);
+    if (!inserted) {
+        heapOf(obj)->releaseHold(obj);
+    }
+}
+
+Value MemoryManager::receiveMessage(Value msg) {
+    if (!isObj(msg)) {
+        return msg;
+    }
+    Obj* obj = as<Obj*>(msg);
+    if (obj->heapId == m_heapId) {
+        releaseHold(obj);
+        return msg;
+    }
+    if (obj->type == ObjType::STRING) {
+        auto* str = static_cast<ObjString*>(obj);
+        ObjString* found = m_strings.findString(
+            str->chars.data(), static_cast<int>(str->chars.size()), str->hash);
+        if (found == str) {
+            adoptForeign(str);
+            return msg;
+        }
+        if (found != nullptr) {
+            heapOf(str)->releaseHold(str);
+            return Value{static_cast<Obj*>(found)};
+        }
+        adoptForeign(str);
+        pushTempRoot(str); // the table can grow, and a collection can run
+        m_strings.set(str, Value{Nil{}});
+        popTempRoot();
+        return msg;
+    }
+    adoptForeign(obj);
+    return msg;
+}
+
+void MemoryManager::retire() {
+    std::vector<Envelope> rest;
+    {
+        std::lock_guard<std::mutex> lock(m_inbox.mutex);
+        m_inbox.exited = true;
+        m_inbox.runtime = nullptr;
+        rest.swap(m_inbox.queue);
+        m_inbox.nonEmpty.store(false);
+    }
+    rest.insert(rest.end(), m_draining.begin(), m_draining.end());
+    m_draining.clear();
+    for (const Envelope& env : rest) {
+        releaseValue(env.msg);
+    }
+    m_markRoots = nullptr;
+    m_currentCompiler = nullptr;
+    m_tempRoots.clear();
+#ifdef LOXPP_PROFILE
+    m_profilerData = nullptr;
+#endif
+    m_exitCollection = true;
+    collectGarbage();
+    m_exitCollection = false;
+}
+
+void MemoryManager::dropOwner() {
+    bool freeNow = false;
+    {
+        std::lock_guard<std::mutex> lock(m_holdMutex);
+        m_ownerAlive = false;
+        freeNow = m_heldTotal == 0;
+    }
+    if (freeNow) {
+        delete this;
+    }
 }

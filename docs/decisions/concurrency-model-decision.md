@@ -315,15 +315,22 @@ says the library is too slow, and it changes no rule.
 
 **Lifetime across workers.** A message object lives in the heap that
 created it. When a send crosses to another worker, the sender increments a
-holder count on the object, atomically, on behalf of the receiving worker,
+holder count on the object, under the owner heap's hold lock (constraint
+"The holder counts of one heap" below), on behalf of the receiving worker,
 before the message enters that worker's inbound queue; the receiver
 registers the object in its *foreign set* when it drains the queue. The
 count moves at the send and not at the receive because the message sits in
 the inbound queue between the two, and the owner's collector must not free
-it there. Each worker contributes at most one to a count, so the count is
-bounded by the worker count and changes only at a send, at a drain, and at
-a collection, never on the interpreter's hot path. The creating worker's collector treats an
-object with a count above zero as a root. The receiver's collector marks
+it there. Each send raises the count by one, so while two envelopes with
+the same object are in a queue, one worker contributes two. The drain
+releases a duplicate, so after a drain each worker contributes at most one
+to a count. A count changes only at these events, never on the
+interpreter's hot path: a send across workers; a spawn, which raises one
+count on the new task handle for the spawning worker and one on the start
+message; a drain; the new worker's receipt of its start message; a
+collection; a worker exit; and the free of a dead heap. The creating
+worker's collector treats an object with a count above zero as a root. The
+receiver's collector marks
 foreign objects in a side table of its own, never in the object header,
 because the header's mark bit belongs to the owner's collector; a foreign
 object the receiver's mark phase did not reach leaves its foreign set and
@@ -355,14 +362,19 @@ tracing stops at it. A send to a handle routes through the target worker's
 inbound queue. A send to a dead task, or to a task of a dead worker, raises
 `DeadTaskError` at the send site: a lost message is a fault, not a silence.
 
-**Strings are interned on receive.** `==` on two strings is a pointer
-compare, and that is correct only because every string in a heap is
-interned. A received string is therefore not held as a second object with
-the same characters. The receiver probes its own intern table with the
-hash the object already carries: if the characters are present it keeps
-its local object and shares nothing; if not, it inserts the received object
-into its table as the interned one and counts it as foreign. The invariant
-holds inside each worker and `==` stays a pointer compare. *Constraint:* the
+**Strings are interned on receive.** Inside one heap every string is
+interned, so `==` on two strings of that heap is a pointer compare. A
+received string is therefore not held as a second object with the same
+characters. The receiver probes its own intern table with the hash the
+object already carries: if the characters are present it keeps its local
+object and shares nothing; if not, it inserts the received object into its
+table as the interned one and counts it as foreign. Intern on receive
+changes only the received value itself. A string in a field of a received
+enum value stays the object of its own heap, because a walk of the fields
+would make a send linear. So `==` on two strings of two different heaps
+compares their characters, with the stored hash first, and `==` on any
+other pair of objects stays a pointer compare. The constraint "Strings of
+two heaps" below states this as a rule for every backend. *Constraint:* the
 probe must be sublinear in the table size. The table is open addressing
 with a bounded load factor, so the probe is expected constant; the hash is
 not keyed, so hostile input can lengthen a probe chain, and a keyed hash
@@ -473,7 +485,7 @@ experiment starts from the constraints and not from a surprise.
 | Nothing a foreign reader reads is written by the collector | A reader sees fields, never the mark bit | A mark bit in the object header that a reader could see. A side bitmap removes the constraint |
 | A held object is a root, and the collector traces from it | A held message may hold a third worker's message | A collector that treats a root as a leaf |
 | A heap can outlive its thread as a dead heap and be freed as a whole | A worker may exit while another holds its messages | An allocator that cannot release a whole heap at once, or that must be freed by its creating thread |
-| The holder count is a field the owner's collector reads and other threads change atomically | The count moves at a send | A header layout with no room for one atomic word |
+| Every change of a holder count, and the owner collector's read of all its counts in one step, happen under one hold lock of the owner heap; a collection raises each new foreign object before it releases any count | The count moves at a send, and a worker can reach an object only through another held one (constraint "The holder counts of one heap" below) | A lone atomic count per object that the owner reads one at a time |
 
 | The model leaves free | What it means for an experiment |
 |---|---|
@@ -488,6 +500,48 @@ whole, and a bump allocator inside a region. That is a candidate, not a
 decision. `benchmarks/copy_bench.cpp` is the harness to extend to object
 headers once allocation can take an allocator, and the GC trace gives the
 pause and the live set per collection.
+
+### Constraints from named bug classes
+
+Each constraint below names a structural bug class. It binds all remaining
+work of the mission and every later change to the layer it names.
+
+**The holder counts of one heap.** *Bug class:* with one lone atomic count
+per object, the owner's collector reads the counts one at a time. A worker
+that reached G only through a field of a held E raises G, then releases E.
+The owner can read G before the raise and E after the release, see no hold
+on either, and free G while the worker uses it. *Constraint:* every change
+of a count of a heap, from any thread, and the owner's read of all the
+counts of that heap, happen under one hold lock of that heap, and the owner
+reads all the counts in one step. Every collection, the exit collection
+included, raises a count on each foreign object that it reached and that
+is not in its foreign set yet, before it releases any count. Then the owner
+never sees the release of E without the raise of G. *Shared layer:* the
+hold table of the native `MemoryManager` (`hold`, `releaseHold`, and the
+held roots of a collection). Every path that changes a count goes through
+it: the send, the spawn (the hold on the new task handle and on the start
+message), the drain, the new worker's receipt of its start message, the
+collection, the worker exit, and the free of a dead heap. The QBE backend
+links this runtime. The JVM and the bootstrap have one collector for all
+workers and keep no count.
+
+**Strings of two heaps.** *Bug class:* intern on receive changes only the
+received value. A string in a field of a received enum value is not in the
+receiver's intern table, so a pointer `==` says that two strings with the
+same characters are not equal, as values and as map keys. *Constraint:*
+`==` on two strings is the equality of their characters on every backend.
+A backend may compare by pointer only for two strings that one intern table
+holds. Every hash that a map uses for a string key is a hash of its
+characters, so a string of another heap finds the same entry. A table that
+compares its string keys by pointer takes only keys of its own intern table
+and interns a key from a program value first. *Shared layer:* the String
+equality of `Value` (`operator==` in `src/value.cpp`) and the hashes beside
+it. On native, the map of the language uses `operator==` and the stored
+hash. The tables of globals, fields, and methods take only interned keys:
+the compiler's constants, and the field names of `reflect`, which it
+interns first. `ValueHash` hashes by pointer and is correct only for the
+values of one heap, which is all that the compiler's constant pool holds.
+The JVM and the bootstrap compare strings by their characters already.
 
 ### What this unblocks and in which order
 

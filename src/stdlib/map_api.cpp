@@ -7,7 +7,8 @@
 
 // Module-local class pointer; used indirectly (ObjMap stores it at construction
 // via registerMapAPI).
-static ObjClass* s_mapClass = nullptr;
+// Per thread: each worker registers the classes of its own heap.
+static thread_local ObjClass* s_mapClass = nullptr;
 
 // args[-1] = the ObjMap receiver
 static ObjMap* checkMap(Value* args) { return asObjMap(as<Obj*>(args[-1])); }

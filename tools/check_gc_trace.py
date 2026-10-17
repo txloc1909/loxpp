@@ -27,6 +27,40 @@ for (var i = 0; i < 22; i = i + 1) {
 # Stress mode collects on every allocation, so this one must stay tiny.
 STRESS_PROGRAM = 'var a = "a" + "b";'
 
+# A second worker writes its own trace file, <path>.w1. It sends a message
+# and ends while the main worker holds it and the handle of its task, so its
+# exit collection keeps those two messages and what they reach, and nothing
+# else: the task, the enum value, its string field, its constructor, and the
+# two name strings of the constructor. The main task waits until the exit
+# record is in the worker's file, because the process ends with the main task
+# and abandons a worker that has not run its exit collection. A send to the
+# ended task is no such wait: the task ends before its worker collects.
+WORKER_PROGRAM = """
+enum Box { Of(v) }
+fun entry(main) {
+    var junk = [];
+    for (var i = 0; i < 100; i = i + 1) junk.append(str(i) + "x");
+    task.send(main, Of("kept" + "!"));
+}
+fun exitCollected(path) {
+    if (!exists(path)) return false;
+    var f = open(path, "r");
+    var lines = f.readlines();
+    f.close();
+    for (var line in lines) {
+        if (len(line) >= 13 and line[0:13] == "gc cause=exit") return true;
+    }
+    return false;
+}
+var w = task.spawn_worker(entry, task.self());
+var held = task.receive();
+var path = env("LOXPP_GC_TRACE") + ".w1";
+while (!exitCollected(path)) sleep(0.001);
+print held[0];
+"""
+
+TIMEOUT_S = 120
+
 FIELDS = (
     "cause t0 t1 t2 t3 t4 bytes_before bytes_after objs_before objs_after "
     "marked freed"
@@ -39,14 +73,18 @@ def run(binary, workdir, env_extra, unset=(), program=PROGRAM):
     src = os.path.join(workdir, "prog.lox")
     with open(src, "w") as f:
         f.write(program)
-    return subprocess.run(
-        [binary, src],
-        cwd=workdir,
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    try:
+        return subprocess.run(
+            [binary, src],
+            cwd=workdir,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"the run did not end in {TIMEOUT_S} s")
 
 
 def fail(msg):
@@ -55,8 +93,13 @@ def fail(msg):
 
 
 def check_records(path, require_shrink=False):
+    """Checks one trace file and returns its gc records but the last one.
+
+    The last gc record is the exit collection of the heap (cause=exit): the
+    heap's worker ended, and its only roots were the held objects.
+    """
     lines = [l.split() for l in open(path).read().splitlines() if l.strip()]
-    if lines[0] != ["#", "loxpp-gc-trace", "v1"]:
+    if lines[0] != ["#", "loxpp-gc-trace", "v2"]:
         fail(f"bad header {lines[0]}")
     if lines[1][0] != "start":
         fail("no start record")
@@ -84,7 +127,10 @@ def check_records(path, require_shrink=False):
         prev_t4 = n["t4"]
     if require_shrink and not shrank:
         fail("no collection freed any bytes")
-    return gcs
+    causes = [g[1] for g in gcs]
+    if causes[-1] != "cause=exit" or causes.count("cause=exit") != 1:
+        fail(f"{path}: expected one exit collection, the last: {causes}")
+    return gcs[:-1]
 
 
 def main():
@@ -122,6 +168,30 @@ def main():
         )
         if not all(g[1] == "cause=stress" for g in check_records(trace)):
             fail("expected stress cause under LOXPP_STRESS_GC")
+
+        # Each worker writes its own file, with the same records. Its exit
+        # collection keeps exactly the held messages (see WORKER_PROGRAM).
+        worker_trace = trace + ".w1"
+        r = run(
+            binary,
+            d,
+            {"LOXPP_GC_TRACE": trace},
+            unset=("LOXPP_STRESS_GC",),
+            program=WORKER_PROGRAM,
+        )
+        if r.returncode != 0:
+            fail(f"worker run failed: {r.returncode} {r.stderr}")
+        if not os.path.exists(worker_trace):
+            fail("a second worker wrote no trace file of its own")
+        check_records(trace)
+        check_records(worker_trace)
+        exit_rec = [l for l in open(worker_trace).read().splitlines()
+                    if l.startswith("gc cause=exit")][0]
+        kv = dict(x.split("=", 1) for x in exit_rec.split()[1:])
+        if kv["objs_after"] != "6":
+            fail(f"the dead heap keeps {kv['objs_after']} objects, not the "
+                 f"6 that the held messages reach: {exit_rec}")
+        os.remove(worker_trace)
 
         # An unwritable path warns and the program still runs.
         r = run(binary, d, {"LOXPP_GC_TRACE": os.path.join(d, "no/such/dir/t")})

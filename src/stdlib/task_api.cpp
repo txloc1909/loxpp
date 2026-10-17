@@ -36,12 +36,31 @@ static Value taskSpawnNative(int /*argCount*/, Value* argv) {
     return taskValue(rt->spawnTask(fn));
 }
 
-// task.spawn_worker(fn, msg): this runtime is one worker with one heap. It
-// makes no second worker, so the call is a fatal error.
-static Value taskSpawnWorkerNative(int /*argCount*/, Value* /*argv*/) {
-    nativeRuntimeError("task.spawn_worker is not implemented: workers on "
-                       "threads are node N3 of mission #595 (#598).");
-    return from<Nil>(Nil{});
+static void raiseSendError(Runtime* rt, const Value& msg) {
+    std::string text = "Value of type ";
+    text += valueTypeName(msg);
+    text += " is not a message.";
+    rt->raiseFromNative("SendError", text.c_str());
+}
+
+// task.spawn_worker(fn, msg): spec/04-semantics.md, task.spawn_worker, in
+// its order of checks.
+static Value taskSpawnWorkerNative(int /*argCount*/, Value* argv) {
+    Runtime* rt = taskRuntime();
+    if (rt == nullptr) {
+        return from<Nil>(Nil{});
+    }
+    if (!rt->isTopLevelFunction(argv[0])) {
+        nativeRuntimeError("task.spawn_worker expects a function that a "
+                           "top-level fun declaration made.");
+        return from<Nil>(Nil{});
+    }
+    Value msg = argv[1];
+    if (!isMessage(msg)) {
+        raiseSendError(rt, msg);
+        return from<Nil>(Nil{});
+    }
+    return taskValue(rt->spawnWorker(asObjClosure(as<Obj*>(argv[0])), msg));
 }
 
 // task.send(t, msg): spec/04-semantics.md, task.send, in its order of checks.
@@ -57,18 +76,14 @@ static Value taskSendNative(int /*argCount*/, Value* argv) {
     ObjTask* target = asObjTask(as<Obj*>(argv[0]));
     Value msg = argv[1];
     if (!isMessage(msg)) {
-        std::string text = "Value of type ";
-        text += valueTypeName(msg);
-        text += " is not a message.";
-        rt->raiseFromNative("SendError", text.c_str());
+        raiseSendError(rt, msg);
         return from<Nil>(Nil{});
     }
-    if (rt->taskEnded(target)) {
+    if (rt->taskEnded(target) || !rt->sendMessage(target, msg)) {
         rt->raiseFromNative("DeadTaskError",
                             "Cannot send to a task that has ended.");
         return from<Nil>(Nil{});
     }
-    rt->deliverMessage(target, msg);
     return from<Nil>(Nil{});
 }
 

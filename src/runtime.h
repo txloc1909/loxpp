@@ -39,8 +39,11 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #ifdef LOXPP_PROFILE
@@ -111,7 +114,12 @@ class Runtime {
     static constexpr int STACK_OVERFLOW_STACK_RESERVE =
         loxpp::kStackOverflowStackReserve;
 
-    Runtime() : m_globals(VmAllocator<Entry>{&m_mm}) {
+    // A Runtime of its own heap: the main worker, a test, or the QBE entry.
+    Runtime() : Runtime(new MemoryManager(0)) {}
+    // A Runtime over `heap`, which it then owns (see m_heapOwner): the
+    // Runtime of a worker that task.spawn_worker made.
+    explicit Runtime(MemoryManager* heap)
+        : m_heapOwner{heap}, m_mm(*heap), m_globals(VmAllocator<Entry>{heap}) {
         resetStack();
         m_mm.setMarkRootsCallback([this]() { markRoots(); });
 #ifdef LOXPP_PROFILE
@@ -124,7 +132,18 @@ class Runtime {
         // global/thread-local at whichever VM is currently active.
         m_stdlibCtx.mm = &m_mm;
         m_stdlibCtx.rt = this;
+        {
+            std::lock_guard<std::mutex> lock(m_mm.inbox().mutex);
+            m_mm.inbox().runtime = this;
+        }
     }
+
+    // The worker ends: retires the heap (MemoryManager::retire). The heap
+    // itself is freed by m_heapOwner, after every other member.
+    ~Runtime();
+
+    Runtime(const Runtime&) = delete;
+    Runtime& operator=(const Runtime&) = delete;
 
     // Set once by VM's constructor to `[this](int stop){ return run(stop); }`
     // — the one place this class needs the interpreter loop back
@@ -343,9 +362,29 @@ class Runtime {
     // the program after only that task's defers ran.
 
     // Runs `script` as the main task, and every task it spawns, until the
-    // main task ends. Tasks still in the run queue then are abandoned.
-    // loadSource() left `script` at stack slot 0.
+    // main task ends. Tasks still in the run queue then are abandoned, and
+    // so is every worker of the run. loadSource() left `script` at stack
+    // slot 0.
     InterpretResult runTasks(ObjClosure* script);
+
+    // The body of a worker that task.spawn_worker made, on its own thread:
+    // defines the top-level declarations of source `sourceId`, then runs
+    // `task` as this worker's first task, which calls the function of the
+    // top-level `fun` declaration `ordinal` with `msg` (one hold raised for
+    // this worker). Returns when every task of the worker ended, or the
+    // program ended; RUNTIME_ERROR after an uncaught fault (reported).
+    InterpretResult
+    runWorker(std::shared_ptr<WorkerGroup> group,
+              std::vector<std::shared_ptr<const std::string>> sources,
+              int sourceId, int ordinal, ObjTask* task, Value msg);
+
+    // task.spawn_worker after its checks passed: makes the heap and the
+    // first task of a new worker, starts its thread, and returns the handle.
+    ObjTask* spawnWorker(ObjClosure* entry, Value msg);
+
+    // True when `fn` is a function that a top-level `fun` declaration of a
+    // source of this Runtime made.
+    [[nodiscard]] bool isTopLevelFunction(const Value& fn) const;
 
     // The task that runs now, or nullptr when no scheduler runs (the QBE
     // entry, rt_startup, does not start one).
@@ -362,6 +401,12 @@ class Runtime {
     // task.send after its checks passed: appends `msg` to the mailbox of
     // `task`. A task that waits in task.receive() joins the run queue.
     void deliverMessage(ObjTask* task, Value msg);
+
+    // task.send after its checks passed, for a task of this worker or of
+    // another one. A task of another worker gets an envelope in its worker's
+    // inbound queue. Returns false when that worker has ended
+    // (DeadTaskError).
+    bool sendMessage(ObjTask* task, Value msg);
 
     // task.receive for the current task. Returns true with the head of the
     // mailbox in *out when the mailbox has one. On an empty mailbox returns
@@ -832,6 +877,28 @@ class Runtime {
     // (already reported); the program then ends.
     bool resumeTask(ObjTask* task);
 
+    // The scheduler loop of this worker: drains the inbound queue between
+    // tasks, runs the head of the run queue, and waits on the inbound
+    // queue's condition variable when no task is ready. The main worker
+    // runs until the main task ends; another worker until its last task
+    // ends or the program ends.
+    InterpretResult schedule();
+    // Delivers every envelope in the inbound queue to its task's mailbox.
+    void drainInbox();
+    enum class WaitResult : std::uint8_t { Work, Deadlock, Ended };
+    // No task is ready: waits until a message arrives, the program ends, or
+    // (main worker only) every worker waits.
+    WaitResult waitForWork();
+    // Reports DeadlockError with every task that waits in receive, on every
+    // worker. The main worker only, after waitForWork() returned Deadlock.
+    void reportDeadlock();
+    void describeWaitingTasks(std::vector<std::string>& out) const;
+    // A task of this worker ended or was abandoned.
+    void markTaskDead(ObjTask* task);
+    // Compiles `source` with `options`, then as loadSource().
+    ObjClosure* loadProgram(const std::string& source, DiagnosticSink* sink,
+                            bool declarationsOnly);
+
     // Abandons every task but the main task: the run of the program ended.
     void endTasks();
 
@@ -1029,6 +1096,20 @@ class Runtime {
     // STACK_OVERFLOW_FRAME_RESERVE/STACK_OVERFLOW_STACK_RESERVE), so the
     // physical storage must reach past them or that unwind's own pushes run
     // out of bounds.
+    // Owns the heap. Declared first, so it is destroyed last: m_globals and
+    // every other member that frees memory through the heap are gone before
+    // the heap can be freed. The heap outlives this Runtime as a dead heap
+    // while another worker holds one of its objects.
+    struct HeapOwner {
+        MemoryManager* heap;
+        explicit HeapOwner(MemoryManager* h) : heap(h) {}
+        HeapOwner(const HeapOwner&) = delete;
+        HeapOwner& operator=(const HeapOwner&) = delete;
+        ~HeapOwner() { heap->dropOwner(); }
+    };
+    HeapOwner m_heapOwner;
+    MemoryManager& m_mm;
+
     CallFrame m_frames[FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE];
     int m_frameCount{0};
     Value stack[STACK_MAX + STACK_OVERFLOW_STACK_RESERVE];
@@ -1052,7 +1133,6 @@ class Runtime {
     // the second overflow stays fatal, it is never handed to the same
     // handler a second time.
     bool m_unwindingStackOverflow{false};
-    MemoryManager m_mm;
     Table m_globals;
     std::array<ObjString*, static_cast<std::size_t>(Protocol::Count)>
         m_protocolNames{};
@@ -1091,6 +1171,19 @@ class Runtime {
     bool m_taskSwitchPending{false};
     // The coroutine that suspended last in the task switch in progress.
     ObjCoroutine* m_taskSwitchInner{nullptr};
+    // The tasks that wait in task.receive(), rooted so the deadlock report
+    // can name each one.
+    std::unordered_set<ObjTask*> m_waitingTasks;
+    // Tasks of this run that have not ended, the main task included.
+    int m_liveTasks{0};
+    std::uint64_t m_nextTaskSerial{0};
+    // The workers of the current run (one per runTasks() on the main
+    // worker), and whether this Runtime is the main worker.
+    std::shared_ptr<WorkerGroup> m_group;
+    bool m_isMainWorker{true};
+    // Every source this Runtime compiled, by ObjFunction::sourceId. A new
+    // worker gets the list, so it compiles the same source again.
+    std::vector<std::shared_ptr<const std::string>> m_sources;
     // Number of natives running now (callNative), innermost included.
     int m_nativeDepth{0};
     // m_nativeDepth at which the frames of m_currentCoroutine run, while the

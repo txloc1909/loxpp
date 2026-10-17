@@ -10,7 +10,8 @@
 #include <string>
 
 // Module-local class pointer used by openNative to stamp new ObjFile instances.
-static ObjClass* s_fileClass = nullptr;
+// Per thread: each worker registers the classes of its own heap.
+static thread_local ObjClass* s_fileClass = nullptr;
 
 // Validate that args[-1] is an open ObjFile. Returns nullptr and sets a
 // runtime error if the file is closed.

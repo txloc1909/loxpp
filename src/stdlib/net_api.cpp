@@ -20,8 +20,9 @@
 
 // Module-local class pointers, used to stamp new instances and register the
 // method tables Runtime::opGetProperty/opInvoke dispatch to.
-static ObjClass* s_socketClass = nullptr;
-static ObjClass* s_serverClass = nullptr;
+// Per thread: each worker registers the classes of its own heap.
+static thread_local ObjClass* s_socketClass = nullptr;
+static thread_local ObjClass* s_serverClass = nullptr;
 
 static bool asStringArg(const Value& v, std::string& out) {
     if (!isString(v)) {
