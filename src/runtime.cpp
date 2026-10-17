@@ -667,11 +667,18 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         }
         OpResult r = opCall(argCount, boundary);
         m_resumableMode = savedResumable;
-        // Resumed (native VM: a pushed interpreted frame) or Call (coroutine
-        // mode: a pushed compiled frame) both mean one frame of ours is ready
-        // for the driver.
-        if ((r == OpResult::Resumed || r == OpResult::Call) &&
-            m_frameCount == entry + 1) {
+        // A native or bound-native entry cannot yield, so opCall ran it to
+        // completion synchronously and pushed its result: callNative popped the
+        // callee+args and pushed the result, leaving stackTop == base + 1 with
+        // the result at base. Harvest it and mark the coroutine dead, the same
+        // shape the interpreted normal-return path reaches for a closure entry.
+        if (r == OpResult::OK &&
+            (isNative(co->callee) || isBoundNative(co->callee))) {
+            *out = peek(0);
+            stackTop = co->activeWindowTop;
+            co->state = CoroutineState::DEAD;
+        } else if ((r == OpResult::Resumed || r == OpResult::Call) &&
+                   m_frameCount == entry + 1) {
             frameReady = true;
         } else {
             // No frame of ours was pushed: an arity fault caught inside this
@@ -1589,8 +1596,7 @@ InterpretResult Runtime::runPendingDefers(int frameIndex,
         // fatal "unexpected type" it has always been, rather than falling
         // through to reentrantCall()/opCall()'s wider dispatch
         // (tools/check_fault_table.py pins this).
-        if (!isBoundMethod(calleeVal) && !isClosure(calleeVal) &&
-            !isNative(calleeVal) && !isBoundNative(calleeVal)) {
+        if (!isCallableValue(calleeVal)) {
             runtimeError("Deferred callable has unexpected type.");
             return InterpretResult::RUNTIME_ERROR;
         }

@@ -1829,6 +1829,22 @@ fun reflectTypeName(v) {
     return "Unknown";
 }
 
+// True when v is a Function or a BoundMethod, the exact set type() reports as
+// "Function" or "BoundMethod" (see reflectTypeName above). coroutine.create
+// and task.spawn accept exactly this set: a closure, a native, a math
+// function, or a bound method of any built-in type. A class and an enum
+// constructor are callable via `()` but are neither a Function nor a
+// BoundMethod, so they are rejected, matching the native VM
+// (isCallableValue) and spec/04-semantics.md.
+fun isFunctionOrBoundMethod(v) {
+    var tag = loxTag(v);
+    if (tag == "function") return true;
+    if (tag == "native" or tag == "mathfn") return true;
+    return tag == "mapmethod" or tag == "filemethod" or tag == "listmethod" or
+           tag == "socketmethod" or tag == "servermethod" or
+           tag == "processmethod" or tag == "comethod";
+}
+
 // methods() walks the superclass chain: unlike the real VM's ObjClass,
 // which INHERIT flattens at class-declaration time, LoxClass.methods holds
 // only a class's own methods — findMethod() re-walks the chain on every
@@ -2461,7 +2477,7 @@ class InterpCoroutineCreate {
     arity() { return 1; }
     call(interp, args) {
         var fn = args[0];
-        if (loxTag(fn) != "function") {
+        if (!isFunctionOrBoundMethod(fn)) {
             interp.fatalError("coroutine.create expects a function.");
             return nil;
         }
@@ -2736,7 +2752,7 @@ class Interpreter {
     }
 
     taskSpawn(fn) {
-        if (loxTag(fn) != "function") {
+        if (!isFunctionOrBoundMethod(fn)) {
             this.fatalError("task.spawn expects a function.");
             return nil;
         }
@@ -3474,8 +3490,10 @@ class Interpreter {
                 return nil;
             }
             if (len(args) == 1) received = args[0];
-        } else if (len(args) != co.fn.arity()) {
+        } else if (co.fn.arity() != -1 and len(args) != co.fn.arity()) {
             // The coroutine stays suspended and unstarted, as on native.
+            // A native of arity -1 is variadic (LoxNative.arity): any count is
+            // accepted, matching Runtime::callNative's `arity != -1` guard.
             this.setError("ArityError", "Expected " + str(co.fn.arity()) + " arguments but got " + str(len(args)) + ".", 0);
             return nil;
         }

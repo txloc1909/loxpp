@@ -515,10 +515,13 @@ public final class LoxRuntime {
         module.fields.put("create", new LoxNative("create", 1, args -> {
             Object fn = args[0];
             // spec/04-semantics.md: fn must be a Function or a BoundMethod.
-            // A bound native (e.g. someMap.has) is a LoxNative here, not a
-            // LoxBoundMethod, and is rejected exactly as native rejects
-            // ObjBoundNative.
-            if (!(fn instanceof LoxClosure) && !(fn instanceof LoxBoundMethod)) {
+            // A native function is a LoxNative (clock, str, math.sin, ...);
+            // a bound native (e.g. someMap.has, someFile.read) is also a
+            // LoxNative, told apart only by a non-null `receiver` (see
+            // LoxNative and the type() note above). Both are callable and both
+            // are accepted, matching the native VM (isCallableValue).
+            if (!(fn instanceof LoxClosure) && !(fn instanceof LoxBoundMethod) &&
+                !(fn instanceof LoxNative)) {
                 throw new LoxError("coroutine.create expects a function.");
             }
             return new LoxCoroutine(fn);
@@ -534,7 +537,8 @@ public final class LoxRuntime {
         LoxInstance module = new LoxInstance(new LoxClass("TaskModule", null));
         module.fields.put("spawn", new LoxNative("spawn", 1, args -> {
             if (!(args[0] instanceof LoxClosure) &&
-                !(args[0] instanceof LoxBoundMethod)) {
+                !(args[0] instanceof LoxBoundMethod) &&
+                !(args[0] instanceof LoxNative)) {
                 throw new LoxError("task.spawn expects a function.");
             }
             return LoxWorker.current().spawn(args[0]);

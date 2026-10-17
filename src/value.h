@@ -141,6 +141,16 @@ inline bool isNative(const Value& v) {
 inline bool isBoundNative(const Value& v) {
     return isValueOfType<ObjType::BOUND_NATIVE>(v);
 }
+// A callable value: a user function (closure), a native function, a bound
+// user method, or a bound native method. This is the set type() reports as
+// "Function" or "BoundMethod" (spec/05-stdlib.md, type): the NATIVE/CLOSURE/
+// BOUND_NATIVE split is a C++ representation detail, not part of the
+// language's type vocabulary (spec/03-types.md has one Function heading and
+// one BoundMethod heading).
+inline bool isCallableValue(const Value& v) {
+    return isValueOfType<ObjType::CLOSURE>(v) || isNative(v) ||
+           isValueOfType<ObjType::BOUND_METHOD>(v) || isBoundNative(v);
+}
 inline Obj* asObj(const Value& v) { return as<Obj*>(v); }
 inline ObjString* asObjString(const Value& v) {
     return static_cast<ObjString*>(as<Obj*>(v));
