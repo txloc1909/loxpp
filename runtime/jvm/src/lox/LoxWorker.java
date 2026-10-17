@@ -12,12 +12,12 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * <p><b>Threads.</b> The main task runs on the thread that runs the
  * generated {@code main}. The first task of every other worker runs on a
- * platform thread of its own, and every task of {@code task.spawn} and
- * every coroutine runs on a platform thread of its own too. The
- * virtual-thread carrier pool has one carrier for each processor, so a
- * CPU-bound virtual task could stop the ready task of another worker, and
- * the spec says that only the tasks of the worker of a computing task
- * stop (spec/04-semantics.md, Suspend Points). Only one task of a worker
+ * platform thread of its own. A task of {@code task.spawn} runs on a
+ * virtual thread, as a coroutine does. The default carrier pool has one
+ * carrier for each processor, and a CPU-bound virtual task keeps its
+ * carrier, so the pool is raised to the JDK maximum (see the static block
+ * below): a suspended task holds no carrier, and a task that computes does
+ * not stop the ready task of another worker. Only one task of a worker
  * runs at a time: a task that suspends gives control to the head of the
  * run queue directly ({@link #switchTo}), and no scheduler thread exists.
  *
@@ -26,6 +26,27 @@ import java.util.concurrent.locks.ReentrantLock;
  * deadlock check simple: it reads the state of every worker in one step.
  */
 final class LoxWorker {
+    // The virtual-thread scheduler has one carrier for each processor by
+    // default. A CPU-bound virtual task keeps its carrier, so a program with
+    // more CPU-bound tasks than processors can stop a ready task on another
+    // worker (spec/04-semantics.md, Suspend Points). Raise the pool to the
+    // largest value a ForkJoinPool accepts. The pool creates a carrier only
+    // for a mounted task, so a suspended task still costs no host thread,
+    // and the value is a maximum, not a reservation. A caller can set either
+    // property to override the value.
+    static {
+        if (System.getProperty(
+                "jdk.virtualThreadScheduler.parallelism") == null) {
+            System.setProperty(
+                "jdk.virtualThreadScheduler.parallelism", "32767");
+        }
+        if (System.getProperty(
+                "jdk.virtualThreadScheduler.maxPoolSize") == null) {
+            System.setProperty(
+                "jdk.virtualThreadScheduler.maxPoolSize", "32767");
+        }
+    }
+
     static final ReentrantLock LOCK = new ReentrantLock();
 
     // Guarded by LOCK. A worker is live from its spawn until its last task
@@ -308,7 +329,7 @@ final class LoxWorker {
         next.started = true;
         LOCK.unlock();
         if (start) {
-            Thread.ofPlatform().daemon().name("lox-task").start(next.body);
+            Thread.ofVirtual().name("lox-task").start(next.body);
         } else {
             next.wake.release();
         }

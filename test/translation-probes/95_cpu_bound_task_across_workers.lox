@@ -1,11 +1,15 @@
 // A task that computes without reaching a suspend point stops only the
 // tasks of its own worker (spec/04-semantics.md, Suspend Points). This
-// program starts 64 workers, more than the processor count of the machines
-// that run it, and each worker runs one spawned task that sends once and
-// then computes for ever. The main task must receive one message from every
-// worker. A backend that runs the tasks on a carrier pool with one carrier
-// for each processor never starts the tasks beyond the processor count, so
-// the main task waits for ever: the TIMEOUT below catches that.
+// program starts 64 workers and each worker runs one spawned task that sends
+// once and then computes for ever. The main task must receive one message
+// from every worker. A backend that runs the tasks on a carrier pool with one
+// carrier for each processor never starts the tasks beyond the processor
+// count, so the main task waits for ever: the TIMEOUT below catches that.
+//
+// The count is 64. That is more than the processor count of current CI
+// runners, so the probe fails before the fix there. On a machine with 64 or
+// more processors the probe passes before the fix too, and it cannot show
+// that defect. The code change does not depend on the processor count.
 //
 // The CHECK lines do not bind the bootstrap interpreter. It runs every
 // worker on one host thread under the implementation-gated exception of

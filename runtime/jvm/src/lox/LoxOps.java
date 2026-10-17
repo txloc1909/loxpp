@@ -149,7 +149,7 @@ public final class LoxOps {
      * reflection callback, or a deferred-call drain. Mirrors src/runtime.h's
      * Runtime::m_reentrantRunDepth: such a frame cannot be frozen into a
      * coroutine snapshot, so a {@code yield} reached beneath one is a runtime
-     * error. Per-thread: a coroutine's own thread starts at 0, so the
+     * error. Per-thread: a coroutine's own virtual thread starts at 0, so the
      * callback depth of the resumer never leaks in.
      */
     private static final ThreadLocal<Integer> callbackDepth =

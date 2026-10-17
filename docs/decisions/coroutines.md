@@ -95,11 +95,10 @@ a collection is a process-global pause, not a coroutine's work.
   frames, re-entering each at its saved point. The interpreter fallback was
   dropped: a caller that does not itself contain `YIELD` must still suspend,
   and dynamic dispatch makes the safe fallback set the whole program.
-- JVM: each coroutine is a daemon platform thread of its own; `yield`/`resume`
-  use a handoff over two zero-capacity queues. No stack copying (shared-heap
-  object model). A virtual thread would keep one carrier of the
-  processor-sized carrier pool while the coroutine computes, and could stop
-  the ready task of another worker (issue #619).
+- JVM: each coroutine is a virtual thread; `yield`/`resume` use a handoff over
+  two zero-capacity queues. No stack copying (shared-heap object model). The
+  carrier pool is raised from the processor count, so a CPU-bound coroutine
+  does not stop the ready task of another worker (issue #619).
 - Bootstrap: one host coroutine per Lox++ coroutine, like its existing I/O
   delegation.
 
