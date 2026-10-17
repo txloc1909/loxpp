@@ -39,7 +39,7 @@ public final class LoxCoroutine {
 
     static LoxCoroutine currentOrNull() { return CURRENT.get(); }
 
-    private final Object callee; // LoxClosure or LoxBoundMethod (coroutine.create)
+    private final Object callee; // LoxClosure, LoxBoundMethod, or LoxNative (coroutine.create)
     // A coroutine is not a message, so it runs only on the worker that made
     // it; its thread binds to that worker.
     private final LoxWorker worker = LoxWorker.current();
