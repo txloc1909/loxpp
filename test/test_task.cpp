@@ -5,9 +5,11 @@
 // rules. These tests cover the paths of the native scheduler that the probes
 // do not reach: a receive inside a coroutine that a for-in or a second
 // coroutine resumed, a throw after the wake, the native-callback rule through
-// a defer and through a native, deadlock on one worker, and the main task
-// across REPL lines. The `_gc` twin runs the suite under LOXPP_STRESS_GC.
+// a defer and through a native, deadlock on one worker, the names in the
+// deadlock report of the credit channel probe, and the main task across REPL
+// lines. The `_gc` twin runs the suite under LOXPP_STRESS_GC.
 
+#include "corpus.h"
 #include "test_harness.h"
 
 #include <gtest/gtest.h>
@@ -212,6 +214,33 @@ TEST_F(TaskTest, DeadlockOnOneWorkerIsFatal) {
     )"),
               InterpretResult::RUNTIME_ERROR);
     expect_string(h, "log", "start");
+}
+
+// The credit channel probe ends in DeadlockError with the producer waiting
+// for a credit in its own receive. The spec lets the report list the tasks
+// that wait; the native report names both, by the function each task runs.
+TEST_F(TaskTest, CreditChannelDeadlockNamesProducerAndConsumer) {
+    const std::string source = loxpp_test::readFile(
+        loxpp_test::projectRoot() /
+        "test/translation-probes/90_credit_channel_deadlock.lox");
+    VMTestHarness h;
+    testing::internal::CaptureStderr();
+    testing::internal::CaptureStdout();
+    InterpretResult result = h.run(source);
+    std::string out = testing::internal::GetCapturedStdout();
+    std::string err = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(result, InterpretResult::RUNTIME_ERROR);
+    EXPECT_NE(err.find("Deadlock: every task waits in receive.\n"),
+              std::string::npos)
+        << err;
+    EXPECT_NE(err.find("  task script on worker 0 waits in receive\n"),
+              std::string::npos)
+        << err;
+    EXPECT_NE(err.find("  task producer on worker 0 waits in receive\n"),
+              std::string::npos)
+        << err;
+    EXPECT_NE(out.find("send 4\n"), std::string::npos) << out;
+    EXPECT_EQ(out.find("sent 4\n"), std::string::npos) << out;
 }
 
 // A function that no top-level fun declaration made is not an entry: a
