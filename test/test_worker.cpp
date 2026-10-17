@@ -303,9 +303,14 @@ TEST_F(WorkerTest, DeadHeapLivesWhileItsMessageIsHeld) {
     EXPECT_EQ(dead->holderCount(held), 1U);
 
     // Drop the message and the handle, then collect: the main worker
-    // releases its last holds on the dead heap, and that frees it.
+    // releases its last holds on the heap. The heap is freed by whichever
+    // comes last, this release or the end of the worker's thread, which can
+    // still be on its way out after its task ended.
     ASSERT_EQ(vm.interpret("held = nil; w = nil;"), InterpretResult::OK);
     vm.runtime().memoryManager().collectGarbage();
+    for (int i = 0; i < 500 && heapById(deadId) != nullptr; i++) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     EXPECT_EQ(heapById(deadId), nullptr);
 }
 
