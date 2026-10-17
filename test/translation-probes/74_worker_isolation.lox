@@ -3,7 +3,9 @@
 // spawn in the source, and runs no other top-level statement, so a
 // top-level var is undefined there. Global variables are per worker. The
 // entry gets the message as its argument. An enum value made on one worker
-// matches its constructor patterns on another, and comes back == to itself.
+// matches its constructor patterns on another, and comes back == to itself:
+// a field of a message, the message of the spawn, and a message that
+// task.send carries to the worker and back (spec/03-types.md, Messages).
 enum Msg { Ask(from, n, payload) Answer(n, payload) }
 
 var counter = 10;
@@ -35,10 +37,13 @@ fun entry(m) {
     shared_name = "changed on the worker";
     task.send(from, shared_name);
     task.send(from, defined_after());
+    task.send(from, m);
+    task.send(from, task.receive());
 }
 
 var payload = Answer(0, "p");
-var w = task.spawn_worker(entry, Ask(task.self(), 21, payload));
+var ask = Ask(task.self(), 21, payload);
+var w = task.spawn_worker(entry, ask);
 print type(w);
 var answer = task.receive();
 print match answer {
@@ -51,6 +56,10 @@ print task.receive();
 print task.receive();
 print type(shared_name);
 print read_counter();
+var sent = Answer(1, "q");
+task.send(w, sent);
+print task.receive() == ask;
+print task.receive() == sent;
 
 fun defined_after() {
     return "defined after";
@@ -65,3 +74,5 @@ fun defined_after() {
 // CHECK: defined after
 // CHECK: Function
 // CHECK: 10
+// CHECK: true
+// CHECK: true
