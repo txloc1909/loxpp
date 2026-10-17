@@ -1691,11 +1691,15 @@ A program that uses credit channels stays free of deadlock when its
 blocking waits form a directed acyclic graph of ranks. Give each task a
 rank, and let each channel go from a task of a lower rank to a task of a
 higher rank. A producer then waits only for a credit from a consumer of a
-higher rank, and only while that consumer holds N items it has not taken
-yet. The task of the highest rank waits for no credit. So, when every
-consumer takes each item it gets, some task can always run, from the
-highest rank down. A cycle of channels breaks this rule, and then two full
-channels can wait on each other.
+higher rank, and only while that consumer has at least one item that it
+has not taken. This is true when the producer waits to send an item, and
+when it waits to close the channel. The task of the highest rank waits for
+no credit. So, when every consumer takes each item it gets, some task can
+always run, from the highest rank down. A cycle of channels breaks this
+rule, and then two full channels can wait on each other. A task between two
+ranks holds two ends, so its mailbox gets the items of one channel and the
+credits of the other. The library in `examples/credit_channel.lox` lets a
+task hold one end only.
 
 ---
 
