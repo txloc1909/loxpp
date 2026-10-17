@@ -3,11 +3,14 @@
 #include "object.h"
 #include "table.h"
 #include "vm_allocator.h"
+#include "worker.h"
 
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <mutex>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #ifdef LOXPP_PROFILE
@@ -19,7 +22,9 @@ class Compiler;
 
 class MemoryManager : public VmAllocBase {
   public:
-    MemoryManager();
+    // `workerNumber` names the worker the heap belongs to; the GC trace of
+    // worker N > 0 goes to `<LOXPP_GC_TRACE>.w<N>`.
+    explicit MemoryManager(int workerNumber = 0);
     ~MemoryManager();
 
     // Non-copyable, non-movable (VmAllocator stores 'this' pointer).
@@ -39,6 +44,7 @@ class MemoryManager : public VmAllocBase {
         }
         bytesAllocated += sizeof(T);
         T* p = new T(std::forward<Args>(args)...);
+        p->heapId = m_heapId;
         // Every boxed Obj* goes through here. A pointer the NaN tag cannot
         // hold would be silently truncated by Value's constructor, so reject it
         // before it can be stored anywhere (src/value.h: pointerFitsInValue).
@@ -79,6 +85,67 @@ class MemoryManager : public VmAllocBase {
     void markValue(const Value& v);
     void collectGarbage();
 
+    // --- Workers (docs/decisions/concurrency-model-decision.md, "Lifetime
+    // across workers") ---------------------------------------------------
+    //
+    // A message object lives in the heap that created it. A worker that
+    // holds a message of another heap counts once in the holder count of
+    // that object, and an envelope on its way counts once too. The owner's
+    // collector treats an object with a count above zero as a root. The
+    // counts of one heap change under its hold lock, from any thread, and
+    // the owner reads them all under that lock in one step at the start of a
+    // collection. One step matters: a worker that reached G only through a
+    // field of a held E raises G before it drops E, and the owner must not
+    // see the drop of E without the raise of G.
+
+    [[nodiscard]] std::uint16_t heapId() const { return m_heapId; }
+    [[nodiscard]] int workerNumber() const { return m_workerNumber; }
+    [[nodiscard]] Inbox& inbox() { return m_inbox; }
+
+    // Raises the count of `obj`, an object of this heap. Any thread.
+    void hold(const Obj* obj);
+    // Drops the count of `obj`, an object of this heap. Any thread. Frees
+    // this heap when it is dead and that was its last count; the caller must
+    // not touch the heap or its objects after that.
+    void releaseHold(const Obj* obj);
+    // The holder count of `obj`, an object of this heap. For tests.
+    [[nodiscard]] std::uint32_t holderCount(const Obj* obj);
+    // hold()/releaseHold() on the owner of `v`, when `v` is an object.
+    static void holdValue(const Value& v);
+    static void releaseValue(const Value& v);
+
+    // A message that a send from another worker delivered to this heap: the
+    // sender raised one count for it. Registers or releases that count, and
+    // returns the value the receiver keeps:
+    //   - an object of this heap, or one already in the foreign set: the
+    //     count is released;
+    //   - a String: intern on receive. The receiver probes its own intern
+    //     table with the hash the string carries. A string with the same
+    //     characters there is kept instead, and the count is released (the
+    //     received one is not foreign here). Otherwise the received string
+    //     becomes the interned one and goes into the foreign set;
+    //   - any other new foreign object goes into the foreign set and keeps
+    //     the count.
+    Value receiveMessage(Value msg);
+    // Adds `obj`, an object of another heap with one count already raised
+    // for this heap, to the foreign set; releases that count when the set
+    // has it already.
+    void adoptForeign(Obj* obj);
+    [[nodiscard]] bool inForeignSet(const Obj* obj) const {
+        return m_foreign.count(const_cast<Obj*>(obj)) != 0U;
+    }
+
+    // The worker of this heap ended. Marks the inbox exited, releases every
+    // message still in it, and runs one last collection whose only roots
+    // are the held objects (GC trace cause=exit). The heap then holds
+    // exactly the held messages and what they reach, and its foreign set
+    // only the foreign objects those messages reach. No allocation may
+    // follow.
+    void retire();
+    // The owner of the heap is gone. Frees the heap when no count is left;
+    // otherwise it is a dead heap, and the last releaseHold() frees it.
+    void dropOwner();
+
   private:
     template <bool Traced>
     void runCollection();
@@ -86,6 +153,11 @@ class MemoryManager : public VmAllocBase {
     void traceObject(Obj* obj);
     void removeWhiteStrings();
     void sweep();
+    void markHeldRoots();
+    void markInboxTargets();
+    void adoptReachedForeign();
+    void releaseUnreachedForeign();
+    [[nodiscard]] bool isMarkedHere(const Obj* obj) const;
 
     // Plain std::vector — using VmAllocator here would cause infinite recursion
     // inside rawAlloc when push_back triggers a reallocation.
@@ -116,4 +188,31 @@ class MemoryManager : public VmAllocBase {
     static constexpr std::size_t kMinHeap = 1024 * 1024;
     static constexpr int GC_HEAP_GROW_FACTOR = 2;
     std::size_t m_nextGC{kMinHeap};
+
+    int m_workerNumber{0};
+    std::uint16_t m_heapId{0};
+    // The foreign set and the side mark table in one: the keys are the
+    // objects of other heaps that this heap holds a count on, and the value
+    // is the side mark of the collection in progress. The header mark bit of
+    // a foreign object belongs to its owner's collector.
+    std::unordered_map<Obj*, bool> m_foreign;
+    // Foreign objects the collection in progress reached that were not in
+    // the set yet. The collection raises their counts before it releases
+    // any count.
+    std::vector<Obj*> m_reachedForeign;
+    // An envelope batch that the drain took out of the inbox and has not
+    // delivered yet: the receiver's roots while it delivers.
+    std::vector<Envelope> m_draining;
+    bool m_exitCollection{false};
+    Inbox m_inbox;
+
+    // The holder counts of the objects of this heap, under m_holdMutex.
+    std::mutex m_holdMutex;
+    std::unordered_map<const Obj*, std::uint32_t> m_holders;
+    std::size_t m_heldTotal{0};
+    bool m_ownerAlive{true};
+
+  public:
+    // The drain's batch (see m_draining).
+    std::vector<Envelope>& drainingBatch() { return m_draining; }
 };

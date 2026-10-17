@@ -379,8 +379,12 @@ InterpretResult VM::run(int stopAtFrameCount) {
             Runtime::OpResult result = m_rt.opStr(stopAtFrameCount);
             if (result == Runtime::OpResult::OK) {
                 ObjString* s = asObjString(m_rt.pop());
+                // One whole line, also when another worker prints at the
+                // same time (spec/04-semantics.md, Ending).
+                flockfile(stdout);
                 std::fwrite(s->chars.data(), 1, s->chars.size(), stdout);
-                std::printf("\n");
+                std::fputc('\n', stdout);
+                funlockfile(stdout);
                 break;
             }
             if (result == Runtime::OpResult::Resumed) {

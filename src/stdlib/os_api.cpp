@@ -1,5 +1,6 @@
 #include "os_api.h"
 #include "stdlib_context.h"
+#include "../worker.h"
 #include "../container_objects.h"
 #include "../vm_allocator.h"
 #include "../value.h"
@@ -17,7 +18,8 @@
 
 // Module-local Map class pointer, used by statNative to stamp the returned
 // metadata map so it dispatches to the shared Map methods.
-static ObjClass* s_mapClass = nullptr;
+// Per thread: each worker registers the classes of its own heap.
+static thread_local ObjClass* s_mapClass = nullptr;
 
 // Convert a filesystem clock time to seconds since the Unix epoch. The
 // file_clock epoch is implementation-defined, so shift by the live offset
@@ -83,7 +85,8 @@ static Value exitNative(int /*argc*/, Value* argv) {
                            "integer range.");
         return from<Nil>(Nil{});
     }
-    std::exit(static_cast<int>(std::trunc(raw)));
+    // Any worker can end the program (spec/04-semantics.md, Ending).
+    endProcess(static_cast<int>(std::trunc(raw)));
     return from<Nil>(Nil{});
 }
 

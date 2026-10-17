@@ -39,10 +39,25 @@ bool operator==(const Value& a, const Value& b) {
     if (is<Nil>(a) && is<Nil>(b)) {
         return true;
     }
-    // For strings, interning guarantees same content → same pointer. Other Obj
-    // types use identity equality.
+    // For strings, interning guarantees same content → same pointer inside
+    // one heap. A string of another heap (a field of a message from another
+    // worker) can have the characters of a local one, so two strings of two
+    // heaps compare their characters. Other Obj types use identity equality.
     if (is<Obj*>(a) && is<Obj*>(b)) {
-        return as<Obj*>(a) == as<Obj*>(b);
+        Obj* x = as<Obj*>(a);
+        Obj* y = as<Obj*>(b);
+        if (x == y) {
+            return true;
+        }
+        if (x->heapId == y->heapId || x->type != ObjType::STRING ||
+            y->type != ObjType::STRING) {
+            return false;
+        }
+        const auto* s = static_cast<const ObjString*>(x);
+        const auto* t = static_cast<const ObjString*>(y);
+        return s->hash == t->hash && s->chars.size() == t->chars.size() &&
+               std::memcmp(s->chars.data(), t->chars.data(), s->chars.size()) ==
+                   0;
     }
     return false;
 }

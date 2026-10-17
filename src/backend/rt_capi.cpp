@@ -199,8 +199,10 @@ int rt_op_print(Runtime* rt, int stopAtFrameCount) noexcept {
             return r;
         }
         ObjString* s = asObjString(rt->pop());
+        flockfile(stdout);
         std::fwrite(s->chars.data(), 1, s->chars.size(), stdout);
         std::fputc('\n', stdout);
+        funlockfile(stdout);
         return Runtime::OpResult::OK;
     });
 }

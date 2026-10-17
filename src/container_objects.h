@@ -6,6 +6,7 @@
 #include "value.h"
 #include "vm_allocator.h"
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <deque>
@@ -428,6 +429,10 @@ enum class TaskState : std::uint8_t {
     DEAD,    // its function returned, or the program ended it
 };
 
+// The object lives in the heap of its worker. A handle on another worker is
+// a pointer to this same object, held as a message: that worker reads only
+// `ended` and the heap id, and routes a send through the inbound queue of
+// the owner (worker.h). Every other field belongs to the owner's thread.
 struct ObjTask : public Obj {
     ObjCoroutine* co;
     // Unbounded by design: a send never waits for room. A bound is a library
@@ -437,9 +442,18 @@ struct ObjTask : public Obj {
     // True while the task waits in task.receive(): its next resume hands it
     // the head of the mailbox as the value of that receive.
     bool receiving{false};
+    // The first resume calls the function with this one argument when
+    // `hasStartArg` is set: the message of task.spawn_worker.
+    bool hasStartArg{false};
+    Value startArg;
     // The scheduler's run of the program this task belongs to. A task of an
     // earlier run (an earlier REPL line) has ended with that run.
     std::uint64_t epoch;
+    // The order in which the worker made its tasks, for the deadlock report.
+    std::uint64_t serial{0};
+    // Set by the owner when the task ends; read by any worker that sends to
+    // it (DeadTaskError).
+    std::atomic<bool> ended{false};
 
     ObjTask(ObjCoroutine* c, std::uint64_t e)
         : Obj(ObjType::TASK), co(c), epoch(e) {}

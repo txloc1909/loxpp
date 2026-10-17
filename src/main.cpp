@@ -4,6 +4,7 @@
 #include "json_escape.h"
 #include "scanner.h"
 #include "vm.h"
+#include "worker.h"
 #include "loxpp_version.h"
 
 #include <algorithm>
@@ -173,10 +174,10 @@ static void runFile(VM& vm, const std::string& path) {
     InterpretResult result = vm.interpret(source);
 
     if (result == InterpretResult::COMPILE_ERROR) {
-        std::exit(65);
+        endProcess(65);
     }
     if (result == InterpretResult::RUNTIME_ERROR) {
-        std::exit(70);
+        endProcess(70);
     }
 }
 
@@ -713,19 +714,20 @@ int main(int argc, const char* argv[]) {
         return exitCode.value();
     }
 
-    VM vm;
-
-    if (argc == 1) {
-        repl(vm);
-        return 0;
+    {
+        VM vm;
+        if (argc == 1) {
+            repl(vm);
+        } else {
+            std::vector<std::string> progArgs;
+            for (int i = 2; i < argc; i++) {
+                progArgs.emplace_back(argv[i]);
+            }
+            vm.setArgs(std::move(progArgs));
+            runFile(vm, argv[1]);
+        }
     }
-
-    std::vector<std::string> progArgs;
-    for (int i = 2; i < argc; i++) {
-        progArgs.emplace_back(argv[i]);
-    }
-    vm.setArgs(std::move(progArgs));
-    runFile(vm, argv[1]);
-
-    return 0;
+    // A worker can still run here, and it can end the process too: one of
+    // the two ends wins (spec/04-semantics.md, Ending).
+    endProcess(0);
 }

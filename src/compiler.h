@@ -22,6 +22,20 @@ static constexpr int UINT8_COUNT = 256;
 ObjFunction* compile(const std::string& source, MemoryManager* mm,
                      DiagnosticSink* sink = nullptr);
 
+struct CompileOptions {
+    // Keep the code of the top-level `fun`, `class`, and `enum` declarations
+    // only, in source order: the start of a new worker
+    // (spec/04-semantics.md, task.spawn_worker, step 3). Every other
+    // top-level statement still compiles, so the same errors are found, but
+    // its code is dropped.
+    bool declarationsOnly{false};
+    // Written into ObjFunction::sourceId of each top-level `fun`.
+    int sourceId{0};
+};
+
+ObjFunction* compile(const std::string& source, MemoryManager* mm,
+                     DiagnosticSink* sink, const CompileOptions& options);
+
 enum class FunctionType : std::uint8_t {
     SCRIPT,
     FUNCTION,
@@ -263,4 +277,12 @@ class Compiler {
     std::unordered_map<std::string, std::vector<std::string>> m_enumCtors;
     // Class name table — only meaningfully populated on the root compiler.
     std::set<std::string> m_classNames;
+    // Root compiler only: the next ObjFunction::topLevelOrdinal, and the
+    // source id written next to it.
+    int m_topLevelFunCount{0};
+    int m_sourceId{0};
+
+    friend ObjFunction* compile(const std::string& source, MemoryManager* mm,
+                                DiagnosticSink* sink,
+                                const CompileOptions& options);
 };

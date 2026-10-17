@@ -15,14 +15,29 @@
 
 ObjFunction* compile(const std::string& source, MemoryManager* mm,
                      DiagnosticSink* sink) {
+    return compile(source, mm, sink, CompileOptions{});
+}
+
+ObjFunction* compile(const std::string& source, MemoryManager* mm,
+                     DiagnosticSink* sink, const CompileOptions& options) {
     ObjFunction* fn = mm->create<ObjFunction>();
     auto parser = std::make_unique<Parser>(source);
     parser->m_sink = sink;
     auto compiler = std::make_unique<Compiler>(fn, parser.get(), mm,
                                                FunctionType::SCRIPT, nullptr);
+    compiler->m_sourceId = options.sourceId;
 
     while (!parser->check(TokenType::EOF_)) {
+        bool keep =
+            !options.declarationsOnly || parser->check(TokenType::FUN) ||
+            parser->check(TokenType::CLASS) || parser->check(TokenType::ENUM);
+        std::size_t start = fn->chunk.size();
         compiler->declaration();
+        if (!keep) {
+            // A top-level statement leaves the stack as it found it, and no
+            // jump leaves it, so its code can go as a whole.
+            fn->chunk.truncate(start);
+        }
     }
 
     compiler->endCompiler();
@@ -1784,6 +1799,10 @@ void Compiler::funDeclaration() {
     fn->name = m_mm->makeString(name.lexeme);
     if (m_scopeDepth == 0) {
         inner.m_selfName = name.lexeme;
+    }
+    if (m_scopeDepth == 0 && m_type == FunctionType::SCRIPT) {
+        fn->topLevelOrdinal = m_topLevelFunCount++;
+        fn->sourceId = m_sourceId;
     }
     inner.parseFunction(FunctionType::FUNCTION);
 

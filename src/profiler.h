@@ -63,9 +63,15 @@ struct ProfilerData {
     int64_t programStartNs{0};
     int64_t programEndNs{0};
 
+    // The worker this profile belongs to: each worker has its own
+    // ProfilerData and prints its own report.
+    int worker{0};
+
+    // The CPU time of the calling thread: the thread of the worker whose
+    // work this profile counts, and no other worker's.
     int64_t nowNs() const noexcept {
         struct timespec ts;
-        clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
         return ts.tv_sec * int64_t{1'000'000'000} + ts.tv_nsec;
     }
 
@@ -296,8 +302,14 @@ inline void ProfilerData::report(std::FILE* out) const {
                       "================"
                       "========\n";
 
+    // One report, whole, also when another worker reports at the same time.
+    flockfile(out);
     std::fprintf(out, "%s", sep);
-    std::fprintf(out, "loxpp PROFILER REPORT\n");
+    if (worker == 0) {
+        std::fprintf(out, "loxpp PROFILER REPORT\n");
+    } else {
+        std::fprintf(out, "loxpp PROFILER REPORT (worker %d)\n", worker);
+    }
     std::fprintf(out, "%s\n", sep);
 
     // --- Program Summary ---
@@ -401,6 +413,7 @@ inline void ProfilerData::report(std::FILE* out) const {
     }
 
     std::fprintf(out, "%s", sep);
+    funlockfile(out);
 }
 
 #endif // LOXPP_PROFILE

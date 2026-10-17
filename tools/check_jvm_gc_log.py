@@ -145,7 +145,7 @@ def check_shared_math():
     with open(path) as f:
         _, start, end, gcs, _ = jvm_gc_log.parse_log(f.read())
     with tempfile.NamedTemporaryFile("w", suffix=".trace", delete=False) as t:
-        t.write("# loxpp-gc-trace v1\n")
+        t.write("# loxpp-gc-trace v2\n")
         t.write(f"start t={start}\n")
         for g in gcs:
             # The native format needs phase timestamps and counts; they do

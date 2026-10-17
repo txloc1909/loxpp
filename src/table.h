@@ -47,6 +47,11 @@ class Table {
     void addAll(const Table& from);
     ObjString* findString(const char* chars, int length, uint32_t hash) const;
     void removeUnmarkedKeys();
+    // Removes every entry whose key `drop(key)` says to drop.
+    template <typename F>
+    void removeKeysIf(F&& drop) {
+        m_map.removeIf([&drop](const Entry& e) { return drop(e.key); });
+    }
 
     template <typename F>
     void forEach(F&& fn) const {

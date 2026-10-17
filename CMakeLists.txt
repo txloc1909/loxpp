@@ -111,6 +111,7 @@ set(LOXPP_CORE_SOURCES
     src/container_objects.cpp
     src/table.cpp
     src/memory_manager.cpp
+    src/worker.cpp
     src/math.cpp
     src/runtime.cpp
     src/vm.cpp
@@ -136,6 +137,9 @@ set(LOXPP_CORE_SOURCES
 
 add_library(loxpp_core OBJECT ${LOXPP_CORE_SOURCES})
 target_include_directories(loxpp_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
+# Each worker is an OS thread (src/worker.h).
+find_package(Threads REQUIRED)
+target_link_libraries(loxpp_core PUBLIC Threads::Threads)
 
 # Wire the generated version header as an explicit dependency of loxpp_core.
 # loxpp_core is an OBJECT library; its TUs #include the header, so it must
@@ -245,6 +249,7 @@ if(LOXPP_PROFILE)
         LOXPP_PROFILE
         ${LOXPP_CORE_PUBLIC_DEFINITIONS}
         ${LOXPP_CORE_PRIVATE_DEFINITIONS})
+    target_link_libraries(loxpp PRIVATE Threads::Threads)
 else()
     target_link_libraries(loxpp PRIVATE loxpp_core)
 endif()

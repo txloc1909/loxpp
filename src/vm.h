@@ -31,6 +31,16 @@ class VM {
         // Runtime::setInterpretLoop's own comment.
         m_rt.setInterpretLoop([this](int stop) { return run(stop); });
     }
+    // The VM of a worker that task.spawn_worker made, over the heap that
+    // the spawn made for it (Runtime::spawnWorker).
+    explicit VM(MemoryManager* heap) : m_rt(heap) {
+        m_rt.setInterpretLoop([this](int stop) { return run(stop); });
+    }
+    VM(const VM&) = delete;
+    VM& operator=(const VM&) = delete;
+
+    // The worker thread drives its Runtime through Runtime::runWorker.
+    Runtime& runtime() { return m_rt; }
 
     InterpretResult interpret(const std::string& source);
     // stopAtFrameCount: returns InterpretResult::OK as soon as

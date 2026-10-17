@@ -214,20 +214,32 @@ TEST_F(TaskTest, DeadlockOnOneWorkerIsFatal) {
     expect_string(h, "log", "start");
 }
 
-TEST_F(TaskTest, SpawnWorkerFailsLoudly) {
-    VMTestHarness h;
-    EXPECT_EQ(h.run(R"(
-        fun entry(m) {}
-        var reached = "before";
-        try {
-            task.spawn_worker(entry, nil);
-        } catch (e) {
-            reached = "caught";
-        }
-        reached = "after";
-    )"),
-              InterpretResult::RUNTIME_ERROR);
-    expect_string(h, "reached", "before");
+// A function that no top-level fun declaration made is not an entry: a
+// nested fun, a bound method, and a number all fail before a worker starts.
+// The fault is fatal, so the try does not catch it.
+TEST_F(TaskTest, SpawnWorkerTakesOnlyATopLevelFunction) {
+    const char* entries[] = {"nested()", "C().m", "42"};
+    for (const char* entry : entries) {
+        VMTestHarness h;
+        std::string program = R"(
+            fun nested() {
+                fun inner(m) {}
+                return inner;
+            }
+            class C { m(x) {} }
+            var reached = "before";
+            try {
+                task.spawn_worker()";
+        program += entry;
+        program += R"(, nil);
+            } catch (e) {
+                reached = "caught";
+            }
+            reached = "after";
+        )";
+        EXPECT_EQ(h.run(program), InterpretResult::RUNTIME_ERROR) << entry;
+        expect_string(h, "reached", "before");
+    }
 }
 
 // The bit is the conjunction of the field bits, computed once at the

@@ -41,6 +41,7 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/container_objects.cpp
     ${PROJECT_SOURCE_DIR}/src/table.cpp
     ${PROJECT_SOURCE_DIR}/src/memory_manager.cpp
+    ${PROJECT_SOURCE_DIR}/src/worker.cpp
     ${PROJECT_SOURCE_DIR}/src/token.cpp
     ${PROJECT_SOURCE_DIR}/src/scanner.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/stdlib_context.cpp
@@ -60,10 +61,12 @@ set(LOXPP_CORE_SRCS
 
 add_library(loxpp_test_core OBJECT ${LOXPP_CORE_SRCS} test_harness.cpp)
 target_include_directories(loxpp_test_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(loxpp_test_core PUBLIC Threads::Threads)
 
 add_library(loxpp_test_core_profile OBJECT ${LOXPP_CORE_SRCS} test_harness.cpp)
 target_include_directories(loxpp_test_core_profile PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_compile_definitions(loxpp_test_core_profile PUBLIC LOXPP_PROFILE)
+target_link_libraries(loxpp_test_core_profile PUBLIC Threads::Threads)
 
 # loxpp_add_test(<name> <source>... CORE <object-library> [PROBE])
 #

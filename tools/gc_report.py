@@ -7,16 +7,17 @@ Producing a trace (any build; the trace is not tied to a build flag):
 
     LOXPP_GC_TRACE=/tmp/gc.trace build/loxpp program.lox
 
-Trace format, version 1
+Trace format, version 2
 -----------------------
 A text file, one record per line. Blank lines and lines that begin with '#'
 are ignored. Every other line is a record name followed by space-separated
 key=value fields. All t* values are CLOCK_MONOTONIC nanoseconds, so they are
 comparable inside one file and meaningless across files or hosts.
 
-    # loxpp-gc-trace v1          header; the version bumps on any change
+    # loxpp-gc-trace v2          header; the version bumps on any change
     start t=<ns>                 the MemoryManager was created
-    gc cause=<threshold|stress>  one record per collection, with fields:
+    gc cause=<threshold|stress|exit>
+                                 one record per collection, with fields:
        t0..t4          t0 collection begins; t1 roots marked; t2 gray stack
                        traced; t3 unmarked interned strings removed; t4 sweep
                        finished. Phases: mark = t1-t0, trace = t2-t1,
@@ -28,6 +29,19 @@ comparable inside one file and meaningless across files or hosts.
     end t=<ns>                   the MemoryManager was destroyed; absent when
                                  the process left through std::exit(), and
                                  the last t4 stands in for it then
+
+The last gc record of a heap whose worker ended normally has cause=exit:
+the collection that worker ran as it ended, with the held messages as its
+only roots. Its objs_after and bytes_after are what the heap keeps as a dead
+heap while another worker holds those messages; its end record follows when
+the last of them is dropped.
+
+Each worker writes its own file: the main worker writes the path in
+LOXPP_GC_TRACE, and worker N (N >= 1, in the order of task.spawn_worker
+calls) writes <path>.w<N>.
+
+Version 2 added cause=exit and the files of the workers. A version 1 file
+reads the same way.
 
 Each MemoryManager opens the file for writing and truncates it. A Lox program
 that starts a child loxpp inherits the variable, so the child truncates the
