@@ -50,15 +50,6 @@ public final class LoxRuntime {
 
     static { Runtime.getRuntime().addShutdownHook(new Thread(out::flush)); }
 
-    // The one LoxGlobals instance for this JVM process (design decision A2:
-    // one dynamic map, not one static field per global name — this is a
-    // different concern, "where does a generated method find the map").
-    // main's own frame holds a reference in a JVM local, but a generated
-    // LoxFn$<n>.invoke has no such local, so it reads this static instead
-    // of threading the reference through every call. Safe
-    // because exactly one Lox++ program ever runs per JVM process here.
-    private static LoxGlobals current;
-
     // Command-line arguments after the program name, forwarded by the
     // generated script's main() before the first script statement runs. An
     // empty array when main received none, as in the differential harness.
@@ -103,21 +94,99 @@ public final class LoxRuntime {
      */
     public static final LoxClass ERROR_CLASS = new LoxClass("Error", null);
 
+    /** The generated main() calls this once, before the script body runs. */
     public static LoxGlobals init() {
+        LoxGlobals globals = newGlobals();
+        LoxWorker.MAIN.globals = globals;
+        return globals;
+    }
+
+    /**
+     * The globals of the current worker (design decision A2: one dynamic map,
+     * not one static field per global name). main's own frame holds a
+     * reference in a JVM local, but a generated LoxFn$<n>.invoke has no such
+     * local, so it reads this instead of threading the reference through
+     * every call. A function is not a message, so it runs only on the worker
+     * whose globals it must see. Null before {@link #init} runs.
+     */
+    public static LoxGlobals current() { return LoxWorker.current().globals; }
+
+    /** A fresh set of globals with the full stdlib, one per worker. */
+    static LoxGlobals newGlobals() {
         LoxGlobals globals = new LoxGlobals();
         registerGlobals(globals);
         registerMath(globals);
         registerReflection(globals);
         registerCoroutine(globals);
-        current = globals;
+        registerTask(globals);
         return globals;
     }
 
     /**
-     * The instance the script's own {@link #init} call built. Null before that
-     * call runs.
+     * The class src/backend/jvm_emitter.cpp emits from the program compiled
+     * with CompileOptions::declarationsOnly. Its main() defines every
+     * top-level fun, class, and enum declaration, in source order, in the
+     * globals of the current worker, and runs no other statement.
      */
-    public static LoxGlobals current() { return current; }
+    static final String DECLARATIONS_CLASS = "LoxDecls";
+
+    /**
+     * Runs the declarations on a new worker (spec/04-semantics.md,
+     * task.spawn_worker, step 3). Package-private and replaceable so that a
+     * runtime test, which has no generated program, can stand in for it.
+     */
+    static Runnable declarations = LoxRuntime::runGeneratedDeclarations;
+
+    static void runDeclarations() { declarations.run(); }
+
+    private static void runGeneratedDeclarations() {
+        java.lang.reflect.Method main;
+        try {
+            main = Class.forName(DECLARATIONS_CLASS)
+                       .getMethod("main", String[].class);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(
+                "no declarations class " + DECLARATIONS_CLASS, e);
+        }
+        try {
+            main.invoke(null, (Object)new String[0]);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException)cause;
+            }
+            if (cause instanceof Error) {
+                throw (Error)cause;
+            }
+            throw new IllegalStateException(cause);
+        } catch (IllegalAccessException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * An uncaught throw or a fatal fault in a task other than the main task
+     * ends the program (spec/04-semantics.md, Ending). The deferred calls of
+     * the task already ran while the fault left its frames. The status is
+     * native's for a runtime error.
+     */
+    static void endWithFault(Throwable fault) {
+        String text = (fault instanceof LoxError) ? fault.getMessage()
+                                                  : fault.toString();
+        out.flush();
+        System.err.println(text);
+        System.exit(70);
+    }
+
+    /**
+     * spec/04-semantics.md, Deadlock: the fault is fatal, and no pending
+     * deferred call runs.
+     */
+    static void endWithDeadlock() {
+        out.flush();
+        System.err.println("Deadlock: every task waits in receive.");
+        System.exit(70);
+    }
 
     /**
      * Creates an Error instance with the given kind and message. Used at fault
@@ -453,6 +522,60 @@ public final class LoxRuntime {
         globals.define("coroutine", module);
     }
 
+    // Mirrors src/stdlib/task_api.cpp: a `task` module instance whose members
+    // are the primitive of the concurrency model (spec/05-stdlib.md, task).
+    // A wrong argument kind is a fatal error of a stdlib native; SendError
+    // and DeadTaskError are catchable faults.
+    private static void registerTask(LoxGlobals globals) {
+        LoxInstance module = new LoxInstance(new LoxClass("TaskModule", null));
+        module.fields.put("spawn", new LoxNative("spawn", 1, args -> {
+            if (!(args[0] instanceof LoxClosure) &&
+                !(args[0] instanceof LoxBoundMethod)) {
+                throw new LoxError("task.spawn expects a function.");
+            }
+            return LoxWorker.current().spawn(args[0]);
+        }));
+        module.fields.put(
+            "spawn_worker", new LoxNative("spawn_worker", 2, args -> {
+                if (!(args[0] instanceof LoxClosure) ||
+                    !((LoxClosure)args[0]).topLevel) {
+                    throw new LoxError("task.spawn_worker expects a function "
+                                       + "that a top-level fun declaration "
+                                       + "made.");
+                }
+                requireMessage(args[1]);
+                return LoxWorker.spawnWorker((LoxClosure)args[0], args[1]);
+            }));
+        module.fields.put("send", new LoxNative("send", 2, args -> {
+            if (!(args[0] instanceof LoxTask)) {
+                throw new LoxError("task.send expects a task.");
+            }
+            requireMessage(args[1]);
+            LoxWorker.send((LoxTask)args[0], args[1]);
+            return null;
+        }));
+        module.fields.put("receive", new LoxNative("receive", 0, args -> {
+            boolean canSuspend = LoxOps.callbackDepthOfChain() == 0;
+            return LoxWorker.current().receive(canSuspend);
+        }));
+        module.fields.put(
+            "self",
+            new LoxNative("self", 0, args -> LoxWorker.current().current));
+        module.fields.put(
+            "pending", new LoxNative("pending", 0, args -> {
+                return (double)LoxWorker.current().pending();
+            }));
+        globals.define("task", module);
+    }
+
+    private static void requireMessage(Object msg) {
+        if (!LoxTask.isMessage(msg)) {
+            throw LoxOps.makeError("SendError", "Value of type " +
+                                                    typeNameOf(msg) +
+                                                    " is not a message.");
+        }
+    }
+
     // type(x)'s ladder groups values the same way LoxOps.stringify does:
     // a closure and a plain native are both "Function"; a user-defined bound
     // method and a bound Map/File native are both "BoundMethod" (see
@@ -517,6 +640,9 @@ public final class LoxRuntime {
         }
         if (v instanceof LoxCoroutine) {
             return "Coroutine";
+        }
+        if (v instanceof LoxTask) {
+            return "Task";
         }
         if (v instanceof LoxEnumCtor) {
             return "EnumConstructor";

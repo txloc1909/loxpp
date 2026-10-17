@@ -37,47 +37,49 @@ public abstract class LoxClosure implements LoxCallable {
 
     // Mirrors src/vm.h's STACK_OVERFLOW_FRAME_RESERVE. Spent only while a
     // StackOverflowError this class raised is still unwinding
-    // (s_unwindingStackOverflow below): a deferred call drained during that
+    // (unwindingStackOverflow below): a deferred call drained during that
     // unwind runs before the JVM's own call-stack unwind has brought
-    // s_frameCount back down past FRAMES_MAX, so it needs room of its own
+    // the frame count back down past FRAMES_MAX, so it needs room of its own
     // to make any nested calls at all — the same reason native reserves
     // capacity above its own FRAMES_MAX instead of using one ceiling for
     // both the ordinary and the unwinding case.
     private static final int FRAMES_RESERVE = 16;
 
-    // Starts at 1, not 0: src/vm.cpp's own interpret() pushes the
-    // top-level script itself as CallFrame 0 through the very same call()
-    // this class's CallAsSelf mirrors, before the script body ever runs,
-    // and that frame is never popped until the whole program ends. A
-    // counter starting at 0 here would let one more nested Lox call
-    // succeed than FRAMES_MAX allows natively.
-    private static int s_frameCount = 1;
-
-    // True for the dynamic extent between a StackOverflowError this class
-    // raises and that same fault's resolution (delivered to a real
-    // try/catch, or the program exiting fatally) — LoxError's own
-    // getValue() clears this the moment it delivers the fault s_overflowInFlight
-    // still names, which is the only point that knows the unwind is over.
-    // A second overflow raised inside that extent — reachable only through
-    // a deferred call that itself recurses too deep while running during
-    // the first overflow's own unwind — is not delivered to any catchBlock
-    // (spec/04-semantics.md line 1120); it is fatal, matching native's own
-    // m_unwindingStackOverflow guard (src/vm.h).
-    private static boolean s_unwindingStackOverflow = false;
-
-    // The LoxError object whose delivery to getValue() ends the unwind
-    // above. Starts as the StackOverflowError this class raises.
-    // spec/04-semantics.md's defer Statement step 5 lets a deferred call's
-    // own throw, if not caught within it, replace whatever fault was
+    // The frame count and the two stack-overflow guard fields below are one
+    // set per worker (LoxWorker.frameCount, unwindingStackOverflow,
+    // overflowInFlight), as native keeps them in its one Runtime per worker.
+    //
+    // The frame count starts at 1, not 0: src/vm.cpp's own interpret() pushes
+    // the top-level script itself as CallFrame 0 through the very same call()
+    // this class's CallAsSelf mirrors, before the script body ever runs, and
+    // that frame is never popped until the whole program ends. A counter
+    // starting at 0 here would let one more nested Lox call succeed than
+    // FRAMES_MAX allows natively.
+    //
+    // unwindingStackOverflow is true for the dynamic extent between a
+    // StackOverflowError this class raises and that same fault's resolution
+    // (delivered to a real try/catch, or the program exiting fatally) —
+    // LoxError's own getValue() clears it the moment it delivers the fault
+    // overflowInFlight still names, which is the only point that knows the
+    // unwind is over. A second overflow raised inside that extent —
+    // reachable only through a deferred call that itself recurses too deep
+    // while running during the first overflow's own unwind — is not
+    // delivered to any catchBlock (spec/04-semantics.md line 1120); it is
+    // fatal, matching native's own m_unwindingStackOverflow guard
+    // (src/vm.h).
+    //
+    // overflowInFlight is the LoxError object whose delivery to getValue()
+    // ends the unwind above. It starts as the StackOverflowError this class
+    // raises. spec/04-semantics.md's defer Statement step 5 lets a deferred
+    // call's own throw, if not caught within it, replace whatever fault was
     // already propagating through the frame draining that defer; when that
-    // happens, LoxOps.runDefers() calls replaceOverflowInFlight() so this
-    // field tracks the replacement instead, but only when the replaced
-    // fault is the one this guard already names. Identity, not the
-    // delivered value's own kind field, is what must decide the unwind is
-    // over: a plain Lox++ instance can carry a field named "kind" equal to
+    // happens, LoxOps.runDefers() calls replaceOverflowInFlight() so the
+    // field tracks the replacement instead, but only when the replaced fault
+    // is the one this guard already names. Identity, not the delivered
+    // value's own kind field, is what must decide the unwind is over: a
+    // plain Lox++ instance can carry a field named "kind" equal to
     // "StackOverflowError" with no connection to this guard at all, and a
     // kind-string check would clear the guard on that alone.
-    private static LoxError s_overflowInFlight = null;
 
     public final String name; // null for the top-level script, per <script>
     public final int arity;
@@ -123,57 +125,60 @@ public abstract class LoxClosure implements LoxCallable {
             throw LoxOps.makeError("ArityError",
                     "Expected " + arity + " arguments but got " + args.length + ".");
         }
-        if (s_unwindingStackOverflow) {
+        LoxWorker w = LoxWorker.current();
+        if (w.unwindingStackOverflow) {
             // Already unwinding one StackOverflowError: only the reserve
             // stands between here and fatal, and no further catchable
-            // attempt is made (see s_unwindingStackOverflow's own comment).
-            if (s_frameCount >= FRAMES_MAX + FRAMES_RESERVE) {
+            // attempt is made (see unwindingStackOverflow's comment above).
+            if (w.frameCount >= FRAMES_MAX + FRAMES_RESERVE) {
                 // A raw, valueless LoxError is uncatchable: LoxError.getValue()
                 // rethrows it instead of delivering it to any catchBlock.
                 throw new LoxError("Stack overflow.");
             }
-        } else if (s_frameCount >= FRAMES_MAX) {
+        } else if (w.frameCount >= FRAMES_MAX) {
             if (!LoxOps.isHandlerLive()) {
                 // src/runtime.cpp Runtime::call() takes the same fatal fast path (no
                 // handler live anywhere in the program) for the first
                 // overflow too — it never constructs the catchable
                 // StackOverflowError Error value in that case (issue
-                // #319). s_unwindingStackOverflow stays false: this fault
+                // #319). unwindingStackOverflow stays false: this fault
                 // is never delivered, so there is no unwind for a second
                 // overflow to be re-entrant with.
                 throw new LoxError("Stack overflow.");
             }
-            s_unwindingStackOverflow = true;
+            w.unwindingStackOverflow = true;
             LoxError overflow =
                     LoxOps.makeError("StackOverflowError", "Stack overflow.");
-            s_overflowInFlight = overflow;
+            w.overflowInFlight = overflow;
             throw overflow;
         }
-        s_frameCount++;
+        w.frameCount++;
         try {
             return invoke(self, args);
         } finally {
-            s_frameCount--;
+            w.frameCount--;
         }
     }
 
     // Package-private: LoxError.getValue() calls this, and only this,
     // exactly when the fault it is about to deliver to a real catchBlock is
-    // the one s_overflowInFlight names. Resetting there — not at throw
+    // the one overflowInFlight names. Resetting there — not at throw
     // time — is what lets a deferred call spend the reserve above while
     // this fault is still propagating, without a later, unrelated overflow
     // being mistaken for part of the same unwind.
     static void endStackOverflowUnwind() {
-        s_unwindingStackOverflow = false;
-        s_overflowInFlight = null;
+        LoxWorker w = LoxWorker.current();
+        w.unwindingStackOverflow = false;
+        w.overflowInFlight = null;
     }
 
     // Package-private: LoxError.getValue() calls this to decide whether IT
     // is the fault whose delivery ends the current unwind (see
-    // s_overflowInFlight's own comment) — by identity, not by inspecting
+    // overflowInFlight's comment above) — by identity, not by inspecting
     // the delivered value.
     static boolean isOverflowInFlight(LoxError error) {
-        return s_unwindingStackOverflow && error == s_overflowInFlight;
+        LoxWorker w = LoxWorker.current();
+        return w.unwindingStackOverflow && error == w.overflowInFlight;
     }
 
     // Package-private: LoxOps.runDefers() calls this when a deferred call's
@@ -187,19 +192,22 @@ public abstract class LoxClosure implements LoxCallable {
     // handler knows which fault a defer list is being drained for, so it
     // is the one caller that can supply `replaced` correctly.
     static void replaceOverflowInFlight(LoxError replaced, LoxError replacement) {
-        if (s_unwindingStackOverflow && replaced == s_overflowInFlight) {
-            s_overflowInFlight = replacement;
+        LoxWorker w = LoxWorker.current();
+        if (w.unwindingStackOverflow && replaced == w.overflowInFlight) {
+            w.overflowInFlight = replacement;
         }
     }
 
     // Package-private read/write for LoxCoroutine's suspend/resume snapshot.
-    // The frame budget is one program-wide counter, exactly as native's
+    // The frame budget is one counter per worker, exactly as native's
     // m_frameCount is: a resumed coroutine's frames sit above the resumer's,
     // so the two are counted together. A coroutine hides its own frames while
     // it is suspended (see LoxCoroutine's snapshot).
-    static int frameCountValue() { return s_frameCount; }
+    static int frameCountValue() { return LoxWorker.current().frameCount; }
 
-    static void setFrameCountValue(int value) { s_frameCount = value; }
+    static void setFrameCountValue(int value) {
+        LoxWorker.current().frameCount = value;
+    }
 
     /**
      * The resume-time budget check (src/runtime.cpp's resumeCoroutine).
@@ -210,7 +218,8 @@ public abstract class LoxClosure implements LoxCallable {
      * only a restore past the ceiling is rejected.
      */
     static void checkResumeBudget(int frameCount) {
-        if (s_unwindingStackOverflow) {
+        LoxWorker w = LoxWorker.current();
+        if (w.unwindingStackOverflow) {
             if (frameCount > FRAMES_MAX + FRAMES_RESERVE) {
                 throw new LoxError("Stack overflow.");
             }
@@ -222,10 +231,10 @@ public abstract class LoxClosure implements LoxCallable {
         if (!LoxOps.isHandlerLive()) {
             throw new LoxError("Stack overflow.");
         }
-        s_unwindingStackOverflow = true;
+        w.unwindingStackOverflow = true;
         LoxError overflow =
             LoxOps.makeError("StackOverflowError", "Stack overflow.");
-        s_overflowInFlight = overflow;
+        w.overflowInFlight = overflow;
         throw overflow;
     }
 

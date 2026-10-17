@@ -13,7 +13,7 @@ public final class CoroutineTest {
     private static final Object[][] NO_UPVALUES = new Object[0][];
 
     public static void main(String[] args) {
-        checkYieldOutsideCoroutine();
+        checkYieldOutsideEveryCoroutine();
         checkResumeAndStatus();
         checkDeadAndRunningFaults();
         checkYieldAcrossNative();
@@ -40,15 +40,20 @@ public final class CoroutineTest {
         return new LoxInstance(klass);
     }
 
-    private static void checkYieldOutsideCoroutine() {
+    private static void checkYieldOutsideEveryCoroutine() {
+        // The main task is a coroutine too (spec/04-semantics.md, yield
+        // Expression): a yield outside every coroutine it resumed is a task
+        // switch, and with no other task the main task runs again at once.
+        Object result = null;
         LoxError err = null;
         try {
-            LoxOps.yield(1.0);
+            result = LoxOps.yield(1.0);
         } catch (LoxError e) {
             err = e;
         }
-        check(err != null && "YieldOutsideCoroutineError".equals(kindOf(err)),
-              "yield outside a coroutine is a YieldOutsideCoroutineError");
+        check(err == null, "a yield outside every coroutine raises no fault");
+        checkEquals(null, result,
+                    "the yield discards its value and evaluates to nil");
     }
 
     private static void checkResumeAndStatus() {
@@ -171,8 +176,8 @@ public final class CoroutineTest {
     }
 
     private static void checkResumerHandlerVisibleInCoroutine() {
-        // The handler count is program-wide, like native's handler stack, so a
-        // coroutine sees the resumer's live try: an arity fault inside the
+        // The handler count is one per worker, like native's handler stack,
+        // so a coroutine sees the resumer's live try: an arity fault inside the
         // coroutine is catchable in the resumer.
         LoxClosure needsOne = new LoxClosure("needsOne", 1, NO_UPVALUES) {
             @Override
