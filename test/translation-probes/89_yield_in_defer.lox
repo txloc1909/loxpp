@@ -1,0 +1,47 @@
+// A deferred call cannot suspend (spec/04-semantics.md, yield Expression and
+// defer Statement): a yield in one, and a task.receive() on an empty mailbox
+// in one, raise the catchable YieldAcrossNativeError. This holds in the main
+// task outside every coroutine, where a plain yield is a task switch and a
+// plain receive suspends the task. The fault leaves g (or h), and the try
+// around the call catches it.
+fun note() {
+    var v = yield 1;
+    print "defer got " + str(v);
+}
+
+fun g() {
+    defer note();
+    print "g body";
+}
+
+try {
+    g();
+} catch (e) {
+    print e.kind;
+}
+print "after";
+
+fun recv() {
+    var m = task.receive();
+    print "defer got " + str(m);
+}
+
+fun h() {
+    defer recv();
+    print "h body";
+}
+
+try {
+    h();
+} catch (e) {
+    print e.kind;
+}
+print "after2";
+
+// STATUS: ok
+// CHECK: g body
+// CHECK: YieldAcrossNativeError
+// CHECK: after
+// CHECK: h body
+// CHECK: YieldAcrossNativeError
+// CHECK: after2

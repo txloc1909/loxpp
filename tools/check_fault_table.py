@@ -316,6 +316,16 @@ CATCHABLE_ROWS = [
               "var co = coroutine.create(f);\n",
         expected_kind="YieldAcrossNativeError",
     ),
+    # A yield in a deferred call (spec/04-semantics.md, yield Expression): the
+    # drain raises, in the main task outside every coroutine too.
+    Row(
+        "yield_in_deferred_call",
+        "caught",
+        "g();",
+        setup="fun note() { var v = yield 1; return v; }\n"
+              "fun g() { defer note(); print \"g body\"; }\n",
+        expected_kind="YieldAcrossNativeError",
+    ),
 ]
 
 # --- Fatal Runtime Errors table (spec/04-semantics.md) --------------------
