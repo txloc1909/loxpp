@@ -321,10 +321,13 @@ before the message enters that worker's inbound queue; the receiver
 registers the object in its *foreign set* when it drains the queue. The
 count moves at the send and not at the receive because the message sits in
 the inbound queue between the two, and the owner's collector must not free
-it there. Each worker contributes at most one to a count, so the count is
-bounded by the worker count and changes only at a send, at a drain, and at
-a collection, never on the interpreter's hot path. The creating worker's collector treats an
-object with a count above zero as a root. The receiver's collector marks
+it there. Each send raises the count by one, so while two envelopes with
+the same object are in a queue, one worker contributes two. The drain
+releases a duplicate, so after a drain each worker contributes at most one
+to a count. A count changes only at a send, at a drain, at a collection, at
+a worker exit, and at the free of a dead heap, never on the interpreter's
+hot path. The creating worker's collector treats an object with a count
+above zero as a root. The receiver's collector marks
 foreign objects in a side table of its own, never in the object header,
 because the header's mark bit belongs to the owner's collector; a foreign
 object the receiver's mark phase did not reach leaves its foreign set and
