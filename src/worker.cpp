@@ -122,9 +122,7 @@ void WorkerGroup::signalDeadlock() {
     deadlock.store(true);
     // Take and drop the main worker's lock, so the store cannot fall between
     // its check of the wait condition and its wait.
-    {
-        std::lock_guard<std::mutex> lock(mainInbox->mutex);
-    }
+    { std::lock_guard<std::mutex> lock(mainInbox->mutex); }
     mainInbox->wake.notify_all();
 }
 
