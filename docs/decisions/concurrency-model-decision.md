@@ -202,7 +202,7 @@ listed separately only where their code shapes differ.
 
 | Model | Native C++ VM | QBE backend | JVM backend | Bootstrap interpreter |
 |---|---|---|---|---|
-| CSP (Go) | New scheduler, growable stacks, channels in the runtime | Inherits native's runtime, but a suspend point must survive real C frames (C9) | Goroutines → host threads/virtual threads; channels in `LoxRuntime.java` | Needs a scheduler written in Lox++ itself, or excluded |
+| CSP (Go) | New scheduler, growable stacks, channels in the runtime | Inherits native's runtime, but a suspend point must survive real C frames (C9) | Goroutines → one OS thread for each task and coroutine; channels in `LoxRuntime.java` | Needs a scheduler written in Lox++ itself, or excluded |
 | Actor / isolated heap | One `VM` per task; scheduler copies messages | Same runtime as native; no QBE-specific work beyond the shared runtime | One runtime instance per task; copy via shared serialization | Feasible: tasks as interpreter instances in one Lox++ process |
 | OS threads | pthreads per task; thread-safe GC required | Same runtime as native; QBE frames complicate root scanning across task boundaries | `Thread` + shared heap; concurrent GC in the runtime | No host threads exist to expose |
 
@@ -462,7 +462,7 @@ itself is a later decision with a measurement.
 |---|---|---|
 | Native VM | The whole model. | Workers are `Runtime` instances on threads; tasks are the coroutines of #523; copy and mailbox are runtime code. No concurrent GC. |
 | QBE | Code generation only; it links the native runtime. | A program with tasks contains `yield`, so it compiles in coroutine mode and pays about 6 ns per call. Accepted for an experiment. The whole-program rule stays a stopgap (design-tensions T1). |
-| JVM | The model as a semantic oracle: observable output must match. | One runtime instance per worker on one Java thread, which means the static runtime state becomes per instance; tasks stay virtual threads; copy by the same rules. Host threads give it nothing extra, because it is not shipped. |
+| JVM | The model as a semantic oracle: observable output must match. | One runtime instance per worker, which means the static runtime state becomes per instance; each task and each coroutine runs on a daemon platform thread of its own, so the OS schedules it (the constraint under "Constraints from named bug classes"); copy by the same rules. Host threads give it nothing extra, because it is not shipped. |
 | Bootstrap interpreter | Runs the language and matches native on observable output. | Tasks are host coroutines, as today. A worker is a host worker that runs a second interpreter over the same source, or, as the implementation-gated exception named in `spec/`, a coroutine on one thread. Parallel speed-up is not observable output, so the second form conforms. |
 
 ### Re-score of criteria 2 and 5 under the backend roles
@@ -583,6 +583,17 @@ and continues with `nil`, and its main task needs no driver. *Shared layer:*
 (`src/backend/qbe_emitter.h`), the one test that the front end and
 `tools/qbe_emit_program.cpp` call. A new suspend point in the spec's table
 must be added to it.
+
+**A carrier per processor.** *Bug class:* a virtual thread that computes
+without reaching a suspend point keeps its carrier. The carrier pool has one
+carrier for each processor, so a program with more CPU-bound virtual tasks
+than processors leaves the ready task of another worker without a carrier.
+That task does not run, though the spec says that a computing task stops
+only the tasks of its own worker. *Constraint:* on the JVM every task and
+every coroutine runs on a daemon platform thread of its own, so the OS
+schedules it. A new site that starts Lox code on a host thread follows the
+same rule. *Shared layer:* the two thread-creation sites,
+`LoxWorker.switchTo` and `LoxCoroutine.resume`.
 
 ### What this unblocks and in which order
 

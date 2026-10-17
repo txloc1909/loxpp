@@ -12,12 +12,14 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * <p><b>Threads.</b> The main task runs on the thread that runs the
  * generated {@code main}. The first task of every other worker runs on a
- * platform thread of its own, so a task that computes without a suspend
- * point cannot hold back another worker by holding a carrier of the
- * virtual-thread pool. A task of {@code task.spawn} runs on a virtual
- * thread, as a coroutine does. Only one task of a worker runs at a time: a
- * task that suspends gives control to the head of the run queue directly
- * ({@link #switchTo}), and no scheduler thread exists.
+ * platform thread of its own, and every task of {@code task.spawn} and
+ * every coroutine runs on a platform thread of its own too. The
+ * virtual-thread carrier pool has one carrier for each processor, so a
+ * CPU-bound virtual task could stop the ready task of another worker, and
+ * the spec says that only the tasks of the worker of a computing task
+ * stop (spec/04-semantics.md, Suspend Points). Only one task of a worker
+ * runs at a time: a task that suspends gives control to the head of the
+ * run queue directly ({@link #switchTo}), and no scheduler thread exists.
  *
  * <p><b>Lock.</b> {@link #LOCK} guards the run queues, the task states, the
  * mailboxes, and the idle counts of every worker. One lock keeps the
@@ -306,7 +308,7 @@ final class LoxWorker {
         next.started = true;
         LOCK.unlock();
         if (start) {
-            Thread.ofVirtual().name("lox-task").start(next.body);
+            Thread.ofPlatform().daemon().name("lox-task").start(next.body);
         } else {
             next.wake.release();
         }
