@@ -91,8 +91,12 @@ public final class LoxRuntime {
      * LoxOps.stringify) reliably tells a genuine caught-fault value apart
      * from any user-defined instance, including one a user names "Error"
      * themselves.
+     *
+     * <p>Every worker shares this one object, so it must never change
+     * (spec/04-semantics.md, Workers and Tasks): it has no writable methods
+     * map and no writable superclass.
      */
-    public static final LoxClass ERROR_CLASS = new LoxClass("Error", null);
+    public static final LoxClass ERROR_CLASS = LoxClass.immutable("Error");
 
     /** The generated main() calls this once, before the script body runs. */
     public static LoxGlobals init() {
