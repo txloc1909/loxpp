@@ -1170,20 +1170,36 @@ TEST(EmitDeclarations, KeepsOnlyTheDeclarationsAndReusesTheProgramClasses) {
     expectEveryJumpTargetIsLabeled(j);
 }
 
-TEST(EmitDeclarations, RefusesACompileOfAnotherProgram) {
+// Compiles `program` and `other` (two different sources) and asks
+// emitDeclarations to take `other` as the declarations of `program`.
+static void expectDeclarationsRefused(const std::string& program,
+                                      const std::string& other) {
     MemoryManager mm;
-    ObjFunction* program = compile("fun f() { return 1; }\n", &mm);
-    ASSERT_NE(program, nullptr);
-    mm.pushTempRoot(program);
-    ObjFunction* other = compile("fun f() { return 2; }\n", &mm);
+    ObjFunction* programFn = compile(program, &mm);
+    ASSERT_NE(programFn, nullptr);
+    mm.pushTempRoot(programFn);
+    ObjFunction* otherFn = compile(other, &mm);
     mm.popTempRoot();
-    ASSERT_NE(other, nullptr);
-    DecodedFunction programTree = decodeFunctionTree(program);
-    DecodedFunction otherTree = decodeFunctionTree(other);
+    ASSERT_NE(otherFn, nullptr);
+    DecodedFunction programTree = decodeFunctionTree(programFn);
+    DecodedFunction otherTree = decodeFunctionTree(otherFn);
     StackAnalysisTree analysis = analyzeStackTree(otherTree);
     EXPECT_THROW(jvm::emitDeclarations(otherTree, analysis, programTree,
                                        "LoxMain", "LoxDecls"),
                  std::runtime_error);
+}
+
+TEST(EmitDeclarations, RefusesACompileWithOtherConstants) {
+    expectDeclarationsRefused("fun f() { return 1; }\n",
+                              "fun f() { return 2; }\n");
+}
+
+// The same constants in every chunk (no literal: `a` and `b` are locals), and
+// one opcode of a nested function that differs: only the hash of the
+// nested chunk tells the two compiles apart.
+TEST(EmitDeclarations, RefusesACompileWithOtherBytesInANestedFunction) {
+    expectDeclarationsRefused("fun f(a, b) { return a + b; }\n",
+                              "fun f(a, b) { return a - b; }\n");
 }
 
 TEST(EmitProgram, SiblingFunctionsGetSequentialClassNames) {
