@@ -31,7 +31,10 @@ STRESS_PROGRAM = 'var a = "a" + "b";'
 # and ends while the main worker holds it and the handle of its task, so its
 # exit collection keeps those two messages and what they reach, and nothing
 # else: the task, the enum value, its string field, its constructor, and the
-# two name strings of the constructor.
+# two name strings of the constructor. The main task waits until the exit
+# record is in the worker's file, because the process ends with the main task
+# and abandons a worker that has not run its exit collection. A send to the
+# ended task is no such wait: the task ends before its worker collects.
 WORKER_PROGRAM = """
 enum Box { Of(v) }
 fun entry(main) {
@@ -39,11 +42,24 @@ fun entry(main) {
     for (var i = 0; i < 100; i = i + 1) junk.append(str(i) + "x");
     task.send(main, Of("kept" + "!"));
 }
+fun exitCollected(path) {
+    if (!exists(path)) return false;
+    var f = open(path, "r");
+    var lines = f.readlines();
+    f.close();
+    for (var line in lines) {
+        if (len(line) >= 13 and line[0:13] == "gc cause=exit") return true;
+    }
+    return false;
+}
 var w = task.spawn_worker(entry, task.self());
 var held = task.receive();
-sleep(0.2);
+var path = env("LOXPP_GC_TRACE") + ".w1";
+while (!exitCollected(path)) sleep(0.001);
 print held[0];
 """
+
+TIMEOUT_S = 120
 
 FIELDS = (
     "cause t0 t1 t2 t3 t4 bytes_before bytes_after objs_before objs_after "
@@ -57,14 +73,18 @@ def run(binary, workdir, env_extra, unset=(), program=PROGRAM):
     src = os.path.join(workdir, "prog.lox")
     with open(src, "w") as f:
         f.write(program)
-    return subprocess.run(
-        [binary, src],
-        cwd=workdir,
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    try:
+        return subprocess.run(
+            [binary, src],
+            cwd=workdir,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"the run did not end in {TIMEOUT_S} s")
 
 
 def fail(msg):
