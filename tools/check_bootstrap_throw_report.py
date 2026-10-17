@@ -3,10 +3,19 @@
 Differential check: an uncaught throw of a non-Error value reports its
 canonical string form on both native and the bootstrap interpreter — which for
 an Instance means dispatching __str__ (or the default "ClassName instance").
+The same check covers the DeadlockError report (spec/04-semantics.md,
+Deadlock).
 
 The report lands on stderr, and native appends a stack trace the bootstrap
 does not, so this compares the exit code and the FIRST stderr line (the
 message) only, not the full stderr.
+
+A case with `report_lines_from_native` also checks each later stderr line of
+the bootstrap: it must be a line of native's report. Native's DeadlockError
+report lists the tasks of the program that wait. The bootstrap reports the
+deadlock itself, before the host VM can. If the host VM reports it instead,
+its first line is the same message, but its later lines name the host tasks
+of the interpreter, which are not tasks of the program, so this rule fails.
 
 Native's stdout is the ground truth for the first line. A case whose native
 run does not exit 70 is a corpus bug and is reported, not skipped.
@@ -42,6 +51,7 @@ SKIP_RETURN_CODE = 125
 class Case:
     name: str
     program: str  # full source text, including trailing newline
+    report_lines_from_native: bool = False
 
 
 # One uncaught throw per shape: an Instance with __str__, an Instance without,
@@ -79,6 +89,15 @@ CASES = [
     Case(
         "string",
         "throw \"hi\";\n",
+    ),
+    Case(
+        "deadlock",
+        "fun waiter() { task.receive(); }\n"
+        "fun far(m) { task.receive(); }\n"
+        "task.spawn(waiter);\n"
+        "task.spawn_worker(far, nil);\n"
+        "task.receive();\n",
+        report_lines_from_native=True,
     ),
 ]
 
@@ -135,6 +154,11 @@ def check_case(case: Case, native: RunResult, bootstrap: RunResult) -> list[str]
     if bootstrap_line != native_line:
         problems.append(
             f"first stderr line: native={native_line!r} bootstrap={bootstrap_line!r}")
+    if case.report_lines_from_native:
+        native_lines = set(native.stderr.splitlines())
+        for line in bootstrap.stderr.splitlines()[1:]:
+            if line not in native_lines:
+                problems.append(f"bootstrap stderr line not in native's report: {line!r}")
     return problems
 
 
@@ -176,7 +200,7 @@ def main() -> int:
         print("\n\n".join(failures))
         return 1
 
-    print(f"OK: {len(CASES)} uncaught-throw case(s) match between native and bootstrap.")
+    print(f"OK: {len(CASES)} uncaught-report case(s) match between native and bootstrap.")
     return 0
 
 
