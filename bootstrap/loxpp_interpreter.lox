@@ -4546,12 +4546,14 @@ class Interpreter {
         }
         if (loxTag(object) == "server") {
             if (name == "accept" or name == "port" or name == "close") return InterpServerMethod(name, object);
-            this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
+            if (isCallTarget) this.fatalError("Undefined method '" + name + "' on server.");
+            this.fatalError("Undefined property '" + name + "' on server.");
             return nil;
         }
         if (loxTag(object) == "process") {
             if (name == "read" or name == "read_bytes" or name == "readline" or name == "readlines" or name == "read_err" or name == "err_read_bytes" or name == "err_readline" or name == "err_readlines" or name == "write" or name == "writeline" or name == "close_stdin" or name == "wait" or name == "kill" or name == "pid") return InterpProcessMethod(name, object);
-            this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
+            if (isCallTarget) this.fatalError("Undefined method '" + name + "' on process.");
+            this.fatalError("Undefined property '" + name + "' on process.");
             return nil;
         }
         if (loxTag(object) == "comodule") {
