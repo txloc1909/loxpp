@@ -202,10 +202,8 @@ EXPECTED_CALLS = [
     ('ArityError', '"Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + "."', RECORDED),
     ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
     ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
-    ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
-    # Issue #516: evalGet's socket, server and process property-read branches
-    # reuse the same non-table UndefinedMemberError text as list/map/file.
-    ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
+    # Issue #516: evalGet's server and process property-read branches reuse
+    # the same non-table UndefinedMemberError text as list/map.
     ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
     ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
     ('UndefinedPropertyError', '"Undefined property on error."', RECORDED),
