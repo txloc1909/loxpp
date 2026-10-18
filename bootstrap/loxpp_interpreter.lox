@@ -2422,14 +2422,6 @@ class InterpListMethod {
             }
             return this.list.elements.pop();
         }
-        // "ValueNotFoundError" (below) is not a row of the catchable-fault
-        // table in spec/04-semantics.md. Native has its own remove()
-        // (src/vm.cpp, RAISE_ERROR) and reaches this same cause only
-        // through its always-fatal path, never as a catchable value, so
-        // there is no existing `.kind` here to collide with. It names its
-        // own cause ("no element equals args[0]") and is not an index
-        // fault, so it must not share a `kind` with an actual
-        // index-out-of-range error.
         if (this.name == "remove") {
             var i = 0;
             while (i < len(this.list.elements)) {
@@ -2444,7 +2436,7 @@ class InterpListMethod {
                 }
                 i = i + 1;
             }
-            interp.setError("ValueNotFoundError", "Value not found in list.", 0);
+            interp.fatalError("Value not found in list.");
             return nil;
         }
         return nil;
@@ -3681,7 +3673,7 @@ class Interpreter {
                 // Pre-body check: catches a mutation from an earlier
                 // iteration (including via continue) before binding.
                 if (iterable.version != expectedVersion) {
-                    this.setError("MapSizeChangedError", "Map changed size during iteration.", varLine);
+                    this.fatalError("Map changed size during iteration.");
                     return;
                 }
                 loopEnv.define(varName, ks[i]);
@@ -3694,7 +3686,7 @@ class Interpreter {
                 // later binding to catch it, so check before looping back.
                 // Break and return leave above without reaching this check.
                 if (iterable.version != expectedVersion) {
-                    this.setError("MapSizeChangedError", "Map changed size during iteration.", varLine);
+                    this.fatalError("Map changed size during iteration.");
                     return;
                 }
             }
