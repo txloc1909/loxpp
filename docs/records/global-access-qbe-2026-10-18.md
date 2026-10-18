@@ -48,21 +48,21 @@ The difference between the two issue benchmarks above is an end-to-end figure.
 It also includes a call with two arguments instead of one, and the different
 shape of a top-level loop against a function loop. To isolate one global read,
 this pair runs the same loop and changes only the source of `g`:
+`benchmarks/global_access_read.lox` reads a global; the identical loop in
+`benchmarks/global_access_local.lox` reads a local slot.
 
 | Program | QBE, ns per iteration | Native, ns per iteration |
 |---|---|---|
-| one read of a global `G` | 3.05 | 37.08 |
-| the same loop with a local `g` | 2.37 | 31.61 |
-| difference: one global read | **0.68** | **5.47** |
+| one read of a global `G` | 3.06 | 35.93 |
+| the same loop with a local `g` | 2.37 | 32.38 |
+| difference: one global read | **0.69** | **3.55** |
 
-That is the per-access number. The compiled read costs 0.68 ns and the
-interpreted read costs 5.47 ns on this host. The two benchmarks agree with the
-direction: QBE is 2.3 times faster than native on the global loop; before, it
-was 1.8 times slower.
-
-The same change also improves the top-level coroutine benchmark, because its
-loop is global too: `coroutine_yield.lox` goes from 179 ns (2026-10-17) to
-80.4 ns per round trip, against native's 120.4 ns.
+Repeated runs on this host give 0.3 to 0.7 ns for the compiled read and 3.5
+to 5.5 ns for the interpreted read. The `powersave` governor changes the clock
+between runs. In every run the compiled read is below the interpreted read.
+That is the per-access result; the two benchmarks above are the end-to-end
+gate. On them QBE is 2.3 times faster than native; before the change it was
+1.8 times slower.
 
 The same change also improves the top-level coroutine benchmark, because its
 loop is global too: `coroutine_yield.lox` goes from 179 ns (2026-10-17) to
