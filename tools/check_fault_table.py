@@ -355,18 +355,14 @@ FATAL_ROWS = [
         "clock(1);",
         expected_message="Expected 0 arguments but got 1.",
     ),
-    # A stdlib native's own error text is not enumerated by spec/04-semantics.md
-    # (see the Fatal Runtime Errors section's own note); native and the JVM
-    # each report a different OS/runtime-level reason for the same open()
-    # failure (native: "No such file or directory"; the JVM's IOException
-    # repeats the path before its own parenthesized reason) -- full message
-    # equality is not realistic across two different OS/runtime
-    # error-reporting conventions. Issue #374 decided this: assert the
-    # weaker, still-real property that every consumer's message names the
-    # failing path, instead of skipping the field outright. The bootstrap
-    # interpreter calls the same native open() bootstrap itself runs under,
-    # so its message matches native exactly -- no skip needed there at all.
-    # Disposition (fatal on every consumer) is always checked regardless.
+    # The first stderr line must equal native's line, and native's line must
+    # equal the spec's text (spec/04-semantics.md, Fatal Runtime Errors table).
+    # This row needs a prefix check on the JVM instead: the JVM text starts
+    # with "open(): cannot open '/no/such/path': " and then gives its own
+    # reason, "/no/such/path (No such file or directory)", where the spec
+    # gives "No such file or directory". The prefix check allows only that
+    # difference (issues #374 and #703). The bootstrap runs the native open(),
+    # so it matches native exactly.
     Row(
         "stdlib_open_failure",
         "fatal",
