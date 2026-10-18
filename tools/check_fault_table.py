@@ -1060,11 +1060,15 @@ def load_spec_fatal_row_count() -> int:
 
 
 # Exit code every consumer uses for a compile-time (parse) error, distinct
-# from a run-time fault's own exit code, which differs by consumer (native
-# 70, JVM 1). A row whose program never compiles proves nothing about the
-# fault it names: classify() must tell the two apart, not read "no marker
-# on stdout" as "fatal".
+# from a run-time fault's own exit code (FATAL_EXIT_CODE). A row whose
+# program never compiles proves nothing about the fault it names:
+# classify() must tell the two apart, not read "no marker on stdout" as
+# "fatal".
 COMPILE_ERROR_EXIT_CODE = 65
+
+# Exit code of an uncaught run-time fault on every consumer. compare()
+# requires a "fatal" outcome to carry it on both sides.
+FATAL_EXIT_CODE = 70
 
 
 @dataclass
@@ -1076,6 +1080,7 @@ class RunResult:
     # row outcome), or "crash" (neither marker seen although the program
     # compiled and ran -- see module docstring hazard).
     outcome: str
+    returncode: int | None = None
     kind: str | None = None
     message: str | None = None
     type_: str | None = None
@@ -1139,7 +1144,7 @@ def classify(returncode: int, stdout: str, stderr: str) -> RunResult:
     # what "fatal" requires.
     if returncode == COMPILE_ERROR_EXIT_CODE:
         return RunResult(outcome="compile_error", message=_first_stderr_line(stderr))
-    return RunResult(outcome="fatal", message=_first_stderr_line(stderr))
+    return RunResult(outcome="fatal", returncode=returncode, message=_first_stderr_line(stderr))
 
 
 def run_row(row: Row, commands: dict[str, ConsumerCommand], workdir: Path, timeout: float) -> dict[str, RunResult]:
@@ -1166,6 +1171,12 @@ def compare(row: Row, native_result: RunResult, other: RunResult, consumer: str)
         )
         return problems
     if native_result.outcome == "fatal":
+        for side, result in (("native", native_result), (consumer, other)):
+            if result.returncode != FATAL_EXIT_CODE:
+                problems.append(
+                    f"exit status: {side} exited {result.returncode}, "
+                    f"expected {FATAL_EXIT_CODE} for an uncaught fault"
+                )
         if row.expected_message is not None and native_result.message != row.expected_message:
             problems.append(
                 f"native's own message ({native_result.message!r}) does not match "
@@ -1173,9 +1184,8 @@ def compare(row: Row, native_result: RunResult, other: RunResult, consumer: str)
                 "corpus bug, fix the row"
             )
         # Fatal message text is compared as a substring, not equality: each
-        # consumer wraps the same message in its own prefix/trailer (native
-        # "[line N] in script", the JVM's "Exception in thread \"main\"
-        # lox.LoxError: ").
+        # consumer may wrap the same message in its own prefix/trailer
+        # (native "[line N] in script").
         skip = row.skip_fields.get(consumer, set())
         if "message" not in skip:
             native_msg = native_result.message or ""
