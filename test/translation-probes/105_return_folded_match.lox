@@ -1,0 +1,33 @@
+// A `return` whose value is a `match` expression. `compileMatchBody` stores
+// each arm's value in a pre-allocated named local, so the RETURN sees the
+// match result as the top local (operand depth 0), not as an operand
+// temporary. The JVM backend loads that local through
+// normalizeFoldedOperands's RETURN row; QBE's fused stack already holds it.
+// This probe keeps the shape in the corpus for both run-parity gates.
+enum Kind { A B }
+
+fun literal(v) {
+    return match v {
+        case 1 => "one"
+        case _ => "other"
+    };
+}
+
+fun table(v) {
+    return match v {
+        case A => 10
+        case B => 20
+    };
+}
+
+print literal(1);
+print literal(2);
+
+print table(A());
+print table(B());
+
+// STATUS: ok
+// CHECK: one
+// CHECK: other
+// CHECK: 10
+// CHECK: 20

@@ -23,17 +23,6 @@
 // its guard: a match with one arm per constructor, every guard false at run
 // time, compiles as "exhaustive" yet accepts nothing, and MATCH_ERROR is
 // exactly the real, reachable in-language shape that produces.
-//
-// Kept at script scope, printing each match directly (not `return`ed out of
-// a function): AbstractStackTest.RunsOverEveryProbeWithNoInconsistency
-// checks every probe's own RETURN sites have exactly the return value as a
-// genuine operand-stack temporary (test_backend_abstract_stack.cpp's own
-// checkReturnHeightZero) — a check this file's own header comment already
-// says does not hold program-wide once a match's result is `return`ed
-// (bytecode-translation-problems.md, "RETURN can return a named local"),
-// so a `return match ...;` shape belongs under examples/, the way
-// examples/or_pattern_demo.lox already uses it, not under
-// test/translation-probes/.
 enum Status { A B C D E }
 
 print match C() {

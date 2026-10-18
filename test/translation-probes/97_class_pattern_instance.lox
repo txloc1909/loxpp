@@ -19,13 +19,12 @@ class Other {
 }
 
 fun kind(v) {
-    var out = match v {
+    return match v {
         case Circle{r} => "circle " + str(r)
         case Shape{name} => "shape " + name
         case Other => Other().label()
         case _ => "no class"
     };
-    return out;
 }
 
 print kind(Circle(2));
@@ -36,12 +35,11 @@ print kind(42);
 print kind(nil);
 
 fun bare(v) {
-    var out = match v {
+    return match v {
         case Square => "square"
         case Shape => "shape"
         case _ => "other"
     };
-    return out;
 }
 
 print bare(Square(1));
@@ -49,11 +47,10 @@ print bare(Circle(1));
 print bare(Other());
 
 fun either(v) {
-    var out = match v {
+    return match v {
         case Circle or Square => "round or square"
         case _ => "neither"
     };
-    return out;
 }
 
 print either(Circle(1));
@@ -61,11 +58,10 @@ print either(Square(1));
 print either(Shape("plain"));
 
 fun whole(v) {
-    var out = match v {
+    return match v {
         case s @ Shape => "bound " + s.name
         case _ => "not bound"
     };
-    return out;
 }
 
 print whole(Circle(1));

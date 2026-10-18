@@ -499,12 +499,13 @@ bool findDeclaringPushIndices(
 // Sound, not heuristic: clox's scoping is strictly LIFO (StackState's own
 // comment in abstract_stack.h), so once one slot is independently confirmed
 // local — a GET_LOCAL/SET_LOCAL/CLOSE_UPVALUE/CLOSURE-capture names it, a
-// CLOSURE's own push declares it, or RETURN's operandDepth()==1 invariant
-// proves it (backfillFromFrameTeardown) — every lower slot must be local
-// too, whether or not anything ever names *those*. This is not the "run
-// length implies local count" rule an earlier design tried and a
-// counter-example defeated: that rule had no independently-confirmed anchor
-// at all, only POP adjacency; every call here starts from one.
+// CLOSURE's own push declares it, or RETURN's return-value invariant proves
+// it (backfillFromFrameTeardown: the cell under the return value is local) —
+// every lower slot must be local too, whether or not anything ever names
+// *those*. This is not the "run length implies local count" rule an earlier
+// design tried and a counter-example defeated: that rule had no
+// independently-confirmed anchor at all, only POP adjacency; every call here
+// starts from one.
 void chaseSlotsDownward(int originIdx, int topSlot,
                         const std::vector<DecodedInstruction>& ins,
                         const LocalCfg& cfg,
@@ -690,12 +691,13 @@ void findPersistentPopLocals(
 // (function `f(){ var a=1; var never=99; print a; }` — `never` has no POP in
 // the whole chunk for findPersistentPopLocals's test to run at).
 //
-// The return-height invariant gives the fix for free: operandDepth() is
-// exactly 1 immediately before every RETURN (the return value, and nothing
-// else, is ever a temporary there — vm.cpp tears down the rest of the frame
-// wholesale). So every slot below that one temporary is local, with no
-// reference needed to prove it; chase each one's declaring push from the
-// RETURN itself.
+// The return-value invariant gives the fix for free: the top cell before
+// every RETURN is the return value, and nothing sits above it. That cell is a
+// temporary at operand depth 1, or a folded `match` result at operand depth 0
+// — a match result lives in a named local (compileMatchBody) and is recognized
+// at its own `SET_LOCAL`. Either way every slot below that top cell is local,
+// with no reference needed to prove it; chase each one's declaring push from
+// the RETURN itself.
 void backfillFromFrameTeardown(
     const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
     const std::vector<StackState>& before, const std::vector<StackState>& after,
