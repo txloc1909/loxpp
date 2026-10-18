@@ -87,11 +87,12 @@ LITERAL_RE = re.compile(r'"([^"]*)"')
 STATIC_ALLOW = {
     ("NotCallableError", "Can only call functions, classes and enums."): (
         2,
-        "the catchable 'Call of a non-callable value' row (NotCallableError) has "
-        "the same text as the fatal row for a non-callable field; the two calls "
-        "in evalCall check a callee that is Nil, Bool, String, Number or of an "
-        "unknown tag, and the fatal row is raised through fatalError in the "
-        "member lookup",
+        "the two calls in evalCall raise a catchable NotCallableError on purpose "
+        "for a callee that is Nil, Bool, String, Number or of an unknown tag "
+        "(the catchable 'Call of a non-callable value' row). The check does not "
+        "cover the fatal row for a non-callable field (message shared with these "
+        "calls): a field that holds a List, Map or Instance reaches the second "
+        "call and is catchable (issue #685)",
     ),
 }
 
