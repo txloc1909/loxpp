@@ -1,0 +1,19 @@
+// The \r escape in a string literal is one carriage return (U+000D), and the
+// characters on both sides of it stay in place (spec/01-lexical.md). The
+// probe reads the string with len and ord, so a CHECK line holds no carriage
+// return byte.
+var s = "a\rb";
+print len(s);
+print ord(s[0]);
+print ord(s[1]);
+print ord(s[2]);
+print len("\r");
+print "x\r" == "x" + chr(13);
+
+// STATUS: ok
+// CHECK: 3
+// CHECK: 97
+// CHECK: 13
+// CHECK: 98
+// CHECK: 1
+// CHECK: true
