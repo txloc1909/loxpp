@@ -3559,9 +3559,8 @@ class Interpreter {
         }
         // Native raises this through its own always-fatal RAISE_ERROR site,
         // separate from SET_INDEX's catchable NotIndexableError path below
-        // (src/vm.cpp Op::SET_INDEX) -- so it needs its own kind, not that
-        // one's.
-        if (isLoxStr(object)) { this.setError("StringImmutableError", "Strings are immutable.", line); return nil; }
+        // (src/vm.cpp Op::SET_INDEX).
+        if (isLoxStr(object)) { this.fatalError("Strings are immutable and cannot be indexed for assignment."); return nil; }
         var m = this.findDunder(object, "__index_set__");
         if (m != nil) {
             var val = this.evalExpr(valueExpr, env);
@@ -4394,7 +4393,7 @@ class Interpreter {
                 return false;
             }
             if (isLoxStr(right)) {
-                if (!isLoxStr(left)) { this.setError("InLeftOperandTypeError", "Left operand of 'in' on a String must be a String.", opLine); return nil; }
+                if (!isLoxStr(left)) { this.fatalError("Left operand of 'in' on a string must be a string."); return nil; }
                 return left in right;
             }
             if (rtag == "map") {
@@ -4410,7 +4409,7 @@ class Interpreter {
                 if (this.throwFlag) return nil;
                 return b;
             }
-            this.setError("InRightOperandTypeError", "Right operand of 'in' must be a List, String, or Map.", opLine);
+            this.fatalError("Right operand of 'in' must be a list, string, or map.");
             return nil;
         }
         return nil;
