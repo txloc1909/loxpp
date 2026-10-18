@@ -220,10 +220,12 @@ class Scanner {
     scanString() {
         var startLine = this.line;
         var value = "";
+        var badEscape = false;
         while (this.peek() != "\"" and !this.isAtEnd()) {
             if (this.peek() == "\n") this.line = this.line + 1;
             if (this.peek() == "\\") {
                 this.advance();
+                if (this.isAtEnd()) break;
                 var esc = this.peek();
                 if      (esc == "n")  { value = value + "\n"; this.advance(); }
                 else if (esc == "t")  { value = value + "\t"; this.advance(); }
@@ -231,15 +233,24 @@ class Scanner {
                 else if (esc == "\\") { value = value + "\\"; this.advance(); }
                 else if (esc == "0")  { value = value + "\0"; this.advance(); }
                 else if (esc == "r")  { value = value + "\r"; this.advance(); }
-                else                  { value = value + "\\"; }
+                else {
+                    // One error per literal, as on native, which sits in
+                    // panic mode until the next statement.
+                    if (!badEscape) this.lexError("Unknown escape sequence.");
+                    badEscape = true;
+                    if (esc == "\n") this.line = this.line + 1;
+                    this.advance();
+                }
             } else {
                 value = value + this.peek();
                 this.advance();
             }
         }
         if (this.isAtEnd()) {
-            this.line = startLine;
-            this.lexError("Unterminated string.");
+            if (!badEscape) {
+                this.line = startLine;
+                this.lexError("Unterminated string.");
+            }
             return;
         }
         this.advance();

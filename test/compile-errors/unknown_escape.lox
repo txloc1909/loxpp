@@ -1,0 +1,2 @@
+// Compile error: an unknown escape in a string literal.
+print "a\qb";
