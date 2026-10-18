@@ -847,3 +847,67 @@ TEST_F(CoroutineTest, SuspendsWithAnUpvalueWhoseClosureIsDead) {
               InterpretResult::OK);
     expect_string(h, "got", "cell!");
 }
+
+// A task or coroutine whose entry is a native function has no frame to
+// rebuild after a task switch. A receive below that entry raises
+// YieldAcrossNativeError, even when the native is the coroutine's own entry.
+TEST_F(CoroutineTest, NativeEntryReceiveOnEmptyMailboxRaises) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var kind = "none";
+        var message = "";
+        var co = coroutine.create(task.receive);
+        try {
+            co.resume();
+        } catch (e) {
+            kind = e.kind;
+            message = e.message;
+        }
+        var status = co.status();
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "kind", "YieldAcrossNativeError");
+    expect_string(h, "message", "Cannot receive across a native callback.");
+    expect_string(h, "status", "dead");
+}
+
+// A receive that finds a message never suspends, so a native entry returns
+// that message and the coroutine is dead.
+TEST_F(CoroutineTest, NativeEntryReceiveWithMessageReturnsIt) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var me = task.self();
+        task.send(me, "m");
+        var co = coroutine.create(task.receive);
+        var got = co.resume();
+        var status = co.status();
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "got", "m");
+    expect_string(h, "status", "dead");
+}
+
+// A native entry that resumes another coroutine keeps its host frame on the
+// chain. The inner receive raises, and both coroutines are dead.
+TEST_F(CoroutineTest, NativeResumeEntryReceiveRaises) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        fun body() {
+            task.receive();
+        }
+        var inner = coroutine.create(body);
+        var outer = coroutine.create(inner.resume);
+        var kind = "none";
+        try {
+            outer.resume();
+        } catch (e) {
+            kind = e.kind;
+        }
+        var outerStatus = outer.status();
+        var innerStatus = inner.status();
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "kind", "YieldAcrossNativeError");
+    expect_string(h, "outerStatus", "dead");
+    expect_string(h, "innerStatus", "dead");
+}

@@ -1,0 +1,8 @@
+// A receive that finds a message does not suspend, even below a native entry.
+var t = task.spawn(task.receive);
+task.send(t, "m");
+yield;
+print "main done";
+
+// STATUS: ok
+// CHECK: main done

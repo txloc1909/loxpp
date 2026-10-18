@@ -1,0 +1,13 @@
+// The same chain inside a spawned task: the task's entry is a bound native
+// that resumes `inner`, and `inner` calls task.receive. The task has no
+// handler, so the fault ends the program.
+fun body() {
+    task.receive();
+}
+var inner = coroutine.create(body);
+task.spawn(inner.resume);
+yield;
+print "main done";
+
+// STATUS: error
+// STDERR: Cannot receive across a native callback.

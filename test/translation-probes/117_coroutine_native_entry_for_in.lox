@@ -1,0 +1,12 @@
+// A for-in over a coroutine whose native entry returns. The coroutine returns
+// without yielding, so the loop body does not run.
+var me = task.self();
+task.send(me, "m");
+var co = coroutine.create(task.receive);
+for (var x in co) {
+    print x;
+}
+print co.status();
+
+// STATUS: ok
+// CHECK: dead

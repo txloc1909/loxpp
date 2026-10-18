@@ -1,0 +1,16 @@
+// The same rule applies to a coroutine. A receive below a native entry
+// raises, the resumer catches it, and the coroutine is dead
+// (spec/04-semantics.md, co.resume step 5).
+var co = coroutine.create(task.receive);
+try {
+    co.resume();
+} catch (e) {
+    print e.kind;
+    print e.message;
+}
+print co.status();
+
+// STATUS: ok
+// CHECK: YieldAcrossNativeError
+// CHECK: Cannot receive across a native callback.
+// CHECK: dead

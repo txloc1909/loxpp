@@ -1,0 +1,8 @@
+// A task whose entry is a native function cannot suspend the task. The native
+// has no frame that a task switch can rebuild, so task.receive raises
+// YieldAcrossNativeError (spec/04-semantics.md, task.receive step 3).
+task.spawn(task.receive);
+yield;
+
+// STATUS: error
+// STDERR: Cannot receive across a native callback.
