@@ -587,6 +587,56 @@ TEST(ToolingResolver, PastEndOfLineStaysOnSameLine) {
     EXPECT_EQ(noTrailModel.positionToOffset({99, 100}), noTrail.size());
 }
 
+TEST(ToolingResolver, CursorAtEndOfNameResolves) {
+    const std::string src =
+        "var count = 1;\nprint count;\nprint type(count);\n";
+    DocumentModel model(src);
+    EXPECT_TRUE(warningMessages(model).empty());
+
+    const std::size_t declStart = offsetOf(src, "count =");
+    const std::size_t declEnd = declStart + 5;
+    const std::size_t useStart = offsetOf(src, "count;");
+    const std::size_t useEnd = useStart + 5;
+    const std::size_t stdStart = offsetOf(src, "type(");
+    const std::size_t stdEnd = stdStart + 4;
+
+    const Symbol* declSym = model.symbolAt(declStart);
+    ASSERT_NE(declSym, nullptr);
+    EXPECT_EQ(model.symbolAt(declEnd), declSym);
+    EXPECT_EQ(model.symbolAt(useEnd), declSym);
+
+    const auto def = model.definitionAt(useEnd);
+    ASSERT_TRUE(def.has_value());
+    EXPECT_EQ(def->offset, declStart);
+    EXPECT_EQ(def->length, 5u);
+
+    EXPECT_EQ(model.referencesAt(declEnd).size(), 3u);
+    EXPECT_EQ(model.referencesAt(useEnd).size(), 3u);
+
+    // A stdlib global has no Symbol, but the cursor rule must reach it too:
+    // hover reads knownGlobalAt at the same position.
+    EXPECT_EQ(model.symbolAt(stdEnd), nullptr);
+    EXPECT_EQ(model.knownGlobalAt(stdEnd), "type");
+    EXPECT_FALSE(model.definitionAt(stdEnd).has_value());
+    EXPECT_TRUE(model.referencesAt(stdEnd).empty());
+
+    // One byte past the end is not the name.
+    EXPECT_EQ(model.symbolAt(declEnd + 1), nullptr);
+    EXPECT_EQ(model.symbolAt(useEnd + 1), nullptr);
+    EXPECT_FALSE(model.definitionAt(useEnd + 1).has_value());
+    EXPECT_TRUE(model.referencesAt(useEnd + 1).empty());
+    EXPECT_TRUE(model.knownGlobalAt(stdEnd + 1).empty());
+
+    // A name that ends at end of file (no trailing newline) still resolves.
+    const std::string eofSrc = "var eof = 1;\nprint eof";
+    DocumentModel eofModel(eofSrc);
+    const std::size_t eofEnd = eofSrc.size();
+    const Symbol* eofSym = eofModel.symbolAt(eofEnd);
+    ASSERT_NE(eofSym, nullptr);
+    EXPECT_EQ(eofSym->name, "eof");
+    EXPECT_EQ(eofModel.definitionAt(eofEnd)->offset, offsetOf(eofSrc, "eof ="));
+}
+
 TEST(ToolingResolver, RebuildReplacesState) {
     DocumentModel model("var first = 1;\n");
     EXPECT_TRUE(model.warnings().empty());

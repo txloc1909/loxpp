@@ -244,6 +244,15 @@ capability object:
 
 Handlers implemented:
 
+Every name-navigation lookup for a user symbol or a stdlib global uses one
+cursor rule from `ReferenceIndex::at()`: a position at the start of a name,
+inside it, or just past its last byte names that name. At a boundary where
+one span starts and the previous span ends, the span that starts there wins.
+The rule applies to the symbol and stdlib-global lookup of hover, and to
+definition, references, documentHighlight, and rename. A stdlib global has
+no `Symbol`, so definition, references, documentHighlight, and rename still
+return null for it; hover reads `knownGlobalAt()`.
+
 | Method | Notes |
 |---|---|
 | `initialize` / `initialized` / `shutdown` / `exit` | Lifecycle. |

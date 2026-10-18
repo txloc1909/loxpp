@@ -31,14 +31,16 @@ void ReferenceIndex::finish() {
 
 const ReferenceIndex::Entry* ReferenceIndex::at(std::size_t offset) const {
     // Spans never overlap, so the last entry whose start is <= offset is the
-    // only candidate.
+    // only candidate. Start precedence matters at a boundary: when offset is
+    // the start of one span and the end of the one before, the entry that
+    // starts there wins.
     auto it = std::ranges::upper_bound(
         m_entries, offset, {}, [](const Entry& e) { return e.span.offset; });
     if (it == m_entries.begin()) {
         return nullptr;
     }
     --it;
-    return it->span.contains(offset) ? &*it : nullptr;
+    return it->span.coversCursor(offset) ? &*it : nullptr;
 }
 
 // ---------------------------------------------------------------------------

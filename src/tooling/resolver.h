@@ -40,7 +40,8 @@ class ReferenceIndex {
     void add(Entry entry);
     void finish(); // sort by offset; call once after resolve
 
-    // The entry whose span covers offset, or null.
+    // The entry whose span covers offset, or null. The end of a span counts,
+    // so a cursor just past a name still names it.
     [[nodiscard]] const Entry* at(std::size_t offset) const;
 
     [[nodiscard]] const std::vector<Entry>& entries() const {
