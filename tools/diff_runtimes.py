@@ -24,9 +24,9 @@ corpus file that stops being a compile error fails and does not pass as a
 quiet run-time match.
 
 Run phase. When neither run exits 65, this script compares stdout. It does
-not compare stderr in the ordinary comparison, and it compares the exit code
-only for the empty-stdout tie-break below: run-time scope is stdout. The
-probe criteria that the --xfail account uses also include a probe's stderr
+not compare stderr in the ordinary comparison. It compares the exit status
+exactly: a run with the same stdout but another exit status reports DIVERGE
+(an uncaught fault exits 70 on every runner). The probe criteria that the --xfail account uses also include a probe's stderr
 lines, because a spec probe can pin them with `// STDERR:` lines (see
 tools/check_spec_probes.py). Four outcomes per program:
   MATCH        stdout is byte-identical on both runtimes.
@@ -68,11 +68,8 @@ shared probes of the spec and no other program in it.
 
 Two silent runs are not proof that both ran: a runner that crashes before
 writing anything looks identical, on stdout alone, to a program that
-legitimately prints nothing. So when both sides' stdout is empty, this
-script also requires the two exit statuses to agree on success vs. failure
-(zero vs. non-zero) — not on the exact code, since native and another
-runtime are free to use different codes for the same kind of failure. Such
-a match prints as "MATCH (empty)"; a disagreement prints as DIVERGE.
+legitimately prints nothing. The exact exit status comparison above rejects
+such a run. A match of two silent runs prints as "MATCH (empty)".
 
 On a DIVERGE, this script prints a short diff excerpt and a best-effort guess
 at which opcode family (P1-P8, see docs/reference/bytecode-translation-problems.md) is
@@ -257,11 +254,9 @@ def run_program(
 ) -> tuple[str, str, int]:
     """Runs one program and returns (stdout, stderr, exit code).
 
-    The run-time comparison reads the exit code only for the empty-stdout
-    tie-break in main(), where stdout alone cannot tell a legitimate silent
-    success from a silent crash. The compile phase reads the exit code and
-    stderr (see COMPILE_ERROR_STATUS), and the --xfail account reads a
-    probe's STDERR lines.
+    The run-time comparison requires the two exit codes to be equal. The
+    compile phase reads the exit code and stderr (see COMPILE_ERROR_STATUS),
+    and the --xfail account reads a probe's STDERR lines.
 
     raise_native_stack scopes _raise_native_stack_limit to this one child via
     preexec_fn — never this parent process, never the other runner's child.
@@ -480,9 +475,9 @@ def main() -> None:
             continue
 
         if native_out == other_out:
-            if native_out == "" and (native_status == 0) != (other_status == 0):
+            if native_status != other_status:
                 print(
-                    f"DIVERGE     {lox_file}  (empty stdout on both sides, but exit status "
+                    f"DIVERGE     {lox_file}  (stdout is equal, but exit status "
                     f"disagrees: native exited {native_status}, other exited {other_status})"
                 )
                 diverged += 1
@@ -503,6 +498,13 @@ def main() -> None:
         is_permutation = sorted(native_lines) == sorted(other_lines)
 
         if lox_file.name in excluded and is_permutation:
+            if native_status != other_status:
+                print(
+                    f"DIVERGE     {lox_file}  (excluded for map order, but exit status "
+                    f"disagrees: native exited {native_status}, other exited {other_status})"
+                )
+                diverged += 1
+                continue
             print(f"PERMUTATION {lox_file}  (excluded: {excluded[lox_file.name]})")
             permuted += 1
             continue

@@ -407,14 +407,21 @@ for probe in "${error_probes[@]}"; do
         continue
     fi
 
-    # A non-zero exit is not proof of a Lox error. The JVM gives the same
-    # non-zero exit for a host fault that happens before the Lox program can
-    # raise anything: a missing or bad runtime jar, a class the verifier
-    # rejects, a class that is not found, or a stack overflow. Only stderr
-    # that names lox.LoxError proves the failure is the Lox-level error this
-    # probe exists to check for.
-    if ! grep -q "lox\.LoxError" "$jvm_err"; then
-        echo "check_jvm_probes.sh: FAIL $probe (JVM run failed, but not with a lox.LoxError)" >&2
+    # A non-zero exit is not proof of a Lox error. The JVM gives a non-zero
+    # exit (status 1) for a host fault that happens before the Lox program
+    # can raise anything: a missing or bad runtime jar, a class the verifier
+    # rejects, or a class that is not found. A Lox-level fault ends the JVM
+    # with status 70, as on native, and reports native's own message line.
+    # Both facts are required.
+    if [ "$jvm_status" -ne 70 ]; then
+        echo "check_jvm_probes.sh: FAIL $probe (JVM run exited $jvm_status, not 70)" >&2
+        cat "$jvm_err" >&2
+        failed_probes+=("$probe")
+        continue
+    fi
+    native_message="$(head -n 1 "$native_err")"
+    if ! grep -qxF -- "$native_message" "$jvm_err"; then
+        echo "check_jvm_probes.sh: FAIL $probe (JVM stderr lacks native's message: $native_message)" >&2
         cat "$jvm_err" >&2
         failed_probes+=("$probe")
         continue

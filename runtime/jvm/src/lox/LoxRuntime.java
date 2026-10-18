@@ -100,6 +100,10 @@ public final class LoxRuntime {
 
     /** The generated main() calls this once, before the script body runs. */
     public static LoxGlobals init() {
+        // An uncaught fault in the main task ends the program as one in
+        // any other task does, with native's status and no Java stack trace.
+        Thread.currentThread().setUncaughtExceptionHandler(
+            (thread, fault) -> endWithFault(fault));
         LoxGlobals globals = newGlobals();
         LoxWorker.MAIN.globals = globals;
         return globals;
@@ -169,10 +173,10 @@ public final class LoxRuntime {
     }
 
     /**
-     * An uncaught throw or a fatal fault in a task other than the main task
-     * ends the program (spec/04-semantics.md, Ending). The deferred calls of
-     * the task already ran while the fault left its frames. The status is
-     * native's for a runtime error.
+     * An uncaught throw or a fatal fault in any task ends the program
+     * (spec/04-semantics.md, Ending). The deferred calls of the task already
+     * ran while the fault left its frames. The status is native's for a
+     * runtime error.
      */
     static void endWithFault(Throwable fault) {
         String text = (fault instanceof LoxError) ? fault.getMessage()
