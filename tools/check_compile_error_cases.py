@@ -46,7 +46,9 @@ that stops matching a case fails those suites, not this one.
 
 A build that traces every instruction (LOXPP_DEBUG_TRACE_EXECUTION or
 LOXPP_DEBUG_PRINT_CODE) skips the GENERATED programs: the trace would print
-them in full and gain nothing. CI's release leg runs them.
+them in full and gain nothing. It also skips the stdout-empty check on the
+cases, because the trace writes that disassembly to stdout. The marker,
+stderr, and exit status checks still run. CI's release leg runs both fully.
 
 Usage:
     tools/check_compile_error_cases.py [--native PATH] [--list] [--timeout SECONDS]
@@ -560,6 +562,7 @@ def main() -> None:
         sys.exit(2)
 
     messages = source_messages()
+    trace_build = os.environ.get("LOXPP_EXEC_TRACE_ENABLED") == "1"
     cases: dict[str, list[Path]] = {}
     for path in sorted(CORPUS.glob("*.lox")):
         try:
@@ -616,7 +619,7 @@ def main() -> None:
                     f"{rel}: native exited {run.status}, not {COMPILE_ERROR_STATUS}"
                 )
                 continue
-            if run.stdout:
+            if run.stdout and not trace_build:
                 problems.append(f"{rel}: compile error wrote to stdout")
                 continue
             diagnostic = first_diagnostic(run.stderr)
