@@ -1536,6 +1536,11 @@ current task, and returns it.
    deferred call runs, the call raises `YieldAcrossNativeError`, for the
    same reason a `yield` there does (see [`yield` Expression](#yield-expression)).
 
+A native function or bound native that runs as the entry of a task or a
+coroutine is a native callback on the call chain too. A receive below it
+raises `YieldAcrossNativeError` in the same way: the entry has no frame
+that a task switch can rebuild.
+
 A receive suspends the whole task. Every call frame of the task stays in
 place, which includes the frames of a coroutine that the task resumed, and
 no deferred call runs. A coroutine that holds a suspended receive keeps the
