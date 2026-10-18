@@ -1,0 +1,16 @@
+// When an enum constructor and a global class have the same name, a bare
+// pattern name is a tag test, not a class test
+// (spec/04-semantics.md, match Expression, "Constructor patterns"). The
+// class `Foo` replaces the global `Foo` after the enum is declared, but the
+// pattern was fixed as a tag test when the match was compiled.
+enum E { Foo Bar }
+var e = Bar();
+class Foo {}
+
+print match e {
+    case Foo => "foo"
+    case Bar => "bar"
+};
+
+// STATUS: ok
+// CHECK: bar

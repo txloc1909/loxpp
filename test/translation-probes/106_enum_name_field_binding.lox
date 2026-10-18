@@ -1,0 +1,17 @@
+// A name in the braces of a class pattern is a field name, and the arm binds
+// it to the value of that field (spec/04-semantics.md, match Expression,
+// "Constructor patterns": a bare name in braces is a binding). This is so
+// also when an enum constructor has the same name: the tag test applies
+// only to the name before the braces, not to the field names.
+enum Color { Red }
+class Box {
+    init(v) { this.Red = v; }
+}
+
+print match Box(42) {
+    case Box{Red} => "field " + str(Red)
+    case _ => "no match"
+};
+
+// STATUS: ok
+// CHECK: field 42
