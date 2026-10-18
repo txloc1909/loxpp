@@ -138,3 +138,23 @@ gap is issue [#687](https://github.com/txloc1909/loxpp/issues/687).
 that show it. A deferred call that needs more frames than the ordinary depth
 limit of the bootstrap halts for a different cause, issue
 [#638](https://github.com/txloc1909/loxpp/issues/638).
+
+## The depth limit is an accepted limit
+
+The bootstrap interpreter reaches fewer nested calls than the 1022 that
+`test/translation-probes/53_deep_recursion_boundary.lox` makes: it prints
+nothing there, raises `StackOverflowError`, and exits with status 70.
+This is an accepted implementation-gated limit, not a defect to fix. The
+owner decided in issue [#638](https://github.com/txloc1909/loxpp/issues/638)
+that the bootstrap may support a lower call depth, and
+`spec/04-semantics.md` (Implementation-Gated Exception, "Call depth") says
+so. Probe 53 does not bind the bootstrap interpreter. The limit is the shared
+frame budget that this note describes, so it moves with `FRAMES_MAX` and with
+the frames that the interpreter uses for its own calls.
+
+The bootstrap does not run self tail calls in constant call depth: a
+recursion of self tail calls halts with `Stack overflow.` where native
+completes. This is the known gap
+[#716](https://github.com/txloc1909/loxpp/issues/716). The call depth
+exception does not cover it, because the spec says that a self tail call
+never raises `StackOverflowError`.

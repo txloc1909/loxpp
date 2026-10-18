@@ -325,11 +325,12 @@ CASES = [
 ]
 
 
-# Programs that native completes and the bootstrap halts on, because the
+# Programs that native completes and the bootstrap halts on. Issue #687: the
 # bootstrap has no frame reserve for a deferred call that runs during an
-# overflow unwind (issue #687). Each entry pins the gap: native must finish
+# overflow unwind. Issue #716: the bootstrap does not run a self tail call in
+# constant call depth. Each entry pins the gap: native must finish
 # with exit 0, and the bootstrap must halt with one "Stack overflow." line.
-# When a reserve lands, an entry starts to match native and
+# When a fix lands, an entry starts to match native and
 # check_known_gaps() fails; move the entry to CASES then.
 def _gap_program(deferred_body: str, extra: str = "") -> str:
     return (
@@ -344,6 +345,16 @@ def _gap_program(deferred_body: str, extra: str = "") -> str:
 
 
 KNOWN_GAPS = [
+    (
+        "5000 self tail calls (the two CASES that recurse with `return f(n + 1);` rely on this)",
+        "fun f(n) {\n"
+        "    if (n == 0) return 0;\n"
+        "    return f(n - 1);\n"
+        "}\n"
+        "f(5000);\n"
+        'print "after";\n',
+        716,
+    ),
     ("a deferred call with one assignment", _gap_program("ran = ran + 1;"), 687),
     (
         "a deferred call that calls one helper",

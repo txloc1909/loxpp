@@ -8,6 +8,12 @@
 // counter that starts too low lets 31_deep_recursion.lox (1023) wrongly
 // succeed; a counter that starts too high makes this probe (1022) wrongly
 // fail. Neither probe alone can see the other's mistake.
+//
+// This probe does not bind the bootstrap interpreter. Under the call depth
+// exception of spec/04-semantics.md, the bootstrap interpreter may support a
+// lower call depth than 1022, and a program that needs more may raise
+// StackOverflowError. The probe has no STATUS line, so the spec-probe gate
+// does not run it on the bootstrap.
 fun down(n) {
     if (n == 0) return 0;
     down(n - 1);
