@@ -150,9 +150,9 @@ each has an off-the-shelf solution.
 | `56_file_nul` | `File.read`/`readline`/`readlines` return the full binary content when it holds NUL bytes (issue #401); CI names it in the same bootstrap step "NUL probes" (issue #634) | none (parity gate) |
 | `56_file_read` | `File.read()` with arity 0 exists on every consumer, the bootstrap included (issue #378) | none (parity gate) |
 | `56_math_constants` | `math.inf` and `math.nan` are Numbers with the native values, not a native-fn value (issue #329) | none (parity gate) |
-| `57_defer_arity_fatal_fast_path` | the wrong-argument-count fatal fast path skips every pending `defer` when no `try` is live — empty stdout, no `defer-g` (issue #319) | none (error-parity gate) |
-| `58_defer_overflow_fatal_fast_path` | the call-stack-overflow fatal fast path skips every pending `defer` when no `try` is live — empty stdout (issue #319) | none (error-parity gate) |
-| `59_return_out_of_try_leak` | a `return` out of a still-open `try` must not leak the JVM handler-liveness counter, or a later unrelated arity fault looks catchable (issue #319) | none (error-parity gate) |
+| `57_defer_arity_fatal_fast_path` | the wrong-argument-count fatal fast path skips every pending `defer` when no `try` is live — empty stdout, no `defer-g` (issue #319); CI names it in the bootstrap step "fatal fast path probes" (issue #636) | none (error-parity gate) |
+| `58_defer_overflow_fatal_fast_path` | the call-stack-overflow fatal fast path skips every pending `defer` when no `try` is live — empty stdout (issue #319); CI names it in the bootstrap step "fatal fast path probes" (issue #636) | none (error-parity gate) |
+| `59_return_out_of_try_leak` | a `return` out of a still-open `try` must not leak the JVM handler-liveness counter, or a later unrelated arity fault looks catchable (issue #319); CI names it in the bootstrap step "fatal fast path probes" (issue #636) | none (error-parity gate) |
 | `60_throw_ends_try_binding` | a `throw` unwinds past try-body locals without `endScope`, so the unwinding side ends their bindings itself (issue #386) | P1, P4 |
 | `63_ord_chr_string_order` | `ord()`/`chr()` byte conversion and String byte ordering on every backend (issue #507) | none (parity gate) |
 | `defer_runs_before_caught_throw_propagates` | a deferred call runs when its own function exits by `throw`, before the fault propagates to the caller's `catch` (`spec/04-semantics.md`) | none (parity gate) |

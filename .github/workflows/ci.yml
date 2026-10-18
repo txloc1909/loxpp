@@ -514,6 +514,21 @@ jobs:
             loxpp-dev:latest \
             bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/32_string_nul.lox test/translation-probes/56_file_nul.lox test/translation-probes/bootstrap-only/stdout_no_trailing_newline.lox --timeout 120"
 
+      # Three fatal fast path probes that the walk above skips: they have no
+      # STATUS line. Probes 57 and 59 are the wrong argument count (issue
+      # #636), probe 58 is the call stack overflow (issue #616). Each skips
+      # every pending deferred call, so the bootstrap must print nothing and
+      # exit 70, as native does.
+      - name: Bootstrap differential suite - fatal fast path probes
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev:latest \
+            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/57_defer_arity_fatal_fast_path.lox test/translation-probes/58_defer_overflow_fatal_fast_path.lox test/translation-probes/59_return_out_of_try_leak.lox --timeout 120"
+
       # examples/bench_jump_table.lox is left out by name: it is a
       # 5,000,000-iteration microbenchmark with no CHECK line, and it does
       # not finish inside the timeout on the bootstrap interpreter. The
@@ -631,6 +646,18 @@ jobs:
             -w /workspace \
             loxpp-dev:latest \
             bash -c "ctest --test-dir build -R BootstrapMatchArmBreak --output-on-failure --no-tests=error"
+
+      # BootstrapArityFatal self-skips on the debug leg (SKIP_RETURN_CODE 125):
+      # the debug trace floods native's stdout, which the check compares. This
+      # step on the release leg is the one that runs it.
+      - name: Run bootstrap wrong-argument-count fatal path check
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "ctest --test-dir build -R BootstrapArityFatal --output-on-failure --no-tests=error"
 
       # GcSweepLinear self-skips on debug (SKIP_RETURN_CODE 125), so the release
       # leg is the only place the sweep-time bound is checked.
