@@ -1,0 +1,16 @@
+// A name in the parentheses of a positional constructor pattern is a
+// binding (spec/02-syntax.md, identArmPat). This is so also when a global
+// class has the same name: the arm binds the constructor argument, and does
+// not test it against the class.
+class Shape {}
+enum Wrap {
+    W(v)
+}
+
+print match W(7) {
+    case W(Shape) => "arg " + str(Shape)
+    case _ => "no match"
+};
+
+// STATUS: ok
+// CHECK: arg 7

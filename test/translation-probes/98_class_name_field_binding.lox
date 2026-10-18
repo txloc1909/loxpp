@@ -1,0 +1,16 @@
+// A name in the braces of a class pattern is a field name, and the arm binds
+// it to the value of that field (spec/02-syntax.md, identArmPat). This is so
+// also when a global class has the same name: the class test applies only to
+// the name before the braces, not to the field names.
+class Item {}
+class Box {
+    init(v) { this.Item = v; }
+}
+
+print match Box(42) {
+    case Box{Item} => "field " + str(Item)
+    case _ => "no match"
+};
+
+// STATUS: ok
+// CHECK: field 42

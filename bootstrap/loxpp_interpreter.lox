@@ -142,6 +142,7 @@ enum Pattern {
     CtorPat(cname, subpats)
     ListPat(elems, rest_name)
     AtPat(at_name, subpat)
+    ClassPat(cname)
 }
 
 // bodyStmts is the arm's leading declarations/statements (possibly ending in
@@ -1122,8 +1123,8 @@ class Resolver {
         this.loopDepth       = 0;
         this.matchArmDepth   = 0;
         this.enumCtors       = {};
-        // Global classes declared so far, in source order: a bare pattern
-        // name in this set is a class type check, not a binding.
+        // Global classes declared so far, in source order. See
+        // classifyArmPat for the pattern names that this set changes.
         this.classNames      = {};
     }
 
@@ -1465,7 +1466,36 @@ class Resolver {
             case CtorPat{cname, subpats}   => this.resolveSubpats(subpats)
             case ListPat{elems, rest_name} => this.resolveListPat(elems, rest_name)
             case AtPat{at_name, subpat}    => this.resolveAtPat(at_name, subpat)
+            case ClassPat{cname}           => nil
         };
+    }
+
+    // A bare name is a class test only as a whole arm pattern (alone or in
+    // an or-chain) or as the sub-pattern of an @-binding, and only when a
+    // global class of that name is declared earlier in the source. A name
+    // inside braces, parentheses or brackets is always a binding. The
+    // parser cannot tell the two apart, so the resolver rewrites the
+    // pattern here, before the interpreter runs it.
+    classifyArmPat(pat) {
+        return match pat {
+            case BindPat{name}          => this.classifyBareName(pat, name)
+            case AtPat{at_name, subpat} => this.classifyAtPat(pat, at_name, subpat)
+            case _                      => pat
+        };
+    }
+
+    classifyAtPat(pat, at_name, subpat) {
+        var sub = match subpat {
+            case BindPat{name} => this.classifyBareName(subpat, name)
+            case _             => subpat
+        };
+        return AtPat(at_name, sub);
+    }
+
+    classifyBareName(pat, name) {
+        if (this.enumCtors.has(name)) return pat;
+        if (this.classNames.has(name)) return ClassPat(name);
+        return pat;
     }
 
     resolveAtPat(at_name, subpat) {
@@ -1475,7 +1505,6 @@ class Resolver {
 
     resolveBindPat(name) {
         if (this.enumCtors.has(name)) return;
-        if (this.classNames.has(name)) return;
         // In OR-patterns, the same name may appear in multiple alternatives.
         // Skip re-declaration if already bound in the current scope.
         if (len(this.scopes) > 0) {
@@ -1508,6 +1537,7 @@ class Resolver {
             this.beginScope();
             var j = 0;
             while (j < len(arm.pats)) {
+                arm.pats[j] = this.classifyArmPat(arm.pats[j]);
                 this.resolvePattern(arm.pats[j]);
                 j = j + 1;
             }
@@ -4578,6 +4608,7 @@ class Interpreter {
             case CtorPat{cname, subpats}   => this.matchCtor(cname, subpats, subject, bindings)
             case ListPat{elems, rest_name} => this.matchListPat(elems, rest_name, subject, bindings)
             case AtPat{at_name, subpat}    => this.matchAtPat(at_name, subpat, subject, bindings)
+            case ClassPat{cname}           => this.isInstanceOfClass(subject, this.globals[cname])
         };
     }
 
@@ -4591,9 +4622,6 @@ class Interpreter {
         var ctorVal = this.globals[name];
         if (ctorVal != nil and loxTag(ctorVal) == "enum_ctor" and ctorVal.arity() == 0) {
             return loxTag(subject) == "enum_val" and subject.tag == name;
-        }
-        if (ctorVal != nil and loxTag(ctorVal) == "class") {
-            return this.isInstanceOfClass(subject, ctorVal);
         }
         bindings[name] = subject;
         return true;

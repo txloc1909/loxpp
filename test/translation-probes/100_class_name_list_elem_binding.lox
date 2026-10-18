@@ -1,0 +1,13 @@
+// A name in a sequence pattern is a binding for that element
+// (spec/02-syntax.md, seqElem). This is so also when a global class has the
+// same name: the arm binds the element, and does not test it against the
+// class.
+class Shape {}
+
+print match [1, 2] {
+    case [Shape, b] => "elem " + str(Shape) + " " + str(b)
+    case _ => "no match"
+};
+
+// STATUS: ok
+// CHECK: elem 1 2

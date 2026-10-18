@@ -1,0 +1,28 @@
+// Which bare pattern names are class tests is fixed when the program is
+// compiled, from the classes declared at global scope before the match in
+// the source. A class declared later in the source does not change the
+// match: the bare name there is a binding. The class test itself reads the
+// global with that name when it runs, so a pattern name whose global no
+// longer holds a class matches no value.
+fun f(v) {
+    var out = match v {
+        case B => "bound " + str(B)
+    };
+    return out;
+}
+
+class B {}
+
+print f(1);
+
+class A {}
+A = 5;
+
+print match 3 {
+    case A => "matched " + str(A)
+    case _ => "none"
+};
+
+// STATUS: ok
+// CHECK: bound 1
+// CHECK: none
