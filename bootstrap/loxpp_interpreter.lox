@@ -1750,15 +1750,15 @@ class LoxFunction {
                     // Matches native's own Runtime::call: an arity mismatch on
                     // a deferred call is the ordinary catchable ArityError
                     // while a try block is active, and the fatal fast path
-                    // (fatalIfNoTry, below) when none is -- native's Runtime::runPendingDefers
-                    // calls the same Runtime::call() a normal call uses, so
-                    // any handler still live around this function's own
-                    // caller sees it (issue #359 measured only the no-handler
-                    // shape, where this and an uncaught halt look identical).
-                    // Matches native's own "abandon any remaining sibling
-                    // defers" rule too (src/runtime.cpp's runPendingDefers):
-                    // the mismatched call never started, so nothing here
-                    // drains the defers that have not run yet.
+                    // (fatalIfNoTry) when none is. The mismatched call never
+                    // starts, but the defers of this function that have not
+                    // run yet still run: native's handleThrow starts a nested
+                    // unwind of the same frame, and that unwind drains the
+                    // same defer list (the "abandon" return in
+                    // Runtime::runPendingDefers only skips what the nested
+                    // unwind has already run). So the loop goes on to the
+                    // next defer, and the ArityError stays in flight across
+                    // them like any other throw from a deferred call.
                     //
                     // Set throwFlag/thrownValue directly, not through
                     // setError -- setError refuses to overwrite an
@@ -1766,8 +1766,7 @@ class LoxFunction {
                     // (Runtime::handleThrow draining Runtime::runPendingDefers,
                     // both src/runtime.cpp) always lets a fault found while draining
                     // defers replace whichever throw was already in flight,
-                    // handler present or not (issue #405, verified directly
-                    // against native both ways). This is the one call site
+                    // handler present or not. This is the one call site
                     // that can run while a throw is already in flight (an
                     // uncaught throw propagating out through this function),
                     // so it is the one place setError's usual "first fault
@@ -1775,7 +1774,6 @@ class LoxFunction {
                     interp.fatalIfNoTry("Expected " + str(callee.arity()) + " arguments but got " + str(len(defer_args)) + ".");
                     interp.throwFlag = true;
                     interp.thrownValue = LoxError("ArityError", "Expected " + str(callee.arity()) + " arguments but got " + str(len(defer_args)) + ".");
-                    break;
                 }
             } else {
                 interp.fatalError("Deferred callable has unexpected type.");
