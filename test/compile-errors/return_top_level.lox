@@ -1,0 +1,3 @@
+// Compile error: `return` in top-level code.
+return 1;
+print "after";

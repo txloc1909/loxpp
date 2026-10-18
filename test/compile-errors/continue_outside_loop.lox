@@ -1,0 +1,3 @@
+// Compile error: `continue` outside a loop.
+continue;
+print "after";

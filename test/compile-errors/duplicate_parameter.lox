@@ -1,0 +1,2 @@
+// Compile error: two parameters with one name.
+fun f(a, a) {}

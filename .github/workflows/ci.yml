@@ -424,9 +424,9 @@ jobs:
             bash -c "tools/check_coroutine_probes.sh"
 
       # The spec probes of test/translation-probes/ (the files with a STATUS
-      # line), against the stdout the spec defines. Each consumer has an
-      # expected-failure list, tools/probe_xfail_<consumer>.txt; a listed
-      # probe that passes fails the step. Release only: the debug preset's
+      # line), against the stdout the spec defines. A consumer that does not
+      # pass a probe yet can list it in an expected-failure file (--xfail);
+      # no consumer lists one now. Release only: the debug preset's
       # instruction trace floods stdout (see AGENTS.md).
       - name: Check spec probes - native
         if: matrix.preset == 'release'
@@ -435,7 +435,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev:latest \
-            bash -c "python3 tools/check_spec_probes.py build/loxpp test/translation-probes/ --xfail tools/probe_xfail_native.txt"
+            bash -c "python3 tools/check_spec_probes.py build/loxpp test/translation-probes/"
 
       - name: Check spec probes - bootstrap interpreter
         if: matrix.preset == 'release'
@@ -445,7 +445,7 @@ jobs:
             -w /workspace \
             -e LANGUAGE=LOXPP \
             loxpp-dev:latest \
-            bash -c "python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/ --xfail tools/probe_xfail_bootstrap.txt --consumer bootstrap && python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/bootstrap-only/"
+            bash -c "python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/ --consumer bootstrap && python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/bootstrap-only/"
 
       - name: Run examples through loxpp bootstrap interpreter
         if: matrix.preset == 'release'
@@ -456,6 +456,79 @@ jobs:
             -e LANGUAGE=LOXPP \
             loxpp-dev:latest \
             bash -c "python3 tools/check_examples.py bootstrap/lox_wrapper.sh examples/"
+
+      # spec/04-semantics.md, Workers and Tasks, Ending: lines that tasks on
+      # different workers print never mix inside one line. The order of the
+      # lines of two workers is not defined, so this check reads the lines in
+      # any order (tools/check_print_lines.py). Release only, like the steps
+      # above.
+      - name: Check print lines of two workers - native
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "python3 tools/check_print_lines.py build/loxpp"
+
+      - name: Check print lines of two workers - bootstrap interpreter
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev:latest \
+            bash -c "python3 tools/check_print_lines.py bootstrap/lox_wrapper.sh"
+
+      # The differential gate for the bootstrap interpreter, both phases:
+      # tools/diff_runtimes.py compares each compile error (exit status 65
+      # and its stderr) and each run's stdout with native.
+      # check_spec_probes.py and check_examples.py above check each consumer
+      # alone; this step compares it with native, which also covers an
+      # example with no CHECK line. The probe walk takes only the spec
+      # probes: other files of test/translation-probes/ pin translation
+      # problems of the compiled backends.
+      - name: Bootstrap differential suite - spec probes
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev:latest \
+            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/ --only-spec-probes --consumer bootstrap --timeout 120"
+
+      # examples/bench_jump_table.lox is left out by name: it is a
+      # 5,000,000-iteration microbenchmark with no CHECK line, and it does
+      # not finish inside the timeout on the bootstrap interpreter. The
+      # QBE step that runs the corpus through the self-hosted interpreter
+      # leaves it out for the same reason.
+      - name: Bootstrap differential suite - examples
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev:latest \
+            bash -c '
+              files=$(find examples -maxdepth 1 -name "*.lox" ! -name "bench_jump_table.lox" | sort)
+              python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh $files --timeout 120
+            '
+
+      # test/compile-errors/: one program per parser or resolver error.
+      # --compile-errors fails a file that native does not reject at compile
+      # time, so the corpus cannot turn into run-time programs unseen.
+      - name: Bootstrap differential suite - compile errors
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev:latest \
+            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/compile-errors/ --compile-errors"
 
       # Issue #323: the bootstrap interpreter borrows the native VM's own
       # call-frame budget (see docs/reference/bootstrap-stack-depth.md), so any
@@ -893,19 +966,39 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/ test/translation-probes/jvm-only/ --xfail tools/probe_xfail_jvm.txt"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/ test/translation-probes/jvm-only/"
 
       # The spec probes of test/translation-probes/ (the files with a
       # STATUS line) on the JVM backend, against the stdout the spec
-      # defines. tools/probe_xfail_jvm.txt lists the probes the backend does
-      # not pass yet; a listed probe that passes fails the step.
+      # defines.
       - name: Check spec probes - JVM
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "python3 tools/check_spec_probes.py tools/loxpp_jvm.sh test/translation-probes/ --xfail tools/probe_xfail_jvm.txt"
+            bash -c "python3 tools/check_spec_probes.py tools/loxpp_jvm.sh test/translation-probes/"
+
+      # The compile phase of the differential gate: each parser or resolver
+      # error of test/compile-errors/ must give the same exit status (65)
+      # and the same stderr on the JVM backend as on native.
+      - name: JVM differential suite - compile errors
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/compile-errors/ --compile-errors"
+
+      # spec/04-semantics.md, Workers and Tasks, Ending: print lines of two
+      # workers never mix (see the native step in build-and-test).
+      - name: Check print lines of two workers - JVM
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/check_print_lines.py tools/loxpp_jvm.sh"
 
       # The full example corpus on the JVM backend, zero failures. --exclude
       # skips the map-iteration-order-sensitive examples
@@ -1096,15 +1189,34 @@ jobs:
 
       # The spec probes of test/translation-probes/ (the files with a STATUS
       # line) on the QBE backend, against the stdout the spec defines.
-      # tools/probe_xfail_qbe.txt lists the probes the backend does not pass
-      # yet; a listed probe that passes fails the step.
       - name: Check spec probes - QBE
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-qbe:latest \
-            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/check_spec_probes.py tools/loxpp_qbe.sh test/translation-probes/ --xfail tools/probe_xfail_qbe.txt"
+            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/check_spec_probes.py tools/loxpp_qbe.sh test/translation-probes/"
+
+      # The compile phase of the differential gate: each parser or resolver
+      # error of test/compile-errors/ must give the same exit status (65)
+      # and the same stderr on the QBE backend as on native.
+      - name: QBE differential suite - compile errors
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-qbe:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/diff_runtimes.py build/loxpp tools/loxpp_qbe.sh test/compile-errors/ --compile-errors"
+
+      # spec/04-semantics.md, Workers and Tasks, Ending: print lines of two
+      # workers never mix (see the native step in build-and-test).
+      - name: Check print lines of two workers - QBE
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-qbe:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/check_print_lines.py tools/loxpp_qbe.sh"
 
       # S8's own checkpoint (issue #461): register promotion narrows what the
       # GC can see on the QBE backend's fused stack, so this runs the whole

@@ -1,4 +1,0 @@
-# Spec probes in test/translation-probes/ that the JVM backend does not pass yet.
-# Read by tools/check_spec_probes.py and tools/diff_runtimes.py --xfail (the managed-toolchains job).
-# Each line is `<probe>.lox  <reason>`. A listed probe must fail. When it
-# passes, the gate fails, and the node that made it pass deletes its line.

@@ -1,0 +1,7 @@
+// Compile error: an initializer that returns a task handle.
+class A {
+  init() {
+    task.spawn(this.f);
+    return task.self();
+  }
+}

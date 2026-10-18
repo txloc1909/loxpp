@@ -15,10 +15,6 @@
 #     supports (see tools/check_qbe_probes.sh);
 #   - the whole examples/ corpus.
 #
-# The spec probes that tools/probe_xfail_qbe.txt lists are expected to fail
-# on QBE (tools/diff_runtimes.py --xfail): they report XFAIL, and one that
-# starts to pass fails this gate until its line is deleted.
-#
 # The whole example corpus needs longer than the 30s default under stress GC,
 # so --timeout 180 is used.
 #
@@ -47,8 +43,7 @@ run_diff() {
 
 run_diff "test/translation-probes/ + qbe-only/ (stress GC)" \
     "$root/test/translation-probes/" \
-    "$root/test/translation-probes/qbe-only/" \
-    --xfail "$root/tools/probe_xfail_qbe.txt"
+    "$root/test/translation-probes/qbe-only/"
 
 run_diff "jvm-only/61_operator_overload.lox (stress GC)" \
     "$root/test/translation-probes/jvm-only/61_operator_overload.lox"

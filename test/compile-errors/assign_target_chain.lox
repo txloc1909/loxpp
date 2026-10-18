@@ -1,0 +1,5 @@
+// Compile error: a chained assignment whose inner target is a value.
+var a;
+var b;
+a = 1 = 2;
+print "after";

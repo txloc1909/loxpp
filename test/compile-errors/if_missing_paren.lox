@@ -1,0 +1,3 @@
+// Compile error: an `if` condition with no opening parenthesis.
+if 1) print 2;
+print "after";

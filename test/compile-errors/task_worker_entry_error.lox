@@ -1,0 +1,9 @@
+// Compile error in a function that only a new worker runs: the error is
+// found before the main task runs, so no worker starts and stdout is empty.
+fun worker(msg) {
+  print "worker ran";
+  return msg;
+  continue;
+}
+print "main ran";
+task.spawn_worker(worker, 1);

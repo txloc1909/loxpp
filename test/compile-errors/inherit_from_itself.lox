@@ -1,0 +1,2 @@
+// Compile error: a class that inherits from itself.
+class A < A {}

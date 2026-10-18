@@ -1,0 +1,3 @@
+// Compile error: a class declaration with no name.
+class {}
+print "after";

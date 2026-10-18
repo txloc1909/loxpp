@@ -3,8 +3,9 @@
 **Status:** accepted. The decision was taken on 2026-10-17 (#590) on the
 measurements in `docs/records/coroutine-cost-2026-10-17.md`,
 `docs/records/coroutine-cost-qbe-2026-10-17.md`, and
-`docs/records/message-copy-cost-2026-10-17.md`. The sections up to "Reading
-the matrix" are the analysis that led to it; "Decision" states it.
+`docs/records/message-copy-cost-2026-10-17.md`. Implemented under mission
+#595, which is complete; see "Shipped". The sections up to "Reading the
+matrix" are the analysis that led to it; "Decision" states it.
 
 ## Why this doc
 
@@ -624,6 +625,50 @@ and the two thread-creation sites, `LoxWorker.switchTo` and
 
 This decision does not open the mission. The mission's tracking issue and
 node issues follow it, per `AGENTS.md`, "Missions".
+
+## Shipped
+
+**Mission #595: workers and tasks.** All four consumers implement the model:
+the native VM, the bootstrap interpreter (with the implementation-gated
+exception of `spec/04-semantics.md`), the JVM backend as the oracle, and the
+QBE backend, which links the native runtime.
+
+| Node | Issue | PR |
+|---|---|---|
+| N1 spec, tables, and probes | #596 | #605 |
+| N2 native messages and tasks on one worker | #597 | #607 |
+| N3 native workers on OS threads | #598 | #611 |
+| N4 bootstrap interpreter | #599 | #615 |
+| N5 JVM backend as the oracle | #600 | #618 |
+| N6 QBE parity | #601 | #621 |
+| N8 credit channel library | #604 | #622 |
+| N7 differential gate and close | #602 | #644 |
+
+Follow-ups that merged before the mission ended: #612 (a deferred call cannot
+suspend, for #610), #623, #624, #625, #626, #627, and #628.
+
+**The gate.** `tools/check_spec_probes.py` runs the shared spec probes on
+each consumer, with no expected-failure list left. `tools/diff_runtimes.py`
+compares each consumer with native in two phases: a compile error (exit
+status 65) must have the same stderr, and a run must have the same stdout.
+It runs on the spec probes, the examples, and `test/compile-errors/`, for
+the bootstrap, the JVM, and QBE. `tools/check_print_lines.py` checks on all
+four consumers that the print lines of two workers never mix.
+
+**A measured cost.** A QBE program that names `task` runs every task in the
+coroutine driver. With one `task.self()` line, `coroutine_mode_tax.lox` costs
+about 12 ns per call over the floor (#621), not the "about 6 ns" of the QBE
+row above, which holds for a program with no task.
+
+**After the mission**, in the order of "What this unblocks and in which
+order", item 5: the per-worker netpoller (#629), then #519, which GitHub had
+closed by mistake through the text of #603 and which N7 reopened, then GC
+item 11 per worker heap (#630), then FFI in the full package (#631). The
+credit channel needs a selective receive or `select` for a task with two
+ends (#632), and moves to the stdlib with the import system (#633). The
+remaining gaps that the reviews and the gate found: #614, #616, #617, and
+#634 to #643. The retrospective is
+`docs/records/concurrency-workers-tasks-retro.md`.
 
 ## Non-goals
 

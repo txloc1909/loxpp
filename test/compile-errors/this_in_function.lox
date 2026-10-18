@@ -1,0 +1,2 @@
+// Compile error: `this` in a function that is not a method.
+fun f() { return this; }
