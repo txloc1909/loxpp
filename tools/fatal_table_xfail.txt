@@ -3,5 +3,3 @@
 # tools/check_fatal_table.py fails on a mismatch that is not listed here, and on a
 # listed row that passes. The fix for a row removes its line from this file.
 
-`GET_TAG` applied to a non-enum value | G9 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
-`class Sub < Super {}` where `Super` is not a Class | G9 | the bootstrap raises it through setError, so a try catches it and the pending defers run
