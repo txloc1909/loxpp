@@ -5,8 +5,8 @@ spec/04-semantics.md is fatal on the bootstrap interpreter, as on native.
 
 The spec says a fatal fault is never delivered to a `catch` block, and it
 skips every pending deferred call, including the ones of the function where
-the fault happened. Native follows the table. The bootstrap still raises some
-of these faults through a catchable path (issue #666).
+the fault happened. Native follows the table. The bootstrap can raise one
+of these faults through a catchable path.
 
 The script reads the table rows from the spec, so a new spec row gets a case
 with no edit here. For each row it runs the Example three ways, on native and
@@ -25,7 +25,17 @@ compared on its first line only.
 tools/fatal_table_xfail.txt lists the rows the bootstrap does not pass yet.
 The check passes only when every mismatching row is on the list. It fails on
 a mismatch that is not listed, and it fails on a listed row that passes, so
-the list shrinks as the fix groups of issue #666 land.
+the list cannot go stale.
+
+A static pass also reads bootstrap/loxpp_interpreter.lox as text. It finds
+every `setError(...)` call that has a string literal equal to a Message cell of
+the table. Such a call is a catchable path for a fatal fault. The Example of a
+row reaches only one call site, so the run cannot see a second one. A found
+call is allowed in two cases: the row that owns the message is listed in the
+expected-failure file (the fix for that row has not landed), or the call is on
+STATIC_ALLOW below, with the reason. The pass does not run the program. It sees
+only a call whose message is one literal. It does not see a message that the
+call builds from parts, such as "Undefined property '" + name + "'.".
 
 A release build is required (the same --trace-enabled skip rule as the other
 bootstrap ctest entries): a debug build's instruction trace floods native's
@@ -33,9 +43,11 @@ stdout.
 
 Usage:
     tools/check_fatal_table.py [--native PATH] [--bootstrap PATH]
-        [--xfail PATH] [--timeout SECONDS] [--jobs N]
+        [--xfail PATH] [--interpreter PATH] [--show-static]
+        [--timeout SECONDS] [--jobs N]
 
-Exits 0 when the mismatching rows are exactly the listed rows. Exits 1 and
+Exits 0 when the mismatching rows are exactly the listed rows and the static
+pass finds no unreviewed call. Exits 1 and
 prints every discrepancy otherwise. Exits 125 (ctest's SKIP_RETURN_CODE) when
 the binary under test was built with the debug trace macros on.
 """
@@ -65,6 +77,23 @@ CODE_RE = re.compile(r"`([^`]+)`")
 # outside the `try` block and the function of the wrapped variants.
 ENUM_RE = re.compile(r"^((?:enum \w+ \{[^}]*\}\s*)+)(.*)$", re.DOTALL)
 SPEC_TMP_FILE = "/tmp/f.txt"
+INTERPRETER_PATH = REPO_ROOT / "bootstrap" / "loxpp_interpreter.lox"
+LITERAL_RE = re.compile(r'"([^"]*)"')
+
+# Reviewed setError calls whose message equals a Fatal-table message, but whose
+# fault is catchable. Key: (kind, message). Value: (number of calls, reason).
+# A different number of calls fails the check, so a new call is not allowed
+# without a review.
+STATIC_ALLOW = {
+    ("NotCallableError", "Can only call functions, classes and enums."): (
+        2,
+        "the catchable 'Call of a non-callable value' row (NotCallableError) has "
+        "the same text as the fatal row for a non-callable field; the two calls "
+        "in evalCall check a callee that is Nil, Bool, String, Number or of an "
+        "unknown tag, and the fatal row is raised through fatalError in the "
+        "member lookup",
+    ),
+}
 
 VARIANTS = ("bare", "try", "defer")
 
@@ -127,6 +156,77 @@ def run_program(cmd: list[str], program: str, path: Path, timeout: float,
     stderr = proc.stderr.splitlines()
     return RunResult(proc.returncode, proc.stdout.splitlines(),
                      stderr[0] if stderr else "")
+
+
+@dataclass
+class SetErrorCall:
+    line: int
+    kind: str
+    literals: list[str]
+
+
+def find_set_error_calls(text: str) -> list[SetErrorCall]:
+    """Find each `setError(` call, with the string literals of its arguments."""
+    calls = []
+    for match in re.finditer(r"\bsetError\(", text):
+        depth, i, in_string = 1, match.end(), False
+        while i < len(text) and depth:
+            char = text[i]
+            if in_string:
+                in_string = char != '"'
+            elif char == '"':
+                in_string = True
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            i += 1
+        literals = LITERAL_RE.findall(text[match.end():i])
+        if literals:
+            calls.append(SetErrorCall(text.count("\n", 0, match.start()) + 1,
+                                      literals[0], literals))
+    return calls
+
+
+def check_static(rows: list[Row], listed: dict[str, tuple[str, str]],
+                 interpreter: Path, show: bool) -> list[str]:
+    """Find setError calls that carry a Fatal-table message."""
+    by_message: dict[str, list[Row]] = {}
+    for row in rows:
+        by_message.setdefault(row.message, []).append(row)
+    found = []  # (call, message)
+    for call in find_set_error_calls(interpreter.read_text()):
+        for literal in call.literals:
+            if literal in by_message:
+                found.append((call, literal))
+    name = interpreter.relative_to(REPO_ROOT) if interpreter.is_relative_to(REPO_ROOT) else interpreter
+    failures = []
+    allowed_count: dict[tuple[str, str], int] = {}
+    for call, message in found:
+        owners = by_message[message]
+        rows_text = "; ".join(f"row {rows.index(r) + 1}" for r in owners)
+        key = (call.kind, message)
+        if key in STATIC_ALLOW:
+            status = "allowed (STATIC_ALLOW)"
+            allowed_count[key] = allowed_count.get(key, 0) + 1
+        elif any(r.cause in listed for r in owners):
+            status = "allowed (the row is in the expected-failure file)"
+        else:
+            status = "FAIL"
+            failures.append(
+                f"{name}:{call.line}: setError({call.kind!r}, ...) carries the Fatal-table "
+                f"message {message!r} ({rows_text}); the fault must go through fatalError")
+        if show:
+            print(f"static: {name}:{call.line}: setError({call.kind!r}) {message!r} "
+                  f"({rows_text}): {status}")
+    for key, (count, reason) in STATIC_ALLOW.items():
+        if allowed_count.get(key, 0) != count:
+            failures.append(
+                f"STATIC_ALLOW entry {key!r} expects {count} call(s) but the source has "
+                f"{allowed_count.get(key, 0)}; review the change and update the entry")
+    if show:
+        print(f"static: {len(found)} setError call(s) carry a Fatal-table message")
+    return failures
 
 
 def read_xfail(path: Path, rows: list[Row]) -> dict[str, tuple[str, str]]:
@@ -192,6 +292,10 @@ def main() -> int:
     parser.add_argument("--bootstrap",
                         default=str(REPO_ROOT / "bootstrap" / "lox_wrapper.sh"))
     parser.add_argument("--xfail", default=str(XFAIL_PATH))
+    parser.add_argument("--interpreter", default=str(INTERPRETER_PATH))
+    parser.add_argument("--show-static", action="store_true",
+                        help="print every setError call that carries a Fatal-table message, "
+                        "with its status")
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     parser.add_argument(
@@ -219,6 +323,7 @@ def main() -> int:
                 enumerate(rows, 1)))
 
     failures: list[str] = []
+    failures += check_static(rows, listed, Path(args.interpreter), args.show_static)
     passing = xfailing = 0
     for number, (row, (native_problems, mismatches)) in enumerate(zip(rows, results), 1):
         label = f"row {number}: {row.cause}"
@@ -237,12 +342,13 @@ def main() -> int:
             passing += 1
 
     if failures:
-        print(f"{len(failures)}/{len(rows)} row(s) fail:\n")
+        print(f"{len(failures)} failure(s) in {len(rows)} row(s) and the static pass:\n")
         print("\n\n".join(failures))
         return 1
 
     print(f"OK: {len(rows)} Fatal Runtime Errors rows: {passing} match native, "
-          f"{xfailing} are listed as expected failures.")
+          f"{xfailing} are listed as expected failures; the static pass found no "
+          "unreviewed setError call with a Fatal-table message.")
     return 0
 
 
