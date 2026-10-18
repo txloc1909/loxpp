@@ -155,7 +155,7 @@ DEFERRED: dict[str, Deferred] = {
     "Expect ';' after defer statement.":
         Deferred(641, 'different line at end of file'),
     "Expect ';' after loop condition.":
-        Deferred(641, 'the bootstrap adds a second error'),
+        Deferred(641, 'error recovery differs'),
     "Expect ';' after return value.":
         Deferred(641, 'different line at end of file'),
     "Expect ';' after throw expression.":
@@ -203,6 +203,8 @@ DEFERRED: dict[str, Deferred] = {
     'Expect element name in sequence pattern.':
         Deferred(679, 'different message text'),
     'Expect element name.':
+        Deferred(679, 'different message text'),
+    "Expect ',' between arguments.":
         Deferred(679, 'different message text'),
     'Expect expression.':
         Deferred(640, 'different token'),
@@ -261,13 +263,11 @@ GENERATED: dict[str, Generated] = {
 
 UNREACHABLE: dict[str, Unreachable] = {
     "Expect '{' in destructuring pattern.":
-        Unreachable('varDeclaration checks LEFT_BRACE before it calls varDestructure (src/compiler.cpp:458), so the consume cannot fail'),
+        Unreachable('varDeclaration checks LEFT_BRACE before it calls varDestructure (src/compiler.cpp:462), so the consume cannot fail'),
     "Expect '[' in sequence destructuring pattern.":
-        Unreachable('varDeclaration checks LEFT_BRACKET before it calls varDestructureSeq (src/compiler.cpp:454), so the consume cannot fail'),
+        Unreachable('varDeclaration checks LEFT_BRACKET before it calls varDestructureSeq (src/compiler.cpp:458), so the consume cannot fail'),
     "Expect '[' in sequence pattern.":
-        Unreachable('both call sites check LEFT_BRACKET before compileListPattern (src/compiler.cpp:1087, 1220), so the consume cannot fail'),
-    "Expect ',' between arguments.":
-        Unreachable('selfTailCall is reached only after isWholeCallStatement counts exactly arity - 1 top-level commas (src/compiler.cpp:2112), so consume(COMMA) cannot fail'),
+        Unreachable('both call sites check LEFT_BRACKET before compileListPattern (src/compiler.cpp:1086, 1213), so the consume cannot fail'),
 }
 
 
