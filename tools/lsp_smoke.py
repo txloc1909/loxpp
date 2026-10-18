@@ -314,7 +314,7 @@ def main():
 
         hover_end = client.request("textDocument/hover", {
             "textDocument": {"uri": CLEAN_URI},
-            "position": {"line": hl, "character": hc + 4}})
+            "position": {"line": hl, "character": hc + len("type")}})
         hover_end_text = ""
         if hover_end and isinstance(hover_end.get("contents"), dict):
             hover_end_text = hover_end["contents"].get("value", "")
@@ -347,7 +347,7 @@ def main():
         # Editors commonly place the cursor after the last character of a
         # name. That position must still name it in all handlers, not only in
         # one of them.
-        end_pos = {"line": ul, "character": uc + 4}
+        end_pos = {"line": ul, "character": uc + len("name")}
 
         definition_end = client.request("textDocument/definition", {
             "textDocument": {"uri": CLEAN_URI},
@@ -387,7 +387,7 @@ def main():
 
         past_end = client.request("textDocument/definition", {
             "textDocument": {"uri": CLEAN_URI},
-            "position": {"line": ul, "character": uc + 5}})
+            "position": {"line": ul, "character": uc + len("name") + 1}})
         check(past_end is None,
               "definition one byte past 'name' is null (got %s)" % (past_end,))
 
