@@ -175,6 +175,34 @@ CASES = [
         70,
     ),
     (
+        "fatal fast path: a caught overflow leaves no try block counted behind it",
+        "fun rec(n) { return rec(n + 1) + 1; }\n"
+        "fun say(s) { print s; }\n"
+        "fun r(n) { try { return r(n + 1); } catch (e) { return e.kind; } }\n"
+        'fun m() { defer say("main defer"); print r(0); rec(0); }\n'
+        "m();\n",
+        ["StackOverflowError"],
+        ["Stack overflow."],
+        70,
+    ),
+    (
+        "fatal fast path: a task that wakes from a receive inside a try gets back its own count",
+        "fun rec(n) { return rec(n + 1) + 1; }\n"
+        "fun say(s) { print s; }\n"
+        'fun worker(p) { task.send(p, "hi"); }\n'
+        "var me = task.self();\n"
+        "fun m() {\n"
+        '    defer say("main defer");\n'
+        '    try { task.spawn(fun_w); print task.receive(); } catch (e) { print "no"; }\n'
+        "    rec(0);\n"
+        "}\n"
+        "fun fun_w() { worker(me); }\n"
+        "m();\n",
+        ["hi"],
+        ["Stack overflow."],
+        70,
+    ),
+    (
         "catchable: a try in the same function sees the overflow; the defer of that function runs after the catch",
         "fun rec(n) { return rec(n + 1) + 1; }\n"
         'fun say() { print "d"; }\n'
