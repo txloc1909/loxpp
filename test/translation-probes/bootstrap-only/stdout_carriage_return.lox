@@ -1,0 +1,6 @@
+// A program prints a carriage return (byte 13). The bootstrap wrapper must
+// pass it on: stdout is the bytes a, CR, b, newline. A CHECK line cannot hold
+// a CR byte, and the text mode of tools/diff_runtimes.py turns each CR into a
+// newline, so this probe has no STATUS line and tools/check_cr_bytes.py
+// compares its raw stdout bytes with native.
+print "a" + chr(13) + "b";

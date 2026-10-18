@@ -504,6 +504,9 @@ jobs:
       # in bootstrap-only/. Name them, so the bootstrap is compared with
       # native, byte for byte, on a NUL byte in a string literal, a NUL byte in
       # file content, and a last line with no newline.
+      # The same step runs tools/check_cr_bytes.py on a printed carriage
+      # return. diff_runtimes.py reads stdout in text mode, which turns each CR
+      # into a newline, so that script compares the raw bytes (issue #656).
       - name: Bootstrap differential suite - NUL probes
         if: matrix.preset == 'release'
         run: |
@@ -512,7 +515,7 @@ jobs:
             -w /workspace \
             -e LANGUAGE=LOXPP \
             loxpp-dev:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/32_string_nul.lox test/translation-probes/56_file_nul.lox test/translation-probes/bootstrap-only/stdout_no_trailing_newline.lox --timeout 120"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/32_string_nul.lox test/translation-probes/56_file_nul.lox test/translation-probes/bootstrap-only/stdout_no_trailing_newline.lox --timeout 120 && python3 tools/check_cr_bytes.py build/loxpp bootstrap/lox_wrapper.sh"
 
       # Three fatal fast path probes that the walk above skips: they have no
       # STATUS line. Probes 57 and 59 are the wrong argument count (issue
