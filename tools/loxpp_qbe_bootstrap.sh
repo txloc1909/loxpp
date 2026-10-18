@@ -40,27 +40,28 @@ exitcode=0
 # interpreter itself failing on a runtime error inside loxpp_interpreter.lox
 # that the interpreter never catches -- prints no LOXERR line; it only shows
 # up as loxpp_qbe.sh's own nonzero exit status. Capture that status via a
-# status file written inside the process substitution (its subshell exit
+# status file written inside the pipeline's left side (its subshell exit
 # status is not visible to the parent shell any other way) so a host-level
 # fault still fails the wrapper instead of silently reporting exit 0. This is
 # the same fallback bootstrap/lox_wrapper.sh needs for its own native host.
+#
+# sed filters the stream because it passes NUL bytes through and bash `read`
+# drops them: a program that prints a NUL byte must reach stdout intact.
+# LC_ALL=C keeps the filter byte-oriented. Each protocol line goes to stderr
+# without its prefix, and its exit code is appended to $code_file, so the
+# last protocol line decides the exit code (same filter as
+# bootstrap/lox_wrapper.sh).
 status_file="$(mktemp)"
-trap 'rm -f "$status_file"' EXIT
-while IFS= read -r line; do
-    case "$line" in
-        LOXERR65\ *)
-            printf '%s\n' "${line#LOXERR65 }" >&2
-            exitcode=65
-            ;;
-        LOXERR70\ *)
-            printf '%s\n' "${line#LOXERR70 }" >&2
-            exitcode=70
-            ;;
-        *)
-            printf '%s\n' "$line"
-            ;;
-    esac
-done < <(eval "$FEED_CMD" | "$LOXPP_QBE" "$INTERPRETER"; echo "$?" > "$status_file")
+code_file="$(mktemp)"
+trap 'rm -f "$status_file" "$code_file"' EXIT
+{ eval "$FEED_CMD" | "$LOXPP_QBE" "$INTERPRETER"; echo "$?" > "$status_file"; } \
+    | LC_ALL=C sed -u \
+        -e '/^LOXERR65 /{s///;w /dev/stderr' -e 's/.*/65/;w '"$code_file" -e 'd;}' \
+        -e '/^LOXERR70 /{s///;w /dev/stderr' -e 's/.*/70/;w '"$code_file" -e 'd;}'
+last_code="$(tail -n 1 "$code_file")"
+if [ -n "$last_code" ]; then
+    exitcode="$last_code"
+fi
 qbe_status="$(cat "$status_file" 2>/dev/null)"
 if [ "$exitcode" -eq 0 ] && [ -n "$qbe_status" ] && [ "$qbe_status" -ne 0 ]; then
     exitcode="$qbe_status"

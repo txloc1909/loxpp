@@ -36,19 +36,20 @@ case "${LANGUAGE:-LOX}" in
 esac
 
 exitcode=0
-while IFS= read -r line; do
-    case "$line" in
-        LOXERR65\ *)
-            printf '%s\n' "${line#LOXERR65 }" >&2
-            exitcode=65
-            ;;
-        LOXERR70\ *)
-            printf '%s\n' "${line#LOXERR70 }" >&2
-            exitcode=70
-            ;;
-        *)
-            printf '%s\n' "$line"
-            ;;
-    esac
-done < <(eval "$FEED_CMD" | "$LOXPP_JVM" "$INTERPRETER" "$@")
+# sed filters the stream because it passes NUL bytes through and bash `read`
+# drops them: a program that prints a NUL byte must reach stdout intact.
+# LC_ALL=C keeps the filter byte-oriented. Each protocol line goes to stderr
+# without its prefix, and its exit code is appended to $code_file, so the
+# last protocol line decides the exit code (same filter as
+# bootstrap/lox_wrapper.sh).
+code_file="$(mktemp)"
+trap 'rm -f "$code_file"' EXIT
+eval "$FEED_CMD" | "$LOXPP_JVM" "$INTERPRETER" "$@" \
+    | LC_ALL=C sed -u \
+        -e '/^LOXERR65 /{s///;w /dev/stderr' -e 's/.*/65/;w '"$code_file" -e 'd;}' \
+        -e '/^LOXERR70 /{s///;w /dev/stderr' -e 's/.*/70/;w '"$code_file" -e 'd;}'
+last_code="$(tail -n 1 "$code_file")"
+if [ -n "$last_code" ]; then
+    exitcode="$last_code"
+fi
 exit $exitcode
