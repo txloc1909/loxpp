@@ -1733,7 +1733,7 @@ class LoxFunction {
             var callee = defer_item[0];
             var defer_args = defer_item[1];
             var tag = loxTag(callee);
-            if (tag == "function" or tag == "class" or tag == "native" or tag == "mathfn" or tag == "listmethod" or tag == "mapmethod" or tag == "filemethod" or tag == "socketmethod" or tag == "servermethod" or tag == "processmethod" or tag == "comethod" or tag == "enum_ctor") {
+            if (tag == "function" or tag == "native" or tag == "mathfn" or tag == "listmethod" or tag == "mapmethod" or tag == "filemethod" or tag == "socketmethod" or tag == "servermethod" or tag == "processmethod" or tag == "comethod") {
                 if (callee.arity() == -1 or len(defer_args) == callee.arity()) {
                     var savedThrow = interp.throwFlag;
                     var savedValue = interp.thrownValue;
@@ -3823,7 +3823,7 @@ class Interpreter {
             var callee = defer_item[0];
             var args = defer_item[1];
             var tag = loxTag(callee);
-            if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "socketmethod" and tag != "servermethod" and tag != "processmethod" and tag != "comethod" and tag != "enum_ctor") {
+            if (tag != "function" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "socketmethod" and tag != "servermethod" and tag != "processmethod" and tag != "comethod") {
                 i = i - 1;
                 this.fatalError("Deferred callable has unexpected type.");
             }
