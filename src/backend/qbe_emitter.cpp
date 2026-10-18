@@ -403,6 +403,35 @@ class Emitter {
         return t;
     }
 
+    // #592: an inline slot read: no interning, no hash probe, no runtime
+    // call on the bound path. Only an unbound slot calls the runtime, which
+    // fills it from m_globals or raises UndefinedVariableError.
+    void emitGlobalRead(const DecodedInstruction& ins, int topHeight) {
+        int slot = globalSlotIndexFor(ins.constantIndex);
+        std::string address = globalSlotAddress(slot);
+        std::string value = loadl(address);
+        std::string unbound = newTemp();
+        m_body << "\t" << unbound << " =w ceql " << value << ", "
+               << VAL_UNBOUND_GLOBAL << "\n";
+        std::string tag = std::to_string(m_tempCounter++);
+        std::string slowLabel = "@" + m_symbol + "_global_slow" + tag;
+        std::string fastLabel = "@" + m_symbol + "_global_fast" + tag;
+        std::string doneLabel = "@" + m_symbol + "_global_done" + tag;
+        m_body << "\tjnz " << unbound << ", " << slowLabel << ", " << fastLabel
+               << "\n";
+        m_body << slowLabel << "\n";
+        callSlowPathTyped("rt_resolve_global_slot", topHeight,
+                          {"w " + std::to_string(ins.constantIndex),
+                           "w " + std::to_string(slot), "w " + m_stopTemp},
+                          ins.offset, Catchability::Local);
+        std::string resolved = loadl(address);
+        storel(resolved, addr(topHeight));
+        m_body << "\tjmp " << doneLabel << "\n";
+        m_body << fastLabel << "\n";
+        storel(value, addr(topHeight));
+        m_body << doneLabel << "\n";
+    }
+
     // The currently executing function's own closure, as a Value — never
     // read out of the frame's own stack window (addr(0)): base[0] is that
     // closure only when this frame was entered by a direct CALL on a
@@ -901,35 +930,9 @@ class Emitter {
                               ins.offset, Catchability::Fatal);
             break;
         }
-        case Op::GET_GLOBAL: {
-            // Inline slot read: no interning, no hash probe, no runtime call
-            // on the bound path. Only an unbound slot calls the runtime,
-            // which fills it from m_globals or raises UndefinedVariableError.
-            int slot = globalSlotIndexFor(ins.constantIndex);
-            std::string address = globalSlotAddress(slot);
-            std::string value = loadl(address);
-            std::string unbound = newTemp();
-            m_body << "\t" << unbound << " =w ceql " << value << ", "
-                   << VAL_UNBOUND_GLOBAL << "\n";
-            std::string tag = std::to_string(m_tempCounter++);
-            std::string slowLabel = "@" + m_symbol + "_global_slow" + tag;
-            std::string fastLabel = "@" + m_symbol + "_global_fast" + tag;
-            std::string doneLabel = "@" + m_symbol + "_global_done" + tag;
-            m_body << "\tjnz " << unbound << ", " << slowLabel << ", "
-                   << fastLabel << "\n";
-            m_body << slowLabel << "\n";
-            callSlowPathTyped("rt_resolve_global_slot", before.height,
-                              {"w " + std::to_string(ins.constantIndex),
-                               "w " + std::to_string(slot), "w " + m_stopTemp},
-                              ins.offset, Catchability::Local);
-            std::string resolved = loadl(address);
-            storel(resolved, addr(before.height));
-            m_body << "\tjmp " << doneLabel << "\n";
-            m_body << fastLabel << "\n";
-            storel(value, addr(before.height));
-            m_body << doneLabel << "\n";
+        case Op::GET_GLOBAL:
+            emitGlobalRead(ins, before.height);
             break;
-        }
         case Op::SET_GLOBAL: {
             int slot = globalSlotIndexFor(ins.constantIndex);
             callSlowPathTyped("rt_op_set_global_at", before.height,
