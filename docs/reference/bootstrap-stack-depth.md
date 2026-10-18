@@ -126,10 +126,15 @@ another one unwinds fatal (`spec/04-semantics.md`, "Runtime Errors").
 A second overflow while it is set halts with the same `Stack overflow.`
 message and exit status as native.
 
-The bootstrap has no equivalent of the frame reserve that native holds for
-this unwind. The first deferred call runs in the deepest frames, with the few
-host frames that the unwind freed. A deferred call that fits in the reserve of
-native can therefore overflow here, and that overflow is now fatal. The fatal
-outcome is the one the spec gives for a call that exceeds the reserve. Before
-the change, such an overflow was delivered to a `catch`, which the spec never
-allows.
+The bootstrap has no equivalent of the frame reserve that native, the JVM
+backend and the QBE backend hold for this unwind. The spec has no reserve; it
+names no limit on what a deferred call may do. The first deferred call runs in
+the deepest frames, with only the few host frames that the unwind freed. Even
+one assignment in the deferred call can overflow again, and by the rule above
+that second overflow halts the program, where native completes. Before this
+change the second overflow reached a `catch`, which the spec never allows. The
+gap is issue [#687](https://github.com/txloc1909/loxpp/issues/687).
+`KNOWN_GAPS` in `tools/check_bootstrap_stack_overflow.py` pins four programs
+that show it. A deferred call that needs more frames than the ordinary depth
+limit of the bootstrap halts for a different cause, issue
+[#638](https://github.com/txloc1909/loxpp/issues/638).

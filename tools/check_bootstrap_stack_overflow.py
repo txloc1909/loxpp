@@ -325,6 +325,47 @@ CASES = [
 ]
 
 
+# Programs that native completes and the bootstrap halts on, because the
+# bootstrap has no frame reserve for a deferred call that runs during an
+# overflow unwind (issue #687). Each entry pins the gap: native must finish
+# with exit 0, and the bootstrap must halt with one "Stack overflow." line.
+# When a reserve lands, an entry starts to match native and
+# check_known_gaps() fails; move the entry to CASES then.
+def _gap_program(deferred_body: str, extra: str = "") -> str:
+    return (
+        extra
+        + "var ran = 0;\n"
+        + f"fun boom(n) {{ {deferred_body} }}\n"
+        + "fun f(n) { defer boom(n); f(n + 1); }\n"
+        + 'try { f(0); } catch (e) { print "caught " + e.kind; }\n'
+        + 'print "ran>0 " + str(ran > 0);\n'
+        + 'print "after";\n'
+    )
+
+
+KNOWN_GAPS = [
+    ("a deferred call with one assignment", _gap_program("ran = ran + 1;"), 687),
+    (
+        "a deferred call that calls one helper",
+        _gap_program("helper();", "fun helper() { ran = ran + 1; }\n"),
+        687,
+    ),
+    (
+        "a deferred call with a local try/catch",
+        _gap_program("try { throw Fake(); } catch (e) { ran = ran + 1; }", "class Fake {}\n"),
+        687,
+    ),
+    (
+        "a deferred call that calls deepcall(5)",
+        _gap_program(
+            "deepcall(5); ran = ran + 1;",
+            "fun deepcall(n) { if (n == 0) return 0; return 1 + deepcall(n - 1); }\n",
+        ),
+        687,
+    ),
+]
+
+
 def run(program: str, extra_env: dict | None = None) -> tuple[list[str], list[str], int]:
     with tempfile.NamedTemporaryFile("w", suffix=".lox", delete=False) as f:
         # A source file with no trailing newline mis-lexes the final token
@@ -365,6 +406,42 @@ def check_cases() -> list[str]:
         if any("] in " in line for line in stdout_lines + stderr_lines):
             failures.append(
                 f"{name}: a native traceback line leaked into output: "
+                f"stdout {stdout_lines!r}, stderr {stderr_lines!r}"
+            )
+    return failures
+
+
+def check_known_gaps() -> list[str]:
+    """Each KNOWN_GAPS program still differs from native in the pinned way."""
+    failures = []
+    native_bin = REPO_ROOT / "build" / "loxpp"
+    if not native_bin.exists():
+        return [f"native VM not found at {native_bin}"]
+    for name, program, issue in KNOWN_GAPS:
+        with tempfile.NamedTemporaryFile("w", suffix=".lox", delete=False) as f:
+            f.write(program)
+            path = f.name
+        try:
+            native = subprocess.run(
+                [str(native_bin), path], capture_output=True, text=True, timeout=60, check=False
+            )
+        finally:
+            os.unlink(path)
+        if native.returncode != 0 or native.stdout.splitlines()[-1:] != ["after"]:
+            failures.append(
+                f"known gap #{issue} ({name}): native no longer completes: "
+                f"exit {native.returncode}, stdout {native.stdout!r}"
+            )
+            continue
+        stdout_lines, stderr_lines, exit_code = run(program)
+        if stdout_lines == native.stdout.splitlines() and exit_code == 0:
+            failures.append(
+                f"known gap #{issue} ({name}): the bootstrap now matches native; "
+                "move this entry from KNOWN_GAPS to CASES"
+            )
+        elif (stdout_lines, stderr_lines, exit_code) != ([], ["Stack overflow."], 70):
+            failures.append(
+                f"known gap #{issue} ({name}): expected the pinned halt, got exit {exit_code}, "
                 f"stdout {stdout_lines!r}, stderr {stderr_lines!r}"
             )
     return failures
@@ -675,6 +752,7 @@ def main() -> int:
     examples_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else REPO_ROOT / "examples"
 
     failures = check_cases()
+    failures += check_known_gaps()
     failures += check_defer_count_matches_depth()
     failures += check_state_restore_probes()
     failures += check_state_after_examples(examples_dir)
@@ -687,7 +765,7 @@ def main() -> int:
     checked = [p for p in examples_dir.glob("*.lox") if p.name not in EXCLUDED_EXAMPLES]
     print(
         f"OK: {len(CASES)} catchability/clean-stop cases, 1 defer-count probe, "
-        f"{len(STRINGIFY_DEPTH_SWEEP)} stringifyDepth-restore sweep points, and "
+        f"{len(KNOWN_GAPS)} pinned known gaps, {len(STRINGIFY_DEPTH_SWEEP)} stringifyDepth-restore sweep points, and "
         f"{len(checked)} example state-restore checks, all match."
     )
     return 0
