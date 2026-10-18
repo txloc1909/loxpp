@@ -644,7 +644,7 @@ QBE backend, which links the native runtime.
 | N8 credit channel library | #604 | #622 |
 | N7 differential gate and close | #602 | #644 |
 
-Follow-ups that merged before the close: #612 (a deferred call cannot
+Follow-ups that merged before the mission ended: #612 (a deferred call cannot
 suspend, for #610), #623, #624, #625, #626, #627, and #628.
 
 **The gate.** `tools/check_spec_probes.py` runs the shared spec probes on

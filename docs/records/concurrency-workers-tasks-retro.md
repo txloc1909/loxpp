@@ -55,14 +55,15 @@ while N7 ran, so N7 rebased once before its PR.
    N2 did the work.
 3. **A wrong reachability claim.** The N2 implementer said that a QBE gap
    becomes reachable at N6. The reviewer showed that it was reachable at
-   once through `tools/loxpp_qbe.sh` (#607, third review).
+   once through `tools/loxpp_qbe.sh` (#607, second review,
+   2026-10-16T22:29:30Z).
 4. **An agent stopped processes of other agents.** The orchestrator reports
    that one agent ran `pkill` with a pattern that matched processes in
    containers that other agents had started. GitHub has no record of it.
 5. **The run stopped and resumed.** The orchestrator reports stops on the
    spend limit. The GitHub record shows a 7.1-hour gap after the first N3
-   review (02:33 to 09:38 UTC, 2026-10-17) and a 4-hour gap after the N5 PR
-   opened (11:41 to 15:21 UTC). Each time, the loop resumed from the GitHub
+   review (02:33 to 09:38 UTC, 2026-10-17) and a gap of 3 hours 40 minutes
+   after the N5 PR opened (11:41 to 15:21 UTC). Each time, the loop resumed from the GitHub
    state: the PR, its review comments, and the node issue. No work was lost,
    because each agent had pushed its commits.
 6. **The commit trailers differ.** The squash commits of N1, N2, N4, N5, and
@@ -83,8 +84,9 @@ while N7 ran, so N7 rebased once before its PR.
 - The run-time diff alone did not show compile-time parity. The N7 gate
   found that the bootstrap reports some compile errors with a different
   message, line, or not at all, and that 12 older translation probes differ
-  on the bootstrap. Each became an issue (#634 to #642). A gate for both phases on every
-  consumer from the first node would have found them before this mission.
+  on the bootstrap. Each became an issue (#634 to #642). These gaps are
+  older than the mission. A gate for both phases on every consumer in an
+  earlier mission would have found them then.
 
 ## Rules for AGENTS.md
 
