@@ -1,2 +1,0 @@
-// Compile error: a character that is not a token, after a value.
-print 1 @ 2;

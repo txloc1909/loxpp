@@ -1,3 +1,4 @@
+// DIAGNOSTIC: Cannot use 'continue' outside a loop.
 // Compile error: `continue` outside a loop.
 continue;
 print "after";

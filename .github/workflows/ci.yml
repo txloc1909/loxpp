@@ -560,6 +560,19 @@ jobs:
             loxpp-dev:latest \
             bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/compile-errors/ --compile-errors"
 
+      # Issue #642: CompileDiagnosticCases self-skips its three generated
+      # size-limit programs on the debug leg (the trace build), so this leg
+      # runs them. --no-tests=error fails the step if the name stops being
+      # registered.
+      - name: Run compile-diagnostic case coverage
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "ctest --test-dir build -R CompileDiagnosticCases --output-on-failure --no-tests=error"
+
       # Issue #323: the bootstrap interpreter borrows the native VM's own
       # call-frame budget (see docs/reference/bootstrap-stack-depth.md), so any
       # refactor that adds frames per evaluator cycle shrinks how deep a

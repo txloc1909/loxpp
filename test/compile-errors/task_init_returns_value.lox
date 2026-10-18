@@ -1,3 +1,4 @@
+// DIAGNOSTIC: Can't return a value from an initializer.
 // Compile error: an initializer that returns a task handle.
 class A {
   init() {

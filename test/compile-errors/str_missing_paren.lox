@@ -1,3 +1,4 @@
+// DIAGNOSTIC: Expect '(' after 'str'.
 // Compile error: `str` with no parenthesis.
 var x = str 1;
 print "after";

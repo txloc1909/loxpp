@@ -1,2 +1,3 @@
+// DIAGNOSTIC: A class can't inherit from itself.
 // Compile error: a class that inherits from itself.
 class A < A {}

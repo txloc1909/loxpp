@@ -1,2 +1,3 @@
+// DIAGNOSTIC: Can't use 'super' in a class with no superclass.
 // Compile error: `super` in a class with no superclass.
 class A { f() { return super.f(); } }

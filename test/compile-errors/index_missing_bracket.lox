@@ -1,3 +1,4 @@
+// DIAGNOSTIC: Expect ']' after index.
 // Compile error: an index with no closing bracket.
 var l = [1, 2];
 print l[0;

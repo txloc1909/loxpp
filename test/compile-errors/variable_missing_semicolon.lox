@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Expect ';' after variable declaration.
+// Compile error: a variable declaration with no closing semicolon.
+var x = 1 2;

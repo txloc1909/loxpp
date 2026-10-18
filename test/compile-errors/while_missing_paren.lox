@@ -1,3 +1,4 @@
+// DIAGNOSTIC: Expect ')' after condition.
 // Compile error: a `while` condition with no closing parenthesis.
 while (true print 1;
 print "after";

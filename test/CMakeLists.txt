@@ -357,6 +357,19 @@ if(LOXPP_PYTHON3)
     set_tests_properties(BootstrapDeferCallable PROPERTIES
         ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
+
+    # Issue #642: every compile message native can report has a case in
+    # test/compile-errors/ or a recorded reason. The checker reads the message
+    # templates from src/parser.cpp, src/compiler.cpp, and src/scanner.cpp, so
+    # a new message cannot land without a case or a reason. Its three
+    # generated size-limit programs self-skip on a trace build; the release
+    # leg runs them.
+    add_test(NAME CompileDiagnosticCases
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_compile_error_cases.py
+                --native $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(CompileDiagnosticCases PROPERTIES
+        ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}")
 endif()
 
 # The *_gc targets share their source with a non-_gc twin. They run under GC

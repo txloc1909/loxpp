@@ -1,3 +1,4 @@
+// DIAGNOSTIC: Can't defer at the top level.
 // Compile error: `defer` in top-level code.
 fun f() {}
 defer f();

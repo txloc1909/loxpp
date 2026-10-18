@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Expect superclass name.
+// Compile error: a superclass clause with no name.
+class A < {}

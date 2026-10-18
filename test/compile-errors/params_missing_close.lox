@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Expect ')' after parameters.
+// Compile error: a parameter list with no closing parenthesis.
+fun f(a {}

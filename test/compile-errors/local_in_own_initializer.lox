@@ -1,2 +1,3 @@
+// DIAGNOSTIC: Can't read local variable in its own initializer.
 // Compile error: a local read in its own initializer.
 fun f() { var a = a; }

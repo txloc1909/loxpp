@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Can't use 'yield' as an operand.
+// Compile error: `yield` as the right operand of a binary operator.
+fun f() { 1 + yield; }

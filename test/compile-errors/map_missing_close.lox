@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Expect '}' after map entries.
+// Compile error: a map literal with no closing brace.
+var m = {"a": 1;

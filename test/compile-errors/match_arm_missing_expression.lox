@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Match arm body must end with an expression.
+// Compile error: a match arm body that ends with a statement.
+var x = match 1 { case 1 => { var y = 2; } };

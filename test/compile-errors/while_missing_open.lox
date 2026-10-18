@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Expect '(' after 'while'.
+// Compile error: a `while` condition with no opening parenthesis.
+while true) print 1;

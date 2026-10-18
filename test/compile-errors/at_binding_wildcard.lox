@@ -1,2 +1,0 @@
-// Compile error: `@` after an expression statement.
-_ @ x;

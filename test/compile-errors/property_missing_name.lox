@@ -1,3 +1,4 @@
+// DIAGNOSTIC: Expect property name after '.'.
 // Compile error: a `.` with no property name.
 var a = 1;
 print a.;

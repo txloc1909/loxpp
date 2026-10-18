@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Expect ';' after expression.
+// Compile error: an expression statement with no closing semicolon.
+fun f() { 1 + 2 3; }
