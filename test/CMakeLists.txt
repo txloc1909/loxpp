@@ -370,6 +370,17 @@ if(LOXPP_PYTHON3)
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(CompileDiagnosticCases PROPERTIES
         ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}")
+
+    # Issue #666: every row of the Fatal Runtime Errors table is fatal on the
+    # bootstrap, as on native. The rows the bootstrap does not pass yet are in
+    # tools/fatal_table_xfail.txt; the check fails on a listed row that
+    # passes. Same trace-noise constraint as BootstrapOperatorOverload above.
+    add_test(NAME FatalTable
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_fatal_table.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(FatalTable PROPERTIES
+        ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
 endif()
 
 # The *_gc targets share their source with a non-_gc twin. They run under GC

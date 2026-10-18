@@ -685,6 +685,18 @@ jobs:
             loxpp-dev:latest \
             bash -c "ctest --test-dir build -R BootstrapDeferCallable --output-on-failure --no-tests=error"
 
+      # FatalTable self-skips on the debug leg (SKIP_RETURN_CODE 125) for the
+      # same reason as BootstrapArityFatal. This step on the release leg is the
+      # one that runs it.
+      - name: Run Fatal Runtime Errors table check
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "ctest --test-dir build -R FatalTable --output-on-failure --no-tests=error"
+
       # GcSweepLinear self-skips on debug (SKIP_RETURN_CODE 125), so the release
       # leg is the only place the sweep-time bound is checked.
       - name: Run GC sweep linearity check
