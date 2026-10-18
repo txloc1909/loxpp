@@ -3576,9 +3576,7 @@ class Interpreter {
 
     // Native validates a slice through its own always-fatal RAISE_ERROR
     // sites (src/vm.cpp Op::SLICE), never through the catchable Index*/
-    // NotIndexableError machinery Op::GET_INDEX and Op::SET_INDEX use above
-    // -- so every kind in this method is its own, not a reuse of an Index*
-    // table kind for a slice-shaped cause.
+    // NotIndexableError machinery Op::GET_INDEX and Op::SET_INDEX use above.
     evalSlice(objectExpr, startExpr, endExpr, line, env) {
         var object = this.evalExpr(objectExpr, env);
         if (this.throwFlag) return nil;
@@ -3594,15 +3592,15 @@ class Interpreter {
                 if (this.throwFlag) return nil;
                 return r;
             }
-            this.setError("NotSliceableError", "Slice requires a List or String.", line);
+            this.fatalError("Slice requires a List or String.");
             return nil;
         }
-        if (!isLoxNum(startV)) { this.setError("SliceIndexTypeError", "Slice index must be a number.", line); return nil; }
-        if (math.floor(startV) != startV) { this.setError("SliceIndexNotIntegerError", "Slice index must be an integer.", line); return nil; }
-        if (startV < 0) { this.setError("SliceIndexNegativeError", "Slice index must be non-negative.", line); return nil; }
-        if (!isLoxNum(endV)) { this.setError("SliceIndexTypeError", "Slice index must be a number.", line); return nil; }
-        if (math.floor(endV) != endV) { this.setError("SliceIndexNotIntegerError", "Slice index must be an integer.", line); return nil; }
-        if (endV < 0) { this.setError("SliceIndexNegativeError", "Slice index must be non-negative.", line); return nil; }
+        if (!isLoxNum(startV)) { this.fatalError("Slice index must be a number."); return nil; }
+        if (math.floor(startV) != startV) { this.fatalError("Slice index must be an integer."); return nil; }
+        if (startV < 0) { this.fatalError("Slice index must be non-negative."); return nil; }
+        if (!isLoxNum(endV)) { this.fatalError("Slice index must be a number."); return nil; }
+        if (math.floor(endV) != endV) { this.fatalError("Slice index must be an integer."); return nil; }
+        if (endV < 0) { this.fatalError("Slice index must be non-negative."); return nil; }
         var s = startV;
         var e = endV;
         if (tag == "list") {
