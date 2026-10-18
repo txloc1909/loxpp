@@ -138,6 +138,23 @@ public final class FileTest {
             }
         }
 
+        // Issue #654: a pipe or a character device rejects RandomAccessFile's
+        // seek, though native's fopen opens it. A write-only open must fall
+        // back to a stream handle. /dev/null is the deterministic device
+        // case; the bootstrap wrapper gate covers a pipe through /dev/stdout.
+        if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux")) {
+            LoxFile devNull = LoxFile.open("/dev/null", "w");
+            devNull.write("discarded");
+            devNull.writeline("discarded");
+            devNull.close();
+            checkThrows(devNull::read, LoxError.class,
+                    "read() on a closed stream-mode file raises an error");
+
+            LoxFile devNullAppender = LoxFile.open("/dev/null", "a");
+            devNullAppender.write("discarded");
+            devNullAppender.close();
+        }
+
         // Issue #401: NUL byte handling in File.read/readline/readlines
         // Create a temp file with NUL bytes
         File nulTmp = File.createTempFile("lox-rt-file-nul", ".bin");
