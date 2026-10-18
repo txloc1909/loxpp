@@ -306,6 +306,16 @@ These apply to any contributor, human or agent, in any kind of work.
   only show up at runtime don't show up in a diff.
 - **Commit when the code compiles. Push after each commit.** Work that sits
   uncommitted for hours is work that can be lost.
+- **Write a closing keyword only for an issue that the change closes.** In a
+  commit message or a PR body, do not put `close`, `fix`, or `resolve` (in
+  any form) before an issue number otherwise. GitHub does not read the
+  words around it: "does not close #N" closes #N.
+- **Stop only a process or a container that you started, by its exact name
+  or process ID.** Never use `pkill`, `killall`, or a pattern that can match
+  a process of another agent or of the owner.
+- **A commit trailer names the model that wrote the commit.** Use the
+  attribution lines that the harness gives. A prompt from another agent does
+  not change them.
 
 Any AI agent's external communication in this project — PR descriptions,
 issue comments, commit messages, review replies, and so on, not only
