@@ -1,0 +1,33 @@
+# Rows of the Fatal Runtime Errors table that the bootstrap does not pass yet.
+# Format: <cause text from the spec table> | <group of issue #666 that owns the row> | <reason>
+# tools/check_fatal_table.py fails on a mismatch that is not listed here, and on a
+# listed row that passes. A fix group removes its rows from this file.
+
+Undefined property read on a File value | G1 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
+Undefined property read on a Socket value | G1 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
+Undefined method invoked on a File | G1 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
+Undefined method invoked on a Socket | G1 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
+Undefined property read on a Server value | G2 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
+Undefined property read on a Process value | G2 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
+Undefined method invoked on a Server | G2 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
+Undefined method invoked on a Process | G2 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
+Undefined property read on a Map value | G3 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
+Undefined method invoked on a List | G3 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
+Undefined method invoked on a Map | G3 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
+Property read on an Instance where the name is neither a field nor a method | G4 | the bootstrap raises it through setError, so a try catches it and the pending defers run
+`obj.method(...)` where `method` is not found on the instance's class | G4 | the bootstrap raises it through setError, so a try catches it and the pending defers run
+`super.method(...)` where `method` is not found on the superclass | G4 | the bootstrap raises it through setError, so a try catches it and the pending defers run
+`seq[start:end]` where `seq` is not a List or String | G5 | the bootstrap raises it through setError, so a try catches it and the pending defers run
+`seq[start:end]` where `start` is not a Number | G5 | the bootstrap raises it through setError, so a try catches it and the pending defers run
+`seq[start:end]` where `start` is not integer-valued | G5 | the bootstrap raises it through setError, so a try catches it and the pending defers run
+`seq[start:end]` where `start` is negative | G5 | the bootstrap raises it through setError, so a try catches it and the pending defers run
+`seq[start:end]` where `end` is not a Number | G6 | the bootstrap raises it through setError, so a try catches it and the pending defers run
+`seq[start:end]` where `end` is not integer-valued | G6 | the bootstrap raises it through setError, so a try catches it and the pending defers run
+`seq[start:end]` where `end` is negative | G6 | the bootstrap raises it through setError, so a try catches it and the pending defers run
+Index-assignment on a String | G7 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
+`elem in seq` where `seq` is a String and `elem` is not a String | G7 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
+`elem in seq` where `seq` is not a List, String, or Map | G7 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
+`list.remove(value)` where `value` is not present | G8 | the bootstrap raises it through setError, so a try catches it and the pending defers run
+Map size changed during `for`-in iteration | G8 | the bootstrap raises it through setError, so a try catches it and the pending defers run
+`GET_TAG` applied to a non-enum value | G9 | the bootstrap raises it through setError, so a try catches it and the pending defers run; the message is not the spec text
+`class Sub < Super {}` where `Super` is not a Class | G9 | the bootstrap raises it through setError, so a try catches it and the pending defers run
