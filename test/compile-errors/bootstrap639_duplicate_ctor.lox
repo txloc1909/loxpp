@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Duplicate constructor name.
+// Compile error: two constructors of one enum have one name.
+enum E { A A }
