@@ -58,6 +58,10 @@ tools/probe_xfail_jvm.txt. A listed program reports one of two outcomes:
 EXEMPT and is not run: a spec exception releases that consumer from the
 probe's output.
 
+--only-spec-probes keeps only the spec probes (the .lox files with a
+`// STATUS:` line) of the program list, so a walk of a directory runs the
+shared probes of the spec and no other program in it.
+
 Two silent runs are not proof that both ran: a runner that crashes before
 writing anything looks identical, on stdout alone, to a program that
 legitimately prints nothing. So when both sides' stdout is empty, this
@@ -76,7 +80,7 @@ this script's default. State that trade-off, do not hide it.
 Usage:
     python3 tools/diff_runtimes.py <native-loxpp> <other-runner> <path>...
         [--exclude <file>] [--xfail <file>] [--consumer <name>]
-        [--compile-errors] [--timeout <seconds>]
+        [--only-spec-probes] [--compile-errors] [--timeout <seconds>]
     python3 tools/diff_runtimes.py <native-loxpp> <other-runner>
         --exclude <file> --only-excluded <dir>
 
@@ -338,6 +342,11 @@ def main() -> None:
         help="the consumer the other runner is, for the NOT-BINDING lines of spec probes",
     )
     parser.add_argument(
+        "--only-spec-probes",
+        action="store_true",
+        help="run only the spec probes (the files with a STATUS line) of the program list",
+    )
+    parser.add_argument(
         "--compile-errors",
         action="store_true",
         help="every program must be a compile error on native; one that is not reports DIVERGE",
@@ -374,9 +383,13 @@ def main() -> None:
             parser.error("provide at least one <path>, or use --only-excluded")
         programs = collect_programs(args.paths)
 
+    if args.only_spec_probes:
+        programs = [p for p in programs if parse_probe(p) is not None]
+
     if not programs:
         print(
-            "error: no programs to check (empty directory, or an empty exclusion list)",
+            "error: no programs to check (empty directory, an empty exclusion list, "
+            "or no spec probe with --only-spec-probes)",
             file=sys.stderr,
         )
         sys.exit(2)

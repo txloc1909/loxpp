@@ -457,6 +457,55 @@ jobs:
             loxpp-dev:latest \
             bash -c "python3 tools/check_examples.py bootstrap/lox_wrapper.sh examples/"
 
+      # The differential gate for the bootstrap interpreter, both phases:
+      # tools/diff_runtimes.py compares each compile error (exit status 65
+      # and its stderr) and each run's stdout with native.
+      # check_spec_probes.py and check_examples.py above check each consumer
+      # alone; this step compares it with native, which also covers an
+      # example with no CHECK line. The probe walk takes only the spec
+      # probes: other files of test/translation-probes/ pin translation
+      # problems of the compiled backends.
+      - name: Bootstrap differential suite - spec probes
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev:latest \
+            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/ --only-spec-probes --consumer bootstrap --timeout 120"
+
+      # examples/bench_jump_table.lox is left out by name: it is a
+      # 5,000,000-iteration microbenchmark with no CHECK line, and it does
+      # not finish inside the timeout on the bootstrap interpreter. The
+      # QBE step that runs the corpus through the self-hosted interpreter
+      # leaves it out for the same reason.
+      - name: Bootstrap differential suite - examples
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev:latest \
+            bash -c '
+              files=$(find examples -maxdepth 1 -name "*.lox" ! -name "bench_jump_table.lox" | sort)
+              python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh $files --timeout 120
+            '
+
+      # test/compile-errors/: one program per parser or resolver error.
+      # --compile-errors fails a file that native does not reject at compile
+      # time, so the corpus cannot turn into run-time programs unseen.
+      - name: Bootstrap differential suite - compile errors
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev:latest \
+            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/compile-errors/ --compile-errors"
+
       # Issue #323: the bootstrap interpreter borrows the native VM's own
       # call-frame budget (see docs/reference/bootstrap-stack-depth.md), so any
       # refactor that adds frames per evaluator cycle shrinks how deep a
