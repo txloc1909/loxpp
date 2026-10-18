@@ -30,6 +30,7 @@ class Scanner {
     TokenType identifierType();
     Token consumeNumber();
     Token consumeString();
+    void skipRestOfString();
     Token consumeIdentifier();
     void skipWhitespaceAndComments();
 
