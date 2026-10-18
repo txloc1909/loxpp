@@ -1,3 +1,4 @@
+// This pins spec/04-semantics.md, match Expression, "Class patterns".
 // Which bare pattern names are class tests is fixed when the program is
 // compiled, from the classes declared at global scope before the match in
 // the source. A class declared later in the source does not change the
