@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Unknown escape sequence.
+// Compile error: an unknown escape in a literal with no closing quote.
+print "a\qb

@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Unknown escape sequence.
+// Compile error: a later literal is not an error after an unknown escape.
+print "a\qb";
+print "c";

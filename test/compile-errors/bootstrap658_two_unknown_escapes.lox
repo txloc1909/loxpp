@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Unknown escape sequence.
+// Compile error: two unknown escapes in one literal give one error.
+print "a\qb\wc";
