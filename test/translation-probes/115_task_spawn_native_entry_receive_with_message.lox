@@ -1,8 +1,16 @@
 // A receive that finds a message does not suspend, even below a native entry.
+// The task then ends, so a later send to it raises DeadTaskError. That send
+// proves the task ran and consumed the message, not that it is still parked.
 var t = task.spawn(task.receive);
 task.send(t, "m");
 yield;
-print "main done";
+var kind = "none";
+try {
+    task.send(t, "again");
+} catch (e) {
+    kind = e.kind;
+}
+print kind;
 
 // STATUS: ok
-// CHECK: main done
+// CHECK: DeadTaskError
