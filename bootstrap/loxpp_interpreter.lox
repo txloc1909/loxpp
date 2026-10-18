@@ -3557,10 +3557,15 @@ class Interpreter {
             object.elements[fl] = val;
             return val;
         }
-        // Native raises this through its own always-fatal RAISE_ERROR site,
-        // separate from SET_INDEX's catchable NotIndexableError path below
-        // (src/vm.cpp Op::SET_INDEX).
-        if (isLoxStr(object)) { this.fatalError("Strings are immutable and cannot be indexed for assignment."); return nil; }
+        // The object, the index and the value are all evaluated before the
+        // fault, in this order, as Runtime::opSetIndex sees them on the stack.
+        // The fault is fatal here but a catchable NotIndexableError below.
+        if (isLoxStr(object)) {
+            this.evalExpr(valueExpr, env);
+            if (this.throwFlag) return nil;
+            this.fatalError("Strings are immutable and cannot be indexed for assignment.");
+            return nil;
+        }
         var m = this.findDunder(object, "__index_set__");
         if (m != nil) {
             var val = this.evalExpr(valueExpr, env);
@@ -4380,8 +4385,8 @@ class Interpreter {
             return nil;
         }
         // `in`'s own operand-type checks are always fatal on native
-        // (src/vm.cpp Op::IN, RAISE_ERROR), a separate opcode from indexing
-        // -- neither IndexTypeError nor NotIndexableError applies here.
+        // (Runtime::opIn), a separate opcode from indexing -- neither
+        // IndexTypeError nor NotIndexableError applies here.
         if (opL == "in") {
             var rtag = loxTag(right);
             if (rtag == "list") {
