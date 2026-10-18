@@ -564,11 +564,19 @@ class Parser {
     deferStatement() {
         var line = this.previous().line;
         var expr = this.unary();
-        this.expect("SEMICOLON", "Expect ';' after defer statement.");
-        return match expr {
+        // The operand check comes before the ';' check and names the last
+        // token of the operand, as native does. The ';' stays unread after
+        // the error, so that synchronize() skips to it and stops there.
+        var stmt = match expr {
             case Call{callee, paren_line, args} => DeferStmt(line, callee, args)
-            case _ => { this.softError(this.peek(), "defer requires a function call."); nil }
+            case _ => nil
         };
+        if (stmt == nil) {
+            this.parseError(this.previous(), "Expect a call expression after 'defer'.");
+            return nil;
+        }
+        this.expect("SEMICOLON", "Expect ';' after defer statement.");
+        return stmt;
     }
 
     blockContents() {
