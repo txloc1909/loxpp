@@ -52,11 +52,25 @@ FATAL_FAST_PATH_PROBE = (
     REPO_ROOT / "test" / "translation-probes" / "58_defer_overflow_fatal_fast_path.lox"
 )
 
+PROBE_DIR = REPO_ROOT / "test" / "translation-probes"
+
+# A second StackOverflowError raised by a deferred call while the first one
+# unwinds is fatal, not delivered to the live catch (spec, "Runtime Errors").
+# The probes are shared with the native VM and the JVM backend.
+REENTRANT_OVERFLOW_PROBES = [
+    "58_stack_overflow_reentrant_fatal",
+    "defer_overflow_during_unwind",
+    "defer_overflow_kind_spoof",
+    "defer_replaces_unrelated_fault_during_unwind",
+    "defer_throw_on_normal_return_during_unwind",
+]
+
 STATE_LINE_RE = re.compile(
     r"^__BOOTSTRAP_STATE__ defers=(\d+) stringifyDepth=(\d+) "
     r"returnFlag=(true|false) breakFlag=(true|false) "
     r"continueFlag=(true|false) throwFlag=(true|false) "
-    r"maxStringifyDepthSeen=(\d+)$"
+    r"maxStringifyDepthSeen=(\d+) "
+    r"overflowUnwinding=(true|false) overflowDeferNest=(\d+)$"
 )
 STATE_START = {
     "defers": "0",
@@ -65,6 +79,8 @@ STATE_START = {
     "breakFlag": "false",
     "continueFlag": "false",
     "throwFlag": "false",
+    "overflowUnwinding": "false",
+    "overflowDeferNest": "0",
 }
 
 # (name, program, expected stdout lines, expected stderr lines, expected
@@ -223,6 +239,79 @@ CASES = [
         'try { co.resume(); } catch (e) { print "caught " + e.kind; }\n'
         'print "after";\n',
         ["d", "caught StackOverflowError", "after"],
+        [],
+        0,
+    ),
+    *[
+        (
+            f"fatal: a second overflow during an overflow unwind is not caught ({name})",
+            (PROBE_DIR / f"{name}.lox").read_text(),
+            [],
+            ["Stack overflow."],
+            70,
+        )
+        for name in REENTRANT_OVERFLOW_PROBES
+    ],
+    (
+        "catchable: two overflows one after the other are both delivered",
+        "fun f(n) { return 1 + f(n + 1); }\n"
+        'try { f(0); } catch (e) { print "first " + e.kind; }\n'
+        'try { f(0); } catch (e) { print "second " + e.kind; }\n'
+        'print "after";\n',
+        ["first StackOverflowError", "second StackOverflowError", "after"],
+        [],
+        0,
+    ),
+    (
+        "catchable: a throw that replaces the overflow in a defer ends the unwind when caught",
+        'fun thrower() { throw "replaced"; }\n'
+        "fun f(n) { defer thrower(); f(n + 1); }\n"
+        'try { f(0); } catch (e) { print "outer " + str(e); }\n'
+        "fun h(n) { return 1 + h(n + 1); }\n"
+        'try { h(0); } catch (e) { print "again " + e.kind; }\n'
+        'print "after";\n',
+        ["outer replaced", "again StackOverflowError", "after"],
+        [],
+        0,
+    ),
+    (
+        "fatal: a catch that ended an overflow unwind does not hide a later re-entrant overflow",
+        "fun h(n) { return 1 + h(n + 1); }\n"
+        'fun f(n) { try { h(n); } catch (e) { print "in " + e.kind; } }\n'
+        "f(0);\n"
+        'try { h(0); } catch (e) { print "again " + e.kind; }\n'
+        "fun k(n) { defer f(n); k(n + 1); }\n"
+        'try { k(0); } catch (e) { print "k " + e.kind; }\n'
+        'print "end";\n',
+        ["in StackOverflowError", "again StackOverflowError"],
+        ["Stack overflow."],
+        70,
+    ),
+    # Only the frames n < 20 hold a defer, so the first deferred call runs
+    # with plenty of native frames left and a try/catch inside it completes.
+    # That inner catch must not end the unwind: deepcall(2000) overflows
+    # again, and the budget of native is below 2000 frames.
+    (
+        "fatal: a try/catch inside a deferred call does not end the overflow unwind",
+        "class Fake {}\n"
+        "fun deepcall(n) { if (n == 0) return 0; return 1 + deepcall(n - 1); }\n"
+        'fun boom(n) { try { throw Fake(); } catch (e) { print "local"; } deepcall(2000); }\n'
+        "fun f(n) { if (n < 20) defer boom(n); f(n + 1); }\n"
+        'try { f(0); } catch (e) { print "caught " + e.kind; }\n'
+        'print "after";\n',
+        ["local"],
+        ["Stack overflow."],
+        70,
+    ),
+    (
+        "catchable: the same deferred calls without a second overflow run, then the catch gets the first",
+        "class Fake {}\n"
+        "fun deepcall(n) { if (n == 0) return 0; return 1 + deepcall(n - 1); }\n"
+        'fun boom(n) { try { throw Fake(); } catch (e) { print "local"; } deepcall(5); }\n'
+        "fun f(n) { if (n < 20) defer boom(n); f(n + 1); }\n"
+        'try { f(0); } catch (e) { print "caught " + e.kind; }\n'
+        'print "after";\n',
+        ["local"] * 20 + ["caught StackOverflowError", "after"],
         [],
         0,
     ),
@@ -536,6 +625,8 @@ def check_state_after_examples(examples_dir: Path) -> list[str]:
                 "breakFlag": m.group(4),
                 "continueFlag": m.group(5),
                 "throwFlag": m.group(6),
+                "overflowUnwinding": m.group(8),
+                "overflowDeferNest": m.group(9),
             }
             if actual != STATE_START:
                 failures.append(

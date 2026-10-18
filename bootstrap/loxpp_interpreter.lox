@@ -1688,6 +1688,10 @@ class LoxFunction {
             // deferred call, this call's own included (spec, "Fatal Runtime
             // Errors" and "Call stack overflow's fatal fast path").
             if (interp.tryDepth == 0) interp.fatalError("Stack overflow.");
+            // A second overflow while the first one still unwinds is fatal
+            // too, with the same skipped defers (spec, "Runtime Errors").
+            if (interp.overflowUnwinding) interp.fatalError("Stack overflow.");
+            interp.overflowUnwinding = true;
             // pendingDefers needs no repair: this try's own scope holds only
             // THIS call's own accumulated defers at the moment of the fault
             // -- the overflow is native refusing to enter the NEXT frame, so
@@ -1740,7 +1744,10 @@ class LoxFunction {
                     interp.throwFlag = false;
                     interp.thrownValue = nil;
                     interp.nativeDepth = interp.nativeDepth + 1;
+                    var unwindingOverflow = interp.overflowUnwinding;
+                    if (unwindingOverflow) interp.overflowDeferNest = interp.overflowDeferNest + 1;
                     callee.call(interp, defer_args);
+                    if (unwindingOverflow) interp.overflowDeferNest = interp.overflowDeferNest - 1;
                     interp.nativeDepth = interp.nativeDepth - 1;
                     if (!interp.throwFlag) {
                         interp.throwFlag = savedThrow;
@@ -2721,6 +2728,15 @@ class Interpreter {
         // overflow is fatal, and skips every pending deferred call, only
         // when this is 0.
         this.tryDepth = 0;
+        // True from the moment a StackOverflowError becomes a flag-based
+        // error until a try statement outside every deferred call of that
+        // unwind catches the throw in flight. A second overflow while it is
+        // true is fatal. overflowDeferNest counts the deferred calls that
+        // the unwind is running: a try inside one of them must not end it,
+        // as native's m_unwindingStackOverflow stays set for the whole
+        // handler search.
+        this.overflowUnwinding = false;
+        this.overflowDeferNest = 0;
         // High-water mark of stringifyDepth, for tools/check_bootstrap_stack_overflow.py
         // only: it never decreases, so a probe can tell "the run actually
         // recursed into stringify() before the fault" from "stringifyDepth
@@ -3785,6 +3801,7 @@ class Interpreter {
         this.execStmt(tryBlock, env);
         this.tryDepth = this.tryDepth - 1;
         if (this.throwFlag) {
+            if (this.overflowDeferNest == 0) this.overflowUnwinding = false;
             this.throwFlag = false;
             var caughtVal = this.thrownValue;
             this.thrownValue = nil;
@@ -4863,5 +4880,7 @@ if (interpreter != nil and env("LOXPP_BOOTSTRAP_CHECK_STATE") == "1") {
           " breakFlag=" + str(interpreter.breakFlag) +
           " continueFlag=" + str(interpreter.continueFlag) +
           " throwFlag=" + str(interpreter.throwFlag) +
-          " maxStringifyDepthSeen=" + str(interpreter.maxStringifyDepthSeen);
+          " maxStringifyDepthSeen=" + str(interpreter.maxStringifyDepthSeen) +
+          " overflowUnwinding=" + str(interpreter.overflowUnwinding) +
+          " overflowDeferNest=" + str(interpreter.overflowDeferNest);
 }

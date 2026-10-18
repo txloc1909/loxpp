@@ -114,3 +114,22 @@ checkpoint, including the state a caught overflow must restore by hand
 (`pendingDefers`, `stringifyDepth`, the return flags) because the host
 unwind that reaches the `catch` skips whatever `LoxFunction.call` would
 otherwise restore on its normal return path.
+
+## Update: a second overflow during an overflow unwind is fatal
+
+The spec makes a `StackOverflowError` that a deferred call raises while
+another one unwinds fatal (`spec/04-semantics.md`, "Runtime Errors").
+`Interpreter.overflowUnwinding` marks that unwind. It is set when
+`LoxFunction.call` turns the host overflow into a flag-based error, and a
+`try` outside every deferred call of the unwind clears it
+(`overflowDeferNest` counts those calls, so a `try` inside one does not).
+A second overflow while it is set halts with the same `Stack overflow.`
+message and exit status as native.
+
+The bootstrap has no equivalent of the frame reserve that native holds for
+this unwind. The first deferred call runs in the deepest frames, with the few
+host frames that the unwind freed. A deferred call that fits in the reserve of
+native can therefore overflow here, and that overflow is now fatal. The fatal
+outcome is the one the spec gives for a call that exceeds the reserve. Before
+the change, such an overflow was delivered to a `catch`, which the spec never
+allows.
