@@ -253,8 +253,8 @@ class Scanner {
         }
         if (this.isAtEnd()) {
             if (badEscape) {
-                // Native is in panic mode when it reaches end of input here,
-                // so the parser reports nothing at the EOF token.
+                // Marks the EOF token: the parser enters panic mode when it
+                // reaches that token (see Parser.advance).
                 this.eofInBadString = true;
             } else {
                 this.line = startLine;
@@ -383,7 +383,14 @@ class Parser {
     previous()   { return this.tokens[this.current - 1]; }
 
     advance() {
-        if (!this.isAtEnd()) this.current = this.current + 1;
+        if (!this.isAtEnd()) {
+            this.current = this.current + 1;
+            // Native scans the error token of a bad literal when it advances
+            // onto it, and that starts panic mode. This literal ends the
+            // input, so the EOF token stands for it. Panic mode stays until
+            // the next synchronize(), as on native.
+            if (this.isAtEnd() and this.peek().literal != nil) this.panicMode = true;
+        }
         return this.previous();
     }
 
@@ -420,10 +427,6 @@ class Parser {
 
     parseError(token, msg) {
         if (this.panicMode) return;
-        if (token.type == "EOF" and token.literal != nil) {
-            this.panicMode = true;
-            return;
-        }
         this.panicMode = true;
         this.softError(token, msg);
     }
