@@ -514,6 +514,8 @@ statement).
 
 **@-bindings.** A pattern of the form `name @ subPat` evaluates `subPat` against the subject; if it matches, `name` is bound to the whole subject value. Both `name` and any bindings introduced by `subPat` are visible in the arm body. `_` is not allowed as an @-binding name. The sub-pattern must be a structural pattern (constructor, class, or sequence); a plain binding or wildcard sub-pattern is a compile error.
 
+**Class patterns.** A bare name in a pattern is a class test only as a whole arm pattern (alone or in an `or`-chain) or as the sub-pattern of an @-binding, and only when a global class with that name is declared earlier in the source. Any other bare name is a binding, including a name in braces, parentheses or brackets. The class test reads the global with that name when it runs; if that global does not hold a class then, the test matches no value.
+
 
 ---
 

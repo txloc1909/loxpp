@@ -147,6 +147,8 @@ mapEntry       ::= expression ":" expression ;
 
 **Note on `match`:** `match` is an **expression** construct. It always produces a value. Arms can contain multiple declarations followed by a final expression, or a single expression. When a `match` expression is used as a statement (followed by `;`), the produced value is discarded.
 
+**Class patterns.** A class pattern matches an instance of the class or of any subclass of it.
+
 ---
 
 ## Operator Precedence

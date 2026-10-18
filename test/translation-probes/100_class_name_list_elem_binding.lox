@@ -1,5 +1,6 @@
 // A name in a sequence pattern is a binding for that element
-// (spec/02-syntax.md, seqElem). This is so also when a global class has the
+// (spec/04-semantics.md, match Expression, "Class patterns": a bare name in
+// brackets is a binding). This is so also when a global class has the
 // same name: the arm binds the element, and does not test it against the
 // class.
 class Shape {}

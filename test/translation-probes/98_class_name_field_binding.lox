@@ -1,5 +1,6 @@
 // A name in the braces of a class pattern is a field name, and the arm binds
-// it to the value of that field (spec/02-syntax.md, identArmPat). This is so
+// it to the value of that field (spec/04-semantics.md, match Expression,
+// "Class patterns": a bare name in braces is a binding). This is so
 // also when a global class has the same name: the class test applies only to
 // the name before the braces, not to the field names.
 class Item {}

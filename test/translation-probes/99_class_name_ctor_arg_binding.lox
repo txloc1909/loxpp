@@ -1,5 +1,6 @@
 // A name in the parentheses of a positional constructor pattern is a
-// binding (spec/02-syntax.md, identArmPat). This is so also when a global
+// binding (spec/04-semantics.md, match Expression, "Class patterns": a bare
+// name in parentheses is a binding). This is so also when a global
 // class has the same name: the arm binds the constructor argument, and does
 // not test it against the class.
 class Shape {}

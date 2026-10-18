@@ -1,6 +1,6 @@
 // A class pattern matches an instance of that class or of one of its
-// subclasses, and no other value (spec/02-syntax.md, identArmPat and subPat;
-// spec/04-semantics.md, match Expression). Each form of the pattern is here:
+// subclasses, and no other value (spec/02-syntax.md, "Class patterns" in the
+// Note on match; spec/04-semantics.md, match Expression). Each form of the pattern is here:
 // the bare name, the named-field form, an or-chain, and the @-binding. A
 // bare class name is a type check, not a binding, so the arm body still sees
 // the class under that name. The last match has no arm that matches, so it
