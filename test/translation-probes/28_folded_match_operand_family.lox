@@ -16,21 +16,9 @@
 // statements below, one per shape, in the same order the unit tests list
 // them.
 //
-// The `RETURN`-of-a-folded-match shape is NOT repeated here on purpose.
-// `AbstractStackTest.RunsOverEveryProbeWithNoInconsistency`
-// (test_backend_abstract_stack.cpp) globs this whole directory and asserts
-// every `RETURN` it finds has `operandDepth() == 1` — checkReturnHeightZero's
-// own header comment states this does NOT hold once a `match` result is
-// `return`ed, by design (P1 is scoped to "a temporary on the stack", not to
-// this fused-local shape), so a `return match ...;` program belongs under
-// `examples/`, never here (`26_enum_match_dispatch_and_error.lox`'s own
-// header already makes the same call for the same reason).
-// `examples/or_pattern_demo.lox`'s `must_stop`/`describe`/`classify`
-// functions already `return match ...;` with simple expression arms, and
-// that file is already both a checkpoint example and a
-// `check_jvm_probes.sh` entry — the RETURN row's own run-parity coverage,
-// so adding it a second time here would only duplicate that file, not add
-// new coverage.
+// The `RETURN`-of-a-folded-match shape is covered by
+// `105_return_folded_match.lox`, so this file stays scoped to the consumer
+// on the other side of each folded operand.
 
 // Shape 1: BUILD_LIST, width above 1, first element folded.
 print [match 1 { case 1 => 2 case _ => 3 }, 5];

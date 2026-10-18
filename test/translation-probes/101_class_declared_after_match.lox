@@ -6,10 +6,9 @@
 // global with that name when it runs, so a pattern name whose global no
 // longer holds a class matches no value.
 fun f(v) {
-    var out = match v {
+    return match v {
         case B => "bound " + str(B)
     };
-    return out;
 }
 
 class B {}

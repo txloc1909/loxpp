@@ -75,9 +75,11 @@ probes=(
     "examples/at_binding_demo.lox"
     "examples/string_list_pattern_demo.lox"
     # Run-parity proof for normalizeFoldedOperands's own required
-    # coverage — the nine folded-operand shapes, RETURN of a folded match,
-    # and a nested match subject.
+    # coverage — the nine folded-operand shapes and a nested match subject.
     "test/translation-probes/28_folded_match_operand_family.lox"
+    # RETURN of a folded match (issue #647): the result is a named local, so
+    # the JVM backend must load it before areturn.
+    "test/translation-probes/105_return_folded_match.lox"
     # Reflection introspection: type()/fields()/methods()/getField()/
     # hasField()/setField()/callMethod(), now supported on native and JVM
     # alike (src/stdlib/reflect_api.cpp, LoxRuntime.registerReflection).
