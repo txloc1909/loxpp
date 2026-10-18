@@ -4534,12 +4534,14 @@ class Interpreter {
         }
         if (loxTag(object) == "file") {
             if (name == "read" or name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close") return InterpFileMethod(name, object);
-            this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
+            if (isCallTarget) this.fatalError("Undefined method '" + name + "' on file.");
+            this.fatalError("Undefined property '" + name + "' on file.");
             return nil;
         }
         if (loxTag(object) == "socket") {
             if (name == "read" or name == "read_bytes" or name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close_write" or name == "close") return InterpSocketMethod(name, object);
-            this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
+            if (isCallTarget) this.fatalError("Undefined method '" + name + "' on socket.");
+            this.fatalError("Undefined property '" + name + "' on socket.");
             return nil;
         }
         if (loxTag(object) == "server") {
