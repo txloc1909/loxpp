@@ -333,6 +333,18 @@ if(LOXPP_PYTHON3)
     set_tests_properties(BootstrapThrowReport PROPERTIES
         ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
+
+    # Issue #636: a wrong argument count with no try block active in the
+    # running task is fatal and skips every pending deferred call, as on
+    # native. Compares the bootstrap with native on stdout, exit status and
+    # the first stderr line. Same trace-noise constraint as
+    # BootstrapOperatorOverload above.
+    add_test(NAME BootstrapArityFatal
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_arity_fatal.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(BootstrapArityFatal PROPERTIES
+        ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
 endif()
 
 # The *_gc targets share their source with a non-_gc twin. They run under GC

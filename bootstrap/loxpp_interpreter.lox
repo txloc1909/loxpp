@@ -1652,6 +1652,7 @@ class LoxFunction {
         // of bounds below. The ordinary call sites (evalCall, deferred
         // calls) check first and never reach this branch.
         if (len(args) != this.arity()) {
+            interp.fatalIfNoTry("Expected " + str(this.arity()) + " arguments but got " + str(len(args)) + ".");
             interp.setError("ArityError", "Expected " + str(this.arity()) + " arguments but got " + str(len(args)) + ".", 0);
             return nil;
         }
@@ -1746,8 +1747,9 @@ class LoxFunction {
                     }
                 } else {
                     // Matches native's own Runtime::call: an arity mismatch on
-                    // a deferred call is the ordinary catchable ArityError,
-                    // not a fatal fault -- native's Runtime::runPendingDefers
+                    // a deferred call is the ordinary catchable ArityError
+                    // while a try block is active, and the fatal fast path
+                    // (fatalIfNoTry, below) when none is -- native's Runtime::runPendingDefers
                     // calls the same Runtime::call() a normal call uses, so
                     // any handler still live around this function's own
                     // caller sees it (issue #359 measured only the no-handler
@@ -1769,6 +1771,7 @@ class LoxFunction {
                     // uncaught throw propagating out through this function),
                     // so it is the one place setError's usual "first fault
                     // wins" guard must not apply.
+                    interp.fatalIfNoTry("Expected " + str(callee.arity()) + " arguments but got " + str(len(defer_args)) + ".");
                     interp.throwFlag = true;
                     interp.thrownValue = LoxError("ArityError", "Expected " + str(callee.arity()) + " arguments but got " + str(len(defer_args)) + ".");
                     break;
@@ -2982,6 +2985,15 @@ class Interpreter {
         exit(70);
     }
 
+    // A Lox++ function called with the wrong argument count: with no try
+    // block active in the running task, native takes a direct fatal path
+    // that skips every pending deferred call (spec, "Wrong argument count's
+    // fatal fast path"). With one active, the caller raises the catchable
+    // ArityError instead.
+    fatalIfNoTry(msg) {
+        if (this.tryDepth == 0) this.fatalError(msg);
+    }
+
     isValidMapKey(v) {
         if (v == nil or v == true or v == false) return true;
         if (isLoxStr(v)) return true;
@@ -3565,6 +3577,7 @@ class Interpreter {
             // The coroutine stays suspended and unstarted, as on native.
             // A native of arity -1 is variadic (LoxNative.arity): any count is
             // accepted, matching Runtime::callNative's `arity != -1` guard.
+            this.fatalIfNoTry("Expected " + str(co.fn.arity()) + " arguments but got " + str(len(args)) + ".");
             this.setError("ArityError", "Expected " + str(co.fn.arity()) + " arguments but got " + str(len(args)) + ".", 0);
             return nil;
         }
@@ -4294,6 +4307,7 @@ class Interpreter {
                 // call() dispatch through the closure's real arity.
                 this.setError("ConstructorArityError", "Expected 0 arguments but got some.", paren_line);
             } else {
+                this.fatalIfNoTry("Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".");
                 this.setError("ArityError", "Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".", paren_line);
             }
             return nil;
