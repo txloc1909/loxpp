@@ -1122,6 +1122,9 @@ class Resolver {
         this.loopDepth       = 0;
         this.matchArmDepth   = 0;
         this.enumCtors       = {};
+        // Global classes declared so far, in source order: a bare pattern
+        // name in this set is a class type check, not a binding.
+        this.classNames      = {};
     }
 
     resError(name, line, msg) {
@@ -1261,6 +1264,7 @@ class Resolver {
     resolveClass(name, super_id, super_name, methods) {
         var enclosingClass = this.currentClass;
         this.currentClass = "CLASS";
+        if (len(this.scopes) == 0) this.classNames[name] = true;
         this.declare(name, 0);
         this.define(name);
 
@@ -1471,6 +1475,7 @@ class Resolver {
 
     resolveBindPat(name) {
         if (this.enumCtors.has(name)) return;
+        if (this.classNames.has(name)) return;
         // In OR-patterns, the same name may appear in multiple alternatives.
         // Skip re-declaration if already bound in the current scope.
         if (len(this.scopes) > 0) {
@@ -4587,6 +4592,9 @@ class Interpreter {
         if (ctorVal != nil and loxTag(ctorVal) == "enum_ctor" and ctorVal.arity() == 0) {
             return loxTag(subject) == "enum_val" and subject.tag == name;
         }
+        if (ctorVal != nil and loxTag(ctorVal) == "class") {
+            return this.isInstanceOfClass(subject, ctorVal);
+        }
         bindings[name] = subject;
         return true;
     }
@@ -4604,8 +4612,22 @@ class Interpreter {
             return true;
         }
         if (stag == "instance") {
-            if (subject.klass.name != cname) return false;
+            if (!this.isInstanceOfClass(subject, this.globals[cname])) return false;
             return this.matchClassPat(subpats, subject, bindings);
+        }
+        return false;
+    }
+
+    // The class test of a class pattern: klass is the subject's class or a
+    // class on its superclass chain. Classes compare by identity, so a
+    // different class with the same name does not match.
+    isInstanceOfClass(subject, klass) {
+        if (klass == nil or loxTag(klass) != "class") return false;
+        if (loxTag(subject) != "instance") return false;
+        var k = subject.klass;
+        while (k != nil) {
+            if (k == klass) return true;
+            k = k.superclass;
         }
         return false;
     }
