@@ -234,8 +234,9 @@ class Scanner {
                 else if (esc == "0")  { value = value + "\0"; this.advance(); }
                 else if (esc == "r")  { value = value + "\r"; this.advance(); }
                 else {
-                    // One error per literal, as on native, which sits in
-                    // panic mode until the next statement.
+                    // Report the first unknown escape of a literal, then skip
+                    // to the closing quote. Native rescans the rest of the
+                    // literal as code, so later errors differ (issue #658).
                     if (!badEscape) this.lexError("Unknown escape sequence.");
                     badEscape = true;
                     if (esc == "\n") this.line = this.line + 1;
