@@ -1537,9 +1537,11 @@ current task, and returns it.
    same reason a `yield` there does (see [`yield` Expression](#yield-expression)).
 
 A native function or bound native that runs as the entry of a task or a
-coroutine is a native callback on the call chain too. A receive below it
-raises `YieldAcrossNativeError` in the same way: the entry has no frame
-that a task switch can rebuild.
+coroutine is on the call chain for this rule. A receive below it raises
+`YieldAcrossNativeError` in the same way: the entry has no frame that a
+task switch can rebuild. This does not change the [`yield` Expression](#yield-expression)
+rule: a yield inside a coroutine that such an entry resumed is legal,
+because the entry's frame is below the resume point and keeps running.
 
 A receive suspends the whole task. Every call frame of the task stays in
 place, which includes the frames of a coroutine that the task resumed, and
