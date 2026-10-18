@@ -1,0 +1,70 @@
+// Two workers print long lines at the same time. A print statement writes
+// its whole line at once, so a line of one worker never mixes with a line of
+// the other (spec/04-semantics.md, Workers and Tasks, Ending). The order of
+// the lines of two workers is not defined, so this program is not a spec
+// probe: tools/check_print_lines.py reads its stdout in any order, and
+// checks the form of each line and the count of each worker.
+//
+// Each worker prints the lines "w<id> <index> <pad>", where the index has
+// four digits and runs from 0000 in order, and the pad is 64 copies of the
+// letter of that worker. A line that mixes two workers has the wrong pad or
+// the wrong length.
+
+enum Job { Start(main, id) }
+enum Note { Ready(id) Go Done(id) }
+
+fun lineCount() {
+    return 1000;
+}
+
+fun digits(n) {
+    var s = str(n);
+    while (len(s) < 4) {
+        s = "0" + s;
+    }
+    return s;
+}
+
+fun pad(letter) {
+    var s = "";
+    var i = 0;
+    while (i < 64) {
+        s = s + letter;
+        i = i + 1;
+    }
+    return s;
+}
+
+fun printLines(main, id) {
+    var letter = "a";
+    if (id == 2) {
+        letter = "b";
+    }
+    var head = "w" + str(id) + " ";
+    var tail = " " + pad(letter);
+    task.send(main, Ready(id));
+    task.receive();
+    var i = 0;
+    while (i < lineCount()) {
+        print head + digits(i) + tail;
+        i = i + 1;
+    }
+    task.send(main, Done(id));
+}
+
+// The entry of a printer worker. It reads no top-level var: a new worker
+// does not run the top-level var declarations.
+fun printer(job) {
+    match job {
+        case Start(main, id) => printLines(main, id)
+    };
+}
+
+var first = task.spawn_worker(printer, Start(task.self(), 1));
+var second = task.spawn_worker(printer, Start(task.self(), 2));
+task.receive();
+task.receive();
+task.send(first, Go());
+task.send(second, Go());
+task.receive();
+task.receive();

@@ -197,9 +197,10 @@ passes fails the gate until its line is deleted.
 
 One rule of the Workers and Tasks section has no spec probe: a `print`
 line from one worker never mixes with a line from another worker. Its
-output order depends on timing between threads, and the gate compares an
-exact stdout, so it needs a check that does not depend on order. Node N7
-of mission #595 (#602) owns that check.
+output order depends on timing between threads, and a spec probe compares
+an exact stdout. `tools/check_print_lines.py` checks it with
+`test/print-lines/two_workers.lox`, and does not use the order of lines
+between workers.
 
 `jvm-only/61_operator_overload` and `jvm-only/defer_replaces_overflow` sit one
 level down because this directory's own files are walked non-recursively by
