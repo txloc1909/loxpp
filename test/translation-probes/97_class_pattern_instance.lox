@@ -1,0 +1,95 @@
+// A class pattern matches an instance of that class or of one of its
+// subclasses, and no other value (spec/02-syntax.md, identArmPat and subPat;
+// spec/04-semantics.md, match Expression). Each form of the pattern is here:
+// the bare name, the named-field form, an or-chain, and the @-binding. A
+// bare class name is a type check, not a binding, so the arm body still sees
+// the class under that name. The last match has no arm that matches, so it
+// raises MatchError and the program ends with an error.
+class Shape {
+    init(name) { this.name = name; }
+}
+class Circle < Shape {
+    init(r) { this.name = "circle"; this.r = r; }
+}
+class Square < Shape {
+    init(s) { this.name = "square"; this.s = s; }
+}
+class Other {
+    label() { return "other"; }
+}
+
+fun kind(v) {
+    var out = match v {
+        case Circle{r} => "circle " + str(r)
+        case Shape{name} => "shape " + name
+        case Other => Other().label()
+        case _ => "no class"
+    };
+    return out;
+}
+
+print kind(Circle(2));
+print kind(Square(3));
+print kind(Shape("plain"));
+print kind(Other());
+print kind(42);
+print kind(nil);
+
+fun bare(v) {
+    var out = match v {
+        case Square => "square"
+        case Shape => "shape"
+        case _ => "other"
+    };
+    return out;
+}
+
+print bare(Square(1));
+print bare(Circle(1));
+print bare(Other());
+
+fun either(v) {
+    var out = match v {
+        case Circle or Square => "round or square"
+        case _ => "neither"
+    };
+    return out;
+}
+
+print either(Circle(1));
+print either(Square(1));
+print either(Shape("plain"));
+
+fun whole(v) {
+    var out = match v {
+        case s @ Shape => "bound " + s.name
+        case _ => "not bound"
+    };
+    return out;
+}
+
+print whole(Circle(1));
+print whole(Other());
+
+print "before";
+print match Circle(1) {
+    case Square => "square"
+    case Other => "other"
+};
+
+// STATUS: error
+// CHECK: circle 2
+// CHECK: shape square
+// CHECK: shape plain
+// CHECK: other
+// CHECK: no class
+// CHECK: no class
+// CHECK: square
+// CHECK: shape
+// CHECK: other
+// CHECK: round or square
+// CHECK: round or square
+// CHECK: neither
+// CHECK: bound circle
+// CHECK: not bound
+// CHECK: before

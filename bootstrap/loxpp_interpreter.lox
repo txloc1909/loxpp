@@ -142,6 +142,7 @@ enum Pattern {
     CtorPat(cname, subpats)
     ListPat(elems, rest_name)
     AtPat(at_name, subpat)
+    ClassPat(cname)
 }
 
 // bodyStmts is the arm's leading declarations/statements (possibly ending in
@@ -1122,6 +1123,9 @@ class Resolver {
         this.loopDepth       = 0;
         this.matchArmDepth   = 0;
         this.enumCtors       = {};
+        // Global classes declared so far, in source order. See
+        // classifyArmPat for the pattern names that this set changes.
+        this.classNames      = {};
     }
 
     resError(name, line, msg) {
@@ -1261,6 +1265,7 @@ class Resolver {
     resolveClass(name, super_id, super_name, methods) {
         var enclosingClass = this.currentClass;
         this.currentClass = "CLASS";
+        if (len(this.scopes) == 0) this.classNames[name] = true;
         this.declare(name, 0);
         this.define(name);
 
@@ -1461,7 +1466,36 @@ class Resolver {
             case CtorPat{cname, subpats}   => this.resolveSubpats(subpats)
             case ListPat{elems, rest_name} => this.resolveListPat(elems, rest_name)
             case AtPat{at_name, subpat}    => this.resolveAtPat(at_name, subpat)
+            case ClassPat{cname}           => nil
         };
+    }
+
+    // A bare name is a class test only as a whole arm pattern (alone or in
+    // an or-chain) or as the sub-pattern of an @-binding, and only when a
+    // global class of that name is declared earlier in the source. A name
+    // inside braces, parentheses or brackets is always a binding. The
+    // parser cannot tell the two apart, so the resolver rewrites the
+    // pattern here, before the interpreter runs it.
+    classifyArmPat(pat) {
+        return match pat {
+            case BindPat{name}          => this.classifyBareName(pat, name)
+            case AtPat{at_name, subpat} => this.classifyAtPat(pat, at_name, subpat)
+            case _                      => pat
+        };
+    }
+
+    classifyAtPat(pat, at_name, subpat) {
+        var sub = match subpat {
+            case BindPat{name} => this.classifyBareName(subpat, name)
+            case _             => subpat
+        };
+        return AtPat(at_name, sub);
+    }
+
+    classifyBareName(pat, name) {
+        if (this.enumCtors.has(name)) return pat;
+        if (this.classNames.has(name)) return ClassPat(name);
+        return pat;
     }
 
     resolveAtPat(at_name, subpat) {
@@ -1503,6 +1537,7 @@ class Resolver {
             this.beginScope();
             var j = 0;
             while (j < len(arm.pats)) {
+                arm.pats[j] = this.classifyArmPat(arm.pats[j]);
                 this.resolvePattern(arm.pats[j]);
                 j = j + 1;
             }
@@ -4573,6 +4608,7 @@ class Interpreter {
             case CtorPat{cname, subpats}   => this.matchCtor(cname, subpats, subject, bindings)
             case ListPat{elems, rest_name} => this.matchListPat(elems, rest_name, subject, bindings)
             case AtPat{at_name, subpat}    => this.matchAtPat(at_name, subpat, subject, bindings)
+            case ClassPat{cname}           => this.isInstanceOfClass(subject, this.globals[cname])
         };
     }
 
@@ -4604,8 +4640,22 @@ class Interpreter {
             return true;
         }
         if (stag == "instance") {
-            if (subject.klass.name != cname) return false;
+            if (!this.isInstanceOfClass(subject, this.globals[cname])) return false;
             return this.matchClassPat(subpats, subject, bindings);
+        }
+        return false;
+    }
+
+    // The class test of a class pattern: klass is the subject's class or a
+    // class on its superclass chain. Classes compare by identity, so a
+    // different class with the same name does not match.
+    isInstanceOfClass(subject, klass) {
+        if (klass == nil or loxTag(klass) != "class") return false;
+        if (loxTag(subject) != "instance") return false;
+        var k = subject.klass;
+        while (k != nil) {
+            if (k == klass) return true;
+            k = k.superclass;
         }
         return false;
     }
