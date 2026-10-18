@@ -244,6 +244,13 @@ capability object:
 
 Handlers implemented:
 
+Every cursor-driven handler uses one cursor rule from `ReferenceIndex::at()`:
+a position at the start of a name, inside it, or just past its last byte
+names that symbol. At a boundary where one span starts and the previous span
+ends, the span that starts there wins. This rule applies to hover,
+definition, references, documentHighlight, and rename. No handler has its
+own rule.
+
 | Method | Notes |
 |---|---|
 | `initialize` / `initialized` / `shutdown` / `exit` | Lifecycle. |

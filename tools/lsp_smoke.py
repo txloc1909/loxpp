@@ -312,6 +312,16 @@ def main():
         check("type(value)" in hover_text,
               "hover on 'type' shows its signature (got %r)" % hover_text[:60])
 
+        hover_end = client.request("textDocument/hover", {
+            "textDocument": {"uri": CLEAN_URI},
+            "position": {"line": hl, "character": hc + 4}})
+        hover_end_text = ""
+        if hover_end and isinstance(hover_end.get("contents"), dict):
+            hover_end_text = hover_end["contents"].get("value", "")
+        check("type(value)" in hover_end_text,
+              "hover at end of 'type' shows its signature (got %r)"
+              % hover_end_text[:60])
+
         # -- document symbols --------------------------------------
         symbols = client.request("textDocument/documentSymbol", {
             "textDocument": {"uri": CLEAN_URI}})
@@ -332,6 +342,54 @@ def main():
                   and definition["range"]["start"]["character"] == dc)
         check(ok_def, "definition of 'name' points at the parameter (got %s)"
               % (definition["range"] if definition else None))
+
+        # -- cursor just past a name: every navigation handler --------
+        # Editors commonly place the cursor after the last character of a
+        # name. That position must still name it in all handlers, not only in
+        # one of them.
+        end_pos = {"line": ul, "character": uc + 4}
+
+        definition_end = client.request("textDocument/definition", {
+            "textDocument": {"uri": CLEAN_URI},
+            "position": end_pos})
+        if isinstance(definition_end, list):
+            definition_end = definition_end[0] if definition_end else None
+        ok_def_end = (definition_end is not None
+                      and definition_end["range"]["start"]["line"] == dl
+                      and definition_end["range"]["start"]["character"] == dc)
+        check(ok_def_end,
+              "definition at end of 'name' points at the parameter (got %s)"
+              % (definition_end["range"] if definition_end else None))
+
+        references_end = client.request("textDocument/references", {
+            "textDocument": {"uri": CLEAN_URI},
+            "position": end_pos}) or []
+        check(len(references_end) == 2,
+              "references at end of 'name' yields 2 locations (got %d)"
+              % len(references_end))
+
+        highlight_end = client.request("textDocument/documentHighlight", {
+            "textDocument": {"uri": CLEAN_URI},
+            "position": end_pos}) or []
+        check(len(highlight_end) == 2,
+              "documentHighlight at end of 'name' yields 2 ranges (got %d)"
+              % len(highlight_end))
+
+        rename_end = client.request("textDocument/rename", {
+            "textDocument": {"uri": CLEAN_URI},
+            "position": end_pos,
+            "newName": "person"})
+        end_edits = (rename_end.get("changes", {}).get(CLEAN_URI, [])
+                     if isinstance(rename_end, dict) else [])
+        check(len(end_edits) == 2 and all(e.get("newText") == "person"
+                                          for e in end_edits),
+              "rename at end of 'name' yields 2 edits (got %s)" % (end_edits,))
+
+        past_end = client.request("textDocument/definition", {
+            "textDocument": {"uri": CLEAN_URI},
+            "position": {"line": ul, "character": uc + 5}})
+        check(past_end is None,
+              "definition one byte past 'name' is null (got %s)" % (past_end,))
 
         # -- codeAction: missing match arm -------------------------
         client.notify("textDocument/didOpen", {"textDocument": {

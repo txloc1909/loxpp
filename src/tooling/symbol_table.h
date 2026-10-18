@@ -31,6 +31,12 @@ struct Span {
     [[nodiscard]] bool contains(std::size_t pos) const {
         return pos >= offset && pos < offset + length;
     }
+    // End-inclusive position test for editor cursors. Editors commonly place
+    // the cursor just past the last byte of a name, and that position still
+    // names it. Structural membership stays end-exclusive in contains().
+    [[nodiscard]] bool coversCursor(std::size_t pos) const {
+        return contains(pos) || pos == offset + length;
+    }
     [[nodiscard]] bool valid() const { return length != 0 || offset != 0; }
 
     friend bool operator==(const Span& a, const Span& b) {
