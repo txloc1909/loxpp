@@ -1,0 +1,5 @@
+// DIAGNOSTIC: Expect '}' after field pattern.
+// Compile error: a named field of a constructor pattern holds an @-pattern.
+class Shape {}
+enum Wrap { W(inner) }
+var r = match W(Shape()) { case W{inner @ Shape} => 1 };
