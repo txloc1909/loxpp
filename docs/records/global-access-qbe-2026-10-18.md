@@ -11,7 +11,7 @@ that re-interns the name and then probes the globals table.
 |---|---|
 | Commit | `b528dbd`, release preset, `loxpp` and `loxrt` targets |
 | Toolchain | `loxpp-dev-qbe`: Ubuntu clang 18.1.3, QBE 1.3; `tools/check_qbe_toolchain.sh` passed |
-| Machine | Intel Core 7 240H, 10 cores, 16 threads; Linux 7.2.9 (Arch host, Ubuntu container) |
+| Machine | 12th Gen Intel(R) Core(TM) i5-1235U, 10 cores, 12 threads; Linux 7.2.9 (Arch host, Ubuntu container) |
 | Power | AC on, governor `powersave`, energy preference `balance_performance` |
 | Pinning | every run on core 2, a P-core, with `taskset` |
 | Protocol | each program compiled once in the image; 5 warm-up runs discarded, 10 measured, median; `benchmarks/coroutine_cost_qbe.sh` for QBE, the same loop for native |
@@ -23,28 +23,46 @@ a different machine state and appear only in parentheses.
 ## The two benchmarks from #592
 
 `coroutine_call_baseline.lox` keeps its state at top level, so its loop makes
-five global accesses per iteration: four reads and one write.
-`coroutine_mode_floor.lox` runs the same loop with local slots.
+six global accesses per iteration: five reads and one write. The reads are
+`i` and `REPS` in the condition, `step` for the call, `i` for the argument,
+and `REPS` inside `step`. The write is the assignment to `i`.
+
+`coroutine_mode_floor.lox` moves the counter and the limit to local slots, but
+it is not global-free: `run` reads the global `step` once per iteration. So
+the floor makes one global access per iteration, and the difference between
+the two programs covers five accesses. `step` itself names no global and does
+not fetch the slot base; `run` does.
 
 | Program | QBE before, ns | QBE after, ns | Native, ns |
 |---|---|---|---|
-| `coroutine_call_baseline` (globals) | 125.6 (148) | **30.7** | 71.1 |
-| `coroutine_mode_floor` (locals) | 33.7 (38.5) | **16.4** | 53.4 |
+| `coroutine_call_baseline` (6 accesses) | 125.6 (148) | **30.7** | 71.1 |
+| `coroutine_mode_floor` (1 access) | 33.7 (38.5) | **16.4** | 53.4 |
 
-The local-state floor does not pay for the change: its hot functions name no
-global, so their prologue does not fetch the slot base.
+Both programs improve, because the floor's one read uses the same new path.
+The floor falls from 33.7 to 16.4 ns: that is the cost of one global read
+becoming cheaper.
 
-Per global access, from the difference between a program's global loop and
-its local floor over five accesses per iteration:
+## A direct one-read comparison
 
-| | QBE | Native |
+The difference between the two issue benchmarks above is an end-to-end figure.
+It also includes a call with two arguments instead of one, and the different
+shape of a top-level loop against a function loop. To isolate one global read,
+this pair runs the same loop and changes only the source of `g`:
+
+| Program | QBE, ns per iteration | Native, ns per iteration |
 |---|---|---|
-| Before | 18.4 ns | 3.5 ns |
-| After | 2.9 ns | 3.5 ns |
+| one read of a global `G` | 3.05 | 37.08 |
+| the same loop with a local `g` | 2.37 | 31.61 |
+| difference: one global read | **0.68** | **5.47** |
 
-The compiled access is now below the interpreter's, which is the deliverable.
-End to end, QBE is 2.3 times faster than native on the global loop; before, it
+That is the per-access number. The compiled read costs 0.68 ns and the
+interpreted read costs 5.47 ns on this host. The two benchmarks agree with the
+direction: QBE is 2.3 times faster than native on the global loop; before, it
 was 1.8 times slower.
+
+The same change also improves the top-level coroutine benchmark, because its
+loop is global too: `coroutine_yield.lox` goes from 179 ns (2026-10-17) to
+80.4 ns per round trip, against native's 120.4 ns.
 
 The same change also improves the top-level coroutine benchmark, because its
 loop is global too: `coroutine_yield.lox` goes from 179 ns (2026-10-17) to

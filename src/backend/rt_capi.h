@@ -186,7 +186,7 @@ int rt_op_iter_next(Runtime* rt) noexcept;
 
 // Classes, methods, aggregates, slicing, and match dispatch (S5, #458).
 // rt_op_class/rt_op_define_method have no error path, matching
-// rt_op_define_global's shape above.
+// rt_op_define_global_at's shape above.
 int rt_op_class(Runtime* rt, ObjString* name) noexcept;
 int rt_op_set_property(Runtime* rt, ObjString* name) noexcept;
 int rt_op_define_method(Runtime* rt, ObjString* name) noexcept;

@@ -155,9 +155,9 @@ compiled than interpreted.
   assignment to an undeclared name still faults.
 - `m_globals` stays the authority for "defined". `DEFINE_GLOBAL` and
   `SET_GLOBAL` write both the table and the slot, so the roots scan,
-  `Runtime::getGlobal`, `globalNames()`, and the `is` operator keep working.
-  A slot value duplicates a rooted table value, so it needs no root of its
-  own.
+  `Runtime::getGlobal`, `globalNames()`, and a class pattern test in `match`
+  (the `INSTANCEOF` opcode) keep working. A slot value duplicates a rooted
+  table value, so it needs no root of its own.
 - The slot array is per Runtime and is allocated once. The globals table may
   grow; a slot address does not change.
 
