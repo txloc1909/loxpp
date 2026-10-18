@@ -564,11 +564,19 @@ class Parser {
     deferStatement() {
         var line = this.previous().line;
         var expr = this.unary();
-        this.expect("SEMICOLON", "Expect ';' after defer statement.");
-        return match expr {
+        // The operand check comes before the ';' check and names the last
+        // token of the operand, as native does. The ';' stays unread after
+        // the error, so that synchronize() skips to it and stops there.
+        var stmt = match expr {
             case Call{callee, paren_line, args} => DeferStmt(line, callee, args)
-            case _ => { this.softError(this.peek(), "defer requires a function call."); nil }
+            case _ => nil
         };
+        if (stmt == nil) {
+            this.parseError(this.previous(), "Expect a call expression after 'defer'.");
+            return nil;
+        }
+        this.expect("SEMICOLON", "Expect ';' after defer statement.");
+        return stmt;
     }
 
     blockContents() {
@@ -675,9 +683,21 @@ class Parser {
         return YieldExpr(val, yieldTok.line);
     }
 
+    isOperatorExpr(expr) {
+        return match expr {
+            case Binary{op, left, right}  => true
+            case Logical{op, left, right} => true
+            case Unary{op, right}         => true
+            case _                        => false
+        };
+    }
+
     assignment() {
         if (this.check("YIELD")) return this.yieldExpression();
         var expr = this.logicOr();
+        // The grammar makes `a + b` a whole expression, so the `=` after it
+        // is not an assignment: the caller reports the missing ';' or ')'.
+        if (this.check("EQUAL") and this.isOperatorExpr(expr)) return expr;
         if (this.matchT("EQUAL")) {
             var equals = this.previous();
             var val    = this.assignment();
@@ -972,7 +992,10 @@ class Parser {
         if (this.panicMode) return MatchExpr(subject, [], 0);
         var arms = [];
         while (!this.check("RIGHT_BRACE") and !this.isAtEnd()) {
-            this.expect("CASE", "Expect 'case' in match arm.");
+            if (!this.matchT("CASE")) {
+                this.parseError(this.previous(), "Expect 'case' in match body.");
+                break;
+            }
             if (this.panicMode) break;
             var pats = this.parseMatchArmPatterns();
             var guard = nil;

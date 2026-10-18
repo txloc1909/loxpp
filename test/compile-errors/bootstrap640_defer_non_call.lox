@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Expect a call expression after 'defer'.
+// Compile error: the operand of defer is not a call.
+fun f() { defer 1; }

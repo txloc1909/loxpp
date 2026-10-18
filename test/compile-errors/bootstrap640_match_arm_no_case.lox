@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Expect 'case' in match body.
+// Compile error: a match arm starts without 'case'.
+var x = match 1 { 1 => 2 };
