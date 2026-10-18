@@ -2,6 +2,8 @@
 
 **Status:** proposal. Waits for the owner's approval. On acceptance it moves to
 `docs/decisions/` and names its tracking issue.
+**Tracking (draft):** #711. The DAG and the node body drafts are there. Node
+issues open only after acceptance.
 
 ## Why
 
