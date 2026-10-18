@@ -1,6 +1,8 @@
 package lox;
 
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -13,13 +15,23 @@ import java.util.Locale;
  * {@link LoxRuntime#CHARSET} — see that class's byte-boundary rule.
  */
 public final class LoxFile {
-    private RandomAccessFile raf; // null once closed
+    private RandomAccessFile raf; // null once closed, and always null in stream mode
+    // Non-null only for a write-only file on a target RandomAccessFile cannot
+    // seek: a pipe or a character device. Lox++ has no seek, so a stream is
+    // enough, and it is what native's fopen gives for the same path.
+    private OutputStream out;
     public final boolean readable;
     public final boolean writable;
     private boolean isDirectory; // true only for a directory opened with "r" mode
 
     private LoxFile(RandomAccessFile raf, boolean readable, boolean writable, boolean isDirectory) {
+        this(raf, null, readable, writable, isDirectory);
+    }
+
+    private LoxFile(RandomAccessFile raf, OutputStream out, boolean readable,
+                    boolean writable, boolean isDirectory) {
         this.raf = raf;
+        this.out = out;
         this.readable = readable;
         this.writable = writable;
         this.isDirectory = isDirectory;
@@ -62,8 +74,9 @@ public final class LoxFile {
                 return new LoxFile(null, true, false, true);
             }
         }
+        RandomAccessFile raf = null;
         try {
-            RandomAccessFile raf = new RandomAccessFile(path, readable && !writable ? "r" : "rw");
+            raf = new RandomAccessFile(path, readable && !writable ? "r" : "rw");
             if (truncate) {
                 raf.setLength(0);
             }
@@ -72,6 +85,25 @@ public final class LoxFile {
             }
             return new LoxFile(raf, readable, writable, false);
         } catch (IOException e) {
+            if (raf != null) {
+                try {
+                    raf.close();
+                } catch (IOException ignored) {
+                    // The fallback below decides the outcome.
+                }
+            }
+            // A pipe or a character device rejects RandomAccessFile's seek,
+            // though native's fopen opens it. A write-only File never
+            // observes a position, so a stream handle gives the same result.
+            if (writable && !readable) {
+                try {
+                    return new LoxFile(null, new FileOutputStream(path, append),
+                                       readable, writable, false);
+                } catch (IOException fallback) {
+                    throw new LoxError(
+                            "open(): cannot open '" + path + "': " + fallback.getMessage());
+                }
+            }
             throw new LoxError("open(): cannot open '" + path + "': " + e.getMessage());
         }
     }
@@ -90,7 +122,7 @@ public final class LoxFile {
     }
 
     private void checkOpen(String method) {
-        if (raf == null && !isDirectory) {
+        if (raf == null && out == null && !isDirectory) {
             throw new LoxError("Cannot call '" + method + "' on a closed file.");
         }
     }
@@ -159,8 +191,13 @@ public final class LoxFile {
         if (!writable) {
             throw new LoxError("File is not open for writing.");
         }
+        byte[] bytes = s.getBytes(LoxRuntime.CHARSET);
         try {
-            raf.write(s.getBytes(LoxRuntime.CHARSET));
+            if (out != null) {
+                out.write(bytes);
+            } else {
+                raf.write(bytes);
+            }
         } catch (IOException e) {
             throw new LoxError("write(): " + e.getMessage());
         }
@@ -179,6 +216,14 @@ public final class LoxFile {
                 // Matches ObjFile: close is best-effort, never raises.
             }
             raf = null;
+        }
+        if (out != null) {
+            try {
+                out.close();
+            } catch (IOException ignored) {
+                // Matches ObjFile: close is best-effort, never raises.
+            }
+            out = null;
         }
         isDirectory = false;
     }

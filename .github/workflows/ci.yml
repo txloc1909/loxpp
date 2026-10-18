@@ -1126,6 +1126,35 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "python3 tools/check_examples.py tools/loxpp_jvm_bootstrap.sh examples/ --exclude tools/jvm_excluded_examples.txt"
 
+      # The JVM bootstrap wrapper's own stdout filter, on the probes that the
+      # spec walk cannot take: the two NUL probes have no STATUS line, and a
+      # CHECK line cannot hold a NUL byte. The filter must keep every NUL byte
+      # and an unterminated last line. diff_runtimes.py compares stdout byte
+      # for byte and requires the exit statuses to be equal, so a wrapper that
+      # crashes after it writes the right bytes still fails. The last check
+      # makes a host failure non-zero; without it a failed host looks like a
+      # clean run with empty output (issue #654).
+      - name: JVM differential suite - bootstrap wrapper NUL and last-line probes
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev-managed:latest \
+            bash -c '
+              set -e
+              python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm_bootstrap.sh \
+                test/translation-probes/32_string_nul.lox \
+                test/translation-probes/56_file_nul.lox \
+                test/translation-probes/bootstrap-only/stdout_no_trailing_newline.lox \
+                --timeout 300
+              if LOXPP_BIN=/nonexistent tools/loxpp_jvm_bootstrap.sh \
+                  test/translation-probes/32_string_nul.lox >/dev/null 2>&1; then
+                echo "the JVM bootstrap wrapper exited 0 when its host failed" >&2
+                exit 1
+              fi
+            '
+
       # The JVM lox-rt test step above is continue-on-error so its own
       # failure can't hide every step after it (see that step's comment).
       # This step is what still turns that failure into a red job.
@@ -1357,6 +1386,34 @@ jobs:
               cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j$(nproc)
               files=$(find examples -maxdepth 1 -name "*.lox" ! -name "bench_jump_table.lox" | sort)
               python3 tools/diff_runtimes.py bootstrap/lox_wrapper.sh tools/loxpp_qbe_bootstrap.sh $files --timeout 60
+            '
+
+      # The same wrapper-filter gate as the JVM job's step of that name, on
+      # the QBE bootstrap wrapper: two NUL probes and a last line with no
+      # newline, compared byte for byte with native. diff_runtimes.py also
+      # requires the exit statuses to be equal. The last check makes a host
+      # failure non-zero, so a failed host cannot look like a clean run with
+      # empty output (issue #654).
+      - name: QBE differential suite - bootstrap wrapper NUL and last-line probes
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev-qbe:latest \
+            bash -c '
+              set -e
+              cmake --preset release && cmake --build build --target loxpp loxrt -j$(nproc)
+              python3 tools/diff_runtimes.py build/loxpp tools/loxpp_qbe_bootstrap.sh \
+                test/translation-probes/32_string_nul.lox \
+                test/translation-probes/56_file_nul.lox \
+                test/translation-probes/bootstrap-only/stdout_no_trailing_newline.lox \
+                --timeout 300
+              if LOXPP_BIN=/nonexistent tools/loxpp_qbe_bootstrap.sh \
+                  test/translation-probes/32_string_nul.lox >/dev/null 2>&1; then
+                echo "the QBE bootstrap wrapper exited 0 when its host failed" >&2
+                exit 1
+              fi
             '
 
   release-static:
