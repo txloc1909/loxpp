@@ -1,0 +1,42 @@
+// A global is undefined until its declaration runs, even when a function
+// already names it (spec/04-semantics.md, "Undefined global variable"): both
+// a read and an assignment raise a catchable UndefinedVariableError, and a
+// call made after the declaration sees the value. The QBE backend reads
+// globals through a predeclared slot, so this probe covers the unbound state
+// of that slot as well as the bound one.
+fun read_before() {
+    return declared_later;
+}
+
+try {
+    print declared_later;
+} catch (e) {
+    print e.kind;
+}
+
+try {
+    declared_later = 1;
+} catch (e) {
+    print e.kind;
+}
+
+try {
+    print read_before();
+} catch (e) {
+    print e.kind;
+}
+
+var declared_later = 5;
+print declared_later;
+print read_before();
+
+declared_later = 7;
+print declared_later;
+
+// STATUS: ok
+// CHECK: UndefinedVariableError
+// CHECK: UndefinedVariableError
+// CHECK: UndefinedVariableError
+// CHECK: 5
+// CHECK: 5
+// CHECK: 7

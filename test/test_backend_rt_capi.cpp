@@ -23,6 +23,7 @@
 #include <atomic>
 #include <deque>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -381,6 +382,43 @@ TEST(RtStartup, CompilesAndReturnsARuntime) {
     Runtime* rt = rt_startup("var x = 1;", nullptr, 0);
     ASSERT_NE(rt, nullptr);
     rt_shutdown(rt);
+}
+
+TEST(RtStartup, PredeclaresTheSortedGlobalSlotList) {
+    // #592: the emitter assigns slot indices from this list, so the runtime
+    // must derive the same sorted names from the same source. A stdlib name
+    // the program uses is already bound; a top-level var is unbound until
+    // its declaration executes.
+    Runtime* rt = rt_startup("var b = 2; var a = clock;", nullptr, 0);
+    ASSERT_NE(rt, nullptr);
+    EXPECT_EQ(rt->globalSlotNames(),
+              (std::vector<std::string>{"a", "b", "clock"}));
+    ASSERT_EQ(rt->globalSlotCount(), 3);
+    Value* slots = rt->globalSlotBase();
+    ASSERT_NE(slots, nullptr);
+    EXPECT_TRUE(isUnboundGlobal(slots[0]));  // a
+    EXPECT_TRUE(isUnboundGlobal(slots[1]));  // b
+    EXPECT_FALSE(isUnboundGlobal(slots[2])); // clock, from defineNatives()
+    EXPECT_TRUE(is<Obj*>(slots[2]));
+    rt_shutdown(rt);
+}
+
+TEST(RtStartup, DefineGlobalAtWritesTheSlot) {
+    // #592: m_globals is the authority, but a compiled read uses the slot.
+    // A declare that updates only the table would pass every other test,
+    // because the unbound slow path reads m_globals.
+    Runtime rt;
+    rt.setGlobalSlotNames({"x"});
+    rt.predeclareGlobalSlots();
+    ObjString* name = rt.memoryManager().makeString("x");
+    rt.push(Value{42.0});
+    rt.opDefineGlobalAt(name, 0);
+    ASSERT_EQ(rt.globalSlotCount(), 1);
+    ASSERT_FALSE(isUnboundGlobal(rt.globalSlotBase()[0]));
+    EXPECT_DOUBLE_EQ(as<Number>(rt.globalSlotBase()[0]), 42.0);
+    auto got = rt.getGlobal("x");
+    ASSERT_TRUE(got.has_value());
+    EXPECT_DOUBLE_EQ(as<Number>(*got), 42.0);
 }
 
 TEST(RtStartup, ReturnsNullOnCompileError) {

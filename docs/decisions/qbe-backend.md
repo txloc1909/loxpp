@@ -131,6 +131,41 @@ QBE is the first backend where a wrong height breaks output directly: a wrong
 height means a wrong slot, which means a wrong result. So the backend tests
 the height computation the JVM and CLR backends also rely on.
 
+## Global access: one slot per global name
+
+A compiled global access is an index into a per-Runtime slot array, not a
+name lookup. This mechanism (#592) replaced the two runtime calls — re-intern
+the name, then probe the globals table — that made top-level code slower
+compiled than interpreted.
+
+- `qbe::collectGlobalNames` walks every `GET_GLOBAL`, `SET_GLOBAL`, and
+  `DEFINE_GLOBAL` in the function tree, removes duplicates, and sorts. The
+  index is the slot. The emitter receives the same list for every function of
+  the program (`EmitOptions::globalSlots`).
+- `rt_startup` decodes the recompiled tree and derives the same sorted list
+  from the same source, so the executable carries no separate name table. A
+  worker gets the main Runtime's list through `WorkerStart`, and
+  `loadProgram(declarationsOnly)` predeclares it, because a declarations
+  compile alone would produce a different list.
+- A slot holds `VAL_UNBOUND_GLOBAL` (a reserved NaN tag) until the name's
+  declaration executes. A compiled read tests that tag: the bound path stores
+  the slot value directly; the unbound path calls
+  `rt_resolve_global_slot`, which binds the slot from the globals table or
+  raises the same `UndefinedVariableError` the interpreter raises. An
+  assignment to an undeclared name still faults.
+- `m_globals` stays the authority for "defined". `DEFINE_GLOBAL` and
+  `SET_GLOBAL` write both the table and the slot, so the roots scan,
+  `Runtime::getGlobal`, `globalNames()`, and a class pattern test in `match`
+  (the `INSTANCEOF` opcode) keep working. A slot value duplicates a rooted
+  table value, so it needs no root of its own.
+- The slot array is per Runtime and is allocated once. The globals table may
+  grow; a slot address does not change.
+
+Constraint for later work: every compiled write to a global must go through
+the slot-aware helpers. A new write path that touches only the globals table
+leaves the slot stale. The slow path repairs an unbound slot with a bound
+name; a stale bound value is not detected.
+
 ## Runtime reuse
 
 ### Layer 0: reuse as is

@@ -1,0 +1,24 @@
+// One global read per iteration, for the per-access figure in
+// docs/records/global-access-qbe-2026-10-18.md (#592). Pair it with
+// benchmarks/global_access_local.lox: the two programs differ only in the
+// source of `g`, so the difference is the cost of one global read.
+//
+// Run: build/loxpp benchmarks/global_access_read.lox
+//      tools/loxpp_qbe.sh benchmarks/global_access_read.lox
+var REPS = 200000;
+var G = 1;
+
+fun run(reps) {
+    var i = 0;
+    var s = 0;
+    while (i < reps) {
+        s = s + G;
+        i = i + 1;
+    }
+    return s;
+}
+
+var start = clock();
+run(REPS);
+var elapsed = clock() - start;
+print elapsed / REPS * 1000000000.0;

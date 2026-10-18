@@ -35,6 +35,7 @@ using detail::QNAN;
 using detail::VAL_FALSE;
 using detail::VAL_NIL;
 using detail::VAL_TRUE;
+using detail::VAL_UNBOUND_GLOBAL;
 
 // Wire values of Runtime::OpResult (runtime.h) — a rt_op_*/rt_call wrapper's
 // own raw status, distinct from the compiled function's own kRtOk/kRtThrow/
@@ -132,6 +133,17 @@ class Emitter {
                 m_resumeStates.push_back(fn.instructions[i].offset);
             }
         }
+        for (std::size_t i = 0; i < m_options.globalSlots.size(); i++) {
+            m_globalSlotIndex.emplace(m_options.globalSlots[i],
+                                      static_cast<int>(i));
+        }
+        m_usesGlobals =
+            std::any_of(fn.instructions.begin(), fn.instructions.end(),
+                        [](const DecodedInstruction& ins) {
+                            return ins.op == Op::DEFINE_GLOBAL ||
+                                   ins.op == Op::GET_GLOBAL ||
+                                   ins.op == Op::SET_GLOBAL;
+                        });
     }
 
     std::string run() {
@@ -173,7 +185,7 @@ class Emitter {
         m_body << "}\n";
 
         std::ostringstream out;
-        out << m_data.str() << m_body.str();
+        out << m_body.str();
         return out.str();
     }
 
@@ -208,11 +220,16 @@ class Emitter {
     // GET_TAG's tag, when the two were fused (emitBlock). Absent for a
     // JUMP_TABLE whose tag came through the unfused rt_op_get_tag path.
     std::unordered_map<int, std::string> m_fusedTagWordByJumpOffset;
-    std::ostringstream m_data;
     std::ostringstream m_body;
     int m_tempCounter{0};
-    int m_dataCounter{0};
     int m_maxHeight{0};
+    // #592: name -> global slot, shared by every function of the program.
+    // m_usesGlobals is this function's own answer; only such a function
+    // fetches the slot base, so one that names no global pays nothing.
+    std::unordered_map<std::string, int> m_globalSlotIndex;
+    bool m_usesGlobals{false};
+    // The prologue's slot base (rt_global_slots), empty when unused.
+    std::string m_globalSlotsTemp;
     // This function's own frame depth minus one, computed once in the
     // prologue (emitStackCheck) — every fallible call this function makes
     // passes this as its own stopAtFrameCount, so OpResult::Resumed from
@@ -360,31 +377,59 @@ class Emitter {
         }
     }
 
-    // Interns `name`'s literal text as a `data` C-string and returns a
-    // fresh temp holding the ObjString* the interned Value carries — never
-    // the raw Value bits, since a caller of an op*_global wrapper needs an
-    // ObjString* (rt_capi.h). MemoryManager::makeString interns by content
-    // (memory_manager.cpp), so calling rt_new_string on this same literal
-    // text at every dynamic execution always resolves to the SAME
-    // ObjString* the startup recompile's own DEFINE_GLOBAL/GET_GLOBAL/
-    // SET_GLOBAL used — this emitter never sees, and does not need, the
-    // pointer value itself.
-    std::string internedNamePtr(const std::string& text) {
-        // rt_new_string allocates (makeString), so this is a safe point: a
-        // promoted local live across it must be visible to the GC.
-        spillPromotedLocals();
-        std::string sym =
-            "$" + m_symbol + "_name" + std::to_string(m_dataCounter++);
-        m_data << "data " << sym << " = { b \"" << escapeForQbeData(text)
-               << "\", b 0 }\n";
-        std::string bits = newTemp();
-        m_body << "\t" << bits << " =l call $rt_new_string(l %rt, l " << sym
-               << ")\n";
-        std::string ptr = newTemp();
-        // Value carrying an Obj*: OBJ_TAG | ptr (value.h). Mask it back off.
-        m_body << "\t" << ptr << " =l and " << bits << ", " << (~OBJ_TAG)
+    // #592: the slot index the emitter assigned to this instruction's global
+    // name. EmitOptions::globalSlots comes from qbe::collectGlobalNames over
+    // the whole tree, and the Runtime derives the same sorted list at
+    // startup, so the index means the same name on every Runtime.
+    int globalSlotIndexFor(int constantIndex) const {
+        std::string name = nameConstant(constantIndex);
+        auto it = m_globalSlotIndex.find(name);
+        if (it == m_globalSlotIndex.end()) {
+            throw std::runtime_error("qbe_emitter: no global slot for '" +
+                                     name +
+                                     "' — EmitOptions::globalSlots must hold "
+                                     "qbe::collectGlobalNames(whole tree)");
+        }
+        return it->second;
+    }
+
+    // Address of a global slot: m_globalSlotsTemp + 8*slot. The base comes
+    // from the prologue (emitStackCheck) and is stable for the program's
+    // lifetime, so a slot address never changes when m_globals grows.
+    std::string globalSlotAddress(int slot) {
+        std::string t = newTemp();
+        m_body << "\t" << t << " =l add " << m_globalSlotsTemp << ", "
+               << (slot * 8) << "\n";
+        return t;
+    }
+
+    // #592: an inline slot read: no interning, no hash probe, no runtime
+    // call on the bound path. Only an unbound slot calls the runtime, which
+    // fills it from m_globals or raises UndefinedVariableError.
+    void emitGlobalRead(const DecodedInstruction& ins, int topHeight) {
+        int slot = globalSlotIndexFor(ins.constantIndex);
+        std::string address = globalSlotAddress(slot);
+        std::string value = loadl(address);
+        std::string unbound = newTemp();
+        m_body << "\t" << unbound << " =w ceql " << value << ", "
+               << VAL_UNBOUND_GLOBAL << "\n";
+        std::string tag = std::to_string(m_tempCounter++);
+        std::string slowLabel = "@" + m_symbol + "_global_slow" + tag;
+        std::string fastLabel = "@" + m_symbol + "_global_fast" + tag;
+        std::string doneLabel = "@" + m_symbol + "_global_done" + tag;
+        m_body << "\tjnz " << unbound << ", " << slowLabel << ", " << fastLabel
                << "\n";
-        return ptr;
+        m_body << slowLabel << "\n";
+        callSlowPathTyped("rt_resolve_global_slot", topHeight,
+                          {"w " + std::to_string(ins.constantIndex),
+                           "w " + std::to_string(slot), "w " + m_stopTemp},
+                          ins.offset, Catchability::Local);
+        std::string resolved = loadl(address);
+        storel(resolved, addr(topHeight));
+        m_body << "\tjmp " << doneLabel << "\n";
+        m_body << fastLabel << "\n";
+        storel(value, addr(topHeight));
+        m_body << doneLabel << "\n";
     }
 
     // The currently executing function's own closure, as a Value — never
@@ -404,13 +449,12 @@ class Emitter {
 
     // Reads constant `constantIndex` from the CURRENTLY EXECUTING function's
     // own constant pool, via rt_constant_at (rt_capi.h) — the same
-    // mechanism CLOSURE already uses for its own FUNCTION constant. Unlike
-    // internedNamePtr above, this never re-interns anything at runtime: the
-    // constant already exists as a real object, built by rt_startup's own
-    // embed-and-recompile step, so this just reads the SAME Value the
-    // native VM's own CONSTANT/GET_PROPERTY/etc. read from this function's
-    // chunk (S5, #458 — "materialise", bytecode-translation-problems.md
-    // P6).
+    // mechanism CLOSURE already uses for its own FUNCTION constant. This
+    // never re-interns anything at runtime: the constant already exists as a
+    // real object, built by rt_startup's own embed-and-recompile step, so
+    // this just reads the SAME Value the native VM's own
+    // CONSTANT/GET_PROPERTY/etc. read from this function's chunk (S5, #458 —
+    // "materialise", bytecode-translation-problems.md P6).
     std::string constantValueBits(int constantIndex) {
         // ownClosureBits() itself emits an instruction as a side effect
         // (its own `call`), so — like addr() — it must be computed as its
@@ -433,23 +477,6 @@ class Emitter {
         m_body << "\t" << ptr << " =l and " << bits << ", " << (~OBJ_TAG)
                << "\n";
         return ptr;
-    }
-
-    // QBE `data` string bodies take a quoted C string; backslash and quote
-    // are the only bytes that need escaping to stay inside one `b "..."`
-    // item. A global-variable name is always a valid Lox++ identifier
-    // (scanner.cpp), so neither byte can actually appear here — this guards
-    // the general case anyway rather than assuming it.
-    static std::string escapeForQbeData(const std::string& raw) {
-        std::string out;
-        out.reserve(raw.size());
-        for (char c : raw) {
-            if (c == '"' || c == '\\') {
-                out += '\\';
-            }
-            out += c;
-        }
-        return out;
     }
 
     // is<Number>(v): (bits & QNAN) != QNAN (value.h). Returns a `w` 0/1.
@@ -656,6 +683,15 @@ class Emitter {
         m_body << "\t" << myDepth << " =w call $rt_frame_count(l %rt)\n";
         m_stopTemp = newTemp();
         m_body << "\t" << m_stopTemp << " =w sub " << myDepth << ", 1\n";
+        // #592: only a function that names a global fetches the slot base, so
+        // a global-free function pays nothing. The array never moves after
+        // predeclare, and the prologue runs again on every coroutine re-entry,
+        // so resume blocks see the same base.
+        if (m_usesGlobals) {
+            m_globalSlotsTemp = newTemp();
+            m_body << "\t" << m_globalSlotsTemp
+                   << " =l call $rt_global_slots(l %rt)\n";
+        }
         // S8 (#461): promoted parameters are loaded here, in the block that
         // jumps to block 0, so a phi at block 0 (a loop that jumps back to
         // it) can name them as the prologue predecessor's values.
@@ -884,21 +920,25 @@ class Emitter {
             break;
         }
         case Op::DEFINE_GLOBAL: {
-            std::string name = internedNamePtr(nameConstant(ins.constantIndex));
-            callSlowPath("rt_op_define_global", before.height, {name},
-                         std::nullopt, ins.offset, Catchability::Fatal);
+            // #592: m_globals holds the binding; the slot is the compiled
+            // read's cache. Both are written, so the roots scan, getGlobal(),
+            // globalNames(), and `is` keep reading the table.
+            int slot = globalSlotIndexFor(ins.constantIndex);
+            callSlowPathTyped("rt_op_define_global_at", before.height,
+                              {"w " + std::to_string(ins.constantIndex),
+                               "w " + std::to_string(slot)},
+                              ins.offset, Catchability::Fatal);
             break;
         }
-        case Op::GET_GLOBAL: {
-            std::string name = internedNamePtr(nameConstant(ins.constantIndex));
-            callSlowPath("rt_op_get_global", before.height, {name}, m_stopTemp,
-                         ins.offset, Catchability::Local);
+        case Op::GET_GLOBAL:
+            emitGlobalRead(ins, before.height);
             break;
-        }
         case Op::SET_GLOBAL: {
-            std::string name = internedNamePtr(nameConstant(ins.constantIndex));
-            callSlowPath("rt_op_set_global", before.height, {name}, m_stopTemp,
-                         ins.offset, Catchability::Local);
+            int slot = globalSlotIndexFor(ins.constantIndex);
+            callSlowPathTyped("rt_op_set_global_at", before.height,
+                              {"w " + std::to_string(ins.constantIndex),
+                               "w " + std::to_string(slot), "w " + m_stopTemp},
+                              ins.offset, Catchability::Local);
             break;
         }
         case Op::PRINT:

@@ -100,6 +100,7 @@ set(LOXPP_CORE_SOURCES
     src/chunk.cpp
     src/debug.cpp
     src/backend/chunk_decoder.cpp
+    src/backend/global_slots.cpp
     src/backend/cfg.cpp
     src/backend/abstract_stack.cpp
     src/backend/handler_depth.cpp

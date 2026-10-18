@@ -784,6 +784,44 @@ class Runtime {
     OpResult opGetGlobal(ObjString* name, int stopAtFrameCount);
     OpResult opSetGlobal(ObjString* name, int stopAtFrameCount);
 
+    // Global slots (QBE backend, #592). Compiled code reads a global through
+    // an index into `m_globalSlots` instead of a name lookup. The index is
+    // assigned by the compiler from the same sorted name list the startup
+    // recompile derives (backend/global_slots.h), and every Runtime —
+    // workers included — predeclares that list in the same order. A slot is
+    // `isUnboundGlobal` until the name's declaration runs.
+    //
+    // `m_globals` stays the authority for "defined": the `*At` helpers below
+    // write both it and the slot, so markRoots(), getGlobal(), globalNames(),
+    // and the `is` operator keep their existing behaviour. The slot array is
+    // per Runtime and never resized after predeclare(), so a slot address
+    // stays valid when the globals table grows.
+    void setGlobalSlotNames(std::vector<std::string> names) {
+        m_globalSlotNames = std::move(names);
+    }
+    void predeclareGlobalSlots();
+    [[nodiscard]] Value* globalSlotBase() {
+        return m_globalSlots.empty() ? nullptr : m_globalSlots.data();
+    }
+    [[nodiscard]] int globalSlotCount() const {
+        return static_cast<int>(m_globalSlots.size());
+    }
+    [[nodiscard]] const std::vector<std::string>& globalSlotNames() const {
+        return m_globalSlotNames;
+    }
+    void opDefineGlobalAt(ObjString* name, int slot) {
+        Value value = peek(0);
+        m_globals.set(name, value);
+        setGlobalSlot(slot, value);
+        pop();
+    }
+    OpResult opSetGlobalAt(ObjString* name, int slot, int stopAtFrameCount);
+    // The slow path of a compiled read: binds the slot from `m_globals`, or
+    // raises the same UndefinedVariableError opGetGlobal() raises. It never
+    // pushes; the caller re-reads the slot.
+    OpResult opResolveGlobalSlot(ObjString* name, int slot,
+                                 int stopAtFrameCount);
+
     // Op::THROW's own op*()-shaped entry point: handleThrow() collapsed
     // through fromThrow() (private below) into the same OpResult contract
     // every other op*() call site uses, so Op::THROW can go through
@@ -1224,6 +1262,15 @@ class Runtime {
     // worker), and whether this Runtime is the main worker.
     std::shared_ptr<WorkerGroup> m_group;
     bool m_isMainWorker{true};
+    // QBE global slots (#592): parallel to m_globalSlotNames, index = slot.
+    // Both are fixed for a program's lifetime, so globalSlotBase() is stable.
+    std::vector<Value> m_globalSlots;
+    std::vector<std::string> m_globalSlotNames;
+    void setGlobalSlot(int slot, Value value) {
+        if (slot >= 0 && slot < static_cast<int>(m_globalSlots.size())) {
+            m_globalSlots[static_cast<std::size_t>(slot)] = value;
+        }
+    }
     // Every source this Runtime compiled, by ObjFunction::sourceId. A new
     // worker gets the list, so it compiles the same source again.
     std::vector<std::shared_ptr<const std::string>> m_sources;

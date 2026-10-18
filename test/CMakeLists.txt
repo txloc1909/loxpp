@@ -26,6 +26,7 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/chunk.cpp
     ${PROJECT_SOURCE_DIR}/src/debug.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/chunk_decoder.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/global_slots.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/cfg.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/abstract_stack.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/handler_depth.cpp

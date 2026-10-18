@@ -1,0 +1,23 @@
+// The same loop as benchmarks/global_access_read.lox, with `g` in a local
+// slot. The difference between the two runs is the cost of one global read
+// (docs/records/global-access-qbe-2026-10-18.md, #592).
+//
+// Run: build/loxpp benchmarks/global_access_local.lox
+//      tools/loxpp_qbe.sh benchmarks/global_access_local.lox
+var REPS = 200000;
+
+fun run(reps) {
+    var i = 0;
+    var s = 0;
+    var g = 1;
+    while (i < reps) {
+        s = s + g;
+        i = i + 1;
+    }
+    return s;
+}
+
+var start = clock();
+run(REPS);
+var elapsed = clock() - start;
+print elapsed / REPS * 1000000000.0;
