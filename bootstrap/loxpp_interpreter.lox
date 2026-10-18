@@ -3557,11 +3557,15 @@ class Interpreter {
             object.elements[fl] = val;
             return val;
         }
-        // Native raises this through its own always-fatal RAISE_ERROR site,
-        // separate from SET_INDEX's catchable NotIndexableError path below
-        // (src/vm.cpp Op::SET_INDEX) -- so it needs its own kind, not that
-        // one's.
-        if (isLoxStr(object)) { this.setError("StringImmutableError", "Strings are immutable.", line); return nil; }
+        // The object, the index and the value are all evaluated before the
+        // fault, in this order, as Runtime::opSetIndex sees them on the stack.
+        // The fault is fatal here but a catchable NotIndexableError below.
+        if (isLoxStr(object)) {
+            this.evalExpr(valueExpr, env);
+            if (this.throwFlag) return nil;
+            this.fatalError("Strings are immutable and cannot be indexed for assignment.");
+            return nil;
+        }
         var m = this.findDunder(object, "__index_set__");
         if (m != nil) {
             var val = this.evalExpr(valueExpr, env);
@@ -4381,8 +4385,8 @@ class Interpreter {
             return nil;
         }
         // `in`'s own operand-type checks are always fatal on native
-        // (src/vm.cpp Op::IN, RAISE_ERROR), a separate opcode from indexing
-        // -- neither IndexTypeError nor NotIndexableError applies here.
+        // (Runtime::opIn), a separate opcode from indexing -- neither
+        // IndexTypeError nor NotIndexableError applies here.
         if (opL == "in") {
             var rtag = loxTag(right);
             if (rtag == "list") {
@@ -4394,7 +4398,7 @@ class Interpreter {
                 return false;
             }
             if (isLoxStr(right)) {
-                if (!isLoxStr(left)) { this.setError("InLeftOperandTypeError", "Left operand of 'in' on a String must be a String.", opLine); return nil; }
+                if (!isLoxStr(left)) { this.fatalError("Left operand of 'in' on a string must be a string."); return nil; }
                 return left in right;
             }
             if (rtag == "map") {
@@ -4410,7 +4414,7 @@ class Interpreter {
                 if (this.throwFlag) return nil;
                 return b;
             }
-            this.setError("InRightOperandTypeError", "Right operand of 'in' must be a List, String, or Map.", opLine);
+            this.fatalError("Right operand of 'in' must be a list, string, or map.");
             return nil;
         }
         return nil;
