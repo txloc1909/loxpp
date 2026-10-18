@@ -230,6 +230,7 @@ class Scanner {
                 else if (esc == "\"") { value = value + "\""; this.advance(); }
                 else if (esc == "\\") { value = value + "\\"; this.advance(); }
                 else if (esc == "0")  { value = value + "\0"; this.advance(); }
+                else if (esc == "r")  { value = value + "\r"; this.advance(); }
                 else                  { value = value + "\\"; }
             } else {
                 value = value + this.peek();
