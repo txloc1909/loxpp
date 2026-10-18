@@ -11,6 +11,7 @@
 
 #include "backend/capture_analysis.h"
 #include "backend/chunk_decoder.h"
+#include "backend/global_slots.h"
 #include "backend/qbe_emitter.h"
 #include "compiler.h"
 #include "exec_objects.h"
@@ -55,7 +56,10 @@ int main(int argc, char** argv) {
         FunctionStackAnalysis analysis = analyzeStack(tree);
         FunctionCaptureInfo captures =
             analyzeCaptures(tree).functions.at(tree.id);
-        std::string ssa = qbe::emitScript(tree, analysis, captures, argv[2]);
+        qbe::EmitOptions options;
+        options.globalSlots = qbe::collectGlobalNames(tree);
+        std::string ssa =
+            qbe::emitScript(tree, analysis, captures, argv[2], options);
         std::fputs(ssa.c_str(), stdout);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "qbe_emit_probe: %s\n", e.what());

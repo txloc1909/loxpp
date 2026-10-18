@@ -3,6 +3,7 @@
 #include "backend/abstract_stack.h"
 #include "backend/capture_analysis.h"
 #include "backend/chunk_decoder.h"
+#include "backend/global_slots.h"
 #include "backend/qbe_emitter.h"
 #include "compiler.h"
 #include "exec_objects.h"
@@ -288,6 +289,7 @@ int runQbeTarget(const std::string& exePath, const std::string& scriptPath,
     try {
         DecodedFunction tree = decodeFunctionTree(script);
         options.coroutineMode = qbe::needsCoroutineMode(tree);
+        options.globalSlots = qbe::collectGlobalNames(tree);
         StackAnalysisTree analysis = analyzeStackTree(tree);
         CaptureAnalysis captures = analyzeCaptures(tree);
         emitTree(tree, analysis, captures, options, ssa, fns);

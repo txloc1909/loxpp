@@ -131,6 +131,12 @@ void rt_set_args(Runtime* rt, int argc, const char* const* argv) noexcept;
 // code's job).
 Value rt_new_string(Runtime* rt, const char* chars) noexcept;
 
+// The base of this Runtime's global-slot array (#592), indexed by the slot
+// the emitter assigned. Every Runtime predeclares the program's sorted global
+// name list, so the same index means the same name on the main runtime and on
+// every worker. The array never moves after predeclare.
+Value* rt_global_slots(Runtime* rt) noexcept;
+
 // Looks up a global by name (Runtime::getGlobal), returning Nil if it is
 // undefined. GET_GLOBAL's own compiled lowering (straight-line code) has a
 // real undefined-global error path; this convenience does not — it exists
@@ -233,17 +239,19 @@ int rt_op_less(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_greater(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_equal(Runtime* rt, int stopAtFrameCount) noexcept;
 
-// One wrapper per Runtime's global-variable helper (runtime.h). `name` must
-// already be interned (rt_new_string/MemoryManager::makeString dedupe by
-// content, so a compiled name literal reaches the same ObjString* the
-// startup recompile's own DEFINE_GLOBAL used) — the emitter is responsible
-// for interning it before calling these, exactly the way it is responsible
-// for setting rt_set_top() first (Q1).
-int rt_op_define_global(Runtime* rt, ObjString* name) noexcept;
-int rt_op_get_global(Runtime* rt, ObjString* name,
-                     int stopAtFrameCount) noexcept;
-int rt_op_set_global(Runtime* rt, ObjString* name,
-                     int stopAtFrameCount) noexcept;
+// One wrapper per Runtime's global-variable helper (runtime.h), keyed by a
+// slot index the emitter assigned (backend/global_slots.h). `constantIndex`
+// names the current function's own constant for the global's name; the
+// runtime reads it from the frame's closure, so compiled code does not
+// intern a name at run time. `m_globals` stays the authority for "defined";
+// these write both it and the slot.
+int rt_op_define_global_at(Runtime* rt, int constantIndex, int slot) noexcept;
+int rt_op_set_global_at(Runtime* rt, int constantIndex, int slot,
+                        int stopAtFrameCount) noexcept;
+// Slow path of a compiled read: binds the slot from m_globals, or raises
+// UndefinedVariableError. It pushes nothing; the caller re-reads the slot.
+int rt_resolve_global_slot(Runtime* rt, int constantIndex, int slot,
+                           int stopAtFrameCount) noexcept;
 
 // CALL/RETURN/CLOSURE/upvalues/CLOSE_UPVALUE (S4, #457). No capture
 // analysis at this stage (docs/decisions/qbe-backend.md, "Staged plan", row

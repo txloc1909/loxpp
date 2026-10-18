@@ -72,6 +72,7 @@
 #include "chunk_decoder.h"
 
 #include <string>
+#include <vector>
 
 namespace qbe {
 
@@ -89,10 +90,15 @@ struct EmitOptions {
     // suspension. See rt_abi.h's kRtCall/kRtYield and Runtime::
     // runCompiledFrames().
     bool coroutineMode{false};
+    // The program's global names, index = slot (#592), from
+    // qbe::collectGlobalNames over the whole function tree. Every function
+    // of one program must receive the same list; the Runtime derives it the
+    // same way at startup. Empty is valid only when the program names no
+    // global.
+    std::vector<std::string> globalSlots;
 };
 
-// Emits complete QBE textual IL (.ssa) for one function: `data` declarations
-// for any global-variable name it references, plus one
+// Emits complete QBE textual IL (.ssa) for one function: one
 // `export function w $<qbeSymbol>(l %rt, l %base) { ... }` matching
 // RtCompiledFn's signature (backend/rt_abi.h) exactly. `analysis` must come
 // from analyzeStack(fn) (or the matching node of analyzeStackTree(root)) and

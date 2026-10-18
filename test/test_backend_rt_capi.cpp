@@ -23,6 +23,7 @@
 #include <atomic>
 #include <deque>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -380,6 +381,25 @@ TEST(RtAttachCode, RejectsUnknownId) {
 TEST(RtStartup, CompilesAndReturnsARuntime) {
     Runtime* rt = rt_startup("var x = 1;", nullptr, 0);
     ASSERT_NE(rt, nullptr);
+    rt_shutdown(rt);
+}
+
+TEST(RtStartup, PredeclaresTheSortedGlobalSlotList) {
+    // #592: the emitter assigns slot indices from this list, so the runtime
+    // must derive the same sorted names from the same source. A stdlib name
+    // the program uses is already bound; a top-level var is unbound until
+    // its declaration executes.
+    Runtime* rt = rt_startup("var b = 2; var a = clock;", nullptr, 0);
+    ASSERT_NE(rt, nullptr);
+    EXPECT_EQ(rt->globalSlotNames(),
+              (std::vector<std::string>{"a", "b", "clock"}));
+    ASSERT_EQ(rt->globalSlotCount(), 3);
+    Value* slots = rt->globalSlotBase();
+    ASSERT_NE(slots, nullptr);
+    EXPECT_TRUE(isUnboundGlobal(slots[0]));  // a
+    EXPECT_TRUE(isUnboundGlobal(slots[1]));  // b
+    EXPECT_FALSE(isUnboundGlobal(slots[2])); // clock, from defineNatives()
+    EXPECT_TRUE(is<Obj*>(slots[2]));
     rt_shutdown(rt);
 }
 

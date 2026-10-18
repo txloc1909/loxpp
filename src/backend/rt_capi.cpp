@@ -1,5 +1,6 @@
 #include "rt_capi.h"
 #include "rt_abi.h"
+#include "backend/global_slots.h"
 #include "chunk_decoder.h"
 #include "runtime.h"
 #include "container_objects.h"
@@ -9,6 +10,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <exception>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -71,6 +73,22 @@ const DecodedFunction* findById(const DecodedFunction& node,
         }
     }
     return nullptr;
+}
+
+// The name a compiled DEFINE_GLOBAL/GET_GLOBAL/SET_GLOBAL names, taken from
+// the running function's own constant pool. Compiled code passes the index,
+// so no name is interned at run time (#592).
+ObjString* constantName(Runtime* rt, int constantIndex) {
+    ObjClosure* closure = rt->currentClosure();
+    if (closure == nullptr) {
+        throw std::runtime_error("global op outside a frame");
+    }
+    Value v = closure->function->chunk.getConstant(
+        static_cast<uint16_t>(constantIndex));
+    if (!isString(v)) {
+        throw std::runtime_error("global op's name constant is not a string");
+    }
+    return asObjString(v);
 }
 
 // S4 (#457), hazard R4 on issue #457: walks the whole rebuilt tree and
@@ -143,6 +161,11 @@ Runtime* rt_startup(const char* source, const RtFunctionDesc* descs,
             return nullptr;
         }
         DecodedFunction tree = decodeFunctionTree(closure->function);
+        // The same sorted list the emitter reserved slot indices from
+        // (backend/global_slots.h). The runtime recompiles the same source,
+        // so both sides agree without a shared table in the executable.
+        rt->setGlobalSlotNames(qbe::collectGlobalNames(tree));
+        rt->predeclareGlobalSlots();
         for (std::size_t i = 0; i < nDescs; i++) {
             if (!rt_attach_code(tree, descs[i])) {
                 delete rt;
@@ -171,6 +194,9 @@ Value rt_peek(Runtime* rt, int distance) noexcept { return rt->peek(distance); }
 Value* rt_top(Runtime* rt) noexcept { return rt->top(); }
 void rt_set_top(Runtime* rt, Value* top) noexcept { rt->setTop(top); }
 Value* rt_stack_base(Runtime* rt) noexcept { return rt->stackBase(); }
+Value* rt_global_slots(Runtime* rt) noexcept {
+    return rt == nullptr ? nullptr : rt->globalSlotBase();
+}
 int rt_frame_count(Runtime* rt) noexcept { return rt->frameCount(); }
 
 void rt_set_args(Runtime* rt, int argc, const char* const* argv) noexcept {
@@ -377,21 +403,27 @@ int rt_op_equal(Runtime* rt, int stopAtFrameCount) noexcept {
     return rtGuard(rt, [&] { return rt->opEqual(stopAtFrameCount); });
 }
 
-int rt_op_define_global(Runtime* rt, ObjString* name) noexcept {
+int rt_op_define_global_at(Runtime* rt, int constantIndex, int slot) noexcept {
     return rtGuard(rt, [&] {
-        rt->opDefineGlobal(name);
+        rt->opDefineGlobalAt(constantName(rt, constantIndex), slot);
         return Runtime::OpResult::OK;
     });
 }
 
-int rt_op_get_global(Runtime* rt, ObjString* name,
-                     int stopAtFrameCount) noexcept {
-    return rtGuard(rt, [&] { return rt->opGetGlobal(name, stopAtFrameCount); });
+int rt_op_set_global_at(Runtime* rt, int constantIndex, int slot,
+                        int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] {
+        return rt->opSetGlobalAt(constantName(rt, constantIndex), slot,
+                                 stopAtFrameCount);
+    });
 }
 
-int rt_op_set_global(Runtime* rt, ObjString* name,
-                     int stopAtFrameCount) noexcept {
-    return rtGuard(rt, [&] { return rt->opSetGlobal(name, stopAtFrameCount); });
+int rt_resolve_global_slot(Runtime* rt, int constantIndex, int slot,
+                           int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] {
+        return rt->opResolveGlobalSlot(constantName(rt, constantIndex), slot,
+                                       stopAtFrameCount);
+    });
 }
 
 Value rt_current_closure(Runtime* rt) noexcept {

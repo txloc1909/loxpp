@@ -21,6 +21,11 @@ inline constexpr uint64_t OBJ_TAG = QNAN | SIGN_BIT; // 0xFFFC000000000000
 inline constexpr uint64_t VAL_NIL = QNAN | 0x01ULL;
 inline constexpr uint64_t VAL_FALSE = QNAN | 0x02ULL;
 inline constexpr uint64_t VAL_TRUE = QNAN | 0x03ULL;
+// A global slot that has no binding yet (QBE backend, #592). It is not a Lox
+// value and must never reach user code: the compiled read checks it and
+// throws, and the declare/assign paths overwrite it. The payload 0x04 is
+// unused by the tags above, and the QNAN bit 50 keeps a hardware NaN out.
+inline constexpr uint64_t VAL_UNBOUND_GLOBAL = QNAN | 0x04ULL;
 } // namespace detail
 
 // The OBJ_TAG pattern leaves this many low bits for an object pointer. Every
@@ -81,6 +86,17 @@ inline bool is<Nil>(const Value& v) {
 template <>
 inline bool is<Obj*>(const Value& v) {
     return (v.bits & detail::OBJ_TAG) == detail::OBJ_TAG;
+}
+
+// A global slot's empty state (src/runtime.h's m_globalSlots). Not one of the
+// Lox value types, so `is<T>` above all return false for it.
+inline bool isUnboundGlobal(const Value& v) {
+    return v.bits == detail::VAL_UNBOUND_GLOBAL;
+}
+inline Value unboundGlobal() {
+    Value v;
+    v.bits = detail::VAL_UNBOUND_GLOBAL;
+    return v;
 }
 
 // as<T> performs no type check; every call site guards with the matching

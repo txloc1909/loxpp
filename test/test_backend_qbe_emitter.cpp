@@ -13,6 +13,7 @@
 #include "backend/abstract_stack.h"
 #include "backend/capture_analysis.h"
 #include "backend/chunk_decoder.h"
+#include "backend/global_slots.h"
 #include "backend/qbe_emitter.h"
 #include "compiler.h"
 #include "memory_manager.h"
@@ -35,7 +36,9 @@ std::string emitScriptFrom(const std::string& source) {
     DecodedFunction tree = decodeFunctionTree(script);
     FunctionStackAnalysis analysis = analyzeStack(tree);
     FunctionCaptureInfo captures = analyzeCaptures(tree).functions.at(tree.id);
-    return qbe::emitScript(tree, analysis, captures, "lox_fn_0");
+    qbe::EmitOptions options;
+    options.globalSlots = qbe::collectGlobalNames(tree);
+    return qbe::emitScript(tree, analysis, captures, "lox_fn_0", options);
 }
 
 // Emits one function nested inside the compiled program, found by walking
@@ -58,8 +61,10 @@ std::string emitNestedFrom(const std::string& source,
     }
     FunctionStackAnalysis analysis = analyzeStack(*node);
     CaptureAnalysis allCaptures = analyzeCaptures(tree);
+    qbe::EmitOptions options;
+    options.globalSlots = qbe::collectGlobalNames(tree);
     return qbe::emitScript(*node, analysis, allCaptures.functions.at(node->id),
-                           "lox_fn_nested");
+                           "lox_fn_nested", options);
 }
 
 std::string emitNestedWithOptions(const std::string& source,
@@ -77,8 +82,10 @@ std::string emitNestedWithOptions(const std::string& source,
     }
     FunctionStackAnalysis analysis = analyzeStack(*node);
     CaptureAnalysis allCaptures = analyzeCaptures(tree);
+    qbe::EmitOptions withSlots = options;
+    withSlots.globalSlots = qbe::collectGlobalNames(tree);
     return qbe::emitScript(*node, analysis, allCaptures.functions.at(node->id),
-                           "lox_fn_nested", options);
+                           "lox_fn_nested", withSlots);
 }
 
 int countOccurrences(const std::string& haystack, const std::string& needle) {
@@ -188,12 +195,17 @@ TEST(QbeEmitter, JumpIfFalseBranchesOnBothTargets) {
     EXPECT_NE(ssa.find("jnz "), std::string::npos);
 }
 
-TEST(QbeEmitter, GlobalNameIsEmbeddedAsAnInternedDataString) {
+TEST(QbeEmitter, GlobalAccessReadsAPredeclaredSlot) {
     std::string ssa = emitScriptFrom("var g = 1; print g;");
-    EXPECT_NE(ssa.find("data $lox_fn_0_name"), std::string::npos);
-    EXPECT_NE(ssa.find("b \"g\""), std::string::npos);
-    EXPECT_NE(ssa.find("call $rt_op_define_global"), std::string::npos);
-    EXPECT_NE(ssa.find("call $rt_op_get_global"), std::string::npos);
+    // #592: no name is interned at run time, and a read does not probe the
+    // globals table. The prologue fetches the slot base, and an unbound slot
+    // takes the runtime's slow path.
+    EXPECT_EQ(ssa.find("rt_new_string"), std::string::npos);
+    EXPECT_EQ(ssa.find("rt_op_get_global"), std::string::npos);
+    EXPECT_NE(ssa.find("call $rt_global_slots(l %rt)"), std::string::npos);
+    EXPECT_NE(ssa.find("call $rt_op_define_global_at"), std::string::npos);
+    EXPECT_NE(ssa.find(std::to_string(detail::VAL_UNBOUND_GLOBAL)),
+              std::string::npos);
 }
 
 TEST(QbeEmitter, ArithmeticHasAFastAndSlowPath) {

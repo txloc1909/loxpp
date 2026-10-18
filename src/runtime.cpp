@@ -51,6 +51,20 @@ std::vector<std::string> Runtime::globalNames() const {
     return names;
 }
 
+void Runtime::predeclareGlobalSlots() {
+    m_globalSlots.assign(m_globalSlotNames.size(), unboundGlobal());
+    for (std::size_t i = 0; i < m_globalSlotNames.size(); i++) {
+        // A name the startup stdlib registration already bound (clock, print,
+        // ...) starts with that value; every other name stays unbound until
+        // its declaration executes.
+        ObjString* key = m_mm.findString(m_globalSlotNames[i]);
+        Value value;
+        if (key != nullptr && m_globals.get(key, value)) {
+            m_globalSlots[i] = value;
+        }
+    }
+}
+
 ObjClosure* Runtime::loadSource(const std::string& source,
                                 DiagnosticSink* sink) {
     return loadProgram(source, sink, false);
@@ -99,6 +113,13 @@ ObjClosure* Runtime::loadProgram(const std::string& source,
     ObjClosure* closure = m_mm.create<ObjClosure>(fn);
     stackTop[-1] =
         Value{static_cast<Obj*>(closure)}; // replace fn with its closure
+    // A worker recompiles only the declarations, but the compiled code it
+    // attaches uses the main program's slot indices. m_globalSlotNames was
+    // copied from the spawning Runtime before runWorker(), so the same list
+    // is predeclared here, in the same order.
+    if (declarationsOnly && !m_globalSlotNames.empty()) {
+        predeclareGlobalSlots();
+    }
     return closure;
 }
 
@@ -1403,6 +1424,7 @@ struct WorkerStart {
     ObjTask* task;
     Value msg;
     Runtime::CodeAttacher attachCode;
+    std::vector<std::string> globalSlotNames;
 };
 
 void workerMain(WorkerStart start) {
@@ -1414,6 +1436,7 @@ void workerMain(WorkerStart start) {
     Runtime& rt = vm->runtime();
     rt.setArgs(std::move(start.args));
     rt.setCodeAttacher(std::move(start.attachCode));
+    rt.setGlobalSlotNames(std::move(start.globalSlotNames));
     InterpretResult result =
         rt.runWorker(start.group, std::move(start.sources), start.sourceId,
                      start.ordinal, start.task, start.msg);
@@ -1456,7 +1479,8 @@ ObjTask* Runtime::spawnWorker(ObjClosure* entry, Value msg) {
                       entry->function->topLevelOrdinal,
                       task,
                       msg,
-                      m_attachCode};
+                      m_attachCode,
+                      m_globalSlotNames};
     try {
         std::thread(workerMain, std::move(start)).detach();
     } catch (const std::system_error& e) {
@@ -3797,5 +3821,31 @@ Runtime::OpResult Runtime::opSetGlobal(ObjString* name, int stopAtFrameCount) {
         return fromThrow(raiseThrowableError(
             "UndefinedVariableError", "Undefined variable.", stopAtFrameCount));
     }
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::opSetGlobalAt(ObjString* name, int slot,
+                                         int stopAtFrameCount) {
+    // m_globals is the authority for "defined"; the slot is a read cache that
+    // a successful write keeps in step. The insert-then-delete on an unknown
+    // name is opSetGlobal()'s existing behaviour, so the fault and the table
+    // state match the interpreted path exactly.
+    if (m_globals.set(name, peek(0))) {
+        m_globals.del(name);
+        return fromThrow(raiseThrowableError(
+            "UndefinedVariableError", "Undefined variable.", stopAtFrameCount));
+    }
+    setGlobalSlot(slot, peek(0));
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::opResolveGlobalSlot(ObjString* name, int slot,
+                                               int stopAtFrameCount) {
+    Value value;
+    if (!m_globals.get(name, value)) {
+        return fromThrow(raiseThrowableError(
+            "UndefinedVariableError", "Undefined variable.", stopAtFrameCount));
+    }
+    setGlobalSlot(slot, value);
     return OpResult::OK;
 }
