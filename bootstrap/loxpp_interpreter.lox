@@ -675,9 +675,21 @@ class Parser {
         return YieldExpr(val, yieldTok.line);
     }
 
+    isOperatorExpr(expr) {
+        return match expr {
+            case Binary{op, left, right}  => true
+            case Logical{op, left, right} => true
+            case Unary{op, right}         => true
+            case _                        => false
+        };
+    }
+
     assignment() {
         if (this.check("YIELD")) return this.yieldExpression();
         var expr = this.logicOr();
+        // The grammar makes `a + b` a whole expression, so the `=` after it
+        // is not an assignment: the caller reports the missing ';' or ')'.
+        if (this.check("EQUAL") and this.isOperatorExpr(expr)) return expr;
         if (this.matchT("EQUAL")) {
             var equals = this.previous();
             var val    = this.assignment();

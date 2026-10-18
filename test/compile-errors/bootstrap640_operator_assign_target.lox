@@ -1,0 +1,5 @@
+// DIAGNOSTIC: Expect ';' after expression.
+// Compile error: an operator expression is on the left of '='.
+var a;
+var b;
+a + b = 3;
