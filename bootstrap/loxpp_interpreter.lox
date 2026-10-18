@@ -4502,13 +4502,11 @@ class Interpreter {
         return callee.call(this, args);
     }
 
-    // Undefined-member faults below use "UndefinedMemberError", not the
-    // table's "UndefinedPropertyError" -- that kind is reserved for a
-    // narrower table cause (an undefined property read on a caught Error
-    // value itself, the "error" branch below), and native's own undefined-
-    // member faults on every other receiver type are separate, always-fatal
-    // RAISE_ERROR sites (src/vm.cpp Op::GET_PROPERTY) with no catchable kind
-    // of their own.
+    // Undefined-member faults below are fatal: native's are always-fatal
+    // RAISE_ERROR sites (src/vm.cpp Op::GET_PROPERTY) with no catchable kind.
+    // The table's "UndefinedPropertyError" is reserved for a narrower cause,
+    // an undefined property read on a caught Error value itself (the "error"
+    // branch below).
     //
     // Receive isCallTarget to distinguish plain property reads from method calls
     // on non-instances. See evalCall's syntactic dispatch.
@@ -4592,7 +4590,7 @@ class Interpreter {
         }
         var val = object.instGet(name, 0);
         if (val == nil and !object.fields.has(name) and object.klass.findMethod(name) == nil) {
-            this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
+            this.fatalError("Undefined property '" + name + "'.");
             return nil;
         }
         // Calling a non-callable field value is fatal on native. Check before
@@ -4621,16 +4619,14 @@ class Interpreter {
     }
 
     // Native's fallback for a missing superclass method is its own
-    // always-fatal RAISE_ERROR site (src/vm.cpp Op::GET_SUPER), so this uses
-    // "UndefinedMemberError" like evalGet's other non-Error receivers, not
-    // the Error-value-only "UndefinedPropertyError".
+    // always-fatal RAISE_ERROR site (src/vm.cpp Op::GET_SUPER).
     evalSuper(id, method, line, env) {
         var dist       = this.locals[id];
         var superclass = env.getAt(dist, "super");
         var object     = env.getAt(dist - 1, "this");
         var fn         = superclass.findMethod(method);
         if (fn == nil) {
-            this.setError("UndefinedMemberError", "Undefined property '" + method + "'.", line);
+            this.fatalError("Undefined property '" + method + "'.");
             return nil;
         }
         return fn.bind(object);
