@@ -3,9 +3,6 @@
 # tools/check_fatal_table.py fails on a mismatch that is not listed here, and on a
 # listed row that passes. The fix for a row removes its line from this file.
 
-Property read on an Instance where the name is neither a field nor a method | G4 | the bootstrap raises it through setError, so a try catches it and the pending defers run
-`obj.method(...)` where `method` is not found on the instance's class | G4 | the bootstrap raises it through setError, so a try catches it and the pending defers run
-`super.method(...)` where `method` is not found on the superclass | G4 | the bootstrap raises it through setError, so a try catches it and the pending defers run
 `seq[start:end]` where `seq` is not a List or String | G5 | the bootstrap raises it through setError, so a try catches it and the pending defers run
 `seq[start:end]` where `start` is not a Number | G5 | the bootstrap raises it through setError, so a try catches it and the pending defers run
 `seq[start:end]` where `start` is not integer-valued | G5 | the bootstrap raises it through setError, so a try catches it and the pending defers run
