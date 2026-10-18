@@ -642,7 +642,7 @@ QBE backend, which links the native runtime.
 | N5 JVM backend as the oracle | #600 | #618 |
 | N6 QBE parity | #601 | #621 |
 | N8 credit channel library | #604 | #622 |
-| N7 differential gate and close | #602 | the PR that adds this section |
+| N7 differential gate and close | #602 | #644 |
 
 Follow-ups that merged before the close: #612 (a deferred call cannot
 suspend, for #610), #623, #624, #625, #626, #627, and #628.

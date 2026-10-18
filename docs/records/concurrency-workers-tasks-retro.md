@@ -22,7 +22,7 @@ issue, a pull request, or a commit. The design is in the decision, not here.
 | N5 JVM | #600 | #618 | 2 (1) | An emitter comparison got a check that can fail. Two limits became #619 and #620. |
 | N6 QBE | #601 | #621 | 1 (0) | Approved at the first review. |
 | N8 credit channel | #604 | #622 | 2 (1) | Probe 90 had passed with a wrong error; probe numbers moved to 90 and 91 to avoid #612. |
-| N7 gate and close | #602 | this record's PR | — | The compile phase, the bootstrap differential suite, the print-line check, and the close. |
+| N7 gate and close | #602 | #644 | — | The compile phase, the bootstrap differential suite, the print-line check, and the close. |
 
 Two referee rulings were made. On #596, the main task is a coroutine, because
 the decision says that a task is one; the spec does not add an exception
