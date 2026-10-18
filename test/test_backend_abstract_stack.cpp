@@ -6,10 +6,12 @@
 //      LOCAL-RECLAIM. Assert the reason, not only the label.
 //   2. 15_nested_arith: the computed maximum stack depth equals an
 //      independent hand count.
-//   3. The stack height is exactly 0 at every RETURN in every probe, after
-//      the return value is accounted for.
+//   3. The top cell at every RETURN is the return value: a temporary
+//      (operand depth 1) or a folded `match` result in a named local
+//      (operand depth 0), with no cell above it.
 //   4. The analysis runs over every probe, every examples/*.lox, and
-//      bootstrap/loxpp_interpreter.lox with no inconsistency.
+//      bootstrap/loxpp_interpreter.lox with no inconsistency, and every
+//      RETURN in them satisfies item 3.
 //   5. At every control-flow merge, the stack height from all predecessors
 //      is the same. Assert this.
 //
@@ -25,6 +27,7 @@
 #include "object.h"
 
 #include <gtest/gtest.h>
+#include <gtest/gtest-spi.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -105,14 +108,37 @@ void checkNoInconsistency(const DecodedFunction& node,
     }
 }
 
-// The return-height check, scoped to "every probe". It does not hold
-// program-wide — a `match` expression whose arm is a block of
-// fully-discarded statements (no trailing bare expression) can leave the
-// arm's "value" sitting in a local slot instead of a temporary (observed in
-// bootstrap/loxpp_interpreter.lox's `resolveStmt`); RETURNing that value
-// needs an explicit load, which is an emitter concern, not a P1 defect.
-void checkReturnHeightZero(const DecodedFunction& node,
-                           const std::string& path) {
+// True when `slot`'s declaring push is a NIL: the `(match_result)` local
+// that `compileMatchBody` pre-allocates and initializes before it compiles
+// the subject. Any other local at the top of a RETURN frame has a different
+// declaring push (or none at all, for a parameter).
+bool isMatchResultSlot(const DecodedFunction& node,
+                       const FunctionStackAnalysis& analysis, int slot) {
+    for (const InvisibleVarSite& site : analysis.invisibleVars) {
+        if (site.slot != slot) {
+            continue;
+        }
+        for (const DecodedInstruction& ins : node.instructions) {
+            if (ins.offset == site.offset && ins.op == Op::NIL) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// The return-value check: the top cell at every RETURN is the value the
+// function returns, and nothing sits above it. That cell is a temporary
+// (operand depth 1) in the ordinary case. `compileMatchBody` instead stores
+// each arm's value in a pre-allocated `(match_result)` local, so
+// `return match ...;` leaves the value as the top named local (operand
+// depth 0); both backends already load it (jvm_emitter's
+// normalizeFoldedOperands, qbe_emitter's fused stack). Any other depth means
+// a cell above the return value is unrecognized. A depth-0 top cell whose
+// declaring push is not that NIL is not the match result slot the compiler
+// emits, so it fails too; so does a frame with no value at all.
+void checkReturnValueIsTopCell(const DecodedFunction& node,
+                               const std::string& path) {
     SCOPED_TRACE("function id=" + node.id + " path=" + path);
     FunctionStackAnalysis analysis = analyzeStack(node);
     for (size_t i = 0; i < node.instructions.size(); i++) {
@@ -120,14 +146,20 @@ void checkReturnHeightZero(const DecodedFunction& node,
             node.instructions[i].op != Op::RETURN) {
             continue;
         }
-        EXPECT_EQ(analysis.before[i].operandDepth(), 1)
+        const StackState& before = analysis.before[i];
+        bool valueIsTemp = before.operandDepth() == 1;
+        bool valueIsMatchResult =
+            before.operandDepth() == 0 && before.height > 0 &&
+            isMatchResultSlot(node, analysis, before.height - 1);
+        EXPECT_TRUE(valueIsTemp || valueIsMatchResult)
             << "RETURN at offset " << node.instructions[i].offset
-            << " does not have exactly the return value on the operand "
-            << "stack (height=" << analysis.before[i].height
-            << ", localCount=" << analysis.before[i].localCount << ")";
+            << " must have its return value as the only cell above the "
+            << "locals (operand depth 1), or as the match result local "
+            << "(operand depth 0 with a NIL declaring push); got height="
+            << before.height << ", localCount=" << before.localCount;
     }
     for (const DecodedFunction& child : node.nested) {
-        checkReturnHeightZero(child, path + " > " + child.displayName);
+        checkReturnValueIsTopCell(child, path + " > " + child.displayName);
     }
 }
 
@@ -136,6 +168,7 @@ void checkFileNoInconsistency(const fs::path& path) {
     MemoryManager mm;
     DecodedFunction tree = decodeSource(readFile(path), mm);
     checkNoInconsistency(tree, path.filename().string());
+    checkReturnValueIsTopCell(tree, path.filename().string());
 }
 
 void checkProbeFile(const fs::path& path) {
@@ -143,7 +176,7 @@ void checkProbeFile(const fs::path& path) {
     MemoryManager mm;
     DecodedFunction tree = decodeSource(readFile(path), mm);
     checkNoInconsistency(tree, path.filename().string());
-    checkReturnHeightZero(tree, path.filename().string());
+    checkReturnValueIsTopCell(tree, path.filename().string());
 }
 
 } // namespace
@@ -335,7 +368,7 @@ TEST(AbstractStackTest, MaxStackWithLocalsIsNotInflatedByLateRecognition) {
     EXPECT_EQ(analysis.maxOperandDepth, 3);
 }
 
-// The return-height, corpus-consistency, and merge-consistency checks for
+// The return-value, corpus-consistency, and merge-consistency checks for
 // the probe corpus specifically.
 TEST(AbstractStackTest, RunsOverEveryProbeWithNoInconsistency) {
     std::vector<fs::path> probes =
@@ -346,9 +379,65 @@ TEST(AbstractStackTest, RunsOverEveryProbeWithNoInconsistency) {
     }
 }
 
-// The corpus-consistency and merge-consistency checks over the wider corpus
-// (the return-height check is probe-scoped only — see
-// checkReturnHeightZero's comment).
+// The issue #647 program, directly: a `return match ...;` puts the match
+// result in a named local, so the RETURN's operand depth is 0. The check
+// must accept that form, and the analysis must still recognize every local.
+TEST(AbstractStackTest, ReturnMatchValueInNamedLocalIsAccepted) {
+    MemoryManager mm;
+    DecodedFunction script = decodeSource(R"(
+fun f(v) {
+    return match v { case 1 => "one" case _ => "other" };
+}
+print f(1);
+print f(2);
+)",
+                                          mm);
+    const DecodedFunction* f = findFunctionByName(script, "f");
+    ASSERT_NE(f, nullptr) << "f not found among nested functions";
+    FunctionStackAnalysis analysis = analyzeStack(*f);
+
+    bool foundReturn = false;
+    for (size_t i = 0; i < f->instructions.size(); i++) {
+        if (!static_cast<bool>(analysis.reached[i]) ||
+            f->instructions[i].op != Op::RETURN) {
+            continue;
+        }
+        foundReturn = true;
+        EXPECT_EQ(analysis.before[i].operandDepth(), 0)
+            << "the match result must be a named local at this RETURN";
+        EXPECT_GE(analysis.before[i].localCount, 1)
+            << "the named local that holds the result must exist";
+    }
+    ASSERT_TRUE(foundReturn) << "f has no reached RETURN";
+    checkReturnValueIsTopCell(*f, "f");
+}
+
+// The relaxed check still rejects a depth-0 return that is not a match
+// result. A depth above 1 is not reachable through analyzeStack:
+// backfillFromFrameTeardown recognizes every cell below the top one at a
+// RETURN, so the analysis reports 0 or 1. The branch this test drives is the
+// new depth-0 one. Frame entry pushes the parameters, so the top slot here
+// is a parameter: a local with no declaring push at all — the exact opposite
+// of the match result slot, whose declaring push is NIL.
+TEST(AbstractStackTest, ReturnValueCheckRejectsALocalThatIsNotAMatchResult) {
+    ObjFunction fakeFn;
+    fakeFn.arity = 1;
+    DecodedFunction fn;
+    fn.function = &fakeFn;
+    fn.id = "0";
+    fn.displayName = "malformed";
+
+    DecodedInstruction ret;
+    ret.offset = 0;
+    ret.op = Op::RETURN;
+    fn.instructions = {ret};
+
+    EXPECT_NONFATAL_FAILURE(checkReturnValueIsTopCell(fn, "malformed"),
+                            "RETURN at offset 0");
+}
+
+// The corpus-consistency, return-value, and merge-consistency checks over
+// the wider corpus.
 TEST(AbstractStackTest, RunsOverEveryExampleWithNoInconsistency) {
     std::vector<fs::path> examples = listLoxFiles(projectRoot() / "examples");
     ASSERT_FALSE(examples.empty()) << "no example programs found";
@@ -482,9 +571,9 @@ TEST(AbstractStackTest, UnreadSiblingLocalGetsItsOwnDeclaringPushSite) {
 // chunk — a function's own top-level scope has no enclosing block left to
 // close, so the whole frame is simply discarded at RETURN. Nothing in the
 // reference-driven search, and no sibling POP to backfill from either: only
-// RETURN's own operandDepth()==1 invariant (the return-height check) proves
-// every slot below it is local. A wrong implementation leaves `never`'s cell
-// an unrecognized temporary forever, inflating maxOperandDepth and
+// RETURN's own return-value invariant (the return-value check) proves every
+// slot below the top cell is local. A wrong implementation leaves `never`'s
+// cell an unrecognized temporary forever, inflating maxOperandDepth and
 // misclassifying any later POP that would have reclaimed it — the same
 // silent failure the unread-sibling test catches, in a shape the
 // persistence test at every POP (findPersistentPopLocals) alone cannot reach
@@ -761,12 +850,12 @@ TEST(AbstractStackTest, ClassValueStaysTempAcrossMultipleMethodDefinitions) {
         << "`C` must be the top local right before its own reclaim";
 }
 
-// The depth term `after.operandDepth() + declaredSlotsAt[i].size()`. The
-// return-height check guarantees operand depth 1 immediately before every
-// *reached* RETURN, so any function with a reachable RETURN already masks the
-// undercount this term fixes — a measurement found the term changes no
-// reported number over the real corpus. To exercise it for real, this
-// function's only statement after its two invisible vars is `for (;;) {}`:
+// The depth term `after.operandDepth() + declaredSlotsAt[i].size()`. A
+// reachable RETURN whose value is a temporary (operand depth 1) masks the
+// undercount this term fixes. A folded-match return sits at operand depth 0,
+// so it does not mask it; the return-value check accepts both forms. To
+// isolate the term regardless, this function's only statement after its two
+// invisible vars is `for (;;) {}`:
 // an omitted condition emits no exit test at all (Compiler::forStatement),
 // so the loop has no successor and the compiler's own trailing NIL;RETURN
 // is unreachable. `a` and `fun g(){}` are both declared, and both
