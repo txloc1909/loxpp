@@ -1,2 +1,3 @@
+// DIAGNOSTIC: Expect ':' after map key.
 // Compile error: a map entry with no colon.
 var m = {"a" 1};

@@ -1,2 +1,3 @@
+// DIAGNOSTIC: Can't return a value from an initializer.
 // Compile error: `return` with a value in an initializer.
 class A { init() { return 1; } }

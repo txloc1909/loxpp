@@ -1,3 +1,4 @@
+// DIAGNOSTIC: Expect variable name.
 // Compile error: a `var` declaration with no name.
 var 1 = 2;
 print "after";

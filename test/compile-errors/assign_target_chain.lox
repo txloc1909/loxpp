@@ -1,3 +1,4 @@
+// DIAGNOSTIC: Invalid assignment target.
 // Compile error: a chained assignment whose inner target is a value.
 var a;
 var b;

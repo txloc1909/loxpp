@@ -1,3 +1,4 @@
+// DIAGNOSTIC: Cannot use 'break' outside a loop or match.
 // Compile error after a spawn: the whole program is compiled before the
 // main task runs, so no task runs and stdout is empty.
 fun job() { print "job ran"; }

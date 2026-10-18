@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Expect constructor name.
+// Compile error: an enum constructor with no name.
+enum E { 1 }

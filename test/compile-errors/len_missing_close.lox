@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Expect ')' after argument.
+// Compile error: `len` with no closing parenthesis.
+print len(1;

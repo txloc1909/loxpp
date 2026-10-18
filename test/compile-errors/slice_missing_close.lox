@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Expect ']' after slice.
+// Compile error: a slice with no closing bracket.
+var l = [1, 2];
+print l[1:2;

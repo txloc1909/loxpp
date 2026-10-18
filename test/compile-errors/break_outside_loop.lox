@@ -1,2 +1,3 @@
+// DIAGNOSTIC: Cannot use 'break' outside a loop or match.
 // Compile error: `break` outside a loop or a match.
 break;

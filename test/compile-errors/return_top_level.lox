@@ -1,3 +1,4 @@
+// DIAGNOSTIC: Can't return from top-level code.
 // Compile error: `return` in top-level code.
 return 1;
 print "after";

@@ -1,3 +1,4 @@
+// DIAGNOSTIC: Expect ')' after arguments.
 // Compile error: a call with no closing parenthesis.
 fun f(a) {}
 f(1;

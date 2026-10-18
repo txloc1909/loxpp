@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Expect enum name.
+// Compile error: an enum declaration with no name.
+enum {}

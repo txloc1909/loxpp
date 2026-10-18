@@ -1,3 +1,4 @@
+// DIAGNOSTIC: Cannot use 'continue' outside a loop.
 // Compile error in a function that only a new worker runs: the error is
 // found before the main task runs, so no worker starts and stdout is empty.
 fun worker(msg) {

@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Expect ')' after expression.
+// Compile error: a grouping with no closing parenthesis.
+print (1;

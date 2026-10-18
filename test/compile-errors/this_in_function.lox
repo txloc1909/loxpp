@@ -1,2 +1,3 @@
+// DIAGNOSTIC: Can't use 'this' outside of a class.
 // Compile error: `this` in a function that is not a method.
 fun f() { return this; }

@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Expect '(' after function name.
+// Compile error: a function declaration with no parameter list.
+fun f {}

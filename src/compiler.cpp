@@ -1766,15 +1766,16 @@ void Compiler::checkEnumExhaustiveness(const std::set<std::string>& seenCtors) {
             }
         }
         if (!missing.empty()) {
-            std::string msg = "Non-exhaustive match on enum '" +
-                              info->enumName + "': missing arms for: ";
+            std::string names;
             for (size_t i = 0; i < missing.size(); i++) {
                 if (i > 0) {
-                    msg += ", ";
+                    names += ", ";
                 }
-                msg += missing[i];
+                names += missing[i];
             }
-            m_parser->error(msg.c_str());
+            m_parser->error(("Non-exhaustive match on enum '" + info->enumName +
+                             "': missing arms for: " + names)
+                                .c_str());
         }
     }
 }

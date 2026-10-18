@@ -1,2 +1,3 @@
+// DIAGNOSTIC: Can't use 'this' outside of a class.
 // Compile error: `this` in top-level code.
 print this;
