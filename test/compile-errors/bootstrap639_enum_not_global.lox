@@ -1,0 +1,6 @@
+// DIAGNOSTIC: Enum declarations are only allowed at global scope.
+// Compile error: an enum declared inside a function body.
+fun f() {
+    enum E { A }
+    return 1;
+}

@@ -127,12 +127,6 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(681, 'different message and a second error'),
     "Class patterns only support named-field syntax (e.g., 'ClassName{field1, field2}').":
         Deferred(680, 'the bootstrap runs the program'),
-    'Duplicate constructor name.':
-        Deferred(639, 'the bootstrap does not check it'),
-    'Duplicate enum name.':
-        Deferred(639, 'the bootstrap does not check it'),
-    'Enum declarations are only allowed at global scope.':
-        Deferred(639, 'the bootstrap does not check it'),
     "Expect '(' after 'catch'.":
         Deferred(641, 'the bootstrap adds a second error'),
     "Expect '(' after 'for'.":
@@ -219,8 +213,6 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(641, 'the bootstrap adds a second error'),
     "Expected a structural pattern (constructor, class, or '[') after '@'.":
         Deferred(680, 'the bootstrap misparses the sub-pattern'),
-    "Non-exhaustive match on enum '<...>': missing arms for: <...>":
-        Deferred(639, 'the bootstrap does not check it'),
     'Or-pattern alternatives must bind the same names in the same order.':
         Deferred(680, 'the bootstrap accepts the program'),
     'Or-patterns are not supported for sequence patterns.':

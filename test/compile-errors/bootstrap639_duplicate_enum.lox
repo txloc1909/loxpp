@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Duplicate enum name.
+// Compile error: two enum declarations have one name.
+enum E { A }
+enum E { B }

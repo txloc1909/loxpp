@@ -107,7 +107,7 @@ enum Expr {
     IndexExpr(object, index, line)
     SliceExpr(object, start, end_, line)
     IndexSetExpr(object, index, line, value)
-    MatchExpr(subject, arms)
+    MatchExpr(subject, arms, end_line)
     YieldExpr(value, line)
 }
 
@@ -127,7 +127,7 @@ enum Stmt {
     ContinueStmt(line)
     ForStmt(init, condition, increment, body)
     ForInStmt(varName, varLine, iterable, body)
-    EnumDecl(name, ctor_names, ctor_fields_list)
+    EnumDecl(name, ctor_names, ctor_fields_list, keyword_line, name_line, ctor_lines)
     SeqDestructure(names, line, initializer)
     ObjDestructure(names, line, initializer)
     TryStmt(try_block, catch_var, catch_block)
@@ -938,11 +938,13 @@ class Parser {
     }
 
     enumDeclaration() {
+        var keywordLine = this.previous().line;
         var nameTok = this.expect("IDENTIFIER", "Expect enum name.");
         this.expect("LEFT_BRACE", "Expect '{' before enum body.");
-        if (this.panicMode) return EnumDecl(nameTok.lexeme, [], []);
+        if (this.panicMode) return EnumDecl(nameTok.lexeme, [], [], keywordLine, nameTok.line, []);
         var ctor_names = [];
         var ctor_fields = [];
+        var ctor_lines = [];
         while (!this.check("RIGHT_BRACE") and !this.isAtEnd()) {
             var ctorTok = this.expect("IDENTIFIER", "Expect constructor name.");
             if (this.panicMode) break;
@@ -958,15 +960,16 @@ class Parser {
             }
             ctor_names.append(ctorTok.lexeme);
             ctor_fields.append(fields);
+            ctor_lines.append(ctorTok.line);
         }
         this.expect("RIGHT_BRACE", "Expect '}' after enum body.");
-        return EnumDecl(nameTok.lexeme, ctor_names, ctor_fields);
+        return EnumDecl(nameTok.lexeme, ctor_names, ctor_fields, keywordLine, nameTok.line, ctor_lines);
     }
 
     matchExpression() {
         var subject = this.expression();
         this.expect("LEFT_BRACE", "Expect '{' after match subject.");
-        if (this.panicMode) return MatchExpr(subject, []);
+        if (this.panicMode) return MatchExpr(subject, [], 0);
         var arms = [];
         while (!this.check("RIGHT_BRACE") and !this.isAtEnd()) {
             this.expect("CASE", "Expect 'case' in match arm.");
@@ -978,8 +981,8 @@ class Parser {
             if (this.panicMode) break;
             arms.append(this.matchArmBody(pats, guard));
         }
-        this.expect("RIGHT_BRACE", "Expect '}' after match arms.");
-        return MatchExpr(subject, arms);
+        var closeTok = this.expect("RIGHT_BRACE", "Expect '}' after match arms.");
+        return MatchExpr(subject, arms, closeTok.line);
     }
 
     // armBody ::= "{" declaration* expression "}" | expression
@@ -1136,7 +1139,10 @@ class Resolver {
         this.hadError        = false;
         this.loopDepth       = 0;
         this.matchArmDepth   = 0;
+        // Constructor name -> name of its enum, and enum name -> its
+        // constructor names in declaration order. Both are global.
         this.enumCtors       = {};
+        this.enumDecls       = {};
         // Global classes declared so far, in source order. See
         // classifyArmPat for the pattern names that this set changes.
         this.classNames      = {};
@@ -1219,7 +1225,7 @@ class Resolver {
                 this.endScope();
                 nil
             }
-            case EnumDecl{name, ctor_names, ctor_fields_list} => this.resolveEnumDecl(name, ctor_names)
+            case EnumDecl{name, ctor_names, ctor_fields_list, keyword_line, name_line, ctor_lines} => this.resolveEnumDecl(name, ctor_names, keyword_line, name_line, ctor_lines)
             case SeqDestructure{names, line, initializer}     => this.resolveDestructure(names, line, initializer)
             case ObjDestructure{names, line, initializer}     => this.resolveDestructure(names, line, initializer)
             case TryStmt{try_block, catch_var, catch_block}   => this.resolveTry(try_block, catch_var, catch_block)
@@ -1394,7 +1400,7 @@ class Resolver {
             case IndexExpr{object, index, line}            => { this.resolveExpr(object); this.resolveExpr(index) }
             case SliceExpr{object, start, end_, line}      => { this.resolveExpr(object); this.resolveExpr(start); this.resolveExpr(end_) }
             case IndexSetExpr{object, index, line, value}  => { this.resolveExpr(object); this.resolveExpr(index); this.resolveExpr(value) }
-            case MatchExpr{subject, arms}                  => this.resolveMatchExpr(subject, arms)
+            case MatchExpr{subject, arms, end_line}        => this.resolveMatchExpr(subject, arms, end_line)
             case YieldExpr{value, line}                    => this.resolveYield(value)
         };
     }
@@ -1449,15 +1455,28 @@ class Resolver {
         while (i < len(keys)) { this.resolveExpr(keys[i]); this.resolveExpr(vals[i]); i = i + 1; }
     }
 
-    resolveEnumDecl(name, ctor_names) {
-        this.declare(name, 0);
-        this.define(name);
+    // An enum is registered when its first constructor is, so an enum with
+    // no constructor can be declared twice. A duplicate constructor stops
+    // the declaration; the constructors before it stay registered.
+    resolveEnumDecl(name, ctor_names, keyword_line, name_line, ctor_lines) {
+        if (len(this.scopes) > 0) {
+            this.resError("enum", keyword_line, "Enum declarations are only allowed at global scope.");
+            return;
+        }
+        if (this.enumDecls.has(name)) {
+            this.resError(name, name_line, "Duplicate enum name.");
+            return;
+        }
         var i = 0;
         while (i < len(ctor_names)) {
             var cname = ctor_names[i];
-            this.declare(cname, 0);
-            this.define(cname);
-            this.enumCtors[cname] = true;
+            if (this.enumCtors.has(cname)) {
+                this.resError(cname, ctor_lines[i], "Duplicate constructor name.");
+                return;
+            }
+            this.enumCtors[cname] = name;
+            if (!this.enumDecls.has(name)) this.enumDecls[name] = [];
+            this.enumDecls[name].append(cname);
             i = i + 1;
         }
     }
@@ -1543,8 +1562,79 @@ class Resolver {
         }
     }
 
-    resolveMatchExpr(subject, arms) {
+    // The constructor that an arm pattern tests, or nil. A bare name is a
+    // constructor when an enum declares it; classifyArmPat has already turned
+    // a class name into a ClassPat.
+    patCtorName(pat) {
+        return match pat {
+            case BindPat{name}           => this.knownCtor(name)
+            case CtorPat{cname, subpats} => this.knownCtor(cname)
+            case AtPat{at_name, subpat}  => this.patCtorName(subpat)
+            case _                       => nil
+        };
+    }
+
+    knownCtor(name) {
+        if (this.enumCtors.has(name)) return name;
+        return nil;
+    }
+
+    // An unguarded arm whose only pattern is `_` or a plain binding.
+    isCatchAllArm(arm) {
+        if (arm.guard != nil or len(arm.pats) != 1) return false;
+        return match arm.pats[0] {
+            case WildPat      => true
+            case BindPat{name} => !this.enumCtors.has(name)
+            case _            => false
+        };
+    }
+
+    // Spec: a match with a constructor arm of enum E needs an arm for every
+    // constructor of E, or an unguarded catch-all. A guarded arm counts.
+    checkEnumExhaustive(seen, end_line) {
+        // Sorted, as native reports the enums in constructor-name order.
+        var names = [];
+        var keys = seen.keys();
+        var i = 0;
+        while (i < len(keys)) {
+            var k = len(names);
+            names.append(keys[i]);
+            while (k > 0 and names[k - 1] > keys[i]) {
+                names[k] = names[k - 1];
+                k = k - 1;
+            }
+            names[k] = keys[i];
+            i = i + 1;
+        }
+        var checked = {};
+        i = 0;
+        while (i < len(names)) {
+            var enumName = this.enumCtors[names[i]];
+            i = i + 1;
+            if (checked.has(enumName)) continue;
+            checked[enumName] = true;
+            var missing = "";
+            var ctors = this.enumDecls[enumName];
+            var c = 0;
+            while (c < len(ctors)) {
+                if (!seen.has(ctors[c])) {
+                    if (missing != "") missing = missing + ", ";
+                    missing = missing + ctors[c];
+                }
+                c = c + 1;
+            }
+            if (missing != "") {
+                this.resError("}", end_line, "Non-exhaustive match on enum '" + enumName + "': missing arms for: " + missing);
+                // Native is in panic mode after the first one and drops the rest.
+                return;
+            }
+        }
+    }
+
+    resolveMatchExpr(subject, arms, end_line) {
         this.resolveExpr(subject);
+        var seen = {};
+        var catchAll = false;
         var i = 0;
         while (i < len(arms)) {
             var arm = arms[i];
@@ -1564,8 +1654,16 @@ class Resolver {
             this.matchArmDepth = this.matchArmDepth - 1;
             if (arm.bodyExpr != nil) this.resolveExpr(arm.bodyExpr);
             this.endScope();
+            j = 0;
+            while (j < len(arm.pats)) {
+                var ctor = this.patCtorName(arm.pats[j]);
+                if (ctor != nil) seen[ctor] = true;
+                j = j + 1;
+            }
+            if (this.isCatchAllArm(arm)) catchAll = true;
             i = i + 1;
         }
+        if (!catchAll and len(seen.keys()) > 0) this.checkEnumExhaustive(seen, end_line);
     }
 }
 

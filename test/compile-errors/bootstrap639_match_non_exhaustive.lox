@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Non-exhaustive match on enum '<...>': missing arms for: <...>
+// Compile error: a match on an enum with no arm for constructor B and no catch-all.
+enum E { A B }
+var x = match A() { case A => 1 };
