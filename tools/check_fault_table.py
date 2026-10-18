@@ -91,11 +91,11 @@ class Row:
     expected_message: str | None = None  # spec's Message column literal, when disposition == "fatal"
     skip: dict[str, str] = field(default_factory=dict)  # consumer -> reason, skips the whole row
     skip_fields: dict[str, set[str]] = field(default_factory=dict)  # consumer -> {"type", "str", "message"}
-    # consumer -> a substring that must appear in that consumer's own fatal
-    # message, checked in place of the normal native-message-is-a-substring
-    # comparison when "message" is in skip_fields for that consumer (issue
-    # #374): a real, weaker property instead of no check at all.
-    message_contains: dict[str, str] = field(default_factory=dict)
+    # consumer -> a prefix that that consumer's own fatal message must start
+    # with, checked in place of the whole-message comparison when "message" is
+    # in skip_fields for that consumer (issue #374): a real, weaker property
+    # instead of no check at all.
+    message_prefix: dict[str, str] = field(default_factory=dict)
 
     def program(self, workdir: Path | None = None) -> str:
         if self.disposition == "caught":
@@ -372,7 +372,7 @@ FATAL_ROWS = [
         "fatal",
         'open("/no/such/path", "r");',
         skip_fields={JVM: {"message"}},
-        message_contains={JVM: "/no/such/path"},
+        message_prefix={JVM: "open(): cannot open '/no/such/path': "},
         expected_message="open(): cannot open '/no/such/path': No such file or directory",
     ),
     # Issue #375: unlike an index read/write, a map/set literal, or `in`
@@ -1183,22 +1183,21 @@ def compare(row: Row, native_result: RunResult, other: RunResult, consumer: str)
                 f"the spec table's Message column ({row.expected_message!r}) -- "
                 "corpus bug, fix the row"
             )
-        # Fatal message text is compared as a substring, not equality: each
-        # consumer may wrap the same message in its own prefix/trailer
-        # (native "[line N] in script").
+        # The message is the first stderr line. It must equal native's line:
+        # a prefix or a trailer on it is a divergence.
         skip = row.skip_fields.get(consumer, set())
         if "message" not in skip:
             native_msg = native_result.message or ""
             other_msg = other.message or ""
-            if not native_msg or native_msg not in other_msg:
-                problems.append(f"message: native={native_msg!r} not found in {consumer}={other_msg!r}")
-        elif consumer in row.message_contains:
-            wanted = row.message_contains[consumer]
+            if not native_msg or native_msg != other_msg:
+                problems.append(f"message: native={native_msg!r} {consumer}={other_msg!r}")
+        elif consumer in row.message_prefix:
+            wanted = row.message_prefix[consumer]
             other_msg = other.message or ""
-            if wanted not in other_msg:
+            if not other_msg.startswith(wanted):
                 problems.append(
-                    f"message: {consumer}={other_msg!r} does not contain the required "
-                    f"substring {wanted!r} (full native-message match is skipped for this "
+                    f"message: {consumer}={other_msg!r} does not start with the required "
+                    f"prefix {wanted!r} (full native-message match is skipped for this "
                     "row/consumer; see the row's own comment)"
                 )
         return problems
