@@ -499,6 +499,20 @@ jobs:
             loxpp-dev:latest \
             bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/ --only-spec-probes --consumer bootstrap --timeout 120"
 
+      # Two probes that the walk above skips by design: they have no STATUS
+      # line, because a CHECK line cannot hold the NUL byte they print. Name
+      # them, so the bootstrap is compared with native on a NUL byte in a
+      # string literal and in file content.
+      - name: Bootstrap differential suite - NUL probes
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev:latest \
+            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/32_string_nul.lox test/translation-probes/56_file_nul.lox --timeout 120"
+
       # examples/bench_jump_table.lox is left out by name: it is a
       # 5,000,000-iteration microbenchmark with no CHECK line, and it does
       # not finish inside the timeout on the bootstrap interpreter. The

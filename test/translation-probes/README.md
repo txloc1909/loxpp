@@ -75,7 +75,7 @@ each has an off-the-shelf solution.
 | `defer_overflow_kind_spoof` | a plain instance whose `kind` field spoofs `"StackOverflowError"`, thrown and caught entirely inside a deferred call, must not clear the unwind guard early while a real `StackOverflowError` is still unwinding — promoted from jvm-only (issue #322) | P5, P6 |
 | `defer_throw_on_normal_return_during_unwind` | a deferred call's throw on a normal return (no fault propagating out of the deferring frame) must not be handed the unwind guard's identity, even while an unrelated `StackOverflowError` unwinds elsewhere — promoted from jvm-only (issue #322) | P5, P6 |
 | `defer_replaces_unrelated_fault_during_unwind` | a deferred call's throw that replaces a different, unrelated fault must not be handed the unwind guard's identity while an unrelated `StackOverflowError` unwinds elsewhere — promoted from jvm-only (issue #322) | P5, P6 |
-| `32_string_nul` | a string literal holding an embedded NUL byte (`\0`): `print` must write every byte, including the text after the NUL, on every backend (issue #129) | none (parity gate) |
+| `32_string_nul` | a string literal holding an embedded NUL byte (`\0`): `print` must write every byte, including the text after the NUL, on every backend, the bootstrap included (issue #129, issue #634); CI names it in the bootstrap differential step "NUL probes" | none (parity gate) |
 | `33_class_pattern_match_error` | a `match` whose arms are all class patterns raises a real, reachable `MATCH_ERROR` when no arm matches, through the same fused opcode as the enum case | P8 |
 | `34_match_consumed_result` | a `match` expression's result, once its own closing `POP` retires the synthetic subject local, is exposed as a named local's own value — `PRINT` and `DEFINE_GLOBAL` each need their own fold-aware read, the same way `RETURN` and `SET_GLOBAL` already do | P1, P2 |
 | `37_invoke_field_bound_native_method` | a bound built-in method stored in an instance field and invoked through the field name drives `INVOKE`'s field-shadow arm, not `GET_PROPERTY` followed by `CALL` (spec/04-semantics.md) | P5, P6 |
@@ -143,7 +143,7 @@ each has an off-the-shelf solution.
 | `49_try_catch_map_undefined_property_fatal` | an undefined property read on a Map is fatal even with a live `try` (issue #253) | none (error-parity gate) |
 | `50_try_catch_non_instance_get_property_fatal` | `GET_PROPERTY` on a non-Instance receiver is fatal even with a live `try` (issue #253) | none (error-parity gate) |
 | `51_try_catch_non_instance_set_property_fatal` | `SET_PROPERTY` on a non-Instance receiver is fatal even with a live `try` (issue #253) | none (error-parity gate) |
-| `56_file_nul` | `File.read`/`readline`/`readlines` return the full binary content when it holds NUL bytes (issue #401) | none (parity gate) |
+| `56_file_nul` | `File.read`/`readline`/`readlines` return the full binary content when it holds NUL bytes (issue #401); CI names it in the same bootstrap step "NUL probes" (issue #634) | none (parity gate) |
 | `56_file_read` | `File.read()` with arity 0 exists on every consumer, the bootstrap included (issue #378) | none (parity gate) |
 | `56_math_constants` | `math.inf` and `math.nan` are Numbers with the native values, not a native-fn value (issue #329) | none (parity gate) |
 | `57_defer_arity_fatal_fast_path` | the wrong-argument-count fatal fast path skips every pending `defer` when no `try` is live — empty stdout, no `defer-g` (issue #319) | none (error-parity gate) |
@@ -197,7 +197,8 @@ probe of this directory on one consumer and compares the whole stdout, the
 stderr prefix, and the exit status. CI runs it on the native VM, the bootstrap interpreter, the JVM
 backend, and the QBE backend. `tools/diff_runtimes.py` compares the JVM, QBE,
 and bootstrap runs with native; the bootstrap walk takes only the spec
-probes (`--only-spec-probes`). A consumer that does not pass a probe yet
+probes (`--only-spec-probes`), and a separate CI step names `32_string_nul` and
+`56_file_nul`. A consumer that does not pass a probe yet
 can list it in an expected-failure file, which both tools read with
 `--xfail`: a listed probe must fail, and a listed probe that passes fails
 the gate until its line is deleted.
