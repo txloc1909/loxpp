@@ -1,5 +1,0 @@
-# Spec probes in test/translation-probes/ that the bootstrap interpreter does not pass yet.
-# Read by tools/check_spec_probes.py with LANGUAGE=LOXPP (the Build & Test job).
-# Each line is `<probe>.lox  <reason>`. A listed probe must fail. When it
-# passes, the gate fails, and the node that made it pass deletes its line.
-

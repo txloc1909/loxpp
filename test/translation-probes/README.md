@@ -189,11 +189,13 @@ stderr, in order, and later stderr lines are not checked, so a report may
 append its own stack trace or the tasks that wait. A probe with no `STDERR`
 line does not check stderr. `tools/check_spec_probes.py` runs every spec
 probe of this directory on one consumer and compares the whole stdout, the
-stderr prefix, and the exit status. Each consumer has an expected-failure list,
-`tools/probe_xfail_<consumer>.txt` (native, bootstrap, jvm, qbe), which
-`tools/check_spec_probes.py` and the `tools/diff_runtimes.py --xfail` walks
-of this directory read: a listed probe must fail, and a listed probe that
-passes fails the gate until its line is deleted.
+stderr prefix, and the exit status. CI runs it on the native VM, the bootstrap interpreter, the JVM
+backend, and the QBE backend. `tools/diff_runtimes.py` compares the JVM, QBE,
+and bootstrap runs with native; the bootstrap walk takes only the spec
+probes (`--only-spec-probes`). A consumer that does not pass a probe yet
+can list it in an expected-failure file, which both tools read with
+`--xfail`: a listed probe must fail, and a listed probe that passes fails
+the gate until its line is deleted.
 
 One rule of the Workers and Tasks section has no spec probe: a `print`
 line from one worker never mixes with a line from another worker. Its

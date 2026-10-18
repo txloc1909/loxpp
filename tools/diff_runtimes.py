@@ -44,8 +44,9 @@ being a permutation of the native stdout — the exclusion list excuses a
 reordering, never a content change.
 
 --xfail <file> names the spec probes (tools/check_spec_probes.py) that the
-other runner does not pass yet: the backend's expected-failure list, such as
-tools/probe_xfail_jvm.txt. A listed program reports one of two outcomes:
+other runner does not pass yet: the consumer's expected-failure list, in the
+form tools/check_spec_probes.py reads. A listed program reports one of two
+outcomes:
   XFAIL        the other runner's run does not pass the probe, or native's
                does not. Not a divergence.
   XPASS        both runs pass the probe: their stdout is its CHECK lines,
@@ -334,7 +335,7 @@ def main() -> None:
         "--xfail",
         type=Path,
         default=None,
-        help="the backend's expected-failure list of spec probes, e.g. tools/probe_xfail_jvm.txt",
+        help="the consumer's expected-failure list of spec probes, in the form tools/check_spec_probes.py reads",
     )
     parser.add_argument(
         "--consumer",
