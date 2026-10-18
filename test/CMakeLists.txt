@@ -361,9 +361,9 @@ if(LOXPP_PYTHON3)
     # Issue #642: every compile message native can report has a case in
     # test/compile-errors/ or a recorded reason. The checker reads the message
     # templates from src/parser.cpp, src/compiler.cpp, and src/scanner.cpp, so
-    # a new message cannot land without a case or a reason. Its three
-    # generated size-limit programs self-skip on a trace build; the release
-    # leg runs them.
+    # a new message cannot land without a case or a reason. It builds the
+    # three size-limit programs itself. On a trace build it skips only the
+    # stdout-empty check, because that build writes its disassembly there.
     add_test(NAME CompileDiagnosticCases
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_compile_error_cases.py
                 --native $<TARGET_FILE:loxpp>

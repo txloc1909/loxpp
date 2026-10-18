@@ -45,10 +45,9 @@ suites run every case in the directory with --compile-errors, so a consumer
 that stops matching a case fails those suites, not this one.
 
 A build that traces every instruction (LOXPP_DEBUG_TRACE_EXECUTION or
-LOXPP_DEBUG_PRINT_CODE) skips the GENERATED programs: the trace would print
-them in full and gain nothing. It also skips the stdout-empty check on the
-cases, because the trace writes that disassembly to stdout. The marker,
-stderr, and exit status checks still run. CI's release leg runs both fully.
+LOXPP_DEBUG_PRINT_CODE) skips the stdout-empty check on the cases, because the
+trace writes that disassembly to stdout. The marker, stderr, exit status, and
+GENERATED checks still run.
 
 Usage:
     tools/check_compile_error_cases.py [--native PATH] [--list] [--timeout SECONDS]
@@ -634,12 +633,6 @@ def main() -> None:
     for template, row in sorted(GENERATED.items()):
         builder = BUILDERS.get(row.builder)
         if builder is None:
-            continue
-        if os.environ.get("LOXPP_EXEC_TRACE_ENABLED") == "1":
-            print(
-                f"check_compile_error_cases: skipped GENERATED {template!r} "
-                "(this build traces every instruction)"
-            )
             continue
         program = builder()
         with tempfile.NamedTemporaryFile(
