@@ -213,6 +213,16 @@ public final class LoxCoroutine {
     private void run() {
         LoxWorker.bind(worker);
         CURRENT.set(this);
+        // A native entry is a host frame. A task.receive below it must raise
+        // YieldAcrossNativeError; a coroutine this entry resumes has this
+        // count in its own recorded callbackBelow, so it is covered too. A
+        // yield inside such a resumed coroutine runs on its own thread with
+        // its own count, and the entry's frame is below the resume point, so
+        // the yield stays legal.
+        boolean nativeEntry = callee instanceof LoxNative;
+        if (nativeEntry) {
+            LoxOps.enterCallback();
+        }
         Object msg;
         try {
             Object result = LoxOps.call(callee, firstArgs);
@@ -222,6 +232,9 @@ public final class LoxCoroutine {
             state = State.DEAD;
             msg = new Thrown(t);
         } finally {
+            if (nativeEntry) {
+                LoxOps.exitCallback();
+            }
             CURRENT.remove();
             // Drop this coroutine's slice; the resumer sees its own counts.
             LoxClosure.setFrameCountValue(frameBase);

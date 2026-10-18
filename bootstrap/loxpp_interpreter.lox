@@ -2096,6 +2096,15 @@ fun isFunctionOrBoundMethod(v) {
            tag == "processmethod" or tag == "comethod";
 }
 
+// A Function or BoundMethod that native code implements, not a user closure.
+// Such an entry is a host frame: a task.receive below it cannot suspend the
+// task (spec/04-semantics.md, task.receive step 3), while a yield inside a
+// coroutine that this entry resumes stays legal because that coroutine's own
+// resumeDepth includes the entry.
+fun isNativeCallable(v) {
+    return isFunctionOrBoundMethod(v) and loxTag(v) != "function";
+}
+
 // methods() walks the superclass chain: unlike the real VM's ObjClass,
 // which INHERIT flattens at class-declaration time, LoxClass.methods holds
 // only a class's own methods — findMethod() re-walks the chain on every
@@ -2695,7 +2704,18 @@ class InterpCoroutine {
     // The host coroutine's function. The first host resume passes the target
     // call's arguments as one list; this unpacks them into the ordinary call.
     run(argList) {
-        return this.fn.call(this.interp, argList);
+        var fn = this.fn;
+        if (!isNativeCallable(fn)) return fn.call(this.interp, argList);
+        this.interp.nativeDepth = this.interp.nativeDepth + 1;
+        var result = nil;
+        try {
+            result = fn.call(this.interp, argList);
+        } catch (e) {
+            this.interp.nativeDepth = this.interp.nativeDepth - 1;
+            throw e;
+        }
+        this.interp.nativeDepth = this.interp.nativeDepth - 1;
+        return result;
     }
 
     toString() { return "<coroutine>"; }
@@ -3102,7 +3122,18 @@ class Interpreter {
             args = [t.startArg];
             t.startArg = nil;
         }
-        if (!this.throwFlag) fn.call(this, args);
+        // A native entry is a host frame: a task.receive below it must raise
+        // rather than park a task that has no interpreted frame to resume
+        // (spec/04-semantics.md, task.receive step 3).
+        var nativeEntry = isNativeCallable(fn);
+        if (nativeEntry) this.nativeDepth = this.nativeDepth + 1;
+        try {
+            if (!this.throwFlag) fn.call(this, args);
+        } catch (e) {
+            if (nativeEntry) this.nativeDepth = this.nativeDepth - 1;
+            throw e;
+        }
+        if (nativeEntry) this.nativeDepth = this.nativeDepth - 1;
         if (this.throwFlag) {
             this.reportUncaught();
             exit(70);

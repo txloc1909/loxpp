@@ -662,6 +662,8 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
     bool frameReady = false;
     bool loopOk = true;
 
+    const bool nativeEntry = isNative(co->callee) || isBoundNative(co->callee);
+
     if (!co->started) {
         // First resume: the callee/args window is already at the top. Put the
         // stored callee where the receiver sat and dispatch it.
@@ -672,6 +674,13 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         co->activeStackBase = calleeSlot;
         co->activeWindowTop = calleeSlot + argCount + 1;
         co->started = true;
+        // A native entry leaves no frame to rebuild after a task switch, so
+        // the entry itself breaks the clean chain from the task's base. A
+        // task.receive reached below it must raise YieldAcrossNativeError,
+        // not park a coroutine that has no frame to resume.
+        if (nativeEntry) {
+            m_cleanNativeDepth = -1;
+        }
         // A compiled entry (QBE coroutine mode) must be pushed, not run:
         // opCall's own invokeClosure branches on m_resumableMode, and
         // callCompiled would run the callee to completion instead of leaving
@@ -688,19 +697,29 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         }
         OpResult r = opCall(argCount, boundary);
         m_resumableMode = savedResumable;
-        // A native or bound-native entry cannot yield, so opCall ran it to
+        // A native or bound-native entry cannot suspend, so opCall ran it to
         // completion synchronously and pushed its result: callNative popped the
         // callee+args and pushed the result, leaving stackTop == base + 1 with
         // the result at base. Harvest it and mark the coroutine dead, the same
         // shape the interpreted normal-return path reaches for a closure entry.
-        if (r == OpResult::OK &&
-            (isNative(co->callee) || isBoundNative(co->callee))) {
+        if (r == OpResult::OK && nativeEntry) {
             *out = peek(0);
             stackTop = co->activeWindowTop;
             co->state = CoroutineState::DEAD;
         } else if ((r == OpResult::Resumed || r == OpResult::Call) &&
                    m_frameCount == entry + 1) {
             frameReady = true;
+        } else if (nativeEntry &&
+                   (r == OpResult::Stop || r == OpResult::Resumed)) {
+            // A handler outside the coroutine caught a throw from the native
+            // entry. spec/04-semantics.md, co.resume step 5: a throw that
+            // propagates out of the entry leaves the coroutine dead. This is
+            // not the unstarted case below: an arity fault on a native entry
+            // is fatal, so a caught throw here means the entry ran.
+            co->state = CoroutineState::DEAD;
+            co->activeStackBase = nullptr;
+            co->activeWindowTop = nullptr;
+            outcome = r;
         } else {
             // No frame of ours was pushed: an arity fault caught inside this
             // run, or an uncaught/fatal error. The coroutine never started.
