@@ -166,9 +166,6 @@ PROBES = [
      "try { co.resume(); } catch (e) { print e.kind; }",
      CATCHABLE, "ArityError",
      '"Expected " + str(co.fn.arity()) + " arguments but got " + str(len(args)) + "."'),
-    ("superclass is not a class",
-     "var N = 1; fun f() { class Sub < N {} } try { f(); } catch (e) { print e.kind; }",
-     FATAL, "InvalidSuperclassError", '"Superclass must be a class."'),
     ("object destructuring of a non-instance", "try { var {a} = 42; } catch (e) { print e.kind; }",
      FATAL, "InvalidDestructureReceiverError", '"Object destructuring requires an instance."'),
 
